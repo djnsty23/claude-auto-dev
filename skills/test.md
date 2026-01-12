@@ -1,6 +1,6 @@
 ---
 name: Test / Verify
-description: Comprehensive testing using Playwright MCP with network/console monitoring.
+description: Comprehensive testing with test generation, Playwright MCP, and coverage tracking.
 triggers:
   - test
   - verify
@@ -11,294 +11,371 @@ triggers:
 
 # Test Workflow
 
-## On "test" or "verify"
+## Test Philosophy
 
-### Step 1: Pre-Flight Checks
-```bash
-# 1. Verify build passes
-npm run build
+Tests are generated from THREE sources (3-Pass System):
+1. **Story-based:** From acceptanceCriteria and testSpec
+2. **Code-based:** From analyzing implementation files
+3. **Integration-based:** From cross-story dependencies
 
-# 2. Check dev server is running
-# If not, use start-server script or notify user
-```
+---
 
-### Step 2: Determine Test Scope
-```
-question: "What should I test?"
-options:
-  - { label: "Full E2E suite", description: "All user flows" }
-  - { label: "Auth flow", description: "Login/logout/signup" }
-  - { label: "Specific feature", description: "I'll describe it" }
-  - { label: "Regression", description: "Test recent changes" }
+## Story Schema with Testing
+
+Every story should have a `testSpec` field:
+
+```json
+{
+  "id": "S1",
+  "title": "User Login",
+  "description": "Users can log in with email/password",
+  "priority": 1,
+  "passes": true,
+  "completedAt": "2024-01-15T10:00:00Z",
+  "testedAt": null,
+  "files": ["src/app/auth/login/page.tsx", "src/app/api/auth/login/route.ts"],
+  "acceptanceCriteria": [
+    "User can enter email and password",
+    "Valid credentials redirect to dashboard",
+    "Invalid credentials show error message"
+  ],
+  "testSpec": {
+    "preconditions": [
+      "Dev server running on localhost:3000",
+      "Test user exists in database"
+    ],
+    "happyPath": [
+      {
+        "name": "Successful login",
+        "steps": [
+          "Navigate to /auth/login",
+          "Enter nvision.tester@gmail.com",
+          "Enter valid password",
+          "Click Login button"
+        ],
+        "expected": "Redirect to /dashboard, user session created"
+      }
+    ],
+    "errorCases": [
+      {
+        "name": "Invalid password",
+        "steps": ["Enter valid email", "Enter wrong password", "Click Login"],
+        "expected": "Error message: Invalid credentials"
+      },
+      {
+        "name": "Empty fields",
+        "steps": ["Click Login with empty form"],
+        "expected": "Validation error messages"
+      }
+    ],
+    "edgeCases": [
+      {
+        "name": "SQL injection attempt",
+        "input": "'; DROP TABLE users; --",
+        "expected": "Rejected, no database impact"
+      },
+      {
+        "name": "XSS in email field",
+        "input": "<script>alert('xss')</script>",
+        "expected": "Sanitized, no script execution"
+      }
+    ],
+    "networkChecks": [
+      { "endpoint": "/api/auth/login", "method": "POST", "expectedStatus": 200 }
+    ],
+    "consoleChecks": {
+      "noErrors": true,
+      "noWarnings": false
+    }
+  },
+  "testResults": null
+}
 ```
 
 ---
 
-## Playwright MCP Testing Protocol
+## Test Generation (3-Pass System)
 
-### Test Story Format
+### On "test" or "test generate"
 
-Every test generates a **Test Story** with this structure:
-
-```markdown
-## Test Story: [Feature Name]
-**Date:** [timestamp]
-**URL:** [tested URL]
-**Status:** PASS | FAIL | PARTIAL
-
-### Actions Performed
-1. [Action]: [Result]
-2. [Action]: [Result]
-...
-
-### Network Activity
-| Request | Method | Status | Time |
-|---------|--------|--------|------|
-| /api/... | GET | 200 | 45ms |
-
-### Console Logs
-| Level | Message |
-|-------|---------|
-| error | [message] |
-| warn | [message] |
-
-### Screenshots
-- [step]: [filename or description]
-
-### Verdict
-[Summary of what passed/failed and why]
+#### Pass 1: Story-Based Tests
+```
+For each story with passes: true AND testedAt: null:
+  1. Read acceptanceCriteria
+  2. Read existing testSpec (if any)
+  3. Generate test cases for each criterion:
+     - Happy path: How to verify it works
+     - Error case: How it should fail gracefully
+     - Edge case: Boundary conditions
 ```
 
----
-
-## Core Testing Flows
-
-### 1. Navigation Test
+#### Pass 2: Code-Based Tests
 ```
-Actions:
-1. browser_navigate({ url: "http://localhost:3000" })
-2. browser_snapshot() → Capture initial state
-3. browser_network_requests() → Check for failed requests
-4. browser_console_messages({ level: "error" }) → Check for errors
+For each file in story.files:
+  1. Analyze the code:
+     - API routes: Check all response codes
+     - Forms: Check all validation rules
+     - Components: Check all props/states
+     - Database: Check all queries
 
-Pass Criteria:
-- Page loads without errors
-- No failed network requests
-- No console errors
-- Key elements visible in snapshot
+  2. Generate additional test cases:
+     - Null/undefined handling
+     - Empty arrays/objects
+     - Type boundaries (max int, long strings)
+     - Auth/permission checks
 ```
 
-### 2. Authentication Flow
+#### Pass 3: Integration Tests
 ```
-Actions:
-1. browser_navigate({ url: "http://localhost:3000/auth/login" })
-2. browser_snapshot() → Verify login form exists
-3. browser_fill_form({
-     fields: [
-       { name: "email", type: "textbox", ref: "[email-input-ref]", value: "nvision.tester@gmail.com" },
-       { name: "password", type: "textbox", ref: "[password-input-ref]", value: "${TEST_USER_PASSWORD}" }
-     ]
-   })
-4. browser_click({ element: "Login button", ref: "[submit-ref]" })
-5. browser_wait_for({ text: "Dashboard" }) OR browser_wait_for({ time: 3 })
-6. browser_snapshot() → Verify dashboard loaded
-7. browser_network_requests() → Check auth API calls
-8. browser_console_messages() → Check for auth errors
-
-Pass Criteria:
-- Login form renders correctly
-- Form submission succeeds (200/201 response)
-- Redirects to dashboard
-- User session established
-- No auth errors in console
+For stories with dependencies:
+  1. Identify cross-story flows
+  2. Generate integration tests:
+     - S1 (login) + S2 (dashboard) = "Logged in user sees dashboard"
+     - S3 (create item) + S4 (list items) = "Created item appears in list"
 ```
-
-### 3. API Integration Test
-```
-Actions:
-1. browser_navigate({ url: "http://localhost:3000/dashboard" })
-2. browser_wait_for({ time: 2 }) → Allow API calls to complete
-3. browser_network_requests() → Capture all API calls
-4. browser_console_messages({ level: "error" })
-
-Analysis:
-- Check each API request status
-- Verify expected endpoints were called
-- Check response times
-- Flag any 4xx/5xx errors
-```
-
-### 4. Form Submission Test
-```
-Actions:
-1. browser_navigate({ url: "[form-url]" })
-2. browser_snapshot() → Capture empty form
-3. browser_fill_form({ fields: [...] })
-4. browser_snapshot() → Capture filled form
-5. browser_click({ element: "Submit", ref: "[submit-ref]" })
-6. browser_wait_for({ text: "Success" }) OR check network
-7. browser_network_requests() → Verify POST request
-8. browser_snapshot() → Capture result state
-
-Pass Criteria:
-- Form fields accept input
-- Validation works (if applicable)
-- Submit triggers correct API call
-- Success/error feedback displays
-```
-
-### 5. CRUD Operations Test
-```
-For each operation (Create, Read, Update, Delete):
-
-CREATE:
-1. Navigate to create form
-2. Fill required fields
-3. Submit
-4. Verify new item appears
-5. Check network for POST request
-
-READ:
-1. Navigate to list view
-2. Verify items load
-3. Check network for GET request
-4. Click item to view details
-
-UPDATE:
-1. Navigate to edit form
-2. Modify fields
-3. Submit
-4. Verify changes saved
-5. Check network for PUT/PATCH
-
-DELETE:
-1. Click delete button
-2. Confirm dialog (if any)
-3. Verify item removed
-4. Check network for DELETE request
-```
-
----
-
-## Network Request Monitoring
-
-### Using browser_network_requests()
-
-```
-# Get all requests (excluding static assets)
-browser_network_requests({ includeStatic: false })
-
-# Response format:
-[
-  {
-    "url": "/api/users",
-    "method": "GET",
-    "status": 200,
-    "statusText": "OK",
-    "duration": 45
-  }
-]
-```
-
-### What to Check
-
-| Check | Pass | Fail |
-|-------|------|------|
-| API status | 2xx | 4xx, 5xx |
-| Auth endpoints | 200/201 | 401, 403 |
-| Response time | < 1000ms | > 3000ms |
-| Required calls | All made | Missing |
-
-### Common Issues
-
-| Status | Meaning | Fix |
-|--------|---------|-----|
-| 401 | Not authenticated | Check auth token |
-| 403 | Not authorized | Check permissions |
-| 404 | Endpoint not found | Check API route |
-| 500 | Server error | Check server logs |
-| CORS | Cross-origin blocked | Check API config |
-
----
-
-## Console Log Monitoring
-
-### Using browser_console_messages()
-
-```
-# Get errors only
-browser_console_messages({ level: "error" })
-
-# Get warnings and errors
-browser_console_messages({ level: "warning" })
-
-# Get all logs
-browser_console_messages({ level: "debug" })
-```
-
-### Severity Levels
-
-| Level | Action |
-|-------|--------|
-| **error** | FAIL - Must fix |
-| **warning** | REVIEW - May need fix |
-| **info** | PASS - Informational |
-| **debug** | IGNORE - Dev only |
-
-### Common Console Errors
-
-| Error Pattern | Likely Cause |
-|---------------|--------------|
-| `Hydration failed` | SSR/client mismatch |
-| `Cannot read property of undefined` | Null reference |
-| `Failed to fetch` | Network/CORS issue |
-| `Invalid hook call` | React hook rules |
-| `ChunkLoadError` | Bundle/deploy issue |
 
 ---
 
 ## Test Execution Flow
 
-### Full E2E Suite
+### Full Test Suite
 
 ```
-1. Start test session
-   - Verify dev server running
-   - Clear previous test data (if needed)
+1. PRE-FLIGHT
+   ├── Verify build passes: npm run build
+   ├── Check dev server: curl localhost:3000
+   └── Verify test user exists
 
-2. Run core flows in order:
-   a. Homepage loads
-   b. Navigation works
-   c. Auth flow (login)
-   d. Protected routes accessible
-   e. Core features work
-   f. Auth flow (logout)
+2. COLLECT TESTS
+   ├── Load all stories from prd.json
+   ├── Filter: passes === true
+   ├── Sort by: testedAt (null first), then priority
+   └── Generate test matrix
 
-3. After each flow:
-   - Capture network requests
-   - Capture console logs
-   - Take snapshot
-   - Record in test story
+3. EXECUTE (per story)
+   │
+   ├── PRECONDITIONS
+   │   └── Verify all preconditions met
+   │
+   ├── HAPPY PATH (run first)
+   │   ├── Execute each step
+   │   ├── Capture network requests
+   │   ├── Capture console logs
+   │   ├── Take snapshot
+   │   └── Verify expected outcome
+   │
+   ├── ERROR CASES
+   │   └── Same flow, expect failures handled gracefully
+   │
+   ├── EDGE CASES
+   │   └── Same flow, test boundaries
+   │
+   └── RECORD RESULTS
+       ├── Update story.testedAt
+       ├── Update story.testResults
+       └── Log to progress.txt
 
-4. Generate report
+4. REPORT
+   └── Generate test report (see format below)
 ```
 
-### Quick Commands
+---
+
+## Playwright MCP Commands Reference
+
+### Navigation & State
+```javascript
+browser_navigate({ url: "http://localhost:3000/path" })
+browser_snapshot()  // Capture accessibility tree
+browser_take_screenshot({ filename: "step-1.png" })
+```
+
+### Interaction
+```javascript
+browser_click({ element: "Login button", ref: "[ref-from-snapshot]" })
+browser_type({ element: "Email input", ref: "[ref]", text: "test@example.com" })
+browser_fill_form({ fields: [
+  { name: "email", type: "textbox", ref: "[ref]", value: "test@test.com" },
+  { name: "password", type: "textbox", ref: "[ref]", value: "password" }
+]})
+browser_select_option({ element: "Country", ref: "[ref]", values: ["US"] })
+```
+
+### Monitoring
+```javascript
+browser_network_requests({ includeStatic: false })
+browser_console_messages({ level: "error" })
+```
+
+### Waiting
+```javascript
+browser_wait_for({ text: "Dashboard" })      // Wait for text to appear
+browser_wait_for({ textGone: "Loading..." }) // Wait for text to disappear
+browser_wait_for({ time: 2 })                // Wait 2 seconds
+```
+
+---
+
+## Test Story Format (Output)
+
+Each test generates a Test Story:
+
+```markdown
+## Test Story: S1 - User Login
+**Date:** 2024-01-15T14:30:00Z
+**Duration:** 12.5s
+**Status:** PASS | FAIL | PARTIAL
+
+### Preconditions
+- [x] Dev server running
+- [x] Test user exists
+
+### Happy Path: Successful Login
+| Step | Action | Result | Time |
+|------|--------|--------|------|
+| 1 | Navigate to /auth/login | Page loaded | 0.5s |
+| 2 | Enter email | Field populated | 0.1s |
+| 3 | Enter password | Field populated | 0.1s |
+| 4 | Click Login | Redirect to /dashboard | 1.2s |
+**Result:** PASS
+
+### Error Case: Invalid Password
+| Step | Action | Result | Time |
+|------|--------|--------|------|
+| 1 | Enter valid email | OK | 0.1s |
+| 2 | Enter wrong password | OK | 0.1s |
+| 3 | Click Login | Error displayed | 0.8s |
+**Result:** PASS (error handled correctly)
+
+### Edge Case: SQL Injection
+| Input | Result |
+|-------|--------|
+| `'; DROP TABLE users; --` | Rejected by validation |
+**Result:** PASS (no injection possible)
+
+### Network Activity
+| Endpoint | Method | Status | Time |
+|----------|--------|--------|------|
+| /api/auth/login | POST | 200 | 145ms |
+| /api/user/me | GET | 200 | 89ms |
+
+### Console
+- Errors: 0
+- Warnings: 1 (React dev mode warning - OK)
+
+### Verdict
+All 4 test cases passed. Story S1 fully tested.
+```
+
+---
+
+## Test Commands
 
 | Say | Action |
 |-----|--------|
-| `test` | Full E2E suite |
-| `test auth` | Auth flow only |
-| `test api` | API integration check |
-| `test [page]` | Specific page test |
-| `test network` | Check all network calls |
-| `test console` | Check for console errors |
+| `test` | Test all untested stories |
+| `test all` | Test ALL stories (including already tested) |
+| `test S1` | Test specific story |
+| `test auth` | Test all auth-related stories |
+| `test generate` | Generate testSpec for stories without them |
+| `test generate S1` | Generate testSpec for specific story |
+| `test report` | Show last test results |
+
+---
+
+## Incremental Testing
+
+For efficiency, tests track what's been tested:
+
+```json
+{
+  "testedAt": "2024-01-15T10:00:00Z",
+  "testResults": {
+    "total": 12,
+    "passed": 11,
+    "failed": 1,
+    "duration": "45.2s",
+    "failedTests": [
+      {
+        "name": "Edge case: Long email",
+        "error": "Input truncated at 255 chars",
+        "severity": "low"
+      }
+    ]
+  }
+}
+```
+
+### When to Re-Test
+- `testedAt` is null → Never tested
+- Story files modified after `testedAt` → Code changed
+- Dependencies changed → Related story updated
+- `test all` command → Force full re-test
+
+---
+
+## Test Suites (Cross-Story Tests)
+
+For complex flows spanning multiple stories:
+
+```json
+{
+  "testSuites": [
+    {
+      "id": "TS1",
+      "name": "Full User Journey",
+      "stories": ["S1", "S2", "S5", "S8"],
+      "flow": [
+        { "story": "S1", "action": "Login" },
+        { "story": "S2", "action": "View dashboard" },
+        { "story": "S5", "action": "Create item" },
+        { "story": "S8", "action": "Logout" }
+      ],
+      "testedAt": null
+    }
+  ]
+}
+```
+
+---
+
+## Auto-Generation Rules
+
+When generating testSpec automatically:
+
+### From Accept Criteria
+```
+"User can enter email and password"
+→ happyPath: Fill form with valid data
+→ errorCase: Empty fields, invalid format
+→ edgeCase: Max length, special characters
+```
+
+### From Code Analysis
+```javascript
+// API route with validation
+if (!email.includes('@')) throw new Error('Invalid email')
+→ errorCase: Test email without @
+
+// Database query
+await db.users.findUnique({ where: { email } })
+→ edgeCase: Email not found, duplicate email
+```
+
+### From Component Props
+```typescript
+interface Props {
+  maxLength?: number;  // → edgeCase: Test at maxLength
+  required?: boolean;  // → errorCase: Test empty when required
+  disabled?: boolean;  // → edgeCase: Test interaction when disabled
+}
+```
 
 ---
 
 ## Test Account
 
-**CRITICAL:** Always use the test account:
+**CRITICAL:** Always use:
 - **Email:** nvision.tester@gmail.com
 - **Password:** `${TEST_USER_PASSWORD}` env var
 
@@ -306,72 +383,95 @@ browser_console_messages({ level: "debug" })
 
 ---
 
-## Test Report Format
+## Performance Optimization
 
-After testing, generate a report:
+### Parallel Execution
+```
+Independent tests can run in parallel:
+- S1 tests + S5 tests (no dependency)
+- NOT: S1 + S2 if S2 requires login from S1
+```
 
-```markdown
-# Test Report: [Project Name]
-**Date:** [timestamp]
-**Duration:** [time]
-**Result:** PASS | FAIL | PARTIAL
+### Smart Ordering
+```
+1. Smoke tests (critical paths) - 30 seconds
+2. Feature tests (story-specific) - 2-3 minutes
+3. Edge cases (boundaries) - 1-2 minutes
+4. Integration tests (cross-story) - 2-3 minutes
+```
 
-## Summary
-- Total Flows: X
-- Passed: Y
-- Failed: Z
-- Warnings: W
-
-## Test Stories
-[Include each test story]
-
-## Network Summary
-- Total Requests: N
-- Failed: X (list URLs)
-- Slow (>1s): Y (list URLs)
-
-## Console Summary
-- Errors: X
-- Warnings: Y
-
-## Issues Found
-1. [Issue]: [Severity] - [Description]
-   - Steps to reproduce
-   - Expected vs Actual
-   - Suggested fix
-
-## Auto-Fixed
-1. [Issue]: [What was fixed]
-
-## Needs User Input
-1. [Issue]: [Why it can't be auto-fixed]
+### Caching
+```
+- Cache authentication state
+- Reuse logged-in session across tests
+- Only re-login when auth tests fail
 ```
 
 ---
 
 ## Integration with prd.json
 
-When testing reveals issues:
+### On Story Completion (in build.md)
+```
+When marking story passes: true:
+1. Generate testSpec from acceptanceCriteria
+2. Analyze files for additional test cases
+3. Add testSpec to story
+4. Set testedAt: null (needs testing)
+```
 
-1. **For auto-fixable issues:**
+### On Test Failure
+```
+1. If auto-fixable:
    - Fix immediately
-   - Log in progress.txt
-   - Continue testing
+   - Re-run failed test
+   - Log to progress.txt
 
-2. **For complex issues:**
-   - Create new story in prd.json:
-   ```json
-   {
-     "id": "SXXX",
-     "title": "Fix: [issue description]",
-     "description": "Found during testing: [details]",
-     "priority": 1,
-     "passes": false,
-     "acceptanceCriteria": ["Issue no longer occurs"]
-   }
-   ```
+2. If needs new story:
+   - Create bug story in prd.json
+   - Link to original story
+   - Set high priority
+```
 
-3. **For blocked tests:**
-   - Document why blocked
-   - Note dependencies needed
-   - Skip and continue
+---
+
+## Example: Full Test Run
+
+```
+User: "test"
+
+Claude:
+1. Loading prd.json... Found 15 stories (12 passed, 3 in progress)
+2. Filtering untested... 4 stories need testing
+
+Testing S1: User Login
+├── Preconditions: ✓ All met
+├── Happy path: ✓ Login successful
+├── Error cases: ✓ 3/3 passed
+├── Edge cases: ✓ 2/2 passed
+├── Network: ✓ All 200s
+└── Console: ✓ No errors
+Result: PASS (8/8 tests)
+
+Testing S2: Dashboard
+├── Preconditions: ✓ Logged in from S1
+├── Happy path: ✓ Dashboard loads
+├── Error cases: ✓ 2/2 passed
+└── Network: ✓ API calls successful
+Result: PASS (5/5 tests)
+
+...
+
+## Test Report
+- Stories tested: 4
+- Total tests: 24
+- Passed: 23
+- Failed: 1
+- Duration: 1m 42s
+
+Failed:
+- S3/Edge case: Long title truncation
+  Expected: Error message
+  Actual: Truncated silently
+  → Created story S16 to fix
+```

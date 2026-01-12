@@ -145,10 +145,62 @@ claude "stop"
   "passes": false,
   "claimedAt": null,
   "completedAt": null,
+  "testedAt": null,
   "files": ["path/to/file.ts"],
-  "acceptanceCriteria": ["Requirement"]
+  "acceptanceCriteria": ["Requirement"],
+  "testSpec": { "happyPath": [], "errorCases": [], "edgeCases": [] },
+  "testResults": null
 }
 ```
+
+## Test Suites (prd.json)
+
+```json
+{
+  "testSuites": [
+    {
+      "id": "TS1",
+      "name": "Full User Journey",
+      "stories": ["S1", "S2", "S5"],
+      "testedAt": null
+    }
+  ]
+}
+```
+
+## Testing System
+
+### 3-Pass Test Generation
+
+Tests are auto-generated from three sources:
+
+| Pass | Source | Tests Generated |
+|------|--------|-----------------|
+| **1. Story** | acceptanceCriteria | Happy path, basic errors |
+| **2. Code** | Implementation files | Validation, auth, null checks |
+| **3. Integration** | Cross-story deps | User journeys, data flows |
+
+### Test Workflow
+
+```
+Story Completion → testSpec Generated → testedAt: null
+      ↓
+"test" Command → Execute testSpec → Update testedAt + testResults
+      ↓
+Failures → Auto-fix or Create Bug Story
+```
+
+### Test Commands
+
+| Say | Action |
+|-----|--------|
+| `test` | Test untested stories |
+| `test all` | Re-test everything |
+| `test S1` | Test specific story |
+| `test generate` | Generate testSpec without running |
+| `test report` | Show last results |
+
+---
 
 ## API Key Setup
 
