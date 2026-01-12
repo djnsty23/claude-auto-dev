@@ -21,11 +21,12 @@ git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 This installs:
 - `~/.claude/CLAUDE.md` - Global config
 - `~/.claude/QUICKSTART.md` - Quick reference
-- `~/.claude/rules/*.md` - Coding rules
-- `~/.claude/skills/build.md` - Auto-dev skill
-- `~/.claude/mcp.json` - MCP server config (uses `${ENV_VAR}` references, no hardcoded secrets)
+- `~/.claude/rules/*.md` - Coding rules (security, design-system, windows)
+- `~/.claude/skills/*.md` - All 7 skill files
+- `~/.claude/scripts/*` - Helper scripts (start-server)
+- `~/.claude/mcp.json` - MCP config (uses `${ENV_VAR}` references)
 
-## Quick Install (Skill Only)
+## Quick Install (Skills Only)
 
 **Windows:**
 ```powershell
@@ -41,23 +42,58 @@ git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 
 ## Commands
 
+### Task Management (build.md)
+
 | Say | What Happens |
 |-----|--------------|
-| `auto` | Work through all tasks, don't stop |
+| `auto` | Work through all tasks autonomously |
 | `continue` | One task, then ask |
 | `work on S42` | Do specific task |
-| `status` | Show progress |
-| `brainstorm` | Generate new stories |
-| `adjust` | Reprioritize tasks |
-| `stop` | Before closing session |
-| `reset` | Clear claims after crash |
+| `status` | Show progress summary |
+| `brainstorm` | Generate new stories from requirements |
+| `adjust` | Reprioritize remaining tasks |
+| `stop` | Clear claims before closing session |
+| `reset` | Clear all claims after crash |
+
+### Additional Skills
+
+| Say | Skill | What Happens |
+|-----|-------|--------------|
+| `ship` / `deploy` | ship.md | Build → deploy to Vercel → verify |
+| `test` | test.md | Run Playwright tests, categorize failures |
+| `fix` / `debug` | fix.md | Systematic debugging workflow |
+| `set up` / `init` | setup-project.md | Initialize new project with stack |
+| `env` / `credentials` | env-vars.md | Manage environment variables |
+| `schema` / `database` | supabase-schema.md | Create tables, migrations via MCP |
+
+## Skills Reference
+
+| Skill | Triggers | Purpose |
+|-------|----------|---------|
+| **build.md** | auto, continue, status, brainstorm, adjust, stop, reset | Autonomous task loop |
+| **ship.md** | ship, deploy | Build and deploy to production |
+| **test.md** | test, verify | Playwright auto-testing with nvision.tester@gmail.com |
+| **fix.md** | fix, debug | Reproduce → isolate → fix → verify |
+| **setup-project.md** | set up, init, new project | Scaffold new projects |
+| **env-vars.md** | env, credentials, api key | Environment variable management |
+| **supabase-schema.md** | schema, database, table, migration | Database operations via Supabase MCP |
 
 ## Workflow
 
 ```bash
-claude "brainstorm"    # Generate tasks
-claude "auto"          # Build everything
-claude "stop"          # Before closing
+claude "brainstorm"    # Generate tasks from requirements
+claude "auto"          # Build everything autonomously
+claude "stop"          # Before closing session
+```
+
+**Deployment:**
+```bash
+claude "ship"          # Build → deploy → verify
+```
+
+**Testing:**
+```bash
+claude "test"          # Run Playwright tests
 ```
 
 ## Multi-Agent
@@ -86,14 +122,13 @@ Stagger starts slightly to avoid collisions. Each agent will:
 ```bash
 claude "stop"
 ```
-This clears claims so other agents can pick up the work.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `prd.json` | Tasks (`passes: true/false`) |
-| `progress.txt` | Learnings log |
+| `prd.json` | Tasks with `passes: true/false` status |
+| `progress.txt` | Append-only learnings log |
 | `.claude/briefs/` | Optional detailed specs |
 
 ## Task Schema
@@ -114,7 +149,7 @@ This clears claims so other agents can pick up the work.
 
 ## API Key Setup
 
-Run the API key wizard to set up environment variables:
+Run the API key wizard:
 
 **Windows:**
 ```powershell
@@ -126,12 +161,16 @@ Run the API key wizard to set up environment variables:
 ~/claude-auto-dev/setup-keys.sh
 ```
 
-This prompts for:
-- `SUPABASE_ACCESS_TOKEN` (required) - MCP server auth
-- `GITHUB_PAT` (required) - GitHub integration
-- `BRAVE_API_KEY` - Web search
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - OAuth
-- `ELEVENLABS_API_KEY`, `OPENROUTER_API_KEY`, etc.
+**Keys prompted (grouped by category):**
+
+| Category | Keys |
+|----------|------|
+| **Required** | `SUPABASE_ACCESS_TOKEN`, `GITHUB_PAT` |
+| **Google OAuth** | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
+| **AI/LLM** | `ELEVENLABS_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `ZAI_API_KEY` |
+| **Search/Scrape** | `BRAVE_API_KEY`, `FIRECRAWL_API_KEY`, `LINKUP_API_KEY`, `CAPSOLVER_API_KEY` |
+| **Email** | `RESEND_API_KEY` |
+| **Testing** | `TEST_USER_PASSWORD` |
 
 Keys are stored in:
 - **Windows:** System environment variables (persists across reboots)
@@ -143,20 +182,16 @@ The `mcp.json` config uses `${ENV_VAR}` syntax - MCP reads from your system env 
 
 **Never hardcode API keys.** Use system environment variables.
 
-**Manual setup (Windows Admin):**
+**Manual setup (Windows):**
 ```powershell
 setx SUPABASE_ACCESS_TOKEN "sbp_..."
-setx GOOGLE_CLIENT_ID "..."
-setx OPENAI_API_KEY "sk-..."
+setx GITHUB_PAT "ghp_..."
 ```
 
 **Project .env.local (project-specific only):**
 ```env
-# Supabase (project-specific)
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-
-# System env vars are picked up automatically - no need to repeat
 ```
 
 **Rules:**
@@ -175,8 +210,12 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 - Or run `reset` then restart agents
 
 **Build keeps failing?**
-- Agent stops after 3 failures
+- Agent stops after 3 consecutive failures
 - Fix the issue manually, then `auto` again
+
+**Dev server issues?**
+- Check if port is already in use: `netstat -ano | findstr :3000`
+- Use `~/.claude/scripts/start-server.ps1` to launch in external terminal
 
 ## Update
 
