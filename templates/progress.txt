@@ -1,10 +1,4 @@
-# $PROJECT_NAME - Development Progress
+# {{NAME}} - Progress
 
-================================================================================
-## Setup
-================================================================================
-
-### $DATE: Project initialized
-**Completed:** Installed Claude Auto-Dev system
-**Next:** Run `brainstorm` to generate stories, or add them to prd.json manually
-
+## {{DATE}}: Setup
+Installed Claude Auto-Dev. Run `brainstorm` to generate tasks.
