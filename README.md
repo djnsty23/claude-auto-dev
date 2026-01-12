@@ -60,7 +60,10 @@ git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 | Say | Skill | What Happens |
 |-----|-------|--------------|
 | `ship` / `deploy` | ship.md | Build → deploy to Vercel → verify |
-| `test` | test.md | Run Playwright tests, categorize failures |
+| `test` | test.md | Full E2E with network/console monitoring |
+| `test auth` | test.md | Test authentication flow only |
+| `test api` | test.md | Check API integrations |
+| `test network` | test.md | Monitor all network requests |
 | `fix` / `debug` | fix.md | Systematic debugging workflow |
 | `set up` / `init` | setup-project.md | Initialize new project with stack |
 | `env` / `credentials` | env-vars.md | Manage environment variables |
@@ -72,7 +75,7 @@ git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 |-------|----------|---------|
 | **build.md** | auto, continue, status, brainstorm, adjust, stop, reset | Autonomous task loop |
 | **ship.md** | ship, deploy | Build and deploy to production |
-| **test.md** | test, verify | Playwright auto-testing with nvision.tester@gmail.com |
+| **test.md** | test, verify, e2e, playwright | Full E2E testing with network/console monitoring |
 | **fix.md** | fix, debug | Reproduce → isolate → fix → verify |
 | **setup-project.md** | set up, init, new project | Scaffold new projects |
 | **env-vars.md** | env, credentials, api key | Environment variable management |
