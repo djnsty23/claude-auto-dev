@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Auto-Dev Installer
-# Usage: ./install.sh --global --init
+# Usage: ./install.sh --global --init --full
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,9 +11,65 @@ for arg in "$@"; do
         --global|-g) GLOBAL=1 ;;
         --init|-i) INIT=1 ;;
         --update|-u) UPDATE=1 ;;
+        --full|-f) FULL=1 ;;
         --name=*) NAME="${arg#*=}" ;;
     esac
 done
+
+# Full restore (includes Global)
+if [[ $FULL ]]; then
+    echo -e "\n\033[35m=== FULL RESTORE ===\033[0m"
+
+    CLAUDE_DIR=~/.claude
+
+    # Create directories
+    mkdir -p "$CLAUDE_DIR/skills" "$CLAUDE_DIR/rules" "$CLAUDE_DIR/scripts"
+
+    # Copy global configs
+    echo -e "\033[36m→ Installing global configs...\033[0m"
+    cp "$SCRIPT_DIR/config/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
+    echo -e "\033[32m✓ ~/.claude/CLAUDE.md\033[0m"
+
+    cp "$SCRIPT_DIR/config/QUICKSTART.md" "$CLAUDE_DIR/QUICKSTART.md"
+    echo -e "\033[32m✓ ~/.claude/QUICKSTART.md\033[0m"
+
+    # Copy rules
+    echo -e "\033[36m→ Installing rules...\033[0m"
+    for f in "$SCRIPT_DIR/config/rules/"*.md; do
+        if [[ -f "$f" ]]; then
+            cp "$f" "$CLAUDE_DIR/rules/"
+            echo -e "\033[32m✓ ~/.claude/rules/$(basename "$f")\033[0m"
+        fi
+    done
+
+    # Copy skill
+    echo -e "\033[36m→ Installing skills...\033[0m"
+    cp "$SCRIPT_DIR/skills/build.md" "$CLAUDE_DIR/skills/build.md"
+    echo -e "\033[32m✓ ~/.claude/skills/build.md\033[0m"
+
+    # Copy scripts
+    if [[ -d "$SCRIPT_DIR/scripts" ]]; then
+        echo -e "\033[36m→ Installing scripts...\033[0m"
+        for f in "$SCRIPT_DIR/scripts/"*; do
+            if [[ -f "$f" ]]; then
+                cp "$f" "$CLAUDE_DIR/scripts/"
+                echo -e "\033[32m✓ ~/.claude/scripts/$(basename "$f")\033[0m"
+            fi
+        done
+    fi
+
+    # Run API key setup if mcp.json doesn't exist
+    if [[ ! -f "$CLAUDE_DIR/mcp.json" ]]; then
+        echo -e "\n\033[35m=== API Key Setup ===\033[0m"
+        echo -e "\033[33mNo mcp.json found. Running setup wizard...\033[0m"
+        bash "$SCRIPT_DIR/setup-keys.sh"
+    else
+        echo -e "\033[33m○ mcp.json (run setup-keys.sh manually to update)\033[0m"
+    fi
+
+    echo -e "\n\033[32m=== Full Restore Complete ===\033[0m"
+    exit 0
+fi
 
 # Global/Update
 if [[ $GLOBAL || $UPDATE ]]; then
@@ -41,11 +97,12 @@ if [[ $INIT ]]; then
 fi
 
 # Help
-if [[ ! $GLOBAL && ! $INIT && ! $UPDATE ]]; then
+if [[ ! $GLOBAL && ! $INIT && ! $UPDATE && ! $FULL ]]; then
     echo "
 Claude Auto-Dev
 ===============
-./install.sh --global    Install skill file
+./install.sh --full      FULL RESTORE (all configs + API keys)
+./install.sh --global    Install skill file only
 ./install.sh --init      Initialize project
 ./install.sh --update    Update skill file
 

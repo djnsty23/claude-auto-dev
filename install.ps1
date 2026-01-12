@@ -6,12 +6,14 @@
     .\install.ps1 -Init            # Initialize current project
     .\install.ps1 -Global -Init    # Both
     .\install.ps1 -Update          # Update skill file
+    .\install.ps1 -Full            # FULL RESTORE: all configs + API key setup
 #>
 
 param(
     [switch]$Global,
     [switch]$Init,
     [switch]$Update,
+    [switch]$Full,
     [string]$Name = (Split-Path -Leaf (Get-Location))
 )
 
@@ -21,6 +23,61 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 function Write-Step { param($msg) Write-Host "→ $msg" -ForegroundColor Cyan }
 function Write-Done { param($msg) Write-Host "✓ $msg" -ForegroundColor Green }
 function Write-Skip { param($msg) Write-Host "○ $msg (exists)" -ForegroundColor Yellow }
+
+# Full restore (includes Global)
+if ($Full) {
+    Write-Host "`n=== FULL RESTORE ===" -ForegroundColor Magenta
+
+    $claudeDir = "$env:USERPROFILE\.claude"
+
+    # Create directories
+    @("$claudeDir", "$claudeDir\skills", "$claudeDir\rules", "$claudeDir\scripts") | ForEach-Object {
+        if (-not (Test-Path $_)) {
+            New-Item -ItemType Directory -Path $_ -Force | Out-Null
+        }
+    }
+
+    # Copy global configs
+    Write-Step "Installing global configs..."
+    Copy-Item "$ScriptDir\config\CLAUDE.md" "$claudeDir\CLAUDE.md" -Force
+    Write-Done "~/.claude/CLAUDE.md"
+
+    Copy-Item "$ScriptDir\config\QUICKSTART.md" "$claudeDir\QUICKSTART.md" -Force
+    Write-Done "~/.claude/QUICKSTART.md"
+
+    # Copy rules
+    Write-Step "Installing rules..."
+    Get-ChildItem "$ScriptDir\config\rules\*.md" | ForEach-Object {
+        Copy-Item $_.FullName "$claudeDir\rules\$($_.Name)" -Force
+        Write-Done "~/.claude/rules/$($_.Name)"
+    }
+
+    # Copy skill
+    Write-Step "Installing skills..."
+    Copy-Item "$ScriptDir\skills\build.md" "$claudeDir\skills\build.md" -Force
+    Write-Done "~/.claude/skills/build.md"
+
+    # Copy scripts
+    if (Test-Path "$ScriptDir\scripts") {
+        Write-Step "Installing scripts..."
+        Get-ChildItem "$ScriptDir\scripts\*" | ForEach-Object {
+            Copy-Item $_.FullName "$claudeDir\scripts\$($_.Name)" -Force
+            Write-Done "~/.claude/scripts/$($_.Name)"
+        }
+    }
+
+    # Run API key setup if mcp.json doesn't exist
+    if (-not (Test-Path "$claudeDir\mcp.json")) {
+        Write-Host "`n=== API Key Setup ===" -ForegroundColor Magenta
+        Write-Host "No mcp.json found. Running setup wizard..." -ForegroundColor Yellow
+        & "$ScriptDir\setup-keys.ps1"
+    } else {
+        Write-Skip "mcp.json (run setup-keys.ps1 manually to update)"
+    }
+
+    Write-Host "`n=== Full Restore Complete ===" -ForegroundColor Green
+    exit 0
+}
 
 # Global install or update
 if ($Global -or $Update) {
@@ -61,12 +118,13 @@ if ($Init) {
 }
 
 # Help
-if (-not $Global -and -not $Init -and -not $Update) {
+if (-not $Global -and -not $Init -and -not $Update -and -not $Full) {
     Write-Host @"
 
 Claude Auto-Dev
 ===============
-.\install.ps1 -Global    Install skill file
+.\install.ps1 -Full      FULL RESTORE (all configs + API keys)
+.\install.ps1 -Global    Install skill file only
 .\install.ps1 -Init      Initialize project
 .\install.ps1 -Update    Update skill file
 
