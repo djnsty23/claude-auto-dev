@@ -16,18 +16,28 @@ Write-Host "Keys are stored in Windows system environment variables."
 Write-Host "MCP config references them via `${ENV_VAR}` syntax."
 Write-Host "Press Enter to skip any key you don't have.`n"
 
-# Define all keys
+# Define all keys (grouped by category)
 $keys = @(
+    # Required
     @{ Name = "SUPABASE_ACCESS_TOKEN"; Desc = "Supabase Access Token (sbp_...)"; Required = $true },
     @{ Name = "GITHUB_PAT"; Desc = "GitHub Personal Access Token (ghp_...)"; Required = $true },
-    @{ Name = "BRAVE_API_KEY"; Desc = "Brave Search API Key"; Required = $false },
+    # Google OAuth
     @{ Name = "GOOGLE_CLIENT_ID"; Desc = "Google OAuth Client ID"; Required = $false },
     @{ Name = "GOOGLE_CLIENT_SECRET"; Desc = "Google OAuth Client Secret"; Required = $false },
-    @{ Name = "ELEVENLABS_API_KEY"; Desc = "ElevenLabs API Key"; Required = $false },
+    # AI/LLM
+    @{ Name = "ELEVENLABS_API_KEY"; Desc = "ElevenLabs API Key (voice)"; Required = $false },
     @{ Name = "OPENROUTER_API_KEY"; Desc = "OpenRouter API Key"; Required = $false },
     @{ Name = "DEEPSEEK_API_KEY"; Desc = "DeepSeek API Key"; Required = $false },
     @{ Name = "GEMINI_API_KEY"; Desc = "Google Gemini API Key"; Required = $false },
+    @{ Name = "ZAI_API_KEY"; Desc = "ZAI API Key"; Required = $false },
+    # Search/Scrape
+    @{ Name = "BRAVE_API_KEY"; Desc = "Brave Search API Key"; Required = $false },
+    @{ Name = "FIRECRAWL_API_KEY"; Desc = "Firecrawl API Key (web scraping)"; Required = $false },
+    @{ Name = "LINKUP_API_KEY"; Desc = "Linkup API Key"; Required = $false },
+    @{ Name = "CAPSOLVER_API_KEY"; Desc = "Capsolver API Key (captcha)"; Required = $false },
+    # Email
     @{ Name = "RESEND_API_KEY"; Desc = "Resend Email API Key"; Required = $false },
+    # Testing
     @{ Name = "TEST_USER_PASSWORD"; Desc = "Test account password"; Required = $false }
 )
 

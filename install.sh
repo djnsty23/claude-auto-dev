@@ -5,6 +5,7 @@
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME=$(basename "$(pwd)")
+VERSION=$(head -1 "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "dev")
 
 for arg in "$@"; do
     case $arg in
@@ -18,7 +19,7 @@ done
 
 # Full restore (includes Global)
 if [[ $FULL ]]; then
-    echo -e "\n\033[35m=== FULL RESTORE ===\033[0m"
+    echo -e "\n\033[35m=== FULL RESTORE (v$VERSION) ===\033[0m"
 
     CLAUDE_DIR=~/.claude
 
@@ -42,10 +43,14 @@ if [[ $FULL ]]; then
         fi
     done
 
-    # Copy skill
+    # Copy all skills
     echo -e "\033[36m→ Installing skills...\033[0m"
-    cp "$SCRIPT_DIR/skills/build.md" "$CLAUDE_DIR/skills/build.md"
-    echo -e "\033[32m✓ ~/.claude/skills/build.md\033[0m"
+    for f in "$SCRIPT_DIR/skills/"*.md; do
+        if [[ -f "$f" ]]; then
+            cp "$f" "$CLAUDE_DIR/skills/"
+            echo -e "\033[32m✓ ~/.claude/skills/$(basename "$f")\033[0m"
+        fi
+    done
 
     # Copy scripts
     if [[ -d "$SCRIPT_DIR/scripts" ]]; then
@@ -73,10 +78,14 @@ fi
 
 # Global/Update
 if [[ $GLOBAL || $UPDATE ]]; then
-    echo -e "\n\033[35m=== Skill Install ===\033[0m"
+    echo -e "\n\033[35m=== Skill Install (v$VERSION) ===\033[0m"
     mkdir -p ~/.claude/skills
-    cp "$SCRIPT_DIR/skills/build.md" ~/.claude/skills/build.md
-    echo -e "\033[32m✓ Installed ~/.claude/skills/build.md\033[0m"
+    for f in "$SCRIPT_DIR/skills/"*.md; do
+        if [[ -f "$f" ]]; then
+            cp "$f" ~/.claude/skills/
+            echo -e "\033[32m✓ ~/.claude/skills/$(basename "$f")\033[0m"
+        fi
+    done
 fi
 
 # Project init
@@ -99,14 +108,14 @@ fi
 # Help
 if [[ ! $GLOBAL && ! $INIT && ! $UPDATE && ! $FULL ]]; then
     echo "
-Claude Auto-Dev
-===============
+Claude Auto-Dev v$VERSION
+========================
 ./install.sh --full      FULL RESTORE (all configs + API keys)
-./install.sh --global    Install skill file only
+./install.sh --global    Install all skills
 ./install.sh --init      Initialize project
-./install.sh --update    Update skill file
+./install.sh --update    Update all skills
 
-Commands: auto, continue, status, brainstorm, adjust, stop
+Commands: auto, continue, status, brainstorm, adjust, stop, reset
 "
     exit 0
 fi

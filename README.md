@@ -1,6 +1,6 @@
 # Claude Auto-Dev
 
-Autonomous task management for Claude Code.
+> **Version 1.0.0** | Autonomous task management for Claude Code.
 
 ## Full Restore (New Machine)
 

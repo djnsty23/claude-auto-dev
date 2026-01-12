@@ -34,7 +34,7 @@ React + TypeScript + Tailwind + shadcn/ui + Supabase + Vercel
 Full system: https://github.com/djnsty23/claude-auto-dev
 - **prd.json**: Task list with `passes: true/false` status
 - **progress.txt**: Append-only learnings log
-- **adjust wizard**: Auto-triggers every 5 tasks for user input
+- **adjust**: Say "adjust" to reprioritize remaining tasks
 - See `~/.claude/skills/build.md` for full workflow
 
 ## Rules
@@ -98,13 +98,19 @@ Say "test" → Playwright MCP → categorize issues → auto-fix code → report
 ## Skills
 Located in `~/.claude/skills/`:
 - **build.md** - Autonomous task loop (prd.json + progress.txt)
-- setup-project.md, ship.md, fix.md, test.md, env-vars.md, supabase-schema.md
+- **ship.md** - Build, deploy, verify workflow
+- **test.md** - Playwright auto-testing
+- **fix.md** - Debug and fix issues
+- **setup-project.md** - New project setup
+- **env-vars.md** - Environment variable management
+- **supabase-schema.md** - Database schema operations
 
 ## Scripts
 Located in `~/.claude/scripts/`:
-- `start-server.ps1` - Auto-launch dev server in external terminal
+- `start-server.ps1` - Auto-launch dev server in external terminal (Windows)
+- `start-server.sh` - Auto-launch dev server in external terminal (Mac/Linux)
 
-@QUICKSTART.md
+## Included Rules
 @rules/security.md
 @rules/design-system.md
 @rules/windows.md

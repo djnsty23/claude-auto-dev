@@ -39,18 +39,28 @@ set_key() {
     export "$name"="$value"
 }
 
-# Prompt for keys
+# Prompt for keys (grouped by category)
 keys=(
+    # Required
     "SUPABASE_ACCESS_TOKEN:Supabase Access Token (sbp_...):required"
     "GITHUB_PAT:GitHub Personal Access Token (ghp_...):required"
-    "BRAVE_API_KEY:Brave Search API Key:optional"
+    # Google OAuth
     "GOOGLE_CLIENT_ID:Google OAuth Client ID:optional"
     "GOOGLE_CLIENT_SECRET:Google OAuth Client Secret:optional"
-    "ELEVENLABS_API_KEY:ElevenLabs API Key:optional"
+    # AI/LLM
+    "ELEVENLABS_API_KEY:ElevenLabs API Key (voice):optional"
     "OPENROUTER_API_KEY:OpenRouter API Key:optional"
     "DEEPSEEK_API_KEY:DeepSeek API Key:optional"
     "GEMINI_API_KEY:Google Gemini API Key:optional"
+    "ZAI_API_KEY:ZAI API Key:optional"
+    # Search/Scrape
+    "BRAVE_API_KEY:Brave Search API Key:optional"
+    "FIRECRAWL_API_KEY:Firecrawl API Key (web scraping):optional"
+    "LINKUP_API_KEY:Linkup API Key:optional"
+    "CAPSOLVER_API_KEY:Capsolver API Key (captcha):optional"
+    # Email
     "RESEND_API_KEY:Resend Email API Key:optional"
+    # Testing
     "TEST_USER_PASSWORD:Test account password:optional"
 )
 
