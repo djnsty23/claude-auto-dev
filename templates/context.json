@@ -1,0 +1,53 @@
+{
+  "project": "{{NAME}}",
+  "version": "1.0.0",
+  "lastUpdated": null,
+  "domains": {
+    "backend": {
+      "database": {
+        "schema": [],
+        "migrations": [],
+        "queries": []
+      },
+      "api": {
+        "endpoints": [],
+        "middleware": [],
+        "errorHandling": []
+      },
+      "auth": {
+        "strategy": null,
+        "flows": [],
+        "permissions": []
+      }
+    },
+    "frontend": {
+      "components": [],
+      "state": {
+        "management": null,
+        "stores": []
+      },
+      "routing": [],
+      "forms": []
+    },
+    "shared": {
+      "types": [],
+      "utils": [],
+      "constants": []
+    },
+    "devops": {
+      "environment": [],
+      "deployment": null,
+      "ci": null
+    }
+  },
+  "patterns": {
+    "naming": {},
+    "fileStructure": {},
+    "errorHandling": {},
+    "validation": {},
+    "testing": {}
+  },
+  "conventions": [],
+  "knownIssues": [],
+  "decisions": []
+}

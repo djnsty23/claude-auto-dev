@@ -18,6 +18,17 @@ npm run build
 | `stop` | Before closing session |
 | `reset` | Clear all claims after crash |
 
+## Context & Learning
+| Say | Action |
+|-----|--------|
+| `curate` | Extract patterns from codebase |
+| `query <domain>` | Load domain context (backend/frontend/shared) |
+| `learn` | Analyze recent work, extract patterns |
+| `patterns` | Show successful/failed approaches |
+| `what works` | Show effective patterns |
+| `what fails` | Show approaches to avoid |
+| `metrics` | Show development metrics |
+
 ## Additional Commands
 | Say | Action |
 |-----|--------|
@@ -32,4 +43,6 @@ npm run build
 |------|---------|
 | `prd.json` | Tasks (`passes: true/false`) |
 | `progress.txt` | Learnings log |
-| `.claude/briefs/` | Optional detailed specs |
+| `context.json` | Hierarchical project knowledge |
+| `patterns.json` | Successful/failed patterns |
+| `metrics.json` | Development tracking |

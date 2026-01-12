@@ -11,6 +11,11 @@ triggers:
   - stop
   - reset
   - work on
+  - curate
+  - query
+  - learn
+  - metrics
+  - patterns
 ---
 
 # Autonomous Development Loop
@@ -28,22 +33,36 @@ Report: "X of Y complete. Active: [list]. Next available: [title]"
 **DO NOT ASK FOR CONFIRMATION. DO NOT STOP. Just keep going.**
 
 ```
-1. Read prd.json
+1. Read prd.json, patterns.json, context.json
 2. available = stories where passes=false AND (claimedAt is null OR >30min old)
 3. Pick first available task
-4. **IMMEDIATELY** claim in prd.json:
+4. **PRE-TASK AWARENESS** (see awareness.md):
+   - Generate task briefing
+   - Load relevant patterns
+   - Assess confidence level
+   - Identify doom loop risks
+   - Set time budget
+5. **IMMEDIATELY** claim in prd.json:
    - Set claimedAt = new Date().toISOString()
    - Save prd.json RIGHT NOW before any other work
-   - This is how other agents know the task is taken
-5. Implement task
-6. Run: npm run build (or project's build command)
-7. If passes: set passes=true, completedAt=today, save prd.json
-8. Append to progress.txt
-9. Goto step 1
+6. Implement task (with monitoring):
+   - Apply recommended patterns
+   - Avoid known failed approaches
+   - Check for doom loops after each action
+   - Respect time budget
+7. Run: npm run build (or project's build command)
+8. **POST-TASK LEARNING** (see learn.md):
+   - Extract learnings
+   - Update patterns.json
+   - Update metrics.json
+9. If passes: set passes=true, completedAt=today, generate testSpec
+10. Append to progress.txt
+11. Goto step 1
 
 STOP ONLY IF:
   - User interrupts
-  - Build fails repeatedly (3+ times)
+  - Doom loop detected (3+ same errors)
+  - Time budget exceeded (ask user)
   - No available tasks remaining
 ```
 
@@ -270,6 +289,30 @@ if (!title) throw new Error('Title required')
 | `build [goal]` | Generate tasks from description |
 | `stop` | Clear claims, safe to close |
 | `reset` | Clear all claims after crash |
+
+## Context & Learning Commands
+
+| Command | What Happens | See |
+|---------|--------------|-----|
+| `curate` | Extract patterns from codebase | context.md |
+| `query <domain>` | Load specific domain context | context.md |
+| `learn` | Analyze recent work, extract patterns | learn.md |
+| `patterns` | Show successful/failed patterns | learn.md |
+| `what works` | Show effective approaches | learn.md |
+| `what fails` | Show approaches to avoid | learn.md |
+| `metrics` | Show development metrics | metrics.md |
+
+---
+
+## Project Files
+
+| File | Purpose |
+|------|---------|
+| `prd.json` | Tasks with passes status (source of truth) |
+| `progress.txt` | Append-only learnings log |
+| `context.json` | Hierarchical project knowledge |
+| `patterns.json` | Successful/failed patterns |
+| `metrics.json` | Development tracking metrics |
 
 ---
 
