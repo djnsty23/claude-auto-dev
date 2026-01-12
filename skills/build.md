@@ -31,7 +31,10 @@ Report: "X of Y complete. Active: [list]. Next available: [title]"
 1. Read prd.json
 2. available = stories where passes=false AND (claimedAt is null OR >30min old)
 3. Pick first available task
-4. Claim: set claimedAt = now(), save prd.json
+4. **IMMEDIATELY** claim in prd.json:
+   - Set claimedAt = new Date().toISOString()
+   - Save prd.json RIGHT NOW before any other work
+   - This is how other agents know the task is taken
 5. Implement task
 6. Run: npm run build (or project's build command)
 7. If passes: set passes=true, completedAt=today, save prd.json
@@ -44,7 +47,11 @@ STOP ONLY IF:
   - No available tasks remaining
 ```
 
-**Multi-agent note:** If another agent claims the same task (claimedAt changed), just pick next available. No complex coordination needed - 30min expiry handles abandoned claims.
+**CRITICAL: prd.json is the coordination mechanism.**
+- Write claims to prd.json BEFORE starting work
+- Do NOT rely on internal TodoWrite for multi-agent coordination
+- Other agents read prd.json to see what's claimed
+- If you don't update prd.json, other agents will grab the same task
 
 ## On "continue" - Single Task Mode
 
@@ -55,9 +62,11 @@ Same as auto but:
 ## On "work on SXX" - Specific Task
 
 1. Find story with matching ID (e.g., S42)
-2. Claim it regardless of other claims
-3. Implement it
-4. Mark passes=true when done
+2. **IMMEDIATELY** update prd.json:
+   - Set claimedAt = new Date().toISOString()
+   - Save prd.json before doing anything else
+3. Implement the task
+4. Mark passes=true, completedAt=today, save prd.json
 5. Ask what to do next
 
 ---
