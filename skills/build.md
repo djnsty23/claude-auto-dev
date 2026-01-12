@@ -10,6 +10,7 @@ triggers:
   - brainstorm
   - stop
   - reset
+  - work on
 ---
 
 # Autonomous Development Loop
@@ -24,23 +25,18 @@ Report: "X of Y complete. Active: [list]. Next available: [title]"
 
 ## On "auto" - Full Autonomous Mode
 
-**DO NOT ASK FOR CONFIRMATION. Just keep going.**
+**DO NOT ASK FOR CONFIRMATION. DO NOT STOP. Just keep going.**
 
 ```
 1. Read prd.json
 2. available = stories where passes=false AND (claimedAt is null OR >30min old)
-3. active_count = count stories where passes=false AND claimedAt <30min old
-4. offset = random(0,2) if active_count=0, else active_count
-5. task = available[offset] (or last available if offset too high)
-6. Claim: set claimedAt = now(), save prd.json IMMEDIATELY
-7. Verify: re-read prd.json, confirm claimedAt is still yours
-   - If overwritten by another agent: goto step 1
-8. Implement task
-9. Run: npm run build (or project's build command)
-10. If passes: set passes=true, completedAt=today, save prd.json
-11. Append to progress.txt
-12. After every 5 tasks: trigger "adjust" wizard
-13. Goto step 1
+3. Pick first available task
+4. Claim: set claimedAt = now(), save prd.json
+5. Implement task
+6. Run: npm run build (or project's build command)
+7. If passes: set passes=true, completedAt=today, save prd.json
+8. Append to progress.txt
+9. Goto step 1
 
 STOP ONLY IF:
   - User interrupts
@@ -48,177 +44,110 @@ STOP ONLY IF:
   - No available tasks remaining
 ```
 
+**Multi-agent note:** If another agent claims the same task (claimedAt changed), just pick next available. No complex coordination needed - 30min expiry handles abandoned claims.
+
 ## On "continue" - Single Task Mode
 
 Same as auto but:
 - Only process ONE task
 - Ask before continuing to next
-- Skip offset calculation (just pick first available)
+
+## On "work on SXX" - Specific Task
+
+1. Find story with matching ID (e.g., S42)
+2. Claim it regardless of other claims
+3. Implement it
+4. Mark passes=true when done
+5. Ask what to do next
 
 ---
 
-## On "brainstorm" - Discovery Questionnaire
+## On "brainstorm" - Generate New Stories
 
-**Interactive session to uncover new stories. Use AskUserQuestion for each step.**
+**Use AskUserQuestion. Keep it simple - one good question.**
 
-### Step 1: Understand Current State
+### Step 1: One Adaptive Question
 ```
-Read prd.json and progress.txt
-Summarize: "You have X complete, Y remaining tasks."
-```
-
-### Step 2: Ask Discovery Questions (use AskUserQuestion)
-
-**Question 1: Pain Points**
-```
-question: "What's frustrating you most about the current app?"
+question: "What would you like to build next?"
 options:
-  - { label: "UX issues", description: "Confusing flows, slow interactions" }
-  - { label: "Missing features", description: "Things you wish existed" }
-  - { label: "Bugs/stability", description: "Things that break or don't work" }
-  - { label: "Performance", description: "Speed, loading times" }
+  - { label: "Fix bugs/issues", description: "Things that are broken or annoying" }
+  - { label: "Add features", description: "New functionality" }
+  - { label: "Improve UX", description: "Polish, speed, usability" }
+  - { label: "Let me describe", description: "I'll type what I need" }
 ```
 
-**Question 2: User Needs**
+### Step 2: Based on Answer
+- If "Fix bugs": Ask what's broken, generate 3-5 fix stories
+- If "Add features": Ask what features, generate 3-5 feature stories
+- If "Improve UX": Analyze current code, suggest 3-5 polish stories
+- If "Let me describe": Parse their input, generate matching stories
+
+### Step 3: Confirm Before Adding
 ```
-question: "Who uses this and what do they need most?"
+question: "Generated X stories. Add them?"
 options:
-  - { label: "New users", description: "Onboarding, discoverability" }
-  - { label: "Power users", description: "Advanced features, shortcuts" }
-  - { label: "Admins", description: "Management, analytics, controls" }
-  - { label: "All of the above", description: "General improvements" }
+  - { label: "Add all", description: "Include everything" }
+  - { label: "Show me first", description: "List them before adding" }
 ```
 
-**Question 3: Scope**
-```
-question: "How big should these new features be?"
-options:
-  - { label: "Quick wins", description: "Small fixes, polish (1-2 hours each)" }
-  - { label: "Medium features", description: "New functionality (half day each)" }
-  - { label: "Big features", description: "Major additions (full day+)" }
-  - { label: "Mix", description: "Variety of sizes" }
-```
-
-**Question 4: Open Input**
-```
-question: "Describe any specific features or improvements you have in mind:"
-(Allow free text input - user types custom ideas)
-```
-
-### Step 3: Generate Stories
-```
-Based on answers, generate 5-15 new stories
-Group them by feature area
-Each story has: id, title, description, priority, files (guessed), acceptanceCriteria
-```
-
-### Step 4: Review Generated Stories (use AskUserQuestion)
-```
-question: "I've drafted X stories. Which should we add?"
-options:
-  - { label: "Add all", description: "Include everything I suggested" }
-  - { label: "Let me pick", description: "Show me the list to select from" }
-  - { label: "Refine first", description: "Discuss before adding" }
-```
-
-### Step 5: Add to prd.json
-```
-Add selected stories with incremental IDs
-Report: "Added X new stories. Run 'auto' to start building."
-```
+### Step 4: Add to prd.json
+Report: "Added X stories. Say 'auto' to start."
 
 ---
 
-## On "adjust" - Interactive Feature Selection Wizard
+## On "adjust" - Reprioritize Tasks
 
-**ALWAYS use AskUserQuestion tool for this wizard.**
+**Only runs when user explicitly says "adjust". Never auto-triggers.**
 
-### Step 1: Show Current State
-```
-Read prd.json and progress.txt
-Summarize: "Completed X tasks. Recent: [last 3 titles]"
-```
-
-### Step 2: Group Remaining Tasks by Feature Area
+### Step 1: Group Remaining Tasks
 ```
 Analyze remaining tasks (passes=false)
-Group by common theme/component/feature
-Example groupings:
-  - "UI Polish" (3 tasks): animations, responsive fixes, dark mode
-  - "API Integration" (4 tasks): YouTube import, batch processing, webhooks
-  - "Testing" (2 tasks): E2E tests, unit tests
+Group by theme/component
 ```
 
-### Step 3: Present Options via AskUserQuestion
+### Step 2: Present Options
 ```
-question: "Which feature set should I work on next?"
+question: "Which should I focus on?"
 options:
-  - { label: "UI Polish (3 tasks)", description: "Animations, responsive, dark mode" }
-  - { label: "API Integration (4 tasks)", description: "YouTube, batch, webhooks" }
-  - { label: "Testing (2 tasks)", description: "E2E and unit tests" }
-  - { label: "All remaining", description: "Work through everything in order" }
+  - { label: "[Group A] (X tasks)", description: "..." }
+  - { label: "[Group B] (X tasks)", description: "..." }
+  - { label: "All in order", description: "Keep current priorities" }
 ```
 
-### Step 4: Reprioritize Based on Selection
-```
-If user picks a feature group:
-  - Move those tasks to top priority
-  - Renumber priorities in prd.json
-  - Report: "Reprioritized. Starting with [group name]."
-
-If user picks "All remaining":
-  - Keep current order
-  - Continue with auto
-
-If user provides custom input:
-  - Parse their request
-  - Either reprioritize existing tasks OR generate new tasks
-  - Confirm understanding before proceeding
-```
-
-### When to Auto-Trigger This Wizard
-- After every 5 completed tasks (rhythm check)
-- When a task seems unclear or out of scope
-- When build fails and you're unsure of the fix
-- When you notice conflicting requirements
-- When the next task doesn't logically follow
-
-**Phrase it as:** "I've completed 5 tasks. Let me check in on priorities."
+### Step 3: Reprioritize
+Move selected group to top, renumber priorities.
 
 ---
 
-## On "stop" - Clear Claims and Exit Safely
+## On "stop" - Before Closing Session
 
 ```
 1. Read prd.json
-2. For stories where passes=false AND claimedAt is recent:
-   - Set claimedAt = null
+2. Clear claimedAt on any incomplete tasks you were working on
 3. Save prd.json
-4. Report: "Stopped. Released X claims. Safe to close."
+4. Report: "Stopped. Safe to close."
 ```
 
-## On "reset" - Clear ALL Claims (After Crash)
+## On "reset" - After Crash
 
 ```
 1. Read prd.json
-2. For ALL stories where passes=false:
-   - Set claimedAt = null
+2. Clear ALL claimedAt fields where passes=false
 3. Save prd.json
-4. Report: "Reset all claims. Ready for fresh start."
+4. Report: "Reset all claims."
 ```
 
-## On "build [goal]" - Auto-Generate Tasks
+## On "build [goal]" - Quick Start
 
-1. Analyze the goal
-2. Break into feature groups (each group = 3-5 related tasks)
-3. **Present feature groups via adjust wizard**
-4. Let user pick which to start with
-5. Add selected tasks to prd.json
-6. Begin auto loop
+1. Parse the goal
+2. Generate 5-10 stories
+3. Show list, ask to confirm
+4. Add to prd.json
+5. Begin auto loop
 
 ---
 
-## Task Schema (prd.json)
+## Task Schema
 
 ```json
 {
@@ -229,41 +158,25 @@ If user provides custom input:
   "passes": false,
   "claimedAt": null,
   "completedAt": null,
-  "group": "UI Polish",
   "files": ["path/to/file.ts"],
   "acceptanceCriteria": ["Testable requirement"]
 }
 ```
 
-**Key fields:**
-- `passes`: true/false - the source of truth
-- `claimedAt`: ISO timestamp or null - for multi-agent coordination
-- `group`: Optional feature group for wizard categorization
-
----
-
-## Parallel Agents
-
-```bash
-claude "auto"   # Each agent auto-coordinates via offset algorithm
-claude "auto"
-claude "auto"
-```
-
-Each agent will independently trigger "adjust" after 5 tasks.
-User only needs to respond to one wizard at a time.
+**Source of truth:** `passes: true/false`
 
 ---
 
 ## Command Summary
 
-| Command | Purpose |
-|---------|---------|
-| `auto` | Work through all tasks without stopping |
-| `continue` | One task, then ask before next |
-| `status` | Show progress summary |
-| `brainstorm` | Discovery questionnaire → generate new stories |
-| `adjust` | Pick which feature set to work on next |
-| `build [goal]` | Generate tasks from a goal description |
-| `stop` | Clear your claims before closing |
+| Command | What Happens |
+|---------|--------------|
+| `auto` | Work through all tasks, don't stop |
+| `continue` | One task, then ask |
+| `work on S42` | Do specific task |
+| `status` | Show progress |
+| `brainstorm` | Generate new stories |
+| `adjust` | Reprioritize remaining tasks |
+| `build [goal]` | Generate tasks from description |
+| `stop` | Clear claims, safe to close |
 | `reset` | Clear all claims after crash |

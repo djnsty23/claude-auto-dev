@@ -1,5 +1,4 @@
 {
-  "project": "$PROJECT_NAME",
-  "description": "TODO: Add project description",
+  "project": "{{NAME}}",
   "stories": []
 }
