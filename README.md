@@ -23,7 +23,7 @@ This installs:
 - `~/.claude/QUICKSTART.md` - Quick reference
 - `~/.claude/rules/*.md` - Coding rules
 - `~/.claude/skills/build.md` - Auto-dev skill
-- `~/.claude/mcp.json` - MCP server config (via API key wizard)
+- `~/.claude/mcp.json` - MCP server config (uses `${ENV_VAR}` references, no hardcoded secrets)
 
 ## Quick Install (Skill Only)
 
@@ -136,6 +136,8 @@ This prompts for:
 Keys are stored in:
 - **Windows:** System environment variables (persists across reboots)
 - **Mac/Linux:** `~/.zshrc` or `~/.bashrc`
+
+The `mcp.json` config uses `${ENV_VAR}` syntax - MCP reads from your system env vars at runtime. **No secrets are hardcoded in the config file.**
 
 ## Environment Variables
 

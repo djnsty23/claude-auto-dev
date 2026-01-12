@@ -2,8 +2,8 @@
 .SYNOPSIS
     API Key Setup Wizard for Claude Code
 .DESCRIPTION
-    Prompts for API keys and stores them securely in Windows environment variables.
-    Also generates mcp.json from template.
+    Prompts for API keys and stores them in Windows system environment variables.
+    MCP config uses ${ENV_VAR} syntax - no hardcoding needed.
 .EXAMPLE
     .\setup-keys.ps1
 #>
@@ -13,6 +13,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host "`n=== Claude Code API Key Setup ===" -ForegroundColor Magenta
 Write-Host "Keys are stored in Windows system environment variables."
+Write-Host "MCP config references them via `${ENV_VAR}` syntax."
 Write-Host "Press Enter to skip any key you don't have.`n"
 
 # Define all keys
@@ -29,8 +30,6 @@ $keys = @(
     @{ Name = "RESEND_API_KEY"; Desc = "Resend Email API Key"; Required = $false },
     @{ Name = "TEST_USER_PASSWORD"; Desc = "Test account password"; Required = $false }
 )
-
-$values = @{}
 
 foreach ($key in $keys) {
     $existing = [Environment]::GetEnvironmentVariable($key.Name, "User")
@@ -49,44 +48,38 @@ foreach ($key in $keys) {
     $value = Read-Host "  $($key.Name)"
 
     if ($value) {
-        $values[$key.Name] = $value
         [Environment]::SetEnvironmentVariable($key.Name, $value, "User")
-        Write-Host "  ✓ Saved" -ForegroundColor Green
+        Write-Host "  ✓ Saved to system env vars" -ForegroundColor Green
     } elseif ($existing) {
-        $values[$key.Name] = $existing
         Write-Host "  ○ Keeping existing" -ForegroundColor Yellow
     } else {
         Write-Host "  - Skipped" -ForegroundColor Gray
     }
 }
 
-# Generate mcp.json from template
-Write-Host "`n=== Generating mcp.json ===" -ForegroundColor Magenta
+# Copy MCP config (uses ${ENV_VAR} references, no substitution needed)
+Write-Host "`n=== Installing mcp.json ===" -ForegroundColor Magenta
 
-$mcpTemplate = Get-Content "$ScriptDir\config\mcp.template.json" -Raw
+$mcpSource = "$ScriptDir\config\mcp.template.json"
 $mcpPath = "$env:USERPROFILE\.claude\mcp.json"
-
-# Replace placeholders with actual values
-foreach ($key in $values.Keys) {
-    $mcpTemplate = $mcpTemplate -replace "\{\{$key\}\}", $values[$key]
-}
 
 # Create .claude directory if needed
 if (-not (Test-Path "$env:USERPROFILE\.claude")) {
     New-Item -ItemType Directory -Path "$env:USERPROFILE\.claude" -Force | Out-Null
 }
 
-$mcpTemplate | Out-File -FilePath $mcpPath -Encoding UTF8 -NoNewline
-Write-Host "✓ Generated $mcpPath" -ForegroundColor Green
+Copy-Item $mcpSource $mcpPath -Force
+Write-Host "✓ Installed $mcpPath" -ForegroundColor Green
+Write-Host "  (Uses `${ENV_VAR}` references - no secrets in file)" -ForegroundColor Gray
 
 Write-Host "`n=== Done ===" -ForegroundColor Green
 Write-Host @"
 
 Keys stored in Windows environment variables.
-MCP config generated at ~/.claude/mcp.json
+MCP config installed at ~/.claude/mcp.json
 
-Next: Run the full installer:
-  .\install.ps1 -Full
+The config uses `${ENV_VAR}` syntax - MCP reads from your system env vars at runtime.
+No secrets are hardcoded in the config file.
 
 Note: Restart your terminal for env vars to take effect.
 "@

@@ -4,7 +4,7 @@
       "command": "npx",
       "args": ["-y", "@supabase/mcp-server-supabase@latest"],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "{{SUPABASE_ACCESS_TOKEN}}"
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
       },
       "autoApprove": ["list_projects", "get_project", "list_tables", "execute_sql", "apply_migration", "get_logs", "list_functions", "get_schemas"]
     },
@@ -22,7 +22,7 @@
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
       "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "{{GITHUB_PAT}}"
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"
       },
       "autoApprove": ["search_repositories", "get_file_contents", "create_pull_request", "list_issues"]
     },
@@ -30,7 +30,7 @@
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-brave-search"],
       "env": {
-        "BRAVE_API_KEY": "{{BRAVE_API_KEY}}"
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
       },
       "autoApprove": ["brave_web_search"]
     },
