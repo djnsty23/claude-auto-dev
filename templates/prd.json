@@ -1,4 +1,5 @@
 {
   "project": "{{NAME}}",
-  "stories": []
+  "stories": [],
+  "testSuites": []
 }

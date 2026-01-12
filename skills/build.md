@@ -169,12 +169,91 @@ Move selected group to top, renumber priorities.
   "passes": false,
   "claimedAt": null,
   "completedAt": null,
+  "testedAt": null,
   "files": ["path/to/file.ts"],
-  "acceptanceCriteria": ["Testable requirement"]
+  "acceptanceCriteria": ["Testable requirement"],
+  "testSpec": null,
+  "testResults": null
 }
 ```
 
 **Source of truth:** `passes: true/false`
+
+---
+
+## On Story Completion - Generate testSpec
+
+When marking a story `passes: true`, **also generate testSpec**:
+
+```
+1. Set passes = true, completedAt = now
+2. Generate testSpec:
+   a. Parse acceptanceCriteria → happyPath tests
+   b. Analyze files → errorCases (validation, auth)
+   c. Infer edgeCases (null, empty, boundaries)
+   d. Add networkChecks for API routes
+   e. Set consoleChecks based on component type
+3. Set testedAt = null (needs testing)
+4. Save prd.json
+5. Append to progress.txt
+```
+
+### testSpec Structure
+
+```json
+{
+  "testSpec": {
+    "preconditions": ["Dev server running", "User logged in"],
+    "happyPath": [
+      {
+        "name": "Test name from criteria",
+        "steps": ["Step 1", "Step 2"],
+        "expected": "What should happen"
+      }
+    ],
+    "errorCases": [
+      {
+        "name": "Empty input",
+        "steps": ["Submit with empty form"],
+        "expected": "Validation error shown"
+      }
+    ],
+    "edgeCases": [
+      {
+        "name": "Max length input",
+        "input": "Very long string...",
+        "expected": "Handled gracefully"
+      }
+    ],
+    "networkChecks": [
+      { "endpoint": "/api/...", "method": "POST", "expectedStatus": 200 }
+    ],
+    "consoleChecks": { "noErrors": true, "noWarnings": false }
+  }
+}
+```
+
+### Auto-Generation Examples
+
+**From acceptance criteria:**
+```
+"User can create a new item"
+→ happyPath: Fill form, submit, verify item created
+→ errorCase: Submit empty form, duplicate item
+→ edgeCase: Very long title, special characters
+```
+
+**From code analysis:**
+```typescript
+// Found in API route
+if (!title) throw new Error('Title required')
+→ errorCase: { name: "Missing title", expected: "Error message" }
+
+// Found in component
+<input maxLength={100} />
+→ edgeCase: { name: "100 char title", expected: "Accepted" }
+→ edgeCase: { name: "101 char title", expected: "Truncated or rejected" }
+```
 
 ---
 
