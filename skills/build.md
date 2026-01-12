@@ -134,7 +134,8 @@ Move selected group to top, renumber priorities.
 1. Read prd.json
 2. Clear claimedAt on any incomplete tasks you were working on
 3. Save prd.json
-4. Report: "Stopped. Safe to close."
+4. Delete tmpclaude-* files (Bash: rm tmpclaude-* or PowerShell: Remove-Item tmpclaude-*)
+5. Report: "Stopped. Safe to close."
 ```
 
 ## On "reset" - After Crash
@@ -143,7 +144,8 @@ Move selected group to top, renumber priorities.
 1. Read prd.json
 2. Clear ALL claimedAt fields where passes=false
 3. Save prd.json
-4. Report: "Reset all claims."
+4. Delete tmpclaude-* files
+5. Report: "Reset all claims."
 ```
 
 ## On "build [goal]" - Quick Start
