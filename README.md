@@ -2,7 +2,30 @@
 
 Autonomous task management for Claude Code.
 
-## Install
+## Full Restore (New Machine)
+
+After Windows reinstall or on a new machine, run this to restore everything:
+
+**Windows:**
+```powershell
+git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
+& $env:USERPROFILE\claude-auto-dev\install.ps1 -Full
+```
+
+**Mac/Linux:**
+```bash
+git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
+~/claude-auto-dev/install.sh --full
+```
+
+This installs:
+- `~/.claude/CLAUDE.md` - Global config
+- `~/.claude/QUICKSTART.md` - Quick reference
+- `~/.claude/rules/*.md` - Coding rules
+- `~/.claude/skills/build.md` - Auto-dev skill
+- `~/.claude/mcp.json` - MCP server config (via API key wizard)
+
+## Quick Install (Skill Only)
 
 **Windows:**
 ```powershell
@@ -89,26 +112,49 @@ This clears claims so other agents can pick up the work.
 }
 ```
 
+## API Key Setup
+
+Run the API key wizard to set up environment variables:
+
+**Windows:**
+```powershell
+& $env:USERPROFILE\claude-auto-dev\setup-keys.ps1
+```
+
+**Mac/Linux:**
+```bash
+~/claude-auto-dev/setup-keys.sh
+```
+
+This prompts for:
+- `SUPABASE_ACCESS_TOKEN` (required) - MCP server auth
+- `GITHUB_PAT` (required) - GitHub integration
+- `BRAVE_API_KEY` - Web search
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - OAuth
+- `ELEVENLABS_API_KEY`, `OPENROUTER_API_KEY`, etc.
+
+Keys are stored in:
+- **Windows:** System environment variables (persists across reboots)
+- **Mac/Linux:** `~/.zshrc` or `~/.bashrc`
+
 ## Environment Variables
 
 **Never hardcode API keys.** Use system environment variables.
 
-**Windows (set once, available everywhere):**
+**Manual setup (Windows Admin):**
 ```powershell
-# Run as Admin
 setx SUPABASE_ACCESS_TOKEN "sbp_..."
 setx GOOGLE_CLIENT_ID "..."
 setx OPENAI_API_KEY "sk-..."
 ```
 
-**Project .env.local (reference system vars):**
+**Project .env.local (project-specific only):**
 ```env
 # Supabase (project-specific)
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 
-# These come from system env vars - no values in repo
-# GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+# System env vars are picked up automatically - no need to repeat
 ```
 
 **Rules:**
