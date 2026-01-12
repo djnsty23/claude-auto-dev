@@ -191,3 +191,27 @@ Move selected group to top, renumber priorities.
 | `build [goal]` | Generate tasks from description |
 | `stop` | Clear claims, safe to close |
 | `reset` | Clear all claims after crash |
+
+---
+
+## Security Rules
+
+**NEVER hardcode API keys or secrets in code.**
+
+When implementing features that need API keys:
+1. Use `process.env.API_KEY_NAME` - never literal values
+2. Add the var name to `.env.example` (without value)
+3. Tell user to set it via system env vars or .env.local
+
+```typescript
+// GOOD
+const apiKey = process.env.OPENAI_API_KEY;
+
+// BAD - never do this
+const apiKey = "sk-abc123...";
+```
+
+Environment variable storage:
+- System env vars for global keys (GOOGLE_CLIENT_ID, etc.)
+- .env.local for project-specific URLs only
+- Never commit .env files to git

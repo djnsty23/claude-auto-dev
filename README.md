@@ -89,6 +89,34 @@ This clears claims so other agents can pick up the work.
 }
 ```
 
+## Environment Variables
+
+**Never hardcode API keys.** Use system environment variables.
+
+**Windows (set once, available everywhere):**
+```powershell
+# Run as Admin
+setx SUPABASE_ACCESS_TOKEN "sbp_..."
+setx GOOGLE_CLIENT_ID "..."
+setx OPENAI_API_KEY "sk-..."
+```
+
+**Project .env.local (reference system vars):**
+```env
+# Supabase (project-specific)
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+
+# These come from system env vars - no values in repo
+# GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+```
+
+**Rules:**
+- API keys in system env vars (not .env files)
+- .env.local for project-specific URLs only
+- Never commit secrets to git
+- Use `.env.example` to document required vars (no values)
+
 ## Troubleshooting
 
 **Tasks stuck as claimed?**
