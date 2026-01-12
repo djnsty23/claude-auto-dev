@@ -19,6 +19,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Version = Get-Content "$ScriptDir\VERSION" -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $Version) { $Version = "dev" }
 
 function Write-Step { param($msg) Write-Host "→ $msg" -ForegroundColor Cyan }
 function Write-Done { param($msg) Write-Host "✓ $msg" -ForegroundColor Green }
@@ -26,7 +28,7 @@ function Write-Skip { param($msg) Write-Host "○ $msg (exists)" -ForegroundColo
 
 # Full restore (includes Global)
 if ($Full) {
-    Write-Host "`n=== FULL RESTORE ===" -ForegroundColor Magenta
+    Write-Host "`n=== FULL RESTORE (v$Version) ===" -ForegroundColor Magenta
 
     $claudeDir = "$env:USERPROFILE\.claude"
 
@@ -52,10 +54,12 @@ if ($Full) {
         Write-Done "~/.claude/rules/$($_.Name)"
     }
 
-    # Copy skill
+    # Copy all skills
     Write-Step "Installing skills..."
-    Copy-Item "$ScriptDir\skills\build.md" "$claudeDir\skills\build.md" -Force
-    Write-Done "~/.claude/skills/build.md"
+    Get-ChildItem "$ScriptDir\skills\*.md" | ForEach-Object {
+        Copy-Item $_.FullName "$claudeDir\skills\$($_.Name)" -Force
+        Write-Done "~/.claude/skills/$($_.Name)"
+    }
 
     # Copy scripts
     if (Test-Path "$ScriptDir\scripts") {
@@ -81,15 +85,17 @@ if ($Full) {
 
 # Global install or update
 if ($Global -or $Update) {
-    Write-Host "`n=== Skill Install ===" -ForegroundColor Magenta
+    Write-Host "`n=== Skill Install (v$Version) ===" -ForegroundColor Magenta
 
     $skillDir = "$env:USERPROFILE\.claude\skills"
     if (-not (Test-Path $skillDir)) {
         New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
     }
 
-    Copy-Item "$ScriptDir\skills\build.md" "$skillDir\build.md" -Force
-    Write-Done "Installed ~/.claude/skills/build.md"
+    Get-ChildItem "$ScriptDir\skills\*.md" | ForEach-Object {
+        Copy-Item $_.FullName "$skillDir\$($_.Name)" -Force
+        Write-Done "~/.claude/skills/$($_.Name)"
+    }
 }
 
 # Project init
@@ -121,14 +127,14 @@ if ($Init) {
 if (-not $Global -and -not $Init -and -not $Update -and -not $Full) {
     Write-Host @"
 
-Claude Auto-Dev
-===============
+Claude Auto-Dev v$Version
+========================
 .\install.ps1 -Full      FULL RESTORE (all configs + API keys)
-.\install.ps1 -Global    Install skill file only
+.\install.ps1 -Global    Install all skills
 .\install.ps1 -Init      Initialize project
-.\install.ps1 -Update    Update skill file
+.\install.ps1 -Update    Update all skills
 
-Commands: auto, continue, status, brainstorm, adjust, stop
+Commands: auto, continue, status, brainstorm, adjust, stop, reset
 
 "@ -ForegroundColor Cyan
     exit 0
