@@ -36,7 +36,7 @@
     },
     "playwright": {
       "command": "npx",
-      "args": ["@anthropic-ai/claude-code-mcp-server-playwright@latest"],
+      "args": ["-y", "@anthropic-ai/claude-code-mcp-server-playwright@latest"],
       "autoApprove": ["browser_navigate", "browser_snapshot", "browser_click", "browser_type"]
     }
   }

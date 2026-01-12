@@ -2,7 +2,7 @@
 
 ## Quick Start
 ```bash
-npm run dev
+npm run dev    # http://localhost:3000
 npm run build
 ```
 
@@ -16,7 +16,20 @@ npm run build
 | `brainstorm` | Generate new stories |
 | `adjust` | Reprioritize tasks |
 | `stop` | Before closing session |
+| `reset` | Clear all claims after crash |
+
+## Additional Commands
+| Say | Action |
+|-----|--------|
+| `ship` | Build → deploy → verify |
+| `test` | Run Playwright tests |
+| `fix` | Debug and fix issues |
+| `schema` | Database operations via MCP |
+| `env` | Manage environment variables |
 
 ## Files
-- `prd.json` - Task list (`passes: true/false`)
-- `progress.txt` - Learnings log
+| File | Purpose |
+|------|---------|
+| `prd.json` | Tasks (`passes: true/false`) |
+| `progress.txt` | Learnings log |
+| `.claude/briefs/` | Optional detailed specs |
