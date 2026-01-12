@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "project": "PROJECT_NAME",
+  "lastUpdated": "DATE",
+  "learnings": [],
+  "uxChecklist": {
+    "visibility": [
+      "All interactive elements visible on screen",
+      "Popups/modals within viewport bounds",
+      "Loading states visible",
+      "Error messages visible and helpful"
+    ],
+    "persistence": [
+      "Dismissed dialogs stay dismissed (localStorage fallback)",
+      "Form state survives refresh",
+      "User preferences persist"
+    ],
+    "navigation": [
+      "Can always go back",
+      "Action buttons at END of content",
+      "Clear what clicking a button does",
+      "No dead ends"
+    ],
+    "emptyStates": [
+      "0 items has helpful message",
+      "Clear CTAs when list is empty",
+      "Skip option when data unavailable"
+    ],
+    "buttonLabels": [
+      "Labels describe action outcome, not process",
+      "No ambiguous buttons"
+    ],
+    "aiFirstDefaults": [
+      "AI pre-selects optimal values",
+      "User tweaks, not builds from scratch",
+      "Sensible defaults everywhere"
+    ]
+  },
+  "designPrinciples": {
+    "owner": "Andy",
+    "principles": [
+      "AI-first defaults: AI analyzes and pre-fills optimal values",
+      "User tweaks, doesn't build from scratch",
+      "Button labels = outcome, not process",
+      "Empty states have helpful message + CTA",
+      "Dismissed dialogs persist via localStorage",
+      "All elements visible on screen",
+      "No dead ends"
+    ]
+  }
+}

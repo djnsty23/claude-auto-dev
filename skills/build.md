@@ -1,6 +1,6 @@
 ---
 name: Autonomous Build Loop
-description: Multi-agent autonomous development with interactive task management.
+description: Multi-agent autonomous development with learning loop, UX review, and AI-first defaults.
 triggers:
   - build
   - continue
@@ -11,11 +11,11 @@ triggers:
   - stop
   - reset
   - work on
-  - curate
-  - query
+  - skip
+  - unskip
+  - archive
+  - ux review
   - learn
-  - metrics
-  - patterns
 ---
 
 # Autonomous Development Loop
@@ -25,45 +25,187 @@ triggers:
 Read prd.json
 Count: passes=true (complete), passes=false (remaining)
 Show active claims (claimedAt < 30min, passes=false)
-Report: "X of Y complete. Active: [list]. Next available: [title]"
+Flag stale tasks (claimedAt > 7 days ago, passes=false) with ⚠️
+Show recent learnings count from learnings.json
+Report: "X of Y complete. Active: [list]. Stale: [list]. Learnings: Z. Next: [title]"
 ```
 
 ## On "auto" - Full Autonomous Mode
 
 **DO NOT ASK FOR CONFIRMATION. DO NOT STOP. Just keep going.**
 
+### Phase 1: LOAD (Quick Context)
 ```
-1. Read prd.json, patterns.json, context.json
-2. available = stories where passes=false AND (claimedAt is null OR >30min old)
-3. Pick first available task
-4. **PRE-TASK AWARENESS** (see awareness.md):
-   - Generate task briefing
-   - Load relevant patterns
-   - Assess confidence level
-   - Identify doom loop risks
-   - Set time budget
-5. **IMMEDIATELY** claim in prd.json:
+1. Check for .claude/handoff.md - read if exists (previous session notes)
+2. Read .claude/context.json if exists (cached state)
+3. Read prd.json
+4. Skim progress.txt (last 20 lines for recent learnings)
+5. Skim ~/.claude/patterns.txt (global patterns that apply everywhere)
+6. Load learnings.json (structured error→solution pairs)
+7. Initialize tracking:
+   - errorCount = {}     // Track error types
+   - fileAttempts = {}   // Track file edit attempts
+   - taskAttempts = 0    // Attempts on current task
+```
+
+### Phase 2: TASK SELECTION (with Auto-Discovery)
+```
+1. available = stories where passes=false AND (claimedAt is null OR >30min old)
+
+2. IF available.length === 0 (queue empty):
+   → Trigger AUTO-DISCOVERY mode (see below)
+   → After discovery, re-check available
+
+3. Pick first available by priority
+4. **IMMEDIATELY** claim in prd.json:
    - Set claimedAt = new Date().toISOString()
    - Save prd.json RIGHT NOW before any other work
-6. Implement task (with monitoring):
-   - Apply recommended patterns
-   - Avoid known failed approaches
-   - Check for doom loops after each action
-   - Respect time budget
-7. Run: npm run build (or project's build command)
-8. **POST-TASK LEARNING** (see learn.md):
-   - Extract learnings
-   - Update patterns.json
-   - Update metrics.json
-9. If passes: set passes=true, completedAt=today, generate testSpec
-10. Append to progress.txt
-11. Goto step 1
+```
 
-STOP ONLY IF:
-  - User interrupts
-  - Doom loop detected (3+ same errors)
-  - Time budget exceeded (ask user)
-  - No available tasks remaining
+### AUTO-DISCOVERY MODE (when queue empty)
+```
+Triggered automatically when no tasks available.
+
+1. RUN UX REVIEW (silent):
+   - Check for console errors in browser
+   - Run through main user flows
+   - Look for: off-screen elements, broken buttons, empty states
+   - Generate UX-### stories for issues found
+
+2. RUN CODE SCAN:
+   - npm run build (check for warnings)
+   - Look for TODO/FIXME comments
+   - Check for unused exports
+   - Generate FIX-### stories for issues found
+
+3. CHECK LEARNINGS:
+   - Review recent learnings.json entries
+   - Any patterns that suggest missing features?
+   - Generate S### stories for improvements
+
+4. PRESENT FINDINGS:
+   "Found X potential issues:
+   - UX: [list]
+   - Code: [list]
+   - Improvements: [list]
+
+   Add to queue? (yes/no/pick)"
+
+5. IF user says yes:
+   - Add stories to prd.json
+   - Continue auto loop
+
+6. IF user says no:
+   - Report: "Queue empty. Say 'brainstorm' to add new features."
+   - Exit auto mode
+```
+
+### Phase 3: PRE-TASK CONFIDENCE CHECK
+```
+Before implementing, verify:
+- [ ] Files mentioned in task exist (or will be created)
+- [ ] Required env vars are documented
+- [ ] No blockers noted in context.json
+
+If confidence < 80%:
+- Log concern to progress.txt
+- Continue anyway (don't block on uncertainty)
+```
+
+### Phase 4: IMPLEMENT with LEARNING LOOP
+
+#### 4a: Pre-Retry Consultation (CRITICAL)
+```
+BEFORE attempting any fix:
+1. Extract error signature (key terms, error codes)
+2. Search learnings.json for matching signature
+3. Search progress.txt for similar issues
+4. Search ~/.claude/patterns.txt for applicable patterns
+
+If match found with confidence > 0.7:
+   - Apply known solution FIRST
+   - Log: "Applied learning [id]: [description]"
+   - Increment learnings.json timesApplied
+
+If no match:
+   - Attempt novel solution
+   - Track for potential new learning
+```
+
+#### 4b: Doom Loop Detection
+```
+While implementing:
+- Track fileAttempts[path]++ on each edit
+- Track errorCount[errorType]++ on each error
+
+DOOM LOOP TRIGGERS (stop and ask user):
+- Same file edited 5+ times without build passing
+- Same error type appears 3+ times
+- Task attempted 3+ times without progress
+- Build fails 3+ times consecutively
+
+On doom loop:
+1. Log to progress.txt: "DOOM LOOP: [description]"
+2. Create structured learning entry (even for failure)
+3. Save current state to context.json
+4. Ask user: "Stuck on [task]. Tried X times. Options: skip, different approach, or help?"
+```
+
+### Phase 5: VERIFICATION
+```
+1. Run: npm run build (or project's build command)
+2. If build passes, run tests:
+   - npm test (if test script exists)
+   - Check for test failures
+3. If both pass:
+   - Set passes=true, completedAt=today in prd.json
+   - Clear errorCount and fileAttempts for this task
+   - Update .claude/context.json (every 5 tasks)
+4. If fails:
+   - Consult learnings before retrying (Phase 4a)
+   - Increment taskAttempts
+   - Check doom loop conditions
+   - If not doom loop: try to fix and repeat
+
+Note: If project has no test script, skip step 2.
+```
+
+### Phase 6: LEARN (Automatic Pattern Extraction)
+```
+AFTER each task (success or failure):
+
+1. Append to progress.txt:
+   - What was done
+   - Any gotchas discovered
+   - Files changed
+
+2. If error took 2+ attempts to fix:
+   a. Create entry in learnings.json:
+      {
+        "id": "L###",
+        "type": "fix|pattern|gotcha|workaround",
+        "errorSignature": "regex pattern matching the error",
+        "description": "What went wrong",
+        "solution": "How to fix it",
+        "confidence": 0.7,
+        "stories": ["S##"],
+        "files": ["affected/files.ts"],
+        "created": "ISO date",
+        "timesApplied": 0
+      }
+   b. If pattern is universal (applies to any project):
+      - Also append to ~/.claude/patterns.txt
+      - Format: [Category] Pattern: explanation
+
+3. Goto Phase 2 (next task)
+```
+
+### STOP CONDITIONS
+```
+- User interrupts
+- Doom loop triggered
+- No available tasks remaining
+- Context limit approaching (proactively save and notify)
 ```
 
 **CRITICAL: prd.json is the coordination mechanism.**
@@ -71,6 +213,8 @@ STOP ONLY IF:
 - Do NOT rely on internal TodoWrite for multi-agent coordination
 - Other agents read prd.json to see what's claimed
 - If you don't update prd.json, other agents will grab the same task
+
+---
 
 ## On "continue" - Single Task Mode
 
@@ -84,9 +228,84 @@ Same as auto but:
 2. **IMMEDIATELY** update prd.json:
    - Set claimedAt = new Date().toISOString()
    - Save prd.json before doing anything else
-3. Implement the task
-4. Mark passes=true, completedAt=today, save prd.json
-5. Ask what to do next
+3. Run PRE-TASK CONFIDENCE CHECK
+4. Implement the task (with learning loop + doom loop detection)
+5. Mark passes=true, completedAt=today, save prd.json
+6. Ask what to do next
+
+---
+
+## On "ux review" - Manual UX Testing Phase
+
+**Automated tests catch code bugs. UX review catches human friction.**
+
+### Step 1: Identify Testable Flows
+```
+Read prd.json, find completed UI stories
+List main user flows:
+- [ ] Auth flow (signup, login, logout)
+- [ ] Main creation flow (wizard steps)
+- [ ] Settings/preferences
+- [ ] Admin panel (if exists)
+```
+
+### Step 2: UX Review Checklist
+```
+For each flow, check:
+
+VISIBILITY
+- [ ] All interactive elements visible on screen (no off-screen buttons)
+- [ ] Popups/modals within viewport bounds
+- [ ] Loading states visible
+- [ ] Error messages visible and helpful
+
+PERSISTENCE
+- [ ] Dismissed dialogs stay dismissed (localStorage fallback)
+- [ ] Form state survives refresh
+- [ ] User preferences persist
+
+NAVIGATION
+- [ ] Can always go back
+- [ ] Action buttons at END of content (not middle)
+- [ ] Clear what clicking a button does
+- [ ] No dead ends
+
+EMPTY STATES
+- [ ] "0 items" has helpful message
+- [ ] Clear CTAs when list is empty
+- [ ] Skip option when data unavailable
+
+BUTTON LABELS
+- [ ] Labels describe action outcome, not technical process
+- [ ] "Continue to Preview" not "Generate Preview"
+- [ ] No ambiguous buttons
+
+AI-FIRST DEFAULTS (Andy's Preference)
+- [ ] AI pre-selects optimal values
+- [ ] User tweaks, not builds from scratch
+- [ ] Sensible defaults everywhere
+```
+
+### Step 3: Test with Playwright MCP
+```
+For critical flows:
+1. Launch browser: mcp__playwright__browser_navigate
+2. Walk through flow step by step
+3. Take snapshots: mcp__playwright__browser_snapshot
+4. Document any friction found
+```
+
+### Step 4: Log UX Issues
+```
+Create UX stories in prd.json for issues found:
+{
+  "id": "UX-###",
+  "title": "Fix: [issue description]",
+  "type": "ux-fix",
+  "priority": 0,  // High priority
+  "passes": false
+}
+```
 
 ---
 
@@ -107,7 +326,7 @@ options:
 ### Step 2: Based on Answer
 - If "Fix bugs": Ask what's broken, generate 3-5 fix stories
 - If "Add features": Ask what features, generate 3-5 feature stories
-- If "Improve UX": Analyze current code, suggest 3-5 polish stories
+- If "Improve UX": Run UX review checklist, suggest fixes
 - If "Let me describe": Parse their input, generate matching stories
 
 ### Step 3: Confirm Before Adding
@@ -147,14 +366,67 @@ Move selected group to top, renumber priorities.
 
 ---
 
+## On "learn [description]" - Manual Learning Entry
+
+```
+1. Parse the learning from user description
+2. Create entry in learnings.json:
+   {
+     "id": "L###",
+     "type": "manual",
+     "errorSignature": "[extracted pattern]",
+     "description": "[what user said]",
+     "solution": "[extracted solution]",
+     "confidence": 1.0,  // User-provided = high confidence
+     "stories": [],
+     "created": "ISO date",
+     "timesApplied": 0
+   }
+3. If global, also add to ~/.claude/patterns.txt
+4. Report: "Learning captured. ID: L###"
+```
+
+---
+
 ## On "stop" - Before Closing Session
+
+**ENHANCED: Generate handoff + save learnings**
 
 ```
 1. Read prd.json
 2. Clear claimedAt on any incomplete tasks you were working on
 3. Save prd.json
-4. Delete tmpclaude-* files (Bash: rm tmpclaude-* or PowerShell: Remove-Item tmpclaude-*)
-5. Report: "Stopped. Safe to close."
+4. Generate .claude/handoff.md:
+   ---
+   # Session Handoff
+   Date: [ISO timestamp]
+
+   ## What Was Done
+   - [List of completed tasks this session]
+
+   ## In Progress (if any)
+   - [Task ID]: [What was started, what's left]
+
+   ## Blocked/Issues
+   - [Any problems encountered]
+
+   ## Learnings This Session
+   - [Count] new entries in learnings.json
+   - Key patterns: [list]
+
+   ## Next Steps
+   - [Recommended next task]
+   - [Any context needed]
+
+   ## Quick Stats
+   - Tasks completed: X
+   - Current phase: Y
+   - Overall progress: Z%
+   ---
+5. Update .claude/context.json with final state
+6. Ensure learnings.json is saved
+7. Delete tmpclaude-* files (PowerShell: Remove-Item tmpclaude-*)
+8. Report: "Session saved. Handoff ready. X learnings captured. Safe to close."
 ```
 
 ## On "reset" - After Crash
@@ -177,8 +449,9 @@ Move selected group to top, renumber priorities.
 
 ---
 
-## Task Schema
+## File Schemas
 
+### prd.json Task Schema
 ```json
 {
   "id": "S1",
@@ -188,11 +461,30 @@ Move selected group to top, renumber priorities.
   "passes": false,
   "claimedAt": null,
   "completedAt": null,
-  "testedAt": null,
   "files": ["path/to/file.ts"],
   "acceptanceCriteria": ["Testable requirement"],
-  "testSpec": null,
-  "testResults": null
+  "attempts": []  // Optional: track retry history
+}
+```
+
+### learnings.json Schema
+```json
+{
+  "version": "1.0",
+  "learnings": [
+    {
+      "id": "L001",
+      "type": "fix",
+      "errorSignature": "Export .* doesn't exist in target module",
+      "description": "Import name doesn't match actual export",
+      "solution": "Check actual exports with Read tool, use correct name",
+      "confidence": 0.9,
+      "stories": ["S107"],
+      "files": ["src/lib/supabase/server.ts"],
+      "created": "2026-01-12",
+      "timesApplied": 3
+    }
+  ]
 }
 ```
 
@@ -200,78 +492,34 @@ Move selected group to top, renumber priorities.
 
 ---
 
-## On Story Completion - Generate testSpec
-
-When marking a story `passes: true`, **also generate testSpec**:
+## On "skip SXX" - Skip Blocked Task
 
 ```
-1. Set passes = true, completedAt = now
-2. Generate testSpec:
-   a. Parse acceptanceCriteria → happyPath tests
-   b. Analyze files → errorCases (validation, auth)
-   c. Infer edgeCases (null, empty, boundaries)
-   d. Add networkChecks for API routes
-   e. Set consoleChecks based on component type
-3. Set testedAt = null (needs testing)
+1. Find story with matching ID
+2. Add to story: skippedAt = new Date().toISOString(), skipReason = "[reason]"
+3. Clear claimedAt if set
 4. Save prd.json
-5. Append to progress.txt
+5. Report: "Skipped [title]. Reason: [reason]. Say 'unskip SXX' to restore."
 ```
 
-### testSpec Structure
+## On "unskip SXX" - Restore Skipped Task
 
-```json
-{
-  "testSpec": {
-    "preconditions": ["Dev server running", "User logged in"],
-    "happyPath": [
-      {
-        "name": "Test name from criteria",
-        "steps": ["Step 1", "Step 2"],
-        "expected": "What should happen"
-      }
-    ],
-    "errorCases": [
-      {
-        "name": "Empty input",
-        "steps": ["Submit with empty form"],
-        "expected": "Validation error shown"
-      }
-    ],
-    "edgeCases": [
-      {
-        "name": "Max length input",
-        "input": "Very long string...",
-        "expected": "Handled gracefully"
-      }
-    ],
-    "networkChecks": [
-      { "endpoint": "/api/...", "method": "POST", "expectedStatus": 200 }
-    ],
-    "consoleChecks": { "noErrors": true, "noWarnings": false }
-  }
-}
+```
+1. Find story with matching ID
+2. Remove skippedAt and skipReason
+3. Save prd.json
+4. Report: "Restored [title]. It's back in the queue."
 ```
 
-### Auto-Generation Examples
+## On "archive" - Clean Completed Phases
 
-**From acceptance criteria:**
 ```
-"User can create a new item"
-→ happyPath: Fill form, submit, verify item created
-→ errorCase: Submit empty form, duplicate item
-→ edgeCase: Very long title, special characters
-```
-
-**From code analysis:**
-```typescript
-// Found in API route
-if (!title) throw new Error('Title required')
-→ errorCase: { name: "Missing title", expected: "Error message" }
-
-// Found in component
-<input maxLength={100} />
-→ edgeCase: { name: "100 char title", expected: "Accepted" }
-→ edgeCase: { name: "101 char title", expected: "Truncated or rejected" }
+1. Read prd.json
+2. Find phases where all stories have passes=true
+3. Move those stories to prd-archive.json (create if needed)
+4. Remove archived stories from prd.json
+5. Keep phase metadata in prd.json (for reference)
+6. Report: "Archived X stories from phases [list]. prd.json is now lighter."
 ```
 
 ---
@@ -280,39 +528,55 @@ if (!title) throw new Error('Title required')
 
 | Command | What Happens |
 |---------|--------------|
-| `auto` | Work through all tasks, don't stop |
+| `auto` | Work through tasks; auto-discover when queue empty |
 | `continue` | One task, then ask |
 | `work on S42` | Do specific task |
-| `status` | Show progress |
+| `status` | Show progress + learnings count |
 | `brainstorm` | Generate new stories |
 | `adjust` | Reprioritize remaining tasks |
 | `build [goal]` | Generate tasks from description |
-| `stop` | Clear claims, safe to close |
+| `ux review` | Manual UX testing checklist |
+| `learn [desc]` | Manually add a learning |
+| `skip S42` | Skip blocked task with reason |
+| `unskip S42` | Restore skipped task |
+| `archive` | Move completed phases to prd-archive.json |
+| `stop` | Save handoff + learnings, safe to close |
 | `reset` | Clear all claims after crash |
-
-## Context & Learning Commands
-
-| Command | What Happens | See |
-|---------|--------------|-----|
-| `curate` | Extract patterns from codebase | context.md |
-| `query <domain>` | Load specific domain context | context.md |
-| `learn` | Analyze recent work, extract patterns | learn.md |
-| `patterns` | Show successful/failed patterns | learn.md |
-| `what works` | Show effective approaches | learn.md |
-| `what fails` | Show approaches to avoid | learn.md |
-| `metrics` | Show development metrics | metrics.md |
 
 ---
 
-## Project Files
+## Andy's Design Principles (Always Apply)
 
-| File | Purpose |
-|------|---------|
-| `prd.json` | Tasks with passes status (source of truth) |
-| `progress.txt` | Append-only learnings log |
-| `context.json` | Hierarchical project knowledge |
-| `patterns.json` | Successful/failed patterns |
-| `metrics.json` | Development tracking metrics |
+### AI-First Defaults
+```
+When building UI that collects user input:
+1. AI should pre-analyze and suggest optimal values
+2. Pre-fill all fields with AI recommendations
+3. User tweaks, not builds from scratch
+4. "Generate" happens automatically, user reviews result
+
+Example: Video import → AI analyzes → pre-selects clips, style, music mood
+User sees optimized result, can adjust if wanted.
+```
+
+### UX Patterns
+```
+- Action buttons at END of content, never middle
+- Button labels = outcome ("Continue to Preview"), not process ("Generate")
+- Empty states have helpful message + CTA
+- Dismissed dialogs persist (localStorage fallback)
+- All elements visible on screen
+- No dead ends - always a way forward
+```
+
+### Technical Patterns
+```
+- TypeScript strict, no `any` (use typed helpers)
+- Relative paths, not absolute
+- Environment vars for all secrets
+- Build must pass before marking complete
+- Console errors = bugs to fix
+```
 
 ---
 
