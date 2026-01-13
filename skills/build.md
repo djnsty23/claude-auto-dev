@@ -101,9 +101,10 @@ Triggered automatically when no tasks available.
    - Exit auto mode
 ```
 
-### Phase 3: PRE-TASK CONFIDENCE CHECK
+### Phase 3: PRE-TASK QUALITY CHECK
 ```
 Before implementing, verify:
+- [ ] Criteria are specific (no red flags: "test flow", "ensure works")
 - [ ] Files mentioned in task exist (or will be created)
 - [ ] Required env vars are documented
 - [ ] No blockers noted in context.json
@@ -631,4 +632,52 @@ Each criterion should be:
 
 BAD: "Good UX" (not testable)
 GOOD: "Button visible without scrolling" (testable)
+```
+
+## Criteria Effectiveness Tracking
+
+### Track Attempts Per Story
+```json
+{
+  "id": "S140",
+  "attempts": [
+    { "at": "2026-01-13T10:00:00Z", "error": "Still showing 2 toasts", "fix": "..." },
+    { "at": "2026-01-13T10:15:00Z", "error": null }  // Success
+  ],
+  "criteriaScore": 0.5  // 1/attempts = effectiveness
+}
+```
+
+### Auto-Adjustment Rules
+```
+After completing a story:
+
+IF attempts > 2:
+  - Flag criteria as "weak"
+  - Analyze which criterion was vague
+  - Add learning: "Criterion '[text]' was too vague, needed: [specific version]"
+
+IF attempts == 1:
+  - Flag criteria as "strong"
+  - Use as template for similar stories
+
+Over time, build pattern:
+  - Vague phrases to avoid: "test X flow", "ensure works", "fix issue"
+  - Strong phrases to use: "X returns Y", "clicking Z shows exactly 1 toast"
+```
+
+### Criteria Quality Auto-Check
+```
+Before starting a story, scan criteria for red flags:
+
+RED FLAGS (vague):
+- "Test the X flow"
+- "Ensure X works"
+- "Fix the issue"
+- "Improve X"
+- "Handle errors"
+
+If >50% criteria have red flags:
+  - Suggest rewrites before implementing
+  - Example: "Test clip flow" → "Clicking Analyze shows 1 toast, clips appear in <2s"
 ```
