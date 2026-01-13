@@ -603,3 +603,32 @@ Environment variable storage:
 - System env vars for global keys (GOOGLE_CLIENT_ID, etc.)
 - .env.local for project-specific URLs only
 - Never commit .env files to git
+
+## Story Creation Guidelines
+
+### Acceptance Criteria Count (Dynamic)
+```
+Match criteria count to story complexity:
+
+| Type | Criteria | Example |
+|------|----------|---------|
+| Bug fix | 2-3 | "Error gone, no regression, build passes" |
+| Small feature | 3-4 | "UI renders, API works, state persists, tests pass" |
+| Medium feature | 4-5 | Standard |
+| Complex feature | 5-7 | Multiple integrations, edge cases |
+| Infrastructure | 2-3 | "Config works, deploys, no downtime" |
+
+DON'T pad with filler criteria. Each must be testable.
+```
+
+### Criteria Quality Checklist
+```
+Each criterion should be:
+- [ ] Testable (can verify pass/fail)
+- [ ] Specific (not vague like "works well")
+- [ ] Independent (doesn't duplicate another)
+- [ ] Necessary (removing it would miss something)
+
+BAD: "Good UX" (not testable)
+GOOD: "Button visible without scrolling" (testable)
+```
