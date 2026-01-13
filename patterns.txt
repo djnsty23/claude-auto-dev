@@ -1,0 +1,45 @@
+# Global Patterns
+# Universal learnings that apply across all projects
+# Format: [Category] Pattern: explanation
+
+## Environment
+[Windows] Dev server in Claude Code: NEVER run npm run dev via Claude - gets killed on session end. User must start in separate terminal.
+[Windows] Port check before server: netstat -ano | findstr :3000
+[Windows] Kill process: powershell -Command "Stop-Process -Id PID -Force"
+[Windows] MCP servers: Always use cmd /c wrapper in configs
+
+## API Keys
+[Security] Never hardcode: Always use process.env.KEY_NAME
+[New APIs] When adding new API integration: Update setup.md with link + steps + env var name
+[Google] Free tier limits: Gemini was slashed 90% Dec 2025 - prefer DeepSeek for AI tasks
+[Supabase] Project ref format: 20 char alphanumeric (e.g., abcdefghijklmnopqrst)
+
+## TypeScript/Next.js
+[TypeScript] Strict mode: Avoid `any`, use proper types
+[Next.js] API routes: /api/[resource]/route.ts pattern
+[Next.js] Server components: Default, use 'use client' only when needed
+[React Query] Query keys: Define in queryKeys object before using in hooks
+
+## Supabase
+[Auth] Disable email confirm for dev: Saves testing friction
+[RLS] Always enable: Even for dev, prevents production surprises
+[Migrations] Use apply_migration MCP: Not raw execute_sql for DDL
+
+## Testing
+[Playwright] Server startup: Add webServer config with cwd: __dirname
+[Playwright] Test account: Use dedicated test account (TEST_USER_EMAIL env var), never admin account
+[Vitest] React: Need @testing-library/react + jsdom
+
+## Common Fixes
+[File edit conflict] Re-read immediately before edit, use unique strings
+[HMR not updating] Run npm run build first - TypeScript errors break HMR
+[Import errors] Check relative vs absolute paths in tsconfig
+
+## UI/UX
+[shadcn/ui] Install components: npx shadcn@latest add [component]
+[Tailwind] Semantic tokens: Use bg-background, text-foreground, not raw colors
+[Forms] Validation: Always use Zod schemas
+
+---
+# Add new patterns above this line
+# Keep this file under 100 lines - archive old patterns periodically
