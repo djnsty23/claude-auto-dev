@@ -1,6 +1,40 @@
 # Claude Auto-Dev
 
-> **Version 1.0.0** | Autonomous task management for Claude Code.
+> **Version 2.0.0** | Autonomous task management with heartbeat monitoring, dependency tracking, and pattern storm detection.
+
+## 🚀 What's New in v2.0
+
+### Heartbeat Monitoring
+- Tasks update heartbeat every 3min during work
+- Stale work detected in 10min (down from 30min)
+- Faster multi-agent coordination
+
+### Dependency Tracking
+- Define task dependencies: `dependsOn: ["S40", "S41"]`
+- Auto-computed `blockedBy` for visibility
+- ASCII dependency tree: `deps` / `tree` command
+- Tasks auto-skip until dependencies complete
+
+### Pattern Storm Detection
+- Detects same error across 3+ tasks within 1hr
+- Identifies root cause (imports, config, env)
+- Creates high-priority fix story
+- Prevents systematic failures
+
+### Enhanced Dashboard
+- Rich `status` output with emojis and ANSI colors
+- Shows active tasks with heartbeat indicators
+- Lists blocked tasks with dependencies
+- Top learnings by usage count
+- Session stats (duration, completions, storms)
+
+### Rollback Command
+- Git-based time machine: `rollback S42`
+- Auto-commits before each task
+- Undo changes, reopen task
+- Safe experimentation
+
+---
 
 ## Full Restore (New Machine)
 
@@ -46,10 +80,12 @@ git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev ~/claude-auto-
 
 | Say | What Happens |
 |-----|--------------|
-| `auto` | Work through all tasks autonomously |
+| `auto` | Work through all tasks autonomously with auto-discovery |
 | `continue` | One task, then ask |
 | `work on S42` | Do specific task |
-| `status` | Show progress summary |
+| `status` | **Enhanced dashboard** with heartbeats, dependencies, learnings |
+| `deps` / `tree` | **NEW:** Show ASCII dependency tree with status emojis |
+| `rollback S42` | **NEW:** Undo task changes via git, reopen task |
 | `brainstorm` | Generate new stories from requirements |
 | `adjust` | Reprioritize remaining tasks |
 | `stop` | Clear claims before closing session |
@@ -99,9 +135,9 @@ claude "ship"          # Build → deploy → verify
 claude "test"          # Run Playwright tests
 ```
 
-## Multi-Agent
+## Multi-Agent (with Heartbeat Monitoring)
 
-Run `claude "auto"` in multiple terminals. Each picks unclaimed tasks. 30-minute claim expiry handles abandoned work.
+Run `claude "auto"` in multiple terminals. Each picks unclaimed tasks. **Heartbeat monitoring** (3-min intervals) enables faster work stealing compared to old 30-min timeout.
 
 **Best practice:**
 ```bash
@@ -116,10 +152,16 @@ claude "auto"
 ```
 
 Stagger starts slightly to avoid collisions. Each agent will:
-1. Read prd.json, find first unclaimed task
-2. Set `claimedAt` timestamp immediately
-3. Work on task
-4. Mark `passes: true` when done
+1. Read prd.json, find first unclaimed task (checks dependencies)
+2. Set `claimedAt` and `heartbeat` timestamps immediately
+3. **Update heartbeat every 3 minutes** during work
+4. Work on task
+5. Mark `passes: true` when done
+
+**Heartbeat advantages:**
+- Crashed agents detected in 10min (vs old 30min)
+- Other agents can steal stale work faster
+- Real-time visibility in `status` dashboard
 
 **Before closing any terminal:**
 ```bash
@@ -134,7 +176,7 @@ claude "stop"
 | `progress.txt` | Append-only learnings log |
 | `.claude/briefs/` | Optional detailed specs |
 
-## Task Schema
+## Task Schema (v2.0)
 
 ```json
 {
@@ -144,14 +186,25 @@ claude "stop"
   "priority": 1,
   "passes": false,
   "claimedAt": null,
+  "heartbeat": null,                    // NEW: Updated every 3min, enables fast work stealing
   "completedAt": null,
   "testedAt": null,
+  "dependsOn": [],                      // NEW: Array of story IDs that must complete first
+  "blockedBy": [],                      // NEW: Auto-computed, shows blocking dependencies
   "files": ["path/to/file.ts"],
   "acceptanceCriteria": ["Requirement"],
+  "attempts": [],                       // Track retry history
+  "criteriaScore": null,                // 1/attempts = criteria effectiveness
   "testSpec": { "happyPath": [], "errorCases": [], "edgeCases": [] },
   "testResults": null
 }
 ```
+
+**New Features:**
+- **Heartbeat Monitoring:** Tasks update heartbeat every 3min. Stale (>10min) tasks are stealable.
+- **Dependency Tracking:** Use `dependsOn: ["S40", "S41"]` to ensure tasks complete in order.
+- **Pattern Storm Detection:** System detects when same error appears across 3+ tasks within 1hr.
+- **Enhanced Dashboard:** `status` shows active tasks with heartbeat indicators, blocked tasks, and top learnings.
 
 ## Test Suites (prd.json)
 
