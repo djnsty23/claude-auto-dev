@@ -681,3 +681,45 @@ If >50% criteria have red flags:
   - Suggest rewrites before implementing
   - Example: "Test clip flow" → "Clicking Analyze shows 1 toast, clips appear in <2s"
 ```
+
+## Auto-QA After Implementation
+
+### Trigger Automatically
+```
+After marking any story as complete:
+
+1. RUN BUILD CHECK (always):
+   npm run build
+   - If fails: reopen story, fix errors, don't mark complete until passes
+   
+2. RUN RELATED TESTS (if test files exist):
+   - Check for: tests/**/*.spec.ts matching modified files
+   - Run: npx playwright test [matched-files]
+   - If fails: add failing tests to learnings, attempt fix
+   
+3. QUICK SMOKE TEST (if UI changed):
+   - List affected routes from story files
+   - Suggest: "Run smoke test on /dashboard/create?" (y/n)
+   
+4. UPDATE STORY:
+   - Add "qaPass": true/false to story
+   - Add "qaNotes": ["build passed", "2 tests passed"] 
+```
+
+### Skip Conditions
+```
+Skip auto-QA if:
+- Story is type: "docs" or "refactor" (no functional change)
+- User says "skip qa" or "quick mode"
+- Previous 3 stories all passed QA (confidence boost)
+```
+
+### QA Failure Recovery
+```
+If QA fails after implementation:
+1. DON'T mark story complete
+2. Analyze error, search learnings.json
+3. Apply fix
+4. Re-run QA
+5. Max 3 attempts, then ask user
+```
