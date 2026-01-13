@@ -146,7 +146,7 @@ BEGIN
   VALUES (
     NEW.id,
     NEW.email,
-    CASE WHEN NEW.email = 'andy@nvision-data.com' THEN 'admin' ELSE 'user' END
+    CASE WHEN NEW.email = 'YOUR_ADMIN_EMAIL' THEN 'admin' ELSE 'user' END
   );
   RETURN NEW;
 END;

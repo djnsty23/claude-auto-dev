@@ -8,6 +8,7 @@ triggers:
   - status
   - adjust
   - brainstorm
+  - generate
   - stop
   - reset
   - work on
@@ -309,7 +310,7 @@ Create UX stories in prd.json for issues found:
 
 ---
 
-## On "brainstorm" - Generate New Stories
+## On "brainstorm" or "generate" - Generate New Stories
 
 **Use AskUserQuestion. Keep it simple - one good question.**
 
@@ -533,6 +534,7 @@ Move selected group to top, renumber priorities.
 | `work on S42` | Do specific task |
 | `status` | Show progress + learnings count |
 | `brainstorm` | Generate new stories |
+| `generate` | Same as brainstorm - create new stories |
 | `adjust` | Reprioritize remaining tasks |
 | `build [goal]` | Generate tasks from description |
 | `ux review` | Manual UX testing checklist |

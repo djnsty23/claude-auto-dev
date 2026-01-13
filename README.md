@@ -8,13 +8,13 @@ After Windows reinstall or on a new machine, run this to restore everything:
 
 **Windows:**
 ```powershell
-git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
+git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev $env:USERPROFILE\claude-auto-dev
 & $env:USERPROFILE\claude-auto-dev\install.ps1 -Full
 ```
 
 **Mac/Linux:**
 ```bash
-git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
+git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev ~/claude-auto-dev
 ~/claude-auto-dev/install.sh --full
 ```
 
@@ -30,13 +30,13 @@ This installs:
 
 **Windows:**
 ```powershell
-git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
+git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev $env:USERPROFILE\claude-auto-dev
 & $env:USERPROFILE\claude-auto-dev\install.ps1 -Global -Init
 ```
 
 **Mac/Linux:**
 ```bash
-git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
+git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev ~/claude-auto-dev
 ~/claude-auto-dev/install.sh --global --init
 ```
 

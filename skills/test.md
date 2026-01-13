@@ -49,7 +49,7 @@ Every story should have a `testSpec` field:
         "name": "Successful login",
         "steps": [
           "Navigate to /auth/login",
-          "Enter nvision.tester@gmail.com",
+          "Enter YOUR_TEST_EMAIL",
           "Enter valid password",
           "Click Login button"
         ],
@@ -376,10 +376,10 @@ interface Props {
 ## Test Account
 
 **CRITICAL:** Always use:
-- **Email:** nvision.tester@gmail.com
+- **Email:** YOUR_TEST_EMAIL
 - **Password:** `${TEST_USER_PASSWORD}` env var
 
-**NEVER** use andy@nvision-data.com for automated tests.
+**NEVER** use YOUR_ADMIN_EMAIL for automated tests.
 
 ---
 

@@ -50,7 +50,7 @@ Just say what you want:
 
 Install once per project:
 ```powershell
-git clone https://github.com/djnsty23/claude-auto-dev "$env:USERPROFILE\claude-auto-dev"
+git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev "$env:USERPROFILE\claude-auto-dev"
 & "$env:USERPROFILE\claude-auto-dev\install.ps1" -Global -Init
 ```
 
