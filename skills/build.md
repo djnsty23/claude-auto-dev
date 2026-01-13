@@ -17,19 +17,53 @@ triggers:
   - archive
   - ux review
   - learn
+  - rollback
+  - deps
+  - tree
 ---
 
 # Autonomous Development Loop
 
-## On "status" - Show Progress
+## On "status" - Show Progress (Enhanced Dashboard)
+
+**Generate rich markdown output with emojis and ANSI colors:**
+
+```markdown
+# 🎯 Progress: X/Y (Z%)
+
+## 🔥 Active (N)
+SXX: [Title] (Agent-N, ❤️ Xm ago, N attempts)
+[List all with heartbeat <10min, show ⚠️ if heartbeat >10min but <30min]
+
+## ✅ Recent Completions (Last 3)
+SXX: [Title] (Xm ago, N attempts, coverage X%)
+
+## 📋 Next Up (Top 5 ready tasks)
+SXX: [Title] (P0, ready)
+SYY: [Title] (P1, blocked by SXX)
+
+## 🧠 Learnings: X entries
+LXXX: [Description] (applied X× ⭐ most used)
+[Show top 3 by timesApplied]
+
+## 🚫 Blocked (if any)
+SXX: [Title] (waiting for: SYY, SZZ)
+
+## 📊 Session Stats
+Duration: Xh Ym | Completed: N | Doom loops: N | Pattern storms: N
+
+## 🎯 Next Task
+SXX: [Title] - [Brief description]
 ```
-Read prd.json
-Count: passes=true (complete), passes=false (remaining)
-Show active claims (claimedAt < 30min, passes=false)
-Flag stale tasks (claimedAt > 7 days ago, passes=false) with ⚠️
-Show recent learnings count from learnings.json
-Report: "X of Y complete. Active: [list]. Stale: [list]. Learnings: Z. Next: [title]"
-```
+
+**Logic:**
+1. Read prd.json
+2. Calculate stats
+3. Check heartbeats (flag if >10min as ⚠️)
+4. Load learnings.json, sort by timesApplied
+5. Identify blocked tasks (dependsOn not satisfied)
+6. Generate formatted output
+7. Also write to `.claude/dashboard.md` for persistence
 
 ## On "auto" - Full Autonomous Mode
 
@@ -44,23 +78,58 @@ Report: "X of Y complete. Active: [list]. Stale: [list]. Learnings: Z. Next: [ti
 5. Skim ~/.claude/patterns.txt (global patterns that apply everywhere)
 6. Load learnings.json (structured error→solution pairs)
 7. Initialize tracking:
-   - errorCount = {}     // Track error types
-   - fileAttempts = {}   // Track file edit attempts
-   - taskAttempts = 0    // Attempts on current task
+   - errorCount = {}           // Track error types
+   - fileAttempts = {}         // Track file edit attempts
+   - taskAttempts = 0          // Attempts on current task
+   - patternStormTracker = []  // Recent errors for storm detection
+   - sessionStart = Date.now() // For session duration
+   - heartbeatInterval = null  // Will be set when claiming task
 ```
 
-### Phase 2: TASK SELECTION (with Auto-Discovery)
+### Phase 2: TASK SELECTION (with Auto-Discovery + Dependencies + Heartbeat)
 ```
-1. available = stories where passes=false AND (claimedAt is null OR >30min old)
+1. Filter available tasks with multi-pass logic:
+
+   Pass 1 - Availability:
+   available = stories where passes=false AND NOT skipped
+
+   Pass 2 - Claim status (with heartbeat check):
+   available = available.filter(s =>
+     s.claimedAt === null OR
+     Date.now() - new Date(s.heartbeat || s.claimedAt) > 10 * 60 * 1000  // >10min
+   )
+
+   Pass 3 - Dependencies (NEW):
+   available = available.filter(s =>
+     (s.dependsOn || []).every(depId =>
+       stories.find(d => d.id === depId)?.passes === true
+     )
+   )
 
 2. IF available.length === 0 (queue empty):
-   → Trigger AUTO-DISCOVERY mode (see below)
+   → Check if blocked tasks exist (all remaining have unmet dependencies)
+   → If blocked: Report which tasks are blocking progress
+   → Else: Trigger AUTO-DISCOVERY mode (see below)
    → After discovery, re-check available
 
-3. Pick first available by priority
+3. Sort by priority (ascending), pick first
 4. **IMMEDIATELY** claim in prd.json:
    - Set claimedAt = new Date().toISOString()
+   - Set heartbeat = new Date().toISOString()
    - Save prd.json RIGHT NOW before any other work
+   - Start background heartbeat updater (every 3 min)
+```
+
+**Heartbeat Logic (Background):**
+```
+Every 3 minutes during task work:
+1. Read current prd.json
+2. Find your claimed task
+3. Update heartbeat = new Date().toISOString()
+4. Save prd.json (quick atomic write)
+
+This allows other agents to steal work if you hang/crash.
+Heartbeat >10min = stealable (vs old 30min claim timeout)
 ```
 
 ### AUTO-DISCOVERY MODE (when queue empty)
@@ -134,23 +203,44 @@ If no match:
    - Track for potential new learning
 ```
 
-#### 4b: Doom Loop Detection
+#### 4b: Doom Loop & Pattern Storm Detection
 ```
 While implementing:
 - Track fileAttempts[path]++ on each edit
 - Track errorCount[errorType]++ on each error
+- Add to patternStormTracker: { signature, taskId, timestamp }
 
 DOOM LOOP TRIGGERS (stop and ask user):
 - Same file edited 5+ times without build passing
-- Same error type appears 3+ times
+- Same error type appears 3+ times in CURRENT task
 - Task attempted 3+ times without progress
 - Build fails 3+ times consecutively
+
+PATTERN STORM TRIGGERS (NEW - stop immediately):
+- Same error signature appears in 3+ different stories within last hour
+- Indicates systematic issue (broken import, missing config, bad env var)
+
+Pattern Storm Check:
+recentErrors = patternStormTracker.filter(e =>
+  Date.now() - e.timestamp < 3600000  // Last hour
+)
+errorsBySignature = groupBy(recentErrors, 'signature')
+stormDetected = Object.values(errorsBySignature).some(group =>
+  group.length >= 3 && new Set(group.map(e => e.taskId)).size >= 3
+)
 
 On doom loop:
 1. Log to progress.txt: "DOOM LOOP: [description]"
 2. Create structured learning entry (even for failure)
 3. Save current state to context.json
 4. Ask user: "Stuck on [task]. Tried X times. Options: skip, different approach, or help?"
+
+On pattern storm:
+1. Log to progress.txt: "PATTERN STORM: [signature] across tasks [list]"
+2. Identify common factor (import path, config file, env var)
+3. Create high-priority fix story: "FIX-STORM: [root cause]"
+4. Ask user: "Same error in 3+ tasks within 1hr. Root cause likely: [analysis].
+   Options: fix globally now, skip affected tasks, or investigate manually?"
 ```
 
 ### Phase 5: VERIFICATION
@@ -453,7 +543,7 @@ Move selected group to top, renumber priorities.
 
 ## File Schemas
 
-### prd.json Task Schema
+### prd.json Task Schema (Updated)
 ```json
 {
   "id": "S1",
@@ -462,12 +552,21 @@ Move selected group to top, renumber priorities.
   "priority": 1,
   "passes": false,
   "claimedAt": null,
+  "heartbeat": null,                    // NEW: Updated every 3min during work
   "completedAt": null,
+  "dependsOn": [],                      // NEW: Array of story IDs that must complete first
+  "blockedBy": [],                      // Auto-computed: stories blocking this one
   "files": ["path/to/file.ts"],
   "acceptanceCriteria": ["Testable requirement"],
-  "attempts": []  // Optional: track retry history
+  "attempts": [],                       // Optional: track retry history
+  "criteriaScore": null                 // Optional: 1/attempts = effectiveness
 }
 ```
+
+**New Fields:**
+- `heartbeat`: Timestamp of last activity (updated every 3min). If >10min old, task is stealable.
+- `dependsOn`: Array of story IDs (e.g., ["S40", "S41"]). Task won't be picked until all dependencies pass.
+- `blockedBy`: Auto-computed from dependsOn. Shows what's blocking this task (for dashboard).
 
 ### learnings.json Schema
 ```json
@@ -526,6 +625,76 @@ Move selected group to top, renumber priorities.
 
 ---
 
+## On "rollback SXX" - Undo Task Changes
+
+**Git-based time machine for undoing task work:**
+
+```
+1. Find task with matching ID
+2. Search git log for commit before task started:
+   git log --all --grep="Before SXX" --format="%H %s" -1
+
+3. If found:
+   - Show changes that will be lost: git diff [commit] HEAD
+   - Ask confirmation: "Rollback to before SXX? This will discard: [file list]"
+   - If yes: git reset --hard [commit]
+   - Update prd.json: clear claimedAt, completedAt, set passes=false
+   - Report: "Rolled back to before SXX. Task reopened."
+
+4. If not found:
+   - Report: "No rollback point found for SXX. Use 'git log' to find manual restore point."
+```
+
+**Auto-commit before each task (add to Phase 2 after claiming):**
+```
+After claiming task in prd.json:
+1. git add -A
+2. git commit -m "WIP: Before SXX - [title]" --no-verify
+3. Continue with implementation
+
+This creates restore points without manual intervention.
+```
+
+---
+
+## On "deps" or "tree" - Show Dependency Tree
+
+**ASCII visualization of task dependencies:**
+
+```
+1. Read prd.json
+2. Build dependency graph from dependsOn fields
+3. Generate tree starting from roots (tasks with no dependencies)
+
+Example output:
+
+📦 Dependency Tree
+
+S40: Database schema ✅
+  ├─ S41: Auth endpoints ✅
+  │   ├─ S43: Login UI ⏳ (you are here, 5m ago)
+  │   └─ S45: Signup UI 📋 (ready)
+  └─ S42: User model ✅
+      ├─ S46: Profile page 🚫 (blocked, depends on S43)
+      └─ S47: Settings 📋 (ready)
+
+S50: Payments 📋 (ready)
+  └─ S51: Checkout 🚫 (blocked by S50)
+
+S60: Analytics ⚠️ (claimed 15m ago, no heartbeat)
+
+Legend:
+✅ Complete | ⏳ In progress | 📋 Ready | 🚫 Blocked | ⚠️ Stale claim
+```
+
+**Algorithm:**
+- Group by root (tasks with no dependencies)
+- Use DFS to traverse dependents
+- Show status emoji based on passes/claimedAt/heartbeat/dependsOn
+- Indent children with tree characters (├─ └─)
+
+---
+
 ## Command Summary
 
 | Command | What Happens |
@@ -533,7 +702,9 @@ Move selected group to top, renumber priorities.
 | `auto` | Work through tasks; auto-discover when queue empty |
 | `continue` | One task, then ask |
 | `work on S42` | Do specific task |
-| `status` | Show progress + learnings count |
+| `status` | Enhanced dashboard with heartbeats, dependencies, learnings |
+| `deps` / `tree` | Show ASCII dependency tree with status emojis |
+| `rollback S42` | Undo task changes via git, reopen task |
 | `brainstorm` | Generate new stories |
 | `generate` | Same as brainstorm - create new stories |
 | `adjust` | Reprioritize remaining tasks |
