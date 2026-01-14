@@ -1,6 +1,6 @@
 # Claude Auto-Dev
 
-> **Version 2.0.0** | Autonomous task management with heartbeat monitoring, dependency tracking, and pattern storm detection.
+> **Version 2.1.0** | Autonomous task management with heartbeat monitoring, dependency tracking, and pattern storm detection.
 
 ## 🚀 What's New in v2.0
 
