@@ -24,6 +24,10 @@ triggers:
 | `archive` | Move completed phases to prd-archive.json |
 | `stop` | Generate handoff + save learnings, safe to close |
 | `reset` | Clear all claims after crash |
+| `rollback` | Undo last task changes (git-based) |
+| `deps` / `tree` | Show task dependencies |
+| `review` | Code quality, security, dependency check |
+| `update` / `sync` | Pull latest system updates |
 
 ## Learning System
 
@@ -105,3 +109,6 @@ After 2+ attempts to fix → Create learning entry
 - **Before shipping?** Say `ux review` to catch human friction
 - **Closing session?** Say `stop` to save handoff + learnings
 - **After crash?** Say `reset` to clear stale claims
+- **System outdated?** Say `update` to pull latest from GitHub
+- **Task blocked?** Say `deps` to see what's blocking it
+- **Made a mess?** Say `rollback` to undo task changes
