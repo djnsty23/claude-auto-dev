@@ -20,6 +20,7 @@ triggers:
   - rollback
   - deps
   - tree
+  - review
 ---
 
 # Autonomous Development Loop
@@ -538,6 +539,79 @@ Move selected group to top, renumber priorities.
 3. Show list, ask to confirm
 4. Add to prd.json
 5. Begin auto loop
+
+---
+
+## On "review" - Code Review & Quality Check
+
+**Comprehensive review of recent changes or specific areas.**
+
+### Automatic Actions
+```
+1. CHECK BUILD
+   npm run build
+   Report any TypeScript/compilation errors
+
+2. CHECK GIT STATUS
+   git status
+   git diff --stat HEAD~3
+   List uncommitted changes and recent commits
+
+3. RUN LINTER (if configured)
+   npm run lint (if exists)
+   Report issues by severity
+
+4. SECURITY SCAN
+   - Check for hardcoded secrets (.env patterns in code)
+   - Check for console.log with sensitive data
+   - Verify no API keys in committed files
+
+5. CODE QUALITY CHECKS
+   - Find TODO/FIXME comments
+   - Check for any `as any` TypeScript casts
+   - Identify large functions (>50 lines)
+   - Find duplicate code patterns
+
+6. DEPENDENCY CHECK
+   - Outdated packages (npm outdated)
+   - Security vulnerabilities (npm audit)
+```
+
+### Generate Report
+```markdown
+# 📋 Code Review Report
+
+## ✅ Build Status
+[Pass/Fail with details]
+
+## 🔒 Security
+[Any issues found or "No issues"]
+
+## 📝 Code Quality
+- TODOs: X found
+- Type safety issues: X
+- Large functions: X
+
+## 📦 Dependencies
+- Outdated: X packages
+- Vulnerabilities: X (Y critical)
+
+## 💡 Recommendations
+1. [Actionable improvement]
+2. [Actionable improvement]
+
+## 🎯 Quick Wins
+[Easy fixes that improve quality]
+```
+
+### Create Stories (Optional)
+```
+If issues found:
+question: "Found X issues. Create fix stories?"
+options:
+  - { label: "Yes, create stories", description: "Add to prd.json" }
+  - { label: "No, just report", description: "Informational only" }
+```
 
 ---
 
