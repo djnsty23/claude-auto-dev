@@ -21,6 +21,8 @@ triggers:
   - deps
   - tree
   - review
+  - update
+  - sync
 ---
 
 # Autonomous Development Loop
@@ -539,6 +541,108 @@ Move selected group to top, renumber priorities.
 3. Show list, ask to confirm
 4. Add to prd.json
 5. Begin auto loop
+
+---
+
+## On "update" or "sync" - Update System & Project Files
+
+**Syncs latest claude-auto-dev system to local and updates project files.**
+
+### Step 1: Pull Latest System
+```bash
+# Navigate to claude-auto-dev repo
+cd ~/Downloads/code/claude-auto-dev  # or wherever it's cloned
+git pull origin main
+
+# If not cloned, clone it
+git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev ~/Downloads/code/claude-auto-dev
+```
+
+### Step 2: Sync to ~/.claude/
+```bash
+# Copy skills
+cp ~/Downloads/code/claude-auto-dev/skills/*.md ~/.claude/skills/
+
+# Copy patterns
+cp ~/Downloads/code/claude-auto-dev/patterns.txt ~/.claude/
+
+# Copy templates (don't overwrite existing learnings)
+cp -n ~/Downloads/code/claude-auto-dev/templates/*.json ~/.claude/templates/
+
+# Copy rules if they exist
+cp ~/Downloads/code/claude-auto-dev/config/rules/*.md ~/.claude/rules/ 2>/dev/null || true
+```
+
+### Step 3: Update Project Files
+
+**Check and migrate prd.json schema:**
+```javascript
+// Add new fields if missing (backwards compatible)
+stories.forEach(story => {
+  if (!story.heartbeat) story.heartbeat = null;
+  if (!story.dependsOn) story.dependsOn = [];
+  if (!story.blockedBy) story.blockedBy = [];
+  if (!story.attempts) story.attempts = [];
+  if (!story.qaPass) story.qaPass = null;
+});
+```
+
+**Update project CLAUDE.md commands table:**
+```markdown
+## Commands
+| Say | Action |
+|-----|--------|
+| `auto` | Work through all tasks without stopping |
+| `continue` | One task, then ask |
+| `status` | Show progress dashboard |
+| `brainstorm` / `generate` | Create new stories |
+| `adjust` | Reprioritize tasks |
+| `review` | Code quality check |
+| `update` / `sync` | Pull latest system updates |
+| `stop` | Save session before closing |
+| `reset` | Clear claims after crash |
+| `rollback` | Undo last task changes |
+| `deps` / `tree` | Show task dependencies |
+| `ux review` | Check UI/UX issues |
+| `learn [desc]` | Add to learnings.json |
+```
+
+**Initialize missing project files:**
+```
+If learnings.json doesn't exist:
+  Copy from ~/.claude/templates/learnings.json
+
+If progress.txt doesn't exist:
+  Create with header: "# Progress Log\n\n"
+```
+
+### Step 4: Report Changes
+```markdown
+# 🔄 System Update Complete
+
+## Updated Files
+- ~/.claude/skills/*.md (X files)
+- ~/.claude/patterns.txt
+- Project prd.json schema migrated
+
+## New Features Available
+- [List any new commands added]
+- [List any new capabilities]
+
+## Project Status
+- prd.json: X stories (Y new fields added)
+- learnings.json: ✓ exists
+- CLAUDE.md: Updated commands table
+
+## Version
+claude-auto-dev: [git commit hash]
+```
+
+### Automatic Sync Reminder
+```
+If last sync was >7 days ago (check .claude/last-sync.txt):
+  Show reminder: "System updates available. Say 'update' to sync."
+```
 
 ---
 
