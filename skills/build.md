@@ -136,3 +136,18 @@ Still stuck? Ask user. Don't loop forever.
 | `reset` | Clear stuck state |
 | `review` | Check code quality |
 | `update` | Pull latest system |
+
+---
+
+# Official Claude Code Plugins (Complementary)
+
+Use these alongside claude-auto-dev when helpful:
+
+| Plugin | When to Use |
+|--------|-------------|
+| `/feature-dev` | Complex new feature (7-phase workflow with agents) |
+| `/ralph-loop` | Stuck debugging ("keep trying until it works") |
+| `/commit-push-pr` | Git workflow (commit + push + create PR) |
+| `/code-review` | Deep PR review with 5 parallel agents |
+
+**Install plugins**: See https://github.com/anthropics/claude-code/tree/main/plugins
