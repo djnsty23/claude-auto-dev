@@ -33,7 +33,7 @@ if ($Full) {
     $claudeDir = "$env:USERPROFILE\.claude"
 
     # Create directories
-    @("$claudeDir", "$claudeDir\skills", "$claudeDir\rules", "$claudeDir\scripts") | ForEach-Object {
+    @("$claudeDir", "$claudeDir\skills", "$claudeDir\rules") | ForEach-Object {
         if (-not (Test-Path $_)) {
             New-Item -ItemType Directory -Path $_ -Force | Out-Null
         }
@@ -61,14 +61,6 @@ if ($Full) {
         Write-Done "~/.claude/skills/$($_.Name)"
     }
 
-    # Copy scripts
-    if (Test-Path "$ScriptDir\scripts") {
-        Write-Step "Installing scripts..."
-        Get-ChildItem "$ScriptDir\scripts\*" | ForEach-Object {
-            Copy-Item $_.FullName "$claudeDir\scripts\$($_.Name)" -Force
-            Write-Done "~/.claude/scripts/$($_.Name)"
-        }
-    }
 
     # Run API key setup if mcp.json doesn't exist
     if (-not (Test-Path "$claudeDir\mcp.json")) {

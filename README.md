@@ -1,172 +1,61 @@
 # Claude Auto-Dev
 
-> **Version 2.1.0** | Autonomous task management with heartbeat monitoring, dependency tracking, and pattern storm detection.
+Autonomous task management for Claude Code. No scripts to run - just natural language.
 
-## 🚀 What's New in v2.0
+## Quick Start
 
-### Heartbeat Monitoring
-- Tasks update heartbeat every 3min during work
-- Stale work detected in 10min (down from 30min)
-- Faster multi-agent coordination
+**New project:**
+```
+"brainstorm"  → Creates prd.json, asks what to build, generates tasks
+```
 
-### Dependency Tracking
-- Define task dependencies: `dependsOn: ["S40", "S41"]`
-- Auto-computed `blockedBy` for visibility
-- ASCII dependency tree: `deps` / `tree` command
-- Tasks auto-skip until dependencies complete
+**Existing project:**
+```
+"auto"    → Work through all tasks
+"status"  → Check progress
+```
 
-### Pattern Storm Detection
-- Detects same error across 3+ tasks within 1hr
-- Identifies root cause (imports, config, env)
-- Creates high-priority fix story
-- Prevents systematic failures
-
-### Enhanced Dashboard
-- Rich `status` output with emojis and ANSI colors
-- Shows active tasks with heartbeat indicators
-- Lists blocked tasks with dependencies
-- Top learnings by usage count
-- Session stats (duration, completions, storms)
-
-### Rollback Command
-- Git-based time machine: `rollback S42`
-- Auto-commits before each task
-- Undo changes, reopen task
-- Safe experimentation
+That's it. No installation needed if you already have the skills in `~/.claude/skills/`.
 
 ---
 
-## Full Restore (New Machine)
-
-After Windows reinstall or on a new machine, run this to restore everything:
+## Install (First Time Only)
 
 **Windows:**
 ```powershell
-git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev $env:USERPROFILE\claude-auto-dev
+git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
 & $env:USERPROFILE\claude-auto-dev\install.ps1 -Full
 ```
 
 **Mac/Linux:**
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev ~/claude-auto-dev
+git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 ~/claude-auto-dev/install.sh --full
 ```
 
-This installs:
-- `~/.claude/CLAUDE.md` - Global config
-- `~/.claude/QUICKSTART.md` - Quick reference
-- `~/.claude/rules/*.md` - Coding rules (security, design-system, windows)
-- `~/.claude/skills/*.md` - All 7 skill files
-- `~/.claude/scripts/*` - Helper scripts (start-server)
-- `~/.claude/mcp.json` - MCP config (uses `${ENV_VAR}` references)
-
-## Quick Install (Skills Only)
-
-**Windows:**
-```powershell
-git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev $env:USERPROFILE\claude-auto-dev
-& $env:USERPROFILE\claude-auto-dev\install.ps1 -Global -Init
-```
-
-**Mac/Linux:**
-```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev ~/claude-auto-dev
-~/claude-auto-dev/install.sh --global --init
-```
+---
 
 ## Commands
 
-### Task Management (build.md)
+| Say | What Happens |
+|-----|--------------|
+| `brainstorm` | Generate tasks from your description |
+| `auto` | Work through all tasks automatically |
+| `status` | Show progress (X/Y complete) |
+| `continue` | One task, then stop |
+| `stop` | Save progress, safe to close |
+| `reset` | Clear stuck state after crash |
+
+### Additional Commands
 
 | Say | What Happens |
 |-----|--------------|
-| `auto` | Work through all tasks autonomously with auto-discovery |
-| `continue` | One task, then ask |
-| `work on S42` | Do specific task |
-| `status` | **Enhanced dashboard** with heartbeats, dependencies, learnings |
-| `deps` / `tree` | **NEW:** Show ASCII dependency tree with status emojis |
-| `rollback S42` | **NEW:** Undo task changes via git, reopen task |
-| `brainstorm` | Generate new stories from requirements |
-| `adjust` | Reprioritize remaining tasks |
-| `stop` | Clear claims before closing session |
-| `reset` | Clear all claims after crash |
+| `ship` | Build and deploy to Vercel |
+| `test` | Run browser tests with agent-browser |
+| `fix` | Debug and fix issues |
+| `set up` | Initialize new project |
 
-### Additional Skills
-
-| Say | Skill | What Happens |
-|-----|-------|--------------|
-| `ship` / `deploy` | ship.md | Build → deploy to Vercel → verify |
-| `test` | test.md | Full E2E with network/console monitoring |
-| `test auth` | test.md | Test authentication flow only |
-| `test api` | test.md | Check API integrations |
-| `test network` | test.md | Monitor all network requests |
-| `fix` / `debug` | fix.md | Systematic debugging workflow |
-| `set up` / `init` | setup-project.md | Initialize new project with stack |
-| `env` / `credentials` | env-vars.md | Manage environment variables |
-| `schema` / `database` | supabase-schema.md | Create tables, migrations via MCP |
-
-## Skills Reference
-
-| Skill | Triggers | Purpose |
-|-------|----------|---------|
-| **build.md** | auto, continue, status, brainstorm, adjust, stop, reset | Autonomous task loop |
-| **ship.md** | ship, deploy | Build and deploy to production |
-| **test.md** | test, verify, e2e, playwright | Full E2E testing with network/console monitoring |
-| **fix.md** | fix, debug | Reproduce → isolate → fix → verify |
-| **setup-project.md** | set up, init, new project | Scaffold new projects |
-| **env-vars.md** | env, credentials, api key | Environment variable management |
-| **supabase-schema.md** | schema, database, table, migration | Database operations via Supabase MCP |
-
-## Workflow
-
-```bash
-claude "brainstorm"    # Generate tasks from requirements
-claude "auto"          # Build everything autonomously
-claude "stop"          # Before closing session
-```
-
-**Deployment:**
-```bash
-claude "ship"          # Build → deploy → verify
-```
-
-**Testing:**
-```bash
-claude "test"          # Run Playwright tests
-```
-
-## Multi-Agent (with Heartbeat Monitoring)
-
-Run `claude "auto"` in multiple terminals. Each picks unclaimed tasks. **Heartbeat monitoring** (3-min intervals) enables faster work stealing compared to old 30-min timeout.
-
-**Best practice:**
-```bash
-# Terminal 1
-claude "auto"
-
-# Wait 10-30 seconds, then Terminal 2
-claude "auto"
-
-# Wait 10-30 seconds, then Terminal 3
-claude "auto"
-```
-
-Stagger starts slightly to avoid collisions. Each agent will:
-1. Read prd.json, find first unclaimed task (checks dependencies)
-2. Set `claimedAt` and `heartbeat` timestamps immediately
-3. **Update heartbeat every 3 minutes** during work
-4. Work on task
-5. Mark `passes: true` when done
-
-**Heartbeat advantages:**
-- Crashed agents detected in 10min (vs old 30min)
-- Other agents can steal stale work faster
-- Real-time visibility in `status` dashboard
-
-**Before closing any terminal:**
-```bash
-claude "stop"
-```
+---
 
 ## Files
 
@@ -174,9 +63,8 @@ claude "stop"
 |------|---------|
 | `prd.json` | Tasks with `passes: true/false` status |
 | `progress.txt` | Append-only learnings log |
-| `.claude/briefs/` | Optional detailed specs |
 
-## Task Schema (v2.0)
+### Task Schema
 
 ```json
 {
@@ -185,151 +73,71 @@ claude "stop"
   "description": "What to build",
   "priority": 1,
   "passes": false,
-  "claimedAt": null,
-  "heartbeat": null,                    // NEW: Updated every 3min, enables fast work stealing
-  "completedAt": null,
-  "testedAt": null,
-  "dependsOn": [],                      // NEW: Array of story IDs that must complete first
-  "blockedBy": [],                      // NEW: Auto-computed, shows blocking dependencies
-  "files": ["path/to/file.ts"],
-  "acceptanceCriteria": ["Requirement"],
-  "attempts": [],                       // Track retry history
-  "criteriaScore": null,                // 1/attempts = criteria effectiveness
-  "testSpec": { "happyPath": [], "errorCases": [], "edgeCases": [] },
-  "testResults": null
+  "files": ["src/file.ts"],
+  "acceptanceCriteria": ["Requirement 1"]
 }
 ```
-
-**New Features:**
-- **Heartbeat Monitoring:** Tasks update heartbeat every 3min. Stale (>10min) tasks are stealable.
-- **Dependency Tracking:** Use `dependsOn: ["S40", "S41"]` to ensure tasks complete in order.
-- **Pattern Storm Detection:** System detects when same error appears across 3+ tasks within 1hr.
-- **Enhanced Dashboard:** `status` shows active tasks with heartbeat indicators, blocked tasks, and top learnings.
-
-## Test Suites (prd.json)
-
-```json
-{
-  "testSuites": [
-    {
-      "id": "TS1",
-      "name": "Full User Journey",
-      "stories": ["S1", "S2", "S5"],
-      "testedAt": null
-    }
-  ]
-}
-```
-
-## Testing System
-
-### 3-Pass Test Generation
-
-Tests are auto-generated from three sources:
-
-| Pass | Source | Tests Generated |
-|------|--------|-----------------|
-| **1. Story** | acceptanceCriteria | Happy path, basic errors |
-| **2. Code** | Implementation files | Validation, auth, null checks |
-| **3. Integration** | Cross-story deps | User journeys, data flows |
-
-### Test Workflow
-
-```
-Story Completion → testSpec Generated → testedAt: null
-      ↓
-"test" Command → Execute testSpec → Update testedAt + testResults
-      ↓
-Failures → Auto-fix or Create Bug Story
-```
-
-### Test Commands
-
-| Say | Action |
-|-----|--------|
-| `test` | Test untested stories |
-| `test all` | Re-test everything |
-| `test S1` | Test specific story |
-| `test generate` | Generate testSpec without running |
-| `test report` | Show last results |
 
 ---
 
-## API Key Setup
+## Browser Testing
 
-Run the API key wizard:
+Uses **agent-browser** CLI (5-6x more token-efficient than Playwright MCP).
 
-**Windows:**
-```powershell
-& $env:USERPROFILE\claude-auto-dev\setup-keys.ps1
-```
-
-**Mac/Linux:**
+**Install:**
 ```bash
-~/claude-auto-dev/setup-keys.sh
+npm install -g agent-browser
+agent-browser install
 ```
 
-**Keys prompted (grouped by category):**
-
-| Category | Keys |
-|----------|------|
-| **Required** | `SUPABASE_ACCESS_TOKEN`, `GITHUB_PAT` |
-| **Google OAuth** | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
-| **AI/LLM** | `ELEVENLABS_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `ZAI_API_KEY` |
-| **Search/Scrape** | `BRAVE_API_KEY`, `FIRECRAWL_API_KEY`, `LINKUP_API_KEY`, `CAPSOLVER_API_KEY` |
-| **Email** | `RESEND_API_KEY` |
-| **Testing** | `TEST_USER_PASSWORD` |
-
-Keys are stored in:
-- **Windows:** System environment variables (persists across reboots)
-- **Mac/Linux:** `~/.zshrc` or `~/.bashrc`
-
-The `mcp.json` config uses `${ENV_VAR}` syntax - MCP reads from your system env vars at runtime. **No secrets are hardcoded in the config file.**
-
-## Environment Variables
-
-**Never hardcode API keys.** Use system environment variables.
-
-**Manual setup (Windows):**
-```powershell
-setx SUPABASE_ACCESS_TOKEN "sbp_..."
-setx GITHUB_PAT "ghp_..."
+**Usage:**
+```bash
+agent-browser open http://localhost:3000
+agent-browser snapshot -i     # Get interactive elements with refs
+agent-browser click @e1       # Click by ref
+agent-browser fill @e2 "text" # Fill input
 ```
 
-**Project .env.local (project-specific only):**
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+---
+
+## Multi-Agent
+
+Run `claude "auto"` in multiple terminals. Each picks unclaimed tasks automatically.
+
+```bash
+# Terminal 1
+claude "auto"
+
+# Terminal 2 (wait 10-30 seconds)
+claude "auto"
 ```
 
-**Rules:**
-- API keys in system env vars (not .env files)
-- .env.local for project-specific URLs only
-- Never commit secrets to git
-- Use `.env.example` to document required vars (no values)
+**Before closing:** `claude "stop"`
 
-## Troubleshooting
+---
 
-**Tasks stuck as claimed?**
-- Wait 30 min for auto-expiry, or run `reset` to clear all claims
+## Skills
 
-**Agents grabbing same task?**
-- Stagger starts by 10-30 seconds
-- Or run `reset` then restart agents
+| Skill | Triggers |
+|-------|----------|
+| build.md | auto, continue, status, brainstorm, stop, reset |
+| agent-browser.md | browser, agent-browser, web test |
+| test.md | test, verify, e2e |
+| ship.md | ship, deploy |
+| fix.md | fix, debug |
+| setup-project.md | set up, init |
+| env-vars.md | env, credentials |
+| supabase-schema.md | schema, database, table |
 
-**Build keeps failing?**
-- Agent stops after 3 consecutive failures
-- Fix the issue manually, then `auto` again
-
-**Dev server issues?**
-- Check if port is already in use: `netstat -ano | findstr :3000`
-- Use `~/.claude/scripts/start-server.ps1` to launch in external terminal
+---
 
 ## Update
 
-```powershell
-cd $env:USERPROFILE\claude-auto-dev && git pull && .\install.ps1 -Update
+```bash
+cd ~/claude-auto-dev && git pull && ./install.ps1 -Update
 ```
+
+---
 
 ## License
 

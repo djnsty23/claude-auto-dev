@@ -1,12 +1,12 @@
 ---
 name: Test / Verify
-description: Comprehensive testing with test generation, Playwright MCP, and coverage tracking.
+description: Comprehensive testing with test generation, agent-browser CLI, and coverage tracking.
 triggers:
   - test
   - verify
   - check
   - e2e
-  - playwright
+  - browser test
 ---
 
 # Test Workflow
@@ -181,37 +181,71 @@ For stories with dependencies:
 
 ---
 
-## Playwright MCP Commands Reference
+## Browser Testing with agent-browser
 
-### Navigation & State
-```javascript
-browser_navigate({ url: "http://localhost:3000/path" })
-browser_snapshot()  // Capture accessibility tree
-browser_take_screenshot({ filename: "step-1.png" })
+**Note:** Uses agent-browser CLI instead of Playwright MCP for 5-6x better token efficiency.
+
+Install: `npm install -g agent-browser && agent-browser install`
+
+### Core Workflow
+```bash
+agent-browser open http://localhost:3000/path
+agent-browser snapshot -i              # Get interactive elements with refs
+agent-browser click @e1                # Click by ref from snapshot
+agent-browser fill @e2 "test@test.com" # Fill input by ref
+agent-browser screenshot step-1.png
 ```
 
-### Interaction
-```javascript
-browser_click({ element: "Login button", ref: "[ref-from-snapshot]" })
-browser_type({ element: "Email input", ref: "[ref]", text: "test@example.com" })
-browser_fill_form({ fields: [
-  { name: "email", type: "textbox", ref: "[ref]", value: "test@test.com" },
-  { name: "password", type: "textbox", ref: "[ref]", value: "password" }
-]})
-browser_select_option({ element: "Country", ref: "[ref]", values: ["US"] })
+### Navigation
+```bash
+agent-browser open <url>       # Navigate
+agent-browser back             # Go back
+agent-browser reload           # Refresh
+agent-browser close            # Close browser
 ```
 
-### Monitoring
-```javascript
-browser_network_requests({ includeStatic: false })
-browser_console_messages({ level: "error" })
+### Snapshots (Key Feature)
+```bash
+agent-browser snapshot -i      # Interactive elements only (recommended)
+agent-browser snapshot -i -c   # Interactive + compact (best for tests)
+```
+
+### Interaction (use refs from snapshot)
+```bash
+agent-browser click @e1                 # Click element
+agent-browser fill @e2 "user@test.com"  # Clear and fill input
+agent-browser type @e3 "password"       # Type into field
+agent-browser press Enter               # Press key
+agent-browser check @e4                 # Check checkbox
+agent-browser select @e5 "option"       # Select dropdown
+```
+
+### Semantic Locators (alternative to refs)
+```bash
+agent-browser find role button click --name "Submit"
+agent-browser find text "Sign In" click
+agent-browser find label "Email" fill "test@test.com"
 ```
 
 ### Waiting
-```javascript
-browser_wait_for({ text: "Dashboard" })      // Wait for text to appear
-browser_wait_for({ textGone: "Loading..." }) // Wait for text to disappear
-browser_wait_for({ time: 2 })                // Wait 2 seconds
+```bash
+agent-browser wait @e1                  # Wait for element
+agent-browser wait --text "Dashboard"   # Wait for text
+agent-browser wait --url "**/dashboard" # Wait for URL pattern
+agent-browser wait --load networkidle   # Wait for network idle
+```
+
+### Monitoring
+```bash
+agent-browser network requests --filter api  # View API requests
+agent-browser console                        # View console messages
+agent-browser errors                         # View page errors
+```
+
+### Auth State Persistence
+```bash
+agent-browser state save ./test-auth.json    # Save after login
+agent-browser state load ./test-auth.json    # Reuse in subsequent tests
 ```
 
 ---

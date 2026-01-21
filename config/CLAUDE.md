@@ -3,7 +3,6 @@
 ## Identity
 GitHub: YOUR_GITHUB_USERNAME
 Email: YOUR_EMAIL
-Google Workspace: YOUR_ADMIN_EMAIL (for OAuth testing)
 
 ## Behavior
 - **BE CONCISE** - <2 lines unless asked for detail
@@ -18,80 +17,68 @@ React + TypeScript + Tailwind + shadcn/ui + Supabase + Vercel
 | Say | Get |
 |-----|-----|
 | fix | Debug → fix → test |
-| build X | Auto-generate tasks → implement loop |
 | auto | Work through all tasks without stopping |
 | continue | One task, then ask |
 | status | Show prd.json progress |
-| brainstorm | Discovery questionnaire → new stories |
-| generate | Same as brainstorm - create new stories |
-| adjust | Pick which features to prioritize |
-| stop | Clear claims before closing |
-| reset | Clear all claims after crash |
+| brainstorm | Generate tasks from your description |
+| stop | Save progress, safe to close |
+| reset | Clear stuck state after crash |
 | ship | Build → deploy → verify |
-| set up | CLAUDE.md + stack + Supabase |
-| test | Build check → Playwright tests |
+| test | Build check → agent-browser tests |
 
-## Autonomous Development
-Full system: https://github.com/YOUR_GITHUB_USERNAME/claude-auto-dev
-- **prd.json**: Task list with `passes: true/false` status
-- **progress.txt**: Append-only learnings log
-- **learnings.json**: Structured error→solution pairs
-- **adjust**: Say "adjust" to reprioritize remaining tasks
-- See `~/.claude/skills/build.md` for full workflow
+## Autonomous Development (claude-auto-dev)
+
+**How to start in ANY project:**
+```
+"brainstorm"  → Creates prd.json + generates tasks from your description
+"auto"        → Works through existing tasks in prd.json
+"status"      → Shows progress
+```
+
+**That's it.** No scripts to run. Just say what you want.
+
+**Files created automatically:**
+- `prd.json` - Task list with `passes: true/false` status
+- `progress.txt` - Append-only learnings log
 
 ## Rules
 - TypeScript strict, no `any`
 - All UI states handled
 - Never commit secrets
-- **BEFORE starting dev server**: Check if port is already in use
-
-## Global OAuth (for test projects)
-Set in Windows env vars, reference in project .env.local:
-```powershell
-setx GOOGLE_CLIENT_ID "your-id"
-setx GOOGLE_CLIENT_SECRET "your-secret"
-```
 
 ## User Accounts
 
 | Account | Role | Usage |
 |---------|------|-------|
 | YOUR_ADMIN_EMAIL | **Admin** | App management, admin UI |
-| YOUR_TEST_EMAIL | **Tester** | Automated Playwright tests only |
+| YOUR_TEST_EMAIL | **Tester** | Automated browser tests only |
 
 ### Test Account
 - **Email**: YOUR_TEST_EMAIL
 - **Password**: Stored in `TEST_USER_PASSWORD` env var
 - **ONLY use this for automated testing**
 
-### User Roles (all projects must implement)
-- **admin**: Full access, user management, settings
-- **user**: Standard access, own data only
+## Browser Testing
+- **agent-browser** - CLI for browser automation (5-6x more token-efficient than Playwright MCP)
+- Install: `npm install -g agent-browser && agent-browser install`
+- See `~/.claude/skills/agent-browser.md` for full command reference
 
 ## MCP Servers (Global)
-- **playwright** - Browser automation for testing
 - **supabase** - Database operations via MCP
+- **playwright** - Available but prefer agent-browser CLI for token efficiency
 
 ## GitHub Access
 - **PAT**: `GITHUB_PAT` env var (full repo access)
-- **User**: YOUR_GITHUB_USERNAME
 - Use `gh` CLI for GitHub operations
 
 ## Auto-Testing Flow
-Say "test" → Playwright MCP → categorize issues → auto-fix code → report unfixable
-
-## Dev Server Troubleshooting
-- **HMR not updating?** Run `npm run build` first
-- **Kill stuck process:** `powershell -Command "Stop-Process -Id PID -Force"`
+Say "test" → agent-browser CLI → categorize issues → auto-fix code → report unfixable
 
 ## Skills
 Located in `~/.claude/skills/`:
-- **build.md** - Autonomous task loop
-- **ship.md** - Build, deploy, verify
-- **test.md** - Playwright auto-testing
-- **fix.md** - Debug and fix issues
-- **setup-project.md** - New project setup
-- **help.md** - List all commands
+- **build.md** - Autonomous task loop (prd.json + progress.txt)
+- **agent-browser.md** - Browser automation CLI
+- ship.md, fix.md, test.md, setup-project.md, env-vars.md, supabase-schema.md
 
 ## Included Rules
 @rules/security.md
