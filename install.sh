@@ -24,7 +24,7 @@ if [[ $FULL ]]; then
     CLAUDE_DIR=~/.claude
 
     # Create directories
-    mkdir -p "$CLAUDE_DIR/skills" "$CLAUDE_DIR/rules" "$CLAUDE_DIR/scripts"
+    mkdir -p "$CLAUDE_DIR/skills" "$CLAUDE_DIR/rules"
 
     # Copy global configs
     echo -e "\033[36m→ Installing global configs...\033[0m"
@@ -51,17 +51,6 @@ if [[ $FULL ]]; then
             echo -e "\033[32m✓ ~/.claude/skills/$(basename "$f")\033[0m"
         fi
     done
-
-    # Copy scripts
-    if [[ -d "$SCRIPT_DIR/scripts" ]]; then
-        echo -e "\033[36m→ Installing scripts...\033[0m"
-        for f in "$SCRIPT_DIR/scripts/"*; do
-            if [[ -f "$f" ]]; then
-                cp "$f" "$CLAUDE_DIR/scripts/"
-                echo -e "\033[32m✓ ~/.claude/scripts/$(basename "$f")\033[0m"
-            fi
-        done
-    fi
 
     # Run API key setup if mcp.json doesn't exist
     if [[ ! -f "$CLAUDE_DIR/mcp.json" ]]; then
