@@ -1,0 +1,60 @@
+# Changelog
+
+## [2.2.0] - 2025-01-22
+
+### Added
+- `agent-browser.md` skill - Browser automation CLI (5-6x more token-efficient than Playwright MCP)
+- Browser testing section in README
+
+### Changed
+- `test.md` now uses agent-browser CLI instead of Playwright MCP
+- Simplified README - focus on "brainstorm" and "auto" commands
+- Simplified `config/CLAUDE.md` and `config/QUICKSTART.md` templates
+- Updated install scripts to remove scripts directory references
+
+### Removed
+- `scripts/start-server.ps1` - No longer needed (use background bash instead)
+- `scripts/start-server.sh` - No longer needed
+- `scripts/` directory - Empty after removing start-server scripts
+
+---
+
+## [2.1.0] - 2025-01-15
+
+### Added
+- Heartbeat monitoring (3-min intervals for faster work stealing)
+- Dependency tracking (`dependsOn` field in tasks)
+- Pattern storm detection (detects same error across 3+ tasks)
+- Rollback command (`rollback S42` to undo task changes)
+- Enhanced status dashboard with emojis and ANSI colors
+- ASCII dependency tree (`deps` / `tree` command)
+
+### Changed
+- Stale work detection reduced from 30min to 10min
+- Task schema updated with `heartbeat`, `dependsOn`, `blockedBy` fields
+
+---
+
+## [2.0.0] - 2025-01-10
+
+### Added
+- Multi-agent coordination with claim system
+- `claimedAt` field for task locking
+- Offset algorithm for parallel agent starts
+- `stop` command to release claims before closing
+- `reset` command to clear all claims after crash
+
+### Changed
+- Complete rewrite of build.md for autonomous operation
+- Simplified task schema
+
+---
+
+## [1.0.0] - 2024-12-01
+
+### Added
+- Initial release
+- `prd.json` task management
+- `progress.txt` learnings log
+- Basic skills: build, ship, test, fix, setup-project
+- Supabase MCP integration
