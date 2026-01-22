@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-2.5.1-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
 
