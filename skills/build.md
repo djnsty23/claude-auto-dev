@@ -431,42 +431,28 @@ Still stuck? Log to mistakes.md, ask user. Don't loop forever.
 
 # Model Routing (Automatic)
 
-Spawn subagents with optimal models for different task types.
+Opus is best at coding. Only offload trivial tasks to Haiku.
 
-## Auto-Routing Rules
+## Routing Rules
 
-When executing these tasks, spawn subagents with the specified model:
+| Task | Model | Why |
+|------|-------|-----|
+| `brainstorm`, `auto`, `continue` | **Opus** | Coding quality matters |
+| `review`, `security`, `fix` | **Opus** | Deep analysis |
+| `test` (browser clicks) | **Haiku** | Simple click/verify |
+| `status`, `archive`, `clean` | **Haiku** | Trivial file ops |
 
-| Task | Subagent Model | Why |
-|------|----------------|-----|
-| `test` (browser) | **Haiku** | Simple click/verify |
-| `status` | **Haiku** | Read JSON, count |
-| `archive`, `clean` | **Haiku** | File operations |
-| `auto`, `continue` | **Sonnet** | Implementation |
-| `brainstorm` | **Opus** | Complex reasoning |
-| `review`, `security` | **Opus** | Deep analysis |
-| `fix` | **Opus** | Debugging |
+## When to Use Haiku Subagent
 
-## Implementation
-
-For Haiku tasks, use Task tool:
+Only for browser automation (agent-browser):
 ```
-Task tool: model="haiku", subagent_type="general-purpose"
+Task tool: model="haiku", prompt="Click @e1, verify text..."
 ```
 
-For Sonnet tasks:
-```
-Task tool: model="sonnet", subagent_type="builder"
-```
+## Default: Stay in Opus
 
-Main session stays Opus for orchestration.
-
-## When NOT to Route
-
-Stay in main session (Opus) when:
-- Task requires full conversation context
-- Multi-step reasoning across files
-- User interaction needed mid-task
+All coding, reasoning, and implementation stays in main session.
+Haiku is only for mechanical browser interactions.
 
 ---
 
