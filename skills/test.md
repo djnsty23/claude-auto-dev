@@ -185,16 +185,16 @@ For stories with dependencies:
 
 **Note:** Uses agent-browser CLI instead of Playwright MCP for 5-6x better token efficiency.
 
-Install: `npm install -g agent-browser && agent-browser install`
-
 ### Core Workflow
 ```bash
 agent-browser open http://localhost:3000/path
 agent-browser snapshot -i              # Get interactive elements with refs
 agent-browser click @e1                # Click by ref from snapshot
 agent-browser fill @e2 "test@test.com" # Fill input by ref
-agent-browser screenshot step-1.png
+agent-browser screenshot .claude/screenshots/step-1.png
 ```
+
+**Screenshot Convention:** Always save to `.claude/screenshots/` to avoid polluting root.
 
 ### Navigation
 ```bash

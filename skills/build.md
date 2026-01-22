@@ -81,13 +81,35 @@ Same as auto, but stop after 1 task completed.
 3. Report: "Updated to version X"
 ```
 
+## "archive"
+```
+When prd.json > 2000 lines or read fails:
+1. Backup: cp prd.json prd-backup-YYYYMMDD.json
+2. Separate: completed (passes=true, type!="qa") vs active
+3. Write archive: prd-archive-YYYY-MM.json
+4. Update prd.json:
+   - Add "archived" section with summary
+   - Keep only active/QA stories
+5. Report: "Archived X stories, Y remain active"
+```
+
+## "clean"
+```
+Remove Claude Code artifacts to reduce clutter:
+1. Delete .claude/screenshots/*.png (test screenshots)
+2. Delete prd-backup-*.json older than 7 days
+3. Delete .playwright-mcp/ folder
+4. Report: "Cleaned X files, freed Y MB"
+```
+
 ---
 
 # Files
 
 | File | Purpose |
 |------|---------|
-| prd.json | Tasks. `passes: true/false` is truth. |
+| prd.json | Active tasks + archived summary. `passes: true/false` is truth. |
+| prd-archive-YYYY-MM.json | Completed stories (full detail). |
 | progress.txt | Append-only log. Human readable. |
 | CLAUDE.md | Project context. |
 
@@ -136,6 +158,8 @@ Still stuck? Ask user. Don't loop forever.
 | `reset` | Clear stuck state |
 | `review` | Check code quality |
 | `update` | Pull latest system |
+| `archive` | Compact prd.json (move completed to archive) |
+| `clean` | Remove screenshots, old backups, temp files |
 
 ---
 

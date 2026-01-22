@@ -45,6 +45,8 @@ git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 | `continue` | One task, then stop |
 | `stop` | Save progress, safe to close |
 | `reset` | Clear stuck state after crash |
+| `archive` | Compact prd.json when too large (>2000 lines) |
+| `clean` | Remove screenshots, old backups, temp files |
 
 ### Additional Commands
 
@@ -61,8 +63,10 @@ git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 
 | File | Purpose |
 |------|---------|
-| `prd.json` | Tasks with `passes: true/false` status |
+| `prd.json` | Active tasks + archived summary |
+| `prd-archive-YYYY-MM.json` | Completed stories (full detail) |
 | `progress.txt` | Append-only learnings log |
+| `.claude/screenshots/` | Test screenshots (gitignored) |
 
 ### Task Schema
 
@@ -96,6 +100,7 @@ agent-browser open http://localhost:3000
 agent-browser snapshot -i     # Get interactive elements with refs
 agent-browser click @e1       # Click by ref
 agent-browser fill @e2 "text" # Fill input
+agent-browser screenshot .claude/screenshots/test.png  # Save to gitignored folder
 ```
 
 ---
@@ -149,6 +154,35 @@ claude "auto"
 ```bash
 cd ~/claude-auto-dev && git pull && ./install.ps1 -Update
 ```
+
+---
+
+## Changelog
+
+### [2.4.0] - 2026-01-22
+- **Archive system** - `archive` command compacts prd.json when >2000 lines
+- **Clean command** - `clean` removes screenshots, old backups, temp files
+- **Screenshot convention** - Save to `.claude/screenshots/` (auto-gitignored)
+- **archive-prd.md** skill for detailed archival documentation
+
+### [2.3.0] - 2026-01-22
+- **Hooks system** for token optimization (30-60% savings)
+- SessionStart, PreToolUse, PostToolUse, Stop hooks
+- Windows and Unix hook scripts
+
+### [2.2.0] - 2026-01-22
+- **agent-browser** skill (5-6x more token-efficient than Playwright MCP)
+- Simplified README and templates
+
+### [2.1.0] - 2025-01-15
+- Heartbeat monitoring, dependency tracking, pattern storm detection
+- Rollback command, enhanced status dashboard
+
+### [2.0.0] - 2025-01-10
+- Multi-agent coordination with claim system
+- Stop/reset commands for concurrent sessions
+
+[Full changelog](CHANGELOG.md)
 
 ---
 
