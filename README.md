@@ -1,8 +1,24 @@
 # Claude Auto-Dev
 
-Autonomous task management for Claude Code. No scripts to run - just natural language.
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-2.4.3-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
-> **New user?** See the [Quick Start Guide](QUICKSTART.md) for step-by-step setup.
+**Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, automated testing, and deployment automation.
+
+> No scripts to run - just say what you want to build.
+
+## What is Claude Auto-Dev?
+
+Claude Auto-Dev is a **skills-based automation system** for [Claude Code](https://claude.ai/code) that enables:
+
+- **Autonomous task execution** - AI works through your task list automatically
+- **Multi-agent coordination** - Run multiple Claude sessions in parallel
+- **Automated testing** - Browser automation with agent-browser CLI
+- **One-command deployment** - Ship to Vercel/production with `ship`
+- **Smart context management** - Hooks reduce token usage by 30-60%
+
+Perfect for solo developers, indie hackers, and teams who want AI to handle the implementation while they focus on product decisions.
 
 ## Quick Start
 
@@ -13,7 +29,7 @@ Autonomous task management for Claude Code. No scripts to run - just natural lan
 
 **Existing project:**
 ```
-"auto"    → Work through all tasks
+"auto"    → Work through all tasks automatically
 "status"  → Check progress
 ```
 
@@ -21,71 +37,98 @@ That's it. No installation needed if you already have the skills in `~/.claude/s
 
 ---
 
-## Install (First Time Only)
+## Installation
 
-**Windows:**
+### Windows (PowerShell)
 ```powershell
-git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
-& $env:USERPROFILE\claude-auto-dev\install.ps1 -Full
+git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\Downloads\code\claude-auto-dev
+Copy-Item "$env:USERPROFILE\Downloads\code\claude-auto-dev\skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse
 ```
 
-**Mac/Linux:**
+### Mac/Linux
 ```bash
 git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-~/claude-auto-dev/install.sh --full
+cp -r ~/claude-auto-dev/skills/* ~/.claude/skills/
 ```
 
 ---
 
 ## Commands
 
-Works both as natural language AND slash commands (after install):
+Works as natural language in any Claude Code session:
 
-| Say or Type | What Happens |
-|-------------|--------------|
-| `brainstorm` or `/brainstorm` | Generate tasks from your description |
-| `auto` or `/auto` | Work through all tasks automatically |
-| `status` or `/status` | Show progress (X/Y complete) |
-| `continue` or `/continue` | One task, then stop |
-| `stop` or `/stop` | Save progress, safe to close |
-| `reset` or `/reset` | Clear stuck state after crash |
-| `archive` or `/archive` | Compact prd.json when too large (>2000 lines) |
-| `clean` or `/clean` | Remove screenshots, old backups, temp files |
-| `/resume` | Resume previous session (shows usage) |
+| Command | What Happens |
+|---------|--------------|
+| `brainstorm` | Generate tasks from your description |
+| `auto` | Work through all tasks automatically |
+| `status` | Show progress (X/Y complete) |
+| `continue` | Complete one task, then stop |
+| `stop` | Save progress, safe to close |
+| `reset` | Clear stuck state after crash |
+| `archive` | Compact prd.json when too large |
+| `clean` | Remove screenshots, old backups |
+| `review` | Code quality + security audit |
+| `security` | Pre-push Supabase/RLS/secrets scan |
 
-### Additional Commands
+### Additional Skills
 
-| Say | What Happens |
-|-----|--------------|
+| Command | What Happens |
+|---------|--------------|
 | `ship` | Build and deploy to Vercel |
 | `test` | Run browser tests with agent-browser |
 | `fix` | Debug and fix issues |
-| `set up` | Initialize new project |
+| `set up` | Initialize new project structure |
 
 ---
 
-## Files
+## How It Works
 
-| File | Purpose |
-|------|---------|
-| `prd.json` | Active tasks + archived summary |
-| `prd-archive-YYYY-MM.json` | Completed stories (full detail) |
-| `progress.txt` | Append-only learnings log |
-| `.claude/screenshots/` | Test screenshots (gitignored) |
+### Task Management
 
-### Task Schema
+Claude Auto-Dev uses a simple `prd.json` file to track tasks:
 
 ```json
 {
   "id": "S1",
-  "title": "Short title",
-  "description": "What to build",
+  "title": "Add user authentication",
+  "description": "Implement login/signup with Supabase Auth",
   "priority": 1,
   "passes": false,
-  "files": ["src/file.ts"],
-  "acceptanceCriteria": ["Requirement 1"]
+  "files": ["src/auth/login.tsx", "src/lib/supabase.ts"],
+  "acceptanceCriteria": ["Users can sign up", "Users can log in"]
 }
 ```
+
+- `passes: false` = pending task
+- `passes: true` = completed task
+- `passes: null` = new/unstarted task
+
+### Autonomous Loop
+
+When you say `auto`, Claude:
+
+1. Finds next pending task (`passes: false`)
+2. Reads the relevant files
+3. Implements changes
+4. Runs `npm run build` to verify
+5. Marks task complete if build passes
+6. Continues to next task
+
+Stops when: all tasks done, 3 consecutive failures, or you interrupt.
+
+### Multi-Agent Mode
+
+Run multiple Claude sessions for parallel development:
+
+```bash
+# Terminal 1
+claude "auto"
+
+# Terminal 2 (wait 10-30 seconds)
+claude "auto"
+```
+
+Each session claims different tasks. No conflicts.
 
 ---
 
@@ -102,109 +145,94 @@ agent-browser install
 **Usage:**
 ```bash
 agent-browser open http://localhost:3000
-agent-browser snapshot -i     # Get interactive elements with refs
+agent-browser snapshot -i     # Get interactive elements
 agent-browser click @e1       # Click by ref
 agent-browser fill @e2 "text" # Fill input
-agent-browser screenshot .claude/screenshots/test.png  # Save to gitignored folder
 ```
 
 ---
 
-## Multi-Agent
+## Files Created
 
-Run `claude "auto"` in multiple terminals. Each picks unclaimed tasks automatically.
-
-```bash
-# Terminal 1
-claude "auto"
-
-# Terminal 2 (wait 10-30 seconds)
-claude "auto"
-```
-
-**Before closing:** `claude "stop"`
-
----
-
-## Hooks (Auto-Installed)
-
-| Hook | Purpose |
+| File | Purpose |
 |------|---------|
-| `auto-continue` | Stop hook - auto-continues if tasks remain in prd.json |
-| `session-start` | Injects task progress at session start |
-| `pre-tool-filter` | Blocks dangerous commands, skips large files |
-| `post-tool-typecheck` | Runs typecheck after TS/JS edits |
-
-**Token savings:** 30-60% reduction through context injection and filtering.
+| `prd.json` | Active tasks with pass/fail status |
+| `prd-archive-YYYY-MM.json` | Archived completed tasks |
+| `progress.txt` | Append-only learnings log |
+| `.claude/screenshots/` | Test screenshots (gitignored) |
 
 ---
 
-## Skills
+## Token Optimization
 
-| Skill | Triggers |
-|-------|----------|
-| build.md | auto, continue, status, brainstorm, stop, reset |
-| agent-browser.md | browser, agent-browser, web test |
-| test.md | test, verify, e2e |
-| ship.md | ship, deploy |
-| fix.md | fix, debug |
-| setup-project.md | set up, init |
-| env-vars.md | env, credentials |
-| supabase-schema.md | schema, database, table |
+Claude Auto-Dev includes hooks that reduce token usage by 30-60%:
 
-**Lazy Loading:** Skills are indexed in `skills/manifest.json` for on-demand loading based on triggers and project context.
+- **SessionStart** - Injects task context at session start
+- **PreToolUse** - Blocks dangerous commands, skips large files
+- **PostToolUse** - Runs typecheck after TypeScript edits
+- **Stop** - Auto-continues if tasks remain
+
+---
+
+## Tech Stack Compatibility
+
+Works with any stack, optimized for:
+
+- **Frontend:** React, Vue, Svelte, Next.js, Vite
+- **Backend:** Node.js, Deno, Supabase Edge Functions
+- **Database:** PostgreSQL, Supabase, Firebase
+- **Deployment:** Vercel, Netlify, Cloudflare
 
 ---
 
 ## Update
 
 ```bash
-cd ~/claude-auto-dev && git pull && ./install.ps1 -Update
+cd ~/Downloads/code/claude-auto-dev && git pull
+cp skills/*.md ~/.claude/skills/
 ```
+
+Or just say `update` in any Claude session.
 
 ---
 
 ## Changelog
 
 ### [2.4.3] - 2026-01-22
-- **Cross-platform fix** - Archive uses Read/Write tools (no shell copy)
+- Cross-platform archive (Read/Write tools instead of shell)
 - Fixed emoji encoding in install.ps1
 
 ### [2.4.2] - 2026-01-22
-- **Skill index injection** - SessionStart outputs command→file mapping
-- manifest.json now actively used for instant skill discovery
-
-### [2.4.1] - 2026-01-22
-- **Bug fixes** - Windows paths in QUICKSTART.md, plugin install for Mac/Linux
-- **Stop hook** - Now informs instead of blocks (respects user intent)
+- Skill index injection via manifest.json
+- Instant skill discovery from triggers
 
 ### [2.4.0] - 2026-01-22
-- **Local plugin** - Slash commands (`/auto`, `/status`, etc.) auto-registered
-- **Archive system** - `archive` command compacts prd.json when >2000 lines
-- **Clean command** - `clean` removes screenshots, old backups, temp files
-- **Screenshot convention** - Save to `.claude/screenshots/` (auto-gitignored)
+- Archive system for large prd.json files
+- Clean command for temp file removal
+- Screenshot convention (.claude/screenshots/)
 
 ### [2.3.0] - 2026-01-22
-- **Hooks system** for token optimization (30-60% savings)
-- SessionStart, PreToolUse, PostToolUse, Stop hooks
-- Windows and Unix hook scripts
-
-### [2.2.0] - 2026-01-22
-- **agent-browser** skill (5-6x more token-efficient than Playwright MCP)
-- Simplified README and templates
-
-### [2.1.0] - 2025-01-15
-- Heartbeat monitoring, dependency tracking, pattern storm detection
-- Rollback command, enhanced status dashboard
-
-### [2.0.0] - 2025-01-10
-- Multi-agent coordination with claim system
-- Stop/reset commands for concurrent sessions
+- Hooks system (30-60% token savings)
+- SessionStart, PreToolUse, PostToolUse hooks
 
 [Full changelog](CHANGELOG.md)
 
 ---
 
+## Related Projects
+
+- [Claude Code](https://github.com/anthropics/claude-code) - Official CLI
+- [agent-browser](https://www.npmjs.com/package/agent-browser) - Browser automation
+- [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code) - Plugins & skills
+
+---
+
 ## License
 
-MIT
+MIT - Use it however you want.
+
+---
+
+## Keywords
+
+claude code, autonomous coding, ai development, task automation, claude skills, ai programming assistant, autonomous agent, code generation, ai pair programming, claude code plugins, development automation, ai workflow
