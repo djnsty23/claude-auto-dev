@@ -166,6 +166,10 @@ cd ~/claude-auto-dev && git pull && ./install.ps1 -Update
 
 ## Changelog
 
+### [2.4.3] - 2026-01-22
+- **Cross-platform fix** - Archive uses Read/Write tools (no shell copy)
+- Fixed emoji encoding in install.ps1
+
 ### [2.4.2] - 2026-01-22
 - **Skill index injection** - SessionStart outputs command→file mapping
 - manifest.json now actively used for instant skill discovery
