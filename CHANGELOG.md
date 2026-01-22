@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.4.3] - 2026-01-22
+
+### Fixed
+- **Cross-platform archive** - Use Read/Write tools instead of shell copy commands
+- Prevents `copy` vs `cp` command errors on Windows
+- Fixed emoji encoding in install.ps1 (replaced with ASCII)
+
+---
+
 ## [2.4.2] - 2026-01-22
 
 ### Added
