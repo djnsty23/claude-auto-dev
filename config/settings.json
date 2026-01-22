@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\session-start.ps1\""
+            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\session-start.ps1\""
           }
         ]
       }
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\pre-tool-filter.ps1\""
+            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\pre-tool-filter.ps1\""
           }
         ]
       },
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\pre-tool-filter.ps1\""
+            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\pre-tool-filter.ps1\""
           }
         ]
       }
@@ -54,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\post-tool-typecheck.ps1\""
+            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\post-tool-typecheck.ps1\""
           }
         ]
       }
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\auto-continue.ps1\""
+            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\auto-continue.ps1\""
           }
         ]
       }
