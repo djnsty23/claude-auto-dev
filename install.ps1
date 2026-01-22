@@ -79,6 +79,52 @@ if ($Full) {
         Write-Skip "settings.json (run manually to update hooks config)"
     }
 
+    # Install plugin for slash commands
+    Write-Step "Installing claude-auto-dev plugin..."
+    $pluginDir = "$claudeDir\plugins\local\claude-auto-dev"
+    if (-not (Test-Path $pluginDir)) {
+        New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+    }
+    Copy-Item "$ScriptDir\plugin\*" $pluginDir -Recurse -Force
+    Write-Done "~/.claude/plugins/local/claude-auto-dev"
+
+    # Register plugin in installed_plugins.json
+    $pluginsFile = "$claudeDir\plugins\installed_plugins.json"
+    if (Test-Path $pluginsFile) {
+        $plugins = Get-Content $pluginsFile -Raw | ConvertFrom-Json
+        if (-not $plugins.plugins."claude-auto-dev@local") {
+            $plugins.plugins | Add-Member -NotePropertyName "claude-auto-dev@local" -NotePropertyValue @(
+                @{
+                    scope = "user"
+                    installPath = $pluginDir.Replace('\', '\\')
+                    version = $Version
+                    installedAt = (Get-Date -Format "o")
+                    lastUpdated = (Get-Date -Format "o")
+                }
+            ) -Force
+            $plugins | ConvertTo-Json -Depth 10 | Out-File $pluginsFile -Encoding UTF8
+            Write-Done "Registered in installed_plugins.json"
+        } else {
+            Write-Skip "Plugin already registered"
+        }
+    }
+
+    # Enable plugin in settings.json
+    $settingsFile = "$claudeDir\settings.json"
+    if (Test-Path $settingsFile) {
+        $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
+        if (-not $settings.enabledPlugins."claude-auto-dev@local") {
+            if (-not $settings.enabledPlugins) {
+                $settings | Add-Member -NotePropertyName "enabledPlugins" -NotePropertyValue @{} -Force
+            }
+            $settings.enabledPlugins | Add-Member -NotePropertyName "claude-auto-dev@local" -NotePropertyValue $true -Force
+            $settings | ConvertTo-Json -Depth 10 | Out-File $settingsFile -Encoding UTF8
+            Write-Done "Enabled in settings.json"
+        } else {
+            Write-Skip "Plugin already enabled"
+        }
+    }
+
     # Run API key setup if mcp.json doesn't exist
     if (-not (Test-Path "$claudeDir\mcp.json")) {
         Write-Host "`n=== API Key Setup ===" -ForegroundColor Magenta
