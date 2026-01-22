@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.4.2] - 2026-01-22
+
+### Added
+- **Skill index injection** - SessionStart hook now outputs command→file mapping
+- manifest.json now actively used for skill discovery at session start
+- Claude can now instantly look up which skill file to read for any command
+
+---
+
 ## [2.4.1] - 2026-01-22
 
 ### Fixed
