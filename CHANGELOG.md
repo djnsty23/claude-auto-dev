@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.4.1] - 2026-01-22
+
+### Fixed
+- **QUICKSTART.md**: Fixed Windows path syntax in troubleshooting section
+- **install.sh**: Added plugin installation for Mac/Linux users (was missing)
+- **auto-continue hook**: Changed from blocking to informing behavior
+  - Now respects user's "stop" command instead of forcing continuation
+  - Shows remaining tasks as info message, not blocker
+
+---
+
 ## [2.4.0] - 2026-01-22
 
 ### Added
