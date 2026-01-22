@@ -201,9 +201,13 @@ Say `archive` to compact completed tasks.
 
 ### "Skills not loading"
 Run the install again:
+```powershell
+# Windows (PowerShell)
+& $env:USERPROFILE\claude-auto-dev\install.ps1 -Full
+```
 ```bash
-~/claude-auto-dev/install.ps1 -Full  # Windows
-~/claude-auto-dev/install.sh --full  # Mac/Linux
+# Mac/Linux
+~/claude-auto-dev/install.sh --full
 ```
 
 ### "MCP server not connecting"

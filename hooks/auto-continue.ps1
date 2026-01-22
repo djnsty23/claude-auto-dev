@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Stop hook for claude-auto-dev - Auto-continue if tasks remain
+    Stop hook for claude-auto-dev - Inform about remaining tasks
 .DESCRIPTION
-    Checks prd.json for incomplete tasks. If any remain, blocks stopping
-    and instructs Claude to continue with the next task.
+    Checks prd.json for incomplete tasks. If any remain, outputs a reminder
+    but ALLOWS stopping (doesn't block). User intent takes priority.
 #>
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -20,13 +20,9 @@ if (Test-Path "prd.json") {
             if ($remainingCount -gt 0) {
                 $next = $remaining | Select-Object -First 1
 
-                # Block stopping, tell Claude to continue
-                $output = @{
-                    decision = "block"
-                    reason = "Auto-dev: $remainingCount tasks remain. Continue with: $($next.id) - $($next.title)"
-                }
-                $output | ConvertTo-Json -Compress
-                exit 0
+                # INFORM but don't block - user intent takes priority
+                Write-Host "[Auto-Dev] $remainingCount tasks remain. Next: $($next.id) - $($next.title)"
+                Write-Host "[Auto-Dev] Say 'auto' to continue, or close session to stop."
             }
         }
     }
@@ -35,5 +31,5 @@ if (Test-Path "prd.json") {
     }
 }
 
-# Allow stopping if no prd.json or all tasks complete
+# Always allow stopping - user intent takes priority
 @{ ok = $true } | ConvertTo-Json -Compress

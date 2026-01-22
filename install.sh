@@ -73,6 +73,45 @@ if [[ $FULL ]]; then
         echo -e "\033[33m○ settings.json (exists - run manually to update)\033[0m"
     fi
 
+    # Install plugin for slash commands
+    echo -e "\033[36m→ Installing claude-auto-dev plugin...\033[0m"
+    PLUGIN_DIR="$CLAUDE_DIR/plugins/local/claude-auto-dev"
+    mkdir -p "$PLUGIN_DIR"
+    cp -r "$SCRIPT_DIR/plugin/"* "$PLUGIN_DIR/" 2>/dev/null || true
+    echo -e "\033[32m✓ ~/.claude/plugins/local/claude-auto-dev\033[0m"
+
+    # Register plugin in installed_plugins.json
+    PLUGINS_FILE="$CLAUDE_DIR/plugins/installed_plugins.json"
+    if [[ -f "$PLUGINS_FILE" ]]; then
+        if ! grep -q "claude-auto-dev@local" "$PLUGINS_FILE"; then
+            # Add plugin entry using jq if available, otherwise manual
+            if command -v jq &> /dev/null; then
+                jq --arg path "$PLUGIN_DIR" --arg ver "$VERSION" --arg date "$(date -Iseconds)" \
+                   '.plugins["claude-auto-dev@local"] = [{"scope":"user","installPath":$path,"version":$ver,"installedAt":$date,"lastUpdated":$date}]' \
+                   "$PLUGINS_FILE" > "$PLUGINS_FILE.tmp" && mv "$PLUGINS_FILE.tmp" "$PLUGINS_FILE"
+                echo -e "\033[32m✓ Registered in installed_plugins.json\033[0m"
+            else
+                echo -e "\033[33m○ installed_plugins.json (install jq for auto-registration)\033[0m"
+            fi
+        else
+            echo -e "\033[33m○ Plugin already registered\033[0m"
+        fi
+    fi
+
+    # Enable plugin in settings.json
+    SETTINGS_FILE="$CLAUDE_DIR/settings.json"
+    if [[ -f "$SETTINGS_FILE" ]]; then
+        if ! grep -q "claude-auto-dev@local" "$SETTINGS_FILE"; then
+            if command -v jq &> /dev/null; then
+                jq '.enabledPlugins["claude-auto-dev@local"] = true' \
+                   "$SETTINGS_FILE" > "$SETTINGS_FILE.tmp" && mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
+                echo -e "\033[32m✓ Enabled in settings.json\033[0m"
+            fi
+        else
+            echo -e "\033[33m○ Plugin already enabled\033[0m"
+        fi
+    fi
+
     # Run API key setup if mcp.json doesn't exist
     if [[ ! -f "$CLAUDE_DIR/mcp.json" ]]; then
         echo -e "\n\033[35m=== API Key Setup ===\033[0m"
