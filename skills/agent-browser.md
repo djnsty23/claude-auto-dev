@@ -26,6 +26,9 @@ npm install -g agent-browser
 agent-browser install  # Download Chromium
 ```
 
+### Windows Note
+On Windows, brief console windows may appear when launching the browser. This is a Chromium platform limitation - the testing still works correctly. Use `--headed` mode if you prefer seeing the browser window intentionally.
+
 ---
 
 ## Core Workflow
