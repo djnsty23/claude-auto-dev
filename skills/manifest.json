@@ -1,0 +1,47 @@
+{
+  "version": "2.4.0",
+  "description": "Skill index for lazy loading - only relevant skills loaded per session",
+  "skills": {
+    "build": {
+      "triggers": ["auto", "brainstorm", "status", "continue", "stop", "reset", "archive", "clean", "docs"],
+      "context": ["prd.json", "progress.txt"],
+      "file": "build.md",
+      "priority": 1
+    },
+    "test": {
+      "triggers": ["test", "verify", "e2e", "browser", "agent-browser"],
+      "context": ["*.test.*", "*.spec.*", "vitest.config", "jest.config", "playwright.config"],
+      "file": "test.md",
+      "priority": 2
+    },
+    "ship": {
+      "triggers": ["ship", "deploy", "vercel", "production"],
+      "context": ["vercel.json", ".vercel", "netlify.toml"],
+      "file": "ship.md",
+      "priority": 3
+    },
+    "fix": {
+      "triggers": ["fix", "debug", "error", "bug", "broken"],
+      "context": [],
+      "file": "fix.md",
+      "priority": 2
+    },
+    "setup-project": {
+      "triggers": ["set up", "setup", "init", "initialize", "new project"],
+      "context": [],
+      "file": "setup-project.md",
+      "priority": 3
+    },
+    "supabase-schema": {
+      "triggers": ["schema", "database", "table", "migration", "supabase"],
+      "context": ["supabase/", ".supabase"],
+      "file": "supabase-schema.md",
+      "priority": 3
+    }
+  },
+  "defaults": {
+    "withPrdJson": ["build"],
+    "withoutPrdJson": ["setup-project"],
+    "always": []
+  }
+}

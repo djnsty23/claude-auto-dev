@@ -2,6 +2,8 @@
 
 Autonomous task management for Claude Code. No scripts to run - just natural language.
 
+> **New user?** See the [Quick Start Guide](QUICKSTART.md) for step-by-step setup.
+
 ## Quick Start
 
 **New project:**
@@ -149,6 +151,8 @@ claude "auto"
 | setup-project.md | set up, init |
 | env-vars.md | env, credentials |
 | supabase-schema.md | schema, database, table |
+
+**Lazy Loading:** Skills are indexed in `skills/manifest.json` for on-demand loading based on triggers and project context.
 
 ---
 
