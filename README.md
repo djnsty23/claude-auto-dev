@@ -166,6 +166,10 @@ cd ~/claude-auto-dev && git pull && ./install.ps1 -Update
 
 ## Changelog
 
+### [2.4.1] - 2026-01-22
+- **Bug fixes** - Windows paths in QUICKSTART.md, plugin install for Mac/Linux
+- **Stop hook** - Now informs instead of blocks (respects user intent)
+
 ### [2.4.0] - 2026-01-22
 - **Local plugin** - Slash commands (`/auto`, `/status`, etc.) auto-registered
 - **Archive system** - `archive` command compacts prd.json when >2000 lines
