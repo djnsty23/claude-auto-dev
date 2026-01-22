@@ -10,6 +10,96 @@
 
 ---
 
+## Complete Setup Guide (For Beginners)
+
+### Prerequisites
+
+You need these installed on your computer:
+
+| Tool | Check if installed | Install |
+|------|-------------------|---------|
+| **Node.js 18+** | `node --version` | [nodejs.org](https://nodejs.org/) |
+| **npm** | `npm --version` | Comes with Node.js |
+| **Git** | `git --version` | [git-scm.com](https://git-scm.com/) |
+
+### Step 1: Install Claude Code
+
+Claude Code is Anthropic's official CLI for coding with Claude AI.
+
+**Mac/Linux:**
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+**Windows (PowerShell as Administrator):**
+```powershell
+npm install -g @anthropic-ai/claude-code
+```
+
+**Verify it works:**
+```bash
+claude --version
+```
+
+### Step 2: Authenticate Claude Code
+
+```bash
+claude
+```
+
+This opens a browser window to log in with your Anthropic account. You need:
+- An Anthropic account ([console.anthropic.com](https://console.anthropic.com))
+- Claude Pro, Team, or API credits
+
+### Step 3: Install Claude Auto-Dev
+
+**Easiest way (npx):**
+```bash
+# Full install - recommended
+npx claude-auto-dev --full
+```
+
+**Or from source:**
+```bash
+# Mac/Linux
+git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
+cd ~/claude-auto-dev && ./install.sh --full
+
+# Windows (PowerShell)
+git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\Downloads\code\claude-auto-dev
+cd $env:USERPROFILE\Downloads\code\claude-auto-dev
+.\install.ps1 -Full
+```
+
+### Step 4: Start Using It
+
+```bash
+# Navigate to any project
+cd ~/my-project
+
+# Start Claude Code
+claude
+
+# Type this in the Claude prompt:
+brainstorm
+```
+
+Claude will ask what you want to build, generate tasks, and work through them automatically.
+
+---
+
+## Quick Reference
+
+```
+brainstorm  →  Generate tasks from your description
+auto        →  Work through all tasks automatically
+status      →  Check progress
+handoff     →  Save session for later
+resume      →  Continue from last session
+```
+
+---
+
 ## What Gets Installed
 
 | Component | Location | Purpose |
@@ -22,27 +112,25 @@
 
 ---
 
-## Installation
+## Installation Options
 
 ### Option 1: npx (Easiest)
 
 ```bash
-# Install skills only (works everywhere)
+# Install skills only
 npx claude-auto-dev
 
-# Full install (skills + hooks + config + plugin)
+# Full install (skills + hooks + config + plugin) - RECOMMENDED
 npx claude-auto-dev --full
 
-# Initialize current project
+# Initialize current project with prd.json
 npx claude-auto-dev --init
 
 # Full install + init project
 npx claude-auto-dev --full --init
 ```
 
-### Option 2: Full Install (From Source)
-
-Installs everything: skills, hooks, config, plugin, and prompts for API keys.
+### Option 2: From Source
 
 **Windows (PowerShell):**
 ```powershell
@@ -60,21 +148,13 @@ cd ~/claude-auto-dev && chmod +x install.sh
 
 ### Option 3: Skills Only (Minimal)
 
-Just installs the skill files, no hooks or config.
-
-**Windows:**
-```powershell
-cd $env:USERPROFILE\Downloads\code\claude-auto-dev
-.\install.ps1 -Global
-```
-
-**Mac/Linux:**
 ```bash
-cd ~/claude-auto-dev
+npx claude-auto-dev
+# or
 ./install.sh --global
 ```
 
-### Option 3: Manual (Copy Skills Only)
+### Option 4: Manual Copy
 
 ```bash
 # Mac/Linux
@@ -83,7 +163,7 @@ cp -r ~/claude-auto-dev/skills/* ~/.claude/skills/
 
 # Windows (PowerShell)
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills"
-Copy-Item "$env:USERPROFILE\Downloads\code\claude-auto-dev\skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
+Copy-Item "path\to\claude-auto-dev\skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
 ```
 
 ---
@@ -92,16 +172,16 @@ Copy-Item "$env:USERPROFILE\Downloads\code\claude-auto-dev\skills\*" "$env:USERP
 
 After global install, initialize any project:
 
-**Windows:**
-```powershell
-cd C:\path\to\your\project
-& "$env:USERPROFILE\Downloads\code\claude-auto-dev\install.ps1" -Init
-```
-
-**Mac/Linux:**
 ```bash
+# Using npx
 cd /path/to/your/project
+npx claude-auto-dev --init
+
+# Or from source (Mac/Linux)
 ~/claude-auto-dev/install.sh --init
+
+# Or from source (Windows)
+& "$env:USERPROFILE\Downloads\code\claude-auto-dev\install.ps1" -Init
 ```
 
 This creates:
@@ -121,7 +201,7 @@ ls ~/.claude/skills/
 
 # Check hooks installed (full install only)
 ls ~/.claude/hooks/
-# Should show: session-start.sh, pre-tool-filter.sh, post-tool-typecheck.sh, auto-continue.sh
+# Should show: session-start.sh, pre-tool-filter.sh, etc.
 
 # Check plugin installed (full install only)
 ls ~/.claude/plugins/local/claude-auto-dev/
@@ -129,7 +209,35 @@ ls ~/.claude/plugins/local/claude-auto-dev/
 
 ---
 
-## The Loop
+## Your First Session
+
+```bash
+# 1. Go to your project (or create a new folder)
+mkdir my-app && cd my-app
+
+# 2. Initialize the project
+npx claude-auto-dev --init
+
+# 3. Start Claude Code
+claude
+
+# 4. In the Claude prompt, type:
+brainstorm
+
+# 5. Describe what you want:
+"A React dashboard with user authentication and a dark mode toggle"
+
+# 6. Claude generates tasks. Then type:
+auto
+
+# 7. Claude works through all tasks automatically!
+
+# 8. When done, Claude runs "polish" and asks what's next
+```
+
+---
+
+## The Core Loop
 
 ```
 "brainstorm"  →  What do you want to build?  →  generates tasks
@@ -137,7 +245,7 @@ ls ~/.claude/plugins/local/claude-auto-dev/
 "polish"      →  Suggests improvements  →  asks what's next
 ```
 
-That's it. No scripts, no config files to edit.
+That's the full development cycle. No scripts, no config files to edit.
 
 ---
 
@@ -197,11 +305,6 @@ Saves your complete session context so you can continue seamlessly in a new sess
 - Files modified
 - Recommended next steps
 
-**Output files:**
-- `handoff-2026-01-22-1430.md` - Full session details
-- `ledger.json` - Updated with session stats
-- `progress.txt` - Appended summary
-
 **Example:**
 ```
 You: "handoff"
@@ -211,7 +314,6 @@ Claude: "Handoff saved to handoff-2026-01-22-1430.md
         - Completed: S1, S2, S3
         - In progress: S4 (Add user settings)
         - Files: src/App.tsx, src/hooks/useAuth.ts
-        - Decisions: Switched to React Query for data fetching
 
         Start new session and say 'resume' to continue."
 ```
@@ -219,13 +321,6 @@ Claude: "Handoff saved to handoff-2026-01-22-1430.md
 ### `resume`
 
 Continues from your last handoff with full context restored.
-
-**What it does:**
-1. Finds latest handoff-*.md file
-2. Displays summary of previous session
-3. Reads .claude/mistakes.md for recent errors
-4. Injects warnings: "Avoid these recent issues: [list]"
-5. Reports next task
 
 **Example:**
 ```
@@ -243,14 +338,14 @@ Claude: "Resuming from Jan 22, 2:30 PM:
 
 Analyzes codebase for improvements and presents a direction picker.
 
-**Step 1 - Find improvements (max 4):**
+**What it checks:**
 - TODO/FIXME comments
 - console.log statements
 - Missing error boundaries
 - Accessibility gaps (aria-labels)
 - `any` types in TypeScript
 
-**Step 2 - Direction picker:**
+**Direction picker:**
 ```
 All tasks complete! Found 3 polish items.
 
@@ -259,30 +354,6 @@ What's next?
   ○ New feature                       →  Runs brainstorm
   ○ Ship it                           →  Runs security, then ship
   ○ Done for now                      →  Runs handoff, then stop
-```
-
-### `ledger` / `stats`
-
-Shows session analytics from ledger.json.
-
-**Example output:**
-```
-┌─ Session Analytics ────────────────────────┐
-│ Last 7 days:                               │
-│                                            │
-│ Sessions: 12                               │
-│ Tasks completed: 47/52 (90%)               │
-│ Avg tasks/session: 3.9                     │
-│ Build success rate: 94%                    │
-│                                            │
-│ Hot files (most modified):                 │
-│   src/App.tsx (8x)                         │
-│   src/hooks/useData.ts (6x)                │
-│                                            │
-│ Common blockers:                           │
-│   - Type errors (5x)                       │
-│   - Missing imports (3x)                   │
-└────────────────────────────────────────────┘
 ```
 
 ### `security`
@@ -294,15 +365,13 @@ Pre-deploy security audit. **Run before every push.**
 2. Secrets scan (no hardcoded passwords/keys in code)
 3. Function audit (search_path set, SECURITY DEFINER where needed)
 4. RLS check (all tables have row-level security)
-5. Token security (proper generation, expiry columns)
 
 **Output:**
 ```
 ✓ Supabase advisors: 0 issues
 ✓ No hardcoded secrets
-✓ Functions: search_path set
 ✓ RLS: all tables protected
-✗ ISSUE: Table 'user_sessions' missing RLS policy → Enable RLS
+✗ ISSUE: Table 'user_sessions' missing RLS policy
 
 BLOCKING: Fix issues before deploy.
 ```
@@ -334,7 +403,7 @@ BLOCKING: Fix issues before deploy.
 
 ---
 
-## Workflows
+## Common Workflows
 
 ### 1. Build a New Feature
 ```
@@ -361,7 +430,7 @@ auto → (after 3 tasks, Claude suggests handoff) → handoff → /clear → res
 security → review → ship
 ```
 
-### 6. Multi-Agent Mode
+### 6. Multi-Agent Mode (Parallel Development)
 ```bash
 # Terminal 1
 claude "auto"
@@ -375,7 +444,7 @@ Each session claims different tasks. No conflicts.
 
 ## Architecture
 
-### Files in ~/.claude/ (Global)
+### Files in ~/.claude/ (Global - installed once)
 
 ```
 ~/.claude/
@@ -399,7 +468,7 @@ Each session claims different tasks. No conflicts.
 └── mcp.json            # MCP server config
 ```
 
-### Files in Project Root
+### Files in Project Root (per project)
 
 ```
 your-project/
@@ -417,19 +486,6 @@ your-project/
 
 ---
 
-## Hooks (Full Install Only)
-
-Hooks reduce token usage by 30-60% by automating common tasks:
-
-| Hook | Trigger | What It Does |
-|------|---------|--------------|
-| `session-start` | Session begins | Injects task progress, skill index, recent mistakes |
-| `pre-tool-filter` | Before tool use | Blocks dangerous commands, skips large files |
-| `post-tool-typecheck` | After file edit | Runs `npm run typecheck` after TS/JS changes |
-| `auto-continue` | After tool use | Auto-continues if tasks remain in prd.json |
-
----
-
 ## How It Works
 
 Tasks live in `prd.json`:
@@ -442,7 +498,7 @@ Tasks live in `prd.json`:
   "priority": 1,
   "passes": false,
   "files": ["src/auth/login.tsx", "src/hooks/useAuth.ts"],
-  "acceptanceCriteria": ["User can log in", "User can log out", "Session persists"]
+  "acceptanceCriteria": ["User can log in", "User can log out"]
 }
 ```
 
@@ -460,9 +516,22 @@ Find task → Read files → Implement → Build → Pass? → Mark done → Nex
 
 ---
 
-## Browser Testing
+## Hooks (Full Install Only)
 
-Uses **agent-browser** CLI (5-6x more token-efficient than Playwright MCP).
+Hooks reduce token usage by 30-60% by automating common tasks:
+
+| Hook | Trigger | What It Does |
+|------|---------|--------------|
+| `session-start` | Session begins | Injects task progress, skill index, recent mistakes |
+| `pre-tool-filter` | Before tool use | Blocks dangerous commands, skips large files |
+| `post-tool-typecheck` | After file edit | Runs `npm run typecheck` after TS/JS changes |
+| `auto-continue` | After tool use | Auto-continues if tasks remain in prd.json |
+
+---
+
+## Browser Testing (Optional)
+
+Uses **agent-browser** CLI for automated browser testing.
 
 **Install:**
 ```bash
@@ -482,19 +551,19 @@ agent-browser fill @e2 "text" # Fill input
 
 ## Update
 
-**Update skills only:**
+**Via npx:**
 ```bash
-cd ~/claude-auto-dev && git pull
-./install.sh --update   # or .\install.ps1 -Update on Windows
+npx claude-auto-dev --full
 ```
 
-**Full update (all components):**
+**Via source:**
 ```bash
 cd ~/claude-auto-dev && git pull
-./install.sh --full     # or .\install.ps1 -Full on Windows
+./install.sh --full
 ```
 
-Or just say `update` in any Claude session.
+**Via Claude:**
+Just say `update` in any Claude session.
 
 ---
 
@@ -513,6 +582,35 @@ rm -rf .claude/
 
 ---
 
+## Troubleshooting
+
+### "claude: command not found"
+Claude Code isn't installed. Run:
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+### "Skills not loading"
+Check skills are installed:
+```bash
+ls ~/.claude/skills/
+```
+If empty, reinstall:
+```bash
+npx claude-auto-dev --full
+```
+
+### "brainstorm doesn't work"
+Make sure you're in a Claude Code session (run `claude` first), then type `brainstorm`.
+
+### "Task stuck"
+Say `reset` to clear claimed state, then `auto` to continue.
+
+### "Context too large"
+Say `handoff` to save session, then start fresh with `resume`.
+
+---
+
 ## Changelog
 
 ### [2.5.0] - 2026-01-22
@@ -520,14 +618,13 @@ rm -rf .claude/
 - **Ledger System**: `ledger.json` tracks cross-session analytics
 - **Mistake Learning**: Auto-logs build failures to `.claude/mistakes.md`
 - **Session Analytics**: `ledger` / `stats` shows completion rates, hot files
-- **Context Reminders**: Suggests handoff after 3+ tasks
+- **npx Support**: `npx claude-auto-dev --full` for easy installation
 
 ### [2.4.4] - 2026-01-22
 - Added `polish` command with direction picker
 
 ### [2.4.0] - 2026-01-22
 - Archive system for large prd.json files
-- Clean command for temp file removal
 
 ### [2.3.0] - 2026-01-22
 - Hooks system (30-60% token savings)
@@ -538,9 +635,9 @@ rm -rf .claude/
 
 ## Related Projects
 
-- [Claude Code](https://github.com/anthropics/claude-code) - Official CLI
-- [agent-browser](https://www.npmjs.com/package/agent-browser) - Browser automation
-- [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code) - Plugins & skills
+- [Claude Code](https://github.com/anthropics/claude-code) - Official CLI by Anthropic
+- [agent-browser](https://www.npmjs.com/package/agent-browser) - Browser automation CLI
+- [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code) - Community plugins & skills
 
 ---
 
