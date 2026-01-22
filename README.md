@@ -49,6 +49,7 @@ Works both as natural language AND slash commands (after install):
 | `reset` or `/reset` | Clear stuck state after crash |
 | `archive` or `/archive` | Compact prd.json when too large (>2000 lines) |
 | `clean` or `/clean` | Remove screenshots, old backups, temp files |
+| `/resume` | Resume previous session (shows usage) |
 
 ### Additional Commands
 
