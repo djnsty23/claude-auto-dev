@@ -33,7 +33,7 @@ if ($Full) {
     $claudeDir = "$env:USERPROFILE\.claude"
 
     # Create directories
-    @("$claudeDir", "$claudeDir\skills", "$claudeDir\rules") | ForEach-Object {
+    @("$claudeDir", "$claudeDir\skills", "$claudeDir\rules", "$claudeDir\hooks") | ForEach-Object {
         if (-not (Test-Path $_)) {
             New-Item -ItemType Directory -Path $_ -Force | Out-Null
         }
@@ -61,6 +61,23 @@ if ($Full) {
         Write-Done "~/.claude/skills/$($_.Name)"
     }
 
+    # Copy hooks
+    if (Test-Path "$ScriptDir\hooks") {
+        Write-Step "Installing hooks..."
+        Get-ChildItem "$ScriptDir\hooks\*.ps1" | ForEach-Object {
+            Copy-Item $_.FullName "$claudeDir\hooks\$($_.Name)" -Force
+            Write-Done "~/.claude/hooks/$($_.Name)"
+        }
+    }
+
+    # Copy settings.json (if not exists)
+    if (-not (Test-Path "$claudeDir\settings.json")) {
+        Write-Step "Installing settings.json with hooks..."
+        Copy-Item "$ScriptDir\config\settings.json" "$claudeDir\settings.json" -Force
+        Write-Done "~/.claude/settings.json"
+    } else {
+        Write-Skip "settings.json (run manually to update hooks config)"
+    }
 
     # Run API key setup if mcp.json doesn't exist
     if (-not (Test-Path "$claudeDir\mcp.json")) {

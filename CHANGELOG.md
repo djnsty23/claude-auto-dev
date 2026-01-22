@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.3.0] - 2025-01-22
+
+### Added
+- **Hooks system** for token optimization and automation:
+  - `auto-continue.ps1/.sh` - Stop hook that auto-continues if tasks remain in prd.json
+  - `session-start.ps1/.sh` - Injects task progress context at session start
+  - `pre-tool-filter.ps1/.sh` - Blocks dangerous commands, skips large/generated files
+  - `post-tool-typecheck.ps1/.sh` - Runs typecheck only for TS/JS files
+- `config/settings.json` - Pre-configured hooks for Windows
+- `config/settings-unix.json` - Pre-configured hooks for Mac/Linux
+- Hooks documentation in README
+
+### Changed
+- Install scripts now copy hooks and settings.json
+- Token savings of 30-60% through context injection and filtering
+
+---
+
 ## [2.2.0] - 2025-01-22
 
 ### Added

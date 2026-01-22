@@ -24,7 +24,7 @@ if [[ $FULL ]]; then
     CLAUDE_DIR=~/.claude
 
     # Create directories
-    mkdir -p "$CLAUDE_DIR/skills" "$CLAUDE_DIR/rules"
+    mkdir -p "$CLAUDE_DIR/skills" "$CLAUDE_DIR/rules" "$CLAUDE_DIR/hooks"
 
     # Copy global configs
     echo -e "\033[36m→ Installing global configs...\033[0m"
@@ -51,6 +51,27 @@ if [[ $FULL ]]; then
             echo -e "\033[32m✓ ~/.claude/skills/$(basename "$f")\033[0m"
         fi
     done
+
+    # Copy hooks
+    if [[ -d "$SCRIPT_DIR/hooks" ]]; then
+        echo -e "\033[36m→ Installing hooks...\033[0m"
+        for f in "$SCRIPT_DIR/hooks/"*.sh; do
+            if [[ -f "$f" ]]; then
+                cp "$f" "$CLAUDE_DIR/hooks/"
+                chmod +x "$CLAUDE_DIR/hooks/$(basename "$f")"
+                echo -e "\033[32m✓ ~/.claude/hooks/$(basename "$f")\033[0m"
+            fi
+        done
+    fi
+
+    # Copy settings.json (if not exists)
+    if [[ ! -f "$CLAUDE_DIR/settings.json" ]]; then
+        echo -e "\033[36m→ Installing settings.json with hooks...\033[0m"
+        cp "$SCRIPT_DIR/config/settings-unix.json" "$CLAUDE_DIR/settings.json"
+        echo -e "\033[32m✓ ~/.claude/settings.json\033[0m"
+    else
+        echo -e "\033[33m○ settings.json (exists - run manually to update)\033[0m"
+    fi
 
     # Run API key setup if mcp.json doesn't exist
     if [[ ! -f "$CLAUDE_DIR/mcp.json" ]]; then
