@@ -18,9 +18,10 @@ triggers:
 
 ## "status"
 ```
-1. Read prd.json
+1. Read prd.json (if read fails due to token limit → suggest "archive")
 2. Count: complete (passes=true) vs pending (passes=false/null)
-3. Report: "X/Y complete. Next: [title]"
+3. Include archived count if archived section exists
+4. Report: "X/Y active + Z archived. Next: [title]"
 ```
 
 ## "auto"
@@ -102,6 +103,16 @@ Remove Claude Code artifacts to reduce clutter:
 4. Report: "Cleaned X files, freed Y MB"
 ```
 
+## "docs" / "update docs"
+```
+Sync all documentation:
+1. Copy local skills to claude-auto-dev repo
+2. Update CHANGELOG.md with new version
+3. Update README.md
+4. Bump VERSION
+5. Commit and push
+```
+
 ---
 
 # Files
@@ -160,6 +171,7 @@ Still stuck? Ask user. Don't loop forever.
 | `update` | Pull latest system |
 | `archive` | Compact prd.json (move completed to archive) |
 | `clean` | Remove screenshots, old backups, temp files |
+| `docs` | Sync and push documentation updates |
 
 ---
 

@@ -37,16 +37,18 @@ git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 
 ## Commands
 
-| Say | What Happens |
-|-----|--------------|
-| `brainstorm` | Generate tasks from your description |
-| `auto` | Work through all tasks automatically |
-| `status` | Show progress (X/Y complete) |
-| `continue` | One task, then stop |
-| `stop` | Save progress, safe to close |
-| `reset` | Clear stuck state after crash |
-| `archive` | Compact prd.json when too large (>2000 lines) |
-| `clean` | Remove screenshots, old backups, temp files |
+Works both as natural language AND slash commands (after install):
+
+| Say or Type | What Happens |
+|-------------|--------------|
+| `brainstorm` or `/brainstorm` | Generate tasks from your description |
+| `auto` or `/auto` | Work through all tasks automatically |
+| `status` or `/status` | Show progress (X/Y complete) |
+| `continue` or `/continue` | One task, then stop |
+| `stop` or `/stop` | Save progress, safe to close |
+| `reset` or `/reset` | Clear stuck state after crash |
+| `archive` or `/archive` | Compact prd.json when too large (>2000 lines) |
+| `clean` or `/clean` | Remove screenshots, old backups, temp files |
 
 ### Additional Commands
 
@@ -160,10 +162,10 @@ cd ~/claude-auto-dev && git pull && ./install.ps1 -Update
 ## Changelog
 
 ### [2.4.0] - 2026-01-22
+- **Local plugin** - Slash commands (`/auto`, `/status`, etc.) auto-registered
 - **Archive system** - `archive` command compacts prd.json when >2000 lines
 - **Clean command** - `clean` removes screenshots, old backups, temp files
 - **Screenshot convention** - Save to `.claude/screenshots/` (auto-gitignored)
-- **archive-prd.md** skill for detailed archival documentation
 
 ### [2.3.0] - 2026-01-22
 - **Hooks system** for token optimization (30-60% savings)

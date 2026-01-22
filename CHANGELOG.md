@@ -3,6 +3,10 @@
 ## [2.4.0] - 2026-01-22
 
 ### Added
+- **Local plugin** for slash commands (`/auto`, `/status`, `/brainstorm`, etc.)
+  - Auto-registered during install
+  - Works alongside natural language commands
+  - 8 commands: auto, status, brainstorm, continue, archive, clean, stop, reset
 - **Archive system** for large prd.json files:
   - `archive` command moves completed stories to `prd-archive-YYYY-MM.json`
   - Keeps only active/QA stories in main prd.json
@@ -19,6 +23,7 @@
 - Updated `build.md` with archive and clean commands
 - Updated `test.md` with screenshot folder convention
 - Updated README with inline changelog
+- Install script now auto-registers plugin in Claude Code
 
 ---
 

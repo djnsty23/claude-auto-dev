@@ -1,0 +1,9 @@
+{
+  "name": "claude-auto-dev",
+  "description": "Autonomous task management - brainstorm, auto, status, archive, clean",
+  "author": {
+    "name": "Andy (djnsty23)",
+    "email": "removed@example.com"
+  },
+  "version": "2.4.0"
+}
