@@ -516,29 +516,23 @@ Find task → Read files → Implement → Build → Pass? → Mark done → Nex
 
 ---
 
-## Model Routing (Cost Optimization)
+## Model Routing (Automatic)
 
-Switch models based on task type to optimize usage pools.
+Skills automatically spawn subagents with optimal models:
 
-| Task Type | Model | Command | Why |
-|-----------|-------|---------|-----|
-| `brainstorm`, planning | **Opus** | `/model opus` | Complex reasoning |
-| `auto`, `continue` | **Sonnet** | `/model sonnet` | Balanced speed/quality |
-| `test`, `status`, `clean` | **Haiku** | `/model haiku` | Simple tasks |
-| `review`, `security`, `fix` | **Opus** | `/model opus` | Deep analysis |
+| Task | Subagent | Why |
+|------|----------|-----|
+| `test` (browser) | **Haiku** | Simple click/verify |
+| `auto`, `continue` | **Sonnet** | Implementation |
+| `brainstorm`, `review`, `security`, `fix` | **Opus** | Complex reasoning |
 
-**Switch mid-session:**
-```bash
-/model sonnet    # Switch to Sonnet
-auto             # Now uses Sonnet pool
-```
+**How it works:**
+- Main session stays on Opus for orchestration
+- Heavy lifting delegated to subagents with appropriate models
+- Browser testing uses Haiku (3x cheaper, plenty capable)
+- Implementation uses Sonnet (separate usage pool)
 
-**Hybrid mode:** `/model opusplan` uses Opus for planning, Sonnet for execution.
-
-**Multi-project strategy:**
-- 1-2 sessions on Opus (complex tasks)
-- 1-2 sessions on Sonnet (implementation)
-- Quick tasks on Haiku (status, test, clean)
+**No manual switching needed** - skills handle model routing via Task tool.
 
 ---
 

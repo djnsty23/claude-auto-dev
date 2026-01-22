@@ -183,6 +183,12 @@ For stories with dependencies:
 
 ## Browser Testing with agent-browser
 
+**Model Routing:** Spawn a **Haiku** subagent for browser operations:
+```
+Task tool: model="haiku", prompt="Run browser tests using agent-browser..."
+```
+Haiku handles click/verify while Opus orchestrates and reviews results.
+
 **Note:** Uses agent-browser CLI instead of Playwright MCP for 5-6x better token efficiency.
 
 ### Core Workflow
