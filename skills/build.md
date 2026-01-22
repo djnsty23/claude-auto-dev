@@ -431,7 +431,7 @@ Still stuck? Log to mistakes.md, ask user. Don't loop forever.
 
 # Model Routing (Automatic)
 
-Opus is best at coding. Only offload trivial tasks to Haiku.
+Opus is best at coding. Offload non-coding tasks to Haiku (60x cheaper).
 
 ## Routing Rules
 
@@ -440,19 +440,23 @@ Opus is best at coding. Only offload trivial tasks to Haiku.
 | `brainstorm`, `auto`, `continue` | **Opus** | Coding quality matters |
 | `review`, `security`, `fix` | **Opus** | Deep analysis |
 | `test` (browser clicks) | **Haiku** | Simple click/verify |
-| `status`, `archive`, `clean` | **Haiku** | Trivial file ops |
+| `status`, `ledger`, `stats` | **Haiku** | Read + display data |
+| `handoff`, `stop`, `reset` | **Haiku** | Session file ops |
+| `archive`, `clean`, `update` | **Haiku** | File maintenance |
 
 ## When to Use Haiku Subagent
 
-Only for browser automation (agent-browser):
+For any non-coding task, spawn Haiku:
 ```
+Task tool: model="haiku", prompt="Read prd.json, count tasks..."
+Task tool: model="haiku", prompt="Write handoff file..."
 Task tool: model="haiku", prompt="Click @e1, verify text..."
 ```
 
 ## Default: Stay in Opus
 
 All coding, reasoning, and implementation stays in main session.
-Haiku is only for mechanical browser interactions.
+Haiku handles: browser clicks, file reads, status checks, session management.
 
 ---
 
