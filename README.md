@@ -151,6 +151,36 @@ claude "auto"
 
 Each session claims different tasks. No conflicts.
 
+### 6. Long Sessions (v2.5)
+
+```
+You: "auto"
+Claude: Completes 3 tasks...
+        "Context getting large. Consider 'handoff' to save progress."
+
+You: "handoff"
+Claude: Saves session state to handoff-2026-01-22-1430.md
+        "Start new session and say 'resume' to continue."
+
+# Later, new Claude session:
+You: "resume"
+Claude: "Resuming from Jan 22:
+         - Completed: S1, S2, S3
+         - Next: S4 - Add user settings
+         - Avoiding: null-check errors (from mistakes.md)"
+```
+
+### 7. Session Analytics
+
+```
+You: "ledger"
+Claude: Shows last 7 days:
+        - Sessions: 12
+        - Tasks completed: 47/52 (90%)
+        - Hot files: src/App.tsx (8x)
+        - Common blockers: Type errors (5x)
+```
+
 ---
 
 ## How It Works
@@ -201,6 +231,9 @@ agent-browser fill @e2 "text" # Fill input
 | `prd.json` | Active tasks with pass/fail status |
 | `prd-archive-YYYY-MM.json` | Archived completed tasks |
 | `progress.txt` | Append-only learnings log |
+| `ledger.json` | Session analytics (gitignored) |
+| `handoff-*.md` | Session handoff docs (gitignored) |
+| `.claude/mistakes.md` | Learned error patterns (gitignored) |
 | `.claude/screenshots/` | Test screenshots (gitignored) |
 
 ---
