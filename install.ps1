@@ -22,9 +22,9 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Version = Get-Content "$ScriptDir\VERSION" -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $Version) { $Version = "dev" }
 
-function Write-Step { param($msg) Write-Host "→ $msg" -ForegroundColor Cyan }
-function Write-Done { param($msg) Write-Host "✓ $msg" -ForegroundColor Green }
-function Write-Skip { param($msg) Write-Host "○ $msg (exists)" -ForegroundColor Yellow }
+function Write-Step { param($msg) Write-Host "[>] $msg" -ForegroundColor Cyan }
+function Write-Done { param($msg) Write-Host "[+] $msg" -ForegroundColor Green }
+function Write-Skip { param($msg) Write-Host "[o] $msg (exists)" -ForegroundColor Yellow }
 
 # Full restore (includes Global)
 if ($Full) {
@@ -195,4 +195,4 @@ Commands: auto, continue, status, brainstorm, adjust, stop, reset
     exit 0
 }
 
-Write-Host "`n✓ Done. Run: claude `"brainstorm`"" -ForegroundColor Green
+Write-Host "`n[+] Done. Run: claude `"brainstorm`"" -ForegroundColor Green
