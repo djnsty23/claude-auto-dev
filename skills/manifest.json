@@ -3,7 +3,7 @@
   "description": "Skill index for lazy loading - only relevant skills loaded per session",
   "skills": {
     "build": {
-      "triggers": ["auto", "brainstorm", "status", "continue", "stop", "reset", "archive", "clean", "docs"],
+      "triggers": ["auto", "brainstorm", "status", "continue", "stop", "reset", "archive", "clean", "docs", "review", "security"],
       "context": ["prd.json", "progress.txt"],
       "file": "build.md",
       "priority": 1

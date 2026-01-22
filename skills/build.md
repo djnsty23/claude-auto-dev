@@ -10,6 +10,7 @@ triggers:
   - stop
   - reset
   - review
+  - security
   - update
   - sync
 ---
@@ -72,7 +73,44 @@ Same as auto, but stop after 1 task completed.
 1. npm run build
 2. Check for TODO/FIXME
 3. npm audit (if exists)
-4. Report findings
+4. Run "security" check (see below)
+5. Report findings
+```
+
+## "security" (RUN BEFORE EVERY PUSH)
+```
+Pre-push security audit - catches issues before Lovable/deployment:
+
+1. SUPABASE (if project has Supabase):
+   - get_advisors(project_id, type: "security")
+   - get_advisors(project_id, type: "performance")
+   - Fix any WARN/ERROR before proceeding
+
+2. SECRETS SCAN (grep migrations + .env):
+   - Search: password, secret, api_key, token (hardcoded values)
+   - Check: No secrets in migrations/*.sql
+   - Check: .env is in .gitignore
+
+3. FUNCTION AUDIT (if Supabase):
+   - All functions must have: SET search_path = public
+   - All functions with auth should use: SECURITY DEFINER
+
+4. RLS CHECK:
+   - list_tables → verify rls_enabled = true for ALL tables
+   - No tables without RLS policies
+
+5. TOKEN SECURITY:
+   - Share tokens use: gen_random_bytes(32) or uuid
+   - Tokens have: expires_at column
+
+Report format:
+  ✓ Supabase advisors: 0 issues
+  ✓ No hardcoded secrets
+  ✓ Functions: search_path set
+  ✓ RLS: all tables protected
+  ✗ ISSUE: [description] → [fix]
+
+BLOCK PUSH if any ✗ found. Fix first.
 ```
 
 ## "update" / "sync"
@@ -169,7 +207,8 @@ Still stuck? Ask user. Don't loop forever.
 | `brainstorm` | Create new tasks |
 | `stop` | Save and exit |
 | `reset` | Clear stuck state |
-| `review` | Check code quality |
+| `review` | Check code quality + security |
+| `security` | **PRE-PUSH** audit (Supabase, secrets, RLS) |
 | `update` | Pull latest system |
 | `archive` | Compact prd.json (move completed to archive) |
 | `clean` | Remove screenshots, old backups, temp files |
