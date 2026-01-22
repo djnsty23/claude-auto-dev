@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.5.1-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-2.5.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
 
@@ -274,12 +274,33 @@ That's the full development cycle. No scripts, no config files to edit.
 
 | Command | What It Does | When To Use |
 |---------|--------------|-------------|
-| `polish` | Finds improvements (TODOs, console.logs, any types) + direction picker | After all tasks complete |
-| `review` | Runs build + checks TODOs + npm audit + security | Code review before merge |
+| `polish` | **Visual verification** + static analysis + direction picker | After all tasks complete |
+| `review` | Build + TODOs + npm audit + security + **UX audit** | Code review before merge |
 | `security` | Supabase advisors + RLS check + secrets scan | **Before every deploy** |
 | `ship` | Builds and deploys to Vercel | Ready to go live |
 | `test` | Runs browser tests with agent-browser | Verify features work |
 | `fix` | Debug and fix a specific issue | Something's broken |
+
+### UI/UX Quality (v2.5.2)
+
+Built-in checks to catch design issues before they ship:
+
+**Static Analysis (ux-audit):**
+- Hardcoded colors → Use semantic tokens
+- Inline styles → Use Tailwind classes
+- Placeholder content → Replace Lorem ipsum
+- Generic AI copy → Use specific language
+- Accessibility gaps → Add alt/aria attributes
+
+**Visual Verification (polish):**
+- Screenshots key routes automatically
+- Checks for clipping, overflow, spacing
+- Detects empty states, missing loading UI
+- Flags generic-looking components
+
+**UI Gate (auto):**
+- Component changes require screenshot verification
+- Catches visual bugs before marking task complete
 
 ### Maintenance
 

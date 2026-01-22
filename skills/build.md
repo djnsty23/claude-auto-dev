@@ -40,9 +40,19 @@ LOOP until no pending tasks:
   5. If build fails:
      - Log error pattern to .claude/mistakes.md
      - Fix errors, retry (max 3)
-  6. If build passes: mark passes=true
+  6. If build passes:
+     - Run UI verification (see below)
+     - If UI issues found: fix and rebuild
+     - Mark passes=true
   7. Continue to next task
   8. After every 3 tasks: remind about context/handoff
+
+UI VERIFICATION (for stories with component files):
+  If story.files includes *.tsx components:
+    1. Take screenshot of affected route/component
+    2. Check for: clipping, overflow, spacing issues
+    3. If issues found: fix before marking complete
+  Skip for: API routes, hooks, utilities, types
 
 STOP CONDITIONS:
 - No more pending tasks → run "polish"
@@ -209,28 +219,80 @@ When build fails 2+ times on same error pattern:
 2. Check for TODO/FIXME
 3. npm audit (if exists)
 4. Run "security" check (see below)
-5. Report findings
+5. Run "ux-audit" (see below)
+6. Report findings
+```
+
+## "ux-audit" (part of review)
+```
+Static analysis for design system violations. Run with Haiku.
+
+1. DESIGN TOKEN VIOLATIONS (grep src/):
+   Pattern: text-gray-*, text-white, text-black, bg-gray-*, bg-white, bg-black
+   Fix: Use semantic tokens (text-foreground, bg-background, text-muted-foreground)
+
+   Pattern: text-blue-*, text-red-*, text-green-* (hardcoded colors)
+   Fix: Use primary, destructive, success tokens
+
+2. INLINE STYLE VIOLATIONS:
+   Pattern: style={{, style=", className={`...${
+   Fix: Use Tailwind classes or CSS variables
+
+3. PLACEHOLDER CONTENT:
+   Pattern: Lorem ipsum, placeholder, TODO, FIXME, example.com, test@test
+   Fix: Replace with real content or realistic mock data
+
+4. GENERIC AI PATTERNS:
+   Pattern: "Welcome to", "Get started", "Click here", "Learn more"
+   Fix: Use specific, contextual copy
+
+   Pattern: Default icons (HelpCircle, Settings, User without customization)
+   Fix: Choose icons that match the action
+
+5. ACCESSIBILITY:
+   Pattern: <img without alt=, <button without aria-label (icon-only)
+   Pattern: onClick on non-interactive elements (div, span)
+   Fix: Add proper accessibility attributes
+
+Report format:
+  ✓ Design tokens: No violations
+  ✗ Found 3 hardcoded colors in src/components/Card.tsx
+    → Line 12: text-gray-500 → text-muted-foreground
+    → Line 18: bg-white → bg-background
+  ✗ Placeholder content in src/pages/Dashboard.tsx
+    → Line 45: "Lorem ipsum" → Real description
 ```
 
 ## "polish" (after all tasks done)
 ```
-Analyze codebase and let user choose direction. ONE command, TWO steps:
+Analyze codebase and let user choose direction. THREE steps:
 
-STEP 1: Find improvements (max 4)
-- TODO/FIXME comments
-- console.log statements
-- Missing error boundaries
-- Accessibility gaps
-- any types in TypeScript
+STEP 1: Visual verification (Haiku subagent)
+  1. Start dev server if not running
+  2. Screenshot key routes: /, /dashboard, /login, main features
+  3. AI reviews each screenshot for:
+     - Clipping/overflow (text cut off, elements outside container)
+     - Spacing inconsistencies (uneven margins, cramped layouts)
+     - Color contrast issues (light text on light bg)
+     - Empty states (missing loading, error, or empty UI)
+     - Generic look (default icons, placeholder images)
+  4. List specific issues with file:line references
 
-STEP 2: Direction picker (AskUserQuestion)
+STEP 2: Static analysis
+  - Run ux-audit (design token violations)
+  - TODO/FIXME comments
+  - console.log statements
+  - Missing error boundaries
+  - any types in TypeScript
 
-"All tasks complete! Found 3 polish items."
+STEP 3: Direction picker (AskUserQuestion)
+
+"All tasks complete! Found 3 code issues + 2 visual issues."
 
 ┌─ What's next? ─────────────────────────────────────┐
 │                                                     │
-│ ○ Polish & continue (Recommended)                  │
-│   Add improvements, keep building                   │
+│ ○ Fix issues & continue (Recommended)              │
+│   Address found issues, keep building               │
 │                                                     │
 │ ○ New feature                                      │
 │   Brainstorm something new                          │
@@ -244,7 +306,7 @@ STEP 2: Direction picker (AskUserQuestion)
 └─────────────────────────────────────────────────────┘
 
 ACTIONS:
-- "Polish & continue" → Add items to prd.json → auto
+- "Fix issues & continue" → Add issues to prd.json → auto
 - "New feature" → brainstorm
 - "Ship it" → security → ship
 - "Done for now" → handoff → stop
@@ -410,7 +472,7 @@ Still stuck? Log to mistakes.md, ask user. Don't loop forever.
 
 | Say | Does |
 |-----|------|
-| `auto` | Work through all tasks |
+| `auto` | Work through all tasks + UI verification |
 | `continue` | One task, then stop |
 | `status` | Show progress |
 | `brainstorm` | Create new tasks |
@@ -419,9 +481,9 @@ Still stuck? Log to mistakes.md, ask user. Don't loop forever.
 | `handoff` | Save session for later resume |
 | `resume` | Continue from last handoff |
 | `ledger` / `stats` | Show session analytics |
-| `review` | Check code quality + security |
+| `review` | Check code + security + **UX audit** |
 | `security` | **PRE-PUSH** audit |
-| `polish` | Find improvements + pick direction |
+| `polish` | Visual check + static analysis + direction |
 | `update` | Pull latest system |
 | `archive` | Compact prd.json |
 | `clean` | Remove temp files |
@@ -440,6 +502,8 @@ Opus is best at coding. Offload non-coding tasks to Haiku (60x cheaper).
 | `brainstorm`, `auto`, `continue` | **Opus** | Coding quality matters |
 | `review`, `security`, `fix` | **Opus** | Deep analysis |
 | `test` (browser clicks) | **Haiku** | Simple click/verify |
+| `ux-audit` (grep violations) | **Haiku** | Pattern matching |
+| `polish` visual check | **Haiku** | Screenshot + review |
 | `status`, `ledger`, `stats` | **Haiku** | Read + display data |
 | `handoff`, `stop`, `reset` | **Haiku** | Session file ops |
 | `archive`, `clean`, `update` | **Haiku** | File maintenance |
