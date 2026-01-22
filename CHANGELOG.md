@@ -1,6 +1,28 @@
 # Changelog
 
-## [2.3.0] - 2025-01-22
+## [2.4.0] - 2026-01-22
+
+### Added
+- **Archive system** for large prd.json files:
+  - `archive` command moves completed stories to `prd-archive-YYYY-MM.json`
+  - Keeps only active/QA stories in main prd.json
+  - Adds `archived` section with summary for context
+  - Reduces token usage by 60%+ on large projects
+- **Clean command** to remove Claude Code artifacts:
+  - Deletes `.claude/screenshots/*.png`
+  - Removes `prd-backup-*.json` older than 7 days
+  - Cleans `.playwright-mcp/` folder
+- **Screenshot convention**: Save to `.claude/screenshots/` (auto-gitignored)
+- **archive-prd.md** skill with detailed archival documentation
+
+### Changed
+- Updated `build.md` with archive and clean commands
+- Updated `test.md` with screenshot folder convention
+- Updated README with inline changelog
+
+---
+
+## [2.3.0] - 2026-01-22
 
 ### Added
 - **Hooks system** for token optimization and automation:
