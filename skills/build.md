@@ -85,13 +85,15 @@ Same as auto, but stop after 1 task completed.
 ## "archive"
 ```
 When prd.json > 2000 lines or read fails:
-1. Backup: cp prd.json prd-backup-YYYYMMDD.json
-2. Separate: completed (passes=true, type!="qa") vs active
-3. Write archive: prd-archive-YYYY-MM.json
+1. Backup prd.json → prd-backup-YYYYMMDD.json (use Read+Write, not shell copy)
+2. Parse JSON, separate: completed (passes=true, type!="qa") vs active
+3. Write completed to: prd-archive-YYYY-MM.json
 4. Update prd.json:
    - Add "archived" section with summary
    - Keep only active/QA stories
 5. Report: "Archived X stories, Y remain active"
+
+NOTE: Use Read/Write tools for file operations, not shell commands (cross-platform).
 ```
 
 ## "clean"
