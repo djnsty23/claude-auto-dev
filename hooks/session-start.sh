@@ -1,5 +1,7 @@
 #!/bin/bash
-# SessionStart hook - Inject project context at session start
+# SessionStart hook - Inject project context and skill index
+
+SKILLS_DIR=~/.claude/skills
 
 echo ""
 
@@ -26,6 +28,14 @@ fi
 changed=$(git status --short 2>/dev/null | wc -l | tr -d ' ')
 if [ "$changed" -gt 0 ]; then
     echo "[Git] $changed changed files"
+fi
+
+# Skill index from manifest.json (for efficient skill loading)
+MANIFEST="$SKILLS_DIR/manifest.json"
+if [ -f "$MANIFEST" ] && command -v jq &> /dev/null; then
+    echo ""
+    echo "[Skills] Command -> File mapping:"
+    jq -r '.skills | to_entries[] | "  \(.value.triggers | join(", ")) -> \(.value.file)"' "$MANIFEST" 2>/dev/null
 fi
 
 echo ""

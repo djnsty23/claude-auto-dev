@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-    SessionStart hook - Inject project context at session start
+    SessionStart hook - Inject project context and skill index
 .DESCRIPTION
-    Outputs project status from prd.json and git status.
-    This context is automatically added to Claude's initial prompt.
+    Outputs project status and skill mapping for efficient skill loading.
 #>
 
 $ErrorActionPreference = "SilentlyContinue"
+$skillsDir = "$env:USERPROFILE\.claude\skills"
 
 Write-Host ""
 
@@ -42,6 +42,24 @@ $gitStatus = git status --short 2>$null
 if ($gitStatus) {
     $changedFiles = ($gitStatus | Measure-Object -Line).Lines
     Write-Host "[Git] $changedFiles changed files"
+}
+
+# Skill index from manifest.json (for efficient skill loading)
+$manifestPath = "$skillsDir\manifest.json"
+if (Test-Path $manifestPath) {
+    try {
+        $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+        Write-Host ""
+        Write-Host "[Skills] Command -> File mapping:"
+        foreach ($skill in $manifest.skills.PSObject.Properties) {
+            $triggers = $skill.Value.triggers -join ", "
+            $file = $skill.Value.file
+            Write-Host "  $triggers -> $file"
+        }
+    }
+    catch {
+        # Manifest parse error - skip
+    }
 }
 
 Write-Host ""
