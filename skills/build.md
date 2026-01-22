@@ -429,58 +429,44 @@ Still stuck? Log to mistakes.md, ask user. Don't loop forever.
 
 ---
 
-# Model Routing (Cost Optimization)
+# Model Routing (Automatic)
 
-Switch models based on task complexity. Uses separate usage pools.
+Spawn subagents with optimal models for different task types.
 
-## Recommended Models by Task
+## Auto-Routing Rules
 
-| Task | Model | Command | Why |
-|------|-------|---------|-----|
-| `brainstorm`, planning | **Opus** | `/model opus` | Complex reasoning |
-| `auto`, `continue` | **Sonnet** | `/model sonnet` | Balanced speed/quality |
-| `test` (browser testing) | **Haiku** | `/model haiku` | Simple click/verify |
-| `status`, `archive`, `clean` | **Haiku** | `/model haiku` | Trivial operations |
-| `review`, `security` | **Opus** | `/model opus` | Deep analysis |
-| `fix` (debugging) | **Opus** | `/model opus` | Complex problem-solving |
-| `polish` | **Sonnet** | `/model sonnet` | Code scanning |
+When executing these tasks, spawn subagents with the specified model:
 
-## Usage Pattern
+| Task | Subagent Model | Why |
+|------|----------------|-----|
+| `test` (browser) | **Haiku** | Simple click/verify |
+| `status` | **Haiku** | Read JSON, count |
+| `archive`, `clean` | **Haiku** | File operations |
+| `auto`, `continue` | **Sonnet** | Implementation |
+| `brainstorm` | **Opus** | Complex reasoning |
+| `review`, `security` | **Opus** | Deep analysis |
+| `fix` | **Opus** | Debugging |
 
+## Implementation
+
+For Haiku tasks, use Task tool:
 ```
-# Start session with Opus for planning
-/model opus
-brainstorm
-
-# Switch to Sonnet for implementation
-/model sonnet
-auto
-
-# Use Haiku for simple tasks
-/model haiku
-status
+Task tool: model="haiku", subagent_type="general-purpose"
 ```
 
-## Special Mode: opusplan
-
-For complex features, use hybrid mode:
+For Sonnet tasks:
 ```
-/model opusplan
+Task tool: model="sonnet", subagent_type="builder"
 ```
-- Opus for plan/think phases
-- Auto-switches to Sonnet for implementation
-- Best of both: quality planning + efficient execution
 
-## Why This Matters
+Main session stays Opus for orchestration.
 
-- **Opus**: Most capable, uses "All models" pool
-- **Sonnet**: 0% used (separate pool in many plans!)
-- **Haiku**: 3x cheaper, 90% of Sonnet capability
+## When NOT to Route
 
-Running 4 projects? Distribute:
-- 1-2 on Opus (complex tasks)
-- 1-2 on Sonnet (implementation)
-- Testing/status tasks on Haiku
+Stay in main session (Opus) when:
+- Task requires full conversation context
+- Multi-step reasoning across files
+- User interaction needed mid-task
 
 ---
 
