@@ -518,15 +518,18 @@ Find task → Read files → Implement → Build → Pass? → Mark done → Nex
 
 ## Model Routing (Automatic)
 
-Opus is best at coding. Only trivial tasks use Haiku.
+Opus is best at coding. Offload non-coding tasks to Haiku (60x cheaper).
 
 | Task | Model | Why |
 |------|-------|-----|
-| All coding (`auto`, `brainstorm`, `fix`, etc.) | **Opus** | Quality matters |
-| Browser testing (`test`) | **Haiku** | Just click/verify |
-| File ops (`status`, `clean`) | **Haiku** | Trivial |
+| `brainstorm`, `auto`, `continue` | **Opus** | Coding quality matters |
+| `review`, `security`, `fix` | **Opus** | Deep analysis |
+| `test` (browser clicks) | **Haiku** | Simple click/verify |
+| `status`, `ledger`, `stats` | **Haiku** | Read + display data |
+| `handoff`, `stop`, `reset` | **Haiku** | Session file ops |
+| `archive`, `clean`, `update` | **Haiku** | File maintenance |
 
-**Philosophy:** Don't sacrifice code quality for cost savings. Use Haiku only for mechanical browser interactions.
+**Philosophy:** Don't sacrifice code quality for cost savings. Haiku handles non-coding tasks.
 
 ---
 
