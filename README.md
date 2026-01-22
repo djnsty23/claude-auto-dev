@@ -10,39 +10,112 @@
 
 ---
 
-## Quickstart (Copy-Paste)
+## What Gets Installed
 
-### Windows (PowerShell)
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **Skills** | `~/.claude/skills/` | Command instructions (auto, brainstorm, ship, etc.) |
+| **Hooks** | `~/.claude/hooks/` | Auto-run scripts on session events |
+| **Config** | `~/.claude/` | Global CLAUDE.md, rules, settings.json |
+| **Plugin** | `~/.claude/plugins/local/` | Slash commands (/auto, /resume) |
+| **Templates** | Project root | Project CLAUDE.md, prd.json, progress.txt |
+
+---
+
+## Installation
+
+### Option 1: Full Install (Recommended)
+
+Installs everything: skills, hooks, config, plugin, and prompts for API keys.
+
+**Windows (PowerShell as Admin):**
 ```powershell
-# 1. Clone the repo
+# Clone
 git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\Downloads\code\claude-auto-dev
 
-# 2. Create skills folder if it doesn't exist
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills"
-
-# 3. Copy all skills
-Copy-Item "$env:USERPROFILE\Downloads\code\claude-auto-dev\skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
-
-# 4. Done! Open any project in Claude Code and say "brainstorm"
+# Full install
+cd $env:USERPROFILE\Downloads\code\claude-auto-dev
+.\install.ps1 -Full
 ```
 
-### Mac/Linux
+**Mac/Linux:**
 ```bash
-# 1. Clone the repo
+# Clone
 git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
 
-# 2. Create skills folder and copy
+# Full install
+cd ~/claude-auto-dev
+chmod +x install.sh
+./install.sh --full
+```
+
+### Option 2: Skills Only (Minimal)
+
+Just installs the skill files, no hooks or config.
+
+**Windows:**
+```powershell
+cd $env:USERPROFILE\Downloads\code\claude-auto-dev
+.\install.ps1 -Global
+```
+
+**Mac/Linux:**
+```bash
+cd ~/claude-auto-dev
+./install.sh --global
+```
+
+### Option 3: Manual (Copy Skills Only)
+
+```bash
+# Mac/Linux
 mkdir -p ~/.claude/skills
 cp -r ~/claude-auto-dev/skills/* ~/.claude/skills/
 
-# 3. Done! Open any project in Claude Code and say "brainstorm"
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills"
+Copy-Item "$env:USERPROFILE\Downloads\code\claude-auto-dev\skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
 ```
 
-### Verify Installation
+---
+
+## Initialize a Project
+
+After global install, initialize any project:
+
+**Windows:**
+```powershell
+cd C:\path\to\your\project
+& "$env:USERPROFILE\Downloads\code\claude-auto-dev\install.ps1" -Init
+```
+
+**Mac/Linux:**
 ```bash
-# Check skills are installed
+cd /path/to/your/project
+~/claude-auto-dev/install.sh --init
+```
+
+This creates:
+- `CLAUDE.md` - Project-specific instructions
+- `prd.json` - Task list (empty)
+- `progress.txt` - Learnings log
+- `.claude/briefs/` - Task brief storage
+
+---
+
+## Verify Installation
+
+```bash
+# Check skills installed
 ls ~/.claude/skills/
-# Should show: build.md, manifest.json, ship.md, test.md, fix.md, etc.
+# Should show: build.md, ship.md, test.md, fix.md, manifest.json, etc.
+
+# Check hooks installed (full install only)
+ls ~/.claude/hooks/
+# Should show: session-start.sh, pre-tool-filter.sh, post-tool-typecheck.sh, auto-continue.sh
+
+# Check plugin installed (full install only)
+ls ~/.claude/plugins/local/claude-auto-dev/
 ```
 
 ---
@@ -55,7 +128,7 @@ ls ~/.claude/skills/
 "polish"      →  Suggests improvements  →  asks what's next
 ```
 
-That's it. No scripts, no config files, no setup beyond installation.
+That's it. No scripts, no config files to edit.
 
 ---
 
@@ -201,10 +274,6 @@ Shows session analytics from ledger.json.
 │   - Type errors (5x)                       │
 │   - Missing imports (3x)                   │
 └────────────────────────────────────────────┘
-
-Recent mistakes to avoid:
-  - null-check: Use optional chaining for nested objects
-  - missing-import: Verify file exists before importing
 ```
 
 ### `security`
@@ -295,17 +364,60 @@ Each session claims different tasks. No conflicts.
 
 ---
 
-## Files Created
+## Architecture
 
-| File | Committed? | Purpose |
-|------|------------|---------|
-| `prd.json` | Yes | Active tasks with pass/fail status |
-| `progress.txt` | Yes | Append-only learnings log |
-| `prd-archive-YYYY-MM.json` | Yes | Archived completed tasks |
-| `ledger.json` | No | Session analytics |
-| `handoff-*.md` | No | Session handoff documents |
-| `.claude/mistakes.md` | No | Learned error patterns |
-| `.claude/screenshots/` | No | Test screenshots |
+### Files in ~/.claude/ (Global)
+
+```
+~/.claude/
+├── skills/              # Command instructions
+│   ├── build.md         # Core loop (auto, brainstorm, status, etc.)
+│   ├── ship.md          # Deployment
+│   ├── test.md          # Browser testing
+│   ├── fix.md           # Debugging
+│   └── manifest.json    # Skill index
+├── hooks/               # Auto-run scripts
+│   ├── session-start.sh # Injects task progress
+│   ├── pre-tool-filter.sh # Blocks dangerous commands
+│   ├── post-tool-typecheck.sh # Runs typecheck after edits
+│   └── auto-continue.sh # Auto-continues if tasks remain
+├── rules/               # Always-applied rules
+│   ├── security.md
+│   └── design-system.md
+├── plugins/local/claude-auto-dev/  # Plugin for slash commands
+├── CLAUDE.md            # Global user instructions
+├── settings.json        # Hooks configuration
+└── mcp.json            # MCP server config
+```
+
+### Files in Project Root
+
+```
+your-project/
+├── CLAUDE.md           # Project-specific instructions
+├── prd.json            # Task list
+├── progress.txt        # Append-only learnings log
+├── ledger.json         # Session analytics (gitignored)
+├── handoff-*.md        # Session handoffs (gitignored)
+├── prd-archive-*.json  # Archived completed tasks
+└── .claude/
+    ├── briefs/         # Task briefs
+    ├── mistakes.md     # Learned error patterns (gitignored)
+    └── screenshots/    # Test screenshots (gitignored)
+```
+
+---
+
+## Hooks (Full Install Only)
+
+Hooks reduce token usage by 30-60% by automating common tasks:
+
+| Hook | Trigger | What It Does |
+|------|---------|--------------|
+| `session-start` | Session begins | Injects task progress, skill index, recent mistakes |
+| `pre-tool-filter` | Before tool use | Blocks dangerous commands, skips large files |
+| `post-tool-typecheck` | After file edit | Runs `npm run typecheck` after TS/JS changes |
+| `auto-continue` | After tool use | Auto-continues if tasks remain in prd.json |
 
 ---
 
@@ -359,25 +471,36 @@ agent-browser fill @e2 "text" # Fill input
 
 ---
 
-## Tech Stack Compatibility
-
-Works with any stack, optimized for:
-
-- **Frontend:** React, Vue, Svelte, Next.js, Vite
-- **Backend:** Node.js, Deno, Supabase Edge Functions
-- **Database:** PostgreSQL, Supabase, Firebase
-- **Deployment:** Vercel, Netlify, Cloudflare
-
----
-
 ## Update
 
+**Update skills only:**
 ```bash
-cd ~/Downloads/code/claude-auto-dev && git pull
-cp -r skills/* ~/.claude/skills/
+cd ~/claude-auto-dev && git pull
+./install.sh --update   # or .\install.ps1 -Update on Windows
+```
+
+**Full update (all components):**
+```bash
+cd ~/claude-auto-dev && git pull
+./install.sh --full     # or .\install.ps1 -Full on Windows
 ```
 
 Or just say `update` in any Claude session.
+
+---
+
+## Uninstall
+
+```bash
+# Remove global installation
+rm -rf ~/.claude/skills/
+rm -rf ~/.claude/hooks/
+rm -rf ~/.claude/plugins/local/claude-auto-dev/
+
+# Remove project files (optional)
+rm prd.json progress.txt ledger.json handoff-*.md prd-archive-*.json
+rm -rf .claude/
+```
 
 ---
 
@@ -391,7 +514,7 @@ Or just say `update` in any Claude session.
 - **Context Reminders**: Suggests handoff after 3+ tasks
 
 ### [2.4.4] - 2026-01-22
-- Added `polish` command with direction picker (like Lovable's "What's next?" flow)
+- Added `polish` command with direction picker
 
 ### [2.4.0] - 2026-01-22
 - Archive system for large prd.json files
