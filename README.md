@@ -518,21 +518,15 @@ Find task → Read files → Implement → Build → Pass? → Mark done → Nex
 
 ## Model Routing (Automatic)
 
-Skills automatically spawn subagents with optimal models:
+Opus is best at coding. Only trivial tasks use Haiku.
 
-| Task | Subagent | Why |
-|------|----------|-----|
-| `test` (browser) | **Haiku** | Simple click/verify |
-| `auto`, `continue` | **Sonnet** | Implementation |
-| `brainstorm`, `review`, `security`, `fix` | **Opus** | Complex reasoning |
+| Task | Model | Why |
+|------|-------|-----|
+| All coding (`auto`, `brainstorm`, `fix`, etc.) | **Opus** | Quality matters |
+| Browser testing (`test`) | **Haiku** | Just click/verify |
+| File ops (`status`, `clean`) | **Haiku** | Trivial |
 
-**How it works:**
-- Main session stays on Opus for orchestration
-- Heavy lifting delegated to subagents with appropriate models
-- Browser testing uses Haiku (3x cheaper, plenty capable)
-- Implementation uses Sonnet (separate usage pool)
-
-**No manual switching needed** - skills handle model routing via Task tool.
+**Philosophy:** Don't sacrifice code quality for cost savings. Use Haiku only for mechanical browser interactions.
 
 ---
 
