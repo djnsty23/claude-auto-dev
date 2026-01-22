@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.4.3-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, automated testing, and deployment automation.
 
@@ -22,18 +22,13 @@ Perfect for solo developers, indie hackers, and teams who want AI to handle the 
 
 ## Quick Start
 
-**New project:**
 ```
-"brainstorm"  → Creates prd.json, asks what to build, generates tasks
-```
-
-**Existing project:**
-```
-"auto"    → Work through all tasks automatically
-"status"  → Check progress
+"brainstorm"  → What do you want to build? → generates tasks
+"auto"        → Works through all tasks automatically
+"polish"      → Suggests improvements → asks what's next
 ```
 
-That's it. No installation needed if you already have the skills in `~/.claude/skills/`.
+That's the full loop. No scripts to run.
 
 ---
 
@@ -69,6 +64,10 @@ Works as natural language in any Claude Code session:
 | `clean` | Remove screenshots, old backups |
 | `review` | Code quality + security audit |
 | `security` | Pre-push Supabase/RLS/secrets scan |
+| `polish` | Find improvements + direction picker |
+| `handoff` | Save session for later resume |
+| `resume` | Continue from last handoff |
+| `ledger` | Show session analytics |
 
 ### Additional Skills
 
@@ -81,42 +80,64 @@ Works as natural language in any Claude Code session:
 
 ---
 
-## How It Works
+## Workflows
 
-### Task Management
+### 1. New Project
 
-Claude Auto-Dev uses a simple `prd.json` file to track tasks:
+```
+You: "brainstorm"
+Claude: "What do you want to build?"
+You: "A dashboard with user auth and analytics"
+Claude: Generates 8 tasks → adds to prd.json
 
-```json
-{
-  "id": "S1",
-  "title": "Add user authentication",
-  "description": "Implement login/signup with Supabase Auth",
-  "priority": 1,
-  "passes": false,
-  "files": ["src/auth/login.tsx", "src/lib/supabase.ts"],
-  "acceptanceCriteria": ["Users can sign up", "Users can log in"]
-}
+You: "auto"
+Claude: Implements all 8 tasks automatically
+
+You: "polish"
+Claude: "All tasks done! Found 3 improvements:
+         • Add error boundary to Dashboard
+         • Remove console.logs
+         • Add aria-labels to buttons
+
+         What's next?"
+         ○ Polish & continue
+         ○ New feature
+         ○ Ship it
+         ○ Done for now
 ```
 
-- `passes: false` = pending task
-- `passes: true` = completed task
-- `passes: null` = new/unstarted task
+### 2. Existing Project
 
-### Autonomous Loop
+```
+You: "status"
+Claude: "5/12 complete. Next: Add user settings page"
 
-When you say `auto`, Claude:
+You: "auto"
+Claude: Completes remaining 7 tasks
 
-1. Finds next pending task (`passes: false`)
-2. Reads the relevant files
-3. Implements changes
-4. Runs `npm run build` to verify
-5. Marks task complete if build passes
-6. Continues to next task
+You: "polish" → direction picker
+```
 
-Stops when: all tasks done, 3 consecutive failures, or you interrupt.
+### 3. Pre-Deploy
 
-### Multi-Agent Mode
+```
+You: "security"
+Claude: Checks Supabase advisors, RLS, hardcoded secrets
+        ✓ No issues found
+
+You: "ship"
+Claude: Builds → deploys to Vercel → reports URL
+```
+
+### 4. Maintenance
+
+```
+"archive"  → prd.json too large? Move completed tasks to archive
+"clean"    → Remove screenshots, old backups
+"reset"    → Stuck? Clear claimed tasks and retry
+```
+
+### 5. Multi-Agent Mode
 
 Run multiple Claude sessions for parallel development:
 
@@ -129,6 +150,27 @@ claude "auto"
 ```
 
 Each session claims different tasks. No conflicts.
+
+---
+
+## How It Works
+
+Tasks live in `prd.json`:
+
+```json
+{
+  "id": "S1",
+  "title": "Add user authentication",
+  "passes": false,
+  "files": ["src/auth/login.tsx"]
+}
+```
+
+- `passes: null` = new task
+- `passes: false` = in progress
+- `passes: true` = done
+
+**Auto loop:** Find task → Read files → Implement → Build → Mark done → Repeat
 
 ---
 
@@ -163,14 +205,18 @@ agent-browser fill @e2 "text" # Fill input
 
 ---
 
-## Token Optimization
+## Hooks (Auto-Installed)
 
-Claude Auto-Dev includes hooks that reduce token usage by 30-60%:
+Hooks reduce token usage by 30-60%:
 
-- **SessionStart** - Injects task context at session start
-- **PreToolUse** - Blocks dangerous commands, skips large files
-- **PostToolUse** - Runs typecheck after TypeScript edits
-- **Stop** - Auto-continues if tasks remain
+| Hook | Purpose |
+|------|---------|
+| `session-start` | Injects task progress at session start |
+| `pre-tool-filter` | Blocks dangerous commands, skips large files |
+| `post-tool-typecheck` | Runs typecheck after TS/JS edits |
+| `auto-continue` | Auto-continues if tasks remain in prd.json |
+
+Before closing: `claude "stop"` to save progress.
 
 ---
 
@@ -197,6 +243,17 @@ Or just say `update` in any Claude session.
 ---
 
 ## Changelog
+
+### [2.5.0] - 2026-01-22
+- **Session Management**: `handoff` saves session state, `resume` continues later
+- **Ledger System**: `ledger.json` tracks cross-session analytics
+- **Mistake Learning**: Auto-logs build failures to `.claude/mistakes.md`
+- **Session Analytics**: `ledger` / `stats` shows completion rates, hot files
+- **Context Reminders**: Suggests handoff after 3+ tasks
+
+### [2.4.4] - 2026-01-22
+- Added `polish` command with direction picker (like Lovable's "What's next?" flow)
+- Options: Polish & continue, New feature, Ship it, Done for now
 
 ### [2.4.3] - 2026-01-22
 - Cross-platform archive (Read/Write tools instead of shell)

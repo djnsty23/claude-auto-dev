@@ -323,3 +323,40 @@ Enable: "Leaked password protection" (checks HaveIBeenPwned)
 | Tokens expire? | Check expires_at columns |
 | Cleanup policy? | Add retention function |
 | Password protection? | Enable in Auth settings |
+
+---
+
+## Multi-Account Support
+
+Supabase CLI only supports one login. Workaround using per-project tokens:
+
+### Setup (one-time per account)
+
+1. **Generate access token:**
+   Supabase Dashboard → Account → Access Tokens → Generate
+
+2. **Save as system env var (folder name, uppercase):**
+   ```
+   SUPABASE_ACCESS_TOKEN_DOUGHY=sbp_xxxxx
+   SUPABASE_ACCESS_TOKEN_REELR=sbp_yyyyy
+   ```
+
+### Usage (automatic)
+
+Before supabase CLI commands:
+1. Get folder name: `~/code/doughy` → `DOUGHY`
+2. Look for `SUPABASE_ACCESS_TOKEN_DOUGHY`
+3. If found, prefix command:
+
+**Windows (PowerShell):**
+```powershell
+$env:SUPABASE_ACCESS_TOKEN = $env:SUPABASE_ACCESS_TOKEN_DOUGHY
+npx supabase functions deploy ...
+```
+
+**Mac/Linux:**
+```bash
+SUPABASE_ACCESS_TOKEN=$SUPABASE_ACCESS_TOKEN_DOUGHY npx supabase functions deploy ...
+```
+
+No token found? Falls back to default login.
