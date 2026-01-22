@@ -1,15 +1,17 @@
 {
   "name": "claude-auto-dev",
-  "version": "1.0.0",
-  "description": "Autonomous development system for Claude Code - task management, doom loop detection, session continuity",
+  "version": "2.5.0",
+  "description": "Autonomous development system for Claude Code - task loops, session management, and deployment automation",
   "bin": {
     "claude-auto-dev": "bin/install.js"
   },
   "files": [
     "bin",
     "skills",
-    "templates",
-    "patterns.txt"
+    "hooks",
+    "config",
+    "plugin",
+    "templates"
   ],
   "keywords": [
     "claude",
@@ -17,7 +19,9 @@
     "ai",
     "autonomous",
     "development",
-    "task-management"
+    "task-management",
+    "ai-coding",
+    "claude-skills"
   ],
   "author": "djnsty23",
   "license": "MIT",
