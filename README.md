@@ -24,32 +24,41 @@
 
 ## Installation
 
-### Option 1: Full Install (Recommended)
+### Option 1: npx (Easiest)
+
+```bash
+# Install skills only (works everywhere)
+npx claude-auto-dev
+
+# Full install (skills + hooks + config + plugin)
+npx claude-auto-dev --full
+
+# Initialize current project
+npx claude-auto-dev --init
+
+# Full install + init project
+npx claude-auto-dev --full --init
+```
+
+### Option 2: Full Install (From Source)
 
 Installs everything: skills, hooks, config, plugin, and prompts for API keys.
 
-**Windows (PowerShell as Admin):**
+**Windows (PowerShell):**
 ```powershell
-# Clone
 git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\Downloads\code\claude-auto-dev
-
-# Full install
 cd $env:USERPROFILE\Downloads\code\claude-auto-dev
 .\install.ps1 -Full
 ```
 
 **Mac/Linux:**
 ```bash
-# Clone
 git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-
-# Full install
-cd ~/claude-auto-dev
-chmod +x install.sh
+cd ~/claude-auto-dev && chmod +x install.sh
 ./install.sh --full
 ```
 
-### Option 2: Skills Only (Minimal)
+### Option 3: Skills Only (Minimal)
 
 Just installs the skill files, no hooks or config.
 
