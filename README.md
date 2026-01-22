@@ -516,6 +516,32 @@ Find task → Read files → Implement → Build → Pass? → Mark done → Nex
 
 ---
 
+## Model Routing (Cost Optimization)
+
+Switch models based on task type to optimize usage pools.
+
+| Task Type | Model | Command | Why |
+|-----------|-------|---------|-----|
+| `brainstorm`, planning | **Opus** | `/model opus` | Complex reasoning |
+| `auto`, `continue` | **Sonnet** | `/model sonnet` | Balanced speed/quality |
+| `test`, `status`, `clean` | **Haiku** | `/model haiku` | Simple tasks |
+| `review`, `security`, `fix` | **Opus** | `/model opus` | Deep analysis |
+
+**Switch mid-session:**
+```bash
+/model sonnet    # Switch to Sonnet
+auto             # Now uses Sonnet pool
+```
+
+**Hybrid mode:** `/model opusplan` uses Opus for planning, Sonnet for execution.
+
+**Multi-project strategy:**
+- 1-2 sessions on Opus (complex tasks)
+- 1-2 sessions on Sonnet (implementation)
+- Quick tasks on Haiku (status, test, clean)
+
+---
+
 ## Hooks (Full Install Only)
 
 Hooks reduce token usage by 30-60% by automating common tasks:

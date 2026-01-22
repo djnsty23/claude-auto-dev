@@ -429,6 +429,61 @@ Still stuck? Log to mistakes.md, ask user. Don't loop forever.
 
 ---
 
+# Model Routing (Cost Optimization)
+
+Switch models based on task complexity. Uses separate usage pools.
+
+## Recommended Models by Task
+
+| Task | Model | Command | Why |
+|------|-------|---------|-----|
+| `brainstorm`, planning | **Opus** | `/model opus` | Complex reasoning |
+| `auto`, `continue` | **Sonnet** | `/model sonnet` | Balanced speed/quality |
+| `test` (browser testing) | **Haiku** | `/model haiku` | Simple click/verify |
+| `status`, `archive`, `clean` | **Haiku** | `/model haiku` | Trivial operations |
+| `review`, `security` | **Opus** | `/model opus` | Deep analysis |
+| `fix` (debugging) | **Opus** | `/model opus` | Complex problem-solving |
+| `polish` | **Sonnet** | `/model sonnet` | Code scanning |
+
+## Usage Pattern
+
+```
+# Start session with Opus for planning
+/model opus
+brainstorm
+
+# Switch to Sonnet for implementation
+/model sonnet
+auto
+
+# Use Haiku for simple tasks
+/model haiku
+status
+```
+
+## Special Mode: opusplan
+
+For complex features, use hybrid mode:
+```
+/model opusplan
+```
+- Opus for plan/think phases
+- Auto-switches to Sonnet for implementation
+- Best of both: quality planning + efficient execution
+
+## Why This Matters
+
+- **Opus**: Most capable, uses "All models" pool
+- **Sonnet**: 0% used (separate pool in many plans!)
+- **Haiku**: 3x cheaper, 90% of Sonnet capability
+
+Running 4 projects? Distribute:
+- 1-2 on Opus (complex tasks)
+- 1-2 on Sonnet (implementation)
+- Testing/status tasks on Haiku
+
+---
+
 # Context Management Tips
 
 - After 3+ tasks: consider `/clear` or `handoff`
