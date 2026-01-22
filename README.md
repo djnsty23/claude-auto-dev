@@ -116,6 +116,19 @@ claude "auto"
 
 ---
 
+## Hooks (Auto-Installed)
+
+| Hook | Purpose |
+|------|---------|
+| `auto-continue` | Stop hook - auto-continues if tasks remain in prd.json |
+| `session-start` | Injects task progress at session start |
+| `pre-tool-filter` | Blocks dangerous commands, skips large files |
+| `post-tool-typecheck` | Runs typecheck after TS/JS edits |
+
+**Token savings:** 30-60% reduction through context injection and filtering.
+
+---
+
 ## Skills
 
 | Skill | Triggers |
