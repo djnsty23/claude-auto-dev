@@ -53,23 +53,30 @@ This opens a browser window to log in with your Anthropic account. You need:
 
 ### Step 3: Install Claude Auto-Dev
 
-**Easiest way (npx):**
-```bash
-# Full install - recommended
-npx claude-auto-dev --full
-```
+**Clone and run install script:**
 
-**Or from source:**
 ```bash
 # Mac/Linux
 git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-cd ~/claude-auto-dev && ./install.sh --full
+cd ~/claude-auto-dev && chmod +x install.sh && ./install.sh --full
 
 # Windows (PowerShell)
 git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\Downloads\code\claude-auto-dev
 cd $env:USERPROFILE\Downloads\code\claude-auto-dev
 .\install.ps1 -Full
 ```
+
+**Or manual copy (minimal):**
+```bash
+# Mac/Linux
+mkdir -p ~/.claude/skills && cp -r skills/* ~/.claude/skills/
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills"
+Copy-Item "skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
+```
+
+> **Note:** This is NOT an npm package. It's markdown files that Claude Code loads automatically.
 
 ### Step 4: Start Using It
 
@@ -114,23 +121,7 @@ resume      →  Continue from last session
 
 ## Installation Options
 
-### Option 1: npx (Easiest)
-
-```bash
-# Install skills only
-npx claude-auto-dev
-
-# Full install (skills + hooks + config + plugin) - RECOMMENDED
-npx claude-auto-dev --full
-
-# Initialize current project with prd.json
-npx claude-auto-dev --init
-
-# Full install + init project
-npx claude-auto-dev --full --init
-```
-
-### Option 2: From Source
+### Option 1: Install Script (Recommended)
 
 **Windows (PowerShell):**
 ```powershell
@@ -142,29 +133,29 @@ cd $env:USERPROFILE\Downloads\code\claude-auto-dev
 **Mac/Linux:**
 ```bash
 git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-cd ~/claude-auto-dev && chmod +x install.sh
-./install.sh --full
+cd ~/claude-auto-dev && chmod +x install.sh && ./install.sh --full
 ```
 
-### Option 3: Skills Only (Minimal)
+### Option 2: Skills Only (Minimal)
 
 ```bash
-npx claude-auto-dev
-# or
-./install.sh --global
+./install.sh --global   # Mac/Linux
+.\install.ps1           # Windows
 ```
 
-### Option 4: Manual Copy
+### Option 3: Manual Copy
 
 ```bash
 # Mac/Linux
 mkdir -p ~/.claude/skills
-cp -r ~/claude-auto-dev/skills/* ~/.claude/skills/
+cp -r skills/* ~/.claude/skills/
 
 # Windows (PowerShell)
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills"
-Copy-Item "path\to\claude-auto-dev\skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
+Copy-Item "skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
 ```
+
+> **Note:** This is NOT an npm package. Claude Code loads skill files from `~/.claude/skills/` automatically.
 
 ---
 
@@ -173,14 +164,12 @@ Copy-Item "path\to\claude-auto-dev\skills\*" "$env:USERPROFILE\.claude\skills\" 
 After global install, initialize any project:
 
 ```bash
-# Using npx
 cd /path/to/your/project
-npx claude-auto-dev --init
 
-# Or from source (Mac/Linux)
+# Mac/Linux
 ~/claude-auto-dev/install.sh --init
 
-# Or from source (Windows)
+# Windows (PowerShell)
 & "$env:USERPROFILE\Downloads\code\claude-auto-dev\install.ps1" -Init
 ```
 
@@ -215,8 +204,8 @@ ls ~/.claude/plugins/local/claude-auto-dev/
 # 1. Go to your project (or create a new folder)
 mkdir my-app && cd my-app
 
-# 2. Initialize the project
-npx claude-auto-dev --init
+# 2. Initialize the project (creates prd.json, CLAUDE.md)
+# Just say "brainstorm" in Claude - it creates these automatically
 
 # 3. Start Claude Code
 claude
@@ -589,15 +578,15 @@ agent-browser fill @e2 "text" # Fill input
 
 ## Update
 
-**Via npx:**
-```bash
-npx claude-auto-dev --full
-```
-
 **Via source:**
 ```bash
-cd ~/claude-auto-dev && git pull
-./install.sh --full
+# Mac/Linux
+cd ~/claude-auto-dev && git pull && ./install.sh --full
+
+# Windows (PowerShell)
+cd $env:USERPROFILE\Downloads\code\claude-auto-dev
+git pull
+.\install.ps1 -Full
 ```
 
 **Via Claude:**
@@ -633,9 +622,10 @@ Check skills are installed:
 ```bash
 ls ~/.claude/skills/
 ```
-If empty, reinstall:
+If empty, reinstall from source:
 ```bash
-npx claude-auto-dev --full
+cd ~/claude-auto-dev && ./install.sh --full  # Mac/Linux
+.\install.ps1 -Full                           # Windows
 ```
 
 ### "brainstorm doesn't work"
@@ -651,12 +641,16 @@ Say `handoff` to save session, then start fresh with `resume`.
 
 ## Changelog
 
+### [2.5.2] - 2026-01-23
+- **UI/UX Quality Checks**: `ux-audit` static analysis, visual verification in `polish`
+- **UI Gate**: Screenshot verification for component changes in `auto`
+- **Expanded Haiku Routing**: All non-coding tasks (handoff, status, etc.) use Haiku
+
 ### [2.5.0] - 2026-01-22
 - **Session Management**: `handoff` saves session state, `resume` continues later
 - **Ledger System**: `ledger.json` tracks cross-session analytics
 - **Mistake Learning**: Auto-logs build failures to `.claude/mistakes.md`
 - **Session Analytics**: `ledger` / `stats` shows completion rates, hot files
-- **npx Support**: `npx claude-auto-dev --full` for easy installation
 
 ### [2.4.4] - 2026-01-22
 - Added `polish` command with direction picker
