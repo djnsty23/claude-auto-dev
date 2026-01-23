@@ -114,86 +114,13 @@ resume      →  Continue from last session
 | **Skills** | `~/.claude/skills/` | Command instructions (auto, brainstorm, ship, etc.) |
 | **Hooks** | `~/.claude/hooks/` | Auto-run scripts on session events |
 | **Config** | `~/.claude/` | Global CLAUDE.md, rules, settings.json |
-| **Plugin** | `~/.claude/plugins/local/` | Slash commands (/auto, /resume) |
-| **Templates** | Project root | Project CLAUDE.md, prd.json, progress.txt |
-
----
-
-## Installation Options
-
-### Option 1: Install Script (Recommended)
-
-**Windows (PowerShell):**
-```powershell
-git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\Downloads\code\claude-auto-dev
-cd $env:USERPROFILE\Downloads\code\claude-auto-dev
-.\install.ps1 -Full
-```
-
-**Mac/Linux:**
-```bash
-git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-cd ~/claude-auto-dev && chmod +x install.sh && ./install.sh --full
-```
-
-### Option 2: Skills Only (Minimal)
-
-```bash
-./install.sh --global   # Mac/Linux
-.\install.ps1           # Windows
-```
-
-### Option 3: Manual Copy
-
-```bash
-# Mac/Linux
-mkdir -p ~/.claude/skills
-cp -r skills/* ~/.claude/skills/
-
-# Windows (PowerShell)
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills"
-Copy-Item "skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
-```
-
-> **Note:** This is NOT an npm package. Claude Code loads skill files from `~/.claude/skills/` automatically.
-
----
-
-## Initialize a Project
-
-After global install, initialize any project:
-
-```bash
-cd /path/to/your/project
-
-# Mac/Linux
-~/claude-auto-dev/install.sh --init
-
-# Windows (PowerShell)
-& "$env:USERPROFILE\Downloads\code\claude-auto-dev\install.ps1" -Init
-```
-
-This creates:
-- `CLAUDE.md` - Project-specific instructions
-- `prd.json` - Task list (empty)
-- `progress.txt` - Learnings log
-- `.claude/briefs/` - Task brief storage
 
 ---
 
 ## Verify Installation
 
 ```bash
-# Check skills installed
-ls ~/.claude/skills/
-# Should show: build.md, ship.md, test.md, fix.md, manifest.json, etc.
-
-# Check hooks installed (full install only)
-ls ~/.claude/hooks/
-# Should show: session-start.sh, pre-tool-filter.sh, etc.
-
-# Check plugin installed (full install only)
-ls ~/.claude/plugins/local/claude-auto-dev/
+ls ~/.claude/skills/   # Should show: build.md, ship.md, test.md, etc.
 ```
 
 ---
@@ -201,27 +128,16 @@ ls ~/.claude/plugins/local/claude-auto-dev/
 ## Your First Session
 
 ```bash
-# 1. Go to your project (or create a new folder)
-mkdir my-app && cd my-app
+# 1. Navigate to any project
+cd ~/my-project
 
-# 2. Initialize the project (creates prd.json, CLAUDE.md)
-# Just say "brainstorm" in Claude - it creates these automatically
-
-# 3. Start Claude Code
+# 2. Start Claude Code
 claude
 
-# 4. In the Claude prompt, type:
-brainstorm
-
-# 5. Describe what you want:
-"A React dashboard with user authentication and a dark mode toggle"
-
-# 6. Claude generates tasks. Then type:
-auto
-
-# 7. Claude works through all tasks automatically!
-
-# 8. When done, Claude runs "polish" and asks what's next
+# 3. Type: brainstorm
+# 4. Describe what you want to build
+# 5. Type: auto
+# 6. Claude works through all tasks automatically
 ```
 
 ---
