@@ -10,7 +10,7 @@
     {
       "name": "claude-auto-dev",
       "description": "Autonomous task management - brainstorm, auto, status, ab-test, sync, archive, clean. Say 'brainstorm' to generate tasks, 'auto' to work through them autonomously.",
-      "version": "3.3.0",
+      "version": "3.4.0",
       "author": {
         "name": "Andy (djnsty23)",
         "email": "removed@example.com"

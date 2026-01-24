@@ -26,9 +26,21 @@ Generate tasks from a description.
   "passes": null,
   "blockedBy": [],
   "files": ["src/file.ts"],
-  "acceptanceCriteria": ["Requirement 1"]
+  "acceptanceCriteria": ["Requirement 1", "TypeScript types pass", "No `as any` usage"]
 }
 ```
+
+## Type Safety Rules (ALWAYS INCLUDE)
+
+Every task's `acceptanceCriteria` MUST include:
+- "TypeScript types pass (`npm run typecheck`)"
+- "No `as any` or `as unknown` type casts"
+- "All new interfaces in `src/types/`"
+
+For tasks that create new interfaces:
+- "Interface matches actual runtime data"
+- "Type guards added for external data"
+- "Optional properties marked with `?`"
 
 ## Dependencies
 
