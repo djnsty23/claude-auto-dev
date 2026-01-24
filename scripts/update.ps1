@@ -4,6 +4,7 @@
 $ErrorActionPreference = "SilentlyContinue"
 $sourceDir = "$env:USERPROFILE\Downloads\code\claude-auto-dev"
 $claudeDir = "$env:USERPROFILE\.claude"
+$pluginDir = "$claudeDir\plugins\local\claude-auto-dev"
 
 Write-Host "Updating claude-auto-dev..." -ForegroundColor Cyan
 
@@ -19,11 +20,21 @@ if ($LASTEXITCODE -eq 0) {
 }
 Pop-Location
 
-# 2. Sync plugin
+# 2. Sync plugin (clean copy to avoid nesting)
 Write-Host ""
 Write-Host "[2/4] Syncing plugin..."
-Copy-Item -Path "$sourceDir\.claude-plugin" -Destination "$claudeDir\plugins\local\claude-auto-dev\.claude-plugin" -Recurse -Force
-Copy-Item -Path "$sourceDir\commands" -Destination "$claudeDir\plugins\local\claude-auto-dev\commands" -Recurse -Force
+
+# Remove and recreate to avoid nesting issues
+Remove-Item -Recurse -Force "$pluginDir\.claude-plugin" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$pluginDir\commands" -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path "$pluginDir\.claude-plugin" -Force | Out-Null
+New-Item -ItemType Directory -Path "$pluginDir\commands" -Force | Out-Null
+
+# Copy files (not folders)
+Copy-Item "$sourceDir\.claude-plugin\plugin.json" "$pluginDir\.claude-plugin\plugin.json" -Force
+Copy-Item "$sourceDir\commands\*.md" "$pluginDir\commands\" -Force
+Copy-Item "$sourceDir\PLUGIN.md" "$pluginDir\README.md" -Force -ErrorAction SilentlyContinue
+
 $version = (Get-Content "$sourceDir\.claude-plugin\plugin.json" | ConvertFrom-Json).version
 Write-Host "  Plugin synced to v$version" -ForegroundColor Green
 
@@ -32,7 +43,7 @@ Write-Host ""
 Write-Host "[3/4] Syncing hooks..."
 $hookFiles = Get-ChildItem "$sourceDir\hooks\*.ps1" -ErrorAction SilentlyContinue
 $hookCount = if ($hookFiles) { $hookFiles.Count } else { 0 }
-Copy-Item -Path "$sourceDir\hooks\*" -Destination "$claudeDir\hooks" -Recurse -Force
+Copy-Item -Path "$sourceDir\hooks\*" -Destination "$claudeDir\hooks" -Force
 Write-Host "  $hookCount hook files synced" -ForegroundColor Green
 
 # 4. Check Claude version
