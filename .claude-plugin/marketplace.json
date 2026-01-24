@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-auto-dev",
+  "description": "Autonomous task management plugins by djnsty23",
+  "owner": {
+    "name": "Andy (djnsty23)",
+    "email": "removed@example.com"
+  },
+  "plugins": [
+    {
+      "name": "claude-auto-dev",
+      "description": "Autonomous task management - brainstorm, auto, status, ab-test, sync, archive, clean. Say 'brainstorm' to generate tasks, 'auto' to work through them autonomously.",
+      "version": "3.2.0",
+      "author": {
+        "name": "Andy (djnsty23)",
+        "email": "removed@example.com"
+      },
+      "source": ".",
+      "category": "productivity",
+      "homepage": "https://github.com/djnsty23/claude-auto-dev"
+    }
+  ]
+}

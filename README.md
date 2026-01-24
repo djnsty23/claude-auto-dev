@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.5.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
 
@@ -53,7 +53,17 @@ This opens a browser window to log in with your Anthropic account. You need:
 
 ### Step 3: Install Claude Auto-Dev
 
-**Clone and run install script:**
+**Option A: Marketplace Install (Recommended)**
+
+```bash
+# In any Claude Code session, run:
+/plugin add-marketplace djnsty23/claude-auto-dev
+/plugin install claude-auto-dev
+```
+
+This adds the GitHub repo as a plugin marketplace and installs the plugin.
+
+**Option B: Clone and run install script:**
 
 ```bash
 # Mac/Linux
@@ -66,7 +76,7 @@ cd $env:USERPROFILE\Downloads\code\claude-auto-dev
 .\install.ps1 -Full
 ```
 
-**Or manual copy (minimal):**
+**Option C: Manual copy (minimal):**
 ```bash
 # Mac/Linux
 mkdir -p ~/.claude/skills && cp -r skills/* ~/.claude/skills/
@@ -213,7 +223,7 @@ Built-in checks to catch design issues before they ship:
 |---------|--------------|-------------|
 | `archive` | Moves completed tasks to prd-archive-*.json | prd.json getting too large |
 | `clean` | Removes screenshots, old backups, temp files | Disk cleanup |
-| `update` | Pulls latest claude-auto-dev from GitHub | Get new features |
+| `/sync` | Pulls latest claude-auto-dev from GitHub | Get new features |
 
 ---
 
@@ -325,7 +335,7 @@ BLOCKING: Fix issues before deploy.
 | Clear stuck state | `reset` |
 | Compact large task file | `archive` |
 | Remove temp files | `clean` |
-| Update the system | `update` |
+| Update the system | `/sync` |
 
 ---
 
@@ -494,6 +504,12 @@ agent-browser fill @e2 "text" # Fill input
 
 ## Update
 
+**Via marketplace (if installed via marketplace):**
+```bash
+# In Claude Code session:
+/plugin update claude-auto-dev
+```
+
 **Via source:**
 ```bash
 # Mac/Linux
@@ -506,7 +522,7 @@ git pull
 ```
 
 **Via Claude:**
-Just say `update` in any Claude session.
+Say `/sync` in any Claude session to pull latest from GitHub.
 
 ---
 
@@ -556,6 +572,19 @@ Say `handoff` to save session, then start fresh with `resume`.
 ---
 
 ## Changelog
+
+### [3.2.0] - 2026-01-24
+- **A/B Testing Framework**: `/ab-test` command for comparing approaches at milestone starts
+- **Marketplace Support**: Install via `/plugin add-marketplace djnsty23/claude-auto-dev`
+- **Renamed `/update` to `/sync`**: Avoids conflict with Claude Code CLI
+
+### [3.1.0] - 2026-01-24
+- **blockedBy Dependencies**: Tasks can now depend on other tasks
+- **TaskCreate/TaskUpdate Integration**: Full visibility in Claude Code Tasks UI
+
+### [3.0.0] - 2026-01-24
+- **Plugin Restructure**: Moved from `plugin/` to repo root for marketplace compatibility
+- **Parallel Sub-Agents**: Up to 7 concurrent agents with `auto`
 
 ### [2.5.2] - 2026-01-23
 - **UI/UX Quality Checks**: `ux-audit` static analysis, visual verification in `polish`
