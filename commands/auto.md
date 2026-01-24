@@ -1,50 +1,56 @@
 ---
-description: Work through all tasks in prd.json automatically
+description: Work through all tasks in prd.json automatically with maximum parallelism
 ---
 
 # Auto Mode
 
-Work through all pending tasks until complete or blocked.
+Work through ALL pending tasks using MAXIMUM parallelism. Launch up to 5 parallel builder agents.
 
-## Process
+## CRITICAL: Maximum Parallelism
 
-1. Read `prd.json`
-2. Find next task where `passes !== true` AND `blockedBy` tasks are all complete
-3. Use `TaskUpdate` to mark task `in_progress` (shows in Claude Code UI)
-4. Read files listed in task
-5. Implement changes
-6. Run `npm run build`
-7. If passes: mark `passes: true` in prd.json, `TaskUpdate` to `completed`
-8. If fails 3x: ask user
-9. Loop to step 2
+**DO NOT ask for confirmation between batches. Keep launching agents until done.**
+
+1. Read `prd.json`, find ALL tasks where `passes !== true` AND `blockedBy` are complete
+2. Launch up to 5 parallel `builder` agents via Task tool in a SINGLE message
+3. When agents complete, immediately launch next batch without asking
+4. Continue until no tasks remain
+
+## Parallel Launch Example
+
+```
+// Launch 5 agents in ONE message block:
+Task({ subagent_type: "builder", description: "Build AI11", prompt: "...", run_in_background: true })
+Task({ subagent_type: "builder", description: "Build AI12", prompt: "...", run_in_background: true })
+Task({ subagent_type: "builder", description: "Build AI13", prompt: "...", run_in_background: true })
+Task({ subagent_type: "builder", description: "Build RPT01", prompt: "...", run_in_background: true })
+Task({ subagent_type: "builder", description: "Build RPT02", prompt: "...", run_in_background: true })
+```
 
 ## Dependency Resolution
 
-- Check `blockedBy` array before starting a task
-- Skip tasks whose dependencies aren't complete (`passes: true`)
-- This enables safe parallel execution if multiple agents run
+- Check `blockedBy` array - skip tasks whose deps aren't `passes: true`
+- Tasks WITHOUT blockedBy or with all deps complete → can run in parallel
+- Re-check after each batch completes for newly unblocked tasks
 
-## Task Visibility
+## After Each Batch Completes
 
-Use Claude's built-in task system for UI visibility:
-
-```
-// Starting a task
-TaskUpdate({ taskId: "X", status: "in_progress" })
-
-// Completing a task
-TaskUpdate({ taskId: "X", status: "completed" })
-```
+1. Mark completed tasks in prd.json (`passes: true`)
+2. Git commit the changes
+3. **IMMEDIATELY** launch next batch of unblocked tasks
+4. NO confirmation prompts - just keep going
 
 ## Stop Conditions
 
 - No more pending tasks (all `passes: true`)
-- All remaining tasks are blocked by incomplete dependencies
-- 3 consecutive failures on same task
-- User interrupts
+- All remaining tasks blocked by incomplete dependencies
+- User explicitly interrupts (Ctrl+C or "stop")
 
 ## Screenshots
 
-Save any screenshots to `.claude/screenshots/` folder, not project root.
+Save to `.claude/screenshots/`, never project root.
 
-Load full instructions from `~/.claude/skills/build.md` for details.
+## Task Visibility
+
+Use TaskUpdate for Claude Code UI:
+- Starting: `TaskUpdate({ taskId: "X", status: "in_progress" })`
+- Done: `TaskUpdate({ taskId: "X", status: "completed" })`
