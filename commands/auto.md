@@ -34,10 +34,33 @@ Task({ subagent_type: "builder", description: "Build RPT02", prompt: "...", run_
 
 ## After Each Batch Completes
 
-1. Mark completed tasks in prd.json (`passes: true`)
-2. Git commit the changes
-3. **IMMEDIATELY** launch next batch of unblocked tasks
-4. NO confirmation prompts - just keep going
+1. Run `npm run typecheck` (if available) - **FAIL task if types don't pass**
+2. Run `npm run build` - **FAIL task if build doesn't pass**
+3. Mark completed tasks in prd.json (`passes: true`)
+4. Git commit the changes
+5. **IMMEDIATELY** launch next batch of unblocked tasks
+6. NO confirmation prompts - just keep going
+
+## Type Safety Requirements
+
+**Every agent MUST verify type safety before marking a task complete:**
+
+```bash
+# Run these checks (in order):
+npm run typecheck 2>&1 | head -50  # Check for TS errors
+npm run build 2>&1 | tail -10      # Verify build passes
+```
+
+**If typecheck fails:**
+1. Fix the type errors immediately
+2. Do NOT mark task as complete until types pass
+3. Log the error pattern to `.claude/mistakes.md`
+
+**Common type issues to avoid:**
+- Never use `as any` - use proper type guards
+- Check for `undefined` before accessing properties
+- Ensure interface properties match actual data
+- Use `typeof` and `in` guards for unknown types
 
 ## Stop Conditions
 
