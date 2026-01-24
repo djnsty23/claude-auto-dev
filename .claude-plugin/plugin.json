@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "description": "Autonomous task management - brainstorm, auto, status, ab-test, update, archive, clean",
+  "description": "Autonomous task management - brainstorm, auto, status, ab-test, sync, archive, clean",
   "author": {
     "name": "Andy (djnsty23)",
     "email": "removed@example.com"

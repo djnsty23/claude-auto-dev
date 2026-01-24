@@ -1,10 +1,10 @@
 ---
-description: Update Claude Code plugins and sync from source repo
+description: Sync plugin from source repo to installed location
 ---
 
-# Update
+# Sync
 
-Refresh and update all system components.
+Pull latest from GitHub and sync plugin files.
 
 ## Process
 
