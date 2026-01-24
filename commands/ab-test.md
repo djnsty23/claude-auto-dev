@@ -1,15 +1,28 @@
 ---
-description: A/B test different plugins, prompts, or frameworks using parallel agents
+description: A/B test approaches at milestone start to pick the best strategy
 ---
 
 # A/B Test
 
-Compare Claude Code approaches by running them in parallel and picking the best.
+Run at the **start of a milestone** to determine the best approach, then use that for the entire milestone.
+
+## When to Use
+
+- Starting a new feature or phase
+- Unsure which approach works best for this type of work
+- Want data-driven decision on workflow
+
+## NOT for
+
+- Every task (wasteful)
+- Mid-milestone (stick with chosen approach)
+- Simple/small tasks
 
 ## Quick Start
 
 ```
-ab-test "build a password generator CLI"
+ab-test "build the auth system"   # Tests approaches on a small slice
+                                   # Then use winner for full milestone
 ```
 
 ## How It Works
@@ -118,6 +131,32 @@ Create `ab-test.json` for custom variants:
     "C": { "prompt": "Just build it directly" }
   }
 }
+```
+
+## Milestone Workflow
+
+```
+1. New milestone starts
+   │
+   ├─→ ab-test "small representative task"
+   │     └─→ Winner: Approach B
+   │
+   ├─→ Save result: "For auth milestone, use TaskCreate approach"
+   │
+   └─→ Continue milestone with Approach B for all tasks
+```
+
+## Remembering Results
+
+After test, add to project CLAUDE.md:
+
+```markdown
+## Approach History
+| Milestone | Winner | Notes |
+|-----------|--------|-------|
+| Auth system | TaskCreate | 30% fewer steps |
+| UI components | Direct build | Simple tasks, no tracking needed |
+| API layer | Full plugin | Complex dependencies benefited |
 ```
 
 ## Cleanup
