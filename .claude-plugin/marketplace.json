@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "claude-auto-dev",
-      "description": "Autonomous task management - brainstorm, auto, status, ab-test, sync, archive, clean. Say 'brainstorm' to generate tasks, 'auto' to work through them autonomously.",
-      "version": "3.4.0",
+      "description": "Autonomous task management - sprint, auto, brainstorm, template, mistakes, context-audit, handoff. Say 'sprint 3h' for timed dev cycles, 'auto' for parallel task execution.",
+      "version": "3.5.0",
       "author": {
         "name": "Andy (djnsty23)",
         "email": "removed@example.com"

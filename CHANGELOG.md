@@ -1,5 +1,30 @@
 # Changelog
 
+## [3.5.0] - 2025-01-25
+
+### Added
+- **Sprint mode** - Time/milestone-based development cycles
+  - `sprint 3h` - Run for 3 hours
+  - `sprint "all P1 done"` - Run until milestone
+  - Cycles through: brainstorm → auto → review → polish → security → docs
+- **Session lock** - Prevents parallel session conflicts via `.claude-lock`
+- **Mistake tracking** - `/mistakes` command to view error patterns
+- **Smart retry** - Auto-retry failed tasks with different approach (max 2)
+- **Task templates** - Pre-built patterns: auth, crud, api, component, hook, supabase
+  - `template auth` - Adds 6 authentication tasks
+  - `template crud users` - Adds 5 CRUD tasks
+- **Batch commits** - Commit every 3 tasks instead of per-task
+- **Preflight check** - Validates git, build, types before auto mode
+- **Handoff export** - `/handoff` generates session summary for continuity
+- **Context audit** - Analyze and optimize context window usage
+
+### Changed
+- **Auto mode hardened** - Explicitly forbidden from using AskUserQuestion
+- Decisions logged to `.claude/decisions.md` instead of asking user
+- Ralph Loop integration for true non-stop operation
+
+---
+
 ## [2.4.3] - 2026-01-22
 
 ### Fixed

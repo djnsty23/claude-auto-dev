@@ -1,9 +1,9 @@
 {
   "name": "claude-auto-dev",
-  "description": "Autonomous task management - brainstorm, auto, status, ab-test, sync, archive, clean",
+  "description": "Autonomous task management - brainstorm, auto, sprint, status, template, mistakes, context-audit, handoff",
   "author": {
     "name": "Andy (djnsty23)",
     "email": "removed@example.com"
   },
-  "version": "3.4.0"
+  "version": "3.5.0"
 }
