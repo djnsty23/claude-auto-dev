@@ -66,12 +66,19 @@ Before launching agents, verify:
 2. `npm run build` - ensure project builds before starting
 3. No merge conflicts in current branch
 
-## Maximum Parallelism
+## Execution Modes
 
-1. Read `prd.json`, find ALL tasks where `passes !== true` AND `blockedBy` are complete
-2. Launch up to 5 parallel `builder` agents via Task tool in a SINGLE message
-3. When agents complete, immediately launch next batch
-4. Continue until no tasks remain
+### Sequential Mode (Default for UX/bugfix)
+When tasks touch the SAME files or need visual verification:
+- Work on ONE task at a time
+- Verify with browser/build after each
+- Best for: UX tasks, bugfixes, refactors
+
+### Parallel Mode (For independent features)
+When tasks create NEW files or touch DIFFERENT areas:
+- Launch up to 5 parallel `builder` agents via Task tool
+- All in a SINGLE message block
+- Best for: New pages, new hooks, new components
 
 ## Parallel Launch Example
 
@@ -96,8 +103,24 @@ Task({ subagent_type: "builder", description: "Build RPT02", prompt: "...", run_
 2. Run `npm run build` - **FAIL task if build doesn't pass**
 3. Mark completed tasks in prd.json (`passes: true`)
 4. Git commit the changes
-5. **IMMEDIATELY** launch next batch of unblocked tasks
-6. NO confirmation prompts - just keep going
+5. **IMMEDIATELY** launch next batch - DO NOT:
+   - ❌ Print summary tables
+   - ❌ Show "Sprint Summary" or progress reports
+   - ❌ Wait for acknowledgment
+   - ❌ Say "Let me know if you want to continue"
+6. Just silently continue to next task
+
+## CONTINUATION IS MANDATORY
+
+After EVERY commit, you MUST:
+```
+1. Check prd.json for remaining tasks (passes === null)
+2. If tasks remain → start next task IMMEDIATELY
+3. If no tasks remain → say "All tasks complete" and stop
+```
+
+**NEVER** end with a summary and wait. The loop is:
+`task → verify → commit → next task → verify → commit → ...`
 
 ## Type Safety Requirements
 
@@ -165,6 +188,19 @@ Instead of committing after every task:
 3. Commit on explicit `stop` command
 
 Use commit message: `feat: Complete [TASK-IDs] - [brief summary]`
+
+## Task Type Routing
+
+| Task Type | Mode | Reason |
+|-----------|------|--------|
+| `bugfix` | Sequential | May need debugging, affects existing code |
+| `ux` | Sequential | Needs visual verification, touches shared components |
+| `feature` (new page) | Parallel | Creates new files, independent |
+| `feature` (modify) | Sequential | Touches existing code |
+| `ai` | Parallel | Usually new hooks/components |
+| `integration` | Parallel | New API connections |
+| `performance` | Sequential | Affects shared code paths |
+| `tech-debt` | Sequential | Refactoring existing code |
 
 ## Stop Conditions
 
