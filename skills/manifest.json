@@ -1,46 +1,149 @@
 {
-  "version": "3.5.0",
-  "description": "Skill index for lazy loading - only relevant skills loaded per session",
+  "version": "3.6.0",
+  "description": "Granular skill loading - each command loads only what it needs",
   "skills": {
-    "build": {
-      "triggers": ["auto", "brainstorm", "status", "continue", "stop", "reset", "archive", "clean", "docs", "review", "security", "polish", "handoff", "resume", "ledger", "stats", "sprint", "preflight", "mistakes", "template", "context-audit"],
-      "context": ["prd.json", "progress.txt"],
-      "file": "build.md",
+    "core": {
+      "triggers": [],
+      "context": ["prd.json"],
+      "file": "core.md",
+      "priority": 0,
+      "description": "prd.json schema - auto-loaded when prd.json exists"
+    },
+    "auto": {
+      "triggers": ["auto"],
+      "context": ["prd.json"],
+      "file": "../commands/auto.md",
       "priority": 1
     },
+    "brainstorm": {
+      "triggers": ["brainstorm", "generate"],
+      "context": [],
+      "file": "../commands/brainstorm.md",
+      "priority": 1
+    },
+    "status": {
+      "triggers": ["status"],
+      "context": ["prd.json"],
+      "file": "../commands/status.md",
+      "priority": 2
+    },
+    "sprint": {
+      "triggers": ["sprint"],
+      "context": ["prd.json"],
+      "file": "../commands/sprint.md",
+      "priority": 1
+    },
+    "continue": {
+      "triggers": ["continue"],
+      "context": ["prd.json"],
+      "file": "../commands/continue.md",
+      "priority": 1
+    },
+    "stop": {
+      "triggers": ["stop"],
+      "context": [],
+      "file": "../commands/stop.md",
+      "priority": 2
+    },
+    "reset": {
+      "triggers": ["reset"],
+      "context": [],
+      "file": "../commands/reset.md",
+      "priority": 2
+    },
+    "handoff": {
+      "triggers": ["handoff"],
+      "context": ["prd.json"],
+      "file": "../commands/handoff.md",
+      "priority": 2
+    },
+    "resume": {
+      "triggers": ["resume"],
+      "context": ["handoff-*.md"],
+      "file": "../commands/resume.md",
+      "priority": 2
+    },
+    "review": {
+      "triggers": ["review"],
+      "context": [],
+      "file": "../commands/review.md",
+      "priority": 1
+    },
+    "preflight": {
+      "triggers": ["preflight"],
+      "context": [],
+      "file": "../commands/preflight.md",
+      "priority": 2
+    },
+    "mistakes": {
+      "triggers": ["mistakes"],
+      "context": [".claude/mistakes.md"],
+      "file": "../commands/mistakes.md",
+      "priority": 2
+    },
+    "template": {
+      "triggers": ["template"],
+      "context": [],
+      "file": "../commands/template.md",
+      "priority": 2
+    },
+    "context-audit": {
+      "triggers": ["context-audit", "context audit"],
+      "context": [],
+      "file": "../commands/context-audit.md",
+      "priority": 2
+    },
+    "archive": {
+      "triggers": ["archive"],
+      "context": ["prd.json"],
+      "file": "../commands/archive.md",
+      "priority": 2
+    },
+    "clean": {
+      "triggers": ["clean"],
+      "context": [],
+      "file": "../commands/clean.md",
+      "priority": 2
+    },
+    "sync": {
+      "triggers": ["sync", "update"],
+      "context": [],
+      "file": "../commands/sync.md",
+      "priority": 3
+    },
     "test": {
-      "triggers": ["test", "verify", "e2e", "browser", "agent-browser"],
-      "context": ["*.test.*", "*.spec.*", "vitest.config", "jest.config", "playwright.config"],
+      "triggers": ["test", "verify", "e2e", "browser"],
+      "context": ["*.test.*", "*.spec.*"],
       "file": "test.md",
       "priority": 2
     },
     "ship": {
-      "triggers": ["ship", "deploy", "vercel", "production"],
-      "context": ["vercel.json", ".vercel", "netlify.toml"],
+      "triggers": ["ship", "deploy"],
+      "context": ["vercel.json"],
       "file": "ship.md",
       "priority": 3
     },
     "fix": {
-      "triggers": ["fix", "debug", "error", "bug", "broken"],
+      "triggers": ["fix", "debug", "bug"],
       "context": [],
       "file": "fix.md",
       "priority": 2
     },
     "setup-project": {
-      "triggers": ["set up", "setup", "init", "initialize", "new project"],
+      "triggers": ["setup", "init", "new project"],
       "context": [],
       "file": "setup-project.md",
       "priority": 3
     },
-    "supabase-schema": {
-      "triggers": ["schema", "database", "table", "migration", "supabase"],
-      "context": ["supabase/", ".supabase"],
+    "supabase": {
+      "triggers": ["schema", "database", "migration", "supabase"],
+      "context": ["supabase/"],
       "file": "supabase-schema.md",
       "priority": 3
     }
   },
   "defaults": {
-    "withPrdJson": ["build"],
+    "withPrdJson": ["core"],
     "withoutPrdJson": ["setup-project"],
     "always": []
   }
