@@ -101,14 +101,50 @@ Task({ subagent_type: "builder", description: "Build RPT02", prompt: "...", run_
 
 1. Run `npm run typecheck` (if available) - **FAIL task if types don't pass**
 2. Run `npm run build` - **FAIL task if build doesn't pass**
-3. Mark completed tasks in prd.json (`passes: true`)
-4. Git commit the changes
-5. **IMMEDIATELY** launch next batch - DO NOT:
+3. **VERIFY the feature works** (see Verification below)
+4. Mark completed tasks in prd.json (`passes: true`, `verified: "browser|test"`)
+5. Git commit the changes
+6. **IMMEDIATELY** launch next batch - DO NOT:
    - ❌ Print summary tables
    - ❌ Show "Sprint Summary" or progress reports
    - ❌ Wait for acknowledgment
    - ❌ Say "Let me know if you want to continue"
-6. Just silently continue to next task
+7. Just silently continue to next task
+
+## Verification Requirements (NEW)
+
+**Build passing is NOT enough.** Before marking `passes: true`:
+
+| Task Type | Required Verification |
+|-----------|----------------------|
+| `ux` | Browser test - visually confirm it works |
+| `feature` | Browser test OR unit test |
+| `bugfix` | Reproduce bug, verify fix |
+| `ai` | Test with real/mock data |
+| `integration` | API call succeeds |
+| `performance` | Measure before/after |
+
+**How to verify:**
+```bash
+# For browser testing
+agent-browser navigate http://localhost:PORT/path
+agent-browser snapshot -q "expected element"
+
+# For unit tests
+npm run test -- --grep "feature name"
+```
+
+**Mark verification in prd.json:**
+```json
+{
+  "passes": true,
+  "verified": "browser"  // or "test", "e2e", "build"
+}
+```
+
+**Unverified = Not Done:**
+- `verified: null` or `verified: "build"` = needs testing
+- `verified: "browser"` or `verified: "test"` = truly complete
 
 ## CONTINUATION IS MANDATORY
 

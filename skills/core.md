@@ -14,6 +14,7 @@ description: Canonical prd.json schema and file structure. Loaded once per sessi
   "priority": 1,
   "type": "feature|bugfix|ux|ai|integration|performance|tech-debt",
   "passes": null,
+  "verified": null,
   "blockedBy": [],
   "files": ["src/file.ts"],
   "acceptanceCriteria": ["Specific, testable criterion"]
@@ -31,9 +32,26 @@ description: Canonical prd.json schema and file structure. Loaded once per sessi
 | `blockedBy` | ALWAYS populate | Empty array if none |
 
 ## Status Values
-- `passes: null` = pending
-- `passes: true` = complete
+- `passes: null` = pending (not started)
+- `passes: true` = code complete (but may not be verified)
 - `passes: false` = failed (include error in description)
+
+## Verification (NEW)
+- `verified: null` = not yet tested
+- `verified: "build"` = npm run build passes
+- `verified: "browser"` = manually tested in browser
+- `verified: "test"` = unit/integration tests pass
+- `verified: "e2e"` = end-to-end test passes
+
+**A task is truly DONE when:**
+```
+passes: true AND verified: "browser"|"test"|"e2e"
+```
+
+**Code complete but unverified:**
+```
+passes: true AND verified: null|"build"
+```
 
 ## Task Scoping Rules
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## [3.8.0] - 2025-01-25
+
+### Added
+- **Verification requirement** - Tasks need actual testing, not just build passing
+  - `verified: "browser"|"test"|"e2e"` = truly complete
+  - `verified: null|"build"` = code complete but unverified
+- **Verification matrix** - Different task types require different verification
+  - UX: Browser test required
+  - Feature: Browser OR unit test
+  - Bugfix: Reproduce and verify fix
+  - AI: Test with real/mock data
+- **Status shows verification** - Verified vs unverified counts
+
+### Changed
+- **auto.md** - Verification step required before marking complete
+- **core.md** - Schema includes `verified` field
+- **status.md** - Shows verification quality metric
+
+### Philosophy
+- Build passing is NOT done
+- Unverified code is technical debt
+- Story quality matters more than velocity
+
+---
+
 ## [3.7.0] - 2025-01-25
 
 ### Added

@@ -19,10 +19,21 @@ Show current task progress.
 
 ```
 Status: 15/23 active + 88 archived
+Verified: 10 tasks (browser/test confirmed)
+Unverified: 5 tasks (code complete, needs testing)
 Ready: 3 tasks (no blockers)
 Blocked: 5 tasks (waiting on dependencies)
 Next: QA01 - Google OAuth Sign-In Flow
 ```
+
+## Verification Tracking
+
+Count tasks by verification status:
+- `verified: "browser"|"test"|"e2e"` = Truly complete
+- `verified: "build"|null` with `passes: true` = Needs testing
+- `passes: null` = Not started
+
+**Quality metric:** `verified_count / passes_true_count * 100`%
 
 ## Blocked Tasks
 

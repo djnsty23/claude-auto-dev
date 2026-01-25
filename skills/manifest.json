@@ -1,5 +1,5 @@
 {
-  "version": "3.7.0",
+  "version": "3.8.0",
   "description": "Granular skill loading with learned code quality rules",
   "skills": {
     "core": {
