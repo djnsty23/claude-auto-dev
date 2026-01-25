@@ -1,6 +1,6 @@
 {
-  "version": "3.8.0",
-  "description": "Granular skill loading with learned code quality rules",
+  "version": "3.9.0",
+  "description": "Self-bootstrapping auto mode with Ralph Loop integration",
   "skills": {
     "core": {
       "triggers": [],

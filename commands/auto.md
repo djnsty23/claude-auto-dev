@@ -1,279 +1,193 @@
 ---
-description: Work through all tasks in prd.json automatically with maximum parallelism
+description: Self-bootstrapping autonomous development - handles all scenarios
 ---
 
-# Auto Mode
+# Auto Mode v2
 
-Work through ALL pending tasks using MAXIMUM parallelism. Launch up to 5 parallel builder agents.
+Single command for fully autonomous development. Handles cold start, task execution, and completion.
+
+## Entry Point Flow
+
+```
+auto
+  ├─ Check Ralph Loop active?
+  │   └─ No → Suggest: /ralph-loop auto --completion-promise 'All tasks complete'
+  │
+  ├─ Check prd.json exists?
+  │   ├─ No → Bootstrap (see below)
+  │   └─ Yes → Check pending tasks
+  │             ├─ None pending → All done! (output promise if in Ralph)
+  │             └─ Has pending → Execute tasks
+  │
+  └─ Execute until done or interrupted
+```
+
+## Ralph Loop Detection
+
+Check if in Ralph Loop:
+```bash
+node -e "const fs=require('fs'); const f='.claude/ralph-loop.local.md'; if(fs.existsSync(f)){const c=fs.readFileSync(f,'utf8'); console.log(c.includes('active: true')?'IN_RALPH':'NOT_RALPH')}else{console.log('NOT_RALPH')}"
+```
+
+**If NOT in Ralph Loop:**
+- Work normally but Claude will stop after results
+- Suggest: "For non-stop execution, run: `/ralph-loop auto --completion-promise 'All tasks complete'`"
+
+**If IN Ralph Loop:**
+- Work continuously
+- When all tasks complete, output: `<promise>All tasks complete</promise>`
+
+## Bootstrap (No prd.json)
+
+When prd.json doesn't exist:
+
+1. **Check for project context:**
+   - Read CLAUDE.md, README.md, package.json
+   - Understand what the project is
+
+2. **Generate initial tasks:**
+   - Based on project context, create 5-10 starter tasks
+   - OR if no context, create setup tasks (init, config, first feature)
+
+3. **Create prd.json:**
+   ```json
+   {
+     "projectName": "From package.json or folder name",
+     "version": "0.1.0",
+     "stories": [/* generated tasks */]
+   }
+   ```
+
+4. **Continue to execution** - Don't stop, start working immediately
 
 ## CRITICAL: NEVER STOP
 
-**FORBIDDEN ACTIONS - DO NOT DO THESE:**
-- ❌ NEVER use `AskUserQuestion` tool - make decisions yourself
-- ❌ NEVER ask "Should I continue?" or "Which option?"
-- ❌ NEVER wait for user input between tasks
-- ❌ NEVER stop to show progress - just keep working
+**FORBIDDEN:**
+- ❌ NEVER use `AskUserQuestion` - make decisions yourself
+- ❌ NEVER ask "Should I continue?"
+- ❌ NEVER show summaries and wait
+- ❌ NEVER say "Let me know..."
 
-**REQUIRED BEHAVIOR:**
-- ✅ Make autonomous decisions using reasonable defaults
-- ✅ If unsure between options, pick the simpler/safer one
-- ✅ If a task is ambiguous, interpret it reasonably and proceed
-- ✅ Log decisions to `.claude/decisions.md` instead of asking
+**REQUIRED:**
+- ✅ Make autonomous decisions
+- ✅ Log decisions to `.claude/decisions.md`
+- ✅ Keep working until truly done
 
-## Session Lock (Prevent Conflicts)
+## Pre-flight (Quick)
 
-Before starting, check for active sessions using cross-platform approach:
-
-```javascript
-// Use Node.js for cross-platform compatibility
-const fs = require('fs');
-const lockFile = '.claude-lock';
-
-function checkLock() {
-  if (fs.existsSync(lockFile)) {
-    const stat = fs.statSync(lockFile);
-    const ageSeconds = (Date.now() - stat.mtimeMs) / 1000;
-    if (ageSeconds < 60) {
-      console.log('Another session is active. Use "reset" to force unlock.');
-      return false;
-    }
-  }
-  // Create/update lock
-  fs.writeFileSync(lockFile, JSON.stringify({
-    timestamp: Date.now(),
-    pid: process.pid,
-    hostname: require('os').hostname()
-  }));
-  return true;
-}
-```
-
-**Or use inline check:**
+Before first task:
 ```bash
-# Check if lock exists and is recent (works on both platforms via Node)
-node -e "const fs=require('fs'); if(fs.existsSync('.claude-lock') && (Date.now()-fs.statSync('.claude-lock').mtimeMs)<60000) { console.log('LOCKED'); process.exit(1); }"
+git status --short          # Warn if dirty, continue anyway
+npm run build 2>&1 | tail -5  # Fail if broken
 ```
 
-Update lock every 30 seconds while running. Delete on completion with:
+Skip if takes >10 seconds. Don't block on pre-flight.
+
+## Task Execution
+
+### Mode Selection
+
+| Task Type | Mode | Verification |
+|-----------|------|--------------|
+| `ux`, `bugfix` | Sequential | Browser test |
+| `feature` (new) | Parallel | Build + Browser |
+| `ai`, `integration` | Parallel | Data test |
+| `performance` | Sequential | Metrics |
+
+### Parallel Execution
+
+Launch up to 5 builder agents in ONE message:
+```
+Task({ subagent_type: "builder", prompt: "...", run_in_background: true })
+Task({ subagent_type: "builder", prompt: "...", run_in_background: true })
+// ... up to 5
+```
+
+### After Each Task
+
+1. `npm run typecheck` - Fix if fails
+2. `npm run build` - Fix if fails
+3. **Verify** (see below)
+4. Update prd.json: `passes: true`, `verified: "browser"|"test"`
+5. Commit every 3 tasks
+6. **IMMEDIATELY** start next task
+
+## Auto-Verification
+
+**For UX tasks - REQUIRED browser check:**
 ```bash
-node -e "require('fs').unlinkSync('.claude-lock')" 2>/dev/null || true
+# Navigate to affected page
+agent-browser navigate http://localhost:5173/path
+
+# Check for expected element from acceptance criteria
+agent-browser snapshot -q "expected text or element"
 ```
 
-## Pre-flight Check
+If element NOT found → `passes: false`, retry with fix.
+If element found → `verified: "browser"`
 
-Before launching agents, verify:
-1. `git status` - warn if uncommitted changes (but continue)
-2. `npm run build` - ensure project builds before starting
-3. No merge conflicts in current branch
-
-## Execution Modes
-
-### Sequential Mode (Default for UX/bugfix)
-When tasks touch the SAME files or need visual verification:
-- Work on ONE task at a time
-- Verify with browser/build after each
-- Best for: UX tasks, bugfixes, refactors
-
-### Parallel Mode (For independent features)
-When tasks create NEW files or touch DIFFERENT areas:
-- Launch up to 5 parallel `builder` agents via Task tool
-- All in a SINGLE message block
-- Best for: New pages, new hooks, new components
-
-## Parallel Launch Example
-
-```
-// Launch 5 agents in ONE message block:
-Task({ subagent_type: "builder", description: "Build AI11", prompt: "...", run_in_background: true })
-Task({ subagent_type: "builder", description: "Build AI12", prompt: "...", run_in_background: true })
-Task({ subagent_type: "builder", description: "Build AI13", prompt: "...", run_in_background: true })
-Task({ subagent_type: "builder", description: "Build RPT01", prompt: "...", run_in_background: true })
-Task({ subagent_type: "builder", description: "Build RPT02", prompt: "...", run_in_background: true })
-```
+**For other tasks:**
+- Feature: Build passes + page loads → `verified: "build"`
+- API: Endpoint returns expected data → `verified: "test"`
+- AI: Mock data renders correctly → `verified: "browser"`
 
 ## Dependency Resolution
 
-- Check `blockedBy` array - skip tasks whose deps aren't `passes: true`
-- Tasks WITHOUT blockedBy or with all deps complete → can run in parallel
-- Re-check after each batch completes for newly unblocked tasks
-
-## After Each Batch Completes
-
-1. Run `npm run typecheck` (if available) - **FAIL task if types don't pass**
-2. Run `npm run build` - **FAIL task if build doesn't pass**
-3. **VERIFY the feature works** (see Verification below)
-4. Mark completed tasks in prd.json (`passes: true`, `verified: "browser|test"`)
-5. Git commit the changes
-6. **IMMEDIATELY** launch next batch - DO NOT:
-   - ❌ Print summary tables
-   - ❌ Show "Sprint Summary" or progress reports
-   - ❌ Wait for acknowledgment
-   - ❌ Say "Let me know if you want to continue"
-7. Just silently continue to next task
-
-## Verification Requirements (NEW)
-
-**Build passing is NOT enough.** Before marking `passes: true`:
-
-| Task Type | Required Verification |
-|-----------|----------------------|
-| `ux` | Browser test - visually confirm it works |
-| `feature` | Browser test OR unit test |
-| `bugfix` | Reproduce bug, verify fix |
-| `ai` | Test with real/mock data |
-| `integration` | API call succeeds |
-| `performance` | Measure before/after |
-
-**How to verify:**
-```bash
-# For browser testing
-agent-browser navigate http://localhost:PORT/path
-agent-browser snapshot -q "expected element"
-
-# For unit tests
-npm run test -- --grep "feature name"
+```javascript
+// Find executable tasks
+const executable = stories.filter(s =>
+  s.passes !== true &&
+  (s.blockedBy || []).every(dep =>
+    stories.find(d => d.id === dep)?.passes === true
+  )
+);
 ```
 
-**Mark verification in prd.json:**
-```json
-{
-  "passes": true,
-  "verified": "browser"  // or "test", "e2e", "build"
-}
-```
+Skip blocked tasks, work on unblocked ones.
 
-**Unverified = Not Done:**
-- `verified: null` or `verified: "build"` = needs testing
-- `verified: "browser"` or `verified: "test"` = truly complete
+## Completion
 
-## CONTINUATION IS MANDATORY
+**When all tasks done:**
 
-After EVERY commit, you MUST:
-```
-1. Check prd.json for remaining tasks (passes === null)
-2. If tasks remain → start next task IMMEDIATELY
-3. If no tasks remain → say "All tasks complete" and stop
-```
+1. Check: `stories.every(s => s.passes === true)`
 
-**NEVER** end with a summary and wait. The loop is:
-`task → verify → commit → next task → verify → commit → ...`
+2. If in Ralph Loop, output exactly:
+   ```
+   <promise>All tasks complete</promise>
+   ```
 
-## Type Safety Requirements
+3. If NOT in Ralph, output:
+   ```
+   All 23 tasks complete. Run `status` to see results.
+   ```
 
-**Every agent MUST verify type safety before marking a task complete:**
+## Smart Retry
 
-```bash
-# Run these checks (in order):
-npm run typecheck 2>&1 | head -50  # Check for TS errors
-npm run build 2>&1 | tail -10      # Verify build passes
-```
+On failure:
+1. Log to `.claude/mistakes.md`
+2. Retry 1: Different approach
+3. Retry 2: Simplest implementation
+4. Still fails → `passes: false`, continue to next
 
-**If typecheck fails:**
-1. Fix the type errors immediately
-2. Do NOT mark task as complete until types pass
-3. Log the error pattern to `.claude/mistakes.md`
+## Code Quality Rules
 
-**Common type issues to avoid (from production mistakes):**
-- Never use `as any` - use proper type guards
-- Check for `undefined` before accessing properties
-- Ensure interface properties match actual data
-- Use `typeof` and `in` guards for unknown types
+**From production mistakes - ALWAYS follow:**
 
-## Learned Code Quality Rules
-
-**From recurring mistakes - ALWAYS follow:**
-
-### Type Safety (5 recurring patterns)
-1. **Single source of truth** - NEVER define same type in multiple files
-2. **Complete Record types** - `Record<UnionType, Value>` MUST include ALL union members
-3. **Supabase typing** - Always type-assert: `.insert({...} as Database[...]['Insert'])`
-4. **String→number conversion** - Convert enums before arithmetic: `tierToNumber(tier)`
-5. **Safe property access** - Guard with `'key' in obj && typeof obj.key === 'x'`
-
-### React/Component Rules (2 recurring patterns)
-1. **No nested interactives** - NEVER nest `<button>` inside `<button>` → Use `<div role="button">`
-2. **Hooks at top level** - NEVER call hooks inside callbacks → Extract to component level
-
-### API Integration (1 pattern)
-1. **Surface auth errors** - Detect `reauth_required` and show toast, don't fail silently
-
-### Decision Logging
-When making autonomous decisions, log to `.claude/decisions.md` with:
-```markdown
-## [Component/Feature Name]
-**Decision:** What you decided
-**Rationale:** Why this approach (not just what)
-**Trade-offs:** What was considered but rejected
-**Impact:** Files/features affected
-```
-
-## Smart Retry (On Failure)
-
-When a task fails:
-1. Log error to `.claude/mistakes.md` with pattern
-2. Retry with modified approach (max 2 retries):
-   - Retry 1: "Previous attempt failed with [error]. Try a different approach."
-   - Retry 2: "Two approaches failed. Use simplest possible implementation."
-3. If still fails, mark `passes: false` with error summary and continue to next task
-
-## Batch Commits
-
-Instead of committing after every task:
-1. Commit after every 3 completed tasks OR
-2. Commit before switching to a different file domain OR
-3. Commit on explicit `stop` command
-
-Use commit message: `feat: Complete [TASK-IDs] - [brief summary]`
-
-## Task Type Routing
-
-| Task Type | Mode | Reason |
-|-----------|------|--------|
-| `bugfix` | Sequential | May need debugging, affects existing code |
-| `ux` | Sequential | Needs visual verification, touches shared components |
-| `feature` (new page) | Parallel | Creates new files, independent |
-| `feature` (modify) | Sequential | Touches existing code |
-| `ai` | Parallel | Usually new hooks/components |
-| `integration` | Parallel | New API connections |
-| `performance` | Sequential | Affects shared code paths |
-| `tech-debt` | Sequential | Refactoring existing code |
-
-## Stop Conditions
-
-- No more pending tasks (all `passes: true`)
-- All remaining tasks blocked by incomplete dependencies
-- User explicitly interrupts (Ctrl+C or "stop")
-
-## For TRUE Non-Stop Mode
-
-**Why Claude stops:** Claude Code has natural stopping points after showing results. Our instructions can't override this - it's a platform limitation.
-
-**Solution: Ralph Loop integration**
-
-Ralph Loop uses the Stop hook to inject the prompt back, creating a real loop:
-
-```
-/ralph-loop auto --completion-promise 'All prd.json tasks complete'
-```
-
-This prevents ANY exit until the promise is true. The loop:
-1. Runs auto mode
-2. When Claude tries to stop, Ralph intercepts
-3. Feeds "auto" back as input
-4. Continues until all tasks have `passes: true`
-
-**Alternative: Manual continuation**
-
-If Ralph Loop isn't available, user says `continue` when it stops. The session will see remaining tasks and continue.
-
-**Note:** With Ralph Loop, there's NO manual stop - it runs until completion or max iterations.
+1. **Types:** Single source of truth, complete Records, Supabase typing
+2. **React:** No nested buttons, hooks at top level only
+3. **API:** Surface auth errors with toast
 
 ## Screenshots
 
 Save to `.claude/screenshots/`, never project root.
 
-## Task Visibility
+## Quick Reference
 
-Use TaskUpdate for Claude Code UI:
-- Starting: `TaskUpdate({ taskId: "X", status: "in_progress" })`
-- Done: `TaskUpdate({ taskId: "X", status: "completed" })`
+| Situation | Action |
+|-----------|--------|
+| No prd.json | Bootstrap from context |
+| All done | Output promise (Ralph) or status |
+| Build broken | Fix first |
+| Task fails | Retry 2x, then skip |
+| UX task | Browser verify required |
+| Not in Ralph | Suggest starting it |
