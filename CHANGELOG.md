@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.9.0] - 2025-01-25
+
+### Added
+- **Auto Mode v2** - Self-bootstrapping autonomous development
+  - Detects Ralph Loop for true non-stop execution
+  - Bootstrap from project context if no prd.json exists
+  - Auto-verify UX tasks with browser checks
+  - Outputs `<promise>` tag for Ralph completion
+- **Brainstorm auto mode** - Generates tasks without asking when called programmatically
+- **Ralph Loop integration** - Suggests `/ralph-loop` if not already running
+
+### Changed
+- **auto.md** - Complete rewrite with entry point flow diagram
+- **brainstorm.md** - Added auto mode vs interactive mode distinction
+- Never use `AskUserQuestion` in auto mode - make decisions autonomously
+
+### Philosophy
+- "Walk away" development - start it and come back to finished work
+- Bootstrap intelligently from CLAUDE.md, README.md, package.json context
+
+---
+
 ## [3.8.0] - 2025-01-25
 
 ### Added

@@ -1,19 +1,42 @@
 ---
-description: Generate new tasks from your description
+description: Generate new tasks from description or project context
 ---
 
 # Brainstorm
 
-Generate tasks from a description.
+Generate tasks from a description OR automatically from project context.
+
+## Two Modes
+
+### Interactive Mode (default)
+When user says "brainstorm":
+1. Ask: "What do you want to build?"
+2. Generate 5-15 stories based on answer
+
+### Auto Mode (called from auto)
+When called programmatically with no user input:
+1. **Read project context:**
+   - CLAUDE.md - project-specific instructions
+   - README.md - project description
+   - package.json - name, description, scripts
+   - Existing src/ structure
+
+2. **Infer what to build:**
+   - If TODO comments exist → tasks from TODOs
+   - If package.json has description → features from description
+   - If CLAUDE.md has goals → tasks from goals
+   - Fallback → generic setup tasks
+
+3. **Generate without asking** - Don't stop for confirmation in auto mode
 
 ## Process
 
-1. Ask: "What do you want to build?"
-2. Generate 5-15 stories based on answer
+1. Gather context (ask OR read files)
+2. Generate 5-15 stories based on context
 3. Identify dependencies between tasks
-4. Show list with dependencies, confirm before adding
-5. Add to `prd.json` with `passes: null`
-6. Use `TaskCreate` for each task (enables Claude Code visibility)
+4. Add to `prd.json` with `passes: null`, `verified: null`
+5. Use `TaskCreate` for each task (enables Claude Code visibility)
+6. **If called from auto** → return control, don't stop
 
 ## Story Schema
 
