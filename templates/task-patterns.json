@@ -1,0 +1,398 @@
+{
+  "$schema": "./task-patterns.schema.json",
+  "version": "1.0.0",
+  "templates": {
+    "auth": {
+      "name": "Authentication",
+      "description": "Full authentication flow with login, signup, logout",
+      "tasks": [
+        {
+          "id": "AUTH-01",
+          "title": "Setup auth provider configuration",
+          "description": "Configure Supabase Auth or chosen provider. Add environment variables.",
+          "priority": 1,
+          "files": ["src/lib/auth.ts", ".env.example"],
+          "acceptanceCriteria": [
+            "Auth provider initialized",
+            "Environment variables documented",
+            "TypeScript types pass"
+          ]
+        },
+        {
+          "id": "AUTH-02",
+          "title": "Create AuthContext and useAuth hook",
+          "description": "React context for auth state. Hook returns user, loading, signIn, signOut.",
+          "priority": 1,
+          "blockedBy": ["AUTH-01"],
+          "files": ["src/contexts/AuthContext.tsx", "src/hooks/useAuth.ts"],
+          "acceptanceCriteria": [
+            "Context provides user state",
+            "Hook handles loading states",
+            "TypeScript types pass"
+          ]
+        },
+        {
+          "id": "AUTH-03",
+          "title": "Build Login page",
+          "description": "Login form with email/password. Error handling. Redirect on success.",
+          "priority": 1,
+          "blockedBy": ["AUTH-02"],
+          "files": ["src/pages/Login.tsx"],
+          "acceptanceCriteria": [
+            "Form validation with Zod",
+            "Error messages displayed",
+            "Redirects to dashboard on success"
+          ]
+        },
+        {
+          "id": "AUTH-04",
+          "title": "Build Signup page",
+          "description": "Registration form. Password requirements. Email verification if needed.",
+          "priority": 1,
+          "blockedBy": ["AUTH-02"],
+          "files": ["src/pages/Signup.tsx"],
+          "acceptanceCriteria": [
+            "Password strength indicator",
+            "Confirms password match",
+            "Shows verification instructions"
+          ]
+        },
+        {
+          "id": "AUTH-05",
+          "title": "Add ProtectedRoute component",
+          "description": "Route wrapper that redirects to login if not authenticated.",
+          "priority": 1,
+          "blockedBy": ["AUTH-02"],
+          "files": ["src/components/ProtectedRoute.tsx"],
+          "acceptanceCriteria": [
+            "Redirects unauthenticated users",
+            "Shows loading while checking auth",
+            "Preserves intended destination"
+          ]
+        },
+        {
+          "id": "AUTH-06",
+          "title": "Add logout functionality",
+          "description": "Logout button in header/nav. Clears session. Redirects to login.",
+          "priority": 2,
+          "blockedBy": ["AUTH-02"],
+          "files": ["src/components/UserMenu.tsx"],
+          "acceptanceCriteria": [
+            "Logout clears all auth state",
+            "Redirects to login page",
+            "Works in header/nav"
+          ]
+        }
+      ]
+    },
+    "crud": {
+      "name": "CRUD Operations",
+      "description": "Full CRUD for a database entity",
+      "variables": ["entity", "Entity"],
+      "tasks": [
+        {
+          "id": "CRUD-01",
+          "title": "Create {{entity}} table schema",
+          "description": "Database migration for {{entity}} table with appropriate columns and constraints.",
+          "priority": 1,
+          "files": ["supabase/migrations/*_create_{{entity}}.sql"],
+          "acceptanceCriteria": [
+            "Table created with proper types",
+            "Indexes on frequently queried columns",
+            "Migration applied successfully"
+          ]
+        },
+        {
+          "id": "CRUD-02",
+          "title": "Add RLS policies for {{entity}}",
+          "description": "Row Level Security policies for {{entity}} table. Users can only access their own data.",
+          "priority": 1,
+          "blockedBy": ["CRUD-01"],
+          "files": ["supabase/migrations/*_{{entity}}_rls.sql"],
+          "acceptanceCriteria": [
+            "SELECT policy for owned rows",
+            "INSERT policy with user_id check",
+            "UPDATE/DELETE policies for owners"
+          ]
+        },
+        {
+          "id": "CRUD-03",
+          "title": "Create use{{Entity}} hook",
+          "description": "React Query hook for {{entity}} CRUD operations.",
+          "priority": 1,
+          "blockedBy": ["CRUD-02"],
+          "files": ["src/hooks/use{{Entity}}.ts"],
+          "acceptanceCriteria": [
+            "list, get, create, update, delete functions",
+            "Proper loading/error states",
+            "Optimistic updates where appropriate"
+          ]
+        },
+        {
+          "id": "CRUD-04",
+          "title": "Build {{Entity}}List component",
+          "description": "Display list of {{entity}} items with pagination, sorting, filtering.",
+          "priority": 1,
+          "blockedBy": ["CRUD-03"],
+          "files": ["src/components/{{Entity}}List.tsx"],
+          "acceptanceCriteria": [
+            "Shows loading skeleton",
+            "Empty state when no items",
+            "Delete confirmation dialog"
+          ]
+        },
+        {
+          "id": "CRUD-05",
+          "title": "Build {{Entity}}Form component",
+          "description": "Create/edit form for {{entity}} with validation.",
+          "priority": 1,
+          "blockedBy": ["CRUD-03"],
+          "files": ["src/components/{{Entity}}Form.tsx"],
+          "acceptanceCriteria": [
+            "Zod validation schema",
+            "Works for create and edit",
+            "Shows field-level errors"
+          ]
+        }
+      ]
+    },
+    "api": {
+      "name": "API Endpoint",
+      "description": "REST API endpoint with validation",
+      "variables": ["endpoint", "resource"],
+      "tasks": [
+        {
+          "id": "API-01",
+          "title": "Create {{resource}} API types",
+          "description": "TypeScript types and Zod schemas for {{resource}} API.",
+          "priority": 1,
+          "files": ["src/types/{{resource}}.ts"],
+          "acceptanceCriteria": [
+            "Request/response types defined",
+            "Zod schemas for validation",
+            "Exported for client use"
+          ]
+        },
+        {
+          "id": "API-02",
+          "title": "Implement {{endpoint}} GET handler",
+          "description": "GET endpoint for fetching {{resource}} data.",
+          "priority": 1,
+          "blockedBy": ["API-01"],
+          "files": ["src/api/{{resource}}/route.ts"],
+          "acceptanceCriteria": [
+            "Returns proper JSON response",
+            "Handles query parameters",
+            "Returns 404 for missing items"
+          ]
+        },
+        {
+          "id": "API-03",
+          "title": "Implement {{endpoint}} POST/PUT handlers",
+          "description": "POST for create, PUT for update of {{resource}}.",
+          "priority": 1,
+          "blockedBy": ["API-01"],
+          "files": ["src/api/{{resource}}/route.ts"],
+          "acceptanceCriteria": [
+            "Validates request body with Zod",
+            "Returns created/updated resource",
+            "Returns 400 for invalid data"
+          ]
+        },
+        {
+          "id": "API-04",
+          "title": "Implement {{endpoint}} DELETE handler",
+          "description": "DELETE endpoint for removing {{resource}}.",
+          "priority": 2,
+          "blockedBy": ["API-01"],
+          "files": ["src/api/{{resource}}/route.ts"],
+          "acceptanceCriteria": [
+            "Soft delete or hard delete as appropriate",
+            "Returns 204 on success",
+            "Returns 404 for missing items"
+          ]
+        }
+      ]
+    },
+    "component": {
+      "name": "React Component",
+      "description": "React component with variants and tests",
+      "variables": ["name", "Name"],
+      "tasks": [
+        {
+          "id": "COMP-01",
+          "title": "Create {{Name}} component",
+          "description": "Build {{Name}} React component with props interface and variants.",
+          "priority": 1,
+          "files": ["src/components/{{Name}}.tsx"],
+          "acceptanceCriteria": [
+            "Props typed with interface",
+            "Uses semantic design tokens",
+            "Handles loading/error/empty states"
+          ]
+        },
+        {
+          "id": "COMP-02",
+          "title": "Add {{Name}} variants",
+          "description": "Add size, variant, and color variations using class-variance-authority.",
+          "priority": 2,
+          "blockedBy": ["COMP-01"],
+          "files": ["src/components/{{Name}}.tsx"],
+          "acceptanceCriteria": [
+            "Size variants (sm, md, lg)",
+            "Style variants (default, outline, ghost)",
+            "Composable with other components"
+          ]
+        },
+        {
+          "id": "COMP-03",
+          "title": "Add {{Name}} tests",
+          "description": "Unit tests for {{Name}} component covering all variants and states.",
+          "priority": 2,
+          "blockedBy": ["COMP-02"],
+          "files": ["src/components/{{Name}}.test.tsx"],
+          "acceptanceCriteria": [
+            "Tests render without errors",
+            "Tests all variants",
+            "Tests interaction handlers"
+          ]
+        }
+      ]
+    },
+    "hook": {
+      "name": "React Hook",
+      "description": "Custom React hook with TypeScript",
+      "variables": ["name", "Name"],
+      "tasks": [
+        {
+          "id": "HOOK-01",
+          "title": "Create use{{Name}} hook",
+          "description": "Custom hook for {{name}} functionality.",
+          "priority": 1,
+          "files": ["src/hooks/use{{Name}}.ts"],
+          "acceptanceCriteria": [
+            "Proper TypeScript return type",
+            "Handles cleanup in useEffect",
+            "Memoizes expensive computations"
+          ]
+        },
+        {
+          "id": "HOOK-02",
+          "title": "Add use{{Name}} tests",
+          "description": "Tests for use{{Name}} hook using @testing-library/react-hooks.",
+          "priority": 2,
+          "blockedBy": ["HOOK-01"],
+          "files": ["src/hooks/use{{Name}}.test.ts"],
+          "acceptanceCriteria": [
+            "Tests initial state",
+            "Tests state updates",
+            "Tests cleanup behavior"
+          ]
+        }
+      ]
+    },
+    "supabase": {
+      "name": "Supabase Table",
+      "description": "Supabase table with RLS and types",
+      "variables": ["table", "Table"],
+      "tasks": [
+        {
+          "id": "SUPA-01",
+          "title": "Create {{table}} table migration",
+          "description": "SQL migration for {{table}} table in Supabase.",
+          "priority": 1,
+          "files": ["supabase/migrations/*_create_{{table}}.sql"],
+          "acceptanceCriteria": [
+            "Primary key with UUID",
+            "created_at/updated_at timestamps",
+            "user_id foreign key if needed"
+          ]
+        },
+        {
+          "id": "SUPA-02",
+          "title": "Add RLS policies for {{table}}",
+          "description": "Row Level Security for {{table}} table.",
+          "priority": 1,
+          "blockedBy": ["SUPA-01"],
+          "files": ["supabase/migrations/*_{{table}}_rls.sql"],
+          "acceptanceCriteria": [
+            "RLS enabled on table",
+            "Policies for authenticated users",
+            "No public access without policy"
+          ]
+        },
+        {
+          "id": "SUPA-03",
+          "title": "Generate {{Table}} TypeScript types",
+          "description": "Run supabase gen types and update database.types.ts.",
+          "priority": 1,
+          "blockedBy": ["SUPA-01"],
+          "files": ["src/types/database.types.ts"],
+          "acceptanceCriteria": [
+            "Types match table schema",
+            "Nullable columns typed correctly",
+            "Relationships typed"
+          ]
+        },
+        {
+          "id": "SUPA-04",
+          "title": "Create {{table}} Edge Function",
+          "description": "Optional Edge Function for complex {{table}} operations.",
+          "priority": 3,
+          "blockedBy": ["SUPA-02"],
+          "files": ["supabase/functions/{{table}}-handler/index.ts"],
+          "acceptanceCriteria": [
+            "Validates JWT",
+            "Returns proper responses",
+            "Handles errors gracefully"
+          ]
+        }
+      ]
+    },
+    "edge-function": {
+      "name": "Edge Function",
+      "description": "Supabase Edge Function",
+      "variables": ["name"],
+      "tasks": [
+        {
+          "id": "EDGE-01",
+          "title": "Create {{name}} Edge Function",
+          "description": "Deno Edge Function for {{name}} functionality.",
+          "priority": 1,
+          "files": ["supabase/functions/{{name}}/index.ts"],
+          "acceptanceCriteria": [
+            "Handles CORS properly",
+            "Validates authorization",
+            "Returns JSON responses"
+          ]
+        },
+        {
+          "id": "EDGE-02",
+          "title": "Add {{name}} types and validation",
+          "description": "TypeScript types and Zod schemas for {{name}} function.",
+          "priority": 1,
+          "blockedBy": ["EDGE-01"],
+          "files": ["supabase/functions/{{name}}/types.ts"],
+          "acceptanceCriteria": [
+            "Request body schema",
+            "Response type defined",
+            "Error response type"
+          ]
+        },
+        {
+          "id": "EDGE-03",
+          "title": "Deploy and test {{name}}",
+          "description": "Deploy function and test with curl/Postman.",
+          "priority": 2,
+          "blockedBy": ["EDGE-02"],
+          "files": [],
+          "acceptanceCriteria": [
+            "Function deploys successfully",
+            "Returns expected response",
+            "Handles errors properly"
+          ]
+        }
+      ]
+    }
+  }
+}
