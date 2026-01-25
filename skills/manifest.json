@@ -119,6 +119,13 @@
       "file": "../commands/sync.md",
       "priority": 3
     },
+    "scan": {
+      "triggers": ["scan", "verify-files"],
+      "context": ["prd.json"],
+      "file": "../commands/scan.md",
+      "priority": 2,
+      "description": "Quick file existence check, marks tasks complete"
+    },
     "test": {
       "triggers": ["test", "verify", "e2e", "browser"],
       "context": ["*.test.*", "*.spec.*"],
