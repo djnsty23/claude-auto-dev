@@ -44,6 +44,23 @@ if ($gitStatus) {
     Write-Host "[Git] $changedFiles changed files"
 }
 
+# Status line reminder
+$settingsPath = "$env:USERPROFILE\.claude\settings.local.json"
+$hasStatusLine = $false
+if (Test-Path $settingsPath) {
+    try {
+        $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+        if ($settings.statusLine) {
+            $hasStatusLine = $true
+        }
+    } catch {}
+}
+
+if (-not $hasStatusLine) {
+    Write-Host ""
+    Write-Host "[Status] Run '/status line' to enable context monitoring (model, %, tokens)"
+}
+
 # Skill index from manifest.json (for efficient skill loading)
 $manifestPath = "$skillsDir\manifest.json"
 if (Test-Path $manifestPath) {

@@ -22,21 +22,42 @@ Work through ALL pending tasks using MAXIMUM parallelism. Launch up to 5 paralle
 
 ## Session Lock (Prevent Conflicts)
 
-Before starting, check for active sessions:
-```bash
-# Check lock file
-if [ -f ".claude-lock" ]; then
-  LOCK_AGE=$(($(date +%s) - $(stat -c %Y .claude-lock 2>/dev/null || echo 0)))
-  if [ $LOCK_AGE -lt 60 ]; then
-    echo "Another session is active. Use 'reset' to force unlock."
-    exit 1
-  fi
-fi
-# Create lock with PID and timestamp
-echo "$(date +%s):$$:$(hostname)" > .claude-lock
+Before starting, check for active sessions using cross-platform approach:
+
+```javascript
+// Use Node.js for cross-platform compatibility
+const fs = require('fs');
+const lockFile = '.claude-lock';
+
+function checkLock() {
+  if (fs.existsSync(lockFile)) {
+    const stat = fs.statSync(lockFile);
+    const ageSeconds = (Date.now() - stat.mtimeMs) / 1000;
+    if (ageSeconds < 60) {
+      console.log('Another session is active. Use "reset" to force unlock.');
+      return false;
+    }
+  }
+  // Create/update lock
+  fs.writeFileSync(lockFile, JSON.stringify({
+    timestamp: Date.now(),
+    pid: process.pid,
+    hostname: require('os').hostname()
+  }));
+  return true;
+}
 ```
 
-Update lock every 30 seconds while running. Delete on completion.
+**Or use inline check:**
+```bash
+# Check if lock exists and is recent (works on both platforms via Node)
+node -e "const fs=require('fs'); if(fs.existsSync('.claude-lock') && (Date.now()-fs.statSync('.claude-lock').mtimeMs)<60000) { console.log('LOCKED'); process.exit(1); }"
+```
+
+Update lock every 30 seconds while running. Delete on completion with:
+```bash
+node -e "require('fs').unlinkSync('.claude-lock')" 2>/dev/null || true
+```
 
 ## Pre-flight Check
 
