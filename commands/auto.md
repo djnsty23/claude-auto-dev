@@ -210,12 +210,27 @@ Use commit message: `feat: Complete [TASK-IDs] - [brief summary]`
 
 ## For TRUE Non-Stop Mode
 
-Use Ralph Loop integration:
+**Why Claude stops:** Claude Code has natural stopping points after showing results. Our instructions can't override this - it's a platform limitation.
+
+**Solution: Ralph Loop integration**
+
+Ralph Loop uses the Stop hook to inject the prompt back, creating a real loop:
+
 ```
 /ralph-loop auto --completion-promise 'All prd.json tasks complete'
 ```
 
-This prevents ANY exit until all tasks are done.
+This prevents ANY exit until the promise is true. The loop:
+1. Runs auto mode
+2. When Claude tries to stop, Ralph intercepts
+3. Feeds "auto" back as input
+4. Continues until all tasks have `passes: true`
+
+**Alternative: Manual continuation**
+
+If Ralph Loop isn't available, user says `continue` when it stops. The session will see remaining tasks and continue.
+
+**Note:** With Ralph Loop, there's NO manual stop - it runs until completion or max iterations.
 
 ## Screenshots
 
