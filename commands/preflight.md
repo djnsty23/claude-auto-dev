@@ -55,6 +55,11 @@ if (!prd.stories || !Array.isArray(prd.stories)) {
 - ⚠️ WARN if initial context > 30%
 - Suggest `context-audit` to optimize
 
+### 7. Status Line (Auto-Setup)
+- Check if status line is configured
+- If not, auto-run `/status line` to enable context monitoring
+- Essential for long-running sprints
+
 ## Output Format
 
 ```
