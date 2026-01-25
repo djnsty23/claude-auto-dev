@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.6.0] - 2025-01-25
+
+### Changed
+- **94% context reduction** - Slimmed build.md from 548 to 61 lines
+- **Granular skill loading** - Each command loads only its specific file
+- **Archived build-reference.md** - 1074 lines of redundant content removed
+- **New core.md** - Minimal 43-line prd.json schema reference
+
+### Context Savings
+- "status" command: ~3K → ~300 tokens
+- "auto" command: ~3K → ~1K tokens
+- Estimated 60-70% reduction in initial context per command
+
+---
+
 ## [3.5.0] - 2025-01-25
 
 ### Added
