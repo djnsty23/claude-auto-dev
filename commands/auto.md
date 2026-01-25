@@ -114,11 +114,39 @@ npm run build 2>&1 | tail -10      # Verify build passes
 2. Do NOT mark task as complete until types pass
 3. Log the error pattern to `.claude/mistakes.md`
 
-**Common type issues to avoid:**
+**Common type issues to avoid (from production mistakes):**
 - Never use `as any` - use proper type guards
 - Check for `undefined` before accessing properties
 - Ensure interface properties match actual data
 - Use `typeof` and `in` guards for unknown types
+
+## Learned Code Quality Rules
+
+**From recurring mistakes - ALWAYS follow:**
+
+### Type Safety (5 recurring patterns)
+1. **Single source of truth** - NEVER define same type in multiple files
+2. **Complete Record types** - `Record<UnionType, Value>` MUST include ALL union members
+3. **Supabase typing** - Always type-assert: `.insert({...} as Database[...]['Insert'])`
+4. **String→number conversion** - Convert enums before arithmetic: `tierToNumber(tier)`
+5. **Safe property access** - Guard with `'key' in obj && typeof obj.key === 'x'`
+
+### React/Component Rules (2 recurring patterns)
+1. **No nested interactives** - NEVER nest `<button>` inside `<button>` → Use `<div role="button">`
+2. **Hooks at top level** - NEVER call hooks inside callbacks → Extract to component level
+
+### API Integration (1 pattern)
+1. **Surface auth errors** - Detect `reauth_required` and show toast, don't fail silently
+
+### Decision Logging
+When making autonomous decisions, log to `.claude/decisions.md` with:
+```markdown
+## [Component/Feature Name]
+**Decision:** What you decided
+**Rationale:** Why this approach (not just what)
+**Trade-offs:** What was considered but rejected
+**Impact:** Files/features affected
+```
 
 ## Smart Retry (On Failure)
 

@@ -1,6 +1,6 @@
 {
-  "version": "3.6.0",
-  "description": "Granular skill loading - each command loads only what it needs",
+  "version": "3.7.0",
+  "description": "Granular skill loading with learned code quality rules",
   "skills": {
     "core": {
       "triggers": [],
@@ -9,10 +9,18 @@
       "priority": 0,
       "description": "prd.json schema - auto-loaded when prd.json exists"
     },
+    "code-quality": {
+      "triggers": [],
+      "context": [],
+      "file": "code-quality.md",
+      "priority": 0,
+      "description": "Learned patterns from production - loaded with auto/review/build"
+    },
     "auto": {
       "triggers": ["auto"],
       "context": ["prd.json"],
       "file": "../commands/auto.md",
+      "requires": ["code-quality"],
       "priority": 1
     },
     "brainstorm": {
