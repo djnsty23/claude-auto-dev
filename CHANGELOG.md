@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.7.0] - 2025-01-25
+
+### Added
+- **code-quality.md** - Learned patterns from production mistakes
+  - 5 type safety rules (single source of truth, complete Records, Supabase typing)
+  - 2 React patterns (no nested interactives, hooks at top level)
+  - Error handling patterns (auth errors, storage quota)
+  - Query key factory pattern
+  - Mistake logging format with categories
+
+### Changed
+- **core.md** - Enhanced prd.json schema
+  - Added `type` as required field
+  - Task scoping rules (split if >5 files, >8 criteria)
+  - Field validation rules with examples
+  - ID format: `TYPE-NAME##`
+- **auto.md** - Added learned code quality rules section
+  - Type safety checklist from recurring mistakes
+  - Enhanced decision logging format with rationale/trade-offs
+- **manifest.json** - Added `requires` field for skill dependencies
+
+### Context Optimization
+- code-quality.md auto-loads with auto/review commands
+- Prevents recurring mistake patterns before they happen
+
+---
+
 ## [3.6.0] - 2025-01-25
 
 ### Changed
