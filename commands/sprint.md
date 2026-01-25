@@ -84,40 +84,95 @@ if (p1Incomplete.length === 0) {
 }
 ```
 
-## Phase Details
+## Phase Execution (AUTOMATIC)
+
+**DO NOT just document phases - EXECUTE them using Skill tool:**
 
 ### Phase 1: Brainstorm (5%)
-- Skip if prd.json has pending tasks
-- Otherwise ask for next feature description
-- Generate 5-15 tasks with dependencies
+```
+IF prd.json has no pending tasks:
+  Skill({ skill: "brainstorm" })
+ELSE:
+  Skip - tasks already exist
+```
 
 ### Phase 2: Auto (70%)
-- Launch up to 5 parallel builder agents
-- Work through all unblocked tasks
-- Batch commits every 3 tasks
+```
+Skill({ skill: "auto" })
+// This runs until all unblocked tasks complete
+// Uses parallel builder agents (up to 5)
+```
 
 ### Phase 3: Review (10%)
-- `npm run typecheck` - fix any errors
-- Grep for `as any` - replace with proper types
-- Check interface consistency
-- Update `.claude/mistakes.md` with patterns found
+```
+Skill({ skill: "review" })
+// Runs typecheck, checks for `as any`, validates types
+// Logs issues to .claude/mistakes.md
+```
 
 ### Phase 4: Polish (5%)
-- Strip console.logs (if production build)
-- Remove unused imports
-- Run prettier/eslint fix
-- Check bundle size
+```
+Bash: npm run build -- --mode production  # Strip console.logs
+Bash: npx eslint --fix src/               # Fix lint issues
+Grep: Check bundle size warnings
+```
 
 ### Phase 5: Security (5%)
-- `npm audit` - fix vulnerabilities
-- Check for hardcoded secrets
-- Validate .env.example matches usage
-- Review RLS policies if Supabase
+```
+Bash: npm audit --audit-level=high
+Grep: Search for hardcoded secrets (password=, apiKey=, token=)
+IF Supabase project:
+  mcp__supabase__get_advisors(project_id, type: "security")
+```
 
 ### Phase 6: Docs (5%)
-- Update CHANGELOG.md with completed tasks
-- Generate/update README sections
-- Commit all changes: `feat: Sprint cycle N complete`
+```
+Update CHANGELOG.md with completed task summaries
+Git commit: "feat: Sprint cycle N complete"
+```
+
+## Phase Loop Implementation
+
+```javascript
+// Sprint controller logic
+async function runSprintCycle(cycleNumber) {
+  updateState({ current_phase: "brainstorm", cycle: cycleNumber });
+
+  // Phase 1: Brainstorm (skip if tasks exist)
+  const prd = JSON.parse(fs.readFileSync('prd.json'));
+  const pending = prd.stories.filter(s => s.passes !== true);
+  if (pending.length === 0) {
+    await invokeSkill("brainstorm");
+  }
+
+  // Phase 2: Auto (main work)
+  updateState({ current_phase: "auto" });
+  await invokeSkill("auto");
+
+  // Phase 3: Review
+  updateState({ current_phase: "review" });
+  await invokeSkill("review");
+
+  // Phase 4: Polish
+  updateState({ current_phase: "polish" });
+  await runBash("npm run build -- --mode production");
+  await runBash("npx eslint --fix src/ 2>/dev/null || true");
+
+  // Phase 5: Security
+  updateState({ current_phase: "security" });
+  await runBash("npm audit --audit-level=high 2>/dev/null || true");
+
+  // Phase 6: Docs
+  updateState({ current_phase: "docs" });
+  await updateChangelog();
+  await gitCommit(`feat: Sprint cycle ${cycleNumber} complete`);
+
+  // Check if should continue
+  if (!checkEndCondition()) {
+    return runSprintCycle(cycleNumber + 1);
+  }
+}
+```
 
 ## End of Sprint
 
