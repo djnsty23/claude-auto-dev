@@ -7,6 +7,14 @@ argument-hint: "[HOURS|MILESTONE] [--cycles N]"
 
 Run a structured development sprint with automatic phase rotation.
 
+## First: Configure Status Line
+
+Before starting sprint, ensure context monitoring is active:
+```
+/status line
+```
+This shows model, context %, and tokens in real-time. Essential for long sprints.
+
 ## Usage
 
 ```bash

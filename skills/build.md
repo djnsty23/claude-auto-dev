@@ -137,7 +137,8 @@ Continue from previous session handoff.
 3. Read recent mistakes from .claude/mistakes.md
 4. Inject context: "Avoid these recent issues: [list]"
 5. Read prd.json for current status
-6. Report: "Ready. Next task: [title]"
+6. Check if status line is configured, if not: run /status line
+7. Report: "Ready. Next task: [title]"
 ```
 
 ## "ledger" / "stats"
