@@ -1,0 +1,140 @@
+---
+name: audit
+description: Parallel swarm audit - 6 specialized agents run simultaneously
+allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
+model: sonnet
+---
+
+# Audit (Parallel Swarm)
+
+**Philosophy:** Launch 6 specialized agents in parallel, each focused on one domain. Aggregate results into actionable report with severity ratings.
+
+## Swarm Architecture
+
+```
+User says "audit"
+    │
+    ├─► Agent 1: Security Audit (Haiku) - secrets, XSS, CORS, injection
+    ├─► Agent 2: Performance Audit (Haiku) - memo, effects, re-renders
+    ├─► Agent 3: Accessibility Audit (Haiku) - WCAG, keyboard, contrast
+    ├─► Agent 4: Type Safety Audit (Haiku) - any, ts-ignore, conflicts
+    ├─► Agent 5: UX/UI Audit (Haiku) - states, tokens, feedback
+    └─► Agent 6: Test Coverage Audit (Haiku) - critical paths, gaps
+
+    [All run in parallel via Task tool with run_in_background: true]
+
+    ▼
+Wait for completion → Aggregate Results → Present Report
+```
+
+## Execution
+
+Launch all 6 agents in a single message:
+
+```typescript
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: "Security audit for [PROJECT_PATH]. Scan: exposed secrets, dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. Report: Severity, File:line, Issue, Fix." })
+
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: "Performance audit for [PROJECT_PATH]. Scan: missing React.memo on list items, useEffect without cleanup, inline objects in JSX, missing lazy loading, N+1 queries. Report: Severity, File:line, Issue, Fix." })
+
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: "Accessibility audit for [PROJECT_PATH]. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets. Report: Severity, File:line, Issue, Fix." })
+
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: "Type safety audit for [PROJECT_PATH]. Scan: 'any' usage (skip test files), @ts-ignore, type assertions without guards, conflicting type definitions, untyped API responses. Report: Severity, File:line, Issue, Fix." })
+
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: "UX/UI audit for [PROJECT_PATH]. Scan: missing loading states, missing empty states, missing error states, hardcoded colors instead of tokens, missing toast feedback. Report: Severity, File:line, Issue, Fix." })
+
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: "Test coverage audit for [PROJECT_PATH]. Scan: auth flows without tests, data mutations without tests, hooks without test files, utilities without tests. List critical gaps. Report: Severity, What needs testing, Priority." })
+```
+
+## Output Format
+
+```markdown
+## Audit Report
+
+**Scan Time:** ~3 min | **Agents:** 6 parallel | **Files Scanned:** ~250
+
+### Summary
+
+| Category | Critical | High | Medium | Low | Total |
+|----------|----------|------|--------|-----|-------|
+| Security | X | X | X | X | XX |
+| Performance | X | X | X | X | XX |
+| Accessibility | X | X | X | X | XX |
+| Type Safety | X | X | X | X | XX |
+| UX/UI | X | X | X | X | XX |
+| Test Coverage | X | X | X | X | XX |
+| **TOTAL** | **X** | **X** | **X** | **X** | **XX** |
+
+### Critical Issues (Fix Immediately)
+
+| # | Category | File:Line | Issue | Fix |
+|---|----------|-----------|-------|-----|
+| 1 | Security | src/api/auth.ts:45 | Exposed API key | Move to env var |
+| 2 | A11y | src/components/Button.tsx:12 | No keyboard handler | Add onKeyDown |
+
+### High Priority (Top 10)
+
+1. [Category] File:line - Issue
+2. ...
+
+### Ratings
+
+| Category | Score | Notes |
+|----------|-------|-------|
+| Security | 5/10 | 2 critical vulnerabilities |
+| Performance | 7/10 | Missing memoization |
+| Accessibility | 6/10 | Keyboard nav gaps |
+| Type Safety | 7/10 | 12 'any' types |
+| UX/UI | 6/10 | Missing loading states |
+| Test Coverage | 2/10 | 95% hooks untested |
+| **Overall** | **5.5/10** | |
+```
+
+## Severity Definitions
+
+| Severity | Definition | Example |
+|----------|------------|---------|
+| **Critical** | Security vulnerability or app-breaking | XSS, auth bypass, crash |
+| **High** | Significant UX degradation or major debt | 5s load, no error handling |
+| **Medium** | Noticeable but not blocking | Missing loading state |
+| **Low** | Nice to have, polish | console.log left in |
+
+## Post-Audit Actions
+
+Offer user:
+1. `"critical"` → Create stories for critical issues only
+2. `"security"` → Create stories for security category
+3. `"all"` → Create Sprint with all issues as stories
+4. `"fix X"` → Immediately fix specific issue number
+5. Specific numbers → Create stories for those issues
+
+## Token Cost
+
+- 6 agents × ~15K tokens each = ~90K tokens total
+- Time: 2-4 minutes (parallel execution)
+- Context efficient: agents run in background, results aggregated
+
+## Real Results (From Production Test)
+
+Last audit of Data Globe (247 files):
+
+| Category | Critical | High | Total |
+|----------|----------|------|-------|
+| Security | 2 | 5 | 14 |
+| Performance | 0 | 4 | 8 |
+| Accessibility | 2 | 5 | 7 |
+| Type Safety | 1 | 2 | 8 |
+| UX/UI | 3 | 4 | 10 |
+| Test Coverage | 23 | 15 | 38 |
+| **Overall Score** | **5.5/10** | - | **85 issues** |
+
+Key findings:
+- Test coverage is the biggest gap (95% hooks untested)
+- 68 components use hardcoded colors
+- Edge Functions lack input validation
+- 530 console statements in production

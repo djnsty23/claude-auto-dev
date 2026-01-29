@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
 
@@ -108,12 +108,75 @@ Claude will ask what you want to build, generate tasks, and work through them au
 ## Quick Reference
 
 ```
-brainstorm  →  Generate tasks from your description
+brainstorm  →  Proactively propose improvements (you scan, you propose)
+audit       →  Parallel swarm audit (6 specialized agents)
 auto        →  Work through all tasks automatically
 status      →  Check progress
 handoff     →  Save session for later
 resume      →  Continue from last session
 ```
+
+---
+
+## What's New in v4.0
+
+### Hybrid Task System
+Two-layer architecture for optimal context usage:
+
+| Layer | Tool | Purpose |
+|-------|------|---------|
+| **Long-term** | prd.json | Sprint history, verification notes |
+| **Short-term** | Native Tasks | Current session work |
+
+**Result:** 93% context cost reduction (75K → 5K tokens)
+
+### Proactive Brainstorm
+**You propose, user doesn't ask.** Scans codebase in parallel and presents concrete improvement scenarios:
+
+```
+Brainstorm Complete
+═══════════════════
+Findings:
+- 530 console.log statements
+- 68 hardcoded colors
+- 12 'any' types
+
+Top Recommendations:
+1. Console Cleanup - High impact, quick win
+2. Token Migration - Enables dark mode
+3. Type Hardening - Prevents runtime errors
+
+Say a number (1-3), "all", or describe what interests you.
+```
+
+### Parallel Swarm Audit
+6 specialized agents run simultaneously:
+
+```
+audit
+    ├─► Security (secrets, XSS, injection)
+    ├─► Performance (memo, effects, queries)
+    ├─► Accessibility (WCAG, keyboard, contrast)
+    ├─► Type Safety (any, ts-ignore, conflicts)
+    ├─► UX/UI (states, tokens, feedback)
+    └─► Test Coverage (critical paths, gaps)
+
+→ Aggregated report with severity ratings and scores
+```
+
+### Resolution Learning
+Prevent repeat mistakes by documenting HOW issues were fixed:
+
+```json
+{
+  "id": "S26-001",
+  "title": "Fix tooltip clipping",
+  "passes": true,
+  "resolution": "overflow: Added max-h-[calc(100vh-200px)]"
+}
+```
+
+Pattern format: `[CATEGORY]: [SPECIFIC FIX]`
 
 ---
 
@@ -170,7 +233,8 @@ That's the full development cycle. No scripts, no config files to edit.
 
 | Command | What It Does | When To Use |
 |---------|--------------|-------------|
-| `brainstorm` | Asks what you want to build, generates 3-10 tasks, adds to prd.json | Starting a new feature or project |
+| `brainstorm` | Proactively scans codebase, proposes improvements with impact/effort | Finding what to work on next |
+| `audit` | Runs 6 parallel specialized agents, produces severity-rated report | Comprehensive quality check |
 | `auto` | Loops through ALL pending tasks automatically until done | You want Claude to work autonomously |
 | `continue` | Completes ONE task, then stops and waits | You want control over each task |
 | `status` | Shows "X/Y complete. Next: [task title]" | Check progress anytime |

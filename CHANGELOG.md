@@ -1,5 +1,42 @@
 # Changelog
 
+## [4.0.0] - 2026-01-29
+
+### Added
+- **Hybrid Task System v2.0** - Two-layer architecture
+  - prd.json for long-term memory (sprint history, verification notes)
+  - Native Tasks for short-term memory (current session work)
+  - 93% context cost reduction (75K → 5K tokens for sprint work)
+- **Resolution Learning** - Prevent repeat mistakes
+  - `resolution` field documents HOW issues were fixed
+  - Pattern format: `[PATTERN]: [SPECIFIC FIX]`
+  - Auto-inject warnings on similar errors
+- **Parallel Swarm Audit** - 6 specialized agents run simultaneously
+  - Security (secrets, XSS, CORS, injection)
+  - Performance (memo, effects, re-renders)
+  - Accessibility (WCAG, keyboard, contrast)
+  - Type Safety (any, ts-ignore, conflicts)
+  - UX/UI (states, tokens, feedback)
+  - Test Coverage (critical paths, gaps)
+  - Produces severity-rated report with scores
+- **Proactive Brainstorm** - YOU propose, user doesn't ask
+  - Parallel scans for TODOs, console.logs, hardcoded colors, type issues
+  - Presents concrete improvement scenarios with impact/effort
+  - Never asks "what do you want?" - proposes based on findings
+
+### Changed
+- **brainstorm/SKILL.md** - Rewritten for proactive proposals
+- **audit/SKILL.md** - Rewritten for parallel swarm architecture
+- **New core/SKILL.md** - Hybrid task system documentation
+
+### Philosophy
+- Context is expensive - minimize prd.json reads
+- Learn from mistakes - document resolutions
+- Parallel execution - 6 agents faster than 1 comprehensive scan
+- Proactive assistance - propose improvements without being asked
+
+---
+
 ## [3.9.0] - 2025-01-25
 
 ### Added
