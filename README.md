@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
 
@@ -108,11 +108,12 @@ Claude will ask what you want to build, generate tasks, and work through them au
 ## Quick Reference
 
 ```
-brainstorm  →  Generate tasks from your description
-auto        →  Work through all tasks automatically
-status      →  Check progress
-handoff     →  Save session for later
-resume      →  Continue from last session
+brainstorm  →  Proactively analyze codebase and propose improvements
+auto        →  Execute ALL pending tasks (DOES NOT STOP until done)
+continue    →  Work on one task, then ask what's next
+status      →  Quick progress check (reads prd.json header only)
+audit       →  Launch 6 parallel quality audits
+stop        →  Sync Tasks back to prd.json, safe to close
 ```
 
 ---
@@ -170,11 +171,12 @@ That's the full development cycle. No scripts, no config files to edit.
 
 | Command | What It Does | When To Use |
 |---------|--------------|-------------|
-| `brainstorm` | Asks what you want to build, generates 3-10 tasks, adds to prd.json | Starting a new feature or project |
-| `auto` | Loops through ALL pending tasks automatically until done | You want Claude to work autonomously |
+| `brainstorm` | Scans codebase, proposes 3-5 improvement scenarios | Find what needs work |
+| `auto` | **Executes ALL tasks without stopping** - no confirmations, self-recovers from errors | You want Claude to work autonomously |
 | `continue` | Completes ONE task, then stops and waits | You want control over each task |
-| `status` | Shows "X/Y complete. Next: [task title]" | Check progress anytime |
-| `stop` | Saves session to ledger.json, safe to close terminal | Done for the day |
+| `status` | Shows progress (reads prd.json header only - ~1K tokens) | Check progress anytime |
+| `audit` | Launches 6 parallel agents (Security, Performance, A11y, Types, UX, Tests) | Full quality audit |
+| `stop` | Syncs native Tasks back to prd.json, safe to close | Done for the day |
 | `reset` | Clears all "claimed" task states | Task got stuck or crashed |
 
 ### Session Management (v2.5)
@@ -572,6 +574,14 @@ Say `handoff` to save session, then start fresh with `resume`.
 ---
 
 ## Changelog
+
+### [4.0.0] - 2026-01-30
+- **Hybrid Task Management v2.0**: Two-layer system with prd.json for long-term memory and native Tasks for short-term work
+- **Resolution Learning System**: Documents HOW issues were fixed, not just THAT they were fixed
+- **Autonomous Mode Improvements**: Explicit "DO NOT STOP" instructions - Claude keeps working until all tasks complete
+- **Brainstorm Command**: Proactively analyze codebase and propose improvement scenarios
+- **Audit Swarm**: 6 parallel specialized agents (Security, Performance, A11y, Type Safety, UX, Tests)
+- **Context Optimization**: 93% reduction in token usage for sprint work (75K → 5K)
 
 ### [3.2.0] - 2026-01-24
 - **A/B Testing Framework**: `/ab-test` command for comparing approaches at milestone starts

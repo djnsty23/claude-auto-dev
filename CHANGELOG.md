@@ -1,5 +1,45 @@
 # Changelog
 
+## [4.0.0] - 2026-01-30
+
+### Added
+- **Hybrid Task Management v2.0** - Two-layer architecture
+  - prd.json = Long-term memory (sprint history, verification notes)
+  - Native Tasks = Short-term memory (current session work)
+  - 93% reduction in context cost (75K → 5K tokens for sprint work)
+- **Resolution Learning System** - Documents HOW issues were fixed
+  - `resolution` field in prd.json schema
+  - Pattern injection on similar errors (e.g., "Similar issue fixed in S25-003")
+  - Categories: null-check, missing-import, type-mismatch, overflow, etc.
+- **Brainstorm Command** - Proactive improvement proposals
+  - Scans for TODOs, console.logs, deprecated patterns
+  - Presents 3-5 scenarios with Impact/Effort/Files
+  - Offers to create stories for selected ideas
+- **Audit Swarm** - 6 parallel specialized agents
+  - Security (secrets, XSS, injection, CORS)
+  - Performance (memo, effects, re-renders, N+1)
+  - Accessibility (WCAG, keyboard, contrast, aria)
+  - Type Safety (any usage, ts-ignore, type conflicts)
+  - UX/UI (loading states, empty states, error handling)
+  - Test Coverage (critical paths, untested hooks)
+  - Results aggregated into severity-rated report
+
+### Changed
+- **Auto mode behavior** - Explicit "DO NOT STOP" instructions
+  - No pauses for user confirmation between tasks
+  - No "should I continue?" questions - just continues
+  - Only stops for actual errors/blockers or when ALL tasks complete
+  - Self-recovers from build failures
+- **core.md** - Updated schema with resolution learning
+- **build.md** - Complete rewrite with Hybrid Task Management
+
+### Philosophy
+- "Context is expensive, learn once, apply forever"
+- Work through ALL tasks without asking unless truly blocked
+- Document fixes so they're never repeated
+
+---
+
 ## [3.9.0] - 2025-01-25
 
 ### Added

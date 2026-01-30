@@ -1,84 +1,160 @@
 ---
 name: Core Reference
-description: Canonical prd.json schema and file structure. Loaded once per session.
+description: Hybrid task system - prd.json schema + native Tasks integration + resolution learning
 ---
 
-# prd.json Schema
+# Hybrid Task System (v2.0)
 
-## Required Fields
+## Two-Layer Architecture
+
+| Layer | Tool | Purpose | Persistence |
+|-------|------|---------|-------------|
+| **Long-term** | prd.json | Sprint history, verification notes, roadmap | Git-tracked, survives sessions |
+| **Short-term** | Native Tasks | Current work, real-time progress | Session only |
+
+## When to Use Each
+
+### Use Native Tasks (TaskCreate/TaskUpdate)
+- Active work in current session
+- Showing real-time progress to user
+- Quick fixes not worth adding to prd.json
+- Parallel task tracking during implementation
+
+### Use prd.json
+- Sprint planning and history
+- Verification notes (why something passed/failed)
+- Cross-session persistence
+- Audit trail for completed work
+- **Resolution learning** (how issues were fixed)
+
+## prd.json Story Schema
+
 ```json
 {
-  "id": "TYPE-NAME01",
-  "title": "Verb-first action (Add X, Fix Y, Implement Z)",
-  "description": "What and why - include business context",
+  "id": "S26-001",
+  "title": "Fix AI chat tooltip clipping",
   "priority": 1,
-  "type": "feature|bugfix|ux|ai|integration|performance|tech-debt",
   "passes": null,
-  "verified": null,
-  "blockedBy": [],
-  "files": ["src/file.ts"],
-  "acceptanceCriteria": ["Specific, testable criterion"]
+  "type": "fix",
+  "category": "components",
+  "notes": "",
+  "resolution": ""
 }
 ```
 
-## Field Rules
+### Field Definitions
 
-| Field | Rule | Example |
-|-------|------|---------|
-| `id` | TYPE-NAME## format | `AI-CHAT01`, `BUG-AUTH02` |
-| `title` | Start with verb | "Add mock mode" not "Mock mode" |
-| `files` | 2-4 files optimal | >5 = split task |
-| `acceptanceCriteria` | 5-7 items optimal | <3 = too vague, >8 = too broad |
-| `blockedBy` | ALWAYS populate | Empty array if none |
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `id` | Unique identifier | `S26-001` |
+| `title` | What to do (verb-first) | `Fix tooltip overflow` |
+| `priority` | 0=critical, 1=high, 2=medium, 3=low | `1` |
+| `passes` | Status (see below) | `true` |
+| `type` | fix, feature, refactor, qa, perf | `fix` |
+| `category` | components, hooks, pages, infra | `components` |
+| `notes` | Verification details, why it passed/failed | `VERIFIED: uses clamp()` |
+| `resolution` | **HOW it was fixed** (learning) | `Added bottom overflow check in calculatePosition()` |
 
-## Status Values
-- `passes: null` = pending (not started)
-- `passes: true` = code complete (but may not be verified)
-- `passes: false` = failed (include error in description)
+### Status Values
+- `passes: null` = pending
+- `passes: true` = complete
+- `passes: false` = failed
+- `passes: "deferred"` = blocked/skipped
 
-## Verification (NEW)
-- `verified: null` = not yet tested
-- `verified: "build"` = npm run build passes
-- `verified: "browser"` = manually tested in browser
-- `verified: "test"` = unit/integration tests pass
-- `verified: "e2e"` = end-to-end test passes
+## Resolution Learning System
 
-**A task is truly DONE when:**
+### Purpose
+Prevent repeat mistakes by documenting HOW issues were fixed, not just THAT they were fixed.
+
+### When to Add Resolution
+Add `resolution` field when completing a story that involved:
+- Bug fix (what caused it, what fixed it)
+- Build error (what was wrong, exact fix)
+- Type error (pattern that caused it)
+- Performance fix (before/after, technique used)
+
+### Resolution Format
 ```
-passes: true AND verified: "browser"|"test"|"e2e"
+[PATTERN]: [SPECIFIC FIX]
 ```
 
-**Code complete but unverified:**
+Examples:
+- `null-check: Added optional chaining at line 45`
+- `missing-import: Added import for DateRange from types/reports`
+- `type-mismatch: Changed Record<string, T> to Partial<Record<K, T>>`
+- `overflow: Added max-h-[calc(100vh-200px)] and overflow-auto`
+- `n+1-query: Batched property fetches using Promise.all`
+
+### Injection on Similar Errors
+
+When a build fails, check `.claude/mistakes.md` and prd.json resolutions for similar patterns:
+
 ```
-passes: true AND verified: null|"build"
+1. Classify error: null-check, missing-import, type-mismatch, etc.
+2. Search resolutions: grep prd.json for matching pattern
+3. Inject warning: "Similar issue fixed in S25-003: [resolution]"
 ```
 
-## Task Scoping Rules
+## Workflow
 
-**Split if:**
-- >5 files affected
-- >8 acceptance criteria
-- Multiple unrelated concerns
+### Starting Session
+```
+1. Optionally read prd.json header for context
+2. If user says "auto": grep pending stories, create native Tasks
+3. Work via native Tasks (faster, no file I/O)
+```
 
-**Combine if:**
-- <3 acceptance criteria
-- Single file, trivial change
+### During Work
+```
+1. TaskUpdate status: "in_progress" when starting
+2. TaskUpdate status: "completed" when done
+3. Batch update prd.json at end (not per-task)
+```
+
+### Completing a Story
+```
+1. Update passes: true
+2. Add notes: verification method
+3. Add resolution: how it was fixed (if applicable)
+```
+
+### Ending Session
+```
+1. TaskList to see completed work
+2. Single prd.json edit to update all completed stories
+3. Include resolution for bug fixes
+```
+
+## Context Optimization
+
+| Action | Old Approach | Hybrid Approach |
+|--------|--------------|-----------------|
+| Check status | Read 293KB file | Read 30 lines |
+| Start task | Read full file | Grep specific story |
+| Track progress | Edit file per task | Native TaskUpdate |
+| Complete work | Edit file | Batch edit at end |
+| Learn from past | None | Search resolutions |
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| prd.json | Active tasks |
-| progress.txt | Append-only log |
-| .claude/mistakes.md | Error patterns (categorized) |
-| .claude/decisions.md | Autonomous decisions with rationale |
-| handoff-*.md | Session exports |
-| ledger.json | Analytics (gitignored) |
+| File | Purpose | Read Frequency |
+|------|---------|----------------|
+| prd.json | Sprint history + resolutions | Header: often, Full: rarely |
+| progress.txt | Append-only log | Write only |
+| .claude/mistakes.md | Error patterns (categorized) | On build fail |
+| Native Tasks | Current work | Always (in memory) |
 
-# Model Routing
+## Mistake Categories
 
-| Task | Model |
-|------|-------|
-| auto, brainstorm, fix | Opus |
-| status, clean, archive | Haiku |
-| test (browser) | Haiku |
+When logging to mistakes.md or resolution field:
+
+| Category | Pattern | Example |
+|----------|---------|---------|
+| `null-check` | Accessing potentially undefined | `obj?.prop` |
+| `missing-import` | Forgot to import type/function | `import { X } from 'y'` |
+| `type-mismatch` | Wrong type assignment | `as unknown as Type` |
+| `missing-key` | Record missing union member | Added missing key to Record |
+| `hook-rules` | Hook called conditionally/in callback | Moved hook to component level |
+| `overflow` | Content clips viewport | Added overflow-auto + max-h |
+| `z-index` | Element behind another | Increased z-index |
+| `async-race` | Race condition in async code | Added AbortController |
