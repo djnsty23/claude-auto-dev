@@ -1,3 +1,4 @@
 tmpclaude-*
 *.log
 .DS_Store
+prd.json

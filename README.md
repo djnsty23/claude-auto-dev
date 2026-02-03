@@ -445,16 +445,42 @@ Each session claims different tasks. No conflicts.
 
 ## Architecture
 
+### How Skills vs Plugins Work
+
+**Important distinction:**
+
+| System | Location | Status | Invocation |
+|--------|----------|--------|------------|
+| **Skills** | `~/.claude/skills/` | **Working now** | Say trigger word (e.g., "brainstorm") |
+| **Plugins** | `~/.claude/plugins/local/` | **Requires marketplace approval** | `/command` format |
+
+**Skills system (active):**
+1. `manifest.json` defines triggers: `"brainstorm"` → `brainstorm/SKILL.md`
+2. When you say a trigger word, Claude loads the skill into context
+3. Skill markdown contains instructions Claude follows
+4. No approval needed - works immediately after install
+
+**Plugin system (future):**
+1. Plugins use `.claude-plugin/plugin.json` manifest
+2. `/command` invocation requires Anthropic marketplace approval
+3. Currently dead code - kept for future marketplace submission
+4. Same commands available as skills (just different invocation)
+
+**Why both exist:**
+- Skills work now for personal use
+- Plugins will work when marketplace opens for distribution
+
 ### Files in ~/.claude/ (Global - installed once)
 
 ```
 ~/.claude/
-├── skills/              # Command instructions
-│   ├── build.md         # Core loop (auto, brainstorm, status, etc.)
-│   ├── ship.md          # Deployment
-│   ├── test.md          # Browser testing
-│   ├── fix.md           # Debugging
-│   └── manifest.json    # Skill index
+├── skills/              # WORKING - Command instructions
+│   ├── manifest.json    # Trigger → skill mapping
+│   ├── auto/SKILL.md    # Autonomous execution
+│   ├── brainstorm/SKILL.md  # Codebase analysis + ideation
+│   ├── status/SKILL.md  # Progress check
+│   ├── audit/SKILL.md   # Parallel quality audit
+│   └── ...              # Other skills
 ├── hooks/               # Auto-run scripts
 │   ├── session-start.sh # Injects task progress
 │   ├── pre-tool-filter.sh # Blocks dangerous commands
@@ -463,7 +489,7 @@ Each session claims different tasks. No conflicts.
 ├── rules/               # Always-applied rules
 │   ├── security.md
 │   └── design-system.md
-├── plugins/local/claude-auto-dev/  # Plugin for slash commands
+├── plugins/local/claude-auto-dev/  # FUTURE - /commands (needs marketplace)
 ├── CLAUDE.md            # Global user instructions
 ├── settings.json        # Hooks configuration
 └── mcp.json            # MCP server config

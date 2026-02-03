@@ -1,0 +1,164 @@
+{
+  "version": "4.3.0",
+  "description": "Self-bootstrapping auto mode with Ralph Loop integration",
+  "skills": {
+    "core": {
+      "triggers": [],
+      "context": ["prd.json"],
+      "file": "core/SKILL.md",
+      "priority": 0,
+      "description": "prd.json schema - auto-loaded when prd.json exists"
+    },
+    "code-quality": {
+      "triggers": [],
+      "context": [],
+      "file": "code-quality.md",
+      "priority": 0,
+      "description": "Learned patterns from production - loaded with auto/review/build"
+    },
+    "auto": {
+      "triggers": ["auto"],
+      "context": ["prd.json"],
+      "file": "auto/SKILL.md",
+      "requires": ["code-quality"],
+      "priority": 1
+    },
+    "brainstorm": {
+      "triggers": ["brainstorm", "generate"],
+      "context": [],
+      "file": "brainstorm/SKILL.md",
+      "priority": 1
+    },
+    "status": {
+      "triggers": ["status"],
+      "context": ["prd.json"],
+      "file": "status/SKILL.md",
+      "priority": 2
+    },
+    "sprint": {
+      "triggers": ["sprint"],
+      "context": ["prd.json"],
+      "file": "sprint/SKILL.md",
+      "priority": 1
+    },
+    "review": {
+      "triggers": ["review"],
+      "context": [],
+      "file": "review/SKILL.md",
+      "priority": 1
+    },
+    "clean": {
+      "triggers": ["clean"],
+      "context": [],
+      "file": "clean/SKILL.md",
+      "priority": 2
+    },
+    "test": {
+      "triggers": ["test", "verify", "e2e", "browser"],
+      "context": ["*.test.*", "*.spec.*"],
+      "file": "test/SKILL.md",
+      "priority": 2
+    },
+    "ship": {
+      "triggers": ["ship", "deploy"],
+      "context": ["vercel.json"],
+      "file": "ship.md",
+      "priority": 3
+    },
+    "fix": {
+      "triggers": ["fix", "debug", "bug"],
+      "context": [],
+      "file": "fix.md",
+      "priority": 2
+    },
+    "setup-project": {
+      "triggers": ["setup", "init", "new project"],
+      "context": [],
+      "file": "setup-project.md",
+      "priority": 3
+    },
+    "supabase": {
+      "triggers": ["schema", "database", "migration", "supabase"],
+      "context": ["supabase/"],
+      "file": "supabase/SKILL.md",
+      "priority": 3
+    },
+    "audit": {
+      "triggers": ["audit"],
+      "context": [],
+      "file": "audit/SKILL.md",
+      "priority": 1
+    },
+    "browser-test": {
+      "triggers": ["browser-test"],
+      "context": [],
+      "file": "browser-test/SKILL.md",
+      "priority": 2
+    },
+    "checkpoint": {
+      "triggers": ["checkpoint"],
+      "context": [],
+      "file": "checkpoint/SKILL.md",
+      "priority": 2
+    },
+    "deploy": {
+      "triggers": ["deploy"],
+      "context": ["vercel.json"],
+      "file": "deploy/SKILL.md",
+      "priority": 3
+    },
+    "preserve-ui": {
+      "triggers": [],
+      "context": [],
+      "file": "preserve-ui/SKILL.md",
+      "priority": 2,
+      "description": "Load when modifying UI components"
+    },
+    "quality": {
+      "triggers": [],
+      "context": [],
+      "file": "quality/SKILL.md",
+      "priority": 0,
+      "description": "Code quality principles - guides judgment"
+    },
+    "react-patterns": {
+      "triggers": [],
+      "context": [],
+      "file": "react-patterns/SKILL.md",
+      "priority": 2,
+      "description": "Load for React work"
+    },
+    "self-review": {
+      "triggers": [],
+      "context": [],
+      "file": "self-review/SKILL.md",
+      "priority": 2,
+      "description": "Load for review tasks"
+    },
+    "verify": {
+      "triggers": [],
+      "context": [],
+      "file": "verify/SKILL.md",
+      "priority": 2,
+      "description": "Load for verification"
+    },
+    "workflow": {
+      "triggers": [],
+      "context": [],
+      "file": "workflow/SKILL.md",
+      "priority": 2,
+      "description": "Reference only"
+    },
+    "setup": {
+      "triggers": ["setup"],
+      "context": [],
+      "file": "setup/SKILL.md",
+      "priority": 3
+    }
+  },
+  "defaults": {
+    "withPrdJson": ["core"],
+    "withoutPrdJson": ["setup-project"],
+    "always": []
+  }
+}

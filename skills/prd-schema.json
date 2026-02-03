@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://claude-auto-dev/prd.schema.json",
+  "title": "PRD Task Schema",
+  "description": "Schema for prd.json task tracking file",
+  "type": "object",
+  "required": ["projectName", "stories"],
+  "properties": {
+    "projectName": {
+      "type": "string",
+      "description": "Name of the project"
+    },
+    "lastUpdated": {
+      "type": "string",
+      "format": "date",
+      "description": "ISO date of last update"
+    },
+    "roadmapPhase": {
+      "type": "string",
+      "description": "Current development phase"
+    },
+    "auditScore": {
+      "type": "string",
+      "description": "Latest audit score (e.g., '8/10')"
+    },
+    "sprint": {
+      "type": "string",
+      "description": "Current sprint name"
+    },
+    "totalStories": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completedStories": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "deferredStories": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pendingStories": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "recentChanges": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Log of recent changes"
+    },
+    "stories": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/story"
+      },
+      "description": "Map of story ID to story object"
+    },
+    "categories": {
+      "type": "object",
+      "description": "Category definitions"
+    }
+  },
+  "$defs": {
+    "story": {
+      "type": "object",
+      "required": ["id", "title", "priority", "passes"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^S[0-9]+-[0-9]+$",
+          "description": "Story ID in format S##-###"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Brief description of the task"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4,
+          "description": "0=critical, 1=high, 2=medium, 3=low, 4=backlog"
+        },
+        "passes": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "null" },
+            { "const": "deferred" },
+            { "const": "DEFERRED" }
+          ],
+          "description": "null=pending, true=done, false=failed, 'deferred'=postponed"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["fix", "feature", "refactor", "qa", "perf", "docs", "chore", "test"],
+          "description": "Type of work"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category tag (e.g., 'components', 'auth', 'api')"
+        },
+        "sprint": {
+          "type": "string",
+          "description": "Sprint this story belongs to"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional context or instructions"
+        },
+        "resolution": {
+          "type": "string",
+          "description": "HOW the issue was fixed (for learning)"
+        },
+        "blockedBy": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "IDs of stories that block this one"
+        },
+        "blocks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "IDs of stories this one blocks"
+        },
+        "claimedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When work started"
+        }
+      }
+    }
+  }
+}
