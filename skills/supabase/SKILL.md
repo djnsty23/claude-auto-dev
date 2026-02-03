@@ -76,11 +76,16 @@ SUPABASE_DB_PASSWORD=xxx
 
 ## Direct psql (Most Reliable)
 
-Bypasses all auth issues:
+**Use Pooler URL (IPv4 compatible), not direct connection:**
 ```bash
-# Get connection string from Supabase Dashboard → Settings → Database
-psql "postgresql://postgres:PASSWORD@db.PROJECT_REF.supabase.co:5432/postgres" -c "SELECT 1"
+# ❌ Direct - IPv6 only, won't work on most networks
+# psql "postgresql://postgres:PASS@db.REF.supabase.co:5432/postgres"
+
+# ✅ Pooler - IPv4 compatible (use this)
+psql "postgresql://postgres.REF:PASS@aws-0-REGION.pooler.supabase.com:6543/postgres" -c "SELECT 1"
 ```
+
+Get pooler URL: Dashboard → Connect → Connection String → Session Pooler
 
 ## Skip MCP
 
