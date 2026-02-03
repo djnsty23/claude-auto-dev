@@ -2,6 +2,7 @@
 name: preserve-ui
 description: Preserve existing UI structure when modifying components - auto-applied
 user-invocable: false
+model: sonnet
 ---
 
 # UI Preservation Protocol

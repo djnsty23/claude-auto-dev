@@ -2,6 +2,7 @@
 name: self-review
 description: Adaptive verification - scale effort to task complexity
 user-invocable: false
+model: sonnet
 ---
 
 # Self-Review

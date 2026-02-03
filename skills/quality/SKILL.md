@@ -2,6 +2,7 @@
 name: quality
 description: Quality principles for production code - guides judgment, doesn't limit capability
 user-invocable: false
+model: sonnet
 ---
 
 # Quality Principles
