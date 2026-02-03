@@ -97,23 +97,46 @@ agent-browser snapshot -i  # Verify error UI
 
 ## Auto-Start Dev Server
 
-If dev server not running, start it in background:
+If dev server not running, start it on an available port:
 
 ```bash
-# Check if running
-curl -s http://localhost:3000 > /dev/null 2>&1 || curl -s http://localhost:8080 > /dev/null 2>&1
+# Find first available port (3000, 3001, 3002...)
+find_port() {
+  for port in 3000 3001 3002 3003; do
+    if ! curl -s http://localhost:$port > /dev/null 2>&1; then
+      echo $port
+      return
+    fi
+  done
+  echo 3000  # fallback
+}
 
-# If not, start in background (no context cost)
-Bash({ command: "npm run dev", run_in_background: true })
+PORT=$(find_port)
+echo "Starting on port $PORT"
+
+# Start in background (no context cost)
+Bash({ command: "npm run dev -- -p $PORT", run_in_background: true })
 
 # Wait for startup
 sleep 5
 
-# Then run browser tests
-agent-browser open http://localhost:3000
+# Use detected port for all tests
+export TEST_BASE_URL="http://localhost:$PORT"
+agent-browser open http://localhost:$PORT
+```
+
+**PowerShell version:**
+```powershell
+$port = 3000
+while ((Test-NetConnection -ComputerName localhost -Port $port -WarningAction SilentlyContinue).TcpTestSucceeded) {
+  $port++
+}
+Write-Host "Starting on port $port"
 ```
 
 Background servers don't fill context - output goes to file, only read if needed.
+
+**Note:** OAuth flows may fail on non-3000 ports unless redirect URIs are registered. For testing auth, ensure port 3000 is free or use test accounts that bypass OAuth.
 
 ## Create Stories from Failures
 
