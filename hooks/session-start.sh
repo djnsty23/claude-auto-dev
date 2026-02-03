@@ -2,9 +2,16 @@
 # Session start - quality-first mode
 
 echo "[Auto-Dev v4.3] Quality-First Mode"
-echo "  - Read before write | Match existing patterns | Verify all states"
 
-# Check for checkpoint (context restore after /clear)
+# Auto-source .env.local (project-isolated credentials)
+if [ -f ".env.local" ]; then
+    set -a
+    source .env.local 2>/dev/null
+    set +a
+    echo "[Env] .env.local loaded"
+fi
+
+# Check for checkpoint (context restore after /compact)
 if [ -f ".claude/checkpoint.md" ]; then
     echo ""
     echo "[Checkpoint Found] Restoring context..."
@@ -32,6 +39,6 @@ fi
 if [ -d "src/components/ui" ]; then
     ui_count=$(find src/components/ui -name "*.tsx" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$ui_count" -gt 0 ]; then
-        echo "[UI] $ui_count components in ui/ - use existing before creating new"
+        echo "[UI] $ui_count components in ui/"
     fi
 fi

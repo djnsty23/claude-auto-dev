@@ -1,9 +1,22 @@
 $ErrorActionPreference = "SilentlyContinue"
 
 Write-Host "[Auto-Dev v4.3] Quality-First Mode"
-Write-Host "  - Read before write | Match existing patterns | Verify all states"
 
-# Check for checkpoint (context restore after /clear)
+# Auto-source .env.local (project-isolated credentials)
+if (Test-Path ".env.local") {
+    Get-Content ".env.local" | ForEach-Object {
+        if ($_ -match "^([^#=]+)=(.*)$") {
+            $name = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            if ($name -and $value) {
+                [Environment]::SetEnvironmentVariable($name, $value, "Process")
+            }
+        }
+    }
+    Write-Host "[Env] .env.local loaded"
+}
+
+# Check for checkpoint (context restore after /compact)
 if (Test-Path ".claude/checkpoint.md") {
     Write-Host ""
     Write-Host "[Checkpoint Found] Restoring context..."
@@ -34,5 +47,5 @@ if ($gitStatus) {
 # Check for existing UI components (helps preserve-ui skill)
 if (Test-Path "src/components/ui") {
     $uiComponents = (Get-ChildItem "src/components/ui" -Filter "*.tsx" | Measure-Object).Count
-    Write-Host "[UI] $uiComponents components in ui/ - use existing before creating new"
+    Write-Host "[UI] $uiComponents components in ui/"
 }
