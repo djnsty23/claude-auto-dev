@@ -1,13 +1,15 @@
 ---
 name: brainstorm
-description: Proactively propose improvements without asking - you scan, you propose
+description: Scan codebase, propose improvements, auto-create stories
+aliases: ["what next", "whatnext", "what-next"]
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
 model: sonnet
+user-invocable: true
 ---
 
-# Brainstorm (Proactive Mode)
+# Brainstorm / What Next
 
-**Philosophy:** YOU propose ideas, user doesn't ask. Scan the codebase proactively and present concrete improvement scenarios.
+**Philosophy:** User doesn't know what to focus on. YOU scan, propose, and create stories.
 
 ## Why Proactive?
 
@@ -78,24 +80,37 @@ Don't just list problems. Present **concrete improvement scenarios** with impact
 **Files:** src/components/ReportBuilder.tsx (847 lines)
 ```
 
-### Step 4: Offer Story Creation
+### Step 4: Auto-Create Stories
 
+After presenting scenarios, **immediately create stories** for the top recommendation:
+
+```typescript
+// Auto-create stories for #1 recommendation
+TaskCreate({
+  subject: "Remove console.log from src/hooks/",
+  description: "42 console.log statements in hooks. Remove all.",
+  metadata: { type: "qa", priority: 2, category: "cleanup" }
+})
 ```
-Which would you like to tackle?
-1. "cleanup" → Create stories for console.log removal
-2. "tokens" → Create stories for color token migration
-3. "types" → Create stories for type safety
-4. "split" → Create stories for code splitting
-5. Number(s) → Create stories for specific items
+
+Then ask:
+```
+Created 3 stories for Console Cleanup (top recommendation).
+
+Want stories for other areas?
+- "tokens" → Color token migration (68 items)
+- "types" → Type safety fixes (12 items)
+- "all" → Everything
+- Or say "auto" to start working
 ```
 
 ## Rules
 
-- **Never ask "what do you want?"** - You propose based on scan results
+- **Auto-create stories for top recommendation** - Don't just list issues
 - Present 3-5 scenarios, not 50 raw issues
 - Include impact AND effort for each scenario
-- Offer to create stories for selected improvements
 - Use parallel scans to minimize wait time
+- If user says "all", create stories for everything
 
 ## Token Cost
 

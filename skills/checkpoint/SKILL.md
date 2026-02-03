@@ -1,9 +1,9 @@
 ---
 name: checkpoint
-description: Save context state before /clear - 50-70% token savings
+description: Save context state - auto-triggered every 5 tasks
 allowed-tools: Read, Write, TaskList, Grep
 model: sonnet
-user-invocable: true
+user-invocable: false
 ---
 
 # Context Checkpoint

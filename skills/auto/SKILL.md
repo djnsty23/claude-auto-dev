@@ -3,6 +3,7 @@ name: auto
 description: Autonomous task execution - works through all tasks without stopping
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList
 model: sonnet
+user-invocable: true
 ---
 
 # Auto Mode

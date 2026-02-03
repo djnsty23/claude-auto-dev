@@ -3,6 +3,7 @@ name: status
 description: Show sprint progress
 allowed-tools: Read, TaskList
 model: haiku
+user-invocable: true
 ---
 
 # Status

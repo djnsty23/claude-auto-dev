@@ -1,13 +1,14 @@
 ---
 name: audit
-description: Parallel swarm audit - 6 specialized agents run simultaneously
+description: Rate each aspect of app, auto-create stories from findings
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
 model: sonnet
+user-invocable: true
 ---
 
-# Audit (Parallel Swarm)
+# Audit
 
-**Philosophy:** Launch 6 specialized agents in parallel, each focused on one domain. Aggregate results into actionable report with severity ratings.
+**Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
 
 ## Swarm Architecture
 
@@ -104,14 +105,42 @@ Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
 | **Medium** | Noticeable but not blocking | Missing loading state |
 | **Low** | Nice to have, polish | console.log left in |
 
-## Post-Audit Actions
+## Auto-Create Stories
 
-Offer user:
-1. `"critical"` → Create stories for critical issues only
-2. `"security"` → Create stories for security category
-3. `"all"` → Create Sprint with all issues as stories
-4. `"fix X"` → Immediately fix specific issue number
-5. Specific numbers → Create stories for those issues
+After rating, **automatically create stories** for Critical + High issues:
+
+```typescript
+// Auto-create for critical issues
+TaskCreate({
+  subject: "Fix XSS vulnerability in user input",
+  description: "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
+  metadata: { type: "security", priority: 0, category: "security" }
+})
+
+// Create for high-priority issues
+TaskCreate({
+  subject: "Add keyboard handler to Button",
+  description: "src/components/Button.tsx:12 - onClick without onKeyDown",
+  metadata: { type: "fix", priority: 1, category: "a11y" }
+})
+```
+
+Then report:
+```
+Created [X] stories from audit findings.
+- [N] Critical (priority 0)
+- [N] High (priority 1)
+
+Medium/Low issues logged but not queued.
+Say "auto" to start fixing, or "audit [feature]" to audit specific area.
+```
+
+## Focused Audit
+
+User can audit specific features:
+- `audit auth` → Only scan auth-related files
+- `audit dashboard` → Only scan dashboard components
+- `audit latest` → Audit files changed in last 3 commits
 
 ## Token Cost
 
