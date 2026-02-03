@@ -116,6 +116,26 @@ On failure:
 - Or after major milestones
 - Use conventional commits: `feat|fix|refactor`
 
+## Auto-Checkpoint (Token Protection)
+
+**After every 5 completed tasks**, automatically save checkpoint:
+
+```
+if (completedThisSession % 5 === 0) {
+  // Save checkpoint to .claude/checkpoint.md
+  Write checkpoint with:
+  - Current sprint/phase
+  - Tasks completed this session
+  - Tasks remaining
+  - Key decisions made
+  - Files modified
+
+  Output: "💾 Checkpoint saved (5 tasks). Safe to /clear if needed."
+}
+```
+
+This protects long sessions from context loss. User can `/clear` after checkpoint to reclaim ~50% tokens.
+
 ## Completion
 
 When `stories.every(s => s.passes === true)`:
