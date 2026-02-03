@@ -119,15 +119,15 @@ On failure:
 
 ## Auto-Checkpoint (Token Protection)
 
-**After every 3 completed tasks**, save checkpoint and recommend /clear:
+**After every 3 completed tasks**, save checkpoint and recommend /compact:
 
 ```
 if (completedThisSession % 3 === 0) {
   Write checkpoint to .claude/checkpoint.md
 
   Output:
-  "💾 Checkpoint saved. Run /clear now to reclaim ~50% tokens.
-   Context will auto-restore. Don't wait - clear often."
+  "💾 Checkpoint saved. Run /compact to reclaim ~40% tokens.
+   Use /clear only at major transitions (~70% but wipes context)."
 }
 ```
 

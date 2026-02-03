@@ -42,12 +42,12 @@ Write to `.claude/checkpoint.md`:
 
 ## After Saving
 
-Tell user (be urgent):
+Tell user:
 ```
 💾 Checkpoint saved.
 
-⚠️  Run /clear NOW to reclaim ~50% tokens.
-Context auto-restores. Don't wait - clear often for long sessions.
+Run /compact now to reclaim ~40% tokens (keeps context summary).
+Use /clear only at major transitions (reclaims ~70% but wipes context).
 ```
 
 ## Auto-Restore
@@ -64,10 +64,9 @@ After `/clear`, read `.claude/checkpoint.md` and continue.
 
 ## Token Savings
 
-| Clears | Session Length | Savings |
-|--------|----------------|---------|
-| 2-3 | 2 hours | ~60% |
-| 4-5 | 4 hours | ~70% |
-| 6+ | 5+ hours | ~80% |
+| Command | Savings | Use When |
+|---------|---------|----------|
+| `/compact` | ~40% | Default after checkpoint |
+| `/clear` | ~70% | Major transitions, sprint end |
 
-**Rule:** Clear after every checkpoint. Don't accumulate.
+**Rule:** /compact after every checkpoint. /clear at major transitions.
