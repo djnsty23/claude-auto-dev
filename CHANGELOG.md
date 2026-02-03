@@ -1,39 +1,49 @@
 # Changelog
 
-## [4.0.0] - 2026-01-29
+## [4.0.0] - 2026-02-03
+
+### Breaking Changes
+- Archived v3.9 (19 commands, 14 skills, 8 hooks → archive/v3.9/)
+- New skill structure using SKILL.md in directories
+- Native TaskCreate/TaskUpdate replaces prd.json for active work
 
 ### Added
-- **Hybrid Task System v2.0** - Two-layer architecture
-  - prd.json for long-term memory (sprint history, verification notes)
-  - Native Tasks for short-term memory (current session work)
-  - 93% context cost reduction (75K → 5K tokens for sprint work)
-- **Resolution Learning** - Prevent repeat mistakes
-  - `resolution` field documents HOW issues were fixed
-  - Pattern format: `[PATTERN]: [SPECIFIC FIX]`
+- **Native Tasks Integration** - Uses Claude Code's built-in task system
+  - TaskCreate/TaskUpdate/TaskList/TaskGet with metadata
+  - blocks/blockedBy dependencies built-in
+  - Session-scoped persistence - no file I/O during work
+- **Hybrid Task System** - Two-layer architecture
+  - prd.json = Long-term memory (sprint history, verification notes)
+  - Native Tasks = Short-term memory (current session work)
+  - 92% token reduction (~35K → ~2.6K per session start)
+- **Resolution Learning** - Documents HOW issues were fixed
+  - `resolution` field in prd.json schema
+  - Pattern format: `[CATEGORY]: [SPECIFIC FIX]`
   - Auto-inject warnings on similar errors
 - **Parallel Swarm Audit** - 6 specialized agents run simultaneously
   - Security (secrets, XSS, CORS, injection)
-  - Performance (memo, effects, re-renders)
-  - Accessibility (WCAG, keyboard, contrast)
-  - Type Safety (any, ts-ignore, conflicts)
-  - UX/UI (states, tokens, feedback)
-  - Test Coverage (critical paths, gaps)
+  - Performance (memo, effects, re-renders, N+1)
+  - Accessibility (WCAG, keyboard, contrast, aria)
+  - Type Safety (any, ts-ignore, type conflicts)
+  - UX/UI (loading states, empty states, error handling)
+  - Test Coverage (critical paths, untested hooks)
   - Produces severity-rated report with scores
 - **Proactive Brainstorm** - YOU propose, user doesn't ask
-  - Parallel scans for TODOs, console.logs, hardcoded colors, type issues
+  - Parallel scans for TODOs, console.logs, hardcoded colors
   - Presents concrete improvement scenarios with impact/effort
   - Never asks "what do you want?" - proposes based on findings
 
 ### Changed
-- **brainstorm/SKILL.md** - Rewritten for proactive proposals
-- **audit/SKILL.md** - Rewritten for parallel swarm architecture
-- **New core/SKILL.md** - Hybrid task system documentation
+- **skills/audit/SKILL.md** - Parallel swarm architecture
+- **skills/brainstorm/SKILL.md** - Proactive proposals
+- **skills/core/SKILL.md** - Hybrid task system documentation
+- **Auto mode** - No more Ralph Loop dependency
 
 ### Philosophy
 - Context is expensive - minimize prd.json reads
 - Learn from mistakes - document resolutions
 - Parallel execution - 6 agents faster than 1 comprehensive scan
-- Proactive assistance - propose improvements without being asked
+- Use native tools when available (TaskCreate over prd.json)
 
 ---
 

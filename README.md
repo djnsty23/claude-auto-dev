@@ -108,12 +108,12 @@ Claude will ask what you want to build, generate tasks, and work through them au
 ## Quick Reference
 
 ```
-brainstorm  →  Proactively propose improvements (you scan, you propose)
+brainstorm  →  Proactively analyze codebase and propose improvements
 audit       →  Parallel swarm audit (6 specialized agents)
-auto        →  Work through all tasks automatically
-status      →  Check progress
-handoff     →  Save session for later
-resume      →  Continue from last session
+auto        →  Execute ALL pending tasks automatically
+status      →  Quick progress check (uses native TaskList)
+continue    →  Work on one task, then ask what's next
+stop        →  Safe to close session
 ```
 
 ---
@@ -235,10 +235,11 @@ That's the full development cycle. No scripts, no config files to edit.
 |---------|--------------|-------------|
 | `brainstorm` | Proactively scans codebase, proposes improvements with impact/effort | Finding what to work on next |
 | `audit` | Runs 6 parallel specialized agents, produces severity-rated report | Comprehensive quality check |
-| `auto` | Loops through ALL pending tasks automatically until done | You want Claude to work autonomously |
+| `auto` | Executes ALL pending tasks automatically until done | You want Claude to work autonomously |
 | `continue` | Completes ONE task, then stops and waits | You want control over each task |
-| `status` | Shows "X/Y complete. Next: [task title]" | Check progress anytime |
-| `stop` | Saves session to ledger.json, safe to close terminal | Done for the day |
+| `status` | Shows progress (reads prd.json header only - ~1K tokens) | Check progress anytime |
+| `audit` | Launches 6 parallel agents (Security, Performance, A11y, Types, UX, Tests) | Full quality audit |
+| `stop` | Syncs native Tasks back to prd.json, safe to close | Done for the day |
 | `reset` | Clears all "claimed" task states | Task got stuck or crashed |
 
 ### Session Management (v2.5)
@@ -636,6 +637,14 @@ Say `handoff` to save session, then start fresh with `resume`.
 ---
 
 ## Changelog
+
+### [4.0.0] - 2026-01-30
+- **Hybrid Task Management v2.0**: Two-layer system with prd.json for long-term memory and native Tasks for short-term work
+- **Resolution Learning System**: Documents HOW issues were fixed, not just THAT they were fixed
+- **Autonomous Mode Improvements**: Explicit "DO NOT STOP" instructions - Claude keeps working until all tasks complete
+- **Brainstorm Command**: Proactively analyze codebase and propose improvement scenarios
+- **Audit Swarm**: 6 parallel specialized agents (Security, Performance, A11y, Type Safety, UX, Tests)
+- **Context Optimization**: 93% reduction in token usage for sprint work (75K → 5K)
 
 ### [3.2.0] - 2026-01-24
 - **A/B Testing Framework**: `/ab-test` command for comparing approaches at milestone starts
