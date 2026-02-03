@@ -1,56 +1,116 @@
 ---
 name: quality
-description: Quality standards reference (not user-invocable)
+description: Production-quality code standards - auto-applied to all work
 user-invocable: false
 ---
 
-# Quality Standards
+# Quality-First Development
 
-These standards apply to ALL work done by this system.
+These standards are NON-NEGOTIABLE. Every piece of code must meet them.
 
-## Task Metadata Schema
+## Before Writing ANY Code
 
-All stories created by audit/brainstorm/sprint MUST use this metadata:
+### 1. Read First (Mandatory)
+- [ ] Read the TARGET file completely
+- [ ] Read 2-3 RELATED files in same directory
+- [ ] Identify existing PATTERNS (naming, structure, style)
+- [ ] Check for existing UTILITIES that do what you need
+
+### 2. Plan the Change
+- [ ] State WHAT you're changing in one sentence
+- [ ] State WHY (ties to user request)
+- [ ] State HOW it fits existing patterns
+
+**If you can't answer these, you haven't read enough.**
+
+## Code Requirements
+
+### Structure
+- Functions: <50 lines, single responsibility
+- Components: <200 lines, split if larger
+- Files: <400 lines, extract modules if larger
+- No deeply nested code (max 3 levels)
+
+### Reusability
+- Extract repeated logic (3+ occurrences) to utils/hooks
+- Use composition over prop drilling
+- Create variants, not duplicates
+- Generic types over repeated interfaces
+
+### Type Safety
+- NO `any` - use `unknown` with type guards
+- NO `@ts-ignore` or `@ts-expect-error`
+- Explicit return types on exported functions
+- Zod schemas at system boundaries
+
+### Design System
+- Semantic tokens ONLY: `text-foreground`, `bg-background`
+- NO hardcoded colors: `text-white`, `bg-gray-500`
+- Spacing from scale: `p-4`, `gap-6`, not `p-[13px]`
+- Check tailwind.config.ts before adding values
+
+### UI States (ALL Required)
+```tsx
+// Every data-fetching component needs:
+if (isLoading) return <Skeleton />
+if (error) return <ErrorState message={error.message} />
+if (!data || data.length === 0) return <EmptyState />
+return <ActualContent data={data} />
 ```
-metadata: {
-  sid: "[PREFIX]-[NNN]",     // e.g. TSF-001
-  sprint: "[sprint-name]",   // e.g. sprint-1
-  epic: "[epic name]",       // e.g. Type Safety Fixes
-  priority: [1-3],           // 1=critical, 2=important, 3=nice
-  category: "[category]",    // auth|ui|perf|security|qa|infra
-  type: "[type]",            // feature|fix|qa|security|polish
-  passes: null,              // null → true/false after verify
-  verified: null             // null → "build"|"test"|"browser"
-}
-```
 
-## Non-Negotiable
-1. `npm run typecheck` MUST pass before any task is marked complete
-2. `npm run build` MUST pass before any task is marked complete
-3. No `as any` - use proper types, generics, or `unknown` with type guards
-4. No `@ts-ignore` or `@ts-expect-error`
-5. No `console.log` in production code (use proper logging)
-6. No hardcoded secrets, API keys, or credentials
-7. All user inputs validated with Zod at system boundaries
-8. Supabase tables MUST have RLS policies
-
-## Code Style
-- TypeScript strict mode
-- Functional React components with hooks
-- Tailwind CSS with semantic tokens (not inline colors)
-- Handle all UI states: loading, error, empty, success
+### Error Handling
+- Specific messages: "Failed to save user" not "Error"
 - Error boundaries around feature areas
-- Proper error messages (not generic "Something went wrong")
+- Graceful degradation, not crashes
+- Log errors with context (file, function, params)
 
-## Testing
-- If modifying a function, verify it works (build + typecheck minimum)
-- If adding a feature, it should be testable
-- If fixing a bug, the fix should prevent regression
-- Browser test critical user flows when touching UI
+## After Writing Code
 
-## Do It Right
-- Read existing code before changing it
-- Follow existing patterns in the codebase
-- One concern per commit
-- Don't over-engineer, but don't cut corners
-- If unsure, investigate first rather than guessing
+### Self-Review Checklist
+- [ ] Re-read your changes - do they make sense?
+- [ ] Would a new developer understand this?
+- [ ] Did you introduce any hardcoded values?
+- [ ] Are all edge cases handled?
+- [ ] Does it match the style of surrounding code?
+
+### Verification Steps
+1. `npm run typecheck` - MUST pass
+2. `npm run build` - MUST pass
+3. For UI: Describe what it looks like in different states
+4. List 3 ways this could break (then prevent them)
+
+### Red Flags (Fix Before Continuing)
+- Inline styles or hardcoded colors
+- Copy-pasted code blocks (extract to function)
+- Missing loading/error/empty states
+- Functions doing multiple things
+- Magic numbers or strings without constants
+- TODO comments without TaskCreate
+
+## Anti-Patterns to Avoid
+
+### AI Slop Indicators
+- Generic variable names: `data`, `item`, `thing`
+- Unnecessary abstractions for one-time use
+- Over-commented obvious code
+- Recreating what already exists in codebase
+- Ignoring existing component library
+
+### The "Works" Trap
+Just because it builds doesn't mean it's done:
+- Does it handle errors gracefully?
+- Does it work on mobile?
+- Does it work with empty data?
+- Does it work with lots of data?
+- Does it work when network is slow?
+
+## Quality Gates
+
+Before marking ANY task complete:
+
+1. **Build Gate**: `npm run typecheck && npm run build`
+2. **Pattern Gate**: Matches existing codebase style
+3. **State Gate**: All UI states handled
+4. **Review Gate**: Self-reviewed and would approve your own PR
+
+**If any gate fails, the task is NOT complete.**

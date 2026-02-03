@@ -1,7 +1,7 @@
 {
   "name": "claude-auto-dev",
-  "version": "4.0.0",
-  "description": "Slim autonomous dev system for Claude Code - native tasks, zero bloat",
+  "version": "4.1.0",
+  "description": "Quality-first autonomous dev system for Claude Code - native tasks, prompt hooks, zero slop",
   "bin": {
     "claude-auto-dev": "bin/install.js"
   },
