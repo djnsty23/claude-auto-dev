@@ -23,7 +23,7 @@ const showHelp = args.includes('--help') || args.includes('-h');
 
 if (showHelp) {
   console.log(`
-Claude Auto-Dev v4.0 Installer
+Claude Auto-Dev v4.3 Installer
 
 Usage:
   npx claude-auto-dev           Install skills
@@ -38,7 +38,7 @@ Options:
   process.exit(0);
 }
 
-console.log('Claude Auto-Dev v4.0 Installer\n');
+console.log('Claude Auto-Dev v4.3 Installer\n');
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
