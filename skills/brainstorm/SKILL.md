@@ -3,7 +3,7 @@ name: brainstorm
 description: Scan codebase, propose improvements, auto-create stories
 aliases: ["what next", "whatnext", "what-next"]
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
-model: sonnet
+model: opus
 user-invocable: true
 ---
 

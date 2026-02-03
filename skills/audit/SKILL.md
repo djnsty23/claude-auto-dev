@@ -2,7 +2,7 @@
 name: audit
 description: Rate each aspect of app, auto-create stories from findings
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
-model: sonnet
+model: opus
 user-invocable: true
 ---
 

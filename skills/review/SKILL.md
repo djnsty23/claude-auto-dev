@@ -2,7 +2,7 @@
 name: review
 description: Code quality check - manual trigger for current changes
 allowed-tools: Bash, Read, Grep, Glob
-model: sonnet
+model: opus
 user-invocable: true
 ---
 
