@@ -2,7 +2,7 @@
 name: checkpoint
 description: Save context state before /clear - 50-70% token savings
 allowed-tools: Read, Write, TaskList, Grep
-model: haiku
+model: sonnet
 user-invocable: true
 ---
 

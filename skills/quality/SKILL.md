@@ -2,7 +2,7 @@
 name: quality
 description: Code quality principles - guides judgment
 user-invocable: false
-model: haiku
+model: sonnet
 ---
 
 # Quality Principles

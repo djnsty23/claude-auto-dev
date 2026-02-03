@@ -2,7 +2,7 @@
 name: self-review
 description: Scale review effort to task complexity
 user-invocable: false
-model: haiku
+model: sonnet
 ---
 
 # Adaptive Review
