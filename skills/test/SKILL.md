@@ -1,7 +1,7 @@
 ---
 name: test
 description: Run all tests - npm test + browser tests on latest changes
-allowed-tools: Bash, Read, Grep, Glob
+allowed-tools: Bash, Read, Grep, Glob, TaskCreate
 model: sonnet
 user-invocable: true
 ---

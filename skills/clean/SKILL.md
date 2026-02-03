@@ -3,6 +3,7 @@ name: clean
 description: Remove temporary artifacts
 allowed-tools: Bash, Glob
 model: haiku
+user-invocable: false
 ---
 
 # Clean

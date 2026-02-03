@@ -131,12 +131,12 @@ Findings:
 - 68 hardcoded colors
 - 12 'any' types
 - 5 files >500 lines
-- 6 TODO comments
 
-Top Recommendations:
-1. Console Cleanup (530 items) - High impact, quick win
-2. Token Migration (68 colors) - Medium effort, enables dark mode
-3. Type Hardening (12 anys) - Prevents runtime errors
+Created 3 stories for Console Cleanup (top recommendation).
 
-Say a number (1-3), "all", or describe what interests you.
+Other areas available:
+- "tokens" → Color token migration (68 items)
+- "types" → Type safety fixes (12 items)
+- "all" → Create stories for everything
+- Or say "auto" to start working
 ```

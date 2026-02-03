@@ -3,6 +3,7 @@ name: sprint
 description: Advance to next sprint or create sprint from description
 allowed-tools: Read, Write, Edit, TaskCreate, TaskUpdate, TaskList
 model: sonnet
+user-invocable: false
 ---
 
 # Sprint

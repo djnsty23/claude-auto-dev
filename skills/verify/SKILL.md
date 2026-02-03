@@ -3,6 +3,7 @@ name: verify
 description: Verify work is complete - outcome-focused, encourages going beyond minimum
 allowed-tools: Bash, Read, Grep, Glob, TaskUpdate, TaskList
 model: sonnet
+user-invocable: false
 ---
 
 # Verify

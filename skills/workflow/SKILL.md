@@ -14,11 +14,12 @@ model: haiku
 │  "auto"          → Execute all tasks autonomously       │
 │  "review"        → Code quality check on recent changes │
 │  "brainstorm"    → Scan → propose → create stories      │
-│  "what next"     → Same as brainstorm                   │
 │  "test"          → npm test + browser tests on latest   │
 │  "audit"         → Rate aspects → create stories        │
 │  "status"        → Quick progress check                 │
 └─────────────────────────────────────────────────────────┘
+
+Aliases: "what next" = brainstorm
 ```
 
 ## Auto-Triggered (Internal)
