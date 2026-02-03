@@ -1,27 +1,17 @@
 #!/bin/bash
-# SessionStart hook - Inject project context and skill index
+# Session start - lightweight sprint display
 
-SKILLS_DIR=~/.claude/skills
-
-echo ""
-
-# Project context from prd.json
-if [ -f "prd.json" ]; then
-    done_count=$(jq '[.stories[] | select(.passes == true)] | length' prd.json 2>/dev/null || echo 0)
-    total_count=$(jq '.stories | length' prd.json 2>/dev/null || echo 0)
-
-    echo "[Auto-Dev] Progress: $done_count/$total_count tasks complete"
-
-    remaining=$(jq '[.stories[] | select(.passes != true)] | length' prd.json 2>/dev/null || echo 0)
-    if [ "$remaining" -gt 0 ]; then
-        next_id=$(jq -r '[.stories[] | select(.passes != true)][0].id // empty' prd.json 2>/dev/null)
-        next_title=$(jq -r '[.stories[] | select(.passes != true)][0].title // empty' prd.json 2>/dev/null)
-        echo "[Auto-Dev] Next: $next_id - $next_title"
+# Sprint context from project-meta.json (~200 bytes)
+if [ -f "project-meta.json" ]; then
+    if command -v jq &> /dev/null; then
+        sprint=$(jq -r '.currentSprint // "none"' project-meta.json 2>/dev/null)
+        total=$(jq -r '.totalCompleted // 0' project-meta.json 2>/dev/null)
+        echo "[Auto-Dev v4] Sprint: $sprint | Completed: $total total"
     else
-        echo "[Auto-Dev] All tasks complete!"
+        echo "[Auto-Dev v4] project-meta.json found (install jq for details)"
     fi
 else
-    echo "[Auto-Dev] No prd.json - say 'brainstorm' to create tasks"
+    echo "[Auto-Dev v4] No project-meta.json - say 'audit' or run 'npx claude-auto-dev --init'"
 fi
 
 # Git status (brief)
@@ -29,13 +19,3 @@ changed=$(git status --short 2>/dev/null | wc -l | tr -d ' ')
 if [ "$changed" -gt 0 ]; then
     echo "[Git] $changed changed files"
 fi
-
-# Skill index from manifest.json (for efficient skill loading)
-MANIFEST="$SKILLS_DIR/manifest.json"
-if [ -f "$MANIFEST" ] && command -v jq &> /dev/null; then
-    echo ""
-    echo "[Skills] Command -> File mapping:"
-    jq -r '.skills | to_entries[] | "  \(.value.triggers | join(", ")) -> \(.value.file)"' "$MANIFEST" 2>/dev/null
-fi
-
-echo ""

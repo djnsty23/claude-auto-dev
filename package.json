@@ -1,7 +1,7 @@
 {
   "name": "claude-auto-dev",
-  "version": "2.5.0",
-  "description": "Autonomous development system for Claude Code - task loops, session management, and deployment automation",
+  "version": "4.0.0",
+  "description": "Slim autonomous dev system for Claude Code - native tasks, zero bloat",
   "bin": {
     "claude-auto-dev": "bin/install.js"
   },
@@ -10,7 +10,6 @@
     "skills",
     "hooks",
     "config",
-    "plugin",
     "templates"
   ],
   "keywords": [
