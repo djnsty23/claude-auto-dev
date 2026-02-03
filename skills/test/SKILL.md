@@ -95,15 +95,25 @@ agent-browser open http://localhost:3000/page?error=true
 agent-browser snapshot -i  # Verify error UI
 ```
 
-## When Dev Server Not Running
+## Auto-Start Dev Server
 
-```
-Dev server not detected on port 3000/8080.
-Skipping browser tests.
+If dev server not running, start it in background:
 
-Unit tests: ✓ Passed
-Browser tests: ⏭ Skipped (start dev server to run)
+```bash
+# Check if running
+curl -s http://localhost:3000 > /dev/null 2>&1 || curl -s http://localhost:8080 > /dev/null 2>&1
+
+# If not, start in background (no context cost)
+Bash({ command: "npm run dev", run_in_background: true })
+
+# Wait for startup
+sleep 5
+
+# Then run browser tests
+agent-browser open http://localhost:3000
 ```
+
+Background servers don't fill context - output goes to file, only read if needed.
 
 ## Create Stories from Failures
 

@@ -138,6 +138,22 @@ After browser tests pass, run verify:
 | `--throttle` | `slow-3g` | Simulate slow network |
 | `--headless` | `false` | Show browser window |
 
+## Auto-Start Dev Server
+
+If server not running, start in background automatically:
+
+```bash
+# Check ports 3000, 8080, 5173
+curl -s http://localhost:3000 > /dev/null 2>&1 && echo "Running on 3000"
+curl -s http://localhost:8080 > /dev/null 2>&1 && echo "Running on 8080"
+
+# If none running, start in background (zero context cost)
+Bash({ command: "npm run dev", run_in_background: true })
+sleep 5  # Wait for startup
+```
+
+Background servers don't fill context - output goes to file.
+
 ## When to Use Browser Tests
 
 - After UI changes (verify visual correctness)
