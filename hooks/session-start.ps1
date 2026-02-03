@@ -3,6 +3,15 @@ $ErrorActionPreference = "SilentlyContinue"
 Write-Host "[Auto-Dev v4.1] Quality-First Mode"
 Write-Host "  - Read before write | Match existing patterns | Verify all states"
 
+# Check for checkpoint (context restore after /clear)
+if (Test-Path ".claude/checkpoint.md") {
+    Write-Host ""
+    Write-Host "[Checkpoint Found] Restoring context..."
+    Get-Content ".claude/checkpoint.md" | Select-Object -First 30
+    Write-Host ""
+    Write-Host "---"
+}
+
 # Sprint context from project-meta.json (~200 bytes)
 if (Test-Path "project-meta.json") {
     try {

@@ -4,6 +4,15 @@
 echo "[Auto-Dev v4.1] Quality-First Mode"
 echo "  - Read before write | Match existing patterns | Verify all states"
 
+# Check for checkpoint (context restore after /clear)
+if [ -f ".claude/checkpoint.md" ]; then
+    echo ""
+    echo "[Checkpoint Found] Restoring context..."
+    head -30 .claude/checkpoint.md
+    echo ""
+    echo "---"
+fi
+
 # Sprint context from project-meta.json (~200 bytes)
 if [ -f "project-meta.json" ]; then
     if command -v jq &> /dev/null; then
