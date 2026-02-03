@@ -3,6 +3,7 @@ name: core
 description: Hybrid task system - prd.json + native Tasks + resolution learning
 allowed-tools: Read, Write, Edit, TaskCreate, TaskUpdate, TaskList, Grep, Glob
 model: sonnet
+user-invocable: false
 ---
 
 # Hybrid Task System

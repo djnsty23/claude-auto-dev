@@ -3,6 +3,7 @@ name: browser-test
 description: Secure browser testing with agent-browser CLI (93% more token-efficient than Playwright)
 allowed-tools: Bash
 model: haiku
+user-invocable: false
 ---
 
 # Browser Testing with agent-browser
