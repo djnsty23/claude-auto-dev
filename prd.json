@@ -1,0 +1,20 @@
+{
+  "currentSprint": "S1",
+  "stories": [
+    {
+      "id": "S1-001",
+      "title": "Update README version badge to 4.3.0",
+      "description": "README shows v4.2.0 badge but package.json is 4.3.0",
+      "passes": true,
+      "resolution": "badge: Updated version 4.2.0 → 4.3.0 in README.md"
+    },
+    {
+      "id": "S1-002",
+      "title": "Commit templates/CLAUDE.md changes",
+      "description": "Modified file with improved command table",
+      "passes": true,
+      "blockedBy": ["S1-001"],
+      "resolution": "commit: 66adaf5 docs update"
+    }
+  ]
+}
