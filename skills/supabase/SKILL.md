@@ -52,17 +52,40 @@ Get from CLAUDE.md or:
 supabase projects list 2>&1 | grep -E "^\w"
 ```
 
-## Auth
+## Multi-Org Auth
 
-Uses `SUPABASE_ACCESS_TOKEN` env var. Set per-project tokens:
-- `SUPABASE_ACCESS_TOKEN_REELR`
-- `SUPABASE_ACCESS_TOKEN_CCB`
-- etc.
+CLI only supports one token at a time. For multiple orgs, use per-command token:
+
+```bash
+# Option 1: Inline token (best for multi-org)
+SUPABASE_ACCESS_TOKEN=$SUPABASE_TOKEN_REELR supabase db push --project-ref XXX
+
+# Option 2: Source project's .env.local first
+source .env.local && supabase db push --project-ref $SUPABASE_PROJECT_ID
+
+# Option 3: Use --db-url with connection string (bypasses auth)
+supabase db execute --db-url "postgresql://postgres:PASSWORD@db.XXX.supabase.co:5432/postgres" --sql "..."
+```
+
+**Project .env.local should have:**
+```env
+SUPABASE_ACCESS_TOKEN=sbp_xxx
+SUPABASE_PROJECT_ID=xxx
+SUPABASE_DB_PASSWORD=xxx
+```
+
+## Direct psql (Most Reliable)
+
+Bypasses all auth issues:
+```bash
+# Get connection string from Supabase Dashboard → Settings → Database
+psql "postgresql://postgres:PASSWORD@db.PROJECT_REF.supabase.co:5432/postgres" -c "SELECT 1"
+```
 
 ## Skip MCP
 
-MCP has permission issues. Always prefer CLI:
+MCP has permission issues. Always prefer CLI or psql:
 - More reliable
 - Better error messages
-- Easier to debug
+- Multi-org support via env vars
 - Output can be limited
