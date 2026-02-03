@@ -1,144 +1,83 @@
 ---
 name: self-review
-description: Multi-pass verification before completing any task - auto-applied
+description: Adaptive verification - scale effort to task complexity
 user-invocable: false
 ---
 
-# Self-Review Protocol
+# Self-Review
 
-Every task requires MULTIPLE verification passes before completion.
+Review your work before calling it done. Scale your effort to the task.
 
-## The Three-Pass Rule
+## Adaptive Review
 
-### Pass 1: Implementation
-- Write the code
-- Get it working (builds, no errors)
-- Basic functionality verified
+**Simple fix (typo, one-liner):**
+- Does it work? Ship it.
 
-### Pass 2: Quality Review
-Re-read your changes and check:
-- [ ] Matches existing code style?
-- [ ] No hardcoded values?
-- [ ] All states handled (loading/error/empty)?
-- [ ] No copy-paste code?
-- [ ] Meaningful variable names?
-- [ ] Would you approve this PR?
+**Standard task (feature, component):**
+- Build passes
+- Looks right in browser (if UI)
+- Handles obvious edge cases
+- Code is clean
 
-### Pass 3: Edge Case Audit
-For each change, ask:
-- What if the input is null/undefined?
+**Complex task (architecture, multi-file refactor):**
+- All the above, plus:
+- Consider impact on other parts of the system
+- Test thoroughly
+- Document non-obvious decisions
+
+## The Quick Check
+
+After any change, ask yourself:
+1. **Does it work?** (build, typecheck)
+2. **Does it solve the problem?** (not just technically correct, but actually useful)
+3. **Would I be proud of this code?**
+
+If yes to all three, move on. Don't over-review simple tasks.
+
+## For UI Changes
+
+Mentally (or actually) verify:
+- Loading state (while data fetches)
+- Error state (when something fails)
+- Empty state (when there's no data)
+- Responsive (does it work on mobile?)
+
+If you can't verify all states, at least verify the ones that matter most for this specific change.
+
+## For Logic Changes
+
+Consider:
+- What if input is null/undefined?
 - What if the array is empty?
 - What if the API fails?
-- What if the user double-clicks?
-- What if the data is huge?
-- What if the network is slow?
 
-**Fix issues found in Pass 2 & 3 before proceeding.**
+Handle what's realistic, not every theoretical edge case.
+
+## When to Dig Deeper
+
+**Do more review when:**
+- The change affects money, security, or user data
+- Multiple systems interact
+- You're uncertain about the impact
+- The codebase is unfamiliar
+
+**Less review when:**
+- It's a simple, isolated change
+- You understand the code well
+- The risk of breakage is low
 
 ## Verification Commands
 
-Always run before marking complete:
-
 ```bash
-# TypeScript check
-npm run typecheck
-
-# Build check
-npm run build
-
-# If tests exist
-npm test
-
-# Check for common issues
-grep -r "console.log" src/ --include="*.ts" --include="*.tsx" | grep -v test
-grep -r "any" src/ --include="*.ts" --include="*.tsx" | head -10
+npm run typecheck  # Types are correct
+npm run build      # It compiles
+npm test           # If tests exist, they pass
 ```
 
-## UI Verification
+If all pass, you're probably good. If something fails, fix it before moving on.
 
-For any UI change, verify:
+## The Goal
 
-### Visual Checklist
-- [ ] Looks correct at mobile width (320px)
-- [ ] Looks correct at tablet width (768px)
-- [ ] Looks correct at desktop width (1280px)
-- [ ] Loading state displays correctly
-- [ ] Error state displays correctly
-- [ ] Empty state displays correctly
-- [ ] Hover/focus states work
-- [ ] No layout shift on state change
+**Ship quality code efficiently.** Don't rush, but don't over-engineer review either.
 
-### Accessibility Check
-- [ ] Color contrast sufficient?
-- [ ] Keyboard navigable?
-- [ ] Screen reader friendly?
-- [ ] Touch targets large enough?
-
-## Code Verification
-
-### Before Each Edit
-- Did I read the file first?
-- Do I understand what this code does?
-- Will my change break anything else?
-
-### After Each Edit
-- Does the change do what I intended?
-- Did I introduce any regressions?
-- Is the code cleaner than before (or at least not worse)?
-
-## Common Bugs to Check
-
-### React
-- [ ] Missing dependency in useEffect array
-- [ ] State update on unmounted component
-- [ ] Key prop missing in lists
-- [ ] Event handler not memoized (if needed)
-
-### TypeScript
-- [ ] Optional chaining where needed (`?.`)
-- [ ] Null checks before accessing properties
-- [ ] Proper error type narrowing
-
-### API/Data
-- [ ] Loading state while fetching
-- [ ] Error handling on failure
-- [ ] Empty state when no data
-- [ ] Stale data handled (refetch/invalidate)
-
-## The "Ship It" Checklist
-
-Before saying a task is complete:
-
-1. **Builds?** `npm run build` passes
-2. **Types?** `npm run typecheck` passes
-3. **Tests?** Existing tests still pass
-4. **Visual?** UI looks correct in all states
-5. **Edge cases?** Handled null, empty, error
-6. **Code quality?** Would approve your own PR
-7. **Documentation?** Complex logic has comments
-
-## When to Ask for Help
-
-If after 3 attempts you can't:
-- Fix a failing build
-- Understand existing code
-- Make tests pass
-- Get the UI right
-
-**Stop and ask the user** rather than:
-- Deleting "broken" code
-- Adding workarounds
-- Commenting out errors
-- Using `any` or `@ts-ignore`
-
-## Summary
-
-```
-Write → Review → Test → Fix → Review → Ship
-
-NOT:
-
-Write → Ship → User complains → Fix → Ship → User complains...
-```
-
-The goal is: **User never has to point out obvious issues.**
+The user should never have to point out obvious issues. But they also shouldn't wait forever while you review trivial changes.

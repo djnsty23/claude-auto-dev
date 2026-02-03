@@ -1,69 +1,90 @@
 ---
 name: verify
-description: Run quality checks and mark tasks complete
+description: Verify work is complete - outcome-focused, encourages going beyond minimum
 allowed-tools: Bash, Read, Grep, Glob, TaskUpdate, TaskList
 model: sonnet
 ---
 
 # Verify
 
-Run thorough quality checks on completed work. Do NOT rush this.
+Confirm the work is done well, not just done.
 
-## Process
+## Quick Verification
 
-1. **Find task** - Use $ARGUMENTS as task ID, or find current in_progress task via TaskList
+```bash
+npm run typecheck && npm run build
+```
 
-2. **Run ALL checks** (do not skip any):
-   - `npm run typecheck` - MUST pass with zero errors
-   - `npm run build` - MUST pass
-   - `npm run test` - if available, MUST pass
-   - `npm run lint` - if available, note warnings
-   - Grep changed files for `as any`, `@ts-ignore`, `console.log`
-   - Verify no hardcoded secrets in changed files
+If these fail, fix them first. No exceptions.
 
-3. **Review the work:**
-   - Read the files that were changed (from git diff)
-   - Check: Does the implementation match the acceptance criteria in the task description?
-   - Check: Are all acceptance criteria met?
-   - Check: Is error handling present where needed?
-   - Check: Are loading/empty/error states handled (if UI)?
+## What "Complete" Means
 
-4. **Determine result:**
+A task is complete when:
 
-   **PASS** - All checks pass AND acceptance criteria met:
-   ```
-   TaskUpdate({
-     taskId: "[id]",
-     status: "completed",
-     metadata: { passes: true, verified: "[build|test]" }
-   })
-   ```
+1. **It works.** Build passes, types check, feature functions.
 
-   **FAIL** - Any check fails:
-   ```
-   Report exactly what failed and why.
-   Keep task as in_progress.
-   Do NOT mark as completed.
-   ```
+2. **It solves the actual problem.** Not just the literal requirements, but the underlying need.
 
-5. **Report:**
-   ```
-   Verify: [SID] - [subject]
-   ═══════════════════════════
-   Typecheck: ✓/✗
-   Build: ✓/✗
-   Tests: ✓/✗ ([N] passed, [N] failed)
-   Lint: ✓/✗
-   Code review: ✓/✗
+3. **It's production-ready.** Handles errors, edge cases, and real-world conditions.
 
-   Result: PASS/FAIL
-   [If fail: specific errors]
+## Beyond Acceptance Criteria
 
-   Next: [SID] - [subject]
-   ```
+Acceptance criteria are the **minimum**. If you see opportunities to:
+- Make the UX better
+- Improve performance
+- Add helpful error messages
+- Fix related issues you discover
 
-## Rules
-- NEVER mark a task as completed if any check fails
-- NEVER skip the code review step
-- If tests don't exist for the feature, note it as a gap (don't fail, but flag)
-- Build + typecheck are non-negotiable - both must pass
+**Do it.** A capable developer doesn't stop at "meets requirements."
+
+## For UI Tasks
+
+Verify visually:
+- Does it look right?
+- Do all states work? (loading, error, empty, content)
+- Is it responsive?
+
+Use `agent-browser` for verification when helpful:
+```bash
+agent-browser open http://localhost:3000/path
+agent-browser snapshot -i
+```
+
+## Marking Complete
+
+**PASS:**
+```
+TaskUpdate({
+  taskId: "[id]",
+  status: "completed",
+  metadata: { passes: true, verified: "build" }
+})
+```
+
+**FAIL:**
+- Report what's wrong
+- Keep task in_progress
+- Fix and re-verify
+
+## Report Format
+
+```
+Verify: [task-id] - [title]
+═══════════════════════════
+Build: ✓
+Types: ✓
+Works: ✓
+
+Result: PASS
+
+Extras: [Any improvements made beyond requirements]
+Next: [next-task-id] - [title]
+```
+
+## The Standard
+
+**Would a senior developer approve this PR?**
+
+If yes, it's done. If no, improve it.
+
+Don't just tick boxes. Ensure the solution is genuinely good.

@@ -1,116 +1,65 @@
 ---
 name: quality
-description: Production-quality code standards - auto-applied to all work
+description: Quality principles for production code - guides judgment, doesn't limit capability
 user-invocable: false
 ---
 
-# Quality-First Development
+# Quality Principles
 
-These standards are NON-NEGOTIABLE. Every piece of code must meet them.
+You're a senior developer. These are principles to guide your judgment, not boxes to check.
 
-## Before Writing ANY Code
+## Core Philosophy
 
-### 1. Read First (Mandatory)
-- [ ] Read the TARGET file completely
-- [ ] Read 2-3 RELATED files in same directory
-- [ ] Identify existing PATTERNS (naming, structure, style)
-- [ ] Check for existing UTILITIES that do what you need
+**Build it like you'll maintain it.** Write code that your future self (or another developer) will thank you for.
 
-### 2. Plan the Change
-- [ ] State WHAT you're changing in one sentence
-- [ ] State WHY (ties to user request)
-- [ ] State HOW it fits existing patterns
+## Before Coding
 
-**If you can't answer these, you haven't read enough.**
+**Understand context first.** Read the target file and related code. Identify patterns. Know what already exists before creating something new.
 
-## Code Requirements
+**If the codebase has a way of doing something, use it.** Don't reinvent. Extend.
 
-### Structure
-- Functions: <50 lines, single responsibility
-- Components: <200 lines, split if larger
-- Files: <400 lines, extract modules if larger
-- No deeply nested code (max 3 levels)
+## While Coding
 
-### Reusability
-- Extract repeated logic (3+ occurrences) to utils/hooks
-- Use composition over prop drilling
-- Create variants, not duplicates
-- Generic types over repeated interfaces
+### Write Clean Code
+- Clear names that reveal intent
+- Small functions that do one thing
+- Obvious logic flow (if someone has to think hard, simplify it)
+- Match the style of surrounding code
+
+### Handle Reality
+- Data can be null, empty, huge, or malformed
+- Networks fail, APIs timeout, users double-click
+- Loading takes time, errors happen
+- If UI, all states: loading → error → empty → content
 
 ### Type Safety
-- NO `any` - use `unknown` with type guards
-- NO `@ts-ignore` or `@ts-expect-error`
-- Explicit return types on exported functions
-- Zod schemas at system boundaries
+- `any` is a code smell - use proper types
+- `@ts-ignore` hides problems - fix them instead
+- Types are documentation - be explicit at boundaries
 
 ### Design System
-- Semantic tokens ONLY: `text-foreground`, `bg-background`
-- NO hardcoded colors: `text-white`, `bg-gray-500`
-- Spacing from scale: `p-4`, `gap-6`, not `p-[13px]`
-- Check tailwind.config.ts before adding values
+- Use semantic tokens (`text-foreground`, not `text-gray-500`)
+- Follow the spacing scale
+- Reuse existing components
 
-### UI States (ALL Required)
-```tsx
-// Every data-fetching component needs:
-if (isLoading) return <Skeleton />
-if (error) return <ErrorState message={error.message} />
-if (!data || data.length === 0) return <EmptyState />
-return <ActualContent data={data} />
-```
+## After Coding
 
-### Error Handling
-- Specific messages: "Failed to save user" not "Error"
-- Error boundaries around feature areas
-- Graceful degradation, not crashes
-- Log errors with context (file, function, params)
+**Would you approve this PR?** If not, improve it before calling it done.
 
-## After Writing Code
+**Does it actually work?** Build passes, types check, and the feature does what was asked.
 
-### Self-Review Checklist
-- [ ] Re-read your changes - do they make sense?
-- [ ] Would a new developer understand this?
-- [ ] Did you introduce any hardcoded values?
-- [ ] Are all edge cases handled?
-- [ ] Does it match the style of surrounding code?
+**Did you go beyond the minimum?** Acceptance criteria are the floor, not the ceiling. If you see opportunities to make it better, do it.
 
-### Verification Steps
-1. `npm run typecheck` - MUST pass
-2. `npm run build` - MUST pass
-3. For UI: Describe what it looks like in different states
-4. List 3 ways this could break (then prevent them)
+## Anti-Patterns
 
-### Red Flags (Fix Before Continuing)
-- Inline styles or hardcoded colors
-- Copy-pasted code blocks (extract to function)
-- Missing loading/error/empty states
-- Functions doing multiple things
-- Magic numbers or strings without constants
-- TODO comments without TaskCreate
+**AI Slop:** Generic names (`data`, `item`), unnecessary abstractions, over-commenting obvious code, recreating what exists.
 
-## Anti-Patterns to Avoid
+**The "It Works" Trap:** Building is not shipping. Handle errors, test edge cases, verify the user experience.
 
-### AI Slop Indicators
-- Generic variable names: `data`, `item`, `thing`
-- Unnecessary abstractions for one-time use
-- Over-commented obvious code
-- Recreating what already exists in codebase
-- Ignoring existing component library
+**Checkbox Mentality:** Don't just tick requirements. Understand the intent and deliver a solution that genuinely solves the problem.
 
-### The "Works" Trap
-Just because it builds doesn't mean it's done:
-- Does it handle errors gracefully?
-- Does it work on mobile?
-- Does it work with empty data?
-- Does it work with lots of data?
-- Does it work when network is slow?
+## The Standard
 
-## Quality Gates
+**Code should be correct, clear, and complete.** If it meets those three criteria, it's ready.
 
-Before marking ANY task complete:
-
-1. **Build Gate**: `npm run typecheck && npm run build`
-2. **Pattern Gate**: Matches existing codebase style
-3. **State Gate**: All UI states handled
-4. **Review Gate**: Self-reviewed and would approve your own PR
-
-**If any gate fails, the task is NOT complete.**
+If you're unsure whether something is good enough, it probably isn't. Improve it.
