@@ -154,6 +154,62 @@
       "context": [],
       "file": "setup/SKILL.md",
       "priority": 3
+    },
+    "agent-browser": {
+      "triggers": [],
+      "context": [],
+      "file": "agent-browser.md",
+      "priority": 3,
+      "description": "Browser automation CLI reference - loaded with browser-test"
+    },
+    "archive-prd": {
+      "triggers": ["archive"],
+      "context": ["prd.json"],
+      "file": "archive-prd.md",
+      "priority": 3,
+      "description": "Archive completed stories from prd.json"
+    },
+    "auth-token-injection": {
+      "triggers": [],
+      "context": [],
+      "file": "auth-token-injection.md",
+      "priority": 3,
+      "description": "Auth token injection patterns for testing"
+    },
+    "build": {
+      "triggers": ["build"],
+      "context": [],
+      "file": "build.md",
+      "priority": 2,
+      "description": "Build commands and error handling"
+    },
+    "build-reference": {
+      "triggers": [],
+      "context": [],
+      "file": "build-reference.md",
+      "priority": 3,
+      "description": "Build reference documentation"
+    },
+    "env-vars": {
+      "triggers": [],
+      "context": [".env*"],
+      "file": "env-vars.md",
+      "priority": 3,
+      "description": "Environment variables patterns"
+    },
+    "help": {
+      "triggers": ["help", "commands"],
+      "context": [],
+      "file": "help.md",
+      "priority": 2,
+      "description": "List available commands"
+    },
+    "supabase-schema": {
+      "triggers": [],
+      "context": ["supabase/"],
+      "file": "supabase-schema.md",
+      "priority": 3,
+      "description": "Supabase schema reference - loaded with supabase skill"
     }
   },
   "defaults": {
