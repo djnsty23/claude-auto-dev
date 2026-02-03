@@ -119,23 +119,19 @@ On failure:
 
 ## Auto-Checkpoint (Token Protection)
 
-**After every 5 completed tasks**, automatically save checkpoint:
+**After every 3 completed tasks**, save checkpoint and recommend /clear:
 
 ```
-if (completedThisSession % 5 === 0) {
-  // Save checkpoint to .claude/checkpoint.md
-  Write checkpoint with:
-  - Current sprint/phase
-  - Tasks completed this session
-  - Tasks remaining
-  - Key decisions made
-  - Files modified
+if (completedThisSession % 3 === 0) {
+  Write checkpoint to .claude/checkpoint.md
 
-  Output: "💾 Checkpoint saved (5 tasks). Safe to /clear if needed."
+  Output:
+  "💾 Checkpoint saved. Run /clear now to reclaim ~50% tokens.
+   Context will auto-restore. Don't wait - clear often."
 }
 ```
 
-This protects long sessions from context loss. User can `/clear` after checkpoint to reclaim ~50% tokens.
+**Be concise.** Long responses burn tokens. Short responses = more runway.
 
 ## Completion
 

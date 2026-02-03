@@ -31,4 +31,10 @@ Always handle: `loading → error → empty → content`
 
 **Would you approve this PR?** If not, improve it.
 
-**Go beyond minimum.** Acceptance criteria are the floor, not the ceiling.
+## Token Efficiency
+
+**Be concise.** Short responses = more runway.
+- Don't repeat file contents back
+- Don't explain what you're about to do
+- Just do it, report result briefly
+- Use subagents for exploration (separate context)

@@ -1,6 +1,6 @@
 $ErrorActionPreference = "SilentlyContinue"
 
-Write-Host "[Auto-Dev v4.1] Quality-First Mode"
+Write-Host "[Auto-Dev v4.3] Quality-First Mode"
 Write-Host "  - Read before write | Match existing patterns | Verify all states"
 
 # Check for checkpoint (context restore after /clear)

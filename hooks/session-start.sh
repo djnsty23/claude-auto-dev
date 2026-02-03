@@ -1,7 +1,7 @@
 #!/bin/bash
 # Session start - quality-first mode
 
-echo "[Auto-Dev v4.1] Quality-First Mode"
+echo "[Auto-Dev v4.3] Quality-First Mode"
 echo "  - Read before write | Match existing patterns | Verify all states"
 
 # Check for checkpoint (context restore after /clear)

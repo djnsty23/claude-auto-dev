@@ -12,10 +12,10 @@ Save critical context before `/clear`. Enables 50-70% token savings.
 
 ## When to Checkpoint
 
-- After 5+ tasks completed
+- **Every 3 tasks** (aggressive - preserves tokens)
 - Before switching feature areas
 - After resolving complex bugs
-- When context feels bloated
+- When response feels slow (context bloat sign)
 
 ## Checkpoint Format
 
@@ -42,10 +42,12 @@ Write to `.claude/checkpoint.md`:
 
 ## After Saving
 
-Tell user:
+Tell user (be urgent):
 ```
-Checkpoint saved. Run /clear to free ~50-70% context.
-I'll restore from checkpoint automatically.
+💾 Checkpoint saved.
+
+⚠️  Run /clear NOW to reclaim ~50% tokens.
+Context auto-restores. Don't wait - clear often for long sessions.
 ```
 
 ## Auto-Restore
@@ -62,4 +64,10 @@ After `/clear`, read `.claude/checkpoint.md` and continue.
 
 ## Token Savings
 
-~60% reduction on 2-hour sessions via 2-3 strategic clears.
+| Clears | Session Length | Savings |
+|--------|----------------|---------|
+| 2-3 | 2 hours | ~60% |
+| 4-5 | 4 hours | ~70% |
+| 6+ | 5+ hours | ~80% |
+
+**Rule:** Clear after every checkpoint. Don't accumulate.
