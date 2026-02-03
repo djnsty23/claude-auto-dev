@@ -5,6 +5,15 @@
       "Bash(git *)",
       "Bash(npx *)",
       "Bash(node *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(supabase *)",
+      "Bash(vercel *)",
+      "Bash(agent-browser *)",
       "Read",
       "Edit",
       "Write",
@@ -29,33 +38,7 @@
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/session-start.sh",
-            "statusMessage": "Loading project context..."
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "Before this code change, verify Claude has sufficient context. Input: $ARGUMENTS\n\nCheck:\n1. Has Claude read the target file in this session?\n2. Has Claude read related files in the same directory?\n3. Is Claude following existing patterns from the codebase?\n\nIf context is clearly missing (e.g., creating a component without reading existing components), respond:\n{\"ok\": false, \"reason\": \"Read [specific files] first to understand existing patterns\"}\n\nIf context seems adequate, respond:\n{\"ok\": true}",
-            "timeout": 15,
-            "statusMessage": "Checking context..."
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "Review this code change for quality issues. Input: $ARGUMENTS\n\nCheck for:\n1. Hardcoded colors (text-white, bg-black, text-gray-*) - should use semantic tokens\n2. Missing loading/error/empty state handling\n3. Use of 'any' type or @ts-ignore\n4. Inline styles instead of Tailwind classes\n5. Copy-pasted code that should be extracted\n6. Generic variable names (data, item, thing)\n\nIf issues found, respond:\n{\"ok\": false, \"reason\": \"Quality issues: [list specific issues]\"}\n\nIf code looks good, respond:\n{\"ok\": true}",
-            "timeout": 20,
-            "statusMessage": "Quality check..."
+            "statusMessage": "Loading context..."
           }
         ]
       }
@@ -65,9 +48,9 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Evaluate if Claude should stop. Input: $ARGUMENTS\n\nCheck:\n1. Did the user request multiple items? Are ALL complete?\n2. Were there any build/typecheck errors that need fixing?\n3. For UI changes: were loading/error/empty states implemented?\n4. Did Claude verify the changes work (build check)?\n\nIf work is incomplete, respond:\n{\"ok\": false, \"reason\": \"Continue: [what remains to be done]\"}\n\nIf all requested work is genuinely complete and verified, respond:\n{\"ok\": true}",
-            "timeout": 15,
-            "statusMessage": "Checking completion..."
+            "prompt": "Evaluate if Claude should stop. Context: $ARGUMENTS\n\nRespond {\"ok\": false, \"reason\": \"...\"} if ANY of these are true:\n- User requested multiple items and not all are complete\n- Build or typecheck errors exist that weren't fixed\n- UI changes lack loading/error/empty states\n- No verification was done (build check missing)\n\nRespond {\"ok\": true} only if all work is genuinely complete and verified.",
+            "timeout": 10,
+            "statusMessage": "Verifying completion..."
           }
         ]
       }
