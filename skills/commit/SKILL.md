@@ -90,16 +90,18 @@ gh pr create --title "Add playlist UI" --body "## Summary
 
 ## Safety Checks
 
-**Before committing:**
+**Before committing (if ANY fail, fix before proceeding):**
 - [ ] `npm run typecheck` passes
 - [ ] `npm run build` passes
-- [ ] No `.env` files staged
-- [ ] No `console.log` in staged files
-- [ ] No hardcoded secrets
+- [ ] No `.env` files staged — unstage if found
+- [ ] No `console.log` in staged files — remove if found
+- [ ] No hardcoded secrets — remove if found
 
 **Before pushing:**
 - [ ] Branch is correct (not pushing to main accidentally)
 - [ ] Commit messages are clean
+
+If issues found: fix them, re-stage, re-run checks, THEN commit.
 
 ## Version Sync Check (claude-auto-dev repo only)
 

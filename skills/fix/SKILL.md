@@ -73,7 +73,9 @@ npm run build
 # If passes, test the specific feature
 ```
 
-### Step 6: Document
+If build or feature test fails, return to Step 4 with updated error info. Maximum 3 fix attempts — if still failing after 3 tries, report the remaining issue and stop.
+
+### Step 6: Document (ALWAYS output this after Step 5 passes)
 ```
 Append to progress.txt:
 "## [DATE]: Fixed [issue]

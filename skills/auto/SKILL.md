@@ -134,11 +134,13 @@ Task({ subagent_type: "general-purpose", prompt: "...", run_in_background: true 
 
 ## Smart Retry
 
-On failure:
+On failure (MAXIMUM 2 retries, then move on):
 1. Log to `.claude/mistakes.md`
 2. Retry 1: Different approach
-3. Retry 2: Simplest implementation
-4. Still fails → `passes: false`, continue to next
+3. Retry 2: Simplest possible implementation
+4. Still fails → set `passes: false`, ALWAYS continue to next task
+
+Do NOT retry a third time. Do NOT spend more than 10 minutes on retries for a single task.
 
 ## Commit Cadence
 
