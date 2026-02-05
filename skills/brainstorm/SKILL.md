@@ -1,7 +1,9 @@
 ---
 name: brainstorm
 description: Scan codebase, propose improvements AND features autonomously
-aliases: ["what next", "whatnext", "what-next"]
+triggers:
+  - brainstorm
+  - generate
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
 model: opus
 user-invocable: true

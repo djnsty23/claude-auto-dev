@@ -10,8 +10,8 @@ param()
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# Read JSON input from stdin
-$inputJson = $input | Out-String
+# Read JSON input from stdin (use Console.In for reliable piped input)
+$inputJson = [Console]::In.ReadToEnd()
 
 try {
     $data = $inputJson | ConvertFrom-Json
@@ -29,16 +29,19 @@ if ($toolName -eq "Bash") {
 
     # Dangerous patterns to block
     $dangerousPatterns = @(
-        'rm\s+-rf\s+/',           # rm -rf /
-        'rm\s+-rf\s+\*',          # rm -rf *
-        'rm\s+-rf\s+\.',          # rm -rf .
-        'git\s+reset\s+--hard',   # git reset --hard (without explicit request)
-        'git\s+push\s+--force',   # git push --force
+        'rm\s+(-[a-z]*r[a-z]*\s+-[a-z]*f|--recursive)', # rm -rf, rm -r -f, rm --recursive
+        'find\s+/\s+-delete',     # find / -delete
+        'dd\s+if=.*/dev/',        # dd if=/dev/zero
+        'mkfs\.',                 # mkfs.ext4
+        'chmod\s+-R\s+000\s+/',   # chmod -R 000 /
+        'git\s+reset\s+--hard',   # git reset --hard
+        'git\s+push\s+(--force|.*--force)', # git push --force (any flag order)
         'git\s+clean\s+-fd',      # git clean -fd
         'format\s+c:',            # format c:
-        'del\s+/s\s+/q\s+c:',     # del /s /q c:
-        'DROP\s+TABLE',           # SQL injection
-        'DROP\s+DATABASE'         # SQL injection
+        'del\s+/s\s+/q\s+c:',    # del /s /q c:
+        'DROP\s+(TABLE|DATABASE)', # SQL injection
+        'curl.*\|\s*(ba)?sh',     # curl | bash (remote code exec)
+        'wget.*\|\s*(ba)?sh'      # wget | bash
     )
 
     foreach ($pattern in $dangerousPatterns) {

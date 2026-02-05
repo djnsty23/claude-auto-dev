@@ -18,13 +18,13 @@ user-invocable: true
 ```
 User says "audit"
     │
-    ├─► Agent 1: Security Audit (Haiku) - secrets, XSS, CORS, injection
-    ├─► Agent 2: Performance Audit (Haiku) - memo, effects, re-renders
-    ├─► Agent 3: Accessibility Audit (Haiku) - WCAG, keyboard, contrast
-    ├─► Agent 4: Type Safety Audit (Haiku) - any, ts-ignore, conflicts
-    ├─► Agent 5: UX/UI Audit (Haiku) - states, tokens, feedback
-    ├─► Agent 6: Test Coverage Audit (Haiku) - critical paths, gaps
-    └─► Agent 7: Deploy Readiness Audit (Haiku) - PWA, env vars, runtime
+    ├─► Agent 1: Security Audit (Opus) - secrets, XSS, CORS, injection
+    ├─► Agent 2: Performance Audit (Opus) - memo, effects, re-renders
+    ├─► Agent 3: Accessibility Audit (Opus) - WCAG, keyboard, contrast
+    ├─► Agent 4: Type Safety Audit (Opus) - any, ts-ignore, conflicts
+    ├─► Agent 5: UX/UI Audit (Opus) - states, tokens, feedback
+    ├─► Agent 6: Test Coverage Audit (Opus) - critical paths, gaps
+    └─► Agent 7: Deploy Readiness Audit (Opus) - PWA, env vars, runtime
 
     [All run in parallel via Task tool with run_in_background: true]
 

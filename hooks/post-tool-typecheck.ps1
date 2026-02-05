@@ -10,8 +10,8 @@ param()
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# Read JSON input from stdin
-$inputJson = $input | Out-String
+# Read JSON input from stdin (use Console.In for reliable piped input)
+$inputJson = [Console]::In.ReadToEnd()
 
 try {
     $data = $inputJson | ConvertFrom-Json
@@ -28,7 +28,10 @@ if ($filePath -match '\.(ts|tsx|js|jsx)$') {
         # Check if typecheck script exists
         $pkg = Get-Content "package.json" -Raw | ConvertFrom-Json
         if ($pkg.scripts.typecheck) {
-            $result = npm run typecheck 2>&1
+            $job = Start-Job { npm run typecheck 2>&1 }
+            $result = $job | Wait-Job -Timeout 30 | Receive-Job
+            if ($job.State -eq 'Running') { $job | Stop-Job; $job | Remove-Job -Force; exit 0 }
+            $job | Remove-Job -Force
             if ($LASTEXITCODE -ne 0) {
                 # Output errors for Claude to see
                 Write-Host "[Typecheck] Errors found:"

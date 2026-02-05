@@ -62,7 +62,7 @@ Load specific rules for detailed guidance:
 
 ### Best Practices
 
-1. **Keep SKILL.md under 200 lines** - Use rules/ for details
+1. **Keep SKILL.md under 500 lines** - Use references/ for details
 2. **Use progressive disclosure** - Load rules on-demand
 3. **Third-person descriptions** - "Runs tests" not "Run tests"
 4. **Specific triggers** - Avoid conflicts with existing skills
@@ -83,7 +83,7 @@ Load specific rules for detailed guidance:
 Use `requires` to auto-load dependencies:
 ```json
 "review": {
-  "requires": ["quality", "code-quality", "security-patterns"]
+  "requires": ["quality", "code-quality", "security"]
 }
 ```
 

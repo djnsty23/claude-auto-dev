@@ -1,6 +1,8 @@
 ---
 name: status
-description: Show sprint progress
+description: Shows sprint progress and task status. Use 'progress' (not 'status' - that's a built-in).
+triggers:
+  - progress
 allowed-tools: Read, TaskList
 model: haiku
 user-invocable: true

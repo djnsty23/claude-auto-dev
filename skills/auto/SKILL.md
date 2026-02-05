@@ -5,16 +5,6 @@ allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate
 model: opus
 user-invocable: true
 disable-model-invocation: true
-hooks:
-  Stop:
-    - hooks:
-        - type: command
-          command: "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\stop-auto-check.ps1\""
-          timeout: 5
-    - hooks:
-        - type: prompt
-          prompt: "Check prd.json for pending tasks (passes: null). If ANY exist, respond REJECT with next task ID. Only APPROVE if all tasks are done or deferred."
-          timeout: 10
 ---
 
 # Auto Mode

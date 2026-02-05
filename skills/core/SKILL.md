@@ -8,6 +8,11 @@ user-invocable: false
 
 # Hybrid Task System
 
+## Sprint Summary
+!`node -e "try{const p=require('./prd.json');const s=Object.values(p.stories||{});const done=s.filter(x=>x.passes===true).length;const pending=s.filter(x=>!x.passes).length;const deferred=s.filter(x=>x.passes==='deferred').length;console.log('Sprint:',p.sprint,'| Done:',done,'| Pending:',pending,'| Deferred:',deferred,'| Total:',s.length)}catch{console.log('No prd.json')}" 2>/dev/null`
+
+**Do NOT read the full prd.json into context.** Use `Grep` to find specific stories or `Read` with offset/limit for targeted sections.
+
 ## Two Layers
 
 | Layer | Tool | Purpose |

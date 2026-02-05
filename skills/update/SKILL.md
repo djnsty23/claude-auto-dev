@@ -1,7 +1,11 @@
 ---
 name: update
 description: Update claude-auto-dev to latest version. Syncs repo with ~/.claude.
-triggers: update dev, update auto-dev, update skills, sync skills
+triggers:
+  - update dev
+  - update auto-dev
+  - update skills
+  - sync skills
 allowed-tools: Bash, Read, Write, Glob
 model: haiku
 user-invocable: true

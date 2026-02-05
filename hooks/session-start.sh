@@ -34,11 +34,15 @@ else
     echo "[Auto-Dev v5.0]"
 fi
 
-# Auto-source .env.local (project-isolated credentials)
+# Auto-source .env.local (project-isolated credentials) - safe parser
 if [[ -f ".env.local" ]]; then
-    set -a
-    source .env.local 2>/dev/null
-    set +a
+    while IFS='=' read -r key value; do
+        # Skip comments and empty lines
+        [[ -z "$key" || "$key" =~ ^# ]] && continue
+        # Only export valid variable names
+        key=$(echo "$key" | tr -d ' ')
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
+    done < .env.local
     echo "[Env] .env.local loaded"
 fi
 

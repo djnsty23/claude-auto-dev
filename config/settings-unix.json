@@ -6,11 +6,9 @@
       "Bash(npx *)",
       "Bash(node *)",
       "Bash(ls *)",
-      "Bash(cat *)",
       "Bash(mkdir *)",
       "Bash(cp *)",
       "Bash(mv *)",
-      "Bash(rm *)",
       "Bash(supabase *)",
       "Bash(vercel *)",
       "Bash(agent-browser *)",
@@ -26,11 +24,13 @@
       "TaskUpdate",
       "TaskList",
       "NotebookEdit",
-      "mcp__*"
+      "mcp__supabase__*"
     ],
     "deny": [
-      "Bash(rm -rf /)",
-      "Bash(rm -rf ~)",
+      "Bash(rm -rf *)",
+      "Bash(rm -r -f *)",
+      "Bash(rm --recursive *)",
+      "Bash(find * -delete)",
       "Bash(git push --force origin main)",
       "Bash(git push --force origin master)",
       "Bash(git reset --hard)"

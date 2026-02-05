@@ -1,6 +1,8 @@
 ---
 name: checkpoint
-description: Save context state - auto-triggered every 5 tasks
+description: Save context state - auto-triggered every 3 tasks
+triggers:
+  - save
 allowed-tools: Read, Write, TaskList, Grep
 model: sonnet
 user-invocable: false

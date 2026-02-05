@@ -4,10 +4,10 @@
   "skills": {
     "core": {
       "triggers": [],
-      "context": ["prd.json"],
+      "context": [],
       "file": "core/SKILL.md",
       "priority": 0,
-      "description": "prd.json schema - auto-loaded when prd.json exists"
+      "description": "prd.json schema and task system - auto-loaded when prd.json exists"
     },
     "code-quality": {
       "triggers": [],
@@ -18,7 +18,7 @@
     },
     "auto": {
       "triggers": ["auto"],
-      "context": ["prd.json"],
+      "context": [],
       "file": "auto/SKILL.md",
       "requires": ["code-quality", "quality", "react-patterns", "verify", "browser-auth", "security", "commit"],
       "priority": 1,
@@ -34,14 +34,14 @@
     },
     "status": {
       "triggers": ["progress"],
-      "context": ["prd.json"],
+      "context": [],
       "file": "status/SKILL.md",
       "priority": 2,
       "description": "Shows sprint progress and task status. Use 'progress' (not 'status' - that's a built-in)."
     },
     "sprint": {
       "triggers": ["sprint"],
-      "context": ["prd.json"],
+      "context": [],
       "file": "sprint/SKILL.md",
       "priority": 1,
       "description": "Creates or advances sprints in prd.json. Use when starting new work cycles or closing completed sprints."
@@ -174,7 +174,7 @@
     },
     "archive-prd": {
       "triggers": ["archive"],
-      "context": ["prd.json"],
+      "context": [],
       "file": "archive-prd/SKILL.md",
       "priority": 3,
       "description": "Archives completed stories from prd.json."

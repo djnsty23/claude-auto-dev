@@ -1,6 +1,8 @@
 ---
 name: sprint
-description: Advance to next sprint or create sprint from description
+description: Creates or advances sprints in prd.json. Use when starting new work cycles or closing completed sprints.
+triggers:
+  - sprint
 allowed-tools: Read, Write, Edit, TaskCreate, TaskUpdate, TaskList
 model: sonnet
 user-invocable: true

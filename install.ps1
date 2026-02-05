@@ -25,28 +25,26 @@ $ClaudeDir = "$env:USERPROFILE\.claude"
 Write-Host "`nClaude Auto-Dev v$Version" -ForegroundColor Cyan
 Write-Host "========================" -ForegroundColor Cyan
 
-# Check for Node.js (required)
+# Check for Claude Code (Node.js only needed if Claude Code not installed)
 Write-Host "`n[Prerequisites]" -ForegroundColor Yellow
-$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
-if (-not $nodeCmd) {
-    Write-Host "  Node.js not found. Install from https://nodejs.org (v18+)" -ForegroundColor Red
-    exit 1
-}
-
-$nodeVersion = (node -v) -replace '^v', ''
-$nodeMajor = [int]($nodeVersion -split '\.')[0]
-if ($nodeMajor -lt 18) {
-    Write-Host "  Node.js v18+ required (found v$nodeVersion)" -ForegroundColor Red
-    exit 1
-}
-Write-Host "  Node.js v$nodeVersion" -ForegroundColor Green
-
-# Check for Claude Code
 $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
 if ($claudeCmd) {
     $claudeVersion = (claude --version 2>$null | Select-Object -First 1)
     Write-Host "  Claude Code $claudeVersion" -ForegroundColor Green
 } else {
+    # Need Node.js to install Claude Code
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCmd) {
+        Write-Host "  Node.js not found. Install from https://nodejs.org (v18+)" -ForegroundColor Red
+        exit 1
+    }
+    $nodeVersion = (node -v) -replace '^v', ''
+    $nodeMajor = [int]($nodeVersion -split '\.')[0]
+    if ($nodeMajor -lt 18) {
+        Write-Host "  Node.js v18+ required (found v$nodeVersion)" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  Node.js v$nodeVersion" -ForegroundColor Green
     Write-Host "  Claude Code not found - installing..." -ForegroundColor Yellow
     npm install -g @anthropic-ai/claude-code
     $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
