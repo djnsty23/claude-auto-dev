@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Build, deploy, and verify the application. Full pre-deploy to post-deploy workflow.
+description: Pre-deploy checklist with review, security, and test verification. Use when ready to deploy.
 triggers:
   - ship
 user-invocable: true

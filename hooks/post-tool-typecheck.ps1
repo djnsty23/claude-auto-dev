@@ -28,14 +28,17 @@ if ($filePath -match '\.(ts|tsx|js|jsx)$') {
         # Check if typecheck script exists
         $pkg = Get-Content "package.json" -Raw | ConvertFrom-Json
         if ($pkg.scripts.typecheck) {
-            $job = Start-Job { npm run typecheck 2>&1 }
-            $result = $job | Wait-Job -Timeout 30 | Receive-Job
-            if ($job.State -eq 'Running') { $job | Stop-Job; $job | Remove-Job -Force; exit 0 }
-            $job | Remove-Job -Force
-            if ($LASTEXITCODE -ne 0) {
-                # Output errors for Claude to see
-                Write-Host "[Typecheck] Errors found:"
-                Write-Host $result
+            $job = Start-Job {
+                $output = npm run typecheck 2>&1
+                @{ exitCode = $LASTEXITCODE; output = ($output -join "`n") }
+            }
+            $completed = Wait-Job $job -Timeout 30
+            if (-not $completed) { Stop-Job $job; Remove-Job $job -Force; exit 0 }
+            $result = Receive-Job $job
+            Remove-Job $job -Force
+            if ($result.exitCode -ne 0) {
+                [Console]::Error.WriteLine("[Typecheck] Errors found:")
+                [Console]::Error.WriteLine($result.output)
             }
         }
     }

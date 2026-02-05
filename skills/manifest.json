@@ -30,7 +30,7 @@
       "file": "brainstorm/SKILL.md",
       "requires": ["quality", "design"],
       "priority": 1,
-      "description": "Scans codebase, proposes improvements and features autonomously."
+      "description": "Scans codebase, proposes improvements and features autonomously. Use when unsure what to work on next."
     },
     "status": {
       "triggers": ["progress"],
@@ -60,7 +60,7 @@
       "file": "pr-review/SKILL.md",
       "requires": ["security", "code-quality"],
       "priority": 1,
-      "description": "Comprehensive PR review using specialized agents."
+      "description": "Comprehensive PR review using specialized agents. Use before creating or merging pull requests."
     },
     "clean": {
       "triggers": ["clean"],
@@ -75,7 +75,7 @@
       "file": "test/SKILL.md",
       "requires": ["browser-auth"],
       "priority": 2,
-      "description": "Runs unit and browser tests on latest changes."
+      "description": "Runs unit and browser tests on latest changes. Use after implementing features or fixing bugs."
     },
     "ship": {
       "triggers": ["ship"],
@@ -97,7 +97,7 @@
       "context": [],
       "file": "setup-project/SKILL.md",
       "priority": 3,
-      "description": "Initialize project with prd.json and standard config."
+      "description": "Initializes project with prd.json and standard config. Use when starting a new project."
     },
     "supabase": {
       "triggers": ["db", "supabase", "postgres", "rls", "migration", "schema", "table", "database", "edge function"],
@@ -112,7 +112,7 @@
       "file": "audit/SKILL.md",
       "requires": ["quality", "code-quality", "design", "security", "browser-auth", "perf", "a11y"],
       "priority": 1,
-      "description": "Parallel quality audit with 7 specialized agents (Opus) including deploy readiness."
+      "description": "Parallel quality audit with 7 specialized agents (Opus) including deploy readiness. Use when assessing app quality or before major releases."
     },
     "browser-auth": {
       "triggers": [],
@@ -134,7 +134,7 @@
       "context": ["vercel.json", ".github/"],
       "file": "deploy/SKILL.md",
       "priority": 2,
-      "description": "Deploy workflow for Vercel, Supabase, and CI/CD pipelines."
+      "description": "Deploy workflow for Vercel, Supabase, and CI/CD pipelines. Use for deployment and CI/CD setup."
     },
     "preserve-ui": {
       "triggers": [],
@@ -170,7 +170,7 @@
       "context": [],
       "file": "agent-browser/SKILL.md",
       "priority": 3,
-      "description": "Browser automation CLI reference. Also loaded with browser-auth."
+      "description": "Browser automation CLI for AI agents. 5-6x more token-efficient than Playwright MCP. Use for browser testing and web automation."
     },
     "archive-prd": {
       "triggers": ["archive"],
@@ -192,7 +192,7 @@
       "file": "design/SKILL.md",
       "requires": ["preserve-ui", "quality"],
       "priority": 1,
-      "description": "Creates distinctive UI - avoids generic AI aesthetics."
+      "description": "Creates distinctive UI - avoids generic AI aesthetics. Use when designing or refining user interfaces."
     },
     "security": {
       "triggers": ["security"],
@@ -202,18 +202,18 @@
       "description": "Pre-deploy security audit with vulnerability pattern scanning. Auto-loaded with review, audit, ship."
     },
     "remotion": {
-      "triggers": ["remotion", "video"],
+      "triggers": ["remotion", "video", "animation", "subtitle"],
       "context": ["remotion/"],
       "file": "remotion/SKILL.md",
       "priority": 2,
-      "description": "Remotion best practices - video creation in React."
+      "description": "Best practices for Remotion - video creation in React. Use when working with video compositions, animations, or subtitles."
     },
     "monitoring": {
-      "triggers": ["logs"],
+      "triggers": ["monitoring", "logs"],
       "context": [],
       "file": "monitoring/SKILL.md",
       "priority": 2,
-      "description": "Observability patterns - logging, error tracking, analytics."
+      "description": "Observability patterns for production - logging, error tracking, analytics. Use when setting up monitoring."
     },
     "update": {
       "triggers": ["update dev", "update auto-dev", "update skills", "sync skills"],

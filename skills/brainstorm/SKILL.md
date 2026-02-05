@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: Scan codebase, propose improvements AND features autonomously
+description: Scans codebase, proposes improvements and features autonomously. Use when unsure what to work on next.
 triggers:
   - brainstorm
   - generate

@@ -1,9 +1,12 @@
 ---
 name: audit
-description: Rate each aspect of app, auto-create stories from findings
+description: Parallel quality audit with 7 specialized agents (Opus) including deploy readiness. Use when assessing app quality or before major releases.
+triggers:
+  - audit
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
 model: opus
 user-invocable: true
+argument-hint: "[scope: full|auth|dashboard|latest]"
 ---
 
 # Audit

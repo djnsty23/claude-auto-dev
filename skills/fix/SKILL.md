@@ -1,6 +1,6 @@
 ---
 name: fix
-description: Debug issues and fix bugs systematically.
+description: Debugs and fixes issues systematically. Use when something is broken, throwing errors, or behaving unexpectedly.
 user-invocable: true
 triggers:
   - fix

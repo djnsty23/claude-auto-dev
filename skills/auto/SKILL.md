@@ -1,6 +1,8 @@
 ---
 name: auto
-description: Autonomous task execution - works through all tasks without stopping
+description: Autonomous task execution with testing and security. Works through all tasks without stopping.
+triggers:
+  - auto
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList
 model: opus
 user-invocable: true

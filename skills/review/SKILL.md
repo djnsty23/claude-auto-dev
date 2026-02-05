@@ -1,6 +1,8 @@
 ---
 name: review
 description: Code quality check with adaptive effort scaling. Includes security scanning.
+triggers:
+  - review
 allowed-tools: Bash, Read, Grep, Glob
 model: opus
 user-invocable: true

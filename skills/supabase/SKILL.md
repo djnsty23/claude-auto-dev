@@ -1,6 +1,16 @@
 ---
 name: supabase
 description: Supabase CLI, Postgres performance, and schema patterns. Use for database operations, queries, RLS, and migrations.
+triggers:
+  - db
+  - supabase
+  - postgres
+  - rls
+  - migration
+  - schema
+  - table
+  - database
+  - edge function
 allowed-tools: Bash
 user-invocable: true
 ---

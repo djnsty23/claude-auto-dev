@@ -1,6 +1,9 @@
 ---
 name: test
-description: Run all tests - npm test + browser tests on latest changes
+description: Runs unit and browser tests on latest changes. Use after implementing features or fixing bugs.
+triggers:
+  - test
+  - e2e
 allowed-tools: Bash, Read, Grep, Glob, TaskCreate
 model: sonnet
 user-invocable: true

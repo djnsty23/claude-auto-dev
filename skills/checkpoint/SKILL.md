@@ -5,7 +5,7 @@ triggers:
   - save
 allowed-tools: Read, Write, TaskList, Grep
 model: sonnet
-user-invocable: false
+user-invocable: true
 ---
 
 # Context Checkpoint

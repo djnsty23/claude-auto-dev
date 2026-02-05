@@ -1,6 +1,9 @@
 ---
 name: deploy
 description: Deploy workflow for Vercel, Supabase, and CI/CD pipelines. Use for deployment and CI/CD setup.
+triggers:
+  - ci
+  - deploy
 allowed-tools: Bash
 model: sonnet
 user-invocable: true

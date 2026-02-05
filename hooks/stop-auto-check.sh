@@ -3,7 +3,7 @@
 # Checks for .claude/auto-active flag file.
 
 # Stale flag cleanup (>2 hours old = crashed session)
-AUTO_FLAG=".claude/auto-active"
+AUTO_FLAG="$HOME/.claude/auto-active"
 if [[ -f "$AUTO_FLAG" ]]; then
     flag_age=$(($(date +%s) - $(date -r "$AUTO_FLAG" +%s 2>/dev/null || echo 0)))
     if [[ "$flag_age" -gt 7200 ]]; then
@@ -41,3 +41,5 @@ else
     # Not in auto mode - allow normal stop evaluation
     echo '{"ok":true}'
 fi
+
+exit 0

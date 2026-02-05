@@ -2,6 +2,7 @@
 name: monitoring
 description: Observability patterns for production applications
 triggers:
+  - monitoring
   - logs
 user-invocable: true
 ---

@@ -5,7 +5,7 @@
 #>
 
 $ErrorActionPreference = "SilentlyContinue"
-$autoFlag = ".claude/auto-active"
+$autoFlag = "$env:USERPROFILE\.claude\auto-active"
 
 # Stale flag cleanup (>2 hours old = crashed session)
 if (Test-Path $autoFlag) {

@@ -21,6 +21,16 @@
 | `a11y` | Accessibility audit (WCAG 2.1 AA) |
 | `refactor` | Refactoring patterns |
 | `security` | Pre-deploy security scan |
+| `pr` / `pr-review` | PR review with specialized agents |
+| `db` / `supabase` | Database operations, RLS, migrations |
+| `deploy` / `ci` | Deploy workflow (Vercel, Supabase, CI/CD) |
+| `archive` | Archive completed prd.json stories |
+| `env` | Environment variable patterns |
+| `design` / `ui` | UI design patterns |
+| `browser` | Browser automation (agent-browser) |
+| `logs` / `monitoring` | Logging and observability |
+| `remotion` / `video` | Remotion video creation |
+| `save` | Save context checkpoint |
 | `update dev` | Sync latest skills from GitHub |
 
 **Note:** `/help`, `/status`, `/init`, `/compact` are Claude Code built-ins.

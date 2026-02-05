@@ -1,6 +1,8 @@
 ---
 name: clean
-description: Remove temporary artifacts
+description: Removes temporary screenshots, old backups, stale handoffs, and auto-active flags. Use when project has accumulated temp files.
+triggers:
+  - clean
 allowed-tools: Bash, Glob
 model: haiku
 user-invocable: true

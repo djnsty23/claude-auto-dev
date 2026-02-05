@@ -48,7 +48,10 @@ if (Test-Path ".env.local") {
         if ($_ -match "^([^#=]+)=(.*)$") {
             $name = $matches[1].Trim()
             $value = $matches[2].Trim()
-            if ($name -and $value) {
+            # Strip surrounding quotes from value
+            if ($value -match '^"(.*)"$' -or $value -match "^'(.*)'$") { $value = $matches[1] }
+            # Only export valid variable names
+            if ($name -match '^[A-Za-z_][A-Za-z0-9_]*$') {
                 [Environment]::SetEnvironmentVariable($name, $value, "Process")
             }
         }

@@ -39,8 +39,10 @@ if [[ -f ".env.local" ]]; then
     while IFS='=' read -r key value; do
         # Skip comments and empty lines
         [[ -z "$key" || "$key" =~ ^# ]] && continue
-        # Only export valid variable names
+        # Strip surrounding quotes from value
         key=$(echo "$key" | tr -d ' ')
+        value=$(echo "$value" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+        # Only export valid variable names
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
     done < .env.local
     echo "[Env] .env.local loaded"

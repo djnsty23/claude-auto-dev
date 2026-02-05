@@ -1,6 +1,6 @@
 ---
 name: code-quality
-description: Learned patterns from production mistakes - specific rules
+description: Learned patterns from production - loaded with auto/review/build
 user-invocable: false
 ---
 

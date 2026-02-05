@@ -7,6 +7,7 @@ triggers:
   - prd too large
 user-invocable: true
 disable-model-invocation: true
+argument-hint: "[status|S-ID|unarchive S-ID]"
 ---
 
 # PRD Archival System

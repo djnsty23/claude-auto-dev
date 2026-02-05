@@ -1,9 +1,11 @@
 ---
 name: verify
-description: Verify work is complete - outcome-focused, encourages going beyond minimum
+description: Verifies work completeness with outcome-focused checks. Use after implementing features to ensure quality.
+triggers:
+  - verify
 allowed-tools: Bash, Read, Grep, Glob, TaskUpdate, TaskList
 model: sonnet
-user-invocable: false
+user-invocable: true
 ---
 
 # Verify

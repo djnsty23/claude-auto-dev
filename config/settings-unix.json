@@ -31,8 +31,9 @@
       "Bash(rm -r -f *)",
       "Bash(rm --recursive *)",
       "Bash(find * -delete)",
-      "Bash(git push --force origin main)",
-      "Bash(git push --force origin master)",
+      "Bash(git push --force *)",
+      "Bash(git push * --force *)",
+      "Bash(git reset --hard *)",
       "Bash(git reset --hard)"
     ]
   },
