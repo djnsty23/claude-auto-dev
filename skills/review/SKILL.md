@@ -32,7 +32,7 @@ After any change:
 
 If yes to all, move on.
 
-## Execution
+## Execution (ALL 4 steps required)
 
 1. **Check what changed**
 ```bash
@@ -47,7 +47,7 @@ npm run build
 npm run lint  # If available
 ```
 
-3. **Scan changed files for issues**
+3. **Scan changed files for issues** (ALWAYS do this even if build passes)
 
 For each changed file, check:
 - `any` types or `@ts-ignore`
@@ -56,7 +56,7 @@ For each changed file, check:
 - Missing error handling
 - TODO/FIXME comments
 
-4. **Report**
+4. **Report** (output MUST include all sections below)
 
 ```
 Review: [X files changed]

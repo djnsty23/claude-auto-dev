@@ -7,7 +7,7 @@
 | `auto` | Work through all tasks autonomously |
 | `progress` | Show sprint progress |
 | `brainstorm` | Scan codebase, propose improvements and features |
-| `audit` | Parallel quality audit (6 agents) |
+| `audit` | Parallel quality audit (7 agents) |
 | `sprint` | Create/advance sprint |
 | `verify` | Quality checks on completed work |
 | `ship` | Build, test, review, deploy |

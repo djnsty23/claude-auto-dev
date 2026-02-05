@@ -4,22 +4,22 @@ description: Run all tests - npm test + browser tests on latest changes
 allowed-tools: Bash, Read, Grep, Glob, TaskCreate
 model: sonnet
 user-invocable: true
+argument-hint: "[unit|browser|all]"
 ---
 
 # Test
 
-Run both unit tests and browser tests on latest implementations.
+Run unit tests AND browser tests. ALL steps are mandatory.
 
-## Execution
+## Step 1: Unit Tests
 
-### Step 1: Unit Tests
 ```bash
 npm test  # or npm run test
 ```
 
-If tests fail, report failures and stop.
+If tests fail, report failures but CONTINUE to browser tests.
 
-### Step 2: Identify Latest Changes
+## Step 2: Identify Latest Changes (ALWAYS run this)
 
 ```bash
 # What was recently modified?
@@ -32,24 +32,38 @@ Focus browser tests on:
 - Changed components with UI
 - Updated forms or flows
 
-### Step 3: Browser Tests
+If no UI changes found, STILL run Step 3 on the main page (smoke test).
 
-For each relevant change, run agent-browser:
+## Step 3: Browser Tests (ALWAYS run this)
 
+Check prerequisites first:
 ```bash
-# Start if not running
-# (User should have dev server running externally)
+# 1. Is agent-browser installed?
+command -v agent-browser || npm install -g agent-browser
 
-# Test the changed feature
+# 2. Is dev server running?
+curl -s http://localhost:3000 > /dev/null 2>&1 || \
+curl -s http://localhost:3001 > /dev/null 2>&1 || \
+curl -s http://localhost:5173 > /dev/null 2>&1
+```
+
+If no dev server is running, check if a deploy URL exists:
+- Check `vercel.json` or `.vercel/` for production URL
+- Check git remote for Vercel/Netlify deploy
+- If found, test against production URL instead
+
+Run browser tests:
+```bash
+# Test the changed feature (or main page as smoke test)
 agent-browser open http://localhost:3000/[path]
 agent-browser snapshot -i
 
-# Verify expected elements exist
-# Check for errors in console
-# Verify responsive behavior if UI change
+# Verify: no console errors, elements render, no 404s
 ```
 
-### Step 4: Report
+If `agent-browser` is not available and cannot be installed, report it as a gap (do NOT silently skip).
+
+## Step 4: Report (ALWAYS output this)
 
 ```
 Test Results
@@ -63,11 +77,16 @@ Tested Flows:
 2. /settings - ✓ Form saves correctly
 3. /login - ✓ Auth flow works
 
+Console Errors: none (or list)
+404s Found: none (or list)
+
 Issues Found:
 - None (or list issues)
 
 Ready for: deploy / needs fixes
 ```
+
+Do NOT report results after Step 1 alone. The report MUST include both unit and browser test results.
 
 ## Test Patterns
 

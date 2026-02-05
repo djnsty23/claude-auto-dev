@@ -99,7 +99,9 @@ supabase secrets list --project-ref [ref]
 
 **Missing env vars = broken deploy.** Check before shipping.
 
-## Step 5: Post-Deploy Verification
+## Step 5: Post-Deploy Verification (MANDATORY - never skip)
+
+A successful deploy does NOT mean the app works. ALWAYS verify.
 
 ### Automated Checks (agent-browser)
 

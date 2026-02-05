@@ -23,7 +23,8 @@ User says "audit"
     ├─► Agent 3: Accessibility Audit (Haiku) - WCAG, keyboard, contrast
     ├─► Agent 4: Type Safety Audit (Haiku) - any, ts-ignore, conflicts
     ├─► Agent 5: UX/UI Audit (Haiku) - states, tokens, feedback
-    └─► Agent 6: Test Coverage Audit (Haiku) - critical paths, gaps
+    ├─► Agent 6: Test Coverage Audit (Haiku) - critical paths, gaps
+    └─► Agent 7: Deploy Readiness Audit (Haiku) - PWA, env vars, runtime
 
     [All run in parallel via Task tool with run_in_background: true]
 
@@ -33,7 +34,7 @@ Wait for completion → Aggregate Results → Present Report
 
 ## Execution
 
-Launch all 6 agents in a single message:
+Launch all 7 agents in a single message:
 
 ```typescript
 Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
@@ -53,6 +54,9 @@ Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
 
 Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
   prompt: "Test coverage audit for [PROJECT_PATH]. Scan: auth flows without tests, data mutations without tests, hooks without test files, utilities without tests. List critical gaps. Report: Severity, What needs testing, Priority." })
+
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: "Deploy readiness audit for [PROJECT_PATH]. Scan for runtime issues that unit tests miss: 1) PWA manifest (manifest.json/site.webmanifest) - check every icon/screenshot path references a file that actually exists in public/. 2) Environment variables - check all process.env/import.meta.env references have values set (no trailing newlines/whitespace). 3) Supabase config - check anon key for trailing newline characters that break WebSocket URLs. 4) Asset references - grep for paths like /icons/, /images/, /screenshots/ in source and verify the files exist in public/. 5) next.config/vercel.json - check for mismatched rewrites or missing headers. Report: Severity, File:line, Issue, Fix." })
 ```
 
 ## Output Format
@@ -60,7 +64,7 @@ Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
 ```markdown
 ## Audit Report
 
-**Scan Time:** ~3 min | **Agents:** 6 parallel | **Files Scanned:** ~250
+**Scan Time:** ~3 min | **Agents:** 7 parallel | **Files Scanned:** ~250
 
 ### Summary
 
@@ -72,6 +76,7 @@ Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
 | Type Safety | X | X | X | X | XX |
 | UX/UI | X | X | X | X | XX |
 | Test Coverage | X | X | X | X | XX |
+| Deploy Ready | X | X | X | X | XX |
 | **TOTAL** | **X** | **X** | **X** | **X** | **XX** |
 
 ### Critical Issues (Fix Immediately)
@@ -160,7 +165,7 @@ User can audit specific features:
 
 ## Token Cost
 
-- 6 agents × ~15K tokens each = ~90K tokens total
+- 7 agents × ~15K tokens each = ~105K tokens total
 - Time: 2-4 minutes (parallel execution)
 - Context efficient: agents run in background, results aggregated
 

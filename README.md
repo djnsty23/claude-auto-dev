@@ -62,7 +62,7 @@ cd ~/claude-auto-dev && git pull
 | `brainstorm` | Scan codebase, propose improvements and features |
 | `auto` | Work through all tasks autonomously |
 | `progress` | Show sprint progress |
-| `audit` | 6-agent parallel quality audit |
+| `audit` | 7-agent parallel quality audit |
 | `review` | Code quality check |
 | `security` | Pre-deploy security scan |
 | `sprint` | Create/advance sprint |
