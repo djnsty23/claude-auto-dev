@@ -24,6 +24,36 @@ done
 echo -e "\n\033[36mClaude Auto-Dev v$VERSION\033[0m"
 echo "========================"
 
+# Check for Node.js (required)
+echo -e "\n\033[33m[Prerequisites]\033[0m"
+if ! command -v node &> /dev/null; then
+    echo -e "  \033[31mNode.js not found. Install from https://nodejs.org (v18+)\033[0m"
+    exit 1
+fi
+
+NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
+if [[ "$NODE_VERSION" -lt 18 ]]; then
+    echo -e "  \033[31mNode.js v18+ required (found v$(node -v))\033[0m"
+    exit 1
+fi
+echo -e "  \033[32mNode.js $(node -v)\033[0m"
+
+# Check for Claude Code
+if command -v claude &> /dev/null; then
+    CLAUDE_VERSION=$(claude --version 2>/dev/null | head -1)
+    echo -e "  \033[32mClaude Code $CLAUDE_VERSION\033[0m"
+else
+    echo -e "  \033[33mClaude Code not found - installing...\033[0m"
+    npm install -g @anthropic-ai/claude-code
+    if command -v claude &> /dev/null; then
+        CLAUDE_VERSION=$(claude --version 2>/dev/null | head -1)
+        echo -e "  \033[32mClaude Code $CLAUDE_VERSION installed\033[0m"
+    else
+        echo -e "  \033[31mClaude Code install failed. Try: npm install -g @anthropic-ai/claude-code\033[0m"
+        exit 1
+    fi
+fi
+
 # Create base directory
 mkdir -p "$CLAUDE_DIR"
 
