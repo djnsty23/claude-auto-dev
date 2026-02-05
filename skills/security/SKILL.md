@@ -54,9 +54,9 @@ Flag these patterns:
 - Service role keys or admin tokens stored in queryable tables
 
 **Supabase auth config checks:**
-- Leaked password protection should be enabled (Supabase Dashboard → Auth → Settings)
 - Email enumeration protection enabled
 - MFA available for admin accounts
+- Note: Leaked password protection requires Supabase Pro plan ($20/mo) — skip if free tier
 
 ### 4. Input Validation
 ```typescript
