@@ -11,7 +11,7 @@ disable-model-invocation: true
 
 # PRD Archival System
 
-When prd.json exceeds ~20k tokens (2000+ lines), archive completed stories.
+Archive completed stories to keep prd.json fast and small. **Never let prd.json grow beyond 3 sprints of active data.**
 
 ## "archive" Command
 
@@ -69,10 +69,13 @@ When prd.json exceeds ~20k tokens (2000+ lines), archive completed stories.
 
 | Condition | Action |
 |-----------|--------|
-| prd.json > 2000 lines | Suggest archive |
-| prd.json read fails (token limit) | Force archive |
+| **3+ completed sprints** | **Auto-suggest archive** |
+| prd.json > 500 lines | Suggest archive |
+| prd.json > 50KB | Force archive |
 | User says "archive" | Manual archive |
 | All stories complete | Archive and start fresh |
+
+**Rule of thumb:** Keep only the current sprint + 2 previous sprints in prd.json. Archive everything older.
 
 ## Archive Process
 
@@ -127,7 +130,9 @@ Claude:
 
 | State | Estimated Tokens |
 |-------|-----------------|
-| Full prd.json (70 stories) | ~25,000 |
-| After archive (30 QA only) | ~10,000 |
+| Full prd.json (70+ stories, 10 sprints) | ~25,000+ |
+| After archive (current sprint + 2) | ~3,000-5,000 |
 | With summary | +500 |
-| **Total Savings** | **~60%** |
+| **Total Savings** | **~80%** |
+
+**Real example:** muzic.ai grew to 828 rows / 10 sprints / ~20K tokens. After archiving to keep only sprints 9-11, prd.json drops to ~150 rows / ~3K tokens.

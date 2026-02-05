@@ -79,5 +79,6 @@ Examples:
 
 ## Archive Trigger
 
-When `completedStories > 500` or `prd.json > 100KB`:
-→ Archive to `prd-archive-YYYY-MM.json`
+When **3+ completed sprints** or `prd.json > 500 lines` or `prd.json > 50KB`:
+→ Run `archive` to move old sprints to `prd-archive-YYYY-MM.json`
+→ Keep only current sprint + 2 previous in prd.json
