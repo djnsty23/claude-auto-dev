@@ -1,5 +1,5 @@
 #!/bin/bash
-# Claude Auto-Dev Installer (v4.9)
+# Claude Auto-Dev Installer (v5.0)
 # Usage: ./install.sh [--init] [--full] [--copy]
 
 set -e

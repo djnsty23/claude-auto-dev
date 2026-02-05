@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Deploy workflow for Vercel, Supabase, and CI/CD pipelines. User-facing via ship skill.
+description: Deploy workflow for Vercel, Supabase, and CI/CD pipelines. Use for deployment and CI/CD setup.
 allowed-tools: Bash
 model: sonnet
 user-invocable: true

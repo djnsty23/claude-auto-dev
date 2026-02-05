@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Claude Auto-Dev Installer (v4.9)
+    Claude Auto-Dev Installer (v5.0)
 .EXAMPLE
     .\install.ps1              # Symlink skills + hooks, add update-dev alias
     .\install.ps1 -Full        # + rules + settings

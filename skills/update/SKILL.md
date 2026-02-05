@@ -44,7 +44,7 @@ Sync the local repo with ~/.claude installation.
    [Update] Pulled 3 commits
    [Update] Skills: 2 added, 1 updated, 0 removed
    [Update] Hooks: 0 added, 1 updated, 0 removed
-   [Update] Now at v4.9.1
+   [Update] Now at v5.0
    ```
 
 ## Windows Commands

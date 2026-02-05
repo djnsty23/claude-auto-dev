@@ -32,7 +32,7 @@ git status --short         # Warn if uncommitted changes
 
 ## Step 2: Security Scan (REQUIRED)
 
-Run before every deploy (uses `security-patterns` skill):
+Run before every deploy (uses `security` skill):
 
 - [ ] No hardcoded API keys, tokens, or secrets in code
 - [ ] `.env` files not committed (check `.gitignore`)
@@ -175,7 +175,6 @@ If any verification failed, list specific failures and next steps.
 | Skill | Role in Ship |
 |-------|-------------|
 | `review` | Code quality check (auto-loaded via requires) |
-| `security-patterns` | Vulnerability scan (auto-loaded via requires) |
+| `security` | Vulnerability scan (auto-loaded via requires) |
 | `test` | Run tests before deploy (auto-loaded via requires) |
-| `deploy` | Internal deploy patterns reference |
-| `ci-cd` | For CI/CD pipeline deploys instead of manual |
+| `deploy` | Deploy patterns and CI/CD pipeline reference |

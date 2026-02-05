@@ -99,10 +99,10 @@ pr-review --comment
 
 | When | Also Reference |
 |------|----------------|
-| Security issues found | `security-patterns` |
+| Security issues found | `security` |
 | Type issues found | `code-quality` |
 | UI changes | `design`, `preserve-ui` |
-| Test gaps | `browser-test` |
+| Test gaps | `browser-auth` |
 
 ## Tips
 

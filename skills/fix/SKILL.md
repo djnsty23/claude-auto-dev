@@ -1,6 +1,7 @@
 ---
 name: fix
 description: Debug issues and fix bugs systematically.
+user-invocable: true
 triggers:
   - fix
   - debug

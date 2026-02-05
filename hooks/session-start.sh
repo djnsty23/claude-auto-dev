@@ -31,7 +31,7 @@ if [[ -f "$REPO_PATH_FILE" ]]; then
         fi
     fi
 else
-    echo "[Auto-Dev v4.9]"
+    echo "[Auto-Dev v5.0]"
 fi
 
 # Auto-source .env.local (project-isolated credentials)

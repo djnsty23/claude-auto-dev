@@ -1,6 +1,7 @@
 ---
 name: env-vars
 description: Manage environment variables and credentials securely.
+user-invocable: true
 triggers:
   - env
   - environment

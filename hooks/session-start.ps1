@@ -39,7 +39,7 @@ if (Test-Path $repoPathFile) {
         }
     }
 } else {
-    Write-Host "[Auto-Dev v4.9]"
+    Write-Host "[Auto-Dev v5.0]"
 }
 
 # Auto-source .env.local (project-isolated credentials)
