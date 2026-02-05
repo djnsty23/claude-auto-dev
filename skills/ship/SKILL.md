@@ -3,6 +3,8 @@ name: ship
 description: Pre-deploy checklist with review, security, and test verification. Use when ready to deploy.
 triggers:
   - ship
+allowed-tools: Bash, Read, Grep, Glob, Task
+model: opus
 user-invocable: true
 disable-model-invocation: true
 ---

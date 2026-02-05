@@ -1,6 +1,6 @@
 ---
 name: env-vars
-description: Manage environment variables and credentials securely.
+description: Manages environment variables and credentials securely. Use when configuring secrets or .env files.
 user-invocable: true
 triggers:
   - env
@@ -8,6 +8,8 @@ triggers:
   - credentials
   - secrets
   - api key
+allowed-tools: Bash, Read, Write, Grep
+model: haiku
 ---
 
 # Environment Variables Workflow

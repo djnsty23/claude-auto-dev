@@ -2,6 +2,8 @@
 name: code-quality
 description: Learned patterns from production - loaded with auto/review/build
 user-invocable: false
+allowed-tools: Read, Grep, Glob
+model: sonnet
 ---
 
 # Code Quality Rules

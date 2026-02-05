@@ -1,9 +1,11 @@
 ---
 name: monitoring
-description: Observability patterns for production applications
+description: Observability patterns for production - logging, error tracking, analytics. Use when setting up monitoring.
 triggers:
   - monitoring
   - logs
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob
+model: sonnet
 user-invocable: true
 ---
 

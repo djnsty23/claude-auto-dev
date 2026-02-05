@@ -9,7 +9,7 @@ input=$(cat)
 if ! command -v jq &>/dev/null; then
     # Basic safety filtering without jq
     if echo "$input" | grep -q '"Bash"'; then
-        if echo "$input" | grep -qiE 'rm\s+(-[a-z]*r[a-z]*\s+-[a-z]*f|-[a-z]*f[a-z]*\s+-[a-z]*r|--recursive)|find\s+/\s+-delete|dd\s+if=|mkfs\.|chmod\s+-R\s+000|git\s+reset\s+--hard|git\s+push\s+(--force|.*--force)|git\s+clean\s+-fd|DROP\s+(TABLE|DATABASE)|curl.*\|\s*(ba)?sh|wget.*\|\s*(ba)?sh'; then
+        if echo "$input" | grep -qiE 'rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|/)|-[a-z]*f[a-z]*\s+-[a-z]*r)|rm\s+--recursive|find\s+/\s+-delete|dd\s+if=.*/dev/|mkfs\.|chmod\s+-R\s+000\s+/|git\s+reset\s+--hard|git\s+push\s+(--force|.*--force)|git\s+clean\s+(-[a-z]*f|--force)|git\s+checkout\s+(\.|--\s+\.)|git\s+restore\s+\.|DROP\s+(TABLE|DATABASE)|curl.*\|\s*(ba)?sh|wget.*\|\s*(ba)?sh'; then
             echo "Blocked potentially dangerous command (jq unavailable)" >&2
             exit 2
         fi
@@ -24,7 +24,7 @@ file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
 # Bash command filtering
 if [ "$tool_name" = "Bash" ] && [ -n "$command" ]; then
     # Dangerous patterns to block (expanded to catch flag variations and indirect execution)
-    if echo "$command" | grep -qiE 'rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|/)|-[a-z]*f[a-z]*\s+-[a-z]*r)|rm\s+--recursive|find\s+/\s+-delete|dd\s+if=.*/dev/|mkfs\.|chmod\s+-R\s+000\s+/|git\s+reset\s+--hard|git\s+push\s+(--force|.*--force)|git\s+clean\s+-fd|DROP\s+(TABLE|DATABASE)|curl.*\|\s*(ba)?sh|wget.*\|\s*(ba)?sh'; then
+    if echo "$command" | grep -qiE 'rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|/)|-[a-z]*f[a-z]*\s+-[a-z]*r)|rm\s+--recursive|find\s+/\s+-delete|dd\s+if=.*/dev/|mkfs\.|chmod\s+-R\s+000\s+/|git\s+reset\s+--hard|git\s+push\s+(--force|.*--force)|git\s+clean\s+(-[a-z]*f|--force)|git\s+checkout\s+(\.|--\s+\.)|git\s+restore\s+\.|DROP\s+(TABLE|DATABASE)|curl.*\|\s*(ba)?sh|wget.*\|\s*(ba)?sh'; then
         echo "Blocked potentially dangerous command: $command" >&2
         exit 2
     fi

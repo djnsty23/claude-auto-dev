@@ -6,6 +6,8 @@ triggers:
   - extract
   - split
   - restructure
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob
+model: sonnet
 user-invocable: true
 argument-hint: "[target file or pattern]"
 ---

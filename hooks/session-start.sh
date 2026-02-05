@@ -67,10 +67,16 @@ if [[ -f "prd.json" ]]; then
         sprint=$(jq -r '.sprint // empty' prd.json 2>/dev/null)
         total=$(jq -r '.completedStories // 0' prd.json 2>/dev/null)
         all=$(jq -r '.totalStories // 0' prd.json 2>/dev/null)
-        pending=$((all - total))
-        if [[ -n "$sprint" ]]; then
-            echo "[Sprint] $sprint | $total done, $pending pending"
-        fi
+    else
+        sprint=$(grep -oP '"sprint"\s*:\s*"?\K[^",}]+' prd.json 2>/dev/null | head -1)
+        total=$(grep -oP '"completedStories"\s*:\s*\K[0-9]+' prd.json 2>/dev/null | head -1)
+        all=$(grep -oP '"totalStories"\s*:\s*\K[0-9]+' prd.json 2>/dev/null | head -1)
+    fi
+    total=${total:-0}
+    all=${all:-0}
+    pending=$((all - total))
+    if [[ -n "$sprint" ]]; then
+        echo "[Sprint] $sprint | $total done, $pending pending"
     fi
 fi
 

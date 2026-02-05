@@ -1,9 +1,10 @@
 ---
 name: design
-description: Creates distinctive UI - avoids generic AI aesthetics.
+description: Creates distinctive UI - avoids generic AI aesthetics. Use when designing or refining user interfaces.
 triggers:
   - design
   - ui
+model: opus
 user-invocable: true
 ---
 

@@ -1,7 +1,8 @@
 ---
 name: preserve-ui
-description: Preserve existing UI structure when modifying components - auto-applied
+description: Preserves existing UI structure when modifying components. Auto-loaded with design skill.
 user-invocable: false
+allowed-tools: Read, Grep, Glob
 model: sonnet
 ---
 

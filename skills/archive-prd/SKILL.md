@@ -1,10 +1,12 @@
 ---
 name: archive-prd
-description: Compact prd.json by archiving completed stories to reduce token usage
+description: Archives completed stories from prd.json to reduce token usage.
 triggers:
   - archive
   - compact prd
   - prd too large
+allowed-tools: Read, Write, Edit, Bash
+model: haiku
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[status|S-ID|unarchive S-ID]"

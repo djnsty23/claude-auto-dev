@@ -7,6 +7,8 @@ triggers:
   - debug
   - broken
   - error
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob
+model: opus
 argument-hint: "[error or file]"
 ---
 

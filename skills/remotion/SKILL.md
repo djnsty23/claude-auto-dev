@@ -1,12 +1,14 @@
 ---
 name: remotion
-description: Best practices for Remotion - Video creation in React. Use when working with video compositions, animations, or subtitles.
+description: Best practices for Remotion - video creation in React. Use when working with video compositions, animations, or subtitles.
 user-invocable: true
 triggers:
   - remotion
   - video
   - animation
   - subtitle
+allowed-tools: Read, Write, Edit, Bash, Grep, Glob
+model: sonnet
 ---
 
 # Remotion Best Practices

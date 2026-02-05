@@ -83,7 +83,7 @@
       "file": "ship/SKILL.md",
       "requires": ["review", "security", "test", "commit"],
       "priority": 3,
-      "description": "Pre-deploy checklist with review, security, and test verification."
+      "description": "Pre-deploy checklist with review, security, and test verification. Use when ready to deploy."
     },
     "fix": {
       "triggers": ["fix", "debug", "broken", "error"],
@@ -141,7 +141,7 @@
       "context": [],
       "file": "preserve-ui/SKILL.md",
       "priority": 2,
-      "description": "Preserves existing UI structure when modifying components."
+      "description": "Preserves existing UI structure when modifying components. Auto-loaded with design skill."
     },
     "quality": {
       "triggers": [],
@@ -155,7 +155,7 @@
       "context": [],
       "file": "react-patterns/SKILL.md",
       "priority": 2,
-      "description": "React/Next.js best practices and optimization patterns."
+      "description": "React/Next.js best practices and prioritized optimization patterns. Auto-loaded with auto and review."
     },
     "verify": {
       "triggers": ["verify"],
@@ -177,14 +177,14 @@
       "context": [],
       "file": "archive-prd/SKILL.md",
       "priority": 3,
-      "description": "Archives completed stories from prd.json."
+      "description": "Archives completed stories from prd.json to reduce token usage."
     },
     "env-vars": {
       "triggers": ["env", "environment", "credentials", "secrets", "api key"],
       "context": [".env*"],
       "file": "env-vars/SKILL.md",
       "priority": 3,
-      "description": "Environment variables and credentials patterns."
+      "description": "Manages environment variables and credentials securely. Use when configuring secrets or .env files."
     },
     "design": {
       "triggers": ["design", "ui"],
@@ -220,7 +220,7 @@
       "context": [],
       "file": "update/SKILL.md",
       "priority": 1,
-      "description": "Updates claude-auto-dev to latest. Syncs repo with ~/.claude, removes stale files."
+      "description": "Updates claude-auto-dev to latest version. Syncs repo with ~/.claude."
     },
     "commit": {
       "triggers": ["commit", "push", "commit-push-pr"],

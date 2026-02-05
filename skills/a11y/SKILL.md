@@ -6,6 +6,8 @@ triggers:
   - accessibility
   - wcag
   - screen reader
+allowed-tools: Bash, Read, Grep, Glob
+model: sonnet
 user-invocable: true
 ---
 

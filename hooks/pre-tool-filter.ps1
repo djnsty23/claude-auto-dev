@@ -29,16 +29,20 @@ if ($toolName -eq "Bash") {
 
     # Dangerous patterns to block
     $dangerousPatterns = @(
-        'rm\s+(-[a-z]*r[a-z]*\s+-[a-z]*f|--recursive)', # rm -rf, rm -r -f, rm --recursive
+        'rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|/)|-[a-z]*f[a-z]*\s+-[a-z]*r)', # rm -rf, rm -r -f
+        'rm\s+--recursive',       # rm --recursive
         'find\s+/\s+-delete',     # find / -delete
         'dd\s+if=.*/dev/',        # dd if=/dev/zero
         'mkfs\.',                 # mkfs.ext4
         'chmod\s+-R\s+000\s+/',   # chmod -R 000 /
         'git\s+reset\s+--hard',   # git reset --hard
         'git\s+push\s+(--force|.*--force)', # git push --force (any flag order)
-        'git\s+clean\s+-fd',      # git clean -fd
+        'git\s+clean\s+(-[a-z]*f|--force)', # git clean -f, -fd, --force
+        'git\s+checkout\s+(\.|--\s+\.)', # git checkout .
+        'git\s+restore\s+\.',     # git restore .
         'format\s+c:',            # format c:
         'del\s+/s\s+/q\s+c:',    # del /s /q c:
+        'diskpart',               # diskpart (Windows disk utility)
         'DROP\s+(TABLE|DATABASE)', # SQL injection
         'curl.*\|\s*(ba)?sh',     # curl | bash (remote code exec)
         'wget.*\|\s*(ba)?sh'      # wget | bash

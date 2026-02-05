@@ -8,6 +8,7 @@ triggers:
   - review-pr
   - code-review
 allowed-tools: Bash(gh *), Glob, Grep, Read, Task
+model: opus
 argument-hint: "[#PR-number] [--comment]"
 ---
 

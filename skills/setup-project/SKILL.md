@@ -1,10 +1,12 @@
 ---
 name: setup-project
-description: Initialize a new project with standard configuration.
+description: Initializes project with prd.json and standard config. Use when starting a new project.
 triggers:
   - setup
   - scaffold
   - new-project
+allowed-tools: Bash, Read, Write, Edit, Glob
+model: sonnet
 user-invocable: true
 disable-model-invocation: true
 ---

@@ -34,7 +34,12 @@
       "Bash(git push --force *)",
       "Bash(git push * --force *)",
       "Bash(git reset --hard *)",
-      "Bash(git reset --hard)"
+      "Bash(git reset --hard)",
+      "Bash(git clean *)",
+      "Bash(git checkout .)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore .)",
+      "Bash(git restore --staged .)"
     ]
   },
   "model": "opus",
@@ -45,6 +50,7 @@
           {
             "type": "command",
             "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\session-start.ps1\"",
+            "timeout": 15,
             "statusMessage": "Loading context..."
           }
         ]

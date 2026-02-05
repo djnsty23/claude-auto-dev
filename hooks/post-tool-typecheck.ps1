@@ -19,6 +19,7 @@ try {
     $filePath = $toolInput.file_path
 }
 catch {
+    [Console]::Error.WriteLine("PostToolUse: Failed to parse input")
     exit 0
 }
 

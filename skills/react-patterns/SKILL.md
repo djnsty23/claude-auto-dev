@@ -1,7 +1,8 @@
 ---
 name: react-patterns
-description: React/Next.js best practices - prioritized optimization patterns
+description: React/Next.js best practices and prioritized optimization patterns. Auto-loaded with auto and review.
 user-invocable: false
+allowed-tools: Read, Grep, Glob
 model: sonnet
 ---
 

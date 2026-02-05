@@ -6,6 +6,8 @@ triggers:
   - agent-browser
   - web test
   - ui test
+allowed-tools: Bash
+model: sonnet
 user-invocable: true
 ---
 

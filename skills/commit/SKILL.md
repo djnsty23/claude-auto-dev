@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Standardized git commit, push, and PR creation workflow. Use for committing work.
+description: Standardized git commit, push, and PR creation workflow.
 triggers:
   - commit
   - push
@@ -126,7 +126,7 @@ The current version is: !`cat VERSION 2>/dev/null`
 
 During `auto`, commit every 3 tasks:
 ```bash
-git add -A
+git add -A -- ':!.env*' ':!*.pem' ':!*.key' ':!*.secret'
 git commit -m "feat: complete S9-1 through S9-3
 
 - S9-1: Playlist UI with drag-drop

@@ -1,6 +1,6 @@
 ---
 name: checkpoint
-description: Save context state - auto-triggered every 3 tasks
+description: Saves context state. Auto-triggered every 3 tasks.
 triggers:
   - save
 allowed-tools: Read, Write, TaskList, Grep

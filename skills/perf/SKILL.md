@@ -7,6 +7,8 @@ triggers:
   - lighthouse
   - bundle size
   - core web vitals
+allowed-tools: Bash, Read, Grep, Glob
+model: sonnet
 user-invocable: true
 ---
 
