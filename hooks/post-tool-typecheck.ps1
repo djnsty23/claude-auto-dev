@@ -38,8 +38,10 @@ if ($filePath -match '\.(ts|tsx|js|jsx)$') {
             $result = Receive-Job $job
             Remove-Job $job -Force
             if ($result.exitCode -ne 0) {
-                [Console]::Error.WriteLine("[Typecheck] Errors found:")
-                [Console]::Error.WriteLine($result.output)
+                [Console]::Out.WriteLine("")
+                [Console]::Out.WriteLine("[TYPECHECK FAILED] Fix these errors before continuing:")
+                [Console]::Out.WriteLine($result.output)
+                [Console]::Out.WriteLine("")
             }
         }
     }

@@ -24,8 +24,10 @@ if echo "$file_path" | grep -qE '\.(ts|tsx|js|jsx)$'; then
         if [ "$has_typecheck" = true ]; then
             result=$(timeout 30 npm run typecheck 2>&1)
             if [ $? -ne 0 ]; then
-                echo "[Typecheck] Errors found:"
+                echo ""
+                echo "[TYPECHECK FAILED] Fix these errors before continuing:"
                 echo "$result"
+                echo ""
             fi
         fi
     fi

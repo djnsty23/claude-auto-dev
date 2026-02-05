@@ -58,6 +58,25 @@ else
 fi
 ```
 
+### Step 2b: Clean stale skills
+
+```bash
+# Remove skill directories that are no longer in manifest
+node -e "
+const fs = require('fs');
+const path = require('path');
+const manifest = JSON.parse(fs.readFileSync('$REPO/skills/manifest.json', 'utf8'));
+const validSkills = new Set(Object.keys(manifest.skills));
+const dest = '$DEST/skills';
+fs.readdirSync(dest, { withFileTypes: true })
+  .filter(d => d.isDirectory() && !validSkills.has(d.name))
+  .forEach(d => {
+    fs.rmSync(path.join(dest, d.name), { recursive: true, force: true });
+    console.log('Removed stale: ' + d.name);
+  });
+"
+```
+
 ### Step 3: Report
 
 ```
@@ -77,7 +96,7 @@ fi
 
 | Source | Destination | Mode |
 |--------|-------------|------|
-| `repo/skills/` | `~/.claude/skills/` | Copy (overwrite) |
+| `repo/skills/` | `~/.claude/skills/` | Copy + clean stale (manifest-based) |
 | `repo/hooks/` | `~/.claude/hooks/` | Copy (overwrite) |
 | `repo/config/rules/` | `~/.claude/rules/` | Copy (add/update only, no delete) |
 | `repo/config/settings.json` | `~/.claude/settings.json` | Overwrite (security-critical) |

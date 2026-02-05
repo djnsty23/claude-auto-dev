@@ -32,6 +32,22 @@ if [[ -f "$REPO_PATH_FILE" ]]; then
                 cp -r "$REPO_PATH/skills/"* "$CLAUDE_DIR/skills/"
                 cp "$REPO_PATH/hooks/"* "$CLAUDE_DIR/hooks/"
                 cp "$REPO_PATH/config/settings-unix.json" "$CLAUDE_DIR/settings.json" 2>/dev/null
+                # Remove stale skill directories not in manifest
+                if command -v node &>/dev/null && [ -f "$REPO_PATH/skills/manifest.json" ]; then
+                    node -e "
+const fs = require('fs');
+const path = require('path');
+const manifest = JSON.parse(fs.readFileSync('$REPO_PATH/skills/manifest.json', 'utf8'));
+const validSkills = new Set(Object.keys(manifest.skills));
+const dest = '$CLAUDE_DIR/skills';
+fs.readdirSync(dest, { withFileTypes: true })
+  .filter(d => d.isDirectory() && !validSkills.has(d.name))
+  .forEach(d => {
+    fs.rmSync(path.join(dest, d.name), { recursive: true, force: true });
+    console.log('[Auto-Dev] Removed stale skill: ' + d.name);
+  });
+" 2>/dev/null
+                fi
                 echo "[Auto-Dev] Skills/hooks/settings synced"
             fi
         else

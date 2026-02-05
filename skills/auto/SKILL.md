@@ -94,13 +94,27 @@ const executable = storyEntries.filter(([id, s]) =>
 ### Execute Each Task
 
 1. Read the task description
-2. Implement the solution
-3. `npm run typecheck` - Fix if fails
-4. `npm run build` - Fix if fails
-5. Verify (see below)
-6. **Run Self-Verification** (see below) — all checks must pass first
-7. Update prd.json: `passes: true`
-8. **IMMEDIATELY** start next task
+2. **Context Loading** (see below) — REQUIRED before writing any code
+3. Implement the solution
+4. `npm run typecheck` - Fix if fails
+5. `npm run build` - Fix if fails
+6. Verify (see below)
+7. **Run Self-Verification** (see below) — all checks must pass first
+8. Update prd.json: `passes: true`
+9. **IMMEDIATELY** start next task
+
+### Context Loading (REQUIRED before implementation)
+
+Before writing ANY code for a task:
+
+1. **Read 2-3 existing files** that are most similar to what you're building
+   - If adding a component: read an existing component in the same directory
+   - If adding an API route: read an existing route
+   - If modifying a file: read the FULL file first, not just the section
+2. **Identify patterns**: Note naming conventions, import style, error handling patterns, state management approach
+3. **Match patterns**: Your new code MUST follow the same patterns. Never introduce a new pattern when an existing one covers the use case.
+
+This prevents: wrong imports, inconsistent naming, duplicate utilities, style mismatches.
 
 ### Verification
 

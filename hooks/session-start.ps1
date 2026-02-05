@@ -40,6 +40,18 @@ if (Test-Path $repoPathFile) {
                 Copy-Item -Path "$repoPath\skills\*" -Destination "$claudeDir\skills\" -Recurse -Force
                 Copy-Item -Path "$repoPath\hooks\*" -Destination "$claudeDir\hooks\" -Force
                 Copy-Item -Path "$repoPath\config\settings.json" -Destination "$claudeDir\settings.json" -Force -ErrorAction SilentlyContinue
+                # Remove stale skill directories not in manifest
+                $manifestPath = "$repoPath\skills\manifest.json"
+                if (Test-Path $manifestPath) {
+                    try {
+                        $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+                        $validSkills = $manifest.skills.PSObject.Properties.Name
+                        Get-ChildItem "$claudeDir\skills" -Directory | Where-Object { $_.Name -notin $validSkills } | ForEach-Object {
+                            Remove-Item $_.FullName -Recurse -Force
+                            Write-Host "[Auto-Dev] Removed stale skill: $($_.Name)"
+                        }
+                    } catch {}
+                }
                 Write-Host "[Auto-Dev] Skills/hooks/settings synced"
             }
         } else {
