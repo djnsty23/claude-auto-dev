@@ -115,7 +115,7 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
 
 ## Persist Findings to prd.json (REQUIRED)
 
-After aggregating results, write ALL Critical + High findings to prd.json so they persist across sessions.
+After aggregating results, write ALL findings to prd.json so they persist across sessions.
 
 ### Step 1: Read current prd.json
 
@@ -159,16 +159,15 @@ Use ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`)
 
 **Category → type mapping:**
 
-| Audit Category | prd.json type | Priority |
-|---------------|---------------|----------|
-| Security (Critical) | fix | 0 |
-| Security (High) | fix | 1 |
-| Performance | perf | 1 |
-| Accessibility | fix | 1 |
-| Type Safety | fix | 2 |
-| UX/UI | fix | 1 |
-| Test Coverage | qa | 2 |
-| Deploy Readiness | fix | 0 |
+| Audit Category | prd.json type | Critical | High | Medium | Low |
+|---------------|---------------|----------|------|--------|-----|
+| Security | fix | 0 | 1 | 2 | 3 |
+| Performance | perf | 0 | 1 | 2 | 3 |
+| Accessibility | fix | 0 | 1 | 2 | 3 |
+| Type Safety | fix | 0 | 1 | 2 | 3 |
+| UX/UI | fix | 0 | 1 | 2 | 3 |
+| Test Coverage | qa | 0 | 1 | 2 | 3 |
+| Deploy Readiness | fix | 0 | 1 | 2 | 3 |
 
 ### Step 4: Also create session Tasks
 
@@ -186,12 +185,13 @@ TaskCreate({
 
 ```
 Created [X] stories in prd.json from audit findings.
-- [N] Critical (priority 0) — S{sprint}-AUD-001 through AUD-00N
+- [N] Critical (priority 0)
 - [N] High (priority 1)
+- [N] Medium (priority 2)
+- [N] Low (priority 3)
 - [N] skipped (duplicates of existing stories)
 
-Medium/Low issues noted in report but not added to prd.json.
-Say "auto" to start fixing, or "audit [feature]" to audit specific area.
+Say "auto" to start fixing (works Critical→Low), or "audit [feature]" to audit specific area.
 ```
 
 ## Focused Audit
