@@ -100,6 +100,30 @@ When user says `brainstorm X`:
 - **Note effort** - Low/Medium/High for each
 - **Skip shadcn/ui colors** - note them but don't prioritize (library defaults)
 - **Auto-create for top recommendation** - then offer more
+- **Deduplicate** - check existing tasks before creating (see below)
+
+## Deduplication (REQUIRED)
+
+Before creating any story, check for existing tasks:
+
+```typescript
+const existing = await TaskList();
+
+// Skip if similar task exists
+function isDuplicate(newTitle: string): boolean {
+  return existing.some(task =>
+    task.subject.toLowerCase().includes(newTitle.toLowerCase().slice(0, 20)) ||
+    newTitle.toLowerCase().includes(task.subject.toLowerCase().slice(0, 20))
+  );
+}
+
+// Only create if truly new
+if (!isDuplicate("Add keyboard shortcuts")) {
+  TaskCreate({ subject: "Add keyboard shortcuts (Cmd+K)", ... });
+}
+```
+
+**Report skipped duplicates:** "Skipped 2 ideas (already in task list)"
 
 ## Token Cost
 

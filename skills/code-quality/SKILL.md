@@ -1,97 +1,69 @@
 ---
-name: Code Quality Rules
-description: Learned patterns from production - prevents recurring mistakes
-triggers: [auto, build, review]
+name: code-quality
+description: Learned patterns from production mistakes - specific rules
+user-invocable: false
 ---
 
 # Code Quality Rules
 
-These rules are learned from production mistakes. Violation = failed task.
+Patterns learned from production. Violation = failed task.
 
-## Type Safety (Critical)
-
-| Rule | Wrong | Right |
-|------|-------|-------|
-| Single source of truth | Define `User` in 3 files | Define in `types/user.ts`, import everywhere |
-| Complete Records | `Record<Status, Color>` missing members | Include ALL union members, use exhaustive check |
-| Supabase typing | `.insert(data)` untyped | `.insert(data as Database['table']['Insert'])` |
-| Enum arithmetic | `"high" + 1` | `tierToNumber(tier) + 1` |
-| Safe property access | `obj[key]` | `'key' in obj && typeof obj[key] === 'string'` |
-
-## React Patterns (Critical)
+## Type Safety Patterns
 
 | Rule | Wrong | Right |
 |------|-------|-------|
-| Nested interactives | `<button><button></button></button>` | `<button><div role="button"></div></button>` |
-| Hooks in callbacks | `onClick={() => { useState() }}` | `const [x, setX] = useState()` at top |
-| Conditional hooks | `if (x) { useEffect() }` | `useEffect(() => { if (x) {...} })` |
+| Single source | Define type in 3 files | Define once, import |
+| Complete Records | Missing union members | Include ALL members |
+| Supabase typing | Untyped `.insert()` | Cast to `Database['table']['Insert']` |
+| Safe access | `obj[key]` | `'key' in obj && ...` |
 
-## Error Handling (Required)
+## React Patterns
+
+| Rule | Wrong | Right |
+|------|-------|-------|
+| Nested interactives | `<button><button>` | Use `role="button"` |
+| Hooks in callbacks | `onClick={() => useState()}` | Hooks at top level |
+| Conditional hooks | `if (x) useEffect()` | `useEffect(() => { if (x) })` |
+
+## Error Handling
 
 ```typescript
-// ALWAYS detect auth errors
+// Auth errors
 if (error?.error_type === 'reauth_required') {
-  toast.error('Session expired. Please sign in again.');
-  // Trigger re-auth flow
+  toast.error('Session expired');
 }
 
-// ALWAYS catch storage quota
+// Storage quota
 try {
   localStorage.setItem(key, value);
 } catch (e) {
-  if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+  if (e.name === 'QuotaExceededError') {
     toast.error('Storage full');
   }
 }
 ```
 
-## Component Architecture
-
-| Pattern | Guideline |
-|---------|-----------|
-| File size | >300 lines = consider splitting |
-| Props | Type all props with interface |
-| State | Co-locate with consumer, lift only when shared |
-| Effects | One concern per effect |
-| Memoization | useMemo for expensive calcs, useCallback for stable refs |
-
-## Design Tokens (Mandatory)
-
-```tsx
-// WRONG - hardcoded colors
-<div className="text-red-500 bg-green-100">
-
-// RIGHT - semantic tokens
-<div className="text-destructive bg-success/10">
-```
-
-All colors via CSS variables: `hsl(var(--primary))`
-
-## Query Keys (Required Pattern)
+## Query Keys
 
 ```typescript
-// Use factory pattern for cache keys
 export const queryKeys = {
   reports: {
     all: ['reports'] as const,
     detail: (id: string) => ['reports', id] as const,
-    list: (filters: Filters) => ['reports', 'list', filters] as const,
   }
 } as const;
 ```
 
-## Mistake Logging Format
+## Mistake Logging
 
-When errors occur, log to `.claude/mistakes.md`:
+Log errors to `.claude/mistakes.md`:
 
 ```markdown
-## [Category]: [Brief Description]
-**Date:** YYYY-MM-DD
-**Task:** TASK-ID
-**Error:** What went wrong
-**Root Cause:** Why it happened
-**Fix Applied:** How it was resolved
-**Prevention:** Rule to add
+## [Category]: [Description]
+**Task:** ID
+**Error:** What
+**Fix:** How
+**Prevention:** Rule
 ```
 
-Categories: `Type Safety`, `React Violation`, `API Integration`, `Performance`, `Accessibility`
+Categories: `Type Safety`, `React`, `API`, `Performance`, `A11y`

@@ -1,9 +1,0 @@
-{
-  "name": "claude-auto-dev",
-  "description": "Autonomous task management - brainstorm, auto, sprint, status, template, mistakes, context-audit, handoff",
-  "author": {
-    "name": "djnsty23",
-    "url": "https://github.com/djnsty23"
-  },
-  "version": "4.6.3"
-}

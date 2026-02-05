@@ -1,6 +1,6 @@
 {
-  "version": "4.7.0",
-  "description": "Skill system with single-word commands",
+  "version": "4.8.0",
+  "description": "Optimized skill system - complete synergy chains",
   "skills": {
     "core": {
       "triggers": [],
@@ -20,7 +20,7 @@
       "triggers": ["auto"],
       "context": ["prd.json"],
       "file": "auto/SKILL.md",
-      "requires": ["code-quality", "quality", "react-patterns"],
+      "requires": ["code-quality", "quality", "react-patterns", "verify"],
       "priority": 1,
       "description": "Autonomous task execution. Works through all tasks without stopping."
     },
@@ -145,12 +145,12 @@
       "description": "Saves context state. Auto-triggered every 5 tasks."
     },
     "deploy": {
-      "triggers": ["deploy"],
+      "triggers": [],
       "context": ["vercel.json"],
       "file": "deploy/SKILL.md",
       "requires": ["ci-cd"],
       "priority": 3,
-      "description": "Deploy workflow for Vercel and Supabase Edge Functions."
+      "description": "Internal deploy patterns. User-facing: use 'ship'."
     },
     "preserve-ui": {
       "triggers": [],

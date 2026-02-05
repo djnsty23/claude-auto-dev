@@ -47,7 +47,12 @@ Verify visually:
 
 Use `agent-browser` for verification when helpful:
 ```bash
-agent-browser open http://localhost:3000/path
+# Detect running dev server port
+for port in 3000 3001 5173 8080; do
+  curl -s http://localhost:$port > /dev/null && break
+done
+
+agent-browser open http://localhost:$port/path
 agent-browser snapshot -i
 ```
 

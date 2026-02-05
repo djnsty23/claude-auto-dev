@@ -1,9 +1,0 @@
-{
-  "name": "{{NAME}}",
-  "currentSprint": "sprint-1",
-  "totalCompleted": 0,
-  "sprints": {
-    "sprint-1": {"status": "active", "tasks": 0}
-  },
-  "roadmap": []
-}

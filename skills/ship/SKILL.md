@@ -1,34 +1,31 @@
 ---
-name: Ship / Deploy
+name: Ship
 description: Build, deploy, and verify the application.
 triggers:
   - ship
-  - deploy
-  - publish
 ---
 
 # Ship Workflow
 
-## On "ship" or "deploy"
-
-### Step 1: Pre-flight Checks
-```
-1. Run: npm run build (or project's build command)
-2. If build fails: STOP, report errors
-3. Check for uncommitted changes: git status
-4. If dirty: Ask user to commit or stash
+## Step 1: Pre-flight Checks
+```bash
+npm run build              # Must pass
+git status --short         # Warn if dirty
 ```
 
-### Step 2: Determine Deployment Target
-```
-question: "Where should I deploy?"
-options:
-  - { label: "Vercel", description: "Recommended for Next.js" }
-  - { label: "Netlify", description: "Static sites, serverless" }
-  - { label: "Custom", description: "I'll provide the command" }
-```
+If build fails: STOP, fix errors first.
 
-### Step 3: Deploy
+## Step 2: Auto-detect Target
+
+**Check in order:**
+1. `vercel.json` exists → Vercel
+2. `netlify.toml` exists → Netlify
+3. User specified "ship to X" → Use X
+4. None found → Default to Vercel
+
+**NEVER ask which platform** - detect or default.
+
+## Step 3: Deploy
 
 **Vercel:**
 ```bash
@@ -40,37 +37,28 @@ npx vercel --prod
 npx netlify deploy --prod
 ```
 
-**Custom:**
-Ask user for deployment command.
+## Step 4: Post-deploy Verify
 
-### Step 4: Verify
 ```bash
-# Get deployment URL from output, then:
-agent-browser run --task "Go to [DEPLOYMENT_URL], verify page loads, check console for errors"
-# Report: "Deployed to [URL]. Verified: [status]"
+# Detect port or use deployment URL
+agent-browser open [URL]
+agent-browser snapshot -i
+# Check: page loads, no console errors
 ```
 
-### Step 5: Update Progress
+## Step 5: Log Result
+
 ```
 Append to progress.txt:
-"## [DATE]: Shipped
-- Deployed to [URL]
-- Build: success
-- Verification: [pass/fail]"
+"[DATE]: Shipped to [URL] - [pass/fail]"
 ```
-
-## Quick Ship (No Prompts)
-
-If user says "ship to vercel" or "deploy to netlify":
-- Skip the target question
-- Run the appropriate command directly
 
 ## Rollback
 
-If user says "rollback":
-```
-1. Check deployment platform
-2. Vercel: vercel rollback
-3. Netlify: netlify deploy --prod --alias previous
-4. Report rollback status
+```bash
+# Vercel
+vercel rollback
+
+# Netlify
+netlify rollback
 ```

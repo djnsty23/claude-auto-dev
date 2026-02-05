@@ -107,22 +107,35 @@ Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
 
 ## Auto-Create Stories
 
-After rating, **automatically create stories** for Critical + High issues:
+After rating, **automatically create stories** for Critical + High issues.
+
+### Deduplication (REQUIRED)
+
+Before creating any task, check for duplicates:
 
 ```typescript
-// Auto-create for critical issues
-TaskCreate({
-  subject: "Fix XSS vulnerability in user input",
-  description: "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
-  metadata: { type: "security", priority: 0, category: "security" }
-})
+// 1. Get existing tasks
+const existing = await TaskList();
 
-// Create for high-priority issues
-TaskCreate({
-  subject: "Add keyboard handler to Button",
-  description: "src/components/Button.tsx:12 - onClick without onKeyDown",
-  metadata: { type: "fix", priority: 1, category: "a11y" }
-})
+// 2. For each finding, check similarity
+function isDuplicate(newTitle: string): boolean {
+  return existing.some(task =>
+    task.subject.toLowerCase().includes(newTitle.toLowerCase().slice(0, 20)) ||
+    newTitle.toLowerCase().includes(task.subject.toLowerCase().slice(0, 20))
+  );
+}
+
+// 3. Only create if not duplicate
+if (!isDuplicate("Fix XSS vulnerability")) {
+  TaskCreate({
+    subject: "Fix XSS vulnerability in user input",
+    description: "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
+    metadata: { type: "security", priority: 0, category: "security" }
+  });
+}
+```
+
+**Skip if:** Task with similar title already exists (pending or in_progress).
 ```
 
 Then report:
