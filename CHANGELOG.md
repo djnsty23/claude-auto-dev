@@ -1,5 +1,47 @@
 # Changelog
 
+## [4.9.0] - 2026-02-05
+
+### Added
+- **Zero-Maintenance Updates** - Symlink-based installation
+  - Skills/hooks symlinked to repo (changes auto-sync)
+  - `update-dev` command added to shell profile
+  - `repo-path.txt` stores clone location for portability
+  - `--copy` flag for systems where symlinks fail
+- **Plan Mode Integration** - brainstorm and audit now suggest plan mode for complex work
+  - `brainstorm` suggests plan mode for features spanning 3+ files
+  - `audit` suggests plan mode when 5+ critical/high issues found
+- **Enhanced Triggers** - More natural language activation
+  - `fix` now responds to: "broken", "error"
+  - `env-vars` now responds to: "environment", "credentials", "secrets", "api key"
+  - `agent-browser` now responds to: "browser", "web test", "ui test"
+
+### Changed
+- **Install Scripts Rewritten** - Now use symlinks by default
+  - `install.ps1` / `install.sh` create symlinks instead of copying
+  - Automatic fallback to copy if symlinks fail (Windows without admin/dev mode)
+  - Adds `update-dev` function to PowerShell profile / bashrc / zshrc
+- **Complete Synergy Chains** - All critical workflows now fully connected
+  - `auto` requires: code-quality, quality, react-patterns, verify, browser-test, security-patterns
+  - `ship` requires: review, security-patterns, test
+  - `audit` requires: quality, code-quality, design, security-patterns, browser-test
+- **Built-in Command Conflicts Resolved**
+  - `status` skill trigger changed to "progress" (status is Claude Code built-in)
+  - `deploy` marked internal-only (use `ship` for user-facing deploys)
+- **Enhanced Clean Skill** - Age-based cleanup
+  - Screenshots: all deleted on clean
+  - Backups: delete older than 7 days
+  - Handoffs: delete older than 7 days
+  - Archives: prompt before deleting (30+ days)
+
+### Fixed
+- **prd.json Schema** - Corrected skills referencing stories as array (now object)
+- **Deprecated MCP Reference** - Removed from settings.local.json template
+
+**Total skills:** 36 | **Requires chains:** 14 | **Version:** 4.9.0
+
+---
+
 ## [4.8.0] - 2026-02-05
 
 ### Added

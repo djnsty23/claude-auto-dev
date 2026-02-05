@@ -1,5 +1,38 @@
 #!/bin/bash
-echo "[Auto-Dev v4.8]"
+
+# Auto-update claude-auto-dev (with timeout for offline)
+REPO_PATH_FILE="$HOME/.claude/repo-path.txt"
+CLAUDE_DIR="$HOME/.claude"
+
+if [[ -f "$REPO_PATH_FILE" ]]; then
+    REPO_PATH=$(cat "$REPO_PATH_FILE" | tr -d '\r\n')
+    if [[ -d "$REPO_PATH/.git" ]]; then
+        pushd "$REPO_PATH" > /dev/null
+        # 5 second timeout
+        RESULT=$(timeout 5 git pull 2>&1 || echo "timeout")
+        popd > /dev/null
+
+        VERSION=$(head -1 "$REPO_PATH/VERSION" 2>/dev/null)
+
+        # Check if using copy mode (skills is a directory, not symlink)
+        IS_SYMLINK=false
+        [[ -L "$CLAUDE_DIR/skills" ]] && IS_SYMLINK=true
+
+        if [[ "$RESULT" != *"Already up to date"* && "$RESULT" != "timeout" ]]; then
+            echo "[Auto-Dev] Updated to v$VERSION"
+            # If copy mode, re-copy skills and hooks
+            if [[ "$IS_SYMLINK" == false ]]; then
+                cp -r "$REPO_PATH/skills/"* "$CLAUDE_DIR/skills/"
+                cp "$REPO_PATH/hooks/"* "$CLAUDE_DIR/hooks/"
+                echo "[Auto-Dev] Skills/hooks synced"
+            fi
+        else
+            echo "[Auto-Dev v$VERSION]"
+        fi
+    fi
+else
+    echo "[Auto-Dev v4.9]"
+fi
 
 # Auto-source .env.local (project-isolated credentials)
 if [[ -f ".env.local" ]]; then

@@ -1,6 +1,6 @@
 {
-  "version": "4.8.0",
-  "description": "Optimized skill system - complete synergy chains",
+  "version": "4.9.0",
+  "description": "Optimized skill system - complete synergy chains, plan mode integration",
   "skills": {
     "core": {
       "triggers": [],
