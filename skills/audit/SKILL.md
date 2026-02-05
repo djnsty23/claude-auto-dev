@@ -38,7 +38,7 @@ Launch all 7 agents in a single message:
 
 ```typescript
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Security audit for [PROJECT_PATH]. Scan: exposed secrets, dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Security audit for [PROJECT_PATH]. Scan: exposed secrets (check src/ AND supabase/migrations/ for hardcoded keys, passwords, service_role, cron secrets), dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. ALSO check Supabase RLS policy quality: tables with PII (emails, tokens) that allow SELECT without auth.uid() restriction, OAuth tokens accessible via public policies, profiles without row-level restriction. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Performance audit for [PROJECT_PATH]. Scan: missing React.memo on list items, useEffect without cleanup, inline objects in JSX, missing lazy loading, N+1 queries. Report: Severity, File:line, Issue, Fix." })

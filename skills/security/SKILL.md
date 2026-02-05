@@ -15,12 +15,13 @@ Run before every deploy.
 
 ### 1. Secrets Scan
 ```bash
-# Check for hardcoded secrets
-grep -rn "sk_live\|sk_test\|api_key\s*=\s*['\"][^'\"]\+" src/ --include="*.ts" --include="*.tsx"
-grep -rn "password\s*=\s*['\"][^'\"]\+" src/ --include="*.ts" --include="*.tsx"
+# Check for hardcoded secrets in source AND migrations
+grep -rn "sk_live\|sk_test\|api_key\s*=\s*['\"][^'\"]\+" src/ supabase/ --include="*.ts" --include="*.tsx" --include="*.sql"
+grep -rn "password\s*=\s*['\"][^'\"]\+" src/ supabase/ --include="*.ts" --include="*.tsx" --include="*.sql"
+grep -rn "service_role\|supabase_admin\|cron\.\|pg_cron" supabase/migrations/ --include="*.sql" 2>/dev/null
 ```
 
-If found: **STOP** - move to env vars.
+If found: **STOP** - move to env vars or Edge Function secrets. CRON secrets must use `vault.secrets`, never hardcoded in migrations.
 
 ### 2. Environment Variables
 ```bash
@@ -30,13 +31,32 @@ git status | grep ".env"
 
 If .env tracked: **STOP** - add to .gitignore.
 
-### 3. Supabase RLS
+### 3. Supabase RLS (Enabled + Policy Quality)
 ```bash
 # Check all tables have RLS
 npx supabase db lint
 ```
 
 If RLS disabled: **STOP** - enable RLS.
+
+**Beyond enabled — check policy quality:**
+
+```sql
+-- Find tables with public SELECT (data exposure risk)
+SELECT schemaname, tablename, policyname, cmd, qual
+FROM pg_policies WHERE schemaname = 'public';
+```
+
+Flag these patterns:
+- Tables with PII (emails, names, tokens) that allow SELECT without `auth.uid() = user_id`
+- OAuth/refresh tokens accessible via public SELECT policy
+- Profiles table without row-level restriction (`auth.uid() = id`)
+- Service role keys or admin tokens stored in queryable tables
+
+**Supabase auth config checks:**
+- Leaked password protection should be enabled (Supabase Dashboard → Auth → Settings)
+- Email enumeration protection enabled
+- MFA available for admin accounts
 
 ### 4. Input Validation
 ```typescript
