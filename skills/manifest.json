@@ -1,6 +1,6 @@
 {
-  "version": "4.9.3",
-  "description": "40 skills - complete synergy chains, commit/perf/a11y/refactor patterns",
+  "version": "4.9.4",
+  "description": "39 skills - complete synergy chains, all hooks wired, disable-model-invocation on side-effect skills",
   "skills": {
     "core": {
       "triggers": [],
@@ -44,7 +44,7 @@
       "context": ["prd.json"],
       "file": "sprint/SKILL.md",
       "priority": 1,
-      "description": "Creates or advances sprints."
+      "description": "Creates or advances sprints in prd.json. Use when starting new work cycles or closing completed sprints."
     },
     "review": {
       "triggers": ["review"],
@@ -67,7 +67,7 @@
       "context": [],
       "file": "clean/SKILL.md",
       "priority": 2,
-      "description": "Removes temporary artifacts and old backups."
+      "description": "Removes temporary screenshots, old backups, stale handoffs, and auto-active flags. Use when project has accumulated temp files."
     },
     "test": {
       "triggers": ["test", "e2e"],
@@ -90,7 +90,7 @@
       "context": [],
       "file": "fix/SKILL.md",
       "priority": 2,
-      "description": "Debugging and bug fixing patterns."
+      "description": "Debugs and fixes issues systematically. Use when something is broken, throwing errors, or behaving unexpectedly."
     },
     "setup-project": {
       "triggers": ["setup", "scaffold", "new-project"],
@@ -178,7 +178,7 @@
       "context": [],
       "file": "self-review/SKILL.md",
       "priority": 2,
-      "description": "Scales review effort to task complexity."
+      "description": "Auto-scales code review rigor to task complexity. Simple fixes get quick checks, refactors get deep analysis."
     },
     "verify": {
       "triggers": ["verify"],
@@ -186,7 +186,7 @@
       "file": "verify/SKILL.md",
       "requires": ["quality"],
       "priority": 2,
-      "description": "Verifies work completeness."
+      "description": "Verifies work completeness with outcome-focused checks. Use after implementing features to ensure quality."
     },
     "agent-browser": {
       "triggers": ["browser", "agent-browser", "web test", "ui test"],
@@ -207,7 +207,7 @@
       "context": [],
       "file": "auth-token-injection/SKILL.md",
       "priority": 3,
-      "description": "Auth token injection patterns for testing."
+      "description": "Auth token injection for browser testing. Enables testing authenticated user flows with agent-browser."
     },
     "env-vars": {
       "triggers": ["env", "environment", "credentials", "secrets", "api key"],
@@ -237,7 +237,7 @@
       "file": "security/SKILL.md",
       "requires": ["security-patterns"],
       "priority": 1,
-      "description": "Pre-deploy security audit. Run before every deploy."
+      "description": "Pre-deploy security audit scanning for XSS, injection, exposed secrets, and missing validation. Use before deploying."
     },
     "remotion": {
       "triggers": ["remotion", "video"],

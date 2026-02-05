@@ -43,6 +43,30 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\pre-tool-filter.ps1\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\post-tool-typecheck.ps1\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

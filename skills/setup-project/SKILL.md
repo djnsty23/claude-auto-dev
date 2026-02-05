@@ -6,6 +6,7 @@ triggers:
   - scaffold
   - new-project
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # Setup Project Workflow

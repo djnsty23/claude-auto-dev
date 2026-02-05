@@ -4,6 +4,7 @@ description: Deploy workflow for Vercel and Supabase Edge Functions
 allowed-tools: Bash
 model: sonnet
 user-invocable: false
+disable-model-invocation: true
 ---
 
 # Deploy Workflow

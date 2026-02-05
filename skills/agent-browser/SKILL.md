@@ -1,5 +1,5 @@
 ---
-name: Agent Browser
+name: agent-browser
 description: Browser automation CLI for AI agents. 5-6x more token-efficient than Playwright MCP.
 triggers:
   - browser

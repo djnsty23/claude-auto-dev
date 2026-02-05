@@ -1,10 +1,12 @@
 ---
-name: Archive PRD
+name: archive-prd
 description: Compact prd.json by archiving completed stories to reduce token usage
 triggers:
   - archive
   - compact prd
   - prd too large
+user-invocable: true
+disable-model-invocation: true
 ---
 
 # PRD Archival System

@@ -5,6 +5,7 @@ triggers: update dev, update auto-dev, update skills, sync skills
 allowed-tools: Bash, Read, Write, Glob
 model: haiku
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # Update Claude Auto-Dev

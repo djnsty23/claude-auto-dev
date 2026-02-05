@@ -1,5 +1,5 @@
 ---
-name: Environment Variables
+name: env-vars
 description: Manage environment variables and credentials securely.
 triggers:
   - env

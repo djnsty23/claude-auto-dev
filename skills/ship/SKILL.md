@@ -1,9 +1,10 @@
 ---
-name: Ship
+name: ship
 description: Build, deploy, and verify the application. Full pre-deploy to post-deploy workflow.
 triggers:
   - ship
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # Ship Workflow

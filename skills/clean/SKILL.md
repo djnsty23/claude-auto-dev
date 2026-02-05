@@ -4,6 +4,7 @@ description: Remove temporary artifacts
 allowed-tools: Bash, Glob
 model: haiku
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # Clean

@@ -1,5 +1,28 @@
 # Changelog
 
+## [4.9.4] - 2026-02-05
+
+### Fixed
+- **CRITICAL: Stop hooks disabled** - Installed settings.json had empty Stop array; auto-mode protection was non-functional
+- **CRITICAL: Unwired hooks** - PreToolUse (security filter) and PostToolUse (typecheck) now wired in all settings files
+- **Orphaned build/ skill** - Deleted dead directory (not in manifest, unreachable)
+- **6 invalid skill names** - Uppercase/spaces fixed to lowercase-hyphens per Anthropic spec (agent-browser, archive-prd, env-vars, fix, ship)
+- **Settings divergence** - Installed, repo, and unix configs now aligned (ExecutionPolicy, WindowStyle, hook wiring)
+- **README missing commands** - Added sprint and verify to command table (18 commands)
+- **Install script fallbacks** - Updated from 4.9.0 to 4.9.4
+
+### Added
+- **disable-model-invocation** on 8 side-effect skills (auto, commit, ship, deploy, clean, setup-project, update, archive-prd)
+- **PreToolUse hook** - Blocks dangerous commands (rm -rf, DROP TABLE, git push --force) and skips large file reads
+- **PostToolUse hook** - Auto-runs typecheck after TS/JS edits
+- **.gitignore** - Added node_modules/, .env*, dist/, build/, .next/
+
+### Changed
+- **Manifest descriptions** improved with "use when..." context for 7 skills (sprint, fix, self-review, auth-token-injection, clean, verify, security)
+- **Skill count** 40 → 39 (build removed)
+
+Total skills: 39 | Version: 4.9.4
+
 ## [4.9.3] - 2026-02-05
 
 ### Added

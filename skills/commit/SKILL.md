@@ -6,6 +6,7 @@ triggers:
   - push
   - commit-push-pr
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # Commit Workflow

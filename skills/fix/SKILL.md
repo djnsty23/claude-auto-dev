@@ -1,5 +1,5 @@
 ---
-name: Fix / Debug
+name: fix
 description: Debug issues and fix bugs systematically.
 triggers:
   - fix
