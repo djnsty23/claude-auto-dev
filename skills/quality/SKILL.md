@@ -1,6 +1,6 @@
 ---
 name: quality
-description: Core principles - guides judgment on what "good" means
+description: Enforces type safety, design tokens, and all UI states.
 user-invocable: false
 model: sonnet
 ---
