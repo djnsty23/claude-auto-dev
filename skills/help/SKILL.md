@@ -3,44 +3,51 @@ name: Help
 description: Show available commands.
 triggers:
   - help
-  - commands
 ---
 
 # Commands
 
 | Say | Does |
 |-----|------|
-| `auto` | Work through all tasks without stopping |
-| `continue` | Do one task, then ask |
-| `status` | Show progress (X/Y complete) |
-| `brainstorm` | Generate new stories |
-| `generate` | Same as brainstorm |
-| `stop` | Save session, safe to close |
-| `reset` | Clear stuck state after crash |
-| `review` | Build + code quality check |
-| `update` | Pull latest system from GitHub |
-| `sync` | Same as update |
+| `auto` | Work through all tasks |
+| `status` | Show progress |
+| `brainstorm` | Generate tasks |
+| `sprint` | Advance sprint |
+| `review` | Code quality check |
+| `audit` | 6-agent quality audit |
+| `test` | Run tests |
+| `fix` | Debug issues |
+| `ship` | Deploy |
+| `clean` | Remove temp files |
+| `save` | Checkpoint context |
+| `help` | Show this list |
 
-## Other Skills
+## Database
 
 | Say | Does |
 |-----|------|
-| `fix [issue]` | Debug and fix a problem |
-| `test` | Run tests |
-| `ship` | Build and deploy |
-| `set up` | Initialize new project |
+| `db` | Supabase operations |
+| `postgres` | Query optimization |
+| `rls` | Row-level security |
+
+## Other
+
+| Say | Does |
+|-----|------|
+| `pr` | Review pull request |
+| `deploy` | Deploy workflow |
+| `init` | New project |
+| `setup` | Init auto-dev |
+| `archive` | Archive old tasks |
+| `design` | UI design |
+| `ci` | GitHub Actions |
+| `logs` | Monitoring |
+| `env` | Environment vars |
+| `video` | Remotion |
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `prd.json` | Task list (`passes: true/false`) |
-| `progress.txt` | Session log (append-only) |
-| `CLAUDE.md` | Project config |
-
-## Tips
-
-- **Starting work?** Say `status` to see what's next
-- **Done for now?** Say `stop` to save progress
-- **Stuck?** I'll ask after 3 failed attempts
-- **After crash?** Say `reset` to clear state
+| `prd.json` | Tasks |
+| `progress.txt` | Log |

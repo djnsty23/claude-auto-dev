@@ -1,6 +1,6 @@
 {
-  "version": "4.6.3",
-  "description": "Comprehensive skill system with CI/CD, monitoring, security, and Remotion",
+  "version": "4.7.0",
+  "description": "Skill system with single-word commands",
   "skills": {
     "core": {
       "triggers": [],
@@ -55,12 +55,12 @@
       "description": "Code quality check on recent changes. Includes security scanning."
     },
     "pr-review": {
-      "triggers": ["pr-review", "review-pr", "code-review"],
+      "triggers": ["pr"],
       "context": [],
       "file": "pr-review/SKILL.md",
       "requires": ["security-patterns", "code-quality"],
       "priority": 1,
-      "description": "Comprehensive PR review using specialized agents. Use before creating/merging PRs."
+      "description": "Comprehensive PR review using specialized agents."
     },
     "clean": {
       "triggers": ["clean"],
@@ -70,7 +70,7 @@
       "description": "Removes temporary artifacts and old backups."
     },
     "test": {
-      "triggers": ["test", "e2e", "browser"],
+      "triggers": ["test", "e2e"],
       "context": ["*.test.*", "*.spec.*"],
       "file": "test/SKILL.md",
       "requires": ["browser-test"],
@@ -86,21 +86,21 @@
       "description": "Pre-deploy checklist with review and security check."
     },
     "fix": {
-      "triggers": ["fix", "debug", "bug"],
+      "triggers": ["fix", "debug"],
       "context": [],
       "file": "fix/SKILL.md",
       "priority": 2,
       "description": "Debugging and bug fixing patterns."
     },
     "setup-project": {
-      "triggers": ["init", "new project", "scaffold"],
+      "triggers": ["init", "scaffold"],
       "context": [],
       "file": "setup-project/SKILL.md",
       "priority": 3,
       "description": "Scaffolds new project from scratch."
     },
     "supabase": {
-      "triggers": ["schema", "database", "migration", "supabase"],
+      "triggers": ["db", "supabase"],
       "context": ["supabase/"],
       "file": "supabase/SKILL.md",
       "requires": ["supabase-postgres", "supabase-schema"],
@@ -108,18 +108,18 @@
       "description": "Supabase CLI patterns for database operations."
     },
     "supabase-postgres": {
-      "triggers": ["postgres", "sql optimization", "query performance"],
+      "triggers": ["postgres"],
       "context": ["supabase/"],
       "file": "supabase-postgres/SKILL.md",
       "priority": 2,
-      "description": "Postgres performance optimization from Supabase. Indexes, RLS, pooling, N+1."
+      "description": "Postgres performance optimization. Indexes, RLS, pooling, N+1."
     },
     "supabase-schema": {
       "triggers": ["rls"],
       "context": ["supabase/"],
       "file": "supabase-schema/SKILL.md",
       "priority": 3,
-      "description": "SQL patterns, RLS policies, and security templates for Supabase."
+      "description": "SQL patterns, RLS policies, and security templates."
     },
     "audit": {
       "triggers": ["audit"],
@@ -130,15 +130,15 @@
       "description": "Parallel quality audit with 6 specialized agents."
     },
     "browser-test": {
-      "triggers": ["browser-test"],
+      "triggers": [],
       "context": [],
       "file": "browser-test/SKILL.md",
       "requires": ["agent-browser"],
       "priority": 2,
-      "description": "Secure browser testing with agent-browser CLI. 93% more token-efficient."
+      "description": "Browser testing with agent-browser CLI. Loaded via test skill."
     },
     "checkpoint": {
-      "triggers": ["checkpoint"],
+      "triggers": ["save"],
       "context": [],
       "file": "checkpoint/SKILL.md",
       "priority": 2,
@@ -186,7 +186,7 @@
       "file": "verify/SKILL.md",
       "requires": ["quality"],
       "priority": 2,
-      "description": "Verifies work completeness. Encourages going beyond minimum."
+      "description": "Verifies work completeness."
     },
     "workflow": {
       "triggers": [],
@@ -231,58 +231,51 @@
       "priority": 2,
       "description": "Build commands and error handling."
     },
-    "build-reference": {
-      "triggers": [],
-      "context": [],
-      "file": "build-reference/SKILL.md",
-      "priority": 3,
-      "description": "Build reference documentation."
-    },
     "env-vars": {
-      "triggers": [],
+      "triggers": ["env"],
       "context": [".env*"],
       "file": "env-vars/SKILL.md",
       "priority": 3,
       "description": "Environment variables patterns."
     },
     "help": {
-      "triggers": ["help", "commands"],
+      "triggers": ["help"],
       "context": [],
       "file": "help/SKILL.md",
       "priority": 2,
       "description": "Lists available commands."
     },
     "design": {
-      "triggers": ["design", "ui", "landing page", "marketing page"],
+      "triggers": ["design", "ui"],
       "context": [],
       "file": "design/SKILL.md",
       "requires": ["preserve-ui", "quality"],
       "priority": 1,
-      "description": "Creates distinctive UI - avoids generic AI aesthetics (purple gradients, Inter font)."
+      "description": "Creates distinctive UI - avoids generic AI aesthetics."
     },
     "security-patterns": {
       "triggers": [],
       "context": [],
       "file": "security-patterns/SKILL.md",
       "priority": 0,
-      "description": "Security vulnerability patterns. Auto-loaded with review, audit, ship, pr-review."
+      "description": "Security vulnerability patterns. Auto-loaded with review, audit, ship."
     },
     "remotion": {
-      "triggers": ["remotion", "video composition", "animation"],
+      "triggers": ["remotion", "video"],
       "context": ["remotion/"],
       "file": "remotion/SKILL.md",
       "priority": 2,
-      "description": "Remotion best practices - video creation in React. Compositions, animations, subtitles."
+      "description": "Remotion best practices - video creation in React."
     },
     "ci-cd": {
-      "triggers": ["ci", "github actions", "workflow", "pipeline"],
+      "triggers": ["ci"],
       "context": [".github/"],
       "file": "ci-cd/SKILL.md",
       "priority": 2,
       "description": "GitHub Actions workflows and CI/CD patterns."
     },
     "monitoring": {
-      "triggers": ["monitoring", "logging", "observability", "analytics"],
+      "triggers": ["logs"],
       "context": [],
       "file": "monitoring/SKILL.md",
       "priority": 2,
