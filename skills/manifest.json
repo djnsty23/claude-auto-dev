@@ -50,7 +50,7 @@
       "triggers": ["review"],
       "context": [],
       "file": "review/SKILL.md",
-      "requires": ["quality", "code-quality", "security-patterns"],
+      "requires": ["quality", "code-quality", "security-patterns", "self-review"],
       "priority": 1,
       "description": "Code quality check on recent changes. Includes security scanning."
     },
@@ -133,7 +133,7 @@
       "triggers": [],
       "context": [],
       "file": "browser-test/SKILL.md",
-      "requires": ["agent-browser"],
+      "requires": ["agent-browser", "auth-token-injection"],
       "priority": 2,
       "description": "Browser testing with agent-browser CLI. Loaded via test skill."
     },
@@ -142,7 +142,7 @@
       "context": [],
       "file": "checkpoint/SKILL.md",
       "priority": 2,
-      "description": "Saves context state. Auto-triggered every 5 tasks."
+      "description": "Saves context state. Auto-triggered every 3 tasks."
     },
     "deploy": {
       "triggers": [],
@@ -210,12 +210,12 @@
       "description": "Auth token injection patterns for testing."
     },
     "build": {
-      "triggers": ["build"],
+      "triggers": [],
       "context": [],
       "file": "build/SKILL.md",
       "requires": ["code-quality"],
       "priority": 2,
-      "description": "Build commands and error handling."
+      "description": "Hybrid task management architecture reference. Internal use."
     },
     "env-vars": {
       "triggers": ["env"],

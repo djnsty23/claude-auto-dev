@@ -61,12 +61,11 @@ Skip if takes >10 seconds.
 ### Find Next Task
 
 ```javascript
-// Find executable tasks (not done, not blocked)
-const executable = stories.filter(s =>
+// stories is an object { "S1-001": {...}, "S1-002": {...} }
+const storyEntries = Object.entries(prd.stories);
+const executable = storyEntries.filter(([id, s]) =>
   s.passes !== true &&
-  (s.blockedBy || []).every(dep =>
-    stories.find(d => d.id === dep)?.passes === true
-  )
+  (s.blockedBy || []).every(dep => prd.stories[dep]?.passes === true)
 );
 ```
 
@@ -135,7 +134,7 @@ if (completedThisSession % 3 === 0) {
 
 ## Completion
 
-When `stories.every(s => s.passes === true)`:
+When all stories have `passes === true`:
 
 ```
 All [N] tasks complete.

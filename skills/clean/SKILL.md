@@ -16,4 +16,4 @@ Remove Claude Code artifacts.
 3. Delete any leftover v3 artifacts: `prd-backup-*.json`, `handoff-*.md`
 4. Report files removed
 
-Never touches source code, project-meta.json, or config.
+Never touches source code, prd.json, or config.

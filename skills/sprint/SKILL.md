@@ -19,7 +19,7 @@ Create a new sprint or advance to the next one.
 
 1. Parse $ARGUMENTS as feature description
 2. Generate epic prefix from description
-3. Create/update project-meta.json with new sprint
+3. Create/update prd.json with new sprint
 4. Generate 10-20 stories via TaskCreate with full metadata (see quality skill for schema):
    ```
    TaskCreate({
@@ -44,11 +44,11 @@ Create a new sprint or advance to the next one.
 
 ## Advancing (sprint next)
 
-1. Read project-meta.json
+1. Read prd.json
 2. Mark current sprint as "done"
 3. Find next unscheduled roadmap epic(s)
 4. Create new sprint with stories from those epics
-5. Update project-meta.json
+5. Update prd.json
 
 ## Rules
 - HARD CAP: 20 stories per sprint
