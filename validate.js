@@ -453,7 +453,7 @@ function checkHookFilesExist() {
 
   // Extract hook file paths from settings command strings
   // In JSON-stringified text, backslashes are doubled (\\hooks\\file.ps1)
-  const hookFileRegex = /hooks[\\\/]+([\w-]+\.(?:sh|ps1))/g;
+  const hookFileRegex = /hooks[\\\/]+([\w-]+\.(?:sh|ps1|js))/g;
   const settingsStr = JSON.stringify(settings);
   let hookMatch;
   while ((hookMatch = hookFileRegex.exec(settingsStr)) !== null) {

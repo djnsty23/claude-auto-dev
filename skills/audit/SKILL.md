@@ -247,10 +247,8 @@ When rating findings, apply principles from related skills:
 | Skill | What to Reference |
 |-------|-------------------|
 | `quality` | Type safety, design tokens, all UI states |
-| `code-quality` | React patterns, error handling, type completeness |
-| `design` | Color tokens vs hardcoded, typography consistency |
-| `preserve-ui` | Structural integrity for UI changes |
-| `react-patterns` | Performance optimization patterns |
+| `code-quality` | React patterns, error handling, type completeness, performance optimization |
+| `design` | Color tokens vs hardcoded, typography consistency, structural integrity for UI changes |
 
 **UX/UI Agent should check:**
 - Hardcoded colors → Reference `design` (NEVER purple gradients, NEVER Inter/Roboto)

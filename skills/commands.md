@@ -40,7 +40,7 @@
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 34 skills in directory format (`skill-name/SKILL.md`)
+- 32 skills in directory format (`skill-name/SKILL.md`)
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
 - Auto-loaded: core (with prd.json), quality, code-quality, security
 

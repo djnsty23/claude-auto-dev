@@ -144,13 +144,12 @@ Before proposing UI features, check design constraints:
 
 | Skill | What to Check |
 |-------|---------------|
-| `design` | Aesthetic direction, typography, color palette |
-| `preserve-ui` | Can we extend existing components vs. create new? |
+| `design` | Aesthetic direction, typography, color palette, UI structure preservation |
 | `quality` | Design token usage, semantic colors |
-| `react-patterns` | Performance implications of new features |
+| `code-quality` | Performance implications of new features (React/Next.js patterns) |
 
 **When proposing UI features:**
-- Check existing component structure first (`preserve-ui`)
+- Check existing component structure first (`design` - Preserve UI Structure section)
 - Ensure proposals use design tokens, not hardcoded colors
 - Reference `design` for aesthetic consistency
 - Note if feature requires new design patterns
@@ -158,7 +157,7 @@ Before proposing UI features, check design constraints:
 **Example validation:**
 ```
 Feature: "Add dark mode toggle"
-├─ preserve-ui: Extend existing ThemeProvider? ✓
+├─ design: Extend existing ThemeProvider? ✓
 ├─ design: Uses CSS variables? ✓
 ├─ quality: All states handled? (system/light/dark) ✓
 └─ Ready to create story
@@ -168,7 +167,7 @@ Feature: "Add dark mode toggle"
 
 For UI-heavy features, add validation step:
 1. Check `design` principles (no AI slop)
-2. Check `preserve-ui` (extend vs. replace)
+2. Check `design` Preserve UI section (extend vs. replace)
 3. Check existing tokens/variables
 4. Propose feature with design context included
 

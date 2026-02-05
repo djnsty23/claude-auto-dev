@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\session-start.ps1\"",
+            "command": "node \"$HOME/.claude/hooks/session-start.js\"",
             "timeout": 15,
             "statusMessage": "Loading context..."
           }
@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\pre-tool-filter.ps1\"",
+            "command": "node \"$HOME/.claude/hooks/pre-tool-filter.js\"",
             "timeout": 5
           }
         ]
@@ -74,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\post-tool-typecheck.ps1\"",
+            "command": "node \"$HOME/.claude/hooks/post-tool-typecheck.js\"",
             "timeout": 60
           }
         ]
@@ -85,7 +85,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\stop-auto-check.ps1\"",
+            "command": "node \"$HOME/.claude/hooks/stop-auto-check.js\"",
             "timeout": 5,
             "statusMessage": "Checking auto mode..."
           }
@@ -107,7 +107,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command \"$p=Get-Content prd.json -Raw -ErrorAction SilentlyContinue;if($p){Set-Content .claude/pre-compact-state.json $p}\"",
+            "command": "node -e \"const fs=require('fs');if(fs.existsSync('prd.json')){fs.mkdirSync('.claude',{recursive:true});fs.copyFileSync('prd.json','.claude/pre-compact-state.json')}\"",
             "timeout": 5,
             "statusMessage": "Saving sprint state..."
           }

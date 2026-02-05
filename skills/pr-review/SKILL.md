@@ -103,7 +103,7 @@ pr-review --comment
 |------|----------------|
 | Security issues found | `security` |
 | Type issues found | `code-quality` |
-| UI changes | `design`, `preserve-ui` |
+| UI changes | `design` |
 | Test gaps | `browser-auth` |
 
 ## Tips

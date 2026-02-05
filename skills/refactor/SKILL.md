@@ -196,4 +196,4 @@ After completion:
 | `auto` | Refactoring stories executed during auto mode |
 | `brainstorm` | Proposes refactoring when large files detected |
 | `review` | Flags refactoring opportunities |
-| `preserve-ui` | Refactoring must preserve existing UI |
+| `design` | Refactoring must preserve existing UI (see Preserve UI Structure section) |

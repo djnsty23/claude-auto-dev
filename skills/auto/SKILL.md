@@ -155,9 +155,19 @@ Run `git diff` and check your own changes for:
 - [ ] No `any` types introduced
 - [ ] No commented-out code
 
-**4. UI Change? Visual Check**
-If the task modified UI components:
-- Describe what the user should see
+**4. UI Change? Visual Verification**
+If the task modified UI components AND a dev server is running:
+```bash
+# Take screenshot of affected page
+agent-browser screenshot http://localhost:3000/[page] --output .claude/screenshots/verify-$(date +%s).png 2>/dev/null
+```
+If agent-browser is available:
+- Take a screenshot of the affected page
+- Read the screenshot to verify it looks correct
+- Check: layout intact, no overlapping elements, text readable, responsive on mobile breakpoints
+- If something looks wrong, fix it before marking done
+
+If agent-browser is NOT available, describe what the user should see and flag for manual check.
 - Note any interactive states (hover, focus, click)
 - Flag if responsive behavior needs manual check
 

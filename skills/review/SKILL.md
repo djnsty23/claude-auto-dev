@@ -106,7 +106,7 @@ Apply principles from related skills when reviewing:
 - Missing Zod -> Check `quality` validation rules
 
 **React Checks:**
-- Missing cleanup -> Check `react-patterns`
+- Missing cleanup -> Check `code-quality` React/Next.js patterns
 - Inline objects -> Check `code-quality` memo patterns
 
 > For detailed verification workflow, use `verify` command.
