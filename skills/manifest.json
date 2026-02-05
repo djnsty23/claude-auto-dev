@@ -93,11 +93,11 @@
       "description": "Debugging and bug fixing patterns."
     },
     "setup-project": {
-      "triggers": ["scaffold", "new-project"],
+      "triggers": ["setup", "scaffold", "new-project"],
       "context": [],
       "file": "setup-project/SKILL.md",
       "priority": 3,
-      "description": "Scaffolds new project from scratch. Use 'scaffold' (not 'init' - that's a built-in)."
+      "description": "Initialize project with prd.json and standard config."
     },
     "supabase": {
       "triggers": ["db", "supabase"],
@@ -187,20 +187,6 @@
       "requires": ["quality"],
       "priority": 2,
       "description": "Verifies work completeness."
-    },
-    "workflow": {
-      "triggers": [],
-      "context": [],
-      "file": "workflow/SKILL.md",
-      "priority": 2,
-      "description": "Documents skill orchestration patterns."
-    },
-    "setup": {
-      "triggers": ["setup"],
-      "context": [],
-      "file": "setup/SKILL.md",
-      "priority": 3,
-      "description": "Initialize claude-auto-dev in a project."
     },
     "agent-browser": {
       "triggers": [],

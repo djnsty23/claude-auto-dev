@@ -1,6 +1,6 @@
 $ErrorActionPreference = "SilentlyContinue"
 
-Write-Host "[Auto-Dev v4.3] Quality-First Mode"
+Write-Host "[Auto-Dev v4.8]"
 
 # Auto-source .env.local (project-isolated credentials)
 if (Test-Path ".env.local") {
@@ -25,13 +25,14 @@ if (Test-Path ".claude/checkpoint.md") {
     Write-Host "---"
 }
 
-# Sprint context from project-meta.json (~200 bytes)
-if (Test-Path "project-meta.json") {
+# Sprint context from prd.json
+if (Test-Path "prd.json") {
     try {
-        $meta = Get-Content "project-meta.json" -Raw | ConvertFrom-Json
-        $sprint = $meta.currentSprint
-        $total = $meta.totalCompleted
-        Write-Host "[Sprint] $sprint | $total completed"
+        $prd = Get-Content "prd.json" -Raw | ConvertFrom-Json
+        $sprint = $prd.sprint
+        $total = $prd.completedStories
+        $pending = $prd.totalStories - $prd.completedStories
+        Write-Host "[Sprint] $sprint | $total done, $pending pending"
     } catch {
         # Silent fail
     }
@@ -42,10 +43,4 @@ $gitStatus = git status --short 2>$null
 if ($gitStatus) {
     $changedFiles = ($gitStatus | Measure-Object -Line).Lines
     Write-Host "[Git] $changedFiles uncommitted changes"
-}
-
-# Check for existing UI components (helps preserve-ui skill)
-if (Test-Path "src/components/ui") {
-    $uiComponents = (Get-ChildItem "src/components/ui" -Filter "*.tsx" | Measure-Object).Count
-    Write-Host "[UI] $uiComponents components in ui/"
 }
