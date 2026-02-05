@@ -5,11 +5,25 @@ allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate
 model: opus
 user-invocable: true
 disable-model-invocation: true
+hooks:
+  Stop:
+    - hooks:
+        - type: command
+          command: "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"$env:USERPROFILE\\.claude\\hooks\\stop-auto-check.ps1\""
+          timeout: 5
+    - hooks:
+        - type: prompt
+          prompt: "Check prd.json for pending tasks (passes: null). If ANY exist, respond REJECT with next task ID. Only APPROVE if all tasks are done or deferred."
+          timeout: 10
 ---
 
 # Auto Mode
 
 Fully autonomous development. Works through all tasks without stopping until complete.
+
+## Current State
+!`git status --short 2>/dev/null || echo "not a git repo"`
+!`node -e "try{const p=require('./prd.json');const s=Object.values(p.stories||{});console.log('Sprint:',p.sprint,'| Pending:',s.filter(x=>!x.passes).length,'| Done:',s.filter(x=>x.passes===true).length)}catch{console.log('No prd.json')}" 2>/dev/null`
 
 ## Entry Flow
 

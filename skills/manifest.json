@@ -1,6 +1,6 @@
 {
-  "version": "4.9.4",
-  "description": "39 skills - complete synergy chains, all hooks wired, disable-model-invocation on side-effect skills",
+  "version": "5.0",
+  "description": "34 skills - consolidated synergy chains, dynamic context injection, argument hints, PreCompact hook",
   "skills": {
     "core": {
       "triggers": [],
@@ -20,7 +20,7 @@
       "triggers": ["auto"],
       "context": ["prd.json"],
       "file": "auto/SKILL.md",
-      "requires": ["code-quality", "quality", "react-patterns", "verify", "browser-test", "security-patterns", "commit"],
+      "requires": ["code-quality", "quality", "react-patterns", "verify", "browser-auth", "security", "commit"],
       "priority": 1,
       "description": "Autonomous task execution with testing and security. Works through all tasks without stopping."
     },
@@ -50,15 +50,15 @@
       "triggers": ["review"],
       "context": [],
       "file": "review/SKILL.md",
-      "requires": ["quality", "code-quality", "security-patterns", "self-review"],
+      "requires": ["quality", "code-quality", "security"],
       "priority": 1,
-      "description": "Code quality check on recent changes. Includes security scanning."
+      "description": "Code quality check with adaptive effort scaling. Includes security scanning."
     },
     "pr-review": {
       "triggers": ["pr", "pr-review", "review-pr", "code-review"],
       "context": [],
       "file": "pr-review/SKILL.md",
-      "requires": ["security-patterns", "code-quality"],
+      "requires": ["security", "code-quality"],
       "priority": 1,
       "description": "Comprehensive PR review using specialized agents."
     },
@@ -73,7 +73,7 @@
       "triggers": ["test", "e2e"],
       "context": ["*.test.*", "*.spec.*"],
       "file": "test/SKILL.md",
-      "requires": ["browser-test"],
+      "requires": ["browser-auth"],
       "priority": 2,
       "description": "Runs unit and browser tests on latest changes."
     },
@@ -81,7 +81,7 @@
       "triggers": ["ship"],
       "context": ["vercel.json"],
       "file": "ship/SKILL.md",
-      "requires": ["review", "security-patterns", "test", "commit"],
+      "requires": ["review", "security", "test", "commit"],
       "priority": 3,
       "description": "Pre-deploy checklist with review, security, and test verification."
     },
@@ -100,42 +100,27 @@
       "description": "Initialize project with prd.json and standard config."
     },
     "supabase": {
-      "triggers": ["db", "supabase"],
+      "triggers": ["db", "supabase", "postgres", "rls"],
       "context": ["supabase/"],
       "file": "supabase/SKILL.md",
-      "requires": ["supabase-postgres", "supabase-schema"],
       "priority": 3,
-      "description": "Supabase CLI patterns for database operations."
-    },
-    "supabase-postgres": {
-      "triggers": ["postgres"],
-      "context": ["supabase/"],
-      "file": "supabase-postgres/SKILL.md",
-      "priority": 2,
-      "description": "Postgres performance optimization. Indexes, RLS, pooling, N+1."
-    },
-    "supabase-schema": {
-      "triggers": ["rls"],
-      "context": ["supabase/"],
-      "file": "supabase-schema/SKILL.md",
-      "priority": 3,
-      "description": "SQL patterns, RLS policies, and security templates."
+      "description": "Supabase CLI, Postgres performance, and schema patterns. Use for database operations, queries, RLS, and migrations."
     },
     "audit": {
       "triggers": ["audit"],
       "context": [],
       "file": "audit/SKILL.md",
-      "requires": ["quality", "code-quality", "design", "security-patterns", "browser-test", "perf", "a11y"],
+      "requires": ["quality", "code-quality", "design", "security", "browser-auth", "perf", "a11y"],
       "priority": 1,
       "description": "Parallel quality audit with 6 specialized agents including test coverage."
     },
-    "browser-test": {
+    "browser-auth": {
       "triggers": [],
       "context": [],
-      "file": "browser-test/SKILL.md",
-      "requires": ["agent-browser", "auth-token-injection"],
+      "file": "browser-auth/SKILL.md",
+      "requires": ["agent-browser"],
       "priority": 2,
-      "description": "Browser testing with agent-browser CLI. Loaded via test skill."
+      "description": "Browser testing with agent-browser CLI and auth token injection. Loaded via test skill."
     },
     "checkpoint": {
       "triggers": ["save"],
@@ -145,12 +130,11 @@
       "description": "Saves context state. Auto-triggered every 3 tasks."
     },
     "deploy": {
-      "triggers": [],
-      "context": ["vercel.json"],
+      "triggers": ["ci", "deploy"],
+      "context": ["vercel.json", ".github/"],
       "file": "deploy/SKILL.md",
-      "requires": ["ci-cd"],
-      "priority": 3,
-      "description": "Internal deploy patterns. User-facing: use 'ship'."
+      "priority": 2,
+      "description": "Deploy workflow for Vercel, Supabase, and CI/CD pipelines."
     },
     "preserve-ui": {
       "triggers": [],
@@ -173,13 +157,6 @@
       "priority": 2,
       "description": "React/Next.js best practices and optimization patterns."
     },
-    "self-review": {
-      "triggers": [],
-      "context": [],
-      "file": "self-review/SKILL.md",
-      "priority": 2,
-      "description": "Auto-scales code review rigor to task complexity. Simple fixes get quick checks, refactors get deep analysis."
-    },
     "verify": {
       "triggers": ["verify"],
       "context": [],
@@ -193,7 +170,7 @@
       "context": [],
       "file": "agent-browser/SKILL.md",
       "priority": 3,
-      "description": "Browser automation CLI reference. Also loaded with browser-test."
+      "description": "Browser automation CLI reference. Also loaded with browser-auth."
     },
     "archive-prd": {
       "triggers": ["archive"],
@@ -201,13 +178,6 @@
       "file": "archive-prd/SKILL.md",
       "priority": 3,
       "description": "Archives completed stories from prd.json."
-    },
-    "auth-token-injection": {
-      "triggers": [],
-      "context": [],
-      "file": "auth-token-injection/SKILL.md",
-      "priority": 3,
-      "description": "Auth token injection for browser testing. Enables testing authenticated user flows with agent-browser."
     },
     "env-vars": {
       "triggers": ["env", "environment", "credentials", "secrets", "api key"],
@@ -224,20 +194,12 @@
       "priority": 1,
       "description": "Creates distinctive UI - avoids generic AI aesthetics."
     },
-    "security-patterns": {
-      "triggers": [],
-      "context": [],
-      "file": "security-patterns/SKILL.md",
-      "priority": 0,
-      "description": "Security vulnerability patterns. Auto-loaded with review, audit, ship."
-    },
     "security": {
       "triggers": ["security"],
       "context": [],
       "file": "security/SKILL.md",
-      "requires": ["security-patterns"],
-      "priority": 1,
-      "description": "Pre-deploy security audit scanning for XSS, injection, exposed secrets, and missing validation. Use before deploying."
+      "priority": 0,
+      "description": "Pre-deploy security audit with vulnerability pattern scanning. Auto-loaded with review, audit, ship."
     },
     "remotion": {
       "triggers": ["remotion", "video"],
@@ -245,13 +207,6 @@
       "file": "remotion/SKILL.md",
       "priority": 2,
       "description": "Remotion best practices - video creation in React."
-    },
-    "ci-cd": {
-      "triggers": ["ci"],
-      "context": [".github/"],
-      "file": "ci-cd/SKILL.md",
-      "priority": 2,
-      "description": "GitHub Actions workflows and CI/CD patterns."
     },
     "monitoring": {
       "triggers": ["logs"],

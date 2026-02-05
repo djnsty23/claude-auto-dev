@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "4.9.4",
+  "version": "5.0.0",
   "description": "Autonomous development workflow for Claude Code - skills, hooks, and task management",
   "files": [
     "skills",

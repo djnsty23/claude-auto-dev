@@ -1,12 +1,11 @@
 ---
 name: supabase
-description: Supabase CLI patterns - replaces MCP (more reliable)
+description: Supabase CLI, Postgres performance, and schema patterns. Use for database operations, queries, RLS, and migrations.
 allowed-tools: Bash
-model: haiku
-user-invocable: false
+user-invocable: true
 ---
 
-# Supabase CLI
+# Supabase
 
 Use CLI instead of MCP - more reliable, fewer permission issues.
 
@@ -78,19 +77,173 @@ SUPABASE_DB_PASSWORD=xxx
 
 **Use Pooler URL (IPv4 compatible), not direct connection:**
 ```bash
-# ❌ Direct - IPv6 only, won't work on most networks
-# psql "postgresql://postgres:PASS@db.REF.supabase.co:5432/postgres"
-
-# ✅ Pooler - IPv4 compatible (use this)
+# Pooler - IPv4 compatible (use this)
 psql "postgresql://postgres.REF:PASS@aws-0-REGION.pooler.supabase.com:6543/postgres" -c "SELECT 1"
 ```
 
-Get pooler URL: Dashboard → Connect → Connection String → Session Pooler
+Get pooler URL: Dashboard > Connect > Connection String > Session Pooler
 
-## Skip MCP
+---
 
-MCP has permission issues. Always prefer CLI or psql:
-- More reliable
-- Better error messages
-- Multi-org support via env vars
-- Output can be limited
+## Postgres Performance
+
+### Missing Indexes (Critical)
+```sql
+-- BAD: Full table scan
+SELECT * FROM orders WHERE customer_id = 123;
+
+-- GOOD: Add index
+CREATE INDEX idx_orders_customer_id ON orders(customer_id);
+```
+
+### N+1 Queries (Critical)
+```sql
+-- BAD: N+1 queries
+SELECT * FROM orders WHERE id = 1;
+SELECT * FROM customers WHERE id = (order.customer_id); -- repeated
+
+-- GOOD: Single join
+SELECT o.*, c.*
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE o.id = 1;
+```
+
+### RLS Performance (Critical)
+```sql
+-- BAD: Function call in RLS (slow)
+CREATE POLICY "users" ON profiles
+  USING (user_id = get_current_user_id());
+
+-- GOOD: Use auth.uid() directly
+CREATE POLICY "users" ON profiles
+  USING (user_id = auth.uid());
+```
+
+### Connection Pooling
+```
+Supabase default: Transaction mode (pgbouncer)
+- Use for serverless/edge functions
+- Prepared statements require session mode
+- Set pool size based on: max_connections / num_instances
+```
+
+### Foreign Key Indexes
+```sql
+-- Always index foreign keys!
+ALTER TABLE orders ADD CONSTRAINT fk_customer
+  FOREIGN KEY (customer_id) REFERENCES customers(id);
+
+CREATE INDEX idx_orders_customer_id ON orders(customer_id);
+```
+
+### Priority Reference
+
+| Priority | Category | Impact |
+|----------|----------|--------|
+| 1 | Query Performance | CRITICAL - Missing indexes, composite indexes |
+| 2 | Connection Management | CRITICAL - Pooling, limits, idle timeout |
+| 3 | Security & RLS | CRITICAL - RLS basics, RLS performance |
+| 4 | Schema Design | HIGH - Data types, PKs, FK indexes, partitioning |
+| 5 | Concurrency & Locking | MEDIUM-HIGH - Short transactions, deadlock prevention |
+| 6 | Data Access Patterns | MEDIUM - N+1, pagination, batch inserts, upsert |
+
+### Detailed References
+
+| File | When to Load |
+|------|--------------|
+| `references/query-missing-indexes.md` | Query optimization |
+| `references/conn-pooling.md` | Connection issues |
+| `references/security-rls-performance.md` | Slow RLS policies |
+| `references/security-rls-basics.md` | Setting up RLS |
+| `references/data-n-plus-one.md` | Multiple query issues |
+| `references/monitor-explain-analyze.md` | Query debugging |
+
+---
+
+## Schema & RLS Patterns
+
+### Standard Table Template
+
+```sql
+CREATE TABLE IF NOT EXISTS public.[table_name] (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Always enable RLS
+ALTER TABLE public.[table_name] ENABLE ROW LEVEL SECURITY;
+
+-- User owns row
+CREATE POLICY "Users access own data"
+  ON public.[table_name] FOR ALL
+  USING (auth.uid() = user_id);
+```
+
+### Profiles Table (Standard)
+
+```sql
+CREATE TABLE public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT,
+  full_name TEXT,
+  avatar_url TEXT,
+  role TEXT DEFAULT 'user',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Auto-create on signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email)
+  VALUES (NEW.id, NEW.email);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+```
+
+### CLI Workflow
+
+```bash
+# View schema
+npx supabase db dump --schema public | head -200
+
+# Create migration
+npx supabase migration new create_[table_name]
+
+# Apply migration
+npx supabase db push
+```
+
+### Safety Rules
+
+**ALWAYS:**
+- Enable RLS on every table
+- Use migrations for schema changes
+- Include ON DELETE CASCADE for FKs
+- Add created_at/updated_at columns
+
+**NEVER:**
+- Disable RLS in production
+- Hardcode secrets in migrations
+- Delete tables without confirmation
+
+### Detailed Rules
+
+| Rule | When to Load |
+|------|--------------|
+| `rules/rls-patterns.md` | RLS policy examples |
+| `rules/security-patterns.md` | Security hardening |
+| `rules/multi-account.md` | Multi-account CLI setup |
+
+Source: [supabase/agent-skills](https://github.com/supabase/agent-skills)

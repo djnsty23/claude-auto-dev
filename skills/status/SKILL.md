@@ -10,6 +10,9 @@ user-invocable: true
 
 Show current progress with minimal token usage.
 
+## Sprint Data
+!`node -e "try{const p=require('./prd.json');const s=Object.values(p.stories||{});console.log('Project:',p.projectName,'| Sprint:',p.sprint);console.log('Done:',s.filter(x=>x.passes===true).length,'| Pending:',s.filter(x=>!x.passes).length,'| Deferred:',s.filter(x=>x.passes==='deferred').length)}catch{console.log('No prd.json found')}" 2>/dev/null`
+
 ## Process
 
 1. Call `TaskList` to get all native tasks

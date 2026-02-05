@@ -1,4 +1,4 @@
-# claude-auto-dev (v4.9.4)
+# claude-auto-dev (v5.0)
 
 ## Commands
 
@@ -30,9 +30,9 @@
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 39 skills in directory format (`skill-name/SKILL.md`)
+- 34 skills in directory format (`skill-name/SKILL.md`)
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
-- Auto-loaded: core (with prd.json), quality, code-quality, security-patterns
+- Auto-loaded: core (with prd.json), quality, code-quality, security
 
 ## Cleanup
 - Screenshots: `.claude/screenshots/` (cleaned by `clean`)

@@ -7,9 +7,15 @@ triggers:
   - commit-push-pr
 user-invocable: true
 disable-model-invocation: true
+argument-hint: "[type] [message]"
 ---
 
 # Commit Workflow
+
+## Working Tree
+!`git status --short 2>/dev/null`
+!`git diff --stat HEAD 2>/dev/null | tail -5`
+!`git log --oneline -5 2>/dev/null`
 
 ## Quick Commit
 

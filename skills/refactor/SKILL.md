@@ -7,6 +7,7 @@ triggers:
   - split
   - restructure
 user-invocable: true
+argument-hint: "[target file or pattern]"
 ---
 
 # Refactoring Patterns

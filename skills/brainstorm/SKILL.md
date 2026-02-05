@@ -5,11 +5,15 @@ aliases: ["what next", "whatnext", "what-next"]
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
 model: opus
 user-invocable: true
+argument-hint: "[focus area]"
 ---
 
 # Brainstorm
 
 **Philosophy:** User doesn't know what to focus on. YOU scan, analyze, propose, and create stories - without asking.
+
+## Existing Tasks
+!`node -e "try{const p=require('./prd.json');Object.entries(p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch{}" 2>/dev/null`
 
 ## Usage
 

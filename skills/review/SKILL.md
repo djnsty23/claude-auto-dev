@@ -1,6 +1,6 @@
 ---
 name: review
-description: Code quality check - manual trigger for current changes
+description: Code quality check with adaptive effort scaling. Includes security scanning.
 allowed-tools: Bash, Read, Grep, Glob
 model: opus
 user-invocable: true
@@ -9,6 +9,28 @@ user-invocable: true
 # Review
 
 Quick quality check on current/recent changes.
+
+## Effort Levels
+
+Scale your effort to the task. Don't over-review trivial changes, don't under-review critical ones.
+
+| Task Type | Review Depth |
+|-----------|--------------|
+| Typo, one-liner | Does it work? Ship it. |
+| Feature, component | Build + types + looks right |
+| Architecture, refactor | All above + system impact + docs |
+
+**More review:** Money, security, user data, unfamiliar code
+**Less review:** Isolated changes, low risk, well-understood code
+
+## Quick Check
+
+After any change:
+1. `npm run typecheck && npm run build` - must pass
+2. Does it solve the problem? (not just technically correct)
+3. Would I approve this PR?
+
+If yes to all, move on.
 
 ## Execution
 
@@ -38,11 +60,11 @@ For each changed file, check:
 
 ```
 Review: [X files changed]
-═══════════════════════
+==========================
 
-Build: ✓ Pass
-Types: ✓ Pass
-Lint: ✓ Pass (or N/A)
+Build: Pass/Fail
+Types: Pass/Fail
+Lint: Pass/Fail (or N/A)
 
 Issues Found:
 - src/component.tsx:45 - console.log left in
@@ -62,12 +84,6 @@ Overall: Ready to commit / Needs fixes
 - When unsure about code quality
 - Before creating a PR
 
-## Auto-Trigger
-
-Consider running `review` automatically:
-- After `verify` marks task complete
-- Before `deploy`
-
 ## Quality Framework Reference
 
 Apply principles from related skills when reviewing:
@@ -77,17 +93,18 @@ Apply principles from related skills when reviewing:
 | `quality` | Type safety, design tokens, all UI states handled |
 | `code-quality` | React patterns, error handling, Supabase typing |
 | `design` | Avoid AI slop (no purple gradients, no Inter/Roboto) |
-| `self-review` | Scale effort to change complexity |
 
 **Design System Checks:**
-- Hardcoded colors → Suggest semantic tokens
-- Inter/Roboto fonts → Reference `design` alternatives
-- Purple gradients → Flag as "AI slop"
+- Hardcoded colors -> Suggest semantic tokens
+- Inter/Roboto fonts -> Reference `design` alternatives
+- Purple gradients -> Flag as "AI slop"
 
 **Type Safety Checks:**
-- `any` usage → Check `code-quality` patterns
-- Missing Zod → Check `quality` validation rules
+- `any` usage -> Check `code-quality` patterns
+- Missing Zod -> Check `quality` validation rules
 
 **React Checks:**
-- Missing cleanup → Check `react-patterns`
-- Inline objects → Check `code-quality` memo patterns
+- Missing cleanup -> Check `react-patterns`
+- Inline objects -> Check `code-quality` memo patterns
+
+> For detailed verification workflow, use `verify` command.

@@ -1,5 +1,47 @@
 # Changelog
 
+## [5.0] - 2026-02-05
+
+### Breaking Changes
+- **Skill consolidation** (40 -> 34): 6 skills merged into parent skills
+  - `supabase-postgres` + `supabase-schema` merged into `supabase`
+  - `browser-test` + `auth-token-injection` merged into new `browser-auth`
+  - `security-patterns` merged into `security`
+  - `self-review` merged into `review`
+  - `ci-cd` merged into `deploy`
+- **Requires chains updated**: All downstream skills (auto, ship, audit, test, review, pr-review) reference new consolidated names
+- **Deleted directories**: supabase-postgres/, supabase-schema/, browser-test/, auth-token-injection/, security-patterns/, self-review/, ci-cd/
+
+### Added
+- **Dynamic context injection** (`!`command`` syntax) on 5 skills
+  - `auto` - Pre-injects git status and prd.json sprint stats
+  - `status` - Pre-injects sprint data (project, done/pending/deferred counts)
+  - `commit` - Pre-injects working tree status, diff stats, recent log
+  - `audit` - Pre-injects existing task list from prd.json
+  - `brainstorm` - Pre-injects existing task list from prd.json
+  - Estimated savings: 18-24 tool calls, 23-37K tokens per auto session
+- **`argument-hint` frontmatter** on 6 user-facing skills
+  - `commit` -> `[type] [message]`
+  - `fix` -> `[error or file]`
+  - `security` -> `[scope: full|quick|file]`
+  - `refactor` -> `[target file or pattern]`
+  - `brainstorm` -> `[focus area]`
+  - `sprint` -> `[new|advance|close]`
+- **Skill-scoped Stop hook** in `auto/SKILL.md` frontmatter (forward-looking: blocked by Claude Code bug #19225)
+- **PreCompact hook** in all 3 settings files - preserves prd.json to `.claude/pre-compact-state.json` before context compaction
+- **Permission deny rules** in all 3 settings files - blocks `rm -rf /`, `rm -rf ~`, `git push --force origin main/master`, `git reset --hard`
+- **New skill**: `browser-auth` (merged browser-test + auth-token-injection)
+
+### Changed
+- **Supabase triggers expanded**: now includes `postgres`, `rls` (absorbed from merged skills)
+- **Deploy triggers expanded**: now includes `ci`, `deploy` (absorbed from ci-cd)
+- **Security priority**: changed to 0 (auto-loaded with review, audit, ship)
+- **Sprint skill**: now user-invocable with argument-hint
+- **Manifest description**: updated to reflect 34 skills
+- All version files bumped to 5.0
+
+Total skills: 34 | Version: 5.0
+
 ## [4.9.4] - 2026-02-05
 
 ### Fixed

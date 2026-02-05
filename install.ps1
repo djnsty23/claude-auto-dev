@@ -18,7 +18,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Version = Get-Content "$ScriptDir\VERSION" -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $Version) { $Version = "4.9.3" }
+if (-not $Version) { $Version = "5.0" }
 
 $ClaudeDir = "$env:USERPROFILE\.claude"
 

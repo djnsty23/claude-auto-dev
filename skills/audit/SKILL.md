@@ -10,6 +10,9 @@ user-invocable: true
 
 **Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
 
+## Existing Tasks
+!`node -e "try{const p=require('./prd.json');Object.entries(p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch{}" 2>/dev/null`
+
 ## Swarm Architecture
 
 ```

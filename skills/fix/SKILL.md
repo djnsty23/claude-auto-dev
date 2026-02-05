@@ -6,6 +6,7 @@ triggers:
   - debug
   - broken
   - error
+argument-hint: "[error or file]"
 ---
 
 # Fix Workflow

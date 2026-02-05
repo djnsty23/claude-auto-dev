@@ -1,6 +1,6 @@
 ---
-name: browser-test
-description: Secure browser testing with agent-browser CLI (93% more token-efficient than Playwright)
+name: browser-auth
+description: Browser testing with agent-browser CLI and auth token injection. Loaded via test skill.
 allowed-tools: Bash
 model: haiku
 user-invocable: false
@@ -110,9 +110,9 @@ agent-browser run --task "Go to localhost:3000/login, enter test@example.com and
 
 After browser tests pass, run verify:
 ```
-1. Browser test passes → agent-browser confirms UI state
-2. Run verify → npm run typecheck && npm run build
-3. Both pass → Task marked complete with verified: "browser"
+1. Browser test passes -> agent-browser confirms UI state
+2. Run verify -> npm run typecheck && npm run build
+3. Both pass -> Task marked complete with verified: "browser"
 ```
 
 ## Token Efficiency
@@ -122,12 +122,6 @@ After browser tests pass, run verify:
 | Playwright MCP | ~31K chars | ~7,800 |
 | agent-browser | ~5.5K chars | ~1,400 |
 | **Savings** | | **82%** |
-
-## Test Account
-
-- **Email**: `TEST_USER_EMAIL` env var
-- **Password**: `TEST_USER_PASSWORD` env var
-- **NEVER use real credentials**
 
 ## Options
 
@@ -145,14 +139,11 @@ If server not running, start in background automatically:
 ```bash
 # Check ports 3000, 8080, 5173
 curl -s http://localhost:3000 > /dev/null 2>&1 && echo "Running on 3000"
-curl -s http://localhost:8080 > /dev/null 2>&1 && echo "Running on 8080"
 
 # If none running, start in background (zero context cost)
 Bash({ command: "npm run dev", run_in_background: true })
 sleep 5  # Wait for startup
 ```
-
-Background servers don't fill context - output goes to file.
 
 ## When to Use Browser Tests
 
@@ -161,3 +152,71 @@ Background servers don't fill context - output goes to file.
 - Form submissions (validation, success, error)
 - Responsive layouts (mobile, tablet, desktop)
 - Before marking UX tasks as complete
+
+---
+
+## Auth Token Injection
+
+Quick login method when Google OAuth blocks automated browsers.
+
+### When to Use
+
+- Google shows "Couldn't sign you in - This browser or app may not be secure"
+- Testing apps that use Supabase + Google OAuth
+- Need to test authenticated features with agent-browser
+
+### Step 1: Ask User for Tokens
+
+Ask the user to provide their localStorage values from Chrome DevTools:
+
+```
+To test authenticated features, I need your session tokens.
+
+In your Chrome browser (where you're logged in):
+1. Open DevTools (F12)
+2. Go to Application -> Local Storage -> [your-app-url]
+3. Copy these values:
+   - sb-[project-id]-auth-token (the full JSON value)
+   - Any other app-specific keys (theme, preferences, etc.)
+
+Paste them here and I'll inject them into the test browser.
+```
+
+### Step 2: Inject Tokens
+
+Start agent-browser in visible mode:
+```bash
+agent-browser open http://localhost:8080 --headed
+```
+
+Inject the Supabase auth token:
+```bash
+agent-browser eval "localStorage.setItem('sb-[PROJECT_ID]-auth-token', '[FULL_JSON_TOKEN]'); location.reload();"
+```
+
+### Step 3: Verify Login
+
+After reload, check for authenticated UI elements:
+- User avatar/initials instead of "Sign In"
+- User menu instead of login button
+- Protected routes accessible
+
+### Token Format Requirements
+
+When injecting the token via `agent-browser eval`:
+
+1. **Single-line JSON**: The token must be on one line (no newlines)
+2. **Escaped quotes**: Internal double quotes must be escaped as `\"`
+3. **Outer single quotes**: Wrap the entire JSON in single quotes for the bash command
+
+### Important Notes
+
+1. **Token Expiry**: Tokens expire (usually 1 hour). Ask for fresh tokens if auth fails.
+2. **GA4 OAuth is Separate**: Supabase auth != Google Analytics access. GA4 tokens are stored server-side.
+3. **Visible Mode**: Use `--headed` flag so user can see the browser state.
+
+## Test Account
+
+- **Email**: `TEST_USER_EMAIL` env var
+- **Password**: `TEST_USER_PASSWORD` env var
+- **NEVER use real credentials**

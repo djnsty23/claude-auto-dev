@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.9.4-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-5.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
 
@@ -94,7 +94,7 @@ brainstorm  →  generates tasks  →  auto  →  completes all  →  ship
 
 **Global** (`~/.claude/`):
 ```
-skills/        # Synced from repo (39 skills)
+skills/        # Synced from repo (34 skills)
 hooks/         # Symlink to repo
 rules/         # Your custom rules (optional)
 repo-path.txt  # Points to your clone location
