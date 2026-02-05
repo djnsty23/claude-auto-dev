@@ -1,5 +1,45 @@
 # Changelog
 
+## [4.9.3] - 2026-02-05
+
+### Added
+- **Commit Skill** - Standardized git commit, push, and PR workflow
+  - Conventional commits format (feat|fix|refactor|chore|docs|test|perf)
+  - Safety checks: no .env, no console.log, no hardcoded secrets
+  - Batch commit pattern for auto mode (every 3 tasks)
+  - Full PR flow with gh CLI
+  - Triggers: "commit", "push", "pr", "commit-push-pr"
+- **Perf Skill** - Web performance audit patterns
+  - Core Web Vitals targets (LCP, INP, CLS, FCP, TTFB)
+  - Bundle size rules and common fixes (images, code splitting, React.memo, fonts)
+  - Supabase query optimization
+  - Audit report format
+  - Triggers: "perf", "performance", "lighthouse", "bundle size", "core web vitals"
+- **A11y Skill** - Accessibility audit (WCAG 2.1 AA)
+  - Keyboard navigation, focus management, color contrast
+  - Images/media, forms, ARIA, semantic HTML patterns
+  - Bad vs good code examples for each pattern
+  - Audit report format with scoring
+  - Triggers: "a11y", "accessibility", "wcag", "screen reader"
+- **Refactor Skill** - Code refactoring patterns
+  - Split large file, extract component, extract hook
+  - Replace prop drilling, consolidate duplicates
+  - Safety checklist (typecheck before/after each step)
+  - Triggers: "refactor", "extract", "split", "restructure"
+
+### Changed
+- **Requires Chains Updated** - New skills integrated into critical workflows
+  - `auto` now requires: commit (for batch commits)
+  - `ship` now requires: commit (for clean commits before deploy)
+  - `audit` now requires: perf, a11y (comprehensive quality audit)
+- **Auto Skill Fixed** - No longer auto-creates new sprints when all tasks done
+  - Explicit STOP rule added to IDLE Detection
+  - Suggests `brainstorm` or `sprint` for next work
+
+**Total skills:** 41 | **Version:** 4.9.3
+
+---
+
 ## [4.9.2] - 2026-02-05
 
 ### Added

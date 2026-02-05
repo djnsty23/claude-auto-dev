@@ -151,8 +151,14 @@ Run `status` to see full results.
 
 If no tasks to work on:
 1. Check: Are ALL stories `passes: true`?
-   - YES → Output completion summary
+   - YES → Output completion summary and **STOP**
    - NO → Find blocked tasks and resolve blockers
+
+**CRITICAL: When all tasks are done, STOP.**
+- Do NOT auto-create new sprints
+- Do NOT generate new stories from brainstorm ideas
+- Do NOT start new work without user approval
+- Output summary, suggest `brainstorm` or `sprint` if user wants more
 
 ## Quick Reference
 

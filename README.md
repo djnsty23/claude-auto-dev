@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.9.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-4.9.3-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
 
@@ -40,7 +40,7 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
 You: update dev
 Claude: [pulls latest, syncs skills/hooks, removes stale files]
-        Updated to v4.9.2
+        Updated to v4.9.3
 ```
 
 **Option 2: Automatic on session start**
@@ -68,6 +68,10 @@ cd ~/claude-auto-dev && git pull
 | `ship` | Build, test, review, deploy |
 | `test` | Run unit + browser tests |
 | `fix` | Debug issues |
+| `commit` | Conventional commit + push + PR |
+| `refactor` | Code refactoring patterns |
+| `perf` | Performance audit (Core Web Vitals) |
+| `a11y` | Accessibility audit (WCAG 2.1 AA) |
 | `clean` | Remove temp files |
 | `setup` | Initialize new project |
 | `update dev` | Sync latest from GitHub to ~/.claude |
@@ -88,7 +92,7 @@ brainstorm  →  generates tasks  →  auto  →  completes all  →  ship
 
 **Global** (`~/.claude/`):
 ```
-skills/        # Synced from repo (37 skills)
+skills/        # Synced from repo (41 skills)
 hooks/         # Symlink to repo
 rules/         # Your custom rules (optional)
 repo-path.txt  # Points to your clone location
