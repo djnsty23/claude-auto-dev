@@ -1,5 +1,27 @@
 # Changelog
 
+## [4.6.2] - 2026-02-05
+
+### Added
+- **Supabase Postgres Skill** - Official Postgres best practices from Supabase
+  - Query performance (missing indexes, composite indexes)
+  - Connection management (pooling, limits)
+  - Security & RLS (basics, performance optimization)
+  - Schema design (foreign key indexes, data types)
+  - N+1 query prevention
+  - 8 detailed reference files included
+  - Source: [supabase/agent-skills](https://github.com/supabase/agent-skills)
+- **CONTRIBUTING.md** - Skill authoring guide
+  - Directory structure conventions
+  - SKILL.md format specification
+  - Manifest entry guidelines
+  - Best practices and checklist
+- **New requires chain**: `supabase` → `supabase-postgres`
+- **Total skills**: 37 (was 36)
+- **Total requires chains**: 11 (was 10)
+
+---
+
 ## [4.6.1] - 2026-02-05
 
 ### Added

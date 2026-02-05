@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.6.1-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-4.6.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
 
@@ -150,7 +150,7 @@ Verification Chain:
 **Token Efficiency**: ~100 tokens for metadata (always), SKILL.md on-demand (~500-2000).
 
 ### Complete Skill Library
-**36 skills** with **10 requires chains**:
+**37 skills** with **11 requires chains**:
 
 | Category | Skills |
 |----------|--------|
@@ -161,8 +161,15 @@ Verification Chain:
 | **Video** | remotion (compositions, animations, subtitles) |
 | **Testing** | test, browser-test, agent-browser |
 | **Deploy** | ship, deploy, build, clean |
-| **Data** | supabase, supabase-schema, env-vars |
+| **Data** | supabase, supabase-postgres, supabase-schema, env-vars |
 | **Utility** | fix, help, setup, archive-prd, checkpoint |
+
+### External Skill Sources
+| Source | Skills |
+|--------|--------|
+| [Anthropic claude-code](https://github.com/anthropics/claude-code) | design, security-patterns, pr-review |
+| [remotion-dev/skills](https://github.com/remotion-dev/skills) | remotion |
+| [supabase/agent-skills](https://github.com/supabase/agent-skills) | supabase-postgres |
 
 ### Skill Synergy System
 Skills **cross-reference each other** for comprehensive quality:

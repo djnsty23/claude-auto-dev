@@ -1,5 +1,5 @@
 {
-  "version": "4.6.1",
+  "version": "4.6.2",
   "description": "Comprehensive skill system with security patterns, PR review, and Remotion",
   "skills": {
     "core": {
@@ -103,8 +103,16 @@
       "triggers": ["schema", "database", "migration", "supabase"],
       "context": ["supabase/"],
       "file": "supabase/SKILL.md",
+      "requires": ["supabase-postgres"],
       "priority": 3,
       "description": "Supabase CLI patterns for database operations."
+    },
+    "supabase-postgres": {
+      "triggers": ["postgres", "sql optimization", "query performance", "rls"],
+      "context": ["supabase/"],
+      "file": "supabase-postgres/SKILL.md",
+      "priority": 2,
+      "description": "Postgres performance optimization from Supabase. Indexes, RLS, pooling, N+1."
     },
     "audit": {
       "triggers": ["audit"],
