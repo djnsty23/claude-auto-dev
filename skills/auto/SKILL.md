@@ -147,25 +147,63 @@ Summary:
 Run `status` to see full results.
 ```
 
-## IDLE Detection
+## IDLE Detection (Smart Next Action)
 
 If no tasks to work on:
 1. Check: Are ALL stories `passes: true`?
-   - YES → Output completion summary and **STOP**
    - NO → Find blocked tasks and resolve blockers
+   - YES → Continue to step 2
+2. Output completion summary for current sprint
+3. **Assess context** to decide next action:
 
-**CRITICAL: When all tasks are done, STOP.**
-- Do NOT auto-create new sprints
-- Do NOT generate new stories from brainstorm ideas
-- Do NOT start new work without user approval
-- Output summary, suggest `brainstorm` or `sprint` if user wants more
+### Decision Matrix
+
+| Signal | Action |
+|--------|--------|
+| TODOs/FIXMEs in code | Brainstorm → create sprint → continue |
+| Console.logs left in | Quick cleanup sprint → continue |
+| No tests exist | Suggest test sprint |
+| Build warnings | Fix warnings sprint |
+| Clean codebase, no issues | Ask user (see below) |
+
+### Auto-Continue (Obvious Work)
+
+If brainstorm scan finds **3+ actionable improvements**, auto-create next sprint and continue:
+```
+Sprint [N] complete (8/8 tasks).
+
+Scanning codebase... found 5 improvements.
+Creating Sprint [N+1] and continuing.
+```
+
+**Limit: 1 auto-generated sprint per session.** After completing an auto-generated sprint, always ask.
+
+### Ask User (No Obvious Work or Limit Reached)
+
+When the codebase is clean OR you've already auto-generated 1 sprint:
+```
+Sprint [N] complete (8/8 tasks).
+
+What's next? (Recommended: ship)
+1. 🚀 ship - Deploy current work
+2. 🔍 audit - Deep quality check
+3. 💡 brainstorm - Find more improvements
+4. ✅ Done for now
+```
+
+Use `AskUserQuestion` with these options. Pick the recommended option based on context:
+- Just finished features → recommend `ship`
+- Been a while since audit → recommend `audit`
+- Early in project → recommend `brainstorm`
 
 ## Quick Reference
 
 | Situation | Action |
 |-----------|--------|
 | No prd.json | Bootstrap from context |
-| All done | Output completion summary |
+| All done + issues found | Auto-brainstorm → new sprint |
+| All done + clean code | Ask user for next action |
+| All done + already auto-sprinted | Ask user (limit reached) |
 | Build broken | Fix first |
 | Task fails | Retry 2x, then skip |
 | UX task | Browser verify required |
