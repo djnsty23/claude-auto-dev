@@ -77,7 +77,7 @@ if ($Copy) {
     } catch {
         Write-Host "  Symlink failed. Using copy..." -ForegroundColor Yellow
         New-Item -ItemType Directory -Path $HooksTarget -Force | Out-Null
-        Copy-Item -Path "$ScriptDir\hooks\*.ps1" -Destination $HooksTarget -Force
+        Copy-Item -Path "$ScriptDir\hooks\*" -Destination $HooksTarget -Force
         Write-Host "  Copied to ~/.claude/hooks/" -ForegroundColor Green
     }
 }
