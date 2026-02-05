@@ -2,7 +2,11 @@
 name: pr-review
 description: Comprehensive PR review using specialized agents. Use before creating or merging pull requests.
 user-invocable: true
-triggers: pr-review, review-pr, code-review
+triggers:
+  - pr
+  - pr-review
+  - review-pr
+  - code-review
 allowed-tools: Bash(gh *), Glob, Grep, Read, Task
 ---
 

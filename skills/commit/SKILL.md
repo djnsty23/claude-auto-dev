@@ -4,7 +4,6 @@ description: Standardized git commit, push, and PR creation workflow. Use for co
 triggers:
   - commit
   - push
-  - pr
   - commit-push-pr
 user-invocable: true
 ---

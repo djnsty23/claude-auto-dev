@@ -2,6 +2,8 @@
 # Stop hook - Blocks stopping when auto mode is active.
 # Checks for .claude/auto-active flag file.
 
+command -v jq &>/dev/null || exit 0
+
 AUTO_FLAG=".claude/auto-active"
 
 if [[ -f "$AUTO_FLAG" ]]; then

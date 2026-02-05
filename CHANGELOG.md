@@ -36,7 +36,16 @@
   - Explicit STOP rule added to IDLE Detection
   - Suggests `brainstorm` or `sprint` for next work
 
-**Total skills:** 41 | **Version:** 4.9.3
+### Fixed
+- **Duplicate "pr" trigger** - removed from commit, kept in pr-review
+- **Missing YAML frontmatter** - added to auth-token-injection and design skills
+- **Trigger mismatches** - synced pr-review and setup-project with manifest
+- **Orphaned hooks** - removed unused auto-continue.ps1/.sh
+- **Dead build skill** - removed from manifest (directory kept as reference)
+- **Missing jq checks** - added to stop-auto-check.sh, pre-tool-filter.sh, post-tool-typecheck.sh
+- **Auto skill language** - dialed back aggressive caps/bold for Opus 4.5+ compatibility
+
+**Total skills:** 40 | **Version:** 4.9.3
 
 ---
 

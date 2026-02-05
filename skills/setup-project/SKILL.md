@@ -1,11 +1,11 @@
 ---
-name: Setup Project
+name: setup-project
 description: Initialize a new project with standard configuration.
 triggers:
-  - set up
   - setup
-  - initialize
-  - init project
+  - scaffold
+  - new-project
+user-invocable: true
 ---
 
 # Setup Project Workflow

@@ -92,7 +92,7 @@ brainstorm  →  generates tasks  →  auto  →  completes all  →  ship
 
 **Global** (`~/.claude/`):
 ```
-skills/        # Synced from repo (41 skills)
+skills/        # Synced from repo (40 skills)
 hooks/         # Symlink to repo
 rules/         # Your custom rules (optional)
 repo-path.txt  # Points to your clone location

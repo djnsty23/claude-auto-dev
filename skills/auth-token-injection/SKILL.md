@@ -1,3 +1,9 @@
+---
+name: auth-token-injection
+description: Auth token injection patterns for testing.
+triggers: []
+---
+
 # Auth Token Injection for Automated Testing
 
 Quick login method for agent-browser when Google OAuth blocks automated browsers.

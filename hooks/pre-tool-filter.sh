@@ -2,6 +2,8 @@
 # PreToolUse hook - Security filtering and token optimization
 # Blocks dangerous Bash commands and unnecessary file reads.
 
+command -v jq &>/dev/null || exit 0
+
 # Read JSON input from stdin
 input=$(cat)
 

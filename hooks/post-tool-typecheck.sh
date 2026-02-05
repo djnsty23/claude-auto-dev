@@ -1,6 +1,8 @@
 #!/bin/bash
 # PostToolUse hook - Run typecheck after TypeScript/JavaScript edits
 
+command -v jq &>/dev/null || exit 0
+
 # Read JSON input from stdin
 input=$(cat)
 

@@ -1,6 +1,6 @@
 {
   "version": "4.9.3",
-  "description": "41 skills - complete synergy chains, commit/perf/a11y/refactor patterns",
+  "description": "40 skills - complete synergy chains, commit/perf/a11y/refactor patterns",
   "skills": {
     "core": {
       "triggers": [],
@@ -55,7 +55,7 @@
       "description": "Code quality check on recent changes. Includes security scanning."
     },
     "pr-review": {
-      "triggers": ["pr"],
+      "triggers": ["pr", "pr-review", "review-pr", "code-review"],
       "context": [],
       "file": "pr-review/SKILL.md",
       "requires": ["security-patterns", "code-quality"],
@@ -209,14 +209,6 @@
       "priority": 3,
       "description": "Auth token injection patterns for testing."
     },
-    "build": {
-      "triggers": [],
-      "context": [],
-      "file": "build/SKILL.md",
-      "requires": ["code-quality"],
-      "priority": 2,
-      "description": "Hybrid task management architecture reference. Internal use."
-    },
     "env-vars": {
       "triggers": ["env", "environment", "credentials", "secrets", "api key"],
       "context": [".env*"],
@@ -276,7 +268,7 @@
       "description": "Updates claude-auto-dev to latest. Syncs repo with ~/.claude, removes stale files."
     },
     "commit": {
-      "triggers": ["commit", "push", "pr", "commit-push-pr"],
+      "triggers": ["commit", "push", "commit-push-pr"],
       "context": [],
       "file": "commit/SKILL.md",
       "priority": 2,

@@ -1,3 +1,12 @@
+---
+name: design
+description: Creates distinctive UI - avoids generic AI aesthetics.
+triggers:
+  - design
+  - ui
+user-invocable: true
+---
+
 # Frontend Design
 
 Create distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics.

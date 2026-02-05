@@ -40,21 +40,17 @@ This flag tells the Stop hook to **block Claude from stopping**. Claude will kee
 rm -f .claude/auto-active
 ```
 
-**CRITICAL:** Always delete the flag when auto mode ends. If you're about to ask the user what's next (IDLE Detection), keep the flag active so the conversation doesn't end.
+Always delete the flag when auto mode ends. If you're about to ask the user what's next (IDLE Detection), keep the flag active so the conversation doesn't end.
 
-## CRITICAL: NEVER STOP
+## Autonomous Behavior
 
-**FORBIDDEN:**
-- NEVER ask "Should I continue?"
-- NEVER show summaries and wait
-- NEVER say "Let me know..."
-- NEVER output minimal responses (`.`, `—`, `Idle.`)
+Don't ask "Should I continue?" or show summaries and wait. Don't output minimal responses.
 
-**REQUIRED:**
+Instead:
 - Make autonomous decisions
 - Log decisions to `.claude/decisions.md`
 - Keep working until truly done
-- The Stop hook will prevent Claude from ending - trust it
+- The Stop hook prevents Claude from ending - trust it
 
 ## Bootstrap (No prd.json)
 
