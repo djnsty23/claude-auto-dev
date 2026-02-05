@@ -14,19 +14,37 @@ Fully autonomous development. Works through all tasks without stopping until com
 
 ```
 auto
+  ├─ Activate: write .claude/auto-active
   ├─ Check prd.json exists?
   │   ├─ No → Bootstrap from context
   │   └─ Yes → Check pending tasks
-  │             ├─ None pending → All done!
+  │             ├─ None pending → IDLE Detection
   │             └─ Has pending → Execute tasks
   │
   └─ Execute until done or interrupted
+  └─ Deactivate: delete .claude/auto-active
 ```
+
+## Auto-Active Flag (Continuous Execution)
+
+**On start**, immediately create the flag file:
+```bash
+echo '{"started":"'$(date -Iseconds)'","sprint":"current"}' > .claude/auto-active
+```
+PowerShell: `@{started=(Get-Date -Format o)} | ConvertTo-Json > .claude/auto-active`
+
+This flag tells the Stop hook to **block Claude from stopping**. Claude will keep working as long as this flag exists.
+
+**On exit** (user says "done", or truly nothing left), delete the flag:
+```bash
+rm -f .claude/auto-active
+```
+
+**CRITICAL:** Always delete the flag when auto mode ends. If you're about to ask the user what's next (IDLE Detection), keep the flag active so the conversation doesn't end.
 
 ## CRITICAL: NEVER STOP
 
 **FORBIDDEN:**
-- NEVER use `AskUserQuestion` - make decisions yourself
 - NEVER ask "Should I continue?"
 - NEVER show summaries and wait
 - NEVER say "Let me know..."
@@ -36,6 +54,7 @@ auto
 - Make autonomous decisions
 - Log decisions to `.claude/decisions.md`
 - Keep working until truly done
+- The Stop hook will prevent Claude from ending - trust it
 
 ## Bootstrap (No prd.json)
 
@@ -185,16 +204,19 @@ When the codebase is clean OR you've already auto-generated 1 sprint:
 Sprint [N] complete (8/8 tasks).
 
 What's next? (Recommended: ship)
-1. 🚀 ship - Deploy current work
-2. 🔍 audit - Deep quality check
-3. 💡 brainstorm - Find more improvements
-4. ✅ Done for now
+1. ship - Deploy current work
+2. audit - Deep quality check
+3. brainstorm - Find more improvements
+4. Done for now
 ```
 
 Use `AskUserQuestion` with these options. Pick the recommended option based on context:
 - Just finished features → recommend `ship`
 - Been a while since audit → recommend `audit`
 - Early in project → recommend `brainstorm`
+
+**Keep `.claude/auto-active` flag while asking.** Only delete it if user picks "Done for now".
+If user picks ship/audit/brainstorm → execute that flow, then loop back to IDLE Detection.
 
 ## Quick Reference
 

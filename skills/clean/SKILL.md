@@ -16,8 +16,9 @@ Remove Claude Code artifacts and temporary files.
 2. **Backups** - Delete `prd-backup-*.json` older than 7 days
 3. **Handoffs** - Delete `handoff-*.md` older than 7 days
 4. **Archives** - List `prd-archive-*.json` older than 30 days (prompt before delete)
-5. **Playwright** - Delete `.playwright-mcp/` folder if exists
-6. **Report** - Show files removed and space reclaimed
+5. **Auto flag** - Delete `.claude/auto-active` if stale (from crashed sessions)
+6. **Playwright** - Delete `.playwright-mcp/` folder if exists
+7. **Report** - Show files removed and space reclaimed
 
 ## Commands
 
@@ -33,6 +34,9 @@ find . -maxdepth 1 -name "handoff-*.md" -mtime +7 -delete
 
 # Archives - list only (prompt user)
 find . -maxdepth 1 -name "prd-archive-*.json" -mtime +30
+
+# Stale auto mode flag
+rm -f .claude/auto-active
 
 # Playwright MCP artifacts
 rm -rf .playwright-mcp/

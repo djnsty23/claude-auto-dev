@@ -18,3 +18,6 @@ handoff-*.md
 
 # Session analytics
 ledger.json
+
+# Auto mode flag (session-specific)
+.claude/auto-active
