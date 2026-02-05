@@ -8,32 +8,30 @@ user-invocable: true
 
 # Status
 
-Show current sprint progress with minimal token usage.
+Show current progress with minimal token usage.
 
 ## Process
 
-1. Read `project-meta.json` for sprint context and roadmap
-2. Call `TaskList` to get all tasks
+1. Call `TaskList` to get all native tasks
+2. Read `prd.json` header (first 20 lines) if exists
 3. Display:
 
 ```
-[project-name] | Sprint: [name]
-═════════════════════════════════
-Progress: [N]/[N] complete | [N] verified
+[projectName] | Sprint: [sprint]
+═══════════════════════════════
+Progress: [N]/[N] complete
 In Progress: [N] | Ready: [N] | Blocked: [N]
 
 Active:
-  → [SID] [subject] (in_progress)
+  → [id] [subject] (in_progress)
 
 Next:
-  [SID] [subject] (ready)
-  [SID] [subject] (ready)
-
-Roadmap: [N] epics remaining (~[N] stories)
-Historical: [N] tasks completed across [N] sprints
+  [id] [subject] (pending)
+  [id] [subject] (pending)
 ```
 
 ## Rules
-- Do NOT read source files, only project-meta.json
+- Use TaskList for native tasks (primary)
+- Read only prd.json header for context (not full file)
 - Use haiku model for minimal cost
-- If no project-meta.json exists, suggest running `audit` or `npx claude-auto-dev --init`
+- If no prd.json, just show TaskList results

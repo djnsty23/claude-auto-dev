@@ -1,5 +1,8 @@
 {
-  "project": "{{NAME}}",
-  "stories": [],
-  "testSuites": []
+  "projectName": "{{NAME}}",
+  "sprint": "S1",
+  "lastUpdated": "{{DATE}}",
+  "totalStories": 0,
+  "completedStories": 0,
+  "stories": {}
 }

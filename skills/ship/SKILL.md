@@ -15,6 +15,16 @@ git status --short         # Warn if dirty
 
 If build fails: STOP, fix errors first.
 
+## Step 1.5: Security Check (REQUIRED)
+
+Run security scan before deploy:
+- Secrets scan (no hardcoded keys)
+- .env files not committed
+- RLS enabled on all tables
+- Input validation present
+
+If critical issues: **STOP** - fix before deploying.
+
 ## Step 2: Auto-detect Target
 
 **Check in order:**

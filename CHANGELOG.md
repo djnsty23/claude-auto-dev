@@ -1,5 +1,37 @@
 # Changelog
 
+## [4.8.0] - 2026-02-05
+
+### Added
+- **Security Skill** - Pre-deploy security audit (user-invocable)
+  - Secrets scan, env file check, RLS validation, XSS detection
+  - Trigger: `security`
+  - Auto-runs before ship
+
+### Fixed
+- **Version sync** - All version files now 4.8.0 (VERSION, package.json, manifest)
+- **status skill** - Now uses TaskList + prd.json (removed project-meta.json reference)
+- **prd.json template** - Fixed to match schema (projectName, stories as object)
+- **ship skill** - Added security check step before deploy
+- **Auto requires** - Added verify to chain (ensures completion quality)
+- **Deduplication** - audit/brainstorm now check existing tasks before creating
+
+### Changed
+- **Quality skills consolidated** - Clear boundaries, no overlap
+  - `quality` = Core principles (judgment, UI states)
+  - `code-quality` = Production patterns (learned rules)
+- **deploy skill** - Now internal only (use `ship` for deploys)
+- **Single-word commands** - All triggers simplified
+
+### Removed
+- Unused templates (ab-test, context, learnings, project-meta)
+- Plugin files (marketplace not approved yet)
+- Redundant QUICKSTART files
+
+**Total skills:** 39 | **Requires chains:** 14
+
+---
+
 ## [4.6.3] - 2026-02-05
 
 ### Added

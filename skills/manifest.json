@@ -260,6 +260,14 @@
       "priority": 0,
       "description": "Security vulnerability patterns. Auto-loaded with review, audit, ship."
     },
+    "security": {
+      "triggers": ["security"],
+      "context": [],
+      "file": "security/SKILL.md",
+      "requires": ["security-patterns"],
+      "priority": 1,
+      "description": "Pre-deploy security audit. Run before every deploy."
+    },
     "remotion": {
       "triggers": ["remotion", "video"],
       "context": ["remotion/"],

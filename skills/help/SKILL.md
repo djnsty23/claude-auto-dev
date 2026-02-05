@@ -17,7 +17,8 @@ triggers:
 | `audit` | 6-agent quality audit |
 | `test` | Run tests |
 | `fix` | Debug issues |
-| `ship` | Deploy |
+| `security` | Pre-deploy security check |
+| `ship` | Deploy (runs security first) |
 | `clean` | Remove temp files |
 | `save` | Checkpoint context |
 | `help` | Show this list |
@@ -35,7 +36,6 @@ triggers:
 | Say | Does |
 |-----|------|
 | `pr` | Review pull request |
-| `deploy` | Deploy workflow |
 | `init` | New project |
 | `setup` | Init auto-dev |
 | `archive` | Archive old tasks |
