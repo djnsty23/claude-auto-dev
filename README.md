@@ -36,7 +36,7 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 |-----|------|
 | `brainstorm` | Scan codebase, propose improvements and features |
 | `auto` | Work through all tasks autonomously |
-| `status` | Show progress |
+| `progress` | Show sprint progress |
 | `audit` | 6-agent parallel quality audit |
 | `review` | Code quality check |
 | `security` | Pre-deploy security scan |
@@ -44,7 +44,9 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 | `test` | Run tests |
 | `fix` | Debug issues |
 | `clean` | Remove temp files |
-| `help` | Show all commands |
+| `scaffold` | Create new project |
+
+**Note:** Use `/help`, `/status`, `/init` for Claude Code built-in commands.
 
 ---
 

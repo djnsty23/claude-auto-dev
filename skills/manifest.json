@@ -33,11 +33,11 @@
       "description": "Scans codebase, proposes improvements and features autonomously."
     },
     "status": {
-      "triggers": ["status"],
+      "triggers": ["progress"],
       "context": ["prd.json"],
       "file": "status/SKILL.md",
       "priority": 2,
-      "description": "Shows sprint progress and task status."
+      "description": "Shows sprint progress and task status. Use 'progress' (not 'status' - that's a built-in)."
     },
     "sprint": {
       "triggers": ["sprint"],
@@ -93,11 +93,11 @@
       "description": "Debugging and bug fixing patterns."
     },
     "setup-project": {
-      "triggers": ["init", "scaffold"],
+      "triggers": ["scaffold", "new-project"],
       "context": [],
       "file": "setup-project/SKILL.md",
       "priority": 3,
-      "description": "Scaffolds new project from scratch."
+      "description": "Scaffolds new project from scratch. Use 'scaffold' (not 'init' - that's a built-in)."
     },
     "supabase": {
       "triggers": ["db", "supabase"],
@@ -237,13 +237,6 @@
       "file": "env-vars/SKILL.md",
       "priority": 3,
       "description": "Environment variables patterns."
-    },
-    "help": {
-      "triggers": ["help"],
-      "context": [],
-      "file": "help/SKILL.md",
-      "priority": 2,
-      "description": "Lists available commands."
     },
     "design": {
       "triggers": ["design", "ui"],
