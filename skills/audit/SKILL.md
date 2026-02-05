@@ -37,25 +37,25 @@ Wait for completion → Aggregate Results → Present Report
 Launch all 7 agents in a single message:
 
 ```typescript
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Security audit for [PROJECT_PATH]. Scan: exposed secrets, dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Performance audit for [PROJECT_PATH]. Scan: missing React.memo on list items, useEffect without cleanup, inline objects in JSX, missing lazy loading, N+1 queries. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Accessibility audit for [PROJECT_PATH]. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets (<44px), div/span with onClick (should be button), outline-none without focus-visible replacement, user-scalable=no or maximum-scale=1, missing autocomplete on form inputs, inputs without correct type/inputmode, onPaste with preventDefault, missing prefers-reduced-motion support, transition: all (should list properties), autoFocus without justification. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Type safety audit for [PROJECT_PATH]. Scan: 'any' usage (skip test files), @ts-ignore, type assertions without guards, conflicting type definitions, untyped API responses. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "UX/UI audit for [PROJECT_PATH]. Scan: missing loading states, missing empty states, missing error states, hardcoded colors instead of tokens, missing toast feedback, images without width/height (causes CLS), missing loading=lazy on below-fold images, large lists without virtualization (50+ items .map). ALSO check responsive layout: sidebars without mobile hide/toggle (must use hidden md:block pattern), grids without mobile breakpoints (need grid-cols-1 md:grid-cols-2), fixed-width containers that overflow on mobile, touch targets under 44px, missing mobile navigation (hamburger/drawer), modals not full-screen on mobile. ALSO check: hardcoded date/number formats (should use Intl.*), missing text truncation on user-generated content, flex children without min-w-0. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Test coverage audit for [PROJECT_PATH]. Scan: auth flows without tests, data mutations without tests, hooks without test files, utilities without tests. List critical gaps. Report: Severity, What needs testing, Priority." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Deploy readiness audit for [PROJECT_PATH]. Scan for runtime issues that unit tests miss: 1) PWA manifest (manifest.json/site.webmanifest) - check every icon/screenshot path references a file that actually exists in public/. 2) Environment variables - check all process.env/import.meta.env references have values set (no trailing newlines/whitespace). 3) Supabase config - check anon key for trailing newline characters that break WebSocket URLs. 4) Asset references - grep for paths like /icons/, /images/, /screenshots/ in source and verify the files exist in public/. 5) next.config/vercel.json - check for mismatched rewrites or missing headers. Report: Severity, File:line, Issue, Fix." })
 ```
 
@@ -165,7 +165,7 @@ User can audit specific features:
 
 ## Token Cost
 
-- 7 agents × ~15K tokens each = ~105K tokens total
+- 7 agents × ~15K tokens each = ~105K tokens total (Opus model for thorough analysis)
 - Time: 2-4 minutes (parallel execution)
 - Context efficient: agents run in background, results aggregated
 

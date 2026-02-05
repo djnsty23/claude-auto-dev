@@ -100,7 +100,7 @@
       "description": "Initialize project with prd.json and standard config."
     },
     "supabase": {
-      "triggers": ["db", "supabase", "postgres", "rls"],
+      "triggers": ["db", "supabase", "postgres", "rls", "migration", "schema", "table", "database", "edge function"],
       "context": ["supabase/"],
       "file": "supabase/SKILL.md",
       "priority": 3,
@@ -112,7 +112,7 @@
       "file": "audit/SKILL.md",
       "requires": ["quality", "code-quality", "design", "security", "browser-auth", "perf", "a11y"],
       "priority": 1,
-      "description": "Parallel quality audit with 6 specialized agents including test coverage."
+      "description": "Parallel quality audit with 7 specialized agents (Opus) including deploy readiness."
     },
     "browser-auth": {
       "triggers": [],
