@@ -27,6 +27,13 @@
 - Unused templates (ab-test, context, learnings, project-meta)
 - Plugin files (marketplace not approved yet)
 - Redundant QUICKSTART files
+- **Stale scripts** - setup-keys.ps1, setup-keys.sh, scripts/, bin/install.js
+- **MCP template** - config/mcp.template.json (not using MCPs)
+
+### Changed (Install Scripts)
+- **Simplified install.ps1/sh** - From ~200 lines to ~80 lines
+- **Removed credential setup** - No longer saves API keys during init
+- **README simplified** - From 772 lines to 120 lines (accurate, concise)
 
 **Total skills:** 39 | **Requires chains:** 14
 

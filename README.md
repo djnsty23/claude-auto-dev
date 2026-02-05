@@ -4,768 +4,116 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-4.8.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
-**Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
-
-> No scripts to run - just say what you want to build.
+**Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
 
 ---
 
-## Complete Setup Guide (For Beginners)
+## Install
 
-### Prerequisites
-
-You need these installed on your computer:
-
-| Tool | Check if installed | Install |
-|------|-------------------|---------|
-| **Node.js 18+** | `node --version` | [nodejs.org](https://nodejs.org/) |
-| **npm** | `npm --version` | Comes with Node.js |
-| **Git** | `git --version` | [git-scm.com](https://git-scm.com/) |
-
-### Step 1: Install Claude Code
-
-Claude Code is Anthropic's official CLI for coding with Claude AI.
-
-**Mac/Linux:**
-```bash
-npm install -g @anthropic-ai/claude-code
-```
-
-**Windows (PowerShell as Administrator):**
-```powershell
-npm install -g @anthropic-ai/claude-code
-```
-
-**Verify it works:**
-```bash
-claude --version
-```
-
-### Step 2: Authenticate Claude Code
-
-```bash
-claude
-```
-
-This opens a browser window to log in with your Anthropic account. You need:
-- An Anthropic account ([console.anthropic.com](https://console.anthropic.com))
-- Claude Pro, Team, or API credits
-
-### Step 3: Install Claude Auto-Dev
-
-**Option A: Clone and run install script (Recommended)**
+**Prerequisites:** [Node.js 18+](https://nodejs.org/), [Claude Code](https://github.com/anthropics/claude-code)
 
 ```bash
 # Mac/Linux
 git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-cd ~/claude-auto-dev && chmod +x install.sh && ./install.sh --full
+cd ~/claude-auto-dev && chmod +x install.sh && ./install.sh
 
 # Windows (PowerShell)
-git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\Downloads\code\claude-auto-dev
-cd $env:USERPROFILE\Downloads\code\claude-auto-dev
-.\install.ps1 -Full
+git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
+cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
 
-**Option B: Manual copy (minimal):**
-```bash
-# Mac/Linux
-mkdir -p ~/.claude/skills && cp -r skills/* ~/.claude/skills/
+**Options:**
+- `--full` / `-Full` - Also install hooks and rules
+- `--init` / `-Init` - Initialize current project with prd.json
 
-# Windows (PowerShell)
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills"
-Copy-Item "skills\*" "$env:USERPROFILE\.claude\skills\" -Recurse -Force
-```
-
-> **Note:** This is NOT an npm package. It's markdown files that Claude Code loads automatically.
-
-### Step 4: Start Using It
-
-```bash
-# Navigate to any project
-cd ~/my-project
-
-# Start Claude Code
-claude
-
-# Type this in the Claude prompt:
-brainstorm
-```
-
-Claude will ask what you want to build, generate tasks, and work through them automatically.
+**Verify:** `ls ~/.claude/skills/` should show skill folders.
 
 ---
 
-## Quick Reference
+## Commands
 
-```
-brainstorm  →  Proactively analyze codebase and propose improvements
-audit       →  Parallel swarm audit (6 specialized agents)
-auto        →  Execute ALL pending tasks automatically
-status      →  Quick progress check (uses native TaskList)
-continue    →  Work on one task, then ask what's next
-stop        →  Safe to close session
-```
-
----
-
-## What's New in v4.6
-
-### Optimized Skill Chains (API Best Practices)
-Applied principles from Claude Code API documentation:
-
-```
-Progressive Disclosure Chain:
-┌─────────┐     ┌──────────────┐     ┌──────────────┐
-│  test   │ ──► │ browser-test │ ──► │ agent-browser│
-└─────────┘     └──────────────┘     └──────────────┘
-                      │
-                      └─ Full browser testing knowledge loads on-demand
-
-Pre-Deploy Quality:
-┌─────────┐     ┌──────────────┐     ┌──────────────┐
-│  ship   │ ──► │    review    │ ──► │   quality    │
-└─────────┘     └──────────────┘     └──────────────┘
-                                     + code-quality
-                      │
-                      └─ Can't ship without quality check
-
-Verification Chain:
-┌─────────┐     ┌──────────────┐
-│  verify │ ──► │   quality    │
-└─────────┘     └──────────────┘
-                      │
-                      └─ Standards enforcement on all verifications
-```
-
-**Token Efficiency**: ~100 tokens for metadata (always), SKILL.md on-demand (~500-2000).
-
-### Complete Skill Library
-**39 skills** with **12 requires chains**:
-
-| Category | Skills |
-|----------|--------|
-| **Core** | auto, brainstorm, status, sprint, review, pr-review |
-| **Quality** | audit, verify, self-review, quality, code-quality |
-| **Security** | security-patterns |
-| **Design** | design, preserve-ui, react-patterns |
-| **Video** | remotion (compositions, animations, subtitles) |
-| **Testing** | test, browser-test, agent-browser |
-| **Deploy** | ship, deploy, build, clean, ci-cd |
-| **Observability** | monitoring (logging, analytics, error tracking) |
-| **Data** | supabase, supabase-postgres, supabase-schema, env-vars |
-| **Utility** | fix, help, setup, archive-prd, checkpoint |
-
-### External Skill Sources
-| Source | Skills |
-|--------|--------|
-| [Anthropic claude-code](https://github.com/anthropics/claude-code) | design, security-patterns, pr-review |
-| [remotion-dev/skills](https://github.com/remotion-dev/skills) | remotion |
-| [supabase/agent-skills](https://github.com/supabase/agent-skills) | supabase-postgres |
-
-### Skill Synergy System
-Skills **cross-reference each other** for comprehensive quality:
-
-```
-audit ──────► quality + code-quality + design + security-patterns
-              │
-              ├─ UX agent checks design tokens
-              ├─ Security agent checks vulnerabilities
-              └─ Findings rated against quality principles
-
-pr-review ──► security-patterns + code-quality
-              │
-              ├─ CLAUDE.md compliance
-              ├─ Bug hunting with validation
-              └─ Security scanning
-
-review ─────► quality + code-quality + security-patterns
-              │
-              └─ Checks apply skill knowledge + security patterns
-
-ship ───────► review + security-patterns
-              │
-              └─ Can't deploy without quality + security check
-```
-
-### Design Skill (v4.6)
-Creates distinctive UI - avoids "AI slop":
-- Bold aesthetic direction (not generic purple gradients)
-- Unique typography choices (not Inter/Roboto defaults)
-- Intentional color palettes (not template colors)
-
-**Pro tip**: Ask for 5 variants on /1 /2 /3 /4 /5, then iterate on favorites.
-
-### Hook System
-6 hooks for automation and token optimization:
-
-```
-hooks/
-├── auto-continue.ps1/.sh    # Continue if tasks remain
-├── post-tool-typecheck.ps1/.sh  # Typecheck after edits
-└── pre-tool-filter.ps1/.sh  # Block dangerous commands
-```
-
-### Brainstorm Phase 2
-After cleanup proposals, suggests **new features** based on codebase patterns:
-
-```
-Phase 2: Feature Ideas
-══════════════════════
-Based on your codebase, consider:
-1. Dark mode - You have semantic tokens ready
-2. Keyboard shortcuts - Power user feature
-3. Export to PDF - Users are requesting this
-```
-
-### Hybrid Task System (v4.0)
-Two-layer architecture for optimal context usage:
-
-| Layer | Tool | Purpose |
-|-------|------|---------|
-| **Long-term** | prd.json | Sprint history, verification notes |
-| **Short-term** | Native Tasks | Current session work |
-
-**Result:** 93% context cost reduction (75K → 5K tokens)
+| Say | Does |
+|-----|------|
+| `brainstorm` | Scan codebase, propose improvements and features |
+| `auto` | Work through all tasks autonomously |
+| `status` | Show progress |
+| `audit` | 6-agent parallel quality audit |
+| `review` | Code quality check |
+| `security` | Pre-deploy security scan |
+| `ship` | Build and deploy |
+| `test` | Run tests |
+| `fix` | Debug issues |
+| `clean` | Remove temp files |
+| `help` | Show all commands |
 
 ---
 
-## What Gets Installed
+## Workflow
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| **Skills** | `~/.claude/skills/` | Command instructions (auto, brainstorm, ship, etc.) |
-| **Hooks** | `~/.claude/hooks/` | Auto-run scripts on session events |
-| **Config** | `~/.claude/` | Global CLAUDE.md, rules, settings.json |
+```
+brainstorm  →  generates tasks  →  auto  →  completes all  →  ship
+```
+
+That's it. No config files, no scripts to run.
 
 ---
 
-## Verify Installation
+## Files
 
-```bash
-ls ~/.claude/skills/   # Should show: build.md, ship.md, test.md, etc.
+**Global** (`~/.claude/`):
+```
+skills/     # Command instructions (39 skills)
+hooks/      # Auto-run scripts (optional)
+rules/      # Always-applied rules (optional)
+```
+
+**Per Project**:
+```
+prd.json       # Tasks and sprint history
+progress.txt   # Append-only learnings log
 ```
 
 ---
 
-## Your First Session
-
-```bash
-# 1. Navigate to any project
-cd ~/my-project
-
-# 2. Start Claude Code
-claude
-
-# 3. Type: brainstorm
-# 4. Describe what you want to build
-# 5. Type: auto
-# 6. Claude works through all tasks automatically
-```
-
----
-
-## The Core Loop
-
-```
-"brainstorm"  →  What do you want to build?  →  generates tasks
-"auto"        →  Works through all tasks automatically
-"polish"      →  Suggests improvements  →  asks what's next
-```
-
-That's the full development cycle. No scripts, no config files to edit.
-
----
-
-## Complete Command Reference
-
-### Core Loop Commands
-
-| Command | What It Does | When To Use |
-|---------|--------------|-------------|
-| `brainstorm` | Proactively scans codebase, proposes improvements with impact/effort | Finding what to work on next |
-| `audit` | Runs 6 parallel specialized agents, produces severity-rated report | Comprehensive quality check |
-| `auto` | Executes ALL pending tasks automatically until done | You want Claude to work autonomously |
-| `continue` | Completes ONE task, then stops and waits | You want control over each task |
-| `status` | Shows progress (reads prd.json header only - ~1K tokens) | Check progress anytime |
-| `audit` | Launches 6 parallel agents (Security, Performance, A11y, Types, UX, Tests) | Full quality audit |
-| `stop` | Syncs native Tasks back to prd.json, safe to close | Done for the day |
-| `reset` | Clears all "claimed" task states | Task got stuck or crashed |
-
-### Session Management (v2.5)
-
-| Command | What It Does | When To Use |
-|---------|--------------|-------------|
-| `handoff` | Saves full session context to handoff-*.md file | Before closing a long session |
-| `resume` | Loads last handoff + injects mistake warnings | Starting new session after handoff |
-| `ledger` / `stats` | Shows session analytics (tasks, files, blockers) | Review your productivity |
-
-### Quality & Deployment
-
-| Command | What It Does | When To Use |
-|---------|--------------|-------------|
-| `polish` | **Visual verification** + static analysis + direction picker | After all tasks complete |
-| `review` | Build + TODOs + npm audit + security + **UX audit** | Code review before merge |
-| `security` | Supabase advisors + RLS check + secrets scan | **Before every deploy** |
-| `ship` | Builds and deploys to Vercel | Ready to go live |
-| `test` | Runs browser tests with agent-browser | Verify features work |
-| `fix` | Debug and fix a specific issue | Something's broken |
-
-### UI/UX Quality (v2.5.2)
-
-Built-in checks to catch design issues before they ship:
-
-**Static Analysis (ux-audit):**
-- Hardcoded colors → Use semantic tokens
-- Inline styles → Use Tailwind classes
-- Placeholder content → Replace Lorem ipsum
-- Generic AI copy → Use specific language
-- Accessibility gaps → Add alt/aria attributes
-
-**Visual Verification (polish):**
-- Screenshots key routes automatically
-- Checks for clipping, overflow, spacing
-- Detects empty states, missing loading UI
-- Flags generic-looking components
-
-**UI Gate (auto):**
-- Component changes require screenshot verification
-- Catches visual bugs before marking task complete
-
-### Maintenance
-
-| Command | What It Does | When To Use |
-|---------|--------------|-------------|
-| `archive` | Moves completed tasks to prd-archive-*.json | prd.json getting too large |
-| `clean` | Removes screenshots, old backups, temp files | Disk cleanup |
-| `/sync` | Pulls latest claude-auto-dev from GitHub | Get new features |
-
----
-
-## Command Details
-
-### `handoff`
-
-Saves your complete session context so you can continue seamlessly in a new session.
-
-**What it saves:**
-- Tasks completed this session
-- Current task in progress
-- Key decisions made
-- Blockers/issues encountered
-- Files modified
-- Recommended next steps
-
-**Example:**
-```
-You: "handoff"
-Claude: "Handoff saved to handoff-2026-01-22-1430.md
-
-        This session:
-        - Completed: S1, S2, S3
-        - In progress: S4 (Add user settings)
-        - Files: src/App.tsx, src/hooks/useAuth.ts
-
-        Start new session and say 'resume' to continue."
-```
-
-### `resume`
-
-Continues from your last handoff with full context restored.
-
-**Example:**
-```
-You: "resume"
-Claude: "Resuming from Jan 22, 2:30 PM:
-
-        - Completed: S1, S2, S3
-        - Next: S4 - Add user settings page
-        - Avoiding: null-check errors (user?.profile)
-
-        Ready. Starting S4..."
-```
-
-### `polish`
-
-Analyzes codebase for improvements and presents a direction picker.
-
-**What it checks:**
-- TODO/FIXME comments
-- console.log statements
-- Missing error boundaries
-- Accessibility gaps (aria-labels)
-- `any` types in TypeScript
-
-**Direction picker:**
-```
-All tasks complete! Found 3 polish items.
-
-What's next?
-  ○ Polish & continue (Recommended)  →  Adds items to prd.json, runs auto
-  ○ New feature                       →  Runs brainstorm
-  ○ Ship it                           →  Runs security, then ship
-  ○ Done for now                      →  Runs handoff, then stop
-```
-
-### `security`
-
-Pre-deploy security audit. **Run before every push.**
-
-**Checks:**
-1. Supabase advisors (security + performance)
-2. Secrets scan (no hardcoded passwords/keys in code)
-3. Function audit (search_path set, SECURITY DEFINER where needed)
-4. RLS check (all tables have row-level security)
-
-**Output:**
-```
-✓ Supabase advisors: 0 issues
-✓ No hardcoded secrets
-✓ RLS: all tables protected
-✗ ISSUE: Table 'user_sessions' missing RLS policy
-
-BLOCKING: Fix issues before deploy.
-```
-
----
-
-## Decision Guide
-
-| You want to... | Say this |
-|----------------|----------|
-| Start a new feature | `brainstorm` |
-| Let Claude work autonomously | `auto` |
-| Do one task with control | `continue` |
-| Check where you are | `status` |
-| Stop for the day | `stop` |
-| Save session for later | `handoff` |
-| Continue from yesterday | `resume` |
-| See your productivity | `ledger` |
-| Find improvements | `polish` |
-| Review before merge | `review` |
-| Check security before deploy | `security` |
-| Deploy to production | `ship` |
-| Fix something broken | `fix` |
-| Run browser tests | `test` |
-| Clear stuck state | `reset` |
-| Compact large task file | `archive` |
-| Remove temp files | `clean` |
-| Update the system | `/sync` |
-
----
-
-## Common Workflows
-
-### 1. Build a New Feature
-```
-brainstorm → auto → polish → ship
-```
-
-### 2. Continue Yesterday's Work
-```
-resume → auto → handoff
-```
-
-### 3. Quick Single Task
-```
-continue → stop
-```
-
-### 4. Long Session (3+ hours)
-```
-auto → (after 3 tasks, Claude suggests handoff) → handoff → /clear → resume → auto
-```
-
-### 5. Pre-Deploy Checklist
-```
-security → review → ship
-```
-
-### 6. Multi-Agent Mode (Parallel Development)
-```bash
-# Terminal 1
-claude "auto"
-
-# Terminal 2 (wait 10-30 seconds)
-claude "auto"
-```
-Each session claims different tasks. No conflicts.
-
----
-
-## Architecture
-
-### How Skills Work
-
-Skills are markdown files that Claude loads into context when you say a trigger word.
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| **Skills** | `~/.claude/skills/` | Command instructions loaded on trigger |
-| **manifest.json** | `~/.claude/skills/manifest.json` | Maps triggers to skill files |
-
-**How it works:**
-1. You say a trigger word (e.g., "brainstorm")
-2. Claude loads the matching `SKILL.md` into context
-3. Claude follows the instructions in that skill
-4. No approval needed - works immediately after install
-
-> **Note:** Plugin support (via `/command` invocation) requires Anthropic marketplace approval, which is pending. For now, use skills by saying the trigger word directly.
-
-### Files in ~/.claude/ (Global - installed once)
-
-```
-~/.claude/
-├── skills/              # WORKING - Command instructions
-│   ├── manifest.json    # Trigger → skill mapping
-│   ├── auto/SKILL.md    # Autonomous execution
-│   ├── brainstorm/SKILL.md  # Codebase analysis + ideation
-│   ├── status/SKILL.md  # Progress check
-│   ├── audit/SKILL.md   # Parallel quality audit
-│   └── ...              # Other skills
-├── hooks/               # Auto-run scripts
-│   ├── session-start.sh # Injects task progress
-│   ├── pre-tool-filter.sh # Blocks dangerous commands
-│   ├── post-tool-typecheck.sh # Runs typecheck after edits
-│   └── auto-continue.sh # Auto-continues if tasks remain
-├── rules/               # Always-applied rules
-│   ├── security.md
-│   └── design-system.md
-├── CLAUDE.md            # Global user instructions
-├── settings.json        # Hooks configuration
-└── mcp.json            # MCP server config
-```
-
-### Files in Project Root (per project)
-
-```
-your-project/
-├── CLAUDE.md           # Project-specific instructions
-├── prd.json            # Task list
-├── progress.txt        # Append-only learnings log
-├── ledger.json         # Session analytics (gitignored)
-├── handoff-*.md        # Session handoffs (gitignored)
-├── prd-archive-*.json  # Archived completed tasks
-└── .claude/
-    ├── briefs/         # Task briefs
-    ├── mistakes.md     # Learned error patterns (gitignored)
-    └── screenshots/    # Test screenshots (gitignored)
-```
-
----
-
-## How It Works
-
-Tasks live in `prd.json`:
+## Task Format
 
 ```json
 {
-  "id": "S1",
-  "title": "Add user authentication",
-  "description": "Implement login/logout with Supabase Auth",
-  "priority": 1,
-  "passes": false,
-  "files": ["src/auth/login.tsx", "src/hooks/useAuth.ts"],
-  "acceptanceCriteria": ["User can log in", "User can log out"]
+  "projectName": "my-app",
+  "sprint": "S1",
+  "stories": {
+    "S1-001": {
+      "title": "Add user auth",
+      "passes": null
+    }
+  }
 }
 ```
 
-**Task states:**
-- `passes: null` = new task (not started)
-- `passes: false` = in progress
-- `passes: true` = done
-
-**Auto loop:**
-```
-Find task → Read files → Implement → Build → Pass? → Mark done → Next task
-                                      ↓
-                                    Fail? → Log to mistakes.md → Fix → Retry (max 3)
-```
-
----
-
-## Model Routing (Automatic)
-
-Opus is best at coding. Offload non-coding tasks to Haiku (60x cheaper).
-
-| Task | Model | Why |
-|------|-------|-----|
-| `brainstorm`, `auto`, `continue` | **Opus** | Coding quality matters |
-| `review`, `security`, `fix` | **Opus** | Deep analysis |
-| `test` (browser clicks) | **Haiku** | Simple click/verify |
-| `status`, `ledger`, `stats` | **Haiku** | Read + display data |
-| `handoff`, `stop`, `reset` | **Haiku** | Session file ops |
-| `archive`, `clean`, `update` | **Haiku** | File maintenance |
-
-**Philosophy:** Don't sacrifice code quality for cost savings. Haiku handles non-coding tasks.
-
----
-
-## Hooks (Full Install Only)
-
-Hooks reduce token usage by 30-60% by automating common tasks:
-
-| Hook | Trigger | What It Does |
-|------|---------|--------------|
-| `session-start` | Session begins | Injects task progress, skill index, recent mistakes |
-| `pre-tool-filter` | Before tool use | Blocks dangerous commands, skips large files |
-| `post-tool-typecheck` | After file edit | Runs `npm run typecheck` after TS/JS changes |
-| `auto-continue` | After tool use | Auto-continues if tasks remain in prd.json |
-
----
-
-## Browser Testing (Optional)
-
-Uses **agent-browser** CLI for automated browser testing.
-
-**Install:**
-```bash
-npm install -g agent-browser
-agent-browser install
-```
-
-**Usage:**
-```bash
-agent-browser open http://localhost:3000
-agent-browser snapshot -i     # Get interactive elements
-agent-browser click @e1       # Click by ref
-agent-browser fill @e2 "text" # Fill input
-```
+**States:** `null` = pending, `true` = done, `"deferred"` = postponed
 
 ---
 
 ## Update
 
-**Via marketplace (if installed via marketplace):**
-```bash
-# In Claude Code session:
-/plugin update claude-auto-dev
-```
-
-**Via source:**
 ```bash
 # Mac/Linux
-cd ~/claude-auto-dev && git pull && ./install.sh --full
+cd ~/claude-auto-dev && git pull && ./install.sh
 
-# Windows (PowerShell)
-cd $env:USERPROFILE\Downloads\code\claude-auto-dev
-git pull
-.\install.ps1 -Full
+# Windows
+cd $env:USERPROFILE\claude-auto-dev; git pull; .\install.ps1
 ```
-
-**Via Claude:**
-Say `/sync` in any Claude session to pull latest from GitHub.
 
 ---
 
 ## Uninstall
 
 ```bash
-# Remove global installation
-rm -rf ~/.claude/skills/
-rm -rf ~/.claude/hooks/
-rm -rf ~/.claude/plugins/local/claude-auto-dev/
-
-# Remove project files (optional)
-rm prd.json progress.txt ledger.json handoff-*.md prd-archive-*.json
-rm -rf .claude/
+rm -rf ~/.claude/skills/ ~/.claude/hooks/ ~/.claude/rules/
 ```
-
----
-
-## Troubleshooting
-
-### "claude: command not found"
-Claude Code isn't installed. Run:
-```bash
-npm install -g @anthropic-ai/claude-code
-```
-
-### "Skills not loading"
-Check skills are installed:
-```bash
-ls ~/.claude/skills/
-```
-If empty, reinstall from source:
-```bash
-cd ~/claude-auto-dev && ./install.sh --full  # Mac/Linux
-.\install.ps1 -Full                           # Windows
-```
-
-### "brainstorm doesn't work"
-Make sure you're in a Claude Code session (run `claude` first), then type `brainstorm`.
-
-### "Task stuck"
-Say `reset` to clear claimed state, then `auto` to continue.
-
-### "Context too large"
-Say `handoff` to save session, then start fresh with `resume`.
-
----
-
-## Changelog
-
-### [4.4.0] - 2026-02-05
-- **Frontend Design Skill**: Anthropic's official skill for high-quality UI - avoids AI slop aesthetics
-- **33 Skills Total**: Added frontend-design with triggers for design, frontend, ui, landing page
-
-### [4.3.0] - 2026-02-04
-- **32 Skills Consolidated**: All skills from installed versions now in repo
-- **Hook System Complete**: 6 hooks (auto-continue, post-tool-typecheck, pre-tool-filter) for all platforms
-- **Brainstorm Phase 2**: Feature ideation after cleanup proposals
-- **Single Source of Truth**: Repository now contains all skills, hooks, and configurations
-
-### [4.0.0] - 2026-02-03
-- **Hybrid Task Management v2.0**: Two-layer system with prd.json for long-term memory and native Tasks for short-term work
-- **Resolution Learning System**: Documents HOW issues were fixed, not just THAT they were fixed
-- **Autonomous Mode Improvements**: Explicit "DO NOT STOP" instructions - Claude keeps working until all tasks complete
-- **Brainstorm Command**: Proactively analyze codebase and propose improvement scenarios
-- **Audit Swarm**: 6 parallel specialized agents (Security, Performance, A11y, Type Safety, UX, Tests)
-- **Context Optimization**: 93% reduction in token usage for sprint work (75K → 5K)
-
-### [3.2.0] - 2026-01-24
-- **A/B Testing Framework**: `/ab-test` command for comparing approaches at milestone starts
-- **Renamed `/update` to `/sync`**: Avoids conflict with Claude Code CLI
-
-### [3.1.0] - 2026-01-24
-- **blockedBy Dependencies**: Tasks can now depend on other tasks
-- **TaskCreate/TaskUpdate Integration**: Full visibility in Claude Code Tasks UI
-
-### [3.0.0] - 2026-01-24
-- **Plugin Restructure**: Moved from `plugin/` to repo root for marketplace compatibility
-- **Parallel Sub-Agents**: Up to 7 concurrent agents with `auto`
-
-### [2.5.2] - 2026-01-23
-- **UI/UX Quality Checks**: `ux-audit` static analysis, visual verification in `polish`
-- **UI Gate**: Screenshot verification for component changes in `auto`
-- **Expanded Haiku Routing**: All non-coding tasks (handoff, status, etc.) use Haiku
-
-### [2.5.0] - 2026-01-22
-- **Session Management**: `handoff` saves session state, `resume` continues later
-- **Ledger System**: `ledger.json` tracks cross-session analytics
-- **Mistake Learning**: Auto-logs build failures to `.claude/mistakes.md`
-- **Session Analytics**: `ledger` / `stats` shows completion rates, hot files
-
-### [2.4.4] - 2026-01-22
-- Added `polish` command with direction picker
-
-### [2.4.0] - 2026-01-22
-- Archive system for large prd.json files
-
-### [2.3.0] - 2026-01-22
-- Hooks system (30-60% token savings)
-
-[Full changelog](CHANGELOG.md)
-
----
-
-## Related Projects
-
-- [Claude Code](https://github.com/anthropics/claude-code) - Official CLI by Anthropic
-- [agent-browser](https://www.npmjs.com/package/agent-browser) - Browser automation CLI
-- [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code) - Community plugins & skills
 
 ---
 
 ## License
 
-MIT - Use it however you want.
+MIT

@@ -1,12 +1,8 @@
 {
   "name": "claude-auto-dev",
   "version": "4.8.0",
-  "description": "Quality-first autonomous dev system for Claude Code - native tasks, prompt hooks, zero slop",
-  "bin": {
-    "claude-auto-dev": "bin/install.js"
-  },
+  "description": "Autonomous development workflow for Claude Code - skills, hooks, and task management",
   "files": [
-    "bin",
     "skills",
     "hooks",
     "config",
