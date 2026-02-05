@@ -1,5 +1,5 @@
 {
-  "version": "4.9.1",
+  "version": "4.9.2",
   "description": "Optimized skill system - complete synergy chains, plan mode integration",
   "skills": {
     "core": {
@@ -267,6 +267,13 @@
       "file": "monitoring/SKILL.md",
       "priority": 2,
       "description": "Observability patterns - logging, error tracking, analytics."
+    },
+    "update": {
+      "triggers": ["update dev", "update auto-dev", "update skills", "sync skills"],
+      "context": [],
+      "file": "update/SKILL.md",
+      "priority": 1,
+      "description": "Updates claude-auto-dev to latest. Syncs repo with ~/.claude, removes stale files."
     }
   },
   "defaults": {

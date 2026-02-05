@@ -1,5 +1,23 @@
 # Changelog
 
+## [4.9.2] - 2026-02-05
+
+### Added
+- **Update Skill** - Say "update dev" to sync latest changes
+  - Pulls from GitHub
+  - Mirrors skills/ and hooks/ to ~/.claude
+  - Removes stale files (robocopy /MIR on Windows, rsync --delete on Mac/Linux)
+  - Reports version and changes
+  - Triggers: "update dev", "update auto-dev", "update skills", "sync skills"
+
+### Changed
+- Session-start hook now has 5s timeout (no hang offline)
+- Copy mode auto-detects and re-syncs on updates
+
+**Total skills:** 37 | **Version:** 4.9.2
+
+---
+
 ## [4.9.0] - 2026-02-05
 
 ### Added

@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.9.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-4.9.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
 
@@ -36,14 +36,21 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 
 ## Updates
 
-**Automatic.** Every time you start Claude Code:
-1. Session hook pulls latest from GitHub (5s timeout)
-2. Skills sync instantly (symlink mode) or get re-copied (copy mode)
-3. You see `[Auto-Dev v4.9]` or `[Auto-Dev] Updated to v4.10`
+**Option 1: Say "update dev"** (recommended)
+```
+You: update dev
+Claude: [pulls latest, syncs skills/hooks, removes stale files]
+        Updated to v4.9.2
+```
 
-**Manual** (if needed):
+**Option 2: Automatic on session start**
+- Session hook pulls latest from GitHub (5s timeout)
+- Re-copies if changes detected
+
+**Option 3: Manual**
 ```bash
 cd ~/claude-auto-dev && git pull
+# Then say "update dev" to sync
 ```
 
 ---
@@ -63,6 +70,7 @@ cd ~/claude-auto-dev && git pull
 | `fix` | Debug issues |
 | `clean` | Remove temp files |
 | `setup` | Initialize new project |
+| `update dev` | Sync latest from GitHub to ~/.claude |
 
 **Note:** `/help`, `/status`, `/init`, `/compact` are Claude Code built-ins.
 
@@ -80,7 +88,7 @@ brainstorm  →  generates tasks  →  auto  →  completes all  →  ship
 
 **Global** (`~/.claude/`):
 ```
-skills/        # Symlink to repo (36 skills)
+skills/        # Synced from repo (37 skills)
 hooks/         # Symlink to repo
 rules/         # Your custom rules (optional)
 repo-path.txt  # Points to your clone location
