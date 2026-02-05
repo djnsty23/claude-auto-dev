@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.6.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-4.6.3-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
 
@@ -150,7 +150,7 @@ Verification Chain:
 **Token Efficiency**: ~100 tokens for metadata (always), SKILL.md on-demand (~500-2000).
 
 ### Complete Skill Library
-**37 skills** with **11 requires chains**:
+**39 skills** with **12 requires chains**:
 
 | Category | Skills |
 |----------|--------|
@@ -160,7 +160,8 @@ Verification Chain:
 | **Design** | design, preserve-ui, react-patterns |
 | **Video** | remotion (compositions, animations, subtitles) |
 | **Testing** | test, browser-test, agent-browser |
-| **Deploy** | ship, deploy, build, clean |
+| **Deploy** | ship, deploy, build, clean, ci-cd |
+| **Observability** | monitoring (logging, analytics, error tracking) |
 | **Data** | supabase, supabase-postgres, supabase-schema, env-vars |
 | **Utility** | fix, help, setup, archive-prd, checkpoint |
 

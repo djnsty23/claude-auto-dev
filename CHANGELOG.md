@@ -1,5 +1,37 @@
 # Changelog
 
+## [4.6.3] - 2026-02-05
+
+### Added
+- **CI/CD Skill** - GitHub Actions workflows and CI/CD patterns
+  - Standard CI workflow template
+  - Vercel deploy workflow
+  - Supabase Edge Functions deploy
+  - Matrix builds for multi-version testing
+  - Triggers: `ci`, `github actions`, `workflow`, `pipeline`
+- **Monitoring Skill** - Observability patterns for production
+  - Structured JSON logging
+  - Error boundaries with logging
+  - Vercel Analytics integration
+  - API route monitoring
+  - Health check endpoint
+  - Triggers: `monitoring`, `logging`, `observability`, `analytics`
+- **New requires chain**: `deploy` → `ci-cd`
+
+### Changed
+- **Directory structure normalized** - All skills now use `skill-name/SKILL.md` format
+  - Migrated 12 flat files to directory structure
+  - Updated manifest.json with new paths
+- **supabase-schema split** - Was 361 lines, now modular:
+  - `SKILL.md` - Main reference (~80 lines)
+  - `rules/rls-patterns.md` - RLS policy examples
+  - `rules/security-patterns.md` - Security hardening
+  - `rules/multi-account.md` - Multi-account CLI setup
+- **Total skills**: 39 (was 37)
+- **Total requires chains**: 12 (was 11)
+
+---
+
 ## [4.6.2] - 2026-02-05
 
 ### Added

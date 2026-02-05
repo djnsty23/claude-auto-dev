@@ -1,6 +1,6 @@
 {
-  "version": "4.6.2",
-  "description": "Comprehensive skill system with security patterns, PR review, and Remotion",
+  "version": "4.6.3",
+  "description": "Comprehensive skill system with CI/CD, monitoring, security, and Remotion",
   "skills": {
     "core": {
       "triggers": [],
@@ -12,7 +12,7 @@
     "code-quality": {
       "triggers": [],
       "context": [],
-      "file": "code-quality.md",
+      "file": "code-quality/SKILL.md",
       "priority": 0,
       "description": "Learned patterns from production - loaded with auto/review/build"
     },
@@ -80,7 +80,7 @@
     "ship": {
       "triggers": ["ship"],
       "context": ["vercel.json"],
-      "file": "ship.md",
+      "file": "ship/SKILL.md",
       "requires": ["review", "security-patterns"],
       "priority": 3,
       "description": "Pre-deploy checklist with review and security check."
@@ -88,14 +88,14 @@
     "fix": {
       "triggers": ["fix", "debug", "bug"],
       "context": [],
-      "file": "fix.md",
+      "file": "fix/SKILL.md",
       "priority": 2,
       "description": "Debugging and bug fixing patterns."
     },
     "setup-project": {
       "triggers": ["init", "new project", "scaffold"],
       "context": [],
-      "file": "setup-project.md",
+      "file": "setup-project/SKILL.md",
       "priority": 3,
       "description": "Scaffolds new project from scratch."
     },
@@ -103,16 +103,23 @@
       "triggers": ["schema", "database", "migration", "supabase"],
       "context": ["supabase/"],
       "file": "supabase/SKILL.md",
-      "requires": ["supabase-postgres"],
+      "requires": ["supabase-postgres", "supabase-schema"],
       "priority": 3,
       "description": "Supabase CLI patterns for database operations."
     },
     "supabase-postgres": {
-      "triggers": ["postgres", "sql optimization", "query performance", "rls"],
+      "triggers": ["postgres", "sql optimization", "query performance"],
       "context": ["supabase/"],
       "file": "supabase-postgres/SKILL.md",
       "priority": 2,
       "description": "Postgres performance optimization from Supabase. Indexes, RLS, pooling, N+1."
+    },
+    "supabase-schema": {
+      "triggers": ["rls"],
+      "context": ["supabase/"],
+      "file": "supabase-schema/SKILL.md",
+      "priority": 3,
+      "description": "SQL patterns, RLS policies, and security templates for Supabase."
     },
     "audit": {
       "triggers": ["audit"],
@@ -141,6 +148,7 @@
       "triggers": ["deploy"],
       "context": ["vercel.json"],
       "file": "deploy/SKILL.md",
+      "requires": ["ci-cd"],
       "priority": 3,
       "description": "Deploy workflow for Vercel and Supabase Edge Functions."
     },
@@ -197,58 +205,52 @@
     "agent-browser": {
       "triggers": [],
       "context": [],
-      "file": "agent-browser.md",
+      "file": "agent-browser/SKILL.md",
       "priority": 3,
       "description": "Browser automation CLI reference. Loaded with browser-test."
     },
     "archive-prd": {
       "triggers": ["archive"],
       "context": ["prd.json"],
-      "file": "archive-prd.md",
+      "file": "archive-prd/SKILL.md",
       "priority": 3,
       "description": "Archives completed stories from prd.json."
     },
     "auth-token-injection": {
       "triggers": [],
       "context": [],
-      "file": "auth-token-injection.md",
+      "file": "auth-token-injection/SKILL.md",
       "priority": 3,
       "description": "Auth token injection patterns for testing."
     },
     "build": {
       "triggers": ["build"],
       "context": [],
-      "file": "build.md",
+      "file": "build/SKILL.md",
+      "requires": ["code-quality"],
       "priority": 2,
       "description": "Build commands and error handling."
     },
     "build-reference": {
       "triggers": [],
       "context": [],
-      "file": "build-reference.md",
+      "file": "build-reference/SKILL.md",
       "priority": 3,
       "description": "Build reference documentation."
     },
     "env-vars": {
       "triggers": [],
       "context": [".env*"],
-      "file": "env-vars.md",
+      "file": "env-vars/SKILL.md",
       "priority": 3,
       "description": "Environment variables patterns."
     },
     "help": {
       "triggers": ["help", "commands"],
       "context": [],
-      "file": "help.md",
+      "file": "help/SKILL.md",
       "priority": 2,
       "description": "Lists available commands."
-    },
-    "supabase-schema": {
-      "triggers": [],
-      "context": ["supabase/"],
-      "file": "supabase-schema.md",
-      "priority": 3,
-      "description": "Supabase schema reference. Loaded with supabase skill."
     },
     "design": {
       "triggers": ["design", "ui", "landing page", "marketing page"],
@@ -261,7 +263,7 @@
     "security-patterns": {
       "triggers": [],
       "context": [],
-      "file": "security-patterns.md",
+      "file": "security-patterns/SKILL.md",
       "priority": 0,
       "description": "Security vulnerability patterns. Auto-loaded with review, audit, ship, pr-review."
     },
@@ -271,6 +273,20 @@
       "file": "remotion/SKILL.md",
       "priority": 2,
       "description": "Remotion best practices - video creation in React. Compositions, animations, subtitles."
+    },
+    "ci-cd": {
+      "triggers": ["ci", "github actions", "workflow", "pipeline"],
+      "context": [".github/"],
+      "file": "ci-cd/SKILL.md",
+      "priority": 2,
+      "description": "GitHub Actions workflows and CI/CD patterns."
+    },
+    "monitoring": {
+      "triggers": ["monitoring", "logging", "observability", "analytics"],
+      "context": [],
+      "file": "monitoring/SKILL.md",
+      "priority": 2,
+      "description": "Observability patterns - logging, error tracking, analytics."
     }
   },
   "defaults": {
