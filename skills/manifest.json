@@ -173,7 +173,7 @@
       "description": "Browser automation CLI for AI agents. 5-6x more token-efficient than Playwright MCP. Use for browser testing and web automation."
     },
     "archive-prd": {
-      "triggers": ["archive"],
+      "triggers": ["archive", "compact prd", "prd too large"],
       "context": [],
       "file": "archive-prd/SKILL.md",
       "priority": 3,
