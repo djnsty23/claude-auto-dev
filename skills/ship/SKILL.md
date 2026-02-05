@@ -119,7 +119,7 @@ agent-browser snapshot -i
 | **Auth flow** | Login → protected page → logout | All transitions work |
 | **Critical path** | Complete main user action | End-to-end success |
 | **API calls** | Check network tab | No 500s, no CORS errors |
-| **Mobile layout** | Resize to 375px width | No overflow, readable |
+| **Mobile layout** | Resize to 375px width | Sidebar hidden, grids stacked, no overflow |
 
 ### What to Test by App Type
 

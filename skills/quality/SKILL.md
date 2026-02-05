@@ -26,6 +26,27 @@ if (!data?.length) return <EmptyState />;
 return <Content data={data} />;
 ```
 
+## Responsive Layout (REQUIRED)
+
+Every page must work at 3 breakpoints: mobile (375px), tablet (768px), desktop (1280px+).
+
+- **Sidebars**: Hidden or collapsible on mobile (`md:block hidden`)
+- **Grids**: Stack to single column on mobile (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`)
+- **Navigation**: Hamburger menu or bottom nav on mobile
+- **Touch targets**: Minimum 44x44px on mobile
+- **Text**: No horizontal overflow, no clipped content
+- **Modals/Drawers**: Full-screen on mobile, centered on desktop
+
+```tsx
+// Sidebar pattern
+<aside className="hidden md:block md:w-64">...</aside>
+<main className="flex-1">...</main>
+
+// Mobile menu toggle
+const [open, setOpen] = useState(false);
+<Button className="md:hidden" onClick={() => setOpen(!open)} />
+```
+
 ## Type Safety
 
 - No `any`

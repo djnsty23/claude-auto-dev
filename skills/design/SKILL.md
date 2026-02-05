@@ -46,6 +46,35 @@ Create working code (React/Vue/HTML) that is:
 - Visually striking and memorable
 - Cohesive with clear aesthetic point-of-view
 - Meticulously refined in every detail
+- **Responsive across mobile (375px), tablet (768px), and desktop**
+
+## Responsive Design (MANDATORY)
+
+Every layout must adapt to mobile-first breakpoints:
+
+| Pattern | Mobile | Tablet+ | Desktop+ |
+|---------|--------|---------|----------|
+| Sidebar | Hidden + hamburger | Collapsed icons | Full sidebar |
+| Grid | 1 column | 2 columns | 3-4 columns |
+| Navigation | Bottom tabs or drawer | Side nav | Full nav |
+| Cards | Full-width stack | 2-up grid | 3-4 up grid |
+| Modals | Full-screen sheet | Centered dialog | Centered dialog |
+| Tables | Card view or scroll | Horizontal scroll | Full table |
+
+```tsx
+// Mobile-first: hidden sidebar with toggle
+<Sheet>
+  <SheetTrigger className="md:hidden"><Menu /></SheetTrigger>
+  <SheetContent side="left">
+    <Nav />
+  </SheetContent>
+</Sheet>
+<aside className="hidden md:flex md:w-64 md:flex-col">
+  <Nav />
+</aside>
+```
+
+Test at 375px width before considering any UI complete.
 
 ## Aesthetics Guidelines
 

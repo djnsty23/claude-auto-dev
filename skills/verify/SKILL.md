@@ -41,9 +41,11 @@ Acceptance criteria are the **minimum**. If you see opportunities to:
 ## For UI Tasks
 
 Verify visually:
-- Does it look right?
+- Does it look right at desktop AND mobile (375px)?
 - Do all states work? (loading, error, empty, content)
-- Is it responsive?
+- Is sidebar hidden on mobile with a toggle/hamburger?
+- Do grids stack to single column on mobile?
+- No horizontal overflow or clipped content?
 
 Use `agent-browser` for verification when helpful:
 ```bash
