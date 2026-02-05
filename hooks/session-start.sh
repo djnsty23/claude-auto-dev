@@ -36,11 +36,14 @@ fi
 
 # Auto-source .env.local (project-isolated credentials) - safe parser
 if [[ -f ".env.local" ]]; then
-    while IFS='=' read -r key value; do
+    while IFS= read -r line; do
         # Skip comments and empty lines
-        [[ -z "$key" || "$key" =~ ^# ]] && continue
-        # Strip surrounding quotes from value
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        # Split on first = only (preserves = in values like base64, JWT, URLs)
+        key="${line%%=*}"
+        value="${line#*=}"
         key=$(echo "$key" | tr -d ' ')
+        # Strip surrounding quotes from value
         value=$(echo "$value" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
         # Only export valid variable names
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"

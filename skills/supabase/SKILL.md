@@ -70,7 +70,8 @@ CLI only supports one token at a time. For multiple orgs, use per-command token:
 SUPABASE_ACCESS_TOKEN=$SUPABASE_TOKEN_REELR supabase db push --project-ref XXX
 
 # Option 2: Source project's .env.local first
-source .env.local && supabase db push --project-ref $SUPABASE_PROJECT_ID
+# .env.local is auto-loaded by session-start hook - no need to source
+supabase db push --project-ref $SUPABASE_PROJECT_ID
 
 # Option 3: Use --db-url with connection string (bypasses auth)
 supabase db execute --db-url "postgresql://postgres:PASSWORD@db.XXX.supabase.co:5432/postgres" --sql "..."
