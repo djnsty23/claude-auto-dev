@@ -101,6 +101,25 @@ gh pr create --title "Add playlist UI" --body "## Summary
 - [ ] Branch is correct (not pushing to main accidentally)
 - [ ] Commit messages are clean
 
+## Version Sync Check (claude-auto-dev repo only)
+
+When committing to this repo, check for stale version strings before staging:
+
+```bash
+# Read current version
+VERSION=$(cat VERSION 2>/dev/null)
+
+# Grep for previous version references (skip CHANGELOG.md - it's historical)
+grep -rn "4\.9\.4\|v4\.9" --include="*.md" --include="*.json" --include="*.ps1" --include="*.sh" . \
+  | grep -v CHANGELOG.md | grep -v node_modules | grep -v .git
+```
+
+If stale versions found: **fix them before committing.**
+
+Files to check: VERSION, package.json, manifest.json, README.md badge, commands.md, install.sh fallback, install.ps1 fallback.
+
+The current version is: !`cat VERSION 2>/dev/null`
+
 ## Batch Commit (During Auto Mode)
 
 During `auto`, commit every 3 tasks:
