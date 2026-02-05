@@ -53,17 +53,7 @@ This opens a browser window to log in with your Anthropic account. You need:
 
 ### Step 3: Install Claude Auto-Dev
 
-**Option A: Marketplace Install (Recommended)**
-
-```bash
-# In any Claude Code session, run:
-/plugin add-marketplace djnsty23/claude-auto-dev
-/plugin install claude-auto-dev
-```
-
-This adds the GitHub repo as a plugin marketplace and installs the plugin.
-
-**Option B: Clone and run install script:**
+**Option A: Clone and run install script (Recommended)**
 
 ```bash
 # Mac/Linux
@@ -76,7 +66,7 @@ cd $env:USERPROFILE\Downloads\code\claude-auto-dev
 .\install.ps1 -Full
 ```
 
-**Option C: Manual copy (minimal):**
+**Option B: Manual copy (minimal):**
 ```bash
 # Mac/Linux
 mkdir -p ~/.claude/skills && cp -r skills/* ~/.claude/skills/
@@ -504,30 +494,22 @@ Each session claims different tasks. No conflicts.
 
 ## Architecture
 
-### How Skills vs Plugins Work
+### How Skills Work
 
-**Important distinction:**
+Skills are markdown files that Claude loads into context when you say a trigger word.
 
-| System | Location | Status | Invocation |
-|--------|----------|--------|------------|
-| **Skills** | `~/.claude/skills/` | **Working now** | Say trigger word (e.g., "brainstorm") |
-| **Plugins** | `~/.claude/plugins/local/` | **Requires marketplace approval** | `/command` format |
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **Skills** | `~/.claude/skills/` | Command instructions loaded on trigger |
+| **manifest.json** | `~/.claude/skills/manifest.json` | Maps triggers to skill files |
 
-**Skills system (active):**
-1. `manifest.json` defines triggers: `"brainstorm"` → `brainstorm/SKILL.md`
-2. When you say a trigger word, Claude loads the skill into context
-3. Skill markdown contains instructions Claude follows
+**How it works:**
+1. You say a trigger word (e.g., "brainstorm")
+2. Claude loads the matching `SKILL.md` into context
+3. Claude follows the instructions in that skill
 4. No approval needed - works immediately after install
 
-**Plugin system (future):**
-1. Plugins use `.claude-plugin/plugin.json` manifest
-2. `/command` invocation requires Anthropic marketplace approval
-3. Currently dead code - kept for future marketplace submission
-4. Same commands available as skills (just different invocation)
-
-**Why both exist:**
-- Skills work now for personal use
-- Plugins will work when marketplace opens for distribution
+> **Note:** Plugin support (via `/command` invocation) requires Anthropic marketplace approval, which is pending. For now, use skills by saying the trigger word directly.
 
 ### Files in ~/.claude/ (Global - installed once)
 
@@ -548,7 +530,6 @@ Each session claims different tasks. No conflicts.
 ├── rules/               # Always-applied rules
 │   ├── security.md
 │   └── design-system.md
-├── plugins/local/claude-auto-dev/  # FUTURE - /commands (needs marketplace)
 ├── CLAUDE.md            # Global user instructions
 ├── settings.json        # Hooks configuration
 └── mcp.json            # MCP server config
@@ -743,7 +724,6 @@ Say `handoff` to save session, then start fresh with `resume`.
 
 ### [3.2.0] - 2026-01-24
 - **A/B Testing Framework**: `/ab-test` command for comparing approaches at milestone starts
-- **Marketplace Support**: Install via `/plugin add-marketplace djnsty23/claude-auto-dev`
 - **Renamed `/update` to `/sync`**: Avoids conflict with Claude Code CLI
 
 ### [3.1.0] - 2026-01-24

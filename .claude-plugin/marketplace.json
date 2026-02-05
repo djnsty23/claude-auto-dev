@@ -3,17 +3,17 @@
   "name": "claude-auto-dev",
   "description": "Autonomous task management plugins by djnsty23",
   "owner": {
-    "name": "Andy (djnsty23)",
-    "email": "removed@example.com"
+    "name": "djnsty23",
+    "url": "https://github.com/djnsty23"
   },
   "plugins": [
     {
       "name": "claude-auto-dev",
       "description": "Autonomous task management - sprint, auto, brainstorm, template, mistakes, context-audit, handoff. Say 'sprint 3h' for timed dev cycles, 'auto' for parallel task execution.",
-      "version": "3.5.0",
+      "version": "4.6.3",
       "author": {
-        "name": "Andy (djnsty23)",
-        "email": "removed@example.com"
+        "name": "djnsty23",
+        "url": "https://github.com/djnsty23"
       },
       "source": ".",
       "category": "productivity",
