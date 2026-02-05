@@ -76,6 +76,77 @@ TaskUpdate({
 - Keep task in_progress
 - Fix and re-verify
 
+## Verification Checklist
+
+Run each check in order. Stop and fix on any FAIL.
+
+### 1. Build Check
+```bash
+npm run build 2>&1 | tail -20
+```
+Must complete with zero errors. Warnings are acceptable but note them.
+
+### 2. Type Safety
+```bash
+npm run typecheck 2>/dev/null || npx tsc --noEmit 2>/dev/null
+```
+Zero type errors required.
+
+### 3. Test Suite
+```bash
+npm test -- --passWithNoTests --watchAll=false 2>/dev/null
+```
+All tests must pass. Report: X passed, Y failed, Z skipped.
+
+### 4. Code Hygiene Scan
+```bash
+# Find leftover debug statements
+grep -rn "console\.log\|console\.warn\|debugger\|TODO\|FIXME\|HACK" src/ --include="*.ts" --include="*.tsx" | grep -v node_modules | grep -v "\.test\." | head -20
+```
+Report count and locations. console.error is acceptable.
+
+### 5. UI Quality Scan
+```bash
+# Hardcoded colors (should use tokens)
+grep -rn "text-white\|text-black\|bg-white\|bg-black\|text-gray-\|bg-gray-\|text-red-\|bg-red-\|text-blue-\|bg-blue-" src/ --include="*.tsx" | grep -v node_modules | head -20
+
+# Missing loading states (async without loading)
+grep -rn "useQuery\|useMutation\|useState.*loading\|isLoading" src/ --include="*.tsx" --include="*.ts" | head -10
+
+# Images without dimensions
+grep -rn "<img\|<Image" src/ --include="*.tsx" | grep -v "width\|height\|fill" | head -10
+```
+
+### 6. Diff Review
+```bash
+# Review uncommitted changes
+git diff --stat
+git diff --name-only
+```
+Check that only expected files were modified. Flag unexpected changes.
+
+### 7. Verdict
+
+Output this table after running all checks:
+
+```
+## Verification Result
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| Build | PASS/FAIL | |
+| Types | PASS/FAIL | X errors |
+| Tests | PASS/FAIL | X passed, Y failed |
+| Hygiene | PASS/WARN | X debug statements |
+| UI Quality | PASS/WARN | X hardcoded colors |
+| Diff | PASS/WARN | X files modified |
+
+**Overall: PASS / FAIL**
+
+[If FAIL: list specific items to fix before shipping]
+[If PASS: "Ready for commit. Say 'commit' to proceed."]
+```
+
 ## Report Format
 
 ```

@@ -9,15 +9,22 @@ if (Test-Path $repoPathFile) {
     if (Test-Path "$repoPath\.git") {
         # Quick fetch with 5s timeout
         Push-Location $repoPath
-        $job = Start-Job { git pull 2>&1 }
-        $completed = Wait-Job $job -Timeout 5
-        if ($completed) {
-            $result = Receive-Job $job
+        # Verify remote origin matches expected repo
+        $remoteUrl = git remote get-url origin 2>$null
+        if ($remoteUrl -and $remoteUrl -notmatch "claude-auto-dev") {
+            Write-Host "[Auto-Dev] WARNING: Unexpected remote origin, skipping pull"
+            $result = "skipped"
         } else {
-            Stop-Job $job
-            $result = "timeout"
+            $job = Start-Job { git pull 2>&1 }
+            $completed = Wait-Job $job -Timeout 5
+            if ($completed) {
+                $result = Receive-Job $job
+            } else {
+                Stop-Job $job
+                $result = "timeout"
+            }
+            Remove-Job $job -Force
         }
-        Remove-Job $job -Force
         Pop-Location
 
         $version = Get-Content "$repoPath\VERSION" -ErrorAction SilentlyContinue
@@ -26,7 +33,7 @@ if (Test-Path $repoPathFile) {
         $skillsPath = "$claudeDir\skills"
         $isSymlink = (Get-Item $skillsPath -ErrorAction SilentlyContinue).Attributes -match "ReparsePoint"
 
-        if ($result -notmatch "Already up to date" -and $result -ne "timeout") {
+        if ($result -notmatch "Already up to date" -and $result -ne "timeout" -and $result -ne "skipped") {
             Write-Host "[Auto-Dev] Updated to v$version"
             # If copy mode, re-copy skills and hooks
             if (-not $isSymlink) {

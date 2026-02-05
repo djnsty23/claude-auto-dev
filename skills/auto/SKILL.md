@@ -98,8 +98,9 @@ const executable = storyEntries.filter(([id, s]) =>
 3. `npm run typecheck` - Fix if fails
 4. `npm run build` - Fix if fails
 5. Verify (see below)
-6. Update prd.json: `passes: true`
-7. **IMMEDIATELY** start next task
+6. **Run Self-Verification** (see below) — all checks must pass first
+7. Update prd.json: `passes: true`
+8. **IMMEDIATELY** start next task
 
 ### Verification
 
@@ -115,6 +116,39 @@ For UX tasks - browser check required:
 agent-browser open http://localhost:3000/path
 agent-browser snapshot -i  # Verify expected element
 ```
+
+### Self-Verification (REQUIRED after each task)
+
+Before marking ANY task as complete, run these checks:
+
+**1. Type Safety**
+```bash
+npm run typecheck 2>/dev/null || npx tsc --noEmit 2>/dev/null
+```
+If errors: fix them before proceeding. Never skip.
+
+**2. Tests**
+```bash
+npm test -- --passWithNoTests --watchAll=false 2>/dev/null
+```
+If tests fail: fix them. If no test runner: skip.
+
+**3. Self-Review**
+Run `git diff` and check your own changes for:
+- [ ] No `console.log` or `debugger` left in
+- [ ] No hardcoded colors (use design tokens)
+- [ ] All UI states handled (loading, empty, error)
+- [ ] No `any` types introduced
+- [ ] No commented-out code
+
+**4. UI Change? Visual Check**
+If the task modified UI components:
+- Describe what the user should see
+- Note any interactive states (hover, focus, click)
+- Flag if responsive behavior needs manual check
+
+**5. Mark Complete**
+Only after ALL checks pass, mark the task as done. If ANY check fails, fix it first.
 
 ## Parallel Execution (Optional)
 

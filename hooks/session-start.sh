@@ -8,8 +8,15 @@ if [[ -f "$REPO_PATH_FILE" ]]; then
     REPO_PATH=$(cat "$REPO_PATH_FILE" | tr -d '\r\n')
     if [[ -d "$REPO_PATH/.git" ]]; then
         pushd "$REPO_PATH" > /dev/null
-        # 5 second timeout
-        RESULT=$(timeout 5 git pull 2>&1 || echo "timeout")
+        # Verify remote origin matches expected repo
+        REMOTE_URL=$(git remote get-url origin 2>/dev/null)
+        if [[ -n "$REMOTE_URL" && "$REMOTE_URL" != *"claude-auto-dev"* ]]; then
+            echo "[Auto-Dev] WARNING: Unexpected remote origin, skipping pull" >&2
+            RESULT="skipped"
+        else
+            # 5 second timeout
+            RESULT=$(timeout 5 git pull 2>&1 || echo "timeout")
+        fi
         popd > /dev/null
 
         VERSION=$(head -1 "$REPO_PATH/VERSION" 2>/dev/null)
@@ -18,7 +25,7 @@ if [[ -f "$REPO_PATH_FILE" ]]; then
         IS_SYMLINK=false
         [[ -L "$CLAUDE_DIR/skills" ]] && IS_SYMLINK=true
 
-        if [[ "$RESULT" != *"Already up to date"* && "$RESULT" != "timeout" ]]; then
+        if [[ "$RESULT" != *"Already up to date"* && "$RESULT" != "timeout" && "$RESULT" != "skipped" ]]; then
             echo "[Auto-Dev] Updated to v$VERSION"
             # If copy mode, re-copy skills and hooks
             if [[ "$IS_SYMLINK" == false ]]; then
