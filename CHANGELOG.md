@@ -1,5 +1,137 @@
 # Changelog
 
+## [4.6.1] - 2026-02-05
+
+### Added
+- **Remotion Skill** - Best practices for video creation in React
+  - Compositions, animations, sequencing, timing
+  - Subtitles and captions
+  - Media embedding (videos, images, audio)
+  - 5 detailed rule files included
+  - Source: [remotion-dev/skills](https://github.com/remotion-dev/skills)
+- **Total skills**: 36 (was 35)
+
+### Changed
+- Updated muzic.ai, reelr, cloud-connect-build to v4.6
+- Removed stale skills folder from cloud-connect-build
+
+---
+
+## [4.6.0] - 2026-02-05
+
+### Added
+- **Security Patterns Skill** - Vulnerability detection patterns from Anthropic's security-guidance
+  - Command injection (GitHub Actions, child_process, os.system)
+  - Code injection (eval, new Function, pickle)
+  - XSS patterns (dangerouslySetInnerHTML, document.write, innerHTML)
+  - Auto-loaded with review, audit, ship, pr-review
+- **PR Review Skill** - Comprehensive PR review using specialized agents
+  - Triggers: `pr-review`, `review-pr`, `code-review`
+  - CLAUDE.md compliance checking
+  - Bug hunting with validation
+  - Security scanning
+  - Requires: security-patterns, code-quality
+
+### Changed
+- **Renamed** `frontend-design` → `design` (simpler, clearer)
+  - Triggers: `design`, `ui`, `landing page`, `marketing page`
+  - Creates distinctive UI, avoids generic AI aesthetics
+- **Total skills**: 35 (was 33)
+- **Total requires chains**: 10 (optimized from 6 in v4.4)
+- Updated all skills referencing `frontend-design` to use `design`
+
+### Requires Chain Updates
+```
+review     → quality + code-quality + security-patterns (NEW)
+pr-review  → security-patterns + code-quality (NEW skill)
+audit      → quality + code-quality + design + security-patterns (design renamed)
+ship       → review + security-patterns (security added)
+brainstorm → quality + design (design renamed)
+```
+
+---
+
+## [4.5.0] - 2026-02-05
+
+### Added
+- **Skill Synergy Chains** - Critical missing connections now in place
+  - `test` → requires `browser-test` → requires `agent-browser`
+  - `ship` → requires `review` (pre-deploy quality check)
+  - `verify` → requires `quality` (standards enforcement)
+- **Improved Descriptions** - Third-person, specific, with trigger words per API best practices
+- **Trigger Deduplication** - Removed conflicting triggers between skills
+  - `setup-project` triggers: `init`, `new project`, `scaffold` (removed `setup`)
+  - `test` triggers: `test`, `e2e`, `browser` (removed duplicate `verify`)
+  - `ship` triggers: `ship` only (removed duplicate `deploy`)
+
+### Changed
+- Total `requires` entries: 10 (was 6)
+- Quality skill description now specific about what it enforces
+- Workflow skill description clarifies it's for reference
+- Browser-test now chains to agent-browser automatically
+- Version: 4.5.0
+
+### Optimized (from API best practices review)
+- **Progressive Disclosure**: Skills load only when needed via requires chains
+- **Token Efficiency**: Metadata always loaded (~100 tokens), SKILL.md on-demand
+- **Cross-references**: ONE level deep maximum (e.g., test→browser-test→agent-browser)
+- **Trigger Specificity**: Each trigger maps to exactly one skill
+
+---
+
+## [4.4.0] - 2026-02-05
+
+### Added
+- **Frontend Design Skill** - Anthropic's official skill for high-quality UI design
+  - Avoids "AI slop" (purple gradients, Inter/Roboto, generic layouts)
+  - Guides toward intentional design choices (typography, color, motion, composition)
+  - Pro tips: generate 5 variants, iterate on favorites
+  - Triggers: `design`, `frontend`, `ui`, `landing page`, `marketing page`
+  - Source: [anthropics/claude-code](https://github.com/anthropics/claude-code/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md)
+- **Skill Synergy System** - Skills now cross-reference each other
+  - `audit` → references `quality`, `code-quality`, `frontend-design`, `preserve-ui`
+  - `review` → references `quality`, `code-quality`, `self-review`
+  - `brainstorm` → references `quality`, `frontend-design`, `preserve-ui`
+  - `auto` → requires `code-quality`, `quality`, `react-patterns`
+  - Design validation step in brainstorm for UI features
+
+### Changed
+- Total skills: 33
+- Manifest now has 6 `requires` entries (was 1)
+- Skills include "Quality Framework Reference" sections
+- Design system principles flow into audit/review checks
+
+---
+
+## [4.3.0] - 2026-02-04
+
+### Added
+- **32 skills now registered** - Consolidated all skills from installed versions
+  - agent-browser (browser automation CLI reference)
+  - archive-prd (archive completed stories)
+  - auth-token-injection (auth patterns for testing)
+  - build (build commands and error handling)
+  - build-reference (build documentation)
+  - env-vars (environment variable patterns)
+  - help (list available commands)
+  - supabase-schema (schema reference)
+- **6 hooks added** - Full hook system for all platforms
+  - auto-continue.ps1/.sh - Auto-continues if tasks remain
+  - post-tool-typecheck.ps1/.sh - Runs typecheck after TS/JS edits
+  - pre-tool-filter.ps1/.sh - Blocks dangerous commands
+- **Brainstorm Phase 2** - Feature ideation after cleanup proposals
+- **Skills vs Plugins architecture** - Documentation clarifying the two systems
+
+### Changed
+- Repository is now single source of truth for all skills and hooks
+- Installer synced to v4.3
+- prd.json removed from repo (project-specific file)
+
+### Fixed
+- 8 missing skills now registered in manifest.json
+
+---
+
 ## [4.0.0] - 2026-02-03
 
 ### Breaking Changes

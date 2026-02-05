@@ -167,3 +167,35 @@ Key findings:
 - 68 components use hardcoded colors
 - Edge Functions lack input validation
 - 530 console statements in production
+
+## Quality Framework Reference
+
+When rating findings, apply principles from related skills:
+
+| Skill | What to Reference |
+|-------|-------------------|
+| `quality` | Type safety, design tokens, all UI states |
+| `code-quality` | React patterns, error handling, type completeness |
+| `design` | Color tokens vs hardcoded, typography consistency |
+| `preserve-ui` | Structural integrity for UI changes |
+| `react-patterns` | Performance optimization patterns |
+
+**UX/UI Agent should check:**
+- Hardcoded colors → Reference `design` (NEVER purple gradients, NEVER Inter/Roboto)
+- Missing states → Reference `quality` (loading, empty, error)
+- Design tokens → Reference `quality` design system rules
+
+**Type Safety Agent should check:**
+- Against `code-quality` patterns (single source of truth, complete Records)
+- `quality` principles (strict mode, no any)
+
+## Log Patterns to Mistakes
+
+When audit finds repeated issues (3+ files):
+```markdown
+## Pattern: [Category]
+- **Task:** Audit finding
+- **Root cause:** Why pattern violated
+- **Prevention:** Rule to add
+```
+Log to `.claude/mistakes.md` for future reference.

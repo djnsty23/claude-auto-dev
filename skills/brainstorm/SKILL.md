@@ -107,3 +107,37 @@ When user says `brainstorm X`:
 - Context reads: ~5K tokens
 - Time: 30-60 seconds
 - Much cheaper than reading entire codebase
+
+## Design System Awareness
+
+Before proposing UI features, check design constraints:
+
+| Skill | What to Check |
+|-------|---------------|
+| `design` | Aesthetic direction, typography, color palette |
+| `preserve-ui` | Can we extend existing components vs. create new? |
+| `quality` | Design token usage, semantic colors |
+| `react-patterns` | Performance implications of new features |
+
+**When proposing UI features:**
+- Check existing component structure first (`preserve-ui`)
+- Ensure proposals use design tokens, not hardcoded colors
+- Reference `design` for aesthetic consistency
+- Note if feature requires new design patterns
+
+**Example validation:**
+```
+Feature: "Add dark mode toggle"
+├─ preserve-ui: Extend existing ThemeProvider? ✓
+├─ design: Uses CSS variables? ✓
+├─ quality: All states handled? (system/light/dark) ✓
+└─ Ready to create story
+```
+
+## Phase 2B: Design Validation (Optional)
+
+For UI-heavy features, add validation step:
+1. Check `design` principles (no AI slop)
+2. Check `preserve-ui` (extend vs. replace)
+3. Check existing tokens/variables
+4. Propose feature with design context included

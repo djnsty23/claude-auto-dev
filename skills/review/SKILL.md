@@ -67,3 +67,27 @@ Overall: Ready to commit / Needs fixes
 Consider running `review` automatically:
 - After `verify` marks task complete
 - Before `deploy`
+
+## Quality Framework Reference
+
+Apply principles from related skills when reviewing:
+
+| Skill | Check For |
+|-------|-----------|
+| `quality` | Type safety, design tokens, all UI states handled |
+| `code-quality` | React patterns, error handling, Supabase typing |
+| `design` | Avoid AI slop (no purple gradients, no Inter/Roboto) |
+| `self-review` | Scale effort to change complexity |
+
+**Design System Checks:**
+- Hardcoded colors → Suggest semantic tokens
+- Inter/Roboto fonts → Reference `design` alternatives
+- Purple gradients → Flag as "AI slop"
+
+**Type Safety Checks:**
+- `any` usage → Check `code-quality` patterns
+- Missing Zod → Check `quality` validation rules
+
+**React Checks:**
+- Missing cleanup → Check `react-patterns`
+- Inline objects → Check `code-quality` memo patterns

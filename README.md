@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.3.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-4.6.1-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous AI-powered development workflow for Claude Code.** Turn natural language into working software with task loops, session management, and deployment automation.
 
@@ -118,9 +118,108 @@ stop        →  Safe to close session
 
 ---
 
-## What's New in v4.0
+## What's New in v4.6
 
-### Hybrid Task System
+### Optimized Skill Chains (API Best Practices)
+Applied principles from Claude Code API documentation:
+
+```
+Progressive Disclosure Chain:
+┌─────────┐     ┌──────────────┐     ┌──────────────┐
+│  test   │ ──► │ browser-test │ ──► │ agent-browser│
+└─────────┘     └──────────────┘     └──────────────┘
+                      │
+                      └─ Full browser testing knowledge loads on-demand
+
+Pre-Deploy Quality:
+┌─────────┐     ┌──────────────┐     ┌──────────────┐
+│  ship   │ ──► │    review    │ ──► │   quality    │
+└─────────┘     └──────────────┘     └──────────────┘
+                                     + code-quality
+                      │
+                      └─ Can't ship without quality check
+
+Verification Chain:
+┌─────────┐     ┌──────────────┐
+│  verify │ ──► │   quality    │
+└─────────┘     └──────────────┘
+                      │
+                      └─ Standards enforcement on all verifications
+```
+
+**Token Efficiency**: ~100 tokens for metadata (always), SKILL.md on-demand (~500-2000).
+
+### Complete Skill Library
+**36 skills** with **10 requires chains**:
+
+| Category | Skills |
+|----------|--------|
+| **Core** | auto, brainstorm, status, sprint, review, pr-review |
+| **Quality** | audit, verify, self-review, quality, code-quality |
+| **Security** | security-patterns |
+| **Design** | design, preserve-ui, react-patterns |
+| **Video** | remotion (compositions, animations, subtitles) |
+| **Testing** | test, browser-test, agent-browser |
+| **Deploy** | ship, deploy, build, clean |
+| **Data** | supabase, supabase-schema, env-vars |
+| **Utility** | fix, help, setup, archive-prd, checkpoint |
+
+### Skill Synergy System
+Skills **cross-reference each other** for comprehensive quality:
+
+```
+audit ──────► quality + code-quality + design + security-patterns
+              │
+              ├─ UX agent checks design tokens
+              ├─ Security agent checks vulnerabilities
+              └─ Findings rated against quality principles
+
+pr-review ──► security-patterns + code-quality
+              │
+              ├─ CLAUDE.md compliance
+              ├─ Bug hunting with validation
+              └─ Security scanning
+
+review ─────► quality + code-quality + security-patterns
+              │
+              └─ Checks apply skill knowledge + security patterns
+
+ship ───────► review + security-patterns
+              │
+              └─ Can't deploy without quality + security check
+```
+
+### Design Skill (v4.6)
+Creates distinctive UI - avoids "AI slop":
+- Bold aesthetic direction (not generic purple gradients)
+- Unique typography choices (not Inter/Roboto defaults)
+- Intentional color palettes (not template colors)
+
+**Pro tip**: Ask for 5 variants on /1 /2 /3 /4 /5, then iterate on favorites.
+
+### Hook System
+6 hooks for automation and token optimization:
+
+```
+hooks/
+├── auto-continue.ps1/.sh    # Continue if tasks remain
+├── post-tool-typecheck.ps1/.sh  # Typecheck after edits
+└── pre-tool-filter.ps1/.sh  # Block dangerous commands
+```
+
+### Brainstorm Phase 2
+After cleanup proposals, suggests **new features** based on codebase patterns:
+
+```
+Phase 2: Feature Ideas
+══════════════════════
+Based on your codebase, consider:
+1. Dark mode - You have semantic tokens ready
+2. Keyboard shortcuts - Power user feature
+3. Export to PDF - Users are requesting this
+```
+
+### Hybrid Task System (v4.0)
 Two-layer architecture for optimal context usage:
 
 | Layer | Tool | Purpose |
@@ -129,54 +228,6 @@ Two-layer architecture for optimal context usage:
 | **Short-term** | Native Tasks | Current session work |
 
 **Result:** 93% context cost reduction (75K → 5K tokens)
-
-### Proactive Brainstorm
-**You propose, user doesn't ask.** Scans codebase in parallel and presents concrete improvement scenarios:
-
-```
-Brainstorm Complete
-═══════════════════
-Findings:
-- 530 console.log statements
-- 68 hardcoded colors
-- 12 'any' types
-
-Top Recommendations:
-1. Console Cleanup - High impact, quick win
-2. Token Migration - Enables dark mode
-3. Type Hardening - Prevents runtime errors
-
-Say a number (1-3), "all", or describe what interests you.
-```
-
-### Parallel Swarm Audit
-6 specialized agents run simultaneously:
-
-```
-audit
-    ├─► Security (secrets, XSS, injection)
-    ├─► Performance (memo, effects, queries)
-    ├─► Accessibility (WCAG, keyboard, contrast)
-    ├─► Type Safety (any, ts-ignore, conflicts)
-    ├─► UX/UI (states, tokens, feedback)
-    └─► Test Coverage (critical paths, gaps)
-
-→ Aggregated report with severity ratings and scores
-```
-
-### Resolution Learning
-Prevent repeat mistakes by documenting HOW issues were fixed:
-
-```json
-{
-  "id": "S26-001",
-  "title": "Fix tooltip clipping",
-  "passes": true,
-  "resolution": "overflow: Added max-h-[calc(100vh-200px)]"
-}
-```
-
-Pattern format: `[CATEGORY]: [SPECIFIC FIX]`
 
 ---
 
@@ -664,7 +715,17 @@ Say `handoff` to save session, then start fresh with `resume`.
 
 ## Changelog
 
-### [4.0.0] - 2026-01-30
+### [4.4.0] - 2026-02-05
+- **Frontend Design Skill**: Anthropic's official skill for high-quality UI - avoids AI slop aesthetics
+- **33 Skills Total**: Added frontend-design with triggers for design, frontend, ui, landing page
+
+### [4.3.0] - 2026-02-04
+- **32 Skills Consolidated**: All skills from installed versions now in repo
+- **Hook System Complete**: 6 hooks (auto-continue, post-tool-typecheck, pre-tool-filter) for all platforms
+- **Brainstorm Phase 2**: Feature ideation after cleanup proposals
+- **Single Source of Truth**: Repository now contains all skills, hooks, and configurations
+
+### [4.0.0] - 2026-02-03
 - **Hybrid Task Management v2.0**: Two-layer system with prd.json for long-term memory and native Tasks for short-term work
 - **Resolution Learning System**: Documents HOW issues were fixed, not just THAT they were fixed
 - **Autonomous Mode Improvements**: Explicit "DO NOT STOP" instructions - Claude keeps working until all tasks complete

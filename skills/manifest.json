@@ -1,6 +1,6 @@
 {
-  "version": "4.3.0",
-  "description": "Self-bootstrapping auto mode with Ralph Loop integration",
+  "version": "4.6.1",
+  "description": "Comprehensive skill system with security patterns, PR review, and Remotion",
   "skills": {
     "core": {
       "triggers": [],
@@ -20,196 +20,249 @@
       "triggers": ["auto"],
       "context": ["prd.json"],
       "file": "auto/SKILL.md",
-      "requires": ["code-quality"],
-      "priority": 1
+      "requires": ["code-quality", "quality", "react-patterns"],
+      "priority": 1,
+      "description": "Autonomous task execution. Works through all tasks without stopping."
     },
     "brainstorm": {
       "triggers": ["brainstorm", "generate"],
       "context": [],
       "file": "brainstorm/SKILL.md",
-      "priority": 1
+      "requires": ["quality", "design"],
+      "priority": 1,
+      "description": "Scans codebase, proposes improvements and features autonomously."
     },
     "status": {
       "triggers": ["status"],
       "context": ["prd.json"],
       "file": "status/SKILL.md",
-      "priority": 2
+      "priority": 2,
+      "description": "Shows sprint progress and task status."
     },
     "sprint": {
       "triggers": ["sprint"],
       "context": ["prd.json"],
       "file": "sprint/SKILL.md",
-      "priority": 1
+      "priority": 1,
+      "description": "Creates or advances sprints."
     },
     "review": {
       "triggers": ["review"],
       "context": [],
       "file": "review/SKILL.md",
-      "priority": 1
+      "requires": ["quality", "code-quality", "security-patterns"],
+      "priority": 1,
+      "description": "Code quality check on recent changes. Includes security scanning."
+    },
+    "pr-review": {
+      "triggers": ["pr-review", "review-pr", "code-review"],
+      "context": [],
+      "file": "pr-review/SKILL.md",
+      "requires": ["security-patterns", "code-quality"],
+      "priority": 1,
+      "description": "Comprehensive PR review using specialized agents. Use before creating/merging PRs."
     },
     "clean": {
       "triggers": ["clean"],
       "context": [],
       "file": "clean/SKILL.md",
-      "priority": 2
+      "priority": 2,
+      "description": "Removes temporary artifacts and old backups."
     },
     "test": {
-      "triggers": ["test", "verify", "e2e", "browser"],
+      "triggers": ["test", "e2e", "browser"],
       "context": ["*.test.*", "*.spec.*"],
       "file": "test/SKILL.md",
-      "priority": 2
+      "requires": ["browser-test"],
+      "priority": 2,
+      "description": "Runs unit and browser tests on latest changes."
     },
     "ship": {
-      "triggers": ["ship", "deploy"],
+      "triggers": ["ship"],
       "context": ["vercel.json"],
       "file": "ship.md",
-      "priority": 3
+      "requires": ["review", "security-patterns"],
+      "priority": 3,
+      "description": "Pre-deploy checklist with review and security check."
     },
     "fix": {
       "triggers": ["fix", "debug", "bug"],
       "context": [],
       "file": "fix.md",
-      "priority": 2
+      "priority": 2,
+      "description": "Debugging and bug fixing patterns."
     },
     "setup-project": {
-      "triggers": ["setup", "init", "new project"],
+      "triggers": ["init", "new project", "scaffold"],
       "context": [],
       "file": "setup-project.md",
-      "priority": 3
+      "priority": 3,
+      "description": "Scaffolds new project from scratch."
     },
     "supabase": {
       "triggers": ["schema", "database", "migration", "supabase"],
       "context": ["supabase/"],
       "file": "supabase/SKILL.md",
-      "priority": 3
+      "priority": 3,
+      "description": "Supabase CLI patterns for database operations."
     },
     "audit": {
       "triggers": ["audit"],
       "context": [],
       "file": "audit/SKILL.md",
-      "priority": 1
+      "requires": ["quality", "code-quality", "design", "security-patterns"],
+      "priority": 1,
+      "description": "Parallel quality audit with 6 specialized agents."
     },
     "browser-test": {
       "triggers": ["browser-test"],
       "context": [],
       "file": "browser-test/SKILL.md",
-      "priority": 2
+      "requires": ["agent-browser"],
+      "priority": 2,
+      "description": "Secure browser testing with agent-browser CLI. 93% more token-efficient."
     },
     "checkpoint": {
       "triggers": ["checkpoint"],
       "context": [],
       "file": "checkpoint/SKILL.md",
-      "priority": 2
+      "priority": 2,
+      "description": "Saves context state. Auto-triggered every 5 tasks."
     },
     "deploy": {
       "triggers": ["deploy"],
       "context": ["vercel.json"],
       "file": "deploy/SKILL.md",
-      "priority": 3
+      "priority": 3,
+      "description": "Deploy workflow for Vercel and Supabase Edge Functions."
     },
     "preserve-ui": {
       "triggers": [],
       "context": [],
       "file": "preserve-ui/SKILL.md",
       "priority": 2,
-      "description": "Load when modifying UI components"
+      "description": "Preserves existing UI structure when modifying components."
     },
     "quality": {
       "triggers": [],
       "context": [],
       "file": "quality/SKILL.md",
       "priority": 0,
-      "description": "Code quality principles - guides judgment"
+      "description": "Enforces type safety, design tokens, and all UI states."
     },
     "react-patterns": {
       "triggers": [],
       "context": [],
       "file": "react-patterns/SKILL.md",
       "priority": 2,
-      "description": "Load for React work"
+      "description": "React/Next.js best practices and optimization patterns."
     },
     "self-review": {
       "triggers": [],
       "context": [],
       "file": "self-review/SKILL.md",
       "priority": 2,
-      "description": "Load for review tasks"
+      "description": "Scales review effort to task complexity."
     },
     "verify": {
-      "triggers": [],
+      "triggers": ["verify"],
       "context": [],
       "file": "verify/SKILL.md",
+      "requires": ["quality"],
       "priority": 2,
-      "description": "Load for verification"
+      "description": "Verifies work completeness. Encourages going beyond minimum."
     },
     "workflow": {
       "triggers": [],
       "context": [],
       "file": "workflow/SKILL.md",
       "priority": 2,
-      "description": "Reference only"
+      "description": "Documents skill orchestration patterns."
     },
     "setup": {
       "triggers": ["setup"],
       "context": [],
       "file": "setup/SKILL.md",
-      "priority": 3
+      "priority": 3,
+      "description": "Initialize claude-auto-dev in a project."
     },
     "agent-browser": {
       "triggers": [],
       "context": [],
       "file": "agent-browser.md",
       "priority": 3,
-      "description": "Browser automation CLI reference - loaded with browser-test"
+      "description": "Browser automation CLI reference. Loaded with browser-test."
     },
     "archive-prd": {
       "triggers": ["archive"],
       "context": ["prd.json"],
       "file": "archive-prd.md",
       "priority": 3,
-      "description": "Archive completed stories from prd.json"
+      "description": "Archives completed stories from prd.json."
     },
     "auth-token-injection": {
       "triggers": [],
       "context": [],
       "file": "auth-token-injection.md",
       "priority": 3,
-      "description": "Auth token injection patterns for testing"
+      "description": "Auth token injection patterns for testing."
     },
     "build": {
       "triggers": ["build"],
       "context": [],
       "file": "build.md",
       "priority": 2,
-      "description": "Build commands and error handling"
+      "description": "Build commands and error handling."
     },
     "build-reference": {
       "triggers": [],
       "context": [],
       "file": "build-reference.md",
       "priority": 3,
-      "description": "Build reference documentation"
+      "description": "Build reference documentation."
     },
     "env-vars": {
       "triggers": [],
       "context": [".env*"],
       "file": "env-vars.md",
       "priority": 3,
-      "description": "Environment variables patterns"
+      "description": "Environment variables patterns."
     },
     "help": {
       "triggers": ["help", "commands"],
       "context": [],
       "file": "help.md",
       "priority": 2,
-      "description": "List available commands"
+      "description": "Lists available commands."
     },
     "supabase-schema": {
       "triggers": [],
       "context": ["supabase/"],
       "file": "supabase-schema.md",
       "priority": 3,
-      "description": "Supabase schema reference - loaded with supabase skill"
+      "description": "Supabase schema reference. Loaded with supabase skill."
+    },
+    "design": {
+      "triggers": ["design", "ui", "landing page", "marketing page"],
+      "context": [],
+      "file": "design/SKILL.md",
+      "requires": ["preserve-ui", "quality"],
+      "priority": 1,
+      "description": "Creates distinctive UI - avoids generic AI aesthetics (purple gradients, Inter font)."
+    },
+    "security-patterns": {
+      "triggers": [],
+      "context": [],
+      "file": "security-patterns.md",
+      "priority": 0,
+      "description": "Security vulnerability patterns. Auto-loaded with review, audit, ship, pr-review."
+    },
+    "remotion": {
+      "triggers": ["remotion", "video composition", "animation"],
+      "context": ["remotion/"],
+      "file": "remotion/SKILL.md",
+      "priority": 2,
+      "description": "Remotion best practices - video creation in React. Compositions, animations, subtitles."
     }
   },
   "defaults": {

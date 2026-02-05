@@ -1,0 +1,121 @@
+# Frontend Design
+
+Create distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics.
+
+## When to Use
+
+- Building web components, pages, or applications
+- Creating marketing/landing pages
+- UI that needs to look professionally designed
+- Any frontend where visual quality matters
+
+## Design Thinking
+
+Before coding, commit to a **BOLD aesthetic direction**:
+
+1. **Purpose**: What problem does this solve? Who uses it?
+2. **Tone**: Pick an extreme:
+   - Brutally minimal
+   - Maximalist chaos
+   - Retro-futuristic
+   - Organic/natural
+   - Luxury/refined
+   - Playful/toy-like
+   - Editorial/magazine
+   - Brutalist/raw
+   - Art deco/geometric
+   - Soft/pastel
+   - Industrial/utilitarian
+3. **Differentiation**: What makes this UNFORGETTABLE?
+
+**CRITICAL**: Choose a clear direction and execute with precision. Bold maximalism and refined minimalism both work - the key is **intentionality, not intensity**.
+
+## Implementation
+
+Create working code (React/Vue/HTML) that is:
+- Production-grade and functional
+- Visually striking and memorable
+- Cohesive with clear aesthetic point-of-view
+- Meticulously refined in every detail
+
+## Aesthetics Guidelines
+
+### Typography
+- Choose **unique, interesting fonts** - avoid generic fonts
+- Pair distinctive display font with refined body font
+- Use Google Fonts or custom fonts, not system defaults
+
+### Color & Theme
+- Commit to a cohesive palette
+- Use CSS variables for consistency
+- **Dominant colors with sharp accents** > timid, evenly-distributed palettes
+
+### Motion
+- Use animations for micro-interactions
+- CSS-only for HTML, Motion library for React
+- Focus on high-impact moments: orchestrated page load with staggered reveals
+- Scroll-triggering and hover states that surprise
+
+### Spatial Composition
+- Unexpected layouts
+- Asymmetry, overlap, diagonal flow
+- Grid-breaking elements
+- Generous negative space OR controlled density
+
+### Backgrounds & Visual Details
+- Create atmosphere and depth (not just solid colors)
+- Gradient meshes, noise textures, geometric patterns
+- Layered transparencies, dramatic shadows
+- Decorative borders, custom cursors, grain overlays
+
+## NEVER Do This
+
+**Generic AI aesthetics to avoid:**
+- ❌ Inter, Roboto, Arial, system fonts
+- ❌ Purple/blue gradients on white backgrounds
+- ❌ Predictable layouts and component patterns
+- ❌ Cookie-cutter designs lacking character
+- ❌ Space Grotesk (overused)
+
+## Pro Tips
+
+### Generate Multiple Variants
+Ask for 5 different designs on /1, /2, /3, /4, /5:
+- Model makes each unique from the others
+- Better variety than 5 separate prompts
+- Reveals model's template biases
+
+### Iterate on Favorites
+After seeing variants, tell the model:
+- Which designs you liked
+- What you liked about them
+- Ask for 5 more iterations based on those
+
+This is where Opus shines - it actually understands your preferences and iterates meaningfully.
+
+## Match Complexity to Vision
+
+- **Maximalist designs** → elaborate code, extensive animations, effects
+- **Minimalist designs** → restraint, precision, spacing, typography, subtle details
+
+Elegance comes from executing the vision well.
+
+---
+
+## Integration with Other Skills
+
+| Skill | How It Integrates |
+|-------|-------------------|
+| `preserve-ui` | Before major UI changes, check existing structure. Extend, don't replace. |
+| `quality` | Ensure new designs use semantic tokens, handle all states |
+| `audit` | Design issues flagged here inform UI/UX audit agent |
+| `brainstorm` | Feature proposals validated against design system |
+
+**Before creating new components:**
+1. Check `preserve-ui` - can we extend existing?
+2. Check design tokens - use CSS variables
+3. Check `quality` - handle loading/empty/error states
+
+---
+
+Remember: Claude is capable of extraordinary creative work. Don't hold back - show what can be created when thinking outside the box and committing fully to a distinctive vision.
