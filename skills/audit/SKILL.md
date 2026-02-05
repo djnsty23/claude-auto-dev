@@ -113,46 +113,84 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
 | **Medium** | Noticeable but not blocking | Missing loading state |
 | **Low** | Nice to have, polish | console.log left in |
 
-## Auto-Create Stories
+## Persist Findings to prd.json (REQUIRED)
 
-After rating, **automatically create stories** for Critical + High issues.
+After aggregating results, write ALL Critical + High findings to prd.json so they persist across sessions.
 
-### Deduplication (REQUIRED)
+### Step 1: Read current prd.json
 
-Before creating any task, check for duplicates:
+```bash
+# Get current sprint number and existing story IDs
+node -e "try{const p=require('./prd.json');console.log('sprint:',p.sprint,'stories:',Object.keys(p.stories||{}).length)}catch{console.log('no prd.json')}"
+```
+
+If no prd.json exists, create one with `sprint: 1`.
+
+### Step 2: Deduplicate against existing stories
+
+Before adding, check if a similar story already exists:
+
+```javascript
+// Match by title similarity (first 25 chars) or same file:line
+const isDuplicate = (title, file) => Object.values(stories).some(s =>
+  s.title.toLowerCase().includes(title.toLowerCase().slice(0, 25)) ||
+  (file && s.notes?.includes(file))
+);
+```
+
+### Step 3: Add new stories to prd.json
+
+Use ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`)
+
+```json
+{
+  "S3-AUD-001": {
+    "id": "S3-AUD-001",
+    "title": "Fix XSS vulnerability in user input",
+    "priority": 0,
+    "passes": null,
+    "type": "fix",
+    "category": "security",
+    "notes": "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
+    "resolution": ""
+  }
+}
+```
+
+**Category → type mapping:**
+
+| Audit Category | prd.json type | Priority |
+|---------------|---------------|----------|
+| Security (Critical) | fix | 0 |
+| Security (High) | fix | 1 |
+| Performance | perf | 1 |
+| Accessibility | fix | 1 |
+| Type Safety | fix | 2 |
+| UX/UI | fix | 1 |
+| Test Coverage | qa | 2 |
+| Deploy Readiness | fix | 0 |
+
+### Step 4: Also create session Tasks
+
+Create native TaskCreate entries for the current session so "auto" can immediately start fixing:
 
 ```typescript
-// 1. Get existing tasks
-const existing = await TaskList();
-
-// 2. For each finding, check similarity
-function isDuplicate(newTitle: string): boolean {
-  return existing.some(task =>
-    task.subject.toLowerCase().includes(newTitle.toLowerCase().slice(0, 20)) ||
-    newTitle.toLowerCase().includes(task.subject.toLowerCase().slice(0, 20))
-  );
-}
-
-// 3. Only create if not duplicate
-if (!isDuplicate("Fix XSS vulnerability")) {
-  TaskCreate({
-    subject: "Fix XSS vulnerability in user input",
-    description: "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
-    metadata: { type: "security", priority: 0, category: "security" }
-  });
-}
+TaskCreate({
+  subject: "Fix XSS vulnerability in user input",
+  description: "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
+  metadata: { type: "security", priority: 0, prdId: "S3-AUD-001" }
+});
 ```
 
-**Skip if:** Task with similar title already exists (pending or in_progress).
-```
+### Step 5: Report
 
-Then report:
 ```
-Created [X] stories from audit findings.
-- [N] Critical (priority 0)
+Created [X] stories in prd.json from audit findings.
+- [N] Critical (priority 0) — S{sprint}-AUD-001 through AUD-00N
 - [N] High (priority 1)
+- [N] skipped (duplicates of existing stories)
 
-Medium/Low issues logged but not queued.
+Medium/Low issues noted in report but not added to prd.json.
 Say "auto" to start fixing, or "audit [feature]" to audit specific area.
 ```
 
