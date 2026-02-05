@@ -2,8 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(npm run *)",
-      "Bash(agent-browser *)",
-      "mcp__supabase__*"
+      "Bash(agent-browser *)"
     ]
   }
 }

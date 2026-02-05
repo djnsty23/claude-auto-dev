@@ -165,3 +165,29 @@ For UI-heavy features, add validation step:
 2. Check `preserve-ui` (extend vs. replace)
 3. Check existing tokens/variables
 4. Propose feature with design context included
+
+## Plan Mode (For Complex Features)
+
+When brainstorm identifies features that span multiple areas, suggest plan mode:
+
+**Triggers for plan mode suggestion:**
+- Feature touches 3+ files
+- Architectural decisions required
+- Multiple valid implementation approaches
+- Database schema changes involved
+
+**Suggestion format:**
+```
+This feature spans [N] areas: [list areas].
+
+Would you like me to enter plan mode to design a detailed implementation approach before creating stories?
+
+Say "plan" to explore options, or "create" to proceed with stories.
+```
+
+**In plan mode:**
+1. Explore codebase for existing patterns
+2. Design implementation approach
+3. Identify trade-offs
+4. Present plan for approval
+5. Then create stories from approved plan

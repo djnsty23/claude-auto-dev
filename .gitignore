@@ -2,3 +2,19 @@ tmpclaude-*
 *.log
 .DS_Store
 prd.json
+
+# Screenshots from browser testing
+.claude/screenshots/
+
+# Backup and archive files
+prd-backup-*.json
+prd-archive-*.json
+
+# Session handoffs
+handoff-*.md
+
+# Local settings overrides
+.claude/settings.local.json
+
+# Session analytics
+ledger.json

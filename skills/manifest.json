@@ -20,9 +20,9 @@
       "triggers": ["auto"],
       "context": ["prd.json"],
       "file": "auto/SKILL.md",
-      "requires": ["code-quality", "quality", "react-patterns", "verify"],
+      "requires": ["code-quality", "quality", "react-patterns", "verify", "browser-test", "security-patterns"],
       "priority": 1,
-      "description": "Autonomous task execution. Works through all tasks without stopping."
+      "description": "Autonomous task execution with testing and security. Works through all tasks without stopping."
     },
     "brainstorm": {
       "triggers": ["brainstorm", "generate"],
@@ -81,12 +81,12 @@
       "triggers": ["ship"],
       "context": ["vercel.json"],
       "file": "ship/SKILL.md",
-      "requires": ["review", "security-patterns"],
+      "requires": ["review", "security-patterns", "test"],
       "priority": 3,
-      "description": "Pre-deploy checklist with review and security check."
+      "description": "Pre-deploy checklist with review, security, and test verification."
     },
     "fix": {
-      "triggers": ["fix", "debug"],
+      "triggers": ["fix", "debug", "broken", "error"],
       "context": [],
       "file": "fix/SKILL.md",
       "priority": 2,
@@ -125,9 +125,9 @@
       "triggers": ["audit"],
       "context": [],
       "file": "audit/SKILL.md",
-      "requires": ["quality", "code-quality", "design", "security-patterns"],
+      "requires": ["quality", "code-quality", "design", "security-patterns", "browser-test"],
       "priority": 1,
-      "description": "Parallel quality audit with 6 specialized agents."
+      "description": "Parallel quality audit with 6 specialized agents including test coverage."
     },
     "browser-test": {
       "triggers": [],
@@ -189,11 +189,11 @@
       "description": "Verifies work completeness."
     },
     "agent-browser": {
-      "triggers": [],
+      "triggers": ["browser", "agent-browser", "web test", "ui test"],
       "context": [],
       "file": "agent-browser/SKILL.md",
       "priority": 3,
-      "description": "Browser automation CLI reference. Loaded with browser-test."
+      "description": "Browser automation CLI reference. Also loaded with browser-test."
     },
     "archive-prd": {
       "triggers": ["archive"],
@@ -218,11 +218,11 @@
       "description": "Hybrid task management architecture reference. Internal use."
     },
     "env-vars": {
-      "triggers": ["env"],
+      "triggers": ["env", "environment", "credentials", "secrets", "api key"],
       "context": [".env*"],
       "file": "env-vars/SKILL.md",
       "priority": 3,
-      "description": "Environment variables patterns."
+      "description": "Environment variables and credentials patterns."
     },
     "design": {
       "triggers": ["design", "ui"],

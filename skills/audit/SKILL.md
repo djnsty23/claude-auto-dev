@@ -212,3 +212,26 @@ When audit finds repeated issues (3+ files):
 - **Prevention:** Rule to add
 ```
 Log to `.claude/mistakes.md` for future reference.
+
+## Plan Mode for Critical Fixes
+
+When audit finds 5+ Critical/High severity issues, suggest plan mode:
+
+**Suggestion format:**
+```
+⚠️ Found [N] Critical/High issues across [M] files.
+
+These fixes may have cascading effects. Would you like me to enter plan mode to:
+1. Analyze dependencies between fixes
+2. Design fix order to prevent regressions
+3. Identify shared root causes
+
+Say "plan" to design fix strategy, or "auto" to fix immediately.
+```
+
+**In plan mode:**
+1. Group related issues by root cause
+2. Identify fix order (security first, then stability)
+3. Map file dependencies
+4. Present staged fix plan
+5. Execute fixes in safe order

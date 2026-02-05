@@ -3,17 +3,56 @@ name: clean
 description: Remove temporary artifacts
 allowed-tools: Bash, Glob
 model: haiku
-user-invocable: false
+user-invocable: true
 ---
 
 # Clean
 
-Remove Claude Code artifacts.
+Remove Claude Code artifacts and temporary files.
 
 ## Process
-1. Delete `.claude/screenshots/*.png`
-2. Delete `.playwright-mcp/` folder
-3. Delete any leftover v3 artifacts: `prd-backup-*.json`, `handoff-*.md`
-4. Report files removed
 
-Never touches source code, prd.json, or config.
+1. **Screenshots** - Delete all `.claude/screenshots/*.png`
+2. **Backups** - Delete `prd-backup-*.json` older than 7 days
+3. **Handoffs** - Delete `handoff-*.md` older than 7 days
+4. **Archives** - List `prd-archive-*.json` older than 30 days (prompt before delete)
+5. **Playwright** - Delete `.playwright-mcp/` folder if exists
+6. **Report** - Show files removed and space reclaimed
+
+## Commands
+
+```bash
+# Screenshots (all)
+rm -f .claude/screenshots/*.png
+
+# Backups older than 7 days
+find . -maxdepth 1 -name "prd-backup-*.json" -mtime +7 -delete
+
+# Handoffs older than 7 days
+find . -maxdepth 1 -name "handoff-*.md" -mtime +7 -delete
+
+# Archives - list only (prompt user)
+find . -maxdepth 1 -name "prd-archive-*.json" -mtime +30
+
+# Playwright MCP artifacts
+rm -rf .playwright-mcp/
+```
+
+## Windows (PowerShell)
+
+```powershell
+# Screenshots
+Remove-Item .claude\screenshots\*.png -Force -ErrorAction SilentlyContinue
+
+# Backups older than 7 days
+Get-ChildItem prd-backup-*.json | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item
+
+# Handoffs older than 7 days
+Get-ChildItem handoff-*.md | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item
+```
+
+## Rules
+
+- Never touch source code, prd.json, or config files
+- Always report what was deleted
+- Prompt before deleting archives (they contain history)
