@@ -24,7 +24,8 @@ if [[ -f "$REPO_PATH_FILE" ]]; then
             if [[ "$IS_SYMLINK" == false ]]; then
                 cp -r "$REPO_PATH/skills/"* "$CLAUDE_DIR/skills/"
                 cp "$REPO_PATH/hooks/"* "$CLAUDE_DIR/hooks/"
-                echo "[Auto-Dev] Skills/hooks synced"
+                cp "$REPO_PATH/config/settings-unix.json" "$CLAUDE_DIR/settings.json" 2>/dev/null
+                echo "[Auto-Dev] Skills/hooks/settings synced"
             fi
         else
             echo "[Auto-Dev v$VERSION]"

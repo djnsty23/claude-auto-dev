@@ -11,6 +11,8 @@ argument-hint: "[scope: full|auth|dashboard|latest]"
 
 # Audit
 
+**Before running:** If you're deep in a session, suggest the user run `/compact` first to free context for the 7 parallel agents. Audit spawns ~105K tokens of background work — compacting prevents context loss.
+
 **Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
 
 ## Existing Tasks

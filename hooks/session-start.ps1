@@ -32,7 +32,8 @@ if (Test-Path $repoPathFile) {
             if (-not $isSymlink) {
                 Copy-Item -Path "$repoPath\skills\*" -Destination "$claudeDir\skills\" -Recurse -Force
                 Copy-Item -Path "$repoPath\hooks\*" -Destination "$claudeDir\hooks\" -Force
-                Write-Host "[Auto-Dev] Skills/hooks synced"
+                Copy-Item -Path "$repoPath\config\settings.json" -Destination "$claudeDir\settings.json" -Force -ErrorAction SilentlyContinue
+                Write-Host "[Auto-Dev] Skills/hooks/settings synced"
             }
         } else {
             Write-Host "[Auto-Dev v$version]"

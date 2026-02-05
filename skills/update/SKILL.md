@@ -67,6 +67,20 @@ cp "$REPO/config/rules/"* ~/.claude/rules/ 2>/dev/null
 Copy-Item "$REPO\config\rules\*" "$env:USERPROFILE\.claude\rules\" -Force
 ```
 
+### 5b. Sync settings.json (hooks + permissions)
+
+Settings contain hook configs and security deny rules. Must stay in sync.
+
+```bash
+# Mac/Linux
+cp "$REPO/config/settings-unix.json" ~/.claude/settings.json
+
+# Windows
+Copy-Item "$REPO\config\settings.json" "$env:USERPROFILE\.claude\settings.json" -Force
+```
+
+**Important:** This overwrites the installed settings. If the user customized model/permissions, they'll need to re-apply after update. This is acceptable because settings contain security-critical deny rules and hook configurations that must match the current version.
+
 ### 6. Report
 
 ```
@@ -100,6 +114,9 @@ robocopy "$repo\skills" "$env:USERPROFILE\.claude\skills" /MIR /E /NFL /NDL /NJH
 # Sync hooks
 robocopy "$repo\hooks" "$env:USERPROFILE\.claude\hooks" /MIR /E /NFL /NDL /NJH /NJS /NP
 
+# Sync settings (hooks config + security deny rules)
+Copy-Item "$repo\config\settings.json" "$env:USERPROFILE\.claude\settings.json" -Force
+
 Write-Host "Updated to v$version"
 ```
 
@@ -115,6 +132,9 @@ cd "$REPO" && git pull
 rsync -av --delete "$REPO/skills/" ~/.claude/skills/
 rsync -av --delete "$REPO/hooks/" ~/.claude/hooks/
 
+# Sync settings (hooks config + security deny rules)
+cp "$REPO/config/settings-unix.json" ~/.claude/settings.json
+
 echo "Updated to v$(cat $REPO/VERSION)"
 ```
 
@@ -125,13 +145,13 @@ echo "Updated to v$(cat $REPO/VERSION)"
 | `repo/skills/` | `~/.claude/skills/` | Mirror (delete stale) |
 | `repo/hooks/` | `~/.claude/hooks/` | Mirror (delete stale) |
 | `repo/config/rules/` | `~/.claude/rules/` | Copy (add/update only, no delete) |
+| `repo/config/settings.json` | `~/.claude/settings.json` | Overwrite (security-critical) |
 
 Note: `commands.md` lives inside `skills/` — it syncs automatically with skills.
 
 ## What Does NOT Get Synced
 
-- `~/.claude/settings.json` - User config, never touched
-- `~/.claude/CLAUDE.md` - User instructions, never touched
+- `~/.claude/CLAUDE.md` - User instructions, never touched (uses @include for commands.md)
 
 ## Execution
 
@@ -141,5 +161,6 @@ When user says "update dev":
 2. Pull latest
 3. Mirror skills/ and hooks/ (rsync --delete or robocopy /MIR)
 4. Copy rules/ (add/update only)
-5. Report version
-6. Clean up temp clone if used
+5. Overwrite settings.json (hooks config + security deny rules)
+6. Report version
+7. Clean up temp clone if used
