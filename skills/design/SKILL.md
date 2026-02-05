@@ -109,11 +109,14 @@ Test at 375px width before considering any UI complete.
 ## NEVER Do This
 
 **Generic AI aesthetics to avoid:**
-- ❌ Inter, Roboto, Arial, system fonts
-- ❌ Purple/blue gradients on white backgrounds
-- ❌ Predictable layouts and component patterns
-- ❌ Cookie-cutter designs lacking character
-- ❌ Space Grotesk (overused)
+- Inter, Roboto, Arial, system fonts
+- Purple/blue gradients on white backgrounds
+- Predictable layouts and component patterns
+- Cookie-cutter designs lacking character
+- Space Grotesk (overused)
+- Same design across generations — vary themes, fonts, aesthetics
+
+No design should be the same. Interpret creatively and make unexpected choices that feel genuinely designed for the context.
 
 ## Pro Tips
 
@@ -137,6 +140,34 @@ This is where Opus shines - it actually understands your preferences and iterate
 - **Minimalist designs** → restraint, precision, spacing, typography, subtle details
 
 Elegance comes from executing the vision well.
+
+---
+
+## Detailed Rules
+
+Load specific references for engineering quality:
+
+| Reference | When to Load |
+|-----------|--------------|
+| `references/web-interface-guidelines.md` | Forms, focus states, animation, a11y, dark mode, touch, i18n |
+
+## Component Composition
+
+Avoid boolean prop proliferation. Use composition:
+
+```tsx
+// Bad - boolean explosion
+<Card isCompact isHighlighted hasBorder isClickable />
+
+// Good - composition
+<Card variant="compact">
+  <Card.Highlight>
+    <Card.Clickable>...</Card.Clickable>
+  </Card.Highlight>
+</Card>
+```
+
+Create explicit variant components instead of boolean modes. Use compound components with shared context for complex UI.
 
 ---
 
