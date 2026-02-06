@@ -4,7 +4,7 @@ description: Shows sprint progress and task status. Use 'progress' (not 'status'
 triggers:
   - progress
 allowed-tools: Read, TaskList
-model: haiku
+model: opus
 user-invocable: true
 ---
 
@@ -38,5 +38,5 @@ Next:
 ## Rules
 - Use TaskList for native tasks (primary)
 - Read only prd.json header for context (not full file)
-- Use haiku model for minimal cost
+
 - If no prd.json, just show TaskList results

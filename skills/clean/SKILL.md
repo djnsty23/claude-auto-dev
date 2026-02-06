@@ -4,7 +4,7 @@ description: Removes temporary screenshots, old backups, stale handoffs, and aut
 triggers:
   - clean
 allowed-tools: Bash, Glob
-model: haiku
+model: opus
 user-invocable: true
 disable-model-invocation: true
 ---
