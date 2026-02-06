@@ -62,13 +62,16 @@ fi
 
 ```bash
 # Remove skill directories that are no longer in manifest
+# NOTE: cygpath converts Git Bash paths (/c/Users/...) to Windows-native (C:/Users/...)
 # NOTE: Use ===false instead of ! to avoid bash history expansion in node -e
+NATIVE_REPO=$(cygpath -m "$REPO" 2>/dev/null || echo "$REPO")
+NATIVE_DEST=$(cygpath -m "$DEST" 2>/dev/null || echo "$DEST")
 node -e "
 const fs = require('fs');
 const path = require('path');
-const manifest = JSON.parse(fs.readFileSync('$REPO/skills/manifest.json', 'utf8'));
+const manifest = JSON.parse(fs.readFileSync(path.join('$NATIVE_REPO','skills','manifest.json'), 'utf8'));
 const validSkills = new Set(Object.keys(manifest.skills));
-const dest = '$DEST/skills';
+const dest = path.join('$NATIVE_DEST','skills');
 fs.readdirSync(dest, { withFileTypes: true })
   .filter(d => d.isDirectory() && validSkills.has(d.name) === false)
   .forEach(d => {
