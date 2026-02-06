@@ -90,16 +90,6 @@
             "statusMessage": "Checking auto mode..."
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "Evaluate if Claude should stop. Context: $ARGUMENTS\n\nRespond {\"ok\": false, \"reason\": \"...\"} if ANY of these are true:\n- User requested multiple items and not all are complete\n- Build or typecheck errors exist that weren't fixed\n- UI changes lack loading/error/empty states\n- No verification was done (build check missing)\n\nRespond {\"ok\": true} only if all work is genuinely complete and verified.",
-            "timeout": 10,
-            "statusMessage": "Verifying completion..."
-          }
-        ]
       }
     ],
     "PreCompact": [
