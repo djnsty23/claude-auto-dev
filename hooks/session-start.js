@@ -25,7 +25,11 @@ try {
     const repoPathFile = path.join(CLAUDE_DIR, 'repo-path.txt');
 
     if (fs.existsSync(repoPathFile)) {
-        const repoPath = fs.readFileSync(repoPathFile, 'utf8').trim();
+        let repoPath = fs.readFileSync(repoPathFile, 'utf8').trim();
+        // Convert Git Bash paths (/c/Users/...) to Windows-native (C:/Users/...)
+        if (process.platform === 'win32' && /^\/[a-zA-Z]\//.test(repoPath)) {
+            repoPath = repoPath[1].toUpperCase() + ':' + repoPath.slice(2);
+        }
         const gitDir = path.join(repoPath, '.git');
 
         if (fs.existsSync(gitDir)) {
