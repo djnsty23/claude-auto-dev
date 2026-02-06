@@ -17,7 +17,7 @@ Sync the local repo with ~/.claude installation.
 
 ## Process
 
-**IMPORTANT:** Run this as a SINGLE bash command. Do not split into multiple Bash calls.
+Execute the following with the Bash tool immediately. Do NOT print it — run it. Use a SINGLE Bash call:
 
 ```bash
 REPO=$(cat ~/.claude/repo-path.txt 2>/dev/null | tr -d '\r\n')
@@ -29,7 +29,7 @@ fi
 cd "$REPO" && git pull && bash "$REPO/scripts/update.sh" "$REPO"
 ```
 
-That's it. The script handles everything: copy, stale cleanup, temp clone removal, and version report.
+After the Bash call completes, report the version and status from the output. Do NOT do anything else.
 
 ## What Gets Synced
 
