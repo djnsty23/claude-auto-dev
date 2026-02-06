@@ -40,7 +40,7 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
 You: update dev
 Claude: [pulls latest, syncs skills/hooks, removes stale files]
-        Updated to v5.0
+        Updated to v5.1
 ```
 
 **Option 2: Automatic on session start**

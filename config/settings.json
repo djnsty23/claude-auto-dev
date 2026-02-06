@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/session-start.js\"",
+            "command": "node \"%USERPROFILE%/.claude/hooks/session-start.js\"",
             "timeout": 15,
             "statusMessage": "Loading context..."
           }
@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/pre-tool-filter.js\"",
+            "command": "node \"%USERPROFILE%/.claude/hooks/pre-tool-filter.js\"",
             "timeout": 5
           }
         ]
@@ -74,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/post-tool-typecheck.js\"",
+            "command": "node \"%USERPROFILE%/.claude/hooks/post-tool-typecheck.js\"",
             "timeout": 60
           }
         ]
@@ -85,7 +85,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/stop-auto-check.js\"",
+            "command": "node \"%USERPROFILE%/.claude/hooks/stop-auto-check.js\"",
             "timeout": 5,
             "statusMessage": "Checking auto mode..."
           }

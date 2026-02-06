@@ -1,245 +1,379 @@
 {
-  "version": "5.0",
+  "version": "5.1",
   "description": "32 skills - consolidated synergy chains, dynamic context injection, argument hints, PreCompact hook",
   "skills": {
     "core": {
       "triggers": [],
-
       "file": "core/SKILL.md",
       "priority": 0,
       "description": "prd.json schema and task system - auto-loaded when prd.json exists"
     },
     "code-quality": {
       "triggers": [],
-
       "file": "code-quality/SKILL.md",
       "priority": 0,
       "description": "Learned patterns from production including React/Next.js best practices. Auto-loaded with auto, review, and build."
     },
     "auto": {
-      "triggers": ["auto"],
-
+      "triggers": [
+        "auto"
+      ],
       "file": "auto/SKILL.md",
-      "requires": ["code-quality", "quality", "verify", "browser-auth", "security", "commit"],
+      "requires": [
+        "code-quality",
+        "quality",
+        "verify",
+        "browser-auth",
+        "security",
+        "commit"
+      ],
       "priority": 1,
       "description": "Autonomous task execution with testing and security. Works through all tasks without stopping."
     },
     "brainstorm": {
-      "triggers": ["brainstorm", "generate"],
-
+      "triggers": [
+        "brainstorm",
+        "generate"
+      ],
       "file": "brainstorm/SKILL.md",
-      "requires": ["quality", "design"],
+      "requires": [
+        "quality",
+        "design"
+      ],
       "priority": 1,
       "description": "Scans codebase, proposes improvements and features autonomously. Use when unsure what to work on next."
     },
     "status": {
-      "triggers": ["progress"],
-
+      "triggers": [
+        "progress"
+      ],
       "file": "status/SKILL.md",
       "priority": 2,
       "description": "Shows sprint progress and task status. Use 'progress' (not 'status' - that's a built-in)."
     },
     "sprint": {
-      "triggers": ["sprint"],
-
+      "triggers": [
+        "sprint"
+      ],
       "file": "sprint/SKILL.md",
       "priority": 1,
       "description": "Creates or advances sprints in prd.json. Use when starting new work cycles or closing completed sprints."
     },
     "review": {
-      "triggers": ["review"],
-
+      "triggers": [
+        "review"
+      ],
       "file": "review/SKILL.md",
-      "requires": ["quality", "code-quality", "security"],
+      "requires": [
+        "quality",
+        "code-quality",
+        "security"
+      ],
       "priority": 1,
       "description": "Code quality check with adaptive effort scaling. Includes security scanning."
     },
     "pr-review": {
-      "triggers": ["pr", "pr-review", "review-pr", "code-review"],
-
+      "triggers": [
+        "pr",
+        "pr-review",
+        "review-pr",
+        "code-review"
+      ],
       "file": "pr-review/SKILL.md",
-      "requires": ["security", "code-quality"],
+      "requires": [
+        "security",
+        "code-quality"
+      ],
       "priority": 1,
       "description": "Comprehensive PR review using specialized agents. Use before creating or merging pull requests."
     },
     "clean": {
-      "triggers": ["clean"],
-
+      "triggers": [
+        "clean"
+      ],
       "file": "clean/SKILL.md",
       "priority": 2,
       "description": "Removes temporary screenshots, old backups, stale handoffs, and auto-active flags. Use when project has accumulated temp files."
     },
     "test": {
-      "triggers": ["test", "e2e"],
-      "context": ["*.test.*", "*.spec.*"],
+      "triggers": [
+        "test",
+        "e2e"
+      ],
+      "context": [
+        "*.test.*",
+        "*.spec.*"
+      ],
       "file": "test/SKILL.md",
-      "requires": ["browser-auth"],
+      "requires": [
+        "browser-auth"
+      ],
       "priority": 2,
       "description": "Runs unit and browser tests on latest changes. Use after implementing features or fixing bugs."
     },
     "ship": {
-      "triggers": ["ship"],
-      "context": ["vercel.json"],
+      "triggers": [
+        "ship"
+      ],
+      "context": [
+        "vercel.json"
+      ],
       "file": "ship/SKILL.md",
-      "requires": ["review", "security", "test", "commit"],
+      "requires": [
+        "review",
+        "security",
+        "test",
+        "commit"
+      ],
       "priority": 3,
       "description": "Pre-deploy checklist with review, security, and test verification. Use when ready to deploy."
     },
     "fix": {
-      "triggers": ["fix", "debug", "broken", "error"],
-
+      "triggers": [
+        "fix",
+        "debug",
+        "broken",
+        "error"
+      ],
       "file": "fix/SKILL.md",
       "priority": 2,
       "description": "Debugs and fixes issues systematically. Use when something is broken, throwing errors, or behaving unexpectedly."
     },
     "setup-project": {
-      "triggers": ["setup", "scaffold", "new-project"],
-
+      "triggers": [
+        "setup",
+        "scaffold",
+        "new-project"
+      ],
       "file": "setup-project/SKILL.md",
       "priority": 3,
       "description": "Initializes project with prd.json and standard config. Use when starting a new project."
     },
     "supabase": {
-      "triggers": ["db", "supabase", "postgres", "rls", "migration", "schema", "table", "database", "edge function"],
-      "context": ["supabase/"],
+      "triggers": [
+        "db",
+        "supabase",
+        "postgres",
+        "rls",
+        "migration",
+        "schema",
+        "table",
+        "database",
+        "edge function"
+      ],
+      "context": [
+        "supabase/"
+      ],
       "file": "supabase/SKILL.md",
       "priority": 3,
       "description": "Supabase CLI, Postgres performance, and schema patterns. Use for database operations, queries, RLS, and migrations."
     },
     "audit": {
-      "triggers": ["audit"],
-
+      "triggers": [
+        "audit"
+      ],
       "file": "audit/SKILL.md",
-      "requires": ["quality", "code-quality", "design", "security", "browser-auth", "perf", "a11y"],
+      "requires": [
+        "quality",
+        "code-quality",
+        "design",
+        "security",
+        "browser-auth",
+        "perf",
+        "a11y"
+      ],
       "priority": 1,
       "description": "Parallel quality audit with 7 specialized agents (Opus) including deploy readiness. Use when assessing app quality or before major releases."
     },
     "browser-auth": {
       "triggers": [],
-
       "file": "browser-auth/SKILL.md",
-      "requires": ["agent-browser"],
+      "requires": [
+        "agent-browser"
+      ],
       "priority": 2,
       "description": "Browser testing with agent-browser CLI and auth token injection. Loaded via test skill."
     },
     "checkpoint": {
-      "triggers": ["save"],
-
+      "triggers": [
+        "save"
+      ],
       "file": "checkpoint/SKILL.md",
       "priority": 2,
       "description": "Saves context state. Auto-triggered every 3 tasks."
     },
     "deploy": {
-      "triggers": ["ci", "deploy"],
-      "context": ["vercel.json", ".github/"],
+      "triggers": [
+        "ci",
+        "deploy"
+      ],
+      "context": [
+        "vercel.json",
+        ".github/"
+      ],
       "file": "deploy/SKILL.md",
       "priority": 2,
       "description": "Deploy workflow for Vercel, Supabase, and CI/CD pipelines. Use for deployment and CI/CD setup."
     },
     "quality": {
       "triggers": [],
-
       "file": "quality/SKILL.md",
       "priority": 0,
       "description": "Enforces type safety, design tokens, and all UI states."
     },
     "verify": {
-      "triggers": ["verify"],
-
+      "triggers": [
+        "verify"
+      ],
       "file": "verify/SKILL.md",
-      "requires": ["quality"],
+      "requires": [
+        "quality"
+      ],
       "priority": 2,
       "description": "Verifies work completeness with outcome-focused checks. Use after implementing features to ensure quality."
     },
     "agent-browser": {
-      "triggers": ["browser", "agent-browser", "web test", "ui test"],
-
+      "triggers": [
+        "browser",
+        "agent-browser",
+        "web test",
+        "ui test"
+      ],
       "file": "agent-browser/SKILL.md",
       "priority": 3,
       "description": "Browser automation CLI for AI agents. 5-6x more token-efficient than Playwright MCP. Use for browser testing and web automation."
     },
     "archive-prd": {
-      "triggers": ["archive", "compact prd", "prd too large"],
-
+      "triggers": [
+        "archive",
+        "compact prd",
+        "prd too large"
+      ],
       "file": "archive-prd/SKILL.md",
       "priority": 3,
       "description": "Archives completed stories from prd.json to reduce token usage."
     },
     "env-vars": {
-      "triggers": ["env", "environment", "credentials", "secrets", "api key"],
-      "context": [".env*"],
+      "triggers": [
+        "env",
+        "environment",
+        "credentials",
+        "secrets",
+        "api key"
+      ],
+      "context": [
+        ".env*"
+      ],
       "file": "env-vars/SKILL.md",
       "priority": 3,
       "description": "Manages environment variables and credentials securely. Use when configuring secrets or .env files."
     },
     "design": {
-      "triggers": ["design", "ui"],
-
+      "triggers": [
+        "design",
+        "ui"
+      ],
       "file": "design/SKILL.md",
-      "requires": ["quality"],
+      "requires": [
+        "quality"
+      ],
       "priority": 1,
       "description": "Creates distinctive UI with preserved structure. Avoids generic AI aesthetics. Use when designing or refining user interfaces."
     },
     "security": {
-      "triggers": ["security"],
-
+      "triggers": [
+        "security"
+      ],
       "file": "security/SKILL.md",
       "priority": 0,
       "description": "Pre-deploy security audit with vulnerability pattern scanning. Auto-loaded with review, audit, ship."
     },
     "remotion": {
-      "triggers": ["remotion", "video", "animation", "subtitle"],
-      "context": ["remotion/"],
+      "triggers": [
+        "remotion",
+        "video",
+        "animation",
+        "subtitle"
+      ],
+      "context": [
+        "remotion/"
+      ],
       "file": "remotion/SKILL.md",
       "priority": 2,
       "description": "Best practices for Remotion - video creation in React. Use when working with video compositions, animations, or subtitles."
     },
     "monitoring": {
-      "triggers": ["monitoring", "logs"],
-
+      "triggers": [
+        "monitoring",
+        "logs"
+      ],
       "file": "monitoring/SKILL.md",
       "priority": 2,
       "description": "Observability patterns for production - logging, error tracking, analytics. Use when setting up monitoring."
     },
     "update": {
-      "triggers": ["update dev", "update auto-dev", "update skills", "sync skills"],
-
+      "triggers": [
+        "update dev",
+        "update auto-dev",
+        "update skills",
+        "sync skills"
+      ],
       "file": "update/SKILL.md",
       "priority": 1,
       "description": "Updates claude-auto-dev to latest version. Syncs repo with ~/.claude."
     },
     "commit": {
-      "triggers": ["commit", "push", "commit-push-pr"],
-
+      "triggers": [
+        "commit",
+        "push",
+        "commit-push-pr"
+      ],
       "file": "commit/SKILL.md",
       "priority": 2,
       "description": "Standardized git commit, push, and PR creation workflow."
     },
     "perf": {
-      "triggers": ["perf", "performance", "lighthouse", "bundle size", "core web vitals"],
-
+      "triggers": [
+        "perf",
+        "performance",
+        "lighthouse",
+        "bundle size",
+        "core web vitals"
+      ],
       "file": "perf/SKILL.md",
       "priority": 2,
       "description": "Web performance audit - Core Web Vitals, bundle analysis, Lighthouse patterns."
     },
     "a11y": {
-      "triggers": ["a11y", "accessibility", "wcag", "screen reader"],
-
+      "triggers": [
+        "a11y",
+        "accessibility",
+        "wcag",
+        "screen reader"
+      ],
       "file": "a11y/SKILL.md",
       "priority": 2,
       "description": "Accessibility audit and patterns - WCAG 2.1 AA compliance for React apps."
     },
     "refactor": {
-      "triggers": ["refactor", "extract", "split", "restructure"],
-
+      "triggers": [
+        "refactor",
+        "extract",
+        "split",
+        "restructure"
+      ],
       "file": "refactor/SKILL.md",
       "priority": 2,
       "description": "Code refactoring patterns - extract, split, restructure without changing behavior."
     }
   },
   "defaults": {
-    "withPrdJson": ["core"],
-    "withoutPrdJson": ["setup-project"],
+    "withPrdJson": [
+      "core"
+    ],
+    "withoutPrdJson": [
+      "setup-project"
+    ],
     "always": []
   }
 }

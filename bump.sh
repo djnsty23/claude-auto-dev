@@ -71,25 +71,17 @@ else
   sed -i "s/\"${OLD_VERSION}\"/\"${NEW_VERSION}\"/g" install.ps1
 fi
 
-# 9. session-start.sh fallback
+# 9. session-start.js fallback version
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  sed -i '' "s/Auto-Dev v${OLD_VERSION}/Auto-Dev v${NEW_VERSION}/g" hooks/session-start.sh
+  sed -i '' "s/version = '${OLD_VERSION}'/version = '${NEW_VERSION}'/g" hooks/session-start.js
 else
-  sed -i "s/Auto-Dev v${OLD_VERSION}/Auto-Dev v${NEW_VERSION}/g" hooks/session-start.sh
-fi
-
-# 10. session-start.ps1 fallback
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  sed -i '' "s/Auto-Dev v${OLD_VERSION}/Auto-Dev v${NEW_VERSION}/g" hooks/session-start.ps1
-else
-  sed -i "s/Auto-Dev v${OLD_VERSION}/Auto-Dev v${NEW_VERSION}/g" hooks/session-start.ps1
+  sed -i "s/version = '${OLD_VERSION}'/version = '${NEW_VERSION}'/g" hooks/session-start.js
 fi
 
 echo ""
 echo "Updated $NEW_VERSION in:"
 echo "  VERSION, package.json, manifest.json, README.md,"
-echo "  commands.md, install.sh, install.ps1,"
-echo "  session-start.sh, session-start.ps1"
+echo "  commands.md, install.sh, install.ps1, session-start.js"
 echo ""
 echo "Manual steps:"
 echo "  1. Add ## [$NEW_VERSION] section to CHANGELOG.md"

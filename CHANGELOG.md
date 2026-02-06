@@ -1,5 +1,26 @@
 # Changelog
 
+## [5.1] - 2026-02-06
+
+### Security
+- **Remove auto-pull from session-start hook** — updates now manual via `update dev` only
+- **Write/Edit protection** for `~/.claude/hooks/` and `settings.json` in pre-tool-filter.js
+- **Settings backup** — `update dev` backs up settings.json before overwrite
+
+### Changed
+- **Node.js hooks** — all 4 hooks converted from .sh/.ps1 pairs to unified .js files
+- **Skill consolidation** (34 -> 32): `react-patterns` into `code-quality`, `preserve-ui` into `design`
+- **Preserve-ui extracted** to `design/references/preserve-ui.md` (loaded on demand, saves ~400 tokens)
+- **Manifest cleaned** — removed 20 empty `context: []` arrays
+- **CLAUDE.md deduplicated** — `~/CLAUDE.md` slimmed from 49 to 6 lines
+- **Windows settings** use `%USERPROFILE%` instead of `$HOME` for hook paths
+
+### Fixed
+- **Git Bash path translation** in session-start.js (`/c/Users/...` -> `C:/Users/...`)
+- **Bash `!` escaping** in update skill stale cleanup (`=== false` instead of `!`)
+- **validate.js** updated for .js hooks and CRLF normalization
+- **All frontmatter complete** — 0 WARN (was 2)
+
 ## [5.0] - 2026-02-05
 
 ### Breaking Changes
