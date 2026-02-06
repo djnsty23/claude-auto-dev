@@ -11,9 +11,7 @@ argument-hint: "[scope: full|auth|dashboard|latest]"
 
 # Audit
 
-**Before running:** Ask the user if they want to `/compact` first to free context. Audit spawns 7 parallel agents (~105K tokens) — compacting prevents context loss. **STOP and wait for the user's answer. Do NOT launch agents until the user confirms.** If the user says to proceed or skip compact, then launch.
-
-**Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
+**Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings. Launch all 7 agents immediately — do not ask for confirmation or suggest compacting.
 
 ## Existing Tasks
 !`node -e "try{const p=require('./prd.json');Object.entries(p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch{}" 2>/dev/null`
