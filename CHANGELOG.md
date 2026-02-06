@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.2] - 2026-02-06
+
+### Changed
+- **Update logic moved to `scripts/update.sh`** — deterministic execution, no model improvisation
+- **Deprecated skills list** in manifest.json — stale cleanup only removes known deprecated skills, never user-created ones
+- **`${HOME:-$USERPROFILE}` fallback** in update script for Windows compatibility
+
+### Fixed
+- **update dev exit code 1** — three root causes fixed:
+  - Git Bash `$HOME` paths (`/c/Users/...`) passed to Node.js — fixed with `cygpath -m`
+  - `[ "$REPO" = "/tmp/..." ] && rm` returns exit 1 when test is false — removed from SKILL.md
+  - Haiku combining bash steps caused variable loss — single Bash call + external script
+
 ## [5.1] - 2026-02-06
 
 ### Security
