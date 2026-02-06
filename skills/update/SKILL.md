@@ -67,18 +67,20 @@ fi
 NATIVE_REPO=$(cygpath -m "$REPO" 2>/dev/null || echo "$REPO")
 NATIVE_DEST=$(cygpath -m "$DEST" 2>/dev/null || echo "$DEST")
 node -e "
-const fs = require('fs');
-const path = require('path');
-const manifest = JSON.parse(fs.readFileSync(path.join('$NATIVE_REPO','skills','manifest.json'), 'utf8'));
-const validSkills = new Set(Object.keys(manifest.skills));
-const dest = path.join('$NATIVE_DEST','skills');
-fs.readdirSync(dest, { withFileTypes: true })
-  .filter(d => d.isDirectory() && validSkills.has(d.name) === false)
-  .forEach(d => {
-    fs.rmSync(path.join(dest, d.name), { recursive: true, force: true });
-    console.log('Removed stale: ' + d.name);
-  });
-"
+try {
+  const fs = require('fs');
+  const path = require('path');
+  const manifest = JSON.parse(fs.readFileSync(path.join('$NATIVE_REPO','skills','manifest.json'), 'utf8'));
+  const validSkills = new Set(Object.keys(manifest.skills));
+  const dest = path.join('$NATIVE_DEST','skills');
+  fs.readdirSync(dest, { withFileTypes: true })
+    .filter(d => d.isDirectory() && validSkills.has(d.name) === false)
+    .forEach(d => {
+      fs.rmSync(path.join(dest, d.name), { recursive: true, force: true });
+      console.log('Removed stale: ' + d.name);
+    });
+} catch(e) { console.log('Stale cleanup skipped: ' + e.message); }
+" || true
 ```
 
 ### Step 3: Report
