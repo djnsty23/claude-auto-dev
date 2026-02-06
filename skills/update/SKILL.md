@@ -17,83 +17,21 @@ Sync the local repo with ~/.claude installation.
 
 ## Process
 
-**IMPORTANT:** Always use bash commands (works in Git Bash and Mac/Linux). Never use cmd or PowerShell syntax — Claude Code runs bash.
-
-### Step 1: Find repo and pull
+**IMPORTANT:** Run this as a SINGLE bash command. Do not split into multiple Bash calls.
 
 ```bash
 REPO=$(cat ~/.claude/repo-path.txt 2>/dev/null | tr -d '\r\n')
-
-# If no repo-path.txt, clone to temp
 if [ -z "$REPO" ] || [ ! -d "$REPO" ]; then
   REPO=/tmp/claude-auto-dev
   rm -rf "$REPO"
   gh repo clone djnsty23/claude-auto-dev "$REPO"
 fi
-
-cd "$REPO" && git pull
-VERSION=$(cat VERSION)
+cd "$REPO" && git pull && bash "$REPO/scripts/update.sh" "$REPO"
 ```
 
-### Step 2: Sync files (cp -r works everywhere including Git Bash)
+That's it. The script handles copying skills, hooks, rules, settings, cleaning stale skills, and reporting the version.
 
-```bash
-DEST="$HOME/.claude"
-
-# Skills (includes commands.md)
-cp -r "$REPO/skills/"* "$DEST/skills/"
-
-# Hooks
-cp "$REPO/hooks/"* "$DEST/hooks/"
-
-# Rules (add/update only, no delete)
-cp "$REPO/config/rules/"* "$DEST/rules/" 2>/dev/null
-
-# Settings (hooks config + security deny rules)
-# Detect OS for correct settings file
-if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || -n "$WINDIR" ]]; then
-  cp "$REPO/config/settings.json" "$DEST/settings.json"
-else
-  cp "$REPO/config/settings-unix.json" "$DEST/settings.json"
-fi
-```
-
-### Step 2b: Clean stale skills
-
-```bash
-# Remove skill directories that are no longer in manifest
-# NOTE: cygpath converts Git Bash paths (/c/Users/...) to Windows-native (C:/Users/...)
-# NOTE: Use ===false instead of ! to avoid bash history expansion in node -e
-NATIVE_REPO=$(cygpath -m "$REPO" 2>/dev/null || echo "$REPO")
-NATIVE_DEST=$(cygpath -m "$DEST" 2>/dev/null || echo "$DEST")
-node -e "
-try {
-  const fs = require('fs');
-  const path = require('path');
-  const manifest = JSON.parse(fs.readFileSync(path.join('$NATIVE_REPO','skills','manifest.json'), 'utf8'));
-  const validSkills = new Set(Object.keys(manifest.skills));
-  const dest = path.join('$NATIVE_DEST','skills');
-  fs.readdirSync(dest, { withFileTypes: true })
-    .filter(d => d.isDirectory() && validSkills.has(d.name) === false)
-    .forEach(d => {
-      fs.rmSync(path.join(dest, d.name), { recursive: true, force: true });
-      console.log('Removed stale: ' + d.name);
-    });
-} catch(e) { console.log('Stale cleanup skipped: ' + e.message); }
-" || true
-```
-
-### Step 3: Report
-
-```
-[Update] Now at v{VERSION}
-[Update] Skills: synced
-[Update] Hooks: synced
-[Update] Settings: synced
-```
-
-### Step 4: Cleanup (if cloned to temp)
-
+If cloned to temp, clean up:
 ```bash
 [ "$REPO" = "/tmp/claude-auto-dev" ] && rm -rf "$REPO"
 ```
@@ -112,15 +50,3 @@ Note: `commands.md` lives inside `skills/` — it syncs automatically with skill
 ## What Does NOT Get Synced
 
 - `~/.claude/CLAUDE.md` - User instructions, never touched (uses @include for commands.md)
-
-## Execution
-
-When user says "update dev":
-
-1. Find repo via `~/.claude/repo-path.txt` or clone from GitHub
-2. Pull latest
-3. Copy skills/ and hooks/ (cp -r, works in Git Bash + Mac/Linux)
-4. Copy rules/ (add/update only)
-5. Overwrite settings.json (hooks config + security deny rules)
-6. Report version
-7. Clean up temp clone if used
