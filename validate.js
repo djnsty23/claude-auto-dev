@@ -154,21 +154,12 @@ function checkVersionSync() {
     allMatch = false;
   }
 
-  // session-start.sh
-  const sessionSh = readFile('hooks/session-start.sh');
-  if (sessionSh && sessionSh.includes(`v${version}`)) {
-    files.push('session-start.sh');
+  // session-start.js
+  const sessionJs = readFile('hooks/session-start.js');
+  if (sessionJs && sessionJs.includes(version)) {
+    files.push('session-start.js');
   } else {
-    log('FAIL', `Version v${version} not found in session-start.sh`);
-    allMatch = false;
-  }
-
-  // session-start.ps1
-  const sessionPs1 = readFile('hooks/session-start.ps1');
-  if (sessionPs1 && sessionPs1.includes(`v${version}`)) {
-    files.push('session-start.ps1');
-  } else {
-    log('FAIL', `Version v${version} not found in session-start.ps1`);
+    log('FAIL', `Version ${version} not found in session-start.js`);
     allMatch = false;
   }
 

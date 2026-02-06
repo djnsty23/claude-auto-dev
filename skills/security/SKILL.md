@@ -3,6 +3,7 @@ name: security
 description: Pre-deploy security audit with vulnerability pattern scanning. Auto-loaded with review, audit, ship.
 triggers:
   - security
+allowed-tools: Bash, Grep, Read, Glob
 model: opus
 user-invocable: true
 argument-hint: "[scope: full|quick|file]"

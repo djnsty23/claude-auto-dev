@@ -12,6 +12,7 @@ triggers:
   - database
   - edge function
 allowed-tools: Bash
+model: opus
 user-invocable: true
 ---
 

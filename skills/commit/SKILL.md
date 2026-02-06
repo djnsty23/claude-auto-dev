@@ -5,6 +5,8 @@ triggers:
   - commit
   - push
   - commit-push-pr
+allowed-tools: Bash, Read, Glob
+model: sonnet
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[type] [message]"
