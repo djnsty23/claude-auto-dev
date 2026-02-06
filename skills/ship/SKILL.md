@@ -29,7 +29,7 @@ git status --short         # Warn if uncommitted changes
 | Build fails | **STOP** - fix errors first |
 | Typecheck fails | **STOP** - fix types first |
 | Tests fail | **STOP** - fix tests first |
-| Uncommitted changes | Warn, suggest commit first |
+| Uncommitted changes | Warn user, ask if they want to commit (use git directly, do NOT invoke the commit skill) |
 | All pass | Continue to Step 2 |
 
 ## Step 2: Security Scan (REQUIRED)

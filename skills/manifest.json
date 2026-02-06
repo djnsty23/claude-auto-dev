@@ -133,8 +133,7 @@
       "requires": [
         "review",
         "security",
-        "test",
-        "commit"
+        "test"
       ],
       "priority": 3,
       "description": "Pre-deploy checklist with review, security, and test verification. Use when ready to deploy."
