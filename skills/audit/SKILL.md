@@ -11,7 +11,7 @@ argument-hint: "[scope: full|auth|dashboard|latest]"
 
 # Audit
 
-**Before running:** Tell the user: "Audit spawns 7 parallel agents (~105K tokens). Type `/compact` first if you want to free context, then say `audit` again. Or say `go` to launch now." Wait for the user to respond. Do NOT try to invoke `/compact` yourself — it is a built-in CLI command only the user can type.
+**Before running:** Tell the user: "Audit spawns 7 parallel agents — this is token-heavy. Type `/compact` first to free context, then say `audit` again. Or say `go` to launch now." Wait for the user to respond. Do NOT try to invoke `/compact` yourself — it is a built-in CLI command only the user can type.
 
 **Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
 
@@ -216,7 +216,7 @@ This is instant and free — use it before committing. The full agent audit is f
 
 ## Token Cost
 
-- 1 Opus agent (Security) + 6 Sonnet agents = ~60K tokens total (~80% cheaper than all-Opus)
+- 7 parallel agents (1 Opus + 6 Sonnet). Token cost varies by codebase size.
 - Time: 2-4 minutes (parallel execution)
 - Context efficient: agents run in background, results aggregated
 
