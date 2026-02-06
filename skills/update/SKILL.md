@@ -62,6 +62,7 @@ fi
 
 ```bash
 # Remove skill directories that are no longer in manifest
+# NOTE: Use ===false instead of ! to avoid bash history expansion in node -e
 node -e "
 const fs = require('fs');
 const path = require('path');
@@ -69,7 +70,7 @@ const manifest = JSON.parse(fs.readFileSync('$REPO/skills/manifest.json', 'utf8'
 const validSkills = new Set(Object.keys(manifest.skills));
 const dest = '$DEST/skills';
 fs.readdirSync(dest, { withFileTypes: true })
-  .filter(d => d.isDirectory() && !validSkills.has(d.name))
+  .filter(d => d.isDirectory() && validSkills.has(d.name) === false)
   .forEach(d => {
     fs.rmSync(path.join(dest, d.name), { recursive: true, force: true });
     console.log('Removed stale: ' + d.name);
