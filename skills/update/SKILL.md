@@ -29,12 +29,7 @@ fi
 cd "$REPO" && git pull && bash "$REPO/scripts/update.sh" "$REPO"
 ```
 
-That's it. The script handles copying skills, hooks, rules, settings, cleaning stale skills, and reporting the version.
-
-If cloned to temp, clean up:
-```bash
-[ "$REPO" = "/tmp/claude-auto-dev" ] && rm -rf "$REPO"
-```
+That's it. The script handles everything: copy, stale cleanup, temp clone removal, and version report.
 
 ## What Gets Synced
 

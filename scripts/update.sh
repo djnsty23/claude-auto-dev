@@ -52,6 +52,6 @@ echo "[Update] Hooks: synced"
 echo "[Update] Settings: synced"
 
 # Cleanup temp clone if used
-[ "$REPO" = "/tmp/claude-auto-dev" ] && rm -rf "$REPO"
+[ "$REPO" = "/tmp/claude-auto-dev" ] && rm -rf "$REPO" || true
 
 exit 0
