@@ -1,6 +1,17 @@
 {
   "version": "5.1",
   "description": "32 skills - consolidated synergy chains, dynamic context injection, argument hints, PreCompact hook",
+  "deprecated": [
+    "supabase-postgres",
+    "supabase-schema",
+    "browser-test",
+    "auth-token-injection",
+    "security-patterns",
+    "self-review",
+    "ci-cd",
+    "react-patterns",
+    "preserve-ui"
+  ],
   "skills": {
     "core": {
       "triggers": [],

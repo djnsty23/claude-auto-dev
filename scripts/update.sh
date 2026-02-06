@@ -26,7 +26,7 @@ else
   cp "$REPO/config/settings-unix.json" "$DEST/settings.json"
 fi
 
-# Clean stale skill directories not in manifest
+# Clean deprecated skills only (user-created skills are never touched)
 NATIVE_REPO=$(cygpath -m "$REPO" 2>/dev/null || echo "$REPO")
 NATIVE_DEST=$(cygpath -m "$DEST" 2>/dev/null || echo "$DEST")
 node -e "
@@ -34,13 +34,13 @@ try {
   const fs = require('fs');
   const path = require('path');
   const manifest = JSON.parse(fs.readFileSync(path.join('$NATIVE_REPO','skills','manifest.json'), 'utf8'));
-  const validSkills = new Set(Object.keys(manifest.skills));
+  const deprecated = new Set(manifest.deprecated || []);
   const dest = path.join('$NATIVE_DEST','skills');
   fs.readdirSync(dest, { withFileTypes: true })
-    .filter(d => d.isDirectory() && validSkills.has(d.name) === false)
+    .filter(d => d.isDirectory() && deprecated.has(d.name))
     .forEach(d => {
       fs.rmSync(path.join(dest, d.name), { recursive: true, force: true });
-      console.log('Removed stale: ' + d.name);
+      console.log('Removed deprecated: ' + d.name);
     });
 } catch(e) { console.log('Stale cleanup skipped: ' + e.message); }
 " || true
