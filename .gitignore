@@ -22,6 +22,10 @@ ledger.json
 # Auto mode flag (session-specific)
 .claude/auto-active
 
+# Update backups and compact state
+settings.backup.json
+.claude/pre-compact-state.json
+
 # Node dependencies
 node_modules/
 

@@ -8,7 +8,7 @@ triggers:
   - bundle size
   - core web vitals
 allowed-tools: Bash, Read, Grep, Glob
-model: sonnet
+model: opus
 user-invocable: true
 ---
 

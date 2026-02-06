@@ -25,7 +25,8 @@ try {
             try {
                 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
                 hasTypecheck = !!(pkg.scripts && pkg.scripts.typecheck);
-            } catch {
+            } catch (parseErr) {
+                process.stderr.write(`[Typecheck] package.json parse error: ${parseErr.message}\n`);
                 hasTypecheck = false;
             }
 

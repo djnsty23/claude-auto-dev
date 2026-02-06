@@ -35,8 +35,8 @@ try {
                         nextTask = pending[0][0];
                     }
                 }
-            } catch {
-                // Silent fail on prd.json parse
+            } catch (parseErr) {
+                process.stderr.write(`[Auto-Dev] prd.json parse error: ${parseErr.message}\n`);
             }
         }
 

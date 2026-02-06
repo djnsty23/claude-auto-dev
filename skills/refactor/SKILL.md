@@ -7,7 +7,7 @@ triggers:
   - split
   - restructure
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob
-model: sonnet
+model: opus
 user-invocable: true
 argument-hint: "[target file or pattern]"
 ---

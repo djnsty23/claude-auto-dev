@@ -7,7 +7,7 @@ triggers:
   - web test
   - ui test
 allowed-tools: Bash
-model: sonnet
+model: opus
 user-invocable: true
 ---
 

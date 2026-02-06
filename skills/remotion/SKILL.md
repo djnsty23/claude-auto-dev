@@ -8,7 +8,7 @@ triggers:
   - animation
   - subtitle
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob
-model: sonnet
+model: opus
 ---
 
 # Remotion Best Practices

@@ -5,7 +5,7 @@ triggers:
   - monitoring
   - logs
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob
-model: sonnet
+model: opus
 user-invocable: true
 ---
 

@@ -6,7 +6,7 @@ triggers:
   - scaffold
   - new-project
 allowed-tools: Bash, Read, Write, Edit, Glob
-model: sonnet
+model: opus
 user-invocable: true
 disable-model-invocation: true
 ---

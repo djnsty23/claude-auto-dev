@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Claude Auto-Dev Installer (v5.3)
+    Claude Auto-Dev Installer (v5.4)
 .EXAMPLE
     .\install.ps1              # Symlink skills + hooks, add update-dev alias
     .\install.ps1 -Full        # + rules + settings
@@ -18,7 +18,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Version = Get-Content "$ScriptDir\VERSION" -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $Version) { $Version = "5.3" }
+if (-not $Version) { $Version = "5.4" }
 
 $ClaudeDir = "$env:USERPROFILE\.claude"
 

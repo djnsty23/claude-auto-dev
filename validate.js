@@ -51,8 +51,9 @@ function parseFrontmatter(content) {
         fm[currentKey] = val;
       }
       currentArray = Array.isArray(fm[currentKey]) ? fm[currentKey] : null;
-    } else if (currentArray !== null && line.match(/^\s+-\s+(.*)/)) {
-      currentArray.push(line.match(/^\s+-\s+(.*)/)[1].trim());
+    } else if (currentArray !== null) {
+      const listMatch = line.match(/^\s+-\s+(.*)/);
+      if (listMatch) currentArray.push(listMatch[1].trim());
     }
   }
   return fm;
@@ -346,7 +347,8 @@ function checkCommandsCompleteness() {
     // Check if any trigger appears in commands.md
     const triggers = fm.triggers || [];
     const appearsInCommands = triggers.some(t => {
-      const pattern = new RegExp(`\`${t}\`|${t}\\b`, 'i');
+      const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`\`${escaped}\`|${escaped}\\b`, 'i');
       return pattern.test(commands);
     });
 

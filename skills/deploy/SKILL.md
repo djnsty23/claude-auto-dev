@@ -5,7 +5,7 @@ triggers:
   - ci
   - deploy
 allowed-tools: Bash
-model: sonnet
+model: opus
 user-invocable: true
 disable-model-invocation: true
 ---

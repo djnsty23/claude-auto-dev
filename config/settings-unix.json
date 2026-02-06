@@ -39,7 +39,11 @@
       "Bash(git checkout .)",
       "Bash(git checkout -- *)",
       "Bash(git restore .)",
-      "Bash(git restore --staged .)"
+      "Bash(git restore --staged .)",
+      "Bash(git stash drop *)",
+      "Bash(git stash clear)",
+      "Bash(git branch -D *)",
+      "Bash(rm -r *)"
     ]
   },
   "model": "opus",

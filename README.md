@@ -2,9 +2,36 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-5.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-5.3-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
+
+---
+
+## Quick Start
+
+```bash
+# Mac/Linux
+git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
+cd ~/claude-auto-dev && chmod +x install.sh && ./install.sh
+
+# Windows (PowerShell)
+git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
+cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
+```
+```
+claude
+```
+```
+You: brainstorm
+Claude: [Scans codebase, finds improvements] → Created 5 stories in prd.json
+
+You: auto
+Claude: [Works through all tasks autonomously] → 5/5 complete
+
+You: ship
+Claude: [Review → security scan → deploy] → Shipped to production
+```
 
 ---
 
@@ -40,7 +67,7 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
 You: update dev
 Claude: [pulls latest, syncs skills/hooks, removes stale files]
-        Updated to v5.3
+        Updated to v5.4
 ```
 
 **Option 2: Automatic on session start**
@@ -85,8 +112,12 @@ cd ~/claude-auto-dev && git pull
 ## Workflow
 
 ```
-brainstorm  →  generates tasks  →  auto  →  completes all  →  ship
+brainstorm → scans codebase, creates stories in prd.json
+auto       → implements all pending stories + runs tests
+ship       → review + security scan + build + deploy
 ```
+
+See [`skills/commands.md`](skills/commands.md) for the full list of 32 skills.
 
 ---
 
@@ -94,7 +125,7 @@ brainstorm  →  generates tasks  →  auto  →  completes all  →  ship
 
 **Global** (`~/.claude/`):
 ```
-skills/        # Synced from repo (34 skills)
+skills/        # Synced from repo (32 skills)
 hooks/         # Symlink to repo
 rules/         # Your custom rules (optional)
 repo-path.txt  # Points to your clone location
@@ -152,6 +183,14 @@ cd /path/to/claude-auto-dev
 - Check `~/.claude/repo-path.txt` points to your clone
 - Ensure you have internet on Claude start
 - Manual: `cd ~/claude-auto-dev && git pull`
+
+**Skills not loading?**
+- Verify `~/.claude/skills/` exists and contains skill directories
+- Restart terminal after install
+
+**Hook errors?**
+- Requires Node.js v18+. Check: `node -v`
+- Hooks fail silently by design — run `node validate.js` to check consistency
 
 ---
 

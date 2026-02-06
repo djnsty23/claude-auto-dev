@@ -4,7 +4,7 @@ description: Verifies work completeness with outcome-focused checks. Use after i
 triggers:
   - verify
 allowed-tools: Bash, Read, Grep, Glob, TaskUpdate, TaskList
-model: sonnet
+model: opus
 user-invocable: true
 ---
 

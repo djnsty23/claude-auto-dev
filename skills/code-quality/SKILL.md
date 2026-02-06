@@ -3,7 +3,7 @@ name: code-quality
 description: Learned patterns from production including React/Next.js best practices. Auto-loaded with auto, review, and build.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
-model: sonnet
+model: opus
 ---
 
 # Code Quality Rules

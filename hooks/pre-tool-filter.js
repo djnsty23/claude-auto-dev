@@ -5,6 +5,53 @@
 
 const fs = require('fs');
 
+// Module-level constants — compiled once, reused on every tool call
+const DANGEROUS_BASH_PATTERNS = [
+    /rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|\/)|(-[a-z]*f[a-z]*\s+-[a-z]*r))/i,   // rm -rf, rm -r -f
+    /rm\s+--recursive/i,                      // rm --recursive
+    /rm\s+--force\s+--recursive/i,            // rm --force --recursive
+    /rm\s+--force\s+-r/i,                     // rm --force -r
+    /rm\s+-r\s+[^-]/i,                        // rm -r (without -f, still dangerous)
+    /find\s+\/\s+-delete/i,                    // find / -delete
+    /dd\s+if=.*\/dev\//i,                      // dd if=/dev/zero
+    /mkfs\./i,                                 // mkfs.ext4
+    /chmod\s+-R\s+000\s+\//i,                  // chmod -R 000 /
+    /git\s+reset\s+--hard/i,                   // git reset --hard
+    /git\s+push\s+(--force|.*--force)/i,       // git push --force (any flag order)
+    /git\s+clean\s+(-[a-z]*f|--force)/i,       // git clean -f, -fd, --force
+    /git\s+checkout\s+(\.|--\s+\.)/i,          // git checkout .
+    /git\s+restore\s+\./i,                     // git restore .
+    /git\s+stash\s+(drop|clear)/i,             // git stash drop/clear
+    /git\s+branch\s+-D/,                        // git branch -D (force delete, case-sensitive)
+    /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
+    /curl.*\|\s*(ba)?sh/i,                     // curl | bash (remote code exec)
+    /wget.*\|\s*(ba)?sh/i,                     // wget | bash
+];
+
+const DANGEROUS_WIN32_PATTERNS = [
+    /format\s+c:/i,                            // format c:
+    /del\s+\/s\s+\/q\s+c:/i,                  // del /s /q c:
+    /diskpart/i,                               // diskpart (Windows disk utility)
+];
+
+const PROTECTED_FILE_PATTERNS = [
+    /[/\\]\.claude[/\\]hooks[/\\]/,            // Hook scripts (security-critical)
+    /[/\\]\.claude[/\\]settings\.json$/,        // Permission deny rules
+];
+
+const SKIP_READ_PATTERNS = [
+    /node_modules/,
+    /dist[/\\]/,
+    /build[/\\]/,
+    /\.git[/\\]/,
+    /package-lock\.json/,
+    /yarn\.lock/,
+    /pnpm-lock\.yaml/,
+    /\.next[/\\]/,
+    /coverage[/\\]/,
+    /\.turbo[/\\]/,
+];
+
 try {
     const input = fs.readFileSync(0, 'utf8');
 
@@ -24,36 +71,20 @@ try {
         const command = toolInput.command || '';
         if (!command) process.exit(0);
 
-        const dangerousPatterns = [
-            /rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|\/)|(-[a-z]*f[a-z]*\s+-[a-z]*r))/i,   // rm -rf, rm -r -f
-            /rm\s+--recursive/i,                      // rm --recursive
-            /find\s+\/\s+-delete/i,                    // find / -delete
-            /dd\s+if=.*\/dev\//i,                      // dd if=/dev/zero
-            /mkfs\./i,                                 // mkfs.ext4
-            /chmod\s+-R\s+000\s+\//i,                  // chmod -R 000 /
-            /git\s+reset\s+--hard/i,                   // git reset --hard
-            /git\s+push\s+(--force|.*--force)/i,       // git push --force (any flag order)
-            /git\s+clean\s+(-[a-z]*f|--force)/i,       // git clean -f, -fd, --force
-            /git\s+checkout\s+(\.|--\s+\.)/i,          // git checkout .
-            /git\s+restore\s+\./i,                     // git restore .
-            /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
-            /curl.*\|\s*(ba)?sh/i,                     // curl | bash (remote code exec)
-            /wget.*\|\s*(ba)?sh/i,                     // wget | bash
-        ];
-
-        // Windows-specific dangerous patterns
-        if (process.platform === 'win32') {
-            dangerousPatterns.push(
-                /format\s+c:/i,                        // format c:
-                /del\s+\/s\s+\/q\s+c:/i,              // del /s /q c:
-                /diskpart/i                            // diskpart (Windows disk utility)
-            );
-        }
-
-        for (const pattern of dangerousPatterns) {
+        for (const pattern of DANGEROUS_BASH_PATTERNS) {
             if (pattern.test(command)) {
                 process.stderr.write(`Blocked potentially dangerous command: ${command}\n`);
                 process.exit(2);
+            }
+        }
+
+        // Windows-specific dangerous patterns
+        if (process.platform === 'win32') {
+            for (const pattern of DANGEROUS_WIN32_PATTERNS) {
+                if (pattern.test(command)) {
+                    process.stderr.write(`Blocked potentially dangerous command: ${command}\n`);
+                    process.exit(2);
+                }
             }
         }
     }
@@ -61,11 +92,7 @@ try {
     // Write/Edit protection - prevent Claude from modifying security-critical files
     if (toolName === 'Write' || toolName === 'Edit') {
         const filePath = toolInput.file_path || '';
-        const protectedPatterns = [
-            /[/\\]\.claude[/\\]hooks[/\\]/,        // Hook scripts (security-critical)
-            /[/\\]\.claude[/\\]settings\.json$/,    // Permission deny rules
-        ];
-        for (const pattern of protectedPatterns) {
+        for (const pattern of PROTECTED_FILE_PATTERNS) {
             if (pattern.test(filePath)) {
                 process.stderr.write(`Blocked: Cannot modify security-critical file: ${filePath}\nUse 'update dev' to sync from repo instead.\n`);
                 process.exit(2);
@@ -77,20 +104,7 @@ try {
     if (toolName === 'Read') {
         const filePath = toolInput.file_path || '';
         if (filePath) {
-            const skipPatterns = [
-                /node_modules/,
-                /dist[/\\]/,
-                /build[/\\]/,
-                /\.git[/\\]/,
-                /package-lock\.json/,
-                /yarn\.lock/,
-                /pnpm-lock\.yaml/,
-                /\.next[/\\]/,
-                /coverage[/\\]/,
-                /\.turbo[/\\]/,
-            ];
-
-            for (const pattern of skipPatterns) {
+            for (const pattern of SKIP_READ_PATTERNS) {
                 if (pattern.test(filePath)) {
                     process.stderr.write(`Skipping generated/large file: ${filePath} (use targeted search instead)\n`);
                     process.exit(2);

@@ -2,7 +2,7 @@
 name: browser-auth
 description: Browser testing with agent-browser CLI and auth token injection. Loaded via test skill.
 allowed-tools: Bash
-model: haiku
+model: opus
 user-invocable: false
 ---
 

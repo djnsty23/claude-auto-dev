@@ -2,7 +2,7 @@
 name: core
 description: prd.json schema and task system - auto-loaded when prd.json exists
 allowed-tools: Read, Write, Edit, TaskCreate, TaskUpdate, TaskList, Grep, Glob
-model: sonnet
+model: opus
 user-invocable: false
 ---
 

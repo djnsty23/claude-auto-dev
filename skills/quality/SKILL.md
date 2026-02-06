@@ -3,7 +3,7 @@ name: quality
 description: Enforces type safety, design tokens, and all UI states.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
-model: sonnet
+model: opus
 ---
 
 # Quality Principles

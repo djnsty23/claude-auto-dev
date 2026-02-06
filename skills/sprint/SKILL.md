@@ -4,7 +4,7 @@ description: Creates or advances sprints in prd.json. Use when starting new work
 triggers:
   - sprint
 allowed-tools: Read, Write, Edit, TaskCreate, TaskUpdate, TaskList
-model: sonnet
+model: opus
 user-invocable: true
 argument-hint: "[new|advance|close]"
 ---

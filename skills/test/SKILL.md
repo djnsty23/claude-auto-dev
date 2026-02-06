@@ -5,7 +5,7 @@ triggers:
   - test
   - e2e
 allowed-tools: Bash, Read, Grep, Glob, TaskCreate
-model: sonnet
+model: opus
 user-invocable: true
 argument-hint: "[unit|browser|all]"
 ---

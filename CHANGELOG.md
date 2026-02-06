@@ -1,5 +1,27 @@
 # Changelog
 
+## [5.4] - 2026-02-06
+
+### Security
+- **Shell injection prevention** — bump.sh validates version format, update.sh passes paths via `process.env` instead of string interpolation
+- **Expanded deny rules** — `rm -r`, `git stash drop/clear`, `git branch -D` blocked in settings and pre-tool-filter
+- **Env var protection** — session-start blocks overriding `PATH`, `HOME`, `NODE_OPTIONS` from .env.local
+- **Fallback validation** — update.sh validates JSON before fallback copy
+
+### Changed
+- **All agents now use Opus** — 27 skills on Opus, 5 simple commands on Haiku (update, status, clean, archive, env)
+- **Audit compact detection** — skips `/compact` suggestion if user already compacted this session
+- **Pre-tool-filter refactored** — patterns moved to module-level constants (compiled once, not per call)
+- **Error logging** — all empty catch blocks now log parse errors to stderr
+
+### Fixed
+- **README badge** — was stuck on 5.0, now auto-bumped
+- **README skill count** — 34 → 32 (actual)
+- **README Quick Start** — added PowerShell instructions, example session
+- **`git branch -D` pattern** — case-sensitive to not block safe `git branch -d`
+- **validate.js** — safe regex match, escaped special chars in trigger matching
+- **.gitignore** — added `settings.backup.json`, `.claude/pre-compact-state.json`
+
 ## [5.3] - 2026-02-06
 
 ### Added

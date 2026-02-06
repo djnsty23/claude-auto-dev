@@ -12,6 +12,12 @@ if [ -z "$NEW_VERSION" ]; then
     exit 1
 fi
 
+# Validate version format (prevents shell injection via node -e)
+if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+    echo "Error: Version must match X.Y or X.Y.Z (got: $NEW_VERSION)"
+    exit 1
+fi
+
 OLD_VERSION=$(cat VERSION)
 echo "Bumping $OLD_VERSION → $NEW_VERSION"
 echo ""

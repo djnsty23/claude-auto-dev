@@ -7,7 +7,7 @@ triggers:
   - wcag
   - screen reader
 allowed-tools: Bash, Read, Grep, Glob
-model: sonnet
+model: opus
 user-invocable: true
 ---
 

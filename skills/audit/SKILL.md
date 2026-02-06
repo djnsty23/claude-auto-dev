@@ -4,14 +4,14 @@ description: Parallel quality audit with 7 specialized agents (Opus) including d
 triggers:
   - audit
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
-model: sonnet
+model: opus
 user-invocable: true
 argument-hint: "[scope: full|auth|dashboard|latest]"
 ---
 
 # Audit
 
-**Before running:** Tell the user: "Audit spawns 7 parallel agents — this is token-heavy. Type `/compact` first to free context, then say `audit` again. Or say `go` to launch now." Wait for the user to respond. Do NOT try to invoke `/compact` yourself — it is a built-in CLI command only the user can type.
+**Before running:** Check if the user ran `/compact` recently in this session (look for "Compacted" output in recent messages). If they did, launch immediately — no need to suggest it again. If they did NOT compact recently, tell the user: "Audit spawns 7 parallel agents — this is token-heavy. Type `/compact` first to free context, then say `audit` again. Or say `go` to launch now." Wait for the user to respond. Do NOT try to invoke `/compact` yourself — it is a built-in CLI command only the user can type.
 
 **Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
 
@@ -24,12 +24,12 @@ argument-hint: "[scope: full|auth|dashboard|latest]"
 User says "audit"
     │
     ├─► Agent 1: Security Audit (Opus) - secrets, XSS, CORS, injection
-    ├─► Agent 2: Performance Audit (Sonnet) - memo, effects, re-renders
-    ├─► Agent 3: Accessibility Audit (Sonnet) - WCAG, keyboard, contrast
-    ├─► Agent 4: Type Safety Audit (Sonnet) - any, ts-ignore, conflicts
-    ├─► Agent 5: UX/UI Audit (Sonnet) - states, tokens, feedback
-    ├─► Agent 6: Test Coverage Audit (Sonnet) - critical paths, gaps
-    └─► Agent 7: Deploy Readiness Audit (Sonnet) - PWA, env vars, runtime
+    ├─► Agent 2: Performance Audit (Opus) - memo, effects, re-renders
+    ├─► Agent 3: Accessibility Audit (Opus) - WCAG, keyboard, contrast
+    ├─► Agent 4: Type Safety Audit (Opus) - any, ts-ignore, conflicts
+    ├─► Agent 5: UX/UI Audit (Opus) - states, tokens, feedback
+    ├─► Agent 6: Test Coverage Audit (Opus) - critical paths, gaps
+    └─► Agent 7: Deploy Readiness Audit (Opus) - PWA, env vars, runtime
 
     [All run in parallel via Task tool with run_in_background: true]
 
@@ -45,22 +45,22 @@ Launch all 7 agents in a single message:
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Security audit for [PROJECT_PATH]. Scan: exposed secrets (check src/ AND supabase/migrations/ for hardcoded keys, passwords, service_role, cron secrets), dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. ALSO check Supabase RLS policy quality: tables with PII (emails, tokens) that allow SELECT without auth.uid() restriction, OAuth tokens accessible via public policies, profiles without row-level restriction. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Performance audit for [PROJECT_PATH]. Scan: missing React.memo on list items, useEffect without cleanup, inline objects in JSX, missing lazy loading, N+1 queries. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Accessibility audit for [PROJECT_PATH]. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets (<44px), div/span with onClick (should be button), outline-none without focus-visible replacement, user-scalable=no or maximum-scale=1, missing autocomplete on form inputs, inputs without correct type/inputmode, onPaste with preventDefault, missing prefers-reduced-motion support, transition: all (should list properties), autoFocus without justification. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Type safety audit for [PROJECT_PATH]. Scan: 'any' usage (skip test files), @ts-ignore, type assertions without guards, conflicting type definitions, untyped API responses. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "UX/UI audit for [PROJECT_PATH]. Scan: missing loading states, missing empty states, missing error states, hardcoded colors instead of tokens, missing toast feedback, images without width/height (causes CLS), missing loading=lazy on below-fold images, large lists without virtualization (50+ items .map). ALSO check responsive layout: sidebars without mobile hide/toggle (must use hidden md:block pattern), grids without mobile breakpoints (need grid-cols-1 md:grid-cols-2), fixed-width containers that overflow on mobile, touch targets under 44px, missing mobile navigation (hamburger/drawer), modals not full-screen on mobile. ALSO check: hardcoded date/number formats (should use Intl.*), missing text truncation on user-generated content, flex children without min-w-0. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Test coverage audit for [PROJECT_PATH]. Scan: auth flows without tests, data mutations without tests, hooks without test files, utilities without tests. List critical gaps. Report: Severity, What needs testing, Priority." })
 
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Deploy readiness audit for [PROJECT_PATH]. Scan for runtime issues that unit tests miss: 1) PWA manifest (manifest.json/site.webmanifest) - check every icon/screenshot path references a file that actually exists in public/. 2) Environment variables - check all process.env/import.meta.env references have values set (no trailing newlines/whitespace). 3) Supabase config - check anon key for trailing newline characters that break WebSocket URLs. 4) Asset references - grep for paths like /icons/, /images/, /screenshots/ in source and verify the files exist in public/. 5) next.config/vercel.json - check for mismatched rewrites or missing headers. Report: Severity, File:line, Issue, Fix." })
 ```
 
@@ -216,7 +216,7 @@ This is instant and free — use it before committing. The full agent audit is f
 
 ## Token Cost
 
-- 7 parallel agents (1 Opus + 6 Sonnet). Token cost varies by codebase size.
+- 7 parallel Opus agents. Token cost varies by codebase size.
 - Time: 2-4 minutes (parallel execution)
 - Context efficient: agents run in background, results aggregated
 

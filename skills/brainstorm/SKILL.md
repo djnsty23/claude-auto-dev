@@ -30,16 +30,16 @@ argument-hint: "[focus area]"
 Launch 4 scans simultaneously using Task tool with `run_in_background: true`:
 
 ```typescript
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Find TODOs/FIXMEs in [PROJECT_PATH]. Report: count, file:line, content." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Find console.log statements in [PROJECT_PATH] (skip test files). Report: count, files." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Find hardcoded colors (text-white, bg-black, #hex, rgb) in [PROJECT_PATH]. Report: count, files." })
 
-Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Find large files (>300 lines) and 'any' type usage in [PROJECT_PATH]. Report: file, lines, issues." })
 ```
 

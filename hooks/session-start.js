@@ -13,13 +13,15 @@ try {
     // ============================================================
     // 1. Display version (read from local install, no network)
     // ============================================================
-    let version = '5.3';
+    let version = '5.4';
     const manifestPath = path.join(CLAUDE_DIR, 'skills', 'manifest.json');
     if (fs.existsSync(manifestPath)) {
         try {
             const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
             if (manifest.version) version = manifest.version;
-        } catch {}
+        } catch (parseErr) {
+            process.stderr.write(`[Auto-Dev] manifest parse error: ${parseErr.message}\n`);
+        }
     }
     console.log(`[Auto-Dev v${version}]`);
 
@@ -39,7 +41,8 @@ try {
             let value = trimmed.substring(eqIndex + 1);
             value = value.replace(/^["']/, '').replace(/["']$/, '');
 
-            if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+            const PROTECTED_VARS = new Set(['PATH', 'HOME', 'USERPROFILE', 'NODE_OPTIONS', 'NODE_PATH', 'SHELL', 'COMSPEC', 'SystemRoot']);
+            if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !PROTECTED_VARS.has(key)) {
                 process.env[key] = value;
             }
         }
@@ -72,8 +75,8 @@ try {
             if (sprint) {
                 console.log(`[Sprint] ${sprint} | ${total} done, ${pending} pending`);
             }
-        } catch {
-            // Silent fail on prd.json parse
+        } catch (parseErr) {
+            process.stderr.write(`[Auto-Dev] prd.json parse error: ${parseErr.message}\n`);
         }
     }
 

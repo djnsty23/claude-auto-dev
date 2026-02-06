@@ -4,7 +4,7 @@ description: Saves context state. Auto-triggered every 3 tasks.
 triggers:
   - save
 allowed-tools: Read, Write, TaskList, Grep
-model: sonnet
+model: opus
 user-invocable: true
 ---
 

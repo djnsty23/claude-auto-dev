@@ -27,16 +27,18 @@ else
 fi
 NATIVE_SRC=$(cygpath -m "$SETTINGS_SRC" 2>/dev/null || echo "$SETTINGS_SRC")
 NATIVE_SETTINGS_DEST=$(cygpath -m "$DEST/settings.json" 2>/dev/null || echo "$DEST/settings.json")
-node -e "
+UPDATE_SRC="$NATIVE_SRC" UPDATE_DEST="$NATIVE_SETTINGS_DEST" node -e "
 const fs = require('fs');
+const src = process.env.UPDATE_SRC;
+const dest = process.env.UPDATE_DEST;
 try {
-  const incoming = JSON.parse(fs.readFileSync('$NATIVE_SRC', 'utf8'));
+  const incoming = JSON.parse(fs.readFileSync(src, 'utf8'));
   let existing = {};
-  try { existing = JSON.parse(fs.readFileSync('$NATIVE_SETTINGS_DEST', 'utf8')); } catch {}
+  try { existing = JSON.parse(fs.readFileSync(dest, 'utf8')); } catch {}
 
   // Backup existing settings
   if (Object.keys(existing).length > 0) {
-    fs.writeFileSync('$NATIVE_SETTINGS_DEST'.replace('.json', '.backup.json'), JSON.stringify(existing, null, 2));
+    fs.writeFileSync(dest.replace('.json', '.backup.json'), JSON.stringify(existing, null, 2));
   }
 
   // Merge permissions: incoming is base, add user-only entries
@@ -55,25 +57,30 @@ try {
     if (incomingHookEvents.has(event) === false) merged.hooks[event] = hooks;
   });
 
-  fs.writeFileSync('$NATIVE_SETTINGS_DEST', JSON.stringify(merged, null, 2) + '\\n');
+  fs.writeFileSync(dest, JSON.stringify(merged, null, 2) + '\\n');
   console.log('[Update] Settings: merged (user rules preserved)');
 } catch(e) {
-  // Fallback: just copy
-  fs.copyFileSync('$NATIVE_SRC', '$NATIVE_SETTINGS_DEST');
-  console.log('[Update] Settings: copied (merge failed: ' + e.message + ')');
+  // Fallback: validate incoming before copying
+  try {
+    JSON.parse(fs.readFileSync(src, 'utf8'));
+    fs.copyFileSync(src, dest);
+    console.log('[Update] Settings: copied (merge failed: ' + e.message + ')');
+  } catch(e2) {
+    console.log('[Update] Settings: skipped (invalid source: ' + e2.message + ')');
+  }
 }
 " || true
 
 # Clean deprecated skills only (user-created skills are never touched)
 NATIVE_REPO=$(cygpath -m "$REPO" 2>/dev/null || echo "$REPO")
 NATIVE_DEST=$(cygpath -m "$DEST" 2>/dev/null || echo "$DEST")
-node -e "
+UPDATE_REPO="$NATIVE_REPO" UPDATE_DEST_DIR="$NATIVE_DEST" node -e "
 try {
   const fs = require('fs');
   const path = require('path');
-  const manifest = JSON.parse(fs.readFileSync(path.join('$NATIVE_REPO','skills','manifest.json'), 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(process.env.UPDATE_REPO,'skills','manifest.json'), 'utf8'));
   const deprecated = new Set(manifest.deprecated || []);
-  const dest = path.join('$NATIVE_DEST','skills');
+  const dest = path.join(process.env.UPDATE_DEST_DIR,'skills');
   fs.readdirSync(dest, { withFileTypes: true })
     .filter(d => d.isDirectory() && deprecated.has(d.name))
     .forEach(d => {
