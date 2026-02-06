@@ -11,7 +11,9 @@ argument-hint: "[scope: full|auth|dashboard|latest]"
 
 # Audit
 
-**Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings. Launch all 7 agents immediately — do not ask for confirmation or suggest compacting.
+**Before running:** Tell the user: "Audit spawns 7 parallel agents (~105K tokens). Type `/compact` first if you want to free context, then say `audit` again. Or say `go` to launch now." Wait for the user to respond. Do NOT try to invoke `/compact` yourself — it is a built-in CLI command only the user can type.
+
+**Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
 
 ## Existing Tasks
 !`node -e "try{const p=require('./prd.json');Object.entries(p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch{}" 2>/dev/null`
