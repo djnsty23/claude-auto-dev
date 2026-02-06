@@ -58,6 +58,21 @@ try {
         }
     }
 
+    // Write/Edit protection - prevent Claude from modifying security-critical files
+    if (toolName === 'Write' || toolName === 'Edit') {
+        const filePath = toolInput.file_path || '';
+        const protectedPatterns = [
+            /[/\\]\.claude[/\\]hooks[/\\]/,        // Hook scripts (security-critical)
+            /[/\\]\.claude[/\\]settings\.json$/,    // Permission deny rules
+        ];
+        for (const pattern of protectedPatterns) {
+            if (pattern.test(filePath)) {
+                process.stderr.write(`Blocked: Cannot modify security-critical file: ${filePath}\nUse 'update dev' to sync from repo instead.\n`);
+                process.exit(2);
+            }
+        }
+    }
+
     // Read file filtering - skip large/generated files
     if (toolName === 'Read') {
         const filePath = toolInput.file_path || '';
