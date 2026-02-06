@@ -1,5 +1,19 @@
 # Changelog
 
+## [5.3] - 2026-02-06
+
+### Added
+- **Agent Teams** enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` env var in settings
+- **Settings merge** — `update dev` deep-merges permissions (user-added allow/deny rules preserved)
+- **Settings backup** — `settings.backup.json` created before every merge
+- **Post-install validation** — checks manifest, hooks, settings, commands after sync
+- **`.gitattributes`** — CRLF normalization, no more warnings on commit
+
+### Changed
+- **Removed prompt-type Stop hook** — only command-type `stop-auto-check.js` remains (saves tokens every session)
+- **Audit skill** — launches immediately, tells user to type `/compact` themselves (not invoke as skill)
+- **Removed fake token estimates** from audit skill
+
 ## [5.2] - 2026-02-06
 
 ### Changed

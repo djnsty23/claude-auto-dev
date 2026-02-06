@@ -1,4 +1,4 @@
-# claude-auto-dev (v5.2)
+# claude-auto-dev (v5.3)
 
 ## Commands
 
