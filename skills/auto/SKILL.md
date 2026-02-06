@@ -59,6 +59,10 @@ Instead:
 - Keep working until truly done
 - The Stop hook prevents Claude from ending - trust it
 
+## Always Persist to prd.json
+
+When findings, scan results, or ad-hoc issues are identified (from brainstorm, audit, or during execution), ALWAYS write them to prd.json as stories BEFORE fixing them. Never use only session-local TaskCreate entries — prd.json is the source of truth that survives session restarts and /compact.
+
 ## Bootstrap (No prd.json)
 
 When prd.json doesn't exist:

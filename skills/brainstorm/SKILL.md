@@ -58,36 +58,36 @@ Then analyze and propose 3-8 features:
 
 **Be specific:** "Add Cmd+K search modal" not "Improve UX"
 
-## Phase 3: Present Everything
+## Phase 3: Persist to prd.json (ALWAYS — never skip)
+
+After scans complete, ALWAYS write ALL findings to prd.json before presenting results. Do NOT ask "Create stories?" — just create them.
+
+### Step 1: Read or create prd.json
+
+```bash
+node -e "try{const p=require('./prd.json');console.log('sprint:',p.sprint,'stories:',Object.keys(p.stories||{}).length)}catch{console.log('no prd.json')}"
+```
+
+If no prd.json, create with `sprint: "S1"`.
+
+### Step 2: Deduplicate and add stories
+
+Use ID format: `S{sprint}-{number}` (e.g., `S1-005`). Check existing stories to avoid duplicates (match first 25 chars of title).
+
+**Priority mapping:** Quality issues = priority 1-2, Feature ideas = priority 2-3.
+
+### Step 3: Present results
 
 ```
 Brainstorm Complete
 ═══════════════════
 Scanned 247 files in 45 seconds.
 
-Quality Issues
-┌──────────────────┬───────┬──────────────────┐
-│ Category         │ Count │ Status           │
-├──────────────────┼───────┼──────────────────┤
-│ TODOs/FIXMEs     │ 0     │ ✅ Clean         │
-│ console.log      │ 12    │ ⚠️ In 4 files    │
-│ Hardcoded colors │ 6     │ ⚠️ In shadcn/ui  │
-│ Large files      │ 3     │ ⚠️ >500 lines    │
-└──────────────────┴───────┴──────────────────┘
+Quality Issues: 3 stories created
+Feature Ideas: 5 stories created
+Skipped: 2 (duplicates)
 
-Feature Ideas
-┌───┬─────────────────────────────────┬────────┐
-│ # │ Idea                            │ Effort │
-├───┼─────────────────────────────────┼────────┤
-│ 1 │ Add keyboard shortcuts (Cmd+K) │ Medium │
-│ 2 │ Offline mode (PWA ready)        │ High   │
-│ 3 │ Export to PDF                   │ Low    │
-└───┴─────────────────────────────────┴────────┘
-
-Create stories?
-- "quality" → cleanup tasks only
-- "features" → feature tasks only
-- "all" → everything
+Say "auto" to start working, or "progress" to review.
 ```
 
 ## Targeted Mode
