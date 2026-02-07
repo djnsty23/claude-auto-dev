@@ -13,7 +13,7 @@ user-invocable: true
 Show current progress with minimal token usage.
 
 ## Sprint Data
-!`node -e "try{const p=require('./prd.json');const s=Object.values(p.stories||{});console.log('Project:',p.projectName,'| Sprint:',p.sprint);console.log('Done:',s.filter(x=>x.passes===true).length,'| Pending:',s.filter(x=>!x.passes).length,'| Deferred:',s.filter(x=>x.passes==='deferred').length)}catch{console.log('No prd.json found')}" 2>/dev/null`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';console.log('Project:',p.project||p.projectName||'unknown','| Sprint:',name);console.log('Done:',s.filter(x=>x.passes===true).length,'| Pending:',s.filter(x=>x.passes===null||x.passes===false).length,'| Deferred:',s.filter(x=>x.passes==='deferred').length)}catch(e){console.log('No prd.json found')}"`
 
 ## Process
 

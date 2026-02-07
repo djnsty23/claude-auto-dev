@@ -14,8 +14,8 @@ disable-model-invocation: true
 Fully autonomous development. Works through all tasks without stopping until complete.
 
 ## Current State
-!`git status --short 2>/dev/null || echo "not a git repo"`
-!`node -e "try{const p=require('./prd.json');const s=Object.values(p.stories||{});console.log('Sprint:',p.sprint,'| Pending:',s.filter(x=>!x.passes).length,'| Done:',s.filter(x=>x.passes===true).length)}catch{console.log('No prd.json')}" 2>/dev/null`
+!`git status --short`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const done=s.filter(x=>x.passes===true).length;const pend=s.filter(x=>x.passes===null||x.passes===false).length;console.log('Sprint:',name,'| Done:',done,'| Pending:',pend,'| Total:',s.length)}catch(e){console.log('No prd.json')}"`
 
 ## Entry Flow
 
@@ -87,11 +87,15 @@ Skip if takes >10 seconds.
 ### Find Next Task
 
 ```javascript
-// stories is an object { "S1-001": {...}, "S1-002": {...} }
-const storyEntries = Object.entries(prd.stories);
+// prd.json has two shapes:
+// Flat:   { stories: { "S1-001": {...} }, sprint: "sprint-1" }
+// Nested: { sprints: [{ id: "sprint-1", stories: { "S1-001": {...} } }] }
+const sp = prd.sprints ? prd.sprints[prd.sprints.length - 1] : prd;
+const stories = sp.stories || prd.stories || {};
+const storyEntries = Object.entries(stories);
 const executable = storyEntries.filter(([id, s]) =>
   s.passes !== true &&
-  (s.blockedBy || []).every(dep => prd.stories[dep]?.passes === true)
+  (s.blockedBy || []).every(dep => stories[dep]?.passes === true)
 );
 ```
 

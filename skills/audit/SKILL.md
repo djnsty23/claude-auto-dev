@@ -16,7 +16,7 @@ argument-hint: "[scope: full|auth|dashboard|latest]"
 **Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
 
 ## Existing Tasks
-!`node -e "try{const p=require('./prd.json');Object.entries(p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch{}" 2>/dev/null`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch(e){}"`
 
 ## Swarm Architecture
 
@@ -126,7 +126,7 @@ After aggregating results, write ALL findings to prd.json so they persist across
 
 ```bash
 # Get current sprint number and existing story IDs
-node -e "try{const p=require('./prd.json');console.log('sprint:',p.sprint,'stories:',Object.keys(p.stories||{}).length)}catch{console.log('no prd.json')}"
+node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;console.log('sprint:',sp.id||sp.name||p.sprint||'unknown','stories:',Object.keys(sp.stories||p.stories||{}).length)}catch{console.log('no prd.json')}"
 ```
 
 If no prd.json exists, create one with `sprint: 1`.
