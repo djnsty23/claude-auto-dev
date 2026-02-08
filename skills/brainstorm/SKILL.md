@@ -34,7 +34,7 @@ These scans look for real issues, not linter warnings:
 
 ```typescript
 // Scan 1: Dead code — unused exports, unreferenced components, orphan routes
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", run_in_background: true,
   prompt: `Find dead code in [PROJECT_PATH]/src:
   1. Components in src/components/ or src/app/ not imported anywhere else
   2. Exported functions/constants not imported by any other file
@@ -42,7 +42,7 @@ Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
   Cross-reference: for each export, grep for its name across src/. Report only confirmed unused.` })
 
 // Scan 2: Console statements + error handling gaps
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", run_in_background: true,
   prompt: `In [PROJECT_PATH]/src (skip test/spec files):
   1. Count console.log/warn/error statements — report top 5 files by count
   2. Find empty catch blocks (catch that do nothing or just console.log)
@@ -50,7 +50,7 @@ Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
   Report: count per category, top offenders with file:line.` })
 
 // Scan 3: Bundle + complexity — what actually costs users
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", run_in_background: true,
   prompt: `In [PROJECT_PATH]/src:
   1. Files over 300 lines — report file path and line count
   2. For each large file: is it a single component that could be split? Or cohesive logic that should stay together? Check if it has multiple exported components or clearly separable sections.
@@ -58,7 +58,7 @@ Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
   Report only genuinely splittable files, not cohesive ones.` })
 
 // Scan 4: Dependency audit
-Task({ subagent_type: "Explore", model: "sonnet", run_in_background: true,
+Task({ subagent_type: "Explore", run_in_background: true,
   prompt: `In [PROJECT_PATH]:
   1. Read package.json dependencies. For each dependency, grep src/ to check if it's actually imported. Report unused deps.
   2. Find hardcoded colors (text-white, bg-black, #hex, rgb) — skip node_modules, skip test files, skip shadcn/ui component defaults
