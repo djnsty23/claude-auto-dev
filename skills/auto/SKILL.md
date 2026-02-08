@@ -128,16 +128,19 @@ This prevents: wrong imports, inconsistent naming, duplicate utilities, style mi
 
 | Task Type | Verification |
 |-----------|--------------|
-| UX/UI | `agent-browser` visual check |
-| Feature | Build passes |
-| API | Endpoint returns expected data |
-| Bug fix | Reproduce → verify fixed |
+| UX/UI | `agent-browser` visual + console + network |
+| Feature | Build passes + browser devtools check |
+| API | Endpoint returns expected data + network check |
+| Bug fix | Reproduce → verify fixed + no new errors |
 
-For UX tasks - browser check required:
+For any task touching UI or API — browser check required:
 ```bash
 agent-browser open http://localhost:3000/path
-agent-browser snapshot -i  # Verify expected element
+agent-browser snapshot -i            # Visual: expected elements present
+agent-browser errors                 # Console: no uncaught errors
+agent-browser network requests       # Network: no failed requests (4xx/5xx)
 ```
+Fix any console errors or failed network requests before moving on.
 
 ### Self-Verification (REQUIRED after each task)
 
@@ -163,20 +166,25 @@ Run `git diff` and check your own changes for:
 - [ ] No `any` types introduced
 - [ ] No commented-out code
 
-**4. UI Change? Visual Verification**
-If the task modified UI components AND a dev server is running:
+**4. UI/API Change? Browser Verification**
+If the task modified UI components or API routes AND a dev server is running:
 ```bash
-# Take screenshot of affected page
-agent-browser screenshot http://localhost:3000/[page] --output .claude/screenshots/verify-$(date +%s).png 2>/dev/null
+agent-browser open http://localhost:3000/[page]
+# Visual check
+agent-browser screenshot .claude/screenshots/verify-$(date +%s).png
+agent-browser snapshot -i
+# DevTools check (always — just like a developer would)
+agent-browser errors                        # Must be empty
+agent-browser console                       # Check for warnings
+agent-browser network requests --filter api # Check for 4xx/5xx
 ```
 If agent-browser is available:
-- Take a screenshot of the affected page
-- Read the screenshot to verify it looks correct
-- Check: layout intact, no overlapping elements, text readable, responsive on mobile breakpoints
+- Screenshot + snapshot: layout intact, no overlapping elements, text readable
+- Console errors: fix any uncaught exceptions or React errors
+- Network: fix any failed API calls (wrong URL, missing auth, 500s)
 - If something looks wrong, fix it before marking done
 
 If agent-browser is NOT available, describe what the user should see and flag for manual check.
-- Note any interactive states (hover, focus, click)
 - Flag if responsive behavior needs manual check
 
 **5. Mark Complete**
