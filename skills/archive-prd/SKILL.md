@@ -8,7 +8,6 @@ triggers:
 allowed-tools: Read, Write, Edit, Bash
 model: opus
 user-invocable: true
-disable-model-invocation: true
 argument-hint: "[status|S-ID|unarchive S-ID]"
 ---
 

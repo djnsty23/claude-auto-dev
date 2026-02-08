@@ -2,7 +2,6 @@
 name: env-vars
 description: Manages environment variables and credentials securely. Use when configuring secrets or .env files.
 user-invocable: true
-disable-model-invocation: true
 triggers:
   - env
   - environment

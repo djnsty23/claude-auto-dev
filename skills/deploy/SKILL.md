@@ -7,7 +7,6 @@ triggers:
 allowed-tools: Bash
 model: opus
 user-invocable: true
-disable-model-invocation: true
 ---
 
 # Deploy & CI/CD

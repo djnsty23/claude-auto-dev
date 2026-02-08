@@ -6,7 +6,6 @@ triggers:
 allowed-tools: Bash, Glob
 model: opus
 user-invocable: true
-disable-model-invocation: true
 ---
 
 # Clean

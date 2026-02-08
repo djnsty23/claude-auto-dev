@@ -8,7 +8,6 @@ triggers:
 allowed-tools: Bash, Read, Write, Edit, Glob
 model: opus
 user-invocable: true
-disable-model-invocation: true
 ---
 
 # Setup Project Workflow

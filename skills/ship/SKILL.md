@@ -6,7 +6,6 @@ triggers:
 allowed-tools: Bash, Read, Grep, Glob, Task
 model: opus
 user-invocable: true
-disable-model-invocation: true
 ---
 
 # Ship Workflow

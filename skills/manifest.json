@@ -1,6 +1,6 @@
 {
   "version": "6.0",
-  "description": "30 active skills + 1 deprecated redirect (verify) - merged quality layer, report-first brainstorm, tone moderation, lazy loading via disable-model-invocation",
+  "description": "30 active skills + 1 deprecated redirect (verify) - merged quality layer, report-first brainstorm, tone moderation",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",

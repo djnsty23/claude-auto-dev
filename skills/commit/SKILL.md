@@ -8,7 +8,6 @@ triggers:
 allowed-tools: Bash, Read, Glob
 model: opus
 user-invocable: true
-disable-model-invocation: true
 argument-hint: "[type] [message]"
 ---
 
