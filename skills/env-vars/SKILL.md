@@ -2,6 +2,7 @@
 name: env-vars
 description: Manages environment variables and credentials securely. Use when configuring secrets or .env files.
 user-invocable: true
+disable-model-invocation: true
 triggers:
   - env
   - environment
@@ -71,13 +72,13 @@ echo $GOOGLE_CLIENT_ID
 
 ## Security Rules
 
-**NEVER:**
+**Avoid:**
 - Hardcode API keys in code
 - Commit .env files to git
 - Log secret values
 - Store secrets in .env.example
 
-**ALWAYS:**
+**Do:**
 - Use process.env.VAR_NAME
 - Store secrets in system env vars
 - Use .env.local for project-specific values

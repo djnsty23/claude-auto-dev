@@ -12,7 +12,7 @@ argument-hint: "[unit|browser|all]"
 
 # Test
 
-Run unit tests AND browser tests. ALL steps are mandatory.
+Run unit tests AND browser tests. All steps are mandatory.
 
 ## Step 1: Unit Tests
 
@@ -22,7 +22,7 @@ npm test  # or npm run test
 
 If tests fail, report failures but CONTINUE to browser tests.
 
-## Step 2: Identify Latest Changes (ALWAYS run this)
+## Step 2: Identify Latest Changes
 
 ```bash
 # What was recently modified?
@@ -37,7 +37,7 @@ Focus browser tests on:
 
 If no UI changes found, STILL run Step 3 on the main page (smoke test).
 
-## Step 3: Browser Tests (ALWAYS run this)
+## Step 3: Browser Tests
 
 Check prerequisites first:
 ```bash
@@ -66,7 +66,7 @@ agent-browser snapshot -i
 
 If `agent-browser` is not available and cannot be installed, report it as a gap (do NOT silently skip).
 
-## Step 4: Report (ALWAYS output this)
+## Step 4: Report
 
 ```
 Test Results
@@ -89,7 +89,7 @@ Issues Found:
 Ready for: deploy / needs fixes
 ```
 
-Do NOT report results after Step 1 alone. The report MUST include both unit and browser test results.
+Do not report results after Step 1 alone. The report should include both unit and browser test results.
 
 ## Test Patterns
 

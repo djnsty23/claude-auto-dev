@@ -183,6 +183,6 @@ Critical: 0 | High: 1 | Medium: 2 | Low: 1
 | Skill | How It Integrates |
 |-------|-------------------|
 | `audit` | A11y agent uses these patterns |
-| `quality` | A11y is part of "all UI states handled" |
+| `standards` | A11y is part of "all UI states handled" |
 | `design` | New UI must meet contrast + keyboard requirements |
 | `review` | Flag a11y regressions |

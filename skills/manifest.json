@@ -1,6 +1,6 @@
 {
-  "version": "5.5",
-  "description": "32 skills - consolidated synergy chains, dynamic context injection, argument hints, PreCompact hook",
+  "version": "6.0",
+  "description": "30 active skills + 1 deprecated redirect (verify) - merged quality layer, report-first brainstorm, tone moderation, lazy loading via disable-model-invocation",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -10,7 +10,11 @@
     "self-review",
     "ci-cd",
     "react-patterns",
-    "preserve-ui"
+    "preserve-ui",
+    "quality",
+    "code-quality",
+    "verify",
+    "checkpoint"
   ],
   "skills": {
     "core": {
@@ -19,11 +23,11 @@
       "priority": 0,
       "description": "prd.json schema and task system - auto-loaded when prd.json exists"
     },
-    "code-quality": {
+    "standards": {
       "triggers": [],
-      "file": "code-quality/SKILL.md",
+      "file": "standards/SKILL.md",
       "priority": 0,
-      "description": "Learned patterns from production including React/Next.js best practices. Auto-loaded with auto, review, and build."
+      "description": "Type safety, design tokens, UI states, React/Next.js patterns from production."
     },
     "auto": {
       "triggers": [
@@ -31,9 +35,7 @@
       ],
       "file": "auto/SKILL.md",
       "requires": [
-        "code-quality",
-        "quality",
-        "verify",
+        "standards",
         "browser-auth",
         "security",
         "commit"
@@ -48,7 +50,7 @@
       ],
       "file": "brainstorm/SKILL.md",
       "requires": [
-        "quality",
+        "standards",
         "design"
       ],
       "priority": 1,
@@ -72,12 +74,13 @@
     },
     "review": {
       "triggers": [
-        "review"
+        "review",
+        "verify",
+        "check"
       ],
       "file": "review/SKILL.md",
       "requires": [
-        "quality",
-        "code-quality",
+        "standards",
         "security"
       ],
       "priority": 1,
@@ -93,7 +96,7 @@
       "file": "pr-review/SKILL.md",
       "requires": [
         "security",
-        "code-quality"
+        "standards"
       ],
       "priority": 1,
       "description": "Comprehensive PR review using specialized agents. Use before creating or merging pull requests."
@@ -184,8 +187,7 @@
       ],
       "file": "audit/SKILL.md",
       "requires": [
-        "quality",
-        "code-quality",
+        "standards",
         "design",
         "security",
         "browser-auth",
@@ -209,8 +211,8 @@
         "save"
       ],
       "file": "checkpoint/SKILL.md",
-      "priority": 2,
-      "description": "Saves context state. Auto-triggered every 3 tasks."
+      "priority": 3,
+      "description": "Deprecated. Use /compact instead. Claude has built-in memory that persists across sessions."
     },
     "deploy": {
       "triggers": [
@@ -225,22 +227,13 @@
       "priority": 2,
       "description": "Deploy workflow for Vercel, Supabase, and CI/CD pipelines. Use for deployment and CI/CD setup."
     },
-    "quality": {
-      "triggers": [],
-      "file": "quality/SKILL.md",
-      "priority": 0,
-      "description": "Enforces type safety, design tokens, and all UI states."
-    },
     "verify": {
       "triggers": [
         "verify"
       ],
       "file": "verify/SKILL.md",
-      "requires": [
-        "quality"
-      ],
-      "priority": 2,
-      "description": "Verifies work completeness with outcome-focused checks. Use after implementing features to ensure quality."
+      "priority": 3,
+      "description": "Redirects to review deep. Use review with depth levels instead."
     },
     "agent-browser": {
       "triggers": [
@@ -285,7 +278,7 @@
       ],
       "file": "design/SKILL.md",
       "requires": [
-        "quality"
+        "standards"
       ],
       "priority": 1,
       "description": "Creates distinctive UI with preserved structure. Avoids generic AI aesthetics. Use when designing or refining user interfaces."

@@ -26,6 +26,12 @@ const DANGEROUS_BASH_PATTERNS = [
     /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
     /curl.*\|\s*(ba)?sh/i,                     // curl | bash (remote code exec)
     /wget.*\|\s*(ba)?sh/i,                     // wget | bash
+    /rm\s.*prd-archive/i,                      // NEVER delete prd archives (move instead)
+    /rm\s.*prd-backup/i,                       // NEVER delete prd backups (move instead)
+    /del\s.*prd-archive/i,                     // Windows: NEVER delete prd archives
+    /del\s.*prd-backup/i,                      // Windows: NEVER delete prd backups
+    /Remove-Item\s.*prd-archive/i,             // PowerShell: NEVER delete prd archives
+    /Remove-Item\s.*prd-backup/i,              // PowerShell: NEVER delete prd backups
 ];
 
 const DANGEROUS_WIN32_PATTERNS = [

@@ -13,7 +13,7 @@ try {
     // ============================================================
     // 1. Display version (read from local install, no network)
     // ============================================================
-    let version = '5.5';
+    let version = '6.0';
     const manifestPath = path.join(CLAUDE_DIR, 'skills', 'manifest.json');
     if (fs.existsSync(manifestPath)) {
         try {
@@ -50,20 +50,7 @@ try {
     }
 
     // ============================================================
-    // 3. Check for checkpoint (context restore after /compact)
-    // ============================================================
-    if (fs.existsSync('.claude/checkpoint.md')) {
-        console.log('');
-        console.log('[Checkpoint Found] Restoring context...');
-        const content = fs.readFileSync('.claude/checkpoint.md', 'utf8');
-        const firstLines = content.split('\n').slice(0, 30).join('\n');
-        console.log(firstLines);
-        console.log('');
-        console.log('---');
-    }
-
-    // ============================================================
-    // 4. Sprint context from prd.json
+    // 3. Sprint context from prd.json
     // ============================================================
     if (fs.existsSync('prd.json')) {
         try {

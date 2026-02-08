@@ -26,13 +26,13 @@ git status --short         # Warn if uncommitted changes
 
 | Result | Action |
 |--------|--------|
-| Build fails | **STOP** - fix errors first |
-| Typecheck fails | **STOP** - fix types first |
-| Tests fail | **STOP** - fix tests first |
+| Build fails | Stop — fix errors first |
+| Typecheck fails | Stop — fix types first |
+| Tests fail | Stop — fix tests first |
 | Uncommitted changes | Warn user, ask if they want to commit (use git directly, do NOT invoke the commit skill) |
 | All pass | Continue to Step 2 |
 
-## Step 2: Security Scan (REQUIRED)
+## Step 2: Security Scan
 
 Run before every deploy (uses `security` skill):
 
@@ -43,7 +43,7 @@ Run before every deploy (uses `security` skill):
 - [ ] No `dangerouslySetInnerHTML` without sanitization
 - [ ] Auth checks on protected routes
 
-**If critical issues found → STOP. Fix before deploying.**
+If critical issues found, fix before deploying.
 
 ## Step 3: Auto-detect Deploy Target
 
@@ -54,7 +54,7 @@ Check in order:
 4. User specified "ship to X" → Use X
 5. None found → Default to Vercel
 
-**NEVER ask which platform** - detect or default.
+Do not ask which platform — detect or default.
 
 ## Step 4: Deploy
 
@@ -103,7 +103,7 @@ supabase secrets list --project-ref [ref]
 
 ## Step 5: Post-Deploy Verification (MANDATORY - never skip)
 
-A successful deploy does NOT mean the app works. ALWAYS verify.
+A successful deploy does NOT mean the app works. Verify after deploying.
 
 ### Automated Checks (agent-browser)
 

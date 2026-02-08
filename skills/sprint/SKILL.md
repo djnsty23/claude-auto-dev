@@ -53,7 +53,7 @@ Create a new sprint or advance to the next one.
 4. Create new sprint with stories from those epics
 5. Update prd.json
 
-## Auto-Archive Check (REQUIRED)
+## Auto-Archive Check
 
 Before creating a new sprint, check if prd.json needs archiving:
 
@@ -67,7 +67,7 @@ node -e "try{const p=require('./prd.json');const sprints=p.sprints||[];const don
 | 3+ completed sprints in prd.json | Suggest `archive` before creating new sprint |
 | prd.json > 500 lines | Warn: "prd.json is large, consider `archive` first" |
 
-**Do NOT skip this check.** Large prd.json wastes tokens on every request.
+Large prd.json wastes tokens on every request. Run the check.
 
 ## Rules
 - HARD CAP: 20 stories per sprint

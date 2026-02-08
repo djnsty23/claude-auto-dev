@@ -23,7 +23,7 @@ grep -rn "password\s*=\s*['\"][^'\"]\+" src/ supabase/ --include="*.ts" --includ
 grep -rn "service_role\|supabase_admin\|cron\.\|pg_cron" supabase/migrations/ --include="*.sql" 2>/dev/null
 ```
 
-If found: **STOP** - move to env vars or Edge Function secrets. CRON secrets must use `vault.secrets`, never hardcoded in migrations.
+If found: move to env vars or Edge Function secrets. CRON secrets must use `vault.secrets`, never hardcoded in migrations.
 
 ### 2. Environment Variables
 ```bash
@@ -31,7 +31,7 @@ If found: **STOP** - move to env vars or Edge Function secrets. CRON secrets mus
 git status | grep ".env"
 ```
 
-If .env tracked: **STOP** - add to .gitignore.
+If .env tracked: add to .gitignore immediately.
 
 ### 3. Supabase RLS (Enabled + Policy Quality)
 ```bash
@@ -39,7 +39,7 @@ If .env tracked: **STOP** - add to .gitignore.
 npx supabase db lint
 ```
 
-If RLS disabled: **STOP** - enable RLS.
+If RLS disabled: enable RLS before proceeding.
 
 **Beyond enabled — check policy quality:**
 
@@ -157,7 +157,7 @@ execFile('command', [userInput])
 
 ### When to Flag
 
-**Always flag:**
+**Flag these:**
 - User input flowing into dangerous functions
 - Hardcoded secrets/credentials
 - Missing input validation at system boundaries

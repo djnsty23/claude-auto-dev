@@ -12,7 +12,7 @@ argument-hint: "[focus area]"
 
 # Brainstorm
 
-**Philosophy:** User doesn't know what to focus on. YOU scan, analyze, propose, and create stories - without asking.
+Scan, analyze, and propose — without asking what to focus on.
 
 ## Existing Tasks
 !`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch(e){}"`
@@ -21,7 +21,8 @@ argument-hint: "[focus area]"
 
 | Command | Behavior |
 |---------|----------|
-| `brainstorm` | Full: quality scan + feature ideas |
+| `brainstorm` | Full: quality scan + feature ideas → present findings |
+| `brainstorm apply` | Create prd.json stories from last scan results |
 | `brainstorm auth` | Targeted: ideas for auth specifically |
 | `brainstorm features` | Skip quality scan, only feature ideas |
 
@@ -43,52 +44,53 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Find large files (>300 lines) and 'any' type usage in [PROJECT_PATH]. Report: file, lines, issues." })
 ```
 
-## Phase 2: Feature Ideation (Autonomous)
+## Phase 2: Feature Ideation
 
 After scans complete, read project context:
-- `CLAUDE.md` - goals, roadmap, known issues
-- `README.md` - what the app does
-- `package.json` - name, description, dependencies
+- `CLAUDE.md` — goals, roadmap, known issues
+- `README.md` — what the app does
+- `package.json` — name, description, dependencies
 
 Then analyze and propose 3-8 features:
-- **Missing features** - what similar apps have that this doesn't
-- **UX improvements** - based on component structure found
-- **Integration opportunities** - based on installed packages
-- **Performance wins** - based on patterns observed
+- **Missing features** — what similar apps have that this doesn't
+- **UX improvements** — based on component structure found
+- **Integration opportunities** — based on installed packages
+- **Performance wins** — based on patterns observed
 
-**Be specific:** "Add Cmd+K search modal" not "Improve UX"
+Be specific: "Add Cmd+K search modal" not "Improve UX"
 
-## Phase 3: Persist to prd.json (ALWAYS — never skip)
+## Phase 3: Present Findings
 
-After scans complete, ALWAYS write ALL findings to prd.json before presenting results. Do NOT ask "Create stories?" — just create them.
-
-### Step 1: Read or create prd.json
-
-```bash
-node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;console.log('sprint:',sp.id||sp.name||p.sprint||'unknown','stories:',Object.keys(sp.stories||p.stories||{}).length)}catch{console.log('no prd.json')}"
-```
-
-If no prd.json, create with `sprint: "S1"`.
-
-### Step 2: Deduplicate and add stories
-
-Use ID format: `S{sprint}-{number}` (e.g., `S1-005`). Check existing stories to avoid duplicates (match first 25 chars of title).
-
-**Priority mapping:** Quality issues = priority 1-2, Feature ideas = priority 2-3.
-
-### Step 3: Present results
+Present a findings table. Do not auto-create stories.
 
 ```
 Brainstorm Complete
-═══════════════════
+===================
 Scanned 247 files in 45 seconds.
 
-Quality Issues: 3 stories created
-Feature Ideas: 5 stories created
-Skipped: 2 (duplicates)
+| # | Category | Finding | Priority |
+|---|----------|---------|----------|
+| 1 | Quality  | 12 console.logs in src/ | High |
+| 2 | Quality  | 3 hardcoded colors | Medium |
+| 3 | Feature  | Add keyboard shortcuts (Cmd+K) | Medium |
+| 4 | Feature  | Dark mode toggle | Low |
+| 5 | Perf     | 2 request waterfalls in dashboard | High |
 
-Say "auto" to start working, or "progress" to review.
+Say "brainstorm apply" to create stories, or pick specific items to work on.
 ```
+
+### Auto Mode Exception
+
+If `.claude/auto-active` exists (running in auto mode), skip the presentation and create stories directly in prd.json. Auto mode's IDLE detection depends on story creation to continue the loop.
+
+### brainstorm apply
+
+When user says `brainstorm apply`:
+1. Read prd.json (or create with `sprint: "S1"` if none exists)
+2. Deduplicate against existing stories (match first 25 chars of title)
+3. Create stories with ID format `S{sprint}-{number}`
+4. Priority mapping: quality issues = priority 1-2, feature ideas = priority 2-3
+5. Report: "Created X stories, skipped Y duplicates"
 
 ## Targeted Mode
 
@@ -96,26 +98,15 @@ When user says `brainstorm X`:
 - Skip quality scan entirely
 - Read files related to X topic
 - Propose 3-5 specific ideas for X
-- Immediately create stories
+- Present findings (do not auto-create stories)
 
-## Rules
-
-- **Never ask "what do you want?"** - analyze and propose
-- **Don't over-generate** - 3-8 feature ideas max
-- **Be specific** - concrete features, not vague improvements
-- **Note effort** - Low/Medium/High for each
-- **Skip shadcn/ui colors** - note them but don't prioritize (library defaults)
-- **Auto-create for top recommendation** - then offer more
-- **Deduplicate** - check existing tasks before creating (see below)
-
-## Deduplication (REQUIRED)
+## Deduplication
 
 Before creating any story, check for existing tasks:
 
 ```typescript
 const existing = await TaskList();
 
-// Skip if similar task exists
 function isDuplicate(newTitle: string): boolean {
   return existing.some(task =>
     task.subject.toLowerCase().includes(newTitle.toLowerCase().slice(0, 20)) ||
@@ -123,76 +114,39 @@ function isDuplicate(newTitle: string): boolean {
   );
 }
 
-// Only create if truly new
 if (!isDuplicate("Add keyboard shortcuts")) {
   TaskCreate({ subject: "Add keyboard shortcuts (Cmd+K)", ... });
 }
 ```
 
-**Report skipped duplicates:** "Skipped 2 ideas (already in task list)"
+Report skipped duplicates: "Skipped 2 ideas (already in task list)"
 
 ## Token Cost
 
-- 4 parallel Haiku scans: ~20K tokens
+- 4 parallel scans: ~20K tokens
 - Context reads: ~5K tokens
 - Time: 30-60 seconds
-- Much cheaper than reading entire codebase
 
 ## Design System Awareness
 
-Before proposing UI features, check design constraints:
-
-| Skill | What to Check |
-|-------|---------------|
-| `design` | Aesthetic direction, typography, color palette, UI structure preservation |
-| `quality` | Design token usage, semantic colors |
-| `code-quality` | Performance implications of new features (React/Next.js patterns) |
-
-**When proposing UI features:**
-- Check existing component structure first (`design` - Preserve UI Structure section)
+Before proposing UI features:
+- Check existing component structure (extend vs. replace)
 - Ensure proposals use design tokens, not hardcoded colors
-- Reference `design` for aesthetic consistency
-- Note if feature requires new design patterns
-
-**Example validation:**
-```
-Feature: "Add dark mode toggle"
-├─ design: Extend existing ThemeProvider? ✓
-├─ design: Uses CSS variables? ✓
-├─ quality: All states handled? (system/light/dark) ✓
-└─ Ready to create story
-```
-
-## Phase 2B: Design Validation (Optional)
-
-For UI-heavy features, add validation step:
-1. Check `design` principles (no AI slop)
-2. Check `design` Preserve UI section (extend vs. replace)
-3. Check existing tokens/variables
-4. Propose feature with design context included
+- Reference `design` skill for aesthetic consistency
 
 ## Plan Mode (For Complex Features)
 
-When brainstorm identifies features that span multiple areas, suggest plan mode:
+When brainstorm identifies features spanning 3+ files, multiple approaches, or DB schema changes, suggest plan mode:
 
-**Triggers for plan mode suggestion:**
-- Feature touches 3+ files
-- Architectural decisions required
-- Multiple valid implementation approaches
-- Database schema changes involved
-
-**Suggestion format:**
 ```
-This feature spans [N] areas: [list areas].
-
-Would you like me to enter plan mode to design a detailed implementation approach before creating stories?
-
-Say "plan" to explore options, or "create" to proceed with stories.
+This feature spans [N] areas: [list].
+Say "plan" to explore options, or pick items to work on directly.
 ```
 
-**In plan mode:**
-1. Explore codebase for existing patterns
-2. Design implementation approach
-3. Identify trade-offs
-4. Present plan for approval
-5. Then create stories from approved plan
+## Rules
+
+- Analyze and propose — do not ask "what do you want?"
+- 3-8 feature ideas max
+- Be specific — concrete features, not vague improvements
+- Skip shadcn/ui colors (library defaults, not project issues)
+- Deduplicate against existing tasks before creating

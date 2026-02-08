@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-5.3-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-6.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
 
@@ -67,7 +67,7 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
 You: update dev
 Claude: [pulls latest, syncs skills/hooks, removes stale files]
-        Updated to v5.5
+        Updated to v6.0
 ```
 
 **Option 2: Automatic on session start**
@@ -90,10 +90,9 @@ cd ~/claude-auto-dev && git pull
 | `auto` | Work through all tasks autonomously |
 | `progress` | Show sprint progress |
 | `audit` | 7-agent parallel quality audit |
-| `review` | Code quality check |
+| `review` | Code quality check (add `quick` or `deep`) |
 | `security` | Pre-deploy security scan |
 | `sprint` | Create/advance sprint |
-| `verify` | Quality checks on completed work |
 | `ship` | Build, test, review, deploy |
 | `test` | Run unit + browser tests |
 | `fix` | Debug issues |

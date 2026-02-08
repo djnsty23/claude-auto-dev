@@ -12,7 +12,7 @@ Vercel's agent-browser is purpose-built for AI agents - 93% token savings vs Pla
 
 ## Security Rules (NON-NEGOTIABLE)
 
-1. **Never hardcode credentials** - Use env vars only
+1. Do not hardcode credentials - Use env vars only
 2. **Test account only** - Never use real user accounts
 3. **Localhost/staging only** - Never run against production without explicit approval
 4. **Log all actions** - Commands are visible in session for audit
@@ -219,4 +219,4 @@ When injecting the token via `agent-browser eval`:
 
 - **Email**: `TEST_USER_EMAIL` env var
 - **Password**: `TEST_USER_PASSWORD` env var
-- **NEVER use real credentials**
+- Do not use real credentials

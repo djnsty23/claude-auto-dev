@@ -118,7 +118,7 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
 | **Medium** | Noticeable but not blocking | Missing loading state |
 | **Low** | Nice to have, polish | console.log left in |
 
-## Persist Findings to prd.json (REQUIRED)
+## Persist Findings to prd.json
 
 After aggregating results, write ALL findings to prd.json so they persist across sessions.
 
@@ -246,18 +246,16 @@ When rating findings, apply principles from related skills:
 
 | Skill | What to Reference |
 |-------|-------------------|
-| `quality` | Type safety, design tokens, all UI states |
-| `code-quality` | React patterns, error handling, type completeness, performance optimization |
+| `standards` | Type safety, design tokens, all UI states, React patterns, error handling |
 | `design` | Color tokens vs hardcoded, typography consistency, structural integrity for UI changes |
 
 **UX/UI Agent should check:**
-- Hardcoded colors → Reference `design` (NEVER purple gradients, NEVER Inter/Roboto)
-- Missing states → Reference `quality` (loading, empty, error)
-- Design tokens → Reference `quality` design system rules
+- Hardcoded colors → Reference `design` (avoid purple gradients, avoid Inter/Roboto)
+- Missing states → Reference `standards` (loading, empty, error)
+- Design tokens → Reference `standards` design system rules
 
 **Type Safety Agent should check:**
-- Against `code-quality` patterns (single source of truth, complete Records)
-- `quality` principles (strict mode, no any)
+- Against `standards` patterns (single source of truth, complete Records, strict mode, no any)
 
 ## Log Patterns to Mistakes
 

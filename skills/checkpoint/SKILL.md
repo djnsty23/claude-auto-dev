@@ -1,74 +1,27 @@
 ---
 name: checkpoint
-description: Saves context state. Auto-triggered every 3 tasks.
+description: Deprecated. Use /compact instead. Claude has built-in memory that persists across sessions.
 triggers:
   - save
 allowed-tools: Read, Write, TaskList, Grep
 model: opus
-user-invocable: true
+user-invocable: false
+disable-model-invocation: true
 ---
 
-# Context Checkpoint
+# Checkpoint (Deprecated)
 
-Save critical context before `/clear`. Enables 50-70% token savings.
+This skill is deprecated in v6.0. Claude Code has built-in memory and `/compact` that handle session persistence automatically.
 
-## When to Checkpoint
+## What to Use Instead
 
-- **Every 3 tasks** (aggressive - preserves tokens)
-- Before switching feature areas
-- After resolving complex bugs
-- When response feels slow (context bloat sign)
+| Need | Solution |
+|------|----------|
+| Save context before clearing | `/compact` (reclaims ~40% tokens with context summary) |
+| Persist learnings across sessions | Claude's built-in memory (automatic) |
+| Save prd.json before compaction | PreCompact hook handles this automatically |
+| Clear context completely | `/clear` (reclaims ~70%, loses context) |
 
-## Checkpoint Format
+## Migration
 
-Write to `.claude/checkpoint.md`:
-
-```markdown
-# Checkpoint: [TIMESTAMP]
-
-## Sprint Status
-[Sprint X: N/M complete]
-
-## Completed This Session
-- [Task]: [what was done]
-
-## Key Learnings
-- [Bug pattern]: [resolution]
-
-## Next Priority
-[Next task ID and title]
-
-## Files Modified
-- [file paths]
-```
-
-## After Saving
-
-Tell user:
-```
-💾 Checkpoint saved.
-
-Run /compact now to reclaim ~40% tokens (keeps context summary).
-Use /clear only at major transitions (reclaims ~70% but wipes context).
-```
-
-## Auto-Restore
-
-After `/clear`, read `.claude/checkpoint.md` and continue.
-
-## What to Preserve
-
-| Keep | Skip |
-|------|------|
-| Task progress | File contents |
-| Learnings | Error traces |
-| Next priority | Tool call logs |
-
-## Token Savings
-
-| Command | Savings | Use When |
-|---------|---------|----------|
-| `/compact` | ~40% | Default after checkpoint |
-| `/clear` | ~70% | Major transitions, sprint end |
-
-**Rule:** /compact after every checkpoint. /clear at major transitions.
+If `.claude/checkpoint.md` exists from a previous session, it is safe to delete. All important context is now managed by Claude's memory system and prd.json.

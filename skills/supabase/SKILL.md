@@ -153,9 +153,9 @@ CREATE INDEX idx_orders_customer_id ON orders(customer_id);
 
 | Priority | Category | Impact |
 |----------|----------|--------|
-| 1 | Query Performance | CRITICAL - Missing indexes, composite indexes |
-| 2 | Connection Management | CRITICAL - Pooling, limits, idle timeout |
-| 3 | Security & RLS | CRITICAL - RLS basics, RLS performance |
+| 1 | Query Performance | High - Missing indexes, composite indexes |
+| 2 | Connection Management | High - Pooling, limits, idle timeout |
+| 3 | Security & RLS | High - RLS basics, RLS performance |
 | 4 | Schema Design | HIGH - Data types, PKs, FK indexes, partitioning |
 | 5 | Concurrency & Locking | MEDIUM-HIGH - Short transactions, deadlock prevention |
 | 6 | Data Access Patterns | MEDIUM - N+1, pagination, batch inserts, upsert |
@@ -239,13 +239,13 @@ npx supabase db push
 
 ### Safety Rules
 
-**ALWAYS:**
+**Do:**
 - Enable RLS on every table
 - Use migrations for schema changes
 - Include ON DELETE CASCADE for FKs
 - Add created_at/updated_at columns
 
-**NEVER:**
+**Avoid:**
 - Disable RLS in production
 - Hardcode secrets in migrations
 - Delete tables without confirmation

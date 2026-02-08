@@ -13,53 +13,55 @@ disable-model-invocation: true
 
 Remove Claude Code artifacts and temporary files.
 
-## Process
+## Data Safety: Move, Do Not Delete
 
-1. **Screenshots** - Delete all `.claude/screenshots/*.png`
-2. **Backups** - Delete `prd-backup-*.json` older than 7 days
-3. **Handoffs** - Delete `handoff-*.md` older than 7 days
-4. **Archives** - List `prd-archive-*.json` older than 30 days (prompt before delete)
-5. **Auto flag** - Delete `.claude/auto-active` if stale (from crashed sessions)
-6. **Playwright** - Delete `.playwright-mcp/` folder if exists
-7. **Report** - Show files removed and space reclaimed
+Files found in the project root (`prd-archive-*.json`, `prd-backup-*.json`, `handoff-*.md`, `AUDIT-*.md`) are moved to `.claude/` subdirectories, not deleted. Deleting them destroys sprint history. The move step runs first before any deletion.
 
-## Commands
+## Process (Follow This Order)
+
+### Step 1: Move stray files from root (first)
 
 ```bash
-# Screenshots (all)
-rm -f .claude/screenshots/*.png
-
-# Backups older than 7 days
-find . -maxdepth 1 -name "prd-backup-*.json" -mtime +7 -delete
-
-# Handoffs older than 7 days
-find . -maxdepth 1 -name "handoff-*.md" -mtime +7 -delete
-
-# Archives - list only (prompt user)
-find . -maxdepth 1 -name "prd-archive-*.json" -mtime +30
-
-# Stale auto mode flag
-rm -f .claude/auto-active
-
-# Playwright MCP artifacts
-rm -rf .playwright-mcp/
+mkdir -p .claude/archives .claude/handoffs .claude/reports
+mv prd-backup-*.json .claude/archives/ 2>/dev/null
+mv prd-archive-*.json .claude/archives/ 2>/dev/null
+mv handoff-*.md .claude/handoffs/ 2>/dev/null
+mv AUDIT-*.md .claude/reports/ 2>/dev/null
+mv *-report.md .claude/reports/ 2>/dev/null
 ```
 
-## Windows (PowerShell)
-
+PowerShell:
 ```powershell
-# Screenshots
-Remove-Item .claude\screenshots\*.png -Force -ErrorAction SilentlyContinue
-
-# Backups older than 7 days
-Get-ChildItem prd-backup-*.json | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item
-
-# Handoffs older than 7 days
-Get-ChildItem handoff-*.md | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item
+New-Item -ItemType Directory -Force -Path .claude\archives, .claude\handoffs, .claude\reports | Out-Null
+Move-Item prd-backup-*.json .claude\archives\ -Force -ErrorAction SilentlyContinue
+Move-Item prd-archive-*.json .claude\archives\ -Force -ErrorAction SilentlyContinue
+Move-Item handoff-*.md .claude\handoffs\ -Force -ErrorAction SilentlyContinue
+Move-Item AUDIT-*.md .claude\reports\ -Force -ErrorAction SilentlyContinue
+Move-Item *-report.md .claude\reports\ -Force -ErrorAction SilentlyContinue
 ```
+
+### Step 2: Delete expendable files (only from .claude/ subdirs)
+
+| Target | Path | Rule |
+|--------|------|------|
+| Screenshots | `.claude/screenshots/*.png` | Delete all |
+| Auto flag | `.claude/auto-active` | Delete if stale |
+| Playwright | `.playwright-mcp/` | Delete all |
+| Backups | `.claude/archives/prd-backup-*.json` | Delete if older than 7 days |
+| Handoffs | `.claude/handoffs/handoff-*.md` | Delete if older than 7 days |
+| Reports | `.claude/reports/*.md` | Delete if older than 7 days |
+
+### Step 3: Archives — list only, do not auto-delete
+
+List `.claude/archives/prd-archive-*.json` older than 30 days. Ask user before deleting. If user does not confirm, do not delete.
+
+### Step 4: Report
+
+Show what was moved and what was deleted. Separate the two lists.
 
 ## Rules
 
-- Never touch source code, prd.json, or config files
-- Always report what was deleted
-- Prompt before deleting archives (they contain history)
+- Do not delete `prd-archive-*.json` or `prd-backup-*.json` from project root — move them
+- Do not auto-delete archives — prompt user first
+- Do not touch source code, prd.json, or config files
+- Report what was moved vs what was deleted

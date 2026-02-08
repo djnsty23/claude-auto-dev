@@ -1,5 +1,24 @@
 # Changelog
 
+## [6.0] - 2026-02-08
+
+### Changed
+- **Merged quality + code-quality into standards** — single passive reference skill, not in system prompt listing
+- **Merged review + verify into review** — depth levels: `review`, `review quick`, `review deep`
+- **Brainstorm reports first** — presents findings table, user decides whether to create stories (`brainstorm apply`)
+- **Tone moderation** — replaced ALL-CAPS aggressive language with natural prose (44 instances across 13 files) for Opus 4.6 compatibility
+- **"Just do it" mode** — < 5 tasks skip sprint/story overhead entirely
+- **Archive threshold** — auto-suggests at 4+ sprints, keeps last 3 active
+
+### Removed
+- **Checkpoint skill deprecated** — Claude's built-in memory and `/compact` handle persistence now
+- **quality, code-quality directories deleted** — merged into standards
+- **verify reduced to redirect** — points to `review deep`
+
+### Improved
+- **System prompt listing reduced** — ~25 visible skills down to ~17 via `disable-model-invocation: true` on niche skills
+- **Token savings** — ~200 tokens/turn fewer in system prompt, cleaner context
+
 ## [5.5] - 2026-02-08
 
 ### Fixed

@@ -102,7 +102,7 @@ pr-review --comment
 | When | Also Reference |
 |------|----------------|
 | Security issues found | `security` |
-| Type issues found | `code-quality` |
+| Type issues found | `standards` |
 | UI changes | `design` |
 | Test gaps | `browser-auth` |
 

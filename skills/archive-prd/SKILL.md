@@ -14,7 +14,7 @@ argument-hint: "[status|S-ID|unarchive S-ID]"
 
 # PRD Archival System
 
-Archive completed stories to keep prd.json fast and small. **Never let prd.json grow beyond 3 sprints of active data.**
+Archive completed stories to keep prd.json fast and small. Keep only last 3 sprints active.
 
 ## "archive" Command
 
@@ -23,7 +23,7 @@ Archive completed stories to keep prd.json fast and small. **Never let prd.json 
 2. Separate stories:
    - ACTIVE: passes=false OR passes=null OR type="qa"
    - COMPLETED: passes=true AND type!="qa"
-3. Create archive file: prd-archive-YYYY-MM.json
+3. Create archive file: .claude/archives/prd-archive-YYYY-MM.json
 4. Update main prd.json with summary
 5. Report: "Archived X stories, Y remain active"
 ```
@@ -40,7 +40,7 @@ Archive completed stories to keep prd.json fast and small. **Never let prd.json 
   "archived": {
     "totalCompleted": 41,
     "lastArchived": "2026-01-22",
-    "files": ["prd-archive-2026-01.json"],
+    "files": [".claude/archives/prd-archive-2026-01.json"],
     "summary": {
       "S01-S10": "Core foundation - registry, funnels, OAuth, caching",
       "S11-S20": "Navigation, QA, dashboard, exports, favorites",
@@ -72,25 +72,26 @@ Archive completed stories to keep prd.json fast and small. **Never let prd.json 
 
 | Condition | Action |
 |-----------|--------|
-| **3+ completed sprints** | **Auto-suggest archive** |
+| 4+ total sprints | Auto-suggest archive |
 | prd.json > 500 lines | Suggest archive |
 | prd.json > 50KB | Force archive |
 | User says "archive" | Manual archive |
 | All stories complete | Archive and start fresh |
 
-**Rule of thumb:** Keep only the current sprint + 2 previous sprints in prd.json. Archive everything older.
+Keep only the last 3 sprints in prd.json. Archive everything older.
 
 ## Archive Process
 
 ```
 1. BACKUP
-   cp prd.json prd-backup-$(date +%Y%m%d).json
+   mkdir -p .claude/archives
+   cp prd.json .claude/archives/prd-backup-$(date +%Y%m%d).json
 
 2. EXTRACT COMPLETED
    Filter: passes=true AND type!="qa"
 
 3. CREATE ARCHIVE
-   Write to: prd-archive-YYYY-MM.json
+   Write to: .claude/archives/prd-archive-YYYY-MM.json
 
 4. GENERATE SUMMARY
    Group stories by ID range (10 per group)
@@ -114,7 +115,7 @@ If you need details on an archived story:
 User: "What was S15 about?"
 Claude:
 1. Check archived.summary for S15 range
-2. Read prd-archive-2026-01.json if needed
+2. Read .claude/archives/prd-archive-2026-01.json if needed
 3. Report story details
 ```
 

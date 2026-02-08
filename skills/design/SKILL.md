@@ -39,7 +39,7 @@ Before coding, commit to a **BOLD aesthetic direction**:
    - Industrial/utilitarian
 3. **Differentiation**: What makes this UNFORGETTABLE?
 
-**CRITICAL**: Choose a clear direction and execute with precision. Bold maximalism and refined minimalism both work - the key is **intentionality, not intensity**.
+Choose a clear direction and execute with precision. Bold maximalism and refined minimalism both work - the key is **intentionality, not intensity**.
 
 ## Implementation
 
@@ -108,7 +108,7 @@ Test at 375px width before considering any UI complete.
 - Layered transparencies, dramatic shadows
 - Decorative borders, custom cursors, grain overlays
 
-## NEVER Do This
+## Avoid
 
 **Generic AI aesthetics to avoid:**
 - Inter, Roboto, Arial, system fonts
@@ -177,14 +177,14 @@ Create explicit variant components instead of boolean modes. Use compound compon
 
 | Skill | How It Integrates |
 |-------|-------------------|
-| `quality` | Ensure new designs use semantic tokens, handle all states |
+| `standards` | Ensure new designs use semantic tokens, handle all states |
 | `audit` | Design issues flagged here inform UI/UX audit agent |
 | `brainstorm` | Feature proposals validated against design system |
 
 **Before creating new components:**
 1. Check the Preserve UI Structure section below - can we extend existing?
 2. Check design tokens - use CSS variables
-3. Check `quality` - handle loading/empty/error states
+3. Check `standards` - handle loading/empty/error states
 
 ---
 

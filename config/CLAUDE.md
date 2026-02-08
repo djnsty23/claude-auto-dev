@@ -38,3 +38,4 @@ React + TypeScript + Tailwind + shadcn/ui + Supabase + Vercel
 @rules/security.md
 @rules/design-system.md
 @rules/windows.md
+@rules/file-organization.md

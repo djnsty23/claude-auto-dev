@@ -46,6 +46,10 @@
       "Bash(git stash drop *)",
       "Bash(git stash clear)",
       "Bash(git branch -D *)",
+      "Bash(rm *prd-archive*)",
+      "Bash(rm *prd-backup*)",
+      "Bash(del *prd-archive*)",
+      "Bash(del *prd-backup*)",
       "Bash(rm -r *)"
     ]
   },

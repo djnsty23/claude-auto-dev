@@ -1,6 +1,7 @@
 ---
 name: monitoring
 description: Observability patterns for production - logging, error tracking, analytics. Use when setting up monitoring.
+disable-model-invocation: true
 triggers:
   - monitoring
   - logs
