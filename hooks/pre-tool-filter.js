@@ -17,7 +17,7 @@ const DANGEROUS_BASH_PATTERNS = [
     /mkfs\./i,                                 // mkfs.ext4
     /chmod\s+-R\s+000\s+\//i,                  // chmod -R 000 /
     /git\s+reset\s+--hard/i,                   // git reset --hard
-    /git\s+push\s+(--force|.*--force)/i,       // git push --force (any flag order)
+    /git\s+push\s+(--force|-f\b|.*--force|.*\s-f\b)/i, // git push --force/-f (any flag order)
     /git\s+clean\s+(-[a-z]*f|--force)/i,       // git clean -f, -fd, --force
     /git\s+checkout\s+(\.|--\s+\.)/i,          // git checkout .
     /git\s+restore\s+\./i,                     // git restore .

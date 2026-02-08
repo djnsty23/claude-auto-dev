@@ -114,6 +114,15 @@ if ($Copy) {
     }
 }
 
+# Install agents (always copy - preserves user-created agents)
+Write-Host "`n[Agents]" -ForegroundColor Yellow
+$AgentsTarget = "$ClaudeDir\agents"
+if (-not (Test-Path $AgentsTarget)) {
+    New-Item -ItemType Directory -Path $AgentsTarget -Force | Out-Null
+}
+Copy-Item -Path "$ScriptDir\agents\*.md" -Destination $AgentsTarget -Force -ErrorAction SilentlyContinue
+Write-Host "  Copied to ~/.claude/agents/" -ForegroundColor Green
+
 # Add update-dev alias to PowerShell profile (detect correct location)
 Write-Host "`n[Update Alias]" -ForegroundColor Yellow
 

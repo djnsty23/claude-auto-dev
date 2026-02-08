@@ -2,6 +2,15 @@
 
 ## [5.4] - 2026-02-06
 
+### Added
+- **Custom agents** — 4 read-only Opus agents in `agents/` directory
+  - `code-reviewer` — Reviews changes, learns project patterns (project memory)
+  - `security-scanner` — Vulnerability scanning with cross-project learning (user memory)
+  - `architect` — Feature planning, dependency mapping, architecture decisions (project memory)
+  - `researcher` — Deep codebase/web research, bug investigation (project memory)
+  - All use `permissionMode: plan` (read-only enforcement, no Write/Edit)
+  - Synced via install scripts and `update dev` (copy mode, preserves user agents)
+
 ### Security
 - **Shell injection prevention** — bump.sh validates version format, update.sh passes paths via `process.env` instead of string interpolation
 - **Expanded deny rules** — `rm -r`, `git stash drop/clear`, `git branch -D` blocked in settings and pre-tool-filter

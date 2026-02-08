@@ -8,7 +8,7 @@ DEST="${HOME:-$USERPROFILE}/.claude"
 VERSION=$(cat "$REPO/VERSION" 2>/dev/null || echo "unknown")
 
 # Ensure dest dirs exist
-mkdir -p "$DEST/skills" "$DEST/hooks" "$DEST/rules"
+mkdir -p "$DEST/skills" "$DEST/hooks" "$DEST/rules" "$DEST/agents"
 
 # Skills (includes commands.md)
 cp -r "$REPO/skills/"* "$DEST/skills/"
@@ -18,6 +18,9 @@ cp "$REPO/hooks/"* "$DEST/hooks/"
 
 # Rules (add/update only, no delete)
 cp "$REPO/config/rules/"* "$DEST/rules/" 2>/dev/null || true
+
+# Agents (add/update only, preserves user-created agents)
+cp "$REPO/agents/"*.md "$DEST/agents/" 2>/dev/null || true
 
 # Settings — merge (preserves user-added allow rules and custom hooks)
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || -n "$WINDIR" ]]; then
@@ -101,6 +104,7 @@ ERRORS=0
 echo "[Update] Now at v$VERSION"
 echo "[Update] Skills: synced"
 echo "[Update] Hooks: synced"
+echo "[Update] Agents: synced"
 [ $ERRORS -eq 0 ] && echo "[Update] Validation: OK" || echo "[Update] Validation: $ERRORS warnings"
 
 # Cleanup temp clone if used

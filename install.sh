@@ -87,6 +87,12 @@ else
     echo -e "  \033[32mSymlinked ~/.claude/hooks/ -> repo\033[0m"
 fi
 
+# Install agents (always copy — preserves user-created agents)
+echo -e "\n\033[33m[Agents]\033[0m"
+mkdir -p "$CLAUDE_DIR/agents"
+cp "$SCRIPT_DIR/agents/"*.md "$CLAUDE_DIR/agents/" 2>/dev/null || true
+echo -e "  \033[32mCopied to ~/.claude/agents/\033[0m"
+
 # Add update-dev alias to shell profile
 echo -e "\n\033[33m[Update Alias]\033[0m"
 

@@ -465,6 +465,50 @@ function checkHookFilesExist() {
   }
 }
 
+// CHECK 10: AGENT FILES
+function checkAgentFiles() {
+  const agentsDir = 'agents';
+  if (!fs.existsSync(agentsDir)) {
+    log('WARN', 'agents/ directory not found');
+    return;
+  }
+
+  const agentFiles = fs.readdirSync(agentsDir)
+    .filter(f => f.endsWith('.md'));
+
+  if (agentFiles.length === 0) {
+    log('WARN', 'No agent files found in agents/');
+    return;
+  }
+
+  let allValid = true;
+  const requiredFields = ['name', 'description'];
+
+  for (const file of agentFiles) {
+    const content = readFile(path.join(agentsDir, file));
+    if (!content) continue;
+
+    const fm = parseFrontmatter(content);
+    const missing = requiredFields.filter(f => !fm[f]);
+
+    if (missing.length > 0) {
+      log('FAIL', `Agent ${file}: missing required fields: ${missing.join(', ')}`);
+      allValid = false;
+    }
+
+    // Validate name matches filename (without .md)
+    const expectedName = file.replace('.md', '');
+    if (fm.name && fm.name !== expectedName) {
+      log('FAIL', `Agent ${file}: name "${fm.name}" doesn't match filename "${expectedName}"`);
+      allValid = false;
+    }
+  }
+
+  if (allValid) {
+    log('PASS', `Agent files: ${agentFiles.length} agents validated`);
+  }
+}
+
 // RUN ALL CHECKS
 console.log('Running claude-auto-dev validation...\n');
 
@@ -477,6 +521,7 @@ checkCommandsCompleteness();
 checkSettingsSync();
 checkRequiresChains();
 checkHookFilesExist();
+checkAgentFiles();
 
 console.log(`\nSummary: ${passCount} PASS, ${failCount} FAIL, ${warnCount} WARN`);
 
