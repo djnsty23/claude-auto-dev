@@ -1,5 +1,14 @@
 # Changelog
 
+## [6.2] - 2026-02-09
+
+### Added
+- **Stripe skill** — Stripe integration patterns (API keys, webhooks, checkout, subscriptions) based on stripe/ai (MIT)
+- **SEO skill** — SEO audit and structured data patterns (meta tags, Open Graph, JSON-LD schema) merged from marketingskills repo (MIT)
+
+### Changed
+- **Setup-project rewritten** — smart stack detection from package.json dependencies, project type classification, automatic skill recommendations, environment scaffolding based on detected services
+
 ## [6.1] - 2026-02-08
 
 ### Fixed

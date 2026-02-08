@@ -1,6 +1,6 @@
 {
-  "version": "6.1",
-  "description": "30 active skills + 2 deprecated redirects (verify, checkpoint) - merged quality layer, report-first brainstorm, tone moderation",
+  "version": "6.2",
+  "description": "31 active skills + 2 deprecated redirects (verify, checkpoint) - third-party skills (stripe, seo), smart setup",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -160,7 +160,32 @@
       ],
       "file": "setup-project/SKILL.md",
       "priority": 3,
-      "description": "Initializes project with prd.json and standard config. Use when starting a new project."
+      "description": "Initializes project with smart stack detection, skill recommendations, and standard config. Use when starting a new project."
+    },
+    "stripe": {
+      "triggers": [
+        "stripe",
+        "payment",
+        "checkout",
+        "subscription",
+        "billing"
+      ],
+      "file": "stripe/SKILL.md",
+      "priority": 3,
+      "description": "Stripe integration patterns - API keys, webhooks, checkout, subscriptions. Loads when working with payments."
+    },
+    "seo": {
+      "triggers": [
+        "seo",
+        "meta tags",
+        "schema",
+        "open graph",
+        "structured data",
+        "sitemap"
+      ],
+      "file": "seo/SKILL.md",
+      "priority": 3,
+      "description": "SEO audit and structured data patterns - meta tags, Open Graph, JSON-LD schema, Core Web Vitals. Use for marketing sites and e-commerce."
     },
     "supabase": {
       "triggers": [

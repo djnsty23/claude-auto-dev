@@ -13,7 +13,7 @@ try {
     // ============================================================
     // 1. Display version (read from local install, no network)
     // ============================================================
-    let version = '6.1';
+    let version = '6.2';
     const manifestPath = path.join(CLAUDE_DIR, 'skills', 'manifest.json');
     if (fs.existsSync(manifestPath)) {
         try {

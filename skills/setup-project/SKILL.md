@@ -1,11 +1,11 @@
 ---
 name: setup-project
-description: Initializes project with prd.json and standard config. Use when starting a new project.
+description: Initializes project with smart stack detection, skill recommendations, and standard config. Use when starting a new project.
 triggers:
   - setup
   - scaffold
   - new-project
-allowed-tools: Bash, Read, Write, Edit, Glob
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 model: opus
 user-invocable: true
 ---
@@ -14,115 +14,194 @@ user-invocable: true
 
 ## On "set up" or "setup"
 
-### Step 1: Detect Project Type
+### Step 1: Stack Detection
+
+Scan for dependency files and detect the project stack:
+
 ```
-Check for:
-- package.json → Node/JS project
-- pyproject.toml → Python project
-- Cargo.toml → Rust project
-- go.mod → Go project
+Check for: package.json, pyproject.toml, Cargo.toml, go.mod
 ```
 
-### Step 2: Gather Requirements
+**If package.json exists**, read dependencies and devDependencies to detect:
+
+| Signal | Detection |
+|--------|-----------|
+| Framework | next, react, vue, svelte, express, fastify, remix, astro |
+| CSS | tailwindcss, styled-components, @emotion/react |
+| Database | @supabase/supabase-js, prisma, mongoose, drizzle-orm |
+| Auth | next-auth, @supabase/auth-helpers, @auth/core, passport |
+| Payments | stripe, @stripe/stripe-js, @stripe/react-stripe-js |
+| Testing | vitest, jest, playwright, @playwright/test, cypress |
+| Video | remotion, @remotion/cli |
+
+**Also check for config files:**
+- `vercel.json` or `.vercel/` -> Vercel deployment
+- `netlify.toml` -> Netlify deployment
+- `Dockerfile` -> Container deployment
+- `supabase/` directory -> Supabase project
+- `.github/workflows/` -> CI/CD pipelines
+
+### Step 2: Project Type Classification
+
+Based on detected signals + user description, classify the project:
+
+| Type | Signals |
+|------|---------|
+| E-commerce | stripe + product pages or store |
+| SaaS | auth + subscription/billing + dashboard |
+| Marketing / Portfolio | static pages, SEO focus, no auth |
+| API | express/fastify + no frontend framework |
+| Full-stack app | framework + DB + auth |
+| Library / CLI | no framework, bin field in package.json |
+
+If unclear, ask:
 ```
-question: "What are you building?"
+question: "What best describes this project?"
 options:
-  - { label: "Web app", description: "Next.js + Supabase + Auth" }
-  - { label: "API", description: "Backend service" }
-  - { label: "CLI tool", description: "Command-line application" }
-  - { label: "Library", description: "Reusable package" }
+  - { label: "E-commerce", description: "Online store with payments" }
+  - { label: "SaaS", description: "Subscription app with auth" }
+  - { label: "Marketing site", description: "Landing pages, SEO focus" }
+  - { label: "Full-stack app", description: "Web app with database" }
 ```
 
-### Step 3: Create Project Files
+### Step 3: Generate CLAUDE.md
 
-**For all projects:**
-```
-1. Create/update CLAUDE.md with project context
-2. Create prd.json with initial tasks
-3. Create progress.txt
-4. Create .claude/briefs/ directory
+Create a project-level CLAUDE.md with:
+
+```markdown
+# [Project Name]
+
+## Overview
+[One-line description from user or package.json]
+
+## Stack
+[Detected technologies]
+
+## Key Commands
+- `npm run dev` - Start development server
+- `npm run build` - Production build
+- `npm run test` - Run tests
+[Add detected commands from package.json scripts]
+
+## Key Directories
+[Map out src/ structure if it exists]
+
+## Patterns
+[Stack-specific patterns based on detected technologies]
 ```
 
-**For web apps (Next.js):**
-```
-1. Verify dependencies: npm install
-2. Check for Supabase config
-3. Setup auth if needed
-4. Configure environment variables
-```
+### Step 4: Recommend Skills
 
-### Step 4: Supabase Integration
+Based on detected stack, list relevant auto-dev skills:
 
-If project uses Supabase:
-```bash
-# 1. Check for NEXT_PUBLIC_SUPABASE_URL in .env.local
-# 2. If missing, ask user for project ref
-# 3. Generate .env.local template
-# 4. Verify connection with CLI:
-npx supabase db ping --db-url "$DATABASE_URL"
+**Always relevant:** review, commit, fix
+
+**Conditional recommendations:**
+
+| If Detected | Recommend |
+|-------------|-----------|
+| @supabase/supabase-js | supabase (db, rls, migrations) |
+| stripe | stripe (payments, webhooks, checkout) |
+| next | perf (Core Web Vitals), seo (meta tags, schema) |
+| tailwindcss | design (UI patterns, design tokens) |
+| vercel.json | deploy (Vercel deployment) |
+| playwright/cypress | test (unit + browser tests), browser (automation) |
+| remotion | remotion (video creation) |
+| Marketing/E-commerce type | seo (meta tags, schema markup) |
+| Any auth detected | security (pre-deploy scanning) |
+
+Output format:
+```
+Detected: Next.js + Supabase + Stripe + Tailwind
+
+Recommended skills for this project:
+- supabase — database, RLS policies, migrations
+- stripe — payments, webhooks, checkout
+- seo — meta tags, schema markup, Open Graph
+- design — UI patterns, design tokens
+- deploy — Vercel deployment
+- security — pre-deploy scanning
+- perf — Core Web Vitals
+
+These load automatically when you use their trigger words.
 ```
 
 ### Step 5: Environment Setup
-```
-Create .env.example with required vars (no values):
 
-# Supabase
+Create `.env.example` based on detected services:
+
+```bash
+# Generated based on detected stack
+
+# Supabase (if @supabase/supabase-js detected)
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 
-# OAuth (set in system env vars)
-# GOOGLE_CLIENT_ID
-# GOOGLE_CLIENT_SECRET
+# Stripe (if stripe detected)
+STRIPE_SECRET_KEY=
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
+STRIPE_WEBHOOK_SECRET=
+
+# Auth (if next-auth detected)
+NEXTAUTH_SECRET=
+NEXTAUTH_URL=
+
+# App
+NEXT_PUBLIC_APP_URL=
 ```
 
-### Step 6: Install agent-browser (for browser testing)
-```bash
-# Check if installed
-which agent-browser || npm install -g agent-browser && agent-browser install
-```
+Ensure `.gitignore` includes:
+- `.env.local`, `.env`
+- `node_modules/`
+- `.next/` (for Next.js)
+- `.claude/` (auto-dev artifacts)
 
-### Step 7: Git Setup
-```
-1. Check .gitignore includes:
-   - .env.local
-   - .env
-   - node_modules/
-   - .next/
-2. Add if missing
-```
+### Step 6: Create prd.json
 
-### Step 8: Report
-```
-"Project setup complete:
-- CLAUDE.md: Created with project context
-- prd.json: Ready for tasks
-- Environment: Configured
-- Supabase: [Connected/Not configured]
-- agent-browser: [Installed/Skipped]
+Based on project type, create initial stories:
 
-Next: Say 'brainstorm' to generate tasks."
+**E-commerce starter:**
+- Product listing page with schema markup
+- Shopping cart
+- Stripe Checkout integration
+- Order confirmation and webhooks
+- SEO: meta tags, Open Graph, sitemap
+
+**SaaS starter:**
+- Auth flow (signup, login, logout)
+- Subscription billing with Stripe
+- Dashboard layout
+- User settings and profile
+- Protected API routes
+
+**Marketing site starter:**
+- Landing page with hero section
+- SEO: meta tags, Open Graph, JSON-LD
+- Contact form
+- Responsive design
+- Sitemap and robots.txt
+
+### Step 7: Report
+
+```
+Project setup complete:
+- CLAUDE.md: Created with [detected stack] context
+- prd.json: [N] initial stories based on [project type]
+- .env.example: Configured for [detected services]
+- .gitignore: Updated
+
+Recommended skills: [list]
+
+Next: Say 'auto' to start working through tasks,
+or 'brainstorm' to scan for more improvements.
 ```
 
 ## Quick Setup
 
-If user provides description:
+If user provides a description:
 "Set up this project - I want to build [description]"
 
-1. Parse the description
-2. Generate initial stories based on requirements
-3. Add to prd.json
-4. Skip the questions, use smart defaults
-
-## Project Templates
-
-**Next.js + Supabase + Auth:**
-- User authentication (signup, login, logout)
-- Protected routes
-- User profile management
-- Database schema setup
-
-**API Service:**
-- Route structure
-- Error handling
-- Input validation
-- Authentication middleware
+1. Run stack detection (Steps 1-2)
+2. Generate all files using smart defaults (Steps 3-6)
+3. Skip questions when the description provides enough context
+4. Show the report (Step 7)
