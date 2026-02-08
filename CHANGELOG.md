@@ -1,5 +1,15 @@
 # Changelog
 
+## [5.5] - 2026-02-08
+
+### Fixed
+- **prd.json dual-shape support** — all 7 dynamic injections across 5 skills now handle both flat (`p.stories`) and nested (`p.sprints[].stories`) shapes
+- **Force-push short flag blocked** — `git push -f` now caught alongside `--force` in settings and pre-tool-filter
+
+### Changed
+- **Browser verification upgraded** — auto mode now checks console errors and network requests alongside visual snapshots (mirrors real DevTools workflow)
+- **Update skill reminder** — reminds user to restart session for CLAUDE.md changes to take effect
+
 ## [5.4] - 2026-02-06
 
 ### Added

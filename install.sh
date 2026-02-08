@@ -1,11 +1,11 @@
 #!/bin/bash
-# Claude Auto-Dev Installer (v5.4)
+# Claude Auto-Dev Installer (v5.5)
 # Usage: ./install.sh [--init] [--full] [--copy]
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME=$(basename "$(pwd)")
-VERSION=$(head -1 "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "5.4")
+VERSION=$(head -1 "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "5.5")
 CLAUDE_DIR=~/.claude
 
 INIT=0
