@@ -32,15 +32,12 @@ npx vercel --prod --yes
 
 ## Supabase Edge Functions
 
-**Single function:**
+**Token handling:** System env var may belong to a different Supabase account. Source the project's `.env` first:
 ```bash
-supabase functions deploy [name] --project-ref [ref]
+export $(grep SUPABASE_ACCESS_TOKEN .env) && supabase functions deploy [name] --project-ref [ref]
 ```
 
-**All functions:**
-```bash
-supabase functions deploy --project-ref [ref]
-```
+If you get 401 Unauthorized, the token is wrong — do not retry. Check which token the project needs vs what's in the env.
 
 ## Post-deploy
 1. Verify production URL loads

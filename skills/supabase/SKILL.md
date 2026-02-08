@@ -64,7 +64,7 @@ supabase projects list 2>&1 | grep -E "^\w"
 
 ## Multi-Org Auth
 
-CLI only supports one token at a time. For multiple orgs, use per-command token:
+CLI only supports one token at a time. System env var may not match the current project — always check. A 401 means wrong token, do not retry.
 
 ```bash
 # Option 1: Inline token (best for multi-org)
