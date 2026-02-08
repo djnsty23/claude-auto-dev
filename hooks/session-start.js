@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SessionStart hook - Version display, env loading, checkpoint restore, sprint context, git status
+// SessionStart hook - Version display, env loading, sprint context, git status
 // Updates are manual via 'update dev' command (no auto-pull for security)
 
 const fs = require('fs');

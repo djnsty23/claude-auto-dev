@@ -73,9 +73,9 @@ Load specific rules for detailed guidance:
 
 | Priority | Use For |
 |----------|---------|
-| 0 | Foundation skills (quality, core) |
+| 0 | Foundation skills (standards, core) |
 | 1 | Primary commands (auto, audit, review) |
-| 2 | Secondary commands (test, verify) |
+| 2 | Secondary commands (test, fix) |
 | 3 | Utility skills (help, setup) |
 
 ### Requires Chains
@@ -83,7 +83,7 @@ Load specific rules for detailed guidance:
 Use `requires` to auto-load dependencies:
 ```json
 "review": {
-  "requires": ["quality", "code-quality", "security"]
+  "requires": ["standards", "security"]
 }
 ```
 

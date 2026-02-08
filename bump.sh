@@ -40,13 +40,13 @@ m.version = '$NEW_VERSION';
 require('fs').writeFileSync('skills/manifest.json', JSON.stringify(m, null, 2) + '\n');
 "
 
-# 4. README.md — update badge
+# 4. README.md — update badge + version refs
 if [[ "$OSTYPE" == "darwin"* ]]; then
   # macOS
-  sed -i '' "s/v${OLD_VERSION}/v${NEW_VERSION}/g" README.md
+  sed -i '' "s/v${OLD_VERSION}/v${NEW_VERSION}/g; s/version-${OLD_VERSION}/version-${NEW_VERSION}/g" README.md
 else
   # Linux/Git Bash
-  sed -i "s/v${OLD_VERSION}/v${NEW_VERSION}/g" README.md
+  sed -i "s/v${OLD_VERSION}/v${NEW_VERSION}/g; s/version-${OLD_VERSION}/version-${NEW_VERSION}/g" README.md
 fi
 
 # 5. CHANGELOG.md — don't auto-add, just remind

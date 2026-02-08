@@ -1,6 +1,6 @@
 {
   "version": "6.1",
-  "description": "30 active skills + 1 deprecated redirect (verify) - merged quality layer, report-first brainstorm, tone moderation",
+  "description": "30 active skills + 2 deprecated redirects (verify, checkpoint) - merged quality layer, report-first brainstorm, tone moderation",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
