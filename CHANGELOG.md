@@ -1,5 +1,14 @@
 # Changelog
 
+## [6.1] - 2026-02-08
+
+### Fixed
+- **disable-model-invocation blocks Skill tool** — removed flag from all 11 user-invocable skills; kept only on passive/deprecated (core, standards, checkpoint, verify)
+- **Supabase deploy uses wrong token** — deploy skill now sources project `.env` first; 401 flagged as wrong token, not retried
+
+### Changed
+- **Brainstorm rewritten** — architecture-level scans (dead code, unused deps, splittability, client-vs-server fetch) replace linter-level checks (TODOs, any types). Adds competitor web search, user journey walkthrough, validation-before-claiming. "Codebase is clean" is a valid outcome.
+
 ## [6.0] - 2026-02-08
 
 ### Changed
