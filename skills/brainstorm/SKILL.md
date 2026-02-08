@@ -4,7 +4,7 @@ description: Scans codebase, proposes improvements and features autonomously. Us
 triggers:
   - brainstorm
   - generate
-allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit
+allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit, WebSearch
 model: opus
 user-invocable: true
 argument-hint: "[focus area]"
@@ -21,27 +21,49 @@ Scan, analyze, and propose — without asking what to focus on.
 
 | Command | Behavior |
 |---------|----------|
-| `brainstorm` | Full: quality scan + feature ideas → present findings |
+| `brainstorm` | Full: architecture scan + feature ideas → present findings |
 | `brainstorm apply` | Create prd.json stories from last scan results |
 | `brainstorm auth` | Targeted: ideas for auth specifically |
 | `brainstorm features` | Skip quality scan, only feature ideas |
 
-## Phase 1: Quality Scan (Parallel)
+## Phase 1: Architecture Scan (Parallel)
 
-Launch 4 scans simultaneously using Task tool with `run_in_background: true`:
+Launch 4 scans simultaneously using Task tool with `run_in_background: true`.
+
+These scans look for real issues, not linter warnings:
 
 ```typescript
-Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Find TODOs/FIXMEs in [PROJECT_PATH]. Report: count, file:line, content." })
+// Scan 1: Dead code — unused exports, unreferenced components, orphan routes
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: `Find dead code in [PROJECT_PATH]/src:
+  1. Components in src/components/ or src/app/ not imported anywhere else
+  2. Exported functions/constants not imported by any other file
+  3. Route segments (page.tsx) that import deleted/missing components
+  Cross-reference: for each export, grep for its name across src/. Report only confirmed unused.` })
 
-Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Find console.log statements in [PROJECT_PATH] (skip test files). Report: count, files." })
+// Scan 2: Console statements + error handling gaps
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: `In [PROJECT_PATH]/src (skip test/spec files):
+  1. Count console.log/warn/error statements — report top 5 files by count
+  2. Find empty catch blocks (catch that do nothing or just console.log)
+  3. Find API calls (fetch, axios, supabase.from) without error handling
+  Report: count per category, top offenders with file:line.` })
 
-Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Find hardcoded colors (text-white, bg-black, #hex, rgb) in [PROJECT_PATH]. Report: count, files." })
+// Scan 3: Bundle + complexity — what actually costs users
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: `In [PROJECT_PATH]/src:
+  1. Files over 300 lines — report file path and line count
+  2. For each large file: is it a single component that could be split? Or cohesive logic that should stay together? Check if it has multiple exported components or clearly separable sections.
+  3. Check for client-side data fetching in page.tsx/layout.tsx that could be server-side (useEffect + fetch patterns in 'use client' pages)
+  Report only genuinely splittable files, not cohesive ones.` })
 
-Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Find large files (>300 lines) and 'any' type usage in [PROJECT_PATH]. Report: file, lines, issues." })
+// Scan 4: Dependency audit
+Task({ subagent_type: "Explore", model: "haiku", run_in_background: true,
+  prompt: `In [PROJECT_PATH]:
+  1. Read package.json dependencies. For each dependency, grep src/ to check if it's actually imported. Report unused deps.
+  2. Find hardcoded colors (text-white, bg-black, #hex, rgb) — skip node_modules, skip test files, skip shadcn/ui component defaults
+  3. Check for 'any' type usage in .ts/.tsx files
+  Report: unused deps list, hardcoded color count + top files, any type count.` })
 ```
 
 ## Phase 2: Feature Ideation
@@ -49,35 +71,49 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
 After scans complete, read project context:
 - `CLAUDE.md` — goals, roadmap, known issues
 - `README.md` — what the app does
-- `package.json` — name, description, dependencies
+- `package.json` — name, description
 
-Then analyze and propose 3-8 features:
-- **Missing features** — what similar apps have that this doesn't
-- **UX improvements** — based on component structure found
-- **Integration opportunities** — based on installed packages
-- **Performance wins** — based on patterns observed
+Then **walk the user journey** to find gaps:
+1. Landing/onboarding — what's the first experience?
+2. Core workflow — what does the user do most? Where's the friction?
+3. Output/sharing — can users share results? Export? Collaborate?
+4. Retention — what brings users back?
 
-Be specific: "Add Cmd+K search modal" not "Improve UX"
+Use WebSearch to check 2-3 competitors: "what features do [similar apps] offer?"
+
+Propose only features that pass these filters:
+- **Feasible now** — don't propose features for placeholder/coming-soon pages
+- **Not already done** — verify the feature doesn't already exist before proposing
+- **Specific** — "Add Cmd+K search modal" not "Improve UX"
+- **Proportional** — don't propose 6 stories for a clean codebase. 0-3 is fine.
 
 ## Phase 3: Present Findings
 
 Present a findings table. Do not auto-create stories.
 
+Validate every finding before including it:
+- Claiming "0 tests"? Check test directories, playwright config, jest config first.
+- Claiming a file should be split? Check if it has multiple exported components or is actually cohesive.
+- Claiming a feature is missing? Grep for it first — it might already exist.
+
 ```
 Brainstorm Complete
 ===================
-Scanned 247 files in 45 seconds.
+Scanned [N] files in [T] seconds.
 
 | # | Category | Finding | Priority |
 |---|----------|---------|----------|
-| 1 | Quality  | 12 console.logs in src/ | High |
-| 2 | Quality  | 3 hardcoded colors | Medium |
-| 3 | Feature  | Add keyboard shortcuts (Cmd+K) | Medium |
-| 4 | Feature  | Dark mode toggle | Low |
-| 5 | Perf     | 2 request waterfalls in dashboard | High |
+| 1 | Dead Code | 3 unused components in src/components/ | High |
+| 2 | Quality  | 12 console.logs in production code | Medium |
+| 3 | Perf     | Dashboard page.tsx fetches client-side, could be server prefetch | High |
+| 4 | Feature  | Competitor X has [feature] — worth adding | Medium |
 
-Say "brainstorm apply" to create stories, or pick specific items to work on.
+Codebase health: [honest assessment — "clean, no urgent issues" is valid]
+
+Say "brainstorm apply" to create stories, or pick specific items.
 ```
+
+If the codebase is genuinely clean, say so. Do not invent work to fill a table.
 
 ### Auto Mode Exception
 
@@ -89,8 +125,7 @@ When user says `brainstorm apply`:
 1. Read prd.json (or create with `sprint: "S1"` if none exists)
 2. Deduplicate against existing stories (match first 25 chars of title)
 3. Create stories with ID format `S{sprint}-{number}`
-4. Priority mapping: quality issues = priority 1-2, feature ideas = priority 2-3
-5. Report: "Created X stories, skipped Y duplicates"
+4. Report: "Created X stories, skipped Y duplicates"
 
 ## Targeted Mode
 
@@ -121,12 +156,6 @@ if (!isDuplicate("Add keyboard shortcuts")) {
 
 Report skipped duplicates: "Skipped 2 ideas (already in task list)"
 
-## Token Cost
-
-- 4 parallel scans: ~20K tokens
-- Context reads: ~5K tokens
-- Time: 30-60 seconds
-
 ## Design System Awareness
 
 Before proposing UI features:
@@ -134,19 +163,11 @@ Before proposing UI features:
 - Ensure proposals use design tokens, not hardcoded colors
 - Reference `design` skill for aesthetic consistency
 
-## Plan Mode (For Complex Features)
-
-When brainstorm identifies features spanning 3+ files, multiple approaches, or DB schema changes, suggest plan mode:
-
-```
-This feature spans [N] areas: [list].
-Say "plan" to explore options, or pick items to work on directly.
-```
-
 ## Rules
 
 - Analyze and propose — do not ask "what do you want?"
-- 3-8 feature ideas max
-- Be specific — concrete features, not vague improvements
+- Quality over quantity — 2 real findings beat 6 padded ones
+- Validate before claiming — grep to confirm, don't assume
 - Skip shadcn/ui colors (library defaults, not project issues)
 - Deduplicate against existing tasks before creating
+- "Codebase is clean, nothing to propose" is a valid outcome
