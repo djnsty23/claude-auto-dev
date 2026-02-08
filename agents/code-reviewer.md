@@ -8,7 +8,7 @@ disallowedTools:
   - Edit
   - NotebookEdit
 preloadSkills:
-  - code-quality
+  - standards
   - security
 memory: project
 ---
