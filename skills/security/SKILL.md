@@ -168,3 +168,28 @@ execFile('command', [userInput])
 - Test fixtures with mock data
 
 Reference: [GitHub Actions Security Guide](https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/)
+
+---
+
+## Cloud Credential Hygiene (GCP / Vercel / Supabase)
+
+### 6. API Key & Service Account Audit
+```bash
+# Check for unrestricted or long-lived keys in source
+grep -rn "AIza\|GOOG\|ya29\.\|service_account" src/ --include="*.ts" --include="*.tsx" --include="*.json" --include="*.env*"
+# Check for keys committed to git history
+git log -p --all -S "AIza" --diff-filter=A -- "*.ts" "*.json" 2>/dev/null | head -20
+```
+
+**Rules:**
+- **Zero code storage**: Never commit API keys or service account JSON. Use Secret Manager or env vars injected at runtime.
+- **Disable dormant keys**: Any key unused for 30+ days should be decommissioned.
+- **Restrict every API key**: Limit to specific APIs (e.g., Maps JS only) and bind to IP/referrer/bundle ID.
+- **Least privilege**: Service accounts get minimum required permissions only. Use IAM recommender to prune unused roles.
+- **Enforce rotation**: Set max key lifespan via org policy. Disable key creation entirely if not needed.
+
+### 7. Operational Safeguards
+Flag if missing:
+- **Essential contacts** configured for security notifications
+- **Billing anomaly alerts** enabled (consumption spike = first sign of compromised credential)
+- **Budget alerts** with notification channels that are actively monitored
