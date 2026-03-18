@@ -1,5 +1,11 @@
 # Changelog
 
+## [6.3.1] - 2026-03-19
+
+### Fixed
+- **Audit skill** — Removed /compact prompt gate (unnecessary with 1M context)
+- **validate.js** — Fixed version check failing for X.Y.Z semver (was only handling X.Y)
+
 ## [6.3] - 2026-03-18
 
 ### Added

@@ -89,14 +89,19 @@ function checkVersionSync() {
   const files = [];
   let allMatch = true;
 
-  // package.json (x.y → x.y.0)
+  // package.json (x.y → x.y.0, or x.y.z stays as-is)
   const pkg = readJson('package.json');
   if (pkg && pkg.version) {
-    const semver = pkg.version.split('.').slice(0, 2).join('.');
-    if (semver === version) {
+    // VERSION can be "6.3" or "6.3.1"; package.json is "6.3.0" or "6.3.1"
+    const versionParts = version.split('.');
+    const pkgParts = pkg.version.split('.');
+    const matches = versionParts.length === 2
+      ? pkgParts[0] === versionParts[0] && pkgParts[1] === versionParts[1]
+      : pkg.version === version;
+    if (matches) {
       files.push('package.json');
     } else {
-      log('FAIL', `Version mismatch in package.json: expected ${version}.x, got ${pkg.version}`);
+      log('FAIL', `Version mismatch in package.json: expected ${version}, got ${pkg.version}`);
       allMatch = false;
     }
   }
