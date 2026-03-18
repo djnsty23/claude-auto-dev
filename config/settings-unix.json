@@ -24,7 +24,8 @@
       "TaskUpdate",
       "TaskList",
       "NotebookEdit",
-      "mcp__supabase__*"
+      "mcp__supabase__*",
+      "mcp__audiq__*"
     ],
     "deny": [
       "Bash(rm -rf *)",

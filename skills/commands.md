@@ -15,6 +15,7 @@
 | `review deep` | Full 7-step verification + UI check |
 | `ship` | Build, test, review, deploy |
 | `clean` | Remove temp files |
+| `scan` / `qa` | Live site QA via audiq (visual + functional) |
 | `test` | Run unit + browser tests |
 | `fix` | Debug and fix issues |
 | `setup` | Initialize new project (smart stack detection) |
@@ -45,7 +46,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 31 skills in directory format (`skill-name/SKILL.md`)
+- 32 skills in directory format (`skill-name/SKILL.md`)
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
 - Auto-loaded: core (with prd.json)
 - Standards, security load via requires chains when review/audit/auto run

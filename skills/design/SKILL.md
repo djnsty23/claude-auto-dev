@@ -108,17 +108,34 @@ Test at 375px width before considering any UI complete.
 - Layered transparencies, dramatic shadows
 - Decorative borders, custom cursors, grain overlays
 
-## Avoid
+## AI Slop Detection Checklist
 
-**Generic AI aesthetics to avoid:**
-- Inter, Roboto, Arial, system fonts
-- Purple/blue gradients on white backgrounds
-- Predictable layouts and component patterns
-- Cookie-cutter designs lacking character
-- Space Grotesk (overused)
-- Same design across generations — vary themes, fonts, aesthetics
+Before finalizing any design, check for these patterns. If 3+ are present, start over with a bolder direction:
+
+| Signal | What It Looks Like | Fix |
+|--------|-------------------|-----|
+| **Safe font** | Inter, Roboto, system-ui | Pick a distinctive font from Google Fonts |
+| **Purple gradient** | Purple/blue gradient on white | Choose a committed palette, not a safe default |
+| **Card grid** | 3 identical cards in a row | Break the pattern — vary sizes, overlap, offset |
+| **Centered everything** | All content centered, symmetric | Use asymmetry, left-align text, vary alignment |
+| **No texture** | Flat solid backgrounds | Add grain, noise, mesh gradients, or patterns |
+| **No motion** | Static page load | Add staggered reveals, scroll-triggered animations |
+| **Stock illustration style** | Flat vector people, blob shapes | Use photography, 3D renders, or hand-drawn elements |
+| **Predictable layout** | Header → hero → 3 cards → CTA → footer | Break the flow with unexpected sections |
+| **Same as last time** | Reusing a previous design's patterns | Deliberately choose a different aesthetic direction |
 
 No design should be the same. Interpret creatively and make unexpected choices that feel genuinely designed for the context.
+
+## Visual QA with audiq
+
+After implementing a design, validate it:
+```
+mcp__audiq__analyze_visual({ url: "http://localhost:3000", viewport: "desktop" })
+mcp__audiq__analyze_visual({ url: "http://localhost:3000", viewport: "mobile" })
+mcp__audiq__recommend_design({ url: "http://localhost:3000" })
+```
+
+Use the analysis to identify weak points and the recommendations for improvement direction.
 
 ## Reference Designs (Study Before Designing)
 

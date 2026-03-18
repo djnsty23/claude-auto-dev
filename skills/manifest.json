@@ -1,6 +1,6 @@
 {
   "version": "6.2",
-  "description": "31 active skills + 2 deprecated redirects (verify, checkpoint) - third-party skills (stripe, seo), smart setup",
+  "description": "32 active skills + 2 deprecated redirects (verify, checkpoint) - includes scan (audiq QA), stripe, seo",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -136,7 +136,8 @@
       "requires": [
         "review",
         "security",
-        "test"
+        "test",
+        "scan"
       ],
       "priority": 3,
       "description": "Pre-deploy checklist with review, security, and test verification. Use when ready to deploy."
@@ -370,6 +371,21 @@
       "file": "perf/SKILL.md",
       "priority": 2,
       "description": "Web performance audit - Core Web Vitals, bundle analysis, Lighthouse patterns."
+    },
+    "scan": {
+      "triggers": [
+        "scan",
+        "scan it",
+        "test it",
+        "qa",
+        "visual qa"
+      ],
+      "file": "scan/SKILL.md",
+      "requires": [
+        "design"
+      ],
+      "priority": 1,
+      "description": "Live site QA via audiq MCP — scans pages, catches visual/functional issues, compares with baselines. Use when testing a live site or after deploying."
     },
     "a11y": {
       "triggers": [

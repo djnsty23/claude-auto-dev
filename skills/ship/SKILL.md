@@ -104,7 +104,17 @@ supabase secrets list --project-ref [ref]
 
 A successful deploy does NOT mean the app works. Verify after deploying.
 
-### Automated Checks (agent-browser)
+### Automated Checks (audiq MCP — preferred)
+
+```
+mcp__audiq__scan_page({ url: DEPLOY_URL, profile: "quick" })
+mcp__audiq__screenshot_page({ url: DEPLOY_URL, viewport: "desktop" })
+mcp__audiq__screenshot_page({ url: DEPLOY_URL, viewport: "mobile" })
+mcp__audiq__get_console_errors({ url: DEPLOY_URL })
+mcp__audiq__get_network_issues({ url: DEPLOY_URL })
+```
+
+### Fallback: agent-browser (if audiq unavailable)
 
 ```bash
 agent-browser open [DEPLOY_URL]
