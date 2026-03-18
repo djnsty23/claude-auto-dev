@@ -26,9 +26,9 @@ Scan, analyze, and propose — without asking what to focus on.
 | `brainstorm auth` | Targeted: ideas for auth specifically |
 | `brainstorm features` | Skip quality scan, only feature ideas |
 
-## Phase 1: Architecture Scan (Parallel)
+## Phase 1: Architecture + QA Scan (Parallel)
 
-Launch 4 scans simultaneously using Task tool with `run_in_background: true`.
+Launch 5 scans simultaneously using Task tool with `run_in_background: true`.
 
 Replace `[PROJECT_PATH]` below with the actual working directory path.
 
@@ -66,6 +66,19 @@ Task({ subagent_type: "Explore", run_in_background: true,
   2. Find hardcoded colors (text-white, bg-black, #hex, rgb) — skip node_modules, skip test files, skip shadcn/ui component defaults
   3. Check for 'any' type usage in .ts/.tsx files
   Report: unused deps list, hardcoded color count + top files, any type count.` })
+
+// Scan 5: Live site QA (if dev server running)
+// Detect running dev server first, then scan with audiq MCP
+Task({ subagent_type: "general-purpose", run_in_background: true,
+  prompt: `Check if a dev server is running:
+  curl -s http://localhost:3000 > /dev/null 2>&1 || curl -s http://localhost:3001 > /dev/null 2>&1 || curl -s http://localhost:5173 > /dev/null 2>&1
+  If a server responds, run these audiq MCP scans on the detected URL:
+  1. mcp__audiq__scan_page with profile "quick" — report scores and critical/high issues
+  2. mcp__audiq__screenshot_page with viewport "desktop" — analyze the screenshot for visual issues: bland/generic design, broken layout, missing content, poor hierarchy
+  3. mcp__audiq__screenshot_page with viewport "mobile" — check responsive layout: overflow, tiny text, unreachable buttons, missing mobile nav
+  4. mcp__audiq__get_console_errors — report any JS errors
+  Report: scores (perf/a11y/seo/best-practices), visual issues found in screenshots, console errors, and design quality assessment (is it distinctive or generic AI slop?).
+  If no dev server is running, report "No dev server detected — skipped live QA scan."` })
 ```
 
 ## Phase 2: Feature Ideation
@@ -108,7 +121,10 @@ Scanned [N] files in [T] seconds.
 | 1 | Dead Code | 3 unused components in src/components/ | High |
 | 2 | Quality  | 12 console.logs in production code | Medium |
 | 3 | Perf     | Dashboard page.tsx fetches client-side, could be server prefetch | High |
-| 4 | Feature  | Competitor X has [feature] — worth adding | Medium |
+| 4 | Visual   | Mobile nav overflows on 375px, hamburger menu missing | High |
+| 5 | Design   | Generic card grid layout — needs visual differentiation | Medium |
+| 6 | A11y     | 4 images missing alt text, 2 buttons without labels | High |
+| 7 | Feature  | Competitor X has [feature] — worth adding | Medium |
 
 Codebase health: [honest assessment — "clean, no urgent issues" is valid]
 

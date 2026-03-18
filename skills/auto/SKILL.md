@@ -126,19 +126,28 @@ const executable = storyEntries.filter(([id, s]) =>
 
 | Task Type | Verification |
 |-----------|--------------|
-| UX/UI | `agent-browser` visual + console + network |
-| Feature | Build passes + browser devtools check |
+| UX/UI | audiq scan + screenshots (desktop + mobile) + console errors |
+| Feature | Build passes + audiq scan if UI changed |
 | API | Endpoint returns expected data + network check |
 | Bug fix | Reproduce, verify fixed, no new errors |
 
-For UI/API tasks with a running dev server:
+For UI/API tasks with a running dev server, use audiq MCP (preferred):
+```
+mcp__audiq__scan_page({ url: "http://localhost:3000/[page]", profile: "quick" })
+mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "desktop" })
+mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "mobile" })
+mcp__audiq__get_console_errors({ url: "http://localhost:3000/[page]" })
+```
+
+Analyze returned screenshots for: broken layout, missing content, visual regressions, design quality.
+Fix console errors or visual issues before marking task complete.
+
+If audiq MCP is not available, fall back to agent-browser:
 ```bash
-agent-browser open http://localhost:3000/path
+agent-browser open http://localhost:3000/[page]
 agent-browser snapshot -i
 agent-browser errors
-agent-browser network requests
 ```
-Fix console errors or failed network requests before moving on.
 
 ### Self-Verification (after each task)
 
@@ -162,15 +171,16 @@ Run `git diff` and check:
 - No `any` types introduced
 - No commented-out code
 
-**4. UI/API Change? Browser Verification**
-If agent-browser is available and a dev server is running:
-```bash
-agent-browser open http://localhost:3000/[page]
-agent-browser screenshot .claude/screenshots/verify-$(date +%s).png
-agent-browser snapshot -i
-agent-browser errors
-agent-browser network requests --filter api
+**4. UI/API Change? Visual Verification**
+If a dev server is running, scan the affected page with audiq:
 ```
+mcp__audiq__scan_page({ url: "http://localhost:3000/[page]", profile: "quick" })
+mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "desktop" })
+mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "mobile" })
+mcp__audiq__get_console_errors({ url: "http://localhost:3000/[page]" })
+```
+Check screenshots for: layout breaks, missing content, visual regressions, design quality.
+If audiq is unavailable, use agent-browser as fallback.
 
 **5. Mark Complete**
 Only after all checks pass. If any check fails, fix it first.
@@ -250,6 +260,8 @@ If no tasks to work on:
 | Signal | Action |
 |--------|--------|
 | Sprint had 5+ tasks | Run `simplify` to catch duplication from parallel work |
+| Dev server running + UI changes made | Run `scan` to catch visual/QA regressions |
+| Last scan scored <70 on any category | Create stories from scan findings |
 | TODOs/FIXMEs in code | Brainstorm (auto mode creates stories) |
 | Console.logs left in | Quick cleanup sprint |
 | No tests exist | Suggest test sprint |

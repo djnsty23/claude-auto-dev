@@ -38,7 +38,8 @@
         "standards",
         "browser-auth",
         "security",
-        "commit"
+        "commit",
+        "scan"
       ],
       "priority": 1,
       "description": "Autonomous task execution with testing and security. Works through all tasks without stopping."
@@ -51,7 +52,8 @@
       "file": "brainstorm/SKILL.md",
       "requires": [
         "standards",
-        "design"
+        "design",
+        "scan"
       ],
       "priority": 1,
       "description": "Scans codebase, proposes improvements and features autonomously. Use when unsure what to work on next."
