@@ -11,9 +11,7 @@ argument-hint: "[scope: full|auth|dashboard|latest]"
 
 # Audit
 
-**Before running:** Check if the user ran `/compact` recently in this session (look for "Compacted" output in recent messages). If they did, launch immediately — no need to suggest it again. If they did NOT compact recently, tell the user: "Audit spawns 7 parallel agents — this is token-heavy. Type `/compact` first to free context, then say `audit` again. Or say `go` to launch now." Wait for the user to respond. Do NOT try to invoke `/compact` yourself — it is a built-in CLI command only the user can type.
-
-**Philosophy:** Rate each aspect of the app (or specific feature), then auto-create stories from findings.
+Rate each aspect of the app (or specific feature), then auto-create stories from findings. Launch immediately — no need to suggest /compact first.
 
 ## Existing Tasks
 !`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch(e){}"`
