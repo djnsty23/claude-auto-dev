@@ -23,7 +23,7 @@ Create a new sprint or advance to the next one.
 1. Parse $ARGUMENTS as feature description
 2. Generate epic prefix from description
 3. Create/update prd.json with new sprint
-4. Generate 10-20 stories via TaskCreate with full metadata (see quality skill for schema):
+4. Generate 10-20 stories via TaskCreate with full metadata (see core skill for schema):
    ```
    TaskCreate({
      subject: "[verb] [specific deliverable]",

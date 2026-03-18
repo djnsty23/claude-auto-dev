@@ -384,54 +384,17 @@ function checkSettingsSync() {
     return;
   }
 
-  let allMatch = true;
-
-  // Check deny rules
-  const denyRules1 = [...(settings.permissions?.deny || [])].sort();
-  const denyRules2 = [...(settingsUnix.permissions?.deny || [])].sort();
-
-  if (JSON.stringify(denyRules1) !== JSON.stringify(denyRules2)) {
-    log('FAIL', 'Settings sync: deny rules differ between settings.json and settings-unix.json');
-    allMatch = false;
-  }
-
-  // Check allow rules
-  const allowRules1 = [...(settings.permissions?.allow || [])].sort();
-  const allowRules2 = [...(settingsUnix.permissions?.allow || [])].sort();
-
-  if (JSON.stringify(allowRules1) !== JSON.stringify(allowRules2)) {
-    log('FAIL', 'Settings sync: allow rules differ between settings files');
-    allMatch = false;
-  }
-
-  // Check hook events
-  const hooks1 = [...Object.keys(settings.hooks || {})].sort();
-  const hooks2 = [...Object.keys(settingsUnix.hooks || {})].sort();
-
-  if (JSON.stringify(hooks1) !== JSON.stringify(hooks2)) {
-    log('FAIL', 'Settings sync: hook events differ between settings files');
-    allMatch = false;
-  }
-
-  // Check shared top-level settings
-  const sharedKeys = ['model', 'thinkingEnabled', 'teammateMode'];
-  for (const key of sharedKeys) {
-    if (JSON.stringify(settings[key]) !== JSON.stringify(settingsUnix[key])) {
-      log('FAIL', `Settings sync: "${key}" differs — settings.json has "${settings[key]}", settings-unix.json has "${settingsUnix[key]}"`);
-      allMatch = false;
+  // Both files should be fully identical (both use $HOME since CC 2.1.69)
+  if (JSON.stringify(settings) === JSON.stringify(settingsUnix)) {
+    log('PASS', 'Settings sync: settings.json and settings-unix.json are identical');
+  } else {
+    // Find specific differences for actionable error messages
+    const keys = new Set([...Object.keys(settings), ...Object.keys(settingsUnix)]);
+    for (const key of keys) {
+      if (JSON.stringify(settings[key]) !== JSON.stringify(settingsUnix[key])) {
+        log('FAIL', `Settings sync: "${key}" differs between settings.json and settings-unix.json`);
+      }
     }
-  }
-
-  // Check env vars
-  const env1 = settings.env || {};
-  const env2 = settingsUnix.env || {};
-  if (JSON.stringify(env1) !== JSON.stringify(env2)) {
-    log('FAIL', 'Settings sync: env vars differ between settings files');
-    allMatch = false;
-  }
-
-  if (allMatch) {
-    log('PASS', 'Settings sync: permissions, hooks, model, env, teammateMode all match');
   }
 }
 

@@ -21,7 +21,7 @@ const DANGEROUS_BASH_PATTERNS = [
     /git\s+push\s+(--force|-f\b|.*--force|.*\s-f\b)/i, // git push --force/-f (any flag order)
     /git\s+clean\s+(-[a-z]*f|--force)/i,       // git clean -f, -fd, --force
     /git\s+checkout\s+(\.|--\s+\.)/i,          // git checkout .
-    /git\s+restore\s+\./i,                     // git restore .
+    /git\s+restore\s+(--staged\s+)?\./i,        // git restore . and git restore --staged .
     /git\s+stash\s+(drop|clear)/i,             // git stash drop/clear
     /git\s+branch\s+-D/,                        // git branch -D (force delete, case-sensitive)
     /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection

@@ -30,6 +30,7 @@ try {
     // ============================================================
     if (fs.existsSync('.env.local')) {
         const lines = fs.readFileSync('.env.local', 'utf8').split('\n');
+        const PROTECTED_VARS = new Set(['PATH', 'HOME', 'USERPROFILE', 'NODE_OPTIONS', 'NODE_PATH', 'SHELL', 'COMSPEC', 'SystemRoot']);
         for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith('#')) continue;
@@ -39,9 +40,11 @@ try {
 
             const key = trimmed.substring(0, eqIndex).trim();
             let value = trimmed.substring(eqIndex + 1);
-            value = value.replace(/^["']/, '').replace(/["']$/, '');
+            // Strip matching quotes only
+            if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.slice(1, -1);
+            }
 
-            const PROTECTED_VARS = new Set(['PATH', 'HOME', 'USERPROFILE', 'NODE_OPTIONS', 'NODE_PATH', 'SHELL', 'COMSPEC', 'SystemRoot']);
             if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !PROTECTED_VARS.has(key)) {
                 process.env[key] = value;
             }
