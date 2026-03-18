@@ -81,26 +81,46 @@ Task({ subagent_type: "general-purpose", run_in_background: true,
   If no dev server is running, report "No dev server detected — skipped live QA scan."` })
 ```
 
-## Phase 2: Feature Ideation
+## Phase 2: Feature Ideation (Product Thinking)
 
 After scans complete, read project context:
 - `CLAUDE.md` — goals, roadmap, known issues
 - `README.md` — what the app does
 - `package.json` — name, description
 
-Then **walk the user journey** to find gaps:
-1. Landing/onboarding — what's the first experience?
+### Step 1: Understand the product's identity
+
+Answer these before proposing anything:
+- **What is this product's unique angle?** (Not "what category is it" but "why would someone choose this over alternatives?")
+- **Who specifically uses it?** (Developer? Marketing team? Small business owner?)
+- **What's the core "aha moment"?** (The first thing that makes a user think "this is useful")
+
+### Step 2: Research competitors (required)
+
+Use WebSearch to check 2-3 competitors: "[product name] vs [competitor]" or "best [category] tools 2026"
+
+For each competitor, note:
+- What they do well (features to match)
+- What they do poorly (opportunities to differentiate)
+- What they charge (pricing model insight)
+
+### Step 3: Walk the user journey
+
+1. Landing/onboarding — what's the first experience? Is the value prop clear in 5 seconds?
 2. Core workflow — what does the user do most? Where's the friction?
 3. Output/sharing — can users share results? Export? Collaborate?
 4. Retention — what brings users back?
 
-Use WebSearch to check 2-3 competitors: "what features do [similar apps] offer?"
+### Step 4: Propose differentiated features
 
-Propose only features that pass these filters:
+Propose only features that pass ALL these filters:
 - **Feasible now** — don't propose features for placeholder/coming-soon pages
 - **Not already done** — verify the feature doesn't already exist before proposing
 - **Specific** — "Add Cmd+K search modal" not "Improve UX"
+- **Differentiated** — "This helps because competitors don't do X" not generic SaaS playbook items
 - **Proportional** — don't propose 6 stories for a clean codebase. 0-3 is fine.
+
+Avoid generic suggestions like "add analytics dashboard", "team workspaces", "notification system" unless the competitor research specifically shows these as gaps that matter for THIS product's users.
 
 ## Phase 3: Present Findings
 

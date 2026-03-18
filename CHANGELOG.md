@@ -1,5 +1,13 @@
 # Changelog
 
+## [6.3.2] - 2026-03-19
+
+### Changed
+- **Brainstorm product thinking** — Feature ideation now requires product identity analysis, competitor research with differentiation focus, and rejects generic SaaS playbook suggestions
+- **Auto visual enforcement** — UI tasks cannot be marked complete without visual verification (audiq screenshots). Added explicit step 7 in execution flow and hard gate at step 5.
+- **Auto archive check** — Pre-flight now checks prd.json size and auto-archives when >50KB
+- **Core archive trigger** — Archive runs automatically (no prompt) when starting new sprint with completed previous sprint
+
 ## [6.3.1] - 2026-03-19
 
 ### Fixed

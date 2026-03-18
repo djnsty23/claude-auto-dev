@@ -86,6 +86,11 @@ git status --short
 npm run build 2>&1 | tail -5
 ```
 
+Also check if prd.json needs archiving:
+```bash
+node -e "try{const s=require('fs').statSync('prd.json');if(s.size>50000)console.log('[Archive] prd.json is '+Math.round(s.size/1024)+'KB — run archive before starting')}catch{}"
+```
+
 Skip if takes >10 seconds.
 
 ## Task Execution
@@ -113,8 +118,9 @@ const executable = storyEntries.filter(([id, s]) =>
 4. `npm run typecheck` — fix if fails
 5. `npm run build` — fix if fails
 6. Self-Verification (see below)
-7. Update prd.json: `passes: true`
-8. Start next task immediately
+7. **Visual verification** — if the task touched UI (components, pages, styles, layouts), run audiq scan + screenshots. Do NOT skip this.
+8. Update prd.json: `passes: true`
+9. Start next task immediately
 
 ### Context Loading (before writing any code)
 
@@ -184,6 +190,8 @@ If audiq is unavailable, use agent-browser as fallback.
 
 **5. Mark Complete**
 Only after all checks pass. If any check fails, fix it first.
+
+A task that changed UI files (.tsx, .css, layout, page) without visual verification is NOT complete — go back to step 4.
 
 ## Parallel Execution (Optional)
 

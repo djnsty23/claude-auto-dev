@@ -81,7 +81,10 @@ With 1M context, aggressive token saving is unnecessary. Prefer clarity over bre
 
 ## Archive Trigger
 
-When 4+ total sprints exist, or prd.json > 500 lines, or prd.json > 50KB:
-- Suggest `archive` before starting work
-- Archive keeps only last 3 sprints active
-- Completed stories move to `.claude/archives/prd-archive-YYYY-MM.json`
+When ANY of these are true, run `archive` before starting new work:
+- 4+ total sprints exist in prd.json
+- prd.json > 500 lines
+- prd.json > 50KB
+- Starting a new sprint while previous sprint's stories are all complete
+
+Do not ask — just archive. Archive keeps only last 3 sprints active. Completed stories move to `.claude/archives/prd-archive-YYYY-MM.json`.
