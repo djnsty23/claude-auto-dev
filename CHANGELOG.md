@@ -1,5 +1,37 @@
 # Changelog
 
+## [6.3] - 2026-03-18
+
+### Added
+- **Scan skill** — Live site QA via audiq MCP (17 tools): visual bugs, console errors, a11y, perf, SEO, design quality analysis, baseline comparison, fix plan generation
+- **Brainstorm Phase 1 Scan 5** — Live QA scan runs in parallel with code scans; surfaces visual, design, and a11y issues alongside code issues
+- **Auto visual verification** — UI/UX tasks verified with audiq screenshots (desktop + mobile) + console error check before marking complete
+- **Design AI slop checklist** — 9-point detection checklist (safe font, purple gradient, card grid, etc.) with audiq visual analysis integration
+- **Design reference sites** — linear.app, vercel.com, stripe.com, raycast.com, notion.so, cal.com as quality benchmarks
+
+### Changed
+- **Auto IDLE detection** — Added "dev server + UI changes" and "scan score <70" as signals to trigger QA scan and fix stories
+- **Ship post-deploy** — Now uses audiq MCP for verification (preferred over agent-browser)
+- **Deploy skill** — Added Read, Grep, Glob to allowed-tools
+- **Token management** — Relaxed for 1M context; removed aggressive /compact suggestions
+
+### Fixed
+- **Hook paths** — `%USERPROFILE%` replaced with `$HOME` (Claude Code 2.1.69 runs hooks via Git Bash)
+- **Stop hook schema** — `ALLOW`/`REJECT` replaced with `approve`/`block` (new CC schema)
+- **Stop hook infinite loop** — Added idle marker to prevent re-blocking after IDLE detection runs
+- **Pre-tool filter** — Block `rm --recursive --force` (reversed flag order) and `git restore --staged .`
+- **Settings sync** — Both config files now identical (unified on `$HOME`); validate.js does deep equality
+- **bump.sh** — X.Y.Z input no longer creates invalid semver X.Y.Z.0
+- **Install scripts** — Removed misleading "auto-pull on session start" claim
+- **session-start.js** — Fixed quote stripping (matching pairs only), hoisted PROTECTED_VARS outside loop, fixed section numbering
+- **brainstorm** — Stronger deduplication against prd.json AND native Tasks
+- **browser-auth** — Fixed agent-browser `--task` syntax, added Windows fallback note
+- **sprint** — Fixed stale "quality skill" reference
+- **seo/supabase** — Resolved "schema" trigger overlap
+- **Parallel agents** — Added file ownership rules, worktree commit requirement, overhead guidance (<3 files skip worktree)
+- **Auto retry** — Auto-fix trivial errors (missing import, type mismatch) before counting as retry
+- **Supabase/design** — Use `${CLAUDE_SKILL_DIR}` for portable reference paths
+
 ## [6.2] - 2026-02-09
 
 ### Added
