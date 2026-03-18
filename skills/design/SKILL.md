@@ -151,7 +151,7 @@ Load specific references for engineering quality:
 
 | Reference | When to Load |
 |-----------|--------------|
-| `references/web-interface-guidelines.md` | Forms, focus states, animation, a11y, dark mode, touch, i18n |
+| `${CLAUDE_SKILL_DIR}/references/web-interface-guidelines.md` | Forms, focus states, animation, a11y, dark mode, touch, i18n |
 
 ## Component Composition
 
@@ -202,4 +202,4 @@ Key rules:
 3. Use existing components — never create "similar but different" ones
 4. Check all breakpoints match siblings
 
-Load `references/preserve-ui.md` for the full protocol, checklists, and common traps.
+Load `${CLAUDE_SKILL_DIR}/references/preserve-ui.md` for the full protocol, checklists, and common traps.

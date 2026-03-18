@@ -177,10 +177,12 @@ Only after all checks pass. If any check fails, fix it first.
 
 ## Parallel Execution (Optional)
 
-For independent tasks, launch multiple agents:
+For independent tasks, launch multiple agents with worktree isolation to avoid file conflicts:
 ```
-Task({ subagent_type: "general-purpose", prompt: "...", run_in_background: true })
+Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true, isolation: "worktree" })
 ```
+
+Use `SendMessage({ to: agentId })` to continue a previously spawned agent (do not pass a resume parameter).
 
 ## Smart Retry
 

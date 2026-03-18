@@ -164,12 +164,12 @@ CREATE INDEX idx_orders_customer_id ON orders(customer_id);
 
 | File | When to Load |
 |------|--------------|
-| `references/query-missing-indexes.md` | Query optimization |
-| `references/conn-pooling.md` | Connection issues |
-| `references/security-rls-performance.md` | Slow RLS policies |
-| `references/security-rls-basics.md` | Setting up RLS |
-| `references/data-n-plus-one.md` | Multiple query issues |
-| `references/monitor-explain-analyze.md` | Query debugging |
+| `${CLAUDE_SKILL_DIR}/references/query-missing-indexes.md` | Query optimization |
+| `${CLAUDE_SKILL_DIR}/references/conn-pooling.md` | Connection issues |
+| `${CLAUDE_SKILL_DIR}/references/security-rls-performance.md` | Slow RLS policies |
+| `${CLAUDE_SKILL_DIR}/references/security-rls-basics.md` | Setting up RLS |
+| `${CLAUDE_SKILL_DIR}/references/data-n-plus-one.md` | Multiple query issues |
+| `${CLAUDE_SKILL_DIR}/references/monitor-explain-analyze.md` | Query debugging |
 
 ---
 
@@ -254,8 +254,8 @@ npx supabase db push
 
 | Rule | When to Load |
 |------|--------------|
-| `rules/rls-patterns.md` | RLS policy examples |
-| `rules/security-patterns.md` | Security hardening |
-| `rules/multi-account.md` | Multi-account CLI setup |
+| `${CLAUDE_SKILL_DIR}/rules/rls-patterns.md` | RLS policy examples |
+| `${CLAUDE_SKILL_DIR}/rules/security-patterns.md` | Security hardening |
+| `${CLAUDE_SKILL_DIR}/rules/multi-account.md` | Multi-account CLI setup |
 
 Source: [supabase/agent-skills](https://github.com/supabase/agent-skills)

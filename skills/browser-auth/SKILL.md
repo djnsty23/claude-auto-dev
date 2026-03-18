@@ -10,7 +10,7 @@ user-invocable: false
 
 Vercel's agent-browser is purpose-built for AI agents - 93% token savings vs Playwright MCP.
 
-## Security Rules (NON-NEGOTIABLE)
+## Security Rules
 
 1. Do not hardcode credentials - Use env vars only
 2. **Test account only** - Never use real user accounts
@@ -98,21 +98,28 @@ agent-browser open http://localhost:3000/dashboard
 agent-browser screenshot .claude/screenshots/dashboard-$(date +%Y%m%d-%H%M%S).png
 ```
 
-## Task-Based Testing (Recommended)
+## Multi-Step Testing
 
-For complex flows, use `--task` for natural language:
+For complex flows, chain commands:
 
 ```bash
-agent-browser run --task "Go to localhost:3000/login, enter test@example.com and password123, click Sign In, verify the dashboard loads with user name visible"
+agent-browser open http://localhost:3000/login
+agent-browser snapshot -i
+agent-browser fill @email "test@example.com"
+agent-browser fill @password "password123"
+agent-browser click @submit
+agent-browser snapshot -i  # Verify dashboard loads
 ```
 
-## Integration with verify Skill
+Note: agent-browser daemon fails on Windows. Use `npx playwright open <url>` as fallback for visual checks.
 
-After browser tests pass, run verify:
+## Integration with Review
+
+After browser tests pass, run review:
 ```
 1. Browser test passes -> agent-browser confirms UI state
-2. Run verify -> npm run typecheck && npm run build
-3. Both pass -> Task marked complete with verified: "browser"
+2. Run review -> npm run typecheck && npm run build
+3. Both pass -> Task marked complete
 ```
 
 ## Token Efficiency

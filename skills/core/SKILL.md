@@ -68,11 +68,13 @@ Examples:
 - `type-mismatch: Changed Record<string, T> to Partial<Record<K, T>>`
 - `overflow: Added max-h + overflow-auto`
 
-## Context Optimization
+## Context Tips
+
+With 1M context, aggressive token saving is unnecessary. Prefer clarity over brevity.
 
 | Action | Do This |
 |--------|---------|
-| Check status | Read prd.json header (30 lines) |
+| Check status | Read prd.json header or use dynamic context injection |
 | Start task | Grep specific story |
 | Track progress | Native TaskUpdate |
 | Complete work | Batch edit prd.json at session end |
