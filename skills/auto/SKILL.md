@@ -184,13 +184,28 @@ Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true
 
 Use `SendMessage({ to: agentId })` to continue a previously spawned agent (do not pass a resume parameter).
 
+### File Ownership (required for parallel agents)
+
+Assign each agent exclusive files to prevent merge conflicts:
+- Specify in the prompt: "You own src/components/Feature.tsx and src/lib/feature-utils.ts. Do not modify any other files."
+- **Shared files** (globals.css, shared types, index files) must NOT be assigned to parallel agents — handle them in a single coordinating step after agents complete.
+- If an agent needs a shared type, it should create a local type and let the coordinator merge it.
+
+### Worktree Agents Must Commit
+
+When using `isolation: "worktree"`, agents MUST commit their work before finishing:
+```
+"Before you finish, run: git add -A && git commit -m 'feat: [description]'. Uncommitted changes in worktrees are lost on cleanup."
+```
+
 ## Smart Retry
 
-On failure (maximum 2 retries, then move on):
-1. Log to `.claude/mistakes.md`
-2. Retry 1: Different approach
-3. Retry 2: Simplest possible implementation
-4. Still fails: set `passes: false`, continue to next task
+On failure:
+1. **Auto-fix first** — Most failures are trivial (missing import, type mismatch, wrong path). Read the error, fix it inline, re-run the check. This does not count as a retry.
+2. If auto-fix doesn't resolve it, log to `.claude/mistakes.md`
+3. Retry 1: Different approach
+4. Retry 2: Simplest possible implementation
+5. Still fails: set `passes: false`, continue to next task
 
 Do not retry a third time. Do not spend more than 10 minutes on retries for a single task.
 
@@ -234,6 +249,7 @@ If no tasks to work on:
 
 | Signal | Action |
 |--------|--------|
+| Sprint had 5+ tasks | Run `simplify` to catch duplication from parallel work |
 | TODOs/FIXMEs in code | Brainstorm (auto mode creates stories) |
 | Console.logs left in | Quick cleanup sprint |
 | No tests exist | Suggest test sprint |
@@ -258,9 +274,10 @@ Sprint [N] complete (8/8 tasks).
 
 What's next? (Recommended: ship)
 1. ship - Deploy current work
-2. audit - Deep quality check
-3. brainstorm - Find more improvements
-4. Done for now
+2. simplify - Check for duplication and over-abstraction
+3. audit - Deep quality check
+4. brainstorm - Find more improvements
+5. Done for now
 ```
 
 Present these options to the user and wait for their response. Pick recommendation based on context.

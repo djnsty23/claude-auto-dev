@@ -70,9 +70,10 @@ Claude: [pulls latest, syncs skills/hooks, removes stale files]
         Updated to v6.2
 ```
 
-**Option 2: Automatic on session start**
-- Session hook pulls latest from GitHub (5s timeout)
-- Re-copies if changes detected
+**Option 2: Shell command**
+```bash
+update-dev   # Added to your shell profile by installer
+```
 
 **Option 3: Manual**
 ```bash

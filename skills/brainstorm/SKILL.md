@@ -171,5 +171,6 @@ Before proposing UI features:
 - Quality over quantity — 2 real findings beat 6 padded ones
 - Validate before claiming — grep to confirm, don't assume
 - Skip shadcn/ui colors (library defaults, not project issues)
-- Deduplicate against existing tasks before creating
+- Deduplicate against existing prd.json stories AND native Tasks before creating
+- Check open tasks overlap: if a finding matches an existing pending story (first 25 chars of title), skip it
 - "Codebase is clean, nothing to propose" is a valid outcome

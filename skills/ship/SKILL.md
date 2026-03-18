@@ -14,12 +14,12 @@ Complete deployment pipeline: pre-flight → security → deploy → verify → 
 
 ## Step 1: Pre-flight Checks
 
-Run ALL checks in parallel:
+Run ALL checks in parallel. For monorepos, run in each package:
 
 ```bash
 npm run typecheck          # Must pass
 npm run build              # Must pass
-npm run test               # Run if available
+npm run test               # Run if available (vitest, jest, playwright)
 git status --short         # Warn if uncommitted changes
 ```
 

@@ -120,6 +120,21 @@ Test at 375px width before considering any UI complete.
 
 No design should be the same. Interpret creatively and make unexpected choices that feel genuinely designed for the context.
 
+## Reference Designs (Study Before Designing)
+
+These represent the quality bar — match their craft, not their style:
+
+| Site | Why It's Good |
+|------|---------------|
+| linear.app | Clean dark UI, subtle motion, sharp typography, keyboard-first |
+| vercel.com | Minimal, high contrast, excellent CRO and hierarchy |
+| stripe.com | Editorial feel, generous spacing, clear information architecture |
+| raycast.com | Dark UI done right, motion with purpose, developer aesthetic |
+| notion.so | Warm minimalism, playful illustrations, accessible color system |
+| cal.com | Open source aesthetic, clean forms, purposeful use of color |
+
+Study 1-2 before starting any design work. Note what makes them memorable, then apply that thinking to your own direction.
+
 ## Pro Tips
 
 ### Generate Multiple Variants
