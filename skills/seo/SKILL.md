@@ -4,7 +4,6 @@ description: SEO audit and structured data patterns - meta tags, Open Graph, JSO
 triggers:
   - seo
   - meta tags
-  - schema
   - open graph
   - structured data
   - sitemap

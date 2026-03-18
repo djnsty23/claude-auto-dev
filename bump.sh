@@ -25,8 +25,12 @@ echo ""
 # 1. VERSION file
 echo "$NEW_VERSION" > VERSION
 
-# 2. package.json (x.y → x.y.0)
-SEMVER="${NEW_VERSION}.0"
+# 2. package.json (x.y → x.y.0, x.y.z stays as-is)
+if echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    SEMVER="$NEW_VERSION"
+else
+    SEMVER="${NEW_VERSION}.0"
+fi
 node -e "
 const pkg = require('./package.json');
 pkg.version = '$SEMVER';

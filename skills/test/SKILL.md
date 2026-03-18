@@ -42,7 +42,7 @@ If no UI changes found, STILL run Step 3 on the main page (smoke test).
 Check prerequisites first:
 ```bash
 # 1. Is agent-browser installed?
-command -v agent-browser || npm install -g agent-browser
+command -v agent-browser
 
 # 2. Is dev server running?
 curl -s http://localhost:3000 > /dev/null 2>&1 || \
@@ -64,7 +64,7 @@ agent-browser snapshot -i
 # Verify: no console errors, elements render, no 404s
 ```
 
-If `agent-browser` is not available and cannot be installed, report it as a gap (do NOT silently skip).
+If `agent-browser` is not available, report it as a gap (do not silently skip). On Windows, the daemon may fail — use `npx playwright open <url>` as a fallback for visual checks.
 
 ## Step 4: Report
 

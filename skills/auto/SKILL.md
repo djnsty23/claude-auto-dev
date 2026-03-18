@@ -200,13 +200,9 @@ Do not retry a third time. Do not spend more than 10 minutes on retries for a si
 
 ## Token Management
 
-After every 3 completed tasks, recommend `/compact`:
+With 1M context, token pressure is rarely an issue. Only suggest `/compact` if context usage is visibly high (e.g., after 10+ completed tasks or large file reads).
 
-```
-Checkpoint: 3 tasks complete. Run /compact to reclaim ~40% tokens.
-```
-
-Be concise. Short responses = more runway.
+Be concise but don't sacrifice clarity for brevity.
 
 ## Completion
 
@@ -265,7 +261,7 @@ What's next? (Recommended: ship)
 4. Done for now
 ```
 
-Use `AskUserQuestion` with these options. Pick recommendation based on context.
+Present these options to the user and wait for their response. Pick recommendation based on context.
 
 Keep `.claude/auto-active` flag while asking. Only delete it if user picks "Done for now".
 

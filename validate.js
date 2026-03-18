@@ -387,25 +387,51 @@ function checkSettingsSync() {
   let allMatch = true;
 
   // Check deny rules
-  const denyRules1 = settings.permissions?.deny || [];
-  const denyRules2 = settingsUnix.permissions?.deny || [];
+  const denyRules1 = [...(settings.permissions?.deny || [])].sort();
+  const denyRules2 = [...(settingsUnix.permissions?.deny || [])].sort();
 
-  if (JSON.stringify(denyRules1.sort()) !== JSON.stringify(denyRules2.sort())) {
+  if (JSON.stringify(denyRules1) !== JSON.stringify(denyRules2)) {
     log('FAIL', 'Settings sync: deny rules differ between settings.json and settings-unix.json');
     allMatch = false;
   }
 
-  // Check hook events
-  const hooks1 = Object.keys(settings.hooks || {});
-  const hooks2 = Object.keys(settingsUnix.hooks || {});
+  // Check allow rules
+  const allowRules1 = [...(settings.permissions?.allow || [])].sort();
+  const allowRules2 = [...(settingsUnix.permissions?.allow || [])].sort();
 
-  if (JSON.stringify(hooks1.sort()) !== JSON.stringify(hooks2.sort())) {
+  if (JSON.stringify(allowRules1) !== JSON.stringify(allowRules2)) {
+    log('FAIL', 'Settings sync: allow rules differ between settings files');
+    allMatch = false;
+  }
+
+  // Check hook events
+  const hooks1 = [...Object.keys(settings.hooks || {})].sort();
+  const hooks2 = [...Object.keys(settingsUnix.hooks || {})].sort();
+
+  if (JSON.stringify(hooks1) !== JSON.stringify(hooks2)) {
     log('FAIL', 'Settings sync: hook events differ between settings files');
     allMatch = false;
   }
 
+  // Check shared top-level settings
+  const sharedKeys = ['model', 'thinkingEnabled', 'teammateMode'];
+  for (const key of sharedKeys) {
+    if (JSON.stringify(settings[key]) !== JSON.stringify(settingsUnix[key])) {
+      log('FAIL', `Settings sync: "${key}" differs — settings.json has "${settings[key]}", settings-unix.json has "${settingsUnix[key]}"`);
+      allMatch = false;
+    }
+  }
+
+  // Check env vars
+  const env1 = settings.env || {};
+  const env2 = settingsUnix.env || {};
+  if (JSON.stringify(env1) !== JSON.stringify(env2)) {
+    log('FAIL', 'Settings sync: env vars differ between settings files');
+    allMatch = false;
+  }
+
   if (allMatch) {
-    log('PASS', 'Settings sync: deny rules and hooks match');
+    log('PASS', 'Settings sync: permissions, hooks, model, env, teammateMode all match');
   }
 }
 

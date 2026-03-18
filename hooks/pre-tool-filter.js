@@ -10,6 +10,7 @@ const DANGEROUS_BASH_PATTERNS = [
     /rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|\/)|(-[a-z]*f[a-z]*\s+-[a-z]*r))/i,   // rm -rf, rm -r -f
     /rm\s+--recursive/i,                      // rm --recursive
     /rm\s+--force\s+--recursive/i,            // rm --force --recursive
+    /rm\s+--recursive\s+--force/i,            // rm --recursive --force
     /rm\s+--force\s+-r/i,                     // rm --force -r
     /rm\s+-r\s+[^-]/i,                        // rm -r (without -f, still dangerous)
     /find\s+\/\s+-delete/i,                    // find / -delete

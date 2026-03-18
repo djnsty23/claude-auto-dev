@@ -47,23 +47,39 @@ try {
                 decision: 'REJECT',
                 reason: `${remaining} tasks remaining. Next: ${nextTask}. Continue working.`
             }));
+        } else if (fs.existsSync('prd.json')) {
+            // All tasks done but flag active = IDLE detection (one chance)
+            // Mark that IDLE detection has been triggered
+            const idleMarker = path.join(HOME, '.claude', 'auto-idle-triggered');
+            if (fs.existsSync(idleMarker)) {
+                // Already ran IDLE detection — allow stop to prevent infinite loop
+                fs.unlinkSync(idleMarker);
+                fs.unlinkSync(autoFlag);
+                process.stderr.write('[Auto-Dev] IDLE detection already ran. Allowing stop.\n');
+                console.log(JSON.stringify({ decision: 'ALLOW' }));
+            } else {
+                fs.writeFileSync(idleMarker, new Date().toISOString());
+                process.stderr.write('[Auto-Dev] Sprint complete. Running IDLE detection...\n');
+                console.log(JSON.stringify({
+                    decision: 'REJECT',
+                    reason: '[Auto-Dev] Sprint complete - running smart next action'
+                }));
+            }
         } else {
-            // No tasks but flag still active = IDLE detection phase
-            process.stderr.write('[Auto-Dev] Sprint complete. Running IDLE detection...\n');
-            console.log(JSON.stringify({
-                decision: 'REJECT',
-                reason: '[Auto-Dev] Sprint complete - running smart next action'
-            }));
+            // No prd.json and no tasks — allow stop
+            fs.unlinkSync(autoFlag);
+            process.stderr.write('[Auto-Dev] No tasks found. Cleaning up auto-active flag.\n');
+            console.log(JSON.stringify({ decision: 'ALLOW' }));
         }
     } else {
         // Not in auto mode - allow normal stop evaluation
-        console.log(JSON.stringify({ ok: true }));
+        console.log(JSON.stringify({ decision: 'ALLOW' }));
     }
 
     process.exit(0);
 } catch (err) {
     // Hook should never crash - allow stop on error
     process.stderr.write(`stop-auto-check error: ${err.message}\n`);
-    console.log(JSON.stringify({ ok: true }));
+    console.log(JSON.stringify({ decision: 'ALLOW' }));
     process.exit(0);
 }

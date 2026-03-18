@@ -30,6 +30,8 @@ Scan, analyze, and propose — without asking what to focus on.
 
 Launch 4 scans simultaneously using Task tool with `run_in_background: true`.
 
+Replace `[PROJECT_PATH]` below with the actual working directory path.
+
 These scans look for real issues, not linter warnings:
 
 ```typescript

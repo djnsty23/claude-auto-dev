@@ -178,6 +178,6 @@ fi
 
 echo -e "\n\033[32m[Done]\033[0m"
 echo "  Skills/hooks auto-sync with repo"
-echo "  Updates pulled automatically on Claude start"
+echo "  Run 'update-dev' to pull latest changes"
 echo -e "\n\033[36mStart Claude: claude\033[0m"
 echo -e "Then say: brainstorm\n"

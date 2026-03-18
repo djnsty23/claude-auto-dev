@@ -39,7 +39,7 @@ Wait for completion → Aggregate Results → Present Report
 
 ## Execution
 
-Launch all 7 agents in a single message:
+Launch all 7 agents in a single message. Replace `[PROJECT_PATH]` below with the actual working directory path:
 
 ```typescript
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
@@ -120,7 +120,7 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
 
 ## Persist Findings to prd.json
 
-After aggregating results, write ALL findings to prd.json so they persist across sessions.
+After aggregating results, write all findings to prd.json so they persist across sessions.
 
 ### Step 1: Read current prd.json
 

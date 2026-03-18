@@ -225,6 +225,6 @@ if ($Init) {
 
 Write-Host "`n[Done]" -ForegroundColor Green
 Write-Host "  Skills/hooks auto-sync with repo"
-Write-Host "  Updates pulled automatically on Claude start"
+Write-Host "  Run 'update-dev' to pull latest changes"
 Write-Host "`nStart Claude: claude" -ForegroundColor Cyan
 Write-Host "Then say: brainstorm`n"

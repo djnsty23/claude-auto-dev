@@ -121,5 +121,5 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "CLAUDE_CODE_SUBAGENT_MODEL": "opus"
   },
-  "teammateMode": "in-process"
+  "teammateMode": "auto"
 }

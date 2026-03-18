@@ -4,7 +4,7 @@ description: Deploy workflow for Vercel, Supabase, and CI/CD pipelines. Use for 
 triggers:
   - ci
   - deploy
-allowed-tools: Bash
+allowed-tools: Bash, Read, Grep, Glob
 model: opus
 user-invocable: true
 ---

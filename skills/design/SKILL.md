@@ -50,7 +50,7 @@ Create working code (React/Vue/HTML) that is:
 - Meticulously refined in every detail
 - **Responsive across mobile (375px), tablet (768px), and desktop**
 
-## Responsive Design (MANDATORY)
+## Responsive Design (required)
 
 Every layout must adapt to mobile-first breakpoints:
 

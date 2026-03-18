@@ -36,19 +36,22 @@ npm run build 2>&1
 
 **Runtime error:**
 ```bash
-# Check browser console
-agent-browser run --task "Go to localhost:3000, open dev console, report any errors"
+# Check browser console (if agent-browser available and dev server running)
+agent-browser open http://localhost:3000
+agent-browser errors
 # Or check server logs
 npm run dev 2>&1 | tail -50
 ```
 
 **UI bug:**
 ```bash
-# Take screenshot
-agent-browser run --task "Go to localhost:3000/[page], screenshot the issue"
-# Inspect element
-agent-browser run --task "Inspect [element], report CSS and structure"
+# Take screenshot (if agent-browser available)
+agent-browser open http://localhost:3000/[page]
+agent-browser screenshot .claude/screenshots/bug-$(date +%s).png
+agent-browser snapshot -i
 ```
+
+Note: agent-browser daemon fails on Windows. Use `npx playwright open <url>` as fallback for visual checks.
 
 ### Step 3: Analyze Root Cause
 
@@ -79,7 +82,7 @@ If build or feature test fails, return to Step 4 with updated error info. Maximu
 
 ### Step 6: Document
 ```
-Append to progress.txt:
+Append to .claude/decisions.md:
 "## [DATE]: Fixed [issue]
 - Root cause: [explanation]
 - Solution: [what was changed]

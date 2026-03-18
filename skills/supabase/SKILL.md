@@ -156,9 +156,9 @@ CREATE INDEX idx_orders_customer_id ON orders(customer_id);
 | 1 | Query Performance | High - Missing indexes, composite indexes |
 | 2 | Connection Management | High - Pooling, limits, idle timeout |
 | 3 | Security & RLS | High - RLS basics, RLS performance |
-| 4 | Schema Design | HIGH - Data types, PKs, FK indexes, partitioning |
-| 5 | Concurrency & Locking | MEDIUM-HIGH - Short transactions, deadlock prevention |
-| 6 | Data Access Patterns | MEDIUM - N+1, pagination, batch inserts, upsert |
+| 4 | Schema Design | High - Data types, PKs, FK indexes, partitioning |
+| 5 | Concurrency & Locking | Medium-High - Short transactions, deadlock prevention |
+| 6 | Data Access Patterns | Medium - N+1, pagination, batch inserts, upsert |
 
 ### Detailed References
 
