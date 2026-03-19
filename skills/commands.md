@@ -1,4 +1,4 @@
-# claude-auto-dev (v6.3.2)
+# claude-auto-dev (v6.4)
 
 ## Commands
 
@@ -6,6 +6,7 @@
 |-----|--------|
 | `auto` | Work through all tasks autonomously |
 | `progress` | Show sprint progress |
+| `iterate` | Convergence loop: brainstorm→fix→re-scan until clean |
 | `brainstorm` | Scan codebase, propose improvements (report-first) |
 | `brainstorm apply` | Create stories from last brainstorm scan |
 | `audit` | Parallel quality audit (7 agents) |
@@ -46,7 +47,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 32 skills in directory format (`skill-name/SKILL.md`)
+- 33 skills in directory format (`skill-name/SKILL.md`)
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
 - Auto-loaded: core (with prd.json)
 - Standards, security load via requires chains when review/audit/auto run

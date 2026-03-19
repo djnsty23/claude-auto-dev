@@ -1,5 +1,11 @@
 # Changelog
 
+## [6.4] - 2026-03-19
+
+### Added
+- **Iterate skill** — Convergence loop that chains brainstorm→apply→auto in one command. Runs until codebase is clean (typically 3-4 rounds). Supports focus modes (`iterate auth`, `iterate design`) and configurable round limits. Safety check: stops if a round finds more issues than previous.
+- Triggers: `iterate`, `deep work`, `converge`
+
 ## [6.3.2] - 2026-03-19
 
 ### Changed

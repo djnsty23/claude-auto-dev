@@ -1,6 +1,6 @@
 {
-  "version": "6.3.2",
-  "description": "32 active skills + 2 deprecated redirects (verify, checkpoint) - includes scan (audiq QA), stripe, seo",
+  "version": "6.4",
+  "description": "33 active skills + 2 deprecated redirects (verify, checkpoint) - includes iterate, scan (audiq QA), stripe, seo",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -43,6 +43,21 @@
       ],
       "priority": 1,
       "description": "Autonomous task execution with testing and security. Works through all tasks without stopping."
+    },
+    "iterate": {
+      "triggers": [
+        "iterate",
+        "deep work",
+        "converge"
+      ],
+      "file": "iterate/SKILL.md",
+      "requires": [
+        "brainstorm",
+        "auto",
+        "scan"
+      ],
+      "priority": 1,
+      "description": "Convergence loop — brainstorm, fix, re-scan until the codebase is clean. Combines brainstorm→apply→auto in one command."
     },
     "brainstorm": {
       "triggers": [
