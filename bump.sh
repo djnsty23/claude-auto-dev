@@ -31,16 +31,16 @@ if echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
 else
     SEMVER="${NEW_VERSION}.0"
 fi
-node -e "
+BUMP_SEMVER="$SEMVER" node -e "
 const pkg = require('./package.json');
-pkg.version = '$SEMVER';
+pkg.version = process.env.BUMP_SEMVER;
 require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 "
 
 # 3. manifest.json
-node -e "
+BUMP_VERSION="$NEW_VERSION" node -e "
 const m = require('./skills/manifest.json');
-m.version = '$NEW_VERSION';
+m.version = process.env.BUMP_VERSION;
 require('fs').writeFileSync('skills/manifest.json', JSON.stringify(m, null, 2) + '\n');
 "
 

@@ -46,6 +46,7 @@ Move-Item *-report.md .claude\reports\ -Force -ErrorAction SilentlyContinue
 | Screenshots | `.claude/screenshots/*.png` | Delete all |
 | Auto flag | `.claude/auto-active` | Delete if stale |
 | Idle marker | `.claude/auto-idle-triggered` | Delete always |
+| Typecheck stamp | `.claude/.typecheck-stamp` | Delete always |
 | Playwright | `.playwright-mcp/` | Delete all |
 | Backups | `.claude/archives/prd-backup-*.json` | Delete if older than 7 days |
 | Handoffs | `.claude/handoffs/handoff-*.md` | Delete if older than 7 days |

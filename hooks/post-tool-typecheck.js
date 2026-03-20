@@ -19,6 +19,13 @@ try {
 
     // Only run typecheck for TypeScript/JavaScript files
     if (/\.(ts|tsx|js|jsx)$/.test(filePath)) {
+        // Debounce: skip if last typecheck was <10 seconds ago
+        const stampFile = '.claude/.typecheck-stamp';
+        try {
+            const stamp = fs.statSync(stampFile).mtimeMs;
+            if (Date.now() - stamp < 10000) process.exit(0);
+        } catch { /* no stamp file = never run */ }
+
         if (fs.existsSync('package.json')) {
             // Check if typecheck script exists
             let hasTypecheck = false;
@@ -31,6 +38,8 @@ try {
             }
 
             if (hasTypecheck) {
+                // Update debounce stamp
+                try { fs.mkdirSync('.claude', { recursive: true }); fs.writeFileSync(stampFile, ''); } catch {}
                 try {
                     execSync('npm run typecheck', {
                         timeout: 30000,

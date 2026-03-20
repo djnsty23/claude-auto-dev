@@ -1,5 +1,18 @@
 # Changelog
 
+## [6.5.2] - 2026-03-20
+
+### Security
+- **pre-tool-filter: fail-closed on parse error** — was exit 0 (allow), now exit 2 (block). Malformed input can no longer bypass security checks.
+- **pre-tool-filter: block `bash -c`, `sh -c`, `eval`** — prevents shell escape wrappers that bypass regex patterns
+- **session-start: expanded PROTECTED_VARS** — now blocks NODE_ENV, CI, HTTP_PROXY, HTTPS_PROXY, NODE_TLS_REJECT_UNAUTHORIZED, ANTHROPIC_API_KEY, GITHUB_TOKEN, GITHUB_PAT from .env.local override
+- **bump.sh: env vars instead of shell interpolation** — version strings passed via `process.env` instead of string interpolation in `node -e`
+
+### Fixed
+- **post-tool-typecheck: 10-second debounce** — skips typecheck if last run was <10s ago, preventing dozens of redundant 30s runs during rapid edits
+- **session-start: strip trailing \r from .env.local values** — CRLF files on Windows no longer leave carriage returns in env values
+- **clean skill: added .typecheck-stamp** to cleanup targets
+
 ## [6.5.1] - 2026-03-20
 
 ### Fixed

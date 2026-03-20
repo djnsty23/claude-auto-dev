@@ -27,6 +27,8 @@ const DANGEROUS_BASH_PATTERNS = [
     /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
     /curl.*\|\s*(ba)?sh/i,                     // curl | bash (remote code exec)
     /wget.*\|\s*(ba)?sh/i,                     // wget | bash
+    /\b(bash|sh)\s+-c\s/i,                     // bash -c / sh -c (shell escape wrapper)
+    /\beval\s+/i,                              // eval (arbitrary command execution)
     /rm\s.*prd-archive/i,                      // NEVER delete prd archives (move instead)
     /rm\s.*prd-backup/i,                       // NEVER delete prd backups (move instead)
     /del\s.*prd-archive/i,                     // Windows: NEVER delete prd archives
@@ -66,8 +68,9 @@ try {
     try {
         data = JSON.parse(input);
     } catch {
-        // Can't parse input, allow operation
-        process.exit(0);
+        // Can't parse input — block to be safe (fail-closed)
+        process.stderr.write('pre-tool-filter: failed to parse hook input, blocking operation\n');
+        process.exit(2);
     }
 
     const toolName = data.tool_name || '';

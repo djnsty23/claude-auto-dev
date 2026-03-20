@@ -13,7 +13,7 @@ try {
     // ============================================================
     // 1. Display version (read from local install, no network)
     // ============================================================
-    let version = '6.5.1';
+    let version = '6.5.2';
     const manifestPath = path.join(CLAUDE_DIR, 'skills', 'manifest.json');
     if (fs.existsSync(manifestPath)) {
         try {
@@ -30,7 +30,13 @@ try {
     // ============================================================
     if (fs.existsSync('.env.local')) {
         const lines = fs.readFileSync('.env.local', 'utf8').split('\n');
-        const PROTECTED_VARS = new Set(['PATH', 'HOME', 'USERPROFILE', 'NODE_OPTIONS', 'NODE_PATH', 'SHELL', 'COMSPEC', 'SystemRoot']);
+        const PROTECTED_VARS = new Set([
+            'PATH', 'HOME', 'USERPROFILE', 'NODE_OPTIONS', 'NODE_PATH',
+            'SHELL', 'COMSPEC', 'SystemRoot', 'NODE_ENV', 'CI',
+            'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
+            'NODE_TLS_REJECT_UNAUTHORIZED', 'TERM',
+            'ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GITHUB_PAT'
+        ]);
         for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith('#')) continue;
@@ -39,7 +45,7 @@ try {
             if (eqIndex === -1) continue;
 
             const key = trimmed.substring(0, eqIndex).trim();
-            let value = trimmed.substring(eqIndex + 1);
+            let value = trimmed.substring(eqIndex + 1).replace(/\r$/, '');
             // Strip matching quotes only
             if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
                 value = value.slice(1, -1);
