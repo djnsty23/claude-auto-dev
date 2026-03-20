@@ -1,5 +1,21 @@
 # Changelog
 
+## [6.6.1] - 2026-03-21
+
+### Security
+- **pre-tool-filter: outer catch now fail-closed** — exit 2 instead of exit 0 on unexpected errors
+- **pre-tool-filter: block `node -e`/`node --eval`/`node -p`** — closes the `Bash(node *)` bypass vector
+- **pre-tool-filter: block `npx` except allowlisted tools** (tsc, supabase, vercel, next, vite, vitest, jest, playwright, eslint, prettier)
+- **pre-tool-filter: tightened `bash -c` regex** — `\s*` instead of `\s+` catches `bash -c"cmd"` without space
+- **pre-tool-filter: tightened `eval` regex** — `[\s"']` catches `eval"cmd"`, avoids false positives on `evaluate`
+- **pre-tool-filter: block `cp`/`mv` targeting `.claude/hooks/` and `.claude/settings`**
+- **session-start: expanded PROTECTED_VARS** — added LD_PRELOAD, LD_LIBRARY_PATH, DYLD_INSERT_LIBRARIES, BASH_ENV, ENV, PROMPT_COMMAND, CDPATH, NODE_EXTRA_CA_CERTS, GH_TOKEN, VERCEL_TOKEN, SUPABASE_ACCESS_TOKEN
+
+### Fixed
+- **pr-review: stale `browser-auth` reference** → changed to `agent-browser`
+- **update skill: ALL-CAPS "NOT" and "SINGLE"** → lowercased per tone moderation
+- **commands.md: version and migrate entry** — bump.sh handles version; migrate row was missing
+
 ## [6.6] - 2026-03-20
 
 ### Added

@@ -27,14 +27,17 @@ const DANGEROUS_BASH_PATTERNS = [
     /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
     /curl.*\|\s*(ba)?sh/i,                     // curl | bash (remote code exec)
     /wget.*\|\s*(ba)?sh/i,                     // wget | bash
-    /\b(bash|sh)\s+-c\s/i,                     // bash -c / sh -c (shell escape wrapper)
-    /\beval\s+/i,                              // eval (arbitrary command execution)
+    /\b(bash|sh)\s*-c/i,                        // bash -c / sh -c (shell escape, with or without space)
+    /\beval[\s"']/i,                           // eval (arbitrary command execution)
+    /\bnode\s+(-e|--eval|-p|--print)\b/i,      // node -e (JS execution bypass)
+    /\bnpx\s+(?!tsc|supabase|vercel|next|vite|vitest|jest|playwright|eslint|prettier)/i, // npx with non-allowlisted package
     /rm\s.*prd-archive/i,                      // NEVER delete prd archives (move instead)
     /rm\s.*prd-backup/i,                       // NEVER delete prd backups (move instead)
     /del\s.*prd-archive/i,                     // Windows: NEVER delete prd archives
     /del\s.*prd-backup/i,                      // Windows: NEVER delete prd backups
     /Remove-Item\s.*prd-archive/i,             // PowerShell: NEVER delete prd archives
     /Remove-Item\s.*prd-backup/i,              // PowerShell: NEVER delete prd backups
+    /(cp|mv)\s+.*\.claude[/\\](hooks|settings)/i, // Block cp/mv targeting security-critical files
 ];
 
 const DANGEROUS_WIN32_PATTERNS = [
@@ -126,7 +129,7 @@ try {
     // Allow operation
     process.exit(0);
 } catch (err) {
-    // Hook should never crash - allow on error
-    process.stderr.write(`pre-tool-filter error: ${err.message}\n`);
-    process.exit(0);
+    // Hook should never crash - fail closed on error
+    process.stderr.write(`pre-tool-filter error (blocking): ${err.message}\n`);
+    process.exit(2);
 }

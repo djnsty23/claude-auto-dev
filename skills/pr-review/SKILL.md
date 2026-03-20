@@ -104,7 +104,7 @@ pr-review --comment
 | Security issues found | `security` |
 | Type issues found | `standards` |
 | UI changes | `design` |
-| Test gaps | `browser-auth` |
+| Test gaps | `agent-browser` |
 
 ## Tips
 

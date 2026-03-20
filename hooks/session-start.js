@@ -13,7 +13,7 @@ try {
     // ============================================================
     // 1. Display version (read from local install, no network)
     // ============================================================
-    let version = '6.6';
+    let version = '6.6.1';
     const manifestPath = path.join(CLAUDE_DIR, 'skills', 'manifest.json');
     if (fs.existsSync(manifestPath)) {
         try {
@@ -32,10 +32,13 @@ try {
         const lines = fs.readFileSync('.env.local', 'utf8').split('\n');
         const PROTECTED_VARS = new Set([
             'PATH', 'HOME', 'USERPROFILE', 'NODE_OPTIONS', 'NODE_PATH',
-            'SHELL', 'COMSPEC', 'SystemRoot', 'NODE_ENV', 'CI',
+            'SHELL', 'COMSPEC', 'SystemRoot', 'NODE_ENV', 'CI', 'TERM',
             'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
-            'NODE_TLS_REJECT_UNAUTHORIZED', 'TERM',
-            'ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GITHUB_PAT'
+            'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_EXTRA_CA_CERTS',
+            'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES',
+            'BASH_ENV', 'ENV', 'PROMPT_COMMAND', 'CDPATH',
+            'ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GITHUB_PAT', 'GH_TOKEN',
+            'VERCEL_TOKEN', 'SUPABASE_ACCESS_TOKEN'
         ]);
         for (const line of lines) {
             const trimmed = line.trim();

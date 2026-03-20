@@ -17,7 +17,7 @@ Sync the local repo with ~/.claude installation.
 
 ## Process
 
-Execute the following with the Bash tool immediately. Do NOT print it — run it. Use a SINGLE Bash call:
+Execute the following with the Bash tool immediately. Do not print it — run it. Use a single Bash call:
 
 ```bash
 REPO=$(cat ~/.claude/repo-path.txt 2>/dev/null | tr -d '\r\n')
@@ -29,7 +29,7 @@ fi
 cd "$REPO" && git pull && bash "$REPO/scripts/update.sh" "$REPO"
 ```
 
-After the Bash call completes, report the version and status from the output, then remind the user: "Start a new session (`/exit` then `claude`) for CLAUDE.md changes to take effect." Do NOT do anything else.
+After the Bash call completes, report the version and status from the output, then remind the user: "Start a new session (`/exit` then `claude`) for CLAUDE.md changes to take effect." Do not do anything else.
 
 ## What Gets Synced
 
@@ -43,6 +43,6 @@ After the Bash call completes, report the version and status from the output, th
 
 Note: `commands.md` lives inside `skills/` — it syncs automatically with skills.
 
-## What Does NOT Get Synced
+## What Does Not Get Synced
 
 - `~/.claude/CLAUDE.md` - User instructions, never touched (uses @include for commands.md)
