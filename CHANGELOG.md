@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.4.1] - 2026-03-20
+
+### Added
+- **README Tips & Tricks** — Comprehensive guide covering /btw side questions, parallel work patterns, convergence loop, visual verification, agent teams, context management, design anti-slop, and quick fix workflow
+- Updated commands table with scan/qa, iterate, design skills
+- Fixed stale "30 skills" references to "33 skills"
+
 ## [6.4] - 2026-03-19
 
 ### Added

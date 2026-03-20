@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-6.4-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-6.4.1-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
 
@@ -67,7 +67,7 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
 You: update dev
 Claude: [pulls latest, syncs skills/hooks, removes stale files]
-        Updated to v6.4
+        Updated to v6.4.1
 ```
 
 **Option 2: Shell command**
@@ -87,37 +87,127 @@ cd ~/claude-auto-dev && git pull
 
 | Say | Does |
 |-----|------|
-| `brainstorm` | Scan codebase, propose improvements and features |
+| `iterate` | Convergence loop: brainstorm→fix→re-scan until clean |
+| `brainstorm` | Scan codebase + live site, propose improvements |
 | `auto` | Work through all tasks autonomously |
-| `progress` | Show sprint progress |
+| `scan` / `qa` | Live site QA via audiq (visual + functional + a11y) |
 | `audit` | 7-agent parallel quality audit |
 | `review` | Code quality check (add `quick` or `deep`) |
-| `security` | Pre-deploy security scan |
+| `ship` | Build, test, review, deploy with post-deploy verification |
+| `progress` | Show sprint progress |
 | `sprint` | Create/advance sprint |
-| `ship` | Build, test, review, deploy |
 | `test` | Run unit + browser tests |
 | `fix` | Debug issues |
 | `commit` | Conventional commit + push + PR |
-| `refactor` | Code refactoring patterns |
+| `security` | Pre-deploy security scan |
 | `perf` | Performance audit (Core Web Vitals) |
 | `a11y` | Accessibility audit (WCAG 2.1 AA) |
+| `design` / `ui` | UI design with anti-slop checklist |
+| `refactor` | Code refactoring patterns |
 | `clean` | Remove temp files |
 | `setup` | Initialize new project |
 | `update dev` | Sync latest from GitHub to ~/.claude |
 
-**Note:** `/help`, `/status`, `/init`, `/compact` are Claude Code built-ins.
+**Note:** `/help`, `/status`, `/init`, `/compact`, `/btw` are Claude Code built-ins.
 
 ---
 
 ## Workflow
 
 ```
-brainstorm → scans codebase, creates stories in prd.json
-auto       → implements all pending stories + runs tests
-ship       → review + security scan + build + deploy
+brainstorm → scans codebase + live site, creates stories
+auto       → implements all pending stories + visual verification
+ship       → review + security + deploy + post-deploy scan
+iterate    → brainstorm→fix→re-scan loop until clean (3-4 rounds)
 ```
 
-See [`skills/commands.md`](skills/commands.md) for the full list of 30 skills.
+See [`skills/commands.md`](skills/commands.md) for the full list of 33 skills.
+
+---
+
+## Tips & Tricks
+
+### Parallel work while Claude is busy
+
+| Method | When to Use |
+|--------|------------|
+| `/btw what was that config?` | Quick question without affecting context — answer appears in overlay, never enters history |
+| `& plan the payment system` | Background a task while main thread keeps working |
+| `Ctrl+B` | Move current running task to background, then type something new |
+| `/branch` | Fork the conversation — try an approach without losing the current one |
+
+### Get more from brainstorm
+
+```
+brainstorm              → Full scan (5 parallel agents + competitor research)
+brainstorm auth         → Targeted scan on auth code only
+brainstorm features     → Skip code quality, focus on product gaps
+brainstorm apply        → Create prd.json stories from last findings
+```
+
+The 5th scan agent runs live site QA if a dev server is detected — start your dev server first for visual/a11y/perf findings alongside code issues.
+
+### Convergence loop
+
+Instead of manually cycling `brainstorm → brainstorm apply → auto`, use:
+```
+iterate        → runs until codebase converges (typically 3-4 rounds)
+iterate 2      → quick pass (max 2 rounds)
+iterate design → focus on visual/design issues only
+```
+
+Each round finds fewer issues. When findings drop to 0, it stops.
+
+### Visual verification
+
+Auto mode now requires visual verification for UI tasks. To get the most out of it:
+1. Start your dev server before running `auto`
+2. Claude will screenshot pages (desktop + mobile) after each UI change
+3. Console errors and broken layouts are caught before tasks are marked complete
+
+Works with [audiq MCP](https://github.com/nicholasgriffintn/audiq) for deep scans, falls back to agent-browser if unavailable.
+
+### Agent teams for big features
+
+For complex multi-file features, use Claude Code's agent teams:
+```
+Create an agent team with 3 teammates:
+- Frontend: owns src/components/ and src/app/
+- Backend: owns supabase/functions/ and src/lib/
+- Tests: owns tests/ and writes integration tests
+```
+
+Each teammate works independently with its own context. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings (auto-dev enables this by default).
+
+### Manage context in long sessions
+
+- `/btw` for quick questions that don't need to persist
+- `/clear` between unrelated tasks to reset context
+- `/compact focus on the API changes` to compress with specific focus
+- Use subagents for research: "use a subagent to investigate the auth flow"
+- With 1M context on Opus 4.6, you rarely need to worry about this
+
+### Design without AI slop
+
+The design skill includes a 9-point slop detection checklist. If 3+ of these are present, it starts over:
+- Safe font (Inter, Roboto) → Pick distinctive Google Font
+- Purple gradient on white → Commit to a real palette
+- 3 identical cards in a row → Break the pattern
+- Centered everything → Use asymmetry
+- No texture, no motion, stock illustrations → Add depth
+
+Reference sites studied before designing: linear.app, vercel.com, stripe.com, raycast.com, notion.so, cal.com
+
+### Quick fixes — skip the ceremony
+
+For small tasks (< 5), skip sprints entirely:
+```
+fix the button overflow on mobile
+add loading state to the dashboard
+update the footer links
+```
+
+No `auto`, no `sprint`, no prd.json. Just describe it and Claude fixes it.
 
 ---
 
@@ -125,7 +215,7 @@ See [`skills/commands.md`](skills/commands.md) for the full list of 30 skills.
 
 **Global** (`~/.claude/`):
 ```
-skills/        # Synced from repo (30 skills)
+skills/        # Synced from repo (33 skills)
 hooks/         # Symlink to repo
 rules/         # Your custom rules (optional)
 repo-path.txt  # Points to your clone location
