@@ -1,5 +1,15 @@
 # Changelog
 
+## [6.6] - 2026-03-20
+
+### Added
+- **Migrate skill** — Dependency updates, major version upgrades, and breaking change resolution. Safety tiers (patch→minor→major), one-at-a-time major updates with changelog checks, security audit integration.
+- **PreCompact promoted to .js file** — `hooks/pre-compact.js` with error reporting, replacing inline `node -e` one-liner
+
+### Changed
+- **Merged browser-auth into agent-browser** — Auth token injection, security rules, and test patterns now in one skill. browser-auth is deprecated. Saves 229 lines from 4 requires chains (auto, test, audit, ship).
+- **Requires chains updated** — auto, test, audit now require `agent-browser` directly instead of `browser-auth`
+
 ## [6.5.2] - 2026-03-20
 
 ### Security

@@ -1,6 +1,6 @@
 {
-  "version": "6.5.2",
-  "description": "33 active skills + 2 deprecated redirects (verify, checkpoint) - includes iterate, scan (audiq QA), stripe, seo",
+  "version": "6.6",
+  "description": "33 active skills + 3 deprecated redirects (verify, checkpoint, browser-auth) - includes iterate, scan (audiq QA), migrate, stripe, seo",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -14,7 +14,8 @@
     "quality",
     "code-quality",
     "verify",
-    "checkpoint"
+    "checkpoint",
+    "browser-auth"
   ],
   "skills": {
     "core": {
@@ -36,7 +37,7 @@
       "file": "auto/SKILL.md",
       "requires": [
         "standards",
-        "browser-auth",
+        "agent-browser",
         "security",
         "commit",
         "scan"
@@ -137,7 +138,7 @@
       ],
       "file": "test/SKILL.md",
       "requires": [
-        "browser-auth"
+        "agent-browser"
       ],
       "priority": 2,
       "description": "Runs unit and browser tests on latest changes. Use after implementing features or fixing bugs."
@@ -232,7 +233,7 @@
         "standards",
         "design",
         "security",
-        "browser-auth",
+        "agent-browser",
         "perf",
         "a11y"
       ],
@@ -242,11 +243,8 @@
     "browser-auth": {
       "triggers": [],
       "file": "browser-auth/SKILL.md",
-      "requires": [
-        "agent-browser"
-      ],
-      "priority": 2,
-      "description": "Browser testing with agent-browser CLI and auth token injection. Loaded via test skill."
+      "priority": 3,
+      "description": "Deprecated. Merged into agent-browser skill. Use agent-browser for browser testing and auth token injection."
     },
     "checkpoint": {
       "triggers": [
@@ -414,6 +412,17 @@
       "file": "a11y/SKILL.md",
       "priority": 2,
       "description": "Accessibility audit and patterns - WCAG 2.1 AA compliance for React apps."
+    },
+    "migrate": {
+      "triggers": [
+        "migrate",
+        "upgrade",
+        "update deps",
+        "outdated"
+      ],
+      "file": "migrate/SKILL.md",
+      "priority": 2,
+      "description": "Dependency updates, major version upgrades, and breaking change resolution. Use when updating packages or handling deprecations."
     },
     "refactor": {
       "triggers": [

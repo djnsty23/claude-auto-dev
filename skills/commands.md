@@ -1,4 +1,4 @@
-# claude-auto-dev (v6.5.2)
+# claude-auto-dev (v6.6)
 
 ## Commands
 
@@ -24,6 +24,7 @@
 | `perf` | Performance audit (Core Web Vitals) |
 | `a11y` | Accessibility audit (WCAG 2.1 AA) |
 | `refactor` | Refactoring patterns |
+| `migrate` / `upgrade` | Dependency updates, breaking change resolution |
 | `security` | Pre-deploy security scan |
 | `pr` / `pr-review` | PR review with specialized agents |
 | `db` / `supabase` | Database operations, RLS, migrations |
@@ -47,7 +48,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 35 skills in directory format (33 active + 2 deprecated redirects)
+- 36 skills in directory format (33 active + 3 deprecated redirects)
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
 - Auto-loaded: core (with prd.json)
 - Standards, security load via requires chains when review/audit/auto run

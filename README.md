@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-6.5.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-6.6-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
 
@@ -67,7 +67,7 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
 You: update dev
 Claude: [pulls latest, syncs skills/hooks, removes stale files]
-        Updated to v6.5.2
+        Updated to v6.6
 ```
 
 **Option 2: Shell command**
@@ -121,7 +121,7 @@ ship       → review + security + deploy + post-deploy scan
 iterate    → brainstorm→fix→re-scan loop until clean (3-4 rounds)
 ```
 
-See [`skills/commands.md`](skills/commands.md) for the full list of 35 skills (33 active + 2 deprecated redirects).
+See [`skills/commands.md`](skills/commands.md) for the full list of 36 skills (33 active + 3 deprecated redirects).
 
 ---
 
@@ -215,7 +215,7 @@ No `auto`, no `sprint`, no prd.json. Just describe it and Claude fixes it.
 
 **Global** (`~/.claude/`):
 ```
-skills/        # Synced from repo (35 skills)
+skills/        # Synced from repo (36 skills)
 hooks/         # Symlink to repo
 rules/         # Your custom rules (optional)
 repo-path.txt  # Points to your clone location

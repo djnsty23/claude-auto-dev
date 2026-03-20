@@ -109,7 +109,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const fs=require('fs');if(fs.existsSync('prd.json')){fs.mkdirSync('.claude',{recursive:true});fs.copyFileSync('prd.json','.claude/pre-compact-state.json')}\"",
+            "command": "node \"$HOME/.claude/hooks/pre-compact.js\"",
             "timeout": 5,
             "statusMessage": "Saving sprint state..."
           }
