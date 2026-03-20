@@ -28,15 +28,28 @@ Automated QA using audiq MCP. Catches what typecheck and build cannot: visual bu
 | `scan compare` | Scan and compare against last baseline |
 | `scan design` | Visual design analysis + recommendations |
 
-## Step 1: Detect Target URL
+## Step 1: Detect or Start Target URL
 
 Check in order:
 1. User provided a URL → use it
-2. Dev server running → `curl -s http://localhost:3000 > /dev/null` (try 3000, 3001, 5173, 8080)
-3. Vercel preview → check `.vercel/` or recent deploy URL
-4. Production URL → check `package.json` homepage or CLAUDE.md
+2. Dev server already running → check ports 3000, 3001, 5173, 8080:
+   ```bash
+   for port in 3000 3001 5173 8080; do curl -s http://localhost:$port > /dev/null 2>&1 && echo "http://localhost:$port" && break; done
+   ```
+3. **No server running → auto-start one:**
+   ```bash
+   # Detect the right command from package.json
+   node -e "const p=require('./package.json');const s=p.scripts||{};console.log(s.dev||s.start||'')"
+   ```
+   If a dev script exists, start it in the background:
+   ```
+   Bash({ command: "npm run dev", run_in_background: true })
+   ```
+   Wait 5 seconds, then re-check ports. Report which port was detected.
+4. Vercel preview → check `.vercel/` or recent deploy URL
+5. Production URL → check `package.json` homepage or CLAUDE.md
 
-If nothing found, ask the user.
+If nothing found after all checks, ask the user.
 
 ## Step 2: Discover Site Structure
 

@@ -137,7 +137,16 @@ const executable = storyEntries.filter(([id, s]) =>
 | API | Endpoint returns expected data + network check |
 | Bug fix | Reproduce, verify fixed, no new errors |
 
-For UI/API tasks with a running dev server, use audiq MCP (preferred):
+For UI/API tasks, detect or start a dev server first:
+```bash
+# Check if already running
+for port in 3000 3001 5173 8080; do curl -s http://localhost:$port > /dev/null 2>&1 && break; done
+# If none found, start one in background
+Bash({ command: "npm run dev", run_in_background: true })
+# Wait for startup, then scan
+```
+
+Use audiq MCP (preferred):
 ```
 mcp__audiq__scan_page({ url: "http://localhost:3000/[page]", profile: "quick" })
 mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "desktop" })
@@ -232,6 +241,15 @@ Do not retry a third time. Do not spend more than 10 minutes on retries for a si
 - Commit every 3 completed tasks
 - Or after major milestones
 - Use conventional commits: `feat|fix|refactor`
+
+## Save Project Knowledge
+
+When solving hard problems (debugging, retries, unexpected errors), save reusable lessons:
+- **Patterns discovered** — "This project uses X pattern for Y" → save to auto-memory
+- **Environment quirks** — "Port 5173 is Vite, not 3000" → save to auto-memory
+- **Common fix recipes** — "RLS errors need auth.uid() not custom function" → save to auto-memory
+
+This builds project context that helps future sessions. Use Claude's built-in auto-memory — just describe what you learned and it persists.
 
 ## Token Management
 
