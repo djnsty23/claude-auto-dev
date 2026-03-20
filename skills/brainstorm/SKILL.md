@@ -4,7 +4,7 @@ description: Scans codebase, proposes improvements and features autonomously. Us
 triggers:
   - brainstorm
   - generate
-allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit, WebSearch
+allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit, WebSearch, mcp__audiq__scan_page, mcp__audiq__screenshot_page, mcp__audiq__get_console_errors
 model: opus
 user-invocable: true
 argument-hint: "[focus area]"

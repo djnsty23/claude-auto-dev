@@ -3,7 +3,7 @@ name: ship
 description: Pre-deploy checklist with review, security, and test verification. Use when ready to deploy.
 triggers:
   - ship
-allowed-tools: Bash, Read, Grep, Glob, Task
+allowed-tools: Bash, Read, Grep, Glob, Task, mcp__audiq__scan_page, mcp__audiq__screenshot_page, mcp__audiq__get_console_errors, mcp__audiq__get_network_issues
 model: opus
 user-invocable: true
 ---
@@ -28,7 +28,7 @@ git status --short         # Warn if uncommitted changes
 | Build fails | Stop — fix errors first |
 | Typecheck fails | Stop — fix types first |
 | Tests fail | Stop — fix tests first |
-| Uncommitted changes | Warn user, ask if they want to commit (use git directly, do NOT invoke the commit skill) |
+| Uncommitted changes | Warn user, ask if they want to commit (use git directly, do not invoke the commit skill) |
 | All pass | Continue to Step 2 |
 
 ## Step 2: Security Scan
@@ -102,7 +102,7 @@ supabase secrets list --project-ref [ref]
 
 ## Step 5: Post-Deploy Verification (required - never skip)
 
-A successful deploy does NOT mean the app works. Verify after deploying.
+A successful deploy does not mean the app works. Verify after deploying.
 
 ### Automated Checks (audiq MCP — preferred)
 

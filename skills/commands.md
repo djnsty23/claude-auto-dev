@@ -1,4 +1,4 @@
-# claude-auto-dev (v6.5)
+# claude-auto-dev (v6.5.1)
 
 ## Commands
 
@@ -47,7 +47,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 33 skills in directory format (`skill-name/SKILL.md`)
+- 35 skills in directory format (33 active + 2 deprecated redirects)
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
 - Auto-loaded: core (with prd.json)
 - Standards, security load via requires chains when review/audit/auto run

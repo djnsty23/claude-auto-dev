@@ -1,5 +1,19 @@
 # Changelog
 
+## [6.5.1] - 2026-03-20
+
+### Fixed
+- **allowed-tools mismatches** — 5 skills (auto, brainstorm, ship, commit, design) referenced audiq MCP tools they couldn't call. Added the specific tools each skill needs.
+- **auto: added Agent + SendMessage** to allowed-tools — parallel worktree execution was dead code
+- **auto: removed ghost `simplify` references** — replaced with `refactor` (actual skill)
+- **auto: consolidated duplicate audiq verification blocks** — single reference instead of repeated code
+- **auto: fixed `date -I` (GNU-only)** — replaced with portable `date +%Y-%m-%dT%H:%M:%S`
+- **auto: quoted glob in find command** — prevents shell expansion of `*/node_modules/*`
+- **iterate: trimmed 12 unused audiq tools** from allowed-tools — sub-skills handle audiq calls
+- **audit: removed unused TaskUpdate, TaskList** from allowed-tools
+- **ALL-CAPS cleanup** — lowercased NOT, BOLD, UNFORGETTABLE across auto, ship, design skills
+- **Stale skill counts** — README and commands.md now say "35 skills (33 active + 2 deprecated)"
+
 ## [6.5] - 2026-03-20
 
 ### Added

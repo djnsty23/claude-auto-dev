@@ -3,7 +3,7 @@ name: auto
 description: Autonomous task execution with testing and security. Works through all tasks without stopping.
 triggers:
   - auto
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Agent, SendMessage, mcp__audiq__scan_page, mcp__audiq__screenshot_page, mcp__audiq__get_console_errors, mcp__audiq__get_network_issues
 model: opus
 user-invocable: true
 ---
@@ -35,7 +35,7 @@ auto
 
 On start, create the flag file:
 ```bash
-echo '{"started":"'$(date -Iseconds)'","sprint":"current"}' > .claude/auto-active
+echo '{"started":"'$(date +%Y-%m-%dT%H:%M:%S)'","sprint":"current"}' > .claude/auto-active
 ```
 PowerShell: `@{started=(Get-Date -Format o)} | ConvertTo-Json > .claude/auto-active`
 
@@ -99,7 +99,7 @@ Use the detected runner for all test steps in this session.
 
 ```bash
 # 4. Detect monorepo structure
-node -e "const fs=require('fs');const g=require('child_process').execSync('find . -maxdepth 3 -name package.json -not -path */node_modules/*',{encoding:'utf8'}).trim().split('\n');if(g.length>1)console.log('[Monorepo] '+g.length+' packages: '+g.join(', '))"
+node -e "const g=require('child_process').execSync('find . -maxdepth 3 -name package.json -not -path \"*/node_modules/*\"',{encoding:'utf8'}).trim().split('\n');if(g.length>1)console.log('[Monorepo] '+g.length+' packages: '+g.join(', '))"
 ```
 If monorepo detected, run build/typecheck/test in each workspace.
 
@@ -143,7 +143,7 @@ const executable = storyEntries.filter(([id, s]) =>
 4. `npm run typecheck` — fix if fails
 5. `npm run build` — fix if fails
 6. Self-Verification (see below)
-7. **Visual verification** — if the task touched UI (components, pages, styles, layouts), run audiq scan + screenshots. Do NOT skip this.
+7. **Visual verification** — if the task touched UI (components, pages, styles, layouts), run audiq scan + screenshots. Do not skip this.
 8. Update prd.json: `passes: true`
 9. Start next task immediately
 
@@ -212,20 +212,12 @@ Run `git diff` and check:
 - No commented-out code
 
 **4. UI/API Change? Visual Verification**
-If a dev server is running, scan the affected page with audiq:
-```
-mcp__audiq__scan_page({ url: "http://localhost:3000/[page]", profile: "quick" })
-mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "desktop" })
-mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "mobile" })
-mcp__audiq__get_console_errors({ url: "http://localhost:3000/[page]" })
-```
-Check screenshots for: layout breaks, missing content, visual regressions, design quality.
-If audiq is unavailable, use agent-browser as fallback.
+Run the audiq scan from the Verification section above. This is not optional for UI tasks.
 
 **5. Mark Complete**
 Only after all checks pass. If any check fails, fix it first.
 
-A task that changed UI files (.tsx, .css, layout, page) without visual verification is NOT complete — go back to step 4.
+A task that changed UI files (.tsx, .css, layout, page) without visual verification is not complete — go back to step 4.
 
 ## Parallel Execution (Optional)
 
@@ -240,7 +232,7 @@ Use `SendMessage({ to: agentId })` to continue a previously spawned agent (do no
 
 Assign each agent exclusive files to prevent merge conflicts:
 - Specify in the prompt: "You own src/components/Feature.tsx and src/lib/feature-utils.ts. Do not modify any other files."
-- **Shared files** (globals.css, shared types, index files) must NOT be assigned to parallel agents — handle them in a single coordinating step after agents complete.
+- **Shared files** (globals.css, shared types, index files) must not be assigned to parallel agents — handle them in a single coordinating step after agents complete.
 - If an agent needs a shared type, it should create a local type and let the coordinator merge it.
 
 ### Worktree Agents Must Commit
@@ -337,7 +329,7 @@ If no tasks to work on:
 
 | Signal | Action |
 |--------|--------|
-| Sprint had 5+ tasks | Run `simplify` to catch duplication from parallel work |
+| Sprint had 5+ tasks | Run `refactor` to catch duplication from parallel work |
 | Dev server running + UI changes made | Run `scan` to catch visual/QA regressions |
 | Last scan scored <70 on any category | Create stories from scan findings |
 | TODOs/FIXMEs in code | Brainstorm (auto mode creates stories) |
@@ -364,7 +356,7 @@ Sprint [N] complete (8/8 tasks).
 
 What's next? (Recommended: ship)
 1. ship - Deploy current work
-2. simplify - Check for duplication and over-abstraction
+2. refactor - Check for duplication and over-abstraction
 3. audit - Deep quality check
 4. brainstorm - Find more improvements
 5. Done for now

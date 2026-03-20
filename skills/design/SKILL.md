@@ -4,7 +4,7 @@ description: Creates distinctive UI with preserved structure. Avoids generic AI 
 triggers:
   - design
   - ui
-allowed-tools: Read, Write, Edit, Glob, Grep
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__audiq__analyze_visual, mcp__audiq__recommend_design, mcp__audiq__screenshot_page
 model: opus
 user-invocable: true
 ---
@@ -22,7 +22,7 @@ Create distinctive, production-grade frontend interfaces that avoid generic "AI 
 
 ## Design Thinking
 
-Before coding, commit to a **BOLD aesthetic direction**:
+Before coding, commit to a **bold aesthetic direction**:
 
 1. **Purpose**: What problem does this solve? Who uses it?
 2. **Tone**: Pick an extreme:
@@ -37,7 +37,7 @@ Before coding, commit to a **BOLD aesthetic direction**:
    - Art deco/geometric
    - Soft/pastel
    - Industrial/utilitarian
-3. **Differentiation**: What makes this UNFORGETTABLE?
+3. **Differentiation**: What makes this unforgettable?
 
 Choose a clear direction and execute with precision. Bold maximalism and refined minimalism both work - the key is **intentionality, not intensity**.
 

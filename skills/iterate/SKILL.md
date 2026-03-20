@@ -5,7 +5,7 @@ triggers:
   - iterate
   - deep work
   - converge
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, WebSearch, mcp__audiq__scan_page, mcp__audiq__screenshot_page, mcp__audiq__get_console_errors, mcp__audiq__analyze_visual, mcp__audiq__get_network_issues, mcp__audiq__run_lighthouse, mcp__audiq__check_accessibility, mcp__audiq__get_report, mcp__audiq__generate_fix_plan, mcp__audiq__discover_site, mcp__audiq__qa_audit, mcp__audiq__recommend_design
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, WebSearch, Agent, SendMessage
 model: opus
 user-invocable: true
 argument-hint: "[focus area or max rounds]"

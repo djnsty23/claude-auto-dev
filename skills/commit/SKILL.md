@@ -5,7 +5,7 @@ triggers:
   - commit
   - push
   - commit-push-pr
-allowed-tools: Bash, Read, Glob
+allowed-tools: Bash, Read, Glob, mcp__audiq__get_console_errors
 model: opus
 user-invocable: true
 argument-hint: "[type] [message]"
