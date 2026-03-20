@@ -147,12 +147,21 @@ If a baseline exists, compare:
 - Resolved issues from baseline
 - Visual differences in screenshots
 
-Save current results as new baseline:
+**Auto-save baseline on first scan:**
 ```bash
 mkdir -p .claude/scans
 ```
 
-Write scan summary to `.claude/scans/scan-YYYY-MM-DD.json`.
+If no previous scan exists in `.claude/scans/`, this is the baseline. Save it with a clear label:
+```bash
+# First scan → save as baseline
+.claude/scans/baseline-YYYY-MM-DD.json
+
+# Subsequent scans → save as timestamped
+.claude/scans/scan-YYYY-MM-DD.json
+```
+
+The baseline is never overwritten — it's the reference point for all future `scan compare` runs. Include scores, issue counts, and screenshot references in the JSON.
 
 ## Step 6: Generate Fix Plan
 

@@ -78,20 +78,45 @@ When prd.json does not exist:
 3. Create prd.json with stories
 4. Continue immediately — do not stop for approval
 
-## Pre-flight (Quick)
+## Pre-flight (Smart)
 
-Before first task:
+Before first task, run these checks:
+
 ```bash
+# 1. Git status
 git status --short
-npm run build 2>&1 | tail -5
-```
 
-Also check if prd.json needs archiving:
+# 2. Dependencies fresh? Check if package.json is newer than node_modules
+node -e "const fs=require('fs');try{const p=fs.statSync('package.json').mtimeMs;const n=fs.statSync('node_modules').mtimeMs;if(p>n)console.log('[Pre-flight] package.json changed — running npm install')}catch{console.log('[Pre-flight] No node_modules — running npm install')}"
+```
+If package.json is newer, run `npm install` before anything else.
+
 ```bash
+# 3. Detect test runner (don't hardcode npm test)
+node -e "const p=require('./package.json');const s=p.scripts||{};const d={...p.dependencies,...p.devDependencies};if(d.vitest)console.log('vitest');else if(d.jest)console.log('jest');else if(d['@playwright/test'])console.log('playwright');else if(s.test)console.log('npm test');else console.log('none')"
+```
+Use the detected runner for all test steps in this session.
+
+```bash
+# 4. Detect monorepo structure
+node -e "const fs=require('fs');const g=require('child_process').execSync('find . -maxdepth 3 -name package.json -not -path */node_modules/*',{encoding:'utf8'}).trim().split('\n');if(g.length>1)console.log('[Monorepo] '+g.length+' packages: '+g.join(', '))"
+```
+If monorepo detected, run build/typecheck/test in each workspace.
+
+```bash
+# 5. Build check
+npm run build 2>&1 | tail -5
+
+# 6. Archive check
 node -e "try{const s=require('fs').statSync('prd.json');if(s.size>50000)console.log('[Archive] prd.json is '+Math.round(s.size/1024)+'KB — run archive before starting')}catch{}"
 ```
 
-Skip if takes >10 seconds.
+```bash
+# 7. Branch check — if on main with pending changes, create a feature branch
+node -e "const b=require('child_process').execSync('git branch --show-current',{encoding:'utf8'}).trim();if(b==='main'||b==='master')console.log('[Branch] On '+b+' — create a feature branch before making changes')"
+```
+
+Skip individual checks if they take >10 seconds.
 
 ## Task Execution
 
@@ -236,20 +261,47 @@ On failure:
 
 Do not retry a third time. Do not spend more than 10 minutes on retries for a single task.
 
+### Error Pattern Recognition
+
+Track error types across tasks. When the same error pattern appears 3+ times:
+1. Save it to auto-memory as a known pattern with its fix recipe
+2. On future occurrences, apply the fix immediately without the auto-fix→retry cycle
+
+Common patterns to recognize:
+| Error Pattern | Instant Fix |
+|--------------|-------------|
+| `Cannot find module './X'` | Check file exists, fix path or create file |
+| `Type 'X' is not assignable to type 'Y'` | Check the type definition, add union or cast |
+| `Property 'X' does not exist on type 'Y'` | Add to interface or use optional chaining |
+| `RLS policy violation` | Check auth.uid() in policy, verify user is authenticated |
+| `CORS error` | Check API route headers or middleware config |
+
 ## Commit Cadence
 
 - Commit every 3 completed tasks
 - Or after major milestones
+- Always on a feature branch (auto-create from main if needed)
 - Use conventional commits: `feat|fix|refactor`
 
-## Save Project Knowledge
+## Save Project Knowledge (Continuous Learning)
 
-When solving hard problems (debugging, retries, unexpected errors), save reusable lessons:
-- **Patterns discovered** — "This project uses X pattern for Y" → save to auto-memory
-- **Environment quirks** — "Port 5173 is Vite, not 3000" → save to auto-memory
-- **Common fix recipes** — "RLS errors need auth.uid() not custom function" → save to auto-memory
+After solving hard problems (debugging, retries, unexpected errors), save reusable lessons to auto-memory:
 
-This builds project context that helps future sessions. Use Claude's built-in auto-memory — just describe what you learned and it persists.
+| What to Save | Example |
+|-------------|---------|
+| **Environment quirks** | "This project uses Vite on port 5173, not CRA on 3000" |
+| **Error fix recipes** | "RLS 'permission denied' → check auth.uid() in policy, not custom function" |
+| **Architecture patterns** | "API routes follow /api/v1/[resource]/route.ts pattern" |
+| **Build gotchas** | "Must run `npm run generate` before build (Prisma client)" |
+| **Test setup** | "Tests need `TEST_DB_URL` env var, seed with `npm run seed:test`" |
+| **Deploy requirements** | "Vercel needs `ANALYZE=true` for bundle analysis" |
+
+Also save after these events:
+- **Same error 3+ times across tasks** → save as known pattern with fix recipe
+- **Unexpected project structure** → save the actual structure for next session
+- **Workarounds discovered** → save so next session doesn't rediscover them
+
+This builds per-project context that compounds across sessions.
 
 ## Token Management
 

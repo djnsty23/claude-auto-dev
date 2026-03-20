@@ -59,34 +59,67 @@ git commit -m "feat: add playlist drag-drop reorder"
 ## Commit + Push
 
 ```bash
+# Auto-create feature branch if on main
+BRANCH=$(git branch --show-current)
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  git checkout -b feat/[descriptive-name]
+fi
+
 git add <files>
 git commit -m "feat: description"
 git push origin HEAD
 ```
 
+Always create a feature branch if on main/master. Never commit directly to main.
+
+## Post-Commit Quick Check
+
+After every commit, run a 5-second sanity check:
+```bash
+npm run build 2>&1 | tail -3
+# If dev server running, check for console errors
+curl -s http://localhost:3000 > /dev/null 2>&1 && mcp__audiq__get_console_errors({ url: "http://localhost:3000" })
+```
+
+If errors found, fix immediately and amend the commit.
+
 ## Full PR Flow (commit-push-pr)
 
 ```bash
 # 1. Create branch if on main
-git checkout -b feat/playlist-ui
+BRANCH=$(git branch --show-current)
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  git checkout -b feat/[descriptive-name]
+fi
 
 # 2. Stage and commit
 git add <files>
 git commit -m "feat: add playlist UI with drag-drop"
 
 # 3. Push
-git push -u origin feat/playlist-ui
+git push -u origin HEAD
+```
 
-# 4. Create PR
-gh pr create --title "Add playlist UI" --body "## Summary
-- Drag-drop playlist reorder
-- Play queue integration
-- Uses existing API routes
+### Auto-Generate PR Description from prd.json
 
-## Test plan
-- [ ] Create playlist
-- [ ] Reorder songs
-- [ ] Play from playlist"
+If prd.json exists and has completed stories, generate the PR body from them:
+```bash
+node -e "
+const p=require('./prd.json');
+const stories=p.stories||{};
+const done=Object.entries(stories).filter(([,s])=>s.passes===true);
+if(done.length){
+  console.log('## Changes');
+  done.forEach(([id,s])=>console.log('- **'+id+'**: '+s.title+(s.resolution?' ('+s.resolution+')':'')));
+  console.log('\n## Test Plan');
+  done.forEach(([id,s])=>console.log('- [ ] Verify '+s.title));
+}
+"
+```
+
+Use this output as the PR body:
+```bash
+gh pr create --title "[Sprint summary]" --body "[generated from prd.json]"
 ```
 
 ## Safety Checks

@@ -1,5 +1,17 @@
 # Changelog
 
+## [6.5] - 2026-03-20
+
+### Added
+- **Smart pre-flight** — Auto `npm install` when package.json is newer than node_modules, detect test runner (vitest/jest/playwright) instead of hardcoding `npm test`, detect monorepo structure, auto-create feature branch if on main
+- **Error pattern recognition** — Tracks recurring errors across tasks; after 3+ occurrences, saves fix recipe to auto-memory for instant resolution. Includes common pattern→fix table.
+- **Post-commit quick scan** — After every commit, runs build check + console error scan (~5s) to catch regressions immediately
+- **PR description from prd.json** — Auto-generates PR body from completed stories with titles, resolutions, and test plan
+- **Auto feature branch** — Commit skill auto-creates feature branch when on main/master instead of committing directly
+- **Screenshot baseline** — First scan saves as `baseline-YYYY-MM-DD.json` (never overwritten); all future `scan compare` diffs against it
+- **CLAUDE.md from real data** — setup-project reads actual package.json scripts, detects dev port, maps src/ structure, finds env vars — no guessing
+- **Expanded project knowledge saving** — Auto skill saves environment quirks, build gotchas, test setup, deploy requirements, and error patterns to auto-memory
+
 ## [6.4.1] - 2026-03-20
 
 ### Added

@@ -66,29 +66,49 @@ options:
 
 ### Step 3: Generate CLAUDE.md
 
-Create a project-level CLAUDE.md with:
+Create a project-level CLAUDE.md by analyzing the actual codebase — don't guess, read:
+
+```bash
+# Extract real commands from package.json scripts
+node -e "const p=require('./package.json');Object.entries(p.scripts||{}).forEach(([k,v])=>console.log('- \`npm run '+k+'\` — '+v))"
+
+# Detect test runner
+node -e "const d={...require('./package.json').dependencies,...require('./package.json').devDependencies};console.log(d.vitest?'vitest':d.jest?'jest':d['@playwright/test']?'playwright':'npm test')"
+
+# Map src/ structure (top 2 levels)
+find src/ -maxdepth 2 -type d 2>/dev/null | head -20
+
+# Detect dev server port from scripts
+node -e "const s=require('./package.json').scripts||{};const dev=s.dev||'';const m=dev.match(/--port\s+(\d+)|-p\s+(\d+)/);console.log(m?m[1]||m[2]:dev.includes('vite')?'5173':'3000')"
+```
+
+Generate CLAUDE.md from real data:
 
 ```markdown
 # [Project Name]
 
 ## Overview
-[One-line description from user or package.json]
+[One-line description from package.json description field]
 
 ## Stack
-[Detected technologies]
+[Detected from dependencies — be specific: "Next.js 15 + Supabase + Tailwind + shadcn/ui"]
 
-## Key Commands
-- `npm run dev` - Start development server
-- `npm run build` - Production build
-- `npm run test` - Run tests
-[Add detected commands from package.json scripts]
+## Commands
+[Actual scripts from package.json — every one, not just dev/build/test]
+
+## Dev Server
+- Port: [detected port]
+- Start: `npm run dev`
+- Test runner: [vitest/jest/playwright]
 
 ## Key Directories
-[Map out src/ structure if it exists]
+[Actual src/ structure from find output]
 
-## Patterns
-[Stack-specific patterns based on detected technologies]
+## Environment
+[List all NEXT_PUBLIC_* and other env vars referenced in code]
 ```
+
+Also check for existing CLAUDE.md — if it exists, merge new info rather than overwriting.
 
 ### Step 4: Recommend Skills
 
