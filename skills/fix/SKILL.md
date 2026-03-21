@@ -121,7 +121,7 @@ obj?.property
 
 ## When to Stop
 
-STOP and ask user if:
+Stop and ask user if:
 - Fix requires architectural change
 - Multiple valid approaches exist
 - Fix might break other features

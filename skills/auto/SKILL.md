@@ -180,8 +180,9 @@ Before starting a task, assess its scope:
 
 | Task Type | Verification |
 |-----------|--------------|
-| UX/UI | audiq scan + screenshots (desktop + mobile) + console errors |
-| Feature | Build passes + audiq scan if UI changed |
+| UX/UI (public pages) | audiq scan + screenshots (desktop + mobile) + console errors |
+| UX/UI (admin/internal) | typecheck + build only (skip audiq — not worth the overhead) |
+| Feature | Build passes + audiq scan if public UI changed |
 | API | Endpoint returns expected data + network check |
 | Bug fix | Reproduce, verify fixed, no new errors |
 

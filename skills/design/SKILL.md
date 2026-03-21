@@ -126,6 +126,16 @@ Before finalizing any design, check for these patterns. If 3+ are present, start
 
 No design should be the same. Interpret creatively and make unexpected choices that feel genuinely designed for the context.
 
+## Design Quality Gate
+
+Before shipping any new UI, check these against the existing design:
+
+1. **Pattern match** — Read 2-3 existing pages/components. Does the new UI use the same spacing scale, border radius, shadow depth, and color tokens?
+2. **Font consistency** — Is the new UI using the same font family and size scale as existing pages? No mixing fonts.
+3. **Scroll check** — Does any text get trimmed, overlap, or overflow at 375px mobile width?
+4. **Color scheme** — Are all colors from CSS variables, not hardcoded hex/rgb?
+5. **External resources** — Validate image URLs, font links, icon paths are reachable before committing
+
 ## Visual QA with audiq
 
 After implementing a design, validate it:
@@ -134,6 +144,8 @@ mcp__audiq__analyze_visual({ url: "http://localhost:3000", viewport: "desktop" }
 mcp__audiq__analyze_visual({ url: "http://localhost:3000", viewport: "mobile" })
 mcp__audiq__recommend_design({ url: "http://localhost:3000" })
 ```
+
+Check screenshots for: trimmed text, overlapping elements, unequal font sizes, bad scroll behavior, inconsistent spacing.
 
 Use the analysis to identify weak points and the recommendations for improvement direction.
 
