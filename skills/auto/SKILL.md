@@ -114,6 +114,9 @@ node -e "try{const s=require('fs').statSync('prd.json');if(s.size>50000)console.
 ```bash
 # 7. Branch check — if on main with pending changes, create a feature branch
 node -e "const b=require('child_process').execSync('git branch --show-current',{encoding:'utf8'}).trim();if(b==='main'||b==='master')console.log('[Branch] On '+b+' — create a feature branch before making changes')"
+
+# 8. Worktree cleanup — prune orphaned worktrees from previous sessions
+git worktree prune 2>/dev/null
 ```
 
 Skip individual checks if they take >10 seconds.
@@ -135,17 +138,25 @@ const executable = storyEntries.filter(([id, s]) =>
 );
 ```
 
+### Size-Gate Before Executing
+
+Before starting a task, assess its scope:
+- **Small** (1-3 files, clear fix) → execute directly
+- **Large** (5+ files, needs UI design, new feature with multiple components) → flag as `size: "large"` in prd.json and suggest Plan Mode instead of auto-executing. Large features need design, not auto-execution.
+
 ### Execute Each Task
 
-1. Read the task description
-2. **Context Loading** — read 2-3 similar files to match existing patterns
-3. Implement the solution
-4. `npm run typecheck` — fix if fails
-5. `npm run build` — fix if fails
-6. Self-Verification (see below)
-7. **Visual verification** — if the task touched UI (components, pages, styles, layouts), run audiq scan + screenshots. Do not skip this.
-8. Update prd.json: `passes: true`
-9. Start next task immediately
+1. **Progress output**: `[3/8] Starting: S6-003 — Add loading states`
+2. Read the task description
+3. **Context Loading** — read 2-3 similar files to match existing patterns
+4. Implement the solution
+5. `npm run typecheck` — fix if fails
+6. `npm run build` — fix if fails
+7. Self-Verification (see below)
+8. **Visual verification** — if the task touched UI (components, pages, styles, layouts), run audiq scan + screenshots. Do not skip this.
+9. **Progress output**: `[3/8] ✓ S6-003 | Next: S6-004`
+10. Update prd.json: `passes: true`
+11. Start next task immediately
 
 ### Context Loading (before writing any code)
 
@@ -203,7 +214,17 @@ npm run typecheck 2>/dev/null || npx tsc --noEmit 2>/dev/null
 npm test -- --passWithNoTests --watchAll=false 2>/dev/null
 ```
 
-**3. Self-Review**
+**3. Resource Validation**
+If the task added external resources (images, fonts, API URLs), validate them:
+```bash
+# Check image/asset URLs are reachable
+grep -rn 'https://.*\.(png|jpg|svg|webp|woff2)' src/ --include="*.tsx" --include="*.ts" | while read line; do
+  url=$(echo "$line" | grep -oP 'https://[^\s"'\'']+'); curl -s -o /dev/null -w "%{http_code} $url\n" "$url"
+done
+```
+Fix broken URLs before committing — they cause blank images and layout shifts in production.
+
+**4. Self-Review**
 Run `git diff` and check:
 - No `console.log` or `debugger` left in
 - No hardcoded colors (use design tokens)

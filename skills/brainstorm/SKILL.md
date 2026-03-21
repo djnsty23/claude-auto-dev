@@ -21,10 +21,29 @@ Scan, analyze, and propose — without asking what to focus on.
 
 | Command | Behavior |
 |---------|----------|
-| `brainstorm` | Full: architecture scan + feature ideas → present findings |
+| `brainstorm` | Full: 5 parallel scans + competitor research → present findings |
+| `brainstorm quick` | Diff-based: only scan files changed since last brainstorm (no agents, fast) |
 | `brainstorm apply` | Create prd.json stories from last scan results |
 | `brainstorm auth` | Targeted: ideas for auth specifically |
 | `brainstorm features` | Skip quality scan, only feature ideas |
+
+## Quick Mode (brainstorm quick)
+
+For recently-scanned codebases, skip the full 5-agent scan:
+
+```bash
+# 1. Get files changed since last brainstorm
+git diff --name-only HEAD~5 -- '*.ts' '*.tsx' '*.css'
+
+# 2. For each changed file, check:
+#    - New console.log statements
+#    - New 'any' types
+#    - Missing error handling in new code
+#    - Hardcoded colors in new code
+grep -n 'console\.\|: any\|catch\s*{\s*}' [changed files]
+```
+
+Quick mode takes ~10 seconds instead of ~3 minutes. Use after a recent full brainstorm when the codebase hasn't changed much.
 
 ## Phase 1: Architecture + QA Scan (Parallel)
 

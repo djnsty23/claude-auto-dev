@@ -1,5 +1,14 @@
 # Changelog
 
+## [6.6.2] - 2026-03-22
+
+### Added
+- **`brainstorm quick`** — Diff-based scan that only checks files changed since last brainstorm (~10s vs ~3min). Skips full agent scan for recently-cleaned codebases.
+- **Size-gating for stories** — Tasks touching 5+ files or needing UI design flagged as `size: "large"` with Plan Mode suggestion instead of auto-executing
+- **Progress output** — Auto mode now outputs `[3/8] ✓ S6-003 | Next: S6-004` between tasks for visibility
+- **Resource validation** — Self-review step 3 validates external URLs (images, fonts, API endpoints) with curl before committing
+- **Worktree cleanup** — Auto pre-flight now runs `git worktree prune` to clean orphaned worktrees from previous sessions
+
 ## [6.6.1] - 2026-03-21
 
 ### Security
