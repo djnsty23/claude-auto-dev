@@ -8,6 +8,7 @@
 | `progress` | Show sprint progress |
 | `iterate` | Convergence loop: brainstorm→fix→re-scan until clean |
 | `brainstorm` | Scan codebase, propose improvements (report-first) |
+| `brainstorm quick` | Diff-based scan, only recently changed files (~10s) |
 | `brainstorm apply` | Create stories from last brainstorm scan |
 | `audit` | Parallel quality audit (7 agents) |
 | `sprint` | Create/advance sprint |

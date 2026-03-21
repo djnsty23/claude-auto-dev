@@ -54,9 +54,15 @@ Do not ask "Should I continue?" or show summaries and wait.
 
 Instead:
 - Make autonomous decisions
-- Log decisions to `.claude/decisions.md`
 - Keep working until truly done
 - The Stop hook prevents Claude from ending — trust it
+- Log non-obvious decisions to `.claude/decisions.md`:
+  ```
+  ## [task-id]: [decision]
+  - Why: [reason]
+  - Alternative: [what was considered]
+  ```
+  Only log when choosing between approaches, skipping something, or deviating from the task description. Do not log routine choices.
 
 ## Persist to prd.json
 
@@ -142,7 +148,13 @@ const executable = storyEntries.filter(([id, s]) =>
 
 Before starting a task, assess its scope:
 - **Small** (1-3 files, clear fix) → execute directly
-- **Large** (5+ files, needs UI design, new feature with multiple components) → flag as `size: "large"` in prd.json and suggest Plan Mode instead of auto-executing. Large features need design, not auto-execution.
+- **Medium** (3-5 files, clear approach) → execute with extra caution
+- **Large** (5+ files, needs UI design, new feature, mechanic change) → write a 3-sentence plan first:
+  1. What changes (e.g., "Towers placed on wall tiles adjacent to floor tiles")
+  2. What systems are affected (e.g., "Update: placeTower, preview render, sell restore, pathfinding")
+  3. What to verify (e.g., "All spawns can path to crystal after placement")
+
+  Then flag as `size: "large"` in prd.json and suggest Plan Mode. Large features need design, not auto-execution.
 
 ### Execute Each Task
 
@@ -225,43 +237,27 @@ done
 Fix broken URLs before committing — they cause blank images and layout shifts in production.
 
 **4. Self-Review**
-Run `git diff` and check:
-- No `console.log` or `debugger` left in
-- No hardcoded colors (use design tokens)
-- All UI states handled (loading, empty, error)
-- No `any` types introduced
-- No commented-out code
+Run `git diff` and check: no `console.log`/`debugger`, no hardcoded colors, all UI states handled, no `any` types, no commented-out code.
 
-**4. UI/API Change? Visual Verification**
-Run the audiq scan from the Verification section above. This is not optional for UI tasks.
+**5. UI/API Change? Visual Verification**
+Run the audiq scan from the Verification section above. Not optional for UI tasks.
 
-**5. Mark Complete**
-Only after all checks pass. If any check fails, fix it first.
-
-A task that changed UI files (.tsx, .css, layout, page) without visual verification is not complete — go back to step 4.
+**6. Mark Complete**
+Only after all checks pass. UI files (.tsx, .css, layout, page) without visual verification → go back to step 5.
 
 ## Parallel Execution (Optional)
 
-For independent tasks, launch multiple agents with worktree isolation to avoid file conflicts:
+For independent tasks (3+ files each), use worktree-isolated agents:
 ```
 Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true, isolation: "worktree" })
 ```
 
-Use `SendMessage({ to: agentId })` to continue a previously spawned agent (do not pass a resume parameter).
-
-### File Ownership (required for parallel agents)
-
-Assign each agent exclusive files to prevent merge conflicts:
-- Specify in the prompt: "You own src/components/Feature.tsx and src/lib/feature-utils.ts. Do not modify any other files."
-- **Shared files** (globals.css, shared types, index files) must not be assigned to parallel agents — handle them in a single coordinating step after agents complete.
-- If an agent needs a shared type, it should create a local type and let the coordinator merge it.
-
-### Worktree Agents Must Commit
-
-When using `isolation: "worktree"`, agents MUST commit their work before finishing:
-```
-"Before you finish, run: git add -A && git commit -m 'feat: [description]'. Uncommitted changes in worktrees are lost on cleanup."
-```
+Rules:
+- Assign each agent exclusive files in the prompt ("You own src/X. Do not modify other files.")
+- Shared files (globals.css, types, index) → handle in a coordinating step after agents finish
+- Agents must commit before finishing: include `git add -A && git commit -m 'feat: ...'` in prompt
+- Use `SendMessage({ to: agentId })` to continue a stopped agent
+- Skip worktree for small fixes (<3 files) — direct edits are faster
 
 ## Smart Retry
 
