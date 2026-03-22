@@ -1,5 +1,10 @@
 # Changelog
 
+## [6.6.4] - 2026-03-22
+
+### Fixed
+- **npx allowlist expanded** — Added `npm-check-updates`, `axe-core-cli`, `@next/bundle-analyzer`, `lighthouse`, `netlify`, `remotion` to pre-tool filter. These were referenced in skills but would be blocked at runtime.
+
 ## [6.6.3] - 2026-03-22
 
 ### Fixed

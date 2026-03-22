@@ -1,5 +1,5 @@
 {
-  "version": "6.6.3",
+  "version": "6.6.4",
   "description": "33 active skills + 3 deprecated redirects (verify, checkpoint, browser-auth) - includes iterate, scan (audiq QA), migrate, stripe, seo",
   "deprecated": [
     "supabase-postgres",
