@@ -1,5 +1,14 @@
 # Changelog
 
+## [6.6.3] - 2026-03-22
+
+### Fixed
+- **pre-tool-filter: node -e false positive** — pattern now only matches at command start, not inside grep/echo arguments. Fixes the filter blocking searches for "node -e" strings.
+- **Contradictions resolved across skills:**
+  - commit: "never git add -A" softened to "prefer targeted adds" (batch mode with exclusions is acceptable)
+  - core: "don't read full prd.json" updated for 1M context (fine for <50 stories)
+  - review: "go beyond acceptance criteria" → "flag opportunities but don't implement during review"
+
 ## [6.6.2] - 2026-03-22
 
 ### Added

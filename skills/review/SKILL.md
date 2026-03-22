@@ -95,7 +95,7 @@ Confirm the work is done well, not just done. A task is complete when it works, 
 2. It solves the actual problem — not just the literal requirements.
 3. It's production-ready — handles errors, edge cases, real-world conditions.
 
-Go beyond acceptance criteria when you see opportunities to improve UX, performance, or error messages.
+Flag opportunities to improve UX, performance, or error messages — but do not implement them during review. Report them as findings for a future task.
 
 ### For UI Tasks
 

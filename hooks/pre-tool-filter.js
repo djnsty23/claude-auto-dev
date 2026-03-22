@@ -29,7 +29,7 @@ const DANGEROUS_BASH_PATTERNS = [
     /wget.*\|\s*(ba)?sh/i,                     // wget | bash
     /\b(bash|sh)\s*-c/i,                        // bash -c / sh -c (shell escape, with or without space)
     /\beval[\s"']/i,                           // eval (arbitrary command execution)
-    /\bnode\s+(-e|--eval|-p|--print)\b/i,      // node -e (JS execution bypass)
+    /(?:^|[;&|]\s*)node\s+(-e|--eval|-p|--print)\b/i, // node -e at command start (not inside grep/echo args)
     /\bnpx\s+(?!tsc|supabase|vercel|next|vite|vitest|jest|playwright|eslint|prettier)/i, // npx with non-allowlisted package
     /rm\s.*prd-archive/i,                      // NEVER delete prd archives (move instead)
     /rm\s.*prd-backup/i,                       // NEVER delete prd backups (move instead)

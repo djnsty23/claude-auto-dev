@@ -25,7 +25,7 @@ argument-hint: "[type] [message]"
 git status --short
 git diff --stat
 
-# 2. Stage specific files (never git add -A blindly)
+# 2. Stage specific files (prefer targeted adds over git add -A)
 git add src/components/new-feature.tsx src/lib/utils.ts
 
 # 3. Commit with conventional format

@@ -12,7 +12,7 @@ disable-model-invocation: true
 ## Sprint Summary
 !`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const done=s.filter(x=>x.passes===true).length;const pending=s.filter(x=>x.passes===null||x.passes===false).length;const deferred=s.filter(x=>x.passes==='deferred').length;console.log('Sprint:',name,'| Done:',done,'| Pending:',pending,'| Deferred:',deferred,'| Total:',s.length)}catch(e){console.log('No prd.json')}"`
 
-Do not read the full prd.json into context. Use `Grep` to find specific stories or `Read` with offset/limit for targeted sections.
+For large prd.json (100+ stories), use `Grep` to find specific stories. For typical sizes (<50 stories), reading the full file is fine with 1M context.
 
 ## When to Sprint
 
