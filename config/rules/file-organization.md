@@ -16,8 +16,7 @@
 | Handoffs | `.claude/handoffs/handoff-*.md` | 7 days |
 | Reports | `.claude/reports/*.md` | 7 days |
 | Screenshots | `.claude/screenshots/*.png` | Cleaned each run |
-| Decisions | `.claude/decisions.md` | Persistent |
-| Mistakes | `.claude/mistakes.md` | Persistent |
+| Sprint History | `.claude/sprint-history.md` | Persistent |
 
 ## Rules
 - Create subdirectories on first use (`mkdir -p` / `New-Item -Force`)

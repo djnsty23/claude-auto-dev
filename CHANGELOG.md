@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.7.1] - 2026-03-30
+
+### Fixed
+- **npx regex false positive** — Anchored pattern to command position (like `node -e` fix from v6.6.3). No longer triggers inside quoted strings like `git commit -m "...npx..."`
+- **config/rules/ out of sync** — Updated repo config templates (security, design-system, file-organization, workflow) so `update dev` preserves v6.7.0 rule changes instead of overwriting them
+- **config/CLAUDE.md template** — Added `@rules/workflow.md` to includes
+
 ## [6.7.0] - 2026-03-30
 
 ### Added

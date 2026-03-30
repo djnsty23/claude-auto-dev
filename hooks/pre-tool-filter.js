@@ -30,7 +30,7 @@ const DANGEROUS_BASH_PATTERNS = [
     /\b(bash|sh)\s+-c\b/i,                        // bash -c / sh -c (shell escape, requires space before -c)
     /(?:^|[;&|]\s*)eval\s/i,                   // eval at command start or after chain operator
     /(?:^|[;&|]\s*)node\s+(-e|--eval|-p|--print)\b/i, // node -e at command start (not inside grep/echo args)
-    /\bnpx\s+(?!tsc\b|tsx\b|supabase\b|vercel\b|next\b|vite\b|vitest\b|jest\b|playwright\b|eslint\b|prettier\b|npm-check-updates\b|axe-core-cli\b|@next\/bundle-analyzer\b|lighthouse\b|netlify\b|remotion\b|shadcn\b|shadcn-ui\b|create-next-app\b|prisma\b)/i, // npx with non-allowlisted package (word-bounded)
+    /(?:^|[;&|]\s*)npx\s+(?!tsc\b|tsx\b|supabase\b|vercel\b|next\b|vite\b|vitest\b|jest\b|playwright\b|eslint\b|prettier\b|npm-check-updates\b|axe-core-cli\b|@next\/bundle-analyzer\b|lighthouse\b|netlify\b|remotion\b|shadcn\b|shadcn-ui\b|create-next-app\b|prisma\b)/i, // npx at command start or after chain operator (not inside quoted strings)
     /rm\s.*prd-archive/i,                      // NEVER delete prd archives (move instead)
     /rm\s.*prd-backup/i,                       // NEVER delete prd backups (move instead)
     /del\s.*prd-archive/i,                     // Windows: NEVER delete prd archives

@@ -5,6 +5,8 @@
 - Hardcoded values in components
 - Custom one-off styles
 
+**Exception:** Hardcoded colors (`text-white`, `bg-black`) are valid on dynamic gradient backgrounds or explicitly themed surfaces where the background is not a standard theme token.
+
 ## Always Do
 - Define in tailwind.config.ts or index.css first
 - Use semantic tokens: `text-foreground`, `bg-background`, `text-muted-foreground`

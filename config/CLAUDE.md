@@ -35,6 +35,7 @@ React + TypeScript + Tailwind + shadcn/ui + Supabase + Vercel
 
 ## Included
 @skills/commands.md
+@rules/workflow.md
 @rules/security.md
 @rules/design-system.md
 @rules/windows.md
