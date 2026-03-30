@@ -234,6 +234,9 @@ Fix broken URLs before committing — they cause blank images and layout shifts 
 **4. Self-Review**
 Run `git diff` and check: no `console.log`/`debugger`, no hardcoded colors, all UI states handled, no `any` types, no commented-out code.
 
+**4b. Sweeping Change Verification**
+If the task involved a bulk find-and-replace (e.g., renaming, migrating values, swapping imports), grep for the OLD pattern to confirm it's fully eliminated. Partial migrations cause subtle bugs (e.g., USD→EUR migration that missed one pricing page).
+
 **5. UI/API Change? Visual Verification**
 Run the audiq scan from the Verification section above. Not optional for UI tasks.
 

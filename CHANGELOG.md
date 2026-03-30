@@ -1,5 +1,27 @@
 # Changelog
 
+## [6.7.0] - 2026-03-30
+
+### Added
+- **Auto integration test gate** — API/edge function tasks require real request verification (curl + response shape check) before marking done
+- **Auto sprint transitions** — Automatically archives completed stories, carries forward deferred, bumps sprint number, logs to `.claude/sprint-history.md`
+- **Auto deploy phase** — Detects changed `supabase/functions/` files after commit and auto-deploys edge functions
+- **Sweeping change verification** — Self-review step 4b: grep for old patterns after bulk find-and-replace to confirm full elimination
+- **`rules/workflow.md`** — New global rule documenting audit/brainstorm scope split and verification requirements by task type
+
+### Changed
+- **Audit = bugs/fixes** — Absorbs quality scans (console.log, empty catch blocks) from brainstorm. Type Safety agent expanded to include code quality.
+- **Brainstorm = features/architecture** — Removed quality scans. Now runs 3 agents (dead code, complexity, unused deps) instead of 5. Competitor research is optional.
+- **Agent tool call cap** — All scan agents capped at ~80 tool calls to prevent rate limits
+- **Pre-flight simplified** — Replaced `node -e` one-liners with simpler checks that don't trigger security filter on Windows
+- **Size-gate** — Removed Plan Mode suggestion (dead path). Large tasks get inline 3-sentence plan instead.
+- **Commands.md** — Reorganized into Primary / On-Demand / Specialized tiers
+- **Manifest descriptions** — Synced audit and brainstorm descriptions to reflect scope boundary
+- **Design system** — Added gradient/themed surface exception for hardcoded colors
+- **Security rules** — Added edge function testing and bulk change verification
+- **npx allowlist** — Added `tsx`, `shadcn`, `shadcn-ui`, `create-next-app`, `prisma`
+- **File organization** — Replaced unused `decisions.md`/`mistakes.md` with `sprint-history.md`
+
 ## [6.6.4] - 2026-03-22
 
 ### Fixed
