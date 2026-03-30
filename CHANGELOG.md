@@ -1,5 +1,11 @@
 # Changelog
 
+## [6.7.2] - 2026-03-30
+
+### Changed
+- **Auto: removed unused sections** — Worktree parallel execution (never used), decisions.md logging (nobody reads it), mistakes.md reference
+- **Auto: tool-aware verification** — Audiq/agent-browser instructions now check if MCP is connected before suggesting visual scans. Falls back gracefully to WebFetch or skipping with a note.
+
 ## [6.7.1] - 2026-03-30
 
 ### Fixed

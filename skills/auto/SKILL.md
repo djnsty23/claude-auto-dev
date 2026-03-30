@@ -56,13 +56,6 @@ Instead:
 - Make autonomous decisions
 - Keep working until truly done
 - The Stop hook prevents Claude from ending — trust it
-- Log non-obvious decisions to `.claude/decisions.md`:
-  ```
-  ## [task-id]: [decision]
-  - Why: [reason]
-  - Alternative: [what was considered]
-  ```
-  Only log when choosing between approaches, skipping something, or deviating from the task description. Do not log routine choices.
 
 ## Persist to prd.json
 
@@ -189,7 +182,7 @@ Bash({ command: "npm run dev", run_in_background: true })
 # Wait for startup, then scan
 ```
 
-Use audiq MCP (preferred):
+Use audiq MCP if available (check if `mcp__audiq__scan_page` is in your tool list):
 ```
 mcp__audiq__scan_page({ url: "http://localhost:3000/[page]", profile: "quick" })
 mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "desktop" })
@@ -197,15 +190,10 @@ mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "mo
 mcp__audiq__get_console_errors({ url: "http://localhost:3000/[page]" })
 ```
 
+If audiq MCP is not connected, fall back to `WebFetch` for basic page load verification, or skip visual verification and note it in the completion summary.
+
 Analyze returned screenshots for: broken layout, missing content, visual regressions, design quality.
 Fix console errors or visual issues before marking task complete.
-
-If audiq MCP is not available, fall back to agent-browser:
-```bash
-agent-browser open http://localhost:3000/[page]
-agent-browser snapshot -i
-agent-browser errors
-```
 
 ### Self-Verification (after each task)
 
@@ -243,26 +231,11 @@ Run the audiq scan from the Verification section above. Not optional for UI task
 **6. Mark Complete**
 Only after all checks pass. UI files (.tsx, .css, layout, page) without visual verification → go back to step 5.
 
-## Parallel Execution (Optional)
-
-For independent tasks (3+ files each), use worktree-isolated agents:
-```
-Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true, isolation: "worktree" })
-```
-
-Rules:
-- Assign each agent exclusive files in the prompt ("You own src/X. Do not modify other files.")
-- Shared files (globals.css, types, index) → handle in a coordinating step after agents finish
-- Agents must commit before finishing: include `git add -A && git commit -m 'feat: ...'` in prompt
-- Use `SendMessage({ to: agentId })` to continue a stopped agent
-- Skip worktree for small fixes (<3 files) — direct edits are faster
-
 ## Smart Retry
 
 On failure:
 1. **Auto-fix first** — Most failures are trivial (missing import, type mismatch, wrong path). Read the error, fix it inline, re-run the check. This does not count as a retry.
-2. If auto-fix doesn't resolve it, log to `.claude/mistakes.md`
-3. Retry 1: Different approach
+2. Retry 1: Different approach
 4. Retry 2: Simplest possible implementation
 5. Still fails: set `passes: false`, continue to next task
 
