@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Parallel quality audit with 7 specialized agents (Opus) including deploy readiness. Use when assessing app quality or before major releases.
+description: Parallel quality audit with 7 specialized agents (Opus). Finds bugs, violations, and quality issues. Use audit for fixes, brainstorm for features.
 triggers:
   - audit
 allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, Write, Edit
@@ -11,7 +11,9 @@ argument-hint: "[scope: full|auth|dashboard|latest]"
 
 # Audit
 
-Rate each aspect of the app (or specific feature), then auto-create stories from findings. Launch immediately — no need to suggest /compact first.
+Find bugs, violations, and quality issues. Creates fix stories in prd.json.
+
+**Scope:** Audit owns all bug/violation/quality findings. Brainstorm owns feature ideas and architecture improvements. No overlap.
 
 ## Existing Tasks
 !`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch(e){}"`
@@ -37,29 +39,31 @@ Wait for completion → Aggregate Results → Present Report
 
 ## Execution
 
-Launch all 7 agents in a single message. Replace `[PROJECT_PATH]` below with the actual working directory path:
+Launch all 7 agents in a single message. Replace `[PROJECT_PATH]` below with the actual working directory path.
+
+**Important:** Each agent is capped at ~80 tool calls to avoid rate limits. Scope scans to specific directories.
 
 ```typescript
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Security audit for [PROJECT_PATH]. Scan: exposed secrets (check src/ AND supabase/migrations/ for hardcoded keys, passwords, service_role, cron secrets), dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. ALSO check Supabase RLS policy quality: tables with PII (emails, tokens) that allow SELECT without auth.uid() restriction, OAuth tokens accessible via public policies, profiles without row-level restriction. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Security audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: exposed secrets (check src/ AND supabase/migrations/ for hardcoded keys, passwords, service_role, cron secrets), dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. ALSO check Supabase RLS policy quality: tables with PII (emails, tokens) that allow SELECT without auth.uid() restriction, OAuth tokens accessible via public policies, profiles without row-level restriction. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Performance audit for [PROJECT_PATH]. Scan: missing React.memo on list items, useEffect without cleanup, inline objects in JSX, missing lazy loading, N+1 queries. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Performance audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: missing React.memo on list items, useEffect without cleanup, inline objects in JSX, missing lazy loading, N+1 queries. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Accessibility audit for [PROJECT_PATH]. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets (<44px), div/span with onClick (should be button), outline-none without focus-visible replacement, user-scalable=no or maximum-scale=1, missing autocomplete on form inputs, inputs without correct type/inputmode, onPaste with preventDefault, missing prefers-reduced-motion support, transition: all (should list properties), autoFocus without justification. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Accessibility audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets (<44px), div/span with onClick (should be button), outline-none without focus-visible replacement, user-scalable=no or maximum-scale=1, missing autocomplete on form inputs, inputs without correct type/inputmode, onPaste with preventDefault, missing prefers-reduced-motion support, transition: all (should list properties), autoFocus without justification. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Type safety audit for [PROJECT_PATH]. Scan: 'any' usage (skip test files), @ts-ignore, type assertions without guards, conflicting type definitions, untyped API responses. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Type safety + code quality audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: 'any' usage (skip test files), @ts-ignore, type assertions without guards, conflicting type definitions, untyped API responses. ALSO scan: console.log/warn/error statements (count per file, report top 5 offenders), empty catch blocks, API calls without error handling. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "UX/UI audit for [PROJECT_PATH]. Scan: missing loading states, missing empty states, missing error states, hardcoded colors instead of tokens, missing toast feedback, images without width/height (causes CLS), missing loading=lazy on below-fold images, large lists without virtualization (50+ items .map). ALSO check responsive layout: sidebars without mobile hide/toggle (must use hidden md:block pattern), grids without mobile breakpoints (need grid-cols-1 md:grid-cols-2), fixed-width containers that overflow on mobile, touch targets under 44px, missing mobile navigation (hamburger/drawer), modals not full-screen on mobile. ALSO check: hardcoded date/number formats (should use Intl.*), missing text truncation on user-generated content, flex children without min-w-0. Report: Severity, File:line, Issue, Fix." })
+  prompt: "UX/UI audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: missing loading states, missing empty states, missing error states, hardcoded colors instead of tokens (exception: hardcoded colors on gradient/themed surfaces are OK), missing toast feedback, images without width/height (causes CLS), missing loading=lazy on below-fold images, large lists without virtualization (50+ items .map). ALSO check responsive layout: sidebars without mobile hide/toggle (must use hidden md:block pattern), grids without mobile breakpoints (need grid-cols-1 md:grid-cols-2), fixed-width containers that overflow on mobile, touch targets under 44px, missing mobile navigation (hamburger/drawer), modals not full-screen on mobile. ALSO check: hardcoded date/number formats (should use Intl.*), missing text truncation on user-generated content, flex children without min-w-0. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Test coverage audit for [PROJECT_PATH]. Scan: auth flows without tests, data mutations without tests, hooks without test files, utilities without tests. List critical gaps. Report: Severity, What needs testing, Priority." })
+  prompt: "Test coverage audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: auth flows without tests, data mutations without tests, hooks without test files, utilities without tests. List critical gaps. Report: Severity, What needs testing, Priority." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Deploy readiness audit for [PROJECT_PATH]. Scan for runtime issues that unit tests miss: 1) PWA manifest (manifest.json/site.webmanifest) - check every icon/screenshot path references a file that actually exists in public/. 2) Environment variables - check all process.env/import.meta.env references have values set (no trailing newlines/whitespace). 3) Supabase config - check anon key for trailing newline characters that break WebSocket URLs. 4) Asset references - grep for paths like /icons/, /images/, /screenshots/ in source and verify the files exist in public/. 5) next.config/vercel.json - check for mismatched rewrites or missing headers. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Deploy readiness audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan for runtime issues that unit tests miss: 1) PWA manifest (manifest.json/site.webmanifest) - check every icon/screenshot path references a file that actually exists in public/. 2) Environment variables - check all process.env/import.meta.env references have values set (no trailing newlines/whitespace). 3) Supabase config - check anon key for trailing newline characters that break WebSocket URLs. 4) Asset references - grep for paths like /icons/, /images/, /screenshots/ in source and verify the files exist in public/. 5) next.config/vercel.json - check for mismatched rewrites or missing headers. Report: Severity, File:line, Issue, Fix." })
 ```
 
 ## Output Format

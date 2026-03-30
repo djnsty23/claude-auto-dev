@@ -121,7 +121,7 @@ gh api repos/owner/repo/contents/skills/name/SKILL.md --jq ".content" | base64 -
 
 ## Pull Request Checklist
 
-- [ ] SKILL.md under 200 lines
+- [ ] SKILL.md under 500 lines
 - [ ] Manifest entry added
 - [ ] Description is third-person
 - [ ] No trigger conflicts

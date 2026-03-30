@@ -161,6 +161,20 @@ function Update-Dev {
         git pull
         $version = Get-Content "$repoPath\VERSION" -ErrorAction SilentlyContinue
         Write-Host "Updated to v$version" -ForegroundColor Green
+        # Re-sync if using copy mode (not symlinks)
+        $skillsDir = "$env:USERPROFILE\.claude\skills"
+        if (-not ((Get-Item $skillsDir -ErrorAction SilentlyContinue).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            Write-Host "Re-syncing skills and hooks (copy mode)..." -ForegroundColor Yellow
+            Remove-Item -Recurse -Force $skillsDir -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null
+            Copy-Item -Path "$repoPath\skills\*" -Destination $skillsDir -Recurse -Force
+            $hooksDir = "$env:USERPROFILE\.claude\hooks"
+            Remove-Item -Recurse -Force $hooksDir -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
+            Copy-Item -Path "$repoPath\hooks\*" -Destination $hooksDir -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path "$repoPath\agents\*.md" -Destination "$env:USERPROFILE\.claude\agents\" -Force -ErrorAction SilentlyContinue
+            Write-Host "Synced." -ForegroundColor Green
+        }
     } else {
         Write-Host "Already up to date." -ForegroundColor Green
     }

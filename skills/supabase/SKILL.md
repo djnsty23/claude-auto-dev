@@ -11,7 +11,7 @@ triggers:
   - table
   - database
   - edge function
-allowed-tools: Bash
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 model: opus
 user-invocable: true
 ---

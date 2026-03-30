@@ -86,46 +86,36 @@ When prd.json does not exist:
 
 ## Pre-flight (Smart)
 
-Before first task, run these checks:
+Before first task, run these checks. Use simple commands that won't trigger security filters:
 
 ```bash
 # 1. Git status
 git status --short
 
-# 2. Dependencies fresh? Check if package.json is newer than node_modules
-node -e "const fs=require('fs');try{const p=fs.statSync('package.json').mtimeMs;const n=fs.statSync('node_modules').mtimeMs;if(p>n)console.log('[Pre-flight] package.json changed — running npm install')}catch{console.log('[Pre-flight] No node_modules — running npm install')}"
+# 2. Dependencies fresh?
+# Compare timestamps — if package.json is newer than node_modules, run npm install
+ls -lt package.json node_modules/.package-lock.json 2>/dev/null | head -1
 ```
-If package.json is newer, run `npm install` before anything else.
+If package.json is newer or node_modules is missing, run `npm install`.
 
 ```bash
-# 3. Detect test runner (don't hardcode npm test)
-node -e "const p=require('./package.json');const s=p.scripts||{};const d={...p.dependencies,...p.devDependencies};if(d.vitest)console.log('vitest');else if(d.jest)console.log('jest');else if(d['@playwright/test'])console.log('playwright');else if(s.test)console.log('npm test');else console.log('none')"
-```
-Use the detected runner for all test steps in this session.
+# 3. Detect test runner — read package.json with Read tool, check for vitest/jest/playwright in devDependencies
+# Use the detected runner for all test steps in this session
 
-```bash
-# 4. Detect monorepo structure
-node -e "const g=require('child_process').execSync('find . -maxdepth 3 -name package.json -not -path \"*/node_modules/*\"',{encoding:'utf8'}).trim().split('\n');if(g.length>1)console.log('[Monorepo] '+g.length+' packages: '+g.join(', '))"
-```
-If monorepo detected, run build/typecheck/test in each workspace.
-
-```bash
-# 5. Build check
+# 4. Build check
 npm run build 2>&1 | tail -5
 
-# 6. Archive check
-node -e "try{const s=require('fs').statSync('prd.json');if(s.size>50000)console.log('[Archive] prd.json is '+Math.round(s.size/1024)+'KB — run archive before starting')}catch{}"
+# 5. Branch check
+git branch --show-current
 ```
+If on main/master, create a feature branch before making changes.
 
 ```bash
-# 7. Branch check — if on main with pending changes, create a feature branch
-node -e "const b=require('child_process').execSync('git branch --show-current',{encoding:'utf8'}).trim();if(b==='main'||b==='master')console.log('[Branch] On '+b+' — create a feature branch before making changes')"
-
-# 8. Worktree cleanup — prune orphaned worktrees from previous sessions
+# 6. Worktree cleanup
 git worktree prune 2>/dev/null
 ```
 
-Skip individual checks if they take >10 seconds.
+Skip individual checks if they take >10 seconds. Use Read tool to inspect package.json instead of `node -e` one-liners.
 
 ## Task Execution
 
@@ -149,12 +139,12 @@ const executable = storyEntries.filter(([id, s]) =>
 Before starting a task, assess its scope:
 - **Small** (1-3 files, clear fix) → execute directly
 - **Medium** (3-5 files, clear approach) → execute with extra caution
-- **Large** (5+ files, needs UI design, new feature, mechanic change) → write a 3-sentence plan first:
-  1. What changes (e.g., "Towers placed on wall tiles adjacent to floor tiles")
-  2. What systems are affected (e.g., "Update: placeTower, preview render, sell restore, pathfinding")
-  3. What to verify (e.g., "All spawns can path to crystal after placement")
+- **Large** (5+ files, new feature, multiple integrations) → write a 3-sentence inline plan before coding:
+  1. What changes
+  2. What systems are affected
+  3. What to verify after
 
-  Then flag as `size: "large"` in prd.json and suggest Plan Mode. Large features need design, not auto-execution.
+  Then execute. Do not stop to ask — the inline plan is sufficient for auto mode.
 
 ### Execute Each Task
 
@@ -182,9 +172,13 @@ Before starting a task, assess its scope:
 |-----------|--------------|
 | UX/UI (public pages) | audiq scan + screenshots (desktop + mobile) + console errors |
 | UX/UI (admin/internal) | typecheck + build only (skip audiq — not worth the overhead) |
-| Feature | Build passes + audiq scan if public UI changed |
-| API | Endpoint returns expected data + network check |
+| Feature (UI) | Build passes + audiq scan if public UI changed + complete primary user flow once |
+| Edge Function / API | Deploy + `curl` with real params + verify 200 + response shape matches expected |
+| API Integration | Real request with real credentials + verify response contains expected data |
 | Bug fix | Reproduce, verify fixed, no new errors |
+| Refactor | Typecheck + build + existing tests pass + no behavior change |
+
+**Integration test is mandatory for API/Edge Function tasks.** Typecheck alone does not catch wrong API keys, wrong function signatures, or wrong database tables. Make one real request before marking done.
 
 For UI/API tasks, detect or start a dev server first:
 ```bash
@@ -319,6 +313,25 @@ With 1M context, token pressure is rarely an issue. Only suggest `/compact` if c
 
 Be concise but don't sacrifice clarity for brevity.
 
+## Auto-Deploy (After Commit)
+
+After committing completed tasks, check if changed files need deployment:
+
+```bash
+# Check what changed since last deploy/commit
+git diff --name-only HEAD~1
+```
+
+| Changed Files | Deploy Action |
+|--------------|---------------|
+| `supabase/functions/*/index.ts` | Deploy changed edge functions (read deploy command from project CLAUDE.md) |
+| `supabase/migrations/*.sql` | Run `supabase db push` or apply migration |
+| `src/**` (Vercel/Next.js) | Push to trigger Vercel auto-deploy |
+
+For edge functions, read project-specific deploy config from CLAUDE.md (e.g., path to supabase binary, project ref, flags like `--no-verify-jwt`). If no config found, skip auto-deploy and note it in completion summary.
+
+After deploy, verify the deployment succeeded (check endpoint responds with 200).
+
 ## Completion
 
 When all stories have `passes === true`:
@@ -340,47 +353,63 @@ If no tasks to work on:
 1. Are all stories `passes: true`?
    - No: find blocked tasks and resolve blockers
    - Yes: continue to step 2
-2. Output completion summary for current sprint
-3. Assess context to decide next action:
+2. **Auto-transition sprint** (see below)
+3. Output completion summary
+4. Assess context to decide next action
+
+### Auto Sprint Transition
+
+When all pending tasks are done, auto handles the sprint lifecycle — never ask the user to do this manually:
+
+```
+1. Log summary to .claude/sprint-history.md:
+   "Sprint [N]: [done]/[total] tasks | [date] | [one-line summary of work]"
+
+2. Archive completed stories:
+   - Copy current prd.json to .claude/archives/prd-archive-sprint-[N].json
+   - Remove stories with passes: true from prd.json
+   - Keep stories with passes: null, false, or "deferred"
+
+3. If new work exists (audit findings, brainstorm stories, deferred tasks):
+   - Bump sprint number in prd.json
+   - Continue executing immediately
+
+4. If no work remains:
+   - Ask user (see below)
+```
 
 ### Decision Matrix
 
 | Signal | Action |
 |--------|--------|
-| Sprint had 5+ tasks | Run `refactor` to catch duplication from parallel work |
-| Dev server running + UI changes made | Run `scan` to catch visual/QA regressions |
-| Last scan scored <70 on any category | Create stories from scan findings |
-| TODOs/FIXMEs in code | Brainstorm (auto mode creates stories) |
-| Console.logs left in | Quick cleanup sprint |
-| No tests exist | Suggest test sprint |
-| Build warnings | Fix warnings sprint |
-| Clean codebase | Ask user (see below) |
+| Deferred tasks from previous sprint | Carry forward, start working |
+| Audit/brainstorm created new stories | Bump sprint, continue |
+| Dev server running + UI changes made | Run visual scan, fix issues found |
+| TODOs/FIXMEs in changed files | Create stories, fix them |
+| Build warnings | Fix directly (no story needed) |
+| Clean codebase, no work | Ask user (see below) |
 
 ### Auto-Continue (Obvious Work)
 
-If brainstorm scan finds 3+ actionable improvements, auto-create next sprint and continue:
+When new work exists after sprint transition, continue immediately:
 ```
-Sprint [N] complete (8/8 tasks).
-Scanning codebase... found 5 improvements.
-Creating Sprint [N+1] and continuing.
+Sprint [N] complete ([done]/[total] tasks).
+Archived completed stories. [M] tasks carried forward.
+Continuing as Sprint [N+1].
 ```
 
-Limit: 1 auto-generated sprint per session. After that, ask the user.
+Limit: 2 auto-continued sprints per session. After that, ask the user.
 
 ### Ask User (No Obvious Work or Limit Reached)
 
 ```
-Sprint [N] complete (8/8 tasks).
+Sprint [N] complete ([done]/[total] tasks).
 
-What's next? (Recommended: ship)
-1. ship - Deploy current work
-2. refactor - Check for duplication and over-abstraction
-3. audit - Deep quality check
-4. brainstorm - Find more improvements
-5. Done for now
+What's next?
+1. audit - Deep quality scan (finds bugs + violations)
+2. brainstorm - Feature ideas + dead code scan
+3. Done for now
 ```
-
-Present these options to the user and wait for their response. Pick recommendation based on context.
 
 Keep `.claude/auto-active` flag while asking. Only delete it if user picks "Done for now".
 

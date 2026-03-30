@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: Scans codebase, proposes improvements and features autonomously. Use when unsure what to work on next.
+description: Feature ideation, dead code cleanup, and product thinking. Proposes new features and architecture improvements — not bugs or violations (use audit for those).
 triggers:
   - brainstorm
   - generate
@@ -12,92 +12,82 @@ argument-hint: "[focus area]"
 
 # Brainstorm
 
-Scan, analyze, and propose — without asking what to focus on.
+Feature ideation + architecture improvements. Not bugs — use `audit` for that.
 
 ## Existing Tasks
 !`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch(e){}"`
+
+## Scope: Brainstorm vs Audit
+
+| Brainstorm (this skill) | Audit (separate skill) |
+|--------------------------|------------------------|
+| New feature ideas | Security vulnerabilities |
+| Dead code cleanup | Hardcoded colors / design violations |
+| Architecture improvements | console.log / any types / type safety |
+| Complexity / file splitting | Missing loading/error states |
+| Competitor research | Accessibility violations |
+| Product differentiation | Performance issues |
+| UX flow improvements | Test coverage gaps |
+
+If you find a bug or violation during brainstorm, note it but don't create a story — suggest running `audit` instead.
 
 ## Usage
 
 | Command | Behavior |
 |---------|----------|
-| `brainstorm` | Full: 5 parallel scans + competitor research → present findings |
-| `brainstorm quick` | Diff-based: only scan files changed since last brainstorm (no agents, fast) |
+| `brainstorm` | Full: 3 parallel scans + feature ideation → present findings |
+| `brainstorm quick` | Diff-based: only scan files changed recently (no agents, fast) |
 | `brainstorm apply` | Create prd.json stories from last scan results |
-| `brainstorm auth` | Targeted: ideas for auth specifically |
-| `brainstorm features` | Skip quality scan, only feature ideas |
+| `brainstorm [topic]` | Targeted: ideas for a specific area |
 
 ## Quick Mode (brainstorm quick)
 
-For recently-scanned codebases, skip the full 5-agent scan:
+For recently-scanned codebases, skip full agent scans:
 
 ```bash
 # 1. Get files changed since last brainstorm
 git diff --name-only HEAD~5 -- '*.ts' '*.tsx' '*.css'
 
-# 2. For each changed file, check:
-#    - New console.log statements
-#    - New 'any' types
-#    - Missing error handling in new code
-#    - Hardcoded colors in new code
-grep -n 'console\.\|: any\|catch\s*{\s*}' [changed files]
+# 2. For each changed file, look for architecture opportunities:
+#    - Large new files that could be split
+#    - Duplicated patterns across new files
+#    - New components that could be generalized
 ```
 
-Quick mode takes ~10 seconds instead of ~3 minutes. Use after a recent full brainstorm when the codebase hasn't changed much.
+Quick mode takes ~10 seconds. Use after a recent full brainstorm when the codebase hasn't changed much.
 
-## Phase 1: Architecture + QA Scan (Parallel)
+## Phase 1: Architecture Scan (Parallel)
 
-Launch 5 scans simultaneously using Task tool with `run_in_background: true`.
+Launch 3 scans simultaneously using Task tool with `run_in_background: true`.
 
 Replace `[PROJECT_PATH]` below with the actual working directory path.
 
-These scans look for real issues, not linter warnings:
+**Important:** Cap each agent at ~80 tool calls. Scope to specific directories, not entire src/.
 
 ```typescript
 // Scan 1: Dead code — unused exports, unreferenced components, orphan routes
 Task({ subagent_type: "Explore", run_in_background: true,
-  prompt: `Find dead code in [PROJECT_PATH]/src:
-  1. Components in src/components/ or src/app/ not imported anywhere else
+  prompt: `Find dead code in [PROJECT_PATH]/src. Limit to 80 tool calls max.
+  1. Components in src/components/ not imported anywhere else
   2. Exported functions/constants not imported by any other file
   3. Route segments (page.tsx) that import deleted/missing components
   Cross-reference: for each export, grep for its name across src/. Report only confirmed unused.` })
 
-// Scan 2: Console statements + error handling gaps
+// Scan 2: Complexity + splitting opportunities
 Task({ subagent_type: "Explore", run_in_background: true,
-  prompt: `In [PROJECT_PATH]/src (skip test/spec files):
-  1. Count console.log/warn/error statements — report top 5 files by count
-  2. Find empty catch blocks (catch that do nothing or just console.log)
-  3. Find API calls (fetch, axios, supabase.from) without error handling
-  Report: count per category, top offenders with file:line.` })
-
-// Scan 3: Bundle + complexity — what actually costs users
-Task({ subagent_type: "Explore", run_in_background: true,
-  prompt: `In [PROJECT_PATH]/src:
+  prompt: `In [PROJECT_PATH]/src. Limit to 80 tool calls max.
   1. Files over 300 lines — report file path and line count
-  2. For each large file: is it a single component that could be split? Or cohesive logic that should stay together? Check if it has multiple exported components or clearly separable sections.
-  3. Check for client-side data fetching in page.tsx/layout.tsx that could be server-side (useEffect + fetch patterns in 'use client' pages)
-  Report only genuinely splittable files, not cohesive ones.` })
+  2. For each large file: does it have multiple exported components or clearly separable sections? Only report genuinely splittable files.
+  3. Duplicated code patterns: find 2+ components with >50% structural similarity
+  4. Check for client-side data fetching in page.tsx/layout.tsx that could be server-side
+  Report only actionable findings, not cohesive files that should stay together.` })
 
-// Scan 4: Dependency audit
+// Scan 3: Unused dependencies
 Task({ subagent_type: "Explore", run_in_background: true,
-  prompt: `In [PROJECT_PATH]:
+  prompt: `In [PROJECT_PATH]. Limit to 80 tool calls max.
   1. Read package.json dependencies. For each dependency, grep src/ to check if it's actually imported. Report unused deps.
-  2. Find hardcoded colors (text-white, bg-black, #hex, rgb) — skip node_modules, skip test files, skip shadcn/ui component defaults
-  3. Check for 'any' type usage in .ts/.tsx files
-  Report: unused deps list, hardcoded color count + top files, any type count.` })
-
-// Scan 5: Live site QA (if dev server running)
-// Detect running dev server first, then scan with audiq MCP
-Task({ subagent_type: "general-purpose", run_in_background: true,
-  prompt: `Check if a dev server is running:
-  curl -s http://localhost:3000 > /dev/null 2>&1 || curl -s http://localhost:3001 > /dev/null 2>&1 || curl -s http://localhost:5173 > /dev/null 2>&1
-  If a server responds, run these audiq MCP scans on the detected URL:
-  1. mcp__audiq__scan_page with profile "quick" — report scores and critical/high issues
-  2. mcp__audiq__screenshot_page with viewport "desktop" — analyze the screenshot for visual issues: bland/generic design, broken layout, missing content, poor hierarchy
-  3. mcp__audiq__screenshot_page with viewport "mobile" — check responsive layout: overflow, tiny text, unreachable buttons, missing mobile nav
-  4. mcp__audiq__get_console_errors — report any JS errors
-  Report: scores (perf/a11y/seo/best-practices), visual issues found in screenshots, console errors, and design quality assessment (is it distinctive or generic AI slop?).
-  If no dev server is running, report "No dev server detected — skipped live QA scan."` })
+  2. Check for outdated patterns: class components, legacy API usage, deprecated package usage
+  Report: unused deps list, outdated patterns found.` })
 ```
 
 ## Phase 2: Feature Ideation (Product Thinking)
@@ -114,14 +104,15 @@ Answer these before proposing anything:
 - **Who specifically uses it?** (Developer? Marketing team? Small business owner?)
 - **What's the core "aha moment"?** (The first thing that makes a user think "this is useful")
 
-### Step 2: Research competitors (required)
+### Step 2: Research competitors (optional, skip if WebSearch is slow)
 
-Use WebSearch to check 2-3 competitors: "[product name] vs [competitor]" or "best [category] tools 2026"
+If WebSearch is available and responsive, check 1-2 competitors: "[product name] vs [competitor]" or "best [category] tools 2026"
 
 For each competitor, note:
 - What they do well (features to match)
 - What they do poorly (opportunities to differentiate)
-- What they charge (pricing model insight)
+
+If WebSearch fails or is slow, skip this step — product thinking from step 1 + step 3 is sufficient.
 
 ### Step 3: Walk the user journey
 
@@ -157,17 +148,17 @@ Scanned [N] files in [T] seconds.
 
 | # | Category | Finding | Priority |
 |---|----------|---------|----------|
-| 1 | Dead Code | 3 unused components in src/components/ | High |
-| 2 | Quality  | 12 console.logs in production code | Medium |
-| 3 | Perf     | Dashboard page.tsx fetches client-side, could be server prefetch | High |
-| 4 | Visual   | Mobile nav overflows on 375px, hamburger menu missing | High |
-| 5 | Design   | Generic card grid layout — needs visual differentiation | Medium |
-| 6 | A11y     | 4 images missing alt text, 2 buttons without labels | High |
-| 7 | Feature  | Competitor X has [feature] — worth adding | Medium |
+| 1 | Feature | Competitor X has [feature] — worth adding because [reason] | High |
+| 2 | Feature | [User flow] has friction at [step] — add [solution] | High |
+| 3 | Architecture | 3 unused components can be removed | Medium |
+| 4 | Architecture | Dashboard.tsx (450 lines) should split into 3 components | Medium |
+| 5 | Architecture | Client-side fetch in page.tsx could be server prefetch | Low |
+| 6 | Cleanup | 2 unused dependencies can be removed | Low |
 
 Codebase health: [honest assessment — "clean, no urgent issues" is valid]
 
 Say "brainstorm apply" to create stories, or pick specific items.
+Bugs or violations? Run "audit" instead.
 ```
 
 If the codebase is genuinely clean, say so. Do not invent work to fill a table.
@@ -187,7 +178,7 @@ When user says `brainstorm apply`:
 ## Targeted Mode
 
 When user says `brainstorm X`:
-- Skip quality scan entirely
+- Skip Phase 1 scans entirely
 - Read files related to X topic
 - Propose 3-5 specific ideas for X
 - Present findings (do not auto-create stories)
@@ -222,10 +213,11 @@ Before proposing UI features:
 
 ## Rules
 
+- **Features and architecture, not bugs** — if you find a bug, note it and suggest `audit`, don't create a story
 - Analyze and propose — do not ask "what do you want?"
 - Quality over quantity — 2 real findings beat 6 padded ones
 - Validate before claiming — grep to confirm, don't assume
-- Skip shadcn/ui colors (library defaults, not project issues)
 - Deduplicate against existing prd.json stories AND native Tasks before creating
 - Check open tasks overlap: if a finding matches an existing pending story (first 25 chars of title), skip it
 - "Codebase is clean, nothing to propose" is a valid outcome
+- Cap each scan agent at ~80 tool calls to avoid rate limits

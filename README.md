@@ -24,7 +24,10 @@ claude
 ```
 ```
 You: brainstorm
-Claude: [Scans codebase, finds improvements] → Created 5 stories in prd.json
+Claude: [Scans codebase, finds improvements] → Found 5 items
+
+You: brainstorm apply
+Claude: [Creates stories from findings] → Created 5 stories in prd.json
 
 You: auto
 Claude: [Works through all tasks autonomously] → 5/5 complete

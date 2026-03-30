@@ -72,7 +72,7 @@
         "scan"
       ],
       "priority": 1,
-      "description": "Scans codebase, proposes improvements and features autonomously. Use when unsure what to work on next."
+      "description": "Feature ideation, dead code cleanup, and product thinking. Proposes new features and architecture improvements — not bugs or violations (use audit for those)."
     },
     "status": {
       "triggers": [
@@ -238,7 +238,7 @@
         "a11y"
       ],
       "priority": 1,
-      "description": "Parallel quality audit with 7 specialized agents (Opus) including deploy readiness. Use when assessing app quality or before major releases."
+      "description": "Parallel quality audit with 7 specialized agents (Opus). Finds bugs, violations, and quality issues. Use audit for fixes, brainstorm for features."
     },
     "browser-auth": {
       "triggers": [],

@@ -27,10 +27,10 @@ const DANGEROUS_BASH_PATTERNS = [
     /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
     /curl.*\|\s*(ba)?sh/i,                     // curl | bash (remote code exec)
     /wget.*\|\s*(ba)?sh/i,                     // wget | bash
-    /\b(bash|sh)\s*-c/i,                        // bash -c / sh -c (shell escape, with or without space)
-    /\beval[\s"']/i,                           // eval (arbitrary command execution)
+    /\b(bash|sh)\s+-c\b/i,                        // bash -c / sh -c (shell escape, requires space before -c)
+    /(?:^|[;&|]\s*)eval\s/i,                   // eval at command start or after chain operator
     /(?:^|[;&|]\s*)node\s+(-e|--eval|-p|--print)\b/i, // node -e at command start (not inside grep/echo args)
-    /\bnpx\s+(?!tsc|supabase|vercel|next|vite|vitest|jest|playwright|eslint|prettier|npm-check-updates|axe-core-cli|@next\/bundle-analyzer|lighthouse|netlify|remotion)/i, // npx with non-allowlisted package
+    /\bnpx\s+(?!tsc\b|supabase\b|vercel\b|next\b|vite\b|vitest\b|jest\b|playwright\b|eslint\b|prettier\b|npm-check-updates\b|axe-core-cli\b|@next\/bundle-analyzer\b|lighthouse\b|netlify\b|remotion\b)/i, // npx with non-allowlisted package (word-bounded)
     /rm\s.*prd-archive/i,                      // NEVER delete prd archives (move instead)
     /rm\s.*prd-backup/i,                       // NEVER delete prd backups (move instead)
     /del\s.*prd-archive/i,                     // Windows: NEVER delete prd archives

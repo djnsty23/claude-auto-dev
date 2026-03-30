@@ -1,42 +1,57 @@
 # claude-auto-dev (v6.6.4)
 
-## Commands
+## Primary Commands
+
+These are what you type. Everything else is handled automatically by `auto`.
 
 | Say | Action |
 |-----|--------|
-| `auto` | Work through all tasks autonomously |
-| `progress` | Show sprint progress |
-| `iterate` | Convergence loop: brainstorm→fix→re-scan until clean |
-| `brainstorm` | Scan codebase, propose improvements (report-first) |
+| `auto` | Work through all tasks autonomously (deploys, tests, transitions sprints) |
+| `audit` | Find bugs + violations (7 parallel agents) → creates fix stories |
+| `brainstorm` | Feature ideas + architecture improvements → present findings |
 | `brainstorm quick` | Diff-based scan, only recently changed files (~10s) |
-| `brainstorm apply` | Create stories from last brainstorm scan |
-| `audit` | Parallel quality audit (7 agents) |
-| `sprint` | Create/advance sprint |
-| `review` | Code quality check (adaptive effort) |
-| `review quick` | Build + typecheck only |
-| `review deep` | Full 7-step verification + UI check |
+| `brainstorm apply` | Create stories from last brainstorm |
+| `progress` | Show sprint progress |
+| Natural language | "fix this", "add that", "remove X" — just describe it |
+
+## On-Demand Commands
+
+Use when you need something specific. Auto mode calls these internally too.
+
+| Say | Action |
+|-----|--------|
+| `review` / `review quick` / `review deep` | Code quality check (adaptive effort) |
 | `ship` | Build, test, review, deploy |
-| `clean` | Remove temp files |
-| `scan` / `qa` | Live site QA via audiq (visual + functional) |
+| `scan` / `qa` | Live site QA via audiq |
 | `test` | Run unit + browser tests |
 | `fix` | Debug and fix issues |
-| `setup` | Initialize new project (smart stack detection) |
 | `commit` | Conventional commit + push + PR |
+| `deploy` / `ci` | Deploy workflow (Vercel, Supabase, CI/CD) |
+| `clean` | Remove temp files |
+| `iterate` | Convergence loop: brainstorm→fix→re-scan until clean |
+| `sprint` | Create/advance sprint |
+
+## Specialized Commands
+
+Pattern libraries for specific domains. Auto-loaded when relevant.
+
+| Say | Action |
+|-----|--------|
+| `setup` | Initialize new project |
 | `perf` | Performance audit (Core Web Vitals) |
 | `a11y` | Accessibility audit (WCAG 2.1 AA) |
 | `refactor` | Refactoring patterns |
-| `migrate` / `upgrade` | Dependency updates, breaking change resolution |
+| `migrate` / `upgrade` | Dependency updates |
 | `security` | Pre-deploy security scan |
 | `pr` / `pr-review` | PR review with specialized agents |
 | `db` / `supabase` | Database operations, RLS, migrations |
-| `deploy` / `ci` | Deploy workflow (Vercel, Supabase, CI/CD) |
-| `archive` | Archive completed prd.json stories |
+| `archive` | Archive completed stories |
 | `env` | Environment variable patterns |
 | `design` / `ui` | UI design patterns |
-| `browser` | Browser automation (agent-browser) |
+| `browser` | Browser automation |
 | `logs` / `monitoring` | Logging and observability |
-| `stripe` / `payment` | Stripe integration patterns |
-| `seo` / `schema` | SEO audit and structured data |
+| `stripe` / `payment` | Stripe integration |
+| `seo` / `schema` | SEO and structured data |
 | `remotion` / `video` | Remotion video creation |
 | `update dev` | Sync latest skills from GitHub |
 

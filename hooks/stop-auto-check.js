@@ -10,13 +10,15 @@ try {
     const autoFlag = path.join(HOME, '.claude', 'auto-active');
 
     // Stale flag cleanup (>2 hours old = crashed session)
-    if (fs.existsSync(autoFlag)) {
+    try {
         const flagStat = fs.statSync(autoFlag);
         const flagAgeMs = Date.now() - flagStat.mtimeMs;
         if (flagAgeMs > 2 * 60 * 60 * 1000) {
             fs.unlinkSync(autoFlag);
             process.stderr.write('[Auto-Dev] Removed stale auto-active flag (>2h old)\n');
         }
+    } catch {
+        // Flag doesn't exist — no cleanup needed
     }
 
     if (fs.existsSync(autoFlag)) {
@@ -51,10 +53,12 @@ try {
             // All tasks done but flag active = IDLE detection (one chance)
             // Mark that IDLE detection has been triggered
             const idleMarker = path.join(HOME, '.claude', 'auto-idle-triggered');
-            if (fs.existsSync(idleMarker)) {
+            let idleExists = false;
+            try { fs.statSync(idleMarker); idleExists = true; } catch {}
+            if (idleExists) {
                 // Already ran IDLE detection — allow stop to prevent infinite loop
-                fs.unlinkSync(idleMarker);
-                fs.unlinkSync(autoFlag);
+                try { fs.unlinkSync(idleMarker); } catch {}
+                try { fs.unlinkSync(autoFlag); } catch {}
                 process.stderr.write('[Auto-Dev] IDLE detection already ran. Allowing stop.\n');
                 console.log(JSON.stringify({ decision: 'approve' }));
             } else {

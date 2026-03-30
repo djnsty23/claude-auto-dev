@@ -68,11 +68,13 @@ try {
         try {
             const prd = JSON.parse(fs.readFileSync('prd.json', 'utf8'));
             const sprint = prd.sprint || '';
-            const total = prd.completedStories || 0;
-            const all = prd.totalStories || 0;
-            const pending = all - total;
+            // Count from stories object (the actual schema)
+            const stories = prd.stories || {};
+            const entries = Object.values(stories);
+            const done = entries.filter(s => s.passes === true).length;
+            const pending = entries.length - done;
             if (sprint) {
-                console.log(`[Sprint] ${sprint} | ${total} done, ${pending} pending`);
+                console.log(`[Sprint] ${sprint} | ${done} done, ${pending} pending`);
             }
         } catch (parseErr) {
             process.stderr.write(`[Auto-Dev] prd.json parse error: ${parseErr.message}\n`);
