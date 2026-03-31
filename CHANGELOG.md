@@ -1,5 +1,10 @@
 # Changelog
 
+## [6.7.3] - 2026-03-31
+
+### Changed
+- **Windows: Supabase CLI rule** — `supabase db query --linked` blocked (triggers firewall, times out). Use REST API with curl instead.
+
 ## [6.7.2] - 2026-03-30
 
 ### Changed
