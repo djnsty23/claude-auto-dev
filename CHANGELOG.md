@@ -1,5 +1,21 @@
 # Changelog
 
+## [6.9] - 2026-04-05
+
+### Added
+- **scripts/sync.js** — Single source of truth for syncing repo files to ~/.claude. Handles symlink/copy, settings merge, rules, agents, deprecated cleanup, and validation in one cross-platform Node.js script.
+
+### Changed
+- **install.sh / install.ps1** — Sync logic delegated to sync.js, removing ~90 lines of duplicated copy/symlink code
+- **scripts/update.sh** — Reduced from 114 lines to 12, delegates to sync.js
+- **Embedded update-dev functions** — Both bash and PowerShell versions now call sync.js instead of manual copy blocks
+- **Brainstorm dedup threshold** — Fixed drift: standardized to 25-char match (was 20 in brainstorm, 25 in audit)
+- **Settings: removed CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS** — Redundant since teammateMode: "auto" is set
+
+### Removed
+- **5 dead files** — templates/progress.txt, templates/settings.local.json, templates/env.local.template, templates/task-patterns.json, skills/prd-schema.json
+- **Dead chmod in install.sh** — Was targeting *.sh hooks but all hooks are .js
+
 ## [6.8] - 2026-04-04
 
 ### Added

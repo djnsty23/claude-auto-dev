@@ -1,4 +1,0 @@
-# {{NAME}} - Progress
-
-## {{DATE}}: Setup
-Installed Claude Auto-Dev. Run `brainstorm` to generate tasks.

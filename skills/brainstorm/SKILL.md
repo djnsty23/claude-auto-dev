@@ -192,8 +192,8 @@ const existing = await TaskList();
 
 function isDuplicate(newTitle: string): boolean {
   return existing.some(task =>
-    task.subject.toLowerCase().includes(newTitle.toLowerCase().slice(0, 20)) ||
-    newTitle.toLowerCase().includes(task.subject.toLowerCase().slice(0, 20))
+    task.subject.toLowerCase().includes(newTitle.toLowerCase().slice(0, 25)) ||
+    newTitle.toLowerCase().includes(task.subject.toLowerCase().slice(0, 25))
   );
 }
 

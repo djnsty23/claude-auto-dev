@@ -1,11 +1,11 @@
 #!/bin/bash
-# Claude Auto-Dev Installer (v6.8)
+# Claude Auto-Dev Installer (v6.9)
 # Usage: ./install.sh [--init] [--full] [--copy]
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME=$(basename "$(pwd)")
-VERSION=$(head -1 "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "6.8")
+VERSION=$(head -1 "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "6.9")
 CLAUDE_DIR=~/.claude
 
 INIT=0
@@ -60,53 +60,13 @@ echo -n "$SCRIPT_DIR" > "$CLAUDE_DIR/repo-path.txt"
 echo -e "\n\033[33m[Repo Path]\033[0m"
 echo -e "  \033[32mSaved to ~/.claude/repo-path.txt\033[0m"
 
-# Install skills
-echo -e "\n\033[33m[Skills]\033[0m"
-if [[ $COPY -eq 1 ]]; then
-    rm -rf "$CLAUDE_DIR/skills"
-    mkdir -p "$CLAUDE_DIR/skills"
-    cp -r "$SCRIPT_DIR/skills/"* "$CLAUDE_DIR/skills/"
-    echo -e "  \033[32mCopied to ~/.claude/skills/\033[0m"
-else
-    rm -rf "$CLAUDE_DIR/skills"
-    if ln -s "$SCRIPT_DIR/skills" "$CLAUDE_DIR/skills" 2>/dev/null; then
-        echo -e "  \033[32mSymlinked ~/.claude/skills/ -> repo\033[0m"
-    else
-        echo -e "  \033[33mSymlink failed — falling back to copy mode\033[0m"
-        COPY=1
-        mkdir -p "$CLAUDE_DIR/skills"
-        cp -r "$SCRIPT_DIR/skills/"* "$CLAUDE_DIR/skills/"
-        echo -e "  \033[32mCopied to ~/.claude/skills/\033[0m"
-    fi
+# Sync skills, hooks, agents via sync.js
+echo -e "\n\033[33m[Syncing Skills, Hooks, Agents]\033[0m"
+SYNC_ARGS="--repo $SCRIPT_DIR"
+if [[ $COPY -eq 0 ]]; then
+    SYNC_ARGS="$SYNC_ARGS --symlink"
 fi
-
-# Install hooks
-echo -e "\n\033[33m[Hooks]\033[0m"
-if [[ $COPY -eq 1 ]]; then
-    rm -rf "$CLAUDE_DIR/hooks"
-    mkdir -p "$CLAUDE_DIR/hooks"
-    cp "$SCRIPT_DIR/hooks/"* "$CLAUDE_DIR/hooks/" 2>/dev/null || true
-    chmod +x "$CLAUDE_DIR/hooks/"*.sh 2>/dev/null || true
-    echo -e "  \033[32mCopied to ~/.claude/hooks/\033[0m"
-else
-    rm -rf "$CLAUDE_DIR/hooks"
-    if ln -s "$SCRIPT_DIR/hooks" "$CLAUDE_DIR/hooks" 2>/dev/null; then
-        echo -e "  \033[32mSymlinked ~/.claude/hooks/ -> repo\033[0m"
-    else
-        echo -e "  \033[33mSymlink failed — falling back to copy mode\033[0m"
-        COPY=1
-        mkdir -p "$CLAUDE_DIR/hooks"
-        cp "$SCRIPT_DIR/hooks/"* "$CLAUDE_DIR/hooks/" 2>/dev/null || true
-        chmod +x "$CLAUDE_DIR/hooks/"*.sh 2>/dev/null || true
-        echo -e "  \033[32mCopied to ~/.claude/hooks/\033[0m"
-    fi
-fi
-
-# Install agents (always copy — preserves user-created agents)
-echo -e "\n\033[33m[Agents]\033[0m"
-mkdir -p "$CLAUDE_DIR/agents"
-cp "$SCRIPT_DIR/agents/"*.md "$CLAUDE_DIR/agents/" 2>/dev/null || true
-echo -e "  \033[32mCopied to ~/.claude/agents/\033[0m"
+node "$SCRIPT_DIR/scripts/sync.js" $SYNC_ARGS
 
 # Add update-dev alias to shell profile
 echo -e "\n\033[33m[Update Alias]\033[0m"
@@ -135,11 +95,8 @@ update-dev() {
         echo "Updated to v$version"
         # Re-sync if using copy mode (not symlinks)
         if [[ ! -L "$HOME/.claude/skills" ]]; then
-            echo "Re-syncing skills and hooks (copy mode)..."
-            rm -rf "$HOME/.claude/skills" && mkdir -p "$HOME/.claude/skills" && cp -r "$repo_path/skills/"* "$HOME/.claude/skills/"
-            rm -rf "$HOME/.claude/hooks" && mkdir -p "$HOME/.claude/hooks" && cp "$repo_path/hooks/"* "$HOME/.claude/hooks/" 2>/dev/null
-            cp "$repo_path/agents/"*.md "$HOME/.claude/agents/" 2>/dev/null
-            echo "Synced."
+            echo "Re-syncing (copy mode)..."
+            node "$repo_path/scripts/sync.js" --repo "$repo_path" --rules --clean-deprecated
         fi
     else
         echo "Already up to date."

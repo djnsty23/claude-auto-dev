@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Claude Auto-Dev Installer (v6.8)
+    Claude Auto-Dev Installer (v6.9)
 .EXAMPLE
     .\install.ps1              # Symlink skills + hooks, add update-dev alias
     .\install.ps1 -Full        # + rules + settings
@@ -18,7 +18,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Version = Get-Content "$ScriptDir\VERSION" -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $Version) { $Version = "6.8" }
+if (-not $Version) { $Version = "6.9" }
 
 $ClaudeDir = "$env:USERPROFILE\.claude"
 
@@ -68,60 +68,13 @@ Set-Content -Path $RepoPathFile -Value $ScriptDir -NoNewline
 Write-Host "`n[Repo Path]" -ForegroundColor Yellow
 Write-Host "  Saved to ~/.claude/repo-path.txt" -ForegroundColor Green
 
-# Install skills
-Write-Host "`n[Skills]" -ForegroundColor Yellow
-$SkillsTarget = "$ClaudeDir\skills"
-
-if ($Copy) {
-    # Copy mode
-    if (Test-Path $SkillsTarget) { Remove-Item -Recurse -Force $SkillsTarget }
-    New-Item -ItemType Directory -Path $SkillsTarget -Force | Out-Null
-    Copy-Item -Path "$ScriptDir\skills\*" -Destination $SkillsTarget -Recurse -Force
-    Write-Host "  Copied to ~/.claude/skills/" -ForegroundColor Green
-} else {
-    # Symlink mode (default)
-    if (Test-Path $SkillsTarget) { Remove-Item -Recurse -Force $SkillsTarget }
-    try {
-        New-Item -ItemType SymbolicLink -Path $SkillsTarget -Target "$ScriptDir\skills" -Force | Out-Null
-        Write-Host "  Symlinked ~/.claude/skills/ -> repo" -ForegroundColor Green
-    } catch {
-        Write-Host "  Symlink failed (need admin or Developer Mode). Using copy..." -ForegroundColor Yellow
-        New-Item -ItemType Directory -Path $SkillsTarget -Force | Out-Null
-        Copy-Item -Path "$ScriptDir\skills\*" -Destination $SkillsTarget -Recurse -Force
-        Write-Host "  Copied to ~/.claude/skills/" -ForegroundColor Green
-    }
+# Sync skills, hooks, agents via sync.js
+Write-Host "`n[Syncing Skills, Hooks, Agents]" -ForegroundColor Yellow
+$SyncArgs = "--repo `"$ScriptDir`""
+if (-not $Copy) {
+    $SyncArgs += " --symlink"
 }
-
-# Install hooks
-Write-Host "`n[Hooks]" -ForegroundColor Yellow
-$HooksTarget = "$ClaudeDir\hooks"
-
-if ($Copy) {
-    if (Test-Path $HooksTarget) { Remove-Item -Recurse -Force $HooksTarget }
-    New-Item -ItemType Directory -Path $HooksTarget -Force | Out-Null
-    Copy-Item -Path "$ScriptDir\hooks\*" -Destination $HooksTarget -Force
-    Write-Host "  Copied to ~/.claude/hooks/" -ForegroundColor Green
-} else {
-    if (Test-Path $HooksTarget) { Remove-Item -Recurse -Force $HooksTarget }
-    try {
-        New-Item -ItemType SymbolicLink -Path $HooksTarget -Target "$ScriptDir\hooks" -Force | Out-Null
-        Write-Host "  Symlinked ~/.claude/hooks/ -> repo" -ForegroundColor Green
-    } catch {
-        Write-Host "  Symlink failed. Using copy..." -ForegroundColor Yellow
-        New-Item -ItemType Directory -Path $HooksTarget -Force | Out-Null
-        Copy-Item -Path "$ScriptDir\hooks\*" -Destination $HooksTarget -Force
-        Write-Host "  Copied to ~/.claude/hooks/" -ForegroundColor Green
-    }
-}
-
-# Install agents (always copy - preserves user-created agents)
-Write-Host "`n[Agents]" -ForegroundColor Yellow
-$AgentsTarget = "$ClaudeDir\agents"
-if (-not (Test-Path $AgentsTarget)) {
-    New-Item -ItemType Directory -Path $AgentsTarget -Force | Out-Null
-}
-Copy-Item -Path "$ScriptDir\agents\*.md" -Destination $AgentsTarget -Force -ErrorAction SilentlyContinue
-Write-Host "  Copied to ~/.claude/agents/" -ForegroundColor Green
+node "$ScriptDir\scripts\sync.js" $SyncArgs.Split(" ")
 
 # Add update-dev alias to PowerShell profile (detect correct location)
 Write-Host "`n[Update Alias]" -ForegroundColor Yellow
@@ -164,16 +117,8 @@ function Update-Dev {
         # Re-sync if using copy mode (not symlinks)
         $skillsDir = "$env:USERPROFILE\.claude\skills"
         if (-not ((Get-Item $skillsDir -ErrorAction SilentlyContinue).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            Write-Host "Re-syncing skills and hooks (copy mode)..." -ForegroundColor Yellow
-            Remove-Item -Recurse -Force $skillsDir -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null
-            Copy-Item -Path "$repoPath\skills\*" -Destination $skillsDir -Recurse -Force
-            $hooksDir = "$env:USERPROFILE\.claude\hooks"
-            Remove-Item -Recurse -Force $hooksDir -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
-            Copy-Item -Path "$repoPath\hooks\*" -Destination $hooksDir -Force -ErrorAction SilentlyContinue
-            Copy-Item -Path "$repoPath\agents\*.md" -Destination "$env:USERPROFILE\.claude\agents\" -Force -ErrorAction SilentlyContinue
-            Write-Host "Synced." -ForegroundColor Green
+            Write-Host "Re-syncing (copy mode)..." -ForegroundColor Yellow
+            node "$repoPath\scripts\sync.js" --repo "$repoPath" --rules --clean-deprecated
         }
     } else {
         Write-Host "Already up to date." -ForegroundColor Green
