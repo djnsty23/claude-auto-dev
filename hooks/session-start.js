@@ -82,7 +82,28 @@ try {
     }
 
     // ============================================================
-    // 4. Git status (brief)
+    // 4. Patch MEMORY.md version if stale
+    // ============================================================
+    try {
+        const cwd = process.cwd();
+        // Encode CWD to match Claude's project memory path: C:\Users\foo → C--Users-foo
+        const encoded = cwd.replace(/:/g, '-').replace(/[\\/]/g, '-');
+        const memoryPath = path.join(CLAUDE_DIR, 'projects', encoded, 'memory', 'MEMORY.md');
+        if (fs.existsSync(memoryPath)) {
+            let content = fs.readFileSync(memoryPath, 'utf8');
+            const versionRegex = /(## Project:.*?\(v)[\d.]+(\))/;
+            const match = content.match(versionRegex);
+            if (match && !content.includes(`(v${version})`)) {
+                content = content.replace(versionRegex, `$1${version}$2`);
+                fs.writeFileSync(memoryPath, content);
+            }
+        }
+    } catch {
+        // Non-critical — skip silently
+    }
+
+    // ============================================================
+    // 5. Git status (brief)
     // ============================================================
     try {
         const gitStatus = execSync('git status --short', {
