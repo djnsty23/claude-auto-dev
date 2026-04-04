@@ -260,7 +260,7 @@ Common patterns to recognize:
 
 - Commit every 3 completed tasks
 - Or after major milestones
-- Always on a feature branch (auto-create from main if needed)
+- Feature branch for team projects; main is fine for solo (see commit skill)
 - Use conventional commits: `feat|fix|refactor`
 
 ## Save Project Knowledge (Continuous Learning)
@@ -285,7 +285,7 @@ This builds per-project context that compounds across sessions.
 
 ## Token Management
 
-With 1M context, token pressure is rarely an issue. Only suggest `/compact` if context usage is visibly high (e.g., after 10+ completed tasks or large file reads).
+With 1M context, compaction is almost never needed. Do NOT suggest `/compact` unless you are certain context usage exceeds 70%. A full sprint (10+ tasks) typically uses only 15-20% of 1M context.
 
 Be concise but don't sacrifice clarity for brevity.
 

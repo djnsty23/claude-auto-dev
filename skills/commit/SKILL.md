@@ -59,18 +59,32 @@ git commit -m "feat: add playlist drag-drop reorder"
 ## Commit + Push
 
 ```bash
-# Auto-create feature branch if on main
-BRANCH=$(git branch --show-current)
-if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-  git checkout -b feat/[descriptive-name]
-fi
-
 git add <files>
 git commit -m "feat: description"
 git push origin HEAD
 ```
 
-Always create a feature branch if on main/master. Never commit directly to main.
+### Branch Strategy
+
+Check before branching:
+```bash
+# Solo project? (1 contributor, no branch protection)
+CONTRIBUTORS=$(git shortlog -sn --all 2>/dev/null | wc -l)
+HAS_REMOTE=$(git remote 2>/dev/null | head -1)
+```
+
+- **Solo project** (1 contributor or no remote): commit directly to main — branching adds ceremony with zero value.
+- **Team project** (2+ contributors or CI/branch protection): create a feature branch from main.
+
+```bash
+# Only branch for team projects
+if [ "$CONTRIBUTORS" -gt 1 ] && [ -n "$HAS_REMOTE" ]; then
+  BRANCH=$(git branch --show-current)
+  if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+    git checkout -b feat/[descriptive-name]
+  fi
+fi
+```
 
 ## Post-Commit Quick Check
 

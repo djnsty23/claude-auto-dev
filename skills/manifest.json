@@ -1,5 +1,5 @@
 {
-  "version": "6.7.3",
+  "version": "6.8",
   "description": "33 active skills + 3 deprecated redirects (verify, checkpoint, browser-auth) - includes iterate, scan (audiq QA), migrate, stripe, seo",
   "deprecated": [
     "supabase-postgres",
@@ -173,13 +173,14 @@
     },
     "setup-project": {
       "triggers": [
-        "setup",
+        "setup project",
         "scaffold",
-        "new-project"
+        "new project",
+        "init project"
       ],
       "file": "setup-project/SKILL.md",
       "priority": 3,
-      "description": "Initializes project with smart stack detection, skill recommendations, and standard config. Use when starting a new project."
+      "description": "Scaffolds new projects or onboards existing ones. Detects stack, creates monorepo/single-app, configures strict tooling. Use for greenfield or first-time setup."
     },
     "stripe": {
       "triggers": [

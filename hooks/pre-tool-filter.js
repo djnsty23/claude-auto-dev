@@ -27,7 +27,7 @@ const DANGEROUS_BASH_PATTERNS = [
     /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
     /curl.*\|\s*(ba)?sh/i,                     // curl | bash (remote code exec)
     /wget.*\|\s*(ba)?sh/i,                     // wget | bash
-    /\b(bash|sh)\s+-c\b/i,                        // bash -c / sh -c (shell escape, requires space before -c)
+    /(?:^|[;&|]\s*)(bash|sh)\s+-c\b/i,             // bash -c / sh -c at command start or after chain (not inside quoted args)
     /(?:^|[;&|]\s*)eval\s/i,                   // eval at command start or after chain operator
     /(?:^|[;&|]\s*)node\s+(-e|--eval|-p|--print)\b/i, // node -e at command start (not inside grep/echo args)
     /(?:^|[;&|]\s*)npx\s+(?!tsc\b|tsx\b|supabase\b|vercel\b|next\b|vite\b|vitest\b|jest\b|playwright\b|eslint\b|prettier\b|npm-check-updates\b|axe-core-cli\b|@next\/bundle-analyzer\b|lighthouse\b|netlify\b|remotion\b|shadcn\b|shadcn-ui\b|create-next-app\b|prisma\b)/i, // npx at command start or after chain operator (not inside quoted strings)

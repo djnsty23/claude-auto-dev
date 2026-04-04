@@ -39,7 +39,30 @@ Wait for completion → Aggregate Results → Present Report
 
 ## Execution
 
-Launch all 7 agents in a single message. Replace `[PROJECT_PATH]` below with the actual working directory path.
+### Size Gate (choose agent count by codebase size)
+
+Before launching agents, count source files:
+```bash
+find src/ app/ packages/ -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' 2>/dev/null | wc -l
+```
+
+| Files | Strategy | Agents |
+|-------|----------|--------|
+| < 50 | **Compact** — single Opus agent, all 7 checks sequentially | 1 |
+| 50-200 | **Medium** — 3 agents (security+types, perf+a11y, UX+tests+deploy) | 3 |
+| 200+ | **Full swarm** — all 7 agents in parallel | 7 |
+
+For **compact** mode (< 50 files), use a single agent with all checks combined:
+```typescript
+Agent({ subagent_type: "Explore", model: "opus",
+  prompt: "Full quality audit for [PROJECT_PATH]. Limit to 80 tool calls. Check ALL of: 1) Security (secrets, XSS, injection, RLS), 2) Performance (memo, effects, re-renders), 3) Accessibility (alt, aria, keyboard), 4) Type safety (any, ts-ignore, console.log), 5) UX/UI (loading/error/empty states, hardcoded colors, responsive), 6) Test gaps, 7) Deploy readiness (env vars, asset paths). Report: Severity, File:line, Issue, Fix." })
+```
+
+For **medium** mode (50-200 files), launch 3 combined agents.
+
+For **full swarm** (200+ files), launch all 7 agents below.
+
+Replace `[PROJECT_PATH]` with the actual working directory path.
 
 **Important:** Each agent is capped at ~80 tool calls to avoid rate limits. Scope scans to specific directories.
 

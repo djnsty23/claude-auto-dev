@@ -38,10 +38,15 @@ try {
             }
 
             if (hasTypecheck) {
+                // Detect package manager from lockfile
+                const pm = fs.existsSync('pnpm-lock.yaml') ? 'pnpm' :
+                           fs.existsSync('yarn.lock') ? 'yarn' :
+                           fs.existsSync('bun.lockb') ? 'bun' : 'npm';
+
                 // Update debounce stamp
                 try { fs.mkdirSync('.claude', { recursive: true }); fs.writeFileSync(stampFile, ''); } catch {}
                 try {
-                    execSync('npm run typecheck', {
+                    execSync(`${pm} run typecheck`, {
                         timeout: 30000,
                         stdio: ['ignore', 'pipe', 'pipe']
                     });

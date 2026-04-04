@@ -1,5 +1,21 @@
 # Changelog
 
+## [6.8] - 2026-04-04
+
+### Added
+- **setup-project: greenfield mode** — Full scaffolding from description to working build. Monorepo support (pnpm workspaces), package manager detection, Biome over ESLint, shadcn v4, TS strict defaults, .gitattributes, version table with risk notes
+- **setup-project: onboard mode** — Gap detection (.gitattributes missing, TS strictness, missing .env.example)
+- **Audit size gate** — Scales agent count by codebase size: 1 agent (<50 files), 3 agents (50-200), full 7-swarm (200+)
+
+### Changed
+- **Typecheck hook detects package manager** — Reads lockfile (pnpm-lock.yaml/yarn.lock/bun.lockb) instead of hardcoding `npm run typecheck`
+- **Commit: solo projects stay on main** — Checks contributor count + remote before forcing feature branches. Solo devs commit to main.
+- **Auto: /compact threshold raised** — "Do NOT suggest unless >70%" (was "after 10+ tasks"). 1M context makes premature compaction wasteful.
+- **setup-project triggers narrowed** — `"setup"` → `"setup project"` to avoid false matches on "set up the database"
+
+### Fixed
+- **bash -c filter narrowed** — Only blocks at command position or after chain operators, not inside quoted arguments (e.g., `docker exec` wrapping)
+
 ## [6.7.3] - 2026-03-31
 
 ### Changed
