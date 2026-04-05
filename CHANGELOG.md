@@ -1,5 +1,39 @@
 # Changelog
 
+## [7.0] - 2026-04-05
+
+### Added
+- **Generation constraints in auto** — Security, a11y, design anti-slop rules applied at code-generation time, not just post-hoc audit
+- **Self-critique step** — 8-question checklist auto runs after writing code, before typecheck
+- **Hardening check** — 12-pattern per-task diff scan (fail-open auth, unsafe casts, fire-and-forget fetch, missing labels, stock UI, dark mode, chart colors)
+- **Per-story verify tags** — `"verify": ["visual", "a11y", "design", "security", "auth", "test", "api"]` in prd.json stories for targeted checks
+- **Design token compliance check** — Auto verifies UI output uses project tokens, not stock shadcn defaults
+- **Test generation table** — Auto writes tests for API routes, auth, hooks, data mutations, RLS policies
+- **Risk-shaped testing** — Test effort matches risk (100% auth/billing, 70% hooks, optional for static pages)
+- **Coverage thresholds** — 70% lines, 60% branches, 100% auth/billing paths
+- **Deferred task distinction** — `passes: "needs-setup"` + `blockedReason` separates infrastructure blockers from skipped tasks
+- **Security checks 6-11** — SSRF prevention, fail-open auth, HTTP headers, open redirect, rate limiting, npm audit
+- **Score tracking** — Audit logs scores to sprint-history.md with delta from previous audit
+- **Migration safety** — Deploy checks for destructive SQL operations, nullable defaults rule
+- **Simplify suggestion** — Auto recommends simplify after 5+ task sprints
+
+### Changed
+- **audiq MCP removed from all skills** — Replaced with agent-browser (preferred) and Playwright (fallback) across ship, commit, design, brainstorm
+- **Ship: blocking quality gates** — npm audit critical/high now blocks deploy alongside typecheck/build/tests
+- **Ship: expanded security checklist** — 11 items including fail-closed auth, SSRF, middleware coverage, HTTP headers, rate limiting
+- **Review: tests run in default mode** — Not just deep mode; also adds npm audit, breaking change detection, hardening scan
+- **Audit: reduced noise** — A11y agent skips transition-all (perf not a11y), type agent skips console.error and test files
+- **Audit: expanded security agent** — RLS policy logic, fail-open auth, SSRF, middleware gaps, unsafe casts, fire-and-forget fetch
+- **Fix: regression tests mandatory** — For auth/billing/RLS paths after fix; escalation after 3 failures
+- **Commit: story ID in messages** — `feat(S13-001): description` format; tests added to safety checklist
+- **Standards: anti-patterns reorganized** — Split into accessibility, design system, security/data safety categories
+- **Standards: fail-closed patterns** — Auth deny-by-default, fetch error handling, Zod validation for external data
+- **Supabase: RLS runtime verification** — REST API test after migrations to verify policies actually restrict access
+- **Supabase: migration rollback pattern** — Nullable defaults, separate drop migrations
+- **Design: quality gate expanded** — Dark mode, a11y focus rings, reduced motion, form UX checks
+- **Workflow rules: cross-cutting verification** — 6 patterns applied to all task types regardless of category
+- **Auto: exactOptionalPropertyTypes** — Generates `foo?: string | undefined` on first pass in strict projects
+
 ## [6.9.1] - 2026-04-05
 
 ### Fixed

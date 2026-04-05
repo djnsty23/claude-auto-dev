@@ -75,10 +75,21 @@ Common patterns:
 ### Step 5: Verify
 ```bash
 npm run build
+npm run test -- --watchAll=false --passWithNoTests 2>/dev/null | tail -5
 # If passes, test the specific feature
 ```
 
-If build or feature test fails, return to Step 4 with updated error info. Maximum 3 fix attempts — if still failing after 3 tries, report the remaining issue and stop.
+If build or feature test fails, return to Step 4 with updated error info. Maximum 3 fix attempts — if still failing after 3 tries, escalate to the user with a clear report of what was tried and what's still broken. Do not silently skip or defer.
+
+### Step 5b: Regression Test
+
+After fixing, add a test that would have caught the bug:
+```bash
+# If test file exists for the module, add a test case
+# If no test file exists, create one for critical paths (auth, billing, data mutations)
+```
+
+For non-critical code, a manual verification is sufficient. For auth/billing/RLS, a test is mandatory.
 
 ### Step 6: Document
 ```

@@ -5,7 +5,7 @@ triggers:
   - commit
   - push
   - commit-push-pr
-allowed-tools: Bash, Read, Glob, mcp__audiq__get_console_errors
+allowed-tools: Bash, Read, Glob
 model: opus
 user-invocable: true
 argument-hint: "[type] [message]"
@@ -55,6 +55,7 @@ git commit -m "feat: add playlist drag-drop reorder"
 - Imperative mood: "add" not "added"
 - No period at end
 - Body explains WHY, not WHAT
+- Include story ID when available: `feat(S13-001): add playlist UI`
 
 ## Commit + Push
 
@@ -92,7 +93,7 @@ After every commit, run a 5-second sanity check:
 ```bash
 npm run build 2>&1 | tail -3
 # If dev server running, check for console errors
-curl -s http://localhost:3000 > /dev/null 2>&1 && mcp__audiq__get_console_errors({ url: "http://localhost:3000" })
+curl -s http://localhost:3000 > /dev/null 2>&1 && agent-browser open http://localhost:3000 && agent-browser snapshot -i
 ```
 
 If errors found, fix immediately and amend the commit.
@@ -141,12 +142,14 @@ gh pr create --title "[Sprint summary]" --body "[generated from prd.json]"
 **Before committing (if ANY fail, fix before proceeding):**
 - [ ] `npm run typecheck` passes
 - [ ] `npm run build` passes
+- [ ] `npm test -- --watchAll=false --passWithNoTests` passes
 - [ ] No `.env` files staged — unstage if found
 - [ ] No `console.log` in staged files — remove if found
 - [ ] No hardcoded secrets — remove if found
 
 **Before pushing:**
 - [ ] Branch is correct (not pushing to main accidentally)
+- [ ] Branch is up-to-date with remote: `git fetch && git status`
 - [ ] Commit messages are clean
 
 If issues found: fix them, re-stage, re-run checks, THEN commit.

@@ -3,7 +3,7 @@ name: auto
 description: Autonomous task execution with testing and security. Works through all tasks without stopping.
 triggers:
   - auto
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Agent, SendMessage, mcp__audiq__scan_page, mcp__audiq__screenshot_page, mcp__audiq__get_console_errors, mcp__audiq__get_network_issues
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Agent, SendMessage
 model: opus
 user-invocable: true
 ---
@@ -144,34 +144,148 @@ Before starting a task, assess its scope:
 1. **Progress output**: `[3/8] Starting: S6-003 — Add loading states`
 2. Read the task description
 3. **Context Loading** — read 2-3 similar files to match existing patterns
-4. Implement the solution
-5. `npm run typecheck` — fix if fails
-6. `npm run build` — fix if fails
-7. Self-Verification (see below)
-8. **Visual verification** — if the task touched UI (components, pages, styles, layouts), run audiq scan + screenshots. Do not skip this.
-9. **Progress output**: `[3/8] ✓ S6-003 | Next: S6-004`
-10. Update prd.json: `passes: true`
-11. Start next task immediately
+4. **Apply Generation Constraints** (see below) — before writing code
+5. Implement the solution
+6. **Self-Critique** — re-read your diff before running checks (see below)
+7. `npm run typecheck` — fix if fails
+8. `npm run build` — fix if fails
+9. Self-Verification (see below)
+10. **Visual verification** — if the task touched UI, run agent-browser or Playwright screenshots. Do not skip this.
+11. **Test generation** — if the task created an API route, auth logic, or data mutation, write at least one test (see below)
+12. **Progress output**: `[3/8] ✓ S6-003 | Next: S6-004`
+13. Update prd.json: `passes: true`
+14. Start next task immediately
+
+### Generation Constraints (apply before writing code)
+
+These constraints prevent bugs at generation time instead of finding them in audit:
+
+**TypeScript Strictness:**
+- In strict projects with `exactOptionalPropertyTypes`, always write optional props as `foo?: string | undefined` (not just `foo?: string`) — saves a retry cycle every time
+
+**Security & Data Safety:**
+- Every `fetch()` in a component MUST have try/catch and `res.ok` check
+- Every user-supplied URL in server code MUST be validated before fetch
+- Every `process.env.X` for security vars MUST throw if undefined (no localhost fallbacks)
+- Never cast with `as unknown as` — validate with Zod or type guard
+- Never use `createClient()` in webhook/cron routes — use `createServiceClient()`
+- Every new API route MUST be added to middleware route matcher / PUBLIC_PREFIXES if public
+
+**Accessibility:**
+- Every `<input>` MUST have an associated `<label>` or `aria-label`
+- Every `<select>` MUST have an `aria-label`
+- Every icon-only `<button>` MUST have an `aria-label`
+- Every `<button>` MUST have `focus-visible:ring-*` styles
+- Every form MUST have `autoComplete` on email/password fields
+- Every async operation MUST have loading, error, and empty states
+- Every animation MUST have a `motion-reduce` alternative
+- Every touch target MUST be minimum 44px
+
+**Design (anti-slop):**
+- Read the project's globals.css/tailwind config BEFORE writing UI — use the project's actual tokens, not stock shadcn defaults
+- Fonts must be loaded via `next/font` (or framework equivalent), not just declared in CSS
+- Chart/graph colors: use raw HSL values from tokens, not `hsl(var(--x))` when the variable already contains `hsl(...)` — this produces invalid `hsl(hsl(...))`
+- Cards must have visible elevation/distinction from background in BOTH light and dark mode
+- Navigation needs icons alongside text labels — never text-only nav
+- OAuth/social buttons need provider icons (GitHub octocat, Google G), not plain text
+- Empty states need engaging visuals (illustration, icon + descriptive text), not just "No data yet"
+- Landing pages need a visual hook above the fold (demo, screenshot, animation), not just text + subtitle
+- Use the project's brand/accent color for emphasis, not stock primary
+
+### Self-Critique (re-read diff before checks)
+
+After writing code, before running typecheck, re-read your diff and ask:
+1. Does every input have a label?
+2. Does every fetch handle errors?
+3. Does every async operation show a loading state?
+4. Could any user-supplied value reach a dangerous sink (SQL, HTML, URL fetch)?
+5. Are there any `as unknown as` casts that should be runtime-validated?
+6. Would this work in dark mode? (Are colors from theme tokens, not hardcoded?)
+7. Is every interactive element keyboard-accessible?
+8. Does the UI have visual personality, or is it stock shadcn? (Check: distinctive colors, loaded fonts, icons in nav, non-generic empty states)
+
+Fix issues found, then proceed to typecheck.
+
+### Test Generation (for API/auth/data mutations)
+
+When auto creates an API route, auth logic, hook, or data mutation, also write a test:
+
+| Created | Write Test For |
+|---------|---------------|
+| API route | Happy path (200 + response shape) + missing auth (401) |
+| Auth logic | Valid login + expired token + missing credentials |
+| Hook | Initial state + success path + error path |
+| Data mutation | Success + validation error + unauthorized |
+| RLS policy | Authorized read + unauthorized read blocked |
+
+Keep tests minimal (1-3 assertions each). Prioritize risky paths over easy-to-test pure functions.
+
+### Acceptance Criteria & Verify Tags
+
+When creating stories in prd.json (via audit, brainstorm, or bootstrap), include testable acceptance criteria and a `verify` array that tells auto which checks matter for this specific task:
+
+```json
+{
+  "S13-001": {
+    "title": "Fix SSRF in webhook endpoints",
+    "verify": ["security", "test"],
+    "acceptance": [
+      "curl to http://169.254.169.254 from webhook returns 400",
+      "curl to https://example.com from webhook returns 200"
+    ],
+    "passes": null
+  },
+  "S13-002": {
+    "title": "Add dashboard page",
+    "verify": ["visual", "a11y", "design"],
+    "passes": null
+  }
+}
+```
+
+**Verify tag meanings:**
+
+| Tag | What auto checks |
+|-----|-----------------|
+| `visual` | agent-browser screenshots desktop + mobile, no console errors |
+| `a11y` | Labels on inputs, focus-visible rings, aria-labels, keyboard nav |
+| `design` | Design token compliance check (see below) |
+| `security` | Hardening check patterns (fail-open, unsafe casts, SSRF) |
+| `auth` | Auth deny-by-default verified, middleware coverage |
+| `test` | Write or verify a test for the critical path |
+| `api` | curl with real params, verify 200 + response shape |
+
+If no `verify` field exists, auto infers from the task type (UI → visual+a11y+design, API → api+security, etc.).
+
+Before marking a task done, verify each acceptance criterion. "Does it compile?" is not acceptance — "does it behave correctly?" is.
 
 ### Context Loading (before writing any code)
 
 1. Read 2-3 existing files most similar to what you're building
 2. Identify patterns: naming conventions, import style, error handling, state management
 3. Match patterns — do not introduce new patterns when existing ones cover the use case
+4. **For UI tasks:** Read globals.css (or tailwind config) + layout.tsx to understand the project's design system — fonts, colors, component patterns. Use the project's ACTUAL tokens, not stock defaults. Check if fonts are loaded via `next/font` or just declared in CSS.
+
+**Design context is not optional.** Auto-generated UI without reading the design system produces stock shadcn that fails the AI slop checklist. Spend 30 seconds reading the design tokens before writing any component.
 
 ### Verification
 
 | Task Type | Verification |
 |-----------|--------------|
-| UX/UI (public pages) | audiq scan + screenshots (desktop + mobile) + console errors |
-| UX/UI (admin/internal) | typecheck + build only (skip audiq — not worth the overhead) |
-| Feature (UI) | Build passes + audiq scan if public UI changed + complete primary user flow once |
+| UX/UI (public pages) | agent-browser screenshots (desktop + mobile) + console errors |
+| UX/UI (admin/internal) | typecheck + build only |
+| Feature (UI) | Build passes + visual check if public UI changed + complete primary user flow once |
 | Edge Function / API | Deploy + `curl` with real params + verify 200 + response shape matches expected |
 | API Integration | Real request with real credentials + verify response contains expected data |
 | Bug fix | Reproduce, verify fixed, no new errors |
 | Refactor | Typecheck + build + existing tests pass + no behavior change |
+| Auth / billing / RLS | Write or verify a test for the security-critical path |
+
+**All task types also require the Hardening Check (step 4c).** This catches logic bugs that typecheck and build miss.
 
 **Integration test is mandatory for API/Edge Function tasks.** Typecheck alone does not catch wrong API keys, wrong function signatures, or wrong database tables. Make one real request before marking done.
+
+**Risk-shaped testing.** When adding tests, prioritize paths that handle money, access control, or user data over easy-to-test pure functions.
 
 For UI/API tasks, detect or start a dev server first:
 ```bash
@@ -179,20 +293,29 @@ For UI/API tasks, detect or start a dev server first:
 for port in 3000 3001 5173 8080; do curl -s http://localhost:$port > /dev/null 2>&1 && break; done
 # If none found, start one in background
 Bash({ command: "npm run dev", run_in_background: true })
-# Wait for startup, then scan
+# Wait for startup, then verify
 ```
 
-Use audiq MCP if available (check if `mcp__audiq__scan_page` is in your tool list):
-```
-mcp__audiq__scan_page({ url: "http://localhost:3000/[page]", profile: "quick" })
-mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "desktop" })
-mcp__audiq__screenshot_page({ url: "http://localhost:3000/[page]", viewport: "mobile" })
-mcp__audiq__get_console_errors({ url: "http://localhost:3000/[page]" })
+Use agent-browser (preferred — token efficient) or Playwright (more capabilities):
+
+**agent-browser (preferred):**
+```bash
+agent-browser open http://localhost:3000/[page]
+agent-browser snapshot -i          # Desktop screenshot + DOM
+agent-browser viewport 375 812     # Switch to mobile
+agent-browser snapshot -i          # Mobile screenshot
+agent-browser errors               # Console errors
 ```
 
-If audiq MCP is not connected, fall back to `WebFetch` for basic page load verification, or skip visual verification and note it in the completion summary.
+**Playwright fallback (if agent-browser unavailable):**
+```bash
+npx playwright screenshot http://localhost:3000/[page] .claude/screenshots/page-desktop.png
+npx playwright screenshot --viewport-size=375,812 http://localhost:3000/[page] .claude/screenshots/page-mobile.png
+```
 
-Analyze returned screenshots for: broken layout, missing content, visual regressions, design quality.
+If neither is available, fall back to `WebFetch` or `curl` for basic page load verification.
+
+Analyze screenshots for: broken layout, missing content, visual regressions, design quality, dark mode correctness.
 Fix console errors or visual issues before marking task complete.
 
 ### Self-Verification (after each task)
@@ -225,11 +348,41 @@ Run `git diff` and check: no `console.log`/`debugger`, no hardcoded colors, all 
 **4b. Sweeping Change Verification**
 If the task involved a bulk find-and-replace (e.g., renaming, migrating values, swapping imports), grep for the OLD pattern to confirm it's fully eliminated. Partial migrations cause subtle bugs (e.g., USD→EUR migration that missed one pricing page).
 
-**5. UI/API Change? Visual Verification**
-Run the audiq scan from the Verification section above. Not optional for UI tasks.
+**4c. Hardening Check (per-task audit-lite)**
+Review the diff for these patterns in the files you just changed. Fix before marking done:
 
-**6. Mark Complete**
-Only after all checks pass. UI files (.tsx, .css, layout, page) without visual verification → go back to step 5.
+| Pattern | What to Check | Fix |
+|---------|--------------|-----|
+| **Fail-open auth** | `if (secret && ...)` skips auth when env var is unset | Fail-closed: return 401 if env var missing |
+| **Unsafe casts** | `as unknown as`, `as any`, double assertions | Create a validator (Zod or manual), parse instead of cast |
+| **Fire-and-forget fetch** | `fetch()` without try/catch or `.ok` check | Wrap in try/catch, check `res.ok`, revert optimistic state on failure |
+| **Missing form labels** | `<input placeholder="...">` without `<label>` or `aria-label` | Add `<label>` or `aria-label` to every input |
+| **Missing autocomplete** | Login/signup inputs without `autoComplete` | Add `autoComplete="email"`, `autoComplete="current-password"`, etc. |
+| **User-supplied URLs** | Server-side `fetch(userUrl)` without validation | Validate URL, resolve DNS, block private IP ranges |
+| **Env var fallbacks** | `process.env.X \|\| 'localhost'` or `\|\| ''` | Throw if missing in production, only fallback in dev |
+| **RLS policy logic** | New table or RLS change | Verify policy restricts to `auth.uid()` for user data |
+| **Missing focus styles** | Raw `<button>` without `focus-visible:ring-*` | Add `focus-visible:ring-2 focus-visible:ring-ring` |
+| **Stock UI** | Fonts declared but not loaded, text-only nav, generic empty states | Load fonts via next/font, add icons, add visual personality |
+| **Dark mode** | Colors that don't use theme tokens, cards same color as background | Use semantic tokens, add elevation distinction |
+| **Chart colors** | `hsl(var(--x))` when var already contains `hsl(...)` | Use raw HSL values or remove outer `hsl()` wrapper |
+
+Only check patterns relevant to the files you changed — this is a 30-second scan of your own diff, not a full audit.
+
+**5. Design Token Compliance (UI tasks only)**
+If the task changed `.tsx` or `.css` files, verify the output uses the project's actual tokens:
+```bash
+# Check for stock shadcn / hardcoded colors in changed files
+git diff --name-only | xargs grep -n "text-white\|bg-black\|text-gray-\|bg-gray-\|#[0-9a-fA-F]\{6\}" 2>/dev/null | grep -v "gradient\|from-\|to-\|via-" | head -10
+# Check fonts are loaded, not just declared
+grep -rn "fontFamily\|font-family" src/ --include="*.css" --include="*.tsx" | grep -v "next/font\|@font-face\|tailwind" | head -5
+```
+If stock colors or unloaded fonts found in YOUR changes, fix before proceeding.
+
+**6. UI/API Change? Visual Verification**
+Run agent-browser or Playwright screenshots from the Verification section above. Not optional for UI tasks.
+
+**7. Mark Complete**
+Only after all checks pass. UI files (.tsx, .css, layout, page) without visual verification → go back to step 6.
 
 ## Smart Retry
 
@@ -238,6 +391,7 @@ On failure:
 2. Retry 1: Different approach
 4. Retry 2: Simplest possible implementation
 5. Still fails: set `passes: false`, continue to next task
+6. If failure is due to missing external setup (API keys, services, infrastructure): set `passes: "needs-setup"` with `blockedReason` explaining what's needed. This distinguishes "can't do yet" from "tried and failed."
 
 Do not retry a third time. Do not spend more than 10 minutes on retries for a single task.
 
@@ -250,11 +404,20 @@ Track error types across tasks. When the same error pattern appears 3+ times:
 Common patterns to recognize:
 | Error Pattern | Instant Fix |
 |--------------|-------------|
+| `exactOptionalPropertyTypes` error | Add `\| undefined` to optional prop types: `foo?: string \| undefined` |
 | `Cannot find module './X'` | Check file exists, fix path or create file |
 | `Type 'X' is not assignable to type 'Y'` | Check the type definition, add union or cast |
 | `Property 'X' does not exist on type 'Y'` | Add to interface or use optional chaining |
 | `RLS policy violation` | Check auth.uid() in policy, verify user is authenticated |
 | `CORS error` | Check API route headers or middleware config |
+| `as unknown as` cast | Create a validator function, parse instead of assert |
+| Unhandled fetch in component | Wrap in try/catch, check res.ok, add error feedback |
+| `<input>` without label | Add `<label htmlFor>` or `aria-label` prop |
+| Env var `\|\| ''` fallback | Throw if missing, fallback only with NODE_ENV check |
+| Middleware blocks new route | Add to PUBLIC_PREFIXES or route matcher |
+| Font declared but not loaded | Add `next/font` import in layout.tsx |
+| `hsl(var(--x))` double-wrap | Remove outer `hsl()` when CSS var already contains it |
+| Stock shadcn tokens | Read project's globals.css, use actual brand colors |
 
 ## Commit Cadence
 
@@ -378,13 +541,17 @@ Limit: 2 auto-continued sprints per session. After that, ask the user.
 
 ### Ask User (No Obvious Work or Limit Reached)
 
+If the sprint had 5+ tasks, suggest simplify first:
 ```
 Sprint [N] complete ([done]/[total] tasks).
 
+Recommended: run `simplify` to catch duplicate code from this sprint.
+
 What's next?
-1. audit - Deep quality scan (finds bugs + violations)
-2. brainstorm - Feature ideas + dead code scan
-3. Done for now
+1. simplify - Review for duplicate code and over-abstraction
+2. audit - Deep quality scan (finds bugs + violations)
+3. brainstorm - Feature ideas + dead code scan
+4. Done for now
 ```
 
 Keep `.claude/auto-active` flag while asking. Only delete it if user picks "Done for now".

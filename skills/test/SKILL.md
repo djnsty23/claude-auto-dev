@@ -160,6 +160,34 @@ Background servers don't fill context - output goes to file, only read if needed
 
 **Note:** OAuth flows may fail on non-3000 ports unless redirect URIs are registered. For testing auth, ensure port 3000 is free or use test accounts that bypass OAuth.
 
+## Risk-Shaped Testing
+
+Test effort should match risk, not code volume:
+
+| Code Area | Test Priority | Why |
+|-----------|--------------|-----|
+| Auth flows (login, signup, password reset) | Critical — 100% | Security boundary, user trust |
+| Billing/payment (Stripe, subscriptions) | Critical — 100% | Money, legal liability |
+| RLS policies | Critical — 100% | Data access control |
+| Data mutations (CRUD operations) | High — 80%+ | Data integrity |
+| API routes | High — 80%+ | External contract |
+| Hooks with side effects | Medium — 70%+ | Shared logic |
+| Pure utility functions | Medium — 70%+ | Easy to test, high reuse |
+| UI components (presentational) | Low — optional | Visual, low risk |
+| Static pages | Low — optional | Rarely breaks |
+
+### Coverage Thresholds
+
+When coverage tooling is available:
+- **Lines:** 70% minimum
+- **Branches:** 60% minimum
+- **Auth/billing paths:** 100% (non-negotiable)
+
+```bash
+# Check coverage
+npm run test -- --coverage --watchAll=false 2>/dev/null
+```
+
 ## Create Stories from Failures
 
 If tests reveal issues, auto-create stories:

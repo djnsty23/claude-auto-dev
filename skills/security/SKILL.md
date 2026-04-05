@@ -75,16 +75,68 @@ grep -rn "dangerouslySetInnerHTML\|innerHTML\|document.write" src/
 
 If found: **WARN** - sanitize or remove.
 
+### 6. SSRF Prevention
+```bash
+# Check for user-supplied URLs passed to fetch/axios without validation
+grep -rn "fetch(\|axios\.\(get\|post\)" src/ --include="*.ts" --include="*.tsx" | grep -v "localhost\|supabase\|vercel\|stripe"
+```
+
+Flag if user input flows into URL without private IP blocking (10.x, 172.16-31.x, 192.168.x, 127.x, ::1).
+
+### 7. Fail-Open Auth
+```bash
+# Check for inverted auth logic (should deny by default)
+grep -rn "if.*session\|if.*user\|if.*auth" src/middleware* src/app/**/route.ts src/app/**/page.tsx --include="*.ts" --include="*.tsx" 2>/dev/null | head -20
+```
+
+Flag patterns like `if (session) { allow }` without a default deny. Correct: `if (!session) { redirect('/login'); return; }`
+
+### 8. HTTP Security Headers
+```bash
+# Check next.config headers or middleware
+grep -rn "X-Frame-Options\|Content-Security-Policy\|X-Content-Type-Options\|Referrer-Policy\|Permissions-Policy" next.config* src/middleware* 2>/dev/null
+```
+
+Flag if missing: X-Frame-Options, X-Content-Type-Options, Referrer-Policy.
+
+### 9. Open Redirect
+```bash
+# Check for unvalidated redirect URLs from query params
+grep -rn "redirect\|router.push\|window.location" src/ --include="*.ts" --include="*.tsx" | grep -i "searchParams\|query\|url\|next\|callback\|return"
+```
+
+### 10. Rate Limiting
+```bash
+# Check API routes for rate limiting
+grep -rn "rateLimit\|rate-limit\|throttle\|limiter" src/ --include="*.ts" --include="*.tsx" 2>/dev/null
+```
+
+Flag if auth endpoints (login, signup, password reset) lack rate limiting.
+
+### 11. npm Audit
+```bash
+npm audit --production 2>/dev/null | tail -10
+```
+
+Flag critical/high vulnerabilities.
+
 ## Report
 
 ```
 Security Check
 ==============
-Secrets:     Pass/Fail
-Env files:   Pass/Fail
-RLS:         Pass/Fail
-Validation:  Pass/Warn
-XSS:         Pass/Warn
+Secrets:         Pass/Fail
+Env files:       Pass/Fail
+RLS:             Pass/Fail
+RLS Logic:       Pass/Fail
+Validation:      Pass/Warn
+XSS:             Pass/Warn
+SSRF:            Pass/Warn
+Auth Logic:      Pass/Warn
+HTTP Headers:    Pass/Warn
+Open Redirect:   Pass/Warn
+Rate Limiting:   Pass/Warn
+npm Audit:       Pass/Warn
 
 Result: PASS/FAIL (N warnings)
 Ready to deploy: Yes/No

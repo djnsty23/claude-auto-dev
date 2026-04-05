@@ -58,15 +58,42 @@ npm run build
 npm run lint  # If available
 ```
 
-### 3. Scan changed files for issues
+### 3. Run tests
+```bash
+npm test -- --watchAll=false --passWithNoTests 2>/dev/null | tail -10
+```
+
+### 4. Scan changed files for issues
 For each changed file, check:
 - `any` types or `@ts-ignore`
 - console.log statements
 - Hardcoded colors (text-white, bg-gray-*)
 - Missing error handling
 - TODO/FIXME comments
+- `as unknown as` unsafe casts on API/DB data
+- `fetch()` without error handling (missing `res.ok` check or try/catch)
+- Form inputs without `<label>` or `aria-label`
+- Fail-open auth patterns (`if (session)` without default deny)
 
-### 4. Report
+### 5. npm Audit
+```bash
+npm audit --production 2>/dev/null | grep -E "critical|high" | head -5
+```
+
+### 6. Breaking Change Detection
+For each changed file, check:
+- Exported function signatures changed (parameter types, return types)
+- Removed exports that other files may import
+- Changed API response shapes
+
+### 7. Hardening Scan
+Scan the diff for these 12 patterns:
+```bash
+# Run on staged/changed files only
+git diff --name-only HEAD~3 | xargs grep -n "as unknown as\|fetch(.*)\.\(then\|catch\)\?$\|dangerouslySetInnerHTML\|eval(\|innerHTML\|document.write\|console\.log\|text-white\|bg-black\|text-gray-" 2>/dev/null | head -20
+```
+
+### 8. Report
 ```
 Review: [X files changed]
 ==========================

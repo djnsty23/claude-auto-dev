@@ -39,10 +39,30 @@ export $(grep SUPABASE_ACCESS_TOKEN .env) && supabase functions deploy [name] --
 
 If you get 401 Unauthorized, the token is wrong — do not retry. Check which token the project needs vs what's in the env.
 
+## Migration Safety (if Supabase migrations exist)
+
+Before deploying migrations:
+```bash
+# Check for destructive operations
+grep -in "DROP\|DELETE\|TRUNCATE\|ALTER.*DROP" supabase/migrations/*.sql 2>/dev/null
+```
+
+Rules:
+- Never DROP columns in production without a deprecation period
+- Add columns as nullable with defaults — never NOT NULL without defaults on existing tables
+- Test migrations against a branch/staging database first
+- Always have a rollback migration ready for schema changes
+
 ## Post-deploy
 1. Verify production URL loads
 2. Test critical user flows
 3. Monitor error logs for 5 minutes
+4. Check Sentry/error monitoring for new errors (if configured)
+5. Verify webhook endpoints are reachable (if applicable):
+   ```bash
+   # Test webhook URLs respond
+   curl -s -o /dev/null -w "%{http_code}" [WEBHOOK_URL]
+   ```
 
 ---
 

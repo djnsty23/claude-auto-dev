@@ -21,7 +21,19 @@
 | Task | Required Before Done |
 |------|---------------------|
 | Edge Function / API | curl with real params, verify 200 + response shape |
-| UI (public) | audiq scan + screenshots + console errors |
+| UI (public) | agent-browser snapshot + console errors check |
 | UI (admin) | typecheck + build only |
 | Refactor | typecheck + build + existing tests pass |
 | Bulk change | grep for old pattern to confirm full elimination |
+| Auth / Billing / RLS | tests + manual verification of deny-by-default behavior |
+
+## Cross-Cutting Verification (All Task Types)
+
+These 6 patterns apply to every task, regardless of type:
+
+1. **No unsafe casts** — `as unknown as Type` on external data must be validated with Zod
+2. **No fire-and-forget fetch** — every `fetch()` checks `res.ok` and has try/catch
+3. **Fail-closed auth** — protected routes deny by default, not allow by default
+4. **Design tokens** — no hardcoded colors (semantic tokens only, exception for gradient surfaces)
+5. **Form a11y** — labels on inputs, correct type/inputmode, don't block paste
+6. **Error handling** — empty catch blocks, missing error states, unhandled promise rejections

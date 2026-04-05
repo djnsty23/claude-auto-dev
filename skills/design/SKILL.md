@@ -4,7 +4,7 @@ description: Creates distinctive UI with preserved structure. Avoids generic AI 
 triggers:
   - design
   - ui
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__audiq__analyze_visual, mcp__audiq__recommend_design, mcp__audiq__screenshot_page
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 model: opus
 user-invocable: true
 ---
@@ -135,19 +135,30 @@ Before shipping any new UI, check these against the existing design:
 3. **Scroll check** — Does any text get trimmed, overlap, or overflow at 375px mobile width?
 4. **Color scheme** — Are all colors from CSS variables, not hardcoded hex/rgb?
 5. **External resources** — Validate image URLs, font links, icon paths are reachable before committing
+6. **Dark mode** — Toggle between light and dark. All text readable? Cards have visible borders/elevation in both modes?
+7. **Accessibility** — Focus-visible rings on all interactive elements. No `outline-none` without replacement. Icon-only buttons have `aria-label`.
+8. **Reduced motion** — `prefers-reduced-motion` respected. No essential information conveyed only via animation.
+9. **Form UX** — Correct `type` and `inputmode` on inputs. Labels on all fields. Errors inline next to fields. Don't block paste.
 
-## Visual QA with audiq
+## Visual QA
 
-After implementing a design, validate it:
+After implementing a design, validate visually:
+
+### agent-browser (preferred — token efficient)
+```bash
+agent-browser open http://localhost:3000
+agent-browser snapshot -i
+# Check mobile
+agent-browser viewport 375 812
+agent-browser snapshot -i
 ```
-mcp__audiq__analyze_visual({ url: "http://localhost:3000", viewport: "desktop" })
-mcp__audiq__analyze_visual({ url: "http://localhost:3000", viewport: "mobile" })
-mcp__audiq__recommend_design({ url: "http://localhost:3000" })
+
+### Playwright (fallback — more capabilities)
+```bash
+npx playwright open http://localhost:3000
 ```
 
-Check screenshots for: trimmed text, overlapping elements, unequal font sizes, bad scroll behavior, inconsistent spacing.
-
-Use the analysis to identify weak points and the recommendations for improvement direction.
+Check for: trimmed text, overlapping elements, unequal font sizes, bad scroll behavior, inconsistent spacing, dark mode contrast issues.
 
 ## Reference Designs (Study Before Designing)
 

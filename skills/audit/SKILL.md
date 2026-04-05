@@ -68,16 +68,16 @@ Replace `[PROJECT_PATH]` with the actual working directory path.
 
 ```typescript
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Security audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: exposed secrets (check src/ AND supabase/migrations/ for hardcoded keys, passwords, service_role, cron secrets), dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. ALSO check Supabase RLS policy quality: tables with PII (emails, tokens) that allow SELECT without auth.uid() restriction, OAuth tokens accessible via public policies, profiles without row-level restriction. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Security audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: exposed secrets (check src/ AND supabase/migrations/ for hardcoded keys, passwords, service_role, cron secrets), dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. ALSO check: 1) Supabase RLS policy LOGIC — not just enabled, but correct: flag always-true USING clauses, INSERT WITH CHECK (true), tables with PII allowing SELECT without auth.uid(). 2) Fail-open auth — if (session) allow without default deny. 3) SSRF — user URLs passed to fetch without private IP validation. 4) Missing middleware — /dashboard/*, /api/* routes without auth checks. 5) Unsafe casts — 'as unknown as Type' on DB/API data without Zod validation. 6) Fire-and-forget fetch — fetch() without res.ok check or try/catch. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Performance audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: missing React.memo on list items, useEffect without cleanup, inline objects in JSX, missing lazy loading, N+1 queries. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Accessibility audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets (<44px), div/span with onClick (should be button), outline-none without focus-visible replacement, user-scalable=no or maximum-scale=1, missing autocomplete on form inputs, inputs without correct type/inputmode, onPaste with preventDefault, missing prefers-reduced-motion support, transition: all (should list properties), autoFocus without justification. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Accessibility audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets (<44px), div/span with onClick (should be button), outline-none without focus-visible replacement, user-scalable=no or maximum-scale=1, missing autocomplete on form inputs, inputs without correct type/inputmode, onPaste with preventDefault, missing prefers-reduced-motion support, autoFocus without justification. SKIP false positives: transition-all is perf not a11y (report as Low/perf if at all), console.error is acceptable (only flag console.log), test files don't need strict a11y. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
-  prompt: "Type safety + code quality audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: 'any' usage (skip test files), @ts-ignore, type assertions without guards, conflicting type definitions, untyped API responses. ALSO scan: console.log/warn/error statements (count per file, report top 5 offenders), empty catch blocks, API calls without error handling. Report: Severity, File:line, Issue, Fix." })
+  prompt: "Type safety + code quality audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: 'any' usage (skip test files and type declaration files), @ts-ignore, type assertions without guards ('as unknown as'), conflicting type definitions, untyped API responses. ALSO scan: console.log/warn statements (NOT console.error — that's acceptable), count per file, report top 5 offenders. Empty catch blocks, API calls without error handling (missing res.ok check or try/catch). SKIP: test files for strict typing, .d.ts files, node_modules. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "UX/UI audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: missing loading states, missing empty states, missing error states, hardcoded colors instead of tokens (exception: hardcoded colors on gradient/themed surfaces are OK), missing toast feedback, images without width/height (causes CLS), missing loading=lazy on below-fold images, large lists without virtualization (50+ items .map). ALSO check responsive layout: sidebars without mobile hide/toggle (must use hidden md:block pattern), grids without mobile breakpoints (need grid-cols-1 md:grid-cols-2), fixed-width containers that overflow on mobile, touch targets under 44px, missing mobile navigation (hamburger/drawer), modals not full-screen on mobile. ALSO check: hardcoded date/number formats (should use Intl.*), missing text truncation on user-generated content, flex children without min-w-0. Report: Severity, File:line, Issue, Fix." })
@@ -223,6 +223,31 @@ Created [X] stories in prd.json from audit findings.
 
 Say "auto" to start fixing (works Critical→Low), or "audit [feature]" to audit specific area.
 ```
+
+### Step 6: Score Tracking
+
+After generating the report, log the score to `.claude/sprint-history.md`:
+```markdown
+## Audit [DATE]
+| Category | Score |
+|----------|-------|
+| Security | X/10 |
+| Performance | X/10 |
+| ... | ... |
+| **Overall** | **X/10** |
+| **Delta** | **+/-X from last audit** |
+```
+
+Compare against previous audit scores if available. Report improvement or regression.
+
+### Step 7: npm Audit
+
+Run alongside the agent swarm (not a separate agent — just a bash command):
+```bash
+npm audit --production 2>/dev/null | tail -15
+```
+
+Include critical/high vulnerabilities in the Security category of the report.
 
 ## Focused Audit
 

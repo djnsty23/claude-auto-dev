@@ -237,6 +237,32 @@ npx supabase migration new create_[table_name]
 npx supabase db push
 ```
 
+### RLS Runtime Verification
+
+After applying migrations, verify RLS actually works via REST API:
+```bash
+# Test as anonymous (should fail on protected tables)
+curl -s 'https://REF.supabase.co/rest/v1/TABLE?select=*&limit=1' \
+  -H 'apikey: ANON_KEY' \
+  -H 'Authorization: Bearer ANON_KEY' | head -5
+
+# Should return empty array or 401, NOT actual data
+# If data returns, RLS policy is too permissive
+```
+
+### Migration Rollback Pattern
+
+For every migration that changes schema, prepare a rollback:
+```sql
+-- Migration: add_column.sql
+ALTER TABLE public.items ADD COLUMN status TEXT DEFAULT 'active';
+
+-- Rollback (keep as comment or separate file):
+-- ALTER TABLE public.items DROP COLUMN status;
+```
+
+For destructive changes, add columns as nullable with defaults first, migrate data, then drop old columns in a separate migration.
+
 ### Safety Rules
 
 **Do:**
@@ -244,11 +270,16 @@ npx supabase db push
 - Use migrations for schema changes
 - Include ON DELETE CASCADE for FKs
 - Add created_at/updated_at columns
+- Add new columns as nullable with defaults (never NOT NULL without default on existing tables)
+- Verify RLS policy logic (not just enabled — check USING clauses are correct)
+- Use service client only in server-side code, never expose to client
 
 **Avoid:**
 - Disable RLS in production
 - Hardcode secrets in migrations
 - Delete tables without confirmation
+- `INSERT` policies with `WITH CHECK (true)` on sensitive tables
+- `USING (true)` on tables containing PII
 
 ### Detailed Rules
 

@@ -3,7 +3,7 @@ name: ship
 description: Pre-deploy checklist with review, security, and test verification. Use when ready to deploy.
 triggers:
   - ship
-allowed-tools: Bash, Read, Grep, Glob, Task, mcp__audiq__scan_page, mcp__audiq__screenshot_page, mcp__audiq__get_console_errors, mcp__audiq__get_network_issues
+allowed-tools: Bash, Read, Grep, Glob, Task
 model: opus
 user-invocable: true
 ---
@@ -12,14 +12,15 @@ user-invocable: true
 
 Complete deployment pipeline: pre-flight → security → deploy → verify → report.
 
-## Step 1: Pre-flight Checks
+## Step 1: Blocking Quality Gates
 
-Run ALL checks in parallel. For monorepos, run in each package:
+ALL must pass before deploying. Run in parallel:
 
 ```bash
-npm run typecheck          # Must pass
-npm run build              # Must pass
-npm run test               # Run if available (vitest, jest, playwright)
+npm run typecheck          # BLOCKING — zero errors
+npm run build              # BLOCKING — zero errors
+npm run test -- --watchAll=false  # BLOCKING — all pass
+npm audit --production 2>/dev/null | grep -E "critical|high"  # BLOCKING — zero critical/high
 git status --short         # Warn if uncommitted changes
 ```
 
@@ -28,6 +29,7 @@ git status --short         # Warn if uncommitted changes
 | Build fails | Stop — fix errors first |
 | Typecheck fails | Stop — fix types first |
 | Tests fail | Stop — fix tests first |
+| npm audit critical/high | Stop — fix vulnerabilities first |
 | Uncommitted changes | Warn user, ask if they want to commit (use git directly, do not invoke the commit skill) |
 | All pass | Continue to Step 2 |
 
@@ -41,6 +43,11 @@ Run before every deploy (uses `security` skill):
 - [ ] Input validation on all user-facing forms
 - [ ] No `dangerouslySetInnerHTML` without sanitization
 - [ ] Auth checks on protected routes
+- [ ] Fail-closed auth (deny by default, not allow by default)
+- [ ] No SSRF vectors (user URLs validated against private IPs)
+- [ ] Middleware covers all /dashboard/* and /api/* routes
+- [ ] HTTP security headers set (X-Frame-Options, CSP, X-Content-Type-Options)
+- [ ] Rate limiting on auth endpoints
 
 If critical issues found, fix before deploying.
 
@@ -104,21 +111,20 @@ supabase secrets list --project-ref [ref]
 
 A successful deploy does not mean the app works. Verify after deploying.
 
-### Automated Checks (audiq MCP — preferred)
-
-```
-mcp__audiq__scan_page({ url: DEPLOY_URL, profile: "quick" })
-mcp__audiq__screenshot_page({ url: DEPLOY_URL, viewport: "desktop" })
-mcp__audiq__screenshot_page({ url: DEPLOY_URL, viewport: "mobile" })
-mcp__audiq__get_console_errors({ url: DEPLOY_URL })
-mcp__audiq__get_network_issues({ url: DEPLOY_URL })
-```
-
-### Fallback: agent-browser (if audiq unavailable)
+### Visual Verification (agent-browser — preferred)
 
 ```bash
 agent-browser open [DEPLOY_URL]
 agent-browser snapshot -i
+# Check mobile
+agent-browser viewport 375 812
+agent-browser snapshot -i
+```
+
+### Fallback: Playwright (more capabilities, higher token cost)
+
+```bash
+npx playwright open [DEPLOY_URL]
 ```
 
 ### Verification Checklist
@@ -163,7 +169,19 @@ git checkout [prev-commit] -- supabase/functions/
 supabase functions deploy --project-ref [ref]
 ```
 
-## Step 7: Report
+## Step 7: Quality Metrics (non-blocking, report only)
+
+```bash
+# Coverage (if available)
+npm run test -- --coverage --watchAll=false 2>/dev/null | grep "All files" | head -1
+
+# Bundle size
+npm run build 2>&1 | grep -i "size\|chunk\|bundle" | head -5
+```
+
+Report these as informational — they don't block the deploy.
+
+## Step 8: Report
 
 Update prd.json and report to user:
 

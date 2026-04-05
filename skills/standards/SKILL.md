@@ -97,6 +97,26 @@ Every page works at 3 breakpoints: mobile (375px), tablet (768px), desktop (1280
 ## Error Handling
 
 ```typescript
+// Auth errors — fail closed (deny by default)
+if (!session) {
+  redirect('/login'); // ALWAYS deny first
+  return;
+}
+// Only after auth passes, proceed with protected logic
+
+// Fetch errors — always check response
+const res = await fetch('/api/data');
+if (!res.ok) {
+  throw new Error(`API error: ${res.status}`);
+}
+const data = await res.json();
+
+// Validate external data shape before casting
+const parsed = schema.safeParse(data);
+if (!parsed.success) {
+  throw new Error('Unexpected API response shape');
+}
+
 // Auth errors
 if (error?.error_type === 'reauth_required') {
   toast.error('Session expired');
@@ -179,6 +199,7 @@ const [user, posts] = await Promise.all([getUser(id), getPosts(id)]);
 
 ## Anti-Patterns (Flag These)
 
+### Accessibility
 - `user-scalable=no` or `maximum-scale=1`
 - `transition: all`
 - `outline-none` without focus-visible replacement
@@ -186,8 +207,17 @@ const [user, posts] = await Promise.all([getUser(id), getPosts(id)]);
 - Images without dimensions
 - Form inputs without labels
 - Hardcoded date/number formats (use `Intl.*`)
+
+### Design System
 - Hardcoded colors (use semantic tokens: `text-foreground`, not `text-gray-500`)
 - Spacing with arbitrary values (use scale: `p-4`, not `p-[15px]`)
+
+### Security & Data Safety
+- `as unknown as Type` on DB/API data — validate shape with Zod first
+- `fetch()` without error handling — always check `res.ok` and wrap in try/catch
+- Fail-open auth: `if (!session) redirect` must be the DEFAULT, not `if (session) allow`
+- Missing middleware coverage: every `/dashboard/*`, `/api/*` route must be auth-checked
+- SSRF: user-supplied URLs must be validated against private IP ranges before fetch
 
 ## Design System
 
