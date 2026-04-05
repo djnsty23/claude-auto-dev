@@ -1,5 +1,10 @@
 # Changelog
 
+## [6.9.1] - 2026-04-05
+
+### Fixed
+- **Auto skill: use Write tool for auto-active flag** — Bash echo to `.claude/auto-active` triggered sensitive file permission prompt every time. Now uses Write tool which is already in the allowlist.
+
 ## [6.9] - 2026-04-05
 
 ### Added

@@ -33,11 +33,11 @@ auto
 
 ## Auto-Active Flag (Continuous Execution)
 
-On start, create the flag file:
-```bash
-echo '{"started":"'$(date +%Y-%m-%dT%H:%M:%S)'","sprint":"current"}' > .claude/auto-active
+On start, create the flag file using the **Write tool** (not Bash echo — avoids sensitive file permission prompt):
 ```
-PowerShell: `@{started=(Get-Date -Format o)} | ConvertTo-Json > .claude/auto-active`
+Write tool → .claude/auto-active
+Content: {"started":"<current ISO timestamp>","sprint":"<current sprint>"}
+```
 
 This flag tells the Stop hook to block Claude from stopping. Claude keeps working as long as this flag exists.
 
