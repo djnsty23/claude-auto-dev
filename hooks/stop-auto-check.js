@@ -6,8 +6,10 @@ const fs = require('fs');
 const path = require('path');
 
 try {
+    // Flag is project-relative (matches what skills/auto/SKILL.md writes via Write tool).
     const HOME = process.env.HOME || process.env.USERPROFILE;
-    const autoFlag = path.join(HOME, '.claude', 'auto-active');
+    const autoFlag = path.join(process.cwd(), '.claude', 'auto-active');
+    const exitFlag = path.join(process.cwd(), '.claude', 'auto-exit');
 
     // Stale flag cleanup (>2 hours old = crashed session)
     try {
@@ -19,6 +21,17 @@ try {
         }
     } catch {
         // Flag doesn't exist — no cleanup needed
+    }
+
+    // Explicit exit signal — user asked Claude to deactivate auto.
+    // Claude can't rm the flag (sensitive-file prompt), so it creates auto-exit via Write tool.
+    if (fs.existsSync(exitFlag)) {
+        try { fs.unlinkSync(exitFlag); } catch {}
+        try { fs.unlinkSync(autoFlag); } catch {}
+        try { fs.unlinkSync(path.join(HOME, '.claude', 'auto-idle-triggered')); } catch {}
+        process.stderr.write('[Auto-Dev] auto-exit signal received. Cleaning up and allowing stop.\n');
+        console.log(JSON.stringify({ decision: 'approve' }));
+        process.exit(0);
     }
 
     if (fs.existsSync(autoFlag)) {

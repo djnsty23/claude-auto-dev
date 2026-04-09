@@ -41,12 +41,13 @@ Content: {"started":"<current ISO timestamp>","sprint":"<current sprint>"}
 
 This flag tells the Stop hook to block Claude from stopping. Claude keeps working as long as this flag exists.
 
-On exit (user says "done", or nothing left), delete the flag:
-```bash
-rm -f .claude/auto-active
-```
+On exit (user says "done", or nothing left), **do not `rm` the flag** — Bash ops on `.claude/` trigger a sensitive-file permission prompt even under bypass. Instead, simply stop working. The Stop hook owns the flag lifecycle:
 
-Delete the flag when auto mode ends. If asking the user what's next (IDLE Detection), keep the flag active.
+- Stale flags (>2h old) are auto-cleaned
+- Sprint-complete → hook runs IDLE detection once, then approves stop and removes the flag on the next attempt
+- No prd.json → hook approves stop and removes the flag immediately
+
+If the user explicitly says "deactivate auto" mid-sprint, use the **Write tool** to create `.claude/auto-exit` (empty file). The Stop hook treats that as an unconditional exit signal and cleans up both files.
 
 ## Autonomous Behavior
 
