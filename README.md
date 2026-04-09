@@ -180,7 +180,7 @@ Create an agent team with 3 teammates:
 - Tests: owns tests/ and writes integration tests
 ```
 
-Each teammate works independently with its own context. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings (auto-dev enables this by default).
+Each teammate works independently with its own context. Enabled by default via `teammateMode: "auto"` in settings.
 
 ### Manage context in long sessions
 
@@ -218,9 +218,11 @@ No `auto`, no `sprint`, no prd.json. Just describe it and Claude fixes it.
 
 **Global** (`~/.claude/`):
 ```
-skills/        # Synced from repo (36 skills)
-hooks/         # Symlink to repo
-rules/         # Your custom rules (optional)
+skills/        # 36 skills — symlinked to repo (or copied with --copy)
+hooks/         # 5 hooks — symlinked to repo (or copied with --copy)
+agents/        # 4 specialized agents (always copied)
+rules/         # Workflow/security/design rules (only with --full)
+settings.json  # Merged with your existing settings (only with --full)
 repo-path.txt  # Points to your clone location
 ```
 
@@ -289,10 +291,27 @@ cd /path/to/claude-auto-dev
 
 ## Uninstall
 
+Surgical — only removes files owned by this repo. Your own skills, hooks, agents, and rules stay.
+
 ```bash
-rm -rf ~/.claude/skills ~/.claude/hooks ~/.claude/repo-path.txt
-# Remove update-dev function from your shell profile
+# Mac/Linux
+cd ~/claude-auto-dev && ./uninstall.sh
+
+# Windows (PowerShell)
+cd $env:USERPROFILE\claude-auto-dev; .\uninstall.ps1
+
+# Preview first (no changes)
+./uninstall.sh --dry-run        # or: .\uninstall.ps1 -DryRun
 ```
+
+**What it does:**
+- Removes only the skill directories listed in `skills/manifest.json` (plus deprecated redirects)
+- Removes only the hook files shipped in this repo (5 `.js` files)
+- Removes the 4 shipped agents and any unmodified shipped rules (user-modified rules are kept)
+- Strips auto-dev hook entries from `~/.claude/settings.json` — leaves other entries intact
+- Deletes `~/.claude/repo-path.txt`
+
+**Manual step:** remove the `update-dev` function from your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`) if you no longer want it.
 
 ---
 
