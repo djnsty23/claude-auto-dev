@@ -6,10 +6,10 @@ const fs = require('fs');
 const path = require('path');
 
 try {
-    // Flag is project-relative (matches what skills/auto/SKILL.md writes via Write tool).
-    const HOME = process.env.HOME || process.env.USERPROFILE;
+    // Flags are project-relative (matches what skills/auto/SKILL.md writes via Write tool).
     const autoFlag = path.join(process.cwd(), '.claude', 'auto-active');
     const exitFlag = path.join(process.cwd(), '.claude', 'auto-exit');
+    const idleMarker = path.join(process.cwd(), '.claude', 'auto-idle-triggered');
 
     // Stale flag cleanup (>2 hours old = crashed session)
     try {
@@ -28,7 +28,7 @@ try {
     if (fs.existsSync(exitFlag)) {
         try { fs.unlinkSync(exitFlag); } catch {}
         try { fs.unlinkSync(autoFlag); } catch {}
-        try { fs.unlinkSync(path.join(HOME, '.claude', 'auto-idle-triggered')); } catch {}
+        try { fs.unlinkSync(idleMarker); } catch {}
         process.stderr.write('[Auto-Dev] auto-exit signal received. Cleaning up and allowing stop.\n');
         console.log(JSON.stringify({ decision: 'approve' }));
         process.exit(0);
@@ -65,7 +65,6 @@ try {
         } else if (fs.existsSync('prd.json')) {
             // All tasks done but flag active = IDLE detection (one chance)
             // Mark that IDLE detection has been triggered
-            const idleMarker = path.join(HOME, '.claude', 'auto-idle-triggered');
             let idleExists = false;
             try { fs.statSync(idleMarker); idleExists = true; } catch {}
             if (idleExists) {
