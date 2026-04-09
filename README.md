@@ -53,14 +53,19 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
 
 **What it does:**
-- Symlinks `skills/` and `hooks/` to `~/.claude/` (auto-sync with repo)
+- Copies `skills/`, `hooks/`, and `agents/` from the repo into `~/.claude/`
+- Writes `~/.claude/.auto-dev-installed.json` — a record of exactly what got installed, so uninstall is precise
 - Adds `update-dev` command to your shell
 - Saves repo path for portable updates
+
+**Collision handling:** If `~/.claude/skills/` or `~/.claude/hooks/` already contains a file or directory with the same name as something we ship (and it's not byte-identical), install **refuses** by default and lists the conflicts. Your own skills with different names (`my-company-skill/`) are always preserved.
+
+To proceed anyway, re-run with `--force` — colliding files are backed up to `~/.claude/.user-backup-<timestamp>/` before being overwritten.
 
 **Options:**
 - `--full` / `-Full` - Also install rules and settings templates
 - `--init` / `-Init` - Initialize current project with prd.json
-- `--copy` / `-Copy` - Use copy instead of symlinks (if symlinks fail)
+- `--force` - Back up and overwrite user-owned files that collide with shipped names
 
 ---
 
@@ -218,12 +223,13 @@ No `auto`, no `sprint`, no prd.json. Just describe it and Claude fixes it.
 
 **Global** (`~/.claude/`):
 ```
-skills/        # 36 skills — symlinked to repo (or copied with --copy)
-hooks/         # 5 hooks — symlinked to repo (or copied with --copy)
-agents/        # 4 specialized agents (always copied)
-rules/         # Workflow/security/design rules (only with --full)
-settings.json  # Merged with your existing settings (only with --full)
-repo-path.txt  # Points to your clone location
+skills/                     # 36 skills (copied from repo)
+hooks/                      # 6 hooks (copied from repo)
+agents/                     # 4 specialized agents (copied from repo)
+rules/                      # Workflow/security/design rules (only with --full)
+settings.json               # Merged with your existing settings (only with --full)
+repo-path.txt               # Points to your clone location
+.auto-dev-installed.json    # Install sidecar — what this version put on disk
 ```
 
 **Per Project**:
@@ -291,7 +297,7 @@ cd /path/to/claude-auto-dev
 
 ## Uninstall
 
-Surgical — only removes files owned by this repo. Your own skills, hooks, agents, and rules stay.
+Reads `~/.claude/.auto-dev-installed.json` and removes exactly what install put there. Your own skills, hooks, agents, and rules stay — including ones added to those directories after install.
 
 ```bash
 # Mac/Linux
@@ -305,11 +311,11 @@ cd $env:USERPROFILE\claude-auto-dev; .\uninstall.ps1
 ```
 
 **What it does:**
-- Removes only the skill directories listed in `skills/manifest.json` (plus deprecated redirects)
-- Removes only the hook files shipped in this repo (5 `.js` files)
-- Removes the 4 shipped agents and any unmodified shipped rules (user-modified rules are kept)
+- Uses the install sidecar to remove exactly the files this install created
+- Falls back to manifest-driven removal if the sidecar is missing (legacy installs)
 - Strips auto-dev hook entries from `~/.claude/settings.json` — leaves other entries intact
-- Deletes `~/.claude/repo-path.txt`
+- Deletes `~/.claude/repo-path.txt` and the sidecar itself
+- Preserves user-modified rules and any unrelated user content
 
 **Manual step:** remove the `update-dev` function from your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`) if you no longer want it.
 

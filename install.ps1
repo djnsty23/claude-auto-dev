@@ -11,7 +11,8 @@
 param(
     [switch]$Init,
     [switch]$Full,
-    [switch]$Copy,
+    [switch]$Force,
+    [switch]$Copy,   # deprecated: kept for back-compat, ignored
     [string]$Name = (Split-Path -Leaf (Get-Location))
 )
 
@@ -70,11 +71,10 @@ Write-Host "  Saved to ~/.claude/repo-path.txt" -ForegroundColor Green
 
 # Sync skills, hooks, agents via sync.js
 Write-Host "`n[Syncing Skills, Hooks, Agents]" -ForegroundColor Yellow
-$SyncArgs = "--repo `"$ScriptDir`""
-if (-not $Copy) {
-    $SyncArgs += " --symlink"
-}
-node "$ScriptDir\scripts\sync.js" $SyncArgs.Split(" ")
+$SyncArgsList = @("--repo", $ScriptDir)
+if ($Full)  { $SyncArgsList += @("--rules", "--settings") }
+if ($Force) { $SyncArgsList += "--force" }
+& node "$ScriptDir\scripts\sync.js" @SyncArgsList
 
 # Add update-dev alias to PowerShell profile (detect correct location)
 Write-Host "`n[Update Alias]" -ForegroundColor Yellow
@@ -141,25 +141,8 @@ if (Test-Path $ProfilePath) {
     Write-Host "  Created PowerShell profile with update-dev" -ForegroundColor Green
 }
 
-# Full install adds rules and settings
-if ($Full) {
-    # Rules (copy, not symlink - these are templates user may customize)
-    if (Test-Path "$ScriptDir\config\rules") {
-        Write-Host "`n[Rules]" -ForegroundColor Yellow
-        if (-not (Test-Path "$ClaudeDir\rules")) {
-            New-Item -ItemType Directory -Path "$ClaudeDir\rules" -Force | Out-Null
-        }
-        Copy-Item -Path "$ScriptDir\config\rules\*" -Destination "$ClaudeDir\rules\" -Force
-        Write-Host "  Copied to ~/.claude/rules/" -ForegroundColor Green
-    }
-
-    # Settings (only if not exists)
-    if (-not (Test-Path "$ClaudeDir\settings.json")) {
-        Copy-Item "$ScriptDir\config\settings.json" "$ClaudeDir\settings.json" -Force
-        Write-Host "`n[Settings]" -ForegroundColor Yellow
-        Write-Host "  Created ~/.claude/settings.json" -ForegroundColor Green
-    }
-}
+# Rules and settings are now handled inline by sync.js via --rules --settings
+# when -Full is passed (see $SyncArgsList above).
 
 # Project init
 if ($Init) {

@@ -10,13 +10,14 @@ CLAUDE_DIR=~/.claude
 
 INIT=0
 FULL=0
-COPY=0
+FORCE=0
 
 for arg in "$@"; do
     case $arg in
         --init|-i) INIT=1 ;;
         --full|-f) FULL=1 ;;
-        --copy|-c) COPY=1 ;;
+        --force) FORCE=1 ;;
+        --copy|-c) ;; # deprecated no-op
         --name=*) NAME="${arg#*=}" ;;
     esac
 done
@@ -63,8 +64,11 @@ echo -e "  \033[32mSaved to ~/.claude/repo-path.txt\033[0m"
 # Sync skills, hooks, agents via sync.js
 echo -e "\n\033[33m[Syncing Skills, Hooks, Agents]\033[0m"
 SYNC_ARGS="--repo $SCRIPT_DIR"
-if [[ $COPY -eq 0 ]]; then
-    SYNC_ARGS="$SYNC_ARGS --symlink"
+if [[ $FULL -eq 1 ]]; then
+    SYNC_ARGS="$SYNC_ARGS --rules --settings"
+fi
+if [[ $FORCE -eq 1 ]]; then
+    SYNC_ARGS="$SYNC_ARGS --force"
 fi
 node "$SCRIPT_DIR/scripts/sync.js" $SYNC_ARGS
 
@@ -120,23 +124,8 @@ else
     echo -e "  \033[32mAdded update-dev to $PROFILE_FILE\033[0m"
 fi
 
-# Full install adds rules and settings
-if [[ $FULL -eq 1 ]]; then
-    # Rules (copy, not symlink - user may customize)
-    if [[ -d "$SCRIPT_DIR/config/rules" ]]; then
-        echo -e "\n\033[33m[Rules]\033[0m"
-        mkdir -p "$CLAUDE_DIR/rules"
-        cp "$SCRIPT_DIR/config/rules/"* "$CLAUDE_DIR/rules/"
-        echo -e "  \033[32mCopied to ~/.claude/rules/\033[0m"
-    fi
-
-    # Settings (only if not exists)
-    if [[ ! -f "$CLAUDE_DIR/settings.json" ]]; then
-        cp "$SCRIPT_DIR/config/settings-unix.json" "$CLAUDE_DIR/settings.json"
-        echo -e "\n\033[33m[Settings]\033[0m"
-        echo -e "  \033[32mCreated ~/.claude/settings.json\033[0m"
-    fi
-fi
+# Rules and settings are now handled inline by sync.js via --rules --settings
+# when --full is passed (see SYNC_ARGS above).
 
 # Project init
 if [[ $INIT -eq 1 ]]; then
