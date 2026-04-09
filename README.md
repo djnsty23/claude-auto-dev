@@ -2,9 +2,9 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-7.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-7.1-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
-**Autonomous development workflow for Claude Code.** Say what you want to build - Claude handles the rest.
+**Autonomous development workflow for Claude Code.** Say what you want to build — Claude handles the rest.
 
 ---
 
@@ -13,80 +13,58 @@
 ```bash
 # Mac/Linux
 git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-cd ~/claude-auto-dev && chmod +x install.sh && ./install.sh
+cd ~/claude-auto-dev && ./install.sh
 
 # Windows (PowerShell)
 git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
 cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 ```
-```
-claude
-```
-```
-You: brainstorm
-Claude: [Scans codebase, finds improvements] → Found 5 items
 
-You: brainstorm apply
-Claude: [Creates stories from findings] → Created 5 stories in prd.json
+Then run `claude` and say `brainstorm` — Claude scans the codebase, proposes improvements, creates stories, and works through them autonomously.
 
-You: auto
-Claude: [Works through all tasks autonomously] → 5/5 complete
-
-You: ship
-Claude: [Review → security scan → deploy] → Shipped to production
+```
+You: brainstorm         → Claude finds 5 improvements
+You: brainstorm apply   → Creates 5 stories in prd.json
+You: auto               → Works through all tasks
+You: ship               → Review, security scan, deploy
 ```
 
 ---
 
 ## Install
 
-**Prerequisites:** [Git](https://git-scm.com/), [Claude Code](https://github.com/anthropics/claude-code)
-
-```bash
-# Mac/Linux
-git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-cd ~/claude-auto-dev && chmod +x install.sh && ./install.sh
-
-# Windows (PowerShell)
-git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
-cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
-```
-
-**What it does:**
-- Copies `skills/`, `hooks/`, and `agents/` from the repo into `~/.claude/`
-- Writes `~/.claude/.auto-dev-installed.json` — a record of exactly what got installed, so uninstall is precise
-- Adds `update-dev` command to your shell
-- Saves repo path for portable updates
-
-**Collision handling:** If `~/.claude/skills/` or `~/.claude/hooks/` already contains a file or directory with the same name as something we ship (and it's not byte-identical), install **refuses** by default and lists the conflicts. Your own skills with different names (`my-company-skill/`) are always preserved.
-
-To proceed anyway, re-run with `--force` — colliding files are backed up to `~/.claude/.user-backup-<timestamp>/` before being overwritten.
+**Prerequisites:** [Git](https://git-scm.com/) and [Node.js 18+](https://nodejs.org/) (the installer adds Claude Code for you if it's missing).
 
 **Options:**
-- `--full` / `-Full` - Also install rules and settings templates
-- `--init` / `-Init` - Initialize current project with prd.json
-- `--force` - Back up and overwrite user-owned files that collide with shipped names
+| Flag | What it does |
+|------|--------------|
+| `--full` / `-Full` | Also install rules + settings templates |
+| `--init` / `-Init` | Scaffold `prd.json` in the current project |
+| `--force` | Back up and overwrite files that collide with shipped names |
+
+**What it does:**
+- Copies `skills/`, `hooks/`, and `agents/` into `~/.claude/`
+- Writes `~/.claude/.auto-dev-installed.json` — a sidecar recording exactly what got installed (used by uninstall)
+- Adds an `update-dev` command to your shell
+- Saves your repo path so updates are portable
+
+**Collision handling.** Install leaves user-owned files alone. If `~/.claude/skills/` or `~/.claude/hooks/` already contains something with the same name as a shipped file (and it's not byte-identical), install **refuses** and lists the conflicts. Re-run with `--force` to back them up to `~/.claude/.user-backup-<timestamp>/` before overwriting.
+
+Your own skills with different names (e.g. `my-company-skill/`) are always preserved.
 
 ---
 
 ## Updates
 
-**Option 1: Say "update dev"** (recommended)
 ```
 You: update dev
-Claude: [pulls latest, syncs skills/hooks, removes stale files]
-        Updated to v7.0
+Claude: [pulls latest, re-syncs skills/hooks/agents] Updated to v7.1
 ```
 
-**Option 2: Shell command**
-```bash
-update-dev   # Added to your shell profile by installer
-```
+Or from the shell:
 
-**Option 3: Manual**
 ```bash
-cd ~/claude-auto-dev && git pull
-# Then say "update dev" to sync
+update-dev
 ```
 
 ---
@@ -95,127 +73,48 @@ cd ~/claude-auto-dev && git pull
 
 | Say | Does |
 |-----|------|
-| `iterate` | Convergence loop: brainstorm→fix→re-scan until clean |
 | `brainstorm` | Scan codebase + live site, propose improvements |
-| `auto` | Work through all tasks autonomously |
-| `scan` / `qa` | Live site QA via audiq (visual + functional + a11y) |
+| `brainstorm apply` | Create stories from the last brainstorm |
+| `auto` | Work through all pending stories autonomously |
+| `iterate` | Convergence loop: brainstorm → fix → re-scan until clean |
 | `audit` | 7-agent parallel quality audit |
 | `review` | Code quality check (add `quick` or `deep`) |
-| `ship` | Build, test, review, deploy with post-deploy verification |
-| `progress` | Show sprint progress |
-| `sprint` | Create/advance sprint |
-| `test` | Run unit + browser tests |
+| `ship` | Build, test, review, deploy, verify |
+| `scan` / `qa` | Live site QA (visual + a11y + console) |
 | `fix` | Debug issues |
 | `commit` | Conventional commit + push + PR |
+| `test` | Unit + browser tests |
 | `security` | Pre-deploy security scan |
-| `perf` | Performance audit (Core Web Vitals) |
-| `a11y` | Accessibility audit (WCAG 2.1 AA) |
+| `perf` | Core Web Vitals audit |
+| `a11y` | WCAG 2.1 AA audit |
 | `design` / `ui` | UI design with anti-slop checklist |
-| `refactor` | Code refactoring patterns |
-| `clean` | Remove temp files |
-| `setup` | Initialize new project |
-| `update dev` | Sync latest from GitHub to ~/.claude |
+| `progress` | Show sprint progress |
+| `sprint` | Create/advance sprint |
+| `update dev` | Sync latest from GitHub |
 
-**Note:** `/help`, `/status`, `/init`, `/compact`, `/btw` are Claude Code built-ins.
+See [`skills/commands.md`](skills/commands.md) for the full list.
+
+**Quick fixes — skip the ceremony.** For small tasks, just describe what you want. No `auto`, no sprints, no `prd.json`:
+
+```
+fix the button overflow on mobile
+add loading state to the dashboard
+```
 
 ---
 
 ## Workflow
 
 ```
-brainstorm → scans codebase + live site, creates stories
+brainstorm → scans codebase + live site, proposes improvements
 auto       → implements all pending stories + visual verification
 ship       → review + security + deploy + post-deploy scan
-iterate    → brainstorm→fix→re-scan loop until clean (3-4 rounds)
+iterate    → brainstorm → fix → re-scan loop until clean
 ```
 
-See [`skills/commands.md`](skills/commands.md) for the full list of 36 skills (33 active + 3 deprecated redirects).
+**Visual verification.** Start your dev server before `auto`. Claude screenshots pages (desktop + mobile) after each UI change and catches console errors before marking tasks complete.
 
----
-
-## Tips & Tricks
-
-### Parallel work while Claude is busy
-
-| Method | When to Use |
-|--------|------------|
-| `/btw what was that config?` | Quick question without affecting context — answer appears in overlay, never enters history |
-| `& plan the payment system` | Background a task while main thread keeps working |
-| `Ctrl+B` | Move current running task to background, then type something new |
-| `/branch` | Fork the conversation — try an approach without losing the current one |
-
-### Get more from brainstorm
-
-```
-brainstorm              → Full scan (5 parallel agents + competitor research)
-brainstorm auth         → Targeted scan on auth code only
-brainstorm features     → Skip code quality, focus on product gaps
-brainstorm apply        → Create prd.json stories from last findings
-```
-
-The 5th scan agent runs live site QA if a dev server is detected — start your dev server first for visual/a11y/perf findings alongside code issues.
-
-### Convergence loop
-
-Instead of manually cycling `brainstorm → brainstorm apply → auto`, use:
-```
-iterate        → runs until codebase converges (typically 3-4 rounds)
-iterate 2      → quick pass (max 2 rounds)
-iterate design → focus on visual/design issues only
-```
-
-Each round finds fewer issues. When findings drop to 0, it stops.
-
-### Visual verification
-
-Auto mode now requires visual verification for UI tasks. To get the most out of it:
-1. Start your dev server before running `auto`
-2. Claude will screenshot pages (desktop + mobile) after each UI change
-3. Console errors and broken layouts are caught before tasks are marked complete
-
-Works with [audiq MCP](https://github.com/nicholasgriffintn/audiq) for deep scans, falls back to agent-browser if unavailable.
-
-### Agent teams for big features
-
-For complex multi-file features, use Claude Code's agent teams:
-```
-Create an agent team with 3 teammates:
-- Frontend: owns src/components/ and src/app/
-- Backend: owns supabase/functions/ and src/lib/
-- Tests: owns tests/ and writes integration tests
-```
-
-Each teammate works independently with its own context. Enabled by default via `teammateMode: "auto"` in settings.
-
-### Manage context in long sessions
-
-- `/btw` for quick questions that don't need to persist
-- `/clear` between unrelated tasks to reset context
-- `/compact focus on the API changes` to compress with specific focus
-- Use subagents for research: "use a subagent to investigate the auth flow"
-- With 1M context on Opus 4.6, you rarely need to worry about this
-
-### Design without AI slop
-
-The design skill includes a 9-point slop detection checklist. If 3+ of these are present, it starts over:
-- Safe font (Inter, Roboto) → Pick distinctive Google Font
-- Purple gradient on white → Commit to a real palette
-- 3 identical cards in a row → Break the pattern
-- Centered everything → Use asymmetry
-- No texture, no motion, stock illustrations → Add depth
-
-Reference sites studied before designing: linear.app, vercel.com, stripe.com, raycast.com, notion.so, cal.com
-
-### Quick fixes — skip the ceremony
-
-For small tasks (< 5), skip sprints entirely:
-```
-fix the button overflow on mobile
-add loading state to the dashboard
-update the footer links
-```
-
-No `auto`, no `sprint`, no prd.json. Just describe it and Claude fixes it.
+**Image auto-scan.** Attach a screenshot to any turn and Claude surfaces every distinct issue it sees, not only the one you asked about. Add `[focus]` in your message to opt out.
 
 ---
 
@@ -224,80 +123,24 @@ No `auto`, no `sprint`, no prd.json. Just describe it and Claude fixes it.
 **Global** (`~/.claude/`):
 ```
 skills/                     # 36 skills (copied from repo)
-hooks/                      # 6 hooks (copied from repo)
-agents/                     # 4 specialized agents (copied from repo)
+hooks/                      # 6 hooks
+agents/                     # 4 specialized agents
 rules/                      # Workflow/security/design rules (only with --full)
 settings.json               # Merged with your existing settings (only with --full)
 repo-path.txt               # Points to your clone location
-.auto-dev-installed.json    # Install sidecar — what this version put on disk
+.auto-dev-installed.json    # Install sidecar — what this install put on disk
 ```
 
-**Per Project**:
+**Per project:**
 ```
 prd.json       # Tasks and sprint history
 ```
 
----
-
-## Task Format
-
-```json
-{
-  "projectName": "my-app",
-  "sprint": "S1",
-  "stories": {
-    "S1-001": {
-      "title": "Add user auth",
-      "passes": null
-    }
-  }
-}
-```
-
-**States:** `null` = pending, `true` = done, `"deferred"` = postponed
-
----
-
-## New PC Setup
-
-```bash
-# Clone anywhere
-git clone https://github.com/djnsty23/claude-auto-dev /path/to/claude-auto-dev
-
-# Run installer (creates symlinks + update-dev alias)
-cd /path/to/claude-auto-dev
-./install.sh   # or .\install.ps1 on Windows
-
-# Done - open new terminal and use update-dev
-```
-
----
-
-## Troubleshooting
-
-**Symlinks fail on Windows?**
-- Enable Developer Mode in Settings > Update & Security > For developers
-- Or run PowerShell as Administrator
-- Or use `.\install.ps1 -Copy` (auto-updates still work, just slower)
-
-**Not seeing updates?**
-- Check `~/.claude/repo-path.txt` points to your clone
-- Ensure you have internet on Claude start
-- Manual: `cd ~/claude-auto-dev && git pull`
-
-**Skills not loading?**
-- Verify `~/.claude/skills/` exists and contains skill directories
-- Restart terminal after install
-
-**Hook errors?**
-- Requires Node.js v18+. Check: `node -v`
-- Hooks fail silently by design — run `node validate.js` to check consistency
+Tasks use `passes: null` (pending), `true` (done), or `"deferred"`.
 
 ---
 
 ## Uninstall
-
-Reads `~/.claude/.auto-dev-installed.json` and removes exactly what install put there. Your own skills, hooks, agents, and rules stay — including ones added to those directories after install.
 
 ```bash
 # Mac/Linux
@@ -310,14 +153,21 @@ cd $env:USERPROFILE\claude-auto-dev; .\uninstall.ps1
 ./uninstall.sh --dry-run        # or: .\uninstall.ps1 -DryRun
 ```
 
-**What it does:**
-- Uses the install sidecar to remove exactly the files this install created
-- Falls back to manifest-driven removal if the sidecar is missing (legacy installs)
-- Strips auto-dev hook entries from `~/.claude/settings.json` — leaves other entries intact
-- Deletes `~/.claude/repo-path.txt` and the sidecar itself
-- Preserves user-modified rules and any unrelated user content
+Uninstall reads `.auto-dev-installed.json` and removes exactly what this install created. Your own skills, hooks, agents, and user-modified rules stay. It strips auto-dev hook entries from `~/.claude/settings.json` without touching other entries, then deletes the sidecar and `repo-path.txt`.
 
-**Manual step:** remove the `update-dev` function from your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`) if you no longer want it.
+**Manual step:** remove the `update-dev` function from your shell profile (`~/.bashrc`, `~/.zshrc`, or the PowerShell profile) if you don't want it anymore.
+
+---
+
+## Troubleshooting
+
+**Install refuses with "REFUSING TO OVERWRITE".** You have a file or directory with the same name as something we ship, and it's not byte-identical to ours. Either rename yours or re-run with `--force` (which backs yours up first).
+
+**Not seeing updates?** Check `~/.claude/repo-path.txt` points to your clone. Manual fallback: `cd ~/claude-auto-dev && git pull && update-dev`.
+
+**Skills not loading?** Verify `~/.claude/skills/` exists and contains skill directories. Restart your terminal after install.
+
+**Hook errors?** Requires Node.js 18+. Check with `node -v`. Hooks fail silently by design — run `node validate.js` to check consistency.
 
 ---
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## [7.1] - 2026-04-09
+
+### Added
+- **Collision-safe install** — `scripts/sync.js` enumerates shipped items and refuses to overwrite user-owned files/dirs with the same name unless they're byte-identical. Use `--force` to back up collisions to `.user-backup-<timestamp>/` and install on top.
+- **Install sidecar** — `~/.claude/.auto-dev-installed.json` records exactly what this install put on disk, enabling symmetric uninstall. Legacy installs without a sidecar are auto-detected via `skills/manifest.json`.
+- **Surgical uninstall** — `scripts/uninstall.js` + `uninstall.sh` / `uninstall.ps1` remove only items the install created. User skills, hooks, agents, and user-modified rules are preserved. Strips auto-dev hook entries from `settings.json` without touching other entries. Supports `--dry-run`.
+- **Image auto-scan hook** — `hooks/user-prompt-image-scan.js` (UserPromptSubmit). When you attach an image, Claude surfaces every distinct issue it sees, not just what you asked about. Tail-reads transcript JSONL (~35 ms flat regardless of size). Auto mode logs findings to `.claude/reports/image-scan-*.md` instead of acting. Skip with `[focus]` marker in your prompt.
+- **`auto-exit` flag** — Writing `.claude/auto-exit` unconditionally releases the Stop hook on the next cycle. Gives the auto skill a clean exit path without fighting the idle detector.
+
+### Fixed
+- **Auto-active flag path divergence** — Stop hook was reading `$HOME/.claude/auto-active` while the auto skill and writers used `<project>/.claude/auto-active`. All three flags (`auto-active`, `auto-exit`, `auto-idle-triggered`) are now project-relative under `process.cwd()/.claude/`.
+- **Install was silently destructive** — Previous install wiped `~/.claude/skills/` and `~/.claude/hooks/` on every run, destroying any user-added content. Fixed at the root: install now tracks what it owns and leaves everything else alone.
+- **README uninstall instructions** — Old `rm -rf ~/.claude/skills ~/.claude/hooks` would have blown away unrelated user work. Replaced with the scripted uninstall flow.
+- **README staleness** — Removed obsolete `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` reference (replaced by `teammateMode: "auto"` in v6.9).
+
+### Removed
+- **Symlink install mode** — Fundamentally incompatible with user-owned skills (users couldn't add their own). `--copy` / `-Copy` flags kept as silent no-ops for back-compat.
+
 ## [7.0] - 2026-04-05
 
 ### Added
