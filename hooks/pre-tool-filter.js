@@ -6,6 +6,23 @@
 const fs = require('fs');
 
 // Module-level constants — compiled once, reused on every tool call
+
+// Dev cache directories — safe to rm -r. Matched before DANGEROUS_BASH_PATTERNS.
+const SAFE_RM_TARGETS = [
+    '.next', '.turbo', '.nuxt', '.svelte-kit', '.vite', '.parcel-cache',
+    'dist', 'build', 'out', 'coverage', '.cache',
+    'node_modules/.cache', 'node_modules\\.cache',
+    '.tsbuildinfo', 'tsconfig.tsbuildinfo',
+];
+
+// Match `rm -rf .next`, `rm -r ./dist`, `rm -rf node_modules/.cache`, etc.
+// Accepts optional ./ prefix, trailing slash, and chained safe targets.
+const SAFE_RM_REGEX = new RegExp(
+    '^\\s*rm\\s+-[rRf]+\\s+((\\.\\/)?(?:' +
+    SAFE_RM_TARGETS.map(t => t.replace(/[.\\]/g, '\\$&')).join('|') +
+    ')[\\\\/]?\\s*)+$', 'i'
+);
+
 const DANGEROUS_BASH_PATTERNS = [
     /rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|\/)|(-[a-z]*f[a-z]*\s+-[a-z]*r))/i,   // rm -rf, rm -r -f
     /rm\s+--recursive/i,                      // rm --recursive
@@ -83,6 +100,12 @@ try {
     if (toolName === 'Bash') {
         const command = toolInput.command || '';
         if (!command) process.exit(0);
+
+        // Allow `rm -r/-rf` on known dev cache dirs (.next, dist, coverage, etc.)
+        // Checked before dangerous patterns so it overrides the generic `rm -r` deny.
+        if (SAFE_RM_REGEX.test(command)) {
+            process.exit(0);
+        }
 
         for (const pattern of DANGEROUS_BASH_PATTERNS) {
             if (pattern.test(command)) {

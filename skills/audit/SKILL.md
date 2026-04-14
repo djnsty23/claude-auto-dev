@@ -37,6 +37,24 @@ User says "audit"
 Wait for completion → Aggregate Results → Present Report
 ```
 
+## Known-Safe Framework Patterns (Do Not Flag)
+
+Every audit agent prompt MUST include this list under a "SKIP — NOT A BUG" section. These are valid patterns that agents have historically misidentified:
+
+- **shadcn/ui patterns** — `<label><input /></label>` nesting IS accessible (implicit label), do not flag as missing label. Same for `<Label htmlFor>`.
+- **Checkbox inside label** — `<label><Checkbox /> Text</label>` is the shadcn pattern, not a violation.
+- **React 19 server actions** — `'use server'` files without `await` on the top level are fine; async boundary is per-function.
+- **Next.js App Router** — `<form action={serverAction}>` does not need onSubmit; do not flag as missing handler.
+- **Supabase RLS** — `auth.uid() = user_id` in USING clause is the correct pattern, not a bug.
+- **Tailwind arbitrary values** — `text-[#1a1a1a]` is flagged as hardcoded color ONLY if a token exists for that value. In gradient/brand surfaces, literal hex is acceptable.
+- **`console.error`** — acceptable in production. Only flag `console.log` / `console.debug` / `console.warn` leftovers.
+- **`as const`** — not an unsafe cast. Only flag `as any`, `as unknown as`.
+- **Playwright/Vitest test files** — skip strict type and a11y checks; test scaffolding may use `any`, `!`, or minimal markup.
+- **`.d.ts` files** — skip all checks except unused declarations.
+- **`next/image` without explicit width/height** — valid when `fill` prop is set or the image has a parent with `position: relative`.
+
+If an agent flags one of these, the finding is a false positive. Post-process the aggregated report and drop matching items before writing to prd.json.
+
 ## Agent Memory (read before scanning)
 
 Before launching the swarm, read `.claude/agent-memory/audit-patterns.md` if it exists. This file contains:
@@ -194,7 +212,19 @@ const isDuplicate = (title, file) => Object.values(stories).some(s =>
 );
 ```
 
-### Step 3: Add new stories to prd.json
+### Step 3: Batch trivial findings
+
+Before creating stories, batch findings that are truly one-liners. Story count is not a quality metric — a sprint of 12 aria-label stories inflates output and hides real work.
+
+Rules:
+- 1-line fixes in the same category and same area (e.g., 5 missing aria-labels across src/components/) → single story: "Add missing aria-labels to components (5 files)"
+- Same root cause, different files → single story with `notes` listing all files
+- Auto-fixable by a grep + sed replacement → single story
+- Distinct root causes → distinct stories
+
+Only split out issues that require individual reasoning or different fixes.
+
+### Step 4: Add new stories to prd.json
 
 Use ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`)
 
@@ -225,7 +255,7 @@ Use ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`)
 | Test Coverage | qa | 0 | 1 | 2 | 3 |
 | Deploy Readiness | fix | 0 | 1 | 2 | 3 |
 
-### Step 4: Also create session Tasks
+### Step 5: Also create session Tasks
 
 Create native TaskCreate entries for the current session so "auto" can immediately start fixing:
 
@@ -237,7 +267,7 @@ TaskCreate({
 });
 ```
 
-### Step 5: Report
+### Step 6: Report
 
 ```
 Created [X] stories in prd.json from audit findings.
@@ -250,7 +280,7 @@ Created [X] stories in prd.json from audit findings.
 Say "auto" to start fixing (works Critical→Low), or "audit [feature]" to audit specific area.
 ```
 
-### Step 6: Score Tracking
+### Step 7: Score Tracking
 
 After generating the report, log the score to `.claude/sprint-history.md`:
 ```markdown
@@ -266,7 +296,7 @@ After generating the report, log the score to `.claude/sprint-history.md`:
 
 Compare against previous audit scores if available. Report improvement or regression.
 
-### Step 7: npm Audit
+### Step 8: npm Audit
 
 Run alongside the agent swarm (not a separate agent — just a bash command):
 ```bash

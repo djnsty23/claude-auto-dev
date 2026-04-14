@@ -192,8 +192,12 @@ If `.claude/auto-active` exists (running in auto mode), skip the presentation an
 When user says `brainstorm apply`:
 1. Read prd.json (or create with `sprint: "S1"` if none exists)
 2. Deduplicate against existing stories (match first 25 chars of title)
-3. Create stories with ID format `S{sprint}-{number}`
-4. Report: "Created X stories, skipped Y duplicates"
+3. **Push back on padding.** Before creating, review the finding list:
+   - If 3+ findings are 1-line changes in the same area, batch into one story
+   - If the full list has fewer than 2 findings that are genuinely non-trivial (require reasoning, multi-file changes, or design decisions), tell the user: "This looks like a 1-story sprint, not 5 — recommend skipping the sprint and just doing the fix directly." Then wait for confirmation before creating.
+   - Never create a sprint of padding to hit a round number.
+4. Create stories with ID format `S{sprint}-{number}`
+5. Report: "Created X stories (batched Y trivial findings), skipped Z duplicates"
 
 ## Targeted Mode
 
