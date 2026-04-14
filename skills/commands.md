@@ -22,7 +22,7 @@ Use when you need something specific. Auto mode calls these internally too.
 |-----|--------|
 | `review` / `review quick` / `review deep` | Code quality check (adaptive effort) |
 | `ship` | Build, test, review, deploy |
-| `scan` / `qa` | Live site QA via audiq |
+| `scan` / `qa` | Live site QA via agent-browser + Playwright |
 | `test` | Run unit + browser tests |
 | `fix` | Debug and fix issues |
 | `commit` | Conventional commit + push + PR |

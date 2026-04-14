@@ -1,13 +1,13 @@
 ---
 name: scan
-description: Live site QA via audiq MCP — scans pages, catches visual/functional issues, compares with baselines. Use when testing a live site or after deploying.
+description: Live site QA via agent-browser (token-efficient) and Playwright (login flows). Scans pages, catches visual/functional issues, compares with baselines. Use when testing a live site or after deploying.
 triggers:
   - scan
   - scan it
   - test it
   - qa
   - visual qa
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, mcp__audiq__scan_page, mcp__audiq__start_scan, mcp__audiq__scan_status, mcp__audiq__scan_results, mcp__audiq__cancel_scan, mcp__audiq__get_console_errors, mcp__audiq__get_network_issues, mcp__audiq__run_lighthouse, mcp__audiq__check_accessibility, mcp__audiq__get_report, mcp__audiq__screenshot_page, mcp__audiq__analyze_visual, mcp__audiq__generate_fix_plan, mcp__audiq__login_and_scan, mcp__audiq__recommend_design, mcp__audiq__discover_site, mcp__audiq__qa_audit, mcp__audiq__get_dashboard_report
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 model: opus
 user-invocable: true
 argument-hint: "[url or scope]"
@@ -15,7 +15,12 @@ argument-hint: "[url or scope]"
 
 # Scan — Live Site QA
 
-Automated QA using audiq MCP. Catches what typecheck and build cannot: visual bugs, broken links, console errors, accessibility violations, performance regressions.
+Live site QA without relying on MCP servers. Two tools:
+
+- **agent-browser** — fast, token-efficient page snapshots. Default for unauthenticated pages.
+- **Playwright** — handles login flows, OAuth redirects, Google SSO realistically. Use when auth is required.
+
+Catches what typecheck and build cannot: visual bugs, broken links, console errors, accessibility violations, performance regressions.
 
 ## Usage
 
@@ -24,9 +29,12 @@ Automated QA using audiq MCP. Catches what typecheck and build cannot: visual bu
 | `scan` | Detect URL from project, run quick scan on key pages |
 | `scan http://localhost:3000` | Scan specific URL |
 | `scan full` | Deep scan — all pages, all categories |
-| `scan auth` | Scan authenticated pages (asks for credentials) |
+| `scan auth` | Login via Playwright, then scan authenticated pages |
 | `scan compare` | Scan and compare against last baseline |
-| `scan design` | Visual design analysis + recommendations |
+| `scan errors` | Console + network errors only |
+| `scan a11y` | axe-core accessibility audit |
+| `scan perf` | Lighthouse performance only |
+| `scan mobile` | Mobile viewport screenshots + responsive check |
 
 ## Step 1: Detect or Start Target URL
 
@@ -38,14 +46,13 @@ Check in order:
    ```
 3. **No server running → auto-start one:**
    ```bash
-   # Detect the right command from package.json
    node -e "const p=require('./package.json');const s=p.scripts||{};console.log(s.dev||s.start||'')"
    ```
    If a dev script exists, start it in the background:
    ```
    Bash({ command: "npm run dev", run_in_background: true })
    ```
-   Wait 5 seconds, then re-check ports. Report which port was detected.
+   Wait 5 seconds, then re-check ports.
 4. Vercel preview → check `.vercel/` or recent deploy URL
 5. Production URL → check `package.json` homepage or CLAUDE.md
 
@@ -53,11 +60,16 @@ If nothing found after all checks, ask the user.
 
 ## Step 2: Discover Site Structure
 
-```
-mcp__audiq__discover_site({ url: TARGET_URL, maxPages: 20 })
+```bash
+# Fetch homepage, extract internal links
+curl -sL "$TARGET_URL" | grep -oE 'href="[^"]+"' | sed 's/href="//;s/"$//' | sort -u | head -30
 ```
 
-This maps all pages, forms, and interactive elements. Use the result to prioritize which pages to scan.
+Or use agent-browser to get a structured snapshot of navigation:
+```bash
+agent-browser open "$TARGET_URL"
+agent-browser snapshot -i  # interactive elements + links
+```
 
 **Priority pages** (scan these first):
 1. Landing/home page
@@ -66,58 +78,94 @@ This maps all pages, forms, and interactive elements. Use the result to prioriti
 4. Settings/profile
 5. Any page with forms
 
-## Step 3: Run Scans
+## Step 3: Run Scans (Unauthenticated)
+
+Use agent-browser for speed and token efficiency.
 
 ### Quick Scan (default)
 
-For each priority page, run in parallel:
-```
-mcp__audiq__scan_page({ url: PAGE_URL, profile: "quick" })
-mcp__audiq__screenshot_page({ url: PAGE_URL, viewport: "desktop" })
-mcp__audiq__screenshot_page({ url: PAGE_URL, viewport: "mobile" })
-```
+For each priority page:
+```bash
+mkdir -p .claude/screenshots/$(date +%Y-%m-%d)
+DIR=".claude/screenshots/$(date +%Y-%m-%d)"
 
-### Full Scan
+agent-browser open "$PAGE_URL"
+agent-browser screenshot "$DIR/$(basename $PAGE_URL)-desktop.png"
 
-```
-mcp__audiq__start_scan({ url: TARGET_URL, maxPages: 50 })
-```
+# Mobile viewport
+agent-browser viewport 375 812
+agent-browser screenshot "$DIR/$(basename $PAGE_URL)-mobile.png"
 
-Poll with `mcp__audiq__scan_status` until complete, then retrieve with `mcp__audiq__scan_results`.
-
-### Authenticated Scan
-
-```
-mcp__audiq__login_and_scan({
-  loginUrl: "http://localhost:3000/login",
-  url: "http://localhost:3000/dashboard",
-  username: "$TEST_USER_EMAIL",
-  password: "$TEST_USER_PASSWORD",
-  profile: "deep"
-})
+# Console + network errors
+agent-browser errors > "$DIR/$(basename $PAGE_URL)-errors.txt"
 ```
 
-### Design Analysis
+### Full Scan (all pages)
 
-For visual quality assessment:
-```
-mcp__audiq__analyze_visual({ url: PAGE_URL, viewport: "desktop" })
-mcp__audiq__analyze_visual({ url: PAGE_URL, viewport: "mobile" })
+Loop over discovered URLs, scanning each. Cap at 20 pages to keep scan time reasonable (~5-10 min).
+
+## Step 4: Authenticated Scan (Playwright)
+
+agent-browser handles simple form logins; use Playwright for OAuth, Google SSO, 2FA, or any redirect-heavy flow — it behaves more like a real user.
+
+Create `.claude/scripts/auth-scan.js`:
+```javascript
+const { chromium } = require('playwright');
+
+(async () => {
+  const browser = await chromium.launch({ headless: false });  // headless:false lets you complete 2FA/SSO manually once
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await ctx.newPage();
+
+  // Capture errors as they happen
+  const errors = [];
+  page.on('console', m => m.type() === 'error' && errors.push(m.text()));
+  page.on('pageerror', e => errors.push(`UNCAUGHT: ${e.message}`));
+  page.on('response', r => r.status() >= 400 && errors.push(`${r.status()} ${r.url()}`));
+
+  // Login
+  await page.goto(process.env.LOGIN_URL);
+  await page.fill('input[type="email"]', process.env.TEST_USER_EMAIL);
+  await page.fill('input[type="password"]', process.env.TEST_USER_PASSWORD);
+  await page.click('button[type="submit"]');
+  await page.waitForURL(url => !url.pathname.includes('login'), { timeout: 30000 });
+
+  // Save auth state for reuse
+  await ctx.storageState({ path: '.claude/auth-state.json' });
+
+  // Scan protected pages
+  const pages = (process.env.PAGES || '/dashboard').split(',');
+  for (const path of pages) {
+    await page.goto(new URL(path, process.env.BASE_URL).href);
+    await page.waitForLoadState('networkidle');
+    await page.screenshot({ path: `.claude/screenshots/auth-${path.replace(/\//g, '_')}.png`, fullPage: true });
+  }
+
+  require('fs').writeFileSync('.claude/screenshots/auth-errors.txt', errors.join('\n'));
+  await browser.close();
+})();
 ```
 
-For design improvement suggestions:
-```
-mcp__audiq__recommend_design({ url: PAGE_URL })
+Run it:
+```bash
+LOGIN_URL=http://localhost:3000/login \
+TEST_USER_EMAIL=$TEST_USER_EMAIL \
+TEST_USER_PASSWORD=$TEST_USER_PASSWORD \
+BASE_URL=http://localhost:3000 \
+PAGES=/dashboard,/settings,/profile \
+node .claude/scripts/auth-scan.js
 ```
 
-## Step 4: Analyze Screenshots
+For Google SSO: launch with `headless: false`, complete the login manually the first time, and `storageState` persists the session. Subsequent runs can use `storageState: '.claude/auth-state.json'` in the context options.
 
-When screenshots are returned, analyze them for:
+## Step 5: Analyze Screenshots
+
+Read the saved PNGs directly. Look for:
 
 **Layout issues:**
 - Content overflow or clipping
 - Elements overlapping
-- Broken responsive layout on mobile
+- Broken responsive layout on mobile (horizontal scroll, squashed grids)
 - Missing content or blank sections
 - Misaligned elements
 
@@ -134,42 +182,45 @@ When screenshots are returned, analyze them for:
 - Loading spinners stuck
 - Empty states without guidance
 
-## Step 5: Compare with Baseline (if available)
+## Step 6: Accessibility (axe-core)
 
-Check for previous scan results:
+Inject axe-core into Playwright to get WCAG violations:
+```javascript
+const { AxeBuilder } = require('@axe-core/playwright');
+const results = await new AxeBuilder({ page }).analyze();
+console.log(JSON.stringify(results.violations, null, 2));
+```
+
+Install once: `npm install -D @axe-core/playwright`
+
+## Step 7: Performance (Lighthouse)
+
+Standalone, no MCP needed:
+```bash
+npx lighthouse "$PAGE_URL" --only-categories=performance --chrome-flags="--headless" --output=json --output-path=.claude/lighthouse.json
+node -e "const r=require('./.claude/lighthouse.json');console.log('Perf:',r.categories.performance.score*100,'LCP:',r.audits['largest-contentful-paint'].displayValue)"
+```
+
+For mobile: add `--preset=perf --emulated-form-factor=mobile`.
+
+## Step 8: Compare with Baseline
+
 ```bash
 ls .claude/scans/ 2>/dev/null
 ```
 
-If a baseline exists, compare:
-- Score changes (performance, a11y, SEO, best practices)
-- New issues not in baseline
-- Resolved issues from baseline
-- Visual differences in screenshots
-
 **Auto-save baseline on first scan:**
 ```bash
 mkdir -p .claude/scans
+# First scan → baseline-YYYY-MM-DD.json
+# Subsequent → scan-YYYY-MM-DD.json
 ```
 
-If no previous scan exists in `.claude/scans/`, this is the baseline. Save it with a clear label:
-```bash
-# First scan → save as baseline
-.claude/scans/baseline-YYYY-MM-DD.json
+Save JSON with: URLs scanned, error counts per page, Lighthouse scores, axe violation counts, screenshot paths.
 
-# Subsequent scans → save as timestamped
-.claude/scans/scan-YYYY-MM-DD.json
-```
+Compare with previous baseline — report regressions and resolutions.
 
-The baseline is never overwritten — it's the reference point for all future `scan compare` runs. Include scores, issue counts, and screenshot references in the JSON.
-
-## Step 6: Generate Fix Plan
-
-```
-mcp__audiq__generate_fix_plan({ format: "claude-code", minSeverity: "high" })
-```
-
-## Step 7: Report
+## Step 9: Report
 
 ```
 Scan Results: [URL]
@@ -180,51 +231,23 @@ Scan time: [T]
 
 | Category | Score | Issues |
 |----------|-------|--------|
-| Performance | XX/100 | N issues |
-| Accessibility | XX/100 | N issues |
-| SEO | XX/100 | N issues |
-| Best Practices | XX/100 | N issues |
+| Performance (Lighthouse) | XX/100 | N issues |
+| Accessibility (axe) | N violations | critical: N |
+| Console errors | N pages affected | |
+| Network errors | 4xx/5xx count | |
 
 Critical Issues:
-1. [Category] [page] — [issue] → [fix]
+1. [page] — [issue] → [fix]
 2. ...
 
 Visual Issues (from screenshots):
 1. [page] — [what's wrong visually]
 2. ...
 
-Design Quality: [assessment]
-
 Compared to baseline: [improved/regressed/new scan]
 - Performance: +5 (was 72, now 77)
 - New issues: 3
 - Resolved: 7
-```
-
-## Quick Commands
-
-| Shortcut | Equivalent |
-|----------|-----------|
-| `scan it` | Quick scan of detected URL |
-| `scan errors` | Console errors + network issues only |
-| `scan a11y` | Accessibility audit only |
-| `scan perf` | Lighthouse performance only |
-| `scan mobile` | Mobile screenshots + responsive check |
-
-### scan errors (lightweight)
-```
-mcp__audiq__get_console_errors({ url: TARGET_URL })
-mcp__audiq__get_network_issues({ url: TARGET_URL })
-```
-
-### scan a11y
-```
-mcp__audiq__check_accessibility({ url: TARGET_URL })
-```
-
-### scan perf
-```
-mcp__audiq__run_lighthouse({ url: TARGET_URL, categories: ["performance"], device: "mobile" })
 ```
 
 ## Integration with Other Skills
@@ -234,13 +257,14 @@ mcp__audiq__run_lighthouse({ url: TARGET_URL, categories: ["performance"], devic
 | `ship` | Run `scan` as post-deploy verification |
 | `auto` | After UI tasks, `scan` the affected page |
 | `fix` | When fixing UI bugs, `scan` to verify the fix |
-| `design` | Use `scan design` to assess visual quality |
+| `design` | Review screenshots for visual quality and AI slop indicators |
 
 ## Rules
 
 - Always scan both desktop AND mobile viewports
 - Screenshot every page you scan — visual issues are invisible to code analysis
 - Compare with baselines when available — regressions matter more than absolute scores
-- Don't create stories for scores above 90 — focus on real issues
+- Don't create stories for Lighthouse scores above 90 — focus on real issues
 - Console errors are always critical — fix them before anything else
 - Save scan results to `.claude/scans/` for future comparisons
+- For OAuth/SSO, use Playwright with `storageState` — don't try to automate password entry on Google

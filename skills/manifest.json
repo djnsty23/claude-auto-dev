@@ -1,6 +1,6 @@
 {
   "version": "7.1",
-  "description": "33 active skills + 3 deprecated redirects (verify, checkpoint, browser-auth) - includes iterate, scan (audiq QA), migrate, stripe, seo",
+  "description": "33 active skills + 3 deprecated redirects (verify, checkpoint, browser-auth) - includes iterate, scan (agent-browser/Playwright QA), migrate, stripe, seo",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -401,7 +401,7 @@
         "design"
       ],
       "priority": 1,
-      "description": "Live site QA via audiq MCP — scans pages, catches visual/functional issues, compares with baselines. Use when testing a live site or after deploying."
+      "description": "Live site QA via agent-browser (token-efficient) and Playwright (login flows). Scans pages, catches visual/functional issues, compares with baselines. Use when testing a live site or after deploying."
     },
     "a11y": {
       "triggers": [
