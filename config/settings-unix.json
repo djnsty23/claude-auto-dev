@@ -78,7 +78,8 @@
       "NotebookEdit",
       "mcp__supabase__*",
       "mcp__audiq__*",
-      "mcp__ide__*"
+      "mcp__ide__*",
+      "mcp__plugin_context7_context7__*"
     ],
     "deny": [
       "Bash(rm -rf *)",

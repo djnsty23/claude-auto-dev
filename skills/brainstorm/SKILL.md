@@ -56,6 +56,26 @@ git diff --name-only HEAD~5 -- '*.ts' '*.tsx' '*.css'
 
 Quick mode takes ~10 seconds. Use after a recent full brainstorm when the codebase hasn't changed much.
 
+## Agent Memory (read before scanning)
+
+Before running scans or proposing features, read `.claude/agent-memory/brainstorm-history.md` if it exists. This file tracks:
+
+- **Past suggestions** — applied and rejected ideas from previous sessions. Don't re-propose rejected ideas; don't re-propose applied ideas unless the user explicitly asks.
+- **Skipped patterns** — classes of suggestions the user has consistently declined (e.g., "don't suggest file splits under 300 lines").
+
+If the file doesn't exist, create it on first brainstorm with this seed:
+```markdown
+# Brainstorm History (auto-maintained)
+
+## Past Suggestions
+<!-- Format: [date] title | outcome (applied:S3-002 | rejected | deferred) -->
+
+## Skipped Patterns
+<!-- Rules the user has set. Format: pattern | reason -->
+```
+
+After `brainstorm apply`, append the created stories to "Past Suggestions" with their prd.json IDs. If the user rejects a finding during presentation, record it as `rejected` so it doesn't come back.
+
 ## Phase 1: Architecture Scan (Parallel)
 
 Launch 3 scans simultaneously using Task tool with `run_in_background: true`.
@@ -82,12 +102,12 @@ Task({ subagent_type: "Explore", run_in_background: true,
   4. Check for client-side data fetching in page.tsx/layout.tsx that could be server-side
   Report only actionable findings, not cohesive files that should stay together.` })
 
-// Scan 3: Unused dependencies
-Task({ subagent_type: "Explore", run_in_background: true,
+// Scan 3: Unused dependencies + outdated patterns
+Task({ subagent_type: "researcher", run_in_background: true,
   prompt: `In [PROJECT_PATH]. Limit to 80 tool calls max.
   1. Read package.json dependencies. For each dependency, grep src/ to check if it's actually imported. Report unused deps.
-  2. Check for outdated patterns: class components, legacy API usage, deprecated package usage
-  Report: unused deps list, outdated patterns found.` })
+  2. Check for outdated patterns: class components, legacy API usage, deprecated package usage. If Context7 tools are available (mcp__plugin_context7_context7__*), use them to confirm whether patterns are actually deprecated in the current major version — don't flag based on stale training data.
+  Report: unused deps list, outdated patterns found (with version context).` })
 ```
 
 ## Phase 2: Feature Ideation (Product Thinking)

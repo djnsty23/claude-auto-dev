@@ -363,6 +363,7 @@ Same as Create mode Step 5. Read real project state, generate from actual data.
 - `.gitattributes` missing → create it
 - TypeScript missing `noUncheckedIndexedAccess` → suggest enabling
 - No linter → suggest Biome
+- `.claude/agent-memory/` missing → create it (audit and brainstorm will seed the files themselves on first run)
 
 ### Step 5: Report
 
@@ -375,6 +376,17 @@ Project onboarded:
 
 Say 'auto' to start working, or describe what to build.
 ```
+
+### Step 6: Recommend Context7 MCP (optional)
+
+Check if Context7 tools are already available (`mcp__plugin_context7_context7__*`). If not, suggest installing:
+
+```
+Context7 MCP — real-time library docs for migrate/fix (optional but recommended):
+  npx ctx7 setup --claude
+```
+
+claude-auto-dev skills (migrate, fix) will use Context7 automatically when available.
 
 ---
 

@@ -37,6 +37,32 @@ User says "audit"
 Wait for completion → Aggregate Results → Present Report
 ```
 
+## Agent Memory (read before scanning)
+
+Before launching the swarm, read `.claude/agent-memory/audit-patterns.md` if it exists. This file contains:
+
+- **Accepted noise** — patterns previously marked as intentional (e.g., test-only console.log). Agents should skip these.
+- **Recurring issues** — items already captured as prd.json stories. Deduplicate against these.
+- **Hotspots** — files/directories that consistently surface issues. Agents can prioritize these.
+
+If the file doesn't exist, create it with this seed (first audit only):
+```markdown
+# Audit Patterns (auto-maintained)
+
+## Accepted Noise
+<!-- Patterns marked as intentional — don't re-report. Format: path pattern | reason -->
+
+## Recurring Issues
+<!-- Issues already in prd.json. Format: file:line | prd-id | title -->
+
+## Hotspots
+<!-- Files with 3+ findings across audits. Format: file | count | last-seen -->
+```
+
+Pass the content of this file into each agent's prompt under a "KNOWN PATTERNS — SKIP THESE" section so agents don't re-report them.
+
+After the swarm completes and before writing to prd.json, append any new hotspots (files with 3+ new findings) and mark accepted-noise items if the user explicitly dismisses a class of finding.
+
 ## Execution
 
 ### Size Gate (choose agent count by codebase size)
@@ -67,7 +93,7 @@ Replace `[PROJECT_PATH]` with the actual working directory path.
 **Important:** Each agent is capped at ~80 tool calls to avoid rate limits. Scope scans to specific directories.
 
 ```typescript
-Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
+Task({ subagent_type: "security-scanner", model: "opus", run_in_background: true,
   prompt: "Security audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: exposed secrets (check src/ AND supabase/migrations/ for hardcoded keys, passwords, service_role, cron secrets), dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. ALSO check: 1) Supabase RLS policy LOGIC — not just enabled, but correct: flag always-true USING clauses, INSERT WITH CHECK (true), tables with PII allowing SELECT without auth.uid(). 2) Fail-open auth — if (session) allow without default deny. 3) SSRF — user URLs passed to fetch without private IP validation. 4) Missing middleware — /dashboard/*, /api/* routes without auth checks. 5) Unsafe casts — 'as unknown as Type' on DB/API data without Zod validation. 6) Fire-and-forget fetch — fetch() without res.ok check or try/catch. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
@@ -76,7 +102,7 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Accessibility audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets (<44px), div/span with onClick (should be button), outline-none without focus-visible replacement, user-scalable=no or maximum-scale=1, missing autocomplete on form inputs, inputs without correct type/inputmode, onPaste with preventDefault, missing prefers-reduced-motion support, autoFocus without justification. SKIP false positives: transition-all is perf not a11y (report as Low/perf if at all), console.error is acceptable (only flag console.log), test files don't need strict a11y. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
+Task({ subagent_type: "code-reviewer", model: "opus", run_in_background: true,
   prompt: "Type safety + code quality audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: 'any' usage (skip test files and type declaration files), @ts-ignore, type assertions without guards ('as unknown as'), conflicting type definitions, untyped API responses. ALSO scan: console.log/warn statements (NOT console.error — that's acceptable), count per file, report top 5 offenders. Empty catch blocks, API calls without error handling (missing res.ok check or try/catch). SKIP: test files for strict typing, .d.ts files, node_modules. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,

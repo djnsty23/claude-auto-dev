@@ -17,6 +17,7 @@
 | Reports | `.claude/reports/*.md` | 7 days |
 | Screenshots | `.claude/screenshots/*.png` | Cleaned each run |
 | Sprint History | `.claude/sprint-history.md` | Persistent |
+| Agent Memory | `.claude/agent-memory/*.md` | Persistent (audit-patterns.md, brainstorm-history.md) |
 
 ## Rules
 - Create subdirectories on first use (`mkdir -p` / `New-Item -Force`)

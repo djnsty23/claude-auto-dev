@@ -65,6 +65,13 @@ Common patterns:
 | `CORS error` | API endpoint config |
 | `401 Unauthorized` | Auth token issue |
 
+For library-specific errors (unfamiliar API, deprecated method, version-specific behavior), query Context7 before guessing or WebSearching:
+```
+mcp__plugin_context7_context7__resolve-library-id({ libraryName: "<lib>", query: "<error description>" })
+mcp__plugin_context7_context7__query-docs({ libraryId: "<id>", query: "<specific error or API>" })
+```
+Version-pinned docs beat cached training data for libraries that move fast (Next.js, Supabase, Stripe, Trigger.dev).
+
 ### Step 4: Fix
 
 1. Make the minimal change needed
