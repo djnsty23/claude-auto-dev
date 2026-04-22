@@ -154,6 +154,16 @@
             "timeout": 60
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.claude/hooks/telemetry.js\"",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "Stop": [

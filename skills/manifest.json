@@ -1,6 +1,6 @@
 {
   "description": "35 active skills + 3 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
-  "version": "7.4",
+  "version": "7.5",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -383,6 +383,17 @@
       "file": "memory-backup/SKILL.md",
       "priority": 2,
       "description": "Backs up auto-memory files to a private GitHub repo. One-command setup, committed daily via Task Scheduler (or on-demand). Restore is a single clone."
+    },
+    "telemetry": {
+      "triggers": [
+        "telemetry",
+        "usage stats",
+        "tool stats",
+        "token stats"
+      ],
+      "file": "telemetry/SKILL.md",
+      "priority": 2,
+      "description": "Show token / tool usage stats from the local telemetry log. Use when you want to know \"which tools am I burning context on\", \"which skills are expensive\", or \"was yesterday's session mostly Read/Grep or actually productive\"."
     },
     "commit": {
       "triggers": [
