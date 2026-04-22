@@ -6,6 +6,45 @@ const fs = require('fs');
 const path = require('path');
 
 try {
+    // ============================================================
+    // Memory: Close session on stop
+    // ============================================================
+    try {
+        const HOME = process.env.HOME || process.env.USERPROFILE;
+        const memDbPath = path.join(HOME, '.claude', 'scripts', 'memory-db.js');
+        const sessionFile = path.join(process.cwd(), '.claude', 'memory-session-id');
+
+        if (fs.existsSync(memDbPath) && fs.existsSync(sessionFile)) {
+            const memDB = require(memDbPath);
+            const sessionId = fs.readFileSync(sessionFile, 'utf8').trim();
+
+            if (sessionId && memDB.isAvailable()) {
+                // Read prd.json for session summary context
+                let summary = {};
+                if (fs.existsSync('prd.json')) {
+                    try {
+                        const prd = JSON.parse(fs.readFileSync('prd.json', 'utf8'));
+                        const stories = prd.stories || {};
+                        const entries = Object.entries(stories);
+                        const done = entries.filter(([, v]) => v.passes === true);
+                        const pending = entries.filter(([, v]) => v.passes !== true);
+                        summary.completed = done.map(([k, v]) => `${k}: ${v.title}`).join('; ');
+                        if (pending.length > 0) {
+                            summary.nextSteps = `${pending.length} tasks remaining: ${pending.map(([k]) => k).join(', ')}`;
+                        }
+                    } catch { /* non-critical */ }
+                }
+
+                memDB.endSession(sessionId, summary);
+
+                // Clean up session file
+                try { fs.unlinkSync(sessionFile); } catch {}
+            }
+        }
+    } catch (memErr) {
+        process.stderr.write(`[Memory] session close error: ${memErr.message}\n`);
+    }
+
     // Flags are project-relative (matches what skills/auto/SKILL.md writes via Write tool).
     const autoFlag = path.join(process.cwd(), '.claude', 'auto-active');
     const exitFlag = path.join(process.cwd(), '.claude', 'auto-exit');

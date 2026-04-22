@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// PostToolUse hook - Run typecheck after TypeScript/JavaScript edits
+// PostToolUse hook - Run typecheck after TypeScript/JavaScript edits + capture observations
 // Always exits 0 (PostToolUse hooks inform, don't block)
 
 const fs = require('fs');
+const path = require('path');
 const { execSync } = require('child_process');
 
 try {
@@ -16,6 +17,40 @@ try {
     }
 
     const filePath = (data.tool_input && data.tool_input.file_path) || '';
+
+    // ============================================================
+    // Memory: Capture observation from tool usage
+    // ============================================================
+    try {
+        const HOME = process.env.HOME || process.env.USERPROFILE;
+        const memDbPath = path.join(HOME, '.claude', 'scripts', 'memory-db.js');
+        const classifierPath = path.join(HOME, '.claude', 'scripts', 'observation-classifier.js');
+
+        if (fs.existsSync(memDbPath) && fs.existsSync(classifierPath)) {
+            const memDB = require(memDbPath);
+            const { classifyObservation } = require(classifierPath);
+
+            if (memDB.isAvailable()) {
+                const sessionId = process.env.AUTO_DEV_SESSION_ID || null;
+                const toolName = data.tool_name || '';
+                const toolInput = data.tool_input || {};
+                const toolResult = (data.tool_output || '').slice(0, 500);
+                const userPrompt = process.env.AUTO_DEV_LAST_PROMPT || '';
+
+                const obs = classifyObservation(toolName, toolInput, toolResult, userPrompt);
+                if (obs && sessionId) {
+                    memDB.saveObservation({
+                        sessionId,
+                        projectPath: process.cwd(),
+                        ...obs
+                    });
+                }
+            }
+        }
+    } catch (memErr) {
+        // Memory capture is non-critical — never block tool execution
+        process.stderr.write(`[Memory] capture error: ${memErr.message}\n`);
+    }
 
     // Only run typecheck for TypeScript/JavaScript files
     if (/\.(ts|tsx|js|jsx)$/.test(filePath)) {
