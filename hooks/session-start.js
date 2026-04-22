@@ -119,6 +119,47 @@ try {
         // Not a git repo or git not available
     }
 
+    // ============================================================
+    // 6. Memory: Start session + inject context from past sessions
+    // ============================================================
+    try {
+        const memDbPath = path.join(CLAUDE_DIR, 'scripts', 'memory-db.js');
+        if (fs.existsSync(memDbPath)) {
+            const memDB = require(memDbPath);
+            if (memDB.isAvailable()) {
+                // Start a new memory session
+                const sessionId = memDB.startSession(process.cwd());
+                if (sessionId) {
+                    // Export session ID for other hooks to use
+                    process.env.AUTO_DEV_SESSION_ID = sessionId;
+                    // Write to a temp file so other hooks can read it
+                    const sessionFile = path.join(process.cwd(), '.claude', 'memory-session-id');
+                    try {
+                        fs.mkdirSync(path.join(process.cwd(), '.claude'), { recursive: true });
+                        fs.writeFileSync(sessionFile, sessionId);
+                    } catch { /* non-critical */ }
+                }
+
+                // Inject context from past sessions
+                const context = memDB.getRecentContext(process.cwd(), 3);
+                if (context.length > 0) {
+                    const stats = memDB.getStats(process.cwd());
+                    console.log(`[Memory] ${stats ? stats.totalObservations : '?'} observations across ${context.length}+ sessions`);
+                    const last = context[0];
+                    if (last.next_steps) {
+                        console.log(`[Memory] Last next steps: ${last.next_steps.slice(0, 120)}`);
+                    }
+                    if (last.learned) {
+                        console.log(`[Memory] Last learned: ${last.learned.slice(0, 120)}`);
+                    }
+                }
+            }
+        }
+    } catch (memErr) {
+        // Memory is non-critical — never block session start
+        process.stderr.write(`[Memory] init error: ${memErr.message}\n`);
+    }
+
 } catch (err) {
     // Hook should never crash
     process.stderr.write(`session-start error: ${err.message}\n`);
