@@ -14,9 +14,30 @@ model: opus
 
 # Environment Variables Workflow
 
+## Preferred pattern: Doppler
+
+For any project with 3+ secrets or any secret reused across projects, **use Doppler** (see the `doppler` skill). This skill handles the legacy `.env.local` flow for projects not yet on Doppler.
+
+When you see `.env.local` in a repo that should be on Doppler:
+- Suggest running the `doppler` skill to migrate
+- Don't add new secrets to `.env.local` if a `doppler.yaml` exists (use `doppler secrets set` instead)
+
+When a repo has `doppler.yaml`, secrets live in Doppler. Commands run via `doppler run -- <cmd>`.
+
 ## On "env" or "credentials"
 
-### Step 1: Determine Action
+### Step 0: Check for Doppler
+```bash
+if [ -f doppler.yaml ]; then
+  echo "This repo uses Doppler. See the 'doppler' skill for any env var work."
+  cat doppler.yaml
+  # Route to doppler skill
+fi
+```
+
+If Doppler is in use, defer to the `doppler` skill. If not, proceed with the .env.local flow below.
+
+### Step 1: Determine Action (non-Doppler flow)
 ```
 question: "What do you need?"
 options:
@@ -24,7 +45,10 @@ options:
   - { label: "Add new", description: "Add a new environment variable" }
   - { label: "Debug missing", description: "Something isn't working" }
   - { label: "Setup .env.local", description: "Create project env file" }
+  - { label: "Migrate to Doppler", description: "Move to the recommended tool" }
 ```
+
+If user picks "Migrate to Doppler", invoke the `doppler` skill.
 
 ### Step 2: Actions
 

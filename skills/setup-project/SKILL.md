@@ -364,6 +364,7 @@ Same as Create mode Step 5. Read real project state, generate from actual data.
 - TypeScript missing `noUncheckedIndexedAccess` → suggest enabling
 - No linter → suggest Biome
 - `.claude/agent-memory/` missing → create it (audit and brainstorm will seed the files themselves on first run)
+- `.env.local` has 3+ vars AND no `doppler.yaml` → offer to migrate to Doppler via the `doppler` skill (hub/spoke pattern, rotate once = propagate everywhere)
 
 ### Step 5: Report
 
