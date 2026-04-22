@@ -138,4 +138,4 @@ Claude:
 | With summary | +500 |
 | **Total Savings** | **~80%** |
 
-**Real example:** muzic.ai grew to 828 rows / 10 sprints / ~20K tokens. After archiving to keep only sprints 9-11, prd.json drops to ~150 rows / ~3K tokens.
+**Real example:** a long-running project can grow to 800+ rows / 10 sprints / ~20K tokens. After archiving to keep only the current sprint + 2 prior, prd.json drops to ~150 rows / ~3K tokens.

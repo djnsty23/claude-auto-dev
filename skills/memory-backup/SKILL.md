@@ -32,7 +32,7 @@ NOT:
 
 ```bash
 # 1. Create the private repo
-gh repo create djnsty23/claude-memory --private --description "Auto-memory backups (claude-auto-dev)" --clone --add-readme
+gh repo create $(gh api user --jq .login)/claude-memory --private --description "Auto-memory backups (claude-auto-dev)" --clone --add-readme
 cd claude-memory
 
 # 2. Initial snapshot
@@ -105,7 +105,7 @@ After Windows reinstall, restore memory state in one command:
 
 ```bash
 # Assumes you've already installed claude-auto-dev (hooks/skills/agents)
-gh repo clone djnsty23/claude-memory ~/claude-memory
+gh repo clone $(gh api user --jq .login)/claude-memory ~/claude-memory
 cd ~/claude-memory
 
 # Restore memory files
