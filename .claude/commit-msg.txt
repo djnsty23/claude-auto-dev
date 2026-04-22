@@ -1,43 +1,28 @@
-feat: v7.3 — audit-driven improvements
+feat: v7.4 — progressive disclosure on audit / setup-project / doppler
 
-From the full audit at .claude/reports/AUDIT-2026-04-22.md.
-Validated against Anthropic's Agent Skills spec + 10 popular frameworks.
+Continues v7.3's Anthropic-idiomatic split pattern. Three more heavy
+skills now load long reference sections on demand.
 
-### Critical fixes
-- hooks/session-start.js: add `process.exit(0)` at end — was
-  the only hook without an explicit exit, could return non-zero
-  on unhandled error. Now consistent.
-- hooks/pre-tool-filter.js: new safety pattern for `rm -rf ~`
-  and `rm -rf ~/` (home-dir wipe). Caught by the new test
-  suite on first run.
-- skills/{verify,checkpoint,browser-auth}/: directories deleted.
-  Deprecated rename history retained in manifest.deprecated.
+### Token reductions
+- audit:         398→280 lines (~4765→3675 tokens, 23% ↓)
+- setup-project: 417→217 lines (~2948→1806 tokens, 39% ↓)
+- doppler:       255→218 lines (~2353→2074 tokens, 12% ↓)
 
-### Progressive disclosure (Anthropic-idiomatic)
-- skills/auto/references/generation-constraints.md: new,
-  holds ~100-line "before writing code" checklist
-- skills/auto/references/verify-tags.md: new, holds the
-  prd.json verify-tag table
-- skills/auto/SKILL.md: shortened 590→501 lines, ~7k→6k tokens
-- All 12 `MUST`/`NEVER` directives in auto rewritten as
-  reasoned prose per Anthropic's skill-creator guidance
+### New reference files
+- skills/audit/references/known-safe-patterns.md
+- skills/audit/references/persist-findings.md
+- skills/setup-project/references/monorepo-scaffold.md
+- skills/setup-project/references/tooling-config.md
+- skills/setup-project/references/version-defaults.md
+- skills/doppler/references/extract-to-hub.md
 
-### Cost optimization
-- status/archive-prd/clean/update/env-vars moved to Haiku
-  (~12× cheaper per token on mechanical ops that don't
-  require reasoning; commit stays on Opus for message
-  composition quality)
+### Consolidation deliberately not done
+clean (68 lines) and status (42) are already lean; archive-prd
+(141) has a clear user-facing purpose called from auto. Collapsing
+them would break muscle memory without meaningful token savings.
 
-### Self-healing (Aider pattern)
-- hooks/post-tool-typecheck.js: now also runs Biome (preferred)
-  or ESLint after typecheck. Fails get printed to stderr so
-  the model self-fixes on the next turn. Skips silently if no
-  linter is configured. First 30 lines shown, rest truncated.
-
-### Testing
-- scripts/test-pre-tool-filter.js: 33-case suite covering
-  safe-rm regex, dangerous-command blocks, force-push deny,
-  npx allowlist, Write/Edit protected paths, Read skip
-  patterns. 33/33 pass.
+### Aggregate impact
+Running auto + audit + setup-project (common combo) saves ~2,500
+tokens per session vs v7.2.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

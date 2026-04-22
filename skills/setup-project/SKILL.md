@@ -35,196 +35,17 @@ If the user said "build a SaaS with Supabase and Stripe" — infer all three, do
 
 ### Step 2: Scaffold
 
-#### Single-app
-
+**Single-app:**
 ```bash
 pnpm create next-app . --typescript --tailwind --app --src-dir --use-pnpm --skip-install
 ```
+Then delete `eslint.config.mjs` and remove `eslint` / `eslint-config-next` from devDeps — we use Biome.
 
-Then remove ESLint artifacts (we use Biome): delete `eslint.config.mjs`, remove `eslint`/`eslint-config-next` from devDeps.
-
-#### Monorepo
-
-Do NOT use create-next-app for the root. Scaffold manually:
-
-```
-project/
-├── pnpm-workspace.yaml
-├── package.json            # root: orchestration only
-├── tsconfig.base.json      # shared compiler options
-├── tsconfig.json           # solution-style references
-├── biome.json
-├── .npmrc
-├── .gitattributes
-├── .gitignore
-├── packages/
-│   ├── engine/             # shared types + logic
-│   │   ├── package.json
-│   │   ├── tsconfig.json
-│   │   └── src/index.ts
-│   └── web/                # Next.js app
-│       ├── package.json
-│       ├── tsconfig.json
-│       └── src/app/
-└── [optional: cli/, trigger/, supabase/]
-```
-
-**pnpm-workspace.yaml:**
-```yaml
-packages:
-  - 'packages/*'
-onlyBuiltDependencies:
-  - sharp
-  - unrs-resolver
-  - esbuild
-```
-
-**Root package.json** — orchestration scripts only:
-```json
-{
-  "private": true,
-  "packageManager": "pnpm@10.8.0",
-  "engines": { "node": ">=22" },
-  "scripts": {
-    "build": "pnpm -r run build",
-    "dev": "pnpm -r --parallel run dev",
-    "typecheck": "pnpm -r run typecheck",
-    "lint": "biome check .",
-    "format": "biome check --write .",
-    "preinstall": "npx only-allow pnpm"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.0",
-    "typescript": "^5.8.0"
-  }
-}
-```
-
-For the web package, use create-next-app into `packages/web/` then clean up (remove .git, .gitignore, README, ESLint config).
-
-**Shared package** (e.g., `packages/engine`):
-```json
-{
-  "name": "@<project>/engine",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
-  },
-  "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit"
-  }
-}
-```
-
-Consumer references: `"@<project>/engine": "workspace:*"`.
+**Monorepo:** load `references/monorepo-scaffold.md` for the full directory layout, `pnpm-workspace.yaml`, root `package.json`, and shared-package `package.json` templates. Run `pnpm create next-app` into `packages/web/` and clean up the nested `.git` / `.gitignore` / README / ESLint config.
 
 ### Step 3: Configure Tooling
 
-#### TypeScript — maximum strictness
-
-Start from Next.js defaults, add these flags to every tsconfig:
-```json
-{
-  "compilerOptions": {
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitReturns": true,
-    "noImplicitOverride": true,
-    "noFallthroughCasesInSwitch": true,
-    "forceConsistentCasingInFileNames": true
-  }
-}
-```
-
-For monorepos: `tsconfig.base.json` at root with shared options (target ES2022, module ESNext, moduleResolution bundler, composite true). Per-package configs extend it. Root `tsconfig.json` is solution-style: `"files": []` with `"references"` only.
-
-Prefer TS 5.8 over TS 6 — TS 6 released March 2026, ecosystem support still uncertain.
-
-#### Biome — replaces ESLint + Prettier
-
-```json
-{
-  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
-  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
-  "linter": {
-    "rules": {
-      "recommended": true,
-      "correctness": { "noUnusedImports": "error", "noUnusedVariables": "error" },
-      "style": { "noNonNullAssertion": "error", "useImportType": "error" },
-      "suspicious": { "noExplicitAny": "error" }
-    }
-  },
-  "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } },
-  "files": {
-    "includes": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs", "**/*.json"],
-    "ignore": ["**/dist", "**/node_modules", "**/.next", "**/coverage", "**/*.css"]
-  }
-}
-```
-
-Exclude `**/*.css` — Biome cannot parse Tailwind v4 `@theme` syntax.
-
-#### shadcn/ui v4
-
-After `pnpm install`:
-```bash
-pnpm dlx shadcn@latest init --defaults --force
-pnpm dlx shadcn@latest add button input card badge --yes
-```
-
-For monorepos, run from the web package directory.
-
-shadcn v4 defaults: `base-nova` style, Base UI primitives, `oklch()` colors, Tailwind v4 CSS variables. No `tailwind.config.ts` needed.
-
-#### .gitattributes — always create (cross-platform essential)
-
-```
-* text=auto
-*.ts text eol=lf
-*.tsx text eol=lf
-*.js text eol=lf
-*.mjs text eol=lf
-*.json text eol=lf
-*.css text eol=lf
-*.md text eol=lf
-*.yaml text eol=lf
-*.yml text eol=lf
-*.sql text eol=lf
-*.sh text eol=lf
-*.cmd text eol=crlf
-*.bat text eol=crlf
-*.ps1 text eol=crlf
-*.png binary
-*.jpg binary
-*.ico binary
-*.woff2 binary
-pnpm-lock.yaml -diff
-```
-
-#### .gitignore additions (beyond create-next-app)
-
-Ensure these entries exist:
-```
-.env
-.env.*
-!.env.example
-supabase/.branches
-supabase/.temp
-.turbo/
-.claude/
-*.tsbuildinfo
-```
-
-#### .npmrc
-
-```ini
-strict-peer-dependencies=false
-auto-install-peers=true
-```
+Load `references/tooling-config.md` — it has the ready-to-paste templates for TypeScript (strict with `noUncheckedIndexedAccess` et al.), Biome (replaces ESLint + Prettier, excludes CSS for Tailwind v4), shadcn/ui v4, `.gitattributes` (cross-platform EOLs), `.gitignore` additions beyond create-next-app, and `.npmrc`.
 
 ### Step 4: Install and Verify
 
@@ -391,27 +212,6 @@ claude-auto-dev skills (migrate, fix) will use Context7 automatically when avail
 
 ---
 
-## Version Defaults (updated April 2026)
+## Version Defaults
 
-Safe choices for greenfield projects. Pin with caret ranges.
-
-| Package | Version | Risk |
-|---------|---------|------|
-| next | ^15.3 | Stable. 16 available but 15 is battle-tested |
-| react / react-dom | ^19.2 | Mature |
-| typescript | ^5.8 | Safe. TS 6 too fresh (March 2026) |
-| tailwindcss | ^4.2 | Stable v4, uses @theme not config file |
-| @biomejs/biome | ^2.4 | Stable. Exclude CSS (Tailwind v4) |
-| @supabase/supabase-js | ^2.101 | Mature v2 |
-| @supabase/ssr | ^0.10 | Pre-1.0 but stable API |
-| zod | ^3.24 | Safe. v4 available but ecosystem on v3 |
-| shadcn CLI | ^4.1 | Requires Tailwind v4 |
-| pnpm | 10.x | Set in packageManager field |
-| vitest | ^4.1 | Stable |
-| @playwright/test | ^1.59 | Stable v1 |
-| stripe (Node) | ^21.x | v22 too fresh (April 2026) |
-| lucide-react | ^1.7 | Stable |
-| @trigger.dev/sdk | ^4.4 | Stable v4 |
-| drizzle-orm | ^0.45 | Pre-1.0, pin exact minor |
-| @sentry/nextjs | ^10.47 | Stable v10 |
-| posthog-js | ^1.364 | Stable v1 |
+Load `references/version-defaults.md` for the pinned safe-version table (Next 15.3, React 19.2, TS 5.8, Tailwind 4.2, Biome 2.4, Supabase 2.101 / SSR 0.10, Zod 3.24, shadcn 4.1, pnpm 10.x, Vitest 4.1, Playwright 1.59, Stripe 21.x, Sentry 10.47, PostHog 1.364, Trigger.dev 4.4, Drizzle 0.45, lucide-react 1.7). Updated April 2026.

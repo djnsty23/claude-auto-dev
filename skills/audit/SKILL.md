@@ -39,21 +39,9 @@ Wait for completion → Aggregate Results → Present Report
 
 ## Known-Safe Framework Patterns (Do Not Flag)
 
-Every audit agent prompt MUST include this list under a "SKIP — NOT A BUG" section. These are valid patterns that agents have historically misidentified:
+Before launching the swarm, load `references/known-safe-patterns.md`. Include its "SKIP — NOT A BUG" list inside every audit agent prompt. Common false positives: shadcn label nesting, React 19 server actions, Supabase RLS `auth.uid()` pattern, `console.error`, `as const`, `.test.*` / `.spec.*` / `.d.ts` files.
 
-- **shadcn/ui patterns** — `<label><input /></label>` nesting IS accessible (implicit label), do not flag as missing label. Same for `<Label htmlFor>`.
-- **Checkbox inside label** — `<label><Checkbox /> Text</label>` is the shadcn pattern, not a violation.
-- **React 19 server actions** — `'use server'` files without `await` on the top level are fine; async boundary is per-function.
-- **Next.js App Router** — `<form action={serverAction}>` does not need onSubmit; do not flag as missing handler.
-- **Supabase RLS** — `auth.uid() = user_id` in USING clause is the correct pattern, not a bug.
-- **Tailwind arbitrary values** — `text-[#1a1a1a]` is flagged as hardcoded color ONLY if a token exists for that value. In gradient/brand surfaces, literal hex is acceptable.
-- **`console.error`** — acceptable in production. Only flag `console.log` / `console.debug` / `console.warn` leftovers.
-- **`as const`** — not an unsafe cast. Only flag `as any`, `as unknown as`.
-- **Playwright/Vitest test files** — skip strict type and a11y checks; test scaffolding may use `any`, `!`, or minimal markup.
-- **`.d.ts` files** — skip all checks except unused declarations.
-- **`next/image` without explicit width/height** — valid when `fill` prop is set or the image has a parent with `position: relative`.
-
-If an agent flags one of these, the finding is a false positive. Post-process the aggregated report and drop matching items before writing to prd.json.
+After aggregation, drop any finding that matches a known-safe pattern before writing to prd.json.
 
 ## Agent Memory (read before scanning)
 
@@ -189,121 +177,15 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
 
 ## Persist Findings to prd.json
 
-After aggregating results, write all findings to prd.json so they persist across sessions.
-
-### Step 1: Read current prd.json
-
-```bash
-# Get current sprint number and existing story IDs
-node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;console.log('sprint:',sp.id||sp.name||p.sprint||'unknown','stories:',Object.keys(sp.stories||p.stories||{}).length)}catch{console.log('no prd.json')}"
-```
-
-If no prd.json exists, create one with `sprint: 1`.
-
-### Step 2: Deduplicate against existing stories
-
-Before adding, check if a similar story already exists:
-
-```javascript
-// Match by title similarity (first 25 chars) or same file:line
-const isDuplicate = (title, file) => Object.values(stories).some(s =>
-  s.title.toLowerCase().includes(title.toLowerCase().slice(0, 25)) ||
-  (file && s.notes?.includes(file))
-);
-```
-
-### Step 3: Batch trivial findings
-
-Before creating stories, batch findings that are truly one-liners. Story count is not a quality metric — a sprint of 12 aria-label stories inflates output and hides real work.
-
-Rules:
-- 1-line fixes in the same category and same area (e.g., 5 missing aria-labels across src/components/) → single story: "Add missing aria-labels to components (5 files)"
-- Same root cause, different files → single story with `notes` listing all files
-- Auto-fixable by a grep + sed replacement → single story
-- Distinct root causes → distinct stories
-
-Only split out issues that require individual reasoning or different fixes.
-
-### Step 4: Add new stories to prd.json
-
-Use ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`)
-
-```json
-{
-  "S3-AUD-001": {
-    "id": "S3-AUD-001",
-    "title": "Fix XSS vulnerability in user input",
-    "priority": 0,
-    "passes": null,
-    "type": "fix",
-    "category": "security",
-    "notes": "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
-    "resolution": ""
-  }
-}
-```
-
-**Category → type mapping:**
-
-| Audit Category | prd.json type | Critical | High | Medium | Low |
-|---------------|---------------|----------|------|--------|-----|
-| Security | fix | 0 | 1 | 2 | 3 |
-| Performance | perf | 0 | 1 | 2 | 3 |
-| Accessibility | fix | 0 | 1 | 2 | 3 |
-| Type Safety | fix | 0 | 1 | 2 | 3 |
-| UX/UI | fix | 0 | 1 | 2 | 3 |
-| Test Coverage | qa | 0 | 1 | 2 | 3 |
-| Deploy Readiness | fix | 0 | 1 | 2 | 3 |
-
-### Step 5: Also create session Tasks
-
-Create native TaskCreate entries for the current session so "auto" can immediately start fixing:
-
-```typescript
-TaskCreate({
-  subject: "Fix XSS vulnerability in user input",
-  description: "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
-  metadata: { type: "security", priority: 0, prdId: "S3-AUD-001" }
-});
-```
-
-### Step 6: Report
-
-```
-Created [X] stories in prd.json from audit findings.
-- [N] Critical (priority 0)
-- [N] High (priority 1)
-- [N] Medium (priority 2)
-- [N] Low (priority 3)
-- [N] skipped (duplicates of existing stories)
-
-Say "auto" to start fixing (works Critical→Low), or "audit [feature]" to audit specific area.
-```
-
-### Step 7: Score Tracking
-
-After generating the report, log the score to `.claude/sprint-history.md`:
-```markdown
-## Audit [DATE]
-| Category | Score |
-|----------|-------|
-| Security | X/10 |
-| Performance | X/10 |
-| ... | ... |
-| **Overall** | **X/10** |
-| **Delta** | **+/-X from last audit** |
-```
-
-Compare against previous audit scores if available. Report improvement or regression.
-
-### Step 8: npm Audit
-
-Run alongside the agent swarm (not a separate agent — just a bash command):
-```bash
-npm audit --production 2>/dev/null | tail -15
-```
-
-Include critical/high vulnerabilities in the Security category of the report.
+After aggregating results, load `references/persist-findings.md` — it covers the full 8-step flow:
+1. Read current prd.json (bash one-liner)
+2. Deduplicate against existing stories (25-char title match)
+3. Batch trivial findings (don't inflate story count)
+4. Add new stories with the `S{sprint}-AUD-{n}` ID format + category/priority mapping
+5. Create session Tasks so `auto` can immediately start fixing
+6. Report
+7. Score tracking to `.claude/sprint-history.md`
+8. `npm audit --production` alongside the agent swarm
 
 ## Focused Audit
 
