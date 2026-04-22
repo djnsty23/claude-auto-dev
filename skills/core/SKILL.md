@@ -40,6 +40,7 @@ Work with native Tasks during session, batch-update prd.json at end.
   "title": "Fix tooltip clipping",
   "priority": 1,
   "passes": null,
+  "realness": null,
   "type": "fix",
   "category": "components",
   "notes": "",
@@ -50,9 +51,28 @@ Work with native Tasks during session, batch-update prd.json at end.
 | Field | Values |
 |-------|--------|
 | `passes` | `null` (pending), `true` (done), `false` (failed), `"deferred"` |
+| `realness` | 0-100 (optional, see below). `null` = not rated yet |
 | `type` | fix, feature, refactor, qa, perf |
 | `priority` | 0=critical, 1=high, 2=medium, 3=low |
 | `resolution` | HOW it was fixed (learning) |
+
+### Realness Scale (0-100)
+
+`passes: true` is binary and hides the difference between "wired up" and "works in production." Fill in `realness` when closing non-trivial stories so the sprint summary reflects reality.
+
+| Score | Meaning |
+|-------|---------|
+| 20 | Stubbed — UI exists, no backend |
+| 40 | Wired — frontend and backend connected, happy path works in dev |
+| 60 | Functional — handles the obvious edge cases, one real end-to-end test |
+| 80 | Production-ready — error handling, empty/loading/error states, observability |
+| 100 | Battle-tested — used by real users, edge cases caught and fixed |
+
+Rules:
+- Bug fixes default to 80 (fixing a real issue is usually production-ready).
+- Features require a manual rating — don't auto-assign 100 just because `passes: true`.
+- When in doubt, pick the lower number.
+- Sprint summaries report the AVERAGE realness of closed stories, not just the pass count.
 
 ## Resolution Learning
 

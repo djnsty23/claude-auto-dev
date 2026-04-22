@@ -5,7 +5,7 @@ triggers:
   - review
   - verify
   - check
-allowed-tools: Bash, Read, Grep, Glob
+allowed-tools: Bash, Read, Grep, Glob, Task
 model: opus
 user-invocable: true
 argument-hint: "[quick|deep]"
@@ -145,6 +145,15 @@ agent-browser snapshot -i
 ### 7-Step Checklist
 
 Run each check in order. Stop and fix on any failure.
+
+**0. Optional: Specialist agent review (for significant diffs)**
+
+If the diff touches 5+ files or includes auth/billing/data-mutation code, spawn a code-reviewer agent in parallel with steps 1-6:
+```typescript
+Task({ subagent_type: "code-reviewer", model: "opus", run_in_background: true,
+  prompt: "Review staged changes in [PROJECT_PATH] for bugs, logic errors, security vulnerabilities, and convention drift. Limit to 60 tool calls. Focus on: the diff (git diff --staged), what the change is supposed to do vs. what it actually does, edge cases the author may have missed. Report only high-confidence findings — skip style nits. Format: Severity, File:line, Issue, Why it matters." })
+```
+Read its findings before issuing a verdict. Skip for typos/one-liners.
 
 **1. Build Check**
 ```bash

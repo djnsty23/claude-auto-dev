@@ -76,6 +76,13 @@ For each major update:
    npm info [package] changelog 2>/dev/null || echo "Check GitHub releases"
    ```
 
+   If `mcp__plugin_context7_context7__*` tools are available, prefer them over WebSearch for version-specific breaking changes:
+   ```
+   resolve-library-id({ libraryName: "Next.js", query: "migrating from 14 to 15" })
+   query-docs({ libraryId: "/vercel/next.js/v15.3.0", query: "breaking changes from v14" })
+   ```
+   Context7 returns version-pinned docs, which avoids the common trap of applying stale migration advice from old blog posts.
+
 2. **Update and test:**
    ```bash
    npm install [package]@latest

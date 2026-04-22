@@ -37,6 +37,50 @@ User says "audit"
 Wait for completion → Aggregate Results → Present Report
 ```
 
+## Known-Safe Framework Patterns (Do Not Flag)
+
+Every audit agent prompt MUST include this list under a "SKIP — NOT A BUG" section. These are valid patterns that agents have historically misidentified:
+
+- **shadcn/ui patterns** — `<label><input /></label>` nesting IS accessible (implicit label), do not flag as missing label. Same for `<Label htmlFor>`.
+- **Checkbox inside label** — `<label><Checkbox /> Text</label>` is the shadcn pattern, not a violation.
+- **React 19 server actions** — `'use server'` files without `await` on the top level are fine; async boundary is per-function.
+- **Next.js App Router** — `<form action={serverAction}>` does not need onSubmit; do not flag as missing handler.
+- **Supabase RLS** — `auth.uid() = user_id` in USING clause is the correct pattern, not a bug.
+- **Tailwind arbitrary values** — `text-[#1a1a1a]` is flagged as hardcoded color ONLY if a token exists for that value. In gradient/brand surfaces, literal hex is acceptable.
+- **`console.error`** — acceptable in production. Only flag `console.log` / `console.debug` / `console.warn` leftovers.
+- **`as const`** — not an unsafe cast. Only flag `as any`, `as unknown as`.
+- **Playwright/Vitest test files** — skip strict type and a11y checks; test scaffolding may use `any`, `!`, or minimal markup.
+- **`.d.ts` files** — skip all checks except unused declarations.
+- **`next/image` without explicit width/height** — valid when `fill` prop is set or the image has a parent with `position: relative`.
+
+If an agent flags one of these, the finding is a false positive. Post-process the aggregated report and drop matching items before writing to prd.json.
+
+## Agent Memory (read before scanning)
+
+Before launching the swarm, read `.claude/agent-memory/audit-patterns.md` if it exists. This file contains:
+
+- **Accepted noise** — patterns previously marked as intentional (e.g., test-only console.log). Agents should skip these.
+- **Recurring issues** — items already captured as prd.json stories. Deduplicate against these.
+- **Hotspots** — files/directories that consistently surface issues. Agents can prioritize these.
+
+If the file doesn't exist, create it with this seed (first audit only):
+```markdown
+# Audit Patterns (auto-maintained)
+
+## Accepted Noise
+<!-- Patterns marked as intentional — don't re-report. Format: path pattern | reason -->
+
+## Recurring Issues
+<!-- Issues already in prd.json. Format: file:line | prd-id | title -->
+
+## Hotspots
+<!-- Files with 3+ findings across audits. Format: file | count | last-seen -->
+```
+
+Pass the content of this file into each agent's prompt under a "KNOWN PATTERNS — SKIP THESE" section so agents don't re-report them.
+
+After the swarm completes and before writing to prd.json, append any new hotspots (files with 3+ new findings) and mark accepted-noise items if the user explicitly dismisses a class of finding.
+
 ## Execution
 
 ### Size Gate (choose agent count by codebase size)
@@ -67,7 +111,7 @@ Replace `[PROJECT_PATH]` with the actual working directory path.
 **Important:** Each agent is capped at ~80 tool calls to avoid rate limits. Scope scans to specific directories.
 
 ```typescript
-Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
+Task({ subagent_type: "security-scanner", model: "opus", run_in_background: true,
   prompt: "Security audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: exposed secrets (check src/ AND supabase/migrations/ for hardcoded keys, passwords, service_role, cron secrets), dangerouslySetInnerHTML, eval(), missing Zod validation, SQL injection, XSS vectors, CORS config. ALSO check: 1) Supabase RLS policy LOGIC — not just enabled, but correct: flag always-true USING clauses, INSERT WITH CHECK (true), tables with PII allowing SELECT without auth.uid(). 2) Fail-open auth — if (session) allow without default deny. 3) SSRF — user URLs passed to fetch without private IP validation. 4) Missing middleware — /dashboard/*, /api/* routes without auth checks. 5) Unsafe casts — 'as unknown as Type' on DB/API data without Zod validation. 6) Fire-and-forget fetch — fetch() without res.ok check or try/catch. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
@@ -76,7 +120,7 @@ Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
   prompt: "Accessibility audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: images without alt, missing aria-labels, onClick without onKeyDown, missing form labels, hardcoded colors, undersized touch targets (<44px), div/span with onClick (should be button), outline-none without focus-visible replacement, user-scalable=no or maximum-scale=1, missing autocomplete on form inputs, inputs without correct type/inputmode, onPaste with preventDefault, missing prefers-reduced-motion support, autoFocus without justification. SKIP false positives: transition-all is perf not a11y (report as Low/perf if at all), console.error is acceptable (only flag console.log), test files don't need strict a11y. Report: Severity, File:line, Issue, Fix." })
 
-Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
+Task({ subagent_type: "code-reviewer", model: "opus", run_in_background: true,
   prompt: "Type safety + code quality audit for [PROJECT_PATH]. Limit to 80 tool calls. Scan: 'any' usage (skip test files and type declaration files), @ts-ignore, type assertions without guards ('as unknown as'), conflicting type definitions, untyped API responses. ALSO scan: console.log/warn statements (NOT console.error — that's acceptable), count per file, report top 5 offenders. Empty catch blocks, API calls without error handling (missing res.ok check or try/catch). SKIP: test files for strict typing, .d.ts files, node_modules. Report: Severity, File:line, Issue, Fix." })
 
 Task({ subagent_type: "Explore", model: "opus", run_in_background: true,
@@ -168,7 +212,19 @@ const isDuplicate = (title, file) => Object.values(stories).some(s =>
 );
 ```
 
-### Step 3: Add new stories to prd.json
+### Step 3: Batch trivial findings
+
+Before creating stories, batch findings that are truly one-liners. Story count is not a quality metric — a sprint of 12 aria-label stories inflates output and hides real work.
+
+Rules:
+- 1-line fixes in the same category and same area (e.g., 5 missing aria-labels across src/components/) → single story: "Add missing aria-labels to components (5 files)"
+- Same root cause, different files → single story with `notes` listing all files
+- Auto-fixable by a grep + sed replacement → single story
+- Distinct root causes → distinct stories
+
+Only split out issues that require individual reasoning or different fixes.
+
+### Step 4: Add new stories to prd.json
 
 Use ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`)
 
@@ -199,7 +255,7 @@ Use ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`)
 | Test Coverage | qa | 0 | 1 | 2 | 3 |
 | Deploy Readiness | fix | 0 | 1 | 2 | 3 |
 
-### Step 4: Also create session Tasks
+### Step 5: Also create session Tasks
 
 Create native TaskCreate entries for the current session so "auto" can immediately start fixing:
 
@@ -211,7 +267,7 @@ TaskCreate({
 });
 ```
 
-### Step 5: Report
+### Step 6: Report
 
 ```
 Created [X] stories in prd.json from audit findings.
@@ -224,7 +280,7 @@ Created [X] stories in prd.json from audit findings.
 Say "auto" to start fixing (works Critical→Low), or "audit [feature]" to audit specific area.
 ```
 
-### Step 6: Score Tracking
+### Step 7: Score Tracking
 
 After generating the report, log the score to `.claude/sprint-history.md`:
 ```markdown
@@ -240,7 +296,7 @@ After generating the report, log the score to `.claude/sprint-history.md`:
 
 Compare against previous audit scores if available. Report improvement or regression.
 
-### Step 7: npm Audit
+### Step 8: npm Audit
 
 Run alongside the agent swarm (not a separate agent — just a bash command):
 ```bash

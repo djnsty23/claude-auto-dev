@@ -56,6 +56,26 @@ git diff --name-only HEAD~5 -- '*.ts' '*.tsx' '*.css'
 
 Quick mode takes ~10 seconds. Use after a recent full brainstorm when the codebase hasn't changed much.
 
+## Agent Memory (read before scanning)
+
+Before running scans or proposing features, read `.claude/agent-memory/brainstorm-history.md` if it exists. This file tracks:
+
+- **Past suggestions** — applied and rejected ideas from previous sessions. Don't re-propose rejected ideas; don't re-propose applied ideas unless the user explicitly asks.
+- **Skipped patterns** — classes of suggestions the user has consistently declined (e.g., "don't suggest file splits under 300 lines").
+
+If the file doesn't exist, create it on first brainstorm with this seed:
+```markdown
+# Brainstorm History (auto-maintained)
+
+## Past Suggestions
+<!-- Format: [date] title | outcome (applied:S3-002 | rejected | deferred) -->
+
+## Skipped Patterns
+<!-- Rules the user has set. Format: pattern | reason -->
+```
+
+After `brainstorm apply`, append the created stories to "Past Suggestions" with their prd.json IDs. If the user rejects a finding during presentation, record it as `rejected` so it doesn't come back.
+
 ## Phase 1: Architecture Scan (Parallel)
 
 Launch 3 scans simultaneously using Task tool with `run_in_background: true`.
@@ -82,12 +102,12 @@ Task({ subagent_type: "Explore", run_in_background: true,
   4. Check for client-side data fetching in page.tsx/layout.tsx that could be server-side
   Report only actionable findings, not cohesive files that should stay together.` })
 
-// Scan 3: Unused dependencies
-Task({ subagent_type: "Explore", run_in_background: true,
+// Scan 3: Unused dependencies + outdated patterns
+Task({ subagent_type: "researcher", run_in_background: true,
   prompt: `In [PROJECT_PATH]. Limit to 80 tool calls max.
   1. Read package.json dependencies. For each dependency, grep src/ to check if it's actually imported. Report unused deps.
-  2. Check for outdated patterns: class components, legacy API usage, deprecated package usage
-  Report: unused deps list, outdated patterns found.` })
+  2. Check for outdated patterns: class components, legacy API usage, deprecated package usage. If Context7 tools are available (mcp__plugin_context7_context7__*), use them to confirm whether patterns are actually deprecated in the current major version — don't flag based on stale training data.
+  Report: unused deps list, outdated patterns found (with version context).` })
 ```
 
 ## Phase 2: Feature Ideation (Product Thinking)
@@ -172,8 +192,12 @@ If `.claude/auto-active` exists (running in auto mode), skip the presentation an
 When user says `brainstorm apply`:
 1. Read prd.json (or create with `sprint: "S1"` if none exists)
 2. Deduplicate against existing stories (match first 25 chars of title)
-3. Create stories with ID format `S{sprint}-{number}`
-4. Report: "Created X stories, skipped Y duplicates"
+3. **Push back on padding.** Before creating, review the finding list:
+   - If 3+ findings are 1-line changes in the same area, batch into one story
+   - If the full list has fewer than 2 findings that are genuinely non-trivial (require reasoning, multi-file changes, or design decisions), tell the user: "This looks like a 1-story sprint, not 5 — recommend skipping the sprint and just doing the fix directly." Then wait for confirmation before creating.
+   - Never create a sprint of padding to hit a round number.
+4. Create stories with ID format `S{sprint}-{number}`
+5. Report: "Created X stories (batched Y trivial findings), skipped Z duplicates"
 
 ## Targeted Mode
 

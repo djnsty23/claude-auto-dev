@@ -266,6 +266,7 @@ Before marking a task done, verify each acceptance criterion. "Does it compile?"
 2. Identify patterns: naming conventions, import style, error handling, state management
 3. Match patterns — do not introduce new patterns when existing ones cover the use case
 4. **For UI tasks:** Read globals.css (or tailwind config) + layout.tsx to understand the project's design system — fonts, colors, component patterns. Use the project's ACTUAL tokens, not stock defaults. Check if fonts are loaded via `next/font` or just declared in CSS.
+5. **For library-specific code (third-party APIs, SDKs, framework features):** If Context7 tools are available (`mcp__plugin_context7_context7__*`), query them for version-pinned docs before writing code that touches the library. This prevents using deprecated APIs or patterns from old training data — even for well-known libraries like Next.js, React, and Supabase.
 
 **Design context is not optional.** Auto-generated UI without reading the design system produces stock shadcn that fails the AI slop checklist. Spend 30 seconds reading the design tokens before writing any component.
 
@@ -285,6 +286,8 @@ Before marking a task done, verify each acceptance criterion. "Does it compile?"
 **All task types also require the Hardening Check (step 4c).** This catches logic bugs that typecheck and build miss.
 
 **Integration test is mandatory for API/Edge Function tasks.** Typecheck alone does not catch wrong API keys, wrong function signatures, or wrong database tables. Make one real request before marking done.
+
+**Ignore Preview-plugin visual reminders on non-UI edits.** Claude Code's Preview plugin and similar tools may suggest "verify in browser" on any file change. Skip the suggestion when the edit was purely server-only: API routes, middleware, `next.config.*`, `*.test.*`, migration files, types-only files, server actions without JSX. Only run visual verification when the edit touches a React/Vue/Svelte component, page, layout, or CSS that ships to the browser.
 
 **Risk-shaped testing.** When adding tests, prioritize paths that handle money, access control, or user data over easy-to-test pure functions.
 
@@ -499,24 +502,38 @@ If no tasks to work on:
 
 ### Auto Sprint Transition
 
-When all pending tasks are done, auto handles the sprint lifecycle — never ask the user to do this manually:
+When all pending tasks are done, auto handles the sprint lifecycle — but verifies the work first and surfaces a summary before bumping.
 
 ```
-1. Log summary to .claude/sprint-history.md:
+1. BUILD GATE — run the real deploy-target build before anything else:
+   npm run build  (or pnpm/yarn/bun equivalent)
+   If it fails, do NOT archive or bump. Create a prd.json story for each
+   error and continue working. Sprint can only close on a clean build.
+
+2. Log summary to .claude/sprint-history.md:
    "Sprint [N]: [done]/[total] tasks | [date] | [one-line summary of work]"
 
-2. Archive completed stories:
+3. Archive completed stories:
    - Copy current prd.json to .claude/archives/prd-archive-sprint-[N].json
    - Remove stories with passes: true from prd.json
    - Keep stories with passes: null, false, or "deferred"
 
-3. If new work exists (audit findings, brainstorm stories, deferred tasks):
-   - Bump sprint number in prd.json
-   - Continue executing immediately
+4. Decide whether to bump — show a one-line honesty summary first:
 
-4. If no work remains:
-   - Ask user (see below)
+   Sprint [N] closed: [done]/[total] tasks.
+   Average realness: [avg]%  (see realness field in core schema)
+   Build: passed in [T]s
+   Carried forward: [M] deferred, [K] new findings
+   Bumping to Sprint [N+1]. Say "stop" to pause.
+
+   Then proceed — no confirmation needed, but the user has a clean
+   window to interrupt. This beats silent bumps AND beats blocking
+   prompts that break autonomous execution.
+
+5. If no new work exists, skip the bump and go to "Ask User" below.
 ```
+
+**Honest close criteria:** A sprint doesn't close just because every story has `passes: true`. It closes when (a) build passes on deploy target, (b) the summary accurately reflects what shipped, and (c) realness scores are filled in honestly.
 
 ### Decision Matrix
 
