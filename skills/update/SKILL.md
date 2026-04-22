@@ -7,7 +7,7 @@ triggers:
   - update skills
   - sync skills
 allowed-tools: Bash, Read, Write, Glob
-model: opus
+model: haiku
 user-invocable: true
 ---
 

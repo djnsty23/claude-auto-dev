@@ -4,7 +4,7 @@ description: Shows sprint progress and task status. Use 'progress' (not 'status'
 triggers:
   - progress
 allowed-tools: Read, TaskList
-model: opus
+model: haiku
 user-invocable: true
 ---
 

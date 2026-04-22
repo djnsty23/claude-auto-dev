@@ -159,102 +159,13 @@ Before starting a task, assess its scope:
 
 ### Generation Constraints (apply before writing code)
 
-These constraints prevent bugs at generation time instead of finding them in audit:
+Before writing code, load `references/generation-constraints.md` — it covers TypeScript strictness patterns, security/data-safety rules (fetch error handling, SSRF guards, env var enforcement), accessibility checklist (labels, focus rings, touch targets), design anti-slop rules, and the test-generation matrix for API/auth/data mutations. Each rule explains the failure mode it prevents, so you can judge when to bend it.
 
-**TypeScript Strictness:**
-- In strict projects with `exactOptionalPropertyTypes`, always write optional props as `foo?: string | undefined` (not just `foo?: string`) — saves a retry cycle every time
-
-**Security & Data Safety:**
-- Every `fetch()` in a component MUST have try/catch and `res.ok` check
-- Every user-supplied URL in server code MUST be validated before fetch
-- Every `process.env.X` for security vars MUST throw if undefined (no localhost fallbacks)
-- Never cast with `as unknown as` — validate with Zod or type guard
-- Never use `createClient()` in webhook/cron routes — use `createServiceClient()`
-- Every new API route MUST be added to middleware route matcher / PUBLIC_PREFIXES if public
-
-**Accessibility:**
-- Every `<input>` MUST have an associated `<label>` or `aria-label`
-- Every `<select>` MUST have an `aria-label`
-- Every icon-only `<button>` MUST have an `aria-label`
-- Every `<button>` MUST have `focus-visible:ring-*` styles
-- Every form MUST have `autoComplete` on email/password fields
-- Every async operation MUST have loading, error, and empty states
-- Every animation MUST have a `motion-reduce` alternative
-- Every touch target MUST be minimum 44px
-
-**Design (anti-slop):**
-- Read the project's globals.css/tailwind config BEFORE writing UI — use the project's actual tokens, not stock shadcn defaults
-- Fonts must be loaded via `next/font` (or framework equivalent), not just declared in CSS
-- Chart/graph colors: use raw HSL values from tokens, not `hsl(var(--x))` when the variable already contains `hsl(...)` — this produces invalid `hsl(hsl(...))`
-- Cards must have visible elevation/distinction from background in BOTH light and dark mode
-- Navigation needs icons alongside text labels — never text-only nav
-- OAuth/social buttons need provider icons (GitHub octocat, Google G), not plain text
-- Empty states need engaging visuals (illustration, icon + descriptive text), not just "No data yet"
-- Landing pages need a visual hook above the fold (demo, screenshot, animation), not just text + subtitle
-- Use the project's brand/accent color for emphasis, not stock primary
-
-### Self-Critique (re-read diff before checks)
-
-After writing code, before running typecheck, re-read your diff and ask:
-1. Does every input have a label?
-2. Does every fetch handle errors?
-3. Does every async operation show a loading state?
-4. Could any user-supplied value reach a dangerous sink (SQL, HTML, URL fetch)?
-5. Are there any `as unknown as` casts that should be runtime-validated?
-6. Would this work in dark mode? (Are colors from theme tokens, not hardcoded?)
-7. Is every interactive element keyboard-accessible?
-8. Does the UI have visual personality, or is it stock shadcn? (Check: distinctive colors, loaded fonts, icons in nav, non-generic empty states)
-
-Fix issues found, then proceed to typecheck.
-
-### Test Generation (for API/auth/data mutations)
-
-When auto creates an API route, auth logic, hook, or data mutation, also write a test:
-
-| Created | Write Test For |
-|---------|---------------|
-| API route | Happy path (200 + response shape) + missing auth (401) |
-| Auth logic | Valid login + expired token + missing credentials |
-| Hook | Initial state + success path + error path |
-| Data mutation | Success + validation error + unauthorized |
-| RLS policy | Authorized read + unauthorized read blocked |
-
-Keep tests minimal (1-3 assertions each). Prioritize risky paths over easy-to-test pure functions.
+After writing code but before typecheck, re-read your diff against the 8-point self-critique checklist in the same reference file.
 
 ### Acceptance Criteria & Verify Tags
 
-When creating stories in prd.json (via audit, brainstorm, or bootstrap), include testable acceptance criteria and a `verify` array that tells auto which checks matter for this specific task:
-
-```json
-{
-  "S13-001": {
-    "title": "Fix SSRF in webhook endpoints",
-    "verify": ["security", "test"],
-    "acceptance": [
-      "curl to http://169.254.169.254 from webhook returns 400",
-      "curl to https://example.com from webhook returns 200"
-    ],
-    "passes": null
-  },
-  "S13-002": {
-    "title": "Add dashboard page",
-    "verify": ["visual", "a11y", "design"],
-    "passes": null
-  }
-}
-```
-
-**Verify tag meanings:**
-
-| Tag | What auto checks |
-|-----|-----------------|
-| `visual` | agent-browser screenshots desktop + mobile, no console errors |
-| `a11y` | Labels on inputs, focus-visible rings, aria-labels, keyboard nav |
-| `design` | Design token compliance check (see below) |
-| `security` | Hardening check patterns (fail-open, unsafe casts, SSRF) |
-| `auth` | Auth deny-by-default verified, middleware coverage |
-| `test` | Write or verify a test for the critical path |
-| `api` | curl with real params, verify 200 + response shape |
+When creating stories in prd.json, each story can carry a `verify: []` array and an `acceptance: []` array. Load `references/verify-tags.md` for the tag definitions (`visual`, `a11y`, `design`, `security`, `auth`, `test`, `api`) and an example story.
 
 If no `verify` field exists, auto infers from the task type (UI → visual+a11y+design, API → api+security, etc.).
 

@@ -1,6 +1,6 @@
 {
-  "version": "7.2",
-  "description": "35 active skills + 3 deprecated redirects (verify, checkpoint, browser-auth) - adds doppler (hub/spoke secrets) and memory-backup (private git repo for auto-memory)",
+  "description": "35 active skills + 3 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
+  "version": "7.3",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -241,20 +241,6 @@
       "priority": 1,
       "description": "Parallel quality audit with 7 specialized agents (Opus). Finds bugs, violations, and quality issues. Use audit for fixes, brainstorm for features."
     },
-    "browser-auth": {
-      "triggers": [],
-      "file": "browser-auth/SKILL.md",
-      "priority": 3,
-      "description": "Deprecated. Merged into agent-browser skill. Use agent-browser for browser testing and auth token injection."
-    },
-    "checkpoint": {
-      "triggers": [
-        "save"
-      ],
-      "file": "checkpoint/SKILL.md",
-      "priority": 3,
-      "description": "Deprecated. Use /compact instead. Claude has built-in memory that persists across sessions."
-    },
     "deploy": {
       "triggers": [
         "ci",
@@ -267,14 +253,6 @@
       "file": "deploy/SKILL.md",
       "priority": 2,
       "description": "Deploy workflow for Vercel, Supabase, and CI/CD pipelines. Use for deployment and CI/CD setup."
-    },
-    "verify": {
-      "triggers": [
-        "verify"
-      ],
-      "file": "verify/SKILL.md",
-      "priority": 3,
-      "description": "Redirects to review deep. Use review with depth levels instead."
     },
     "agent-browser": {
       "triggers": [

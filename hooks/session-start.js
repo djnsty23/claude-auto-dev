@@ -13,7 +13,7 @@ try {
     // ============================================================
     // 1. Display version (read from local install, no network)
     // ============================================================
-    let version = '7.2';
+    let version = '7.3';
     const manifestPath = path.join(CLAUDE_DIR, 'skills', 'manifest.json');
     if (fs.existsSync(manifestPath)) {
         try {
@@ -164,3 +164,6 @@ try {
     // Hook should never crash
     process.stderr.write(`session-start error: ${err.message}\n`);
 }
+
+// Always exit 0 — SessionStart hooks inform, never block
+process.exit(0);

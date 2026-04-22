@@ -9,7 +9,7 @@ triggers:
   - secrets
   - api key
 allowed-tools: Bash, Read, Write, Grep
-model: opus
+model: haiku
 ---
 
 # Environment Variables Workflow
