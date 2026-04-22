@@ -1,4 +1,4 @@
-# claude-auto-dev (v7.4)
+# claude-auto-dev (v7.5)
 
 ## Primary Commands
 
@@ -57,6 +57,7 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `doppler` / `setup doppler` | Install + link + migrate secrets to Doppler (hub/spoke pattern) |
 | `memory backup` | Backup/restore auto-memory to private GitHub repo |
 | `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
+| `telemetry` / `usage stats` | Show tool usage stats from local telemetry log |
 
 For quick fixes, just describe what to fix — no commands needed.
 

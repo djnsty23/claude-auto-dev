@@ -1,5 +1,20 @@
 # Changelog
 
+## [7.5] - 2026-04-22
+
+### Added — telemetry (audit finding 3.2)
+- **`hooks/telemetry.js`** — new PostToolUse hook. On every tool call, appends one JSONL line to `.claude/reports/telemetry-YYYY-MM-DD.jsonl`. Logs metadata only (tool name, input/output sizes, cwd, session, timestamp, success heuristic) — never tool input/output **contents**. Privacy-safe by design. Exit 0 always; 500ms timeout cap.
+- **`skills/telemetry/`** — read-side skill. Commands: `telemetry`, `usage stats`, `tool stats`, `token stats`. Reports top tools by event count + total bytes, per-day activity, week view. Runs on Haiku.
+- **Optional OTLP export** — set `CLAUDE_OTEL_ENDPOINT` env var to also POST each event to an OTLP JSON endpoint (Honeycomb, local collector, Jaeger). Fire-and-forget, 500ms HTTP timeout, won't slow sessions if endpoint is down.
+- **Opt-out** — set `CLAUDE_TELEMETRY_DISABLED=1` or remove the hook from settings.
+- **`scripts/test-telemetry-hook.js`** — 15-case suite: field coverage, privacy (no secret leakage), error detection, opt-out, malformed stdin resilience, unreachable-endpoint resilience, speed (<500ms). 15/15 pass. Local run: 39ms end-to-end.
+
+### Registered
+- Added a second `PostToolUse` entry with matcher `.*` in both `settings.json` and `settings-unix.json` so telemetry fires on every tool call (existing `Write|Edit` typecheck entry unchanged).
+
+### Context
+Closes audit finding 3.2 ("No OTEL / telemetry — industry standard in 2026"). The design choice: local JSONL by default so there's zero-config visibility on day one, with OTLP forwarding available to anyone who wants to wire a collector later. Honeycomb and Jaeger both accept OTLP JSON directly; no vendor lock-in.
+
 ## [7.4] - 2026-04-22
 
 ### Changed — Progressive disclosure on three more skills
