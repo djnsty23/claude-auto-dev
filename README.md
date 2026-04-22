@@ -22,6 +22,63 @@ cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
 
 Then run `claude` and say `brainstorm` — Claude scans the codebase, proposes improvements, creates stories, and works through them autonomously.
 
+---
+
+## Full Environment Restore (post-reinstall / new machine)
+
+**Use this section when:** fresh OS install, new dev machine, or onboarding to an existing claude-auto-dev setup.
+
+### For humans (manual)
+
+```powershell
+# Windows — run in an admin PowerShell
+# 1. Prereqs
+winget install -e Git.Git OpenJS.NodeJS GitHub.cli Doppler.doppler Microsoft.VisualStudioCode
+
+# 2. claude-auto-dev itself (this repo)
+git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
+cd $env:USERPROFILE\claude-auto-dev; .\install.ps1 -Full
+
+# 3. Authenticate all services
+gh auth login              # GitHub — browser flow
+doppler login              # Doppler — browser flow
+# claude login             # If Claude Code CLI installed separately
+
+# 4. Restore personal memory + config (PRIVATE repo — requires gh auth from step 3)
+#    This assumes you have a `claude-memory` private repo (see memory-backup skill)
+gh repo clone <your-username>/claude-memory $env:USERPROFILE\claude-memory
+cd $env:USERPROFILE\claude-memory
+# Follow RECOVERY.md in that repo for the per-user restore
+```
+
+```bash
+# Mac/Linux equivalent
+brew install git node gh dopplerhq/cli/doppler
+git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
+cd ~/claude-auto-dev && ./install.sh --full
+gh auth login
+doppler login
+gh repo clone <your-username>/claude-memory ~/claude-memory
+cat ~/claude-memory/RECOVERY.md
+```
+
+### For Claude (you're reading this as the agent)
+
+If the user points you at this repo post-reinstall and says "configure everything", walk this order — **stop and ask for authorization at each interactive step**:
+
+1. **Detect OS + missing prereqs** — check for `git`, `node`, `gh`, `doppler`. Install any missing via the OS package manager (`winget` on Windows, `brew` on macOS, distro-appropriate on Linux).
+2. **Verify `~/.claude/` install** — if this repo is cloned to `~/claude-auto-dev`, run `install.ps1 -Full` (Windows) or `install.sh --full` (Unix).
+3. **Check `gh auth status`** — if broken, tell the user to run `gh auth login` in their terminal. DO NOT try to run the OAuth flow yourself (requires browser).
+4. **Check `doppler me`** — if broken, tell the user to run `doppler login`. Same reason.
+5. **Offer memory restore** — ask the user if they have a private `claude-memory` repo. If yes, `gh repo clone <user>/claude-memory ~/claude-memory`, then copy `memory/projects/*` into `~/.claude/projects/*/memory/`, copy `CLAUDE.md` to `~/.claude/CLAUDE.md`, copy `rules/` to `~/.claude/rules/`. Set `~/.claude/.memory-backup-path` to the restored path so future `memory backup now` calls work.
+6. **Per-project `doppler setup`** — for each repo under `~/Downloads/code/` or `~/code/` that has a `doppler.yaml`, ensure the bind is live: `cd <repo> && doppler run -- node -e "console.log(Object.keys(process.env).length)"` should return a sensible number. If not, `doppler setup` manually.
+7. **Report** — produce a checklist showing what's restored, what the user still needs to touch (e.g. rotating a stale token, reconnecting OneDrive).
+
+**Never**:
+- Autonomously run `gh auth login` or `doppler login` — they open browsers and block waiting on user input.
+- Commit to any repo without the user having configured `git config user.email / user.name`.
+- Restore secrets into local `.env` files — they belong in Doppler only.
+
 ```
 You: brainstorm         → Claude finds 5 improvements
 You: brainstorm apply   → Creates 5 stories in prd.json
