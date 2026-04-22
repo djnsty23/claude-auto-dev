@@ -1,5 +1,30 @@
 # Changelog
 
+## [7.4] - 2026-04-22
+
+### Changed — Progressive disclosure on three more skills
+Continuing v7.3's Anthropic-idiomatic split pattern. Three more heavy skills now load long reference sections on demand instead of inlining everything.
+
+- **`audit/SKILL.md`** — 398 → 280 lines (~4765 → 3675 tokens, 23% reduction).
+  - New `references/known-safe-patterns.md` — false-positive list (shadcn nesting, React 19 server actions, Supabase RLS, etc.) that every audit agent prompt needs
+  - New `references/persist-findings.md` — the 8-step prd.json persistence flow (read, dedupe, batch, add, session tasks, report, score tracking, npm audit)
+  - Dropped the one remaining `MUST` in the body
+
+- **`setup-project/SKILL.md`** — 417 → 217 lines (~2948 → 1806 tokens, 39% reduction — biggest win).
+  - New `references/monorepo-scaffold.md` — full directory layout + pnpm-workspace.yaml + root package.json + shared-package template
+  - New `references/tooling-config.md` — TypeScript strict flags, Biome config, shadcn init, .gitattributes, .gitignore, .npmrc ready-to-paste templates
+  - New `references/version-defaults.md` — the April 2026 pinned version table
+
+- **`doppler/SKILL.md`** — 255 → 218 lines (~2353 → 2074 tokens, 12% reduction).
+  - New `references/extract-to-hub.md` — shared-key and Supabase extraction command sequences with safety rules (the migration steps are rare but dense)
+
+### Not done
+- Consolidation of `clean` / `status` / `archive-prd` — `clean` (68 lines) and `status` (42) are already lean; `archive-prd` (141) has a clear user-facing responsibility called from auto. Consolidation would break muscle memory without meaningful token savings.
+- OTEL telemetry exporter — needs a design decision on destination (local collector vs Honeycomb free tier vs Jaeger). Deferred.
+
+### Aggregate impact
+Running `auto` with `audit` and `setup-project` triggered (common combo) saves ~2,500 tokens per session vs v7.2. Over a typical multi-session day, meaningful.
+
 ## [7.3] - 2026-04-22
 
 ### Added

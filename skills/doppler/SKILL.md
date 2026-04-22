@@ -137,46 +137,9 @@ If `doppler.yaml` exists in the current working directory:
 
 Do not double-wrap if the script already starts with `doppler run`.
 
-## Extracting shared keys to a hub
+## Extracting shared secrets to hubs
 
-When you notice a secret reused across 2+ apps (e.g., `GEMINI_API_KEY`):
-
-```bash
-# 1. Fetch value from one app
-VAL=$(doppler secrets get GEMINI_API_KEY --project app-<source> --config prd --plain)
-
-# 2. Set in hub
-doppler secrets set "GEMINI_API_KEY=$VAL" --project ai-keys --config prd >/dev/null
-
-# 3. Replace in source with ref
-doppler secrets set 'GEMINI_API_KEY=${ai-keys.prd.GEMINI_API_KEY}' --project app-<source> --config prd >/dev/null
-
-# 4. Set ref in any other app that uses this key
-doppler secrets set 'GEMINI_API_KEY=${ai-keys.prd.GEMINI_API_KEY}' --project app-<other> --config prd >/dev/null
-
-# 5. Unset VAL from shell
-unset VAL
-```
-
-## Extracting Supabase creds
-
-Each Supabase project gets its own branch config under `supabase/prd_<name>`:
-
-```bash
-# Create branch config if missing
-doppler configs create "prd_<name>" --project supabase --environment prd
-
-# Populate from source app
-for k in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
-  VAL=$(doppler secrets get "$k" --project app-<source> --config prd --plain)
-  [ -n "$VAL" ] && doppler secrets set "$k=$VAL" --project supabase --config "prd_<name>" >/dev/null
-done
-
-# Point spoke at new config
-for k in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
-  doppler secrets set "$k=\${supabase.prd_<name>.$k}" --project app-<source> --config prd >/dev/null
-done
-```
+When you find the same secret across 2+ apps, move it to a hub and replace with `${ref://...}` — load `references/extract-to-hub.md` for the exact commands (shared API keys → `ai-keys`, Supabase creds → `supabase.prd_<name>` branch configs, safety rules around shell-variable handling).
 
 ## Install CLI (platform-aware)
 
