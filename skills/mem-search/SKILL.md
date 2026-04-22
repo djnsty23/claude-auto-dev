@@ -1,4 +1,5 @@
 ---
+name: mem-search
 description: Search persistent project memory across sessions — decisions, bugs, features, discoveries
 triggers:
   - mem search
@@ -12,9 +13,9 @@ triggers:
   - what was
   - last session
   - past sessions
-allowed-tools:
-  - Bash
-  - Read
+allowed-tools: Bash, Read
+model: opus
+user-invocable: true
 ---
 
 # Memory Search

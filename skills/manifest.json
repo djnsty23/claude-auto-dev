@@ -1,6 +1,6 @@
 {
-  "version": "7.1",
-  "description": "33 active skills + 3 deprecated redirects (verify, checkpoint, browser-auth) - includes iterate, scan (agent-browser/Playwright QA), migrate, stripe, seo",
+  "version": "7.2",
+  "description": "35 active skills + 3 deprecated redirects (verify, checkpoint, browser-auth) - adds doppler (hub/spoke secrets) and memory-backup (private git repo for auto-memory)",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -365,6 +365,46 @@
       "file": "update/SKILL.md",
       "priority": 1,
       "description": "Updates claude-auto-dev to latest version. Syncs repo with ~/.claude."
+    },
+    "mem-search": {
+      "triggers": [
+        "mem search",
+        "mem recent",
+        "mem decisions",
+        "mem bugs",
+        "mem timeline",
+        "mem stats",
+        "remember",
+        "what did we",
+        "what was",
+        "last session",
+        "past sessions"
+      ],
+      "file": "mem-search/SKILL.md",
+      "priority": 2,
+      "description": "Search persistent project memory across sessions — decisions, bugs, features, discoveries"
+    },
+    "doppler": {
+      "triggers": [
+        "doppler",
+        "setup doppler",
+        "add doppler",
+        "env to doppler",
+        "migrate env"
+      ],
+      "file": "doppler/SKILL.md",
+      "priority": 2,
+      "description": "Manage environment variables with Doppler — auto-install CLI, login, link projects, wrap commands with `doppler run`. Replaces scattered .env files with a hub/spoke architecture."
+    },
+    "memory-backup": {
+      "triggers": [
+        "memory backup",
+        "backup memory",
+        "restore memory"
+      ],
+      "file": "memory-backup/SKILL.md",
+      "priority": 2,
+      "description": "Backs up auto-memory files to a private GitHub repo. One-command setup, committed daily via Task Scheduler (or on-demand). Restore is a single clone."
     },
     "commit": {
       "triggers": [

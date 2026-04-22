@@ -1,4 +1,4 @@
-# claude-auto-dev (v7.1)
+# claude-auto-dev (v7.2)
 
 ## Primary Commands
 
@@ -54,6 +54,9 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `seo` / `schema` | SEO and structured data |
 | `remotion` / `video` | Remotion video creation |
 | `update dev` | Sync latest skills from GitHub |
+| `doppler` / `setup doppler` | Install + link + migrate secrets to Doppler (hub/spoke pattern) |
+| `memory backup` | Backup/restore auto-memory to private GitHub repo |
+| `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
 
 For quick fixes, just describe what to fix — no commands needed.
 

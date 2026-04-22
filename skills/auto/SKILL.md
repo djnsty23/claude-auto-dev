@@ -267,6 +267,7 @@ Before marking a task done, verify each acceptance criterion. "Does it compile?"
 3. Match patterns — do not introduce new patterns when existing ones cover the use case
 4. **For UI tasks:** Read globals.css (or tailwind config) + layout.tsx to understand the project's design system — fonts, colors, component patterns. Use the project's ACTUAL tokens, not stock defaults. Check if fonts are loaded via `next/font` or just declared in CSS.
 5. **For library-specific code (third-party APIs, SDKs, framework features):** If Context7 tools are available (`mcp__plugin_context7_context7__*`), query them for version-pinned docs before writing code that touches the library. This prevents using deprecated APIs or patterns from old training data — even for well-known libraries like Next.js, React, and Supabase.
+6. **Check for Doppler:** If `doppler.yaml` exists in the repo, secrets live in Doppler — prepend `doppler run --` when running `npm/pnpm/bun run dev|build|start|test` commands. If `doppler` CLI is missing, install first (see `doppler` skill). If not logged in, stop and guide user to `doppler login`.
 
 **Design context is not optional.** Auto-generated UI without reading the design system produces stock shadcn that fails the AI slop checklist. Spend 30 seconds reading the design tokens before writing any component.
 

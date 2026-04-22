@@ -1,5 +1,21 @@
 # Changelog
 
+## [7.2] - 2026-04-22
+
+### Added
+- **`doppler` skill** — Hub/spoke secret management via Doppler. Handles install detection (`winget install doppler.doppler` on Windows, brew on macOS, curl on Linux), login guidance (`doppler login`), per-project linking via `doppler.yaml`, command wrapping (`doppler run -- npm run dev`), and shared-key extraction to hub projects with cross-project `${ref://hub.config.KEY}` references. Fits the Developer plan's 10-project cap by consolidating supabase accounts into branch configs. Rotate once in a hub, all spokes pick up the new value.
+- **`memory-backup` skill** — Private GitHub repo mirroring `~/.claude/projects/*/memory/`. One-command setup creates `djnsty23/claude-memory` (private), on-demand `memory backup now`, Windows Task Scheduler recipe for daily auto-commits, one-command `memory restore` after Windows reinstall. Explicitly excludes `sessions/`, `tasks/`, and other ephemeral state.
+
+### Changed
+- **`env-vars` skill** — Doppler is now the recommended pattern. Skill defers to the `doppler` skill when `doppler.yaml` is present, otherwise falls back to `.env.local` flow. Added "Migrate to Doppler" option.
+- **`auto` Context Loading** — Step 6 added: detect `doppler.yaml` and prepend `doppler run --` to dev/build/test commands automatically. Installs CLI if missing, guides login if not authenticated.
+- **`setup-project` onboarding** — Gap check now suggests Doppler migration when `.env.local` has 3+ vars and no `doppler.yaml` exists yet.
+
+### Notes
+- Doppler Developer plan is free; cross-project secret references work on it (confirmed 2026-04-22)
+- Project cap is 10 on free tier — skill enforces this check before creating new projects
+- `doppler login` is a browser OAuth flow; Claude cannot run it autonomously — always guide user
+
 ## [7.1] - 2026-04-09
 
 ### Added
