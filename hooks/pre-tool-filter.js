@@ -25,6 +25,7 @@ const SAFE_RM_REGEX = new RegExp(
 
 const DANGEROUS_BASH_PATTERNS = [
     /rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|\/)|(-[a-z]*f[a-z]*\s+-[a-z]*r))/i,   // rm -rf, rm -r -f
+    /rm\s+-[rRf]+\s+~\/?(\s|$)/,              // rm -rf ~ / ~/   (home dir wipe)
     /rm\s+--recursive/i,                      // rm --recursive
     /rm\s+--force\s+--recursive/i,            // rm --force --recursive
     /rm\s+--recursive\s+--force/i,            // rm --recursive --force

@@ -1,5 +1,25 @@
 # Changelog
 
+## [7.3] - 2026-04-22
+
+### Added
+- **`scripts/test-pre-tool-filter.js`** — 33-case test suite for the PreToolUse hook. Caught a real bug on first run: `rm -rf ~/` (home-dir wipe) was not being blocked. Now blocked.
+- **Auto-lint loop in `post-tool-typecheck.js`** (Aider-style) — after typecheck, runs the project's linter (Biome > ESLint, via package.json `lint` script or `biome check .` / `eslint .` fallback). Lint failures get printed to stderr (first 30 lines, truncation notice) so Claude can self-fix in the next turn. Skipped silently if no linter is configured.
+
+### Changed
+- **`auto/SKILL.md`** — split into `references/generation-constraints.md` + `references/verify-tags.md` (Anthropic-idiomatic progressive disclosure). Main body dropped from 590 lines / ~7k tokens to 501 lines / ~6k tokens. Also dropped all 12 `MUST` / `NEVER` ALL-CAPS directives — rewritten as reasoned prose explaining the failure mode each rule prevents. Follows Anthropic's [skill-creator guidance](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md): "yellow flag — if possible, reframe and explain the reasoning."
+- **Haiku tier for mechanical skills** — `status`, `archive-prd`, `clean`, `update`, `env-vars` moved from Opus to Haiku. ~12× cheaper per token on operations that don't require reasoning.
+
+### Fixed
+- **`hooks/session-start.js`** — added `process.exit(0)` at end so the hook can't exit non-zero if an unhandled error slips past the try/catch. Every other hook had this; session-start was the one gap.
+- **`hooks/pre-tool-filter.js`** — `rm -rf ~` and `rm -rf ~/` are now blocked. Tests caught the gap on first run.
+
+### Removed
+- **Deprecated skill dirs deleted:** `skills/verify/`, `skills/checkpoint/`, `skills/browser-auth/`. Manifest entries in `deprecated` retained so rename history stays discoverable.
+
+### Context
+Post-audit pass (see `.claude/reports/AUDIT-2026-04-22.md`). Findings were cross-referenced against Anthropic's official Agent Skills spec ([agentskills.io](https://agentskills.io)) and 10 popular 2026 Claude Code frameworks.
+
 ## [7.2] - 2026-04-22
 
 ### Added

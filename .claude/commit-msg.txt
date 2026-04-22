@@ -1,0 +1,43 @@
+feat: v7.3 — audit-driven improvements
+
+From the full audit at .claude/reports/AUDIT-2026-04-22.md.
+Validated against Anthropic's Agent Skills spec + 10 popular frameworks.
+
+### Critical fixes
+- hooks/session-start.js: add `process.exit(0)` at end — was
+  the only hook without an explicit exit, could return non-zero
+  on unhandled error. Now consistent.
+- hooks/pre-tool-filter.js: new safety pattern for `rm -rf ~`
+  and `rm -rf ~/` (home-dir wipe). Caught by the new test
+  suite on first run.
+- skills/{verify,checkpoint,browser-auth}/: directories deleted.
+  Deprecated rename history retained in manifest.deprecated.
+
+### Progressive disclosure (Anthropic-idiomatic)
+- skills/auto/references/generation-constraints.md: new,
+  holds ~100-line "before writing code" checklist
+- skills/auto/references/verify-tags.md: new, holds the
+  prd.json verify-tag table
+- skills/auto/SKILL.md: shortened 590→501 lines, ~7k→6k tokens
+- All 12 `MUST`/`NEVER` directives in auto rewritten as
+  reasoned prose per Anthropic's skill-creator guidance
+
+### Cost optimization
+- status/archive-prd/clean/update/env-vars moved to Haiku
+  (~12× cheaper per token on mechanical ops that don't
+  require reasoning; commit stays on Opus for message
+  composition quality)
+
+### Self-healing (Aider pattern)
+- hooks/post-tool-typecheck.js: now also runs Biome (preferred)
+  or ESLint after typecheck. Fails get printed to stderr so
+  the model self-fixes on the next turn. Skips silently if no
+  linter is configured. First 30 lines shown, rest truncated.
+
+### Testing
+- scripts/test-pre-tool-filter.js: 33-case suite covering
+  safe-rm regex, dangerous-command blocks, force-push deny,
+  npx allowlist, Write/Edit protected paths, Read skip
+  patterns. 33/33 pass.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>

@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-7.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-7.3-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build — Claude handles the rest.
 
@@ -115,7 +115,7 @@ Your own skills with different names (e.g. `my-company-skill/`) are always prese
 
 ```
 You: update dev
-Claude: [pulls latest, re-syncs skills/hooks/agents] Updated to v7.2
+Claude: [pulls latest, re-syncs skills/hooks/agents] Updated to v7.3
 ```
 
 Or from the shell:

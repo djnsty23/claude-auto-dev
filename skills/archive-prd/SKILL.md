@@ -6,7 +6,7 @@ triggers:
   - compact prd
   - prd too large
 allowed-tools: Read, Write, Edit, Bash
-model: opus
+model: haiku
 user-invocable: true
 argument-hint: "[status|S-ID|unarchive S-ID]"
 ---
