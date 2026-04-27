@@ -164,6 +164,17 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.claude/hooks/post-compact.js\"",
+            "timeout": 5,
+            "statusMessage": "Restoring sprint state..."
+          }
+        ]
       }
     ],
     "Stop": [
