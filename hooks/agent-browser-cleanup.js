@@ -42,6 +42,35 @@ const isWin = process.platform === 'win32';
 function killZombies() {
     try {
         if (isWin) {
+            // Sweep stuck `agent-browser` CLI invocations FIRST, before tree-
+            // killing the binary. Each `agent-browser eval --stdin` (or any
+            // CLI subcommand) spawns a Node process that spawns the binary;
+            // if the Node process is hung (e.g. inside a polling loop), it
+            // keeps re-spawning the binary as old ones get killed. The 2026-
+            // 04-29 afternoon recurrence was caused by a background `until`
+            // loop calling `agent-browser eval --stdin` for hours after a
+            // browser test "finished" — each iteration leaked an orphan, and
+            // the accumulation broke Win+Shift+S. Killing the Node CLI
+            // processes first stops the leak at the source.
+            try {
+                execSync(
+                    'wmic process where "CommandLine like \'%agent-browser%eval%\'" delete',
+                    { stdio: 'ignore', windowsHide: true },
+                );
+            } catch {
+                // wmic is deprecated on Win11 23H2+ — fall back to PS.
+                const ps =
+                    "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'agent-browser.*eval' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+                const encoded = Buffer.from(ps, 'utf16le').toString('base64');
+                try {
+                    execSync(
+                        `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+                        { stdio: 'ignore', windowsHide: true },
+                    );
+                } catch {
+                    // best-effort
+                }
+            }
             // /T is critical: agent-browser spawns renderer / GPU / network /
             // crashpad child processes. Killing only the parent leaves the
             // children alive — they hold the global Win+Shift+S hotkey and
@@ -63,7 +92,7 @@ function killZombies() {
             execSync('pkill -f "agent-browser-(linux|darwin)"', { stdio: 'ignore' });
         }
     } catch {
-        // Expected when no zombies — taskkill/pkill exit non-zero on no match.
+        // Expected when no zombies — taskkill/pkill/wmic exit non-zero on no match.
     }
 }
 
