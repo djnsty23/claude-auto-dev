@@ -126,6 +126,20 @@ function stripPrivate(text) {
     return text.replace(/<private>[\s\S]*?<\/private>/g, '[REDACTED]');
 }
 
+// One canonical form for project paths, applied at EVERY write and query —
+// without it three spellings of the same project silo into three memories:
+//   C:\Users\x\proj  (hook process.cwd())     → c:/users/x/proj
+//   /c/Users/x/proj  (Git Bash "$(pwd)")      → c:/users/x/proj
+//   .../proj/.claude/worktrees/slug (worktree)→ the MAIN project's path
+function normalizeProject(p) {
+    if (!p) return '';
+    let s = String(p).replace(/\\/g, '/').replace(/\/+$/, '');
+    const posix = s.match(/^\/([a-zA-Z])\/(.*)$/);          // Git Bash /c/... form
+    if (posix) s = posix[1] + ':/' + posix[2];
+    s = s.replace(/\/\.claude\/worktrees\/[^/]+$/, '');     // worktree → main project
+    return s.toLowerCase();
+}
+
 function isDuplicate(db, hash, windowSeconds = 30) {
     try {
         // Check if any observation with this hash exists within the time window
@@ -163,6 +177,7 @@ const api = {
     isAvailable,
 
     startSession(projectPath) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return null;
@@ -202,6 +217,7 @@ const api = {
     },
 
     saveObservation({ sessionId, projectPath, type, title, concept, sourceFiles, tokenCost, rawData }) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return null;
@@ -238,6 +254,7 @@ const api = {
 
     // Search — Layer 1: Index (compact, ~50-100 tokens)
     searchIndex(query, projectPath, limit = 20) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return [];
@@ -272,6 +289,7 @@ const api = {
 
     // Search — Layer 2: Timeline (session context, ~500-1000 tokens)
     searchTimeline(query, projectPath, limit = 5) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return [];
@@ -302,6 +320,7 @@ const api = {
 
     // Context for session start injection
     getRecentContext(projectPath, limit = 3) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return [];
@@ -318,6 +337,7 @@ const api = {
 
     // Get observations by type
     getByType(type, projectPath, limit = 20) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return [];
@@ -334,6 +354,7 @@ const api = {
 
     // Recent observations for a project
     getRecent(projectPath, limit = 10) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return [];
@@ -360,6 +381,7 @@ const api = {
 
     // List all sessions for a project
     listSessions(projectPath, limit = 20) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return [];
@@ -376,6 +398,7 @@ const api = {
 
     // Stats for a project
     getStats(projectPath) {
+        projectPath = normalizeProject(projectPath);
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return null;

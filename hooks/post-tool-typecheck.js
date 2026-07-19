@@ -31,7 +31,15 @@ try {
             const { classifyObservation } = require(classifierPath);
 
             if (memDB.isAvailable()) {
-                const sessionId = process.env.AUTO_DEV_SESSION_ID || null;
+                // Hooks run as separate processes — the env var session-start sets dies
+                // with its process. The session FILE it also writes is the cross-process
+                // carrier; without this fallback no observation was ever captured.
+                let sessionId = process.env.AUTO_DEV_SESSION_ID || null;
+                if (!sessionId) {
+                    try {
+                        sessionId = fs.readFileSync(path.join(process.cwd(), '.claude', 'memory-session-id'), 'utf8').trim() || null;
+                    } catch { /* no session file — capture skips quietly */ }
+                }
                 const toolName = data.tool_name || '';
                 const toolInput = data.tool_input || {};
                 const toolResult = (data.tool_output || '').slice(0, 500);

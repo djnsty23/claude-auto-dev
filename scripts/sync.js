@@ -131,10 +131,17 @@ const repoSkillsSrc = path.join(repo, 'skills');
 const repoHooksSrc = path.join(repo, 'hooks');
 const repoAgentsSrc = path.join(repo, 'agents');
 const repoRulesSrc = path.join(repo, 'config', 'rules');
+const repoScriptsSrc = path.join(repo, 'scripts');
 
 const shippedSkillDirs = listDirs(repoSkillsSrc).filter(n => !deprecatedSkillNames.has(n));
 const shippedSkillFiles = ['manifest.json', 'commands.md'].filter(f => fs.existsSync(path.join(repoSkillsSrc, f)));
 const shippedHookFiles = listFiles(repoHooksSrc, '.js');
+// Runtime scripts the hooks require() at ~/.claude/scripts/ — a whitelist, NOT the
+// whole dir (sync.js itself + test-*.js are repo tooling and must not ship).
+// Without this the memory pipeline was dead on every install: hooks guard on
+// fs.existsSync(~/.claude/scripts/memory-db.js) and silently no-op'd forever.
+const shippedScriptFiles = ['memory-db.js', 'observation-classifier.js']
+    .filter(f => fs.existsSync(path.join(repoScriptsSrc, f)));
 const shippedAgentFiles = listFiles(repoAgentsSrc, '.md');
 const shippedRuleFiles = listFiles(repoRulesSrc, '.md');
 
@@ -155,6 +162,7 @@ if (!sidecar && fs.existsSync(path.join(dest, 'skills', 'manifest.json'))) {
             for (const n of shippedSkillDirs) previouslyInstalled.add('skills/' + n);
             for (const f of shippedSkillFiles) previouslyInstalled.add('skills/' + f);
             for (const f of shippedHookFiles) previouslyInstalled.add('hooks/' + f);
+            for (const f of shippedScriptFiles) previouslyInstalled.add('scripts/' + f);
             for (const f of shippedAgentFiles) previouslyInstalled.add('agents/' + f);
             if (syncRules) for (const f of shippedRuleFiles) previouslyInstalled.add('rules/' + f);
             for (const n of deprecatedSkillNames) previouslyInstalled.add('skills/' + n);
@@ -175,6 +183,7 @@ function checkCollision(relPath, srcPath, type) {
 for (const n of shippedSkillDirs) checkCollision('skills/' + n, path.join(repoSkillsSrc, n), 'dir');
 for (const f of shippedSkillFiles) checkCollision('skills/' + f, path.join(repoSkillsSrc, f), 'file');
 for (const f of shippedHookFiles) checkCollision('hooks/' + f, path.join(repoHooksSrc, f), 'file');
+for (const f of shippedScriptFiles) checkCollision('scripts/' + f, path.join(repoScriptsSrc, f), 'file');
 for (const f of shippedAgentFiles) checkCollision('agents/' + f, path.join(repoAgentsSrc, f), 'file');
 if (syncRules) for (const f of shippedRuleFiles) checkCollision('rules/' + f, path.join(repoRulesSrc, f), 'file');
 
@@ -237,6 +246,12 @@ for (const f of shippedHookFiles) {
     newItems['hooks/' + f] = 'file';
 }
 console.log('[Sync] Hooks: ' + shippedHookFiles.length + ' files');
+
+for (const f of shippedScriptFiles) {
+    copyFile(path.join(repoScriptsSrc, f), path.join(dest, 'scripts', f));
+    newItems['scripts/' + f] = 'file';
+}
+console.log('[Sync] Scripts: ' + shippedScriptFiles.length + ' files');
 
 for (const f of shippedAgentFiles) {
     copyFile(path.join(repoAgentsSrc, f), path.join(dest, 'agents', f));
