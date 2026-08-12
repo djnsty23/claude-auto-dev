@@ -75,9 +75,21 @@ accumulated knowledge is edited in a session, prints a compact `[Memory] Domain
 knowledge for <area> (<n> notes):` line plus the top few items to stderr. This
 is **throttled to once per area per session** via a small state file
 (`.claude/knowledge-surfaced`, git-ignored), so it surfaces knowledge without
-flooding: at most one brief is computed per distinct area per session. Root-level
-files and empty/too-broad areas are skipped, and everything degrades silently
-when the memory DB is unavailable.
+flooding: at most one brief is computed per distinct area per session. The state
+file is rewritten on each update to hold only the current session's markers, so
+it stays bounded to the active session's areas rather than growing across
+sessions. Root-level files and empty/too-broad areas are skipped, and everything
+degrades silently when the memory DB is unavailable. A transient DB failure is
+**not** recorded as surfaced, so the next edit retries; only a real result (even
+an empty one) is recorded.
+
+**Limitation — monorepo over-broadening.** The auto-surfaced area is derived from
+the **first two path segments** of the edited file's directory. In a monorepo
+this collapses `packages/foo/src/auth/login.js` to just `packages/foo`, so every
+area inside a package shares one throttle key and one brief. Invoke the skill
+explicitly with a deeper area (e.g. `knowledge packages/foo/src/auth`) when you
+need finer granularity — the on-demand `knowledge <area>` command accepts any
+path prefix.
 
 ## When to Use
 

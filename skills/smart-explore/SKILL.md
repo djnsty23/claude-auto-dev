@@ -35,11 +35,15 @@ native build, no network, works offline everywhere. It reads code line-by-line
 and pattern-matches definitions:
 
 - **JavaScript / TypeScript** (`.js .mjs .cjs .ts .tsx .jsx`): imports/requires,
-  top-level `function` declarations (name + params + line), arrow-function
-  consts, `class` names + their methods, `interface`/`type` names, `export` /
-  `module.exports` names, and notable top-level consts.
-- **Python** (`.py`): `import` / `from`, top-level `def` and `class` (with
-  methods), using indentation to detect top level.
+  top-level `function` declarations (including generic `foo<T>(…)`, name + params
+  + line), arrow-function consts, `class` names + their methods (including
+  `#private()` methods), `interface` / `type` / `enum` names, `export` /
+  `module.exports` names, and notable top-level consts. TS constructor-parameter
+  modifiers (`public`/`private`/`protected`/`readonly`) are stripped so a param
+  reads `http`, not `private http`.
+- **Python** (`.py`): `import` / `from`, top-level `def` / `async def` and
+  `class` (with methods, including `async def` methods), using indentation to
+  detect top level.
 - **Other languages**: a generic keyword scan (`function`, `def`, `class`,
   `func`, `type`, `public …(`, etc.). When nothing structural is found it
   honestly reports `[no structure detected — N lines]` rather than inventing
@@ -57,9 +61,10 @@ or misread:
   captures only what's on the first line.
 - **Dynamic / computed exports** — `export * from …`, re-exports, and exports
   built at runtime.
-- **Unusual syntax** — decorators, deeply nested generics, unconventional
-  formatting, template-string braces, or minified code can confuse the brace
-  tracker.
+- **Decorators & unusual syntax** — decorators, unconventional formatting,
+  template-string braces, or minified code can confuse the brace tracker.
+- **Nested `def` inside a method (Python)** — a `def` nested inside a method is
+  indented like a sibling method and is attributed to the enclosing class.
 - **IIFEs / assigned expressions** — a const assigned an immediately-invoked
   function may show up oddly.
 

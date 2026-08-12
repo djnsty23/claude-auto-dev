@@ -35,6 +35,10 @@
 ### Tested
 - **`scripts/test-semantic-search.js`** — new suite. Pure-ranker tests (always run, no DB): conceptual ranking, stemming, synonym bridging, empty-input handling. DB tests (skipped cleanly on older Node without `node:sqlite`): `<private>` redaction across title/concept/raw_data, and `searchSmart` surfacing a paraphrased match that exact FTS would miss.
 
+### Fixed — smart-explore extraction & auto-injection hardening
+- **`scripts/smart-explore.js`** — an adversarial review found real extraction bugs, now fixed (regex-scoped): Python `async def` (top-level **and** methods) is captured; TS/JS generic functions `foo<T>(x)` (and the `const f = <T>(x) =>` arrow form) are no longer dropped; `export default function X`/`class Y` no longer emit a phantom export literally named `"function"`/`"class"` while the real symbol is still captured; `#private()` methods and TS `enum` declarations are captured; TS constructor-parameter modifiers (`public`/`private`/`protected`/`readonly`) are stripped so a param reads `http` not `private http`; and `savedPct` is clamped at 0 so tiny inputs never print a negative "% smaller". Comments/strings are still not parsed as symbols and the binary/huge/malformed guards are unchanged. New regression cases added to `scripts/test-smart-explore.js` (now 53 cases).
+- **`hooks/post-tool-typecheck.js`** — the knowledge auto-injection throttle file (`.claude/knowledge-surfaced`) is now rewritten to keep only the **current session's** markers before appending, so it stays bounded to the session's areas instead of growing unbounded across sessions (matching its documented "session-specific" intent). A **transient** DB failure (`knowledge()` returns `null`) is no longer recorded as surfaced, so the next edit retries; a real empty result (`total === 0`) is still recorded to avoid recompute. Monorepo over-broadening at the 2-segment area granularity is now documented in code and in `skills/knowledge-agent/SKILL.md`. A capture-active injection case was added to `scripts/test-knowledge-injection.js`.
+
 ## [7.5] - 2026-04-22
 
 ### Added — telemetry (audit finding 3.2)

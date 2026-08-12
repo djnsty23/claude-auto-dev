@@ -122,6 +122,69 @@ if (!memDB.isAvailable()) {
   });
   cases.push(['new session re-surfaces the same area (session-scoped throttle)',
     /Domain knowledge for src\/auth/.test(r5.stderr || '')]);
+
+  // 6) CAPTURE-ACTIVE: unlike the rest of this suite, KEEP observation-classifier.js
+  //    installed so the hook's capture block runs BEFORE injection (as in production).
+  //    Uses its own temp HOME/DB so it can't perturb the deterministic cases above.
+  //    With capture live the exact note count is nondeterministic, so we assert the
+  //    invariants that must always hold: exit 0, no crash, at most ONE injection
+  //    header for the area (capture→inject ordering doesn't double-handle), and the
+  //    throttle marker written exactly once.
+  {
+    const CAP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'knowinject-cap-'));
+    const CAP_SCRIPTS = path.join(CAP_HOME, '.claude', 'scripts');
+    fs.mkdirSync(CAP_SCRIPTS, { recursive: true });
+    for (const f of ['memory-db.js', 'semantic-search.js', 'observation-classifier.js']) {
+      fs.copyFileSync(path.join(REPO_SCRIPTS, f), path.join(CAP_SCRIPTS, f));
+    }
+
+    // Seed src/auth knowledge into CAP_HOME's DB (memory-db binds DB_PATH from HOME
+    // at load time, so temporarily point HOME at CAP_HOME while requiring/seeding).
+    const prevHome = process.env.HOME;
+    const prevProfile = process.env.USERPROFILE;
+    process.env.HOME = CAP_HOME;
+    process.env.USERPROFILE = CAP_HOME;
+    const capDB = require(path.join(CAP_SCRIPTS, 'memory-db.js'));
+    const CAP_PROJ = path.join(CAP_HOME, 'proj');
+    fs.mkdirSync(CAP_PROJ, { recursive: true });
+    const capSid = capDB.startSession(CAP_PROJ);
+    capDB.saveObservation({
+      sessionId: capSid, projectPath: CAP_PROJ, type: 'decision',
+      title: 'chose bcrypt for password hashing',
+      concept: 'adaptive cost factor resists brute-force attacks',
+      sourceFiles: ['src/auth/hash.js']
+    });
+    process.env.HOME = prevHome;
+    process.env.USERPROFILE = prevProfile;
+
+    const CAP_SESSION = 'cap-sess-1';
+    const capRun = spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({
+        tool_name: 'Edit',
+        tool_input: { file_path: path.join(CAP_PROJ, 'src/auth/login.js') },
+        tool_output: 'ok'
+      }),
+      encoding: 'utf8',
+      cwd: CAP_PROJ,
+      env: { ...process.env, HOME: CAP_HOME, USERPROFILE: CAP_HOME, AUTO_DEV_SESSION_ID: CAP_SESSION }
+    });
+
+    const capErr = capRun.stderr || '';
+    const headerCount = (capErr.match(/Domain knowledge for src\/auth/g) || []).length;
+    cases.push(['capture-active: hook exits 0 with capture block running', capRun.status === 0]);
+    cases.push(['capture-active: no hook crash / uncaught error',
+      !/post-tool-typecheck error:/.test(capErr) && !/\[Memory\] capture error:/.test(capErr)]);
+    cases.push(['capture-active: at most one injection header for the area (no double-handle)',
+      headerCount <= 1]);
+    cases.push(['capture-active: throttle marker recorded exactly once for (session, area)', (() => {
+      const sf = path.join(CAP_PROJ, '.claude', 'knowledge-surfaced');
+      if (!fs.existsSync(sf)) return false;
+      const lines = fs.readFileSync(sf, 'utf8').split('\n').filter(Boolean);
+      return lines.filter((l) => l === `${CAP_SESSION}\tsrc/auth`).length === 1;
+    })()]);
+
+    try { fs.rmSync(CAP_HOME, { recursive: true, force: true }); } catch {}
+  }
 }
 
 // --- Report ---

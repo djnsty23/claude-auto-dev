@@ -72,6 +72,11 @@ try {
         // capped to the first 1-2 path segments (e.g. src/auth/login.js →
         // "src/auth", hooks/x.js → "hooks"). Root-level files / empty / "."
         // are skipped to avoid noise.
+        // LIMITATION (monorepo over-broadening): the 2-segment cap collapses a
+        // monorepo's `packages/foo/src/auth/login.js` to just `packages/foo`, so
+        // all of a package's areas share one throttle key and one brief. This is
+        // a deliberate simplicity trade-off, not a bug — documented in
+        // skills/knowledge-agent/SKILL.md.
         let area = '';
         if (filePath) {
             const rel = path.relative(process.cwd(), filePath).replace(/\\/g, '/');
@@ -135,13 +140,26 @@ try {
                             }
                             process.stderr.write(out.join('\n') + '\n');
                         }
-                        // Record the area as surfaced whether or not it had content,
-                        // so an empty area is never recomputed every edit this session.
-                        try {
-                            fs.mkdirSync(path.join(process.cwd(), '.claude'), { recursive: true });
-                            const needsNL = existing && !existing.endsWith('\n');
-                            fs.appendFileSync(surfacedFile, (needsNL ? '\n' : '') + marker + '\n');
-                        } catch { /* non-critical */ }
+                        // Record the area as surfaced ONLY when knowledge() returned a
+                        // real result object. A real empty result (total === 0) is still
+                        // recorded so an empty area is not recomputed every edit this
+                        // session; but a transient DB failure / broken circuit
+                        // (brief === null) is NOT recorded, so the next edit can retry.
+                        if (brief !== null) {
+                            try {
+                                fs.mkdirSync(path.join(process.cwd(), '.claude'), { recursive: true });
+                                // Rewrite the throttle file to keep ONLY the CURRENT
+                                // session's markers (drop other sessions' lines) before
+                                // appending the new one. This bounds the file to this
+                                // session's areas across restarts and matches the
+                                // "session-specific" intent instead of growing unbounded.
+                                const kept = existing
+                                    .split('\n')
+                                    .filter((l) => l && l.startsWith(sessionId + '\t'));
+                                kept.push(marker);
+                                fs.writeFileSync(surfacedFile, kept.join('\n') + '\n');
+                            } catch { /* non-critical */ }
+                        }
                     }
                 }
             }

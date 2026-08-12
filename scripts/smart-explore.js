@@ -78,19 +78,28 @@ function extractJs(src) {
   const reImportFrom = /^\s*import\s+[^;]*?\s+from\s+['"]([^'"]+)['"]/;
   const reImportBare = /^\s*import\s+['"]([^'"]+)['"]/;
   const reRequire = /\brequire\(\s*['"]([^'"]+)['"]\s*\)/;
-  const reFunc = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z0-9_$]+)\s*\(([^)]*)\)/;
-  const reArrow = /^\s*(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*(?::[^=]+)?=\s*(?:async\s+)?(\([^)]*\)|[A-Za-z0-9_$]+)\s*(?::\s*[^=>{]+)?=>/;
+  // Function name may carry an optional generic clause (`name<T>(…)`); the
+  // `(?:<[^>]*>)?` between name and `(` keeps generic declarations captured.
+  const reFunc = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z0-9_$]+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)/;
+  // Arrow form allows an optional generic clause after `=` (e.g. `const f = <T>(x: T) =>`).
+  const reArrow = /^\s*(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:<[^>]*>)?\s*(\([^)]*\)|[A-Za-z0-9_$]+)\s*(?::\s*[^=>{]+)?=>/;
   const reClass = /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_$]+)(?:\s+extends\s+([A-Za-z0-9_$.]+))?/;
   const reInterface = /^\s*(?:export\s+)?interface\s+([A-Za-z0-9_$]+)/;
   const reType = /^\s*(?:export\s+)?type\s+([A-Za-z0-9_$]+)\s*=/;
+  const reEnum = /^\s*(?:export\s+)?(?:const\s+)?enum\s+([A-Za-z0-9_$]+)/;
   const reConst = /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*(?::[^=]+)?=/;
   const reExportList = /^\s*export\s*(?:type\s+)?\{([^}]*)\}/;
-  const reExportDefault = /^\s*export\s+default\s+([A-Za-z0-9_$]+)/;
+  // Negative lookahead so `export default function X`/`class Y`/`async …` do NOT
+  // emit a phantom export literally named "function"/"class"/"async"; the real
+  // symbol is captured by reFunc/reClass instead.
+  const reExportDefault = /^\s*export\s+default\s+(?!function\b|class\b|async\b)([A-Za-z0-9_$]+)/;
   const reModuleExportsObj = /^\s*module\.exports\s*=\s*\{([^}]*)\}/;
   const reModuleExportsName = /^\s*module\.exports\s*=\s*([A-Za-z0-9_$]+)/;
   const reModuleExportsProp = /^\s*(?:module\.)?exports\.([A-Za-z0-9_$]+)\s*=/;
   // Method inside a class body: an identifier followed by (params) and a brace.
-  const reMethod = /^\s*(?:public\s+|private\s+|protected\s+|readonly\s+)*(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?\*?\s*([A-Za-z0-9_$]+)\s*\(([^)]*)\)\s*(?::\s*[^={]+)?\{/;
+  // Method name char class includes `#` so `#private()` methods are captured;
+  // an optional generic clause keeps `run<T>()` methods captured too.
+  const reMethod = /^\s*(?:public\s+|private\s+|protected\s+|readonly\s+)*(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?\*?\s*([A-Za-z0-9_$#]+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)\s*(?::\s*[^={]+)?\{/;
   const NON_METHOD = new Set([
     'if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'do', 'else',
   ]);
@@ -126,6 +135,9 @@ function extractJs(src) {
         if (/^\s*export\b/.test(line)) exportsSet.add(m[1]);
       } else if ((m = line.match(reInterface))) {
         types.push({ name: m[1], kind: 'interface', line: lineNo });
+        if (/^\s*export\b/.test(line)) exportsSet.add(m[1]);
+      } else if ((m = line.match(reEnum))) {
+        types.push({ name: m[1], kind: 'enum', line: lineNo });
         if (/^\s*export\b/.test(line)) exportsSet.add(m[1]);
       } else if ((m = line.match(reConst)) && !reArrow.test(line)) {
         constants.push({ name: m[1], line: lineNo });
@@ -217,8 +229,12 @@ function splitParams(raw) {
     }
   }
   if (cur.trim()) parts.push(cur.trim());
-  // Return just the parameter NAME (strip type annotations / defaults).
-  return parts.map((p) => p.split(/[:=]/)[0].trim()).filter(Boolean);
+  // Return just the parameter NAME (strip type annotations / defaults, and any
+  // leading TS constructor-parameter modifiers so `private http: X` → `http`).
+  return parts
+    .map((p) => p.split(/[:=]/)[0].trim()
+      .replace(/^(?:(?:public|private|protected|readonly)\s+)+/, '').trim())
+    .filter(Boolean);
 }
 
 function arrowParams(raw) {
@@ -245,7 +261,7 @@ function extractPython(src) {
 
   const reImport = /^\s*import\s+(.+)/;
   const reFrom = /^\s*from\s+(\S+)\s+import\s+(.+)/;
-  const reDef = /^(\s*)def\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)/;
+  const reDef = /^(\s*)(?:async\s+)?def\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)/;
   const reClass = /^(\s*)class\s+([A-Za-z0-9_]+)/;
 
   for (let i = 0; i < lines.length; i++) {
@@ -430,7 +446,9 @@ function summarizeDir(dir, opts = {}) {
 
   let sourceChars = 0, outlineChars = 0;
   for (const s of summaries) { sourceChars += s.sourceChars; outlineChars += s.outlineChars; }
-  const savedPct = sourceChars > 0 ? Math.round((1 - outlineChars / sourceChars) * 100) : 0;
+  // Clamp at 0: on tiny inputs the outline (with its headers) can exceed the
+  // source, which would otherwise print a nonsensical negative "% smaller".
+  const savedPct = sourceChars > 0 ? Math.max(0, Math.round((1 - outlineChars / sourceChars) * 100)) : 0;
 
   if (truncated) {
     process.stderr.write(`[smart-explore] file cap reached (${maxFiles}); output truncated\n`);
@@ -532,7 +550,7 @@ function main(argv) {
     }
     process.stdout.write(renderFileOutline(summary) + '\n');
     const pct = summary.sourceChars > 0
-      ? Math.round((1 - summary.outlineChars / summary.sourceChars) * 100)
+      ? Math.max(0, Math.round((1 - summary.outlineChars / summary.sourceChars) * 100))
       : 0;
     process.stdout.write(
       `\nOutline: ${summary.outlineChars} chars vs ${summary.sourceChars} source chars (~${pct}% smaller)\n`

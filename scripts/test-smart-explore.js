@@ -193,6 +193,105 @@ const has = (arr, pred) => Array.isArray(arr) && arr.some(pred);
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// --- Extraction fixes (regression guards for the adversarial-review bugs) --
+{
+  // Python: `async def` at top level AND as a method must be captured.
+  const src = [
+    'import asyncio',
+    '',
+    'async def afetch(url):',
+    '    return url',
+    '',
+    'class AsyncClient:',
+    '    async def aget(self, path):',
+    '        return path',
+    '    def sync_get(self, path):',
+    '        return path',
+  ].join('\n');
+  const s = extractSymbols('async.py', src);
+  cases.push(['py: top-level async def afetch extracted with params [url]',
+    has(s.functions, (f) => f.name === 'afetch' && f.params.join(',') === 'url')]);
+  const client = (s.classes || []).find((c) => c.name === 'AsyncClient');
+  cases.push(['py: async def method aget captured inside class',
+    !!client && has(client.methods, (m) => m.name === 'aget')]);
+  cases.push(['py: async def afetch NOT double-counted as a method',
+    !!client && !has(client.methods, (m) => m.name === 'afetch')]);
+}
+
+{
+  // TS generic function: `<T>` between name and `(` must not drop the function.
+  const src = [
+    'export function generic<T>(x: T): T {',
+    '  return x;',
+    '}',
+  ].join('\n');
+  const s = extractSymbols('generic.ts', src);
+  cases.push(['ts: generic function name "generic" extracted',
+    has(s.functions, (f) => f.name === 'generic' && f.params.join(',') === 'x')]);
+  cases.push(['ts: generic function NOT captured under a bogus name "function"/"T"',
+    !has(s.functions, (f) => f.name === 'function' || f.name === 'T')]);
+}
+
+{
+  // export default function/class must NOT emit a phantom "function"/"class" export.
+  const src = [
+    'export default function ff() {}',
+  ].join('\n');
+  const s = extractSymbols('defaultfn.ts', src);
+  cases.push(['ts: export default function ff captured as real function',
+    has(s.functions, (f) => f.name === 'ff')]);
+  cases.push(['ts: export default function does NOT emit phantom "function" export',
+    !(s.exports || []).includes('function')]);
+  cases.push(['ts: real symbol ff is still exported', (s.exports || []).includes('ff')]);
+
+  const src2 = ['export default class CC {}'].join('\n');
+  const s2 = extractSymbols('defaultclass.ts', src2);
+  cases.push(['ts: export default class CC captured as real class',
+    has(s2.classes, (c) => c.name === 'CC')]);
+  cases.push(['ts: export default class does NOT emit phantom "class" export',
+    !(s2.exports || []).includes('class')]);
+  cases.push(['ts: real symbol CC is still exported', (s2.exports || []).includes('CC')]);
+}
+
+{
+  // FALSE-POSITIVE guard: a def-like keyword inside a comment or string must NOT
+  // become a symbol.
+  const src = [
+    '// function fake(){}',
+    'const s = "class NotReal {}";',
+    'function real() { return 1; }',
+  ].join('\n');
+  const s = extractSymbols('fp.js', src);
+  const names = [
+    ...(s.functions || []).map((f) => f.name),
+    ...(s.arrows || []).map((a) => a.name),
+    ...(s.classes || []).map((c) => c.name),
+    ...(s.constants || []).map((c) => c.name),
+    ...(s.exports || []),
+  ];
+  cases.push(['fp: commented-out "fake" is not extracted', !names.includes('fake')]);
+  cases.push(['fp: "NotReal" inside a string literal is not extracted', !names.includes('NotReal')]);
+  cases.push(['fp: the real function is still extracted', has(s.functions, (f) => f.name === 'real')]);
+}
+
+{
+  // `#private()` method captured; TS `enum` captured.
+  const src = [
+    'enum Color { Red, Green, Blue }',
+    '',
+    'class Store {',
+    '  #priv() { return 1; }',
+    '  pub() { return 2; }',
+    '}',
+  ].join('\n');
+  const s = extractSymbols('enum.ts', src);
+  cases.push(['ts: enum Color captured as a type',
+    has(s.types, (t) => t.name === 'Color' && t.kind === 'enum')]);
+  const store = (s.classes || []).find((c) => c.name === 'Store');
+  cases.push(['ts: #priv() private method captured',
+    !!store && has(store.methods, (m) => m.name === '#priv')]);
+}
+
 // --- Report ---------------------------------------------------------------
 let pass = 0, fail = 0;
 cases.forEach(([label, ok]) => {
