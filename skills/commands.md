@@ -1,4 +1,4 @@
-# claude-auto-dev (v7.5)
+# claude-auto-dev (v7.6)
 
 ## Primary Commands
 

@@ -246,7 +246,7 @@ const api = {
                 JSON.stringify(sourceFiles || []),
                 tokenCost || 0,
                 hash,
-                rawData ? JSON.stringify(rawData) : null
+                rawData ? stripPrivate(JSON.stringify(rawData)) : null
             );
             return id;
         });
@@ -284,6 +284,71 @@ const api = {
                 `);
                 return stmt.all(projectPath, likeQuery, likeQuery, limit);
             }
+        }) || [];
+    },
+
+    // Semantic search — lexical TF-IDF ranker (pure JS, no embeddings/network).
+    // Complements FTS5 with fuzzy/conceptual recall over recent observations.
+    searchSemantic(query, projectPath, limit = 20) {
+        projectPath = normalizeProject(projectPath);
+        return withCircuitBreaker(() => {
+            const db = getDB();
+            if (!db) return [];
+
+            // Load the ranker lazily so a load failure degrades gracefully (like FTS).
+            let ranker;
+            try {
+                ranker = require('./semantic-search');
+            } catch (err) {
+                process.stderr.write(`[Memory] semantic search unavailable: ${err.message}\n`);
+                return [];
+            }
+
+            const rows = db.prepare(`
+                SELECT id, timestamp, type, title, concept
+                FROM observations
+                WHERE project_path = ?
+                ORDER BY timestamp DESC
+                LIMIT 500
+            `).all(projectPath);
+
+            const docs = rows.map((r) => ({
+                id: r.id,
+                text: `${r.title} ${r.concept || ''}`,
+                timestamp: r.timestamp,
+                type: r.type,
+                title: r.title
+            }));
+
+            const ranked = ranker.rank(query, docs, limit);
+            return ranked.map((d) => ({
+                id: d.id,
+                timestamp: d.timestamp,
+                type: d.type,
+                title: d.title,
+                score: d.score
+            }));
+        }) || [];
+    },
+
+    // Smart search — FTS5 first; fall back to semantic when exact matches are sparse.
+    // Roadmap §3.1: "if FTS returns <3 results, fall back to semantic."
+    searchSmart(query, projectPath, limit = 20) {
+        projectPath = normalizeProject(projectPath);
+        return withCircuitBreaker(() => {
+            const ftsResults = api.searchIndex(query, projectPath, limit);
+            if (ftsResults.length >= 3) return ftsResults;
+
+            const semResults = api.searchSemantic(query, projectPath, limit);
+            const seen = new Set(ftsResults.map((r) => r.id));
+            const merged = ftsResults.slice();
+            for (const r of semResults) {
+                if (!seen.has(r.id)) {
+                    seen.add(r.id);
+                    merged.push(r);
+                }
+            }
+            return merged.slice(0, limit);
         }) || [];
     },
 
@@ -448,7 +513,10 @@ if (require.main === module) {
             console.log(JSON.stringify(api.getRecent(projectPath, parseInt(args[2]) || 10), null, 2));
             break;
         case 'search':
-            console.log(JSON.stringify(api.searchIndex(args[2] || '', projectPath), null, 2));
+            console.log(JSON.stringify(api.searchSmart(args[2] || '', projectPath), null, 2));
+            break;
+        case 'semantic':
+            console.log(JSON.stringify(api.searchSemantic(args[2] || '', projectPath), null, 2));
             break;
         case 'timeline':
             console.log(JSON.stringify(api.searchTimeline(args[2] || '', projectPath), null, 2));
@@ -492,6 +560,6 @@ if (require.main === module) {
         }
         default:
             console.log('Usage: node memory-db.js <command> [projectPath] [args]');
-            console.log('Commands: stats, recent, search <query>, timeline <query>, sessions, decisions, bugs, cleanup [days], test');
+            console.log('Commands: stats, recent, search <query>, semantic <query>, timeline <query>, sessions, decisions, bugs, cleanup [days], test');
     }
 }

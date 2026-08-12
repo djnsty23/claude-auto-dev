@@ -8,6 +8,7 @@ triggers:
   - mem bugs
   - mem timeline
   - mem stats
+  - mem why
   - remember
   - what did we
   - what was
@@ -26,7 +27,8 @@ Search the project's persistent memory database. Observations are captured autom
 
 | Say | Does |
 |-----|------|
-| `mem search <query>` | Keyword search across all observations |
+| `mem search <query>` | Keyword search — auto-falls back to conceptual (semantic) search when exact matches are sparse |
+| `mem why <query>` / `semantic` | Conceptual/fuzzy recall (TF-IDF token similarity + synonym expansion) |
 | `mem recent` | Last 10 observations for this project |
 | `mem decisions` | All architectural/design decisions |
 | `mem bugs` | All bug fixes |
@@ -58,8 +60,11 @@ This 3-layer approach saves ~10x tokens vs dumping full context.
 Run queries via the memory-db CLI:
 
 ```bash
-# Search
+# Search — exact FTS5 first, auto-falls back to conceptual search when <3 exact hits
 node ~/.claude/scripts/memory-db.js search "$(pwd)" "auth middleware"
+
+# Conceptual / fuzzy recall (lexical TF-IDF ranker, no embeddings, offline)
+node ~/.claude/scripts/memory-db.js semantic "$(pwd)" "why did we choose X"
 
 # Recent observations
 node ~/.claude/scripts/memory-db.js recent "$(pwd)" 10

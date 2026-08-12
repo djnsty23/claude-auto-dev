@@ -1,6 +1,6 @@
 {
   "description": "35 active skills + 3 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
-  "version": "7.5",
+  "version": "7.6",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -352,6 +352,7 @@
         "mem bugs",
         "mem timeline",
         "mem stats",
+        "mem why",
         "remember",
         "what did we",
         "what was",

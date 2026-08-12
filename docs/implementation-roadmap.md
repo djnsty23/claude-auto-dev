@@ -177,6 +177,8 @@ Add ChromaDB for semantic search alongside SQLite FTS5.
 
 **Alternative:** Skip ChromaDB entirely. Use OpenAI/Anthropic embeddings stored in SQLite with a simple cosine similarity function. Lighter weight, no extra daemon.
 
+**Status (v7.6):** The lightweight, no-daemon path is implemented as pure JS in `scripts/semantic-search.js` — a lexical TF-IDF token-similarity ranker (with conservative stemming and dev-domain synonym expansion), zero deps, offline, deterministic. `searchSmart` uses the auto-select rule above: FTS5 first, fall back to semantic when FTS returns <3 results. This is lexical-semantic, **not** neural embeddings; ChromaDB or real embedding vectors remain an optional future upgrade for stronger conceptual recall.
+
 ### 3.2 knowledge-agent Skill
 
 Build domain-specific "brains" from filtered observation history:
@@ -247,6 +249,8 @@ function stripPrivate(text) {
 ```
 
 Add to observation capture pipeline, before DB write.
+
+**Status (v7.6):** Implemented across all persisted fields. As of v7.6 the `raw_data` redaction gap is closed — `saveObservation` runs `stripPrivate` over the stringified `raw_data` too, so `<private>` content no longer reaches the DB via any field.
 
 ### 4.4 Web Dashboard
 

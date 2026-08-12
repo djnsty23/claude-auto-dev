@@ -1,5 +1,18 @@
 # Changelog
 
+## [7.6] - 2026-08-12
+
+### Added — semantic search fallback (roadmap §3.1, "lighter weight, no daemon" path)
+- **`scripts/semantic-search.js`** — new pure-JS, zero-dependency, offline, deterministic ranker. This is **lexical-semantic** (TF-IDF token cosine similarity + conservative stemming + a small dev-domain synonym expansion), **not** neural embeddings — no ChromaDB, no external API, no network. Exports `{ tokenize, stem, expandQuery, rank }`.
+- **`scripts/memory-db.js`** — two new API functions. `searchSemantic(query, projectPath, limit)` ranks recent project observations (last 500) via the ranker. `searchSmart(query, projectPath, limit)` runs FTS5 first and, only when it returns fewer than 3 results, merges in semantic results (dedup by id, FTS first). The ranker is required lazily inside a try/catch so a load failure degrades gracefully like FTS does.
+- **CLI** — new `semantic` command; the existing `search` command now calls `searchSmart` (output formatting unchanged). `skills/mem-search/SKILL.md` documents the auto-fallback and adds a `mem why` trigger (synced to `skills/manifest.json`).
+
+### Security — privacy hardening
+- **`scripts/memory-db.js`** — `saveObservation` now runs stored `raw_data` through `stripPrivate` after `JSON.stringify`, closing the last gap where `<private>…</private>` content could reach the DB. `title`, `concept`, and the session summary fields were already redacted; `raw_data` was the exception.
+
+### Tested
+- **`scripts/test-semantic-search.js`** — new suite. Pure-ranker tests (always run, no DB): conceptual ranking, stemming, synonym bridging, empty-input handling. DB tests (skipped cleanly on older Node without `node:sqlite`): `<private>` redaction across title/concept/raw_data, and `searchSmart` surfacing a paraphrased match that exact FTS would miss.
+
 ## [7.5] - 2026-04-22
 
 ### Added — telemetry (audit finding 3.2)
