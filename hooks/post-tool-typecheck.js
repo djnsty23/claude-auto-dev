@@ -60,6 +60,94 @@ try {
         process.stderr.write(`[Memory] capture error: ${memErr.message}\n`);
     }
 
+    // ============================================================
+    // Memory: Auto-surface a domain-knowledge brief the FIRST time an
+    // area is edited in a session (roadmap §3.2 auto-injection).
+    // Own try/catch, after capture, so it can never disturb typecheck
+    // or capture. Throttled to once per (session, area) via a small
+    // state file so it computes at most one brief per area per session.
+    // ============================================================
+    try {
+        // Derive the AREA from the edited file's directory relative to cwd,
+        // capped to the first 1-2 path segments (e.g. src/auth/login.js →
+        // "src/auth", hooks/x.js → "hooks"). Root-level files / empty / "."
+        // are skipped to avoid noise.
+        let area = '';
+        if (filePath) {
+            const rel = path.relative(process.cwd(), filePath).replace(/\\/g, '/');
+            if (rel && !rel.startsWith('..')) {
+                const dir = path.posix.dirname(rel);
+                if (dir && dir !== '.') {
+                    area = dir.split('/').filter(Boolean).slice(0, 2).join('/');
+                }
+            }
+        }
+
+        if (area && area !== '.') {
+            const HOME = process.env.HOME || process.env.USERPROFILE;
+            const memDbPath = path.join(HOME, '.claude', 'scripts', 'memory-db.js');
+
+            if (fs.existsSync(memDbPath)) {
+                // Resolve session id the same way the capture block does.
+                let sessionId = process.env.AUTO_DEV_SESSION_ID || null;
+                if (!sessionId) {
+                    try {
+                        sessionId = fs.readFileSync(path.join(process.cwd(), '.claude', 'memory-session-id'), 'utf8').trim() || null;
+                    } catch { /* no session file */ }
+                }
+                sessionId = sessionId || 'nosession';
+
+                // THROTTLE — cheap state-file check FIRST. State file lives at
+                // .claude/knowledge-surfaced, newline-separated "sessionId\tarea".
+                const surfacedFile = path.join(process.cwd(), '.claude', 'knowledge-surfaced');
+                const marker = `${sessionId}\t${area}`;
+                let existing = '';
+                let already = false;
+                try {
+                    existing = fs.readFileSync(surfacedFile, 'utf8');
+                    already = existing.split('\n').includes(marker);
+                } catch { /* no state file yet */ }
+
+                if (!already) {
+                    const memDB = require(memDbPath);
+                    if (memDB.isAvailable()) {
+                        const brief = memDB.knowledge(process.cwd(), area, 500);
+                        if (brief && brief.total > 0) {
+                            const g = brief.groups || {};
+                            // Most relevant first: decisions, then gotchas, then bugfixes, then changes.
+                            const items = [
+                                ...(g.decisions || []),
+                                ...(g.gotchas || []),
+                                ...(g.bugfixes || []),
+                                ...(g.changes || [])
+                            ].slice(0, 3);
+                            const trunc = (s) => {
+                                s = String(s || '').replace(/\s+/g, ' ').trim();
+                                return s.length > 100 ? s.slice(0, 97) + '...' : s;
+                            };
+                            const out = [
+                                `[Memory] Domain knowledge for ${area} (${brief.total} note${brief.total === 1 ? '' : 's'}):`
+                            ];
+                            for (const r of items) {
+                                let line = `[Memory]   - ${trunc(r.title)}`;
+                                if (r.concept) line += `: ${trunc(r.concept)}`;
+                                out.push(line.length > 140 ? line.slice(0, 137) + '...' : line);
+                            }
+                            process.stderr.write(out.join('\n') + '\n');
+                        }
+                        // Record the area as surfaced whether or not it had content,
+                        // so an empty area is never recomputed every edit this session.
+                        try {
+                            fs.mkdirSync(path.join(process.cwd(), '.claude'), { recursive: true });
+                            const needsNL = existing && !existing.endsWith('\n');
+                            fs.appendFileSync(surfacedFile, (needsNL ? '\n' : '') + marker + '\n');
+                        } catch { /* non-critical */ }
+                    }
+                }
+            }
+        }
+    } catch { /* auto-injection is best-effort — never disturb the hook */ }
+
     // Only run typecheck for TypeScript/JavaScript files
     if (/\.(ts|tsx|js|jsx)$/.test(filePath)) {
         // Debounce: skip if last typecheck was <10 seconds ago

@@ -22,6 +22,9 @@ ledger.json
 # Auto mode flag (session-specific)
 .claude/auto-active
 
+# Knowledge auto-injection throttle state (session-specific)
+.claude/knowledge-surfaced
+
 # Update backups and compact state
 settings.backup.json
 .claude/pre-compact-state.json

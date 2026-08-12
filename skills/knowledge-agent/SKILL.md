@@ -66,6 +66,19 @@ node ~/.claude/scripts/memory-db.js knowledge "$(pwd)" "src/auth"
 The command prints Markdown to stdout. Show it to the user, or use it as
 context before working in that area.
 
+### Automatic surfacing
+
+Briefs are **also surfaced automatically**. The PostToolUse (Write|Edit) hook
+derives the area from the edited file's directory (first 1-2 path segments, e.g.
+`src/auth` for `src/auth/login.js`) and, the **first** time an area with
+accumulated knowledge is edited in a session, prints a compact `[Memory] Domain
+knowledge for <area> (<n> notes):` line plus the top few items to stderr. This
+is **throttled to once per area per session** via a small state file
+(`.claude/knowledge-surfaced`, git-ignored), so it surfaces knowledge without
+flooding: at most one brief is computed per distinct area per session. Root-level
+files and empty/too-broad areas are skipped, and everything degrades silently
+when the memory DB is unavailable.
+
 ## When to Use
 
 - Onboarding to an unfamiliar part of the codebase
