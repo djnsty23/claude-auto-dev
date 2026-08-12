@@ -1,5 +1,5 @@
 {
-  "description": "35 active skills + 3 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
+  "description": "38 active skills + 14 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
   "version": "7.6",
   "deprecated": [
     "supabase-postgres",

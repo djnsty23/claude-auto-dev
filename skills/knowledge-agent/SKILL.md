@@ -38,8 +38,12 @@ Knowledge briefs are **derived on demand from the existing memory store** — th
 is no separate knowledge database and no external service. Observations are
 captured automatically by the PostToolUse hook and live in SQLite at
 `~/.claude/auto-dev-memory.db`. An observation belongs to an area if any of its
-`source_files` sits under the area, or the area fragment appears in its title or
-concept. Work is bounded to the most recent 500 observations for the project
+`source_files` matches the area on **path-segment boundaries** — `src/auth`
+matches `src/auth/login.js` and `src/auth`, but not `src/authentication/…`, and
+`auth` matches a whole path segment but not `author`. For word-like areas (no
+`/`), a **whole-word** match of the area in the title or concept also counts
+(so `auth` matches "auth token" but not "author"). Work is bounded to the most
+recent 500 observations for the project
 (same window as semantic search) and degrades gracefully — an area with nothing
 recorded returns "no accumulated knowledge yet" rather than an error.
 

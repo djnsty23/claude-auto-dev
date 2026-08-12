@@ -69,7 +69,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 37 skills in directory format (34 active + 3 deprecated redirects)
+- 38 skills in directory format (all active) + 14 deprecated redirect aliases in the manifest
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
 - Auto-loaded: core (with prd.json)
 - Standards, security load via requires chains when review/audit/auto run

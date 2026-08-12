@@ -87,6 +87,73 @@ if (!memDB.isAvailable()) {
   const emptyMd = memDB.renderKnowledgeBrief(empty, 'src/does-not-exist');
   cases.push(['render: empty area says "no accumulated knowledge yet"',
     emptyMd.toLowerCase().includes('no accumulated knowledge yet')]);
+
+  // --- Regression: path matching is segment/boundary aware ---
+  // `src/authentication/…` must NOT be pulled in by area "src/auth" (old raw
+  // substring `.includes()` leaked it). Use a fresh project for isolation.
+  const PROJ2 = path.join(TMP_HOME, 'proj-boundary');
+  const sid2 = memDB.startSession(PROJ2);
+  memDB.saveObservation({
+    sessionId: sid2, projectPath: PROJ2, type: 'decision',
+    title: 'auth login flow decision',
+    concept: 'short-lived access tokens',
+    sourceFiles: ['src/auth/login.js']
+  });
+  memDB.saveObservation({
+    sessionId: sid2, projectPath: PROJ2, type: 'decision',
+    title: 'authentication service decision',
+    concept: 'central identity provider',
+    sourceFiles: ['src/authentication/service.js']
+  });
+  const bnd = memDB.knowledge(PROJ2, 'src/auth');
+  const bndTitles = bnd
+    ? [...bnd.groups.decisions, ...bnd.groups.bugfixes, ...bnd.groups.gotchas, ...bnd.groups.changes]
+        .map(r => r.title)
+    : [];
+  cases.push(['boundary: "src/auth" includes src/auth/login.js observation',
+    bndTitles.includes('auth login flow decision')]);
+  cases.push(['boundary: "src/auth" excludes src/authentication/service.js observation',
+    !bndTitles.includes('authentication service decision')]);
+
+  // --- Regression: free-text matching is whole-word aware ("auth" != "author") ---
+  const PROJ3 = path.join(TMP_HOME, 'proj-word');
+  const sid3 = memDB.startSession(PROJ3);
+  memDB.saveObservation({
+    sessionId: sid3, projectPath: PROJ3, type: 'discovery',
+    title: 'author bio rendering quirk',
+    concept: 'the author byline truncates on mobile',
+    sourceFiles: ['src/profile/bio.js']
+  });
+  const word = memDB.knowledge(PROJ3, 'auth');
+  const wordTitles = word
+    ? [...word.groups.decisions, ...word.groups.bugfixes, ...word.groups.gotchas, ...word.groups.changes]
+        .map(r => r.title)
+    : [];
+  cases.push(['word: "auth" does NOT match the word "author" in title/concept',
+    !!word && !wordTitles.includes('author bio rendering quirk')]);
+
+  // --- Regression: dedup key includes type (cross-type collision must survive) ---
+  const PROJ4 = path.join(TMP_HOME, 'proj-dedup');
+  const sid4 = memDB.startSession(PROJ4);
+  memDB.saveObservation({
+    sessionId: sid4, projectPath: PROJ4, type: 'decision',
+    title: 'update config',
+    concept: 'switch config format to TOML',
+    sourceFiles: ['src/config/settings.js']
+  });
+  memDB.saveObservation({
+    sessionId: sid4, projectPath: PROJ4, type: 'bugfix',
+    title: 'update config',
+    concept: 'config was not reloaded after save',
+    sourceFiles: ['src/config/settings.js']
+  });
+  const dd = memDB.knowledge(PROJ4, 'src/config');
+  cases.push(['dedup: same title, different types both survive (total === 2)',
+    !!dd && dd.total === 2]);
+  cases.push(['dedup: the decision "update config" is in the decisions group',
+    !!dd && dd.groups.decisions.some(r => r.title === 'update config')]);
+  cases.push(['dedup: the bugfix "update config" is in the bugfixes group',
+    !!dd && dd.groups.bugfixes.some(r => r.title === 'update config')]);
 }
 
 // --- Report ---

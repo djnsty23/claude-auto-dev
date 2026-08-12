@@ -164,16 +164,45 @@ function normalizeArea(area) {
     return String(area || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
+// True when `needle` (lowercased) occurs in `hay` delimited by non-alphanumeric
+// boundaries, so "auth" matches "auth token" but NOT "author". No RegExp is
+// built from user input — we scan indexOf hits and inspect the surrounding
+// chars. Start/end of string count as boundaries.
+function hasWord(hay, needle) {
+    if (!needle) return false;
+    const isAlnum = (c) => !!c && ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
+    let i = hay.indexOf(needle);
+    while (i !== -1) {
+        const before = i > 0 ? hay[i - 1] : '';
+        const after = hay[i + needle.length] || '';
+        if (!isAlnum(before) && !isAlnum(after)) return true;
+        i = hay.indexOf(needle, i + 1);
+    }
+    return false;
+}
+
 function matchesArea(row, needle) {
     if (!needle) return false;
     let files = [];
     try { files = JSON.parse(row.source_files || '[]'); } catch { files = []; }
-    if (Array.isArray(files) &&
-        files.some((f) => String(f).replace(/\\/g, '/').toLowerCase().includes(needle))) {
+    // Path matching is segment/boundary aware on normalized (`/`-separated,
+    // lowercased) paths. `src/auth` matches `src/auth/login.js` and `src/auth`
+    // but NOT `src/authentication/service.js`; `auth` matches a full segment
+    // but NOT `author`. Pure string ops — no RegExp from user input.
+    if (Array.isArray(files) && files.some((f) => {
+        const p = String(f).replace(/\\/g, '/').toLowerCase();
+        return ('/' + p + '/').includes('/' + needle + '/') // segment / dir prefix
+            || ('/' + p).endsWith('/' + needle)             // exact file / suffix
+            || p.startsWith(needle + '/')                    // area is a leading dir
+            || p === needle;
+    })) {
         return true;
     }
+    // Free-text title/concept matching only applies to word-like needles (no
+    // `/`), and is word-boundary aware so "auth" does not match "author".
+    if (needle.includes('/')) return false;
     const hay = `${row.title || ''} ${row.concept || ''}`.toLowerCase();
-    return hay.includes(needle);
+    return hasWord(hay, needle);
 }
 
 // Render a compact Markdown brief from a knowledge() result.
@@ -538,8 +567,8 @@ const api = {
             let total = 0;
             for (const r of rows) {
                 if (!matchesArea(r, needle)) continue;
-                const key = (r.title || '').toLowerCase().trim();
-                if (seen.has(key)) continue; // dedup by title, most-recent wins (rows are DESC)
+                const key = (r.type || '') + ' ' + (r.title || '').toLowerCase().trim();
+                if (seen.has(key)) continue; // dedup by (type,title), most-recent wins (rows are DESC)
                 seen.add(key);
                 total++;
                 if (r.type === 'decision') groups.decisions.push(r);
