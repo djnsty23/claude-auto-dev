@@ -57,6 +57,7 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `doppler` / `setup doppler` | Install + link + migrate secrets to Doppler (hub/spoke pattern) |
 | `memory backup` | Backup/restore auto-memory to private GitHub repo |
 | `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
+| `knowledge <area>` / `what do we know about` / `brief me on` | Distill a domain knowledge brief for a code area from memory |
 | `telemetry` / `usage stats` | Show tool usage stats from local telemetry log |
 
 For quick fixes, just describe what to fix — no commands needed.
@@ -68,7 +69,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 36 skills in directory format (33 active + 3 deprecated redirects)
+- 37 skills in directory format (34 active + 3 deprecated redirects)
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
 - Auto-loaded: core (with prd.json)
 - Standards, security load via requires chains when review/audit/auto run

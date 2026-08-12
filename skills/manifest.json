@@ -363,6 +363,17 @@
       "priority": 2,
       "description": "Search persistent project memory across sessions — decisions, bugs, features, discoveries"
     },
+    "knowledge-agent": {
+      "triggers": [
+        "knowledge",
+        "what do we know about",
+        "brief me on",
+        "domain knowledge"
+      ],
+      "file": "knowledge-agent/SKILL.md",
+      "priority": 2,
+      "description": "Distill accumulated observations for a code area into a focused domain knowledge brief"
+    },
     "doppler": {
       "triggers": [
         "doppler",

@@ -154,6 +154,59 @@ function isDuplicate(db, hash, windowSeconds = 30) {
     }
 }
 
+// --- Knowledge briefs (roadmap §3.2 "domain brains") ---
+// Distill accumulated observations for a code AREA into a focused brief.
+// The "area" is a path prefix / directory / fragment (e.g. "src/auth").
+// An observation belongs to the area if any of its source_files sits under
+// the area, or the area fragment appears in its title/concept.
+
+function normalizeArea(area) {
+    return String(area || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function matchesArea(row, needle) {
+    if (!needle) return false;
+    let files = [];
+    try { files = JSON.parse(row.source_files || '[]'); } catch { files = []; }
+    if (Array.isArray(files) &&
+        files.some((f) => String(f).replace(/\\/g, '/').toLowerCase().includes(needle))) {
+        return true;
+    }
+    const hay = `${row.title || ''} ${row.concept || ''}`.toLowerCase();
+    return hay.includes(needle);
+}
+
+// Render a compact Markdown brief from a knowledge() result.
+function renderKnowledgeBrief(result, area) {
+    const title = (area && normalizeArea(area)) || (result && result.area) || '';
+    if (!result || result.total === 0) {
+        return `# Knowledge brief: ${title}\n\nNo accumulated knowledge yet for \`${title}\`.\n`;
+    }
+    const lines = [
+        `# Knowledge brief: ${title}`,
+        '',
+        `_Distilled from ${result.total} observation${result.total === 1 ? '' : 's'} in the memory store._`,
+        ''
+    ];
+    const section = (heading, rows) => {
+        if (!rows || !rows.length) return;
+        lines.push(`## ${heading}`, '');
+        for (const r of rows) {
+            const when = (r.timestamp || '').slice(0, 10);
+            let line = `- ${r.title}`;
+            if (r.concept) line += ` — ${r.concept}`;
+            if (when) line += ` _(${when})_`;
+            lines.push(line);
+        }
+        lines.push('');
+    };
+    section('Decisions', result.groups.decisions);
+    section('Bug fixes', result.groups.bugfixes);
+    section('Gotchas & discoveries', result.groups.gotchas);
+    section('Changes & features', result.groups.changes);
+    return lines.join('\n');
+}
+
 // --- Circuit breaker ---
 let _failures = 0;
 const MAX_FAILURES = 3;
@@ -461,6 +514,45 @@ const api = {
         }) || [];
     },
 
+    // Knowledge brief — distill area-scoped observations into grouped buckets.
+    // Roadmap §3.2: filter observation history to a domain and compress into a
+    // focused brief. Queries the existing memory store (no parallel DB) and is
+    // bounded to the recent-500 window like searchSemantic. Returns null when
+    // the DB is unavailable; { total: 0, groups } when the area has nothing.
+    knowledge(projectPath, area, limit = 500) {
+        projectPath = normalizeProject(projectPath);
+        const needle = normalizeArea(area);
+        return withCircuitBreaker(() => {
+            const db = getDB();
+            if (!db) return null;
+            const rows = db.prepare(`
+                SELECT id, timestamp, type, title, concept, source_files
+                FROM observations
+                WHERE project_path = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            `).all(projectPath, limit);
+
+            const groups = { decisions: [], bugfixes: [], gotchas: [], changes: [] };
+            const seen = new Set();
+            let total = 0;
+            for (const r of rows) {
+                if (!matchesArea(r, needle)) continue;
+                const key = (r.title || '').toLowerCase().trim();
+                if (seen.has(key)) continue; // dedup by title, most-recent wins (rows are DESC)
+                seen.add(key);
+                total++;
+                if (r.type === 'decision') groups.decisions.push(r);
+                else if (r.type === 'bugfix') groups.bugfixes.push(r);
+                else if (r.type === 'discovery') groups.gotchas.push(r);
+                else groups.changes.push(r); // feature / refactor / change
+            }
+            return { area: needle, projectPath, total, groups };
+        });
+    },
+
+    renderKnowledgeBrief,
+
     // Stats for a project
     getStats(projectPath) {
         projectPath = normalizeProject(projectPath);
@@ -530,6 +622,12 @@ if (require.main === module) {
         case 'bugs':
             console.log(JSON.stringify(api.getByType('bugfix', projectPath), null, 2));
             break;
+        case 'knowledge': {
+            const area = args[2] || '';
+            const result = api.knowledge(projectPath, area);
+            console.log(api.renderKnowledgeBrief(result, area));
+            break;
+        }
         case 'cleanup':
             const removed = api.cleanup(parseInt(args[2]) || 90);
             console.log(`Cleaned up ${removed} old observations`);
@@ -560,6 +658,6 @@ if (require.main === module) {
         }
         default:
             console.log('Usage: node memory-db.js <command> [projectPath] [args]');
-            console.log('Commands: stats, recent, search <query>, semantic <query>, timeline <query>, sessions, decisions, bugs, cleanup [days], test');
+            console.log('Commands: stats, recent, search <query>, semantic <query>, timeline <query>, sessions, decisions, bugs, knowledge <area>, cleanup [days], test');
     }
 }
