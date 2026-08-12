@@ -2,6 +2,10 @@
 
 ## [7.6] - 2026-08-12
 
+### Added — CI
+- **`scripts/test-all.js`** — new zero-dependency `npm test` runner. Discovers every `scripts/test-*.js` suite, runs each in its own child process, then runs `validate.js` as a final consistency gate; prints a `SUITE pass/fail` summary and exits non-zero if any suite or validate fails. Wired as the `test` script in `package.json`.
+- **`.github/workflows/ci.yml`** — new GitHub Actions workflow. Runs `npm test` on `ubuntu-latest` with Node 22 (where `node:sqlite` is available so the DB-backed suites run, not skip) on every push and pull request. Least-privilege `contents: read` permissions.
+
 ### Added — semantic search fallback (roadmap §3.1, "lighter weight, no daemon" path)
 - **`scripts/semantic-search.js`** — new pure-JS, zero-dependency, offline, deterministic ranker. This is **lexical-semantic** (TF-IDF token cosine similarity + conservative stemming + a small dev-domain synonym expansion), **not** neural embeddings — no ChromaDB, no external API, no network. Exports `{ tokenize, stem, expandQuery, rank }`.
 - **`scripts/memory-db.js`** — two new API functions. `searchSemantic(query, projectPath, limit)` ranks recent project observations (last 500) via the ranker. `searchSmart(query, projectPath, limit)` runs FTS5 first and, only when it returns fewer than 3 results, merges in semantic results (dedup by id, FTS first). The ranker is required lazily inside a try/catch so a load failure degrades gracefully like FTS does.

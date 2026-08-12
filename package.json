@@ -18,6 +18,9 @@
     "ai-coding",
     "claude-skills"
   ],
+  "scripts": {
+    "test": "node scripts/test-all.js"
+  },
   "author": "djnsty23",
   "license": "MIT",
   "repository": {
