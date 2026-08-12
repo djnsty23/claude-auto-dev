@@ -250,7 +250,7 @@ function stripPrivate(text) {
 
 Add to observation capture pipeline, before DB write.
 
-**Status (v7.6):** Implemented across all persisted fields. As of v7.6 the `raw_data` redaction gap is closed — `saveObservation` runs `stripPrivate` over the stringified `raw_data` too, so `<private>` content no longer reaches the DB via any field.
+**Status (v7.6):** Implemented across all persisted fields. As of v7.6 every user-controlled field is redacted before write — `title`, `concept`, session summaries, the stringified `raw_data`, and the stringified `source_files` all run through `stripPrivate`, and the dedup `content_hash` is computed over the redacted `title`/`concept`. No `<private>` content — and no hash derived from it — reaches the DB via any field.
 
 ### 4.4 Web Dashboard
 

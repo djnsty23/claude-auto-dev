@@ -8,7 +8,7 @@
 - **CLI** — new `semantic` command; the existing `search` command now calls `searchSmart` (output formatting unchanged). `skills/mem-search/SKILL.md` documents the auto-fallback and adds a `mem why` trigger (synced to `skills/manifest.json`).
 
 ### Security — privacy hardening
-- **`scripts/memory-db.js`** — `saveObservation` now runs stored `raw_data` through `stripPrivate` after `JSON.stringify`, closing the last gap where `<private>…</private>` content could reach the DB. `title`, `concept`, and the session summary fields were already redacted; `raw_data` was the exception.
+- **`scripts/memory-db.js`** — `saveObservation` now redacts every user-controlled field before persisting: `raw_data` and `source_files` are run through `stripPrivate` after `JSON.stringify`, and the dedup `content_hash` is computed over the already-redacted `title`/`concept` so no hash of secret content is stored. Together with the previously redacted `title`, `concept`, and session summary fields, this closes every path by which `<private>…</private>` content could reach the DB. (`source_files` and the `content_hash` were the two fields not covered by the initial `raw_data`-only fix; both are now redacted.)
 
 ### Tested
 - **`scripts/test-semantic-search.js`** — new suite. Pure-ranker tests (always run, no DB): conceptual ranking, stemming, synonym bridging, empty-input handling. DB tests (skipped cleanly on older Node without `node:sqlite`): `<private>` redaction across title/concept/raw_data, and `searchSmart` surfacing a paraphrased match that exact FTS would miss.

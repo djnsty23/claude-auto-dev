@@ -58,28 +58,38 @@ if (!memDB.isAvailable()) {
   const sid = memDB.startSession(PROJ);
   cases.push(['db: startSession returns id', typeof sid === 'string' && sid.length > 0]);
 
-  // Observation with <private> content in title, concept, AND rawData
+  // Observation with <private> content in EVERY user-controlled field:
+  // title, concept, source_files (list entries), and nested rawData.
+  // The sentinel LEAKME must appear in NONE of the persisted columns.
+  const LEAK = 'LEAKME';
+  const priv = `<private>${LEAK}</private>`;
   const oid = memDB.saveObservation({
     sessionId: sid,
     projectPath: PROJ,
     type: 'decision',
-    title: 'chose approach <private>secret</private> here',
-    concept: 'reasoning includes <private>secret</private> details',
-    sourceFiles: ['a.js'],
-    rawData: { note: '<private>secret</private>', keep: 'visible' }
+    title: `chose approach ${priv} here`,
+    concept: `reasoning includes ${priv} details`,
+    sourceFiles: [`src/${priv}.js`, 'a.js', `notes-${priv}.md`],
+    rawData: { note: priv, nested: { deep: priv }, keep: 'visible' }
   });
   cases.push(['db: saveObservation returns id', typeof oid === 'string' && oid.length > 0]);
 
   const row = memDB.getObservation(oid);
   cases.push(['privacy: row read back', !!row]);
-  cases.push(['privacy: no "secret" leaks into any field', row &&
-    !row.title.includes('secret') &&
-    !(row.concept || '').includes('secret') &&
-    !(row.raw_data || '').includes('secret')]);
+  // The sentinel must appear in NO persisted user-controlled field.
+  const fields = row ? [row.title, row.concept, row.raw_data, row.source_files] : [];
+  cases.push(['privacy: sentinel LEAKME appears in NO field (title/concept/raw_data/source_files)',
+    !!row && fields.every(f => !(f || '').includes(LEAK))]);
+  // Belt-and-suspenders: stringify the ENTIRE read-back row and confirm the
+  // sentinel is absent from every column, not just the four we name above.
+  cases.push(['privacy: sentinel absent from entire read-back row',
+    !!row && !JSON.stringify(row).includes(LEAK)]);
   cases.push(['privacy: [REDACTED] present in title', row && row.title.includes('[REDACTED]')]);
   cases.push(['privacy: [REDACTED] present in concept', row && (row.concept || '').includes('[REDACTED]')]);
   cases.push(['privacy: [REDACTED] present in raw_data', row && (row.raw_data || '').includes('[REDACTED]')]);
+  cases.push(['privacy: [REDACTED] present in source_files', row && (row.source_files || '').includes('[REDACTED]')]);
   cases.push(['privacy: non-private raw_data preserved', row && (row.raw_data || '').includes('visible')]);
+  cases.push(['privacy: non-private source_files preserved', row && (row.source_files || '').includes('a.js')]);
 
   // Paraphrase observation: concept talks about "authentication", query is "login".
   // Neither FTS MATCH nor LIKE '%login%' hits it — only the synonym-aware ranker does.

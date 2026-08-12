@@ -226,7 +226,7 @@ const api = {
             const validTypes = ['decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change'];
             if (!validTypes.includes(type)) type = 'change';
 
-            const hash = contentHash(type, title, concept);
+            const hash = contentHash(type, stripPrivate(title), stripPrivate(concept || null));
 
             // Dedup: skip if same hash within 30s
             if (isDuplicate(db, hash)) return null;
@@ -243,7 +243,7 @@ const api = {
                 type,
                 stripPrivate(title),
                 stripPrivate(concept || null),
-                JSON.stringify(sourceFiles || []),
+                stripPrivate(JSON.stringify(sourceFiles || [])),
                 tokenCost || 0,
                 hash,
                 rawData ? stripPrivate(JSON.stringify(rawData)) : null
