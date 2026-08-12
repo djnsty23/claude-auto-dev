@@ -59,6 +59,7 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
 | `knowledge <area>` / `what do we know about` / `brief me on` | Distill a domain knowledge brief for a code area from memory |
 | `telemetry` / `usage stats` | Show tool usage stats from local telemetry log |
+| `smart explore <path>` / `code outline` / `map the codebase` | Compact structural code outline (signatures/classes/imports) to save tokens vs reading whole files |
 
 For quick fixes, just describe what to fix — no commands needed.
 
@@ -69,7 +70,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 38 skills in directory format (all active) + 14 deprecated redirect aliases in the manifest
+- 39 skills in directory format (all active) + 14 deprecated redirect aliases in the manifest
 - See `~/.claude/skills/manifest.json` for triggers and requires chains
 - Auto-loaded: core (with prd.json)
 - Standards, security load via requires chains when review/audit/auto run

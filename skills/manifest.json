@@ -1,5 +1,5 @@
 {
-  "description": "38 active skills + 14 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
+  "description": "39 active skills + 14 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
   "version": "7.6",
   "deprecated": [
     "supabase-postgres",
@@ -476,6 +476,18 @@
       "file": "refactor/SKILL.md",
       "priority": 2,
       "description": "Code refactoring patterns - extract, split, restructure without changing behavior."
+    },
+    "smart-explore": {
+      "triggers": [
+        "smart explore",
+        "explore code",
+        "outline",
+        "map the codebase",
+        "code outline"
+      ],
+      "file": "smart-explore/SKILL.md",
+      "priority": 2,
+      "description": "Emit a compact structural outline of code (signatures, classes, imports, exports) to save tokens vs reading whole files"
     }
   },
   "defaults": {

@@ -200,6 +200,20 @@ Uses Tree-sitter to parse code into AST, then provides structured exploration:
 
 **Implementation:** `scripts/smart-explore.js` using `tree-sitter` npm package.
 
+**Status (v7.6):** A **dependency-free** version is implemented in
+`scripts/smart-explore.js` (pure JS, zero deps, offline). It delivers the same
+core benefit — **compact structural outlines instead of full file contents**
+(~95% smaller than raw source on this repo) — via a **heuristic/regex line-based
+extractor**, **not** a real AST. It handles JS/TS/JSX/TSX robustly (imports,
+function/arrow signatures with params + line numbers, class names + methods,
+`interface`/`type`, exports), Python decently (indentation-based top-level
+`def`/`class`/`import`), and other languages with a generic keyword scan that
+honestly reports "no structure detected" rather than fabricating symbols.
+Exposed as the user-invocable **smart-explore** skill. Known limits: multi-line
+signatures, dynamic/computed exports, and unusual syntax can be missed. A true
+**Tree-sitter AST** (24+ languages, import graphs, higher fidelity) remains an
+optional future upgrade.
+
 ---
 
 ## Phase 4: Infrastructure (Ongoing)
