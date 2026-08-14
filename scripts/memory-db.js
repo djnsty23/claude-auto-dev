@@ -154,6 +154,88 @@ function isDuplicate(db, hash, windowSeconds = 30) {
     }
 }
 
+// --- Knowledge briefs (roadmap §3.2 "domain brains") ---
+// Distill accumulated observations for a code AREA into a focused brief.
+// The "area" is a path prefix / directory / fragment (e.g. "src/auth").
+// An observation belongs to the area if any of its source_files sits under
+// the area, or the area fragment appears in its title/concept.
+
+function normalizeArea(area) {
+    return String(area || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+// True when `needle` (lowercased) occurs in `hay` delimited by non-alphanumeric
+// boundaries, so "auth" matches "auth token" but NOT "author". No RegExp is
+// built from user input — we scan indexOf hits and inspect the surrounding
+// chars. Start/end of string count as boundaries.
+function hasWord(hay, needle) {
+    if (!needle) return false;
+    const isAlnum = (c) => !!c && ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'));
+    let i = hay.indexOf(needle);
+    while (i !== -1) {
+        const before = i > 0 ? hay[i - 1] : '';
+        const after = hay[i + needle.length] || '';
+        if (!isAlnum(before) && !isAlnum(after)) return true;
+        i = hay.indexOf(needle, i + 1);
+    }
+    return false;
+}
+
+function matchesArea(row, needle) {
+    if (!needle) return false;
+    let files = [];
+    try { files = JSON.parse(row.source_files || '[]'); } catch { files = []; }
+    // Path matching is segment/boundary aware on normalized (`/`-separated,
+    // lowercased) paths. `src/auth` matches `src/auth/login.js` and `src/auth`
+    // but NOT `src/authentication/service.js`; `auth` matches a full segment
+    // but NOT `author`. Pure string ops — no RegExp from user input.
+    if (Array.isArray(files) && files.some((f) => {
+        const p = String(f).replace(/\\/g, '/').toLowerCase();
+        return ('/' + p + '/').includes('/' + needle + '/') // segment / dir prefix
+            || ('/' + p).endsWith('/' + needle)             // exact file / suffix
+            || p.startsWith(needle + '/')                    // area is a leading dir
+            || p === needle;
+    })) {
+        return true;
+    }
+    // Free-text title/concept matching only applies to word-like needles (no
+    // `/`), and is word-boundary aware so "auth" does not match "author".
+    if (needle.includes('/')) return false;
+    const hay = `${row.title || ''} ${row.concept || ''}`.toLowerCase();
+    return hasWord(hay, needle);
+}
+
+// Render a compact Markdown brief from a knowledge() result.
+function renderKnowledgeBrief(result, area) {
+    const title = (area && normalizeArea(area)) || (result && result.area) || '';
+    if (!result || result.total === 0) {
+        return `# Knowledge brief: ${title}\n\nNo accumulated knowledge yet for \`${title}\`.\n`;
+    }
+    const lines = [
+        `# Knowledge brief: ${title}`,
+        '',
+        `_Distilled from ${result.total} observation${result.total === 1 ? '' : 's'} in the memory store._`,
+        ''
+    ];
+    const section = (heading, rows) => {
+        if (!rows || !rows.length) return;
+        lines.push(`## ${heading}`, '');
+        for (const r of rows) {
+            const when = (r.timestamp || '').slice(0, 10);
+            let line = `- ${r.title}`;
+            if (r.concept) line += ` — ${r.concept}`;
+            if (when) line += ` _(${when})_`;
+            lines.push(line);
+        }
+        lines.push('');
+    };
+    section('Decisions', result.groups.decisions);
+    section('Bug fixes', result.groups.bugfixes);
+    section('Gotchas & discoveries', result.groups.gotchas);
+    section('Changes & features', result.groups.changes);
+    return lines.join('\n');
+}
+
 // --- Circuit breaker ---
 let _failures = 0;
 const MAX_FAILURES = 3;
@@ -226,7 +308,7 @@ const api = {
             const validTypes = ['decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change'];
             if (!validTypes.includes(type)) type = 'change';
 
-            const hash = contentHash(type, title, concept);
+            const hash = contentHash(type, stripPrivate(title), stripPrivate(concept || null));
 
             // Dedup: skip if same hash within 30s
             if (isDuplicate(db, hash)) return null;
@@ -243,10 +325,10 @@ const api = {
                 type,
                 stripPrivate(title),
                 stripPrivate(concept || null),
-                JSON.stringify(sourceFiles || []),
+                stripPrivate(JSON.stringify(sourceFiles || [])),
                 tokenCost || 0,
                 hash,
-                rawData ? JSON.stringify(rawData) : null
+                rawData ? stripPrivate(JSON.stringify(rawData)) : null
             );
             return id;
         });
@@ -284,6 +366,71 @@ const api = {
                 `);
                 return stmt.all(projectPath, likeQuery, likeQuery, limit);
             }
+        }) || [];
+    },
+
+    // Semantic search — lexical TF-IDF ranker (pure JS, no embeddings/network).
+    // Complements FTS5 with fuzzy/conceptual recall over recent observations.
+    searchSemantic(query, projectPath, limit = 20) {
+        projectPath = normalizeProject(projectPath);
+        return withCircuitBreaker(() => {
+            const db = getDB();
+            if (!db) return [];
+
+            // Load the ranker lazily so a load failure degrades gracefully (like FTS).
+            let ranker;
+            try {
+                ranker = require('./semantic-search');
+            } catch (err) {
+                process.stderr.write(`[Memory] semantic search unavailable: ${err.message}\n`);
+                return [];
+            }
+
+            const rows = db.prepare(`
+                SELECT id, timestamp, type, title, concept
+                FROM observations
+                WHERE project_path = ?
+                ORDER BY timestamp DESC
+                LIMIT 500
+            `).all(projectPath);
+
+            const docs = rows.map((r) => ({
+                id: r.id,
+                text: `${r.title} ${r.concept || ''}`,
+                timestamp: r.timestamp,
+                type: r.type,
+                title: r.title
+            }));
+
+            const ranked = ranker.rank(query, docs, limit);
+            return ranked.map((d) => ({
+                id: d.id,
+                timestamp: d.timestamp,
+                type: d.type,
+                title: d.title,
+                score: d.score
+            }));
+        }) || [];
+    },
+
+    // Smart search — FTS5 first; fall back to semantic when exact matches are sparse.
+    // Roadmap §3.1: "if FTS returns <3 results, fall back to semantic."
+    searchSmart(query, projectPath, limit = 20) {
+        projectPath = normalizeProject(projectPath);
+        return withCircuitBreaker(() => {
+            const ftsResults = api.searchIndex(query, projectPath, limit);
+            if (ftsResults.length >= 3) return ftsResults;
+
+            const semResults = api.searchSemantic(query, projectPath, limit);
+            const seen = new Set(ftsResults.map((r) => r.id));
+            const merged = ftsResults.slice();
+            for (const r of semResults) {
+                if (!seen.has(r.id)) {
+                    seen.add(r.id);
+                    merged.push(r);
+                }
+            }
+            return merged.slice(0, limit);
         }) || [];
     },
 
@@ -396,6 +543,45 @@ const api = {
         }) || [];
     },
 
+    // Knowledge brief — distill area-scoped observations into grouped buckets.
+    // Roadmap §3.2: filter observation history to a domain and compress into a
+    // focused brief. Queries the existing memory store (no parallel DB) and is
+    // bounded to the recent-500 window like searchSemantic. Returns null when
+    // the DB is unavailable; { total: 0, groups } when the area has nothing.
+    knowledge(projectPath, area, limit = 500) {
+        projectPath = normalizeProject(projectPath);
+        const needle = normalizeArea(area);
+        return withCircuitBreaker(() => {
+            const db = getDB();
+            if (!db) return null;
+            const rows = db.prepare(`
+                SELECT id, timestamp, type, title, concept, source_files
+                FROM observations
+                WHERE project_path = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            `).all(projectPath, limit);
+
+            const groups = { decisions: [], bugfixes: [], gotchas: [], changes: [] };
+            const seen = new Set();
+            let total = 0;
+            for (const r of rows) {
+                if (!matchesArea(r, needle)) continue;
+                const key = (r.type || '') + ' ' + (r.title || '').toLowerCase().trim();
+                if (seen.has(key)) continue; // dedup by (type,title), most-recent wins (rows are DESC)
+                seen.add(key);
+                total++;
+                if (r.type === 'decision') groups.decisions.push(r);
+                else if (r.type === 'bugfix') groups.bugfixes.push(r);
+                else if (r.type === 'discovery') groups.gotchas.push(r);
+                else groups.changes.push(r); // feature / refactor / change
+            }
+            return { area: needle, projectPath, total, groups };
+        });
+    },
+
+    renderKnowledgeBrief,
+
     // Stats for a project
     getStats(projectPath) {
         projectPath = normalizeProject(projectPath);
@@ -448,7 +634,10 @@ if (require.main === module) {
             console.log(JSON.stringify(api.getRecent(projectPath, parseInt(args[2]) || 10), null, 2));
             break;
         case 'search':
-            console.log(JSON.stringify(api.searchIndex(args[2] || '', projectPath), null, 2));
+            console.log(JSON.stringify(api.searchSmart(args[2] || '', projectPath), null, 2));
+            break;
+        case 'semantic':
+            console.log(JSON.stringify(api.searchSemantic(args[2] || '', projectPath), null, 2));
             break;
         case 'timeline':
             console.log(JSON.stringify(api.searchTimeline(args[2] || '', projectPath), null, 2));
@@ -462,6 +651,12 @@ if (require.main === module) {
         case 'bugs':
             console.log(JSON.stringify(api.getByType('bugfix', projectPath), null, 2));
             break;
+        case 'knowledge': {
+            const area = args[2] || '';
+            const result = api.knowledge(projectPath, area);
+            console.log(api.renderKnowledgeBrief(result, area));
+            break;
+        }
         case 'cleanup':
             const removed = api.cleanup(parseInt(args[2]) || 90);
             console.log(`Cleaned up ${removed} old observations`);
@@ -492,6 +687,6 @@ if (require.main === module) {
         }
         default:
             console.log('Usage: node memory-db.js <command> [projectPath] [args]');
-            console.log('Commands: stats, recent, search <query>, timeline <query>, sessions, decisions, bugs, cleanup [days], test');
+            console.log('Commands: stats, recent, search <query>, semantic <query>, timeline <query>, sessions, decisions, bugs, knowledge <area>, cleanup [days], test');
     }
 }

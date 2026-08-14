@@ -22,6 +22,11 @@ ledger.json
 # Auto mode flag (session-specific)
 .claude/auto-active
 
+# Knowledge auto-injection throttle state. Rewritten on each update to hold only
+# the current session's "sessionId<TAB>area" markers, so it stays bounded to the
+# active session's areas rather than accumulating across sessions.
+.claude/knowledge-surfaced
+
 # Update backups and compact state
 settings.backup.json
 .claude/pre-compact-state.json

@@ -1,6 +1,6 @@
 {
-  "description": "35 active skills + 3 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
-  "version": "7.5",
+  "description": "39 active skills + 14 deprecated redirects - v7.3 adds progressive disclosure on auto/SKILL.md (references/ pattern), Haiku tier for mechanical skills, pre-tool-filter hook test suite, and an Aider-style auto-lint loop in post-tool-typecheck",
+  "version": "7.6",
   "deprecated": [
     "supabase-postgres",
     "supabase-schema",
@@ -352,6 +352,7 @@
         "mem bugs",
         "mem timeline",
         "mem stats",
+        "mem why",
         "remember",
         "what did we",
         "what was",
@@ -361,6 +362,17 @@
       "file": "mem-search/SKILL.md",
       "priority": 2,
       "description": "Search persistent project memory across sessions — decisions, bugs, features, discoveries"
+    },
+    "knowledge-agent": {
+      "triggers": [
+        "knowledge",
+        "what do we know about",
+        "brief me on",
+        "domain knowledge"
+      ],
+      "file": "knowledge-agent/SKILL.md",
+      "priority": 2,
+      "description": "Distill accumulated observations for a code area into a focused domain knowledge brief"
     },
     "doppler": {
       "triggers": [
@@ -464,6 +476,18 @@
       "file": "refactor/SKILL.md",
       "priority": 2,
       "description": "Code refactoring patterns - extract, split, restructure without changing behavior."
+    },
+    "smart-explore": {
+      "triggers": [
+        "smart explore",
+        "explore code",
+        "outline",
+        "map the codebase",
+        "code outline"
+      ],
+      "file": "smart-explore/SKILL.md",
+      "priority": 2,
+      "description": "Emit a compact structural outline of code (signatures, classes, imports, exports) to save tokens vs reading whole files"
     }
   },
   "defaults": {

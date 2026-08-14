@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "7.5.0",
+  "version": "7.6.0",
   "description": "Autonomous development workflow for Claude Code - skills, hooks, and task management",
   "files": [
     "skills",
@@ -18,6 +18,9 @@
     "ai-coding",
     "claude-skills"
   ],
+  "scripts": {
+    "test": "node scripts/test-all.js"
+  },
   "author": "djnsty23",
   "license": "MIT",
   "repository": {

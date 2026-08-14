@@ -177,6 +177,8 @@ Add ChromaDB for semantic search alongside SQLite FTS5.
 
 **Alternative:** Skip ChromaDB entirely. Use OpenAI/Anthropic embeddings stored in SQLite with a simple cosine similarity function. Lighter weight, no extra daemon.
 
+**Status (v7.6):** The lightweight, no-daemon path is implemented as pure JS in `scripts/semantic-search.js` — a lexical TF-IDF token-similarity ranker (with conservative stemming and dev-domain synonym expansion), zero deps, offline, deterministic. `searchSmart` uses the auto-select rule above: FTS5 first, fall back to semantic when FTS returns <3 results. This is lexical-semantic, **not** neural embeddings; ChromaDB or real embedding vectors remain an optional future upgrade for stronger conceptual recall.
+
 ### 3.2 knowledge-agent Skill
 
 Build domain-specific "brains" from filtered observation history:
@@ -197,6 +199,20 @@ Uses Tree-sitter to parse code into AST, then provides structured exploration:
 - Returns function signatures, class hierarchies, import graphs
 
 **Implementation:** `scripts/smart-explore.js` using `tree-sitter` npm package.
+
+**Status (v7.6):** A **dependency-free** version is implemented in
+`scripts/smart-explore.js` (pure JS, zero deps, offline). It delivers the same
+core benefit — **compact structural outlines instead of full file contents**
+(~95% smaller than raw source on this repo) — via a **heuristic/regex line-based
+extractor**, **not** a real AST. It handles JS/TS/JSX/TSX robustly (imports,
+function/arrow signatures with params + line numbers, class names + methods,
+`interface`/`type`, exports), Python decently (indentation-based top-level
+`def`/`class`/`import`), and other languages with a generic keyword scan that
+honestly reports "no structure detected" rather than fabricating symbols.
+Exposed as the user-invocable **smart-explore** skill. Known limits: multi-line
+signatures, dynamic/computed exports, and unusual syntax can be missed. A true
+**Tree-sitter AST** (24+ languages, import graphs, higher fidelity) remains an
+optional future upgrade.
 
 ---
 
@@ -247,6 +263,8 @@ function stripPrivate(text) {
 ```
 
 Add to observation capture pipeline, before DB write.
+
+**Status (v7.6):** Implemented across all persisted fields. As of v7.6 every user-controlled field is redacted before write — `title`, `concept`, session summaries, the stringified `raw_data`, and the stringified `source_files` all run through `stripPrivate`, and the dedup `content_hash` is computed over the redacted `title`/`concept`. No `<private>` content — and no hash derived from it — reaches the DB via any field.
 
 ### 4.4 Web Dashboard
 
