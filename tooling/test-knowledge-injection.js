@@ -291,7 +291,64 @@ if (!memDB.isAvailable()) {
             after.some((l) => l === `${CAP_SESSION}\tsrc/api`)]);
     }
 
-    // ---- triage of the 18 remaining survivors, so nobody re-derives it ----
+    // ---- the brief must include every GROUP, not just decisions ----
+    //
+    // `...(g.gotchas || [])` and its two siblings all survived mutation to `&&`.
+    // groups always carries all four keys as arrays, so `[] || []` and `[] && []`
+    // are identical — the mutants are only observable when a group is NON-empty,
+    // and the seeded knowledge in this fixture was a decision. A `&&` there
+    // silently drops every gotcha, bugfix and change from the brief while
+    // decisions keep appearing, which is the kind of gap that still looks like
+    // "memory is working".
+    //
+    // Seeded into a FRESH area with no decision, so all three non-decision groups
+    // land inside the brief's slice(0, 3).
+    {
+        const prevH2 = process.env.HOME, prevU2 = process.env.USERPROFILE;
+        process.env.HOME = CAP_HOME; process.env.USERPROFILE = CAP_HOME;
+        const db2 = require(path.join(CAP_SCRIPTS, 'memory-db.js'));
+        const sid2 = db2.startSession(CAP_PROJ);
+        for (const [type, title] of [
+            ['discovery', 'GOTCHA_MARKER the cache lies on cold start'],
+            ['bugfix', 'BUGFIX_MARKER off-by-one in the ledger cursor'],
+            ['feature', 'CHANGE_MARKER added the reconcile endpoint'],
+        ]) {
+            db2.saveObservation({
+                sessionId: sid2, projectPath: CAP_PROJ, type, title,
+                concept: 'seeded for the group-coverage assertion',
+                sourceFiles: ['src/billing/ledger.js'],
+            });
+        }
+        process.env.HOME = prevH2; process.env.USERPROFILE = prevU2;
+
+        const gr = runCapture(path.join(CAP_PROJ, 'src/billing/ledger.js'), 'sess-groups');
+        const gerr = gr.stderr || '';
+        cases.push(['brief includes GOTCHAS, not only decisions', /GOTCHA_MARKER/.test(gerr)]);
+        cases.push(['brief includes BUGFIXES', /BUGFIX_MARKER/.test(gerr)]);
+        cases.push(['brief includes CHANGES', /CHANGE_MARKER/.test(gerr)]);
+    }
+
+    // ---- line 160 CANNOT be reached from here, and here is why ----
+    //
+    // `if (brief !== null)` distinguishes a real empty result (recorded, so an
+    // empty area is not recomputed on every edit) from a DB failure or open
+    // circuit (NOT recorded, so the next edit retries). Its mutant survives, and
+    // an attempt to kill it was written, PASSED, and then removed — because the
+    // premise was false.
+    //
+    // The attempt dropped the `observations` table to make knowledge() throw into
+    // its circuit breaker. It does not: memory-db opens with
+    // `CREATE TABLE IF NOT EXISTS` and the hook runs as a FRESH PROCESS, so the
+    // schema is recreated and the query succeeds against an empty table. There is
+    // no failure — brief comes back non-null with total 0, which is the other
+    // branch entirely. The test passed for reasons unrelated to what it claimed,
+    // which is worse than failing.
+    //
+    // Reaching this branch needs knowledge() to fail while the module stays
+    // available: an injectable circuit-breaker state, or a memory-db seam that
+    // does not exist today. Left undone deliberately.
+
+    // ---- triage of the remaining survivors, so nobody re-derives it ----
     //
     // memory-capture went 27 -> 23 -> 18 survivors as assertions were added. All
     // 18 have been read. They fall into three groups, and only the third is work:
