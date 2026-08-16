@@ -1,0 +1,59 @@
+#!/bin/sh
+# commit-msg — keep private project names out of this public repo's history.
+#
+# The gate scans the working TREE. A commit message is never in the tree, so it
+# was never checked, and it is the one artefact that cannot be fixed later:
+# redaction is not removal, and a history rewrite is a separate, deliberate
+# decision that has already been made the other way.
+#
+# Measured on this repo before writing this hook:
+#
+#   304 commits · 19 message lines carrying a private project name
+#
+# Every one is a true positive — this repo is public, so a private codebase's
+# name in its history is exactly the thing the tree-level gate exists to stop.
+# Precision on that corpus is 100%, which is why this is a hard block and not a
+# warning.
+#
+# Five of those 19 lines are from commit 8b57919, written the same day the
+# write-time hook shipped: a before/after table naming three private repos. The
+# tree gate caught the identical table in the source file and it was anonymised;
+# the copy in the commit message went through unchecked and was pushed. Nothing
+# was checking it. Now something is.
+#
+# Enable (not automatic on clone):
+#   git config core.hooksPath tooling/githooks
+#
+# Bypass, when you mean it:  git commit --no-verify
+
+MSG_FILE="$1"
+ROOT="$(git rev-parse --show-toplevel)"
+CHECKER="$ROOT/tooling/check-no-private-names.js"
+
+[ -f "$CHECKER" ] || exit 0
+
+# Read the denylist from the checker itself rather than copying it, so the hook
+# and the gate cannot drift. Comment lines are stripped first: the checker's own
+# prose explains what it does and would otherwise contribute stray quoted words.
+NAMES=$(sed -n '/^const NAMES = \[/,/^\];/p' "$CHECKER" | grep -v '^\s*//' | grep -oE "'[^']+'" | tr -d "'" | paste -sd '|' -)
+
+[ -n "$NAMES" ] || exit 0
+
+# Ignore comment lines git adds to the template; they never reach the message.
+HITS=$(grep -v '^#' "$MSG_FILE" | grep -inE "\b($NAMES)\b")
+
+if [ -n "$HITS" ]; then
+    echo ""
+    echo "commit-msg: this message names a private project, and this repo is PUBLIC."
+    echo ""
+    echo "$HITS" | sed 's/^/  /'
+    echo ""
+    echo "A commit message cannot be fixed after the fact the way a file can —"
+    echo "redaction is not removal. Anonymise now (Project A/B/C, keeping the"
+    echo "numbers and the product shape)."
+    echo ""
+    echo "Deliberate exception: git commit --no-verify"
+    exit 1
+fi
+
+exit 0

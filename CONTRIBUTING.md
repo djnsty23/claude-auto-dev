@@ -114,11 +114,17 @@ ships it.
 
 ## Releasing
 
-Enable the pre-push hook once per clone — it is not automatic:
+Enable the git hooks once per clone — this is not automatic, and both hooks
+check things nothing else can see:
 
 ```bash
 git config core.hooksPath tooling/githooks
 ```
+
+- `pre-push` refuses to push a tree that fails `validate`.
+- `commit-msg` refuses a commit message naming a private project. The tree-level
+  gate cannot see a message, and a message is the one artefact that cannot be
+  fixed afterwards — measured at 19 such lines across 304 commits, all real.
 
 Then:
 
