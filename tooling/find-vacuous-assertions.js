@@ -50,12 +50,25 @@
 //   hooks/pre-compact.js, post-compact.js          6/6          0  closed
 //   scripts/session-carrier.js                   10/10          0  closed
 //
-// SCRIPTS — surveyed, NOT yet read. These counts are leads, nothing more:
-//   scripts/find-orphan-checks.js                23/41         18  UNREAD
-//   scripts/inbox-watch.js                       16/25          9  UNREAD
-//   templates/preflight.js                       10/17          7  UNREAD
-//   scripts/semantic-search.js                   24/29          5  UNREAD
-//   scripts/drift-audit.js                          —           —  not run (~22min)
+// SCRIPTS — all read except one:
+//   scripts/find-orphan-checks.js                29/41         12  read
+//   scripts/drift-audit.js                          see below   7  read (both suites)
+//   templates/preflight.js                       11/17          6  read
+//   scripts/semantic-search.js                   27/29          2  read
+//   scripts/inbox-watch.js                       24/25          1  read
+//   scripts/memory-db.js                            —          56  LARGEST LEAD
+//
+// memory-db is the one left, and its number needs a caveat: 56 survive BOTH of
+// its two primary suites (test-knowledge 61, test-memory-db-cli 77, intersection
+// 56) — but FOUR other suites also drive it (test-knowledge-injection,
+// test-memory-session-end, test-session-carrier, test-semantic-search), so the
+// true combined figure is lower and has not been measured. Do that before
+// treating 56 as the debt.
+//
+// It is also the case where the one-suite caveat above bites hardest: the CLI
+// suite is a SMOKE suite by design — it asserts every subcommand runs and
+// returns parseable JSON, not what the queries mean — so 77 against it is
+// expected and says nothing about that suite's quality.
 //
 // The hook rows are the evidence for bothering: reading them turned up an inbox
 // that could be claimed without being announced, a session-end summary that
