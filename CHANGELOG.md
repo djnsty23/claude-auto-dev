@@ -1,5 +1,60 @@
 # Changelog
 
+## [8.1.0] - 2026-08-16
+
+Evidence-driven, not guessed. Mined 3,127 `fix` commits across three production
+repos to find what the first pass actually gets wrong. See
+[docs/failure-evidence.md](docs/failure-evidence.md).
+
+### The measurement
+
+| Repo | fix : feat+refactor | Fixes per feature |
+|---|---|---|
+| fitmito | 799 : 853 | 0.94 |
+| ecommercebenchmark | 830 : 486 | 1.71 |
+| spotivibly | 1,299 : 651 | 2.00 |
+
+**93% of fitmito's fixes land within 24 hours on a file a feature had just
+touched.** That is the first pass being wrong, not debt accumulating.
+
+Ranked causes, consistent across all three: ordering/async races (32–41%),
+unhandled flow states (9–20%), cache-key scoping (7–16%), duplicated derivation
+(4–11%), units and references (5–11%), lifecycle cleanup (6–8%), cross-surface
+consistency (3–8%), config targeting (3–8%). Runtime crashes are a small
+minority — the code runs, and is wrong. Typecheck, build, and a clean console
+cannot see any of it.
+
+Two findings about gates themselves:
+
+- **More prose did not help.** The two repos with 526- and 593-line `CLAUDE.md`
+  files have the *worst* fix ratios; the one with 55 lines has the best.
+- **A gate nobody runs is not a gate.** fitmito's own preflight records sixty
+  harness scripts that nothing ran, two of them red for eight days. This
+  framework had the identical defect in `test-all.js`, found in 8.0.
+
+### Added
+- **`rule-ramifications`** — the eight classes as a pre- and post-implementation
+  checklist, auto-loaded on every feature. Every claim traces to a counted commit.
+- **`learn-from-fixes`** + `scripts/mine-fixes.js` — any project ranks its own
+  failure classes from its own git history instead of inheriting this list, and
+  gets proposed executable gates for the top ones. Read-only; never writes to the
+  analysed repo.
+- **`docs/failure-evidence.md`** — method, measurements, and the quoted commits.
+
+### Changed
+- `rule-verification` now states plainly that a clean typecheck is not evidence
+  against any of the eight classes, and defers to `rule-ramifications`.
+
+### Fixed
+- **`pre-tool-filter` blocked its own maintainers, twice**, during this analysis.
+  `cat x.json | node -e '…'` — an everyday read-only idiom — was blocked because
+  the rule matched `node -e` after *any* pipe; and `grep -rn "curl | bash"` was
+  blocked for containing the string it searches for. The hook only ever sees
+  command text and cannot distinguish executing from mentioning, so both rules
+  are now anchored to command start or a chain operator. Fetch-and-execute
+  (`curl … | bash`, `curl … | node -e`) stays blocked, with 8 new regression
+  cases covering both directions.
+
 ## [8.0.0] - 2026-08-16
 
 Restructured from a copy-into-`~/.claude` installer into a Claude Code plugin

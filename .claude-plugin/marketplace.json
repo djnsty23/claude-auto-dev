@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Autonomous development workflow for Claude Code — sprint execution, quality audits, memory, and stack integrations.",
-    "version": "8.0.0"
+    "version": "8.1.0"
   },
   "plugins": [
     {
@@ -14,21 +14,37 @@
       "source": "./plugins/autodev-core",
       "description": "The workflow itself: brainstorm, auto, iterate, audit, review, ship, plus the prd.json sprint system and its hooks.",
       "category": "workflow",
-      "keywords": ["workflow", "autonomous", "sprint", "code-review", "qa"]
+      "keywords": [
+        "workflow",
+        "autonomous",
+        "sprint",
+        "code-review",
+        "qa"
+      ]
     },
     {
       "name": "autodev-memory",
       "source": "./plugins/autodev-memory",
       "description": "Cross-session project memory: observation capture, semantic search, domain-knowledge briefs, and repo-backed backup.",
       "category": "productivity",
-      "keywords": ["memory", "context", "semantic-search", "knowledge"]
+      "keywords": [
+        "memory",
+        "context",
+        "semantic-search",
+        "knowledge"
+      ]
     },
     {
       "name": "autodev-stack",
       "source": "./plugins/autodev-stack",
       "description": "Opinionated integrations for a specific stack: Supabase, Doppler, Stripe, and Remotion.",
       "category": "integrations",
-      "keywords": ["supabase", "doppler", "stripe", "remotion"]
+      "keywords": [
+        "supabase",
+        "doppler",
+        "stripe",
+        "remotion"
+      ]
     }
   ]
 }
