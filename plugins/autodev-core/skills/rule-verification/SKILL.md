@@ -11,6 +11,14 @@ allowed-tools: Read, Grep, Glob, Bash
 A task is not done because the code was written. It is done when the check for
 its type has passed.
 
+> **The checks below catch crashes. They do not catch the common case.** Across
+> 3,127 fix commits in three production repos, runtime crashes were a small
+> minority; the bulk was code that ran fine and was wrong — a handler nested
+> where it never fires, four surfaces disagreeing about one number, a cache key
+> missing the account dimension, a locale holding a translation of the previous
+> sentence. Work `rule-ramifications` before claiming any of these passed.
+> Evidence: [`docs/failure-evidence.md`](../../../../docs/failure-evidence.md).
+
 ## Scope boundary
 
 - **audit** owns: security, a11y, performance, type safety, `console.log`,

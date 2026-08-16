@@ -43,11 +43,20 @@ const DANGEROUS_BASH_PATTERNS = [
     /git\s+stash\s+(drop|clear)/i,             // git stash drop/clear
     /git\s+branch\s+-D/,                        // git branch -D (force delete, case-sensitive)
     /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
-    /curl.*\|\s*(ba)?sh/i,                     // curl | bash (remote code exec)
-    /wget.*\|\s*(ba)?sh/i,                     // wget | bash
+    // Fetch-and-execute. Anchored to command start or a chain operator: this
+    // hook only ever sees command TEXT, so an unanchored rule cannot tell
+    // running `curl … | bash` from grepping for the string "curl | bash".
+    // The unanchored version blocked a maintainer searching for it by name.
+    /(?:^|[;&|]\s*)(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b/i,
     /(?:^|[;&|]\s*)(bash|sh)\s+-c\b/i,             // bash -c / sh -c at command start or after chain (not inside quoted args)
     /(?:^|[;&|]\s*)eval\s/i,                   // eval at command start or after chain operator
-    /(?:^|[;&|]\s*)node\s+(-e|--eval|-p|--print)\b/i, // node -e at command start (not inside grep/echo args)
+    // `node -e` is a real escape hatch, but only when the CODE comes from
+    // somewhere untrusted. Blocking it after any pipe made `cat x.json | node -e
+    // 'parse'` — an everyday read-only idiom — impossible, which is how this
+    // hook blocked its own maintainers. Block it at command start, and after a
+    // pipe only when the upstream is a network fetch.
+    /(?:^|[;&]\s*)node\s+(-e|--eval|-p|--print)\b/i,
+    /\b(curl|wget|fetch)\b[^|]*\|\s*(sudo\s+)?node\s+(-e|--eval|-p|--print)\b/i,
     /(?:^|[;&|]\s*)npx\s+(?!tsc\b|tsx\b|supabase\b|vercel\b|next\b|vite\b|vitest\b|jest\b|playwright\b|eslint\b|prettier\b|npm-check-updates\b|axe-core-cli\b|@next\/bundle-analyzer\b|lighthouse\b|netlify\b|remotion\b|shadcn\b|shadcn-ui\b|create-next-app\b|prisma\b)/i, // npx at command start or after chain operator (not inside quoted strings)
     /rm\s.*prd-archive/i,                      // NEVER delete prd archives (move instead)
     /rm\s.*prd-backup/i,                       // NEVER delete prd backups (move instead)
