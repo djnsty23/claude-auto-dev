@@ -297,6 +297,118 @@ function runWithCfg(dir, cfg) {
         && /S1-003/.test(out?.reason || ''));
 }
 
+// ------------------------------------------------- gaps found by check:vacuity
+//
+// Every case below was found by mutating this hook one decision at a time and
+// noticing that no assertion changed colour. Each is named with the line whose
+// mutant survived.
+
+// line 94 — `if (!fs.existsSync(prdPath))`. Forcing this branch to `false` left
+// every assertion green: nothing exercised auto-mode-with-no-prd, which is the
+// path that DELETES the auto-active flag. A hook that fails to clean up here
+// leaves auto armed in a directory it can never make progress in.
+{
+    const dir = project({ auto: true });   // auto on, no prd.json at all
+    const { r } = run(dir);
+    check('no prd.json: removes the auto-active flag', !exists(dir, 'auto-active'));
+    check('  and says why', /No prd\.json found/.test(r.stderr || ''));
+}
+
+// line 157 — `s.passes === 'deferred'`. Flipping it to `!==` survived: the
+// termination was asserted but the COUNT never was, so the number Claude is
+// told about could be any value at all.
+//
+// The fixture needs an UNEQUAL split. SPRINT_DEFERRED is one done and one
+// deferred, so `passes === 'deferred'` counts 1 and `passes !== 'deferred'` also
+// counts 1 — the mutant produces an identical message and survives. Two deferred
+// against one done tells them apart: 2 versus 1.
+{
+    const TWO_DEFERRED = {
+        stories: {
+            'S1-001': { title: 'a', passes: true },
+            'S1-002': { title: 'b', passes: 'deferred' },
+            'S1-003': { title: 'c', passes: 'deferred' },
+        },
+    };
+    const dir = project({ auto: true, prd: TWO_DEFERRED });
+    const { r } = run(dir);
+    check('deferred stories are counted in the sprint-complete line',
+        /Sprint complete \(2 deferred\)/.test(r.stderr || ''));
+}
+
+// line 140 — `if (skipped.length > 0)`. Forcing it to `true` survived: no
+// assertion read the message that names which stories were set aside. Silently
+// skipping work is how a backlog rots without anyone deciding to let it, so the
+// naming is the point of the branch.
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    const cfg = withAges(dir, { 'S1-002': 200, 'S1-003': 400 });
+    const { stderr } = runWithCfg(dir, cfg);
+    check('skipped stories are named, not just counted',
+        /untouched >30d/.test(stderr) && /S1-002/.test(stderr) && /S1-003/.test(stderr));
+
+    // And the negative case, without which `if (true)` satisfies the assertion
+    // above and survives. Asserting only that a message APPEARS never tests the
+    // condition guarding it — it tests the message.
+    const clean = project({ auto: true, prd: SPRINT_DONE });
+    const cleanCfg = withAges(clean, {});
+    const { stderr: quiet } = runWithCfg(clean, cleanCfg);
+    check('  and nothing is reported when no story was skipped',
+        !/untouched >30d/.test(quiet));
+}
+
+// line 41 — `all[here] || all[cwd]`. Changing `||` to `&&` survived, because no
+// test ever reached the fallback: every cache written by withAges is keyed by
+// the REAL path, so `all[here]` always hit. The fallback exists for the case the
+// comment above it describes — a repo reached through a symlink — and that case
+// had no test at all.
+{
+    const real = project({ auto: true, prd: STALE_PRD });
+    const link = path.join(TMP, 'link' + (++n));
+    let symlinked = true;
+    try { fs.symlinkSync(real, link, 'dir'); } catch { symlinked = false; }
+
+    if (!symlinked) {
+        check('symlinked cwd falls back to the un-resolved path (SKIPPED: no symlink support)', true);
+    } else {
+        // Keyed by the SYMLINK path only, so the realpath lookup must miss.
+        const cfg = path.join(TMP, 'cfglink');
+        fs.mkdirSync(path.join(cfg, 'autodev'), { recursive: true });
+        // BOTH pending stories stale, so nothing is left active. The
+        // "untouched >30d" line sits after an early `block()` that fires
+        // whenever any active work remains — the first version of this test
+        // marked only one story stale, so it blocked on the other and never
+        // reached the line it was asserting on. The mechanism was right and the
+        // assertion was wrong.
+        fs.writeFileSync(path.join(cfg, 'autodev', 'prd-story-ages.json'), JSON.stringify({
+            [link]: {
+                computedAt: new Date().toISOString(), scanDepth: 120,
+                ages: { 'S1-002': 200, 'S1-003': 400 },
+            },
+        }));
+        const { stderr } = runWithCfg(link, cfg);
+        check('a cache keyed by the symlink path is still found',
+            /untouched >30d/.test(stderr) && /S1-002/.test(stderr));
+    }
+}
+
+// line 42 — `if (!entry || !entry.ages)`. Changing `||` to `&&` survived: no
+// cache entry in any test lacked `ages`, so the guard protecting the `id in
+// entry.ages` lookup below was never the thing that returned. Without it that
+// lookup throws, and the catch turns a malformed cache into "nothing is stale" —
+// which is the safe direction, but only by accident rather than by this guard.
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    const cfg = path.join(TMP, 'cfgnoages');
+    fs.mkdirSync(path.join(cfg, 'autodev'), { recursive: true });
+    fs.writeFileSync(path.join(cfg, 'autodev', 'prd-story-ages.json'), JSON.stringify({
+        [fs.realpathSync(dir)]: { computedAt: new Date().toISOString(), scanDepth: 120 },
+    }));
+    const { out, stderr } = runWithCfg(dir, cfg);
+    check('a cache entry with no ages skips nothing',
+        out?.decision === 'block' && !/untouched >30d/.test(stderr));
+}
+
 // ---------------------------------------------------------------- report
 
 let pass = 0, fail = 0;
