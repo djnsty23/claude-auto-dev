@@ -35,7 +35,7 @@ function auditPlugins() {
         if (!e) continue;
         const [, marketName] = key.split('@');
         const market = markets && markets[marketName];
-        if (market || !market.installLocation) continue;
+        if (!market || !market.installLocation) continue;
 
         // Is the local clone ahead of what is installed?
         let headSha = '';
