@@ -1,5 +1,47 @@
 # Changelog
 
+## [8.15.0] - 2026-08-16
+
+### Added — `npm run check:suites`: prove every test suite can fail
+
+This repo keeps writing *"a gate nobody has watched fire is a hypothesis"* and
+then hand-canarying one change at a time. This runs that check for all of them,
+in CI.
+
+For each suite it derives the source files that suite exercises, replaces each
+with a stub that parses and does nothing, and asserts the suite goes red. A
+suite that stays green against a stub is testing nothing.
+
+**Result on the current tree: 12 of 12 suites can fail, 0 vacuous.**
+
+The runner is checked differently — one child suite is made to exit 1 and
+`test-all.js` must notice. That is the exact bug this repo has already shipped
+once: `run(label, file, args)` called as `run(label, [...])` left `args`
+undefined, so every suite spawned a bare `node`, twelve reported PASS having
+executed nothing, and CI was green on an empty test run.
+
+### Three bugs it found in itself, in order
+
+1. **The stub called `process.exit(0)`.** For a suite that `require()`s its
+   subject that runs in the test runner's own process and kills it before a
+   single assertion — so the suite "passed", and two suites were reported
+   VACUOUS when neither was. A checker whose failure mode is a false accusation
+   is worse than no checker.
+2. **The subject map was hand-written and wrong for 3 of 12.** Two pointed at
+   files that do not exist; one accused a suite of vacuity when the real fault
+   was mapping it to a file it never touches. Subjects are now **derived** from
+   what each suite actually references — including bare basenames, because four
+   suites build their path in two steps and derived nothing without that.
+3. **"Every subject must kill the suite" was too strict.** A suite legitimately
+   references files it does not exercise — one names a module in a comment
+   explaining that it deliberately does *not* copy it. The property under test is
+   "this suite can fail", and one killed subject proves it.
+
+Verified non-vacuous by neutering a real suite and confirming it is reported
+VACUOUS, then restoring. Refuses to run on a dirty tree, since it overwrites
+source files and restores them from git. Linux-only in CI — one clean checkout
+answers the question, and three would triple a 40-second job for the same result.
+
 ## [8.14.0] - 2026-08-16
 
 ### Added — closing a task is a claim, and it has to be true

@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "8.14.0",
+  "version": "8.15.0",
   "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
   "private": true,
   "keywords": [
@@ -16,7 +16,8 @@
   "scripts": {
     "test": "node tooling/test-all.js",
     "validate": "node tooling/validate.js",
-    "bump": "node tooling/bump.js"
+    "bump": "node tooling/bump.js",
+    "check:suites": "node tooling/check-suites-can-fail.js"
   },
   "author": "djnsty23",
   "license": "MIT",

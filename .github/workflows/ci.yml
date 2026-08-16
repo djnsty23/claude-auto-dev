@@ -24,3 +24,13 @@ jobs:
         shell: bash
         run: |
           for f in plugins/*/hooks/*.js; do node --check "$f"; done
+
+      # A green suite that executes nothing is this repo's worst historical bug:
+      # test-all.js once spawned a bare `node` for every suite and CI passed on
+      # an empty run. This stubs each suite's subject and asserts the suite goes
+      # red. It rewrites files in place and restores them, so it runs only on
+      # Linux — one clean checkout is enough, and three would just triple a
+      # 40-second job for the same answer.
+      - name: Prove every suite can fail
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:suites
