@@ -17,7 +17,7 @@
  *      - Break the global Win+Shift+S (Snipping Tool) hotkey
  *      - Persist indefinitely until reboot or manual taskkill
  *    A real ~30 min Chrome / Snipping Tool / DWM lockup occurred 2026-04-28
- *    during a spotivibly testing session because of exactly this.
+ *    during a Project C testing session because of exactly this.
  *
  * 2. Bundled Chromium auto-registers itself for Windows startup.
  *    First launch silently writes an HKCU\...\Run entry so Chromium spawns
@@ -106,7 +106,7 @@ function restoreSnippingToolHotkey() {
     //   Even after killZombies() removes the bundled Chromium binary, the
     //   running SnippingTool can be left in a state where Win+Shift+S no
     //   longer reaches it. Process cleanup is necessary but NOT sufficient
-    //   for hotkey state. Observed three times in spotivibly testing
+    //   for hotkey state. Observed three times in Project C testing
     //   sessions: 2026-04-28 needed a reboot; 2026-04-29 morning needed a
     //   manual taskkill mid-session; 2026-04-29 afternoon repeated despite
     //   the agent-browser cleanup running at session start, confirming the

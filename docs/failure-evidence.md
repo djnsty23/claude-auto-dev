@@ -3,13 +3,26 @@
 Measured 2026-08-16 across three production repos built with this framework.
 Every rule in `rule-ramifications` traces to a number here.
 
+> **The repos are anonymised; the numbers are not.** They are private codebases,
+> one of them a client deliverable, and a per-repo defect rate is that team's to
+> publish or not — it is not this tool's to advertise. What is kept is the shape
+> of each product, because it is load-bearing for reading the table: a consumer
+> health app, a B2B audit platform and a consumer media app fail differently.
+>
+> - **Project A** — consumer health/fitness PWA, single-tenant plus invited users
+> - **Project B** — B2B audit platform, multi-tenant, heavy vendor integration
+> - **Project C** — consumer media app, third-party API at its core
+>
+> Run `/learn-from-fixes` in your own repo to get this table for your code. That
+> is the point of the document — not these three.
+
 ## Method
 
 A `fix` commit that touches a file a `feat` or `refactor` commit changed in the
 previous three days is not maintenance — it is the feature having shipped
 broken. Commit subjects and bodies were then clustered by stated root cause.
 
-App-data commits (habit check-offs, meal logs) were excluded from fitmito;
+App-data commits (habit check-offs, meal logs) were excluded from Project A;
 they are not engineering work.
 
 Reproduce with `node tooling/mine-fixes.js <repo>`, or `/learn-from-fixes`
@@ -19,17 +32,17 @@ inside a project.
 
 | Repo | Engineering commits | fix : feat+refactor | Fixes per feature |
 |---|---|---|---|
-| fitmito | 5,154 | 799 : 853 | **0.94** |
-| ecommercebenchmark | 2,174 | 830 : 486 | **1.71** |
-| spotivibly | 3,001 | 1,299 : 651 | **2.00** |
+| Project A | 5,154 | 799 : 853 | **0.94** |
+| Project B | 2,174 | 830 : 486 | **1.71** |
+| Project C | 3,001 | 1,299 : 651 | **2.00** |
 
-**93% of fitmito's fixes land within 24 hours on a file a feature had just
+**93% of Project A's fixes land within 24 hours on a file a feature had just
 touched** (56–58% within 3 days for the other two). This is not accumulated
 debt. It is the first pass being wrong and being corrected immediately.
 
 ## Failure classes, by share of that repo's fix commits
 
-| Class | fitmito | spotivibly | ecommercebenchmark |
+| Class | Project A | Project C | Project B |
 |---|---|---|---|
 | Ordering / async race | **41%** | **32%** | **40%** |
 | Unhandled state in a flow | 20% | 9% | 19% |
@@ -43,7 +56,7 @@ debt. It is the first pass being wrong and being corrected immediately.
 Classes overlap — one fix can belong to several.
 
 By *theme* rather than root cause, the rework in brand-new feature code ranks:
-incomplete flow / dead path (112 in fitmito), copy/content (75), UI layout (52),
+incomplete flow / dead path (112 in Project A), copy/content (75), UI layout (52),
 state/sync (37). Runtime crashes are only 20. **The problem is not that the code
 crashes. It is that it runs, and is wrong.**
 
@@ -83,12 +96,12 @@ every locale holding a translation of the old sentence, with nothing failing.
 
 ## Two findings about gates themselves
 
-**1. More prose rules did not help.** spotivibly and ecommercebenchmark carry
+**1. More prose rules did not help.** Project C and Project B carry
 526- and 593-line `CLAUDE.md` files and have the *worst* fix-per-feature ratios
-(2.00 and 1.71). fitmito's is 55 lines, at 0.94. Rules that are read but not
+(2.00 and 1.71). Project A's is 55 lines, at 0.94. Rules that are read but not
 enforced do not change the outcome.
 
-**2. A gate nobody runs is not a gate.** fitmito's own preflight file records it:
+**2. A gate nobody runs is not a gate.** Project A's own preflight file records it:
 
 > "THE OTHER 60 GATES, which nothing ran. … A sweep found five red, two of which
 > had been failing since 2026-07-22 … The only thing in the repo that objected
@@ -98,7 +111,7 @@ The same defect existed in this framework: `tooling/test-all.js` passed a
 malformed argument list, so every suite launched a bare `node` with no script
 and reported PASS. CI was green on an empty test run for an entire release.
 
-fitmito's answer is the one to copy: gates run automatically, track known-red
+Project A's answer is the one to copy: gates run automatically, track known-red
 against open story ids, **and fail when a known-red gate starts passing** — a
 stale excuse is how a real failure gets waved through.
 

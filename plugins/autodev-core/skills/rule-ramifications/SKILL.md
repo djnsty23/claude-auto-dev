@@ -16,7 +16,7 @@ The thing they share is why QA keeps catching them and tooling does not:
 
 > "this is invisible in a diff and cannot be caught by testing the component
 > alone — the bug lives in WHO owns the mount"
-> — *ecommercebenchmark, fix commit*
+> — *Project B, fix commit*
 
 Typecheck passes. The build is green. The console is clean. The component
 renders. It is still wrong. **A clean verification run is not evidence against
@@ -114,7 +114,7 @@ A checklist a human runs sometimes is not a gate. When the same class bites this
 project twice, encode it as an executable check with `/preflight add` — and make a stale gate fail loudly, because:
 
 > "THE OTHER 60 GATES, which nothing ran … it objected for eight days."
-> — *fitmito, `scripts/preflight.js`*
+> — *Project A, `scripts/preflight.js`*
 
 `/learn-from-fixes` reads this project's own history and tells you which of the
 eight it actually hits, ranked, with the commits as evidence.

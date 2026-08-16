@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const cp = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const PLUGINS_DIR = path.join(ROOT, 'plugins');
@@ -381,6 +382,17 @@ function checkNoLegacyArtifacts() {
   if (ok) log('PASS', 'No pre-8.0 installer artifacts remain');
 }
 
+// This repo is public and the codebases it learned from are not. Delegates to
+// the dedicated checker so there is exactly one denylist, not a copy here that
+// drifts from it.
+function checkNoPrivateNames() {
+  const script = path.join(ROOT, 'tooling', 'check-no-private-names.js');
+  if (!fs.existsSync(script)) return log('WARN', 'check-no-private-names.js is missing');
+  const r = cp.spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  if (r.status === 0) log('PASS', (r.stdout || '').trim().replace(/^\[no-private-names\]\s*/, 'No private project names: '));
+  else log('FAIL', 'a private project name appears in a tracked file — run node tooling/check-no-private-names.js');
+}
+
 // ---------------------------------------------------------------- run
 
 console.log('Validating autodev marketplace...\n');
@@ -394,6 +406,7 @@ checkScriptReferences();
 checkShellGlobQuoting();
 checkAgents();
 checkNoLegacyArtifacts();
+checkNoPrivateNames();
 
 console.log(`\nSummary: ${passCount} PASS, ${failCount} FAIL, ${warnCount} WARN`);
 process.exit(failCount > 0 ? 1 : 0);

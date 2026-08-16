@@ -1,5 +1,49 @@
 # Changelog
 
+## [8.11.0] - 2026-08-16
+
+### Changed — the repos this framework learned from are anonymised
+
+This repo is public. Four tracked files named three private codebases — one of
+them a client deliverable — next to their per-repo defect rates. Nothing was
+secret, and that was never the point: **a team's defect rate is theirs to
+publish, and this tool had published it for them.**
+
+Now `Project A` / `B` / `C`. Every number and conclusion is unchanged, and each
+project's *shape* is kept, because it is load-bearing for reading the table — a
+consumer health app, a B2B audit platform and a consumer media app fail
+differently. `docs/failure-evidence.md` says so up front, and points readers at
+`/learn-from-fixes` for their own numbers, which was always the point of the
+document.
+
+Found by asking whether the repo should be private, not by anything failing.
+Going private was the wrong lever: it breaks `/plugin marketplace add` for
+everyone else and does not address what was actually exposed.
+
+### Added — `tooling/check-no-private-names.js`
+
+So it cannot happen again. Scans every tracked file for a denylist of private
+project and client names; wired into `validate.js`, so CI enforces it.
+
+A **generic** detector was considered and rejected — "a lowercase word that
+looks like a project name" has no precision in a repo full of skill, hook and
+flag names. A denylist of the names you actually work with is small, exact, and
+fails benignly.
+
+The precedent is inverted and worth stating: one of those private repos carries
+a tripwire against publishing verbatim internals, reasoning *"every private repo
+is eventually public."* **That repo is private and has the guard; this one is
+public and had none.**
+
+Verified non-vacuous by planting a name in `README.md` and confirming it fails
+naming file and line, then restoring byte-identically. The first version of its
+binary-file skip was `includes(' ')` — a space, not a NUL — which would have
+skipped every text file and reported clean forever. That is the failure mode
+this repo keeps writing rules about, caught in the file enforcing them.
+
+**It catches the working tree only.** The names remain in git history; redaction
+is not removal, and a rewrite is a separate, deliberate decision.
+
 ## [8.10.0] - 2026-08-16
 
 ### Added — the gate that a comment satisfies
@@ -260,11 +304,11 @@ repos to find what the first pass actually gets wrong. See
 
 | Repo | fix : feat+refactor | Fixes per feature |
 |---|---|---|
-| fitmito | 799 : 853 | 0.94 |
-| ecommercebenchmark | 830 : 486 | 1.71 |
-| spotivibly | 1,299 : 651 | 2.00 |
+| Project A | 799 : 853 | 0.94 |
+| Project B | 830 : 486 | 1.71 |
+| Project C | 1,299 : 651 | 2.00 |
 
-**93% of fitmito's fixes land within 24 hours on a file a feature had just
+**93% of Project A's fixes land within 24 hours on a file a feature had just
 touched.** That is the first pass being wrong, not debt accumulating.
 
 Ranked causes, consistent across all three: ordering/async races (32–41%),
@@ -278,7 +322,7 @@ Two findings about gates themselves:
 
 - **More prose did not help.** The two repos with 526- and 593-line `CLAUDE.md`
   files have the *worst* fix ratios; the one with 55 lines has the best.
-- **A gate nobody runs is not a gate.** fitmito's own preflight records sixty
+- **A gate nobody runs is not a gate.** Project A's own preflight records sixty
   harness scripts that nothing ran, two of them red for eight days. This
   framework had the identical defect in `test-all.js`, found in 8.0.
 
