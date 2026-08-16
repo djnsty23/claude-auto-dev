@@ -1,128 +1,58 @@
 # Claude Auto-Dev
 
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-blueviolet)](https://claude.ai/code)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-7.6-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-8.0-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build — Claude handles the rest.
 
----
-
-## Quick Start
-
-```bash
-# Mac/Linux
-git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-cd ~/claude-auto-dev && ./install.sh
-
-# Windows (PowerShell)
-git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
-cd $env:USERPROFILE\claude-auto-dev; .\install.ps1
-```
-
-Then run `claude` and say `brainstorm` — Claude scans the codebase, proposes improvements, creates stories, and works through them autonomously.
-
----
-
-## Full Environment Restore (post-reinstall / new machine)
-
-**Use this section when:** fresh OS install, new dev machine, or onboarding to an existing claude-auto-dev setup.
-
-### For humans (manual)
-
-```powershell
-# Windows — run in an admin PowerShell
-# 1. Prereqs
-winget install -e Git.Git OpenJS.NodeJS GitHub.cli Doppler.doppler Microsoft.VisualStudioCode
-
-# 2. claude-auto-dev itself (this repo)
-git clone https://github.com/djnsty23/claude-auto-dev $env:USERPROFILE\claude-auto-dev
-cd $env:USERPROFILE\claude-auto-dev; .\install.ps1 -Full
-
-# 3. Authenticate all services
-gh auth login              # GitHub — browser flow
-doppler login              # Doppler — browser flow
-# claude login             # If Claude Code CLI installed separately
-
-# 4. Restore personal memory + config (PRIVATE repo — requires gh auth from step 3)
-#    This assumes you have a `claude-memory` private repo (see memory-backup skill)
-gh repo clone <your-username>/claude-memory $env:USERPROFILE\claude-memory
-cd $env:USERPROFILE\claude-memory
-# Follow RECOVERY.md in that repo for the per-user restore
-```
-
-```bash
-# Mac/Linux equivalent
-brew install git node gh dopplerhq/cli/doppler
-git clone https://github.com/djnsty23/claude-auto-dev ~/claude-auto-dev
-cd ~/claude-auto-dev && ./install.sh --full
-gh auth login
-doppler login
-gh repo clone <your-username>/claude-memory ~/claude-memory
-cat ~/claude-memory/RECOVERY.md
-```
-
-### For Claude (you're reading this as the agent)
-
-If the user points you at this repo post-reinstall and says "configure everything", walk this order — **stop and ask for authorization at each interactive step**:
-
-1. **Detect OS + missing prereqs** — check for `git`, `node`, `gh`, `doppler`. Install any missing via the OS package manager (`winget` on Windows, `brew` on macOS, distro-appropriate on Linux).
-2. **Verify `~/.claude/` install** — if this repo is cloned to `~/claude-auto-dev`, run `install.ps1 -Full` (Windows) or `install.sh --full` (Unix).
-3. **Check `gh auth status`** — if broken, tell the user to run `gh auth login` in their terminal. DO NOT try to run the OAuth flow yourself (requires browser).
-4. **Check `doppler me`** — if broken, tell the user to run `doppler login`. Same reason.
-5. **Offer memory restore** — ask the user if they have a private `claude-memory` repo. If yes, `gh repo clone <user>/claude-memory ~/claude-memory`, then copy `memory/projects/*` into `~/.claude/projects/*/memory/`, copy `CLAUDE.md` to `~/.claude/CLAUDE.md`, copy `rules/` to `~/.claude/rules/`. Set `~/.claude/.memory-backup-path` to the restored path so future `memory backup now` calls work.
-6. **Per-project `doppler setup`** — for each repo under `~/Downloads/code/` or `~/code/` that has a `doppler.yaml`, ensure the bind is live: `cd <repo> && doppler run -- node -e "console.log(Object.keys(process.env).length)"` should return a sensible number. If not, `doppler setup` manually.
-7. **Report** — produce a checklist showing what's restored, what the user still needs to touch (e.g. rotating a stale token, reconnecting OneDrive).
-
-**Never**:
-- Autonomously run `gh auth login` or `doppler login` — they open browsers and block waiting on user input.
-- Commit to any repo without the user having configured `git config user.email / user.name`.
-- Restore secrets into local `.env` files — they belong in Doppler only.
-
-```
-You: brainstorm         → Claude finds 5 improvements
-You: brainstorm apply   → Creates 5 stories in prd.json
-You: auto               → Works through all tasks
-You: ship               → Review, security scan, deploy
-```
+Distributed as a plugin marketplace. Claude Code installs, updates, and removes
+it; there is no install script and nothing is copied into `~/.claude`.
 
 ---
 
 ## Install
 
-**Prerequisites:** [Git](https://git-scm.com/) and [Node.js 18+](https://nodejs.org/) (the installer adds Claude Code for you if it's missing).
+In Claude Code — the desktop app, the CLI, or an IDE session:
 
-**Options:**
-| Flag | What it does |
-|------|--------------|
-| `--full` / `-Full` | Also install rules + settings templates |
-| `--init` / `-Init` | Scaffold `prd.json` in the current project |
-| `--force` | Back up and overwrite files that collide with shipped names |
+```
+/plugin marketplace add djnsty23/claude-auto-dev
+```
 
-**What it does:**
-- Copies `skills/`, `hooks/`, and `agents/` into `~/.claude/`
-- Writes `~/.claude/.auto-dev-installed.json` — a sidecar recording exactly what got installed (used by uninstall)
-- Adds an `update-dev` command to your shell
-- Saves your repo path so updates are portable
+```
+/plugin install autodev-core@autodev
+```
 
-**Collision handling.** Install leaves user-owned files alone. If `~/.claude/skills/` or `~/.claude/hooks/` already contains something with the same name as a shipped file (and it's not byte-identical), install **refuses** and lists the conflicts. Re-run with `--force` to back them up to `~/.claude/.user-backup-<timestamp>/` before overwriting.
+That is the whole install. Then say `brainstorm`.
 
-Your own skills with different names (e.g. `my-company-skill/`) are always preserved.
+Two optional add-ons:
+
+```
+/plugin install autodev-memory@autodev
+```
+
+```
+/plugin install autodev-stack@autodev
+```
+
+If the install summary says `Run /reload-plugins to activate.`, run that.
+
+**Upgrading from 7.x?** The old installer copied files into `~/.claude` and
+appended a function to your shell profile. Read [MIGRATION.md](MIGRATION.md)
+before installing — it clears those out.
 
 ---
 
-## Updates
+## What's in each plugin
 
-```
-You: update dev
-Claude: [pulls latest, re-syncs skills/hooks/agents] Updated to v7.6
-```
+| Plugin | Contains | Install it if |
+|--------|----------|---------------|
+| **autodev-core** | The workflow — `brainstorm`, `auto`, `iterate`, `audit`, `review`, `ship`, `scan`, plus the `prd.json` sprint system, 4 subagents, and the sprint/typecheck/safety hooks | Always. This is the tool. |
+| **autodev-memory** | Cross-session project memory — automatic observation capture, semantic search, domain-knowledge briefs, repo-backed backup | You want Claude to remember earlier sessions in a project |
+| **autodev-stack** | Supabase, Doppler, Stripe, and Remotion integrations | You use that stack |
 
-Or from the shell:
-
-```bash
-update-dev
-```
+`autodev-core` stands alone. The other two are additive and can be removed
+without touching it.
 
 ---
 
@@ -130,28 +60,44 @@ update-dev
 
 | Say | Does |
 |-----|------|
+| `autodev-init` | Read this codebase and write its real conventions to `.claude/project-rules.md` |
 | `brainstorm` | Scan codebase + live site, propose improvements |
 | `brainstorm apply` | Create stories from the last brainstorm |
 | `auto` | Work through all pending stories autonomously |
 | `iterate` | Convergence loop: brainstorm → fix → re-scan until clean |
 | `audit` | 7-agent parallel quality audit |
-| `review` | Code quality check (add `quick` or `deep`) |
+| `review` | Runs `/code-review`, then this project's own checks |
 | `ship` | Build, test, review, deploy, verify |
 | `scan` / `qa` | Live site QA (visual + a11y + console) |
-| `fix` | Debug issues |
+| `fix` | Runs `/debug`, then verifies the fix the way this project requires |
 | `commit` | Conventional commit + push + PR |
 | `test` | Unit + browser tests |
-| `security` | Pre-deploy security scan |
+| `security` | Runs `/security-review`, then Supabase/RLS and cloud-key checks |
 | `perf` | Core Web Vitals audit |
 | `a11y` | WCAG 2.1 AA audit |
 | `design` / `ui` | UI design with anti-slop checklist |
 | `progress` | Show sprint progress |
 | `sprint` | Create/advance sprint |
-| `update dev` | Sync latest from GitHub |
 
-See [`skills/commands.md`](skills/commands.md) for the full list.
+Plugin skills are namespaced, so `/autodev-core:audit` always works even if you
+have another `audit` skill installed. See [`docs/commands.md`](docs/commands.md)
+for the full list.
 
-**Quick fixes — skip the ceremony.** For small tasks, just describe what you want. No `auto`, no sprints, no `prd.json`:
+**Start with `/autodev-init`.** It measures how your codebase is actually
+written — component style, data fetching, where auth is enforced, tokens vs raw
+colors — and writes `.claude/project-rules.md`. `review`, `audit`, and
+`standards` all defer to that file, so the tool enforces your conventions
+rather than the defaults this plugin happens to ship. Every rule it writes cites
+a count from your code; anything genuinely split is recorded as undecided and
+never flagged.
+
+**These build on Claude Code, they do not replace it.** `review`, `security`, and
+`fix` each run the matching built-in command first (`/code-review`,
+`/security-review`, `/debug`) and then add only what is specific to this
+project — its design tokens, its RLS rules, its definition of "verified".
+
+**Quick fixes — skip the ceremony.** For small tasks, just describe what you
+want. No `auto`, no sprints, no `prd.json`:
 
 ```
 fix the button overflow on mobile
@@ -169,62 +115,110 @@ ship       → review + security + deploy + post-deploy scan
 iterate    → brainstorm → fix → re-scan loop until clean
 ```
 
-**Visual verification.** Start your dev server before `auto`. Claude screenshots pages (desktop + mobile) after each UI change and catches console errors before marking tasks complete.
+**Visual verification.** In the desktop app the built-in Browser pane drives
+this — Claude opens your app, reads the page, checks the console, and screenshots
+desktop and mobile after each UI change. In a plain terminal session the same
+steps run through the `agent-browser` CLI if you have it installed. The `browser`
+skill picks between them; you don't have to.
 
-**Image auto-scan.** Attach a screenshot to any turn and Claude surfaces every distinct issue it sees, not only the one you asked about. Add `[focus]` in your message to opt out.
+**Image auto-scan.** Attach a screenshot to any turn and Claude surfaces every
+distinct issue it sees, not only the one you asked about. Add `[focus]` in your
+message to opt out.
+
+---
+
+## Updates
+
+```
+/plugin marketplace update autodev
+```
+
+```
+/plugin update autodev-core
+```
+
+There is no `update-dev` command any more — Claude Code owns the update.
+
+---
+
+## Settings
+
+Plugins cannot change your permissions or your model, by design. If you want the
+permission set this workflow assumes, merge
+[`docs/recommended-settings.json`](docs/recommended-settings.json) into your own
+settings — see [`docs/settings.md`](docs/settings.md), which also explains which
+rules from the old 7.x template were removed and why.
 
 ---
 
 ## Files
 
-**Global** (`~/.claude/`):
-```
-skills/                     # 36 skills (copied from repo)
-hooks/                      # 6 hooks
-agents/                     # 4 specialized agents
-rules/                      # Workflow/security/design rules (only with --full)
-settings.json               # Merged with your existing settings (only with --full)
-repo-path.txt               # Points to your clone location
-.auto-dev-installed.json    # Install sidecar — what this install put on disk
-```
+**Per project** (created as needed):
 
-**Per project:**
 ```
-prd.json       # Tasks and sprint history
+prd.json                    # Tasks and sprint history
+.claude/archives/           # Archived prd snapshots
+.claude/reports/            # Scan and audit reports
+.claude/screenshots/        # Visual verification output
 ```
 
 Tasks use `passes: null` (pending), `true` (done), or `"deferred"`.
+
+**Global:** `~/.claude/auto-dev-memory.db` — the `autodev-memory` SQLite store.
+It deliberately lives outside the plugin so uninstalling does not delete your
+project memory.
 
 ---
 
 ## Uninstall
 
-```bash
-# Mac/Linux
-cd ~/claude-auto-dev && ./uninstall.sh
-
-# Windows (PowerShell)
-cd $env:USERPROFILE\claude-auto-dev; .\uninstall.ps1
-
-# Preview first (no changes)
-./uninstall.sh --dry-run        # or: .\uninstall.ps1 -DryRun
+```
+/plugin uninstall autodev-core@autodev
 ```
 
-Uninstall reads `.auto-dev-installed.json` and removes exactly what this install created. Your own skills, hooks, agents, and user-modified rules stay. It strips auto-dev hook entries from `~/.claude/settings.json` without touching other entries, then deletes the sidecar and `repo-path.txt`.
+Repeat for any add-ons. Claude Code removes exactly what it installed. To drop
+the marketplace too:
 
-**Manual step:** remove the `update-dev` function from your shell profile (`~/.bashrc`, `~/.zshrc`, or the PowerShell profile) if you don't want it anymore.
+```
+/plugin marketplace remove autodev
+```
+
+Your `prd.json` files, memory database, and settings are untouched.
+
+---
+
+## Repository layout
+
+```
+.claude-plugin/marketplace.json   # The catalog
+plugins/autodev-core/             # Plugin: skills, agents, hooks, templates
+plugins/autodev-memory/           # Plugin: skills, hooks, runtime scripts
+plugins/autodev-stack/            # Plugin: skills
+docs/                             # Docs, settings + CLAUDE.md templates
+tooling/                          # Repo tooling — validate, tests, bump. Never shipped.
+VERSION                           # Single source of truth; tooling/bump.js propagates it
+```
+
+Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md). Run `npm test` before
+opening a PR — it runs every suite plus `tooling/validate.js`.
 
 ---
 
 ## Troubleshooting
 
-**Install refuses with "REFUSING TO OVERWRITE".** You have a file or directory with the same name as something we ship, and it's not byte-identical to ours. Either rename yours or re-run with `--force` (which backs yours up first).
+**Skills not showing up.** Run `/plugin` and confirm `autodev-core` is listed and
+enabled. If the install said so, run `/reload-plugins`. Hook changes need a new
+session.
 
-**Not seeing updates?** Check `~/.claude/repo-path.txt` points to your clone. Manual fallback: `cd ~/claude-auto-dev && git pull && update-dev`.
+**Hook errors.** Hooks need Node 18+ (`node -v`). They fail quietly by design;
+`node tooling/validate.js` checks that every hook in every `hooks.json` points at
+a file that exists.
 
-**Skills not loading?** Verify `~/.claude/skills/` exists and contains skill directories. Restart your terminal after install.
+**Memory commands do nothing.** `autodev-memory` needs `node:sqlite`, which is
+built in on Node 22+. On older Node the memory skills no-op rather than error.
 
-**Hook errors?** Requires Node.js 18+. Check with `node -v`. Hooks fail silently by design — run `node validate.js` to check consistency.
+**Still have `update-dev` in your shell.** That is from the 7.x installer.
+[MIGRATION.md](MIGRATION.md) removes it.
 
 ---
 

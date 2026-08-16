@@ -7,10 +7,20 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
+          # node:sqlite (autodev-memory) is built in from Node 22.
           node-version: '22'
-      - run: npm test
+      - name: Run test suites and validator
+        run: npm test
+      - name: Check every hook parses
+        shell: bash
+        run: |
+          for f in plugins/*/hooks/*.js; do node --check "$f"; done

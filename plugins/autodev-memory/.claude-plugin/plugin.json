@@ -1,0 +1,13 @@
+{
+  "name": "autodev-memory",
+  "description": "Cross-session project memory: observation capture, semantic search, domain-knowledge briefs, and repo-backed backup.",
+  "version": "8.0.0",
+  "author": {
+    "name": "djnsty23",
+    "url": "https://github.com/djnsty23"
+  },
+  "homepage": "https://github.com/djnsty23/claude-auto-dev",
+  "repository": "https://github.com/djnsty23/claude-auto-dev",
+  "license": "MIT",
+  "keywords": ["memory", "context", "semantic-search", "knowledge"]
+}

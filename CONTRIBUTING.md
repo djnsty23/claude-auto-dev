@@ -1,130 +1,123 @@
 # Contributing to Claude Auto-Dev
 
-## Skill Authoring Guide
+The repo is a plugin marketplace. Everything shipped to users lives under
+`plugins/`; everything else is repo tooling and docs.
 
-### Directory Structure
-
-Skills should follow this structure:
 ```
-skills/
-├── skill-name/
-│   ├── SKILL.md          # Main skill file (required)
-│   └── rules/            # Optional detailed rules
-│       ├── rule-1.md
-│       └── rule-2.md
-└── manifest.json         # Skill registry
+.claude-plugin/marketplace.json   # Catalog — every plugin must be listed here
+plugins/<plugin>/
+├── .claude-plugin/plugin.json    # ONLY plugin.json goes in this directory
+├── skills/<name>/SKILL.md        # One directory per skill
+├── agents/<name>.md              # Subagents
+├── hooks/hooks.json              # Hook registration
+├── hooks/*.js                    # Hook implementations
+├── scripts/*.js                  # Runtime code hooks and skills call
+└── templates/                    # Files skills scaffold into user projects
+docs/                             # Docs and templates
+tooling/                          # validate.js, test-*.js, bump.js — never shipped
 ```
 
-### SKILL.md Format
+Component directories go at the **plugin root**, never inside `.claude-plugin/`.
+
+## Before you open a PR
+
+```bash
+npm test
+```
+
+This runs every `tooling/test-*.js` suite and then `tooling/validate.js`. Both
+must pass. The validator checks version sync, marketplace/plugin manifests,
+skill frontmatter, hook wiring, and that every `${CLAUDE_PLUGIN_ROOT}` path in a
+skill resolves to a real file.
+
+## Adding a skill
+
+Create `plugins/<plugin>/skills/<name>/SKILL.md`. The directory name becomes the
+command name.
 
 ```markdown
 ---
 name: skill-name
-description: Third-person description. Use when [specific trigger conditions].
-user-invocable: true|false
-triggers: trigger1, trigger2
+description: What it does and when to use it. Claude reads this to decide whether to load the skill, so lead with the use case.
+when_to_use: "Invoked when the user says \"foo\", \"bar\"."
+allowed-tools: Read, Grep, Glob
+user-invocable: true
 ---
 
 # Skill Name
 
-Brief description of what this skill does.
-
-## When to Use
-
-- Condition 1
-- Condition 2
-
-## Quick Reference
-
-[Concise, actionable guidance]
-
-## Detailed Rules
-
-Load specific rules for detailed guidance:
-
-| Rule | When to Load |
-|------|--------------|
-| `rules/rule-1.md` | Condition |
+Instructions Claude follows when the skill runs.
 ```
 
-### Manifest Entry
+Frontmatter rules that the validator enforces:
+
+- `name` must match the directory name.
+- `description` is required.
+- **`triggers:` is not a real field.** It was invented by this repo pre-8.0 and
+  no runtime ever read it. Use `when_to_use`, which Claude Code appends to the
+  description when deciding whether to load the skill.
+- Never set `user-invocable: false` **and** `disable-model-invocation: true` on
+  the same skill — that makes it unreachable by both you and Claude.
+
+Other fields worth knowing: `paths` (auto-load only when working on matching
+files — this is how the `rule-*` skills apply), `model`, `effort`,
+`context: fork` (run in a subagent), `argument-hint`, `disallowed-tools`.
+
+### Keep SKILL.md short
+
+Put long reference material in `references/` next to the skill and link to it,
+so it loads only when needed. `skills/browser/` is the pattern: a short
+selection rule in `SKILL.md`, the 300-line CLI reference in
+`references/agent-browser-cli.md`.
+
+## Adding a hook
+
+Implement it in `plugins/<plugin>/hooks/`, then register it in that plugin's
+`hooks/hooks.json`:
 
 ```json
-"skill-name": {
-  "triggers": ["trigger1", "trigger2"],
-  "context": ["optional/path/"],
-  "file": "skill-name/SKILL.md",
-  "requires": ["other-skill"],
-  "priority": 2,
-  "description": "Third-person description under 100 chars."
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/my-hook.js\"", "timeout": 10 }
+        ]
+      }
+    ]
+  }
 }
 ```
 
-### Best Practices
+- Always resolve paths through `${CLAUDE_PLUGIN_ROOT}`. Never `~/.claude` and
+  never a relative path — the validator rejects both.
+- A hook must never crash the session. Wrap the body in try/catch and
+  `process.exit(0)` unless the hook's whole purpose is to block.
+- Add a suite under `tooling/` that drives it as a subprocess. Follow
+  `tooling/test-pre-tool-filter.js`.
+- On macOS, `realpathSync` any path you compare against `process.cwd()` —
+  `/var/folders` and `/private/var/folders` are the same directory and a raw
+  comparison silently fails.
 
-1. **Keep SKILL.md under 500 lines** - Use references/ for details
-2. **Use progressive disclosure** - Load rules on-demand
-3. **Third-person descriptions** - "Runs tests" not "Run tests"
-4. **Specific triggers** - Avoid conflicts with existing skills
-5. **Include examples** - Show correct vs incorrect patterns
-6. **Source attribution** - Credit external skill sources
+## Which plugin does it belong in?
 
-### Priority Levels
+| Plugin | Scope |
+|--------|-------|
+| `autodev-core` | The workflow. Must work standalone with no other plugin installed. |
+| `autodev-memory` | Anything touching the memory database. |
+| `autodev-stack` | Vendor-specific integrations (Supabase, Doppler, Stripe, Remotion). |
 
-| Priority | Use For |
-|----------|---------|
-| 0 | Foundation skills (standards, core) |
-| 1 | Primary commands (auto, audit, review) |
-| 2 | Secondary commands (test, fix) |
-| 3 | Utility skills (help, setup) |
+A core skill may not depend on a file in another plugin — `${CLAUDE_PLUGIN_ROOT}`
+resolves per plugin, so a cross-plugin path cannot work. If core needs it, core
+ships it.
 
-### Requires Chains
-
-Use `requires` to auto-load dependencies:
-```json
-"review": {
-  "requires": ["standards", "security"]
-}
-```
-
-**Rules:**
-- Max depth: 2 levels
-- Don't create circular dependencies
-- Only require skills that add value
-
-## Adding External Skills
-
-### From GitHub
+## Releasing
 
 ```bash
-# Check repo structure
-gh api repos/owner/repo/contents/skills --jq ".[].name"
-
-# Fetch skill
-gh api repos/owner/repo/contents/skills/name/SKILL.md --jq ".content" | base64 -d > skills/name/SKILL.md
+node tooling/bump.js 8.1.0
 ```
 
-### Adapting External Skills
-
-1. Keep core content intact
-2. Add integration section for our system
-3. Update manifest.json
-4. Credit the source
-
-## Testing
-
-1. Copy skill to `~/.claude/skills/`
-2. Start new Claude Code session
-3. Verify skill appears in `/skills` list
-4. Test trigger words activate skill
-5. Verify requires chains load correctly
-
-## Pull Request Checklist
-
-- [ ] SKILL.md under 500 lines
-- [ ] Manifest entry added
-- [ ] Description is third-person
-- [ ] No trigger conflicts
-- [ ] Source credited (if external)
-- [ ] CHANGELOG.md updated
-- [ ] README.md skill count updated
+That writes `VERSION`, `package.json`, `marketplace.json`, and every
+`plugin.json`. Then add a `CHANGELOG.md` section, run `npm test`, and tag
+`v8.1.0`.

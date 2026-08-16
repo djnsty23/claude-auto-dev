@@ -1,5 +1,129 @@
 # Changelog
 
+## [8.0.0] - 2026-08-16
+
+Restructured from a copy-into-`~/.claude` installer into a Claude Code plugin
+marketplace. Read [MIGRATION.md](MIGRATION.md) before upgrading.
+
+### Changed — distribution
+- **Plugin marketplace.** `.claude-plugin/marketplace.json` catalogs three plugins: `autodev-core` (the workflow, 36 skills, 4 agents, 7 hooks), `autodev-memory` (4 skills, 3 hooks, the SQLite runtime), and `autodev-stack` (Supabase, Doppler, Stripe, Remotion). Install with `/plugin marketplace add` + `/plugin install`; Claude Code owns update and uninstall.
+- **Removed the bespoke installer.** `install.sh`, `install.ps1`, `uninstall.sh`, `uninstall.ps1`, `scripts/sync.js`, `scripts/uninstall.js`, the `.auto-dev-installed.json` sidecar, `repo-path.txt`, the collision detector, and the `update-dev` shell-profile function are all gone — the harness does this natively.
+- **Removed `skills/manifest.json`.** 14KB of `triggers`/`requires`/`priority` metadata that no runtime ever read; its only live uses were printing a version string and listing deprecated skills. Version now comes from the plugin's own `plugin.json`.
+- **Hooks resolve through `${CLAUDE_PLUGIN_ROOT}`**, so the whitelist hack that decided which `scripts/` files to copy — and left the memory pipeline dead on every install when it drifted — is structurally impossible now.
+- **Settings are no longer written for you.** `docs/recommended-settings.json` is opt-in and drops the `Bash(bash *)`, `Bash(sh *)`, `Bash(source *)`, `Bash(curl *)`, `Bash(export *)`, `Bash(chmod *)`, `Bash(rm -f *)`, and `WebFetch(domain:*)` allow rules, each of which made the deny list beneath it unenforceable. The global `model: opus` pin is gone.
+
+### Fixed — latent bugs the restructure exposed
+- **The test suite never ran.** `test-all.js` declared `run(label, file, args)` but every call site passed two arguments, so `args` was `undefined` and each "suite" launched a bare `node` with no script. Every suite reported PASS without executing; CI was green on an empty run.
+- **Memory captured only the first turn of a session.** Session close ran on `Stop`, which fires at the end of every assistant turn — it ended the session and deleted the session-id file, so every later turn's observations were dropped. Moved to `SessionEnd`.
+- **`core` and `standards` were unreachable.** Both set `user-invocable: false` and `disable-model-invocation: true`, which blocks user and model invocation alike. They now load by file context via `paths`.
+- **`PostCompact` never fired.** `post-compact.js` was registered as a `PostToolUse` hook with matcher `"compact"`. It is a real event and is now wired to it.
+- **`agent-browser-cleanup.js` was orphaned.** Its header claimed `session-start.js` invoked it; nothing did. Now registered on `SessionStart`.
+- **Knowledge surfacing broke under symlinked paths.** The area calculation compared a raw `file_path` against `process.cwd()`; on macOS (`/var/folders` vs `/private/var/folders`) every edit looked outside the project. Both sides now go through `realpathSync`.
+- **The image-scan perf assertion flaked.** A fixed 150ms wall-clock budget is mostly Node startup, which swings ~10x under load. It now measures this machine's baseline and budgets the hook's own work against it.
+- **The memory-backup scheduled task did nothing.** It invoked `~/.claude/hooks/memory-backup.sh`, which was never shipped.
+
+### Fixed — second review pass
+
+- **`.env.local` loading was a no-op that claimed success.** The SessionStart hook parsed the file into `process.env` and printed `[Env] .env.local loaded`. A hook runs in its own process and **cannot** set environment variables for the session, so nothing was ever loaded — it read a secrets file for no effect. Removed.
+- **The hook rewrote the user's MEMORY.md.** It patched a version number inside `~/.claude/projects/<guessed-slug>/memory/MEMORY.md` on every session start. A dev tool has no business silently editing the user's memory files. Removed.
+- **SessionStart now uses the structured channel.** Sprint state goes to `additionalContext` (where Claude reads it) and the banner to `systemMessage` (where the user sees it), instead of both going to plain stdout. Deferred stories are counted separately from pending, and a malformed `prd.json` is surfaced instead of swallowed.
+- **The observation classifier never received a prompt.** It derives both the observation TYPE and its concept text from `userPrompt`, which was read from `AUTO_DEV_LAST_PROMPT` — a variable nothing ever set. Every observation ever captured fell back to a generic type and a generic concept, which is why `mem decisions` and `mem bugs` returned so little. A new `UserPromptSubmit` hook records the prompt (with `<private>` blocks redacted) for the classifier to use.
+- **Concurrent sessions clobbered each other's memory.** The session id lived in a single `.claude/memory-session-id` file per project, so a second Claude session overwrote the first's id, and whichever ended first deleted the file — silently ending capture for the other. Replaced with `.claude/memory-sessions/<session>`, keyed by the harness session id, each cleared by its own SessionEnd. Session ids are sanitized so a hostile one cannot escape the directory.
+- **Hooks now read `cwd` and `session_id` from the payload** rather than `process.cwd()`, which is the shell that spawned the hook and not necessarily the project Claude is working in.
+- **Telemetry logged `session: null` for every event** (same dead env var). It now uses the payload session id.
+- **Telemetry is opt-in.** It was on by default, appending a line to `.claude/reports/` in every project on every tool call. Set `AUTODEV_TELEMETRY=1` to enable; `CLAUDE_TELEMETRY_DISABLED=1` still wins for anyone who opted out before.
+- **The typecheck hook could be killed mid-lint.** Typecheck and lint ran back to back with 30s budgets each inside a single 60s hook timeout. Both are 25s now.
+- **Hook-tampering protection had stopped covering the hooks.** `PROTECTED_FILE_PATTERNS` matched `.claude/hooks/`, but 8.0 hooks live under `.claude/plugins/`. Added, scoped to the install location so editing a plugin's own source repo stays ordinary development.
+- Stale remediation text in `pre-tool-filter` (`Use 'update dev'`) and a stale registration comment in `post-compact` corrected. `docs/memory-system-design.md` marked as intent-only where it documents the env-var mechanism that never worked.
+
+### Added — tests for the paths that rotted
+- `tooling/test-session-carrier.js` — 21 assertions covering per-session isolation, the concurrent-session regression, path-traversal safety, prompt redaction, and both memory session hooks (previously untested).
+- `tooling/test-session-start-hook.js` — 21 assertions covering the structured output contract, sprint counting, payload `cwd` handling, and regression guards asserting `.env.local` and `MEMORY.md` are never touched again.
+- Telemetry suite extended for the opt-in gate and the payload session id.
+
+### Changed — Desktop-first browser automation
+- **New `browser` skill** (replaces `agent-browser`) selects a driver: the built-in Browser pane tools where available, the `agent-browser` CLI otherwise. The 300-line CLI reference moved to `references/agent-browser-cli.md` so it costs nothing on the default path.
+- `scan` documents the built-in path first, with the CLI as the terminal-only fallback. Nine other browser-using skills carry the selection rule.
+- Authenticated pages now prefer having the user log in directly in the Browser pane over the localStorage token-injection workaround.
+
+### Fixed — the `auto` loop could not terminate
+
+`stop-auto-check.js` is the hook that blocks the end of a turn to keep `auto`
+running. It shipped with no tests, and writing them surfaced three defects:
+
+- **A sprint whose remaining stories were all `deferred` blocked forever.** The
+  pending filter was `passes !== true`, which counts `"deferred"` as outstanding
+  work — but deferred is a decision *not* to do it. The only escape was the 2-hour
+  stale-flag timeout. `auto/SKILL.md` had the same filter, so the skill and the
+  hook agreed on the wrong answer.
+- **An unparseable `prd.json` sent it into idle detection** instead of stopping,
+  looping the session against a file it could not read. It now leaves auto mode
+  and says why.
+- **It ignored the payload `cwd`**, reading flags and `prd.json` relative to the
+  shell that spawned the hook rather than the project Claude is working in.
+
+Rewritten with every path guaranteed to reach `approve`, and covered by
+`tooling/test-stop-auto-check.js` — 28 assertions across blocking, the idle
+one-shot, the exit signal, stale flags, deferred-only sprints, malformed input,
+and payload-cwd handling.
+
+### Added — `autodev-init`
+
+Generates `.claude/project-rules.md` by **measuring** the codebase — component
+style, data-fetching library, semantic tokens versus raw colors, where auth is
+enforced, where external data is validated — instead of shipping a default. Every
+rule it writes cites a count; anything genuinely split is recorded as
+`Undecided` and explicitly must not be flagged in review. Splits worth a decision
+are put to the user with the counts in the options.
+
+`review`, `audit`, and `standards` now defer to that file wherever it disagrees
+with the shipped defaults. This inverts the plugin's model: it stops being a
+knowledge dump that ages as models improve, and becomes a capture mechanism for
+what a project actually decided.
+
+### Added — validator guard for shell glob quoting
+
+`--include=*.tsx` unquoted in a skill's shell snippet is expanded by zsh before
+grep sees it, and errors when nothing matches locally — so a measurement command
+silently returns 0 instead of failing loudly. This bit `autodev-init` during
+testing: every count came back zero against a fixture that plainly had matches.
+`validate.js` now rejects unquoted globs in `--include`, `--exclude`, and
+`--exclude-dir` across every shipped doc.
+
+### Removed — superseded by Claude Code itself
+
+The tool was written when models needed reminding that `<div onClick>` should be a `<button>`. That is no longer where the value is, and restating it costs context on every session.
+
+- **`smart-explore`** (skill + 565-line script + suite) — the built-in Explore agent does structural code exploration better, and reads real excerpts rather than a signature outline.
+- **`telemetry`** (skill + hook + suite) — Claude Code has native OTEL support, and this wrote a JSONL line into every project on every tool call.
+- **`update`** — its entire content was two slash commands; they live in the README now.
+- The generic bulk of **`a11y`**, **`seo`**, **`perf`**, and **`standards`**. What remains is the part a general-purpose model cannot know: this project's Core Web Vitals and bundle budgets, its design-token rules, its query-key shape, its report formats, and its anti-pattern list. `standards` matters most here — it auto-loads on every code file, so its length was a per-session context tax.
+
+### Changed — `review`, `security`, and `fix` delegate
+
+Each now runs the matching built-in command first and adds only the project-specific delta:
+
+| Skill | Delegates to | Adds |
+|---|---|---|
+| `review` | `/code-review` | prd.json story alignment, design tokens, UI-state completeness, whether verification actually ran |
+| `security` | `/security-review` | secrets in Supabase migrations, RLS policy quality (not just the enabled flag), cloud key hygiene |
+| `fix` | `/debug` | how this project reproduces a bug, and what counts as verified |
+
+`security` also stops "auto-fixing" a leaked credential by deleting the line — the value is already in git history, so it reports and tells the user to rotate.
+
+Net: 7,075 → 5,847 skill lines, 3,131 → 2,450 lines of runtime code, 44 → 41 skills.
+
+### Changed — skills
+- **`triggers:` → `when_to_use:`** across all 39 migrated skills. `triggers` was never a Claude Code frontmatter field.
+- **`config/rules/*.md` became five auto-loading skills** (`rule-security`, `rule-design-system`, `rule-file-organization`, `rule-windows`, `rule-verification`). `rules/` is not a plugin component type, so those files would never have loaded; as skills with `paths` globs they apply automatically.
+- **`update` skill** now hands over `/plugin marketplace update` instead of pulling a git repo and re-running a sync script.
+
+### Changed — repo layout
+- `tooling/` holds `validate.js`, the test suites, and `bump.js`, and ships to no one.
+- `validate.js` rewritten for the plugin layout: version sync, marketplace/plugin manifests, skill frontmatter (including the unreachable-skill and unquoted-YAML traps), hook wiring, and `${CLAUDE_PLUGIN_ROOT}` path resolution.
+- `bump.sh` → `tooling/bump.js`: one writer for `VERSION`, `package.json`, `marketplace.json`, and all three `plugin.json` files, replacing nine sed targets across two platform branches.
+- CI runs on Linux, Windows, and macOS, and syntax-checks every hook.
+
 ## [7.6] - 2026-08-12
 
 ### Added — CI

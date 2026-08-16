@@ -1,0 +1,13 @@
+{
+  "name": "autodev-core",
+  "description": "Autonomous development workflow: brainstorm, auto, iterate, audit, review, ship, plus the prd.json sprint system.",
+  "version": "8.0.0",
+  "author": {
+    "name": "djnsty23",
+    "url": "https://github.com/djnsty23"
+  },
+  "homepage": "https://github.com/djnsty23/claude-auto-dev",
+  "repository": "https://github.com/djnsty23/claude-auto-dev",
+  "license": "MIT",
+  "keywords": ["workflow", "autonomous", "sprint", "code-review", "qa"]
+}
