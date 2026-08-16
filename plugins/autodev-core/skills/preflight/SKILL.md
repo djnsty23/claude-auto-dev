@@ -127,6 +127,67 @@ Shapes that work, by class:
 | Copy / i18n drift | Hash the source string per key; fail when the source changed and a locale's hash did not |
 | Lifecycle | Assert each `addEventListener` / `setInterval` / `requestAnimationFrame` has a teardown in the same module |
 | Config targeting | Assert the env var or project id resolves to the environment the build targets |
+| **Gate satisfied by a comment** | Strip comments with a real lexer before the gate's own regex runs — see below |
+
+## The gate that a comment satisfies
+
+The nastiest failure a gate file has, because the gate reports PASS forever and
+the thing it guards is gone.
+
+Two real instances in one repo, same week:
+
+- An owner-only exemption stripped `//` comments before testing for an owner
+  check. A **block** comment describing a check that had been *deleted three
+  months earlier* kept granting the exemption.
+- An image-consent gate ran `/consentV/` against raw source. Three of the files
+  it checked mention `consentV` in explanatory prose. Delete the real guard,
+  leave the comment twelve lines above it, and the gate stayed green over
+  Art. 9 special-category health data.
+
+Both were proven by injection — remove the guard, confirm the gate still passes —
+which is the only way to know a gate is not decoration.
+
+**Do not ship this as a scanning gate.** Measured on those two files: a detector
+for "regex tested against raw file contents" found **54 hits, of which 2 were
+bugs.** Most raw-source tests are correct — a check looking for `readFileSync`
+calls, or matching a version label, genuinely wants the literal text. A gate at
+that precision is one people learn to skip.
+
+Ship the narrow version instead: **name the security-critical checks and assert
+each one runs against a comment-stripped view.**
+
+```js
+// Not a scan of every regex — a ratchet over the checks that guard something.
+const LEXED = ['owner-exemption', 'img-consent', 'authz-order'];
+gate('gates-are-lexed', 'every security gate reads code, not prose', () => {
+    const src = fs.readFileSync(__filename, 'utf8');
+    const missing = LEXED.filter((id) => {
+        const body = sliceGate(src, id);          // the gate's own body
+        return !/decomment|codeOnly/.test(body);  // …must use the lexer
+    });
+    if (missing.length) fail(`these test raw source, so a comment satisfies them: ${missing}`);
+    else ok(`${LEXED.length} security gates read a lexed view`);
+});
+```
+
+Use a real lexer, not two regexes. `src.replace(/\/\*[^]*?\*\//g,'').replace(/\/\/.*$/gm,'')`
+is not a scanner: a `//` inside a string (every URL) eats the rest of the line,
+and a `/*` inside a string or line comment opens a block that runs to the next
+close marker. Measured on one repo, that idiom deleted **128,599 characters of
+live code** across 5 files — whole functions — from the views assertions ran
+against. Those assertions did not fail; they looked at a hole and passed.
+
+**Pick the right variant.** A comments-only strip keeps string literals; a
+strip that also blanks literal *contents* is stronger but blinds any gate whose
+pattern matches inside a string. One of the two gates above needed each:
+
+```
+sample                          comments-only   +literals
+real gate, identifier form           true         true
+real gate, string-literal form       true         FALSE   <- blinded
+only a line comment                  false        false
+only a block comment                 false        false
+```
 
 **Then prove it.** Reintroduce the original defect, run preflight, and watch the
 gate go red. A gate never seen to fail is not known to work — say explicitly in

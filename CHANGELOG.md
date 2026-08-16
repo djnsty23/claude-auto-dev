@@ -1,5 +1,37 @@
 # Changelog
 
+## [8.10.0] - 2026-08-16
+
+### Added — the gate that a comment satisfies
+
+A new failure class in `preflight` and `rule-ramifications`, from two real
+instances in one repo in one week: an owner-only exemption granted by a **block
+comment describing a check deleted three months earlier**, and an image-consent
+gate over Art. 9 health data satisfied by a comment twelve lines above the guard
+it had lost. Both reported PASS for the entire time the thing they guarded was
+gone.
+
+**Documented as a review lens and a narrow assertion, not as a scanning gate** —
+because it was measured. A detector for "regex tested against raw file contents"
+found **54 hits across the two gate files, of which 2 were bugs**. Most
+raw-source tests are correct; a gate at that precision is one people learn to
+skip. The shippable version names the security-critical checks and asserts each
+reads a lexed view.
+
+Includes the variant table that matters in practice: a comments-only strip keeps
+string literals, while one that also blanks literal *contents* is stronger but
+blinds any gate whose pattern matches inside a string. The two real gates needed
+one each.
+
+`rule-ramifications` gains a section on the gate itself being wrong — comment-
+satisfied, never run, or never seen to fail — with one discipline for all three:
+**prove it fails.** Delete what it guards, confirm it goes red naming file and
+line, restore, verify byte-identical.
+
+*(Version note: 8.10.0 is the first release where a lexical `ls | tail -1` picks
+the wrong directory — it sorts 8.10.0 before 8.8.0. The nightly routine's plugin
+path resolution was switched to `sort -V` in this session, before this bump.)*
+
 ## [8.9.0] - 2026-08-16
 
 ### Changed — `auto` stops blocking on stories nobody is working

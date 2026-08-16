@@ -86,6 +86,28 @@ Then, specifically:
 Say so plainly and name it as a risk in your report. An unverified claim
 presented as verified is the reason these reached manual QA in the first place.
 
+## The gate itself can be the thing that is wrong
+
+Encoding a class as a gate moves the question rather than closing it: now the
+gate can be wrong, and a wrong gate is worse than no gate, because it reports
+PASS about the thing it stopped checking.
+
+Three shapes, all observed in production repos:
+
+1. **A comment satisfies it.** A guard tested with a regex over raw source, so
+   the identifier appearing in *prose* counts. One repo had an owner-only
+   exemption granted by a block comment describing a check deleted three months
+   earlier, and a consent gate over Art. 9 health data satisfied by a comment
+   twelve lines above the guard it had lost.
+2. **Nothing runs it.** 60 gates in one file that no script and no CI job
+   invoked. `scripts/find-orphan-checks.js` finds these.
+3. **It was never seen to fail.** A gate nobody has watched fire is a hypothesis.
+
+The fix for all three is the same discipline: **prove it fails.** Delete the
+thing it guards, confirm the gate goes red naming the file and line, then restore
+the file and verify it is byte-identical. If you cannot make it fail, you have
+not written a gate.
+
 ## Making this mechanical
 
 A checklist a human runs sometimes is not a gate. When the same class bites this
