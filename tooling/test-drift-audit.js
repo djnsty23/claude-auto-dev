@@ -154,9 +154,12 @@ const forRepo = (findings, name) => (findings || [])
     const warn = f.find((x) => /already be reconciled there/.test(x.detail));
     check('unmerged branch with prd changes → warn', !!warn);
     check('  names the branch', !!warn && /origin\/reconciled/.test(warn.detail));
-    check('  fix line is a runnable diff', !!warn && /git diff HEAD\.\.\.origin\/reconciled -- prd\.json/.test(warn.fix));
-    check('  does NOT flag origin/main (not ahead)',
-        !f.some((x) => /already be reconciled/.test(x.detail) && /origin\/main/.test(x.detail)));
+    // Diffed against the DEFAULT branch, not HEAD — see the featurecheckout case.
+    check('  fix line is a runnable diff against the default branch',
+        !!warn && /git diff origin\/main\.\.\.origin\/reconciled -- prd\.json/.test(warn.fix));
+    check('  names which base it compared against', !!warn && /ahead of origin\/main/.test(warn.detail));
+    check('  does NOT flag origin/main (it IS the base)',
+        !f.some((x) => /already be reconciled/.test(x.detail) && /: origin\/main /.test(x.detail)));
 }
 
 // ────────── 6. a branch ahead but NOT touching prd.json is not a carrier
@@ -171,6 +174,31 @@ const forRepo = (findings, name) => (findings || [])
     const f = forRepo(run(), 'branchnoprd');
     check('branch ahead but no prd.json change → not reported',
         !f.some((x) => /already be reconciled there/.test(x.detail)));
+}
+
+// ── 6b. sitting on a FEATURE BRANCH must not make the default branch a carrier
+//
+// The first version compared every branch against HEAD, so the moment the
+// checkout was on a feature branch, origin/main reported as "a branch carrying
+// prd.json changes you do not have" — which is just what being on a branch
+// means. Found by merging a real carrier and watching the finding fail to clear,
+// because the checkout was on a docs branch at the time.
+{
+    const repo = makeRepo('featurecheckout');
+    commitPrd(repo, { 'S-1': story(null) }, 90, 'chore: prd');
+    filler(repo, 20, 2);
+    // The default branch moves ahead with a reconciliation of its own.
+    commitPrd(repo, { 'S-1': story(null), 'S-9': story(true) }, 1, 'chore: close S-9');
+    git(repo, 'update-ref refs/remotes/origin/main refs/heads/main');
+    git(repo, 'symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main');
+    // Now work from a branch that predates that commit.
+    git(repo, 'checkout -q -b sidework HEAD~1');
+
+    const f = forRepo(run(), 'featurecheckout');
+    check('on a feature branch → the DEFAULT branch is not reported as a carrier',
+        !f.some((x) => /already be reconciled/.test(x.detail) && /origin\/main/.test(x.detail)));
+    check('  fix line diffs against the default branch, not HEAD',
+        f.every((x) => !/git diff HEAD\.\.\./.test(x.fix || '')));
 }
 
 // ───────────── 7. a MERGED branch is not a carrier (it is not ahead of HEAD)

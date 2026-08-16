@@ -260,30 +260,49 @@ function writeAgeCache(repo, byId, scanDepth) {
     } catch { /* the cache is an optimisation; never fail the audit for it */ }
 }
 
-// Unmerged branches whose prd.json differs from HEAD's.
+// The repo's default branch, as a remote ref. Falls back through the usual
+// names and finally to HEAD, so a repo with no origin still gets an answer.
+function defaultRef(repo) {
+    const sym = g(repo, 'symbolic-ref refs/remotes/origin/HEAD');
+    if (sym) return sym.replace(/^refs\/remotes\//, '');
+    for (const c of ['origin/main', 'origin/master']) {
+        if (g(repo, `rev-parse --verify --quiet ${c}`)) return c;
+    }
+    return 'HEAD';
+}
+
+// Unmerged branches whose prd.json differs from the DEFAULT branch's.
 //
 // The case this exists for: a repo's tracker looked stale for weeks while the
 // reconciliation sat finished on a branch nobody merged. A staleness check aimed
 // at the checked-out tree cannot see that, and draws the opposite conclusion —
 // "nobody has reconciled this" when someone had, elsewhere.
 //
+// Compared against the DEFAULT BRANCH, not HEAD. The first version compared to
+// HEAD, and the moment you sit on a feature branch it reports `origin/main`
+// itself as a carrier — main being ahead of your branch is the normal state of
+// working on a branch, not drift. Caught by merging one of the real carriers
+// and watching the finding fail to clear, because the checkout was on a docs
+// branch at the time.
+//
 // Measured on 224 remote branches across three repos: 2 carriers, 0 false
 // positives. One held a P0 audit wave (live invite codes tracked in git); the
 // other held a finished P0 investigation. Both were worth surfacing.
 function prdCarrierBranches(repo) {
+    const base = defaultRef(repo);
     const all = g(repo, `for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes`)
         .split('\n').map((b) => b.replace(/'/g, '').trim())
-        .filter((b) => b && !/\/HEAD$/.test(b) && b !== 'origin');
+        .filter((b) => b && !/\/HEAD$/.test(b) && b !== 'origin' && b !== base);
 
     const scanned = all.slice(0, PRD_BRANCH_SCAN);
     const carriers = [];
     for (const b of scanned) {
-        const ahead = Number(g(repo, `rev-list --count HEAD..${b}`)) || 0;
+        const ahead = Number(g(repo, `rev-list --count ${base}..${b}`)) || 0;
         if (!ahead) continue;
-        if (!g(repo, `diff --name-only HEAD...${b} -- prd.json`)) continue;
-        carriers.push({ b, ahead, date: g(repo, `log -1 --format=%ad --date=format:%Y-%m-%d ${b}`) });
+        if (!g(repo, `diff --name-only ${base}...${b} -- prd.json`)) continue;
+        carriers.push({ b, ahead, base, date: g(repo, `log -1 --format=%ad --date=format:%Y-%m-%d ${b}`) });
     }
-    return { carriers, scanned: scanned.length, skipped: all.length - scanned.length };
+    return { carriers, base, scanned: scanned.length, skipped: all.length - scanned.length };
 }
 
 function auditPrd(repo) {
@@ -307,8 +326,8 @@ function auditPrd(repo) {
     const { carriers, skipped } = prdCarrierBranches(repo);
     for (const c of carriers) {
         add('prd', 'warn',
-            `${name}: ${c.b} is ${c.ahead} commit(s) ahead and its prd.json differs from HEAD's (tip ${c.date}) — this backlog may already be reconciled there`,
-            `read it before reconciling by hand: git diff HEAD...${c.b} -- prd.json`);
+            `${name}: ${c.b} is ${c.ahead} commit(s) ahead of ${c.base} and its prd.json differs (tip ${c.date}) — this backlog may already be reconciled there`,
+            `read it before reconciling by hand: git diff ${c.base}...${c.b} -- prd.json`);
     }
     if (skipped) {
         add('prd', 'info', `${name}: ${skipped} older remote branch(es) not checked for prd changes (scanned the ${PRD_BRANCH_SCAN} most recent)`,
