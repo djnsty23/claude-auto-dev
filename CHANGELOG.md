@@ -1,5 +1,43 @@
 # Changelog
 
+## [8.0.0] - 2026-08-16
+
+Restructured from a copy-into-`~/.claude` installer into a Claude Code plugin
+marketplace. Read [MIGRATION.md](MIGRATION.md) before upgrading.
+
+### Changed — distribution
+- **Plugin marketplace.** `.claude-plugin/marketplace.json` catalogs three plugins: `autodev-core` (the workflow, 36 skills, 4 agents, 7 hooks), `autodev-memory` (4 skills, 3 hooks, the SQLite runtime), and `autodev-stack` (Supabase, Doppler, Stripe, Remotion). Install with `/plugin marketplace add` + `/plugin install`; Claude Code owns update and uninstall.
+- **Removed the bespoke installer.** `install.sh`, `install.ps1`, `uninstall.sh`, `uninstall.ps1`, `scripts/sync.js`, `scripts/uninstall.js`, the `.auto-dev-installed.json` sidecar, `repo-path.txt`, the collision detector, and the `update-dev` shell-profile function are all gone — the harness does this natively.
+- **Removed `skills/manifest.json`.** 14KB of `triggers`/`requires`/`priority` metadata that no runtime ever read; its only live uses were printing a version string and listing deprecated skills. Version now comes from the plugin's own `plugin.json`.
+- **Hooks resolve through `${CLAUDE_PLUGIN_ROOT}`**, so the whitelist hack that decided which `scripts/` files to copy — and left the memory pipeline dead on every install when it drifted — is structurally impossible now.
+- **Settings are no longer written for you.** `docs/recommended-settings.json` is opt-in and drops the `Bash(bash *)`, `Bash(sh *)`, `Bash(source *)`, `Bash(curl *)`, `Bash(export *)`, `Bash(chmod *)`, `Bash(rm -f *)`, and `WebFetch(domain:*)` allow rules, each of which made the deny list beneath it unenforceable. The global `model: opus` pin is gone.
+
+### Fixed — latent bugs the restructure exposed
+- **The test suite never ran.** `test-all.js` declared `run(label, file, args)` but every call site passed two arguments, so `args` was `undefined` and each "suite" launched a bare `node` with no script. Every suite reported PASS without executing; CI was green on an empty run.
+- **Memory captured only the first turn of a session.** Session close ran on `Stop`, which fires at the end of every assistant turn — it ended the session and deleted the session-id file, so every later turn's observations were dropped. Moved to `SessionEnd`.
+- **`core` and `standards` were unreachable.** Both set `user-invocable: false` and `disable-model-invocation: true`, which blocks user and model invocation alike. They now load by file context via `paths`.
+- **`PostCompact` never fired.** `post-compact.js` was registered as a `PostToolUse` hook with matcher `"compact"`. It is a real event and is now wired to it.
+- **`agent-browser-cleanup.js` was orphaned.** Its header claimed `session-start.js` invoked it; nothing did. Now registered on `SessionStart`.
+- **Knowledge surfacing broke under symlinked paths.** The area calculation compared a raw `file_path` against `process.cwd()`; on macOS (`/var/folders` vs `/private/var/folders`) every edit looked outside the project. Both sides now go through `realpathSync`.
+- **The image-scan perf assertion flaked.** A fixed 150ms wall-clock budget is mostly Node startup, which swings ~10x under load. It now measures this machine's baseline and budgets the hook's own work against it.
+- **The memory-backup scheduled task did nothing.** It invoked `~/.claude/hooks/memory-backup.sh`, which was never shipped.
+
+### Changed — Desktop-first browser automation
+- **New `browser` skill** (replaces `agent-browser`) selects a driver: the built-in Browser pane tools where available, the `agent-browser` CLI otherwise. The 300-line CLI reference moved to `references/agent-browser-cli.md` so it costs nothing on the default path.
+- `scan` documents the built-in path first, with the CLI as the terminal-only fallback. Nine other browser-using skills carry the selection rule.
+- Authenticated pages now prefer having the user log in directly in the Browser pane over the localStorage token-injection workaround.
+
+### Changed — skills
+- **`triggers:` → `when_to_use:`** across all 39 migrated skills. `triggers` was never a Claude Code frontmatter field.
+- **`config/rules/*.md` became five auto-loading skills** (`rule-security`, `rule-design-system`, `rule-file-organization`, `rule-windows`, `rule-verification`). `rules/` is not a plugin component type, so those files would never have loaded; as skills with `paths` globs they apply automatically.
+- **`update` skill** now hands over `/plugin marketplace update` instead of pulling a git repo and re-running a sync script.
+
+### Changed — repo layout
+- `tooling/` holds `validate.js`, the test suites, and `bump.js`, and ships to no one.
+- `validate.js` rewritten for the plugin layout: version sync, marketplace/plugin manifests, skill frontmatter (including the unreachable-skill and unquoted-YAML traps), hook wiring, and `${CLAUDE_PLUGIN_ROOT}` path resolution.
+- `bump.sh` → `tooling/bump.js`: one writer for `VERSION`, `package.json`, `marketplace.json`, and all three `plugin.json` files, replacing nine sed targets across two platform branches.
+- CI runs on Linux, Windows, and macOS, and syntax-checks every hook.
+
 ## [7.6] - 2026-08-12
 
 ### Added — CI

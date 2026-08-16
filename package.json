@@ -1,25 +1,22 @@
 {
   "name": "claude-auto-dev",
-  "version": "7.6.0",
-  "description": "Autonomous development workflow for Claude Code - skills, hooks, and task management",
-  "files": [
-    "skills",
-    "hooks",
-    "config",
-    "templates"
-  ],
+  "version": "8.0.0",
+  "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
+  "private": true,
   "keywords": [
     "claude",
     "claude-code",
+    "claude-code-plugin",
     "ai",
     "autonomous",
     "development",
     "task-management",
-    "ai-coding",
     "claude-skills"
   ],
   "scripts": {
-    "test": "node scripts/test-all.js"
+    "test": "node tooling/test-all.js",
+    "validate": "node tooling/validate.js",
+    "bump": "node tooling/bump.js"
   },
   "author": "djnsty23",
   "license": "MIT",

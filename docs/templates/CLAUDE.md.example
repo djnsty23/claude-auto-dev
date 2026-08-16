@@ -1,0 +1,42 @@
+# Claude Code User Configuration
+
+Optional starting point for your own `~/.claude/CLAUDE.md`. Nothing installs
+this for you — copy what you want and delete the rest.
+
+Keep this file short. Anything longer than a fact belongs in a skill, where it
+costs no context until it is actually needed.
+
+## Identity
+
+GitHub: YOUR_GITHUB_USERNAME
+Email: YOUR_EMAIL
+
+## Behavior
+
+- **BE CONCISE** — under 2 lines unless detail is asked for
+- **DISCUSS FIRST** — clarify before coding
+- **PARALLEL OPS** — batch independent operations
+
+## Stack
+
+React + TypeScript + Tailwind + shadcn/ui + Supabase + Vercel
+
+## User accounts (update these)
+
+| Account | Role |
+|---------|------|
+| YOUR_ADMIN_EMAIL | Admin |
+| YOUR_TEST_EMAIL | Tester (automated tests only) |
+
+## GitHub access
+
+- Use the `gh` CLI for GitHub operations
+- Token lives in the `GITHUB_PAT` environment variable, never in a file
+
+## Notes
+
+The pre-8.0 version of this template ended with `@` includes pointing at
+`skills/commands.md` and `rules/*.md` under `~/.claude/`. Those files no longer
+exist: the rules ship as auto-loading skills inside `autodev-core`, and the
+command list lives in [`docs/commands.md`](../commands.md). Delete any such
+`@include` lines you still have — they resolve to nothing.
