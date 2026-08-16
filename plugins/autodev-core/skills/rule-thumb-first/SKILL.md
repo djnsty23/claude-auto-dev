@@ -85,6 +85,37 @@ wrong. One type family, wide weight range, and **tabular numerals anywhere
 numeric** — otherwise digits shift horizontally as they change, and that flicker
 reads as cheap even to people who cannot name why.
 
+### The second axis: ambient state
+
+The accent answers *what can I press*. There is a second, orthogonal thing colour
+can carry, and it is easy to miss because it never touches a control:
+**what state is the person in.**
+
+A consumer health app in this codebase's orbit does it properly. Its `<body>`
+carries a mood set at runtime, and the mood moves **hue and tempo together**:
+
+| mood | ambient hue | aurora period |
+|---|---|---|
+| `recovery` | cool — deep blue, indigo, teal | **34s** |
+| `push` | warm — amber, red, yellow | **11s** |
+
+Nothing interactive changes. The accent stays exactly where it was. What changes
+is the *room* — slow and cool when the body needs to back off, fast and warm when
+it is time to work. The user never reads a label saying which mode they are in;
+they feel the tempo before they can name it.
+
+Two rules make this work rather than becoming decoration:
+
+- **The two axes must not collide.** Ambient hue lives in the background and on
+  nothing that can be pressed. If ambient warm and the accent are the same
+  family, the accent stops being findable in the mood that matters most.
+- **Hue and motion move as a pair.** Warm-but-slow and cool-but-fast read as
+  broken, because tempo is doing one thing while colour does another. If the
+  ambient palette shifts, its motion shifts with it.
+
+Use this only where the app genuinely has a state worth broadcasting. Most
+products do not, and inventing one is exactly the unearned signal §4 is about.
+
 ## 4. The rule that generalises past screens
 
 **Unearned signal destroys real signal.**
@@ -109,3 +140,5 @@ does not serve that is noise competing with the line that does.
 - [ ] Every icon has a label, or is a universally-known glyph.
 - [ ] The primary action is reachable without shifting grip.
 - [ ] Nothing is printed, shown, or animated that the reader did not need.
+- [ ] If there is an ambient state axis, it touches nothing pressable, and its
+      hue and its tempo move together.
