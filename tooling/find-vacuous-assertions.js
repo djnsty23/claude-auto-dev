@@ -63,7 +63,7 @@
 //
 //   test-knowledge 61 · memory-db-cli 76 · knowledge-injection 74 ·
 //   memory-session-end 77 · session-carrier 83 · semantic-search 73
-//   survives EVERY suite: 39
+//   survives EVERY suite: 28  (39 before matchesArea was pinned and its three dead clauses removed)
 //
 // All 39 read. They are not 39 gaps:
 //   12  the `if (!db) return []` guards and their `|| []` fallbacks — the

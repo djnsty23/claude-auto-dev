@@ -29,6 +29,12 @@ If speed is the reason for the copy, make the *slow part* injectable instead. A
 2s/8s/32s backoff became an optional parameter that production never passes; the
 real function then runs in milliseconds under test.
 
+The same trap has a timing form: a gate that regenerates an artefact and *then*
+reads it compares the generator against its own output and is green forever. One
+production repo shipped a stale manifest twice that way, with preflight passing
+both times. Snapshot what was **on disk** — what a commit would actually have
+shipped — before any regeneration runs.
+
 ## 2. Assert a population floor
 
 **No output never differs from no output.** A drift check that compares generated
@@ -43,6 +49,17 @@ comparison:
 
 The same shape appears in test tooling: a suite whose subject is stubbed to
 nothing still exits 0, so "the suite passes" proves nothing about the stub.
+
+The sharpest statement of it comes from a production preflight that had already
+learned it, and it is worth keeping in these words:
+
+> **A verdict emitted before the work.**
+
+Its success line used to print before a single file was opened, so it said the
+same thing whether the directory held 200 files or did not exist at all. The fix
+was to move the line to the end and give it the count it actually read — *"so an
+empty scan is visible instead of reassuring."* That repo now carries an explicit
+`read 0 files, so nothing was checked` branch. Copy the shape.
 
 ## 3. A canary must fire, and fire for the RIGHT reason
 
