@@ -242,7 +242,40 @@ const ONE_OFF = /(^|[-.])(migrate|import|export|backfill|seed|fix|push|resync|cr
 // a MANUAL tool. It asserts things, but wiring it into CI would be actively
 // wrong — it would charge a card or write to prod on every push. Measured on a
 // real repo: every one of its six 'orphaned assertions' was in this category.
-const MANUAL_TOOL = /\b(doppler run|stripe|--config prd|prod(uction)? edge|live key|sk_live|charge|invoice|promotion.?code|send.?email|deploy|SERVICE_ROLE|SUPABASE_URL|createClient|DATABASE_URL)\b/i;
+//
+// WIDENED after reading all 22 remaining findings across three product repos by
+// hand — which is the only way this number ever means anything. The verdicts:
+// 2 real orphans, 2 borderline, and 18 manual tools the classifier did not
+// recognise. The keyword list knew about payments and databases but not about
+// browser automation, mail senders, LLM clients, or anything that reads
+// .env.local and talks to a live host.
+//
+// Measured against those 22, with the two REAL orphans named up front as the
+// things a widening must not destroy:
+//
+//   candidate                  silenced  remaining  real orphans destroyed
+//   A  current                        0         22   0
+//   B  +browser/mail/llm              4         18   0
+//   C  B +dotenv                      9         13   0
+//   D  C +external https host        14          8   0   <- shipped
+//
+// Full-detector run of D across all four repos, because the cost of a guard is
+// what it STOPS showing you and nobody sees that:
+//
+//   repo                     assertions      manual bucket
+//   this repo                0 -> 0          0 -> 0
+//   Project A (B2B audit)    16 -> 5         94 -> 135
+//   Project B (health app)   5 -> 3          12 -> 15
+//   Project C (media app)    1 -> 0          11 -> 18
+//
+// This is RECLASSIFICATION, not suppression: everything moved is still printed,
+// under the manual heading, by name. That is the difference between this and the
+// guard that once silenced 67 of 120 scripts into nothing.
+//
+// Precision on the read set went from 2/22 to 2/8 (4/8 counting borderline).
+// Both real orphans — an offline --emulator round-trip and a dependency-free
+// retry-logic check — survive D, which was the acceptance test, not the count.
+const MANUAL_TOOL = /\b(doppler run|stripe|--config prd|prod(uction)? edge|live key|sk_live|charge|invoice|promotion.?code|send.?email|deploy|SERVICE_ROLE|SUPABASE_URL|createClient|DATABASE_URL|playwright|chromium|puppeteer|sendgrid|nodemailer|mailgun|openai|anthropic|dotenv)\b|@google\/genai|https:\/\/[a-z0-9.-]+\.(com|net|io|org)/i;
 
 const results = scripts.map((s) => {
     const abs = path.join(REPO, s);

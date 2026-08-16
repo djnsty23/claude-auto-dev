@@ -199,6 +199,38 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         orphans3.some((f) => /store-mapping\.test\.js/.test(f)));
 }
 
+// MANUAL_TOOL classification. The keyword list knew payments and databases but
+// not browser automation, mail, LLM clients, or dotenv-plus-a-live-host, so 18
+// of 22 real findings across three repos were manual tools called orphans.
+{
+    const manualish = {
+        'playwright': "import { chromium } from 'playwright';\n" + ASSERTS,
+        'sendgrid': "import sg from '@sendgrid/mail';\n" + ASSERTS,
+        'dotenv': "import 'dotenv/config';\n" + ASSERTS,
+        'external https host': "const API = 'https://api.example.com/v1';\n" + ASSERTS,
+    };
+    for (const [label, body] of Object.entries(manualish)) {
+        const out = run(repo({
+            'package.json': JSON.stringify({ name: 'r' }),
+            'scripts/probe.mjs': body,
+        }));
+        check(`${label} is classified MANUAL, not an orphaned check`,
+            !(out.orphanChecks || []).some((o) => o.script === 'scripts/probe.mjs'));
+    }
+
+    // The over-suppression guard, and the one that matters most. A check with no
+    // network, no credentials and no browser must STILL be reported. Both real
+    // orphans found by hand were of exactly this shape, and a widening that ate
+    // them would have been worse than the false positives it removed.
+    const pure = run(repo({
+        'package.json': JSON.stringify({ name: 'r' }),
+        'scripts/verify-retry-logic.mjs':
+            'let tries = 0;\nfunction retry() { tries++; }\nretry();\n' + ASSERTS,
+    }));
+    check('a dependency-free assertion script is STILL an orphan',
+        (pure.orphanChecks || []).some((o) => o.script === 'scripts/verify-retry-logic.mjs'));
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
