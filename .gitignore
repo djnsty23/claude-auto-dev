@@ -50,3 +50,6 @@ node_modules/
 dist/
 build/
 .next/
+
+# find-vacuous-assertions.js crash-recovery backups
+*.vacuity-backup

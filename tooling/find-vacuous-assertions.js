@@ -29,18 +29,53 @@
 //     catch swallowed the resulting TypeError — one guard masking another,
 //     which is exactly the case check-suites-can-fail structurally cannot see
 //
-// Cost: one suite run per mutant. Measured here at 1.3s x 59 = ~80s for a
-// 240-line subject. Scales with suite runtime, so point it at one pair at a
-// time rather than the whole repo.
+// COST, and why there is no sweep-the-whole-repo mode. One suite run per mutant,
+// so the bill is (mutants x suite runtime) and the suite runtime dominates:
+//
+//   subject                 lines  suite runtime  mutants  total
+//   hooks/pre-tool-filter.js  240          1.3s        60   ~80s
+//   scripts/drift-audit.js    409         13.1s      ~100   ~22min
+//
+// A sweep over all 14 pairs was attempted and abandoned on that basis — an
+// estimate of "20 minutes" made from the fast pair was out by an order of
+// magnitude, because the second subject's suite is 10x slower. Point this at one
+// pair at a time, and check the suite's runtime before starting.
 //
 // Usage: node tooling/find-vacuous-assertions.js <subject.js> <suite.js>
 
 const fs = require('fs');
+const path = require('path');
 const { spawnSync } = require('child_process');
 
 const [subject, suite] = process.argv.slice(2);
+recoverStaleBackup(subject);
 const original = fs.readFileSync(subject, 'utf8');
+fs.writeFileSync(backupPath(subject), original);
 const lines = original.split('\n');
+
+// This script OVERWRITES the subject with mutants. The normal path restores
+// after every one, but killing a sweep mid-run left two plugin sources sitting
+// mutated in the working tree — worse than the run not finishing.
+//
+// A SIGTERM/SIGINT handler was tried first and MEASURED NOT TO WORK: this script
+// is entirely synchronous (spawnSync in a loop), so the event loop is blocked
+// for essentially its whole life and a JS signal handler never gets scheduled.
+// Verified by killing a real run — the subject was still mutated afterwards.
+// No handler can fix that; the fix has to survive the process dying outright.
+//
+// So: crash recovery instead of signal handling. A backup is written before the
+// first mutation and removed on clean exit. Any run that finds a stale backup
+// restores from it first. This works no matter how the previous run died.
+function backupPath(file) { return file + '.vacuity-backup'; }
+
+function recoverStaleBackup(file) {
+    const bak = backupPath(file);
+    if (!fs.existsSync(bak)) return false;
+    fs.writeFileSync(file, fs.readFileSync(bak));
+    fs.unlinkSync(bak);
+    console.log(`\nRecovered ${path.basename(file)} from a previous run that did not finish.`);
+    return true;
+}
 
 const isCode = (l) => l.trim() && !/^\s*(\/\/|\*|\/\*)/.test(l);
 
@@ -90,6 +125,8 @@ for (let i = 0; i < lines.length; i++) {
 
 fs.writeFileSync(subject, original);
 const restored = fs.readFileSync(subject, 'utf8') === original;
+// Only now is the backup redundant. Removing it earlier would reopen the window.
+if (restored) fs.unlinkSync(backupPath(subject));
 
 console.log(`\nsubject: ${subject}`);
 console.log(`suite:   ${suite}`);
