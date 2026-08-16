@@ -47,8 +47,20 @@ const ALLOW = new Set([
     'tooling/check-no-private-names.js',   // this file IS the list
 ]);
 
-const tracked = execSync('git ls-files', { cwd: ROOT, encoding: 'utf8' })
+// Tracked files PLUS untracked-but-not-ignored ones.
+//
+// `git ls-files` alone was the gap, and it let a real leak through the same day
+// this file shipped: a handoff doc naming all three private repos was written,
+// `validate.js` was run and passed, and only THEN was the file `git add`ed and
+// pushed to the public remote. The check could not see it, because it was not
+// tracked yet — which is precisely the moment a new file needs checking. The
+// window is every new file, every time, and it closed only after the push.
+//
+// `--others --exclude-standard` adds untracked files while still honouring
+// .gitignore, so scratch and build output stay out.
+const listed = (args) => execSync(`git ls-files ${args}`, { cwd: ROOT, encoding: 'utf8' })
     .split('\n').filter(Boolean);
+const tracked = [...new Set([...listed(''), ...listed('--others --exclude-standard')])];
 
 if (process.argv.includes('--list')) {
     console.log(NAMES.join('\n'));
@@ -75,7 +87,7 @@ for (const rel of tracked) {
 }
 
 if (!hits.length) {
-    console.log(`[no-private-names] ${tracked.length} tracked files, ${NAMES.length} names — clean`);
+    console.log(`[no-private-names] ${tracked.length} files (tracked + untracked), ${NAMES.length} names — clean`);
     process.exit(0);
 }
 
