@@ -166,6 +166,36 @@ function checkRunner(suite) {
     }
 }
 
+// validate.js is a gate too, and it is not a test-*.js file so the loop below
+// never sees it. It guards plugin structure, version sync, hook wiring and the
+// private-names denylist — the checks that stop a broken marketplace shipping —
+// and until now nothing proved it could fail.
+//
+// Its subject is the repo itself, so the mutation is a repo mutation: break the
+// version sync, which every plugin manifest depends on, and assert it goes red.
+function checkValidator() {
+    const suite = 'validate.js';
+    const file = path.join(ROOT, 'VERSION');
+    if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', note: 'no VERSION file' };
+
+    const run = () => spawnSync(process.execPath, [path.join(__dirname, 'validate.js')], {
+        cwd: ROOT, encoding: 'utf8', timeout: 300000,
+    });
+    if (run().status !== 0) return { suite, status: 'RED', note: 'already failing' };
+
+    const original = fs.readFileSync(file);
+    try {
+        fs.writeFileSync(file, '0.0.0-canary\n');
+        return run().status !== 0
+            ? { suite, status: 'ok', note: 'goes red on a version-sync break' }
+            : { suite, status: 'VACUOUS', note: 'stays GREEN with VERSION desynced from every manifest' };
+    } finally {
+        fs.writeFileSync(file, original);
+    }
+}
+
+rows.push(checkValidator());
+
 for (const suite of suites) {
     if (suite === 'test-all.js') { rows.push(checkRunner(suite)); continue; }
 
