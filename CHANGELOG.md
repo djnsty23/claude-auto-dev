@@ -1,5 +1,77 @@
 # Changelog
 
+## [8.17.0] - 2026-08-16
+
+### Retracted — "that P0 is marked done and the fix exists nowhere"
+
+It was not. The fixes had shipped **two minutes before** the duplicate that went
+looking for them, in a commit closing all four findings from the audit wave.
+`passes: true` was accurate the whole time. The claim was stated forcefully,
+twice, including in a handoff document, and 8.14.0 was built on it.
+
+**How the false negative was manufactured**, which is the part worth keeping:
+
+```
+"is the handler now below authCheck?"                 → no
+grep sanitis|sanitiz|generic.*fallback|strip.*PII     → no hits
+∴ "the fix exists nowhere"
+```
+
+The real implementation was a third shape neither pattern matched — split the
+copy into `text` (personal, rides in the encrypted push) and `pubText` (generic,
+written to the public file). It is *better* than either thing searched for, and
+it is the design later recommended independently here, already shipped.
+
+**An absence search is only as good as its enumeration of what would count as
+presence.** Two misses became "nowhere".
+
+`rule-ab-testing` rule 5 is rewritten from "a result of zero is a result" to
+demand the same reading a count gets: write down what you would accept as
+evidence of presence before reporting absence, and **search for the effect, not
+for the fix you had in mind.** The tally goes to sixteen, with the new row
+flagged as the one to read twice — the two detectors built for this class were
+sound; the premise that motivated them was not, and measuring a detector never
+checks the story behind it.
+
+`rule-verification`'s two rules are unchanged and now rest on their own
+reasoning rather than on a retracted anecdote.
+
+### Also
+
+The superseded fix branch was removed locally. The other session's work is
+better on every point: `[img-consent]` now requires `consentV` to be **enforced
+in a 403 refusal** rather than merely present — stronger than the
+comment-stripping version proposed here.
+
+## [8.16.0] - 2026-08-16
+
+### Fixed — the name check could not see a new file, which is when it matters most
+
+It caught its author, and only after the push. A handoff doc naming all three
+private codebases was written into `docs/`, `validate.js` was run and reported
+13 PASS 0 FAIL, and the file was **then** `git add`ed and pushed to the public
+remote. `check-no-private-names.js` scanned `git ls-files` — tracked files only
+— so at the moment it ran, the new file did not exist as far as it was
+concerned.
+
+That window is every new file, every time. A gate that inspects only what is
+already committed cannot stop anything from being committed. Now scans tracked
+plus `--others --exclude-standard`, so untracked files count while `.gitignore`
+is still honoured.
+
+The handoff is removed from the repo rather than anonymised: a document whose
+job is telling the next session which private repos are in what state does not
+belong in a public marketplace, and stripping the names would leave it useless.
+
+### Added
+
+`validate.js` is now covered by `check-suites-can-fail.js`. It guards plugin
+structure, version sync, hook wiring and the denylist above, and nothing had
+ever proved it could fail — it is not a `test-*.js` file, so the loop never saw
+it. Its mutation is a repo mutation: desync `VERSION` from every manifest and
+assert it goes red. **14 gates checked, 0 vacuous.** That check earned itself
+immediately — reporting `validate.js` as RED is what surfaced the leak above.
+
 ## [8.15.0] - 2026-08-16
 
 ### Added — `npm run check:suites`: prove every test suite can fail
@@ -52,14 +124,13 @@ answers the question, and three would triple a 40-second job for the same result
 2. **Do not close a story until the change is somewhere a reader can reach it.**
    Committed and pushed, or the story stays open.
 
-From a measured instance, not a hypothetical. Two P0 stories were marked
-`passes: true`, titled `FIXED <date>`, with bodies reading *"CONFIRMED live and
-FIXED"* — one verified genuinely well, by calling the production endpoint
-unauthenticated and getting HTTP 200. The fix was then absent from the default
-branch, from the 25 most recently updated remote branches, and from all 8 live
-worktrees including uncommitted changes. An exploitable P0, verified live,
-recorded as closed, **fixed nowhere** — and the next reader's rational move,
-seeing `passes: true`, is to skip it.
+> **Corrected in 8.17.0.** This entry originally justified those rules with an
+> instance — two P0 stories marked done while the fix existed nowhere. **That was
+> false.** The fixes had shipped two minutes before the duplicate that went
+> looking for them; `passes: true` was accurate throughout. The rules stand on
+> their own merits; the anecdote was retracted and replaced with the more useful
+> lesson, which is about how a confident false negative gets manufactured. See
+> 8.17.0.
 
 ### Not added — two detectors for it, both measured and dropped
 

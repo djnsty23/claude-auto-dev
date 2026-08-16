@@ -13,7 +13,7 @@ A proposal is not a finding. Before recommending a change, measure it against
 numbers alongside the recommendation.
 
 This is not process for its own sake. Across two working sessions, measurement
-overturned the recommendation **fifteen** times — and four of those were
+overturned the recommendation **sixteen** times — and four of those were
 proposals to build a detector that, once built and run, found nothing true:
 
 | Claim | What measuring found |
@@ -33,6 +33,7 @@ proposals to build a detector that, once built and run, found nothing true:
 | "Compare carrier branches to HEAD" | Sitting on any feature branch makes `origin/main` report as a carrier. The base has to be the *default branch*, or the answer depends on where the reader is standing |
 | "Detect a done-story with no commit referencing its id" | **100% of done stories in all three repos.** None of them put ids in commit messages |
 | "Detect a done-story citing files that no longer exist" | 4 hits across 371 done stories, **0 real** — three path-prefix artifacts, one file the story's own fix deleted |
+| "That P0 is marked done and the fix exists nowhere" | **The fix had shipped two minutes earlier.** I searched for two shapes it might take; the real one was a third, and better. A zero needs reading exactly as much as a count does |
 
 Most of the later ones came from **implementing the recommendation and running
 it** — including errors in claims already written down and shared, a bug in one
@@ -43,12 +44,17 @@ more careful reasoning.
 Every one of those would have shipped noise, and a detector that cries wolf is
 one people learn to skip — after which the ones that were right get skipped too.
 
-**Some classes are real and still not detectable.** The last two rows were
-attempts to mechanise a genuine, damaging failure (a P0 marked done while the
-fix existed nowhere). Both were precise and both found nothing true. The honest
-outcome was to write the class into `rule-verification` as a review step and
-record the two dead ends here — not to ship a third guess. **"No detector fits"
-is a legitimate conclusion, and cheaper than a checker nobody trusts.**
+**Some classes are real and still not detectable.** Two of those rows were
+attempts to mechanise "a story says done but is not". Both were precise and both
+found nothing true, so the class went into `rule-verification` as a review step
+rather than becoming a third guess. **"No detector fits" is a legitimate
+conclusion, and cheaper than a checker nobody trusts.**
+
+**And the last row is the one to read twice.** The failure those two detectors
+were built to catch turned out not to have happened: the fix had shipped two
+minutes before I declared it missing. I had searched for two shapes it might
+take and the real one was a third. The detectors were sound; the *premise* was
+not, and no amount of measuring a detector checks the story that motivated it.
 
 ## What a measurement looks like
 
@@ -78,12 +84,19 @@ meant. Neither was obvious from reasoning about it.
    would have presented as work.
 4. **Report the measurement, not just the conclusion.** The reader needs to be
    able to disagree with your interpretation.
-5. **A result of zero is a result.** "The gate finds nothing" is worth saying;
-   it means the class is already handled, and that is the cheapest possible fix.
+5. **A result of zero is a result — and it needs reading, like any other.**
+   "The gate finds nothing" is worth saying; it usually means the class is
+   already handled, which is the cheapest possible fix. But a zero from a search
+   is a claim about your *search*, not about the world. Before reporting that
+   something is absent, write down what you would accept as evidence that it is
+   present; if that list has two entries, expect a false negative. **Search for
+   the effect, not for the fix you had in mind.** One "it exists nowhere" here
+   was three searches for two shapes, while the real implementation took a
+   third — and better — form that had shipped two minutes earlier.
 6. **Prefer the boring variant when it ties.** An existing rule with a baseline
    beats a bespoke checker you will have to debug.
-7. **Run the fix you recommended before you call it shipped.** Four of the
-   eleven reversals above were invisible until the recommendation was executable
+7. **Run the fix you recommended before you call it shipped.** Several of the
+   sixteen reversals above were invisible until the recommendation was executable
    and executed — including one where the proposal changed nothing at all, and
    one where the implementation had a bug that silently under-reported. A
    recommendation you have only reasoned about is still a hypothesis.

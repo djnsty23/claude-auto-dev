@@ -66,20 +66,49 @@ file and disagree.
 Not "the fix is written", not "the fix is on my branch and I am about to push".
 Committed and pushed, or the story stays open.
 
-This exists because of a measured instance, not a hypothetical. Two P0 stories
-were marked `passes: true`, titled `FIXED <date>`, with bodies reading
-*"CONFIRMED live and FIXED"* — one of them verified genuinely well, by calling
-the production endpoint unauthenticated and getting HTTP 200. Then:
+Both rules are sound. **The story originally told here to justify them was not,
+and correcting it is the more useful lesson.**
 
-| Where the fix was looked for | Result |
-|---|---|
-| the default branch | absent |
-| the 25 most recently updated remote branches | absent |
-| all 8 live worktrees, including uncommitted changes | absent |
+I reported that two P0 stories were marked `passes: true` while the fix existed
+nowhere — not on the default branch, not on 25 remote branches, not in 8 live
+worktrees. Stated forcefully, twice, including in a handoff document.
 
-An exploitable P0, verified live, recorded as closed, **fixed nowhere.** The
-investigation had been excellent and the bookkeeping turned it into a lie — and
-the next reader's rational move, seeing `passes: true`, is to skip it.
+**It was false.** The fixes had landed, in a commit two minutes before my own
+duplicate. `passes: true` was accurate the whole time.
+
+### How a confident false negative gets manufactured
+
+I searched for two shapes I expected the fix to take:
+
+```
+"is the handler now below authCheck?"        → no
+grep sanitis|sanitiz|generic.*fallback|strip.*PII   → no hits
+∴ "the fix exists nowhere"
+```
+
+The real implementation was a third shape neither pattern matched: split the
+copy into `text` (personal, rides in the encrypted push) and `pubText` (generic,
+written to the public file). Better than either thing I looked for — the one I
+eventually recommended myself, already shipped.
+
+**An absence search is only as good as its enumeration of what would count as
+presence.** Two misses became "nowhere". The rule:
+
+> Before reporting that something is missing, write down what you would accept
+> as evidence that it exists. If that list has two entries, you are about to
+> report a false negative. Search for the *effect* — is the leak closed? — not
+> for the fix you had in mind.
+
+The same discipline this framework already applies to counts (*read every
+finding before reporting it*) applies to zeroes. **A zero is a finding too, and
+it needs the same reading.**
+
+### On the rules themselves
+
+They still hold, on their own merits rather than on that anecdote. A story that
+says "fixed" without naming the change cannot be checked by the next reader, and
+one closed before the change is pushed is a claim about a file nobody else can
+see. Neither needs a scandal to justify it.
 
 ### There is no cheap detector for this. Two were measured and dropped.
 
@@ -90,10 +119,9 @@ Recorded so they are not rebuilt:
 | "no commit message references the story id" | **100% of done stories, in all three repos.** None of them put ids in commit messages, so this is the normal state, not a finding |
 | "the story cites file paths that no longer exist" | 4 hits across 371 done stories — **0 real.** Three were path-prefix artifacts (`dashboard/page.tsx` for `src/app/dashboard/page.tsx`), one a file the story's own fix deliberately deleted |
 
-What caught the real instance was reading the claim and checking the specific
-fact it asserted. That is a review step, and it stays a review step. **Before
-closing a story that claims a code change, open the file and confirm the change
-is there.**
+**Before closing a story that claims a code change, open the file and confirm the
+change is there** — and before claiming someone else's story is *falsely*
+closed, do the same, harder.
 
 ## What `auto` handles without being asked
 
