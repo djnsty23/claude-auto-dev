@@ -393,6 +393,48 @@ function checkNoPrivateNames() {
   else log('FAIL', 'a private project name appears in a tracked file — run node tooling/check-no-private-names.js');
 }
 
+// A mutation run that did not finish may have left a mutant in a source file.
+//
+// This is the one defect class no test can catch, by construction: a mutant that
+// SURVIVES its suite is precisely one the suite cannot see. On 2026-08-16 three
+// of them reached the public remote across four commits — an `if (!x)` shipped
+// as `if (true)`, and a dropped negation that outlived the revert because the
+// commit I reverted to was contaminated too. test-all, validate and the pre-push
+// hook were all green for every one of them.
+//
+// So this does not look for mutants. It looks for the WINDOW in which one can
+// exist: find-vacuous-assertions.js writes <subject>.vacuity-backup before its
+// first mutation and removes it only after the final restore is verified. The
+// file existing means a run is in progress or died — either way the tree cannot
+// be trusted, and neither can a commit made from it.
+//
+// Zero false positives by construction: nothing else creates this file, and a
+// completed run always removes it. Cost is one readdir per plugin directory.
+function checkNoStaleMutationBackups() {
+  const found = [];
+  const walk = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === '.git') continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith('.vacuity-backup')) found.push(path.relative(ROOT, full));
+    }
+  };
+  walk(ROOT);
+
+  if (!found.length) return log('PASS', 'No interrupted mutation runs (no .vacuity-backup files)');
+
+  log('FAIL', `${found.length} interrupted mutation run(s) — a source file may still be MUTATED:`);
+  for (const f of found) {
+    const subject = f.replace(/\.vacuity-backup$/, '');
+    console.log(`         ${f}`);
+    console.log(`         restore with: git checkout -- ${subject} && rm ${f}`);
+  }
+  console.log('         Check no mutation process is still running first: pkill -9 -f find-vacuous-assertions');
+}
+
 // ---------------------------------------------------------------- run
 
 console.log('Validating autodev marketplace...\n');
@@ -407,6 +449,7 @@ checkShellGlobQuoting();
 checkAgents();
 checkNoLegacyArtifacts();
 checkNoPrivateNames();
+checkNoStaleMutationBackups();
 
 console.log(`\nSummary: ${passCount} PASS, ${failCount} FAIL, ${warnCount} WARN`);
 process.exit(failCount > 0 ? 1 : 0);
