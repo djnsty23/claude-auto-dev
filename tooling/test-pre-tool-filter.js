@@ -122,6 +122,13 @@ const checkerPath = path.join(guarded, 'tooling', 'check-no-private-names.js');
 fs.writeFileSync(checkerPath, "const NAMES = [\n    'zarblewidget',\n    'quibnorth',\n];\n");
 
 // A guarded repo whose checker cannot be read — proves this block fails OPEN.
+// A guarded repo whose denylist is EMPTY — a legitimate state for a repo that
+// has the checker but no private names yet.
+const emptyListRepo = path.join(fixture, 'emptylist');
+fs.mkdirSync(path.join(emptyListRepo, 'tooling'), { recursive: true });
+fs.mkdirSync(path.join(emptyListRepo, 'docs'), { recursive: true });
+fs.writeFileSync(path.join(emptyListRepo, 'tooling', 'check-no-private-names.js'), 'const NAMES = [\n];\n');
+
 const brokenRepo = path.join(fixture, 'broken');
 fs.mkdirSync(path.join(brokenRepo, 'tooling', 'check-no-private-names.js'), { recursive: true });
 fs.mkdirSync(path.join(brokenRepo, 'docs'), { recursive: true });
@@ -149,6 +156,26 @@ cases.push(
   // Fail-open: a broken checker must not brick writing.
   ['unreadable checker fails OPEN', 'Write',
     { file_path: path.join(brokenRepo, 'docs/a.md'), content: 'anything at all' }, 0],
+
+  // ---- consequences of mutants that LOOKED equivalent ----
+  //
+  // An empty denylist builds the regex \b()\b, which matches at every word
+  // boundary. Without the `names.length` guard, a repo that has the checker but
+  // has not listed a name yet would have EVERY write blocked, reporting a
+  // private name of "".
+  ['an empty denylist blocks nothing', 'Write',
+    { file_path: path.join(emptyListRepo, 'docs/a.md'), content: 'perfectly ordinary text' }, 0],
+
+  // The protected-path rules are about WRITING to security-critical files.
+  // Applying them to Read as well would stop anyone reading their own settings,
+  // which is the ordinary way to answer a question about configuration.
+  ['Read of a protected path is allowed', 'Read',
+    { file_path: '/home/user/.claude/settings.json' }, 0],
+
+  // SKIP_READ_PATTERNS exists to keep large generated files out of context on
+  // READ. Applying it to writes would block tooling from writing a lockfile.
+  ['Write to package-lock.json is allowed', 'Write',
+    { file_path: '/home/user/project/package-lock.json', content: '{}' }, 0],
 );
 
 let pass = 0, fail = 0;
@@ -202,6 +229,28 @@ for (const [label, tool, input, expected] of cases) {
   const ok = offWindows === 0;
   if (ok) pass++; else fail++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  diskpart is NOT blocked off win32  (got ${offWindows}, expected 0)`);
+}
+
+// A clean write must be SILENT, not merely allowed.
+//
+// `if (hit)` forced to `true` looked equivalent: hit is null on a clean write,
+// so hit[1] throws, the fail-open catch swallows it, and the write proceeds —
+// same exit code, mutant survives. But the catch also writes to stderr, so the
+// mutant puts a "private-name check skipped" line on EVERY clean Write and Edit.
+// Exit code alone cannot see that; this can. Same shape as a session-carrier
+// mutant that also survived by exit code while deleting a file it should not.
+{
+  const r = spawnSync('node', [HOOK], {
+    input: JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: path.join(guarded, 'docs/handoff.md'), content: 'the Project A audit' },
+    }),
+    encoding: 'utf8',
+  });
+  const ok = r.status === 0 && (r.stderr || '') === '';
+  if (ok) pass++; else fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  a clean write is silent, not just allowed  `
+    + `(exit ${r.status}, stderr ${JSON.stringify((r.stderr || '').slice(0, 40))})`);
 }
 
 // The fail-CLOSED parse guard. Every case above builds its input with
