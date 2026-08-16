@@ -139,6 +139,78 @@ if ((r.stdout || '').trim()) {
     check('session start is silent with no prior memory', true);
 }
 
+// ---------------------------------------------- clear(): the concurrency rule
+//
+// Found by mutation. `if (left.length === 0)` survived being forced to `true`,
+// to `false`, AND inverted — three mutants, one branch, no assertion able to see
+// any of them. Nothing tested either side of the directory cleanup.
+//
+// The dangerous side is the one the code's own comment promises: "never touch a
+// directory another session is using". Forced to `true`, clear() deletes the
+// carrier directory while another session's file is still in it, and that
+// session loses its state mid-run. A guarantee stated in a comment and asserted
+// nowhere is a guarantee only until someone edits the line.
+{
+    const proj = path.join(TMP, 'concurrent');
+    fs.mkdirSync(proj, { recursive: true });
+
+    carrier.write(proj, 'session-A', 'ses_a');
+    carrier.write(proj, 'session-B', 'ses_b');
+    const dir = carrier.carrierDir(proj);
+
+    // A leaves; B is still live, so the directory must survive.
+    carrier.clear(proj, 'session-A');
+    check('clear() keeps the directory while another session is live',
+        fs.existsSync(dir));
+    check("  and does not disturb the other session's state",
+        carrier.read(proj, 'session-B') === 'ses_b');
+    // The self-ignore must survive a sibling's clear() too. This is the assertion
+    // that actually catches `if (left.length === 0)` forced to `true`: rmdirSync
+    // refuses a non-empty directory and the catch swallows the error, so the
+    // directory itself survives either way — but the mutant unlinks .gitignore
+    // BEFORE trying, and that file is the only thing keeping a folder of verbatim
+    // user prompts out of git.
+    check('  and the self-ignore survives, so prompts stay out of git',
+        fs.existsSync(path.join(dir, '.gitignore')));
+
+    // B leaves too: now nothing is left and the directory goes.
+    carrier.clear(proj, 'session-B');
+    check('clear() removes the directory once the last session leaves',
+        !fs.existsSync(dir));
+}
+
+// The self-ignore file is ours and must not count as "still in use", or the
+// directory would never be cleaned up at all. `filter(f => f !== '.gitignore')`
+// inverted to `===` survived, because no test had a directory holding BOTH the
+// .gitignore and a live session file.
+{
+    const proj = path.join(TMP, 'ignorecount');
+    fs.mkdirSync(proj, { recursive: true });
+
+    carrier.write(proj, 'only-session', 'ses_only');
+    const dir = carrier.carrierDir(proj);
+    check('the carrier directory self-ignores', fs.existsSync(path.join(dir, '.gitignore')));
+
+    carrier.clear(proj, 'only-session');
+    check('.gitignore alone does not keep the directory alive', !fs.existsSync(dir));
+}
+
+// ensureDir is called on every write; rewriting the ignore file each time would
+// clobber a hand-edit and churn the disk. `if (!fs.existsSync(ignore))` forced to
+// `true` survived — nothing asserted the file is written only once.
+{
+    const proj = path.join(TMP, 'idempotent');
+    fs.mkdirSync(proj, { recursive: true });
+
+    carrier.write(proj, 's1', 'ses_1');
+    const ignore = path.join(carrier.carrierDir(proj), '.gitignore');
+    fs.writeFileSync(ignore, '# edited by hand\n*\n');
+
+    carrier.write(proj, 's2', 'ses_2');
+    check('an existing .gitignore is left alone',
+        fs.readFileSync(ignore, 'utf8').includes('# edited by hand'));
+}
+
 // ---------------------------------------------------------------- report
 
 let pass = 0, fail = 0;
