@@ -96,6 +96,61 @@ const cases = [
   ['Read source file allowed', 'Read', { file_path: 'src/app.tsx' }, 0],
 ];
 
+// ---------------------------------------------------------------------------
+// Private-name leak protection (Write/Edit content).
+//
+// These build a THROWAWAY repo with its own tooling/check-no-private-names.js
+// carrying a synthetic name. Two reasons, both load-bearing:
+//
+//   1. This test file is itself scanned by the real gate. Writing a real
+//      private name here to test the blocker would trip the blocker.
+//   2. Scoping is the behaviour most worth testing, and a fixture proves it
+//      properly: the same string is blocked inside a guarded repo and allowed
+//      outside one, which is exactly what keeps product repos writable.
+// ---------------------------------------------------------------------------
+const fs = require('fs');
+const os = require('os');
+
+const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'ptf-names-'));
+const guarded = path.join(fixture, 'guarded');
+const unguarded = path.join(fixture, 'unguarded');
+fs.mkdirSync(path.join(guarded, 'tooling'), { recursive: true });
+fs.mkdirSync(path.join(guarded, 'docs'), { recursive: true });
+fs.mkdirSync(path.join(unguarded, 'docs'), { recursive: true });
+
+const checkerPath = path.join(guarded, 'tooling', 'check-no-private-names.js');
+fs.writeFileSync(checkerPath, "const NAMES = [\n    'zarblewidget',\n    'quibnorth',\n];\n");
+
+// A guarded repo whose checker cannot be read — proves this block fails OPEN.
+const brokenRepo = path.join(fixture, 'broken');
+fs.mkdirSync(path.join(brokenRepo, 'tooling', 'check-no-private-names.js'), { recursive: true });
+fs.mkdirSync(path.join(brokenRepo, 'docs'), { recursive: true });
+
+cases.push(
+  ['private name in a guarded repo blocked', 'Write',
+    { file_path: path.join(guarded, 'docs/handoff.md'), content: 'the zarblewidget audit found 22 things' }, 2],
+  ['second name in the list also blocked', 'Write',
+    { file_path: path.join(guarded, 'docs/handoff.md'), content: 'quibnorth ships tomorrow' }, 2],
+  ['name is case-insensitive', 'Write',
+    { file_path: path.join(guarded, 'docs/handoff.md'), content: 'ZarbleWidget' }, 2],
+  ['Edit new_string is scanned too', 'Edit',
+    { file_path: path.join(guarded, 'docs/handoff.md'), old_string: 'x', new_string: 'ran zarblewidget' }, 2],
+  // The scoping guarantee: identical text, no guarded repo above it.
+  ['same name outside a guarded repo allowed', 'Write',
+    { file_path: path.join(unguarded, 'docs/readme.md'), content: 'the zarblewidget audit found 22 things' }, 0],
+  ['clean content in a guarded repo allowed', 'Write',
+    { file_path: path.join(guarded, 'docs/handoff.md'), content: 'the Project A audit found 22 things' }, 0],
+  // Word-bounded: a substring is not a hit.
+  ['substring of a name allowed', 'Write',
+    { file_path: path.join(guarded, 'docs/handoff.md'), content: 'zarblewidgetry is not a project' }, 0],
+  // The denylist file IS the list; editing it must not trip on itself.
+  ['the denylist file itself allowed', 'Write',
+    { file_path: checkerPath, content: "const NAMES = ['zarblewidget'];" }, 0],
+  // Fail-open: a broken checker must not brick writing.
+  ['unreadable checker fails OPEN', 'Write',
+    { file_path: path.join(brokenRepo, 'docs/a.md'), content: 'anything at all' }, 0],
+);
+
 let pass = 0, fail = 0;
 for (const [label, tool, input, expected] of cases) {
   const { exitCode, stderr } = run(tool, input);
@@ -107,6 +162,8 @@ for (const [label, tool, input, expected] of cases) {
   console.log(`${mark}  ${label}  (${actual})`);
   if (!ok && stderr.trim()) console.log('       stderr:', stderr.trim().split('\n')[0]);
 }
+
+fs.rmSync(fixture, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);
