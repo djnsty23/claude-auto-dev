@@ -32,8 +32,17 @@ exactly the unverified guess this skill exists to prevent.
 
 ## 2. Read the top classes against the real commits
 
-The tool ranks by subject-line keywords, which is a proxy. Before drawing
-conclusions, read the actual commits behind the top two or three classes:
+The tool ranks by subject-line keywords, which is a proxy — and **measured
+against a read of the commit bodies, a weak one.** On three production repos the
+two passes disagreed on magnitude by roughly 8x (ordering/async: 41% / 32% / 40%
+by reading, 5% / 6% / 3% by regex) and on *which class ranked first*. A body
+saying "the phone home raced boot and lost" ships under the subject
+`fix(now): first-paint`; the regex only ever sees the subject.
+
+So: the fix:feature ratio, the rework window and the hot-file list are counts and
+can be quoted. **The class ranking is a starting point, and its number is a
+floor, not a share.** Before drawing conclusions, read the actual commits behind
+the top two or three classes:
 
 ```bash
 git log --format='%h %s%n%b' --grep='^fix' -30 -- <hot file from the report>

@@ -25,8 +25,34 @@ broken. Commit subjects and bodies were then clustered by stated root cause.
 App-data commits (habit check-offs, meal logs) were excluded from Project A;
 they are not engineering work.
 
-Reproduce with `node tooling/mine-fixes.js <repo>`, or `/learn-from-fixes`
-inside a project.
+### Two passes, and they do not agree
+
+**Corrected 2026-08-16.** This section previously said *"Reproduce with
+`node tooling/mine-fixes.js <repo>`"*, directly under the class-share table. It
+does not reproduce, and the gap is not small.
+
+| Ordering / async race | Project A | Project C | Project B |
+|---|---|---|---|
+| Read pass (subjects **and bodies**, clustered by stated root cause) | 41% | 32% | 40% |
+| `mine-fixes.js` (regex over **subjects only**) | 5% | 6% | 3% |
+
+They disagree on the **top class**, not just the magnitude: the read pass ranks
+ordering first for Project A, the tool ranks unhandled-state first.
+
+Both are doing something real. A commit body says *"the phone home raced boot and
+lost"*; its subject says `fix(now): first-paint`. The regex sees the subject. So
+treat them as different instruments:
+
+- **Mechanical and trustworthy** — the fix:feature ratio, the 3-day rework
+  window, and the hot-file list. These are counts over `git log`, and the tool
+  and the read pass agree exactly.
+- **A hint that needs reading** — the class ranking. `mine-fixes.js` gives you
+  somewhere to start; the number under it is a floor, not a share. **Read the
+  commits before you act on a ranking**, which is the same rule this framework
+  applies to every other detector it ships.
+
+The percentages below are from the read pass. They are the honest ones, and they
+are also the ones you cannot get for free.
 
 ## Headline
 
