@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 // PostToolUse hook - Lightweight telemetry exporter.
-// Default: local JSONL at .claude/reports/telemetry-YYYY-MM-DD.jsonl (zero config).
-// Optional: set CLAUDE_OTEL_ENDPOINT env var to also POST each event upstream (OTLP JSON format).
-// Disabled: set CLAUDE_TELEMETRY_DISABLED=1.
+//
+// OPT-IN: set AUTODEV_TELEMETRY=1 to enable. It was previously on by default,
+// which meant every tool call in every project appended a line to a file the
+// user never asked for. Writing to someone's repo should be a choice.
+//
+// Sink: local JSONL at .claude/reports/telemetry-YYYY-MM-DD.jsonl.
+// Optional: set CLAUDE_OTEL_ENDPOINT to also POST each event upstream (OTLP JSON).
 //
 // Fields per event: ts, session, cwd, tool, input_size, output_size, ok.
 // NO tool input/output contents are logged — metadata only. Privacy-safe.
@@ -13,7 +17,9 @@ const fs = require('fs');
 const path = require('path');
 
 try {
-    if (process.env.CLAUDE_TELEMETRY_DISABLED === '1') {
+    // CLAUDE_TELEMETRY_DISABLED is still honoured so anyone who set it to opt
+    // OUT under the old default keeps the behaviour they asked for.
+    if (process.env.AUTODEV_TELEMETRY !== '1' || process.env.CLAUDE_TELEMETRY_DISABLED === '1') {
         process.exit(0);
     }
 
@@ -37,8 +43,10 @@ try {
 
     const event = {
         ts: new Date().toISOString(),
-        session: process.env.AUTO_DEV_SESSION_ID || null,
-        cwd: process.cwd(),
+        // From the hook payload. This used to read AUTO_DEV_SESSION_ID, an env
+        // var nothing ever set, so every event was logged with session: null.
+        session: data.session_id || null,
+        cwd: data.cwd || process.cwd(),
         tool: toolName,
         input_size: inputSize,
         output_size: outputSize,
@@ -48,7 +56,7 @@ try {
 
     // Local JSONL sink (zero-config, private)
     try {
-        const reportsDir = path.join(process.cwd(), '.claude', 'reports');
+        const reportsDir = path.join(event.cwd, '.claude', 'reports');
         fs.mkdirSync(reportsDir, { recursive: true });
         const day = new Date().toISOString().slice(0, 10);
         const file = path.join(reportsDir, `telemetry-${day}.jsonl`);

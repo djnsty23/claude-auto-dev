@@ -12,16 +12,20 @@ const path = require('path');
 // Resolve bundled scripts relative to THIS plugin, not ~/.claude.
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
 
+let data;
 try {
-    const input = fs.readFileSync(0, 'utf8');
+    data = JSON.parse(fs.readFileSync(0, 'utf8'));
+} catch {
+    process.exit(0);
+}
 
-    let data;
-    try {
-        data = JSON.parse(input);
-    } catch {
-        process.exit(0);
-    }
+// Both come from the hook payload. process.cwd() is the shell that spawned the
+// hook, which is not guaranteed to be the project Claude is working in.
+const cwd = data.cwd || process.cwd();
+const harnessSessionId = data.session_id || null;
+const carrier = require(path.join(PLUGIN_ROOT, 'scripts', 'session-carrier.js'));
 
+try {
     const filePath = (data.tool_input && data.tool_input.file_path) || '';
 
     // ============================================================
@@ -36,25 +40,21 @@ try {
             const { classifyObservation } = require(classifierPath);
 
             if (memDB.isAvailable()) {
-                // Hooks run as separate processes — the env var session-start sets dies
-                // with its process. The session FILE it also writes is the cross-process
-                // carrier; without this fallback no observation was ever captured.
-                let sessionId = process.env.AUTO_DEV_SESSION_ID || null;
-                if (!sessionId) {
-                    try {
-                        sessionId = fs.readFileSync(path.join(process.cwd(), '.claude', 'memory-session-id'), 'utf8').trim() || null;
-                    } catch { /* no session file — capture skips quietly */ }
-                }
+                const sessionId = carrier.read(cwd, harnessSessionId);
                 const toolName = data.tool_name || '';
                 const toolInput = data.tool_input || {};
                 const toolResult = (data.tool_output || '').slice(0, 500);
-                const userPrompt = process.env.AUTO_DEV_LAST_PROMPT || '';
+                // The classifier derives BOTH the observation type and its concept
+                // text from the prompt. It used to read AUTO_DEV_LAST_PROMPT, which
+                // nothing ever set, so every observation fell back to a generic type
+                // and a generic concept.
+                const userPrompt = carrier.readPrompt(cwd, harnessSessionId);
 
                 const obs = classifyObservation(toolName, toolInput, toolResult, userPrompt);
                 if (obs && sessionId) {
                     memDB.saveObservation({
                         sessionId,
-                        projectPath: process.cwd(),
+                        projectPath: cwd,
                         ...obs
                     });
                 }
@@ -95,7 +95,7 @@ try {
         let area = '';
         if (filePath) {
             const rel = path
-                .relative(realpath(process.cwd()), realpath(filePath))
+                .relative(realpath(cwd), realpath(filePath))
                 .replace(/\\/g, '/');
             if (rel && !rel.startsWith('..')) {
                 const dir = path.posix.dirname(rel);
@@ -109,18 +109,14 @@ try {
             const memDbPath = path.join(PLUGIN_ROOT, 'scripts', 'memory-db.js');
 
             if (fs.existsSync(memDbPath)) {
-                // Resolve session id the same way the capture block does.
-                let sessionId = process.env.AUTO_DEV_SESSION_ID || null;
-                if (!sessionId) {
-                    try {
-                        sessionId = fs.readFileSync(path.join(process.cwd(), '.claude', 'memory-session-id'), 'utf8').trim() || null;
-                    } catch { /* no session file */ }
-                }
-                sessionId = sessionId || 'nosession';
+                // Throttle on the HARNESS session id, not the memory session id.
+                // It is always present in the payload, so surfacing stays
+                // correctly scoped even when the carrier is missing.
+                const sessionId = harnessSessionId || 'nosession';
 
                 // THROTTLE — cheap state-file check FIRST. State file lives at
                 // .claude/knowledge-surfaced, newline-separated "sessionId\tarea".
-                const surfacedFile = path.join(process.cwd(), '.claude', 'knowledge-surfaced');
+                const surfacedFile = path.join(cwd, '.claude', 'knowledge-surfaced');
                 const marker = `${sessionId}\t${area}`;
                 let existing = '';
                 let already = false;
@@ -132,7 +128,7 @@ try {
                 if (!already) {
                     const memDB = require(memDbPath);
                     if (memDB.isAvailable()) {
-                        const brief = memDB.knowledge(process.cwd(), area, 500);
+                        const brief = memDB.knowledge(cwd, area, 500);
                         if (brief && brief.total > 0) {
                             const g = brief.groups || {};
                             // Most relevant first: decisions, then gotchas, then bugfixes, then changes.
@@ -163,7 +159,7 @@ try {
                         // (brief === null) is NOT recorded, so the next edit can retry.
                         if (brief !== null) {
                             try {
-                                fs.mkdirSync(path.join(process.cwd(), '.claude'), { recursive: true });
+                                fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
                                 // Rewrite the throttle file to keep ONLY the CURRENT
                                 // session's markers (drop other sessions' lines) before
                                 // appending the new one. This bounds the file to this

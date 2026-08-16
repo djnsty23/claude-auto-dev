@@ -117,13 +117,19 @@ export CLAUDE_OTEL_ENDPOINT=http://localhost:4318/v1/logs
 
 The hook uses OTLP JSON format with `service.name=claude-auto-dev`. Fire-and-forget, 500ms timeout — won't slow your session if endpoint is unreachable.
 
-## Disable
+## Enable / disable
+
+Telemetry is **opt-in**. Nothing is recorded until you set:
 
 ```bash
-export CLAUDE_TELEMETRY_DISABLED=1
+export AUTODEV_TELEMETRY=1
 ```
 
-Or remove the PostToolUse entry for `telemetry.js` from `~/.claude/settings.json`.
+To turn it back off, unset that variable (or set `CLAUDE_TELEMETRY_DISABLED=1`,
+which still wins for anyone who opted out under the pre-8.0 default-on behavior).
+
+If there is no telemetry log to read, say so and point the user at the variable
+above rather than reporting zero usage as a finding.
 
 ## Cleanup
 

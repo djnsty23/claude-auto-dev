@@ -2,6 +2,15 @@
 
 > Detailed technical design for the claude-auto-dev persistent memory layer.
 
+> **Status note (8.0).** This is the original design document and parts of it
+> describe an implementation that no longer exists. In particular the code
+> samples below pass the session id through an `AUTO_DEV_SESSION_ID`
+> environment variable. That never worked — each hook runs in its own process,
+> so the variable died with the hook that set it, and capture silently recorded
+> nothing. The shipped implementation uses a per-session carrier file; see
+> `plugins/autodev-memory/scripts/session-carrier.js`, which is the authority.
+> Read this document for intent, not for API.
+
 ## Overview
 
 A lightweight, file-based + SQLite memory system that captures observations during Claude Code sessions and makes them searchable across sessions. Designed to run entirely within Node.js hooks — no separate daemon required for Phase 1-2.

@@ -24,6 +24,8 @@ allowed-tools: Read, Grep, Glob
 | Screenshots | `.claude/screenshots/*.png` | Cleaned each run |
 | Sprint History | `.claude/sprint-history.md` | Persistent |
 | Agent Memory | `.claude/agent-memory/*.md` | Persistent (audit-patterns.md, brainstorm-history.md) |
+| Session carriers | `.claude/memory-sessions/*` | Deleted at SessionEnd (autodev-memory) |
+| Compaction snapshot | `.claude/pre-compact-state.json` | Overwritten each compaction |
 
 ## Rules
 - Create subdirectories on first use (`mkdir -p` / `New-Item -Force`)

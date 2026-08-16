@@ -32,7 +32,7 @@ process.env.USERPROFILE = TMP_HOME;
 const PLUGIN_ROOT = path.join(TMP_HOME, "fake-plugin");
 const HOME_SCRIPTS = path.join(PLUGIN_ROOT, "scripts");
 fs.mkdirSync(HOME_SCRIPTS, { recursive: true });
-for (const f of ['memory-db.js', 'semantic-search.js']) {
+for (const f of ['memory-db.js', 'semantic-search.js', 'session-carrier.js']) {
   fs.copyFileSync(path.join(REPO_SCRIPTS, f), path.join(HOME_SCRIPTS, f));
 }
 
@@ -75,13 +75,15 @@ if (!memDB.isAvailable()) {
     const event = {
       tool_name: 'Edit',
       tool_input: { file_path: path.join(PROJ, relFile) },
-      tool_output: 'ok'
+      tool_output: 'ok',
+      session_id: SESSION,
+      cwd: PROJ
     };
     return spawnSync(process.execPath, [HOOK], {
       input: JSON.stringify(event),
       encoding: 'utf8',
       cwd: PROJ,
-      env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP_HOME, USERPROFILE: TMP_HOME, AUTO_DEV_SESSION_ID: SESSION }
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP_HOME, USERPROFILE: TMP_HOME }
     });
   }
 
@@ -120,10 +122,10 @@ if (!memDB.isAvailable()) {
 
   // 5) A DIFFERENT session sees the same area fresh (throttle is session-scoped).
   const r5 = spawnSync(process.execPath, [HOOK], {
-    input: JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: path.join(PROJ, 'src/auth/token.js') }, tool_output: 'ok' }),
+    input: JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: path.join(PROJ, 'src/auth/token.js') }, tool_output: 'ok', session_id: 'test-sess-2', cwd: PROJ }),
     encoding: 'utf8',
     cwd: PROJ,
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP_HOME, USERPROFILE: TMP_HOME, AUTO_DEV_SESSION_ID: 'test-sess-2' }
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP_HOME, USERPROFILE: TMP_HOME }
   });
   cases.push(['new session re-surfaces the same area (session-scoped throttle)',
     /Domain knowledge for src\/auth/.test(r5.stderr || '')]);
@@ -140,7 +142,7 @@ if (!memDB.isAvailable()) {
     const CAP_PLUGIN_ROOT = path.join(CAP_HOME, "fake-plugin");
     const CAP_SCRIPTS = path.join(CAP_PLUGIN_ROOT, "scripts");
     fs.mkdirSync(CAP_SCRIPTS, { recursive: true });
-    for (const f of ['memory-db.js', 'semantic-search.js', 'observation-classifier.js']) {
+    for (const f of ['memory-db.js', 'semantic-search.js', 'observation-classifier.js', 'session-carrier.js']) {
       fs.copyFileSync(path.join(REPO_SCRIPTS, f), path.join(CAP_SCRIPTS, f));
     }
 
@@ -164,15 +166,22 @@ if (!memDB.isAvailable()) {
     process.env.USERPROFILE = prevProfile;
 
     const CAP_SESSION = 'cap-sess-1';
+
+    // Seed the session carrier so the capture block has a memory session to
+    // write into — capture is keyed on the carrier, not on an env var.
+    require(path.join(CAP_SCRIPTS, 'session-carrier.js')).write(CAP_PROJ, CAP_SESSION, capSid);
+
     const capRun = spawnSync(process.execPath, [HOOK], {
       input: JSON.stringify({
         tool_name: 'Edit',
         tool_input: { file_path: path.join(CAP_PROJ, 'src/auth/login.js') },
-        tool_output: 'ok'
+        tool_output: 'ok',
+        session_id: CAP_SESSION,
+        cwd: CAP_PROJ
       }),
       encoding: 'utf8',
       cwd: CAP_PROJ,
-      env: { ...process.env, CLAUDE_PLUGIN_ROOT: CAP_PLUGIN_ROOT, HOME: CAP_HOME, USERPROFILE: CAP_HOME, AUTO_DEV_SESSION_ID: CAP_SESSION }
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: CAP_PLUGIN_ROOT, HOME: CAP_HOME, USERPROFILE: CAP_HOME }
     });
 
     const capErr = capRun.stderr || '';

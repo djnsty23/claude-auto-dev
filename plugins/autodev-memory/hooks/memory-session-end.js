@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// SessionEnd hook (autodev-memory) — close the open memory session and record a
-// summary of what the session accomplished.
+// SessionEnd hook (autodev-memory) — close this session's memory session and
+// record a summary of what it accomplished.
 //
 // This runs on SessionEnd, NOT Stop. Stop fires at the end of every assistant
 // turn: closing the session there ended it after turn one and deleted the
-// session-id file, so every later turn's capture found no session and silently
-// dropped its observation. A memory session must span the whole Claude session.
+// carrier file, so every later turn's observations were silently dropped. A
+// memory session must span the whole Claude session.
 //
 // Emits no decision payload — autodev-core owns the Stop decision. Exits 0.
 
@@ -14,22 +14,34 @@ const path = require('path');
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
 
+function readPayload() {
+    try {
+        if (process.stdin.isTTY) return {};
+        return JSON.parse(fs.readFileSync(0, 'utf8'));
+    } catch {
+        return {};
+    }
+}
+
+const payload = readPayload();
+const cwd = payload.cwd || process.cwd();
+const harnessSessionId = payload.session_id || null;
+
 try {
     const memDbPath = path.join(PLUGIN_ROOT, 'scripts', 'memory-db.js');
-    const sessionFile = path.join(process.cwd(), '.claude', 'memory-session-id');
-
-    if (fs.existsSync(memDbPath) && fs.existsSync(sessionFile)) {
+    if (fs.existsSync(memDbPath)) {
+        const carrier = require(path.join(PLUGIN_ROOT, 'scripts', 'session-carrier.js'));
+        const sessionId = carrier.read(cwd, harnessSessionId);
         const memDB = require(memDbPath);
-        const sessionId = fs.readFileSync(sessionFile, 'utf8').trim();
 
         if (sessionId && memDB.isAvailable()) {
             // Read prd.json for session summary context
             let summary = {};
-            if (fs.existsSync('prd.json')) {
+            const prdPath = path.join(cwd, 'prd.json');
+            if (fs.existsSync(prdPath)) {
                 try {
-                    const prd = JSON.parse(fs.readFileSync('prd.json', 'utf8'));
-                    const stories = prd.stories || {};
-                    const entries = Object.entries(stories);
+                    const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
+                    const entries = Object.entries(prd.stories || {});
                     const done = entries.filter(([, v]) => v.passes === true);
                     const pending = entries.filter(([, v]) => v.passes !== true);
                     summary.completed = done.map(([k, v]) => `${k}: ${v.title}`).join('; ');
@@ -40,13 +52,15 @@ try {
             }
 
             memDB.endSession(sessionId, summary);
-
-            // Clean up session file
-            try { fs.unlinkSync(sessionFile); } catch {}
         }
+
+        // Clear only THIS session's carrier — other sessions on the same
+        // project keep theirs.
+        carrier.clear(cwd, harnessSessionId);
+        carrier.clearPrompt(cwd, harnessSessionId);
     }
 } catch (err) {
-    // Memory close is non-critical — never interfere with stopping.
+    // Memory close is non-critical — never interfere with session teardown.
     process.stderr.write(`[Memory] session close error: ${err.message}\n`);
 }
 

@@ -6,7 +6,8 @@
 // outputs a brief system message guiding Claude to re-orient by reading
 // the snapshot + active sprint context before continuing work.
 //
-// Registered as PostToolUse with matcher "compact".
+// Registered on the PostCompact event. Pre-8.0 it was registered as PostToolUse
+// with matcher "compact", which never fired.
 
 const fs = require('fs');
 const path = require('path');

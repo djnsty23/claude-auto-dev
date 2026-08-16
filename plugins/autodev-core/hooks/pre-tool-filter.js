@@ -65,8 +65,13 @@ const DANGEROUS_WIN32_PATTERNS = [
 ];
 
 const PROTECTED_FILE_PATTERNS = [
-    /[/\\]\.claude[/\\]hooks[/\\]/,            // Hook scripts (security-critical)
+    /[/\\]\.claude[/\\]hooks[/\\]/,            // Project/global hook scripts
     /[/\\]\.claude[/\\]settings\.json$/,        // Permission deny rules
+    // Installed plugin trees — hooks and their registration moved here in 8.0,
+    // so without this the patterns above stopped protecting any hook that
+    // actually runs. Scoped to the INSTALL location on purpose: editing a
+    // plugin's source in its own repo is ordinary development, not tampering.
+    /[/\\]\.claude[/\\]plugins[/\\]/,
 ];
 
 const SKIP_READ_PATTERNS = [
@@ -131,7 +136,7 @@ try {
         const filePath = toolInput.file_path || '';
         for (const pattern of PROTECTED_FILE_PATTERNS) {
             if (pattern.test(filePath)) {
-                process.stderr.write(`Blocked: Cannot modify security-critical file: ${filePath}\nUse 'update dev' to sync from repo instead.\n`);
+                process.stderr.write(`Blocked: Cannot modify security-critical file: ${filePath}\nInstalled plugin files are managed by Claude Code — edit them in the source repo and run /plugin marketplace update.\n`);
                 process.exit(2);
             }
         }

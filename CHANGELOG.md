@@ -22,6 +22,25 @@ marketplace. Read [MIGRATION.md](MIGRATION.md) before upgrading.
 - **The image-scan perf assertion flaked.** A fixed 150ms wall-clock budget is mostly Node startup, which swings ~10x under load. It now measures this machine's baseline and budgets the hook's own work against it.
 - **The memory-backup scheduled task did nothing.** It invoked `~/.claude/hooks/memory-backup.sh`, which was never shipped.
 
+### Fixed — second review pass
+
+- **`.env.local` loading was a no-op that claimed success.** The SessionStart hook parsed the file into `process.env` and printed `[Env] .env.local loaded`. A hook runs in its own process and **cannot** set environment variables for the session, so nothing was ever loaded — it read a secrets file for no effect. Removed.
+- **The hook rewrote the user's MEMORY.md.** It patched a version number inside `~/.claude/projects/<guessed-slug>/memory/MEMORY.md` on every session start. A dev tool has no business silently editing the user's memory files. Removed.
+- **SessionStart now uses the structured channel.** Sprint state goes to `additionalContext` (where Claude reads it) and the banner to `systemMessage` (where the user sees it), instead of both going to plain stdout. Deferred stories are counted separately from pending, and a malformed `prd.json` is surfaced instead of swallowed.
+- **The observation classifier never received a prompt.** It derives both the observation TYPE and its concept text from `userPrompt`, which was read from `AUTO_DEV_LAST_PROMPT` — a variable nothing ever set. Every observation ever captured fell back to a generic type and a generic concept, which is why `mem decisions` and `mem bugs` returned so little. A new `UserPromptSubmit` hook records the prompt (with `<private>` blocks redacted) for the classifier to use.
+- **Concurrent sessions clobbered each other's memory.** The session id lived in a single `.claude/memory-session-id` file per project, so a second Claude session overwrote the first's id, and whichever ended first deleted the file — silently ending capture for the other. Replaced with `.claude/memory-sessions/<session>`, keyed by the harness session id, each cleared by its own SessionEnd. Session ids are sanitized so a hostile one cannot escape the directory.
+- **Hooks now read `cwd` and `session_id` from the payload** rather than `process.cwd()`, which is the shell that spawned the hook and not necessarily the project Claude is working in.
+- **Telemetry logged `session: null` for every event** (same dead env var). It now uses the payload session id.
+- **Telemetry is opt-in.** It was on by default, appending a line to `.claude/reports/` in every project on every tool call. Set `AUTODEV_TELEMETRY=1` to enable; `CLAUDE_TELEMETRY_DISABLED=1` still wins for anyone who opted out before.
+- **The typecheck hook could be killed mid-lint.** Typecheck and lint ran back to back with 30s budgets each inside a single 60s hook timeout. Both are 25s now.
+- **Hook-tampering protection had stopped covering the hooks.** `PROTECTED_FILE_PATTERNS` matched `.claude/hooks/`, but 8.0 hooks live under `.claude/plugins/`. Added, scoped to the install location so editing a plugin's own source repo stays ordinary development.
+- Stale remediation text in `pre-tool-filter` (`Use 'update dev'`) and a stale registration comment in `post-compact` corrected. `docs/memory-system-design.md` marked as intent-only where it documents the env-var mechanism that never worked.
+
+### Added — tests for the paths that rotted
+- `tooling/test-session-carrier.js` — 21 assertions covering per-session isolation, the concurrent-session regression, path-traversal safety, prompt redaction, and both memory session hooks (previously untested).
+- `tooling/test-session-start-hook.js` — 21 assertions covering the structured output contract, sprint counting, payload `cwd` handling, and regression guards asserting `.env.local` and `MEMORY.md` are never touched again.
+- Telemetry suite extended for the opt-in gate and the payload session id.
+
 ### Changed — Desktop-first browser automation
 - **New `browser` skill** (replaces `agent-browser`) selects a driver: the built-in Browser pane tools where available, the `agent-browser` CLI otherwise. The 300-line CLI reference moved to `references/agent-browser-cli.md` so it costs nothing on the default path.
 - `scan` documents the built-in path first, with the CLI as the terminal-only fallback. Nine other browser-using skills carry the selection rule.

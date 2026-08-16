@@ -50,7 +50,9 @@ try {
                 // Typecheck
                 try {
                     execSync(`${pm} run typecheck`, {
-                        timeout: 30000,
+                        // 25s each: typecheck and lint run back to back inside a single 60s
+                        // hook timeout, so two 30s budgets could be killed mid-lint.
+                        timeout: 25000,
                         stdio: ['ignore', 'pipe', 'pipe']
                     });
                 } catch (e) {
@@ -79,7 +81,7 @@ try {
 
                 if (lintCmd) {
                     try {
-                        execSync(lintCmd, { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] });
+                        execSync(lintCmd, { timeout: 25000, stdio: ['ignore', 'pipe', 'pipe'] });
                     } catch (e) {
                         const output = (e.stdout ? e.stdout.toString() : '') +
                                        (e.stderr ? e.stderr.toString() : '');

@@ -1,130 +1,113 @@
 #!/usr/bin/env node
-// SessionStart hook - Version display, env loading, sprint context, git status
+// SessionStart hook — surface the version, the active sprint, and the working
+// tree state at the top of a session.
+//
+// Output is structured deliberately:
+//   systemMessage     → the one-line banner the user sees
+//   additionalContext → the sprint state Claude should actually reason about
+// Plain stdout is not a reliable channel for the second one.
+//
 // Updates are handled by Claude Code: /plugin marketplace update autodev
 
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const HOME = process.env.HOME || process.env.USERPROFILE;
-const CLAUDE_DIR = path.join(HOME, '.claude');
-// This plugin's own install directory. The fallback keeps the hook runnable
-// directly (tests, manual invocation) where the harness hasn't set the var.
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
 
+// Hooks are always piped JSON in production; the TTY guard keeps a manual
+// `node session-start.js` from blocking forever on an interactive stdin.
+function readPayload() {
+    try {
+        if (process.stdin.isTTY) return {};
+        return JSON.parse(fs.readFileSync(0, 'utf8'));
+    } catch {
+        return {};
+    }
+}
+
+const payload = readPayload();
+const cwd = payload.cwd || process.cwd();
+
+const context = [];
+let banner = '';
+
 try {
-    // ============================================================
-    // 1. Display version (single source of truth: our own plugin.json)
-    // ============================================================
+    // ---- Version (single source of truth: our own plugin.json) ----
     let version = '?';
     try {
         const manifest = JSON.parse(
             fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')
         );
         if (manifest.version) version = manifest.version;
-    } catch (parseErr) {
-        process.stderr.write(`[Auto-Dev] plugin.json read error: ${parseErr.message}\n`);
-    }
-    console.log(`[Auto-Dev v${version}]`);
+    } catch { /* banner degrades to v? — never worth failing over */ }
+    banner = `Auto-Dev v${version}`;
 
-    // ============================================================
-    // 2. Auto-source .env.local (project-isolated credentials)
-    // ============================================================
-    if (fs.existsSync('.env.local')) {
-        const lines = fs.readFileSync('.env.local', 'utf8').split('\n');
-        const PROTECTED_VARS = new Set([
-            'PATH', 'HOME', 'USERPROFILE', 'NODE_OPTIONS', 'NODE_PATH',
-            'SHELL', 'COMSPEC', 'SystemRoot', 'NODE_ENV', 'CI', 'TERM',
-            'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
-            'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_EXTRA_CA_CERTS',
-            'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES',
-            'BASH_ENV', 'ENV', 'PROMPT_COMMAND', 'CDPATH',
-            'ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GITHUB_PAT', 'GH_TOKEN',
-            'VERCEL_TOKEN', 'SUPABASE_ACCESS_TOKEN'
-        ]);
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) continue;
-
-            const eqIndex = trimmed.indexOf('=');
-            if (eqIndex === -1) continue;
-
-            const key = trimmed.substring(0, eqIndex).trim();
-            let value = trimmed.substring(eqIndex + 1).replace(/\r$/, '');
-            // Strip matching quotes only
-            if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                value = value.slice(1, -1);
-            }
-
-            if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !PROTECTED_VARS.has(key)) {
-                process.env[key] = value;
-            }
-        }
-        console.log('[Env] .env.local loaded');
-    }
-
-    // ============================================================
-    // 3. Sprint context from prd.json
-    // ============================================================
-    if (fs.existsSync('prd.json')) {
+    // ---- Sprint state from prd.json ----
+    const prdPath = path.join(cwd, 'prd.json');
+    if (fs.existsSync(prdPath)) {
         try {
-            const prd = JSON.parse(fs.readFileSync('prd.json', 'utf8'));
-            const sprint = prd.sprint || '';
-            // Count from stories object (the actual schema)
+            const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
             const stories = prd.stories || {};
-            const entries = Object.values(stories);
-            const done = entries.filter(s => s.passes === true).length;
-            const pending = entries.length - done;
-            if (sprint) {
-                console.log(`[Sprint] ${sprint} | ${done} done, ${pending} pending`);
+            const entries = Object.entries(stories);
+            const done = entries.filter(([, s]) => s.passes === true);
+            const deferred = entries.filter(([, s]) => s.passes === 'deferred');
+            const pending = entries.filter(([, s]) => s.passes !== true && s.passes !== 'deferred');
+
+            const summary = `Sprint ${prd.sprint || '(unnamed)'}: ${done.length} done, ` +
+                `${pending.length} pending, ${deferred.length} deferred.`;
+            banner += ` | ${summary}`;
+
+            context.push(`This project uses autodev's prd.json task system. ${summary}`);
+            if (pending.length > 0) {
+                const next = pending.slice(0, 3).map(([id, s]) => `${id} (${s.title || 'untitled'})`);
+                context.push(`Next pending stories: ${next.join(', ')}${pending.length > 3 ? `, +${pending.length - 3} more` : ''}.`);
             }
         } catch (parseErr) {
-            process.stderr.write(`[Auto-Dev] prd.json parse error: ${parseErr.message}\n`);
+            context.push(`prd.json exists but failed to parse: ${parseErr.message}. Fix it before running sprint commands.`);
         }
     }
 
-    // ============================================================
-    // 4. Patch MEMORY.md version if stale
-    // ============================================================
-    try {
-        const cwd = process.cwd();
-        // Encode CWD to match Claude's project memory path: C:\Users\foo → C--Users-foo
-        const encoded = cwd.replace(/:/g, '-').replace(/[\\/]/g, '-');
-        const memoryPath = path.join(CLAUDE_DIR, 'projects', encoded, 'memory', 'MEMORY.md');
-        if (fs.existsSync(memoryPath)) {
-            let content = fs.readFileSync(memoryPath, 'utf8');
-            const versionRegex = /(## Project:.*?\(v)[\d.]+(\))/;
-            const match = content.match(versionRegex);
-            if (match && !content.includes(`(v${version})`)) {
-                content = content.replace(versionRegex, `$1${version}$2`);
-                fs.writeFileSync(memoryPath, content);
-            }
-        }
-    } catch {
-        // Non-critical — skip silently
-    }
-
-    // ============================================================
-    // 5. Git status (brief)
-    // ============================================================
+    // ---- Working tree ----
     try {
         const gitStatus = execSync('git status --short', {
+            cwd,
             timeout: 5000,
-            stdio: ['ignore', 'pipe', 'pipe']
+            stdio: ['ignore', 'pipe', 'pipe'],
         }).toString().trim();
 
         if (gitStatus) {
             const changes = gitStatus.split('\n').length;
-            console.log(`[Git] ${changes} uncommitted changes`);
+            context.push(`Working tree has ${changes} uncommitted change${changes === 1 ? '' : 's'} at session start.`);
         }
-    } catch {
-        // Not a git repo or git not available
-    }
+    } catch { /* not a git repo, or git unavailable */ }
 
+    // NOTE: two things used to happen here and no longer do.
+    //
+    // 1. `.env.local` was parsed into process.env. A hook runs in its own
+    //    process, so those variables died with it — SessionStart hooks cannot
+    //    set environment variables for the session (they must come from your
+    //    shell profile or settings.json). It read a secrets file and printed
+    //    "[Env] .env.local loaded" for no effect whatsoever.
+    //
+    // 2. The version number inside ~/.claude/projects/<slug>/memory/MEMORY.md
+    //    was rewritten in place, using a guessed encoding of the project path.
+    //    A dev tool has no business silently editing the user's memory files.
 } catch (err) {
-    // Hook should never crash
     process.stderr.write(`session-start error: ${err.message}\n`);
 }
+
+const out = {
+    systemMessage: `[${banner}]`,
+};
+if (context.length > 0) {
+    out.hookSpecificOutput = {
+        hookEventName: 'SessionStart',
+        additionalContext: context.join('\n'),
+    };
+}
+
+process.stdout.write(JSON.stringify(out));
 
 // Always exit 0 — SessionStart hooks inform, never block
 process.exit(0);
