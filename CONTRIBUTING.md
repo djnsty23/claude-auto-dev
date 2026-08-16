@@ -146,3 +146,24 @@ of truth, and the one `bump.js` writes first — was left behind.
 pipeline's exit status is the last command's, so `node tooling/validate.js |
 tail -4 && git push` pushes on red. That is the other half of how v8.19.0
 shipped. Redirect to a file and check `$?`, or let the pre-push hook do it.
+
+**`;` is not `&&`.** The same failure with a different punctuation mark:
+`verify ; push` runs the push whether or not the verify passed. It put a red
+commit on a product repo's branch on 2026-08-17. Chain them.
+
+## Pushing to a product repo
+
+autodev has a pre-push hook. Product repos do not — their gate is whatever they
+run themselves, and it is on you to invoke it.
+
+**Re-run their gate AFTER the rebase, not before.** A change that is green on its
+own can go red on a new base without being touched. One repo's byte gate asserts
+the recorded gzip baseline is within 5% of measured; upstream had drifted to
+4.94% across many commits, and a 232-gzipped-byte change tipped it to 5.03%.
+Nothing was wrong with the change.
+
+When that happens, find out whose it is before fixing or reverting: build a
+worktree at `HEAD~1` and run the gate there. Passing at `HEAD~1` and failing at
+`HEAD` is what a straw looks like — the drift belongs to everyone, the red branch
+belongs to you. **Worktrees only**, and remove yours afterwards; the others in
+`.claude/worktrees/` belong to live sessions.

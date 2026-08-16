@@ -39,10 +39,25 @@
 // Cost: one full test-all run (~20s) — cheap enough to run often, and cheap
 // BECAUSE it answers the narrower question.
 //
-// Known true-but-fine result: removeWindowsAutostartRegistry() is dead on any
-// non-Windows machine by design. Platform-gated code will always show here; that
-// is information, not a defect, and the fix is to read the list rather than
-// chase the number to zero.
+// READ THE LIST. "Never entered by the suite" is exactly what this measures, and
+// it is NOT a synonym for dead code. The first full run reported 11, and reading
+// every one gave four different answers and a single deletion candidate:
+//
+//   5  reachable through memory-db's own CLI dispatch — getRecent, searchTimeline,
+//      listSessions, getByType, cleanup are `node memory-db.js recent|timeline|
+//      sessions|decisions|cleanup`. User-facing entry points with no test, which
+//      is a coverage gap, not dead weight.
+//   4  called internally on paths the suite never takes: the classifier's
+//      isTrivialBash and isSignificantRead (Bash and Read observations are never
+//      seeded), preflight's soft() (no fixture produces a warning), and
+//      image-scan's fail() (no fixture errors). Live code, untested branches.
+//   1  platform-gated by design — removeWindowsAutostartRegistry() is dead on any
+//      non-Windows machine and always will be.
+//   1  GENUINELY UNREACHABLE — getSession() is absent from the CLI dispatch and
+//      has no caller anywhere in the tree. The only deletion candidate of the 11.
+//
+// So the honest headline was one, not eleven. Chasing the number to zero would
+// have deleted five working CLI commands.
 
 const fs = require('fs');
 const os = require('os');
