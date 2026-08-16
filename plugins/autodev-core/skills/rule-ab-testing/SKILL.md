@@ -13,7 +13,8 @@ A proposal is not a finding. Before recommending a change, measure it against
 numbers alongside the recommendation.
 
 This is not process for its own sake. Across two working sessions, measurement
-overturned the recommendation eleven times:
+overturned the recommendation **fifteen** times — and four of those were
+proposals to build a detector that, once built and run, found nothing true:
 
 | Claim | What measuring found |
 |---|---|
@@ -29,13 +30,25 @@ overturned the recommendation eleven times:
 | "The backlog is 38 days / 809 commits stale" | Hand-counted against a threshold I invented (commits changing ≥2 `passes` lines). No mechanical definition reproduces it |
 | "Slice the story's text block to compare revisions" | The last story in the object has no trailing comma, so its slice ran to EOF — every story read as edited the day a story was appended after it. Under-reported one repo by 2 stale stories and 4 days of median age |
 | "Widen the unmerged-branch check beyond `prd.json`" | Scoped to prd.json: **2 carriers / 224 branches, both real.** Unscoped at ≤45 days: ~30 branches across 4 repos, mostly one-commit debris. The scope *was* the precision |
+| "Compare carrier branches to HEAD" | Sitting on any feature branch makes `origin/main` report as a carrier. The base has to be the *default branch*, or the answer depends on where the reader is standing |
+| "Detect a done-story with no commit referencing its id" | **100% of done stories in all three repos.** None of them put ids in commit messages |
+| "Detect a done-story citing files that no longer exist" | 4 hits across 371 done stories, **0 real** — three path-prefix artifacts, one file the story's own fix deleted |
 
-The last four came from **implementing the recommendation and running it**. Three
-were errors in claims already written down and shared; the fourth was a bug in
-the fix itself. None would have surfaced from more careful reasoning.
+Most of the later ones came from **implementing the recommendation and running
+it** — including errors in claims already written down and shared, a bug in one
+of the fixes itself, and a detector whose base of comparison depended on which
+branch the reader happened to have checked out. None would have surfaced from
+more careful reasoning.
 
 Every one of those would have shipped noise, and a detector that cries wolf is
 one people learn to skip — after which the ones that were right get skipped too.
+
+**Some classes are real and still not detectable.** The last two rows were
+attempts to mechanise a genuine, damaging failure (a P0 marked done while the
+fix existed nowhere). Both were precise and both found nothing true. The honest
+outcome was to write the class into `rule-verification` as a review step and
+record the two dead ends here — not to ship a third guess. **"No detector fits"
+is a legitimate conclusion, and cheaper than a checker nobody trusts.**
 
 ## What a measurement looks like
 

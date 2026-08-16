@@ -1,5 +1,58 @@
 # Changelog
 
+## [8.14.0] - 2026-08-16
+
+### Added — closing a task is a claim, and it has to be true
+
+`rule-verification` gains two rules for marking `passes: true`:
+
+1. **Name the change, so a reader can falsify it.** "Fixed" is not a record.
+2. **Do not close a story until the change is somewhere a reader can reach it.**
+   Committed and pushed, or the story stays open.
+
+From a measured instance, not a hypothetical. Two P0 stories were marked
+`passes: true`, titled `FIXED <date>`, with bodies reading *"CONFIRMED live and
+FIXED"* — one verified genuinely well, by calling the production endpoint
+unauthenticated and getting HTTP 200. The fix was then absent from the default
+branch, from the 25 most recently updated remote branches, and from all 8 live
+worktrees including uncommitted changes. An exploitable P0, verified live,
+recorded as closed, **fixed nowhere** — and the next reader's rational move,
+seeing `passes: true`, is to skip it.
+
+### Not added — two detectors for it, both measured and dropped
+
+| Signal | Result |
+|---|---|
+| "no commit message references the story id" | **100% of done stories, all three repos.** None put ids in commit messages, so this is the normal state |
+| "the story cites file paths that no longer exist" | 4 hits across 371 done stories, **0 real** — three path-prefix artifacts, one file the story's own fix deliberately deleted |
+
+What caught the real instance was reading the claim and checking the fact it
+asserted. That stays a review step. `rule-ab-testing` records both dead ends so
+a third guess does not get built, and now says plainly that **"no detector fits"
+is a legitimate conclusion** — cheaper than a checker nobody trusts.
+
+Its running tally goes from eleven overturned recommendations to **fifteen**.
+
+## [8.13.0] - 2026-08-16
+
+### Fixed — carrier branches compare to the DEFAULT branch, not HEAD
+
+Found by using the tool: merging one of the two real carriers and watching the
+finding fail to clear, because the checkout was on a docs branch at the time. So
+`origin/main` — which now had the merge — reported as "a branch carrying
+prd.json changes you do not have", which is simply what working on a branch
+means.
+
+`defaultRef()` resolves `refs/remotes/origin/HEAD`, falls back through
+`origin/main` and `origin/master`, then HEAD. The base is excluded from its own
+candidate list and named in both the finding and its fix line — which also makes
+the fix line correct, since it used to print `git diff HEAD...<branch>`, a
+command that gives a different answer depending on the reader's checkout.
+
+The first canary **did not fire**, which was itself informative: the mechanism
+has two halves (the `rev-list` and the `diff`), and reverting one left the other
+suppressing the false positive. It fails 1 of 19 when fully reverted.
+
 ## [8.11.0] - 2026-08-16
 
 ### Changed — the repos this framework learned from are anonymised
