@@ -49,6 +49,37 @@ const { spawnSync } = require('child_process');
 
 const [subject, suite] = process.argv.slice(2);
 recoverStaleBackup(subject);
+
+// Refuse to mutate a subject that has uncommitted changes — the same guard
+// check-suites-can-fail.js already carries, and for a sharper reason here.
+//
+// This was not theoretical. A killed run left a mutant in the tree, a later
+// `git add -A` swept it into a commit, and it was PUSHED to a public repo: an
+// `if (!installed.plugins[...])` shipped as `if (true)`. Nothing caught it.
+// `validate` passed and the pre-push hook passed, because a mutation that
+// survives its suite is by definition one the suite cannot see — which is the
+// entire premise of this tool.
+//
+// With this guard, git always holds a clean copy of the subject, so the worst a
+// crash can do is leave a dirty file that `git checkout --` fixes.
+{
+    // Absolute path, and cwd set to the file's directory so git finds the repo.
+    // A relative `subject` with cwd pointed at its own directory made git resolve
+    // the path against the wrong base, so the guard silently matched nothing and
+    // the run proceeded on a dirty file — the exact failure it exists to stop.
+    const abs = path.resolve(subject);
+    const st = spawnSync('git', ['status', '--porcelain', '--', abs],
+        { encoding: 'utf8', cwd: path.dirname(abs) });
+    if (st.status === 0 && (st.stdout || '').trim()) {
+        console.error(`\nRefusing to run: ${path.basename(subject)} has uncommitted changes.\n`);
+        console.error('This script overwrites the subject with mutants. If it dies mid-run, git is');
+        console.error('what restores it — so the subject has to be committed first. A mutant that');
+        console.error('survives its suite will also survive validate and the pre-push hook, and can');
+        console.error('be committed without anything noticing. Commit or stash, then re-run.\n');
+        process.exit(1);
+    }
+}
+
 const original = fs.readFileSync(subject, 'utf8');
 fs.writeFileSync(backupPath(subject), original);
 const lines = original.split('\n');

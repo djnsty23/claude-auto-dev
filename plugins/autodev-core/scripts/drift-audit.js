@@ -69,7 +69,7 @@ function auditPlugins() {
     for (const [marketName, m] of Object.entries(markets || {})) {
         const adopted = Object.keys(installed.plugins).some((k) => k.endsWith(`@${marketName}`));
         if (!adopted) continue;
-        const cat = readJSON(path.join(m.installLocation && '', '.claude-plugin', 'marketplace.json'));
+        const cat = readJSON(path.join(m.installLocation || '', '.claude-plugin', 'marketplace.json'));
         if (!cat || !Array.isArray(cat.plugins)) continue;
         for (const p of cat.plugins) {
             if (!installed.plugins[`${p.name}@${marketName}`]) {
