@@ -1,7 +1,7 @@
 {
   "name": "autodev-core",
   "description": "Autonomous development workflow: brainstorm, auto, iterate, audit, review, ship, plus the prd.json sprint system.",
-  "version": "8.54.0",
+  "version": "8.55.0",
   "author": {
     "name": "djnsty23",
     "url": "https://github.com/djnsty23"

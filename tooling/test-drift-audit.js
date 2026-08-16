@@ -27,17 +27,22 @@
 // MEASURED TOGETHER — the tool takes one suite at a time, so the combined figure
 // is the INTERSECTION of the two survivor sets, not either number alone:
 //
-//   survives the prd suite      57
+//   survives the prd suite      52
 //   survives the config suite   36
-//   survives BOTH               12   <- the real remaining gap
+//   survives BOTH                7   <- the real remaining gap
 //
-// 75 of 87 mutants are now caught by one suite or the other. Reading either 57
+// 80 of 87 mutants are now caught by one suite or the other. Reading either 52
 // or 36 as "the" number would overstate the debt several times over.
 //
 // The arc, for anyone deciding whether this is worth doing again:
-// 57 survivors -> 27 once the config half had a suite at all -> 12 once the
-// four clusters inside it were read and closed (published-but-not-installed,
-// the missing-manifest check, the exit-code contract, and --json).
+// 57 -> 27 once the config half had a suite at all -> 12 once the four clusters
+// inside it were read and closed (published-but-not-installed, the
+// missing-manifest check, the exit-code contract, --json) -> 7 once the
+// fileAge/commitsSince threshold was pinned with one fixture per corner.
+//
+// The 7 that remain were read: an env fallback whose two branches hold the same
+// value in any test environment, three guards masked by the catch around them,
+// the branch-name filter, and `if (skipped)`.
 //
 // Run: node tooling/test-drift-audit.js
 
@@ -273,6 +278,51 @@ const forRepo = (findings, name) => (findings || [])
     run();
     const after = git(repo, 'status --porcelain') + git(repo, 'rev-parse HEAD');
     check('audit does not modify the repo it inspects', before === after);
+}
+
+// ------------------------- the file-age vs commit-activity threshold ---------
+//
+// `if (fileAge >= 3 && commitsSince >= 10)` — all three mutations on it survived
+// both suites. It is the signal that says a prd.json can be recent and still
+// hold a stale backlog, and nothing pinned either half of the AND.
+//
+// Four repos, one per corner, because a single case cannot distinguish
+// `&&` from `||` or from a forced true/false.
+{
+    const mk = (name, prdAgeDays, extraCommits) => {
+        const repo = makeRepo(name);
+        const when = now - prdAgeDays * DAY;
+        // A PENDING story is required: auditPrd returns early when nothing is
+        // pending (see the first case in this file), so an all-done fixture never
+        // reaches the file-age check at all. The first version of these cases used
+        // story(true) and reported nothing for that reason — and the three negative
+        // assertions passed anyway, which is exactly how a vacuous negative looks.
+        fs.writeFileSync(path.join(repo, 'prd.json'),
+            JSON.stringify({ stories: { 'S1-001': story(null) } }));
+        git(repo, 'add -A', when);
+        git(repo, 'commit -qm prd', when);
+        for (let i = 0; i < extraCommits; i++) {
+            fs.writeFileSync(path.join(repo, `f${i}.txt`), String(i));
+            git(repo, 'add -A', when + 60 * (i + 1));
+            git(repo, `commit -qm c${i}`, when + 60 * (i + 1));
+        }
+        return name;
+    };
+
+    const both  = mk('agedbusy',  30, 15);  // old AND busy      -> report
+    const oldQ  = mk('agedquiet', 30, 2);   // old but quiet     -> silent
+    const newB  = mk('freshbusy',  0, 15);  // busy but fresh    -> silent
+    const newQ  = mk('freshquiet', 0, 2);   // neither           -> silent
+
+    const f = run();
+    const said = (name) => forRepo(f, name).some((x) => /prd\.json last changed/.test(x.detail));
+
+    check('old prd.json WITH commit activity is reported', said(both));
+    check('  and names both numbers', forRepo(f, both)
+        .some((x) => /last changed \d+d ago with \d+ commit/.test(x.detail)));
+    check('old but quiet is NOT reported (the commit half of the AND)', !said(oldQ));
+    check('busy but fresh is NOT reported (the age half of the AND)', !said(newB));
+    check('neither is NOT reported', !said(newQ));
 }
 
 let pass = 0, fail = 0;
