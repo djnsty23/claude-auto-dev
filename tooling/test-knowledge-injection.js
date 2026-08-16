@@ -1,5 +1,12 @@
 #!/usr/bin/env node
-// Tests for knowledge AUTO-INJECTION in hooks/post-tool-typecheck.js (roadmap §3.2).
+// Tests for knowledge AUTO-INJECTION in autodev-memory's hooks/memory-capture.js
+// (roadmap §3.2).
+//
+// The header used to name hooks/post-tool-typecheck.js, which is a different
+// hook in a different plugin. HOOK on line ~20 has always pointed at
+// memory-capture.js. Corrected after a mutation run was very nearly dismissed as
+// a bad subject pairing on the strength of this comment — the code was right and
+// the documentation was wrong, which is the more dangerous way round.
 // Drives the REAL hook as a subprocess (like test-telemetry-hook.js / test-pre-tool-filter.js):
 //   spawnSync(node, [hookPath], { input: JSON.stringify(event), env, cwd }).
 //
@@ -186,6 +193,27 @@ if (!memDB.isAvailable()) {
 
     const capErr = capRun.stderr || '';
     const headerCount = (capErr.match(/Domain knowledge for src\/auth/g) || []).length;
+
+    // The assertion this block was missing: capture must actually WRITE.
+    //
+    // Found by mutation. Every guard on the capture path — the two-file
+    // existence check, memDB.isAvailable(), and `if (obs && sessionId)` —
+    // survived being forced to `false`, because the assertions below only check
+    // that the hook exits 0 and does not crash. Skipping capture entirely
+    // satisfies both. The one thing capture exists to do was never observed.
+    const capStatsAfter = (() => {
+        const prevH = process.env.HOME, prevP = process.env.USERPROFILE;
+        process.env.HOME = CAP_HOME; process.env.USERPROFILE = CAP_HOME;
+        try {
+            delete require.cache[require.resolve(path.join(CAP_SCRIPTS, 'memory-db.js'))];
+            const db = require(path.join(CAP_SCRIPTS, 'memory-db.js'));
+            return db.getStats(CAP_PROJ);
+        } catch { return null; }
+        finally { process.env.HOME = prevH; process.env.USERPROFILE = prevProfile ?? prevP; }
+    })();
+    cases.push(['capture-active: an observation was actually recorded',
+        !!capStatsAfter && capStatsAfter.totalObservations > 1]);
+
     cases.push(['capture-active: hook exits 0 with capture block running', capRun.status === 0]);
     cases.push(['capture-active: no hook crash / uncaught error',
       !/post-tool-typecheck error:/.test(capErr) && !/\[Memory\] capture error:/.test(capErr)]);
