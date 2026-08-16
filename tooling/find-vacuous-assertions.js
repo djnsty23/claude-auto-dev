@@ -36,17 +36,31 @@
 //
 // Survey of this repo, most survivors first. Unread counts are just leads:
 //
+// HOOKS — every one read, and every one yielded at least one real defect:
 //   subject                              caught/mutants  survivors
-//   hooks/memory-capture.js                      25/52         27  unread
-//   hooks/session-start.js                       10/18          8  unread
+//   hooks/memory-capture.js                      37/52         15  read, triaged in suite
+//   hooks/agent-browser-cleanup.js               14/23          9  read, isWin-gated
+//   hooks/memory-session-end.js                  10/16          6  read
 //   hooks/pre-tool-filter.js                     54/60          5  read, equivalent
-//   hooks/user-prompt-image-scan.js              16/20          4  unread
 //   hooks/inbox-notify.js                         7/10          3  read, equivalent
 //   hooks/stop-auto-check.js                     25/27          2  read, equivalent
+//   hooks/session-start.js                       17/18          1  read, equivalent
+//   hooks/user-prompt-image-scan.js              19/20          1  read, equivalent
+//   hooks/post-tool-typecheck.js                 13/24         11  read, npx-gated
+//   hooks/pre-compact.js, post-compact.js          6/6          0  closed
 //   scripts/session-carrier.js                   10/10          0  closed
 //
-// Every pair read so far has yielded at least one real defect, so the unread
-// rows are the best-value work left in this file's vicinity.
+// SCRIPTS — surveyed, NOT yet read. These counts are leads, nothing more:
+//   scripts/find-orphan-checks.js                23/41         18  UNREAD
+//   scripts/inbox-watch.js                       16/25          9  UNREAD
+//   templates/preflight.js                       10/17          7  UNREAD
+//   scripts/semantic-search.js                   24/29          5  UNREAD
+//   scripts/drift-audit.js                          —           —  not run (~22min)
+//
+// The hook rows are the evidence for bothering: reading them turned up an inbox
+// that could be claimed without being announced, a session-end summary that
+// could record pending stories as completed, a knowledge brief that showed only
+// decisions, and three Windows rules that had never executed anywhere.
 //
 // What it found on its first real run, all confirmed by hand afterwards:
 //   - the fail-closed "input did not parse" branch was unreachable from the
