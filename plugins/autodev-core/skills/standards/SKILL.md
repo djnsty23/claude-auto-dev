@@ -18,6 +18,12 @@ This skill is auto-loaded on every code file, so it stays short on purpose. It
 holds only the **decisions this project made** — not general React or
 accessibility advice, which you already have.
 
+> **`.claude/project-rules.md` outranks this file.** If it exists, read it and
+> follow it wherever the two disagree — it was measured from this codebase,
+> while everything below is a shipped default. Run `/autodev-init` to generate
+> it. Where a convention appears under "Undecided" there, do not flag either
+> form in review.
+
 Three bars, in order: **correct** (types pass, it works), **clear** (matches
 surrounding patterns), **complete** (handles reality, not just the happy path).
 

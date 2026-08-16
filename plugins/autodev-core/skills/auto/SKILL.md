@@ -126,8 +126,12 @@ Skip individual checks if they take >10 seconds. Use Read tool to inspect packag
 const sp = prd.sprints ? prd.sprints[prd.sprints.length - 1] : prd;
 const stories = sp.stories || prd.stories || {};
 const storyEntries = Object.entries(stories);
+// 'deferred' is a decision NOT to do the work — it is not executable and
+// must not be picked up here. The Stop hook applies the same rule, and the two
+// disagreeing is what made auto loop on an already-finished sprint.
 const executable = storyEntries.filter(([id, s]) =>
   s.passes !== true &&
+  s.passes !== 'deferred' &&
   (s.blockedBy || []).every(dep => stories[dep]?.passes === true)
 );
 ```

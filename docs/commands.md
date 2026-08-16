@@ -9,6 +9,7 @@ These are what you type. Everything else is handled automatically by `auto`.
 
 | Say | Action |
 |-----|--------|
+| `autodev init` | Derive this project's real conventions into `.claude/project-rules.md` |
 | `auto` | Work through all tasks autonomously (deploys, tests, transitions sprints) |
 | `audit` | Find bugs + violations (7 parallel agents) → creates fix stories |
 | `brainstorm` | Feature ideas + architecture improvements → present findings |
@@ -71,7 +72,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 41 skills across three plugins: 34 in `autodev-core`, 3 in `autodev-memory`, 4 in `autodev-stack`
+- 42 skills across three plugins: 35 in `autodev-core`, 3 in `autodev-memory`, 4 in `autodev-stack`
 - Claude picks a skill from its `description` and `when_to_use`; run `/plugin` to see what is installed
 - Auto-loaded by file context: `core` (on prd.json), `standards` and the `rule-*` skills (on matching source files)
 

@@ -43,7 +43,7 @@ try {
                     const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
                     const entries = Object.entries(prd.stories || {});
                     const done = entries.filter(([, v]) => v.passes === true);
-                    const pending = entries.filter(([, v]) => v.passes !== true);
+                    const pending = entries.filter(([, v]) => v.passes !== true && v.passes !== 'deferred');
                     summary.completed = done.map(([k, v]) => `${k}: ${v.title}`).join('; ');
                     if (pending.length > 0) {
                         summary.nextSteps = `${pending.length} tasks remaining: ${pending.map(([k]) => k).join(', ')}`;

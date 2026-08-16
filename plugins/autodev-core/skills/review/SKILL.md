@@ -28,6 +28,11 @@ decisions this project made.
 
 ## Then check the project-specific delta
 
+**Read `.claude/project-rules.md` first if it exists** — it was measured from
+this codebase and outranks both the list below and the `standards` skill. A rule
+listed there as "Undecided" must not be flagged in either direction. If it does
+not exist, suggest `/autodev-init` once, then continue with the defaults below.
+
 Work through these against the changed files only.
 
 ### 1. prd.json alignment

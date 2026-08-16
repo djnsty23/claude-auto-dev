@@ -46,6 +46,50 @@ marketplace. Read [MIGRATION.md](MIGRATION.md) before upgrading.
 - `scan` documents the built-in path first, with the CLI as the terminal-only fallback. Nine other browser-using skills carry the selection rule.
 - Authenticated pages now prefer having the user log in directly in the Browser pane over the localStorage token-injection workaround.
 
+### Fixed — the `auto` loop could not terminate
+
+`stop-auto-check.js` is the hook that blocks the end of a turn to keep `auto`
+running. It shipped with no tests, and writing them surfaced three defects:
+
+- **A sprint whose remaining stories were all `deferred` blocked forever.** The
+  pending filter was `passes !== true`, which counts `"deferred"` as outstanding
+  work — but deferred is a decision *not* to do it. The only escape was the 2-hour
+  stale-flag timeout. `auto/SKILL.md` had the same filter, so the skill and the
+  hook agreed on the wrong answer.
+- **An unparseable `prd.json` sent it into idle detection** instead of stopping,
+  looping the session against a file it could not read. It now leaves auto mode
+  and says why.
+- **It ignored the payload `cwd`**, reading flags and `prd.json` relative to the
+  shell that spawned the hook rather than the project Claude is working in.
+
+Rewritten with every path guaranteed to reach `approve`, and covered by
+`tooling/test-stop-auto-check.js` — 28 assertions across blocking, the idle
+one-shot, the exit signal, stale flags, deferred-only sprints, malformed input,
+and payload-cwd handling.
+
+### Added — `autodev-init`
+
+Generates `.claude/project-rules.md` by **measuring** the codebase — component
+style, data-fetching library, semantic tokens versus raw colors, where auth is
+enforced, where external data is validated — instead of shipping a default. Every
+rule it writes cites a count; anything genuinely split is recorded as
+`Undecided` and explicitly must not be flagged in review. Splits worth a decision
+are put to the user with the counts in the options.
+
+`review`, `audit`, and `standards` now defer to that file wherever it disagrees
+with the shipped defaults. This inverts the plugin's model: it stops being a
+knowledge dump that ages as models improve, and becomes a capture mechanism for
+what a project actually decided.
+
+### Added — validator guard for shell glob quoting
+
+`--include=*.tsx` unquoted in a skill's shell snippet is expanded by zsh before
+grep sees it, and errors when nothing matches locally — so a measurement command
+silently returns 0 instead of failing loudly. This bit `autodev-init` during
+testing: every count came back zero against a fixture that plainly had matches.
+`validate.js` now rejects unquoted globs in `--include`, `--exclude`, and
+`--exclude-dir` across every shipped doc.
+
 ### Removed — superseded by Claude Code itself
 
 The tool was written when models needed reminding that `<div onClick>` should be a `<button>`. That is no longer where the value is, and restating it costs context on every session.

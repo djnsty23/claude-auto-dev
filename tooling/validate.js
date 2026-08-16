@@ -293,6 +293,47 @@ function checkScriptReferences() {
   if (ok) log('PASS', `Script references: ${checked} plugin-relative paths resolve`);
 }
 
+// Shell snippets inside skills run in the user's shell, which is often zsh.
+// An unquoted glob in a flag value (`--include=*.tsx`) is expanded by zsh before
+// grep sees it, and when nothing matches in the current directory zsh errors the
+// whole command. The failure is silent in a pipeline: counts come back 0 and a
+// skill that measures a codebase reports that it found nothing.
+function checkShellGlobQuoting() {
+  const OFFENDERS = [
+    { re: /--include=(?!['"])\S*\*/g, hint: "--include=*.ext must be quoted: --include='*.ext'" },
+    { re: /--exclude=(?!['"])\S*\*/g, hint: "--exclude=*.ext must be quoted: --exclude='*.ext'" },
+    { re: /--exclude-dir=(?!['"])\S*\*/g, hint: "--exclude-dir must be quoted when it contains a glob" },
+  ];
+
+  let ok = true;
+  let scanned = 0;
+
+  const walk = (dir) => {
+    if (!fs.existsSync(dir)) return;
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith('.md')) {
+        scanned++;
+        const content = fs.readFileSync(full, 'utf8');
+        const rel = path.relative(ROOT, full);
+        content.split('\n').forEach((line, i) => {
+          for (const { re, hint } of OFFENDERS) {
+            re.lastIndex = 0;
+            if (re.test(line)) {
+              log('FAIL', `${rel}:${i + 1}: ${hint}`);
+              ok = false;
+            }
+          }
+        });
+      }
+    }
+  };
+  walk(PLUGINS_DIR);
+
+  if (ok) log('PASS', `Shell glob quoting: ${scanned} docs clean`);
+}
+
 function checkAgents() {
   for (const p of pluginDirs()) {
     const dir = path.join(PLUGINS_DIR, p, 'agents');
@@ -350,6 +391,7 @@ checkPluginManifests();
 checkSkillFrontmatter();
 checkHookWiring();
 checkScriptReferences();
+checkShellGlobQuoting();
 checkAgents();
 checkNoLegacyArtifacts();
 

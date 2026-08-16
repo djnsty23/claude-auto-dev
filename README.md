@@ -60,6 +60,7 @@ without touching it.
 
 | Say | Does |
 |-----|------|
+| `autodev-init` | Read this codebase and write its real conventions to `.claude/project-rules.md` |
 | `brainstorm` | Scan codebase + live site, propose improvements |
 | `brainstorm apply` | Create stories from the last brainstorm |
 | `auto` | Work through all pending stories autonomously |
@@ -81,6 +82,14 @@ without touching it.
 Plugin skills are namespaced, so `/autodev-core:audit` always works even if you
 have another `audit` skill installed. See [`docs/commands.md`](docs/commands.md)
 for the full list.
+
+**Start with `/autodev-init`.** It measures how your codebase is actually
+written — component style, data fetching, where auth is enforced, tokens vs raw
+colors — and writes `.claude/project-rules.md`. `review`, `audit`, and
+`standards` all defer to that file, so the tool enforces your conventions
+rather than the defaults this plugin happens to ship. Every rule it writes cites
+a count from your code; anything genuinely split is recorded as undecided and
+never flagged.
 
 **These build on Claude Code, they do not replace it.** `review`, `security`, and
 `fix` each run the matching built-in command first (`/code-review`,
