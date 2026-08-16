@@ -56,13 +56,11 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `stripe` / `payment` | Stripe integration |
 | `seo` / `schema` | SEO and structured data |
 | `remotion` / `video` | Remotion video creation |
-| `update dev` | Sync latest skills from GitHub |
+| `update dev` | Reminds you to run `/plugin marketplace update autodev` |
 | `doppler` / `setup doppler` | Install + link + migrate secrets to Doppler (hub/spoke pattern) |
 | `memory backup` | Backup/restore auto-memory to private GitHub repo |
 | `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
 | `knowledge <area>` / `what do we know about` / `brief me on` | Distill a domain knowledge brief for a code area from memory |
-| `telemetry` / `usage stats` | Show tool usage stats from local telemetry log |
-| `smart explore <path>` / `code outline` / `map the codebase` | Compact structural code outline (signatures/classes/imports) to save tokens vs reading whole files |
 
 For quick fixes, just describe what to fix — no commands needed.
 
@@ -73,7 +71,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 44 skills across three plugins: 36 in `autodev-core`, 4 in `autodev-memory`, 4 in `autodev-stack`
+- 41 skills across three plugins: 34 in `autodev-core`, 3 in `autodev-memory`, 4 in `autodev-stack`
 - Claude picks a skill from its `description` and `when_to_use`; run `/plugin` to see what is installed
 - Auto-loaded by file context: `core` (on prd.json), `standards` and the `rule-*` skills (on matching source files)
 

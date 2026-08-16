@@ -1,147 +1,66 @@
 ---
 name: fix
-description: Debugs and fixes issues systematically. Use when something is broken, throwing errors, or behaving unexpectedly.
-user-invocable: true
-when_to_use: "Invoked when the user says \"fix\", \"debug\", \"broken\", \"error\"."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob
+description: Debug and fix a broken build, a runtime error, or a visual bug, closing the loop with a real verification rather than a passing typecheck.
+when_to_use: "Invoked when the user says \"fix\", \"debug\", \"it's broken\", \"this errors\", or reports something behaving unexpectedly."
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task
 model: opus
-argument-hint: "[error or file]"
+user-invocable: true
+argument-hint: "[build|types|file path|description]"
 ---
 
-# Fix Workflow
+# Fix
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+**For anything beyond a one-line cause, run Claude Code's built-in debugger:**
 
-## On "fix" or "debug"
-
-### Step 1: Identify the Problem
 ```
-question: "What's the issue?"
-options:
-  - { label: "Build error", description: "npm run build fails" }
-  - { label: "Runtime error", description: "App crashes or throws" }
-  - { label: "UI bug", description: "Something looks wrong" }
-  - { label: "I'll describe it", description: "Custom issue" }
+/debug
 ```
 
-### Step 2: Gather Context
+It does root-cause analysis properly — reproduce, isolate, form and test a
+hypothesis — and it is better at that than a checklist. Reach for it whenever
+the cause is not immediately obvious from the error text.
 
-**Build error:**
-```bash
-npm run build 2>&1
-# Capture and parse error output
-```
+This skill adds the two things it does not know: how *this* project reproduces a
+bug, and what counts as fixed here.
 
-**Runtime error:**
-```bash
-# Check browser console (if agent-browser available and dev server running)
-agent-browser open http://localhost:3000
-agent-browser errors
-# Or check server logs
-npm run dev 2>&1 | tail -50
-```
+## Reproduce
 
-**UI bug:**
-```bash
-# Take screenshot (if agent-browser available)
-agent-browser open http://localhost:3000/[page]
-agent-browser screenshot .claude/screenshots/bug-$(date +%s).png
-agent-browser snapshot -i
-```
+| Symptom | Reproduce with |
+|---------|----------------|
+| Build error | `npm run build 2>&1` (or the project's package manager) |
+| Type error | `npm run typecheck 2>&1` |
+| Runtime error | Start the dev server, then drive the app and read the console — see the `browser` skill for which driver to use |
+| UI bug | Same, plus a screenshot at desktop and mobile widths |
 
-Note: agent-browser daemon fails on Windows. Use `npx playwright open <url>` as fallback for visual checks.
+For anything in the browser, read the console **before** reading the code. An
+error message costs one tool call and usually names the file.
 
-### Step 3: Analyze Root Cause
+## Fix
 
-Common patterns:
-| Error Type | Likely Cause |
-|------------|--------------|
-| `Cannot find module` | Missing import or package |
-| `Type 'X' is not assignable` | TypeScript mismatch |
-| `undefined is not a function` | Null/undefined access |
-| `Hydration mismatch` | Server/client render diff |
-| `CORS error` | API endpoint config |
-| `401 Unauthorized` | Auth token issue |
+Change the cause, not the symptom. Specifically, in this codebase:
 
-For library-specific errors (unfamiliar API, deprecated method, version-specific behavior), query Context7 before guessing or WebSearching:
-```
-mcp__plugin_context7_context7__resolve-library-id({ libraryName: "<lib>", query: "<error description>" })
-mcp__plugin_context7_context7__query-docs({ libraryId: "<id>", query: "<specific error or API>" })
-```
-Version-pinned docs beat cached training data for libraries that move fast (Next.js, Supabase, Stripe, Trigger.dev).
+- A `?.` that makes a crash go away is a symptom fix. Ask why the value was
+  absent — a missing loading state is the usual answer, and `rule-design-system`
+  plus the UI-states convention say that state must be handled explicitly.
+- An `as unknown as Type` on external data is never the fix. Validate with Zod.
+- If the same class of bug appears in more than one place, grep for the pattern
+  and fix them together, then grep again to prove none remain.
 
-### Step 4: Fix
+## Verify
 
-1. Make the minimal change needed
-2. Don't refactor unrelated code
-3. Don't add "improvements"
-4. Test the fix immediately
+A fix is not done because it compiles. Per `rule-verification`:
 
-### Step 5: Verify
-```bash
-npm run build
-npm run test -- --watchAll=false --passWithNoTests 2>/dev/null | tail -5
-# If passes, test the specific feature
-```
+- **API / edge function** — curl it with real params, check status and response shape.
+- **UI** — reload it in the browser, confirm the behavior, confirm the console is clean.
+- **Bulk change** — grep for the old pattern and show zero remaining.
+- **Anything auth, billing, or RLS** — verify the deny path, not just the allow path.
 
-If build or feature test fails, return to Step 4 with updated error info. Maximum 3 fix attempts — if still failing after 3 tries, escalate to the user with a clear report of what was tried and what's still broken. Do not silently skip or defer.
+Then say what you verified and how. "Fixed" with no evidence is not a report.
 
-### Step 5b: Regression Test
+## Stop and ask when
 
-After fixing, add a test that would have caught the bug:
-```bash
-# If test file exists for the module, add a test case
-# If no test file exists, create one for critical paths (auth, billing, data mutations)
-```
-
-For non-critical code, a manual verification is sufficient. For auth/billing/RLS, a test is mandatory.
-
-### Step 6: Document
-```
-Append to .claude/decisions.md:
-"## [DATE]: Fixed [issue]
-- Root cause: [explanation]
-- Solution: [what was changed]
-- Files: [list of modified files]"
-```
-
-## Quick Fix Commands
-
-| Say | Action |
-|-----|--------|
-| `fix build` | Run build, auto-fix errors |
-| `fix types` | Fix TypeScript errors only |
-| `fix [file]` | Focus on specific file |
-
-## Common Auto-Fixes
-
-**Missing import:**
-```typescript
-// Add at top of file
-import { Thing } from './path'
-```
-
-**Null safety:**
-```typescript
-// Before
-obj.property
-// After
-obj?.property
-```
-
-**Type assertion:**
-```typescript
-// When type is known but TS doesn't infer
-(value as ExpectedType)
-```
-
-## When to Stop
-
-Stop and ask user if:
-- Fix requires architectural change
-- Multiple valid approaches exist
-- Fix might break other features
-- Root cause is unclear after 3 attempts
+- The fix needs an architectural change.
+- More than one valid approach exists with a real trade-off.
+- The fix could plausibly break something else that has no test.
+- The root cause is still unclear after three attempts. Say what you ruled out —
+  that is genuinely useful even without a fix.

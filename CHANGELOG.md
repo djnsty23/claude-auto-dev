@@ -46,6 +46,29 @@ marketplace. Read [MIGRATION.md](MIGRATION.md) before upgrading.
 - `scan` documents the built-in path first, with the CLI as the terminal-only fallback. Nine other browser-using skills carry the selection rule.
 - Authenticated pages now prefer having the user log in directly in the Browser pane over the localStorage token-injection workaround.
 
+### Removed — superseded by Claude Code itself
+
+The tool was written when models needed reminding that `<div onClick>` should be a `<button>`. That is no longer where the value is, and restating it costs context on every session.
+
+- **`smart-explore`** (skill + 565-line script + suite) — the built-in Explore agent does structural code exploration better, and reads real excerpts rather than a signature outline.
+- **`telemetry`** (skill + hook + suite) — Claude Code has native OTEL support, and this wrote a JSONL line into every project on every tool call.
+- **`update`** — its entire content was two slash commands; they live in the README now.
+- The generic bulk of **`a11y`**, **`seo`**, **`perf`**, and **`standards`**. What remains is the part a general-purpose model cannot know: this project's Core Web Vitals and bundle budgets, its design-token rules, its query-key shape, its report formats, and its anti-pattern list. `standards` matters most here — it auto-loads on every code file, so its length was a per-session context tax.
+
+### Changed — `review`, `security`, and `fix` delegate
+
+Each now runs the matching built-in command first and adds only the project-specific delta:
+
+| Skill | Delegates to | Adds |
+|---|---|---|
+| `review` | `/code-review` | prd.json story alignment, design tokens, UI-state completeness, whether verification actually ran |
+| `security` | `/security-review` | secrets in Supabase migrations, RLS policy quality (not just the enabled flag), cloud key hygiene |
+| `fix` | `/debug` | how this project reproduces a bug, and what counts as verified |
+
+`security` also stops "auto-fixing" a leaked credential by deleting the line — the value is already in git history, so it reports and tells the user to rotate.
+
+Net: 7,075 → 5,847 skill lines, 3,131 → 2,450 lines of runtime code, 44 → 41 skills.
+
 ### Changed — skills
 - **`triggers:` → `when_to_use:`** across all 39 migrated skills. `triggers` was never a Claude Code frontmatter field.
 - **`config/rules/*.md` became five auto-loading skills** (`rule-security`, `rule-design-system`, `rule-file-organization`, `rule-windows`, `rule-verification`). `rules/` is not a plugin component type, so those files would never have loaded; as skills with `paths` globs they apply automatically.

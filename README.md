@@ -47,8 +47,8 @@ before installing — it clears those out.
 
 | Plugin | Contains | Install it if |
 |--------|----------|---------------|
-| **autodev-core** | The workflow — `brainstorm`, `auto`, `iterate`, `audit`, `review`, `ship`, `scan`, plus the `prd.json` sprint system, 4 subagents, and the sprint/typecheck/telemetry hooks | Always. This is the tool. |
-| **autodev-memory** | Cross-session project memory — observation capture, semantic search, domain-knowledge briefs, repo-backed backup | You want Claude to remember earlier sessions in a project |
+| **autodev-core** | The workflow — `brainstorm`, `auto`, `iterate`, `audit`, `review`, `ship`, `scan`, plus the `prd.json` sprint system, 4 subagents, and the sprint/typecheck/safety hooks | Always. This is the tool. |
+| **autodev-memory** | Cross-session project memory — automatic observation capture, semantic search, domain-knowledge briefs, repo-backed backup | You want Claude to remember earlier sessions in a project |
 | **autodev-stack** | Supabase, Doppler, Stripe, and Remotion integrations | You use that stack |
 
 `autodev-core` stands alone. The other two are additive and can be removed
@@ -65,13 +65,13 @@ without touching it.
 | `auto` | Work through all pending stories autonomously |
 | `iterate` | Convergence loop: brainstorm → fix → re-scan until clean |
 | `audit` | 7-agent parallel quality audit |
-| `review` | Code quality check (add `quick` or `deep`) |
+| `review` | Runs `/code-review`, then this project's own checks |
 | `ship` | Build, test, review, deploy, verify |
 | `scan` / `qa` | Live site QA (visual + a11y + console) |
-| `fix` | Debug issues |
+| `fix` | Runs `/debug`, then verifies the fix the way this project requires |
 | `commit` | Conventional commit + push + PR |
 | `test` | Unit + browser tests |
-| `security` | Pre-deploy security scan |
+| `security` | Runs `/security-review`, then Supabase/RLS and cloud-key checks |
 | `perf` | Core Web Vitals audit |
 | `a11y` | WCAG 2.1 AA audit |
 | `design` / `ui` | UI design with anti-slop checklist |
@@ -81,6 +81,11 @@ without touching it.
 Plugin skills are namespaced, so `/autodev-core:audit` always works even if you
 have another `audit` skill installed. See [`docs/commands.md`](docs/commands.md)
 for the full list.
+
+**These build on Claude Code, they do not replace it.** `review`, `security`, and
+`fix` each run the matching built-in command first (`/code-review`,
+`/security-review`, `/debug`) and then add only what is specific to this
+project — its design tokens, its RLS rules, its definition of "verified".
 
 **Quick fixes — skip the ceremony.** For small tasks, just describe what you
 want. No `auto`, no sprints, no `prd.json`:
@@ -123,7 +128,7 @@ message to opt out.
 /plugin update autodev-core
 ```
 
-Or say `update dev` and Claude will hand you the right commands.
+There is no `update-dev` command any more — Claude Code owns the update.
 
 ---
 
@@ -144,7 +149,7 @@ rules from the old 7.x template were removed and why.
 ```
 prd.json                    # Tasks and sprint history
 .claude/archives/           # Archived prd snapshots
-.claude/reports/            # Telemetry and scan reports
+.claude/reports/            # Scan and audit reports
 .claude/screenshots/        # Visual verification output
 ```
 

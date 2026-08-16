@@ -1,6 +1,6 @@
 ---
 name: standards
-description: Type safety, design tokens, UI state, and React/Next.js conventions this project holds code to. Load before writing or reviewing application code.
+description: The conventions this project holds code to — UI state completeness, design tokens, type-safety boundaries, query-key shape, and the anti-patterns to flag on sight.
 when_to_use: "Background knowledge, loaded automatically when writing or reviewing TypeScript/React code. Not user-invocable."
 user-invocable: false
 allowed-tools: Read, Grep, Glob
@@ -14,130 +14,37 @@ paths:
 
 # Code Standards
 
-Senior developer judgment. Patterns learned from production.
+This skill is auto-loaded on every code file, so it stays short on purpose. It
+holds only the **decisions this project made** — not general React or
+accessibility advice, which you already have.
 
-## Core Standards
+Three bars, in order: **correct** (types pass, it works), **clear** (matches
+surrounding patterns), **complete** (handles reality, not just the happy path).
 
-1. **Correct** — It works. Types pass, builds succeed, features function.
-2. **Clear** — Easy to read. Names obvious, flow simple, matches patterns.
-3. **Complete** — Handles reality. Errors, edge cases, all UI states.
+## All UI states
 
-## All UI States
-
-Every component handles: `loading → error → empty → content`
+Every component that fetches handles all four:
 
 ```tsx
 if (isLoading) return <Skeleton />;
-if (error) return <ErrorState message={error.message} />;
+if (error)     return <ErrorState message={error.message} />;
 if (!data?.length) return <EmptyState />;
 return <Content data={data} />;
 ```
 
-## Responsive Layout
+A component that renders only the success path is incomplete here even when it
+compiles. This is the single most common review finding in this codebase.
 
-Every page works at 3 breakpoints: mobile (375px), tablet (768px), desktop (1280px+).
+## Type-safety boundaries
 
-- Sidebars: hidden or collapsible on mobile (`md:block hidden`)
-- Grids: stack to single column (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`)
-- Navigation: hamburger or bottom nav on mobile
-- Touch targets: minimum 44x44px
-- No horizontal overflow or clipped content
-- Modals/drawers: full-screen on mobile, centered on desktop
+- No `any`. No `as unknown as Type` on data from a database, an API, or a user —
+  validate the shape with Zod at the boundary instead.
+- `fetch()` always checks `res.ok` and sits inside try/catch. A fire-and-forget
+  fetch is a bug, not a style choice.
 
-## Frontend Engineering
+## Query keys
 
-### Accessibility
-- `<button>` for actions, `<a>`/`<Link>` for navigation (not `<div onClick>`)
-- Icon-only buttons need `aria-label`
-- Form controls need `<label>` or `aria-label`
-- Images need `alt` (or `alt=""` if decorative)
-- Interactive elements need keyboard handlers
-
-### Focus & Interaction
-- Visible focus: `focus-visible:ring-*` (not bare `outline-none`)
-- Hover states on all interactive elements
-- `touch-action: manipulation` on touch targets
-
-### Forms
-- Correct `type` and `inputmode` on inputs
-- `autocomplete` on form fields
-- Do not block paste
-- Errors inline next to fields; focus first error on submit
-- Disable spellcheck on emails, codes, usernames
-
-### Animation
-- Honor `prefers-reduced-motion`
-- Only animate `transform`/`opacity` (compositor-friendly)
-- List properties explicitly (not `transition: all`)
-- Animations must be interruptible
-
-### Hydration Safety (Next.js/RSC)
-- Inputs with `value` need `onChange` (or use `defaultValue`)
-- Guard date/time rendering against hydration mismatch
-- Server Components by default; `'use client'` only for state/effects/handlers
-
-### Images & Performance
-- `<img>` needs explicit `width` and `height` (prevents CLS)
-- Below-fold: `loading="lazy"`; above-fold: `priority` or `fetchpriority="high"`
-- Large lists (50+): virtualize with `virtua` or `content-visibility: auto`
-
-## Type Safety
-
-| Rule | Wrong | Right |
-|------|-------|-------|
-| No `any` or `@ts-ignore` | `data as any` | Proper typing |
-| Single source of truth | Define type in 3 files | Define once, import |
-| Complete Records | Missing union members | Include all members |
-| Supabase typing | Untyped `.insert()` | `Database['table']['Insert']` |
-| Safe access | `obj[key]` | `'key' in obj && ...` |
-
-## React Patterns
-
-| Rule | Wrong | Right |
-|------|-------|-------|
-| No nested interactives | `<button><button>` | `role="button"` |
-| Hooks at top level | `onClick={() => useState()}` | Hooks in component body |
-| No conditional hooks | `if (x) useEffect()` | `useEffect(() => { if (x) })` |
-
-## Error Handling
-
-```typescript
-// Auth errors — fail closed (deny by default)
-if (!session) {
-  redirect('/login'); // ALWAYS deny first
-  return;
-}
-// Only after auth passes, proceed with protected logic
-
-// Fetch errors — always check response
-const res = await fetch('/api/data');
-if (!res.ok) {
-  throw new Error(`API error: ${res.status}`);
-}
-const data = await res.json();
-
-// Validate external data shape before casting
-const parsed = schema.safeParse(data);
-if (!parsed.success) {
-  throw new Error('Unexpected API response shape');
-}
-
-// Auth errors
-if (error?.error_type === 'reauth_required') {
-  toast.error('Session expired');
-}
-
-// Storage quota
-try {
-  localStorage.setItem(key, value);
-} catch (e) {
-  if (e.name === 'QuotaExceededError') {
-    toast.error('Storage full');
-  }
-}
-```
-
-## Query Keys
+Centralised and `as const`, never inline string arrays:
 
 ```typescript
 export const queryKeys = {
@@ -148,91 +55,33 @@ export const queryKeys = {
 } as const;
 ```
 
-## React/Next.js Optimization Priority
+## Design system
 
-Fix in this order — earlier items have bigger impact:
+Semantic tokens only (`text-foreground`, `bg-background`, `text-muted-foreground`)
+and the spacing scale (`p-4`, never `p-[15px]`). Reuse components and add
+variants rather than forking them. `rule-design-system` has the token
+definitions and the one exception.
 
-### 1. Eliminate Waterfalls
-```typescript
-// Bad - sequential (600ms)
-const user = await getUser(id);
-const posts = await getPosts(id);
+## Anti-patterns — flag these on sight
 
-// Good - parallel (200ms)
-const [user, posts] = await Promise.all([getUser(id), getPosts(id)]);
-```
-- Use `Promise.all()` for independent operations
-- Use `React.cache()` for per-request deduplication
-- Wrap slow components in `<Suspense>` for streaming
+**Security and data safety**
+- Fail-open auth. `if (!session) redirect` must be the default; `if (session) allow` is backwards.
+- Any `/dashboard/*` or `/api/*` route not covered by the auth middleware.
+- SSRF: user-supplied URLs fetched without validating against private IP ranges.
 
-### 2. Bundle Size
-- Avoid barrel files (`index.ts` re-exports) — they prevent tree-shaking
-- Dynamic import heavy components: `dynamic(() => import('./Chart'), { ssr: false })`
-- Direct imports: `import format from 'date-fns/format'` not `import { format } from 'date-fns'`
-- Mark `'use client'` as low as possible in the component tree
+**Accessibility**
+- `user-scalable=no` or `maximum-scale=1`.
+- `outline-none` with no `focus-visible` replacement.
+- `transition: all`.
+- Hardcoded date and number formats — use `Intl.*`.
 
-### 3. Server Performance
-- Server Components by default
-- `React.cache()` to deduplicate identical server-side fetches
-- `Cache-Control` headers for static data
-- Avoid serializing large objects across server/client boundary
+**Design**
+- Hardcoded colors or arbitrary spacing values.
 
-### 4. Client Data Fetching
-- SWR or React Query over raw `useEffect` + `fetch`
-- Optimistic updates for mutations
-- Prefer uncontrolled inputs for forms
-- Add `staleTime` to avoid refetching on every mount
+## Mistake logging
 
-### 5. Re-render Optimization (do last)
-- Lift state up only as far as needed
-- `useCallback` for handlers passed to memoized children
-- Split context providers by update frequency
-- Lazy state initialization: `useState(() => expensiveComputation())`
-
-### 6. Component Architecture
-```tsx
-// Bad - boolean prop explosion
-<Card isCompact isHighlighted hasBorder isClickable />
-
-// Good - composition
-<Card variant="compact">
-  <Card.Highlight>Content</Card.Highlight>
-</Card>
-```
-- Prefer composition over boolean props
-- Eliminate `forwardRef` (React 19+), use `use()` instead of `useContext()`
-
-## Anti-Patterns (Flag These)
-
-### Accessibility
-- `user-scalable=no` or `maximum-scale=1`
-- `transition: all`
-- `outline-none` without focus-visible replacement
-- `<div>`/`<span>` with click handlers (should be `<button>`)
-- Images without dimensions
-- Form inputs without labels
-- Hardcoded date/number formats (use `Intl.*`)
-
-### Design System
-- Hardcoded colors (use semantic tokens: `text-foreground`, not `text-gray-500`)
-- Spacing with arbitrary values (use scale: `p-4`, not `p-[15px]`)
-
-### Security & Data Safety
-- `as unknown as Type` on DB/API data — validate shape with Zod first
-- `fetch()` without error handling — always check `res.ok` and wrap in try/catch
-- Fail-open auth: `if (!session) redirect` must be the DEFAULT, not `if (session) allow`
-- Missing middleware coverage: every `/dashboard/*`, `/api/*` route must be auth-checked
-- SSRF: user-supplied URLs must be validated against private IP ranges before fetch
-
-## Design System
-
-- Semantic tokens only (`text-foreground`, `bg-background`, `text-muted-foreground`)
-- Spacing scale (`p-4`, not `p-[15px]`)
-- Reuse components — create variants for differences
-
-## Mistake Logging
-
-Log errors to `.claude/mistakes.md`:
+When a review or a fix catches something that should not have shipped, append it
+to `.claude/mistakes.md` so the pattern is greppable next time:
 
 ```markdown
 ## [Category]: [Description]
@@ -242,11 +91,4 @@ Log errors to `.claude/mistakes.md`:
 **Prevention:** Rule
 ```
 
-Categories: `Type Safety`, `React`, `API`, `Performance`, `A11y`
-
-## Token Efficiency
-
-Be concise. Short responses = more runway.
-- Do not repeat file contents
-- Do not explain what you're about to do
-- Just do it, report briefly
+Categories: `Type Safety`, `React`, `API`, `Performance`, `A11y`.

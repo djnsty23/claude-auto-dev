@@ -1,163 +1,47 @@
 ---
 name: a11y
-description: Accessibility audit and patterns - WCAG 2.1 AA compliance for React apps.
-when_to_use: "Invoked when the user says \"a11y\", \"accessibility\", \"wcag\", \"screen reader\"."
+description: Accessibility audit against WCAG 2.1 AA — run the automated scan, then the manual checks tooling cannot make, and report in this project's format.
+when_to_use: "Invoked when the user says \"a11y\", \"accessibility\", \"wcag\", \"screen reader\", or asks whether a UI is accessible."
 allowed-tools: Bash, Read, Grep, Glob
 model: opus
 user-invocable: true
+argument-hint: "[url or component path]"
 ---
 
-# Accessibility (WCAG 2.1 AA)
+# Accessibility Audit
 
-## Quick Audit
+You know WCAG 2.1 AA. This skill is the procedure and the report format, not a
+tutorial on it.
+
+## 1. Automated scan
 
 ```bash
-# Automated checks (catches ~30% of issues)
 npx axe-core-cli http://localhost:3000
-
-# Or in browser console
-# Install axe DevTools extension → run scan
 ```
 
-**Automated tools catch 30%. Manual testing catches the rest.**
+**Automated tooling catches roughly 30% of real issues.** Treat a clean axe run
+as the starting point, never as a pass.
 
-## Critical Checklist
+## 2. Manual checks
 
-### 1. Keyboard Navigation (Most Common Failure)
+Drive the page with the `browser` skill and confirm, in this order — the first
+two are where this codebase actually fails:
 
-```tsx
-// ❌ Bad - click-only interaction
-<div onClick={handleClick}>Click me</div>
+1. **Keyboard only.** Tab through the whole flow. Every interactive element is
+   reachable, in a sensible order, with a visible focus indicator. Dialogs trap
+   focus and restore it on close.
+2. **State changes are announced.** Loading, error, and success states reach a
+   live region — a spinner that only appears visually is invisible to a screen
+   reader.
+3. Labels on every input; errors tied to their field.
+4. Contrast at 4.5:1 for body text, 3:1 for large text and UI boundaries.
+5. Landmarks and one `h1`, with no skipped heading levels.
+6. Images: meaningful ones have alt text, decorative ones have `alt=""`.
 
-// ✅ Good - keyboard accessible
-<button onClick={handleClick}>Click me</button>
+`rule-design-system` and `standards` list the anti-patterns to flag on sight
+(`user-scalable=no`, `outline-none` with no `focus-visible`, `transition: all`).
 
-// ✅ Good - custom element with keyboard support
-<div
-  role="button"
-  tabIndex={0}
-  onClick={handleClick}
-  onKeyDown={(e) => {
-    if (e.key === 'Enter' || e.key === ' ') handleClick()
-  }}
->
-  Click me
-</div>
-```
-
-**Test:** Tab through entire page. Can you reach and activate everything?
-
-### 2. Focus Management
-
-```tsx
-// Dialog: trap focus inside, return on close
-<Dialog onOpenChange={(open) => {
-  if (!open) triggerRef.current?.focus()
-}}>
-
-// Page navigation: focus main content
-useEffect(() => {
-  document.getElementById('main-content')?.focus()
-}, [pathname])
-
-// Skip link (first element in body)
-<a href="#main-content" className="sr-only focus:not-sr-only">
-  Skip to main content
-</a>
-```
-
-### 3. Color Contrast
-
-| Element | Minimum Ratio | Enhanced |
-|---------|---------------|----------|
-| Normal text | 4.5:1 | 7:1 |
-| Large text (18px+) | 3:1 | 4.5:1 |
-| UI components | 3:1 | - |
-
-```tsx
-// ❌ Bad - low contrast
-<p className="text-gray-400">Light text on white</p>
-
-// ✅ Good - use semantic tokens with proper contrast
-<p className="text-muted-foreground">Accessible muted text</p>
-```
-
-### 4. Images and Media
-
-```tsx
-// ❌ Bad
-<img src="/artist.jpg" />
-
-// ✅ Good - descriptive alt
-<img src="/artist.jpg" alt="Artist profile photo of Luna performing on stage" />
-
-// ✅ Good - decorative (skip by screen reader)
-<img src="/divider.svg" alt="" role="presentation" />
-
-// Audio/Video: always provide captions
-<audio controls aria-label="Song preview: Midnight Drive">
-```
-
-### 5. Forms
-
-```tsx
-// ❌ Bad - no label
-<input placeholder="Email" />
-
-// ✅ Good - associated label
-<label htmlFor="email">Email</label>
-<input id="email" type="email" aria-required="true" />
-
-// ✅ Good - error messaging
-<input
-  id="email"
-  aria-invalid={!!errors.email}
-  aria-describedby={errors.email ? "email-error" : undefined}
-/>
-{errors.email && (
-  <p id="email-error" role="alert" className="text-destructive text-sm">
-    {errors.email.message}
-  </p>
-)}
-```
-
-### 6. ARIA (Use Sparingly)
-
-```tsx
-// Live regions for dynamic content
-<div aria-live="polite" aria-atomic="true">
-  {status === 'generating' && 'Generating your song...'}
-</div>
-
-// Loading states
-<button disabled={loading} aria-busy={loading}>
-  {loading ? 'Saving...' : 'Save'}
-</button>
-
-// Custom components
-<div role="tablist" aria-label="Song sections">
-  <button role="tab" aria-selected={active === 'lyrics'}>Lyrics</button>
-  <button role="tab" aria-selected={active === 'details'}>Details</button>
-</div>
-```
-
-### 7. Semantic HTML
-
-```tsx
-// ❌ Bad - div soup
-<div class="header"><div class="nav">...</div></div>
-
-// ✅ Good - semantic landmarks
-<header><nav aria-label="Main">...</nav></header>
-<main id="main-content">
-  <section aria-labelledby="songs-heading">
-    <h2 id="songs-heading">Your Songs</h2>
-  </section>
-</main>
-<footer>...</footer>
-```
-
-## Audit Report Format
+## 3. Report
 
 ```
 Accessibility Audit (WCAG 2.1 AA)
@@ -174,11 +58,6 @@ Score: 78/100
 Critical: 0 | High: 1 | Medium: 2 | Low: 1
 ```
 
-## Integration
-
-| Skill | How It Integrates |
-|-------|-------------------|
-| `audit` | A11y agent uses these patterns |
-| `standards` | A11y is part of "all UI states handled" |
-| `design` | New UI must meet contrast + keyboard requirements |
-| `review` | Flag a11y regressions |
+Each finding gets `file:line`, the WCAG criterion, and the fix. Say which checks
+were automated and which you performed manually — a reader cannot tell
+otherwise, and it changes how much the score is worth.

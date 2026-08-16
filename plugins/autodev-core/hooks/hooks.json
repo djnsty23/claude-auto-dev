@@ -50,15 +50,6 @@
             "timeout": 60
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.js\"",
-            "timeout": 3
-          }
-        ]
       }
     ],
     "Stop": [
