@@ -123,6 +123,31 @@ const fullMs = timeN(5);
 check(`flat cost: ${emptyMs.toFixed(0)}ms empty vs ${fullMs.toFixed(0)}ms with 25 files`,
     fullMs < emptyMs * 2 + 25);
 
+// --- the inbox must not be CLAIMED when there is nothing to announce.
+//
+// Found by mutation: `if (out) { inbox.claim(); }` forced to `if (true)` left
+// every assertion green. The suite checked that the hook stays silent on an
+// empty inbox, but never that it stays silent WITHOUT marking anything seen.
+//
+// That gap matters more than it looks. claim() marks every file in the folder as
+// seen, and the hook announces each arrival exactly once. Any path where check()
+// returns nothing while unclaimed files are present would mark them consumed and
+// they would never be announced at all — arrivals lost silently, which is the
+// one outcome an inbox cannot have.
+{
+    const STATE = path.join(INBOX, '.autodev-seen.json');
+    for (const f of fs.readdirSync(INBOX)) fs.rmSync(path.join(INBOX, f), { force: true });
+
+    runWatch('claim');                       // establish a baseline state file
+    const before = fs.readFileSync(STATE, 'utf8');
+
+    const r = runHook();                     // empty inbox: nothing to announce
+    const after = fs.readFileSync(STATE, 'utf8');
+
+    check('empty inbox: hook says nothing', (r.stdout || '').trim() === '');
+    check('  and does NOT claim (seen-state untouched)', after === before);
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
