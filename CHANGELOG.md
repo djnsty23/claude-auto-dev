@@ -1,5 +1,52 @@
 # Changelog
 
+## [8.8.0] - 2026-08-16
+
+### Changed — `drift-audit` ages the prd BACKLOG, not the prd FILE
+
+Four changes were proposed. Measuring against current behaviour on three real
+repos killed two; implementing the survivors exposed a bug in one of them.
+
+- **Per-pending-story age** replaces whole-file age as the finding. The file-level
+  number does not discriminate — it read 4d / 0d / 1d across three repos whose
+  median *pending story* was 61d / 15d / 1d. One had 14 of 15 pending stories
+  untouched for over a month while its file was four days old. Also drops the
+  `age < 3 → return` early-out, which meant the repos whose files looked fresh
+  were never examined.
+- **Unmerged branches carrying `prd.json` changes** are surfaced. Built because a
+  backlog looked abandoned for weeks while the finished reconciliation sat on a
+  branch nobody merged — a check aimed at the working tree concludes the
+  opposite of the truth. 224 remote branches scanned, 2 carriers, 0 false
+  positives.
+- **Commit counts use `<sha>..HEAD`, not `--since=<ts>`.** `--since` filters on
+  committer date, so rebased commits fall outside a window the range includes.
+  Measured +2, −1, 0 — it errs both ways.
+- **Rejected, recorded in the source so it is not rebuilt:** "age from the last
+  commit that changed a `passes` value" returned the identical answer in all
+  three repos. And the story-less commit ratio measured 95–100% everywhere, so
+  it discriminates nothing as a recurring finding.
+
+### Added
+
+- **`tooling/test-drift-audit.js`** — 16 assertions against real git repos rather
+  than fixtures, since both signals are defined in terms of git history. Covers
+  the motivating case (file touched today, backlog 120 days old) and the two
+  negative cases that keep the branch detector honest.
+
+### Fixed
+
+- **Story comparison parses instead of slicing text.** The first implementation
+  sliced from `"S-1": {` to the next `\n    },`; the last story in the object has
+  no trailing comma, so its slice ran to end-of-file and every story read as
+  freshly edited on the day a story was appended after it. Under-reported one
+  repo by two stale stories and four days of median age.
+
+### Note
+
+This file skipped 8.3–8.7, which shipped the inbox, the memory-maintenance
+routine, `claudemd-audit`, the orphan/drift detectors and `rule-ab-testing`.
+Those are in the git log but were never written up here.
+
 ## [8.2.0] - 2026-08-16
 
 ### Added — `preflight`
