@@ -106,6 +106,38 @@ fs.writeFileSync(path.join(broken, 'src', 'bad.js'), 'const = ;\n');
 r = run(broken);
 check('syntax gate catches an unparseable file', r.status === 1 && /does not parse/.test(r.out));
 
+// --- the syntax gate must not walk into node_modules.
+//
+// `e.name === 'node_modules' || e.name.startsWith('.')` mutated to `&&` skips
+// nothing, and the gate then parse-checks every dependency in the tree. On a
+// real project that is thousands of files and a guaranteed failure from some
+// dependency shipping non-parsing source — a gate that always fails is a gate
+// that gets removed. No fixture had a node_modules, so the mutant survived.
+{
+    const dir = project();
+    // Syntactically broken files where the walker must never look.
+    fs.mkdirSync(path.join(dir, 'src', 'node_modules', 'dep'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'src', 'node_modules', 'dep', 'broken.js'), 'function ( { ]]];\n');
+    fs.mkdirSync(path.join(dir, 'src', '.cache'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'src', '.cache', 'broken.js'), 'function ( { ]]];\n');
+
+    // run() already merges stdout+stderr into `out`. An earlier version of this
+    // block read r.stdout, which this helper does not return — so `out` was
+    // undefined, the regex matched nothing, and the assertion passed vacuously
+    // while the mutant lived. Read the helper before assuming its shape.
+    const r = run(dir);
+    const out = r.out || '';
+    check('syntax gate ignores node_modules and dot-dirs',
+        !/node_modules/.test(out) && !/\.cache/.test(out));
+
+    // And it must still catch a broken file that IS in scope, or the guard above
+    // could be "skip everything" and both assertions would pass.
+    const dir2 = project();
+    fs.writeFileSync(path.join(dir2, 'src', 'genuinely-broken.js'), 'function ( { ]]];\n');
+    const r2 = run(dir2);
+    check('  but a broken file in scope IS still caught', /genuinely-broken/.test(r2.out || ''));
+}
+
 let pass = 0, fail = 0;
 for (const [label, okk] of cases) {
     console.log((okk ? 'PASS' : 'FAIL') + '  ' + label);

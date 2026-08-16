@@ -148,6 +148,49 @@ check(`flat cost: ${emptyMs.toFixed(0)}ms empty vs ${fullMs.toFixed(0)}ms with 2
     check('  and does NOT claim (seen-state untouched)', after === before);
 }
 
+// --- the `list` subcommand, which nothing exercised.
+//
+// Every mutant on it survived — the whole branch could be deleted and this suite
+// would stay green. It is the command a user runs by hand to see what is
+// waiting, so "it prints nothing" is the failure that matters.
+{
+    for (const f of fs.readdirSync(INBOX)) fs.rmSync(path.join(INBOX, f), { force: true });
+
+    const empty = runWatch('list');
+    check('list on an empty inbox says so', /Inbox is empty/.test(empty.stdout || ''));
+    check('  and exits 0', empty.status === 0);
+
+    drop('screenshot-a.png', 2048);
+    drop('screenshot-b.png', 4096);
+    const full = runWatch('list');
+    check('list counts the waiting files', /2 file\(s\)/.test(full.stdout || ''));
+    check('  and names each one',
+        /screenshot-a\.png/.test(full.stdout || '') && /screenshot-b\.png/.test(full.stdout || ''));
+    check('  and does not claim them (list is read-only)',
+        /screenshot-a\.png/.test(runWatch('check').stdout || ''));
+}
+
+// --- the announce-once cycle, asserted at the watcher level.
+//
+// `!claimed.has(idOf(f))` with its negation dropped inverts the filter: already
+// claimed files become the "fresh" ones and genuinely new arrivals are hidden.
+// That is the exact opposite of the behaviour, and it survived.
+{
+    for (const f of fs.readdirSync(INBOX)) fs.rmSync(path.join(INBOX, f), { force: true });
+
+    drop('first.png', 1024);
+    check('a new file is fresh', /first\.png/.test(runWatch('check').stdout || ''));
+
+    runWatch('claim');
+    check('after claim, the same file is no longer fresh',
+        !/first\.png/.test(runWatch('check').stdout || ''));
+
+    drop('second.png', 1024);
+    const after = runWatch('check').stdout || '';
+    check('a file arriving after the claim IS fresh', /second\.png/.test(after));
+    check('  and the already-claimed one stays hidden', !/first\.png/.test(after));
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);

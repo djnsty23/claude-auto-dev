@@ -231,6 +231,62 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         (pure.orphanChecks || []).some((o) => o.script === 'scripts/verify-retry-logic.mjs'));
 }
 
+// ------------------------------------------------- gaps found by check:vacuity
+
+// node_modules must never be scanned. `e.name === 'node_modules' ||
+// e.name.startsWith('.')` mutated to `&&` skips nothing, and the tool would then
+// report every assertion-shaped file in every dependency. No fixture had a
+// node_modules, so the mutant survived — and this is the single largest
+// false-positive source the tool could possibly have.
+{
+    const dir = repo({
+        'package.json': JSON.stringify({ name: 'r' }),
+        'node_modules/some-dep/check.mjs': ASSERTS,
+        '.hidden/also-check.mjs': ASSERTS,
+        'scripts/real-orphan.mjs': ASSERTS,
+    });
+    const out = run(dir);
+    const names = (out.orphanChecks || []).map((o) => o.script);
+    check('node_modules is not scanned', !names.some((f) => f.includes('node_modules')));
+    check('dot-directories are not scanned', !names.some((f) => f.startsWith('.hidden')));
+    check('  but a real orphan beside them is still found',
+        names.includes('scripts/real-orphan.mjs'));
+}
+
+// jest config living in package.json, which is the common way to configure it.
+// Both mutants on `(pkg.jest && pkg.jest.testMatch) || []` survived because no
+// fixture used it — a documented input path with no test.
+{
+    const dir = repo({
+        'package.json': JSON.stringify({ name: 'r', jest: { testMatch: ['**/scripts/**/*.spec.js'] } }),
+        'scripts/thing.spec.js': ASSERTS,
+    });
+    const out = run(dir);
+    check('jest testMatch in package.json is honoured', (out.orphanChecks || []).length === 0);
+    check('  and the glob is reported as honoured',
+        (out.includeGlobs || []).includes('**/scripts/**/*.spec.js'));
+}
+
+// The MANUAL bucket must still be PRINTED, by name.
+//
+// This is the assertion the widened classifier rests on. Moving 14 findings out
+// of "orphaned assertions" was defensible only because they are still listed
+// under the manual heading — reclassification, not suppression. If that heading
+// stopped printing, the widening would become exactly the 67-of-120 mistake it
+// was written to avoid, and nothing would have noticed: `if (manual.length)`
+// forced to `false` survived every assertion here.
+{
+    const dir = repo({
+        'package.json': JSON.stringify({ name: 'r' }),
+        'scripts/charge-cards.mjs': "await stripe.charges.create({});\n" + ASSERTS,
+    });
+    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    check('a manual tool is not reported as an orphaned check',
+        !/Verification code that NOTHING runs[\s\S]*charge-cards/.test(r.stdout));
+    check('  but it IS still printed under the manual heading',
+        /MANUAL tools/.test(r.stdout) && /charge-cards\.mjs/.test(r.stdout));
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
