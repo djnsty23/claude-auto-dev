@@ -61,6 +61,7 @@ without touching it.
 | Say | Does |
 |-----|------|
 | `autodev-init` | Read this codebase and write its real conventions to `.claude/project-rules.md` |
+| `learn-from-fixes` | Rank what this project keeps shipping broken, from its own fix history |
 | `brainstorm` | Scan codebase + live site, propose improvements |
 | `brainstorm apply` | Create stories from the last brainstorm |
 | `auto` | Work through all pending stories autonomously |
