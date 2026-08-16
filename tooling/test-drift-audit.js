@@ -28,11 +28,16 @@
 // is the INTERSECTION of the two survivor sets, not either number alone:
 //
 //   survives the prd suite      57
-//   survives the config suite   52
-//   survives BOTH               27   <- the real remaining gap
+//   survives the config suite   36
+//   survives BOTH               12   <- the real remaining gap
 //
-// 60 of 87 mutants are now caught by one suite or the other. Reading either 57
-// or 52 as "the" number would overstate the debt by roughly double.
+// 75 of 87 mutants are now caught by one suite or the other. Reading either 57
+// or 36 as "the" number would overstate the debt several times over.
+//
+// The arc, for anyone deciding whether this is worth doing again:
+// 57 survivors -> 27 once the config half had a suite at all -> 12 once the
+// four clusters inside it were read and closed (published-but-not-installed,
+// the missing-manifest check, the exit-code contract, and --json).
 //
 // Run: node tooling/test-drift-audit.js
 

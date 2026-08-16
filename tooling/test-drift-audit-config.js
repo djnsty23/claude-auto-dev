@@ -46,6 +46,16 @@ function run(cfg) {
     return (r.stdout || '') + (r.stderr || '');
 }
 
+// Same, but keeping the status — the exit code IS the contract for anything
+// wiring this into CI, and asserting output alone leaves it free to invert.
+function runFull(cfg, extra = []) {
+    const r = spawnSync(process.execPath, [AUDIT, ...extra], {
+        encoding: 'utf8',
+        env: { ...process.env, CLAUDE_CONFIG_DIR: cfg, HOME: path.join(TMP, 'home'), USERPROFILE: path.join(TMP, 'home') },
+    });
+    return { out: (r.stdout || '') + (r.stderr || ''), status: r.status };
+}
+
 // ------------------------------------------------------------- auditSettings
 
 // An allow rule that can run any command makes every deny rule decorative.
@@ -169,6 +179,114 @@ function run(cfg) {
 }
 
 // ---------------------------------------------------------------- report
+
+// ------------------------------- published-but-not-installed, and the manifest
+
+// A whole feature with no test: a plugin published in a marketplace you ALREADY
+// USE but have not installed. All three mutations on its guard survived. This is
+// how one plugin sat uninstalled while its sibling was in daily use.
+{
+    const clone2 = path.join(TMP, 'catalog-clone');
+    fs.mkdirSync(path.join(clone2, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(clone2, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify({ plugins: [{ name: 'core' }, { name: 'extra' }] }));
+
+    const adopted = config({
+        'plugins/known_marketplaces.json': { mk: { installLocation: clone2 } },
+        'plugins/installed_plugins.json': { plugins: { 'core@mk': [{ version: '1.0.0' }] } },
+    });
+    const out = run(adopted);
+    check('a published-but-uninstalled sibling is reported', /extra@mk/.test(out));
+    check('  and the one you DO have installed is not', !/core@mk is published/.test(out));
+
+    // The marketplace you have adopted nothing from is none of your business.
+    const unadopted = config({
+        'plugins/known_marketplaces.json': { mk: { installLocation: clone2 } },
+        'plugins/installed_plugins.json': { plugins: { 'thing@other': [{ version: '1.0.0' }] } },
+    });
+    check('a marketplace you use nothing from is not advertised',
+        !/extra@mk/.test(run(unadopted)));
+}
+
+// An install path whose manifest is gone is a broken install, not drift.
+//
+// The marketplace clone has to be a REAL git repo: the sha comparison runs
+// first, and `git rev-parse` in a directory that does not exist throws straight
+// into a `continue` — so with a fake installLocation this check is unreachable
+// and the first version of this case failed for that reason, not because the
+// code was wrong.
+{
+    const repo2 = path.join(TMP, 'manifest-clone');
+    fs.mkdirSync(repo2, { recursive: true });
+    const g2 = (...a) => execSync('git ' + a.join(' '), { cwd: repo2, stdio: 'ignore' });
+    g2('init', '-q'); g2('config', 'user.email', 't@t'); g2('config', 'user.name', 't');
+    fs.writeFileSync(path.join(repo2, 'x.txt'), 'x');
+    g2('add', '-A'); g2('commit', '-qm', 'init');
+    const sha = execSync('git rev-parse HEAD', { cwd: repo2, encoding: 'utf8' }).trim();
+
+    const gone = path.join(TMP, 'installed-but-empty');
+    fs.mkdirSync(gone, { recursive: true });        // exists, but no .claude-plugin/plugin.json
+    const out = run(config({
+        'plugins/known_marketplaces.json': { mk: { installLocation: repo2 } },
+        'plugins/installed_plugins.json': {
+            // matching sha, so the ONLY thing that can fire is the manifest check
+            plugins: { 'broken@mk': [{ version: '1.0.0', gitCommitSha: sha, installPath: gone }] } },
+    }));
+    check('an installPath missing its manifest is reported', /installPath is missing its manifest/.test(out));
+
+    // And a healthy install must not be reported.
+    const ok = path.join(TMP, 'installed-ok');
+    fs.mkdirSync(path.join(ok, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(ok, '.claude-plugin', 'plugin.json'), '{"name":"fine"}');
+    const clean = run(config({
+        'plugins/known_marketplaces.json': { mk: { installLocation: repo2 } },
+        'plugins/installed_plugins.json': {
+            plugins: { 'fine@mk': [{ version: '1.0.0', gitCommitSha: sha, installPath: ok }] } },
+    }));
+    check('  and an install WITH its manifest is not', !/missing its manifest/.test(clean));
+}
+
+// ---------------------------------------------------- the output contract
+
+// The exit code is what CI reads. `severity === 'fail'` inverted would exit 0 on
+// a failure and 1 on a clean run, and no output assertion can see it.
+{
+    const clean = runFull(config({ 'settings.json': { permissions: { allow: ['Bash(npm test)'], deny: [] } } }));
+    check('a clean config exits 0', clean.status === 0);
+    check('  and says everything is current', /are all current/.test(clean.out));
+
+    const failing = runFull(config({ 'settings.json': {
+        permissions: { allow: ['Bash(bash -c *)'], deny: ['Bash(rm *)'] } } }));
+    check('a FAIL-severity finding exits 1', failing.status === 1);
+
+    // warn/info must NOT fail the run, or the exit code stops meaning anything.
+    const warnOnly = runFull(config({ 'settings.json': {
+        permissions: { allow: ['Bash(eval *)'], deny: [] } } }));
+    check('a warning-only run still exits 0', warnOnly.status === 0);
+}
+
+// --json is a separate output path and had no test at all.
+{
+    const j = runFull(config({ 'settings.json': {
+        permissions: { allow: ['Bash(bash -c *)'], deny: ['Bash(rm *)'] } } }), ['--json']);
+    let parsed = null;
+    try { parsed = JSON.parse(j.out); } catch { /* stays null */ }
+    check('--json emits parseable JSON', parsed !== null);
+    check('  carrying the findings', !!parsed && Array.isArray(parsed.findings) && parsed.findings.length > 0);
+    check('  and the config dir it audited', !!parsed && typeof parsed.configDir === 'string');
+    check('  and it still exits 1 on a fail', j.status === 1);
+}
+
+// Findings are grouped by area, and the header prints once per area rather than
+// once per finding.
+{
+    const cfg = config({
+        'settings.json': { permissions: { allow: ['Bash(eval *)', 'Bash(source *)'], deny: [] } },
+    });
+    const out = run(cfg);
+    check('the area header appears once, not once per finding',
+        (out.match(/\[settings\]/g) || []).length === 1);
+}
 
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
