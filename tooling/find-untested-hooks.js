@@ -88,6 +88,17 @@ const rows = wired.map((h) => {
     return { ...h, covering };
 });
 
+// POPULATION FLOOR. Zero wired hooks means hooks.json was not found or not
+// parsed — not that every hook is tested. This is a hard gate in validate now,
+// so that distinction is the difference between a green run and a green LIE.
+if (!rows.length) {
+    const msg = 'REFUSING: found 0 wired hooks. hooks.json is missing, unparseable, or moved — '
+        + 'this cannot report coverage for a population it never found.';
+    if (asJson) console.log(JSON.stringify({ error: msg, wired: 0 }, null, 2));
+    else console.error('\n' + msg + '\n');
+    process.exit(1);
+}
+
 const untested = rows.filter((r) => r.covering.length === 0);
 
 if (asJson) {

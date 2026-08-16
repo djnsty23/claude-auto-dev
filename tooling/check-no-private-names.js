@@ -58,9 +58,28 @@ const ALLOW = new Set([
 //
 // `--others --exclude-standard` adds untracked files while still honouring
 // .gitignore, so scratch and build output stay out.
-const listed = (args) => execSync(`git ls-files ${args}`, { cwd: ROOT, encoding: 'utf8' })
-    .split('\n').filter(Boolean);
+// Returns [] rather than throwing when git is unavailable or this is not a work
+// tree. The throw was worse than the false pass it replaced: an uncaught
+// ENOENT/fatal killed the script before the population floor below could give a
+// readable refusal, so the failure mode was a stack trace instead of an answer.
+const listed = (args) => {
+    try {
+        return execSync(`git ls-files ${args}`, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+            .split('\n').filter(Boolean);
+    } catch { return []; }
+};
 const tracked = [...new Set([...listed(''), ...listed('--others --exclude-standard')])];
+
+// POPULATION FLOOR. `git ls-files` returning nothing — run outside a work tree,
+// a broken git, an empty index — would make this report "0 files, clean" and
+// exit 0. A false all-clear on a PUBLIC repo is the one answer this check must
+// never give, and it is indistinguishable from a real pass in the output.
+if (!tracked.length && !process.argv.includes('--list')) {
+    console.error('\n[no-private-names] REFUSING: git listed 0 files.\n');
+    console.error('This check cannot clear a repo it could not read. Verify you are inside the');
+    console.error('work tree and that `git ls-files` returns something.\n');
+    process.exit(1);
+}
 
 if (process.argv.includes('--list')) {
     console.log(NAMES.join('\n'));
