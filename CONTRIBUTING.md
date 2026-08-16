@@ -151,6 +151,14 @@ shipped. Redirect to a file and check `$?`, or let the pre-push hook do it.
 `verify ; push` runs the push whether or not the verify passed. It put a red
 commit on a product repo's branch on 2026-08-17. Chain them.
 
+**Write commit messages to a file and use `git commit -F`.** A message passed
+with `-m` goes through the shell, so backticks run as command substitution and
+`$(...)`, `$VAR` and `!` expand. On 2026-08-17 three messages lost words that
+way — each time a backticked identifier vanished, leaving a sentence with a hole
+in it, and none of them could be amended afterwards because the fix is a
+force-push and force-push is blocked here. The habit is cheap: write the message
+to a scratch file, then `git commit -F <file>`.
+
 ## Pushing to a product repo
 
 autodev has a pre-push hook. Product repos do not — their gate is whatever they
