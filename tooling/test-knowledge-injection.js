@@ -291,6 +291,40 @@ if (!memDB.isAvailable()) {
             after.some((l) => l === `${CAP_SESSION}\tsrc/api`)]);
     }
 
+    // ---- triage of the 18 remaining survivors, so nobody re-derives it ----
+    //
+    // memory-capture went 27 -> 23 -> 18 survivors as assertions were added. All
+    // 18 have been read. They fall into three groups, and only the third is work:
+    //
+    // EQUIVALENT — the fixture makes both branches identical. The PLUGIN_ROOT
+    //   fallback (every suite sets CLAUDE_PLUGIN_ROOT to the path the fallback
+    //   computes), `data.cwd || process.cwd()` (the tests pass the cwd they run
+    //   in), and `data.tool_input || {}` (always supplied).
+    //
+    // DEFENCE IN DEPTH — a later guard already catches what the mutated one
+    //   would have let through, so no assertion can separate them without
+    //   changing the hook:
+    //     `if (filePath)` forced true still yields no area, because
+    //       path.relative on an empty path produces a '..' path and the
+    //       !rel.startsWith('..') guard rejects it.
+    //     `dir && dir !== '.'` forced true still yields no area, because the
+    //       `area !== '.'` guard below rejects it.
+    //     The existence and isAvailable() guards all sit in front of a require()
+    //       or a DB call that throws into the surrounding catch anyway.
+    //   These are not gaps. They are the redundancy working.
+    //
+    // REAL, and left undone with the reason:
+    //     137-139  `...(g.gotchas || [])` and its two siblings, in the knowledge
+    //              brief assembly. Catching them needs seeded knowledge carrying
+    //              gotchas, bugfixes and changes separately, so a `&&` collapsing
+    //              a list to empty is observable in the rendered brief.
+    //     160      `if (brief !== null)` records the throttle marker even when
+    //              the DB call FAILED, so the next edit never retries — the one
+    //              case the comment there says must retry. Catching it needs a
+    //              forced DB failure or an open circuit breaker.
+    //     46       `data.tool_output || ''` feeds the classifier; nothing asserts
+    //              on the resulting observation's content.
+
     try { fs.rmSync(CAP_HOME, { recursive: true, force: true }); } catch {}
   }
 }
