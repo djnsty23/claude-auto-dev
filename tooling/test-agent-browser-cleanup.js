@@ -151,6 +151,42 @@ const read = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
     check('  and does not create them', !fs.existsSync(path.join(home, '.agent-browser')));
 }
 
+// LOCALAPPDATA is a Windows variable and is simply absent elsewhere, so the
+// `|| path.join(os.homedir(), 'AppData', 'Local')` fallback is the path actually
+// taken on any machine that does not set it. Every case above sets the variable,
+// so the fallback was never exercised.
+{
+    const home = path.join(TMP, 'fallback-home');
+    const tempRoot = path.join(home, 'AppData', 'Local', 'Temp');
+    fs.mkdirSync(tempRoot, { recursive: true });
+    const file = profile(tempRoot, 'agent-browser-chrome-fb', { browser: {}, background_mode: {} });
+
+    const prevHome = process.env.HOME, prevLad = process.env.LOCALAPPDATA, prevUp = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    delete process.env.LOCALAPPDATA;
+    try { mod.disableAutostartPreferences(); } finally {
+        process.env.HOME = prevHome;
+        process.env.USERPROFILE = prevUp;
+        if (prevLad === undefined) delete process.env.LOCALAPPDATA;
+        else process.env.LOCALAPPDATA = prevLad;
+    }
+
+    check('with LOCALAPPDATA unset, falls back to ~/AppData/Local',
+        read(file).browser.auto_launch_chrome_on_startup === false);
+}
+
+// ------------------------------------------------- deliberately not covered
+//
+// The remaining survivors on this file are all `isWin` platform gates plus the
+// `require.main === module` entrypoint guard. On a non-Windows machine the
+// Windows branches are unreachable, and forcing them on would have this hook
+// shell out to taskkill and PowerShell from a test run. pre-tool-filter.js
+// solved the same problem with an injectable platform, but that file only
+// consults denylists; this one KILLS PROCESSES, and an env var that makes a
+// macOS session take the Windows path is a worse thing to own than the gap.
+// Recorded rather than forced.
+
 // ------------------------------------------------------------------ entrypoint
 
 // SessionStart must never be blocked, and the hook must stay silent on the happy

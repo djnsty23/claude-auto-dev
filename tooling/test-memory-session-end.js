@@ -110,6 +110,110 @@ function run(dir, sessionId) {
         carrier.readPrompt(dir, 'sess-P') === '');
 }
 
+// ------------------------------------------------------- the summary it writes
+//
+// Everything above asserts the carrier side, which lives OUTSIDE the
+// `if (sessionId && memDB.isAvailable())` block — so the entire summary builder
+// was untested and its mutants all survived, including `passes === true` flipped
+// to `!==`, which would record the pending stories as the completed ones.
+//
+// The summary is what a later session reads to find out what happened. Asserting
+// the hook exits 0 says nothing about whether it wrote the truth.
+{
+    // memory-db reads HOME at module load, so it is loaded with HOME pointed at
+    // the fixture and then dropped from the cache again.
+    const withHome = (fn) => {
+        const prev = process.env.HOME, prevU = process.env.USERPROFILE;
+        process.env.HOME = HOME; process.env.USERPROFILE = HOME;
+        try { return fn(); } finally { process.env.HOME = prev; process.env.USERPROFILE = prevU; }
+    };
+    const loadDb = () => {
+        const p = require.resolve(path.join(PLUGIN_SRC, 'scripts', 'memory-db.js'));
+        delete require.cache[p];
+        return require(p);
+    };
+
+    const available = withHome(() => loadDb().isAvailable());
+
+    if (!available) {
+        console.log('[skip] node:sqlite unavailable — skipping summary assertions');
+    } else {
+        const readSession = (id) => withHome(() => {
+            const { DatabaseSync } = require('node:sqlite');
+            const db = new DatabaseSync(path.join(HOME, '.claude', 'auto-dev-memory.db'));
+            const row = db.prepare('SELECT completed, next_steps, end_time FROM sessions WHERE id = ?').get(id);
+            db.close();
+            return row;
+        });
+
+        // One done, two pending.
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({
+                    stories: {
+                        'S1-001': { title: 'ship the thing', passes: true },
+                        'S1-002': { title: 'b', passes: null },
+                        'S1-003': { title: 'c', passes: null },
+                    },
+                }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-sum', sid);
+            run(dir, 'sess-sum');
+            const row = readSession(sid);
+
+            check('the session is closed (end_time recorded)', !!row && !!row.end_time);
+            check('completed lists the DONE story, by id and title',
+                /S1-001/.test(row?.completed || '') && /ship the thing/.test(row?.completed || ''));
+            check('  and does not list the pending ones as completed',
+                !/S1-002/.test(row?.completed || ''));
+            check('next_steps counts the pending stories', /2 tasks remaining/.test(row?.next_steps || ''));
+            check('  and names them', /S1-002/.test(row?.next_steps || '') && /S1-003/.test(row?.next_steps || ''));
+        }
+
+        // Nothing pending — next_steps must be absent, not "0 tasks remaining".
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({ stories: { 'S1-001': { title: 'a', passes: true } } }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-done', sid);
+            run(dir, 'sess-done');
+            const row = readSession(sid);
+            check('nothing pending: no next_steps recorded', !row?.next_steps);
+        }
+
+        // A deferred story is neither done nor outstanding.
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({
+                    stories: {
+                        'S1-001': { title: 'a', passes: true },
+                        'S1-002': { title: 'b', passes: 'deferred' },
+                    },
+                }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-def', sid);
+            run(dir, 'sess-def');
+            const row = readSession(sid);
+            check('a deferred story is not counted as pending', !row?.next_steps);
+            check('  nor as completed', !/S1-002/.test(row?.completed || ''));
+        }
+
+        // No prd.json at all — the session still closes, with nothing to say.
+        {
+            const dir = project();
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-noprd', sid);
+            run(dir, 'sess-noprd');
+            const row = readSession(sid);
+            check('no prd.json: session still closed', !!row && !!row.end_time);
+            check('  with no completed summary', !row?.completed);
+        }
+    }
+}
+
 // ---------------------------------------------------------------- report
 
 let pass = 0, fail = 0;
