@@ -98,6 +98,40 @@ try {
     for (const g of (pkg.jest && pkg.jest.testMatch) || []) includeGlobs.push(g);
 } catch {}
 
+// `node --test` with no path arguments, which has NO config file to read.
+//
+// This was failure mode 2 all over again, one layer down. That mode was about
+// runners that include by glob rather than by name, and the fix read globs out
+// of vitest/jest/playwright configs. A runner that discovers by BUILT-IN
+// pattern has no config to read, so it looked like no runner at all.
+//
+// Measured on a real repo: `npm test` is `node --test`, and the detector
+// reported 9 orphaned assertions. Four were `scripts/*.test.js` — files Node's
+// own runner discovers and executes. Verified rather than assumed: a fixture
+// with `scripts/store-mapping.test.js` and a bare `node --test` runs it. So 4
+// of 9 were false positives, in the direction that matters least (noise), but
+// on the class most likely to be believed: files literally named *.test.js.
+//
+// Patterns per Node's documented default test-file discovery. Only applied when
+// a script actually invokes `node --test` without a path argument — with a path,
+// Node runs exactly what it is given and normal name-reference logic applies.
+try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
+    const invokesBareNodeTest = Object.values(pkg.scripts || {}).some(
+        (cmd) => typeof cmd === 'string' && /(^|\s|&&|;)node\s+(--[\w-]+(=\S+)?\s+)*--test(\s+--[\w-]+(=\S+)?)*\s*($|&&|;|\|)/.test(cmd)
+    );
+    if (invokesBareNodeTest) {
+        // Expanded rather than written with extglob `?(c|m)js`, so this does not
+        // depend on globToRe supporting a syntax nothing else here uses.
+        for (const ext of ['js', 'cjs', 'mjs']) {
+            includeGlobs.push(
+                `**/*.test.${ext}`, `**/*-test.${ext}`, `**/*_test.${ext}`,
+                `**/test-*.${ext}`, `**/test.${ext}`, `**/test/**/*.${ext}`
+            );
+        }
+    }
+} catch {}
+
 function globToRe(glob) {
     const T = { DIRSTAR: '\u0001', STARSTAR: '\u0002', STAR: '\u0003', OPEN: '\u0004', CLOSE: '\u0005', SEP: '\u0006' };
 

@@ -162,6 +162,43 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
     check('  the real orphan is still named', /genuinely-orphaned\.js/.test(r.stdout));
 }
 
+// `node --test` discovers test files by BUILT-IN pattern and has no config file
+// to read the globs out of, so it looked like no runner at all. A real repo
+// running `npm test` = `node --test` reported 9 orphaned assertions, 4 of which
+// were scripts/*.test.js that Node's own runner discovers and executes.
+{
+    const withNodeTest = run(repo({
+        'package.json': JSON.stringify({ name: 'r', scripts: { test: 'node --test' } }),
+        'scripts/store-mapping.test.js': ASSERTS,
+        'scripts/genuinely-orphaned.js': ASSERTS,
+    }));
+    const orphans = (withNodeTest.orphanChecks || []).map((o) => o.script);
+    check('node --test discovers scripts/*.test.js',
+        !orphans.some((f) => /store-mapping\.test\.js/.test(f)));
+    check('  and a non-test script beside it is STILL an orphan',
+        orphans.some((f) => /genuinely-orphaned\.js/.test(f)));
+
+    // The over-suppression guard. This must apply ONLY when a script actually
+    // runs bare `node --test`. A blanket version would silence every *.test.js
+    // in every repo, and nobody sees what a detector stops showing them.
+    const withoutNodeTest = run(repo({
+        'package.json': JSON.stringify({ name: 'r', scripts: { test: 'node tooling/custom-runner.js' } }),
+        'scripts/store-mapping.test.js': ASSERTS,
+    }));
+    const orphans2 = (withoutNodeTest.orphanChecks || []).map((o) => o.script);
+    check('a *.test.js is still an orphan when nothing runs node --test',
+        orphans2.some((f) => /store-mapping\.test\.js/.test(f)));
+
+    // `--test-reporter` must not be mistaken for `--test`.
+    const reporterOnly = run(repo({
+        'package.json': JSON.stringify({ name: 'r', scripts: { test: 'node --test-reporter=spec tooling/x.js' } }),
+        'scripts/store-mapping.test.js': ASSERTS,
+    }));
+    const orphans3 = (reporterOnly.orphanChecks || []).map((o) => o.script);
+    check('--test-reporter alone does not trigger node --test discovery',
+        orphans3.some((f) => /store-mapping\.test\.js/.test(f)));
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
