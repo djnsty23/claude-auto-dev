@@ -2,7 +2,7 @@
 name: brainstorm
 description: Feature ideation, dead code cleanup, and product thinking. Proposes new features and architecture improvements — not bugs or violations (use audit for those).
 when_to_use: "Invoked when the user says \"brainstorm\", \"generate\"."
-allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Write, Edit, WebSearch
+allowed-tools: Bash, Read, Grep, Glob, Task, Write, Edit, WebSearch
 model: opus
 user-invocable: true
 argument-hint: "[focus area]"

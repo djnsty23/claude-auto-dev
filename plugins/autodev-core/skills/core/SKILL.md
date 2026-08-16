@@ -2,7 +2,7 @@
 name: core
 description: The prd.json schema and task system used by every autodev workflow. Load before reading or writing prd.json, creating stories, or interpreting a task's passes field.
 when_to_use: "Background knowledge, loaded automatically whenever the session touches prd.json. Not user-invocable."
-allowed-tools: Read, Write, Edit, TaskCreate, TaskUpdate, TaskList, Grep, Glob
+allowed-tools: Read, Write, Edit, Grep, Glob
 model: opus
 user-invocable: false
 paths:
@@ -26,14 +26,15 @@ For large prd.json (100+ stories), use `Grep` to find specific stories. For typi
 
 Sprints are for tracking, not for ceremony. If the work is small, skip the overhead.
 
-## Two Layers
+## One layer, on purpose
 
-| Layer | Tool | Purpose |
-|-------|------|---------|
-| Long-term | prd.json | Sprint history, resolutions (Git-tracked) |
-| Short-term | Native Tasks | Active work (session only) |
+prd.json is the task system. It is git-tracked, so sprint state survives
+`/clear`, compaction, a crash, and a week away — none of which the session-local
+task list survives.
 
-Work with native Tasks during session, batch-update prd.json at end.
+The native task tools (TaskCreate/TaskUpdate/TaskList) were removed on Opus 4.8,
+Sonnet 5, and newer as of Claude Code 2.1.233, so do not plan around them. Track
+in-flight work in your own message to the user and write the outcome to prd.json.
 
 ## prd.json Story Schema
 
@@ -99,7 +100,7 @@ With 1M context, aggressive token saving is unnecessary. Prefer clarity over bre
 |--------|---------|
 | Check status | Read prd.json header or use dynamic context injection |
 | Start task | Grep specific story |
-| Track progress | Native TaskUpdate |
+| Track progress | Update the story in prd.json |
 | Complete work | Batch edit prd.json at session end |
 
 ## Archive Trigger

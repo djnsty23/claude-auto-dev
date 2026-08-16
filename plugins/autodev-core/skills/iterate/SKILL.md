@@ -2,7 +2,7 @@
 name: iterate
 description: Convergence loop — brainstorm, fix, re-scan until the codebase is clean. Combines brainstorm→apply→auto in one command.
 when_to_use: "Invoked when the user says \"iterate\", \"deep work\", \"converge\"."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, WebSearch, Agent, SendMessage
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, WebSearch, Agent, SendMessage
 model: opus
 user-invocable: true
 argument-hint: "[focus area or max rounds]"

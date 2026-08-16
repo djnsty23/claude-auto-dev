@@ -2,7 +2,7 @@
 name: sprint
 description: Creates or advances sprints in prd.json. Use when starting new work cycles or closing completed sprints.
 when_to_use: "Invoked when the user says \"sprint\"."
-allowed-tools: Read, Write, Edit, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Write, Edit
 model: opus
 user-invocable: true
 argument-hint: "[new|advance|close]"
