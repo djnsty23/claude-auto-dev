@@ -116,6 +116,52 @@ const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
 check('exits non-zero on an orphaned check', r.status === 1);
 check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
 
+// ── failure mode 3: a runner that DISCOVERS its work by pattern
+//
+// This tool reported four of THIS repo's own test suites as unreferenced, under
+// a heading saying they touch prod or money and were kept out of CI on purpose.
+// All four run on every build — tooling/test-all.js finds them with
+// readdirSync().filter(f => /^test-.*\.js$/.test(f)), so no literal filename
+// exists anywhere to match.
+{
+    const dir = repo({
+        'package.json': JSON.stringify({ scripts: { test: 'node scripts/run-all.js' } }),
+        'scripts/run-all.js':
+            "const fs=require('fs');\n"
+            + "for (const f of fs.readdirSync(__dirname).filter(f => /^check-.*\\.js$/.test(f))) require('./'+f);\n",
+        'scripts/check-alpha.js': ASSERTS,
+        'scripts/check-beta.js': ASSERTS,
+    });
+    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    check('a pattern-discovered script is NOT an orphan', r.status === 0);
+    check('  and is not named in the output',
+        !/check-alpha\.js/.test(r.stdout) && !/check-beta\.js/.test(r.stdout));
+}
+
+// The guard that keeps failure mode 3 from silencing the whole report. An
+// extension-only pattern names nothing — a version of this check let
+// /\.(js|html|css)$/ through and it suppressed 67 of 120 scripts in a real repo,
+// far worse than the false positives it was built to remove.
+{
+    // The .mjs files matter: without them the extension pattern matches 100% of
+    // the fixture and the >90% BREADTH guard rejects it, so the test passes even
+    // with the discriminator guard removed — it would prove nothing. Measured:
+    // the canary did not fire until these were added.
+    const dir = repo({
+        'package.json': JSON.stringify({ scripts: { test: 'node scripts/sweep.js' } }),
+        'scripts/sweep.js':
+            "const fs=require('fs');\n"
+            + "for (const f of fs.readdirSync(__dirname).filter(f => /\\.(js|html|css)$/.test(f))) console.log(f);\n",
+        'scripts/genuinely-orphaned.js': ASSERTS,
+        'scripts/other-a.mjs': MIGRATION,
+        'scripts/other-b.mjs': MIGRATION,
+        'scripts/other-c.mjs': MIGRATION,
+    });
+    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    check('an extension-only pattern does NOT suppress a real orphan', r.status === 1);
+    check('  the real orphan is still named', /genuinely-orphaned\.js/.test(r.stdout));
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);

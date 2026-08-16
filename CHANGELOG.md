@@ -1,5 +1,48 @@
 # Changelog
 
+## [8.18.0] - 2026-08-16
+
+### Fixed — `find-orphan-checks` cried wolf about the suites that prove it works
+
+It reported four of **this repo's own test suites** as unreferenced, under a
+heading saying they touch prod or money and were kept out of CI on purpose. All
+four run on every build. `tooling/test-all.js` finds them with
+`readdirSync(dir).filter(f => /^test-.*\.js$/.test(f))` — the reference is a
+regex evaluated at run time, so there is no literal filename anywhere to match.
+
+Now treats a runner that **discovers its work by pattern** as a reference.
+Measured across three repos, with identical counting:
+
+| repo | before | after |
+|---|---|---|
+| this one | 7 orphaned assertions + 4 manual | **0 + 0** |
+| a media app | 1 + 11 | 1 + 11 *(no dynamic runner — correctly unchanged)* |
+| a health app | 37 + 14 | **9 + 9** |
+
+The health app's drop is corroborated independently: its own preflight prints
+*"74 harness scripts swept"*, and `harness-sweep.js` is what discovers them.
+
+### The guard took three attempts, both early ones failing the same way
+
+Judging the pattern by hit rate or by a trailing extension, when what matters is
+whether it **names** anything:
+
+1. *discard if it matches >50% of candidates* — killed `/^test-.*\.js$/` in a
+   `tooling/` directory that is mostly tests. The legitimate case. The fix
+   silently did nothing and the four false positives stayed.
+2. *require 3+ literal word chars after stripping one trailing extension* — let
+   `/\.(js|html|css)$/` through, because "html" is three word characters. That
+   suppressed **67 of 120** scripts in a real repo: far worse than the 4 false
+   positives it was built to remove.
+3. *require a literal that is not a file extension* — `^test-` names something;
+   `\.(js|html|css)$` names every file there is.
+
+Four new assertions. **The second canary did not fire until the fixture grew**:
+with only two scripts the extension pattern matched 100% and the breadth guard
+rejected it, so the test passed with the discriminator guard removed and proved
+nothing. Three `.mjs` files were added to isolate the property. A test can be
+vacuous for one assertion while passing.
+
 ## [8.17.0] - 2026-08-16
 
 ### Retracted — "that P0 is marked done and the fix exists nowhere"
