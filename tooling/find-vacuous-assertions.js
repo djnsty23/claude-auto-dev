@@ -28,6 +28,26 @@
 // genuinely unobservable, like a platform-gated branch on the wrong platform, or
 // a condition whose operands are empty in every reachable input.
 //
+// CAVEAT: this takes ONE suite. If a subject is covered by several, every
+// assertion living in the others is invisible here and the survivor count is
+// overstated. Check with `grep -l <subject-basename> tooling/test-*.js` before
+// believing a number — and watch for substring matches, e.g. session-start.js
+// inside memory-session-start.js, which look like extra coverage and are not.
+//
+// Survey of this repo, most survivors first. Unread counts are just leads:
+//
+//   subject                              caught/mutants  survivors
+//   hooks/memory-capture.js                      25/52         27  unread
+//   hooks/session-start.js                       10/18          8  unread
+//   hooks/pre-tool-filter.js                     54/60          5  read, equivalent
+//   hooks/user-prompt-image-scan.js              16/20          4  unread
+//   hooks/inbox-notify.js                         7/10          3  read, equivalent
+//   hooks/stop-auto-check.js                     25/27          2  read, equivalent
+//   scripts/session-carrier.js                   10/10          0  closed
+//
+// Every pair read so far has yielded at least one real defect, so the unread
+// rows are the best-value work left in this file's vicinity.
+//
 // What it found on its first real run, all confirmed by hand afterwards:
 //   - the fail-closed "input did not parse" branch was unreachable from the
 //     suite, so flipping its exit(2) to exit(0) went unnoticed
