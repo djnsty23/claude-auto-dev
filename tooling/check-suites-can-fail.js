@@ -42,6 +42,14 @@ const VERBOSE = process.argv.includes('--verbose');
 // a relative path. Collect all three shapes and resolve them against the repo.
 const SUBJECT_OVERRIDES = {
     // Only for a suite whose subject genuinely cannot be read off its source.
+    //
+    // Derivation looks for plugin sources, because that is what every suite
+    // tested until now. These two test TOOLING instead — a shell hook and the
+    // validator — so they derived nothing and were reported NO-SUBJECT, which
+    // means this script was silently not checking them at all. That is the
+    // "silent skip" failure this whole file exists to prevent, reappearing in it.
+    'test-githooks.js': ['tooling/githooks/commit-msg'],
+    'test-validate.js': ['tooling/validate.js'],
 };
 
 function deriveSubjects(suiteFile) {
