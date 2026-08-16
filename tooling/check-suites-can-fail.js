@@ -140,7 +140,35 @@ const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, su
 
 const rows = [];
 
+// The runner is checked differently, and it matters more than any single suite.
+//
+// test-all.js has no subject to stub — it runs the others. It is also the file
+// that HAS failed this way: it was declared `run(label, file, args)` and called
+// as `run(label, [...])`, so `args` was undefined and every suite spawned a bare
+// `node`. Twelve suites reported PASS having executed nothing, and CI was green
+// on an empty test run.
+//
+// So: make one child suite fail, and assert the runner notices.
+function checkRunner(suite) {
+    const victim = suites.find((s) => s !== suite && deriveSubjects(path.join(__dirname, s)).length);
+    if (!victim) return { suite, status: 'NO-SUBJECT', note: 'no child suite to fail' };
+
+    const full = path.join(__dirname, victim);
+    const original = fs.readFileSync(full);
+    try {
+        fs.writeFileSync(full, '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n');
+        const r = runSuite(suite);
+        return r.status !== 0
+            ? { suite, status: 'ok', note: `reports failure when ${victim} fails` }
+            : { suite, status: 'VACUOUS', note: `stays GREEN while ${victim} exits 1 — it is not running them` };
+    } finally {
+        fs.writeFileSync(full, original);
+    }
+}
+
 for (const suite of suites) {
+    if (suite === 'test-all.js') { rows.push(checkRunner(suite)); continue; }
+
     const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(__dirname, suite));
     if (!subjects.length) {
         rows.push({ suite, status: 'NO-SUBJECT', note: 'references no plugin source — nothing to stub' });
