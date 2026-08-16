@@ -106,6 +106,31 @@ fs.writeFileSync(path.join(broken, 'src', 'bad.js'), 'const = ;\n');
 r = run(broken);
 check('syntax gate catches an unparseable file', r.status === 1 && /does not parse/.test(r.out));
 
+// --- a CI workflow that exists but never runs preflight is a SOFT warning.
+//
+// soft() was reported never entered: the warning at the end of the gates-ran
+// gate sits inside `if (fs.existsSync(ciDir))`, and no fixture had a .github at
+// all, so the whole block was skipped. A repo WITH CI that does not call
+// preflight is the case worth warning about — it looks covered and is not.
+{
+    const dir = project();
+    fs.mkdirSync(path.join(dir, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.github', 'workflows', 'ci.yml'),
+        'jobs:\n  build:\n    steps:\n      - run: npm test\n');
+    const r = run(dir);
+    check('CI that never mentions preflight is warned about', /only guards local runs/.test(r.out));
+    check('  and it is a warning, not a failure', r.status === 0);
+
+    // And CI that DOES reference it says so instead.
+    const dir2 = project();
+    fs.mkdirSync(path.join(dir2, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(dir2, '.github', 'workflows', 'ci.yml'),
+        'jobs:\n  build:\n    steps:\n      - run: npm run preflight\n');
+    const r2 = run(dir2);
+    check('CI that runs preflight is acknowledged', /referenced by CI/.test(r2.out));
+    check('  and does not warn', !/only guards local runs/.test(r2.out));
+}
+
 // --- the syntax gate must not walk into node_modules.
 //
 // `e.name === 'node_modules' || e.name.startsWith('.')` mutated to `&&` skips

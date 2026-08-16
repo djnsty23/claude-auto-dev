@@ -328,6 +328,45 @@ if (!memDB.isAvailable()) {
         cases.push(['brief includes CHANGES', /CHANGE_MARKER/.test(gerr)]);
     }
 
+    // ---- the classifier's Bash and Read paths ----
+    //
+    // check:functions reported isTrivialBash and isSignificantRead as never
+    // entered. They are live code — called at lines 64 and 123 — on paths this
+    // suite never took, because every capture case used tool_name 'Edit'.
+    // A classifier that crashes on a Bash event breaks capture for the most
+    // common tool there is, and nothing here would have noticed.
+    {
+        const bashTrivial = runCapture(null, 'sess-bash-trivial');   // no file_path
+        const bash = spawnSync(process.execPath, [HOOK], {
+            input: JSON.stringify({
+                tool_name: 'Bash',
+                tool_input: { command: 'npm test -- --run' },
+                tool_output: 'all tests passed',
+                session_id: 'sess-bash', cwd: CAP_PROJ,
+            }),
+            encoding: 'utf8', cwd: CAP_PROJ,
+            env: { ...process.env, CLAUDE_PLUGIN_ROOT: CAP_PLUGIN_ROOT, HOME: CAP_HOME, USERPROFILE: CAP_HOME },
+        });
+        cases.push(['a Bash tool event does not crash capture', bash.status === 0]);
+        cases.push(['  and reports no capture error',
+            !/\[Memory\] capture error/.test(bash.stderr || '')]);
+
+        const read = spawnSync(process.execPath, [HOOK], {
+            input: JSON.stringify({
+                tool_name: 'Read',
+                tool_input: { file_path: path.join(CAP_PROJ, 'src/auth/session.js') },
+                tool_output: 'file contents',
+                session_id: 'sess-read', cwd: CAP_PROJ,
+            }),
+            encoding: 'utf8', cwd: CAP_PROJ,
+            env: { ...process.env, CLAUDE_PLUGIN_ROOT: CAP_PLUGIN_ROOT, HOME: CAP_HOME, USERPROFILE: CAP_HOME },
+        });
+        cases.push(['a Read tool event does not crash capture', read.status === 0]);
+        cases.push(['  and reports no capture error',
+            !/\[Memory\] capture error/.test(read.stderr || '')]);
+        cases.push(['a trivial Bash event is handled too', bashTrivial.status === 0]);
+    }
+
     // ---- line 160 CANNOT be reached from here, and here is why ----
     //
     // `if (brief !== null)` distinguishes a real empty result (recorded, so an

@@ -58,6 +58,26 @@
 //
 // So the honest headline was one, not eleven. Chasing the number to zero would
 // have deleted five working CLI commands.
+//
+// Worked down 11 -> 2 by testing rather than deleting: the CLI dispatch got a
+// smoke suite, the classifier's Bash and Read paths got capture events, and
+// preflight's soft() got the case it needed (a .github/workflows that exists but
+// never mentions preflight — no fixture had a CI directory at all).
+//
+// THE LAST TWO ARE CORRECT TO LEAVE, and this is the number's floor, not a debt:
+//   removeWindowsAutostartRegistry()  platform-gated; dead on any non-Windows
+//                                     machine and always will be.
+//   user-prompt-image-scan's fail()   defence-in-depth behind inner handlers. A
+//                                     transcript_path pointing at a DIRECTORY was
+//                                     tried; it exits 0 and stays silent, but an
+//                                     inner catch takes the EISDIR first, so the
+//                                     outer handler is never the one that runs.
+//                                     Reaching it needs a throw outside every
+//                                     inner guard, which cannot be forced from
+//                                     the outside. The case was kept anyway — it
+//                                     pins behaviour worth pinning.
+//
+// A tool like this has a floor above zero. Read the list; do not chase it.
 
 const fs = require('fs');
 const os = require('os');

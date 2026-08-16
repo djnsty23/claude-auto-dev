@@ -189,6 +189,21 @@ for (let i = 0; i < results.length; i++) {
     );
 }
 
+// --- the error path. fail() was reported never entered by check:functions.
+//
+// The hook wraps its whole body in a try and routes any throw through fail(),
+// which must still exit 0 and stay silent — a UserPromptSubmit hook that errors
+// loudly costs the user a turn. Forced by handing it a transcript_path that is a
+// DIRECTORY: readFileSync throws EISDIR inside the body, which the malformed-JSON
+// case never reaches because that is guarded earlier.
+{
+    const dirPath = path.join(tmp, 'transcript-is-a-directory');
+    fs.mkdirSync(dirPath, { recursive: true });
+    const r = runCase('transcript path is a directory', dirPath);
+    assert('an unreadable transcript exits 0', r.exit === 0);
+    assert('  and stays silent', r.stdoutBytes === 0);
+}
+
 console.log('');
 console.log(fails === 0 ? 'ALL PASS' : fails + ' FAIL');
 process.exit(fails === 0 ? 0 : 1);
