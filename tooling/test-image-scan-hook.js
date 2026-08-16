@@ -51,7 +51,7 @@ function runCase(label, transcriptPath, opts = {}) {
         console.log('  (no output — no-op)');
     }
     const ctx = parsed && parsed.hookSpecificOutput && parsed.hookSpecificOutput.additionalContext || '';
-    return { ms, injected: !!ctx, context: ctx };
+    return { ms, injected: !!ctx, context: ctx, stdoutBytes: stdout.length, exit: res.status };
 }
 
 // --- Fixtures ---
@@ -122,6 +122,45 @@ assert('case 4 injects', results[3].injected);
 assert('case 5 injects', results[4].injected);
 assert('case 6 no injection', !results[5].injected);
 assert('case 3 reports 2 images', results[2].context.includes('2 images'));
+
+// --- gaps found by check:vacuity ---
+//
+// `if (extraContext)` in done() forced to `true` survived every assertion above,
+// because they all test whether additionalContext is PRESENT. With the mutant the
+// hook still emits a JSON envelope, just an empty one — so `injected` stays false
+// and nothing notices. But this hook runs on EVERY prompt under a 150ms budget,
+// and emitting an envelope on every turn when there is nothing to say is exactly
+// the cost it was written to avoid. Silence is the behaviour, not just "no
+// context". Asserting zero bytes is the only way to see the difference.
+assert('case 1 writes NOTHING at all (not an empty envelope)', results[0].stdoutBytes === 0);
+assert('case 6 writes NOTHING at all (not an empty envelope)', results[5].stdoutBytes === 0);
+
+// A transcript_path that does not exist must short-circuit silently. Nothing
+// covered a missing file, so the guard that checks for one could be removed
+// without any assertion changing.
+{
+    const missing = runCase('missing transcript file', path.join(tmp, 'does-not-exist.jsonl'));
+    assert('missing transcript: exits 0', missing.exit === 0);
+    assert('missing transcript: silent', missing.stdoutBytes === 0);
+}
+
+// The scan must find the USER's images, not whatever record comes first.
+// `msg && msg.role === 'user' && Array.isArray(msg.content)` forced to `true`
+// takes the newest record regardless of role, so an assistant turn carrying an
+// image would be reported as if the user had just sent it — announcing an image
+// the user never attached, and costing a read of it.
+{
+    const assistantImage = writeFixture('assistant-image.jsonl', [
+        { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'plain question' }] } },
+        { type: 'assistant', message: { role: 'assistant', content: [
+            { type: 'text', text: 'here is a chart' },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+        ] } },
+    ]);
+    const r = runCase("assistant's image is not the user's", assistantImage);
+    assert('an assistant image is not announced as the user\'s', !r.injected);
+    assert('  and nothing is written', r.stdoutBytes === 0);
+}
 assert('case 5 uses auto-mode directive', results[4].context.includes('AUTO MODE IS ACTIVE'));
 assert('case 2 uses base directive (not auto)', !results[1].context.includes('AUTO MODE IS ACTIVE'));
 

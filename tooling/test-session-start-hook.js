@@ -114,6 +114,97 @@ r = spawnSync(process.execPath, [HOOK], {
 check('malformed stdin → exit 0', r.status === 0);
 check('malformed stdin → still valid JSON out', parse(r) !== null);
 
+// ------------------------------------------------- gaps found by check:vacuity
+//
+// This hook runs at the start of every session and had the second-worst mutant
+// survival rate in the repo (10/18 caught). Each case below is named with the
+// line whose mutant survived.
+
+// line 103 — `if (context.length > 0)`. Forced to `true`, the hook attaches a
+// hookSpecificOutput carrying an EMPTY additionalContext. Every assertion still
+// passed, because they all check what the context SAYS, never whether it should
+// be there at all. An empty context block on every session is noise Claude has
+// to read past.
+{
+    const bare = path.join(TMP, 'bare');
+    fs.mkdirSync(bare, { recursive: true });
+    const out = parse(run({ cwd: bare, session_id: 'b', hook_event_name: 'SessionStart' }, bare));
+    check('no context to give: no hookSpecificOutput at all',
+        out !== null && out.hookSpecificOutput === undefined);
+    check('  but the banner is still emitted', typeof out?.systemMessage === 'string');
+}
+
+// line 48 — `if (fs.existsSync(prdPath))`. Forced to `true` on a project with no
+// prd.json, the hook falls into the parse branch and reports "prd.json exists
+// but failed to parse" for a file that does not exist — telling the user to fix
+// something that is not there.
+{
+    const bare2 = path.join(TMP, 'bare2');
+    fs.mkdirSync(bare2, { recursive: true });
+    const out = parse(run({ cwd: bare2, session_id: 'b2', hook_event_name: 'SessionStart' }, bare2));
+    const ctx = out?.hookSpecificOutput?.additionalContext || '';
+    check('no prd.json: says nothing about prd.json', !/prd\.json/.test(ctx));
+}
+
+// lines 62/63 — the "next pending stories" line, and the untitled fallback.
+{
+    const proj = path.join(TMP, 'stories');
+    fs.mkdirSync(proj, { recursive: true });
+
+    // All done: there is no next story, so the line must be absent entirely.
+    fs.writeFileSync(path.join(proj, 'prd.json'), JSON.stringify({
+        sprint: '1', stories: { 'S1-001': { title: 'a', passes: true } },
+    }));
+    let ctx = parse(run({ cwd: proj, session_id: 'x', hook_event_name: 'SessionStart' }, proj))
+        ?.hookSpecificOutput?.additionalContext || '';
+    check('nothing pending: no "next pending stories" line', !/Next pending stories/.test(ctx));
+
+    // A pending story with no title must read "untitled"; one with a title must
+    // read its title. `s.title || 'untitled'` flipped to `&&` inverts both, and
+    // testing only one of them cannot see it.
+    fs.writeFileSync(path.join(proj, 'prd.json'), JSON.stringify({
+        sprint: '1',
+        stories: {
+            'S1-001': { title: 'has a title', passes: null },
+            'S1-002': { passes: null },
+        },
+    }));
+    ctx = parse(run({ cwd: proj, session_id: 'y', hook_event_name: 'SessionStart' }, proj))
+        ?.hookSpecificOutput?.additionalContext || '';
+    check('a titled story shows its title', /S1-001 \(has a title\)/.test(ctx));
+    check('an untitled story shows "untitled"', /S1-002 \(untitled\)/.test(ctx));
+}
+
+// lines 79/81 — the uncommitted-changes line. Both directions of the `if` and
+// the singular/plural choice survived: the whole git branch was untested,
+// because every fixture directory happened not to be a git repo.
+{
+    const repo = path.join(TMP, 'gitrepo');
+    fs.mkdirSync(repo, { recursive: true });
+    const git = (...args) => spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git('init', '-q');
+    git('config', 'user.email', 't@t');
+    git('config', 'user.name', 't');
+
+    // Clean tree → the line must be absent.
+    let ctx = parse(run({ cwd: repo, session_id: 'g0', hook_event_name: 'SessionStart' }, repo))
+        ?.hookSpecificOutput?.additionalContext || '';
+    check('clean tree: no uncommitted-changes line', !/uncommitted change/.test(ctx));
+
+    // Exactly one change → singular.
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'x');
+    ctx = parse(run({ cwd: repo, session_id: 'g1', hook_event_name: 'SessionStart' }, repo))
+        ?.hookSpecificOutput?.additionalContext || '';
+    check('one change: reports it, in the singular', /1 uncommitted change at/.test(ctx));
+
+    // Two changes → plural. Without both cases the `changes === 1` ternary can be
+    // inverted without any assertion noticing.
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'y');
+    ctx = parse(run({ cwd: repo, session_id: 'g2', hook_event_name: 'SessionStart' }, repo))
+        ?.hookSpecificOutput?.additionalContext || '';
+    check('two changes: reports them, in the plural', /2 uncommitted changes at/.test(ctx));
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
