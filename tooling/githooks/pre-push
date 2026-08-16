@@ -1,0 +1,35 @@
+#!/bin/sh
+# pre-push — refuse to push a tree that fails validate.
+#
+# Why this exists, and why it is a git hook rather than a better release script.
+#
+# tooling/bump.js already propagates VERSION into all six files that must agree
+# with it, and already ends by PRINTING the next steps: changelog, validate, tag.
+# On 2026-08-16 that advice was skipped in the most ordinary way possible —
+# the version was hand-edited with `sed` across five JSON files instead of running
+# bump, missing VERSION (which bump would have written first), and the validation
+# run was piped to `tail`, so `&&` read tail's exit status and saw success. The
+# gate fired correctly and its answer was discarded by the pipeline. v8.19.0 is
+# tagged on a commit that fails validate.
+#
+# A wrapper script would have fixed only the path that goes through the wrapper.
+# The push is the last common point every path shares, so the check belongs here.
+#
+# Cost: validate is 0.10s (measured, n=3). Running the full suite here instead
+# would cost 18.6s per push — 186x — to catch classes that have never actually
+# reached a push; both real failures were caught by validate alone. If that
+# changes, raise this to test-all and say so in the commit.
+#
+# Enable (not automatic on clone):
+#   git config core.hooksPath tooling/githooks
+#
+# Bypass, when you mean it:  git push --no-verify
+
+if ! node "$(git rev-parse --show-toplevel)/tooling/validate.js"; then
+    echo ""
+    echo "pre-push: validate failed — not pushing."
+    echo "Fix the failures above, or bypass deliberately with: git push --no-verify"
+    exit 1
+fi
+
+exit 0

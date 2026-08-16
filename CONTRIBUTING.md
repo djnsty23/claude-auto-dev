@@ -114,6 +114,14 @@ ships it.
 
 ## Releasing
 
+Enable the pre-push hook once per clone — it is not automatic:
+
+```bash
+git config core.hooksPath tooling/githooks
+```
+
+Then:
+
 ```bash
 node tooling/bump.js 8.1.0
 ```
@@ -121,3 +129,14 @@ node tooling/bump.js 8.1.0
 That writes `VERSION`, `package.json`, `marketplace.json`, and every
 `plugin.json`. Then add a `CHANGELOG.md` section, run `npm test`, and tag
 `v8.1.0`.
+
+**Use `bump.js`. Do not hand-edit the version.** There are six files that must
+agree and `bump.js` enumerates the plugin ones from disk, so it cannot miss a
+plugin you added. v8.19.0 is tagged on a commit that fails `validate` because
+the version was `sed`-ed across the five JSON files and `VERSION` — the source
+of truth, and the one `bump.js` writes first — was left behind.
+
+**Do not pipe a validation run into `head`/`tail` inside an `&&` chain.** The
+pipeline's exit status is the last command's, so `node tooling/validate.js |
+tail -4 && git push` pushes on red. That is the other half of how v8.19.0
+shipped. Redirect to a file and check `$?`, or let the pre-push hook do it.
