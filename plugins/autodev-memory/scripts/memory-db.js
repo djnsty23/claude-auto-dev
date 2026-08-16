@@ -516,16 +516,6 @@ const api = {
         }) || [];
     },
 
-    // Get session by ID
-    getSession(sessionId) {
-        return withCircuitBreaker(() => {
-            const db = getDB();
-            if (!db) return null;
-            const stmt = db.prepare('SELECT * FROM sessions WHERE id = ?');
-            return stmt.get(sessionId);
-        });
-    },
-
     // List all sessions for a project
     listSessions(projectPath, limit = 20) {
         projectPath = normalizeProject(projectPath);
