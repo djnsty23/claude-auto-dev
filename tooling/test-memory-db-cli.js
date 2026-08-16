@@ -109,6 +109,39 @@ for (const cmd of JSON_COMMANDS) {
         r.status !== 0 || /usage|unknown|commands/i.test((r.stdout || '') + (r.stderr || '')));
 }
 
+// --- the argument DEFAULTS, which explicit args never exercise.
+//
+// Every case above passes a project path and a query, so `args[1] ||
+// process.cwd()`, `args[2] || ''` and `parseInt(args[2]) || 90` never fire — a
+// whole cluster of mutants survived every suite for that reason. Typing
+// `node memory-db.js recent` with nothing after it is the common case for a
+// human, and it was the one nothing covered.
+{
+    for (const cmd of ['stats', 'recent', 'sessions', 'decisions', 'bugs']) {
+        const r = cli(cmd);                     // no project path, no query
+        check(`${cmd} with NO arguments exits 0`, r.status === 0);
+    }
+    // The search-shaped ones default their query to '' rather than throwing.
+    for (const cmd of ['search', 'semantic', 'timeline']) {
+        const r = cli(cmd);
+        check(`${cmd} with no query exits 0`, r.status === 0);
+    }
+    // cleanup defaults its age to 90 days when given no number.
+    const c = cli('cleanup');
+    check('cleanup with no age argument exits 0', c.status === 0);
+
+    // Exit 0 is not enough: a mutated default still exits 0. The default has to
+    // RESOLVE — `args[1] || process.cwd()` means running inside the project must
+    // find the project's own rows, and that is the only assertion that can tell
+    // a working default from a broken one.
+    const noArgs = cli('decisions');
+    check('a defaulted project path resolves to cwd (finds the seeded row)',
+        /chose sqlite/.test(noArgs.stdout || ''));
+
+    const stats = cli('stats');
+    check('  and stats defaults the same way', /"totalObservations": [1-9]/.test(stats.stdout || ''));
+}
+
 // The seeded data must actually come back — otherwise every assertion above
 // would pass against a CLI that returns empty arrays for everything.
 {

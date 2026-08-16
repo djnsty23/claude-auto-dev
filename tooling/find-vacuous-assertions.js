@@ -58,12 +58,24 @@
 //   scripts/inbox-watch.js                       24/25          1  read
 //   scripts/memory-db.js                            —          56  LARGEST LEAD
 //
-// memory-db is the one left, and its number needs a caveat: 56 survive BOTH of
-// its two primary suites (test-knowledge 61, test-memory-db-cli 77, intersection
-// 56) — but FOUR other suites also drive it (test-knowledge-injection,
-// test-memory-session-end, test-session-carrier, test-semantic-search), so the
-// true combined figure is lower and has not been measured. Do that before
-// treating 56 as the debt.
+// memory-db, MEASURED PROPERLY against all six suites that drive it — and the
+// caveat was worth stating, because the two-suite figure of 56 overstated it:
+//
+//   test-knowledge 61 · memory-db-cli 76 · knowledge-injection 74 ·
+//   memory-session-end 77 · session-carrier 83 · semantic-search 73
+//   survives EVERY suite: 39
+//
+// All 39 read. They are not 39 gaps:
+//   12  the `if (!db) return []` guards and their `|| []` fallbacks — the
+//       DB-unavailable and open-circuit paths. Unreachable wherever sqlite works,
+//       which is everywhere the suite runs. Same class as platform-gated code.
+//    7  CLI argument DEFAULTS. Every case passed explicit args, so
+//       `args[1] || process.cwd()` and `parseInt(args[2]) || 90` never fired.
+//       Partly closed — and note that asserting exit 0 does NOT kill them: a
+//       mutated default still exits 0. The default has to be shown to RESOLVE.
+//   ~13 matchesArea's word-boundary and path-prefix logic, which decides what
+//       knowledge surfaces for an area. The real remaining lead.
+//   ~7  renderKnowledgeBrief — pluralisation, the empty-rows guard, date slicing.
 //
 // It is also the case where the one-suite caveat above bites hardest: the CLI
 // suite is a SMOKE suite by design — it asserts every subcommand runs and
