@@ -6,6 +6,24 @@
 // entry changed" and "is a branch carrying a prd.json nobody merged". A mock
 // would let either pass while being wrong about the thing it exists to measure.
 //
+// COVERAGE, measured rather than assumed (npm run check:vacuity, 2026-08-16):
+//
+//   87 mutants · 30 caught · 57 SURVIVED
+//
+// All 57 were read. They are not 57 subtle gaps — they decompose along the line
+// this header already draws:
+//
+//   37  in lines 28-177, which is auditPlugins(), auditSchedules() and
+//       auditSettings() — THREE ENTIRE AUDITS WITH NO SUITE AT ALL. Not a
+//       per-assertion problem; the same class as a wired hook nobody tests.
+//       Every mutant there survives because nothing ever calls that code.
+//   20  in the prd half, which IS tested. These are the genuine per-assertion
+//       gaps and the only ones worth mutation-reading one by one.
+//
+// So the honest number for THIS suite is 20, and the other 37 are a request for
+// three suites that do not exist. Written down so the next reader does not
+// re-derive it from a bare survivor count — a count on its own means nothing.
+//
 // Run: node tooling/test-drift-audit.js
 
 const { spawnSync, execSync } = require('child_process');
