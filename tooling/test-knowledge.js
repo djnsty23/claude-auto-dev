@@ -158,6 +158,72 @@ if (!memDB.isAvailable()) {
 
 // --- Report ---
 let pass = 0, fail = 0;
+  // --- matchesArea: the boundary rules its own comments promise -------------
+  //
+  // ~13 of memory-db's 39 surviving mutants live in matchesArea and hasWord.
+  // They decide which knowledge surfaces for an area, and every claim below is
+  // written down beside that code as a promise — but nothing asserted any of
+  // them, so the boundary logic could be loosened to plain `includes` and no
+  // test would notice. A loosened match is not a small bug: it surfaces another
+  // area's decisions as if they were this one's.
+  {
+    const AREA_PROJ = path.join(TMP_HOME, 'areaproj');
+    const asid = memDB.startSession(AREA_PROJ);
+    const seed = (title, files) => memDB.saveObservation({
+      sessionId: asid, projectPath: AREA_PROJ, type: 'decision',
+      title, concept: 'seeded for boundary tests', sourceFiles: files,
+    });
+
+    seed('AUTH_DIR', ['src/auth/login.js']);          // inside the area
+    seed('AUTH_EXACT', ['src/auth']);                 // the area itself
+    seed('AUTHENTICATION', ['src/authentication/service.js']); // a LONGER name
+    seed('NESTED', ['src/auth/deep/nested/file.js']); // deeper inside
+
+    const titles = (area) => {
+      const r = memDB.knowledge(AREA_PROJ, area);
+      const g = (r && r.groups) || {};
+      return [...(g.decisions || []), ...(g.bugfixes || []), ...(g.gotchas || []), ...(g.changes || [])]
+        .map((x) => x.title);
+    };
+
+    const forAuth = titles('src/auth');
+    cases.push(['area matches a file inside it', forAuth.includes('AUTH_DIR')]);
+    cases.push(['area matches the directory itself', forAuth.includes('AUTH_EXACT')]);
+    cases.push(['area matches arbitrarily deep files', forAuth.includes('NESTED')]);
+    // THE assertion. `src/auth` must not match `src/authentication` — the whole
+    // reason this is segment-aware instead of a substring test.
+    cases.push(['area does NOT match a longer sibling name',
+      !forAuth.includes('AUTHENTICATION')]);
+
+    // And the same rule one level up: a bare segment matches a segment, not a
+    // word that merely starts with it.
+    const forBare = titles('auth');
+    cases.push(['a bare segment matches that segment', forBare.includes('AUTH_DIR')]);
+    cases.push(['  and does not match a longer word starting with it',
+      !forBare.includes('AUTHENTICATION')]);
+
+    // An empty area matches nothing at all, rather than everything — the guard
+    // that stops a missing argument surfacing the entire project.
+    const forEmpty = titles('');
+    cases.push(['an empty area matches nothing', forEmpty.length === 0]);
+
+    // hasWord: matching by TITLE/CONCEPT rather than by file path.
+    //
+    // Every row above matches on its source_files, and the path check returns
+    // before hasWord is ever consulted — so the word-boundary logic sat behind a
+    // branch the fixtures always short-circuited, and its mutants survived for
+    // that reason rather than because they are equivalent. A row with NO useful
+    // path is the only way to reach it.
+    seed('TITLE_ONLY auth rotation landed', ['unrelated/elsewhere.js']);
+    seed('AUTHOR_ONLY the author field is optional', ['unrelated/other.js']);
+
+    const byWord = titles('auth');
+    cases.push(['a row matching only by title/concept still surfaces',
+      byWord.includes('TITLE_ONLY auth rotation landed')]);
+    cases.push(['  and "author" in a title does NOT match the area "auth"',
+      !byWord.includes('AUTHOR_ONLY the author field is optional')]);
+  }
+
 cases.forEach(([label, ok]) => {
   console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
   ok ? pass++ : fail++;
