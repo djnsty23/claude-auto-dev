@@ -20,9 +20,19 @@
 //   20  in the prd half, which IS tested. These are the genuine per-assertion
 //       gaps and the only ones worth mutation-reading one by one.
 //
-// So the honest number for THIS suite is 20, and the other 37 are a request for
-// three suites that do not exist. Written down so the next reader does not
-// re-derive it from a bare survivor count — a count on its own means nothing.
+// So the honest number for THIS suite is 20, and the other 37 were a request for
+// a suite that did not exist. It does now: tooling/test-drift-audit-config.js
+// covers auditPlugins, auditSchedules and auditSettings.
+//
+// MEASURED TOGETHER — the tool takes one suite at a time, so the combined figure
+// is the INTERSECTION of the two survivor sets, not either number alone:
+//
+//   survives the prd suite      57
+//   survives the config suite   52
+//   survives BOTH               27   <- the real remaining gap
+//
+// 60 of 87 mutants are now caught by one suite or the other. Reading either 57
+// or 52 as "the" number would overstate the debt by roughly double.
 //
 // Run: node tooling/test-drift-audit.js
 
