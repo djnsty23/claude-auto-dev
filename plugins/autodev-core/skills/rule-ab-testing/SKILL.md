@@ -106,6 +106,13 @@ meant. Neither was obvious from reasoning about it.
    that produced them, so a tool fix means the old output needs correcting, not
    just the tool.
 
+9. **When two sources disagree, suspect the FRAME before inventing a mechanism.**
+   The cheap hypothesis is that you measured the wrong thing, in the wrong place,
+   or at the wrong time; the expensive one is an exotic mechanism you had not
+   heard of. See `rule-diagnosis`, which owns this and carries the worked
+   examples — a contradiction is information about your frame, not an invitation
+   to build a theory that rescues it.
+
 ## When you cannot measure
 
 Say so explicitly, state which way you are guessing, and make the guess cheap to
