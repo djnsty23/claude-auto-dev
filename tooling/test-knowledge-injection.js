@@ -226,6 +226,71 @@ if (!memDB.isAvailable()) {
       return lines.filter((l) => l === `${CAP_SESSION}\tsrc/auth`).length === 1;
     })()]);
 
+    // ---- the AREA ladder, and the throttle file it writes ----
+    //
+    // `area` decides which part of the project an edit belongs to, and is the key
+    // the whole throttle is built on. Its four guards — a file path at all, a
+    // relative path that does not escape the project, a directory that is not the
+    // root, and a non-empty area — ALL survived being forced to `true`, because
+    // the single capture case above edits src/auth/login.js, where every guard is
+    // satisfied anyway. Cases where a guard is the thing deciding were missing.
+    const surfacedFile = path.join(CAP_PROJ, '.claude', 'knowledge-surfaced');
+    const markers = () => (fs.existsSync(surfacedFile)
+        ? fs.readFileSync(surfacedFile, 'utf8').split('\n').filter(Boolean) : []);
+
+    const runCapture = (filePath, sessionId = CAP_SESSION) => spawnSync(process.execPath, [HOOK], {
+        input: JSON.stringify({
+            tool_name: 'Edit',
+            tool_input: filePath === null ? {} : { file_path: filePath },
+            tool_output: 'ok',
+            session_id: sessionId,
+            cwd: CAP_PROJ,
+        }),
+        encoding: 'utf8',
+        cwd: CAP_PROJ,
+        env: { ...process.env, CLAUDE_PLUGIN_ROOT: CAP_PLUGIN_ROOT, HOME: CAP_HOME, USERPROFILE: CAP_HOME },
+    });
+
+    // An edit OUTSIDE the project must not be recorded as one of ITS areas. The
+    // `!rel.startsWith('..')` guard is the only thing preventing a file in a
+    // sibling checkout — or anywhere on disk — from being filed under this
+    // project's knowledge.
+    {
+        const before = markers().length;
+        runCapture(path.join(os.tmpdir(), 'somewhere-else', 'other.js'));
+        cases.push(['area: a file outside the project records no area',
+            markers().length === before]);
+    }
+
+    // A file at the project ROOT has no meaningful area (dirname is '.').
+    {
+        const before = markers().length;
+        runCapture(path.join(CAP_PROJ, 'index.js'));
+        cases.push(['area: a file at the project root records no area',
+            markers().length === before]);
+    }
+
+    // No file_path at all — a Bash call, say — must not derive an area.
+    {
+        const before = markers().length;
+        runCapture(null);
+        cases.push(['area: no file_path records no area', markers().length === before]);
+    }
+
+    // The throttle file is rewritten to hold ONLY the current session's markers.
+    // `.filter((l) => l && l.startsWith(sessionId + '\t'))` loosened to `||`
+    // keeps every other session's lines too, and the file grows without bound
+    // across restarts — the exact thing the rewrite exists to prevent.
+    {
+        fs.writeFileSync(surfacedFile, `other-session\tsrc/old\n${CAP_SESSION}\tsrc/auth\n`);
+        runCapture(path.join(CAP_PROJ, 'src/api/handler.js'), CAP_SESSION);
+        const after = markers();
+        cases.push(["throttle: another session's markers are dropped on rewrite",
+            !after.some((l) => l.startsWith('other-session\t'))]);
+        cases.push(['throttle: the new area is recorded',
+            after.some((l) => l === `${CAP_SESSION}\tsrc/api`)]);
+    }
+
     try { fs.rmSync(CAP_HOME, { recursive: true, force: true }); } catch {}
   }
 }
