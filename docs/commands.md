@@ -12,6 +12,7 @@ These are what you type. Everything else is handled automatically by `auto`.
 | `autodev init` | Derive this project's real conventions into `.claude/project-rules.md` |
 | `learn from fixes` | Rank the failure classes this project actually ships, from its git history |
 | `preflight` | Scaffold / extend the executable pre-deploy gate file |
+| `memory maintenance` | Dedup memories, repair the index, refresh CLAUDE.md (nightly-schedulable) |
 | `auto` | Work through all tasks autonomously (deploys, tests, transitions sprints) |
 | `audit` | Find bugs + violations (7 parallel agents) → creates fix stories |
 | `brainstorm` | Feature ideas + architecture improvements → present findings |

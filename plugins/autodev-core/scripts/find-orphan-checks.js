@@ -126,7 +126,13 @@ const includeRes = includeGlobs.map(globToRe);
 
 // ---- does the file assert anything? A migration is not a gate.
 const ASSERTION = /\b(assert|expect|describe\s*\(|\bit\s*\(|test\s*\(|should|throw new Error|process\.exit\(1\)|fail\(|✗|FAIL)\b/;
-const ONE_OFF = /^(migrate|import|export|backfill|seed|fix|push|resync|create|setup|gen)[-.]/i;
+const ONE_OFF = /(^|[-.])(migrate|import|export|backfill|seed|fix|push|resync|create|setup|gen|promo)([-.]|\.|$)/i;
+
+// A script that hits production, spends money, or provisions real resources is
+// a MANUAL tool. It asserts things, but wiring it into CI would be actively
+// wrong — it would charge a card or write to prod on every push. Measured on a
+// real repo: every one of its six 'orphaned assertions' was in this category.
+const MANUAL_TOOL = /\b(doppler run|stripe|--config prd|prod(uction)? edge|live key|sk_live|charge|invoice|promotion.?code|send.?email|deploy|SERVICE_ROLE|SUPABASE_URL|createClient|DATABASE_URL)\b/i;
 
 const results = scripts.map((s) => {
     const abs = path.join(REPO, s);
@@ -149,7 +155,8 @@ const results = scripts.map((s) => {
         script: posix,
         referenced: byName || byGlob,
         via: byName ? 'name' : byGlob ? 'glob' : null,
-        asserts: ASSERTION.test(own),
+        asserts: ASSERTION.test(own) && !MANUAL_TOOL.test(own),
+        manual: MANUAL_TOOL.test(own),
         oneOff: ONE_OFF.test(base),
         lines: own.split('\n').length,
     };
@@ -177,6 +184,14 @@ if (orphanChecks.length) {
     console.log('Verification code that NOTHING runs — wire it or delete it:');
     orphanChecks.forEach((r) => console.log(`  ✗ ${r.script}  (${r.lines} lines)`));
     console.log('\nA check nobody runs is worse than no check: it reads as coverage.');
+} 
+
+const manual = results.filter((r) => !r.referenced && r.manual);
+if (manual.length) {
+    console.log(`\n${manual.length} unreferenced script(s) touch prod, money, or real resources.`);
+    console.log('These are MANUAL tools. Do not wire them into CI — that would charge a card');
+    console.log('or write to production on every push. Left unreferenced on purpose:');
+    manual.forEach((r) => console.log('  · ' + r.script));
 } else {
     console.log('Every assertion in this repo is reachable from a runner.');
 }

@@ -61,6 +61,32 @@ A measurement of zero is a fine result: the gate becomes a regression guard.
 A measurement of sixty is a signal your rule is mis-specified, not that the
 project has sixty bugs.
 
+### When the population is large: ratchet, don't flood
+
+A measurement in the hundreds does not mean "write a gate that fails 400 times".
+It means the codebase has a real class of debt and the gate has to be a
+**ratchet**: record today's violations as a baseline, fail only on **new** ones,
+and let the baseline shrink.
+
+Measured example: `@typescript-eslint/no-floating-promises` on one repo returned
+**417 findings across 183 files**. As `error` it breaks the build immediately; as
+`warn` it gates nothing and is ignored within a week. As a ratchet it stops the
+418th on the day it is written.
+
+The shape:
+
+1. Enable the rule and dump today's violations to a checked-in baseline file.
+2. The gate fails when a violation appears that is not in the baseline.
+3. The gate **also fails when a baseline entry no longer violates** — the same
+   stale-excuse rule as `KNOWN_RED`. Otherwise the baseline never shrinks.
+4. Never regenerate the baseline to make a build pass. Regenerating is how a
+   ratchet silently becomes a rubber stamp.
+
+Prefer an existing, battle-tested rule over a hand-written check every time. A
+config line plus a baseline beats a custom detector you will have to debug — and
+this project's own history is four hand-written detectors that were wrong on
+first contact with a real repo.
+
 ### Record the gates you decide NOT to build
 
 When you conclude a gate should not exist, write that into the gate file as a

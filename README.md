@@ -48,7 +48,7 @@ before installing — it clears those out.
 | Plugin | Contains | Install it if |
 |--------|----------|---------------|
 | **autodev-core** | The workflow — `brainstorm`, `auto`, `iterate`, `audit`, `review`, `ship`, `scan`, plus the `prd.json` sprint system, 4 subagents, and the sprint/typecheck/safety hooks | Always. This is the tool. |
-| **autodev-memory** | Cross-session project memory — automatic observation capture, semantic search, domain-knowledge briefs, repo-backed backup | You want Claude to remember earlier sessions in a project |
+| **autodev-memory** | Cross-session project memory + nightly `memory-maintenance` — automatic observation capture, semantic search, domain-knowledge briefs, repo-backed backup | You want Claude to remember earlier sessions in a project |
 | **autodev-stack** | Supabase, Doppler, Stripe, and Remotion integrations | You use that stack |
 
 `autodev-core` stands alone. The other two are additive and can be removed
