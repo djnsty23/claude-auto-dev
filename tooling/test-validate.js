@@ -51,6 +51,41 @@ check('  and gives a restore command', /restore with: git checkout --/.test(with
 const after = runValidate();
 check('removing the backup clears the failure', after.status === 0);
 
+// find-untested-hooks.js — a hook wired into hooks.json that no suite drives.
+//
+// Asserted against the real repo rather than a fixture, because the script
+// resolves its root from __dirname and pointing it elsewhere would mean testing
+// a different code path than the one that runs.
+//
+// The property that matters is not the count — that changes as hooks get tests.
+// It is that a hook mentioned ONLY in a comment does not read as covered.
+// post-tool-typecheck.js looked tested for exactly that reason, and the stale
+// comment naming it is still in tooling/test-knowledge-injection.js today.
+{
+    const HOOKS = path.join(ROOT, 'tooling', 'find-untested-hooks.js');
+    const r = spawnSync(process.execPath, [HOOKS, '--json'], { encoding: 'utf8', cwd: ROOT });
+    let out = null;
+    try { out = JSON.parse(r.stdout); } catch { /* stays null */ }
+
+    check('find-untested-hooks emits parseable JSON', out !== null);
+    check('  it finds the wired hooks at all', (out?.wired || 0) > 0);
+
+    const names = (out?.untested || []).map((u) => u.name);
+
+    // A comment mention must not count as coverage.
+    check('a hook named only in a comment still reads as untested',
+        names.includes('post-tool-typecheck.js'));
+
+    // A hook a suite genuinely drives must NOT be listed. stop-auto-check.js is
+    // resolved by path.join in test-stop-auto-check.js.
+    check('a hook a suite actually drives is not listed',
+        !names.includes('stop-auto-check.js'));
+
+    // Exit code carries the answer, for anyone wiring this into a gate later.
+    check('exits non-zero while any hook is untested',
+        names.length > 0 ? r.status === 1 : r.status === 0);
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);

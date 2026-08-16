@@ -435,6 +435,22 @@ function checkNoStaleMutationBackups() {
   console.log('         Check no mutation process is still running first: pkill -9 -f find-vacuous-assertions');
 }
 
+// A hook wired into hooks.json that no suite drives.
+//
+// WARN, not FAIL, deliberately. There are 5 today, one of them 231 lines, and a
+// gate that is red from the moment it ships is a gate people learn to bypass.
+// This makes the debt visible on every run instead of hiding it behind a number
+// nobody prints.
+function checkUntestedHooks() {
+  const script = path.join(ROOT, 'tooling', 'find-untested-hooks.js');
+  if (!fs.existsSync(script)) return log('WARN', 'find-untested-hooks.js is missing');
+  const r = cp.spawnSync(process.execPath, [script, '--json'], { encoding: 'utf8' });
+  let out;
+  try { out = JSON.parse(r.stdout); } catch { return log('WARN', 'find-untested-hooks.js produced no parseable output'); }
+  if (!out.untested.length) return log('PASS', `Hook coverage: all ${out.wired} wired hooks are driven by a suite`);
+  log('WARN', `${out.untested.length} of ${out.wired} wired hooks have no suite — run node tooling/find-untested-hooks.js`);
+}
+
 // ---------------------------------------------------------------- run
 
 console.log('Validating autodev marketplace...\n');
@@ -450,6 +466,7 @@ checkAgents();
 checkNoLegacyArtifacts();
 checkNoPrivateNames();
 checkNoStaleMutationBackups();
+checkUntestedHooks();
 
 console.log(`\nSummary: ${passCount} PASS, ${failCount} FAIL, ${warnCount} WARN`);
 process.exit(failCount > 0 ? 1 : 0);
