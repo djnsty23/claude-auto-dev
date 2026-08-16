@@ -153,21 +153,32 @@ for (const suite of suites) {
         continue;
     }
 
-    const survived = [];
+    // VACUOUS only if stubbing EVERY derived subject leaves it green.
+    //
+    // Not "any subject survived". A suite legitimately references files it does
+    // not exercise — test-knowledge-injection names observation-classifier.js in
+    // a comment explaining that it DELIBERATELY does not copy it, so stubbing
+    // that file cannot and should not turn the suite red. Demanding every
+    // subject kill the suite would report that as vacuous, which is the same
+    // false-accusation failure the stub's process.exit() produced.
+    //
+    // The property under test is "this suite can fail", and one killed subject
+    // proves it.
+    const killed = [];
     for (const rel of subjects) {
         const full = path.join(ROOT, rel);
         const original = fs.readFileSync(full);
         try {
             fs.writeFileSync(full, STUB);
-            if (runSuite(suite).status === 0) survived.push(rel);
+            if (runSuite(suite).status !== 0) killed.push(rel);
         } finally {
             fs.writeFileSync(full, original);
         }
     }
 
-    rows.push(survived.length
-        ? { suite, status: 'VACUOUS', note: `passes with ${survived.join(', ')} stubbed out` }
-        : { suite, status: 'ok', note: `fails when any of ${subjects.length} subject(s) is stubbed` });
+    rows.push(killed.length
+        ? { suite, status: 'ok', note: `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed` }
+        : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` });
 }
 
 // The restore is the dangerous part; prove it worked rather than assuming.
