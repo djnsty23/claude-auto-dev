@@ -41,18 +41,26 @@ const SUBJECTS = {
     'test-image-scan-hook.js': ['plugins/autodev-core/hooks/user-prompt-image-scan.js'],
     'test-session-start-hook.js': ['plugins/autodev-core/hooks/session-start.js'],
     'test-session-carrier.js': ['plugins/autodev-memory/scripts/session-carrier.js'],
-    'test-knowledge.js': ['plugins/autodev-memory/scripts/knowledge.js'],
-    'test-knowledge-injection.js': ['plugins/autodev-memory/hooks/memory-inject.js'],
+    'test-knowledge.js': ['plugins/autodev-memory/scripts/memory-db.js', 'plugins/autodev-memory/scripts/observation-classifier.js'],
+    'test-knowledge-injection.js': ['plugins/autodev-memory/hooks/memory-session-start.js'],
     'test-semantic-search.js': ['plugins/autodev-memory/scripts/semantic-search.js'],
     'test-preflight-template.js': ['plugins/autodev-core/templates/preflight.js'],
 };
 
-// A stub that parses, runs, exits 0, and does nothing. Anything a suite asserts
-// about behaviour has to fail against this.
+// A stub that parses, does nothing, and exports nothing.
+//
+// NO process.exit() — the first version had one, and it made this checker lie.
+// A suite that `require()`s its subject runs the stub IN ITS OWN PROCESS, so
+// `process.exit(0)` killed the test runner before a single assertion ran and the
+// suite "passed". Two suites were reported VACUOUS on that basis and neither
+// was. A checker whose failure mode is a false accusation is worse than none;
+// this one caught itself on its first run.
+//
+// Spawned subjects still exit 0 here — a script with no code does — so dropping
+// the call costs nothing and removes the trap.
 const STUB = `#!/usr/bin/env node
 // STUB installed by check-suites-can-fail.js — restored immediately.
 module.exports = {};
-process.exit(0);
 `;
 
 const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
