@@ -71,7 +71,7 @@ that runs in preflight or CI and fails the build:
 | Copy / i18n drift | Hash the English string per key; fail when English changed and a locale's hash did not |
 | Lifecycle | Assert every `addEventListener` / `setInterval` / `requestAnimationFrame` has a matching teardown in the same file |
 
-Show the user the list and let them choose. Do not generate six gates nobody
+Then hand the chosen ones to `/preflight add <class>`, which owns the gate file and the four laws that keep it honest. Show the user the list and let them choose. Do not generate six gates nobody
 asked for — an unwanted gate gets disabled, and a disabled gate teaches the team
 that gates are noise.
 

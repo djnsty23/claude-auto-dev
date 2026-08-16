@@ -89,8 +89,7 @@ presented as verified is the reason these reached manual QA in the first place.
 ## Making this mechanical
 
 A checklist a human runs sometimes is not a gate. When the same class bites this
-project twice, encode it as an executable check and wire it into preflight or
-CI — and make a stale gate fail loudly, because:
+project twice, encode it as an executable check with `/preflight add` — and make a stale gate fail loudly, because:
 
 > "THE OTHER 60 GATES, which nothing ran … it objected for eight days."
 > — *fitmito, `scripts/preflight.js`*
