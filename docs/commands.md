@@ -11,6 +11,7 @@ These are what you type. Everything else is handled automatically by `auto`.
 |-----|--------|
 | `autodev init` | Derive this project's real conventions into `.claude/project-rules.md` |
 | `learn from fixes` | Rank the failure classes this project actually ships, from its git history |
+| `preflight` | Scaffold / extend the executable pre-deploy gate file |
 | `auto` | Work through all tasks autonomously (deploys, tests, transitions sprints) |
 | `audit` | Find bugs + violations (7 parallel agents) → creates fix stories |
 | `brainstorm` | Feature ideas + architecture improvements → present findings |
@@ -73,7 +74,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 44 skills across three plugins: 37 in `autodev-core`, 3 in `autodev-memory`, 4 in `autodev-stack`
+- 45 skills across three plugins: 38 in `autodev-core`, 3 in `autodev-memory`, 4 in `autodev-stack`
 - Claude picks a skill from its `description` and `when_to_use`; run `/plugin` to see what is installed
 - Auto-loaded by file context: `core` (on prd.json), `standards` and the `rule-*` skills (on matching source files)
 

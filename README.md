@@ -2,7 +2,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blueviolet)](https://claude.ai/code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-8.1-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
+[![Version](https://img.shields.io/badge/version-8.2-blue.svg)](https://github.com/djnsty23/claude-auto-dev/releases)
 
 **Autonomous development workflow for Claude Code.** Say what you want to build — Claude handles the rest.
 
@@ -62,6 +62,7 @@ without touching it.
 |-----|------|
 | `autodev-init` | Read this codebase and write its real conventions to `.claude/project-rules.md` |
 | `learn-from-fixes` | Rank what this project keeps shipping broken, from its own fix history |
+| `preflight` | Scaffold the executable gate file that fails the build on those classes |
 | `brainstorm` | Scan codebase + live site, propose improvements |
 | `brainstorm apply` | Create stories from the last brainstorm |
 | `auto` | Work through all pending stories autonomously |

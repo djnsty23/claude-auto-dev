@@ -1,5 +1,44 @@
 # Changelog
 
+## [8.2.0] - 2026-08-16
+
+### Added — `preflight`
+
+The executable half of 8.1. `rule-ramifications` tells you what to check;
+`/learn-from-fixes` ranks what this project gets wrong; `preflight` makes the
+top classes fail a build.
+
+- **`/preflight`** — `init` scaffolds `scripts/preflight.js`, `add <class>`
+  grows it one bug family at a time, `verify` audits the gate file itself.
+- **`templates/preflight.js`** — the harness, generalized from a production
+  repo's own gate file, with gate shapes for reachability, duplicated
+  derivation, cross-surface consistency, cache-key scoping, i18n drift,
+  lifecycle, and config targeting.
+
+Four laws are built into the template, each of which cost a production repo a
+shipped bug:
+
+1. **A gate that could not run is not a pass.** Gates sit in try/catch so one
+   broken gate cannot take out the run — but routing that catch to a *warning*
+   lets a gate switch itself off while the run still exits 0. That shipped:
+   renaming one file turned a parity gate into "check skipped" and preflight
+   printed PASS. A skip is a hard failure here.
+2. **Snapshot before you regenerate.** A gate that regenerates an artifact
+   before comparing it to its source compares the generator against its own
+   output and is green forever. That shipped two consecutive stale releases.
+3. **A known-red excuse that now passes is a failure.** `KNOWN_RED` entries are
+   keyed by bare gate id and tied to an open work item, and the run fails when a
+   tracked gate starts passing.
+4. **A gate never seen to fail is not known to work.** Prove each new gate by
+   reintroducing the defect.
+
+The scaffolded file also fails if nothing is wired to run it — a gate file
+nobody executes is decoration, which is exactly how sixty harness scripts in one
+repo went unrun with two of them red for eight days.
+
+`tooling/test-preflight-template.js` proves all four laws by making each one
+fail on purpose (15 assertions).
+
 ## [8.1.0] - 2026-08-16
 
 Evidence-driven, not guessed. Mined 3,127 `fix` commits across three production
