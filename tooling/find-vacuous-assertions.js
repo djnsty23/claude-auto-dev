@@ -11,15 +11,22 @@
 // report its survivor count as a defect count. Measured on this repo's own
 // pre-tool-filter.js the first time it ran:
 //
-//   59 mutants · 1 unparseable (discarded) · 42 caught · 16 survived
-//   of the 16, read individually: ~10 real coverage gaps, ~6 equivalent mutants
+//   hooks/pre-tool-filter.js   59 mutants · 42 caught · 16 survived
+//     of the 16: ~10 real coverage gaps, ~6 equivalent mutants
+//   hooks/stop-auto-check.js   27 mutants · 21 caught ·  6 survived
+//     of the 6: 5 real coverage gaps, 1 masked by a surrounding try/catch,
+//     0 equivalent
 //
-// So roughly a third of survivors are noise — mutants whose behaviour is
-// genuinely unobservable (a platform-gated branch on the wrong platform, a
-// condition whose operands are empty in every reachable input). That ratio is
-// fine for a tool you run deliberately and read; it would be intolerable for a
-// gate that blocks a push. EVERY SURVIVOR MUST BE READ. A survivor count on its
-// own means nothing.
+// The first of those measurements was written up here as "roughly a third of
+// survivors are noise". The second subject came back 0/6 noise, so that ratio
+// was an over-generalisation from n=1 and is withdrawn. **The noise rate varies
+// by subject and cannot be predicted from another one.** Which is only a
+// restatement of the rule that matters: EVERY SURVIVOR MUST BE READ, and a
+// survivor count on its own means nothing.
+//
+// The equivalent mutants seen so far are all of one kind — behaviour that is
+// genuinely unobservable, like a platform-gated branch on the wrong platform, or
+// a condition whose operands are empty in every reachable input.
 //
 // What it found on its first real run, all confirmed by hand afterwards:
 //   - the fail-closed "input did not parse" branch was unreachable from the
