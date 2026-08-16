@@ -124,6 +124,19 @@ desktop and mobile after each UI change. In a plain terminal session the same
 steps run through the `agent-browser` CLI if you have it installed. The `browser`
 skill picks between them; you don't have to.
 
+**Phone screenshots and other out-of-band files.** Save anything into
+`~/Library/Mobile Documents/com~apple~CloudDocs/claude-inbox` — iCloud, so an iOS
+Shortcut can drop a screenshot there in one tap — and the next prompt announces
+it with filename, path, and arrival age. Measured at ~30ms per prompt and **zero
+context when the inbox is empty**, which is almost every turn; the cost is flat
+whether one file is waiting or twenty-five, because the hook stats the directory
+and never opens a file. Each arrival is announced exactly once. Claude reads the
+image only when the arrival time makes it plausibly relevant — auto-injecting
+every screenshot would cost roughly a thousand tokens each.
+
+Set `AUTODEV_INBOX` to use a different folder, `AUTODEV_INBOX_DISABLED=1` to turn
+it off, and `/inbox` to list what is waiting.
+
 **Image auto-scan.** Attach a screenshot to any turn and Claude surfaces every
 distinct issue it sees, not only the one you asked about. Add `[focus]` in your
 message to opt out.
