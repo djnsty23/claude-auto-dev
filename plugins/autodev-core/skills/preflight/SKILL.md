@@ -42,7 +42,46 @@ fix-per-feature ratios. Gates that fail a build are what changes outcomes.
 4. **Run it.** It should fail the first time, on `gates-ran`, until wiring is
    done. That failure is the template proving itself.
 
-## `preflight add <class>`
+## `preflight add <class>` — first, prove the gate does not already exist
+
+**Before writing anything**, in this order:
+
+1. **Is it already gated?** List the gate ids in the existing file and read the
+   tests the build already runs. A duplicate gate reports the same finding under
+   two names and doubles the noise.
+2. **Was it already rejected?** Search the gate file for a recorded decision not
+   to build it. Mature gate files carry these, and they usually contain a reason
+   better than the one you arrived with.
+3. **Measure the population before writing the check.** Count what the gate would
+   fire on today, then **read every finding**. If they are false positives, the
+   gate is wrong — not the codebase. A gate that cries wolf is one people learn
+   to skip, and the skipping generalises to the gates that were right.
+
+A measurement of zero is a fine result: the gate becomes a regression guard.
+A measurement of sixty is a signal your rule is mis-specified, not that the
+project has sixty bugs.
+
+### Record the gates you decide NOT to build
+
+When you conclude a gate should not exist, write that into the gate file as a
+comment block in the same format as a real gate, ending with why. Something like:
+
+```js
+/* [thing] NOT BUILT, ON PURPOSE — <what already covers it>.
+   Written down here because "we should gate <thing>" is a thought that recurs,
+   and the next person to have it should find the answer instead of building the
+   duplicate.
+   <the specific reason a naive version would be WRONG — e.g. four controls are
+   deliberately under the floor, measured in a real browser, so a static px gate
+   fires on all four.>
+   WHAT IS STILL NOT COVERED, so nobody assumes it is: <the honest gap>. */
+```
+
+This convention is worth more than most gates. A rejected-gate record answers a
+recurring question permanently, and it is the only thing that stops each new
+contributor — human or agent — from rebuilding the same wrong check.
+
+## Gate shapes
 
 One gate per bug family. Name the gate after **the family it prevents**, not the
 mechanism — a future reader needs to know why it exists.
