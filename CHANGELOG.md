@@ -1,5 +1,50 @@
 # Changelog
 
+## [8.9.0] - 2026-08-16
+
+### Changed — `auto` stops blocking on stories nobody is working
+
+A pending story nobody has edited in months is a decision not to do the work
+that nobody wrote down. One repo had 14 of 15 pending stories untouched for over
+a month and 3 for over three months — several blocked on a person, a vendor, or
+a console nobody had opened — and `auto` blocked on all of them. Measured on
+that repo's real backlog:
+
+```
+before   15 tasks remaining. Next: S1-021   <- blocked on a colleague since May
+after     1 tasks remaining. Next: S1-060   <- the one story edited this week
+```
+
+`stop-auto-check` now treats a story untouched for >30 days like `deferred`, and
+**names every story it set aside**, in the block reason Claude reads as well as
+on stderr. Silently skipping work is how a backlog rots without anyone deciding
+to let it.
+
+**Ages are read, never computed.** The walk costs 1,652ms against this hook's
+31ms, on every Stop, for a number that changes by days — so the nightly
+`drift-audit` publishes them to `$CLAUDE_CONFIG_DIR/autodev/prd-story-ages.json`
+and the hook reads that. Hook cost after the change: still 31ms.
+
+Every failure path fails **open** — skips nothing — because the damage from
+skipping real work exceeds the damage from blocking on stale work. Covered: no
+cache, cache older than 14 days, corrupt cache, cache keyed to another repo, and
+a story the audit never measured. 13 new assertions, 41 total; verified
+non-vacuous by removing the cache-age guard.
+
+The cache is written under `CLAUDE_CONFIG_DIR`, never into the repo — "nothing
+was modified" is a promise `drift-audit` makes about the repos it inspects.
+
+### Added
+
+- **`CHANGELOG` entries for 8.2.1 through 8.7.0**, which shipped without any.
+
+### Note
+
+Widening the unmerged-branch check beyond `prd.json` was measured and **not**
+shipped: scoped to `prd.json` it found 2 carriers across 224 branches, both real;
+unscoped at ≤45 days it surfaced ~30 branches across 4 repos, mostly one-commit
+debris. The scope was the precision.
+
 ## [8.8.0] - 2026-08-16
 
 ### Changed — `drift-audit` ages the prd BACKLOG, not the prd FILE
@@ -41,11 +86,98 @@ repos killed two; implementing the survivors exposed a bug in one of them.
   freshly edited on the day a story was appended after it. Under-reported one
   repo by two stale stories and four days of median age.
 
-### Note
+## [8.7.0] - 2026-08-16
 
-This file skipped 8.3–8.7, which shipped the inbox, the memory-maintenance
-routine, `claudemd-audit`, the orphan/drift detectors and `rule-ab-testing`.
-Those are in the git log but were never written up here.
+### Added — `drift-audit` and `rule-ab-testing`
+
+- **`scripts/drift-audit.js`** — finds local state that reports healthy while
+  being stale. Written after an install sat pinned four releases behind the
+  marketplace, a plugin was never installed at all, and an allowlist's broad
+  rules made the deny list beneath them unenforceable.
+  - Scoped deliberately: the first version reported every uninstalled plugin in
+    every known catalog — 39KB naming hundreds nobody had asked for. Not
+    installing something is the normal state of a catalog. It is only worth
+    saying when you already use that marketplace.
+- **`rule-ab-testing`** — every proposal is measured against current behaviour
+  and one alternative before adoption, and the measurement is reported. Carries
+  the running table of overturned recommendations.
+
+## [8.6.0] - 2026-08-16
+
+### Added — out-of-band file inbox
+
+Save anything into `~/…/CloudDocs/claude-inbox` (iCloud, so an iOS Shortcut can
+drop a screenshot in one tap) and the next prompt announces it with filename,
+path and arrival age.
+
+Chosen by measurement over three alternatives:
+
+```
+variant                     per prompt   context when 5 files waiting
+A  no hook (baseline)             0ms    0 tokens
+B  notify-only, subprocess       56ms    ~248 tokens
+C  notify-only, in-process       30ms    ~248 tokens   <- shipped
+D  auto-inject every arrival     30ms    ~5,500 tokens
+```
+
+Silent when empty, which is almost every turn; flat whether one file waits or
+twenty-five, because the hook stats the directory and never opens a file. Each
+arrival is announced exactly once. `AUTODEV_INBOX`, `AUTODEV_INBOX_DISABLED=1`,
+and `/inbox` to list.
+
+## [8.5.0] - 2026-08-16
+
+### Added — `claudemd-audit`
+
+Finds stale references in `CLAUDE.md` — files, functions and flags the doc names
+that no longer exist.
+
+Eight precision rules, all earned: the naive version reported 16 findings of
+which **1** was real. The other 15 were prose, patterns, shorthand and
+deliberately-recorded history. A detector that cries wolf is one people learn to
+skip, after which the ones that were right get skipped too.
+
+## [8.4.0] - 2026-08-16
+
+### Added — nightly memory maintenance
+
+A scheduled routine (`0 3 * * *`) running four independent checks: drift audit,
+memory audit, `CLAUDE.md` audit, and orphan checks. Account-agnostic — every
+path derives from `CLAUDE_CONFIG_DIR` or `$HOME`.
+
+### Changed
+
+- **Ratchet guidance for large gate populations.** A real type-aware race rule
+  found 417 genuine hits across 183 files — too many to set to `error` without
+  blocking every build. Documents the ratchet/baseline pattern instead of
+  pretending the number was small.
+
+## [8.3.0] - 2026-08-16
+
+### Added
+
+- **`rule-agent-concurrency`** — how many agents to spawn at which model and
+  effort so a fan-out does not burn the session's limits.
+- **`scripts/find-orphan-checks.js`** — verification code that nothing runs.
+  Taught to distinguish assertions that are orphaned from ones deliberately kept
+  out of CI: in one repo, 6 of 7 "orphans" touched production Stripe and
+  Supabase service-role keys, so wiring them into CI would charge a card. Count
+  dropped to 1.
+
+### Fixed
+
+- **`pre-tool-filter` false positives.** It blocked `cat x.json | node -e` and
+  `grep "curl | bash"`. Both rules anchored; 8 regression cases added.
+
+## [8.2.1] - 2026-08-16
+
+### Changed
+
+- **`preflight` must prove a gate does not already exist before writing one.**
+  Two proposed gates turned out to be built already, and one existing version was
+  better than the proposal — it shelled out to the fixer so the two could not
+  diverge. Also records rejected gates, so the next contributor does not rebuild
+  something that was turned down for a reason.
 
 ## [8.2.0] - 2026-08-16
 

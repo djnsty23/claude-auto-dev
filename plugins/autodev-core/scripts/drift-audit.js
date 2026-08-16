@@ -224,11 +224,40 @@ function pendingStoryAges(repo, pendingIds) {
     }
 
     const now = Date.now() / 1000;
-    const days = pendingIds.map((id) => lastEdit[id] ? Math.floor((now - lastEdit[id]) / 86400) : null);
+    // `null` = unchanged across the whole scan, i.e. older than it reaches.
+    const byId = {};
+    for (const id of pendingIds) {
+        byId[id] = lastEdit[id] ? Math.floor((now - lastEdit[id]) / 86400) : null;
+    }
+    const days = Object.values(byId);
     return {
+        byId,
         known: days.filter((d) => d !== null).sort((a, b) => a - b),
         unresolved: days.filter((d) => d === null).length,
     };
+}
+
+// Publish per-story ages for stop-auto-check, which cannot afford to compute
+// them (31ms hook vs a 1,652ms walk, on every Stop).
+//
+// Under CLAUDE_CONFIG_DIR, never in the repo: "nothing was modified" is a
+// promise this tool makes about the repos it inspects.
+function writeAgeCache(repo, byId, scanDepth) {
+    try {
+        const dir = path.join(CONFIG, 'autodev');
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, 'prd-story-ages.json');
+        let all = {};
+        try { all = JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch { /* first write */ }
+        all[repo] = {
+            computedAt: new Date().toISOString(),
+            scanDepth,
+            // null means "older than the scan reached" — the consumer must treat
+            // that as very old, not as unknown.
+            ages: byId,
+        };
+        fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n');
+    } catch { /* the cache is an optimisation; never fail the audit for it */ }
 }
 
 // Unmerged branches whose prd.json differs from HEAD's.
@@ -295,7 +324,13 @@ function auditPrd(repo) {
     // by measuring: at an 80-revision scan one repo read "12 of 15 stale, median
     // 60d"; at 40 the same repo read "11 of 15, median 48d", because its two
     // oldest stories fell off the end and out of the count.
-    const { known, unresolved } = pendingStoryAges(repo, pendingIds);
+    const { byId, known, unresolved } = pendingStoryAges(repo, pendingIds);
+
+    // Publish the ages for stop-auto-check, which cannot afford to compute them:
+    // 31ms hook against a 1,652ms walk, paid on every Stop, for an answer that
+    // changes by days. The nightly tool writes; the hook reads.
+    writeAgeCache(repo, byId, PRD_COMMIT_SCAN);
+
     const stale = known.filter((d) => d > 30).length + unresolved;
     if (stale) {
         const median = known.length ? known[Math.floor(known.length / 2)] : null;

@@ -28,6 +28,7 @@ overturned the recommendation eleven times:
 | "None of the 60 commits maps to a story" | 58 of 60. The 2 exceptions were named in my own document two sections earlier |
 | "The backlog is 38 days / 809 commits stale" | Hand-counted against a threshold I invented (commits changing ≥2 `passes` lines). No mechanical definition reproduces it |
 | "Slice the story's text block to compare revisions" | The last story in the object has no trailing comma, so its slice ran to EOF — every story read as edited the day a story was appended after it. Under-reported one repo by 2 stale stories and 4 days of median age |
+| "Widen the unmerged-branch check beyond `prd.json`" | Scoped to prd.json: **2 carriers / 224 branches, both real.** Unscoped at ≤45 days: ~30 branches across 4 repos, mostly one-commit debris. The scope *was* the precision |
 
 The last four came from **implementing the recommendation and running it**. Three
 were errors in claims already written down and shared; the fourth was a bug in

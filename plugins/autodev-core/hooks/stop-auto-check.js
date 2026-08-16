@@ -19,6 +19,42 @@ function block(reason) {
     process.exit(0);
 }
 
+// A pending story untouched for this long is not active work.
+const STALE_DAYS = 30;
+// Past this, the cache describes a repo that has moved on. Fail open — skip
+// nothing — rather than set aside a story on a month-old measurement.
+const CACHE_MAX_AGE_DAYS = 14;
+
+// Which of these story ids the nightly drift-audit measured as long-untouched.
+// Every failure path here returns an empty list, so a missing, stale, or
+// corrupt cache can only make auto do MORE work, never less.
+function staleStories(ids, cwd) {
+    const none = { skipped: [], cacheAge: null };
+    try {
+        const config = process.env.CLAUDE_CONFIG_DIR
+            || path.join(process.env.HOME || process.env.USERPROFILE || '', '.claude');
+        const file = path.join(config, 'autodev', 'prd-story-ages.json');
+        const all = JSON.parse(fs.readFileSync(file, 'utf8'));
+        // Match on the real path — a repo reached through a symlink is the same
+        // repo, and this hook is handed a cwd it does not control.
+        const here = fs.realpathSync(cwd);
+        const entry = all[here] || all[cwd];
+        if (!entry || !entry.ages) return none;
+
+        const cacheAge = (Date.now() - Date.parse(entry.computedAt)) / 86400000;
+        if (!(cacheAge >= 0) || cacheAge > CACHE_MAX_AGE_DAYS) return none;
+
+        // `null` means the audit's scan never saw the story change, i.e. it is
+        // older than the scan reached — the oldest class there is, not unknown.
+        const skipped = ids.filter((id) => {
+            if (!(id in entry.ages)) return false;
+            const d = entry.ages[id];
+            return d === null || d > STALE_DAYS;
+        });
+        return { skipped, cacheAge };
+    } catch { return none; }
+}
+
 try {
     // The project Claude is working in, not the shell that spawned the hook.
     let cwd = process.cwd();
@@ -81,9 +117,30 @@ try {
     const pending = Object.entries(stories)
         .filter(([, s]) => s.passes !== true && s.passes !== 'deferred');
 
-    if (pending.length > 0) {
-        process.stderr.write(`[Auto-Dev] Auto mode active. ${pending.length} tasks remaining. Continuing...\n`);
-        block(`${pending.length} tasks remaining. Next: ${pending[0][0]}. Continue working.`);
+    // A story nobody has edited in months is a decision not to do the work that
+    // nobody wrote down. One repo had 14 of 15 pending stories untouched for over
+    // a month and 3 for over three months, several of them blocked on a person,
+    // a vendor, or a console nobody had opened — and auto blocked on all of them.
+    //
+    // Ages come from a cache the nightly drift-audit writes. They are NOT
+    // computed here: the walk costs 1,652ms against this hook's 31ms, on every
+    // Stop, for a number that changes by days. No cache (or a stale one) simply
+    // means no stories are skipped — the conservative direction.
+    const { skipped } = staleStories(pending.map(([id]) => id), cwd);
+    const active = pending.filter(([id]) => !skipped.includes(id));
+
+    if (active.length > 0) {
+        process.stderr.write(`[Auto-Dev] Auto mode active. ${active.length} tasks remaining. Continuing...\n`);
+        block(`${active.length} tasks remaining. Next: ${active[0][0]}. Continue working.`);
+    }
+
+    // Everything left is stale. Say exactly which stories were set aside and
+    // why — silently skipping work is how a backlog rots without anyone
+    // deciding to let it.
+    if (skipped.length > 0) {
+        process.stderr.write(
+            `[Auto-Dev] ${skipped.length} pending story(ies) untouched >${STALE_DAYS}d — not treated as active work: ${skipped.join(', ')}\n`
+        );
     }
 
     // Sprint complete. Give Claude exactly one turn to choose a next action,
@@ -101,7 +158,14 @@ try {
     process.stderr.write(`[Auto-Dev] Sprint complete${deferred ? ` (${deferred} deferred)` : ''}. Running IDLE detection...\n`);
     block(
         '[Auto-Dev] Sprint complete - running smart next action' +
-        (deferred ? `. ${deferred} story(ies) deferred; do not treat them as outstanding work.` : '')
+        (deferred ? `. ${deferred} story(ies) deferred; do not treat them as outstanding work.` : '') +
+        // Surfaced to Claude, not just to stderr: these stories are still
+        // `passes: null` and auto walked past them. Reconciling or deferring
+        // them for real is the next action, and it needs a human.
+        (skipped.length
+            ? `. ${skipped.length} story(ies) were skipped as untouched >${STALE_DAYS}d (${skipped.join(', ')})` +
+              ' — they are still pending in prd.json. Reconcile them or mark them deferred rather than leaving them to age.'
+            : '')
     );
 } catch (err) {
     // Hook must never crash — a thrown error here would strand the session.

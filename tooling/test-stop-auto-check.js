@@ -178,6 +178,125 @@ r = spawnSync(process.execPath, [HOOK], {
 try { parsed = JSON.parse(r.stdout); } catch { parsed = null; }
 check('uses payload cwd, not process cwd', parsed?.decision === 'block');
 
+// ------------------------------------------- stale stories are not active work
+//
+// A pending story nobody has edited in months is a decision not to do the work
+// that nobody wrote down. Ages come from the cache drift-audit writes; every
+// failure path must fail OPEN (skip nothing), because the damage from skipping
+// real work exceeds the damage from blocking on stale work.
+
+const STALE_PRD = {
+    stories: {
+        'S1-001': { title: 'done', passes: true },
+        'S1-002': { title: 'ancient', passes: null },
+        'S1-003': { title: 'active', passes: null },
+    },
+};
+
+// Writes an isolated CLAUDE_CONFIG_DIR carrying an age cache for `dir`.
+function withAges(dir, ages, { computedAt = new Date().toISOString() } = {}) {
+    const cfg = path.join(TMP, 'cfg' + Math.random().toString(36).slice(2));
+    fs.mkdirSync(path.join(cfg, 'autodev'), { recursive: true });
+    fs.writeFileSync(
+        path.join(cfg, 'autodev', 'prd-story-ages.json'),
+        JSON.stringify({ [fs.realpathSync(dir)]: { computedAt, scanDepth: 120, ages } })
+    );
+    return cfg;
+}
+
+function runWithCfg(dir, cfg) {
+    const r = spawnSync(process.execPath, [HOOK], {
+        input: JSON.stringify({ session_id: 's', cwd: dir, hook_event_name: 'Stop' }),
+        encoding: 'utf8',
+        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: cfg },
+    });
+    let out = null;
+    try { out = JSON.parse(r.stdout); } catch { /* stays null */ }
+    return { out, stderr: r.stderr || '' };
+}
+
+// One story stale, one fresh → auto keeps working on the fresh one only.
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    const cfg = withAges(dir, { 'S1-002': 200, 'S1-003': 2 });
+    const { out } = runWithCfg(dir, cfg);
+    check('stale story excluded: blocks on the fresh one', out?.decision === 'block');
+    check('  names the ACTIVE story, not the stale one',
+        /S1-003/.test(out?.reason || '') && !/Next: S1-002/.test(out?.reason || ''));
+    check('  counts 1 remaining, not 2', /\b1 tasks remaining/.test(out?.reason || ''));
+}
+
+// Every pending story stale → the sprint reads as complete, and says what it set aside.
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    const cfg = withAges(dir, { 'S1-002': 200, 'S1-003': 99 });
+    const { out, stderr } = runWithCfg(dir, cfg);
+    check('all pending stale → falls through to sprint-complete',
+        /Sprint complete/.test(out?.reason || ''));
+    check('  NOT silent: names both skipped stories in the reason',
+        /S1-002/.test(out?.reason || '') && /S1-003/.test(out?.reason || ''));
+    check('  tells Claude they are still pending, not done',
+        /still pending in prd\.json/.test(out?.reason || ''));
+    check('  logs the skip to stderr too', /untouched >30d/.test(stderr));
+}
+
+// `null` age = older than the audit's scan reached. The oldest class, not unknown.
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    const cfg = withAges(dir, { 'S1-002': null, 'S1-003': 1 });
+    const { out } = runWithCfg(dir, cfg);
+    check('null age treated as very old, not as unknown',
+        /\b1 tasks remaining/.test(out?.reason || '') && /S1-003/.test(out?.reason || ''));
+}
+
+// --- fail-open paths: each must skip NOTHING
+
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    const cfg = path.join(TMP, 'cfg-empty');
+    fs.mkdirSync(cfg, { recursive: true });
+    const { out } = runWithCfg(dir, cfg);
+    check('no cache at all → skips nothing (2 remaining)', /\b2 tasks remaining/.test(out?.reason || ''));
+}
+
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    // 30 days old, past CACHE_MAX_AGE_DAYS.
+    const cfg = withAges(dir, { 'S1-002': 200, 'S1-003': 200 },
+        { computedAt: new Date(Date.now() - 30 * 86400000).toISOString() });
+    const { out } = runWithCfg(dir, cfg);
+    check('cache older than 14d → skips nothing', /\b2 tasks remaining/.test(out?.reason || ''));
+}
+
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    const cfg = path.join(TMP, 'cfg-corrupt');
+    fs.mkdirSync(path.join(cfg, 'autodev'), { recursive: true });
+    fs.writeFileSync(path.join(cfg, 'autodev', 'prd-story-ages.json'), '{ not json');
+    const { out } = runWithCfg(dir, cfg);
+    check('corrupt cache → skips nothing', /\b2 tasks remaining/.test(out?.reason || ''));
+}
+
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    // A cache that describes a DIFFERENT repo must not be applied to this one.
+    const cfg = path.join(TMP, 'cfg-other');
+    fs.mkdirSync(path.join(cfg, 'autodev'), { recursive: true });
+    fs.writeFileSync(path.join(cfg, 'autodev', 'prd-story-ages.json'),
+        JSON.stringify({ '/some/other/repo': { computedAt: new Date().toISOString(), ages: { 'S1-002': 200, 'S1-003': 200 } } }));
+    const { out } = runWithCfg(dir, cfg);
+    check('cache keyed to another repo → skips nothing', /\b2 tasks remaining/.test(out?.reason || ''));
+}
+
+{
+    const dir = project({ auto: true, prd: STALE_PRD });
+    // A story the audit never measured is not skippable.
+    const cfg = withAges(dir, { 'S1-002': 200 });
+    const { out } = runWithCfg(dir, cfg);
+    check('story absent from the cache → still active', /\b1 tasks remaining/.test(out?.reason || '')
+        && /S1-003/.test(out?.reason || ''));
+}
+
 // ---------------------------------------------------------------- report
 
 let pass = 0, fail = 0;
