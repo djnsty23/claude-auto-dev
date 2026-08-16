@@ -29,23 +29,77 @@ const { spawnSync, execSync } = require('child_process');
 const ROOT = path.resolve(__dirname, '..');
 const VERBOSE = process.argv.includes('--verbose');
 
-// Which source file each suite is the test for. Explicit, because inferring it
-// from the name is exactly the kind of guess that produces a vacuous check.
-// A suite with no entry is reported as UNMAPPED rather than silently skipped.
-const SUBJECTS = {
-    'test-drift-audit.js': ['plugins/autodev-core/scripts/drift-audit.js'],
-    'test-orphan-checks.js': ['plugins/autodev-core/scripts/find-orphan-checks.js'],
-    'test-stop-auto-check.js': ['plugins/autodev-core/hooks/stop-auto-check.js'],
-    'test-inbox.js': ['plugins/autodev-core/hooks/inbox-notify.js', 'plugins/autodev-core/scripts/inbox-watch.js'],
-    'test-pre-tool-filter.js': ['plugins/autodev-core/hooks/pre-tool-filter.js'],
-    'test-image-scan-hook.js': ['plugins/autodev-core/hooks/user-prompt-image-scan.js'],
-    'test-session-start-hook.js': ['plugins/autodev-core/hooks/session-start.js'],
-    'test-session-carrier.js': ['plugins/autodev-memory/scripts/session-carrier.js'],
-    'test-knowledge.js': ['plugins/autodev-memory/scripts/memory-db.js', 'plugins/autodev-memory/scripts/observation-classifier.js'],
-    'test-knowledge-injection.js': ['plugins/autodev-memory/hooks/memory-session-start.js'],
-    'test-semantic-search.js': ['plugins/autodev-memory/scripts/semantic-search.js'],
-    'test-preflight-template.js': ['plugins/autodev-core/templates/preflight.js'],
+// DERIVED, not declared. The first version of this file hand-listed which source
+// each suite tests, and got it wrong for three of twelve — twice producing a
+// STALE row pointing at a file that does not exist, and once accusing a suite of
+// being vacuous when the accusation was really "you mapped me to a file I never
+// touch". A map of guesses is exactly the failure this script exists to find,
+// one level up.
+//
+// So: read what the suite actually references. Every suite in this repo names
+// its subject as a path literal — `hooks/stop-auto-check.js`,
+// `'..','plugins','autodev-memory','hooks','memory-capture.js'`, or a require of
+// a relative path. Collect all three shapes and resolve them against the repo.
+const SUBJECT_OVERRIDES = {
+    // Only for a suite whose subject genuinely cannot be read off its source.
 };
+
+function deriveSubjects(suiteFile) {
+    const src = fs.readFileSync(suiteFile, 'utf8');
+    const found = new Set();
+
+    // 1. A slash-separated path literal inside the repo: 'plugins/…/foo.js'
+    for (const m of src.matchAll(/['"`]((?:\.\.\/)*(?:plugins|templates)\/[\w./-]+\.js)['"`]/g)) {
+        found.add(m[1].replace(/^(\.\.\/)+/, ''));
+    }
+    // 2. path.join / path.resolve segment lists: 'plugins', 'autodev-core', 'hooks', 'x.js'
+    for (const m of src.matchAll(/path\.(?:join|resolve)\(([^)]*)\)/g)) {
+        const parts = [...m[1].matchAll(/['"`]([\w.-]+)['"`]/g)].map((x) => x[1]);
+        const i = parts.indexOf('plugins');
+        if (i >= 0 && parts[parts.length - 1].endsWith('.js')) {
+            found.add(parts.slice(i).join('/'));
+        }
+    }
+    // 3. A bare require of a repo-relative module, with or without .js
+    for (const m of src.matchAll(/require\(['"`]((?:\.\.\/)+[\w./-]+)['"`]\)/g)) {
+        const p = m[1].replace(/^(\.\.\/)+/, '');
+        if (/^(plugins|templates)\//.test(p)) found.add(p.endsWith('.js') ? p : p + '.js');
+    }
+
+    // 4. A bare BASENAME, for suites that build the path in two steps:
+    //      const PLUGIN_ROOT = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
+    //      const HOOK        = path.join(PLUGIN_ROOT, 'hooks', 'stop-auto-check.js');
+    //    Rules 1-3 see neither half. Four of twelve suites are written this way,
+    //    and without this they derive nothing and get waved through as
+    //    NO-SUBJECT — the silent-skip failure this whole script is about.
+    //
+    //    Safe because it demands a UNIQUE match: a basename resolving to two
+    //    files under plugins/ is ambiguous and ignored rather than guessed.
+    for (const m of src.matchAll(/['"`]([\w-]+\.js)['"`]/g)) {
+        const hits = allPluginFiles().filter((p) => path.basename(p) === m[1]);
+        if (hits.length === 1) found.add(hits[0]);
+    }
+
+    return [...found].filter((p) => fs.existsSync(path.join(ROOT, p)));
+}
+
+let _pluginFiles = null;
+function allPluginFiles() {
+    if (_pluginFiles) return _pluginFiles;
+    const out = [];
+    const walk = (dir) => {
+        for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+            if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+            const rel = dir + '/' + e.name;
+            if (e.isDirectory()) walk(rel);
+            else if (e.name.endsWith('.js')) out.push(rel);
+        }
+    };
+    for (const top of ['plugins']) {
+        if (fs.existsSync(path.join(ROOT, top))) walk(top);
+    }
+    return (_pluginFiles = out);
+}
 
 // A stub that parses, does nothing, and exports nothing.
 //
@@ -87,11 +141,11 @@ const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, su
 const rows = [];
 
 for (const suite of suites) {
-    const subjects = SUBJECTS[suite];
-    if (!subjects) { rows.push({ suite, status: 'UNMAPPED', note: 'no subject recorded — add one to SUBJECTS' }); continue; }
-
-    const missing = subjects.filter((s) => !fs.existsSync(path.join(ROOT, s)));
-    if (missing.length) { rows.push({ suite, status: 'STALE', note: `subject missing: ${missing.join(', ')}` }); continue; }
+    const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(__dirname, suite));
+    if (!subjects.length) {
+        rows.push({ suite, status: 'NO-SUBJECT', note: 'references no plugin source — nothing to stub' });
+        continue;
+    }
 
     // Baseline: it must be green before the mutation means anything.
     if (runSuite(suite).status !== 0) {
@@ -128,10 +182,10 @@ if (after) {
 console.log('\nCan each suite fail?\n');
 let bad = 0;
 for (const r of rows) {
-    const mark = r.status === 'ok' ? '✓' : r.status === 'UNMAPPED' ? '·' : '✗';
+    const mark = r.status === 'ok' ? '✓' : r.status === 'NO-SUBJECT' ? '·' : '✗';
     if (r.status === 'VACUOUS' || r.status === 'RED') bad++;
     console.log(`  ${mark} ${r.suite.padEnd(30)} ${r.status.padEnd(9)} ${VERBOSE || r.status !== 'ok' ? r.note : ''}`);
 }
-const unmapped = rows.filter((r) => r.status === 'UNMAPPED').length;
-console.log(`\n${rows.length} suite(s) · ${bad} cannot fail or are already red · ${unmapped} unmapped · tree restored clean\n`);
+const unmapped = rows.filter((r) => r.status === 'NO-SUBJECT').length;
+console.log(`\n${rows.length} suite(s) · ${bad} cannot fail or are already red · ${unmapped} with no subject · tree restored clean\n`);
 process.exit(bad ? 1 : 0);
