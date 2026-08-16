@@ -80,9 +80,18 @@ check('removing the backup clears the failure', after.status === 0);
     // An assertion tied to a fact the work is meant to change is a chore, so
     // this asserts the PROPERTY instead: whatever is currently untested must
     // still be reported, and comments must not rescue it.
+    // Correct when the list is empty, and the empty case is now the real one:
+    // every wired hook has a suite. An earlier version required length > 0 to
+    // avoid a vacuous pass, which pinned it to hooks BEING untested — so
+    // finishing the work broke the test. That is the second time in two turns;
+    // the fix is to assert the invariant and cover emptiness separately below.
     check('every reported hook really has no resolving suite',
-        (out?.untested || []).length > 0
-        && (out?.untested || []).every((u) => (u.covering || []).length === 0));
+        (out?.untested || []).every((u) => (u.covering || []).length === 0));
+
+    // Non-vacuous companion: every wired hook is accounted for either way, so
+    // this fails if the tool starts returning nothing at all.
+    check('every wired hook is reported with its covering suites',
+        (out?.wiredRows || []).length === (out?.wired || -1) && (out?.wired || 0) > 0);
 
     // post-tool-typecheck.js is the case that motivated this tool: it was named
     // in another suite's stale header comment and driven by nothing. It now has

@@ -437,10 +437,14 @@ function checkNoStaleMutationBackups() {
 
 // A hook wired into hooks.json that no suite drives.
 //
-// WARN, not FAIL, deliberately. There are 5 today, one of them 231 lines, and a
+// Now a FAIL. It shipped as a WARN because 5 of 13 hooks were untested, and a
 // gate that is red from the moment it ships is a gate people learn to bypass.
-// This makes the debt visible on every run instead of hiding it behind a number
-// nobody prints.
+// All 5 have suites now, so the debt is zero and the check can hold the line
+// instead of just reporting it: a NEW hook wired without a test fails validate,
+// and therefore fails the pre-push hook.
+//
+// If this ever goes red on a wired hook you are not ready to test, put it back
+// to WARN in the same commit that wires the hook, rather than deleting the call.
 function checkUntestedHooks() {
   const script = path.join(ROOT, 'tooling', 'find-untested-hooks.js');
   if (!fs.existsSync(script)) return log('WARN', 'find-untested-hooks.js is missing');
@@ -448,7 +452,7 @@ function checkUntestedHooks() {
   let out;
   try { out = JSON.parse(r.stdout); } catch { return log('WARN', 'find-untested-hooks.js produced no parseable output'); }
   if (!out.untested.length) return log('PASS', `Hook coverage: all ${out.wired} wired hooks are driven by a suite`);
-  log('WARN', `${out.untested.length} of ${out.wired} wired hooks have no suite — run node tooling/find-untested-hooks.js`);
+  log('FAIL', `${out.untested.length} of ${out.wired} wired hooks have no suite — run node tooling/find-untested-hooks.js`);
 }
 
 // ---------------------------------------------------------------- run
