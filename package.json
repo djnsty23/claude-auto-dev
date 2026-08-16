@@ -17,7 +17,8 @@
     "test": "node tooling/test-all.js",
     "validate": "node tooling/validate.js",
     "bump": "node tooling/bump.js",
-    "check:suites": "node tooling/check-suites-can-fail.js"
+    "check:suites": "node tooling/check-suites-can-fail.js",
+    "check:vacuity": "node tooling/find-vacuous-assertions.js"
   },
   "author": "djnsty23",
   "license": "MIT",

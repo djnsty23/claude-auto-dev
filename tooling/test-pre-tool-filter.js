@@ -163,6 +163,18 @@ for (const [label, tool, input, expected] of cases) {
   if (!ok && stderr.trim()) console.log('       stderr:', stderr.trim().split('\n')[0]);
 }
 
+// The fail-CLOSED parse guard. Every case above builds its input with
+// JSON.stringify, so the "input did not parse" branch was unreachable from this
+// suite and an operator mutation flipping its exit(2) to exit(0) survived
+// undetected. A hook that silently allows everything when it cannot read its
+// input is the worst failure this file has.
+{
+  const r = spawnSync('node', [HOOK], { input: 'this is not json', encoding: 'utf8' });
+  const ok = r.status === 2;
+  if (ok) pass++; else fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  unparseable input fails CLOSED  (got ${r.status}, expected 2)`);
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);
