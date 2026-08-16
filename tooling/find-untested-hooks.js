@@ -91,7 +91,10 @@ const rows = wired.map((h) => {
 const untested = rows.filter((r) => r.covering.length === 0);
 
 if (asJson) {
-    console.log(JSON.stringify({ wired: rows.length, untested }, null, 2));
+    // `wiredRows` carries the covering suites per hook, so a caller can assert
+    // WHICH suite covers a hook rather than only how many are uncovered. Without
+    // it, any assertion about coverage attribution passes vacuously.
+    console.log(JSON.stringify({ wired: rows.length, wiredRows: rows, untested }, null, 2));
     process.exit(untested.length ? 1 : 0);
 }
 

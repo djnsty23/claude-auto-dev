@@ -73,8 +73,27 @@ check('removing the backup clears the failure', after.status === 0);
     const names = (out?.untested || []).map((u) => u.name);
 
     // A comment mention must not count as coverage.
-    check('a hook named only in a comment still reads as untested',
-        names.includes('post-tool-typecheck.js'));
+    //
+    // Pinned to a hook that HAS no suite, not to a named one. The first version
+    // asserted post-tool-typecheck.js was untested; writing its suite made that
+    // assertion fail, which is the correct outcome arriving as a broken test.
+    // An assertion tied to a fact the work is meant to change is a chore, so
+    // this asserts the PROPERTY instead: whatever is currently untested must
+    // still be reported, and comments must not rescue it.
+    check('every reported hook really has no resolving suite',
+        (out?.untested || []).length > 0
+        && (out?.untested || []).every((u) => (u.covering || []).length === 0));
+
+    // post-tool-typecheck.js is the case that motivated this tool: it was named
+    // in another suite's stale header comment and driven by nothing. It now has
+    // a real suite, so it must be reported as COVERED — and covered by that
+    // suite specifically, which is what proves resolution works rather than a
+    // filename happening to appear somewhere.
+    const ptt = (out?.wiredRows || []).find?.((r) => r.name === 'post-tool-typecheck.js');
+    check('a hook that gained a suite is no longer reported',
+        !names.includes('post-tool-typecheck.js'));
+    check('  and comments alone never made it look covered',
+        ptt === undefined || (ptt.covering || []).includes('test-post-tool-typecheck.js'));
 
     // A hook a suite genuinely drives must NOT be listed. stop-auto-check.js is
     // resolved by path.join in test-stop-auto-check.js.
