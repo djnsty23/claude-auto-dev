@@ -129,12 +129,20 @@ what remains undecided.
 
 ## Step 6: Wire it in
 
-Confirm `.claude/` is gitignored *except* this file — the rules are worth
-committing even though the rest of `.claude/` is ephemeral:
+`.claude/` is ephemeral tooling state and should be ignored — but this one file
+is worth committing. A bare `!.claude/project-rules.md` negation only works if
+`.claude/` is ignored as a directory, so add both, and check the result rather
+than assuming:
 
 ```bash
-grep -q "project-rules" .gitignore || printf '\n# autodev project rules are committed\n!.claude/project-rules.md\n' >> .gitignore
+grep -q "^\.claude/$" .gitignore || printf '\n# autodev tooling state\n.claude/\n' >> .gitignore
+grep -q "project-rules" .gitignore || printf '# ...except the project rules, which are committed\n!.claude/project-rules.md\n' >> .gitignore
+git check-ignore -v .claude/project-rules.md && echo "STILL IGNORED — fix the negation before continuing"
 ```
+
+If the repo already ignores only specific paths inside `.claude/` rather than
+the whole directory, leave that alone and just confirm `project-rules.md` is
+committable. Do not restructure someone's `.gitignore`.
 
 Tell the user that `review`, `audit`, and `auto` should read
 `.claude/project-rules.md` and that **it outranks the plugin's generic

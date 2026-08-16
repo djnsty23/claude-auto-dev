@@ -49,6 +49,13 @@ const escaped = path.join(TMP, 'escape');
 check('path-traversal session id cannot escape the carrier dir', !fs.existsSync(escaped));
 check('sanitized id still round-trips', carrier.read(PROJ, '../../escape') === 'ses_evil');
 
+// PRIVACY: this directory holds verbatim user prompts, and projects do not
+// reliably ignore all of .claude/. It must exclude itself on creation, or a
+// user's prompts end up committed — to a public repo, in the worst case.
+const dirIgnore = path.join(PROJ, '.claude', 'memory-sessions', '.gitignore');
+check('carrier dir self-ignores on creation', fs.existsSync(dirIgnore));
+check('self-ignore excludes everything', fs.readFileSync(dirIgnore, 'utf8').includes('\n*'));
+
 // Prompt carrier
 carrier.writePrompt(PROJ, 'harness-B', 'fix the login redirect bug');
 check('prompt round-trips', carrier.readPrompt(PROJ, 'harness-B') === 'fix the login redirect bug');

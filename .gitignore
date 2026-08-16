@@ -22,6 +22,13 @@ ledger.json
 # Auto mode flag (session-specific)
 .claude/auto-active
 
+# Session carriers and verbatim user prompts (autodev-memory). The directory
+# also writes its own .gitignore, so this line is belt-and-braces.
+.claude/memory-sessions/
+
+# Leftover scratch that was tracked before these rules existed
+.claude/commit-msg.txt
+
 # Knowledge auto-injection throttle state. Rewritten on each update to hold only
 # the current session's "sessionId<TAB>area" markers, so it stays bounded to the
 # active session's areas rather than accumulating across sessions.

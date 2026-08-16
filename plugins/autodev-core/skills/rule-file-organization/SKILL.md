@@ -24,7 +24,7 @@ allowed-tools: Read, Grep, Glob
 | Screenshots | `.claude/screenshots/*.png` | Cleaned each run |
 | Sprint History | `.claude/sprint-history.md` | Persistent |
 | Agent Memory | `.claude/agent-memory/*.md` | Persistent (audit-patterns.md, brainstorm-history.md) |
-| Session carriers | `.claude/memory-sessions/*` | Deleted at SessionEnd (autodev-memory) |
+| Session carriers | `.claude/memory-sessions/*` | Deleted at SessionEnd. Holds **verbatim user prompts** — the directory writes its own `.gitignore` so it can never be committed. Never move these files elsewhere. |
 | Compaction snapshot | `.claude/pre-compact-state.json` | Overwritten each compaction |
 
 ## Rules

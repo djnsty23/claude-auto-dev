@@ -24,6 +24,19 @@ function carrierDir(cwd) {
     return path.join(cwd, '.claude', DIR_NAME);
 }
 
+// This directory holds the user's verbatim prompts. Projects do not reliably
+// ignore all of .claude/ — this repo itself ignores only four specific paths
+// inside it — so the directory excludes ITSELF the moment it is created. That
+// holds no matter what the surrounding project's .gitignore says, which is the
+// only version of this guarantee worth having when the repo might be public.
+function ensureDir(dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    const ignore = path.join(dir, '.gitignore');
+    if (!fs.existsSync(ignore)) {
+        fs.writeFileSync(ignore, '# Session state and verbatim user prompts. Never commit.\n*\n');
+    }
+}
+
 // The harness session id is untrusted as a path segment — reduce it to a safe
 // slug so it can never escape the carrier directory.
 function slug(harnessSessionId) {
@@ -36,7 +49,7 @@ function carrierPath(cwd, harnessSessionId) {
 
 function write(cwd, harnessSessionId, memorySessionId) {
     const file = carrierPath(cwd, harnessSessionId);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    ensureDir(path.dirname(file));
     fs.writeFileSync(file, memorySessionId);
     return file;
 }
@@ -52,9 +65,17 @@ function read(cwd, harnessSessionId) {
 
 function clear(cwd, harnessSessionId) {
     try { fs.unlinkSync(carrierPath(cwd, harnessSessionId)); } catch { /* already gone */ }
-    // Remove the directory when this was the last live session. rmdir only
-    // succeeds on an empty directory, which is exactly the condition we want.
-    try { fs.rmdirSync(carrierDir(cwd)); } catch { /* other sessions still live */ }
+    // Remove the directory when this was the last live session. The self-ignore
+    // file is ours, so it does not count as "still in use" — drop it only when
+    // nothing else remains, and never touch a directory another session is using.
+    try {
+        const dir = carrierDir(cwd);
+        const left = fs.readdirSync(dir).filter((f) => f !== '.gitignore');
+        if (left.length === 0) {
+            try { fs.unlinkSync(path.join(dir, '.gitignore')); } catch {}
+            fs.rmdirSync(dir);
+        }
+    } catch { /* other sessions still live, or already gone */ }
 }
 
 // The user's latest prompt, stored beside the session id.
@@ -69,7 +90,7 @@ function promptPath(cwd, harnessSessionId) {
 
 function writePrompt(cwd, harnessSessionId, prompt) {
     const file = promptPath(cwd, harnessSessionId);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    ensureDir(path.dirname(file));
     fs.writeFileSync(file, String(prompt || '').slice(0, 2000));
 }
 
