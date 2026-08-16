@@ -217,6 +217,20 @@ let pass = 0, fail = 0;
     seed('TITLE_ONLY auth rotation landed', ['unrelated/elsewhere.js']);
     seed('AUTHOR_ONLY the author field is optional', ['unrelated/other.js']);
 
+    // renderKnowledgeBrief's title falls back from the AREA ARGUMENT to the
+    // result's own area. Both mutants on that line survived: no case passed an
+    // empty area alongside a populated result, so the fallback never ran and the
+    // `&&` guard was never the thing deciding.
+    {
+        const res = memDB.knowledge(AREA_PROJ, 'src/auth');
+        const fromArg = memDB.renderKnowledgeBrief(res, 'src/billing');
+        cases.push(['brief title prefers the area argument', /src\/billing/.test(fromArg)]);
+
+        const fromResult = memDB.renderKnowledgeBrief(res, '');
+        cases.push(['  and falls back to the result\'s own area when none is given',
+          /src\/auth/.test(fromResult)]);
+    }
+
     const byWord = titles('auth');
     cases.push(['a row matching only by title/concept still surfaces',
       byWord.includes('TITLE_ONLY auth rotation landed')]);
