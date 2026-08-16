@@ -57,6 +57,19 @@ survivor. A deleted memory is unrecoverable and its loss is silent.
 
 ## 3. Refresh CLAUDE.md
 
+Use the checker rather than grepping by hand — it encodes eight precision rules
+learned by running naive versions against real repos:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/claudemd-audit.js" <repo> [<repo>...]
+```
+
+It skips what only looks stale: bare filenames used in prose, filename patterns
+like `qa-YYYY-MM-DD.md`, house shorthand for a path spelled in full elsewhere,
+files the doc itself describes as deleted, and files annotated local-only or
+gitignored. On three production repos a naive check reported 16 findings; this
+reports the 1 that was real.
+
 For each active project, check whether `CLAUDE.md` still matches reality:
 
 - Do the paths, commands, and scripts it names still exist?
