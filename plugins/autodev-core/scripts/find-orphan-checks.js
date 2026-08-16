@@ -88,7 +88,12 @@ for (const f of CONFIG_FILES) {
     let text;
     try { text = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { continue; }
     // include: [...] / testMatch: [...] / testRegex
-    for (const m of text.matchAll(/(?:include|testMatch|testPathPatterns)\s*:\s*\[([^\]]*)\]/g)) {
+    // The optional `"` matters: CONFIG_FILES accepts jest.config.json, but JSON
+    // writes `"testMatch": [...]` and this pattern required the key to be
+    // followed immediately by the colon. So that branch has always been read and
+    // has never been able to contribute a single glob — a config format the tool
+    // claims to support, silently ignored. Found by writing the first test for it.
+    for (const m of text.matchAll(/(?:include|testMatch|testPathPatterns)"?\s*:\s*\[([^\]]*)\]/g)) {
         for (const g of m[1].matchAll(/['"`]([^'"`]+)['"`]/g)) includeGlobs.push(g[1]);
     }
 }

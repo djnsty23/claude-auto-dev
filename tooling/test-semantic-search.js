@@ -117,6 +117,42 @@ if (!memDB.isAvailable()) {
 
 // --- Report ---
 let pass = 0, fail = 0;
+// --- gaps found by check:vacuity -------------------------------------------
+
+// tokenize drops stopwords AND one-character tokens. `t.length > 1 && !STOP`
+// mutated to `||` keeps both, and every downstream score is then dominated by
+// "the", "and" and stray letters — the ranking still returns something, so it
+// looks like it works.
+cases.push(['tokenize drops stopwords', !tokenize('the auth and the token').includes('the')]);
+cases.push(['tokenize drops one-character tokens', !tokenize('a b auth').some((t) => t.length < 2)]);
+cases.push(['  but keeps the real words', tokenize('the auth and the token').includes('auth')]);
+
+// expandQuery dedups by STEM, not by surface form. `if (!seen.has(s))` forced
+// true emits a term once per source token, which silently weights whichever
+// concept the user happened to phrase twice.
+cases.push(['expandQuery does not repeat a stem', (() => {
+  const out = expandQuery(['deploying', 'deployed', 'deploys']);
+  return new Set(out).size === out.length;
+})()]);
+
+// rank's input guards. Each mutated to `&&` lets a bad call through into the
+// scoring loop instead of returning [].
+cases.push(['rank returns [] for an empty query', rank('', [{ id: 1, text: 'auth' }]).length === 0]);
+cases.push(['rank returns [] for no docs', rank('auth', []).length === 0]);
+cases.push(['rank returns [] when docs is not an array', rank('auth', null).length === 0]);
+
+// Document frequency must START at zero for an unseen term. `(df.get(t) || 0)`
+// mutated to `&&` yields undefined + 1 = NaN, which poisons every idf and makes
+// every score NaN — and NaN > 0 is false, so rank silently returns NOTHING
+// rather than failing loudly.
+cases.push(['rank still scores when a term is unique to one doc', (() => {
+  const out = rank('kubernetes', [
+    { id: 'a', text: 'kubernetes rollout strategy' },
+    { id: 'b', text: 'billing invoice totals' },
+  ]);
+  return out.length > 0 && out[0].id === 'a' && Number.isFinite(out[0].score) && out[0].score > 0;
+})()]);
+
 cases.forEach(([label, ok]) => {
   console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
   ok ? pass++ : fail++;

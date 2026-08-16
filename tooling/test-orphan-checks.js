@@ -287,6 +287,70 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         /MANUAL tools/.test(r.stdout) && /charge-cards\.mjs/.test(r.stdout));
 }
 
+// A repo with no scripts at all must say so and exit clean, not crash or report
+// a phantom. `if (!scripts.length)` forced to false survived — no fixture was
+// ever empty.
+{
+    const dir = repo({ 'package.json': JSON.stringify({ name: 'r' }) });
+    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    check('a repo with no scripts exits 0', r.status === 0);
+    check('  and reports nothing as orphaned', !/NOTHING runs/.test(r.stdout));
+}
+
+// jest.config.json is a separate branch of the config-file match from the
+// regex-matched .js/.ts variants, and `f === 'jest.config.json'` had no fixture.
+{
+    const out = run(repo({
+        'package.json': JSON.stringify({ name: 'r' }),
+        'jest.config.json': JSON.stringify({ testMatch: ['**/scripts/**/*.check.js'] }),
+        'scripts/a.check.js': ASSERTS,
+    }));
+    check('jest.config.json is read for include globs',
+        (out.includeGlobs || []).includes('**/scripts/**/*.check.js'));
+    check('  and a file it matches is not an orphan', (out.orphanChecks || []).length === 0);
+}
+
+// Human output must not be JSON. `if (asJson)` forced true makes every run emit
+// JSON, so the human path — the one people actually read — disappears.
+{
+    const dir = repo({
+        'package.json': JSON.stringify({ name: 'r' }),
+        'scripts/lonely3.mjs': ASSERTS,
+    });
+    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch { /* expected */ }
+    check('without --json the output is human text, not JSON', parsed === null);
+    check('  and still names the orphan', /lonely3\.mjs/.test(r.stdout));
+}
+
+// The "verification code that nothing runs" heading must not appear when there
+// is nothing to report. `if (orphanChecks.length)` forced true prints the alarm
+// with an empty list under it, which teaches people to ignore the alarm.
+{
+    const dir = repo({
+        'package.json': JSON.stringify({ name: 'r', scripts: { check: 'node scripts/wired.mjs' } }),
+        'scripts/wired.mjs': ASSERTS,
+    });
+    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    check('a clean repo prints no orphan heading', !/NOTHING runs/.test(r.stdout));
+    check('  and exits 0', r.status === 0);
+}
+
+// --all is what surfaces the one-off bucket; without the flag it must stay
+// summarised. Both directions of `if (showAll && orphanOther.length)` survived.
+{
+    const files = {
+        'package.json': JSON.stringify({ name: 'r' }),
+        'scripts/migrate-things.mjs': MIGRATION,
+    };
+    const dir = repo(files);
+    const plain = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    const all = spawnSync(process.execPath, [TOOL, dir, '--all'], { encoding: 'utf8' });
+    check('a one-off is not listed by default', !/migrate-things\.mjs/.test(plain.stdout));
+    check('  but --all lists it by name', /migrate-things\.mjs/.test(all.stdout));
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
