@@ -163,6 +163,47 @@ for (const [label, tool, input, expected] of cases) {
   if (!ok && stderr.trim()) console.log('       stderr:', stderr.trim().split('\n')[0]);
 }
 
+// The Windows rules, which had no test on any machine that runs this suite.
+// Found by mutation: forcing the platform branch on, off, and inverting its
+// comparison all left every assertion green.
+{
+  const win = (command) => spawnSync('node', [HOOK], {
+    input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PRE_TOOL_PLATFORM: 'win32' },
+  }).status;
+
+  for (const [label, command] of [
+    ['format c: blocked on win32', 'format c:'],
+    ['del /s /q c: blocked on win32', 'del /s /q c:\\'],
+    ['diskpart blocked on win32', 'diskpart'],
+  ]) {
+    const ok = win(command) === 2;
+    if (ok) pass++; else fail++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}  (got ${win(command)}, expected 2)`);
+  }
+
+  // A SAFE command under win32 must still pass. Without this, every win32 case
+  // sends something dangerous, so replacing the pattern test with `true` blocks
+  // everything and the suite stays green — the loop could deny all Windows
+  // commands undetected. Found by mutation, not by review.
+  const safeOnWin = win('npm install');
+  const okSafe = safeOnWin === 0;
+  if (okSafe) pass++; else fail++;
+  console.log(`${okSafe ? 'PASS' : 'FAIL'}  a safe command is allowed on win32  (got ${safeOnWin}, expected 0)`);
+
+  // The same command must NOT be blocked off Windows, or the branch is dead
+  // weight and the platform check is doing nothing.
+  const offWindows = spawnSync('node', [HOOK], {
+    input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'diskpart' } }),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PRE_TOOL_PLATFORM: 'darwin' },
+  }).status;
+  const ok = offWindows === 0;
+  if (ok) pass++; else fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  diskpart is NOT blocked off win32  (got ${offWindows}, expected 0)`);
+}
+
 // The fail-CLOSED parse guard. Every case above builds its input with
 // JSON.stringify, so the "input did not parse" branch was unreachable from this
 // suite and an operator mutation flipping its exit(2) to exit(0) survived

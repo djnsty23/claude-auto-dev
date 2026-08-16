@@ -131,7 +131,16 @@ try {
         }
 
         // Windows-specific dangerous patterns
-        if (process.platform === 'win32') {
+        // Platform is read through an override so these rules are testable off
+        // Windows. Found by mutation: flipping this comparison, and forcing the
+        // branch both on and off, changed nothing any assertion could see — the
+        // three Windows rules below had never been exercised by any test on a
+        // non-Windows machine, which is every machine that runs this suite.
+        //
+        // The override only ever selects which denylist applies to the CURRENT
+        // process, and both denylists are strictly additive blocks. Setting it
+        // cannot unblock anything the platform-appropriate list already denies.
+        if ((process.env.CLAUDE_PRE_TOOL_PLATFORM || process.platform) === 'win32') {
             for (const pattern of DANGEROUS_WIN32_PATTERNS) {
                 if (pattern.test(command)) {
                     process.stderr.write(`Blocked potentially dangerous command: ${command}\n`);
