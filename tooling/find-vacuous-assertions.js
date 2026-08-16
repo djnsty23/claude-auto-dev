@@ -79,8 +79,25 @@
 //
 // It is also the case where the one-suite caveat above bites hardest: the CLI
 // suite is a SMOKE suite by design — it asserts every subcommand runs and
-// returns parseable JSON, not what the queries mean — so 77 against it is
-// expected and says nothing about that suite's quality.
+// returns parseable JSON, not what the queries mean — so a high count against it
+// is expected and says nothing about that suite's quality.
+//
+// ALL 28 READ AND CLASSIFIED. Most of what is left is floor, not debt:
+//
+//   12  `if (!db) return []` guards and their `}) || []` circuit-breaker
+//       fallbacks. Unreachable wherever sqlite works, which is every environment
+//       the suite runs in. Reaching them means making sqlite unavailable — an
+//       environment condition, not a test gap.
+//    6  CLI argument defaults. Partly closed; the rest survive because the
+//       default and the mutated value produce the same observable output for the
+//       fixtures used. Low value.
+//    1  `if (!fs.existsSync(DB_DIR))` — mkdir is idempotent, so forcing it on
+//       changes nothing. Equivalent.
+//    9  genuinely testable but low-value: a dedup key, a pluralisation ternary,
+//       a date slice, the seen-set dedup, the brief's empty-rows guard.
+//
+// So the honest remaining debt here is ~9 formatting and edge-case assertions,
+// not 28. Do not read the headline as a backlog.
 //
 // The hook rows are the evidence for bothering: reading them turned up an inbox
 // that could be claimed without being announced, a session-end summary that
