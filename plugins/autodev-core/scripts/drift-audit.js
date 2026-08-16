@@ -150,46 +150,176 @@ function auditSettings() {
 // worse than no backlog: stop-auto-check blocks on stories nobody is working,
 // and status reports fiction. Detect the gap instead of assuming the file is
 // authoritative.
+// prd.json revisions walked for per-story ages. Measured on three real repos:
+// at 40 the >30d COUNT was already right (unresolved stories count as stale) but
+// the median and oldest were understated — 57d/94d against a true 61d/99d — and
+// two repos had stories older than the scan reached. 120 resolves every story in
+// all three; 200 returns byte-identical output because the walk stops as soon as
+// the last pending story resolves. Cost of the difference: 3.5s -> 5.2s for the
+// whole audit, which is a manual/nightly tool, not a hook.
+const PRD_COMMIT_SCAN = 120;
+const PRD_BRANCH_SCAN = 40;   // most-recent remote branches checked for carriers
+
+const g = (repo, args) => {
+    try {
+        return execSync('git ' + args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch { return ''; }
+};
+
+// A story's value at one revision, as a comparable string.
+//
+// PARSE it. The first version sliced the raw text from `"S-1": {` to the next
+// `\n    },`, which is faster and wrong: the LAST story in the object has no
+// trailing comma, so its slice ran to end-of-file. Append any new story and the
+// previously-last one's slice changes without its content changing — so every
+// story reported as "edited" on the day the story after it was added, which is
+// precisely the day a backlog grows. Caught by a test whose 90-day-stale story
+// read as 1 day old.
+function storyValues(text, ids) {
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { return null; }
+    const stories = parsed.stories || {};
+    const out = {};
+    for (const id of ids) {
+        out[id] = stories[id] === undefined ? undefined : JSON.stringify(stories[id]);
+    }
+    return out;
+}
+
+// How long has each PENDING story's own entry gone unmodified?
+//
+// This exists because the whole-file age does not discriminate. Measured across
+// three repos it read 4d / 0d / 1d — near-identical — while the median PENDING
+// story was 60d, 15d and 1d old. One of those repos had twelve stories nobody
+// had edited in a month and two older than three months; the file-level number
+// called it four days current.
+//
+// The rejected alternative, recorded so it is not rebuilt: "age from the last
+// commit that changed a `passes` value" sounds sharper and is not. Implemented
+// and measured, it returned exactly the current answer in all three repos,
+// because a single incremental story-close resets it just as a bulk edit does.
+function pendingStoryAges(repo, pendingIds) {
+    const revs = g(repo, `log -${PRD_COMMIT_SCAN} --format=%H%x09%ct -- prd.json`)
+        .split('\n').filter(Boolean)
+        .map((l) => { const [h, t] = l.split('\t'); return { h, t: Number(t) }; });
+
+    // Parse each revision once, not once per story.
+    const lastEdit = {};
+    let newer = null;
+    for (const { h, t } of revs) {
+        const text = g(repo, `show ${h}:prd.json`);
+        if (!text) continue;
+        const vals = storyValues(text, pendingIds);
+        // A revision where prd.json did not parse tells us nothing about any
+        // story; skip it rather than reading it as "everything changed".
+        if (!vals) continue;
+        if (newer) {
+            for (const id of pendingIds) {
+                if (lastEdit[id]) continue;
+                if (newer.vals[id] !== vals[id]) lastEdit[id] = newer.t;
+            }
+        }
+        newer = { vals, t };
+        if (pendingIds.every((id) => lastEdit[id])) break;
+    }
+
+    const now = Date.now() / 1000;
+    const days = pendingIds.map((id) => lastEdit[id] ? Math.floor((now - lastEdit[id]) / 86400) : null);
+    return {
+        known: days.filter((d) => d !== null).sort((a, b) => a - b),
+        unresolved: days.filter((d) => d === null).length,
+    };
+}
+
+// Unmerged branches whose prd.json differs from HEAD's.
+//
+// The case this exists for: a repo's tracker looked stale for weeks while the
+// reconciliation sat finished on a branch nobody merged. A staleness check aimed
+// at the checked-out tree cannot see that, and draws the opposite conclusion —
+// "nobody has reconciled this" when someone had, elsewhere.
+//
+// Measured on 224 remote branches across three repos: 2 carriers, 0 false
+// positives. One held a P0 audit wave (live invite codes tracked in git); the
+// other held a finished P0 investigation. Both were worth surfacing.
+function prdCarrierBranches(repo) {
+    const all = g(repo, `for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes`)
+        .split('\n').map((b) => b.replace(/'/g, '').trim())
+        .filter((b) => b && !/\/HEAD$/.test(b) && b !== 'origin');
+
+    const scanned = all.slice(0, PRD_BRANCH_SCAN);
+    const carriers = [];
+    for (const b of scanned) {
+        const ahead = Number(g(repo, `rev-list --count HEAD..${b}`)) || 0;
+        if (!ahead) continue;
+        if (!g(repo, `diff --name-only HEAD...${b} -- prd.json`)) continue;
+        carriers.push({ b, ahead, date: g(repo, `log -1 --format=%ad --date=format:%Y-%m-%d ${b}`) });
+    }
+    return { carriers, scanned: scanned.length, skipped: all.length - scanned.length };
+}
+
 function auditPrd(repo) {
     const prdPath = path.join(repo, 'prd.json');
     if (!fs.existsSync(prdPath)) return;
+    const name = path.basename(repo);
 
     const prd = readJSON(prdPath);
     if (!prd) {
-        add('prd', 'warn', `${path.basename(repo)}/prd.json does not parse`,
+        add('prd', 'warn', `${name}/prd.json does not parse`,
             'fix or delete it — auto and status both read it');
         return;
     }
 
-    const stories = Object.values(prd.stories || {});
-    const pending = stories.filter((s) => s.passes !== true && s.passes !== 'deferred').length;
-    if (!pending) return;
+    const pendingIds = Object.entries(prd.stories || {})
+        .filter(([, s]) => s.passes !== true && s.passes !== 'deferred')
+        .map(([id]) => id);
+    if (!pendingIds.length) return;
 
-    // Age by last COMMIT that changed prd.json, not filesystem mtime. Every
-    // prd.json on this machine reported 0 days by mtime — the file gets touched
-    // without its content changing, so mtime says "current" about a backlog
-    // nobody has reconciled in weeks.
-    let prdAgeDays = 0;
-    let commitsSince = 0;
-    try {
-        const lastPrdCommit = Number(execSync(
-            'git log -1 --format=%ct -- prd.json',
-            { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
-        ).trim());
-        if (!lastPrdCommit) return;
-        prdAgeDays = Math.floor((Date.now() / 1000 - lastPrdCommit) / 86400);
-        if (prdAgeDays < 3) return;
-
-        commitsSince = Number(execSync(
-            `git rev-list --count ${lastPrdCommit ? `--since=${lastPrdCommit}` : ''} HEAD`,
-            { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
-        ).trim()) || 0;
-    } catch { return; }
-
-    if (commitsSince >= 10) {
+    // --- a reconciliation that exists, on a branch nobody merged
+    const { carriers, skipped } = prdCarrierBranches(repo);
+    for (const c of carriers) {
         add('prd', 'warn',
-            `${path.basename(repo)}: prd.json lists ${pending} pending story(ies) but has not been touched in ${prdAgeDays}d, while ${commitsSince} commits landed`,
-            'reconcile it, or stop relying on auto/status here — auto will block on work nobody is doing');
+            `${name}: ${c.b} is ${c.ahead} commit(s) ahead and its prd.json differs from HEAD's (tip ${c.date}) — this backlog may already be reconciled there`,
+            `read it before reconciling by hand: git diff HEAD...${c.b} -- prd.json`);
+    }
+    if (skipped) {
+        add('prd', 'info', `${name}: ${skipped} older remote branch(es) not checked for prd changes (scanned the ${PRD_BRANCH_SCAN} most recent)`,
+            'raise PRD_BRANCH_SCAN if this repo keeps long-lived branches');
+    }
+
+    // --- per-story staleness
+    //
+    // Unresolved stories count as stale rather than as unknown. A story whose
+    // entry is unchanged across the last PRD_COMMIT_SCAN revisions is older than
+    // every story the scan DID resolve, so dropping them biases the answer
+    // downward — and it biases it by discarding exactly the worst cases. Caught
+    // by measuring: at an 80-revision scan one repo read "12 of 15 stale, median
+    // 60d"; at 40 the same repo read "11 of 15, median 48d", because its two
+    // oldest stories fell off the end and out of the count.
+    const { known, unresolved } = pendingStoryAges(repo, pendingIds);
+    const stale = known.filter((d) => d > 30).length + unresolved;
+    if (stale) {
+        const median = known.length ? known[Math.floor(known.length / 2)] : null;
+        const beyond = unresolved ? `; ${unresolved} older than this ${PRD_COMMIT_SCAN}-revision scan reaches` : '';
+        add('prd', 'warn',
+            `${name}: ${stale} of ${pendingIds.length} pending story(ies) untouched >30d`
+            + (median === null ? '' : ` (median ${median}d, oldest resolved ${known[known.length - 1]}d${beyond})`),
+            'reconcile those stories, or stop relying on auto/status here — auto blocks on work nobody is doing');
+    }
+
+    // --- the file-level view, kept as context rather than as the finding
+    //
+    // Count by RANGE, not --since. `--since` filters on COMMITTER date, so a
+    // rebased commit falls outside a window that <sha>..HEAD includes. Measured
+    // across three repos the two disagreed by +2, -1 and 0 — it errs both ways.
+    const lastPrd = g(repo, 'log -1 --format=%H -- prd.json');
+    const lastPrdTs = Number(g(repo, 'log -1 --format=%ct -- prd.json'));
+    if (!lastPrd || !lastPrdTs) return;
+    const fileAge = Math.floor((Date.now() / 1000 - lastPrdTs) / 86400);
+    const commitsSince = Number(g(repo, `rev-list --count ${lastPrd}..HEAD`)) || 0;
+    if (fileAge >= 3 && commitsSince >= 10) {
+        add('prd', 'info',
+            `${name}: prd.json last changed ${fileAge}d ago with ${commitsSince} commit(s) since`,
+            'context for the per-story ages above — a fresh file can still hold a stale backlog');
     }
 }
 
