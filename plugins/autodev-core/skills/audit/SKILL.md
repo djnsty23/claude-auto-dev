@@ -1,8 +1,8 @@
 ---
 name: audit
-description: Parallel quality audit with 7 specialized agents (Opus). Finds bugs, violations, and quality issues. Use audit for fixes, brainstorm for features.
+description: Parallel quality audit across specialized agents. Finds bugs, violations, and quality issues. Use audit for fixes, brainstorm for features.
 when_to_use: "Invoked when the user says \"audit\"."
-allowed-tools: Bash, Read, Grep, Glob, Task, TaskCreate, Write, Edit
+allowed-tools: Bash, Read, Grep, Glob, Task, Write, Edit
 model: opus
 user-invocable: true
 argument-hint: "[scope: full|auth|dashboard|latest]"
@@ -86,9 +86,9 @@ find src/ app/ packages/ -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name 
 
 | Files | Strategy | Agents |
 |-------|----------|--------|
-| < 50 | **Compact** — single Opus agent, all 7 checks sequentially | 1 |
+| < 50 | **Compact** — single Opus agent, all checks sequentially | 1 |
 | 50-200 | **Medium** — 3 agents (security+types, perf+a11y, UX+tests+deploy) | 3 |
-| 200+ | **Full swarm** — all 7 agents in parallel | 7 |
+| 200+ | **Full swarm** — the six dimensions in parallel | 6 |
 
 For **compact** mode (< 50 files), use a single agent with all checks combined:
 ```typescript
@@ -98,7 +98,7 @@ Agent({ subagent_type: "Explore", model: "opus",
 
 For **medium** mode (50-200 files), launch 3 combined agents.
 
-For **full swarm** (200+ files), launch all 7 agents below.
+For **full swarm** (200+ files), launch at most SIX of the agents below in one wave — see rule-agent-concurrency. Six is the project ceiling for any fan-out. If a seventh dimension matters for this codebase, run it as a second wave informed by the first, not as a wider one.
 
 Replace `[PROJECT_PATH]` with the actual working directory path.
 

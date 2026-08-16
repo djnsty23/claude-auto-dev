@@ -63,6 +63,7 @@ without touching it.
 | `autodev-init` | Read this codebase and write its real conventions to `.claude/project-rules.md` |
 | `learn-from-fixes` | Rank what this project keeps shipping broken, from its own fix history |
 | `preflight` | Scaffold the executable gate file that fails the build on those classes |
+| — | `scripts/find-orphan-checks.js` finds verification code nothing runs |
 | `brainstorm` | Scan codebase + live site, propose improvements |
 | `brainstorm apply` | Create stories from the last brainstorm |
 | `auto` | Work through all pending stories autonomously |

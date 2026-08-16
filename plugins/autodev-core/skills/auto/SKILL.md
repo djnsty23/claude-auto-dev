@@ -2,7 +2,7 @@
 name: auto
 description: Autonomous task execution with testing and security. Works through all tasks without stopping.
 when_to_use: "Invoked when the user says \"auto\"."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, TaskCreate, TaskUpdate, TaskList, Agent, SendMessage
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Agent, SendMessage
 model: opus
 user-invocable: true
 ---

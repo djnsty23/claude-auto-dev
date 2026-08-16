@@ -2,7 +2,7 @@
 name: status
 description: Shows sprint progress and task status. Use 'progress' (not 'status' - that's a built-in).
 when_to_use: "Invoked when the user says \"progress\"."
-allowed-tools: Read, TaskList
+allowed-tools: Read
 model: haiku
 user-invocable: true
 ---
