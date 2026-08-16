@@ -196,6 +196,20 @@ function suiteIsRed() {
 const base = suiteIsRed();
 if (base.red) { console.error('Baseline suite is already red — fix that first.'); process.exit(1); }
 
+// POPULATION FLOOR. "No output never differs from no output" — a suite that
+// asserts nothing exits 0, so every mutant it fails to notice reads as a
+// survivor and the run reports a large, meaningless number. And a subject with
+// no mutable line generates no mutants, which reports as a perfect score.
+//
+// Both are the failure this tool exists to find, turned on the tool itself.
+if (!(base.out || '').trim()) {
+    console.error('\nRefusing to run: the baseline suite printed NOTHING.\n');
+    console.error('A suite that reports no assertions exits 0 whatever the subject does, so every');
+    console.error('mutant would survive and the number would mean nothing. Give the suite output,');
+    console.error('or point this at one that has some.\n');
+    process.exit(1);
+}
+
 const results = { caught: 0, survived: [], invalid: 0 };
 let n = 0;
 
@@ -227,6 +241,14 @@ if (restored) fs.unlinkSync(backupPath(subject));
 
 console.log(`\nsubject: ${subject}`);
 console.log(`suite:   ${suite}`);
+if (n === 0) {
+    console.error(`\nRefusing to report: 0 mutants were generated from ${path.basename(subject)}.\n`);
+    console.error('No mutation means no evidence — "0 survived" here would be a perfect score for');
+    console.error('a run that tested nothing. Check the subject actually contains the operators');
+    console.error('this tool mutates.\n');
+    process.exit(1);
+}
+
 console.log(`\n${n} mutant(s) generated · ${results.invalid} did not parse (discarded) · `
     + `${results.caught} caught · ${results.survived.length} SURVIVED`);
 console.log(`subject restored: ${restored}\n`);
