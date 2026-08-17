@@ -212,6 +212,40 @@ const deprecated = run(fixture('exempt-deprecated', 'skill-x6/SKILL.md',
 check('"is gone rather than demoted" exempts (deprecation beats prescription)',
     deprecated.status === 0, 'exit ' + deprecated.status);
 
+// 5c-quater. Markdown shapes and the /dev/null collision.
+//
+// Every one of these was silent (or firing) before the fence rewrite, and none had
+// a live instance — which is exactly why only a review found them.
+
+const devNull = run(fixture('shape-devnull', 'skill-y1/SKILL.md',
+    '# y1\n\nBash({ command: "npm run build > /dev/null", run_in_background: true })\n'));
+check('`/dev/null` does not read as a dev server', devNull.status === 0,
+    'exit ' + devNull.status + ': ' + devNull.stdout.trim().split('\n').pop());
+
+const tilde = run(fixture('shape-tilde', 'skill-y2/SKILL.md',
+    '# y2\n\n~~~powershell\ncurl -H \'x: y\' https://e\n~~~\n'));
+check('a ~~~ fence is a fence', tilde.status === 1, 'exit ' + tilde.status);
+
+const shellInWin = run(fixture('shape-shellwin', 'rule-windows/SKILL.md',
+    '# w\n\n```bash\ncurl -H \'apikey: k\' https://x\n```\n'));
+check('a bash fence in a Windows-named file does NOT fire', shellInWin.status === 0,
+    'exit ' + shellInWin.status + ': ' + shellInWin.stdout.trim().split('\n').pop());
+
+const psInWin = run(fixture('shape-pswin', 'rule-windows/SKILL.md',
+    '# w\n\n```powershell\ncurl -H \'apikey: k\' https://x\n```\n'));
+check('  but a powershell fence in the same file still fires', psInWin.status === 1,
+    'exit ' + psInWin.status);
+
+const noLeak = run(fixture('shape-noleak', 'skill-y3/SKILL.md',
+    '# y3\n\n```powershell\nWrite-Host hi\n```\n\nIn Git Bash run curl -H "x: y" https://e first.\n'));
+check('a closed fence does not leak its language into later prose',
+    noLeak.status === 0, 'exit ' + noLeak.status);
+
+const nested = run(fixture('shape-nested', 'skill-y4/SKILL.md',
+    '# y4\n\n````markdown\n```powershell\nsample\n````\n\n```powershell\ncurl -H \'x: y\' https://e\n```\n'));
+check('a 4-tick wrapper does not invert fence state for the rest of the file',
+    nested.status === 1, 'exit ' + nested.status);
+
 // 5c-ter. A zero-file population must refuse, not pass green.
 //
 // `git ls-tree` exits 0 with empty output when the pathspec matches nothing, so

@@ -160,7 +160,11 @@ const SUPERSEDED = [
         // The half-migrated shape: a detached dev server with no mention of the
         // supervised path anywhere near it. This is the exact drift that left
         // auto/test/scan contradicting rule-windows for as long as both existed.
-        re: /(?:npm|pnpm|yarn|bun)[^\n]*\bdev\b[^\n]*run_in_background/,
+        // `\bdev\b` alone matched the `dev` in `/dev/null`, so
+        // `Bash({ command: "npm run build > /dev/null", run_in_background: true })`
+        // fired as a half-migrated dev server. Require `run dev` or `dev --`, and
+        // exclude a following slash.
+        re: /(?:npm|pnpm|yarn|bun|npx|vite|next)[^\n]*\b(?:run\s+dev|dev\b(?![/\\]))[^\n]*run_in_background/,
         requiresNearby: { re: /preview_start/, within: 6 },
         why: 'a detached dev server with no reference to preview_start is the half-migrated shape; preview_start supervises the process and exposes preview_logs, and skills that omit it drift out of step with the ones that name it',
         replacement: 'name preview_start as the preferred path and keep detached Bash as the stated fallback',
@@ -245,15 +249,36 @@ const SUPERSEDED = [
 function scanLines(lines, rel) {
     const out = [];
     let fenceLang = null;
+    let fenceOpen = null;   // { char, len } of the open fence's marker, or null
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
         // Track the fenced-block language so a bash `curl` is not read as a
         // PowerShell one. A ``` with no language opens or closes an unlabelled block.
-        const fence = /^\s*```+\s*([A-Za-z0-9_+-]*)/.exec(line);
+        // Fence tracking must match the MARKER TYPE and LENGTH, not just toggle.
+        //
+        // A bare toggle gets three shapes wrong, all measured: `~~~powershell`
+        // (valid CommonMark) is invisible; a ````markdown wrapper containing a
+        // ```powershell opener reads the inner opener as a closer and inverts the
+        // state for the rest of the file; and an unclosed fence leaks its language
+        // to EOF, so prose 20 lines later is scanned as PowerShell.
+        //
+        // CommonMark: a fence closes only on the same character, at least as long
+        // as the opener, with no info string. So remember both.
+        const fence = /^\s*(`{3,}|~{3,})\s*([A-Za-z0-9_+{}.-]*)\s*$/.exec(line);
         if (fence) {
-            fenceLang = fenceLang === null ? (fence[1] || '').toLowerCase() : null;
+            const marker = fence[1], info = (fence[2] || '').toLowerCase();
+            if (fenceOpen === null) {
+                fenceOpen = { char: marker[0], len: marker.length };
+                // Strip an Rmd-style info string: ```{powershell} -> powershell
+                fenceLang = info.replace(/^\{|\}$/g, '');
+            } else if (marker[0] === fenceOpen.char && marker.length >= fenceOpen.len && !info) {
+                fenceOpen = null;
+                fenceLang = null;
+            }
+            // A longer/other-type marker inside an open fence is content, not a
+            // delimiter — fall through and leave the state alone.
             continue;
         }
 
@@ -267,7 +292,15 @@ function scanLines(lines, rel) {
 
             if (s.fence) {
                 const inLang = fenceLang !== null && s.fence.includes(fenceLang);
-                const inFile = s.fileScope && s.fileScope.test(rel);
+                // fileScope must not override the fence for shell languages.
+                //
+                // `if (!inLang && !inFile)` meant any file whose PATH matched
+                // fileScope ignored the fence entirely — so a ```bash block inside
+                // rule-windows/SKILL.md fired, which is the exact false positive
+                // the fence exists to prevent (rules/windows.md explicitly blesses
+                // bash examples there: "open Git Bash — these assume bash").
+                const shellFence = ['bash', 'sh', 'zsh', 'shell', 'console'].includes(fenceLang);
+                const inFile = !shellFence && s.fileScope && s.fileScope.test(rel);
                 if (!inLang && !inFile) continue;
             }
 
