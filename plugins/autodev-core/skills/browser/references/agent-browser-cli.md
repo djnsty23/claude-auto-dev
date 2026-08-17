@@ -20,8 +20,62 @@ npm install -g agent-browser
 agent-browser install  # Download Chromium
 ```
 
-### Windows Note
-On Windows, brief console windows may appear when launching the browser. This is a Chromium platform limitation - the testing still works correctly. Use `--headed` mode if you prefer seeing the browser window intentionally.
+### Windows — read this before the first launch
+
+Brief console windows on launch are harmless Chromium noise. The rest of this
+section is not: three separate failure modes have been observed on Windows, all
+from one root cause — the bundled Chromium outliving the session that started it.
+The worst of them cost 30+ minutes of an unusable desktop.
+
+#### 1. Always pass an isolated profile *path*
+
+Never let agent-browser share a user-data dir with a real Chrome. Sharing it puts
+two processes on the same `Cookies` / `Login Data` SQLite files, and Windows file
+locking deadlocks both.
+
+```bash
+PROFILE_DIR="$(pwd)/.claude/chrome-test-profile"
+agent-browser --profile "$PROFILE_DIR" open https://example.com --headed
+```
+
+`--profile` is a **global** flag — it goes before the subcommand — and its two
+forms do opposite things:
+
+- **A path** (`--profile /abs/path`) → an isolated, persistent profile. Always this.
+- **A bare name** (`--profile Default`) → attaches to the user's real Chrome
+  profile. This is the desktop lockup above, one word away.
+
+#### 2. `close --all` does not kill the process
+
+It prints `✓ Closed session` and leaves `agent-browser-win32-x64.exe` running. The
+orphan holds DXGI/GPU resources and has been observed to render the user's real
+Chrome as a black window, break the global `Win+Shift+S` hotkey, and survive until
+reboot.
+
+The `autodev-core` SessionStart hook (`agent-browser-cleanup.js`) sweeps these at
+the start of every Claude Code session. To sweep mid-session:
+
+```powershell
+agent-browser close --all
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -match 'agent-browser' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+#### 3. Chromium registers itself to run at startup
+
+On first launch the bundled Chromium writes itself into the Windows startup
+registry, so every boot spawns it even with no test running — which keeps the
+zombie problem alive across reboots. The same SessionStart hook removes the
+`HKCU\...\Run` value and patches each profile's `Preferences` to stop it
+re-registering. To confirm nothing is registered:
+
+```powershell
+Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' |
+  Select-Object * -ExcludeProperty PS* | Format-List | Out-String -Stream |
+  Select-String -Pattern 'agent-browser'
+# no output = clean
+```
 
 ---
 
