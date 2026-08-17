@@ -193,3 +193,13 @@ After completion:
 | `brainstorm` | Proposes refactoring when large files detected |
 | `review` | Flags refactoring opportunities |
 | `design` | Refactoring must preserve existing UI (see Preserve UI Structure section) |
+
+## Feeding the learning loop
+
+**Threshold — record what broke that the types did not catch.** A refactor the
+compiler verified end to end teaches nothing.
+
+The valuable entry is the failure that survived a green typecheck: a runtime
+contract, a string key, an ordering assumption, a test that was asserting the old
+shape without noticing. Note the class in `.claude/project-rules.md`; it is
+the same class the next refactor in this codebase will hit.

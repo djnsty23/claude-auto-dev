@@ -202,3 +202,14 @@ TaskCreate({
   metadata: { type: "fix", priority: 1, category: "qa" }
 })
 ```
+
+## Feeding the learning loop
+
+**Threshold — record it when a test was green and wrong, or when a bug reached
+this stage that a cheaper gate should have caught.** Ordinary passes and ordinary
+failures teach nothing worth storing.
+
+A vacuous test is the expensive case: it reports success while asserting nothing,
+so it actively buys confidence it has not earned. When you find one, note the
+shape in `.claude/project-rules.md` — the specific way it managed to pass —
+because that shape recurs across suites far more than any single bug does.

@@ -213,3 +213,13 @@ If any verification failed, list specific failures and next steps.
 | `security` | Vulnerability scan (auto-loaded via requires) |
 | `test` | Run tests before deploy (auto-loaded via requires) |
 | `deploy` | Deploy patterns and CI/CD pipeline reference |
+
+## Feeding the learning loop
+
+**Threshold — record what the gates did not catch.** If shipping was clean, there
+is nothing to learn and nothing to write.
+
+When something surfaces only at ship time, the finding is not the bug — it is the
+missing gate. Note which check would have caught it and where it would have run,
+in `.claude/project-rules.md`. That converts a one-off into the thing
+`learn-from-fixes` proposes gates from.

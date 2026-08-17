@@ -64,3 +64,16 @@ Then say what you verified and how. "Fixed" with no evidence is not a report.
 - The fix could plausibly break something else that has no test.
 - The root cause is still unclear after three attempts. Say what you ruled out —
   that is genuinely useful even without a fix.
+
+## Feeding the learning loop
+
+Set the story's `resolution` to `[PATTERN]: [SPECIFIC FIX]` — `null-check:
+added optional chaining at line 45`. That string is the raw material
+`mine-fixes.js` ranks into `.claude/project-rules.md`, which `review` and
+`audit` then check on every future change. A blank resolution costs nothing
+today and loses the pattern permanently.
+
+**Threshold — write a note beyond the resolution only when the first hypothesis
+was wrong.** A fix that went where you expected teaches nothing. A fix whose
+cause was somewhere else entirely is the one worth a sentence, because the wrong
+first guess is what will repeat.

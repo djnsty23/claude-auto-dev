@@ -180,3 +180,14 @@ strategy:
 | `add ci` | Create GitHub Actions workflow |
 | `fix ci` | Debug failing workflow |
 | `add deploy action` | Add deployment workflow |
+
+## Feeding the learning loop
+
+**Threshold — record environment failures, not code failures.** A missing env
+var, a region mismatch, a build setting that differs between preview and
+production: these recur, because the environment is not in the repo and nothing
+type-checks it.
+
+One line in `.claude/project-rules.md` naming the variable or setting turns the
+next occurrence from a debugging session into a lookup. Code bugs found at deploy
+belong in the story's `resolution` instead.

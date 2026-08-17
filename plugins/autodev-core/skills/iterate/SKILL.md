@@ -108,3 +108,13 @@ Codebase health: improved from [initial assessment] to [final assessment]
 - If build breaks during a round, fix it before continuing to the next round.
 - Visual verification is required for UI tasks in every round, not just the final one.
 - Delete the auto-active flag on exit.
+
+## Feeding the learning loop
+
+**Threshold — record it when an iteration undoes an earlier one.** Oscillation is
+the signal this skill is uniquely placed to see and the only one worth storing.
+
+Two changes that reverse each other mean the requirement was never settled, and
+the third pass will cost as much as the first two. Write down what the two
+positions were and which constraint decides between them — that constraint is the
+thing nobody wrote down the first time.

@@ -69,3 +69,15 @@ first. Do not repeat a finding the built-in reviewer already made — add to it.
 
 If the delta above turns up nothing, say so in one line. A review that
 manufactures findings to look thorough is worse than a short one.
+
+## Feeding the learning loop
+
+**Threshold — a finding that appears in a second review is no longer a finding,
+it is a class.** Leaving the same comment twice is the signal that the codebase
+will keep producing it.
+
+When that happens, add the class to `.claude/project-rules.md` under
+`## What this project keeps getting wrong` with its count, rather than writing
+the comment a third time. `review` and `audit` both read that file, so a class
+recorded once is checked on everything after it — which is the difference between
+reviewing and teaching.
