@@ -4,98 +4,92 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A **Claude Code plugin marketplace**, not an application. Nothing here runs as a
-service; everything ships to users' machines and is executed by *their* Claude
-Code. Three plugins are published from `plugins/`, catalogued in
-`.claude-plugin/marketplace.json`.
-
-The consequence that matters: **you are editing code that runs inside someone
-else's session.** A hook that throws kills their turn; a hook that prints
-needlessly costs them context on every prompt.
-
-Everything outside `plugins/` — `tooling/`, `docs/` — is repo machinery and is
-never shipped.
+A **Claude Code plugin marketplace**, not an application. Nothing runs as a
+service; everything under `plugins/` executes inside *someone else's* Claude Code
+session. A hook that throws kills their turn; a hook that prints needlessly costs
+them context on every prompt. Everything outside `plugins/` is repo machinery and
+never ships.
 
 ## Commands
 
 ```bash
-npm test                 # every tooling/test-*.js suite, then validate. The gate.
-node tooling/validate.js # manifests, version sync, frontmatter, hook wiring
+npm test                     # every tooling/test-*.js suite, then validate. The gate.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
+node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
 ```
 
-Run a single suite directly — there is no test-name filter:
+`test-all.js` discovers suites by pattern (`/^test-.*\.js$/`) — a new
+`tooling/test-*.js` needs no registration.
 
-```bash
-node tooling/test-pre-tool-filter.js
-```
-
-`tooling/test-all.js` discovers suites by pattern (`/^test-.*\.js$/`), so a new
-`tooling/test-*.js` file is picked up with no registration step.
-
-### The four coverage questions
-
-Each answers something the others cannot; none substitutes for another.
+### Four coverage questions, none substituting for another
 
 ```bash
 node plugins/autodev-core/scripts/find-orphan-checks.js .   # scripts nobody runs
-npm run check:hooks      # wired hooks no suite drives   (hard gate in validate)
-npm run check:functions  # functions never entered       (~20s, runs the suite under coverage)
-npm run check:vacuity <subject.js> <suite.js>             # code no assertion depends on
+npm run check:hooks       # wired hooks no suite drives (hard gate in validate)
+npm run check:functions   # functions never entered (~20s, suite under coverage)
+npm run check:vacuity <subject.js> <suite.js>   # code no assertion depends on
 ```
 
-**Coverage measures execution; mutation measures verification.** A function can
-be entered on every run while nothing asserts anything about it.
+**Coverage measures execution; mutation measures verification.** A function can be
+entered every run while nothing asserts anything about it.
 
-`check:vacuity` **rewrites its subject file** with mutants. It refuses to start
-unless the subject is committed, and `validate` fails while a `*.vacuity-backup`
-exists. Do not run it on a dirty tree, and `pkill -9` then `pgrep` to confirm any
-kill — a surviving run rewrites the file underneath you.
+`check:vacuity` **rewrites its subject with mutants**. It refuses a dirty subject,
+and `validate` fails while a `*.vacuity-backup` exists. After killing a run,
+`pkill -9` then `pgrep` to confirm — a survivor rewrites the file underneath you.
 
 ## Architecture
 
-### Three plugins, no cross-plugin imports
-
-| plugin | contains |
-|---|---|
-| `autodev-core` | the workflow, 43 skills, 4 agents, 7 hook events, the `prd.json` sprint system |
-| `autodev-memory` | cross-session memory: sqlite DB, semantic search, 4 hook events |
-| `autodev-stack` | vendor integrations (skills only) |
-
-`${CLAUDE_PLUGIN_ROOT}` resolves **per plugin**, so a cross-plugin path cannot
-work. If core needs a file, core ships it. `autodev-core` must stand alone.
+`autodev-core` (the workflow, 43 skills, 4 agents, 7 hook events, the sprint
+system) · `autodev-memory` (sqlite memory, 4 hook events) · `autodev-stack`
+(vendor skills). `${CLAUDE_PLUGIN_ROOT}` resolves **per plugin**, so cross-plugin
+paths cannot work — if core needs a file, core ships it.
 
 ### Skills are the unit of behaviour
 
-`plugins/<plugin>/skills/<name>/SKILL.md`, frontmatter-driven. Two kinds:
+`plugins/<plugin>/skills/<name>/SKILL.md`, frontmatter-driven. User-invocable ones
+take their command name from the directory. **`rule-*` skills are always-on**
+(`user-invocable: false`, auto-loaded by a `paths:` glob) and encode conventions
+derived from real failures — read `rule-diagnosis`, `rule-ab-testing` and
+`rule-gate-integrity` before proposing a cause, a detector or a gate. Long
+reference material goes in `references/` beside the skill so it loads on demand.
 
-- **user-invocable** — `audit`, `ship`, `brainstorm`; the directory name is the command
-- **`rule-*`** — always-on, `user-invocable: false`, auto-loaded via a `paths:`
-  glob. These encode conventions derived from real failures. Read
-  `rule-ab-testing`, `rule-diagnosis` and `rule-gate-integrity` before proposing
-  a detector, a gate, or a cause — they exist because those proposals were
-  repeatedly wrong, and they carry the worked examples.
+### The prd.json sprint system
 
-Long reference material goes in `references/` beside the skill so it loads only
-when needed (`skills/browser/` is the pattern).
+`prd.json` at a user's project root is the shared state between `auto`, `status`,
+the Stop hook and the drift audit. Stories live in a `stories` object keyed by id;
+the load-bearing field is **`passes`**:
+
+| value | meaning |
+|---|---|
+| `null` | pending — counts as remaining work |
+| `true` | done |
+| `false` | failed |
+| `"deferred"` | a decision **not** to do it — explicitly NOT remaining work |
+
+`deferred` exists because counting it as pending (`passes !== true`) made `auto`
+block forever on work nobody intended to do. Anything reading this file must
+distinguish the four states, not treat `passes` as a boolean.
+
+`stop-auto-check.js` blocks the end of a turn while pending stories remain, so a
+wrong answer there hangs the session rather than erroring. Its escape hatches, in
+order: an explicit auto-exit signal, a stale flag (>2h), an unparseable
+`prd.json`, a missing one, and an idle one-shot tracked by a marker file. It also
+skips stories the nightly drift audit measured as long-untouched — a stale backlog
+otherwise blocks `auto` indefinitely.
 
 ### Hooks run on every turn
 
-Registered in `plugins/<plugin>/hooks/hooks.json`, implemented alongside. Core
-wires SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, PreCompact,
-PostCompact.
+Registered in `plugins/<plugin>/hooks/hooks.json`. Resolve paths only through
+`${CLAUDE_PLUGIN_ROOT}` — validate rejects `~/.claude` and relative paths. Wrap
+the body in try/catch and `process.exit(0)` unless blocking *is* the purpose:
+`pre-tool-filter.js` fails **closed**, but its private-name block deliberately
+fails **open**, because it ships installed and a defect there persists until the
+user reinstalls.
 
-- Resolve paths only through `${CLAUDE_PLUGIN_ROOT}`; validate rejects `~/.claude`
-  and relative paths.
-- Wrap the body in try/catch and `process.exit(0)` unless blocking *is* the
-  purpose. `pre-tool-filter.js` fails **closed** deliberately; its private-name
-  block fails **open**, because it ships installed and a defect there would
-  persist until the user reinstalls.
-- **A hook with nothing to say must emit zero bytes.** Asserting "no context" is
-  not enough — assert zero stdout, and stderr too. Several mutants survived
-  precisely because a test checked one stream.
-- Every wired hook needs a suite (`check:hooks` is a hard gate). Drive it as a
-  subprocess; follow `tooling/test-pre-tool-filter.js`.
+**A hook with nothing to say must emit zero bytes** — assert zero stdout *and*
+stderr, not merely "no context". Mutants have survived because a test checked one
+stream. Every wired hook needs a suite (`check:hooks` is a hard gate); drive it as
+a subprocess, following `tooling/test-pre-tool-filter.js`.
 
 ### Version is six files and one writer
 
@@ -103,26 +97,23 @@ PostCompact.
 `marketplace.json` and every `plugins/*/plugin.json`, enumerating plugins from
 disk. Hand-editing is how a release got tagged on a commit that failed validate.
 
-## Conventions that will bite you
+## Conventions that have actually cost something
 
 - **macOS `realpathSync`**: `/var/folders` and `/private/var/folders` are the same
-  directory. Any path compared against a child's `process.cwd()` must be resolved
-  first, or the comparison silently fails.
-- **Write commit messages to a file and `git commit -F`.** With `-m` the shell
-  eats backticks as command substitution; messages have lost words that way and
-  cannot be amended, because force-push is blocked.
-- **Never pipe a validation run into `head`/`tail` inside an `&&` chain**, and
-  `;` is not `&&` — the pipeline's exit status is the last command's, so a red
-  suite reads as green. Redirect to a file and check `$?`.
-- **This repo is PUBLIC.** `check-no-private-names.js` denylists the private
-  codebases discussed in its docs, and `tooling/githooks/commit-msg` blocks them
-  in messages too. Enable both hooks per clone: `git config core.hooksPath tooling/githooks`.
-- Avoid nested quoting in `node -e`; write a scratch file instead.
+  directory. Resolve any path compared against a child's `process.cwd()`.
+- **`git commit -F <file>`, never `-m`** — the shell eats backticks as command
+  substitution, and force-push is blocked so the message cannot be amended.
+- **`;` is not `&&`**, and never pipe a validation run into `head`/`tail` inside a
+  chain: the pipeline's exit status is the last command's, so red reads as green.
+- **This repo is PUBLIC.** `check-no-private-names.js` gates the tree and
+  `tooling/githooks/commit-msg` gates messages. Enable both per clone:
+  `git config core.hooksPath tooling/githooks`.
+- Avoid nested quoting in `node -e`; write a scratch file.
 
-## Working on the product repos this tooling targets
+## Product repos
 
-Standing rule: **commit and push autodev freely; ask before touching a product
-repo.** They deploy to production and often have several concurrent sessions —
-use `git worktree add`, never `git checkout` in a live main tree, and re-run
-*their* gate **after** any rebase, not before. A change that is green alone can
-go red on a new base without being touched.
+**Commit and push autodev freely; ask before touching a product repo.** They
+deploy to production and often run several concurrent sessions — use
+`git worktree add`, never `git checkout` in a live main tree, and re-run *their*
+gate **after** a rebase, not before: a change green on its own can go red on a new
+base without being touched.
