@@ -1,5 +1,69 @@
 # Changelog
 
+## [8.75.0] - 2026-08-17
+
+### Added — `rule-options-protocol` skill, and a Fable reviewer
+
+The options protocol ships as a plugin rule skill, which is the only tier that
+reaches other machines and accounts. It carries the panel contract: four vetted
+paths in one question, a recommendation in every block, complementary options
+under multi-select and genuinely distinct alternatives under single-select, and a
+**delivery contract** — a selection is a work order, so the following turns
+execute the picks in order rather than treating them as direction.
+
+`plan-reviewer` is a new read-only agent on Fable. It exists to put the expensive
+model where the context is small: measured across 125,390 real calls, a
+main-thread turn carries ~534k prompt tokens with 92% of cost input-side, while a
+subagent turn carries ~161k — so the same review work prices at ~$0.28/call in a
+subagent against ~$0.96 on the main loop.
+
+### Fixed — two silent-wrong-answer paths in `check-superseded`
+
+`--ref HEAD^` scanned the wrong tree while labelling it correctly. On Windows
+`execSync` runs through `cmd.exe /d /s /c`, where `^` is the escape character, so
+`git rev-parse HEAD^` returns HEAD's own sha — measured here as af3bd7b against
+execFileSync's faa3c21. That defeats the only thing `--ref` exists for. Both git
+calls now use `execFileSync` with an argv array.
+
+A zero-file population reported clean and exited 0, because `git ls-tree` exits 0
+with empty output when the pathspec matches nothing. The header printed the
+denominator and nothing acted on it — the file's own discipline applied to
+everything except itself. It now exits 2 on the `DETECTOR BROKEN` channel.
+
+That fix immediately exposed a vacuous assertion, which is the better find: the
+suite's disk-walk case deleted the fixture's only `.md` first, so it scanned zero
+files and `status === 0` could not tell "found nothing bad" from "read nothing". A
+clean second fixture now stays in the tree and the case asserts exactly 1 file
+scanned. 30 assertions, 0 failed.
+
+### Fixed — agent frontmatter: dead key, and per-role effort
+
+`preloadSkills` is not a valid field; the correct name is `skills`. So
+`code-reviewer` and `security-scanner` never had their skill content injected at
+startup — they could still reach those skills through the Skill tool, so it was a
+missing preload rather than missing access, but silent either way because nothing
+validates unknown keys. Both now use `skills`.
+
+`effort` is documented (`low|medium|high|xhigh|max`) and is now set per role:
+`architect` at xhigh, the other three at high. **Its effect is unverified** — see
+below.
+
+### Measured — subagent model pinning does not take effect
+
+Worth recording because it was believed on the strength of the tool contract for
+months. Requested `model: fable` ran `claude-opus-5`; requested `model: haiku`
+(control) also ran `claude-opus-5`; and `scout`, whose definition pins
+`model: haiku`, ran `claude-opus-5`. Across **all 37,795 subagent calls on disk**
+there are 22,893 `claude-opus-5` and 14,875 `claude-opus-4-8` and **zero** haiku,
+sonnet or fable — while main-session transcripts show six distinct models, so the
+probe can see variety.
+
+Neither the Agent tool's `model` parameter nor definition-level pinning is
+honoured here; every subagent runs the session model. Mechanical agents chosen to
+be cheap have been billing at Opus rates throughout. Cause undetermined, likely a
+session-level override. `effort` rides the same frontmatter path, so treat it as
+inert until a transcript shows otherwise.
+
 ## [8.74.0] - 2026-08-17
 
 ### Added — the superseded detector runs in the gate
