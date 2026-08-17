@@ -82,7 +82,21 @@ function makeRepo(name) {
     git(repo, 'config user.email t@t.t');
     git(repo, 'config user.name Test');
     // Register it for discovery, exactly as drift-audit reverses the slug.
-    const slug = repo.replace(/\//g, '-');
+    //
+    // Both separators and the drive letter have to go. On Windows `repo` is
+    // `C:\…\clean`, so a forward-slash-only replace left the slug as a full
+    // absolute path and mkdir tried to create `…/projects/C:\Users\…` — an
+    // absolute path nested inside another, which is why this suite crashed on
+    // every Windows run rather than failing an assertion.
+    //
+    // Dropping the drive letter keeps the round-trip working, because
+    // drift-audit.js:388 rebuilds the path as '/' + slug and Windows resolves a
+    // drive-less rooted path against the current drive. That is also the
+    // limit of it: a real Windows slug is `C--Users-…`, which that line turns
+    // into `/C//Users/…` and never finds. Project discovery does not work on
+    // Windows in production, and the slug scheme is lossy on both platforms —
+    // any directory containing a dash reverses wrong.
+    const slug = repo.replace(/^[A-Za-z]:/, '').replace(/[\\/]/g, '-');
     fs.mkdirSync(path.join(CONFIG, 'projects', slug), { recursive: true });
     return repo;
 }
