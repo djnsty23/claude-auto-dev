@@ -136,3 +136,17 @@ Claude:
 | **Total Savings** | **~80%** |
 
 **Real example:** a long-running project can grow to 800+ rows / 10 sprints / ~20K tokens. After archiving to keep only the current sprint + 2 prior, prd.json drops to ~150 rows / ~3K tokens.
+
+## Proving the run
+
+**Observable:** no story is lost. Stories in the archive plus stories left in
+prd.json equals the count before archiving.
+
+```bash
+node -e "const a=require('./prd.json');…"   # or just read both files and add up
+```
+
+Check the total before and after and state both numbers. This is the one failure
+that matters here and the one that is invisible without counting: a story dropped
+during the move looks exactly like a story that was never there. If the two
+totals disagree, restore from `.claude/archives/` and do not proceed.

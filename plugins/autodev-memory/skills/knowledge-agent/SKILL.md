@@ -99,3 +99,14 @@ path prefix.
 Briefs are rendered from already-stored observations. Content wrapped in
 `<private>...</private>` tags is stripped before storage, so it never appears in
 a brief.
+
+## Proving the run
+
+**Observable:** a query for something known to be stored returns it, before any
+"nothing found" is reported.
+
+An empty result from a search is a claim about the index, not about the past. The
+store may be empty, the embedding call may have failed, the filter may exclude
+everything. Run one query whose answer you already know; if that comes back empty
+the retrieval is broken and no other result from this run means anything. Report
+how many records were searched.

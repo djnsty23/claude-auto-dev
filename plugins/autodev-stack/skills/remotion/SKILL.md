@@ -127,3 +127,19 @@ import { Video, Audio, Img, staticFile } from 'remotion';
 - SSR-compatible components
 
 Source: [remotion-dev/skills](https://github.com/remotion-dev/skills)
+
+## Proving the run
+
+**Observable:** the composition renders end to end, and a still from the middle
+of the timeline exists and is not blank.
+
+```bash
+npx remotion still <CompositionId> out/frame.png --frame=<mid>
+npx remotion render <CompositionId> out/video.mp4
+```
+
+A composition that type-checks can still render black — a mistimed `Sequence`,
+an asset that 404s, a `useCurrentFrame` off by a factor of fps. Render a still
+from the middle rather than frame 0, which is often legitimately empty, and look
+at it. Report the frame count and duration actually produced, not the ones
+configured.

@@ -84,3 +84,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/memory-db.js" stats "$(pwd)"
 ## Privacy
 
 Content wrapped in `<private>...</private>` tags is automatically stripped before storage. Secrets, API keys, and sensitive data in private tags never reach the database.
+
+## Proving the run
+
+**Observable:** the number of records searched, printed alongside the results.
+
+"No memories match" is indistinguishable from "the database did not open". Before
+reporting an empty result, run a query you know should hit — a term from a
+memory written this week — and confirm it returns. Then report the count
+searched, so a zero is legible as a real absence rather than a silent failure.

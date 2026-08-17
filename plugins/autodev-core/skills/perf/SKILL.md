@@ -75,3 +75,14 @@ Score: 85/100
 
 Report measured numbers, not estimates. If a metric could not be measured, write
 "not measured" rather than filling it in.
+
+## Proving the run
+
+**Observable:** the same metric, on the same route, measured before and after,
+with both numbers reported.
+
+A perf change without a before number is not an improvement, it is a hope. Report
+the pair (`LCP 3.4s → 1.9s`, `bundle 412kb → 380kb`) and the conditions —
+which route, cold or warm, which viewport — because a comparison across different
+conditions is worse than no comparison; it is a wrong number that reads as
+authoritative. If only one side could be measured, say which and why.

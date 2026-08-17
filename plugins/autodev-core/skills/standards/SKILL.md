@@ -98,3 +98,16 @@ to `.claude/mistakes.md` so the pattern is greppable next time:
 ```
 
 Categories: `Type Safety`, `React`, `API`, `Performance`, `A11y`.
+
+## Proving the run
+
+**Observable:** violations by category, next to the number of files scanned.
+
+```bash
+rg -l "…" --glob "**/*.tsx" | wc -l    # the denominator, always reported
+```
+
+Zero violations across 4 files and zero across 400 are different results printed
+the same way. State the denominator. When a category returns nothing, confirm the
+pattern can match at all by running it against a file you know violates it —
+otherwise a typo'd pattern reports a clean codebase.

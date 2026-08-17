@@ -180,3 +180,18 @@ export async function GET() {
 - Log every request in detail (costs)
 - Ignore client-side errors
 - Skip error context
+
+## Proving the run
+
+**Observable:** the health endpoint answers 200 with the documented shape, and a
+deliberately thrown error arrives in the dashboard.
+
+```bash
+curl -fsS https://<app>/api/health | head -c 200
+```
+
+Wiring monitoring and never seeing an event arrive is the normal outcome of
+getting a DSN wrong, and it looks identical to a healthy quiet app. Throw one
+test error on purpose and confirm it lands, with a link to the event. Until an
+event has arrived, the integration is unverified — say so rather than "monitoring
+is set up".

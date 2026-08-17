@@ -157,3 +157,15 @@ convention wins over a shipped default.
 - Do not reformat or refactor anything. This skill only reads and writes one file.
 - Do not run on a repo with fewer than ~10 source files — there is no convention
   to observe yet. Say so and stop.
+
+## Proving the run
+
+**Observable:** every rule written to `.claude/project-rules.md` cites the file
+it was measured from, and re-reading that file still supports the rule.
+
+The failure mode of this skill is a confident convention nobody follows — a rule
+inferred from two files and applied to two hundred. A citation makes that
+checkable by someone who was not here. Before finishing, re-read three cited
+files at random and confirm each still says what the rule claims. State how many
+files the conventions were measured across; a rule derived from one file is a
+guess and should say so.

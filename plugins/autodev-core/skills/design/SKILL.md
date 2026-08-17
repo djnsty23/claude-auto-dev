@@ -261,3 +261,15 @@ Key rules:
 4. Check all breakpoints match siblings
 
 Load `${CLAUDE_SKILL_DIR}/references/preserve-ui.md` for the full protocol, checklists, and common traps.
+
+## Proving the run
+
+**Observable:** a screenshot of the changed surface, at the viewport it will be
+used at, looked at before saying it is done.
+
+A diff cannot show a modal hanging off the edge of a phone, a token that resolves
+to the same colour as its background, or an animation that lands wrong. Capture
+the real rendered page — 390px and 414px for mobile, since one width is not
+"mobile" — and say which viewports were checked. If the tooling to screenshot is
+unavailable, say that; "it looks right in the diff" is not a verification and has
+shipped broken layouts before.

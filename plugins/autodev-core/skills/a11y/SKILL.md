@@ -61,3 +61,18 @@ Critical: 0 | High: 1 | Medium: 2 | Low: 1
 Each finding gets `file:line`, the WCAG criterion, and the fix. Say which checks
 were automated and which you performed manually — a reader cannot tell
 otherwise, and it changes how much the score is worth.
+
+## Proving the run
+
+**Observable:** zero serious/critical axe violations across the routes scanned,
+and the number of routes is stated.
+
+```bash
+npx axe-core-cli <url> --exit   # non-zero exit on any violation
+```
+
+A clean report is only meaningful next to the population it covers. "No issues
+found" over one route reads identically to "no issues found" over twelve, and
+identically again to a scanner that failed to load the page — so the report says
+how many routes were scanned and names them. If the scan could not run, say that
+instead; it is not a pass.

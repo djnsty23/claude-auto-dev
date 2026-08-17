@@ -83,3 +83,19 @@ already in git history. Say so, and tell the user to rotate it.
 Safe auto-fixes: adding `.env*` to `.gitignore`, moving a value to
 `.env.local`, adding `ALTER TABLE x ENABLE ROW LEVEL SECURITY` — each still
 paired with the rotation note when a real secret was exposed.
+
+## Proving the run
+
+**Observable:** every finding carries a `file:line` and the command that found
+it, and every "clean" carries the population it scanned.
+
+```bash
+# RLS is not proven by reading the policy — query as anon and require the denial
+curl -s "$SUPABASE_URL/rest/v1/<table>?select=*" -H "apikey: $ANON_KEY" | head -c 200
+```
+
+A security pass that reports nothing is the single most dangerous output in this
+repo, because a broken grep and a clean codebase produce the same text. Run each
+check against something you know is findable first, then report both the count of
+findings and the number of files scanned. An unproven "no secrets found" should
+be reported as "the scan did not run".

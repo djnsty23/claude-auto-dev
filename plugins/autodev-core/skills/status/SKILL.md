@@ -39,3 +39,13 @@ Next:
 - Read only prd.json header for context (not full file)
 
 - If no prd.json, just show TaskList results
+
+## Proving the run
+
+**Observable:** the four `passes` states counted, and their sum equal to the
+total number of stories.
+
+If done + pending + failed + deferred does not equal the total, something is
+being miscounted — usually `"deferred"` treated as pending, which is the exact
+confusion the field exists to prevent and the one that makes `auto` block
+forever. Print the four numbers and the total, not a summary sentence.
