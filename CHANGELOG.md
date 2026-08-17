@@ -1,5 +1,50 @@
 # Changelog
 
+## [8.71.0] - 2026-08-17
+
+### Added — a success criterion on every user-invocable skill
+
+Fourteen skills had no verification language at all, including `security`,
+`perf`, `a11y`, `monitoring`, `standards` and `status` — the ones whose output
+someone reads and acts on. Each now has a **Proving the run** section naming one
+observable and, where one exists, a command that can fail. Twelve sections, all
+different: `archive-prd` asserts story-count conservation, `perf` refuses a claim
+without a before number, `monitoring` requires a thrown error to actually arrive,
+`design` requires a screenshot at 390 and 414.
+
+The recurring theme is that a clean result and a probe that never ran produce the
+same text, so `security`, `standards`, `mem-search` and `knowledge-agent` must
+show the check can see something before reporting that it saw nothing. After:
+39 user-invocable skills, 0 without a criterion. The three always-on `rule-*`
+skills are excluded — they are background rules, not runs.
+
+### Added — the learning loop reaches the pipeline skills
+
+37 of 52 skills never wrote anything back. For `fix`, `review`, `test`, `ship`,
+`deploy`, `iterate` and `refactor` that meant every lesson died with the session.
+They now feed the mechanism that already exists — the story `resolution` field
+and conventional `fix:` subjects that `mine-fixes.js` ranks into
+`.claude/project-rules.md`, which `review` and `audit` read.
+
+Each carries a **threshold**, which is what decides whether this helps: a store
+where most entries say "fixed a typo" is one nobody searches twice. `fix` records
+only when the first hypothesis was wrong; `review` when a finding appears twice
+and becomes a class; `test` when a test was green and wrong; `iterate` when an
+iteration undoes an earlier one.
+
+### Restored — telemetry, which 8.0 dropped entirely
+
+No hook, no skill, no mention anywhere in `plugins/`. Ported back with three
+fixes: the session id now comes from the hook payload (7.x read an env var 8.x
+never sets, so every event ever written recorded `"session": null`), the skill
+reports through `scripts/telemetry-report.js` instead of two inline `node -e`
+blocks, and disabling is `CLAUDE_TELEMETRY_DISABLED=1` rather than editing a
+settings file that no longer holds the entry.
+
+The suite's load-bearing case is privacy: a canary secret is fed through every
+field a tool call carries and the written line is grepped for it, because
+"metadata only" is the claim that makes this safe to leave on.
+
 ## [8.70.0] - 2026-08-17
 
 ### Added — `spec`, the front of the pipeline
