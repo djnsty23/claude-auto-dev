@@ -34,7 +34,17 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+// execFileSync, never execSync, for anything carrying a git ref.
+//
+// On Windows execSync runs the command through `cmd.exe /d /s /c`, where `^` is
+// the escape character — so `git rev-parse HEAD^` returns HEAD's own sha instead
+// of its parent's, silently and with exit 0. Measured 2026-08-17 in this repo:
+// execSync gave af3bd7b (HEAD) where execFileSync gave faa3c21 (the real parent).
+// That is fatal for --ref, whose entire purpose is pointing at an earlier commit:
+// you ask for HEAD^, get HEAD's tree, see no findings, and conclude the detector
+// is broken or the fix was never needed. It also removes a shell-metacharacter
+// injection surface and handles refs containing spaces.
+const { execFileSync } = require('child_process');
 
 const argv = process.argv.slice(2);
 const asJson = argv.includes('--json');
@@ -200,7 +210,7 @@ function selfTest() {
 // ------------------------------------------------------------- collection
 function skillFiles() {
     if (REF) {
-        const out = execSync(`git ls-tree -r --name-only ${REF} -- plugins`, {
+        const out = execFileSync('git', ['ls-tree', '-r', '--name-only', REF, '--', 'plugins'], {
             cwd: REPO, encoding: 'utf8', maxBuffer: 1 << 24,
         });
         return out.split('\n').filter((f) => f.endsWith('.md'));
@@ -219,7 +229,7 @@ function skillFiles() {
 const readFile = (rel) => {
     if (REF) {
         try {
-            return execSync(`git show ${REF}:${rel}`, {
+            return execFileSync('git', ['show', REF + ':' + rel], {
                 cwd: REPO, encoding: 'utf8', maxBuffer: 1 << 24, stdio: ['ignore', 'pipe', 'ignore'],
             });
         } catch { return null; }
@@ -257,6 +267,24 @@ for (const rel of skillFiles()) {
     const lines = text.split('\n');
     linesScanned += lines.length;
     findings.push(...scanLines(lines, rel));
+}
+
+// A scan of zero files is a broken probe, not a clean repo.
+//
+// `git ls-tree` exits 0 with EMPTY output when the pathspec matches nothing, so
+// `--ref <commit-before-plugins/-existed>` used to print "0 markdown file(s)"
+// followed by a green tick and exit 0 — the disk path at least throws ENOENT.
+// Printing the population is not enough if nothing acts on it.
+if (!filesScanned) {
+    console.error(`\nREFUSING TO REPORT: scanned 0 files under ${path.relative(REPO, SKILL_GLOB_ROOT) || 'plugins'}`
+        + (REF ? ` at ref ${REF}.` : '.'));
+    console.error('');
+    console.error('A zero-file population is a broken probe, not a clean tree — the path may not');
+    console.error('exist at this ref (plugins/ arrived with the v8 restructure), or the directory');
+    console.error('layout moved. Check with:');
+    console.error(`  git ls-tree -r --name-only ${REF || 'HEAD'} -- plugins | head`);
+    console.error('');
+    process.exit(2);
 }
 
 // --------------------------------------------------------------- reporting

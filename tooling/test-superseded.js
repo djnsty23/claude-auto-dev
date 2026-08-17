@@ -135,6 +135,14 @@ check('a closed powershell fence does not leak into the next block',
 // a disk-based read then finds nothing, so a finding proves git was the source.
 const gitRoot = fixture('gitref', 'skill-e/SKILL.md',
     '# e\n\n- Use external terminal: `start cmd /k "npm run dev"`\n');
+// A second, CLEAN file that is never deleted. Without it the disk-walk assertion
+// below is vacuous: the fixture's only .md is removed after commit, so a disk
+// scan reads zero files, and `status === 0` cannot tell "read the disk and found
+// nothing bad" from "read nothing at all". (It now also trips the zero-population
+// refusal, which is how the vacuity surfaced.)
+fs.mkdirSync(path.join(gitRoot, 'plugins', 'skill-e2'), { recursive: true });
+fs.writeFileSync(path.join(gitRoot, 'plugins', 'skill-e2', 'SKILL.md'),
+    '# e2\n\nNothing superseded here.\n', 'utf8');
 const git = (...a) => spawnSync('git', ['-C', gitRoot,
     '-c', 'user.email=fixture@example.invalid', '-c', 'user.name=fixture',
     '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8' });
@@ -150,6 +158,11 @@ check('--ref labels the revision it scanned', /scan — HEAD/.test(refRun.stdout
 const diskRun = run(gitRoot);
 check('the same tree on disk has nothing (so --ref really read git)',
     diskRun.status === 0, 'exit ' + diskRun.status);
+// Prove the disk walk actually read a file rather than scanning an empty tree —
+// otherwise the assertion above passes for the wrong reason.
+check('  and the disk walk read the clean file, not an empty tree',
+    /scanned : 1 markdown file\(s\)/.test(diskRun.stdout),
+    diskRun.stdout.split('\n').find((l) => l.includes('scanned')));
 
 // 5d. --json carries the population and the findings.
 const jsonRun = run(fixture('json', 'skill-f/SKILL.md',
