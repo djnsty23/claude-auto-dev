@@ -55,6 +55,16 @@
             "timeout": 60
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.js\"",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "Stop": [
