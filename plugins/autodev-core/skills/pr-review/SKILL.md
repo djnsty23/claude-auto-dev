@@ -10,10 +10,11 @@ argument-hint: "[#PR-number] [--comment]"
 
 # PR Review
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
+> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
+> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
+> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
+> the `browser` skill were removed in 8.79.0 — both predate these tools.
 
 Run comprehensive pull request review using specialized agents.
 
@@ -105,7 +106,7 @@ pr-review --comment
 | Security issues found | `security` |
 | Type issues found | `standards` |
 | UI changes | `design` |
-| Test gaps | `agent-browser` |
+| Test gaps | `read_page` + `read_console_messages` |
 
 ## Tips
 

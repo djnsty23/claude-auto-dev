@@ -40,7 +40,7 @@ No overlap. If brainstorm turns up a bug, note it and suggest `audit`.
 | Auth / Billing / RLS | tests + manual verification of deny-by-default behavior |
 
 For the UI rows, use whichever browser driver the `browser` skill selects — the
-built-in tools when available, the `agent-browser` CLI otherwise.
+built-in browser tools; chrome-devtools `emulate` for mobile device gates.
 
 ## Cross-cutting verification (all task types)
 

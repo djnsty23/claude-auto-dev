@@ -10,10 +10,11 @@ argument-hint: "[type] [message]"
 
 # Commit Workflow
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
+> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
+> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
+> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
+> the `browser` skill were removed in 8.79.0 — both predate these tools.
 
 ## Working Tree
 !`git status --short 2>/dev/null`
@@ -95,7 +96,7 @@ After every commit, run a 5-second sanity check:
 ```bash
 npm run build 2>&1 | tail -3
 # If dev server running, check for console errors
-curl -s http://localhost:3000 > /dev/null 2>&1 && agent-browser open http://localhost:3000 && agent-browser snapshot -i
+curl -s http://localhost:3000 > /dev/null 2>&1 && echo "server up - verify with navigate + read_page"
 ```
 
 If errors found, fix immediately and amend the commit.

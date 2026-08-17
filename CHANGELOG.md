@@ -1,5 +1,58 @@
 # Changelog
 
+## [8.79.0] - 2026-08-17
+
+### Removed — the agent-browser harness, migrated to the built-in browser tools
+
+The CLI predates the desktop app having both `mcp__Claude_Browser__*` and
+chrome-devtools MCP, so it was a second driver for a job the session already does.
+Deleted: `agent-browser-cleanup.js` (230 lines), the `browser` skill and its 365-line
+CLI reference, and `test-agent-browser-cleanup.js` — 896 lines, plus the hook's
+`SessionStart` registration. Wired hooks go 14 to 13, hook files 10 to 9, and hook
+spawn sites 10 to 3, since the cleanup hook held six of them.
+
+This was a migration rather than a deletion because 249 references across 22 files
+included the UI-verification step in 12 skills. Deleting without repointing would
+have left the workflow matrix's "UI (public)" row with no verifier, which degrades
+silently to "typecheck + build". Each rewritten step now names the tool that replaces
+it: `navigate` and `read_page` for structure, `computer` `screenshot` for the visual
+check, `resize_window` for width, chrome-devtools `emulate` when a *device* gate must
+fire, `read_console_messages` for errors, and `form_input` plus a `ref` click for
+form flows.
+
+The rewrites carry the traps with them rather than leaving them in a rules file the
+skill's reader may not have loaded: assert the build before measuring (a service
+worker serves the previous one and `ignoreCache` does not help); assert
+`window.innerWidth` in the same call that measures, because a resize can report
+success without changing anything; check 390 **and** 414; dismiss a tour or consent
+overlay before the screenshot and confirm it is gone; measure contrast on the
+rendered surface, since a static checker assumes a white background and a dark theme
+then reports every token as failing.
+
+A sixth detector rule, `agent-browser-cli`, is the completion gate. The risk is not
+the references that were fixed but a new skill copying the old shape from an older
+sibling — which is exactly how the dev-server contradiction spread. It is scoped to
+`plugins/`, so historical mentions in CHANGELOG, MIGRATION and README stay legal: a
+changelog that cannot name what it removed is useless. The eight deprecation notes
+left in the migrated skills pass through the positional exemption, which is that
+exemption's designed purpose.
+
+### Added — validate refuses a hook spawn that can pop a console window
+
+`execSync` routes through `cmd.exe` and Node's `windowsHide` defaults to `false`, so
+a console child of a parent that owns no console gets a real window.
+`checkHookSpawnsHidden` scans `hooks/` only: those are the spawners that run
+unattended, while the other ~90 sites in the repo are test suites that run from a
+shell which already owns a console, and flagging them would ship a gate that is red
+on arrival — the failure mode `checkUntestedHooks` documents. It prints the
+population it scanned, so a zero is distinguishable from a probe that matched
+nothing, and `test-validate.js` fixtures both sides: the same call with and without
+the option, asserted on the check's own output line rather than the exit status,
+since a fixture file in `hooks/` can make other checks fail for unrelated reasons.
+
+Verified: 25/25 suites, validate 16 PASS / 0 FAIL, detector clean across 84 files and
+6 patterns, `test-validate` at 18 assertions.
+
 ## [8.78.0] - 2026-08-17
 
 ### Added — how to write PowerShell blocks, and the detector enforces the labels

@@ -10,10 +10,11 @@ argument-hint: "[url or scope]"
 
 # Scan — Live Site QA
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
+> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
+> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
+> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
+> the `browser` skill were removed in 8.79.0 — both predate these tools.
 
 Catches what typecheck and build cannot: visual bugs, broken links, console
 errors, accessibility violations, performance regressions.
@@ -22,7 +23,7 @@ Drivers, in preference order:
 
 - **Built-in browser tools** — the default. `navigate` + `read_page` +
   `read_console_messages` cover unauthenticated scanning, and the user can watch.
-- **agent-browser CLI** — the same scan in a terminal-only session.
+- **chrome-devtools `emulate`** — when a mobile device gate has to fire, not just a width.
 - **Playwright script** — only for auth flows the other two cannot complete
   (OAuth redirects, SSO, 2FA), or when you need a repeatable checked-in script.
 
@@ -75,11 +76,9 @@ Better, on the built-in path: `navigate` to `$TARGET_URL`, then `read_page` —
 it returns the nav structure with refs already attached, so discovery and the
 first interaction step share one read.
 
-Terminal-only equivalent:
-```bash
-agent-browser open "$TARGET_URL"
-agent-browser snapshot -i  # interactive elements + links
-```
+`navigate` to the target, then `read_page` with `filter: 'interactive'` for the
+controls and links. Use `find` to locate a specific element in that tree rather than
+re-reading it.
 
 **Priority pages** (scan these first):
 1. Landing/home page
@@ -106,22 +105,19 @@ For each priority page:
 Save screenshots the user should keep under
 `.claude/screenshots/$(date +%Y-%m-%d)/` and reference them in the report.
 
-### Quick Scan — terminal-only fallback
+### Quick scan — per page
 
-```bash
-mkdir -p .claude/screenshots/$(date +%Y-%m-%d)
-DIR=".claude/screenshots/$(date +%Y-%m-%d)"
+For each page: `navigate`, `computer` `screenshot`, `resize_window`
+`{preset: 'mobile'}`, screenshot again, then `read_console_messages`
+`{onlyErrors: true}` and `read_network_requests` for failed loads.
 
-agent-browser open "$PAGE_URL"
-agent-browser screenshot "$DIR/$(basename $PAGE_URL)-desktop.png"
+Screenshots come back to the session rather than being written to a path, so record
+findings as you go — note the page, the viewport and what was wrong. A scan whose
+output is 40 unlabelled images is not a report.
 
-# Mobile viewport
-agent-browser viewport 375 812
-agent-browser screenshot "$DIR/$(basename $PAGE_URL)-mobile.png"
-
-# Console + network errors
-agent-browser errors > "$DIR/$(basename $PAGE_URL)-errors.txt"
-```
+Dismiss any tour or consent overlay **before** the screenshot and assert it is gone;
+an overlay that appears between the action and the capture changes the screen you
+thought you measured. On consent banners, decline non-essential cookies.
 
 ### Full Scan (all pages)
 
@@ -129,7 +125,14 @@ Loop over discovered URLs, scanning each. Cap at 20 pages to keep scan time reas
 
 ## Step 4: Authenticated Scan (Playwright)
 
-agent-browser handles simple form logins; use Playwright for OAuth, Google SSO, 2FA, or any redirect-heavy flow — it behaves more like a real user.
+The browser tools handle a simple form login via `form_input` and a click. Use
+Playwright for OAuth, Google SSO, 2FA, or any redirect-heavy flow — it behaves more
+like a real user.
+
+**A stored session can strip demo mode.** If `?demo=1` appears to do nothing, that is
+usually a guard clearing the demo flag because a real session exists, which is
+correct behaviour. Scan from a fresh context rather than the signed-in profile, and
+re-assert that state after every navigation — it does not always survive one.
 
 Create `.claude/scripts/auth-scan.js`:
 ```javascript

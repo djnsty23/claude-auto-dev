@@ -9,10 +9,11 @@ user-invocable: true
 
 # Auto Mode
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
+> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
+> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
+> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
+> the `browser` skill were removed in 8.79.0 — both predate these tools.
 
 Fully autonomous development. Works through all tasks without stopping until complete.
 
@@ -159,7 +160,7 @@ Before starting a task, assess its scope:
 7. `npm run typecheck` — fix if fails
 8. `npm run build` — fix if fails
 9. Self-Verification (see below)
-10. **Visual verification** — if the task touched UI, run agent-browser or Playwright screenshots. Do not skip this.
+10. **Visual verification** — if the task touched UI, screenshot it at 390 and 414 through the browser tools. Do not skip this, and do not substitute reading the diff.
 11. **Test generation** — if the task created an API route, auth logic, or data mutation, write at least one test (see below)
 12. **Progress output**: `[3/8] ✓ S6-003 | Next: S6-004`
 13. Update prd.json: `passes: true`
@@ -194,7 +195,7 @@ Before marking a task done, verify each acceptance criterion. "Does it compile?"
 
 | Task Type | Verification |
 |-----------|--------------|
-| UX/UI (public pages) | agent-browser screenshots (desktop + mobile) + console errors |
+| UX/UI (public pages) | `computer` screenshots (desktop + mobile) + `read_console_messages` |
 | UX/UI (admin/internal) | typecheck + build only |
 | Feature (UI) | Build passes + visual check if public UI changed + complete primary user flow once |
 | Edge Function / API | Deploy + `curl` with real params + verify 200 + response shape matches expected |
@@ -222,24 +223,28 @@ Bash({ command: "npm run dev", run_in_background: true })
 # Wait for startup, then verify
 ```
 
-Use agent-browser (preferred — token efficient) or Playwright (more capabilities):
+Drive the page with the built-in browser tools:
 
-**agent-browser (preferred):**
-```bash
-agent-browser open http://localhost:3000/[page]
-agent-browser snapshot -i          # Desktop screenshot + DOM
-agent-browser viewport 375 812     # Switch to mobile
-agent-browser snapshot -i          # Mobile screenshot
-agent-browser errors               # Console errors
-```
+1. `navigate` to the page.
+2. `read_page` — the accessibility tree, and the assertion surface. Cheaper and more
+   reliable than a screenshot for text and structure.
+3. `computer` `screenshot` for the desktop view.
+4. `resize_window` `{preset: 'mobile'}`, reload, then screenshot again.
+5. `read_console_messages` `{onlyErrors: true}`.
 
-**Playwright fallback (if agent-browser unavailable):**
-```bash
-npx playwright screenshot http://localhost:3000/[page] .claude/screenshots/page-desktop.png
-npx playwright screenshot --viewport-size=375,812 http://localhost:3000/[page] .claude/screenshots/page-mobile.png
-```
+**Two viewports, not one.** Check 390px *and* 414px — a layout can survive one and
+break the other. And `resize_window`'s mobile preset changes the viewport and the
+user agent, which is enough for a CSS breakpoint but not proof that a load-time
+*device* gate fired; when the code branches on device rather than width, use
+chrome-devtools `emulate` and reload so those gates re-run.
 
-If neither is available, fall back to `WebFetch` or `curl` for basic page load verification.
+**Assert the viewport you think you measured.** A resize tool can report success
+while the page never changed, which turns "I verified the mobile layout" into a
+desktop screenshot with a mobile label. Read `window.innerWidth` in the same call
+that takes the measurement.
+
+If the browser tools are unavailable, `WebFetch` verifies that a page loads at all —
+say that is what you did, and do not describe it as visual verification.
 
 Analyze screenshots for: broken layout, missing content, visual regressions, design quality, dark mode correctness.
 Fix console errors or visual issues before marking task complete.
@@ -305,7 +310,7 @@ grep -rn "fontFamily\|font-family" src/ --include="*.css" --include="*.tsx" | gr
 If stock colors or unloaded fonts found in YOUR changes, fix before proceeding.
 
 **6. UI/API Change? Visual Verification**
-Run agent-browser or Playwright screenshots from the Verification section above. Not optional for UI tasks.
+Run the browser-tool screenshots from the Verification section above. Not optional for UI tasks.
 
 **7. Mark Complete**
 Only after all checks pass. UI files (.tsx, .css, layout, page) without visual verification → go back to step 6.

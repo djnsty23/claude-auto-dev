@@ -240,6 +240,31 @@ const SUPERSEDED = [
             '`--outfile=/dev/null` is deprecated; build to the scratchpad.',
         ],
     },
+    {
+        id: 'agent-browser-cli',
+        // The completion gate for the 8.79.0 migration. 249 references across 22
+        // files were rewritten to the built-in browser tools; the risk is not the
+        // ones that were fixed but a new skill copying the old shape from an older
+        // sibling, which is exactly how the dev-server contradiction spread.
+        //
+        // Scoped to plugins/ by the scanner, so the historical mentions in
+        // CHANGELOG.md, MIGRATION.md and README.md stay legal — a changelog that
+        // cannot name what it removed is useless.
+        re: /\bagent-browser\b/,
+        why: 'the agent-browser CLI and its cleanup hook were removed in 8.79.0; the built-in browser tools (navigate/read_page/computer/resize_window) and chrome-devtools emulate replace it, and a skill still prescribing the CLI instructs a binary that is not installed',
+        replacement: 'mcp__Claude_Browser__* tools, or chrome-devtools emulate for mobile device gates',
+        positive: [
+            'agent-browser open http://localhost:3000',
+            '| UX/UI | agent-browser screenshots (desktop + mobile) |',
+            'Use agent-browser (preferred — token efficient) or Playwright.',
+            '- Run `agent-browser snapshot -i` instead of read_page.',
+        ],
+        negative: [
+            'The `agent-browser` CLI was removed in 8.79.0 — both predate these tools.',
+            'Never use `agent-browser` — it was replaced by the built-in tools.',
+            '`agent-browser` is deprecated; use navigate + read_page.',
+        ],
+    },
 ];
 
 // --------------------------------------------------------------- the scan

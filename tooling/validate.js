@@ -455,6 +455,60 @@ function checkUntestedHooks() {
   log('FAIL', `${out.untested.length} of ${out.wired} wired hooks have no suite — run node tooling/find-untested-hooks.js`);
 }
 
+// A hook that spawns a console child without windowsHide can pop a visible
+// window on Windows. execSync/exec route through cmd.exe, and Node's windowsHide
+// option defaults to FALSE — so a child spawned by a parent that owns no console
+// (Claude Desktop is an Electron app) gets a real window. Reported 2026-08-17.
+//
+// Scoped to hooks/ ON PURPOSE. Hooks are the only spawners that run unattended,
+// on every tool call or session start; the ~90 other spawn sites in the repo are
+// test suites, which run under `npm test` from a shell that already owns a console
+// and would produce ~90 findings that all need waiving. A gate that ships red is
+// a gate people learn to bypass (see checkUntestedHooks above).
+//
+// Prints the population it scanned, so a zero is distinguishable from a probe
+// that matched nothing. Verified two-sided by test-validate.js.
+function checkHookSpawnsHidden() {
+  const hooksDir = path.join(ROOT, 'plugins', 'autodev-core', 'hooks');
+  if (!fs.existsSync(hooksDir)) return log('WARN', 'hooks/ not found — spawn scan skipped');
+
+  // execFileSync/spawn with an argv array still creates a console child, so they
+  // are scanned too; only the shell-routing forms are inherently cmd.exe-bound.
+  const CALL = /\b(execSync|execFileSync|exec|spawnSync|spawn)\s*\(/g;
+  const files = fs.readdirSync(hooksDir).filter((f) => f.endsWith('.js'));
+
+  let sites = 0;
+  const exposed = [];
+
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(hooksDir, f), 'utf8');
+    const lines = src.split('\n');
+    let m;
+    CALL.lastIndex = 0;
+    while ((m = CALL.exec(src))) {
+      const lineStart = src.lastIndexOf('\n', m.index) + 1;
+      const prefix = src.slice(lineStart, m.index);
+      // Skip comments, and skip `re.exec(str)` — a regex method, not a spawn.
+      if (prefix.includes('//') || prefix.trimStart().startsWith('*')) continue;
+      if (m[1] === 'exec' && /[\w\])]\s*\.\s*$/.test(prefix)) continue;
+      sites++;
+      const lineNo = src.slice(0, m.index).split('\n').length;
+      // The options object can trail the call over several lines; 12 lines covers
+      // every shape currently in hooks/ without running into the next call.
+      const region = lines.slice(lineNo - 1, lineNo + 11).join('\n');
+      if (!/windowsHide:\s*true/.test(region)) {
+        exposed.push(`${f}:${lineNo}  ${m[1]}`);
+      }
+    }
+  }
+
+  if (!exposed.length) {
+    return log('PASS', `Hook spawns: ${sites} site(s) across ${files.length} hook file(s), all windowsHide:true`);
+  }
+  log('FAIL', `${exposed.length} of ${sites} hook spawn site(s) can pop a console window (add windowsHide: true):`);
+  for (const e of exposed) console.log(`         ${e}`);
+}
+
 // ---------------------------------------------------------------- run
 
 console.log('Validating autodev marketplace...\n');
@@ -471,6 +525,7 @@ checkNoLegacyArtifacts();
 checkNoPrivateNames();
 checkNoStaleMutationBackups();
 checkUntestedHooks();
+checkHookSpawnsHidden();
 
 console.log(`\nSummary: ${passCount} PASS, ${failCount} FAIL, ${warnCount} WARN`);
 process.exit(failCount > 0 ? 1 : 0);

@@ -9,10 +9,11 @@ user-invocable: true
 
 # Frontend Design
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
+> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
+> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
+> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
+> the `browser` skill were removed in 8.79.0 — both predate these tools.
 
 Create distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics.
 
@@ -147,14 +148,18 @@ Before shipping any new UI, check these against the existing design:
 
 After implementing a design, validate visually:
 
-### agent-browser (preferred — token efficient)
-```bash
-agent-browser open http://localhost:3000
-agent-browser snapshot -i
-# Check mobile
-agent-browser viewport 375 812
-agent-browser snapshot -i
-```
+### Browser tools
+
+`navigate` to the page, `computer` `screenshot` for desktop, then `resize_window`
+`{preset: 'mobile'}` and screenshot again. Check 390 **and** 414 — one width is not
+"mobile". For a device gate rather than a width breakpoint, use chrome-devtools
+`emulate` and reload so load-time checks re-run.
+
+**Contrast has to be measured on the rendered surface, not the stylesheet.** A static
+contrast checker assumes a white background, so on a dark theme every light-on-dark
+token reports as a failure. The real question is never "is this background faint" but
+"is there an opaque surface underneath it" — and only the rendered tree can answer
+that. Sweep the DOM and flag only elements with no opaque card ancestor.
 
 ### Playwright (fallback — more capabilities)
 ```bash

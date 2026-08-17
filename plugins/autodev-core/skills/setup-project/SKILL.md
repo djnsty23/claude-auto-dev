@@ -9,10 +9,11 @@ user-invocable: true
 
 # Setup Project
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
+> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
+> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
+> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
+> the `browser` skill were removed in 8.79.0 — both predate these tools.
 
 ## Mode Detection
 
@@ -173,7 +174,7 @@ Same as Create mode Step 5. Read real project state, generate from actual data.
 | next | perf, seo |
 | tailwindcss | design |
 | vercel.json | deploy |
-| playwright/cypress | test, agent-browser |
+| playwright/cypress | test |
 | remotion | remotion |
 | @sentry/nextjs | monitoring |
 | Any auth | security |

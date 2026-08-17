@@ -9,10 +9,11 @@ user-invocable: true
 
 # Ship Workflow
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
+> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
+> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
+> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
+> the `browser` skill were removed in 8.79.0 — both predate these tools.
 
 Complete deployment pipeline: pre-flight → security → deploy → verify → report.
 
@@ -115,15 +116,18 @@ supabase secrets list --project-ref [ref]
 
 A successful deploy does not mean the app works. Verify after deploying.
 
-### Visual Verification (agent-browser — preferred)
+### Visual verification
 
-```bash
-agent-browser open [DEPLOY_URL]
-agent-browser snapshot -i
-# Check mobile
-agent-browser viewport 375 812
-agent-browser snapshot -i
-```
+`navigate` to the deploy URL, `read_page` to assert structure, `computer`
+`screenshot` for desktop, then `resize_window` `{preset: 'mobile'}` and screenshot
+again.
+
+**Assert the build before you measure anything.** A service worker will serve the
+previous build against the new URL, and `ignoreCache` does not fix it — call
+`getRegistrations()` then `unregister()`, clear `caches.keys()`, and only then
+reload. If the app exposes a version marker, read it and confirm it is the build you
+just shipped. Otherwise a screenshot of the old build is indistinguishable from a
+successful deploy.
 
 ### Fallback: Playwright (more capabilities, higher token cost)
 
@@ -136,7 +140,7 @@ npx playwright open [DEPLOY_URL]
 | Check | How | Pass Criteria |
 |-------|-----|---------------|
 | **Page loads** | Open deploy URL | No 404, no blank screen |
-| **No console errors** | agent-browser snapshot | Zero errors in console |
+| **No console errors** | `read_console_messages` | Zero errors in console |
 | **Auth flow** | Login → protected page → logout | All transitions work |
 | **Critical path** | Complete main user action | End-to-end success |
 | **API calls** | Check network tab | No 500s, no CORS errors |

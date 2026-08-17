@@ -27,7 +27,7 @@ When creating stories in prd.json (via audit, brainstorm, or bootstrap), include
 
 | Tag | What auto checks |
 |-----|-----------------|
-| `visual` | agent-browser screenshots desktop + mobile, no console errors |
+| `visual` | `computer` screenshots at 390 and 414, `read_console_messages` clean |
 | `a11y` | Labels on inputs, focus-visible rings, aria-labels, keyboard nav |
 | `design` | Design token compliance check |
 | `security` | Hardening check patterns (fail-open, unsafe casts, SSRF) |

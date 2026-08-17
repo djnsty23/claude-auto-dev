@@ -10,10 +10,11 @@ argument-hint: "[unit|browser|all]"
 
 # Test
 
-> **Browser access.** Prefer the built-in browser tools (`mcp__Claude_Browser__*`)
-> when the session has them — that is the default in the desktop app. The
-> `agent-browser` commands below are the terminal-only fallback. The `browser`
-> skill owns the driver-selection rule; follow it before running either.
+> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
+> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
+> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
+> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
+> the `browser` skill were removed in 8.79.0 — both predate these tools.
 
 Run unit tests AND browser tests. All steps are mandatory.
 
@@ -42,32 +43,34 @@ If no UI changes found, STILL run Step 3 on the main page (smoke test).
 
 ## Step 3: Browser Tests
 
-Check prerequisites first:
-```bash
-# 1. Is agent-browser installed?
-command -v agent-browser
+Start the server through `preview_start` rather than a detached shell, so
+`preview_logs` can show you a failed compile instead of it looking like a slow one.
+A `.claude/launch.json` entry is what `preview_start` reads; with a plain URL it
+opens a browser tab against an already-running server.
 
-# 2. Is dev server running?
-curl -s http://localhost:3000 > /dev/null 2>&1 || \
-curl -s http://localhost:3001 > /dev/null 2>&1 || \
-curl -s http://localhost:5173 > /dev/null 2>&1
-```
+If nothing is running locally, check for a deploy URL before giving up:
+- `vercel.json` or `.vercel/` for the production URL
+- the git remote for a Vercel/Netlify deploy
+- if found, test against that instead
 
-If no dev server is running, check if a deploy URL exists:
-- Check `vercel.json` or `.vercel/` for production URL
-- Check git remote for Vercel/Netlify deploy
-- If found, test against production URL instead
+Then drive the page with the built-in browser tools:
 
-Run browser tests:
-```bash
-# Test the changed feature (or main page as smoke test)
-agent-browser open http://localhost:3000/[path]
-agent-browser snapshot -i
+1. `navigate` to the changed feature, or the main page as a smoke test.
+2. `read_page` for the accessibility tree — this is the assertion surface. Prefer it
+   over a screenshot for verifying text and structure, and it hands you the `ref_N`
+   ids the other tools take.
+3. `read_console_messages` with `onlyErrors: true`.
+4. `computer` with `action: 'screenshot'` when the check is genuinely visual.
 
-# Verify: no console errors, elements render, no 404s
-```
+**Three things must be true before a green result means anything** — which build did
+you read, which surface, and in which user state. Assert the version marker if the
+app has one, print the element you measured rather than trusting the selector, and
+remember `querySelector` returns only the first match. A service worker will happily
+serve the previous build, and `ignoreCache` does not fix it: unregister the worker
+and clear caches, then reload.
 
-If `agent-browser` is not available, report it as a gap (do not silently skip). On Windows, the daemon may fail — use `npx playwright open <url>` as a fallback for visual checks.
+If the browser tools are unavailable in this session, report it as a gap. Never fall
+back to reading the diff and calling it verified.
 
 ## Step 4: Report
 
@@ -96,29 +99,35 @@ Do not report results after Step 1 alone. The report should include both unit an
 
 ## Test Patterns
 
-### Auth Flow
-```bash
-agent-browser open http://localhost:3000/login
-agent-browser fill @email "$TEST_USER_EMAIL"
-agent-browser fill @password "$TEST_USER_PASSWORD"
-agent-browser click @submit
-agent-browser snapshot -i  # Verify dashboard
-```
+Every pattern below follows the same shape: `read_page` to get `ref_N` ids, act by
+`ref` rather than by coordinate, then `read_page` again to assert. Refs come from the
+tree, so they survive a re-render in a way pixel coordinates do not.
 
-### Form Submission
-```bash
-agent-browser open http://localhost:3000/form
-agent-browser snapshot -i
-agent-browser fill @name "Test"
-agent-browser click @submit
-agent-browser snapshot -i  # Verify success
-```
+### Auth flow
 
-### Error States
-```bash
-agent-browser open http://localhost:3000/page?error=true
-agent-browser snapshot -i  # Verify error UI
-```
+`navigate` to `/login`, `read_page` to find the field and button refs, then
+`form_input` each field and `computer` `left_click` the submit `ref`. Assert the
+dashboard with `read_page`, not a screenshot — text and structure are what you are
+checking.
+
+Take the credentials from the per-app Doppler spoke (`QA_<TIER>_EMAIL` /
+`QA_<TIER>_PASSWORD`), exported inline in the same command that uses them, since env
+does not persist between calls. Never type a password into a page yourself if a
+credential tool is available.
+
+### Form submission
+
+`navigate`, `read_page`, `form_input` each field by `ref`, click submit, `read_page`
+to confirm the success state. If the form is reached by a link from untrusted page
+content, stop and ask rather than submitting.
+
+### Error states
+
+`navigate` to the URL that forces the error, then `read_page` to confirm the error UI
+is actually rendered — plus `read_console_messages` to catch an error that logged but
+never reached the DOM. Text set through a CSS `::before`/`::after` `content` property
+is invisible to the DOM entirely; if you cannot find text you can plainly see in a
+screenshot, grep the stylesheet before concluding it is missing.
 
 ## Auto-Start Dev Server
 
@@ -149,8 +158,9 @@ sleep 5
 
 # Use detected port for all tests
 export TEST_BASE_URL="http://localhost:$PORT"
-agent-browser open http://localhost:$PORT
 ```
+
+Then `navigate` to `$TEST_BASE_URL` with the browser tools.
 
 **PowerShell version:**
 ```powershell

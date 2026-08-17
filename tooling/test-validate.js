@@ -114,6 +114,49 @@ check('removing the backup clears the failure', after.status === 0);
         names.length > 0 ? r.status === 1 : r.status === 0);
 }
 
+// checkHookSpawnsHidden — a hook spawn that can pop a console window on Windows.
+//
+// Asserted on the check's OWN output line, not on the exit status. The fixture is
+// a real file dropped into hooks/, so other checks can react to it too, and an
+// exit-1 assertion would then pass for the wrong reason — a mutation caught by a
+// different gate proves nothing about the gate under test.
+{
+    const hooksDir = path.join(ROOT, 'plugins', 'autodev-core', 'hooks');
+    const fixture = path.join(hooksDir, 'zz-spawn-fixture.js');
+    const spawnLine = (out) => (out || '').split('\n').find((l) => /Hook spawns|hook spawn site/.test(l)) || '';
+
+    // Baseline: the real hooks are all hidden, and the PASS line prints the
+    // population it scanned rather than a bare verdict.
+    const cleanLine = spawnLine(base.stdout);
+    check('the spawn check passes on the real hooks', /^\[PASS\].*Hook spawns:/.test(cleanLine.trim()));
+    check('  and reports the population it scanned', /\d+ site\(s\) across \d+ hook file\(s\)/.test(cleanLine));
+
+    let exposed, hidden;
+    try {
+        // An execSync with NO windowsHide — the exact defect.
+        fs.writeFileSync(fixture,
+            "const { execSync } = require('child_process');\n" +
+            "execSync('git status', { stdio: 'ignore' });\n");
+        exposed = runValidate();
+
+        // Same file, same call, windowsHide added: the finding must clear. This is
+        // the half that proves the check reads the option rather than the call name.
+        fs.writeFileSync(fixture,
+            "const { execSync } = require('child_process');\n" +
+            "execSync('git status', { stdio: 'ignore', windowsHide: true });\n");
+        hidden = runValidate();
+    } finally {
+        fs.rmSync(fixture, { force: true });
+    }
+
+    const exposedLine = spawnLine(exposed.stdout);
+    check('an unhidden hook spawn is reported as a FAIL', /^\[FAIL\]/.test(exposedLine.trim()));
+    check('  and names the offending file and line',
+        (exposed.stdout || '').split('\n').some((l) => /zz-spawn-fixture\.js:2\s+execSync/.test(l)));
+    check('adding windowsHide clears that finding',
+        /^\[PASS\].*Hook spawns:/.test(spawnLine(hidden.stdout).trim()));
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
