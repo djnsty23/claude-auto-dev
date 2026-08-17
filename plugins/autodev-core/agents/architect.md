@@ -2,6 +2,7 @@
 name: architect
 description: Plans features, maps dependencies, and records architecture decisions. Use for complex features.
 model: opus
+effort: xhigh
 permissionMode: plan
 disallowedTools:
   - Write

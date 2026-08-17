@@ -2,12 +2,13 @@
 name: code-reviewer
 description: Reviews code changes for quality, patterns, and potential issues. Use before commits or PRs.
 model: opus
+effort: high
 permissionMode: plan
 disallowedTools:
   - Write
   - Edit
   - NotebookEdit
-preloadSkills:
+skills:
   - standards
   - security
 memory: project

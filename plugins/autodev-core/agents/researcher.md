@@ -2,6 +2,7 @@
 name: researcher
 description: Deep codebase and web research. Traces code flows, investigates bugs, researches libraries.
 model: opus
+effort: high
 permissionMode: plan
 disallowedTools:
   - Write

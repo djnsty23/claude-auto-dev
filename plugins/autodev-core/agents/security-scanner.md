@@ -2,12 +2,13 @@
 name: security-scanner
 description: Scans for vulnerabilities, secrets, and security misconfigurations. Cross-project learning.
 model: opus
+effort: high
 permissionMode: plan
 disallowedTools:
   - Write
   - Edit
   - NotebookEdit
-preloadSkills:
+skills:
   - security
 memory: user
 ---
