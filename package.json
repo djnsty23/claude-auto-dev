@@ -23,7 +23,8 @@
     "check:versions": "node tooling/check-version-drift.js",
     "check:functions": "node tooling/find-untested-functions.js",
     "check:superseded": "node tooling/check-superseded.js",
-    "check:agent-cost": "node tooling/analyze-agent-cost.js"
+    "check:agent-cost": "node tooling/analyze-agent-cost.js",
+    "check:runtime": "node tooling/check-runtime.js"
   },
   "author": "djnsty23",
   "license": "MIT",
