@@ -1,5 +1,56 @@
 # Changelog
 
+## [8.77.0] - 2026-08-17
+
+### Fixed — fence tracking, and `/dev/null` reading as a dev server
+
+The last four verified findings from two adversarial reviews. All were latent —
+no live instance in the tree — which is why only a review found them.
+
+Fence tracking was a bare toggle and got three markdown shapes wrong:
+`~~~powershell` is a valid CommonMark fence and was invisible; a ````markdown
+wrapper containing a ```powershell opener read the inner opener as a *closer*,
+inverting fence state for the rest of the file so genuine blocks after it were
+missed; and an unclosed fence leaked its language to EOF, so prose twenty lines
+below was scanned as PowerShell.
+
+It now records the opening marker's character and length and closes only on the
+same character, at least as long, with no info string — the CommonMark rule, which
+handles tildes and nesting together. `` ```{powershell} `` info strings are
+stripped rather than read as an empty language. Deliberate consequence: a
+```powershell block nested inside a ````markdown wrapper is *content*, not an
+instruction, so it does not fire.
+
+`\bdev\b` matched the `dev` in `/dev/null`, so
+`Bash({ command: "npm run build > /dev/null", run_in_background: true })` fired as
+a half-migrated dev server. The repo carries ~20 `2>/dev/null` lines and 3
+backgrounded dev servers, so the collision was one edit from live. The rule now
+requires `run dev` or a `dev` not followed by a slash, and also matches `npx`,
+`vite` and `next`.
+
+`fileScope` overrode fence scoping entirely — any file whose *path* matched it
+ignored the fence, so a ```bash block inside `rule-windows/SKILL.md` fired. That
+is the exact false positive the fence exists to prevent, and one that
+`rules/windows.md` explicitly blesses. `fileScope` now yields to a shell-language
+fence.
+
+Verified: an 11-case shape matrix passes 11/11, the 24-case exemption matrix still
+passes 24/24, the suite is 44 assertions with 0 failed, and mutation score is 58 of
+65 — holding at 89% while adding a fence state machine.
+
+### Added — two independent review passes before a release
+
+The `review` skill now prescribes reviewing twice rather than once, deeper.
+Measured 2026-08-17: two reviewers, byte-identical prompt, same model, same two
+files, converged on about six findings while each surfaced about six more the other
+missed entirely. One caught a `git rev-parse HEAD^` that silently returned HEAD's
+own sha; the other caught two live instructions in shipped skills that contradicted
+a rule in the same plugin.
+
+The skill is explicit that this is a pre-release gate, not a routine one — it
+doubles review cost and false positives for a yield that only matters when a
+mistake ships — and that `/code-review ultra` is the better path where available.
+
 ## [8.76.0] - 2026-08-17
 
 ### Fixed — the exemption disabled the detector on the prose it was built to catch
