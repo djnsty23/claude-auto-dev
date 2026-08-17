@@ -55,3 +55,61 @@ outright. The rule was compensating for a limitation the harness no longer has.
   too. The old rule here claimed the opposite.
 - Use `where` instead of `which` for finding executables
 - Line endings: ensure `.gitattributes` has `* text=auto`
+
+## Writing PowerShell blocks in skills and docs
+
+How you fence a block decides whether the Windows conventions are enforced on it.
+`check-superseded` scans `powershell`, `ps1` and `pwsh` fences for Windows
+conventions and deliberately exempts `bash`, `sh`, `zsh`, `shell` and `console`
+fences — even inside a file whose name matches `windows`. So the label is not
+cosmetic: it is the switch that decides which rules apply.
+
+**Label every block, and label it honestly.**
+
+- An unlabelled ` ``` ` fence is scanned by nothing. If the content is PowerShell,
+  say `powershell` — otherwise the Windows rules silently do not apply to it.
+- Never put bash inside a `powershell` fence, or PowerShell inside a `bash` fence.
+  The Windows rules then fire on content they should spare, or spare content they
+  should catch. Two fences beat one mislabelled fence.
+- A Mac/Linux comparison block belongs in its own `bash` fence. That is explicitly
+  fine here and the detector will leave it alone.
+
+**Close what you open, and mind the marker length.** Fence tracking follows the
+CommonMark rule: a fence closes only on the *same* character, *at least as long*
+as the opener, with no info string.
+
+- An unclosed fence used to leak its language to the end of the file, so prose
+  twenty lines down was read as PowerShell. It no longer does, but an unclosed
+  fence still renders wrong for the reader.
+- Inside a ` ````markdown ` wrapper, an inner ` ```powershell ` is **content**, not
+  an instruction — a displayed example. That is correct, and it also means you
+  cannot enforce a rule on a block you are only demonstrating.
+- `~~~powershell` is a valid fence and is scanned. Prefer backticks for
+  consistency, but tildes are the escape hatch when the block itself contains
+  backtick fences.
+
+**Content rules inside a PowerShell block**, all of which the detector or the
+gotchas above cover:
+
+| Write | Instead of | Because |
+|---|---|---|
+| `curl.exe` with flags | bare `curl` | `curl` is an alias for `Invoke-WebRequest` in PS 5.1 |
+| `cmd1; cmd2` | `cmd1 && cmd2` | `&&` is not a PS 5.1 operator |
+| backtick continuation | `\` continuation | `\` is not a line continuation in PowerShell |
+| `$env:VAR` | `%VAR%` / `$VAR` | cmd and POSIX syntax respectively |
+| `New-Item -Force` | `mkdir -p` | no `-p` on the PowerShell alias |
+| `Select-String` | `grep` | not present unless Git Bash is on PATH |
+
+Note what happened while that table was being written. The first draft spelled the
+wrong form out in full, and `check-superseded` flagged its own documentation at
+`SKILL.md:96` — correctly, because a bare `curl` followed by a flag is an
+instruction wherever it appears, including in a table cell labelled as wrong. A doc
+that shows a banned form has to **name** it, not **invoke** it. `bare curl` carries
+the meaning; `curl` plus a flag carries the bug.
+
+**One trap that is not about fences at all.** When a script shells out with a git
+ref, use `execFileSync` with an argv array, never `execSync` with a string.
+`execSync` routes through `cmd.exe /d /s /c`, where `^` is the escape character, so
+`git rev-parse HEAD^` returns HEAD's own sha — silently, with exit 0. Measured
+2026-08-17: `execSync` gave `af3bd7b` where `execFileSync` gave `faa3c21`. Any
+caret-bearing ref (`HEAD^`, `HEAD^^`, `main^`, `HEAD^2`) is affected.

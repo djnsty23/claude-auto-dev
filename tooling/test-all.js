@@ -32,6 +32,34 @@ if (suites.length === 0) {
   process.exit(1);
 }
 
+// A mutation sweep (find-vacuous-assertions.js) OVERWRITES its subject in place,
+// restoring between mutants. So a suite run that overlaps a sweep reads a file
+// that does not exist on disk by the time the result is printed. On 2026-08-17
+// this produced a clean 25/25 measured against a half-mutated check-superseded.js
+// — a pass that was not about any real version of the code.
+//
+// The sweep already writes `<subject>.vacuity-backup` before its first mutation
+// and removes it on clean exit, so that file is exactly the in-flight marker; no
+// new mechanism is needed. Its presence means either a sweep is running now, or
+// one died and left the subject mutated. Both make a pass here meaningless.
+//
+// This guard is safe because the sweep invokes `node <suite>` directly and never
+// routes through this runner — verified at find-vacuous-assertions.js:224.
+{
+  const stale = fs
+    .readdirSync(scriptsDir)
+    .filter((f) => f.endsWith('.vacuity-backup'));
+  if (stale.length > 0) {
+    console.error('\nRefusing to run: a mutation sweep is in flight or died mid-run.\n');
+    console.error('Found: ' + stale.join(', '));
+    console.error('\nThe sweep rewrites its subject in place, so any result printed now would');
+    console.error('describe a mutant rather than the committed code. Wait for the sweep to');
+    console.error('finish, or recover the subject by re-running `npm run check:vacuity`');
+    console.error('(it restores from the backup first), then re-run the tests.\n');
+    process.exit(2);
+  }
+}
+
 const results = [];
 
 // NOTE: this used to be declared `run(label, file, args)` while every call site

@@ -1,5 +1,74 @@
 # Changelog
 
+## [8.78.0] - 2026-08-17
+
+### Added — how to write PowerShell blocks, and the detector enforces the labels
+
+`rule-windows/SKILL.md` now documents fence labelling as a *mechanism*, not a style
+preference: `check-superseded` scans `powershell`/`ps1`/`pwsh` fences and exempts
+`bash`/`sh`/`zsh`/`shell`/`console` ones even inside a file whose name matches
+`windows`, so the label is the switch that decides which ruleset applies. An
+unlabelled fence is scanned by nothing. The note covers CommonMark closing rules
+(same character, at least as long, no info string), why a fence nested inside a
+longer wrapper is content rather than an instruction, and the content conversions
+in a table.
+
+Writing that note produced a finding in the note itself. The first draft spelled
+out the banned form in a "don't do this" table cell, and the detector flagged
+`rule-windows/SKILL.md:96` — correctly, since a bare `curl` followed by a flag is
+an instruction wherever it sits. Documentation that shows a banned form has to name
+it rather than invoke it. That episode is now part of the note.
+
+### Fixed — a suite run that overlapped a mutation sweep, and the negative half of the self-test
+
+`test-all.js` refuses to run while any `tooling/*.vacuity-backup` exists. The
+mutation sweep overwrites its subject in place, so a suite run overlapping a sweep
+reports on a file that no longer exists on disk by the time the result prints. That
+happened here: a backgrounded `check:vacuity` was still sweeping when `npm test`
+was run, and 25/25 passed against a half-mutated `check-superseded.js`. Minutes
+later a `git diff` taken during a second sweep showed a `|| -> &&` in a file nobody
+had edited, which reads exactly like a harness leaking a mutant — it was the
+in-flight mutant, and the crash-recovery path restored it correctly.
+
+`validate.js` has checked for a stale `.vacuity-backup` since 8.71.0, and that check
+is sound — fixtured here, it fails 14 PASS / 1 FAIL. It could not help, because
+**it runs last**. A sweep that finishes part-way through a test run leaves every
+suite that already reported bogus, and validate then reads a clean tree and passes.
+That is exactly what happened: the sweep's completion notification arrived in the
+same batch as the 25/25. Ordering, not detection, was the hole — so the same check
+now also runs *before* the first suite.
+
+The guard reuses the backup file the sweep already writes before its first mutation
+and removes on clean exit, rather than adding a lockfile that could disagree with
+it. It exits 2, so "refused" is distinguishable from "ran and failed", and it names
+the file it found. Asserted in a new `test-runner-guard.js` (5 assertions), one
+sided on purpose: the pass-through side would need a nested full runner spawn to
+fixture, and every ordinary `npm test` exercises it.
+
+The detector's own self-test asserted its negative fixtures with a
+`.filter((f) => f.id === s.id)`, and the sweep flipped that `===` to `!==` without
+the suite noticing — the mutant counted every *other* rule's findings, which is
+also zero. The filter is gone: a corrected form must now trip **no** rule, which is
+stronger than the filtered version and leaves no comparison to mutate. Measured
+across all 5 rules first — every negative fixture produces zero findings from any
+rule, so nothing was given up.
+
+### Fixed — hooks could pop a visible console window on Windows
+
+`execSync` routes through `cmd.exe`, and Node's `windowsHide` defaults to `false`,
+so a console child spawned by a parent with no console of its own gets a real
+window. `post-tool-typecheck.js` now passes `windowsHide: true` on both the
+typecheck and lint calls; the lint call keeps the shell because its eslint fallback
+uses `||`. `session-start.js` moves to `execFileSync` with an argv array, which
+skips `cmd.exe` altogether and also removes its exposure to the `^`-eats-the-ref
+bug. Six of 96 spawn sites in the plugin set `windowsHide`; the remainder are test
+suites that only run under `npm test`.
+
+Verified: 26/26 suites, `test-superseded` at 48 assertions, `test-runner-guard` at
+5, detector clean on the live tree, mutation score 61 of 65 (up from 58/65). Three
+of the four survivors are inside message strings and change only wording; the
+fourth was the self-test filter fixed above.
+
 ## [8.77.0] - 2026-08-17
 
 ### Fixed — fence tracking, and `/dev/null` reading as a dev server

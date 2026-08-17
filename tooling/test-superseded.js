@@ -246,6 +246,16 @@ const nested = run(fixture('shape-nested', 'skill-y4/SKILL.md',
 check('a 4-tick wrapper does not invert fence state for the rest of the file',
     nested.status === 1, 'exit ' + nested.status);
 
+// The inner ```powershell is CONTENT of the ````markdown block, not an opener, so
+// what it contains is a displayed example rather than an instruction. This is the
+// case that pins the open/close branch: treat every fence line as an opener and
+// this fires, while every other shape case still passes.
+const nestedContent = run(fixture('shape-nested-content', 'skill-y5/SKILL.md',
+    '# y5\n\n````markdown\n```powershell\ncurl -H \'x: y\' https://e\n```\n````\n'));
+check('a fence nested inside a longer fence is content, not an instruction',
+    nestedContent.status === 0, 'exit ' + nestedContent.status + ': '
+    + nestedContent.stdout.trim().split('\n').pop());
+
 // 5c-ter. A zero-file population must refuse, not pass green.
 //
 // `git ls-tree` exits 0 with empty output when the pathspec matches nothing, so
@@ -271,6 +281,18 @@ check('--json reports the population it scanned',
 check('--json reports the finding with file and line',
     !!parsed && parsed.findings.length === 1 && parsed.findings[0].line === 3,
     parsed && JSON.stringify(parsed.findings));
+check('--json labels the ref as the working tree when none is given',
+    !!parsed && parsed.ref === 'working tree', parsed && String(parsed.ref));
+check('--json exits 1 when there is a finding', jsonRun.status === 1,
+    'exit ' + jsonRun.status);
+
+// Two findings from the SAME rule print the rule header once, not per finding.
+const twoHits = run(fixture('group', 'skill-z1/SKILL.md',
+    '# z1\n\n- Use external terminal: `start cmd /k "npm run dev"`\n'
+    + '- And again here: `start cmd /k "npm test"`\n'));
+check('one rule header for two findings of the same rule',
+    (twoHits.stdout.match(/\[dev-server-external-terminal\]/g) || []).length === 1,
+    (twoHits.stdout.match(/\[dev-server-external-terminal\]/g) || []).length + ' headers');
 
 // 6. THE GUARD ITSELF. Push rules that cannot work into the real table and
 //    confirm selfTest reports each one. Without this the exit-2 path is a claim:

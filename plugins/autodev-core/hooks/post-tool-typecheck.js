@@ -53,7 +53,14 @@ try {
                         // 25s each: typecheck and lint run back to back inside a single 60s
                         // hook timeout, so two 30s budgets could be killed mid-lint.
                         timeout: 25000,
-                        stdio: ['ignore', 'pipe', 'pipe']
+                        stdio: ['ignore', 'pipe', 'pipe'],
+                        // execSync always routes through cmd.exe on Windows, and Node's
+                        // windowsHide defaults to FALSE — so a console window is created
+                        // unless the parent already owns one to inherit. Claude Desktop is
+                        // an Electron app with no console, so this hook flashed a visible
+                        // cmd window on EVERY edit (reported 2026-08-17). It is the highest
+                        // frequency spawner in the plugin, which is why it was the one seen.
+                        windowsHide: true
                     });
                 } catch (e) {
                     const output = (e.stdout ? e.stdout.toString() : '') +
@@ -81,7 +88,14 @@ try {
 
                 if (lintCmd) {
                     try {
-                        execSync(lintCmd, { timeout: 25000, stdio: ['ignore', 'pipe', 'pipe'] });
+                        // windowsHide as above. This one genuinely needs a shell — the
+                        // eslint fallback uses `||` — so it stays execSync rather than
+                        // moving to execFileSync.
+                        execSync(lintCmd, {
+                            timeout: 25000,
+                            stdio: ['ignore', 'pipe', 'pipe'],
+                            windowsHide: true
+                        });
                     } catch (e) {
                         const output = (e.stdout ? e.stdout.toString() : '') +
                                        (e.stderr ? e.stderr.toString() : '');

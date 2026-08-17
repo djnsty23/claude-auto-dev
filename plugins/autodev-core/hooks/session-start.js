@@ -11,7 +11,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+// execFileSync, not execSync: execSync routes through cmd.exe on Windows, which
+// (a) creates a console window unless windowsHide is set — Node defaults it to
+// false, and Claude Desktop has no console to inherit — and (b) treats `^` as an
+// escape character, silently corrupting any git ref that contains one. This call
+// needs no shell features, so the shell is pure downside.
+const { execFileSync } = require('child_process');
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
 
@@ -70,10 +75,11 @@ try {
 
     // ---- Working tree ----
     try {
-        const gitStatus = execSync('git status --short', {
+        const gitStatus = execFileSync('git', ['status', '--short'], {
             cwd,
             timeout: 5000,
             stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
         }).toString().trim();
 
         if (gitStatus) {

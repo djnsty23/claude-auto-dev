@@ -337,9 +337,17 @@ function selfTest() {
         }
 
         if (s.negative) {
-            const hitsNeg = scanLines(s.negative, file).filter((f) => f.id === s.id);
+            // Deliberately UNFILTERED. This used to read `.filter((f) => f.id === s.id)`,
+            // and the 2026-08-17 mutation sweep flipped that `===` to `!==` without the
+            // suite noticing: the mutant counted every OTHER rule's findings instead of
+            // this one's, which is also zero, so it passed. Asserting that a corrected
+            // form trips NO rule is both stronger than the filtered version and leaves
+            // no comparison to mutate. Measured the same day across all 5 rules: every
+            // negative fixture produces zero findings from any rule, so nothing is lost.
+            const hitsNeg = scanLines(s.negative, file);
             if (hitsNeg.length) {
-                broken.push(`${s.id}: negative fixture produced a finding — the rule flags its own corrected form`);
+                const ids = [...new Set(hitsNeg.map((f) => f.id))].join(', ');
+                broken.push(`${s.id}: negative fixture produced a finding (${ids}) — a corrected form must trip no rule`);
             }
         }
     }
