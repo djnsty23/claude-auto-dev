@@ -77,7 +77,7 @@ console.log(`\npopulation: ${PLUGINS.length} plugin(s), ${keys.length} cached ve
 if (!cloneV) {
     log('WARN', 'no marketplace clone — the plugin may be installed from elsewhere');
 } else if (cloneV !== srcV) {
-    log('FAIL', `clone is at ${cloneV}, source at ${srcV} — run: git -C "${CLONE}" pull --ff-only`);
+    log('FAIL', `clone is at ${cloneV}, source at ${srcV} — run: claude plugin marketplace update autodev`);
 } else {
     log('PASS', `clone matches source (${srcV})`);
 }
@@ -85,7 +85,18 @@ if (!cloneV) {
 if (!top) {
     log('WARN', 'nothing cached yet — the plugin has not been loaded on this machine');
 } else if (cmp(top, srcV) < 0) {
-    log('FAIL', `runtime is ${top} but source is ${srcV} — ${countReleases(top, srcV)} release(s) have never executed. RESTART the app.`);
+    // "Restart the app" was this script's original advice and it is WRONG — that
+    // is what the first version said, and a real restart on 2026-08-17 changed
+    // nothing. installed_plugins.json pins each plugin to a VERSION and a
+    // gitCommitSha, and only `claude plugin update` rewrites that pin. Restart
+    // applies a pin that already moved; on its own it re-loads the same one, so
+    // the gap survives any number of restarts. Pulling the clone by hand does not
+    // help either: it changes the files the pin does not point at.
+    log('FAIL', `runtime is ${top} but source is ${srcV} — ${countReleases(top, srcV)} release(s) have never executed.`);
+    console.log('         Fix, in this order (a restart alone will NOT work):');
+    console.log('           claude plugin marketplace update autodev');
+    for (const p of PLUGINS) console.log(`           claude plugin update ${p}@autodev`);
+    console.log('           then restart, and re-run this check');
 } else {
     log('PASS', `runtime cache carries ${top}`);
 }
