@@ -1,5 +1,63 @@
 # Changelog
 
+## [8.74.0] - 2026-08-17
+
+### Added — the superseded detector runs in the gate
+
+`check-superseded` shipped in 8.73.0 as a manual `npm run` script, which is how a
+check rots — nobody runs it, and it drifts until it reports zero for a reason
+nobody notices. It is now **suite 25**, so `npm test` fails when a skill picks up
+a convention the harness outgrew.
+
+The suite was then mutation-tested, and the first version caught only 31 of 48
+mutants. Reading the survivors found two real gaps and one embarrassment. The
+embarrassment first, because it is the same defect class the detector exists to
+catch: both curl cases asserted `/bare-curl-on-windows/.test(stdout)` to prove a
+rule had fired — but the population header prints that rule id on **every** run,
+so the assertion matched the tool's own output and could never fail. Confirmed by
+hand: with fence tracking replaced by `if (false)`, the powershell case still
+passed. Both now assert the exit status and the `file:line` arrow.
+
+Gap one: fence tracking was untested — the bash case passed for the wrong reason,
+because that fixture also fails the `fileScope` check. Gap two: `--ref` was
+untested in both `skillFiles()` and `readFile()`, despite being the path every
+"does this still catch the old defect" check runs through; the fixture now commits
+a file, **deletes it from the working tree**, and asserts `--ref` still finds it.
+
+The module-level self-test cases moved into a child process, and that is not
+tidiness. With `require.main !== module` inverted, requiring the gate executes the
+CLI and its `process.exit()` replaces the suite's exit code — so the suite reported
+success while its own earlier assertions had failed. A suite that can be made to
+lie about its result is worse than a missing test. Final score: **44 of 48 mutants
+caught**, the four survivors being fixture-string and cosmetic-grouping mutations.
+
+### Added — `npm run check:agent-cost`
+
+Measures, from real session transcripts, where model spend actually concentrates:
+latency against prompt size, whether prompt caching decays over a long session,
+and how much smaller a subagent's context is than its parent's. It exists because
+those numbers move as usage shifts, and a model-placement rule written against
+stale measurements is worse than no rule.
+
+It carries a guard for the bug that produced it. Subagents do **not** write into
+the parent transcript — they write to
+`<project>/<session-uuid>/subagents/agent-*.jsonl`, which a one-level glob misses
+entirely. The first version of this analysis did exactly that, found zero subagent
+records across 362 subagent files, and reported "no subagents used": confident,
+plausible, and completely wrong. So the walk is recursive, and the tool **refuses
+to print its headline ratio** when the subagent set is empty while main
+transcripts exist, because that means the walk is broken rather than that nobody
+delegated. Verified two-sided: exit 2 with zero subagents, exit 0 and a full
+report when one exists.
+
+### Fixed — `npm run check:vacuity` was unrunnable
+
+The tool takes `<subject.js> <suite.js>` and the npm script passes neither, so
+`path.resolve(undefined)` threw `ERR_INVALID_ARG_TYPE` with a stack trace and no
+hint of the contract. Found by running the meta-gates over this change. It now
+prints usage and exits 2; `npm run check:vacuity -- <subject> <suite>` still
+forwards arguments, so the script itself is unchanged.
+
 ## [8.73.0] - 2026-08-17
 
 ### Added — a detector for conventions the harness outgrew

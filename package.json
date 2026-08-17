@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "8.73.0",
+  "version": "8.74.0",
   "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
   "private": true,
   "keywords": [
@@ -22,7 +22,8 @@
     "check:hooks": "node tooling/find-untested-hooks.js",
     "check:versions": "node tooling/check-version-drift.js",
     "check:functions": "node tooling/find-untested-functions.js",
-    "check:superseded": "node tooling/check-superseded.js"
+    "check:superseded": "node tooling/check-superseded.js",
+    "check:agent-cost": "node tooling/analyze-agent-cost.js"
   },
   "author": "djnsty23",
   "license": "MIT",
