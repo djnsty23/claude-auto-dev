@@ -1,5 +1,48 @@
 # Changelog
 
+## [8.76.0] - 2026-08-17
+
+### Fixed — the exemption disabled the detector on the prose it was built to catch
+
+Each rule carried an `exempt` regex tested against the whole line, with a
+vocabulary of `never|don't|do not|instead|avoid|scratchpad|firewall`. That is the
+vocabulary of prescriptive prose, not only of prohibitions — so the highest-value
+violation shape was exempt by construction:
+
+> "Don't use preview_start for Vite; run `start cmd /k` in a second window."
+
+A stale sibling teaching an old convention almost always argues *against* the new
+path while prescribing the old one. So the one sentence shape this file exists to
+find was the one it could not see, and the header reported the rule as healthy.
+
+It leaked the other way too: the register real docs use for prohibitions carries
+none of those keywords, so `` `start cmd /k` was removed in 8.72.0 ``, "is
+deprecated", and this repo's own CHANGELOG line "is gone rather than demoted" all
+fired. A curly apostrophe in "Don’t" fired as well — the pattern only had the
+straight quote.
+
+The replacement is positional and ordered: deprecation after the match exempts
+(checked first, since such lines often also say "rather than"); prescription after
+the match is an unrescuable violation, because "use X instead of Y" teaches X;
+a prohibition **adjacent** before the match exempts, so "Never skip auth — `curl
+-H ...`" still fires; and a prohibition anywhere after exempts. Adjacency is
+measured against the text before the code span opened as well as the raw prefix,
+because a rule's regex can anchor deep inside the construct being forbidden.
+
+Rule 2 gains a real exemption too — `requiresNearby` had been doing double duty as
+both the half-migration test and the prohibition escape hatch, and those are not
+the same predicate.
+
+Every rule now carries several fixture shapes instead of one. Single-shape
+fixtures are why the old exemption survived review: the mutant and the correct
+code agreed on every input the suite supplied.
+
+Verified — a 24-case matrix drawn from both reviews passes 24/24 (7 shapes that
+must fire, 17 that must be spared), the suite is at 38 assertions with 0 failed,
+and the mutation score is 53 of 59, up from 48. The zero-population refusal added
+in 8.75.0 turned out to be untested: both `if (!filesScanned)` and its `exit(2)`
+survived mutation until these cases existed.
+
 ## [8.75.0] - 2026-08-17
 
 ### Added — `rule-options-protocol` skill, and a Fable reviewer
