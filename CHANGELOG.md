@@ -1,5 +1,35 @@
 # Changelog
 
+## [8.72.0] - 2026-08-17
+
+### Fixed — the plugin shipped three dev-server conventions at once
+
+`rule-windows` forbade `npm run dev` from Claude Code and prescribed
+`start cmd /k`, on the premise that a backgrounded server dies at session end.
+The premise is now false twice over: `run_in_background` detaches the process
+across turns, and `preview_start` supervises it outright.
+
+`browser` had already moved to `preview_start` with `.claude/launch.json`, but
+`auto`, `test` and `scan` still instructed a detached Bash, and the rule still
+forbade both. Three conventions, mutually exclusive, all live. Fixing only the
+rule would have left the harness inconsistent, so the three pipeline skills now
+name `preview_start` as the preferred path with detached Bash as the documented
+fallback. `start cmd /k` is gone rather than demoted — it opens a window no tool
+can read, which makes a failed compile indistinguishable from a slow one.
+
+### Fixed — the Supabase workaround told you to run the wrong `curl`
+
+`rule-windows` claimed `curl` works in PowerShell but not in plain cmd. Both
+halves are wrong. `curl.exe` ships in `C:\Windows\System32`, so cmd is fine, and
+in Windows PowerShell 5.1 `curl` is an alias for `Invoke-WebRequest` —
+`Get-Command curl` returns `CommandType: Alias`.
+
+That made it a live bug rather than a stale note. The section exists because
+`supabase db query --linked` hangs behind the Windows firewall, and its three
+replacement commands all used bare `curl` with `-H`, which `Invoke-WebRequest`
+rejects with a parameter-binding error that never mentions curl. All three now
+say `curl.exe`, and the gotcha explains the alias instead of denying it.
+
 ## [8.71.0] - 2026-08-17
 
 ### Added — a success criterion on every user-invocable skill
