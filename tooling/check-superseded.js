@@ -228,6 +228,16 @@ const readFile = (rel) => {
 };
 
 // ------------------------------------------------------------------- run
+//
+// Exported so the suite can drive the REAL matcher instead of a copy. A suite
+// that reimplements scanLines proves its reimplementation correct and says
+// nothing about this file.
+module.exports = { SUPERSEDED, scanLines, selfTest };
+
+// Node wraps a CommonJS module in a function, so a top-level return is legal and
+// skips the CLI when this file is required. Keeps the scan below unindented.
+if (require.main !== module) return;
+
 const broken = selfTest();
 if (broken.length) {
     console.error('\nDETECTOR BROKEN — refusing to report on the tree:\n');

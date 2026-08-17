@@ -131,6 +131,21 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const [subject, suite] = process.argv.slice(2);
+
+// Both arguments are required. Without this the first path.resolve(undefined)
+// threw ERR_INVALID_ARG_TYPE with a stack trace and no hint of the contract —
+// which is how `npm run check:vacuity`, defined with no arguments, sat crashing
+// instead of running. A gate whose failure mode is a stack trace is a gate nobody
+// runs, so say what it wants and exit cleanly.
+if (!subject || !suite) {
+    console.error('\nUsage: node tooling/find-vacuous-assertions.js <subject.js> <suite.js>\n');
+    console.error('Mutates <subject.js> and checks that <suite.js> notices. Both are required,');
+    console.error('and both must be committed — the subject is restored from git.\n');
+    console.error('Example:');
+    console.error('  node tooling/find-vacuous-assertions.js tooling/check-superseded.js tooling/test-superseded.js\n');
+    process.exit(2);
+}
+
 recoverStaleBackup(subject);
 
 // Refuse to mutate a subject that has uncommitted changes — the same guard
