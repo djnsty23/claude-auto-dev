@@ -97,15 +97,35 @@ fs.writeFileSync(path.join(autoCwd, '.claude', 'auto-active'), '');
 // Missing transcript
 const missing = path.join(tmp, 'does-not-exist.jsonl');
 
+// Timing-only invocation — no logging. Used for the budget samples below, which
+// need several measurements of the same case without seven copies of the output.
+function timeOnce(transcriptPath, opts = {}) {
+    const payload = {
+        session_id: 'test',
+        transcript_path: transcriptPath,
+        cwd: opts.cwd || tmp,
+        permission_mode: 'default',
+        hook_event_name: 'UserPromptSubmit',
+        prompt: opts.prompt || 'test',
+    };
+    const start = process.hrtime.bigint();
+    spawnSync('node', [hook], { input: JSON.stringify(payload), encoding: 'utf8' });
+    return Number(process.hrtime.bigint() - start) / 1e6;
+}
+
 // --- Run ---
-const results = [];
-results.push(runCase('1. No image (should no-op)', noImage));
-results.push(runCase('2. Single image', withImage));
-results.push(runCase('3. Two images', twoImages));
-results.push(runCase('4. Big transcript (~500 KB) with image at end', big));
-results.push(runCase('5. Auto mode active — quieter directive', withImage, { cwd: autoCwd }));
-results.push(runCase('6. Missing transcript file (should no-op)', missing));
-results.push(runCase('7. Invalid stdin JSON', noImage, { prompt: 'ignored' }));
+// Kept as specs so the budget check can re-time each case instead of reusing a
+// single sample taken here. See the performance-budget note below.
+const caseSpecs = [
+    ['1. No image (should no-op)', noImage, {}],
+    ['2. Single image', withImage, {}],
+    ['3. Two images', twoImages, {}],
+    ['4. Big transcript (~500 KB) with image at end', big, {}],
+    ['5. Auto mode active — quieter directive', withImage, { cwd: autoCwd }],
+    ['6. Missing transcript file (should no-op)', missing, {}],
+    ['7. Invalid stdin JSON', noImage, { prompt: 'ignored' }],
+];
+const results = caseSpecs.map(([label, transcriptPath, opts]) => runCase(label, transcriptPath, opts));
 
 // --- Assertions ---
 console.log('');
@@ -182,10 +202,34 @@ const budget = baseline + 150;
 console.log('');
 console.log('Node startup baseline: ' + baseline.toFixed(1) + ' ms  →  budget ' + budget.toFixed(1) + ' ms');
 
-for (let i = 0; i < results.length; i++) {
+// Compare FLOOR to FLOOR, and never on a single sample.
+//
+// This suite failed twice in ~8 full `test-all` runs and never once standalone,
+// which read as a mystery until the distribution was measured on 2026-08-17: the
+// same invocation sits at 33-37 ms with observed spikes to 68 and 84 ms — a 2.3x
+// tail from OS scheduling and disk, not from the hook. The assertion rested on
+// ONE sample per case against a ~180 ms budget, so a single rare outlier failed
+// the suite while the hook was healthy.
+//
+// min-of-3 pins the reported number to the floor: measured over 84 samples the
+// worst single sample was 68 ms while the worst min-of-3 was 36.2 ms. The floor
+// still moves if the hook genuinely regresses, which is the thing being tested;
+// the tail no longer decides whether the suite is green. The baseline above is a
+// min-of-3 too, so both sides of the comparison are floors and neither depends on
+// how loaded the machine happened to be.
+//
+// Rejected: raising the 150 ms constant. That hides a real regression of up to
+// the new margin and would still flake on a large enough spike.
+const TIMING_SAMPLES = 3;
+for (let i = 0; i < caseSpecs.length; i++) {
+    const [, transcriptPath, opts] = caseSpecs[i];
+    const samples = [];
+    for (let s = 0; s < TIMING_SAMPLES; s++) samples.push(timeOnce(transcriptPath, opts));
+    const best = Math.min(...samples);
     assert(
-        'case ' + (i + 1) + ' within budget (' + results[i].ms.toFixed(1) + ' ms of ' + budget.toFixed(1) + ' ms)',
-        results[i].ms < budget
+        'case ' + (i + 1) + ' within budget (best of ' + TIMING_SAMPLES + ': ' + best.toFixed(1)
+        + ' ms of ' + budget.toFixed(1) + ' ms; samples ' + samples.map((n) => n.toFixed(0)).join('/') + ')',
+        best < budget
     );
 }
 

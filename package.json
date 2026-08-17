@@ -21,7 +21,8 @@
     "check:vacuity": "node tooling/find-vacuous-assertions.js",
     "check:hooks": "node tooling/find-untested-hooks.js",
     "check:versions": "node tooling/check-version-drift.js",
-    "check:functions": "node tooling/find-untested-functions.js"
+    "check:functions": "node tooling/find-untested-functions.js",
+    "check:superseded": "node tooling/check-superseded.js"
   },
   "author": "djnsty23",
   "license": "MIT",
