@@ -164,6 +164,67 @@ check('  and the disk walk read the clean file, not an empty tree',
     /scanned : 1 markdown file\(s\)/.test(diskRun.stdout),
     diskRun.stdout.split('\n').find((l) => l.includes('scanned')));
 
+// 5c-bis. The positional exemption, both directions.
+//
+// These live here rather than in the rule table's own fixtures because the table's
+// `requiresNearby` masks them: rule 2's negative array contains a `preview_start`
+// line, so a broken exemption still yields no finding and the mutant survives.
+// Each case below is its own fixture with nothing else in scope.
+
+// Prescribing the OLD way while forbidding the NEW one — the shape the previous
+// whole-line keyword exemption swallowed by construction.
+const forbidsNewPrescribesOld = run(fixture('exempt-prescribe', 'skill-x1/SKILL.md',
+    "# x1\n\n- Don't use preview_start for Vite; run `start cmd /k \"npm run dev\"` in a window.\n"));
+check('forbidding the new path while prescribing the old one IS a finding',
+    forbidsNewPrescribesOld.status === 1, 'exit ' + forbidsNewPrescribesOld.status);
+
+// "instead" after the match means the superseded thing is being taught.
+const prescribedInstead = run(fixture('exempt-instead', 'skill-x2/SKILL.md',
+    '# x2\n\n- Use `start cmd /k "npm run dev"` instead of a detached Bash.\n'));
+check('"use X instead of Y" IS a finding', prescribedInstead.status === 1,
+    'exit ' + prescribedInstead.status);
+
+// A prohibition aimed at something else must not grant amnesty.
+const forbidsSomethingElse = run(fixture('exempt-other', 'skill-x3/SKILL.md',
+    '# x3\n\n- Never skip the port check — `start cmd /k "npm run dev"` after netstat.\n'));
+check('a prohibition aimed elsewhere does NOT exempt', forbidsSomethingElse.status === 1,
+    'exit ' + forbidsSomethingElse.status);
+
+// Adjacency measured to the start of the code span: rule 2's regex anchors on the
+// package manager, deep inside the construct being forbidden. No preview_start
+// anywhere, so requiresNearby cannot mask a broken exemption.
+const forbidsSpan = run(fixture('exempt-span', 'skill-x4/SKILL.md',
+    '# x4\n\nNever use `Bash({ command: "npm run dev", run_in_background: true })` here.\n'));
+check('a prohibition before the code span exempts a match inside it',
+    forbidsSpan.status === 0, 'exit ' + forbidsSpan.status + ': '
+    + forbidsSpan.stdout.trim().split('\n').pop());
+
+// A prohibition on the FOLLOWING line.
+const forbidsNextLine = run(fixture('exempt-next', 'skill-x5/SKILL.md',
+    '# x5\n\n`supabase db query --linked` is the old path.\nNever use it.\n'));
+check('a prohibition on the next line exempts', forbidsNextLine.status === 0,
+    'exit ' + forbidsNextLine.status);
+
+// Deprecation wording that carries no prohibition keyword at all — the register
+// real docs use, which the old keyword exemption fired on.
+const deprecated = run(fixture('exempt-deprecated', 'skill-x6/SKILL.md',
+    '# x6\n\n- `start cmd /k` is gone rather than demoted to a fallback.\n'));
+check('"is gone rather than demoted" exempts (deprecation beats prescription)',
+    deprecated.status === 0, 'exit ' + deprecated.status);
+
+// 5c-ter. A zero-file population must refuse, not pass green.
+//
+// `git ls-tree` exits 0 with empty output when the pathspec matches nothing, so
+// this used to print "scanned 0 markdown file(s)" under a green tick.
+const emptyRoot = path.join(tmp, 'emptyroot');
+fs.mkdirSync(path.join(emptyRoot, 'plugins'), { recursive: true });
+const emptyRun = run(emptyRoot);
+check('a zero-file population exits 2, not 0', emptyRun.status === 2,
+    'exit ' + emptyRun.status);
+check('  and it says the population is empty rather than clean',
+    /REFUSING TO REPORT: scanned 0 files/.test(emptyRun.stderr),
+    (emptyRun.stderr || emptyRun.stdout).trim().split('\n')[0]);
+
 // 5d. --json carries the population and the findings.
 const jsonRun = run(fixture('json', 'skill-f/SKILL.md',
     '# f\n\n- Use external terminal: `start cmd /k "npm run dev"`\n'), ['--json']);
@@ -206,16 +267,21 @@ function probeBody() {
     out.brokenPositive = mod.selfTest();
     mod.SUPERSEDED.pop();
 
-    // An exempt so greedy it swallows its own positive — the other way a rule
-    // ends up permanently silent.
+    // A positive fixture phrased as a prohibition, so the shared positional
+    // exemption spares it and the rule can never fire on its own fixture — the
+    // other way a rule ends up permanently silent.
+    //
+    // This replaced a probe that set a per-rule `exempt: /./`. That mechanism no
+    // longer exists: whole-line keyword exemption was removed after two reviews
+    // proved it swallowed the highest-value violation shape, so a test asserting
+    // on it was testing a field nothing reads.
     mod.SUPERSEDED.push({
-        id: 'exempt-too-greedy',
+        id: 'positive-swallowed-by-exemption',
         re: /start cmd \/k/,
-        exempt: /./,
         why: 'test rule', replacement: 'n/a',
-        positive: ['- Use external terminal: `start cmd /k "npm run dev"`'],
+        positive: ['- Never use `start cmd /k` here.'],
     });
-    out.greedyExempt = mod.selfTest();
+    out.swallowedPositive = mod.selfTest();
     mod.SUPERSEDED.pop();
 
     // A negative fixture the rule DOES match — i.e. a rule that flags its own
@@ -250,9 +316,9 @@ check('the real table passes its own self-test', !!p && p.before.length === 0,
 check('a rule that cannot match its fixture is caught',
     !!p && p.brokenPositive.some((b) => /deliberately-broken/.test(b)),
     p && (p.brokenPositive.join('; ') || '(nothing reported)'));
-check('a rule whose exempt swallows everything is caught',
-    !!p && p.greedyExempt.some((b) => /exempt-too-greedy/.test(b)),
-    p && (p.greedyExempt.join('; ') || '(nothing reported)'));
+check('a positive fixture the shared exemption swallows is caught',
+    !!p && p.swallowedPositive.some((b) => /positive-swallowed-by-exemption/.test(b)),
+    p && (p.swallowedPositive.join('; ') || '(nothing reported)'));
 check('a rule that flags its own corrected form is caught',
     !!p && p.negativeFires.some((b) => /negative-that-fires/.test(b)),
     p && (p.negativeFires.join('; ') || '(nothing reported)'));

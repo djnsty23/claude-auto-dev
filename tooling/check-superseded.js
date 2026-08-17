@@ -56,28 +56,104 @@ const REF = refIdx !== -1 ? argv[refIdx + 1] : null;
 const REPO = process.env.SUPERSEDED_REPO_ROOT || path.resolve(__dirname, '..');
 const SKILL_GLOB_ROOT = path.join(REPO, 'plugins');
 
+// ─────────────────── prohibition vs prescription ───────────────────────
+//
+// Rules used to carry a per-rule `exempt` regex tested against the whole line.
+// Two independent adversarial reviews proved it swallowed the single
+// highest-value violation shape — a stale sibling that forbids the NEW path
+// while prescribing the OLD one:
+//
+//     "Don't use preview_start for Vite; run `start cmd /k` in a second window."
+//
+// `don't` appeared, so the line was exempt. That is exempt-by-construction for
+// precisely the prose a stale skill actually writes, and the header still
+// reported the rule as healthy. It leaked the other way too: the register real
+// docs use for prohibitions — "`start cmd /k` was removed", "is deprecated",
+// "is gone" — contains none of the keywords, so genuine prohibitions fired.
+//
+// The test is now positional and ORDERED, not keyword-soup:
+//
+//   1. Deprecation AFTER the match       -> exempt. "X was removed", "X is gone".
+//      First, because such lines often also say "rather than", which step 2
+//      would otherwise read as prescription.
+//   2. Prescription AFTER the match      -> VIOLATION, unrescuable. "use X
+//      instead of Y" teaches X no matter what else the line says.
+//   3. Prohibition ADJACENT before       -> exempt. "Never `X`", "Don't use `X`".
+//      Adjacency is the point: "Never skip auth — `curl -H ...`" prohibits
+//      something else and must still fire.
+//   4. Prohibition anywhere AFTER        -> exempt. "`X` hangs — never use it."
+//
+// Steps 1 and 4 read the following line too, and a wrapped prohibition
+// ("- Never do this:" then the command) is handled by its own narrow rule,
+// because loosening step 3 enough to span lines re-admits the "prohibits
+// something else" false negative.
+
+const DEPRECATED_AFTER = /^[^.;!?]{0,60}\b(?:is|was|are|were|has been|have been)?\s*(?:deprecated|removed|gone|obsolete|superseded|retired|banned|forbidden|no longer\b)/i;
+const PRESCRIBED_AFTER = /^[^.;!?]{0,80}\b(?:instead|rather than|in place of)\b/i;
+// Adjacent: an optional verb, then optionally an opening quote/bracket, then the match.
+const FORBIDS_ADJACENT = /\b(?:never|don['’]t|do not|does not|avoid|not)\s+(?:ever\s+)?(?:use|run|write|call|invoke|pass|reach for)?\s*[`'"([]*$/i;
+// A prohibition on its own preceding line, ending in a colon.
+const FORBIDS_PREV_LINE = /\b(?:never|don['’]t|do not|avoid)\b[^.]{0,30}:\s*$/i;
+const FORBIDS_AFTER = /\b(?:never use|don['’]t use|do not use|never\s+do\s+this|is banned|is forbidden|is prohibited|must not be used)\b/i;
+
+// lines[i] is the matched line; m is the RegExp match on it.
+function isExempt(lines, i, m) {
+    const line = lines[i];
+    const before = line.slice(0, m.index);
+    const after = line.slice(m.index + m[0].length);
+    const next = lines[i + 1] || '';
+    const prev = lines[i - 1] || '';
+
+    if (DEPRECATED_AFTER.test(after) || DEPRECATED_AFTER.test(' ' + next.trim())) return true;
+    if (PRESCRIBED_AFTER.test(after)) return false;          // prescribing the old way
+
+    // A prohibition attaches to the whole `...` construct, but a rule's regex may
+    // anchor deep inside it — rule 2 anchors on the package manager, which sits
+    // well inside `Bash({ command: "npm run dev", run_in_background: true })`. So
+    // adjacency is measured both against the raw prefix and against the text
+    // before the code span opened.
+    const spanStart = before.lastIndexOf('`');
+    const beforeSpan = spanStart === -1 ? before : before.slice(0, spanStart);
+    if (FORBIDS_ADJACENT.test(before) || FORBIDS_ADJACENT.test(beforeSpan)) return true;
+    if (FORBIDS_PREV_LINE.test(prev)) return true;
+    if (FORBIDS_AFTER.test(after) || FORBIDS_AFTER.test(next)) return true;
+    return false;
+}
+
 // --------------------------------------------------------------- the table
 //
 // re              the superseded string, as it appears in an instruction
-// exempt          same line, but talking ABOUT the convention (a prohibition, a
-//                 "superseded" note). Not a violation.
 // requiresNearby  the line is only a finding when this marker is ABSENT within
 //                 `within` lines either side. For half-finished migrations.
 // fence           only flag inside a fenced block of these languages, or in a
 //                 file matching `fileScope`. Keeps a bash `curl` from being read
 //                 as a PowerShell mistake.
 // positive        fixture lines that MUST yield a finding.
-// negative        fixture lines that must NOT yield one. Catches an `exempt` or
-//                 a `requiresNearby` so loose the rule can never fire.
+// negative        fixture lines that must NOT yield one. Catches a
+//                 `requiresNearby` or an exemption so loose the rule can never
+//                 fire. Both carry several shapes on purpose — a single-shape
+//                 fixture is why the old exempt survived review for so long.
 const SUPERSEDED = [
     {
         id: 'dev-server-external-terminal',
         re: /start\s+cmd\s+\/k/i,
-        exempt: /never|don't|do not|instead of|superseded|no tool can read|avoid/i,
         why: 'preview_start supervises the dev server and exposes preview_logs; an external terminal opens a window no tool can read, so a failed compile looks like a slow one',
         replacement: 'preview_start with a .claude/launch.json entry',
-        positive: ['- Use external terminal: `start cmd /k "cd /d %CD% && npm run dev"`'],
-        negative: ['- Never `start cmd /k`. It opens a window no tool can read.'],
+        positive: [
+            '- Use external terminal: `start cmd /k "cd /d %CD% && npm run dev"`',
+            "- Don't use preview_start for Vite; run `start cmd /k \"npm run dev\"` in a window.",
+            '- Use `start cmd /k "npm run dev"` instead of a detached Bash.',
+            '- Never skip the port check — `start cmd /k "npm run dev"` after netstat.',
+        ],
+        negative: [
+            '- Never `start cmd /k`. It opens a window no tool can read.',
+            '- Do not use `start cmd /k` for dev servers.',
+            '- `start cmd /k` was removed in 8.72.0.',
+            '- `start cmd /k` is gone rather than demoted to a fallback.',
+            "- Don’t use `start cmd /k`.",
+            '- Never do this:',
+            '  `start cmd /k "npm run dev"`',
+        ],
     },
     {
         id: 'dev-server-without-preview-start',
@@ -92,18 +168,31 @@ const SUPERSEDED = [
         negative: [
             '# Prefer preview_start with a .claude/launch.json entry.',
             'Bash({ command: "npm run dev", run_in_background: true })',
+            '',
+            // `requiresNearby` was doing double duty as the migration test AND the
+            // prohibition escape hatch, and they are not the same predicate: a line
+            // banning the detached form fired whenever preview_start was absent.
+            // The shared positional exemption now covers it.
+            'Never use `Bash({ command: "npm run dev", run_in_background: true })` here.',
         ],
     },
     {
         id: 'bare-curl-on-windows',
         re: /(?:^|[^.\w-])curl\s+(?:-[A-Za-z]|'|")/,
-        exempt: /curl\.exe|never|don't|do not|alias|superseded|instead/i,
         why: "in Windows PowerShell 5.1 `curl` is an alias for Invoke-WebRequest, which rejects -H/-d/-X with a parameter-binding error that never mentions curl (verified 2026-08-17: Get-Command curl -> CommandType: Alias)",
         replacement: 'curl.exe',
         fence: ['powershell', 'ps1', 'pwsh'],
         fileScope: /windows/i,
-        positive: ["  - Read: `curl 'https://x.supabase.co/rest/v1/t?select=*' -H 'apikey: k'`"],
-        negative: ["  - Read: `curl.exe 'https://x.supabase.co/rest/v1/t?select=*' -H 'apikey: k'`"],
+        positive: [
+            "  - Read: `curl 'https://x.supabase.co/rest/v1/t?select=*' -H 'apikey: k'`",
+            "  - Never skip auth — `curl -H 'apikey: k' https://x`",
+            "  - Use `curl -H 'apikey: k' https://x` instead of Invoke-WebRequest.",
+        ],
+        negative: [
+            "  - Read: `curl.exe 'https://x.supabase.co/rest/v1/t?select=*' -H 'apikey: k'`",
+            "  - Never use `curl -H 'apikey: k' https://x` on PowerShell.",
+            "  - `curl -H 'apikey: k' https://x` is deprecated here.",
+        ],
         // The fixture has no fence, so it only fires via fileScope. Self-test
         // supplies a filename that matches.
         fixtureFile: 'plugins/autodev-core/skills/rule-windows/SKILL.md',
@@ -111,11 +200,18 @@ const SUPERSEDED = [
     {
         id: 'supabase-db-query-linked',
         re: /supabase\s+db\s+query\s+--linked/,
-        exempt: /never|don't|do not|hangs|times out|instead|superseded|avoid|firewall/i,
         why: 'it triggers a Windows Firewall prompt and times out; the REST endpoint is the automatable path',
         replacement: 'curl.exe against <ref>.supabase.co/rest/v1/',
-        positive: ['Run `supabase db query --linked` to read the table.'],
-        negative: ['`supabase db query --linked` hangs behind the firewall — never use it.'],
+        positive: [
+            'Run `supabase db query --linked` to read the table.',
+            'Query the REST API instead: `supabase db query --linked` is simpler.',
+            'To avoid the SDK, run `supabase db query --linked` directly.',
+        ],
+        negative: [
+            '`supabase db query --linked` hangs behind the firewall — never use it.',
+            'Never use `supabase db query --linked`.',
+            '`supabase db query --linked` is no longer supported here.',
+        ],
     },
     {
         id: 'outfile-dev-null',
@@ -127,12 +223,18 @@ const SUPERSEDED = [
         // because curl is a native binary that handles the name itself. The trap
         // is specifically a tool that resolves the path in JS — bun, esbuild —
         // where the shell understands /dev/null and the tool does not.
-        re: /--outfile[= ]\/dev\/null/,
-        exempt: /never|don't|do not|writes a real|superseded|instead|scratchpad/i,
+        re: /--outfile[= ]"?\/dev\/null/,
         why: 'bun/esbuild resolve the path in JS and create a real file called `nul` in the repo; the reserved device name then makes it hard to delete',
         replacement: 'build into the session scratchpad instead',
-        positive: ['bun build src/index.ts --outfile=/dev/null'],
-        negative: ['Never use `--outfile=/dev/null` — it writes a real file called nul.'],
+        positive: [
+            'bun build src/index.ts --outfile=/dev/null',
+            'Build to `--outfile=/dev/null` rather than the scratchpad.',
+            'bun build src/index.ts --outfile="/dev/null"',
+        ],
+        negative: [
+            'Never use `--outfile=/dev/null` — it writes a real file called nul.',
+            '`--outfile=/dev/null` is deprecated; build to the scratchpad.',
+        ],
     },
 ];
 
@@ -156,8 +258,12 @@ function scanLines(lines, rel) {
         }
 
         for (const s of SUPERSEDED) {
-            if (!s.re.test(line)) continue;
-            if (s.exempt && s.exempt.test(line)) continue;
+            const m = s.re.exec(line);
+            if (!m) continue;
+            // Positional prohibition/prescription test — see isExempt above. This
+            // replaced a per-rule whole-line keyword regex that exempted the
+            // highest-value violation shape by construction.
+            if (isExempt(lines, i, m)) continue;
 
             if (s.fence) {
                 const inLang = fenceLang !== null && s.fence.includes(fenceLang);
