@@ -88,13 +88,20 @@ const SKILL_GLOB_ROOT = path.join(REPO, 'plugins');
 // because loosening step 3 enough to span lines re-admits the "prohibits
 // something else" false negative.
 
-const DEPRECATED_AFTER = /^[^.;!?]{0,60}\b(?:is|was|are|were|has been|have been)?\s*(?:deprecated|removed|gone|obsolete|superseded|retired|banned|forbidden|no longer\b)/i;
+// `dropped` added 8.80.0. The banner written for the agent-browser migration said
+// "the `agent-browser` steps were dropped in 8.79.0" — a plain deprecation notice
+// in the register docs actually use — and all 8 copies fired. That is the same
+// failure this vocabulary exists to prevent, one synonym further out; the fix is
+// the synonym, not rewording the doc to suit the regex.
+const DEPRECATED_AFTER = /^[^.;!?]{0,60}\b(?:is|was|are|were|has been|have been)?\s*(?:deprecated|removed|dropped|gone|obsolete|superseded|retired|banned|forbidden|no longer\b)/i;
 const PRESCRIBED_AFTER = /^[^.;!?]{0,80}\b(?:instead|rather than|in place of)\b/i;
 // Adjacent: an optional verb, then optionally an opening quote/bracket, then the match.
 const FORBIDS_ADJACENT = /\b(?:never|don['’]t|do not|does not|avoid|not)\s+(?:ever\s+)?(?:use|run|write|call|invoke|pass|reach for)?\s*[`'"([]*$/i;
 // A prohibition on its own preceding line, ending in a colon.
 const FORBIDS_PREV_LINE = /\b(?:never|don['’]t|do not|avoid)\b[^.]{0,30}:\s*$/i;
-const FORBIDS_AFTER = /\b(?:never use|don['’]t use|do not use|never\s+do\s+this|is banned|is forbidden|is prohibited|must not be used)\b/i;
+// `reach for` added 8.80.0 alongside `dropped`: "do not reach for that CLI here"
+// is a prohibition, and the vocabulary only knew the literal verb `use`.
+const FORBIDS_AFTER = /\b(?:never (?:use|reach for)|don['’]t (?:use|reach for)|do not (?:use|reach for)|never\s+do\s+this|is banned|is forbidden|is prohibited|must not be used)\b/i;
 
 // lines[i] is the matched line; m is the RegExp match on it.
 function isExempt(lines, i, m) {

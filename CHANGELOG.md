@@ -1,5 +1,53 @@
 # Changelog
 
+## [8.80.0] - 2026-08-17
+
+### Fixed — 8.79.0 removed a safety net for a tool that is still installed
+
+`agent-browser-cleanup.js` and its suite are restored, and the SessionStart
+registration with them. Dropping the agent-browser *skills* was right — nothing in
+the plugin launches that CLI now. But the **binary is still installed**, and it has
+a live consumer with nothing to do with this plugin: kb-factory's `crawl_js.py`
+drives it to render JS-heavy documentation sites, which is how the `meta-ads-kb` and
+`reddit-ads-kb` corpora are refreshed. Both skills correctly still name it.
+
+So 8.79.0 removed the guidance and left the cause. The hook exists for two Windows
+failure modes that come from the bundled Chromium outliving a session — zombie
+`agent-browser-win32-x64.exe` processes, and the Win+Shift+S Snipping Tool hotkey
+being stolen — and a KB refresh can still produce both. Nothing was broken when this
+was found (zero processes live, the pid file stale since Jul 26), but the net was
+gone while its cause was not.
+
+The rule this violated is already written down: enumerate a thing's consumers before
+deleting it. It was applied to the *skills* and not to the *binary*, and only a
+follow-up sweep of other projects surfaced the difference. The restored file carries
+that reasoning in its header so the next cleanup does not repeat it.
+
+The migration banner in the 8 skills is corrected too. It said the CLI "was removed
+in 8.79.0", which reads as the binary being gone and would make someone treat the KB
+refresh path as broken. It now says the `browser` skill and the agent-browser steps
+were dropped, names the binary as a separate consumer, and still tells you not to
+reach for it for page verification.
+
+### Fixed — the exemption vocabulary did not know two ordinary deprecation words
+
+Correcting that banner made all 8 copies fire. "The `agent-browser` steps were
+dropped in 8.79.0 — do not reach for that CLI here" is a deprecation notice followed
+by a prohibition, and the vocabulary knew neither `dropped` nor `reach for`; it had
+`removed`/`gone`/`retired` and the literal verb `use`. That is the same failure the
+positional exemption was built for in 8.76.0, one synonym further out.
+
+Both words are added, and the fix is the synonym rather than rewording the doc — a
+detector that only passes prose written to suit it is measuring itself. Three
+fixtures pin it, including the negative half: widening the vocabulary must not
+exempt a line that still *prescribes* the old tool, so `agent-browser snapshot -i`
+followed by "instead of read_page" is still a finding. A synonym list is exactly
+what rots silently, since nothing fails until a doc happens to use the missing word.
+
+Verified: 26/26 suites, `test-superseded` at 51 assertions (up from 48), validate
+16 PASS / 0 FAIL, hook coverage back to 14 wired hooks all driven by a suite, and 10
+of 10 hook spawn sites setting `windowsHide`.
+
 ## [8.79.0] - 2026-08-17
 
 ### Removed — the agent-browser harness, migrated to the built-in browser tools

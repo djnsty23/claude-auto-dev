@@ -12,8 +12,10 @@ user-invocable: true
 > **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
 > covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
 > reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
-> which `resize_window` alone does not guarantee. The `agent-browser` CLI and
-> the `browser` skill were removed in 8.79.0 — both predate these tools.
+> which `resize_window` alone does not guarantee. The `browser` skill and the
+> `agent-browser` steps were dropped in 8.79.0 — do not reach for that CLI here.
+> (The binary itself is still installed for kb-factory's JS-rendered crawls;
+> that is a separate consumer, not a fallback for page verification.)
 
 Create distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics.
 

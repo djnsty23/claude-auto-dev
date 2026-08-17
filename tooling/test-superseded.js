@@ -83,6 +83,33 @@ const migrated = run(fixture('migrated', 'skill-b/SKILL.md',
 check('detached dev server near preview_start is not', migrated.status === 0,
     'exit ' + migrated.status + ': ' + migrated.stdout.trim().split('\n').pop());
 
+// 4b. Deprecation/prohibition VOCABULARY, added 8.80.0.
+//
+// The 8.79.0 migration banner read "the `agent-browser` steps were dropped in
+// 8.79.0 — do not reach for that CLI here." Both halves are ordinary deprecation
+// prose and BOTH were unknown to the exemption vocabulary, so all 8 copies of the
+// banner fired. Fixtured here because a synonym list is exactly the thing that
+// silently rots: nothing fails when a word is missing until a doc uses it.
+const droppedNotice = run(fixture('vocab-dropped', 'skill-v1/SKILL.md',
+    '# v1\n\nThe `agent-browser` steps were dropped in 8.79.0.\n'));
+check('"were dropped in <version>" reads as deprecation, not instruction',
+    droppedNotice.status === 0,
+    'exit ' + droppedNotice.status + ': ' + droppedNotice.stdout.trim().split('\n').pop());
+
+const reachFor = run(fixture('vocab-reach', 'skill-v2/SKILL.md',
+    '# v2\n\nUse the browser tools; do not reach for `agent-browser` here.\n'));
+check('"do not reach for X" reads as a prohibition',
+    reachFor.status === 0,
+    'exit ' + reachFor.status + ': ' + reachFor.stdout.trim().split('\n').pop());
+
+// The negative half: widening the vocabulary must not exempt a line that still
+// PRESCRIBES the old tool. "instead" after the match outranks everything.
+const stillPrescribes = run(fixture('vocab-neg', 'skill-v3/SKILL.md',
+    '# v3\n\nRun `agent-browser snapshot -i` instead of read_page.\n'));
+check('  but a line prescribing it is still a finding',
+    stillPrescribes.status === 1 && /→ plugins\/skill-v3\/SKILL\.md:3/.test(stillPrescribes.stdout),
+    'exit ' + stillPrescribes.status + ': ' + stillPrescribes.stdout.trim().split('\n').pop());
+
 // 5. Fence scoping: a bare `curl -H` in a bash block of a non-Windows file is
 //    correct usage (Git Bash has the real binary) and must stay quiet; the same
 //    line in a Windows-scoped file must fire.
