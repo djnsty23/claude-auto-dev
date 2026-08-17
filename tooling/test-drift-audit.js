@@ -75,12 +75,19 @@ function git(repo, args, atEpoch) {
     return execSync('git ' + args, { cwd: repo, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function makeRepo(name) {
+// A git repo with no entry under CONFIG/projects — for cases that register
+// themselves some other way, or test that discovery does not find them.
+function makeRepoUnregistered(name) {
     const repo = path.join(TMP, name);
     fs.mkdirSync(repo, { recursive: true });
     git(repo, 'init -q -b main');
     git(repo, 'config user.email t@t.t');
     git(repo, 'config user.name Test');
+    return repo;
+}
+
+function makeRepo(name) {
+    const repo = makeRepoUnregistered(name);
     // Register it for discovery, exactly as drift-audit reverses the slug.
     //
     // Both separators and the drive letter have to go. On Windows `repo` is
@@ -292,6 +299,44 @@ const forRepo = (findings, name) => (findings || [])
     run();
     const after = git(repo, 'status --porcelain') + git(repo, 'rev-parse HEAD');
     check('audit does not modify the repo it inspects', before === after);
+}
+
+// ------------------------- discovery: transcript cwd beats slug reversal -----
+//
+// The slug is the project path with every separator replaced by '-', so it is
+// not reversible: a directory containing a dash reverses into extra path
+// segments, and a Windows slug ('C--Users-x') reverses into '/C//Users/x'.
+// Discovery silently found nothing in both cases — existsSync returns false and
+// the catch around the loop hides it.
+//
+// This repo's directory name carries a dash and its slug directory is
+// deliberately registered under a name that CANNOT be reversed back to it, so
+// the only way to discover it is by reading the cwd out of the transcript. The
+// negative half matters as much: if reversal could have found it anyway, this
+// case would pass without the new code path existing.
+{
+    const repo = makeRepoUnregistered('my-dashed-repo');
+    const when = now - 30 * DAY;
+    fs.writeFileSync(path.join(repo, 'prd.json'), JSON.stringify({ stories: { 'S1-001': story(null) } }));
+    git(repo, 'add -A', when);
+    git(repo, 'commit -qm prd', when);
+    for (let i = 0; i < 15; i++) {
+        fs.writeFileSync(path.join(repo, `f${i}.txt`), String(i));
+        git(repo, 'add -A', when + 60 * (i + 1));
+        git(repo, `commit -qm c${i}`, when + 60 * (i + 1));
+    }
+
+    // A slug that reverses to nothing real, plus a transcript holding the truth.
+    const slugDir = path.join(CONFIG, 'projects', 'C--totally-unreversible-slug');
+    fs.mkdirSync(slugDir, { recursive: true });
+    fs.writeFileSync(path.join(slugDir, 'session.jsonl'),
+        JSON.stringify({ type: 'user', cwd: repo, message: { role: 'user', content: 'hi' } }) + '\n');
+
+    const reversed = '/' + 'C--totally-unreversible-slug'.replace(/^-/, '').replace(/-/g, '/');
+    check('the control: slug reversal alone could NOT find this repo',
+        !fs.existsSync(path.join(reversed, '.git')));
+    check('repo discovered via the transcript cwd',
+        forRepo(run(), 'my-dashed-repo').length > 0);
 }
 
 // ------------------------- the file-age vs commit-activity threshold ---------

@@ -382,11 +382,45 @@ auditSchedules();
 auditSettings();
 
 // Project repos, discovered from the memory store rather than hardcoded.
+//
+// The slug is the project path with every separator replaced by '-', which is
+// not reversible: '/home/my-project' and '/home/my/project' produce the same
+// slug, and on Windows 'C:\Users\x' becomes 'C--Users-x', which the old
+// reversal turned into '/C//Users/x'. That path never exists, existsSync
+// returned false, and the catch below swallowed it — so on Windows this
+// discovered zero projects and said nothing, for as long as it has existed.
+//
+// The session transcripts inside each slug directory record the real cwd. Read
+// that instead of reconstructing it. The reversal stays as a fallback for slug
+// directories with no transcript yet.
+function pathFromTranscripts(dir) {
+    let newest = null;
+    for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const full = path.join(dir, f);
+        const mtime = fs.statSync(full).mtimeMs;
+        if (!newest || mtime > newest.mtime) newest = { full, mtime };
+    }
+    if (!newest) return null;
+    // The cwd appears on most records; the first one found is enough, and
+    // reading the head avoids pulling a multi-megabyte transcript into memory.
+    const head = fs.readFileSync(newest.full, 'utf8').split('\n', 400);
+    for (const line of head) {
+        const m = /"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(line);
+        if (m) { try { return JSON.parse('"' + m[1] + '"'); } catch { /* keep looking */ } }
+    }
+    return null;
+}
+
 try {
     const projects = path.join(CONFIG, 'projects');
     for (const slug of fs.existsSync(projects) ? fs.readdirSync(projects) : []) {
-        const guess = '/' + slug.replace(/^-/, '').replace(/-/g, '/');
-        if (fs.existsSync(path.join(guess, '.git'))) auditPrd(guess);
+        const dir = path.join(projects, slug);
+        if (!fs.statSync(dir).isDirectory()) continue;
+        let repo = null;
+        try { repo = pathFromTranscripts(dir); } catch { /* fall through to the slug */ }
+        if (!repo) repo = '/' + slug.replace(/^-/, '').replace(/-/g, '/');
+        if (fs.existsSync(path.join(repo, '.git'))) auditPrd(repo);
     }
 } catch { /* discovery is best-effort */ }
 
