@@ -215,7 +215,9 @@ For UI/API tasks, detect or start a dev server first:
 ```bash
 # Check if already running
 for port in 3000 3001 5173 8080; do curl -s http://localhost:$port > /dev/null 2>&1 && break; done
-# If none found, start one in background
+# If none found, prefer preview_start with a .claude/launch.json entry — it
+# supervises the server and exposes its output via preview_logs.
+# Fall back to a detached Bash only when there is no launch.json entry:
 Bash({ command: "npm run dev", run_in_background: true })
 # Wait for startup, then verify
 ```

@@ -139,7 +139,9 @@ find_port() {
 PORT=$(find_port)
 echo "Starting on port $PORT"
 
-# Start in background (no context cost)
+# Prefer preview_start with a .claude/launch.json entry (it supervises the
+# server and exposes preview_logs). Detached Bash is the fallback when the
+# project has no launch.json entry:
 Bash({ command: "npm run dev -- -p $PORT", run_in_background: true })
 
 # Wait for startup

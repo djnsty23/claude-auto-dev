@@ -52,7 +52,9 @@ Check in order:
    ```bash
    node -e "const p=require('./package.json');const s=p.scripts||{};console.log(s.dev||s.start||'')"
    ```
-   If a dev script exists, start it in the background:
+   If a dev script exists, start it with `preview_start` (preferred — it
+   supervises the server and exposes `preview_logs`). Only when the project has
+   no `.claude/launch.json` entry, fall back to a detached Bash:
    ```
    Bash({ command: "npm run dev", run_in_background: true })
    ```
