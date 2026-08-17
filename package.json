@@ -24,7 +24,8 @@
     "check:functions": "node tooling/find-untested-functions.js",
     "check:superseded": "node tooling/check-superseded.js",
     "check:agent-cost": "node tooling/analyze-agent-cost.js",
-    "check:runtime": "node tooling/check-runtime.js"
+    "check:runtime": "node tooling/check-runtime.js",
+    "actions:cost": "node tooling/analyze-actions-cost.js"
   },
   "author": "djnsty23",
   "license": "MIT",

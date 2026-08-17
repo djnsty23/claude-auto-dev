@@ -11,7 +11,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macOS dropped 2026-08-17. It was the single largest GROSS line in the
+        # whole account — 376 macOS minutes in 17 days, $23.34 gross — because
+        # this matrix runs on every push and pull_request, and 28 pushes landed
+        # in one day. Public repos bill $0, so it cost nothing; it was noise in
+        # the usage report and it tripled CI wall-clock per push.
+        #
+        # It also tested nothing the other two do not. This plugin is pure Node
+        # with no native deps and no darwin-specific code paths; the platform
+        # risk it actually carries is Windows (cmd.exe routing, the PowerShell
+        # curl alias, CRLF, reserved device names), which is why windows-latest
+        # stays. Re-add macos-latest the day a macOS-only failure appears.
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
