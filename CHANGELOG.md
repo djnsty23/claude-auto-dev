@@ -1,5 +1,54 @@
 # Changelog
 
+## [8.69.0] - 2026-08-17
+
+### Removed — the Bash denylist, after measuring what it actually caught
+
+Across 656 transcripts and 57,599 Bash calls it produced 807 blocks: 591 were
+`node -e`/`-p` reading local JSON, 73 were `npx` (one of them a production
+deploy), 27 were `curl` piped into `node -e` to parse a response, 56 were agents
+doing git cleanup in throwaway worktrees. The rules written for catastrophe —
+`mkfs`, `format c:`, `diskpart`, `rm -rf ~`, `curl | bash`, `find / -delete` —
+fired **zero** times.
+
+Driven with 22 crafted cases, 7 came back wrong, all refusing legitimate work.
+`npx create-next-app` passed but `npx -y create-next-app` was blocked: the
+20-entry allowlist sat behind a negative lookahead that any flag defeats, so it
+only worked when you passed no flags — and the command it exists to permit is the
+one `setup-project` prescribes. `git checkout -- .gitignore` was blocked as if it
+were `git checkout .`. Grepping migrations *for* "drop table" was blocked.
+`--force-with-lease` was blocked while `--force` was the thing feared.
+
+A denylist over command text cannot tell executing a dangerous thing from
+mentioning one. **Kept:** the write guard on the installed plugin tree and the
+private-name check — those catch structural mistakes, not bad judgment, and
+between them produced 8 blocks in 634,893 lines.
+
+### Added — `npm run check:versions`
+
+The pinned-version table in `setup-project` was five majors behind (TypeScript
+^5.8 against a released 7.0.2, Next 15, Zod 3, pnpm 10, Stripe 21) and nothing in
+the repo could see it: the file was internally consistent and every risk note read
+as fact when written. The new gate is the only check here that reads outside the
+repo, because this kind of staleness is invisible from inside it. Majors fail,
+minors warn, an unreachable registry exits 0.
+
+New pins are evidence-led, not recency-led — the test was whether the previous
+major is still being patched — and Next 16 + React 19 + TS 7 were proven by
+scaffolding and building on them under `strict` and `noUncheckedIndexedAccess`.
+
+### Fixed — `npm test` could never pass on Windows
+
+`test-drift-audit` built its slug by replacing forward slashes only, so on Windows
+it asked mkdir for an absolute path nested inside another and crashed during
+setup, before any assertion ran. Production discovery has the mirror-image bug and
+is left alone deliberately, with the reasoning recorded at the call site.
+
+### Added — the real Windows browser failure modes
+
+Recovered from the 7.x skill during migration; the cleanup hook shipped in 8.0 but
+the prose explaining it did not.
+
 ## [8.18.0] - 2026-08-16
 
 ### Fixed — `find-orphan-checks` cried wolf about the suites that prove it works
