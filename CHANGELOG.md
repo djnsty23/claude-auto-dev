@@ -1,5 +1,38 @@
 # Changelog
 
+## [8.70.0] - 2026-08-17
+
+### Added — `spec`, the front of the pipeline
+
+`setup-project` scaffolds and then deliberately skips `prd.json` unless a plan
+already exists; `brainstorm` only writes stories on an explicit apply. So "build
+me X" had nowhere to land. `spec` turns one sentence into `SPEC.md`, a schema and
+a backlog `auto` can work — schema first, assumptions stated rather than
+interviewed for, and printed in the handover so a wrong one costs a line instead
+of a sprint.
+
+`check-spec-output.js` is the half that makes it more than prose. A planning
+skill fails by emitting confident filler — *Auth flow*, *Dashboard layout*, *Set
+up the database* — which looks like a plan and fits any product ever conceived.
+The checker rejects layer-named titles, malformed ids, stories born already
+passing, acceptance criteria too vague to check, and tables created without RLS.
+
+Its criterion rule is a **denylist of vagueness, not an allowlist of approved
+verbs**. The first version demanded a verb from a fixed list and rejected its own
+reference example ("inserts a check-in", "the count increments") — the same shape
+as the `npx` allowlist removed in 8.69.0, which passed `npx create-next-app` and
+blocked `npx -y create-next-app`. Its suite pairs every rejection with a positive
+case, which is how that defect surfaced a minute after being written.
+
+### Fixed — the nightly audit discovered zero projects on Windows, silently
+
+Discovery reversed a slug back into a path, and slugs are not reversible: any
+directory containing a dash gained extra path segments, and a Windows slug
+(`C--Users-…`) became `/C//Users/…`, which cannot exist. `existsSync` returned
+false and the surrounding catch hid it, so the audit reported cleanly while
+finding nothing. It now reads the real cwd out of the session transcripts already
+sitting in each slug directory, and keeps reversal as a fallback.
+
 ## [8.69.0] - 2026-08-17
 
 ### Removed — the Bash denylist, after measuring what it actually caught
