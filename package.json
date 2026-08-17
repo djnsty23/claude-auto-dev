@@ -20,6 +20,7 @@
     "check:suites": "node tooling/check-suites-can-fail.js",
     "check:vacuity": "node tooling/find-vacuous-assertions.js",
     "check:hooks": "node tooling/find-untested-hooks.js",
+    "check:versions": "node tooling/check-version-drift.js",
     "check:functions": "node tooling/find-untested-functions.js"
   },
   "author": "djnsty23",
