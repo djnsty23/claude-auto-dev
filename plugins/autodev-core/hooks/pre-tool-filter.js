@@ -1,78 +1,45 @@
 #!/usr/bin/env node
-// PreToolUse hook - Security filtering and token optimization
-// Blocks dangerous Bash commands and unnecessary file reads.
+// PreToolUse hook - write protection and token optimization
 // Exit 2 = block, Exit 0 = allow
+//
+// THE BASH COMMAND DENYLIST WAS REMOVED ON 2026-08-17. It is deliberately not
+// coming back, and the reasoning is recorded here so it is not re-added by
+// someone who assumes it was lost in a refactor.
+//
+// It was measured over every transcript on one developer's machine: 656
+// sessions, 57,599 Bash calls, 807 blocks. What it caught:
+//
+//     591  node -e / node -p        read-only JSON inspection
+//      73  npx (non-allowlisted)    including a real production deploy
+//      27  curl … | node -e         reading a JSON API response
+//      56  git force/reset/stash    agents cleaning up throwaway worktrees
+//       0  mkfs, format c:, diskpart, rm -rf ~, curl | bash, find / -delete,
+//          chmod -R 000 /, prd-archive deletion
+//
+// The rules that existed to prevent catastrophe never fired once. The rules that
+// fired were blocking inspection. Driven directly with 22 crafted cases, 7 came
+// back wrong, all of them refusing legitimate work: `npx create-next-app` passed
+// but `npx -y create-next-app` was blocked, because the 20-entry allowlist was
+// defeated by any flag before the tool name; `git checkout -- .gitignore` was
+// blocked as if it were `git checkout .`; grepping migrations FOR the string
+// "drop table" was blocked; `--force-with-lease`, the safe form, was blocked
+// while being the form actually in use.
+//
+// A denylist over command TEXT cannot tell executing a dangerous thing from
+// mentioning one. That limit is structural, and the comments this file used to
+// carry were a record of patching around it one idiom at a time. Command-level
+// judgment now sits with the permission layer, which reads intent and, on the
+// day this was measured, was the only layer that stopped anything destructive.
+//
+// What remains here is not judgment about danger — it is protection against two
+// specific structural mistakes a model cannot see from inside a single tool
+// call: writing to the INSTALLED plugin tree instead of the source repo, and
+// putting a private name into a public one.
 
 const fs = require('fs');
 const path = require('path');
 
 // Module-level constants — compiled once, reused on every tool call
-
-// Dev cache directories — safe to rm -r. Matched before DANGEROUS_BASH_PATTERNS.
-const SAFE_RM_TARGETS = [
-    '.next', '.turbo', '.nuxt', '.svelte-kit', '.vite', '.parcel-cache',
-    'dist', 'build', 'out', 'coverage', '.cache',
-    'node_modules/.cache', 'node_modules\\.cache',
-    '.tsbuildinfo', 'tsconfig.tsbuildinfo',
-];
-
-// Match `rm -rf .next`, `rm -r ./dist`, `rm -rf node_modules/.cache`, etc.
-// Accepts optional ./ prefix, trailing slash, and chained safe targets.
-const SAFE_RM_REGEX = new RegExp(
-    '^\\s*rm\\s+-[rRf]+\\s+((\\.\\/)?(?:' +
-    SAFE_RM_TARGETS.map(t => t.replace(/[.\\]/g, '\\$&')).join('|') +
-    ')[\\\\/]?\\s*)+$', 'i'
-);
-
-const DANGEROUS_BASH_PATTERNS = [
-    /rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f|\/)|(-[a-z]*f[a-z]*\s+-[a-z]*r))/i,   // rm -rf, rm -r -f
-    /rm\s+-[rRf]+\s+~\/?(\s|$)/,              // rm -rf ~ / ~/   (home dir wipe)
-    /rm\s+--recursive/i,                      // rm --recursive
-    /rm\s+--force\s+--recursive/i,            // rm --force --recursive
-    /rm\s+--recursive\s+--force/i,            // rm --recursive --force
-    /rm\s+--force\s+-r/i,                     // rm --force -r
-    /rm\s+-r\s+[^-]/i,                        // rm -r (without -f, still dangerous)
-    /find\s+\/\s+-delete/i,                    // find / -delete
-    /dd\s+if=.*\/dev\//i,                      // dd if=/dev/zero
-    /mkfs\./i,                                 // mkfs.ext4
-    /chmod\s+-R\s+000\s+\//i,                  // chmod -R 000 /
-    /git\s+reset\s+--hard/i,                   // git reset --hard
-    /git\s+push\s+(--force|-f\b|.*--force|.*\s-f\b)/i, // git push --force/-f (any flag order)
-    /git\s+clean\s+(-[a-z]*f|--force)/i,       // git clean -f, -fd, --force
-    /git\s+checkout\s+(\.|--\s+\.)/i,          // git checkout .
-    /git\s+restore\s+(--staged\s+)?\./i,        // git restore . and git restore --staged .
-    /git\s+stash\s+(drop|clear)/i,             // git stash drop/clear
-    /git\s+branch\s+-D/,                        // git branch -D (force delete, case-sensitive)
-    /DROP\s+(TABLE|DATABASE)/i,                 // SQL injection
-    // Fetch-and-execute. Anchored to command start or a chain operator: this
-    // hook only ever sees command TEXT, so an unanchored rule cannot tell
-    // running `curl … | bash` from grepping for the string "curl | bash".
-    // The unanchored version blocked a maintainer searching for it by name.
-    /(?:^|[;&|]\s*)(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b/i,
-    /(?:^|[;&|]\s*)(bash|sh)\s+-c\b/i,             // bash -c / sh -c at command start or after chain (not inside quoted args)
-    /(?:^|[;&|]\s*)eval\s/i,                   // eval at command start or after chain operator
-    // `node -e` is a real escape hatch, but only when the CODE comes from
-    // somewhere untrusted. Blocking it after any pipe made `cat x.json | node -e
-    // 'parse'` — an everyday read-only idiom — impossible, which is how this
-    // hook blocked its own maintainers. Block it at command start, and after a
-    // pipe only when the upstream is a network fetch.
-    /(?:^|[;&]\s*)node\s+(-e|--eval|-p|--print)\b/i,
-    /\b(curl|wget|fetch)\b[^|]*\|\s*(sudo\s+)?node\s+(-e|--eval|-p|--print)\b/i,
-    /(?:^|[;&|]\s*)npx\s+(?!tsc\b|tsx\b|supabase\b|vercel\b|next\b|vite\b|vitest\b|jest\b|playwright\b|eslint\b|prettier\b|npm-check-updates\b|axe-core-cli\b|@next\/bundle-analyzer\b|lighthouse\b|netlify\b|remotion\b|shadcn\b|shadcn-ui\b|create-next-app\b|prisma\b)/i, // npx at command start or after chain operator (not inside quoted strings)
-    /rm\s.*prd-archive/i,                      // NEVER delete prd archives (move instead)
-    /rm\s.*prd-backup/i,                       // NEVER delete prd backups (move instead)
-    /del\s.*prd-archive/i,                     // Windows: NEVER delete prd archives
-    /del\s.*prd-backup/i,                      // Windows: NEVER delete prd backups
-    /Remove-Item\s.*prd-archive/i,             // PowerShell: NEVER delete prd archives
-    /Remove-Item\s.*prd-backup/i,              // PowerShell: NEVER delete prd backups
-    /(cp|mv)\s+.*\.claude[/\\](hooks|settings)/i, // Block cp/mv targeting security-critical files
-];
-
-const DANGEROUS_WIN32_PATTERNS = [
-    /format\s+c:/i,                            // format c:
-    /del\s+\/s\s+\/q\s+c:/i,                  // del /s /q c:
-    /diskpart/i,                               // diskpart (Windows disk utility)
-];
 
 const PROTECTED_FILE_PATTERNS = [
     /[/\\]\.claude[/\\]hooks[/\\]/,            // Project/global hook scripts
@@ -111,44 +78,6 @@ try {
 
     const toolName = data.tool_name || '';
     const toolInput = data.tool_input || {};
-
-    // Bash command filtering
-    if (toolName === 'Bash') {
-        const command = toolInput.command || '';
-        if (!command) process.exit(0);
-
-        // Allow `rm -r/-rf` on known dev cache dirs (.next, dist, coverage, etc.)
-        // Checked before dangerous patterns so it overrides the generic `rm -r` deny.
-        if (SAFE_RM_REGEX.test(command)) {
-            process.exit(0);
-        }
-
-        for (const pattern of DANGEROUS_BASH_PATTERNS) {
-            if (pattern.test(command)) {
-                process.stderr.write(`Blocked potentially dangerous command: ${command}\n`);
-                process.exit(2);
-            }
-        }
-
-        // Windows-specific dangerous patterns
-        // Platform is read through an override so these rules are testable off
-        // Windows. Found by mutation: flipping this comparison, and forcing the
-        // branch both on and off, changed nothing any assertion could see — the
-        // three Windows rules below had never been exercised by any test on a
-        // non-Windows machine, which is every machine that runs this suite.
-        //
-        // The override only ever selects which denylist applies to the CURRENT
-        // process, and both denylists are strictly additive blocks. Setting it
-        // cannot unblock anything the platform-appropriate list already denies.
-        if ((process.env.CLAUDE_PRE_TOOL_PLATFORM || process.platform) === 'win32') {
-            for (const pattern of DANGEROUS_WIN32_PATTERNS) {
-                if (pattern.test(command)) {
-                    process.stderr.write(`Blocked potentially dangerous command: ${command}\n`);
-                    process.exit(2);
-                }
-            }
-        }
-    }
 
     // Write/Edit protection - prevent Claude from modifying security-critical files
     if (toolName === 'Write' || toolName === 'Edit') {

@@ -35,7 +35,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|Read|Write|Edit",
+        "matcher": "Read|Write|Edit",
         "hooks": [
           {
             "type": "command",
