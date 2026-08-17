@@ -1,5 +1,48 @@
 # Changelog
 
+## [8.73.0] - 2026-08-17
+
+### Added — a detector for conventions the harness outgrew
+
+8.72.0 found its cascade by reading: one skill had moved to `preview_start` and
+three siblings had not, so the plugin shipped three mutually exclusive
+dev-server instructions and nothing surfaced the contradiction.
+`tooling/check-superseded.js` now finds that shape. `npm run check:superseded`.
+
+Five rules, each with a positive **and** a negative fixture, both run through
+`scanLines` — the same function that scans the tree, so the self-test cannot pass
+while the scanner is broken. A rule failing either fixture exits 2 as a broken
+detector rather than reporting a clean repo. Every run prints the population it
+scanned, because a verdict without a denominator looks exactly like a finder that
+returned nothing.
+
+Mutation-tested against real history rather than asserted: `--ref 81b43fd`
+returns 7 findings and independently rediscovers all five sites 8.72.0 fixed by
+hand, including the three half-migrated ones at `auto:219`, `scan:57` and
+`test:143`. The working tree is clean, and that only means something because the
+pre-fix run fires.
+
+Four more candidate rules were checked and **rejected**: stale model ids, `/tmp`
+leakage, bash-isms inside the 8 powershell fences, and a suspect
+`Test-NetConnection` call that is a real cmdlet. All measured zero. A rule that
+cannot fire is worse than no rule, because the count then reads as coverage.
+
+### Fixed — the image-scan suite's intermittent failure
+
+It failed twice in ~8 full `test-all` runs and never standalone. The cause was
+not contention: measured baseline drift across a run is 0.2ms on a 32-core box.
+Each of the 7 budget assertions rested on **one** wall-clock sample, and the same
+invocation sits at 33–37ms with observed spikes to 68 and 84ms — so one rare
+outlier failed a suite whose subject was healthy.
+
+Now min-of-3 per case against a min-of-3 baseline: floor against floor, neither
+depending on machine load. Over 84 samples the worst single value was 68ms and
+the worst min-of-3 was 36.2ms, while the floor still rises on a real regression.
+Raising the 150ms constant was rejected — it hides regressions and still flakes.
+
+Stated plainly: 18 consecutive full runs were clean *before* this change, so it
+addresses a measured tail-risk mechanism, not a reproduced failure.
+
 ## [8.72.0] - 2026-08-17
 
 ### Fixed — the plugin shipped three dev-server conventions at once
