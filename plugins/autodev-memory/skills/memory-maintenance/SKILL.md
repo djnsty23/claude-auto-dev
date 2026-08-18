@@ -112,3 +112,16 @@ Two rules for the unattended run, because nobody is watching:
 
 If the routine finds nothing to do — the normal case on a healthy setup — it
 should exit quietly rather than manufacturing work.
+
+**But quiet is not invisible: end every run, clean or not, by touching the
+heartbeat stamp** in the scheduled task's own directory:
+
+```bash
+date -u +%Y-%m-%dT%H:%M:%SZ > "$HOME/.claude/scheduled-tasks/<task-id>/.last-run"
+```
+
+Without it, a clean night and a dead schedule are indistinguishable — the log
+only records change, and `drift-audit` can otherwise judge liveness only by the
+SKILL.md's mtime, which a healthy task stops touching forever. The stamp is what
+`drift-audit` prefers; a non-daily task can declare its cadence by writing
+`{"cadence_days": 7}` instead of a bare timestamp.

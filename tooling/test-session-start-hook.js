@@ -205,6 +205,94 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     check('two changes: reports them, in the plural', /2 uncommitted changes at/.test(ctx));
 }
 
+// ---------------------------------------------------------- plugin drift
+// The 2026-08-18 incident: core ran 62 minor versions behind for two days with
+// every layer green. The hook now surfaces two local signals — installed vs the
+// marketplace clone's catalog, and the clone's own fetch age. Fixtures write a
+// fake marketplace under HOME, which run() already redirects into TMP.
+{
+    const realVersion = JSON.parse(fs.readFileSync(
+        path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version;
+    const bump = realVersion.split('.').map(Number);
+    bump[1] += 1;
+    const newerVersion = bump.join('.');
+
+    const mkt = path.join(TMP, '.claude', 'plugins', 'marketplaces', 'testmkt');
+    const catPath = path.join(mkt, '.claude-plugin', 'marketplace.json');
+    fs.mkdirSync(path.dirname(catPath), { recursive: true });
+    // The decoy sits FIRST and always claims a huge version: a real autodev
+    // marketplace carries three plugins, so matching by anything weaker than
+    // the exact name would compare core against a sibling's version. Every
+    // assertion on exact versions below also asserts the decoy lost.
+    const writeCatalog = (v) => fs.writeFileSync(catPath, JSON.stringify({
+        name: 'testmkt',
+        plugins: [{ name: 'autodev-decoy', version: '99.0.0' }, { name: 'autodev-core', version: v }],
+    }));
+
+    const proj = path.join(TMP, 'driftproj');
+    fs.mkdirSync(proj, { recursive: true });
+    const go = (id) => parse(run({ cwd: proj, session_id: id, hook_event_name: 'SessionStart' }, proj));
+
+    // Catalog ahead of the install → both surfaces speak, with the versions and
+    // the exact command. The verify reminder exists because the incident WAS a
+    // /plugin update that reported nothing and changed nothing.
+    writeCatalog(newerVersion);
+    let out = go('d1');
+    let ctx = out?.hookSpecificOutput?.additionalContext || '';
+    check('catalog ahead: banner shows the update', (out?.systemMessage || '').includes(`update available: ${newerVersion}`));
+    check('catalog ahead: context names installed and offered versions',
+        ctx.includes(`v${realVersion}`) && ctx.includes(`v${newerVersion}`));
+    check('catalog ahead: context carries the exact fix command', ctx.includes('/plugin update autodev-core'));
+    check('catalog ahead: context says to verify the update took', /[Vv]erify/.test(ctx));
+
+    // Same fixture path, version now equal → the drift lines must vanish. This
+    // negative is known to reach the code because the case above just fired
+    // through the identical path.
+    writeCatalog(realVersion);
+    out = go('d2');
+    ctx = out?.hookSpecificOutput?.additionalContext || '';
+    check('catalog equal: no update line in the banner', !(out?.systemMessage || '').includes('update available'));
+    check('catalog equal: no update line in the context', !ctx.includes('/plugin update'));
+
+    // Catalog BEHIND the install (mid-publish, rolled back) is not an update.
+    writeCatalog('0.0.1');
+    out = go('d3');
+    check('catalog behind: stays silent', !(out?.systemMessage || '').includes('update available'));
+
+    // Fetch age. FETCH_HEAD older than a week → the clone stopped pulling, and
+    // the "equal" verdict above is against a stale ceiling; say so.
+    writeCatalog(realVersion);
+    const fetchHead = path.join(mkt, '.git', 'FETCH_HEAD');
+    fs.mkdirSync(path.dirname(fetchHead), { recursive: true });
+    fs.writeFileSync(fetchHead, 'x');
+    const old = (Date.now() - 10 * 86400000) / 1000;
+    fs.utimesSync(fetchHead, old, old);
+    ctx = go('d4')?.hookSpecificOutput?.additionalContext || '';
+    check('stale clone: names the marketplace and the command',
+        ctx.includes('testmkt') && ctx.includes('/plugin marketplace update testmkt'));
+
+    // A fresh fetch must not warn.
+    const now = Date.now() / 1000;
+    fs.utimesSync(fetchHead, now, now);
+    ctx = go('d5')?.hookSpecificOutput?.additionalContext || '';
+    check('fresh clone: no staleness line', !ctx.includes('marketplace update'));
+
+    // A malformed catalog must never cost the session its banner.
+    fs.writeFileSync(catPath, '{ not json');
+    const r2 = run({ cwd: proj, session_id: 'd6', hook_event_name: 'SessionStart' }, proj);
+    check('malformed catalog: exit 0, banner intact',
+        r2.status === 0 && /^\[Auto-Dev v/.test(parse(r2)?.systemMessage || ''));
+
+    // End-to-end zero-cost check: with the machinery present and everything
+    // clean, a bare project still gets NO context block at all.
+    writeCatalog(realVersion);
+    const bare3 = path.join(TMP, 'bare3');
+    fs.mkdirSync(bare3, { recursive: true });
+    out = parse(run({ cwd: bare3, session_id: 'd7', hook_event_name: 'SessionStart' }, bare3));
+    check('clean drift machinery adds zero bytes: no hookSpecificOutput',
+        out !== null && out.hookSpecificOutput === undefined);
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);

@@ -87,13 +87,38 @@ function auditSchedules() {
     for (const id of fs.readdirSync(dir)) {
         const skill = path.join(dir, id, 'SKILL.md');
         if (!fs.existsSync(skill)) continue;
+
+        // Heartbeat first. A routine that touches .last-run at the end of every
+        // run — clean or not — gives this check something that measures FIRING.
+        // The SKILL.md mtime below only measures editing, and a healthy task
+        // stops being edited forever: without the stamp, every stable task
+        // starts warning 7 days after its last edit, firing or not.
+        const stamp = path.join(dir, id, '.last-run');
+        if (fs.existsSync(stamp)) {
+            // Optional {"cadence_days": N} in the stamp for non-daily tasks;
+            // anything unparseable (a bare timestamp) means daily.
+            let cadence = 1;
+            try {
+                const c = JSON.parse(fs.readFileSync(stamp, 'utf8')).cadence_days;
+                if (Number.isFinite(c) && c > 0) cadence = c;
+            } catch { /* bare-timestamp stamp — daily */ }
+            const ageDays = Math.floor((Date.now() - fs.statSync(stamp).mtimeMs) / 86400000);
+            // +2 days of slack: a laptop asleep over a weekend is not an outage.
+            if (ageDays > cadence + 2) {
+                add('schedules', 'warn',
+                    `task "${id}" last completed a run ${ageDays}d ago (cadence ${cadence}d) — it has stopped firing`,
+                    'check the Scheduled sidebar, or list_scheduled_tasks for lastRunAt');
+            }
+            continue;
+        }
+
         const st = fs.statSync(skill);
         const ageDays = Math.floor((Date.now() - st.mtimeMs) / 86400000);
         // A daily routine whose definition and state have not been touched in a
         // week is very likely not firing. This is the "gate nobody runs" shape.
         if (ageDays > 7) {
             add('schedules', 'warn', `task "${id}" has not been touched in ${ageDays}d — verify it is still firing`,
-                'check the Scheduled sidebar, or list_scheduled_tasks for lastRunAt');
+                'check the Scheduled sidebar, or list_scheduled_tasks for lastRunAt — or have the task write .last-run at the end of every run, which this check prefers');
         }
     }
 }
