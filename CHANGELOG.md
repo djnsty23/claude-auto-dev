@@ -1,5 +1,47 @@
 # Changelog
 
+## [8.81.0] - 2026-08-18
+
+### Added — plugin drift now surfaces where the user actually looks
+
+Grounded in a same-day incident: core ran 62 minor versions behind for two days
+while every layer reported healthy. The marketplace auto-pull had silently
+stopped, an interrupted `/plugin update` wrote the cache but never flipped the
+manifest, and the nightly drift audit filed the result as `warn`, which its
+policy correctly leaves alone. Detection worked; no surface anyone reads ever
+said a word.
+
+`session-start` now runs two local checks — installed version against the
+marketplace clone's catalog (strictly newer only, so a rolled-back catalog stays
+silent), and the clone's `FETCH_HEAD` age for the stopped-auto-pull class. Both
+are file reads: 0.8ms measured on a 31ms hook, zero added bytes when clean. The
+drifted banner names both versions; the context carries the exact fix command
+and a reminder to verify the update actually took, because the motivating
+incident was precisely an update that reported nothing and changed nothing.
+
+### Added — a heartbeat that distinguishes a quiet schedule from a dead one
+
+`drift-audit` judged scheduled tasks by their SKILL.md mtime, which a healthy
+task stops touching forever — every stable task started warning a week after its
+last edit, firing or not. Tasks that touch `.last-run` at the end of every run
+now get judged on that instead: fresh stamp suppresses the mtime heuristic
+entirely, stale stamp is reported as a stopped run with the cadence it was
+judged against. Stamps may declare `{"cadence_days": N}`; junk cadences fall
+back to daily rather than being believed, because a negative cadence would read
+a minutes-old stamp as overdue. The nightly template and memory-maintenance now
+both instruct writing the stamp unconditionally.
+
+### Added — the learn loop gets its missing trigger, and only that
+
+Measured before building, per `rule-ab-testing`: the loop itself already existed
+(`mine-fixes` → `project-rules.md` → `review`/`audit` all read it). The missing
+piece was that nothing runs the mining unattended. `learn-from-fixes` documents
+its scheduled entry point, and the nightly template gains a weekly report-only
+mining step. Deliberately not built, recorded in
+`docs/rfc-self-heal-heartbeat-learn-loop.md`: unattended auto-update (the
+marketplace is this repo; a bad push auto-installing into every session start is
+worse than drift) and a fourth pattern store next to the three that exist.
+
 ## [8.80.0] - 2026-08-17
 
 ### Fixed — 8.79.0 removed a safety net for a tool that is still installed
