@@ -118,11 +118,14 @@ ship       → review + security + deploy + post-deploy scan
 iterate    → brainstorm → fix → re-scan loop until clean
 ```
 
-**Visual verification.** In the desktop app the built-in Browser pane drives
-this — Claude opens your app, reads the page, checks the console, and screenshots
-desktop and mobile after each UI change. In a plain terminal session the same
-steps run through the `agent-browser` CLI if you have it installed. The `browser`
-skill picks between them; you don't have to.
+**Visual verification.** Claude opens your app in the built-in Browser pane,
+reads the page, checks the console, and screenshots desktop and mobile after each
+UI change. There is no skill to invoke — the browser tools are used directly.
+
+> The separate `browser` skill and the `agent-browser` CLI steps were dropped in
+> 8.79/8.80. The binary itself is unrelated and may still be installed for other
+> tools, which is why `agent-browser-cleanup.js` still runs: it clears zombie
+> Chromium processes and a stolen Win+Shift+S hotkey on Windows.
 
 **Phone screenshots and other out-of-band files.** Save anything into
 `~/Library/Mobile Documents/com~apple~CloudDocs/claude-inbox` — iCloud, so an iOS
@@ -142,6 +145,34 @@ distinct issue it sees, not only the one you asked about. Add `[focus]` in your
 message to opt out.
 
 ---
+
+## Verifying the framework itself
+
+This repo ships checks and is therefore held to its own standard: **coverage measures
+execution, mutation measures verification.** A function can be entered on every run
+while nothing asserts anything about it.
+
+```bash
+npm test                  # every suite, then validate. The gate.
+npm run check:hooks       # wired hooks no suite drives — a hard gate in validate
+npm run check:functions   # functions never entered (~20s)
+npm run check:vacuity <subject.js> <suite.js>   # code no assertion depends on
+npm run check:suites      # suites that cannot fail
+npm run check:superseded  # guidance a later decision has overtaken
+npm run check:versions    # the six files that must agree on a version
+npm run check:runtime     # asserts the version EXECUTING is the one you edited
+npm run check:agent-cost  # what a subagent really costs, from real transcripts
+npm run check:agent-budget --lenses 4 --verify adversarial   # how many agents to spawn now
+npm run actions:cost      # CI spend, from GitHub's own usage CSV
+```
+
+Four of those answer different questions and none substitutes for another: scripts
+nobody runs, hooks no suite drives, functions never entered, and code no assertion
+depends on.
+
+`check:vacuity` **rewrites its subject with mutants**. It refuses a dirty subject, and
+`validate` fails while a `*.vacuity-backup` exists. If you kill a run, `pkill -9` then
+`pgrep` to confirm — a survivor rewrites the file underneath you.
 
 ## Updates
 

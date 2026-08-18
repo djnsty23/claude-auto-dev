@@ -91,3 +91,21 @@ For quick fixes, just describe what to fix — no commands needed.
 - Handoffs: `.claude/handoffs/handoff-*.md` (7 days)
 - Reports: `.claude/reports/*.md` (7 days)
 - All artifacts go under `.claude/`, never project root
+
+## Also available
+
+Less-used commands, complete for reference.
+
+| Say | Action |
+|-----|--------|
+| `setup project` | Scaffold a new project, or onboard an existing one — detects the stack and configures strict tooling |
+| `env` / `secrets` | Manage environment variables and credentials without pasting them into the chat |
+| `telemetry` / `tool stats` | Which tools a session burned context on, which days were busy, what failed |
+| `knowledge` / `brief me on` | Distil stored observations for a code area into a focused domain brief |
+| `archive` / `compact prd` | Move completed stories out of `prd.json` to cut its token cost |
+
+## The rules you never type
+
+Twelve always-on `rule-*` skills load themselves by path and shape every session —
+diagnosis, gate integrity, verification, agent concurrency and more. They are not
+commands and cannot be invoked. See **[rules.md](rules.md)**.
