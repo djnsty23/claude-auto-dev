@@ -60,6 +60,30 @@ if (suites.length === 0) {
   }
 }
 
+// A SUITE MUST NOT REWRITE THE TREE IT GRADES.
+//
+// This repo already has the scar. find-vacuous-assertions.js overwrites its
+// subject with mutants; a killed run left one in place, a later `git add -A`
+// swept it into a commit, and an `if (!installed.plugins[...])` shipped to a
+// PUBLIC repo as `if (true)`. Nothing caught it — validate passed and the
+// pre-push hook passed, because a mutation that survives its suite is by
+// definition one the suite cannot see.
+//
+// The guards added then were local to that script: refuse a dirty subject, and
+// recover from a backup. Both are good and neither watches the RUNNER. So this
+// records the working tree before the suites and compares after. It is
+// deliberately a comparison and not a cleanliness check — the tree is often
+// legitimately dirty while working, and the property that matters is that
+// running the gate CHANGED NOTHING, not that everything was committed first.
+//
+// The failure it catches cannot be caught by exit codes: the scripts that do
+// this exit 0. Only looking at the state afterwards can see it.
+const gitState = () => {
+  const r = spawnSync('git', ['status', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' });
+  return r.status === 0 ? (r.stdout || '') : null;   // null = not a git repo; skip the check
+};
+const treeBefore = gitState();
+
 const results = [];
 
 // NOTE: this used to be declared `run(label, file, args)` while every call site
@@ -96,6 +120,25 @@ for (const file of suites) {
 // Final gate: the consistency validator.
 console.log(`\n=== validate ===`);
 run('validate', [...CHILD_FLAGS, path.join(scriptsDir, 'validate.js')]);
+
+// Did running the gate change the tree it was grading?
+if (treeBefore !== null) {
+  const treeAfter = gitState();
+  if (treeAfter !== null && treeAfter !== treeBefore) {
+    const was = new Set(treeBefore.split('\n').filter(Boolean));
+    const now = treeAfter.split('\n').filter(Boolean);
+    const added = now.filter((l) => !was.has(l));
+    const gone = [...was].filter((l) => !now.includes(l));
+    console.error('\n=== tree-inert ===');
+    console.error('THE TEST RUN MODIFIED THE WORKING TREE. A suite rewrote what it grades.');
+    for (const l of added.slice(0, 15)) console.error('  now:  ' + l);
+    for (const l of gone.slice(0, 15)) console.error('  was:  ' + l);
+    console.error('Every suite above exited 0. That is the point — no exit code can see this.');
+    results.push(['tree-inert', false]);
+  } else {
+    results.push(['tree-inert', true]);
+  }
+}
 
 // --- Summary ---
 console.log('\n──────── summary ────────');
