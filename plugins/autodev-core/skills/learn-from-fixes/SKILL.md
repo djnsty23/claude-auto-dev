@@ -108,3 +108,24 @@ creating a competing one.
 
 That file is what `review` and `audit` read, so a class recorded there is
 checked on every future change — which is the entire point of the exercise.
+
+## Running it on a schedule
+
+The loop above only closes when someone remembers to ask. A nightly or weekly
+routine can run the **measurement half** unattended and propose the rest:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/mine-fixes.js" <repo> --json
+```
+
+Report-only rules for the unattended run:
+
+- Quote the tool's counts (fix:feature ratio, rework window, hot files) as
+  counts. **The class ranking is a floor, not a share** — the calibration in
+  step 2 applies doubly when no human is reading the commit bodies.
+- When a repo's numbers look worth a human's time, log a *proposal* to run
+  `/learn-from-fixes` there. Never write gates or edit `project-rules.md`
+  unattended — an unwanted gate teaches the team that gates are noise, and an
+  unreviewed rule is a guess wearing a rule's clothes.
+- End the run by touching the scheduled task's `.last-run` heartbeat, clean or
+  not, so `drift-audit` can tell a quiet week from a dead schedule.

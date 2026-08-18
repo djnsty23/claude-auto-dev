@@ -73,6 +73,70 @@ try {
         }
     }
 
+    // ---- Plugin drift (the 2026-08-18 failure class) ----
+    // Installed core ran 62 minor versions behind for two days while every
+    // layer reported healthy: the marketplace auto-pull had silently stopped,
+    // and an interrupted /plugin update wrote the cache but never flipped the
+    // manifest. The nightly drift audit filed both as `warn`, which its policy
+    // leaves alone — so nothing the user actually looks at ever said a word.
+    //
+    // Two local checks, no network, no subprocess (a session-start hook must
+    // not block on DNS). Zero added bytes when clean.
+    if (version !== '?') {
+        try {
+            const cfgDir = process.env.CLAUDE_CONFIG_DIR
+                || path.join(process.env.HOME || process.env.USERPROFILE || '', '.claude');
+            const marketsDir = path.join(cfgDir, 'plugins', 'marketplaces');
+            const selfName = JSON.parse(
+                fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')
+            ).name;
+            // Find the marketplace whose catalog carries us. Iterating beats
+            // parsing our own install path: a dev checkout is not under
+            // plugins/cache/<market>/... and must degrade to silence.
+            for (const market of fs.existsSync(marketsDir) ? fs.readdirSync(marketsDir) : []) {
+                const catPath = path.join(marketsDir, market, '.claude-plugin', 'marketplace.json');
+                let cat;
+                try { cat = JSON.parse(fs.readFileSync(catPath, 'utf8')); } catch { continue; }
+                const entry = (cat.plugins || []).find((p) => p && p.name === selfName);
+                if (!entry || !entry.version) continue;
+
+                // 1. Installed vs catalog. Strictly newer only — a catalog
+                //    BEHIND the install (mid-publish, rolled back) is not an
+                //    update and must stay silent.
+                const parse = (v) => String(v).split('.').map(Number);
+                const [a, b] = [parse(entry.version), parse(version)];
+                const newer = a.length === 3 && b.length === 3 && a.every(Number.isFinite) && b.every(Number.isFinite)
+                    && (a[0] - b[0] || a[1] - b[1] || a[2] - b[2]) > 0;
+                if (newer) {
+                    banner += ` | update available: ${entry.version}`;
+                    context.push(
+                        `${selfName} v${version} is running but the local marketplace offers v${entry.version}. `
+                        + `Suggest the user run: /plugin update ${selfName} (then restart to apply). `
+                        + `Verify afterwards that the installed version actually changed — one update `
+                        + `has silently no-oped before.`
+                    );
+                }
+
+                // 2. Catalog freshness. FETCH_HEAD's mtime is the last time the
+                //    clone talked to the remote; a quiet week means the
+                //    per-session auto-pull has stopped and versions above are
+                //    being compared against a stale ceiling.
+                try {
+                    const fetchHead = path.join(marketsDir, market, '.git', 'FETCH_HEAD');
+                    const ageDays = Math.floor((Date.now() - fs.statSync(fetchHead).mtimeMs) / 86400000);
+                    if (ageDays > 7) {
+                        context.push(
+                            `The "${market}" marketplace clone last refreshed ${ageDays} days ago — its catalog `
+                            + `is a stale ceiling, so "up to date" above may be false. Suggest: `
+                            + `/plugin marketplace update ${market}`
+                        );
+                    }
+                } catch { /* no FETCH_HEAD: never-fetched local clone — nothing to measure */ }
+                break;
+            }
+        } catch { /* drift check is best-effort; the banner must survive it */ }
+    }
+
     // ---- Working tree ----
     try {
         const gitStatus = execFileSync('git', ['status', '--short'], {

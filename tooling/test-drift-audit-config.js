@@ -132,6 +132,73 @@ function runFull(cfg, extra = []) {
         !/not-a-task/.test(run(cfg)));
 }
 
+// The .last-run heartbeat. The mtime heuristic above has a built-in
+// false-positive: a healthy task's SKILL.md is never edited again, so every
+// stable task starts warning a week after its last edit whether it fires or
+// not. A task that stamps .last-run at the end of every run gives the audit a
+// signal that measures firing, and the stamp must win over the mtime.
+{
+    const cfg = config({
+        'scheduled-tasks/stamped-alive/SKILL.md': '# nightly\n',
+        'scheduled-tasks/stamped-alive/.last-run': '2026-08-18T00:00:00Z\n',
+        'scheduled-tasks/stamped-dead/SKILL.md': '# nightly\n',
+        'scheduled-tasks/stamped-dead/.last-run': '2026-08-01T00:00:00Z\n',
+    });
+    // Both SKILL.md files aged 30d — old enough that the mtime heuristic alone
+    // would report BOTH. Only the stale stamp may fire.
+    const old = new Date(Date.now() - 30 * 86400000);
+    for (const t of ['stamped-alive', 'stamped-dead']) {
+        const skill = path.join(cfg, 'scheduled-tasks', t, 'SKILL.md');
+        fs.utimesSync(skill, old, old);
+    }
+    const dead = path.join(cfg, 'scheduled-tasks', 'stamped-dead', '.last-run');
+    const staleStamp = new Date(Date.now() - 6 * 86400000);
+    fs.utimesSync(dead, staleStamp, staleStamp);
+    // stamped-alive's stamp keeps its just-written mtime: a run completed today.
+
+    const out = run(cfg);
+    check('a fresh heartbeat suppresses the old-SKILL.md warning entirely', !/stamped-alive/.test(out));
+    check('a stale heartbeat is reported', /stamped-dead/.test(out));
+    check('  as a stopped run, not an unedited file', /last completed a run 6d ago/.test(out));
+    check('  with the cadence it was judged against', /cadence 1d/.test(out));
+}
+
+// A stamp can declare its own cadence for non-daily tasks: {"cadence_days": 7}
+// at 6 days old is on schedule; the same stamp at 12 days is not.
+{
+    const cfg = config({
+        'scheduled-tasks/weekly-on-time/SKILL.md': '# weekly\n',
+        'scheduled-tasks/weekly-on-time/.last-run': '{"cadence_days": 7}\n',
+        'scheduled-tasks/weekly-overdue/SKILL.md': '# weekly\n',
+        'scheduled-tasks/weekly-overdue/.last-run': '{"cadence_days": 7}\n',
+    });
+    const age = (task, days) => {
+        const d = new Date(Date.now() - days * 86400000);
+        fs.utimesSync(path.join(cfg, 'scheduled-tasks', task, '.last-run'), d, d);
+        // SKILL.md aged too, so any hit below is attributable to the stamp path.
+        fs.utimesSync(path.join(cfg, 'scheduled-tasks', task, 'SKILL.md'), d, d);
+    };
+    age('weekly-on-time', 6);
+    age('weekly-overdue', 12);
+
+    const out = run(cfg);
+    check('a weekly stamp 6d old is on schedule', !/weekly-on-time/.test(out));
+    check('a weekly stamp 12d old is reported', /weekly-overdue/.test(out));
+    check('  judged against its declared cadence', /cadence 7d/.test(out));
+}
+
+// A junk cadence must fall back to daily, not be believed. A negative one that
+// slipped through would make (cadence + 2) negative, so a stamp written MINUTES
+// ago reads as overdue — a fresh heartbeat reported as a dead schedule is the
+// exact inversion of what the stamp exists to prevent.
+{
+    const cfg = config({
+        'scheduled-tasks/junk-cadence/SKILL.md': '# nightly\n',
+        'scheduled-tasks/junk-cadence/.last-run': '{"cadence_days": -5}\n',
+    });
+    check('a fresh stamp with a junk cadence is not reported', !/junk-cadence/.test(run(cfg)));
+}
+
 // ------------------------------------------------------------- auditPlugins
 
 // The signal is "installed sha vs marketplace clone HEAD", so the case needs a
