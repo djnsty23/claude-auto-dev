@@ -17,6 +17,16 @@
 // id now comes from the hook payload. 7.x read AUTO_DEV_SESSION_ID, which 8.x
 // does not set, so every event logged on this machine recorded "session": null
 // and the field was dead.
+//
+// 2026-08-19: the same porting bug was still live in two more fields. The
+// PostToolUse payload is built by the CLI as
+//   { hook_event_name, tool_name, tool_input, tool_response, tool_use_id,
+//     duration_ms, session_id, cwd, ... }
+// (read out of the shipping binary, v2.1.234 — there is no `tool_output` and no
+// `tool_error`). Reading the 7.x names meant `output_size` was 0 and `ok` was
+// true in 878 of 878 rows on this machine: the field that exists to record a
+// FAILED tool call had never once fired. The legacy names are kept as a
+// fallback so an older CLI keeps working, but the real key is read first.
 
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +39,25 @@ try {
     catch { process.exit(0); }
 
     const toolInput = data.tool_input || {};
-    const toolOutput = data.tool_output || '';
+    const toolResponse = data.tool_response !== undefined ? data.tool_response : (data.tool_output || '');
+
+    // Sizes only — never content. An object response is measured by its encoded
+    // length, which is a size and not a leak.
+    const sizeOf = (v) => {
+        if (typeof v === 'string') return v.length;
+        if (v === undefined || v === null) return 0;
+        try { return JSON.stringify(v).length; } catch { return 0; }
+    };
+
+    // Failure signals, most explicit first. The string-prefix test is LAST on
+    // purpose: a command whose stdout happens to begin "Error:" is not a failed
+    // tool call, so it must never outrank a structured flag.
+    const failed = (
+        (toolResponse && typeof toolResponse === 'object' && toolResponse.is_error === true)
+        || Boolean(data.tool_error)
+        || (typeof toolResponse === 'string'
+            && (toolResponse.startsWith('[error') || toolResponse.startsWith('Error: ')))
+    );
 
     const event = {
         ts: new Date().toISOString(),
@@ -39,8 +67,11 @@ try {
         cwd: process.cwd(),
         tool: data.tool_name || '',
         input_size: JSON.stringify(toolInput).length,
-        output_size: typeof toolOutput === 'string' ? toolOutput.length : JSON.stringify(toolOutput || '').length,
-        ok: !(data.tool_error || (typeof toolOutput === 'string' && toolOutput.startsWith('[error'))),
+        output_size: sizeOf(toolResponse),
+        // The CLI already measures this; throwing it away left the harness
+        // unable to answer "which tool call is costing us wall-clock".
+        duration_ms: typeof data.duration_ms === 'number' ? data.duration_ms : null,
+        ok: !failed,
     };
 
     try {
@@ -68,6 +99,7 @@ try {
                                 { key: 'cwd', value: { stringValue: event.cwd } },
                                 { key: 'input_size', value: { intValue: event.input_size } },
                                 { key: 'output_size', value: { intValue: event.output_size } },
+                                { key: 'duration_ms', value: { intValue: event.duration_ms || 0 } },
                                 { key: 'ok', value: { boolValue: event.ok } },
                             ],
                         }],

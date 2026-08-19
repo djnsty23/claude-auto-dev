@@ -43,7 +43,14 @@ try {
                 const sessionId = carrier.read(cwd, harnessSessionId);
                 const toolName = data.tool_name || '';
                 const toolInput = data.tool_input || {};
-                const toolResult = (data.tool_output || '').slice(0, 500);
+                // `tool_response` is the real payload key; `tool_output` is the 7.x
+                // name and does not exist on the current CLI, so this read was
+                // handing the classifier an empty string on every single call.
+                // Kept as a fallback for older CLIs only.
+                const rawResult = data.tool_response !== undefined ? data.tool_response : data.tool_output;
+                const toolResult = (typeof rawResult === 'string'
+                    ? rawResult
+                    : (rawResult ? JSON.stringify(rawResult) : '')).slice(0, 500);
                 // The classifier derives BOTH the observation type and its concept
                 // text from the prompt. It used to read AUTO_DEV_LAST_PROMPT, which
                 // nothing ever set, so every observation fell back to a generic type
