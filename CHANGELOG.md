@@ -1,5 +1,22 @@
 # Changelog
 
+## [8.85.0] - 2026-08-19
+
+### Added — the failure advisory covers four classes, and now the browser too
+
+Replayed against the real failures of the last 24 hours, it speaks on 29 of 175
+(16.6%): tmp-path-split 16, shell-quoting 9, browser-blocked-on-user 2,
+browser-self-destroyed-eval 2. A rule set that never fires on real data is a
+hypothesis, so it was checked against the data rather than reasoned about.
+
+The browser rules live in the hook because there is no browser skill left to put
+them in — it was removed in 8.79.0 and its guidance is now spread across five
+unrelated skills. The hook fires at the one moment a checklist would be read.
+
+"Multiple Chrome browsers are connected" is the most expensive class measured:
+it reads like a transient connection problem and is a question waiting for a
+person. One session spent two hours retrying against it.
+
 ## [8.84.0] - 2026-08-19
 
 ### Added — the Windows /tmp split gets named when it bites
