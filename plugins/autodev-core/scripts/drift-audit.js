@@ -500,7 +500,6 @@ function pathFromSlug(slug) {
     return '/' + slug.replace(/^-/, '').replace(/-/g, '/');
 }
 
-const found = [];
 try {
     const projects = path.join(CONFIG, 'projects');
     for (const slug of fs.existsSync(projects) ? fs.readdirSync(projects) : []) {
@@ -509,31 +508,9 @@ try {
         let repo = null;
         try { repo = pathFromTranscripts(dir); } catch { /* fall through to the slug */ }
         if (!repo) repo = pathFromSlug(slug);
-        if (fs.existsSync(path.join(repo, '.git'))) found.push(repo);
+        if (fs.existsSync(path.join(repo, '.git'))) auditPrd(repo);
     }
 } catch { /* discovery is best-effort */ }
-
-// One repo, many checkouts. A .claude/worktrees/* entry is a git worktree of
-// the project it sits inside, and every worktree shares that project's
-// prd.json — so auditing each one reported the same backlog once per checkout.
-// Measured on a real machine 2026-08-19: 34 repos reporting, 29 of them
-// worktrees, and 103 prd findings describing about a dozen actual projects.
-// A tracker warning repeated eleven times is not eleven warnings.
-//
-// `rev-parse --git-common-dir` is the identity every checkout of a repo agrees
-// on: a worktree returns the parent's absolute .git, the main checkout returns
-// a relative '.git'. Resolving both against their own directory yields the same
-// key. Audit the MAIN checkout where there is one, so the finding names the
-// path someone would actually open rather than a scratch worktree.
-const canonical = new Map();
-for (const repo of found) {
-    const common = g(repo, 'rev-parse --git-common-dir');
-    const key = path.resolve(repo, common || '.git').toLowerCase();
-    const isMain = key === path.resolve(repo, '.git').toLowerCase();
-    const seen = canonical.get(key);
-    if (!seen || (isMain && !seen.isMain)) canonical.set(key, { repo, isMain });
-}
-for (const { repo } of canonical.values()) auditPrd(repo);
 
 if (asJson) { console.log(JSON.stringify({ configDir: CONFIG, findings }, null, 2)); process.exit(findings.some((f) => f.severity === 'fail') ? 1 : 0); }
 
