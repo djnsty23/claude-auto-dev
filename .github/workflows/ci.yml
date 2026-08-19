@@ -24,8 +24,13 @@ jobs:
         # stays. Re-add macos-latest the day a macOS-only failure appears.
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # v4 targets Node 20, which the runners now force onto Node 24 and warn
+      # about on every run. v7 is the current major for both and runs natively.
+      # This job touches neither action's optional surface — checkout takes no
+      # inputs, setup-node takes only node-version (no cache, no registry) — so
+      # nothing in the v5/v6/v7 changelogs applies here.
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           # node:sqlite (autodev-memory) is built in from Node 22.
           node-version: '22'
