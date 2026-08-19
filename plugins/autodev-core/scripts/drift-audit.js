@@ -24,6 +24,12 @@ const add = (area, severity, detail, fix) => findings.push({ area, severity, det
 
 const readJSON = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 
+// Above this many uninstalled plugins in one marketplace, summarise instead of
+// naming each. 5 sits between the two real populations measured on this
+// machine: a 3-plugin marketplace missing 1, and a 286-plugin catalog missing
+// 259. See the comment at the loop for why count is the right discriminator.
+const PLUGIN_NAME_LIMIT = 5;
+
 // ---------------------------------------------------------------- plugins
 function auditPlugins() {
     const installed = readJSON(path.join(CONFIG, 'plugins', 'installed_plugins.json'));
@@ -71,11 +77,30 @@ function auditPlugins() {
         if (!adopted) continue;
         const cat = readJSON(path.join(m.installLocation || '', '.claude-plugin', 'marketplace.json'));
         if (!cat || !Array.isArray(cat.plugins)) continue;
-        for (const p of cat.plugins) {
-            if (!installed.plugins[`${p.name}@${marketName}`]) {
-                add('plugins', 'info', `${p.name}@${marketName} is published in a marketplace you use, but not installed`,
-                    `/plugin install ${p.name}@${marketName}`);
-            }
+
+        const missing = cat.plugins.filter((p) => !installed.plugins[`${p.name}@${marketName}`]);
+        if (!missing.length) continue;
+
+        // Naming each one only helps when you have adopted most of a
+        // marketplace and a few slipped — that IS drift. Cherry-picking from a
+        // large general catalog is not drift, it is what a catalog is for, and
+        // the scoping above does not separate the two.
+        //
+        // Measured 2026-08-19: claude-plugins-official carries 286 plugins with
+        // 27 installed, and alone produced 259 of this audit's 277 findings —
+        // 95% of the output, burying the 14 warnings underneath it. Meanwhile
+        // the case this check exists for (autodev-memory uninstalled while
+        // autodev-core was in daily use) sits in a 3-plugin marketplace. The
+        // two are separated by COUNT, so summarise past a handful.
+        if (missing.length > PLUGIN_NAME_LIMIT) {
+            add('plugins', 'info',
+                `${marketName}: ${missing.length} of ${cat.plugins.length} published plugins are not installed`,
+                `that is normal for a general catalog — browse with /plugin if you want one`);
+            continue;
+        }
+        for (const p of missing) {
+            add('plugins', 'info', `${p.name}@${marketName} is published in a marketplace you use, but not installed`,
+                `/plugin install ${p.name}@${marketName}`);
         }
     }
 }

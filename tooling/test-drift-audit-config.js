@@ -316,6 +316,51 @@ function runFull(cfg, extra = []) {
         !/extra@mk/.test(run(unadopted)));
 }
 
+// Past a handful, the list collapses to one line. Cherry-picking from a large
+// catalog is not drift, and naming each one buried everything else: measured
+// 2026-08-19, one 286-plugin marketplace produced 259 of 277 total findings.
+//
+// Both sides of the threshold are pinned. A test for the summary alone would
+// pass just as well if naming had been removed altogether, which would throw
+// away the case the check was written for.
+{
+    const big = path.join(TMP, 'big-catalog');
+    fs.mkdirSync(path.join(big, '.claude-plugin'), { recursive: true });
+    // 1 installed, 20 not — comfortably past the limit.
+    const many = Array.from({ length: 21 }, (_, i) => ({ name: `p${i}` }));
+    fs.writeFileSync(path.join(big, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify({ plugins: many }));
+    const outBig = run(config({
+        'plugins/known_marketplaces.json': { big: { installLocation: big } },
+        'plugins/installed_plugins.json': { plugins: { 'p0@big': [{ version: '1.0.0' }] } },
+    }));
+    check('a large catalog is summarised, not enumerated', /20 of 21 published plugins/.test(outBig));
+    check('  and no individual plugin is named', !/p7@big is published/.test(outBig));
+
+    // The other side: at or under the limit, names are still what you want.
+    const small = path.join(TMP, 'small-catalog');
+    fs.mkdirSync(path.join(small, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(small, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify({ plugins: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] }));
+    const outSmall = run(config({
+        'plugins/known_marketplaces.json': { sm: { installLocation: small } },
+        'plugins/installed_plugins.json': { plugins: { 'a@sm': [{ version: '1.0.0' }] } },
+    }));
+    check('a small marketplace still names each missing plugin',
+        /b@sm is published/.test(outSmall) && /c@sm is published/.test(outSmall));
+    check('  and is not summarised', !/published plugins are not installed/.test(outSmall));
+
+    // A fully installed marketplace says nothing at all — the summary must not
+    // fire on zero.
+    const full = run(config({
+        'plugins/known_marketplaces.json': { sm: { installLocation: small } },
+        'plugins/installed_plugins.json': { plugins: {
+            'a@sm': [{ version: '1.0.0' }], 'b@sm': [{ version: '1.0.0' }], 'c@sm': [{ version: '1.0.0' }] } },
+    }));
+    check('a fully installed marketplace produces no plugin finding',
+        !/published/.test(full));
+}
+
 // An install path whose manifest is gone is a broken install, not drift.
 //
 // The marketplace clone has to be a REAL git repo: the sha comparison runs
