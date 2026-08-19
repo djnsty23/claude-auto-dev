@@ -1,5 +1,39 @@
 # Changelog
 
+## [8.83.0] - 2026-08-19
+
+### Added — the learn loop now measures in-session failures, not just committed ones
+
+`mine-fixes` reads git, so it sees only failures that survived long enough to be
+committed and then fixed. The expensive ones never get there: an Edit refused
+because the file was never read, a browser call made before its precondition
+existed, seven queries in a row naming columns that do not exist. Those are paid
+for in retries inside a session and leave no trace in history.
+`check:patterns` reads the transcript tree, and `learn-from-fixes` now documents
+it as the second half of the scheduled measurement — run once per machine, not
+once per repo, and ranked by sessions affected rather than gross hits.
+
+The script moved from `tooling/` to `plugins/autodev-core/scripts/` because a
+scheduled routine runs against the INSTALLED plugin, which ships agents, hooks,
+scripts, skills and templates — not `tooling/`. A skill citing a path that does
+not exist at the install location is a step that fails the first time it fires,
+unattended, with nobody reading.
+
+### Changed — the taxonomy now names what it could only shrug at
+
+Triaged the 65 shell-nonzero-exit and 25 unclassified errors from 24h rather
+than trusting the ranking. 14 of the 25 were browser failures and all were one
+mistake in different wording — a call made before its precondition existed or
+after it expired — so they are now one class with one fix, with renderer hangs
+split off because retrying is the one response that cannot help there.
+`tmp-path-split` matched only the `C:	mp` spelling and so missed
+`Cannot find module '/tmp/...'`, the commonest form and exactly the case the
+rule exists for; fixed, it is visible at 13 sessions in 24h. Three classes had
+no entry at all: shell quoting collapse, subagent schema violations, and
+querying non-existent columns.
+
+Unclassified falls from 14 sessions / 22 hits to 3 / 5 over the same window.
+
 ## [8.82.0] - 2026-08-19
 
 ### Fixed — telemetry recorded a failure exactly zero times, and its suite agreed
