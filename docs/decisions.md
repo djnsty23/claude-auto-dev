@@ -3,6 +3,31 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-08-19 — a remote's HEAD is filtered by shape, not by name
+
+`prdCarrierBranches` filtered remote refs with `!/\/HEAD$/.test(b)` alongside
+`b !== 'origin'`. Both clauses were wrong, and they hid each other.
+
+`for-each-ref --format='%(refname:short)'` renders `refs/remotes/origin/HEAD` as
+**`origin`** and `refs/remotes/upstream/HEAD` as **`upstream`**. A short name
+therefore never ends in `/HEAD`, so the first clause could not fire at any time.
+The second caught origin's HEAD only because of what that remote happens to be
+called — **any second remote's HEAD passed through and was scanned as a
+branch**, costing a slot against `PRD_BRANCH_SCAN` and skewing the skipped
+count.
+
+Now `b.includes('/') && b !== base`: a real remote branch shortens to
+`<remote>/<branch>`, a remote HEAD shortens to a bare remote name. One rule
+covers every remote instead of one hard-coded name.
+
+**Found by mutation-testing, not by reading.** Deleting the `/HEAD$` clause left
+the suite green — the mutant the header had listed as surviving. The first
+fixture written to catch it used `origin/HEAD` and also stayed green, because
+`b !== 'origin'` was quietly doing the work. Only a *second* remote separated
+them. That is [22c] exactly: when a filter looks redundant, ask what it is
+compensating for before deleting it — and make the planted negative something
+the surviving clause cannot catch by accident.
+
 ## 2026-08-19 — slug reversal restores the drive letter
 
 **The CI failure.** `test-drift-audit` failed on `windows-latest` on every run

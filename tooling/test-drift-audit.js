@@ -65,6 +65,12 @@ const check = (label, ok) => cases.push([label, ok]);
 const DAY = 86400;
 const now = Math.floor(Date.now() / 1000);
 
+// Mirrors PRD_BRANCH_SCAN in drift-audit.js. Duplicated rather than imported
+// because the subject is a CLI that runs its audits on require. If the two ever
+// drift apart the cap assertions below fail loudly, which is the intended
+// failure — a silently rescaled cap is exactly what this pins.
+const PRD_BRANCH_SCAN_LOCAL = 40;
+
 function git(repo, args, atEpoch) {
     const env = { ...process.env };
     if (atEpoch) {
@@ -405,6 +411,60 @@ const forRepo = (findings, name) => (findings || [])
     check('old but quiet is NOT reported (the commit half of the AND)', !said(oldQ));
     check('busy but fresh is NOT reported (the age half of the AND)', !said(newB));
     check('neither is NOT reported', !said(newQ));
+}
+
+// ───────────── the branch-scan cap, and the ref filter that feeds its count
+//
+// Closes two of the seven mutants the header lists as surviving both suites:
+// `if (skipped)` at the cap report, and the `!/\/HEAD$/` clause in the ref
+// filter. Neither had a fixture — no existing repo here carries more than a
+// handful of remote refs, and none carries an origin/HEAD at all, so the whole
+// branch could be deleted and every assertion stayed green.
+//
+// This is live behaviour, not a hypothetical: a real run over 74 registered
+// projects emitted 25 of these cap notices.
+//
+// The ref filter needs a SECOND remote to be tested at all, and that is what
+// found a live bug rather than a dead mutant. `%(refname:short)` renders
+// refs/remotes/origin/HEAD as `origin` and refs/remotes/upstream/HEAD as
+// `upstream`, so no short name ever ends in '/HEAD'. The old `!/\/HEAD$/` clause
+// could not fire, and the `b !== 'origin'` beside it caught origin's HEAD purely
+// because of that remote's name — upstream/HEAD was scanned as a branch.
+//
+// So an origin/HEAD fixture proves nothing: removing the HEAD clause leaves it
+// green, which is exactly what happened on the first attempt here. upstream/HEAD
+// is the discriminator, and the skipped COUNT is the observable — 1 when the
+// filter is right, 2 when a remote HEAD leaks through. "A notice appeared" would
+// not separate them.
+{
+    const repo = makeRepo('manybranches');
+    commitPrd(repo, { 'S-1': story(null) }, 5, 'chore: prd');
+    git(repo, 'update-ref refs/remotes/origin/main refs/heads/main');
+    // Not carriers — they sit level with main, so they cost one rev-list each
+    // and fall out before the diff. The cap counts refs, not carriers.
+    for (let i = 0; i < PRD_BRANCH_SCAN_LOCAL + 1; i++) {
+        git(repo, `update-ref refs/remotes/origin/b${i} refs/heads/main`);
+    }
+    git(repo, 'update-ref refs/remotes/origin/HEAD refs/heads/main');
+    git(repo, 'update-ref refs/remotes/upstream/HEAD refs/heads/main');
+
+    const f = forRepo(run(), 'manybranches');
+    const cap = f.find((x) => /older remote branch\(es\) not checked/.test(x.detail));
+    check('more remote branches than the scan cap → the cap is reported', !!cap);
+    check('  neither remote\'s HEAD is counted as a branch (1 skipped, not 2 or 3)',
+        !!cap && /\b1 older remote branch\(es\)/.test(cap.detail));
+    check('  and it names the cap it applied', !!cap && new RegExp(`scanned the ${PRD_BRANCH_SCAN_LOCAL} most recent`).test(cap.detail));
+}
+
+// The negative half — without it, "the cap is reported" could pass because the
+// notice is emitted unconditionally.
+{
+    const repo = makeRepo('fewbranches');
+    commitPrd(repo, { 'S-1': story(null) }, 5, 'chore: prd');
+    git(repo, 'update-ref refs/remotes/origin/main refs/heads/main');
+    for (let i = 0; i < 3; i++) git(repo, `update-ref refs/remotes/origin/c${i} refs/heads/main`);
+    check('fewer branches than the cap → no cap notice',
+        !forRepo(run(), 'fewbranches').some((x) => /older remote branch\(es\) not checked/.test(x.detail)));
 }
 
 let pass = 0, fail = 0;

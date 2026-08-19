@@ -317,7 +317,16 @@ function prdCarrierBranches(repo) {
     const base = defaultRef(repo);
     const all = g(repo, `for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes`)
         .split('\n').map((b) => b.replace(/'/g, '').trim())
-        .filter((b) => b && !/\/HEAD$/.test(b) && b !== 'origin' && b !== base);
+        // A remote's HEAD is not a branch. `%(refname:short)` renders
+        // refs/remotes/origin/HEAD as `origin` and refs/remotes/upstream/HEAD as
+        // `upstream` — the short form NEVER ends in '/HEAD', so the `!/\/HEAD$/`
+        // test this replaces could not fire, and the `b !== 'origin'` beside it
+        // caught origin's HEAD only because of what that remote is called. Any
+        // second remote's HEAD went through as a branch.
+        //
+        // Requiring a '/' drops all of them: a real remote branch shortens to
+        // `<remote>/<branch>` and a remote HEAD shortens to a bare remote name.
+        .filter((b) => b && b.includes('/') && b !== base);
 
     const scanned = all.slice(0, PRD_BRANCH_SCAN);
     const carriers = [];
