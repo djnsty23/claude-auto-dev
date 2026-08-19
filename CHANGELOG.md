@@ -1,5 +1,16 @@
 # Changelog
 
+## [8.86.0] - 2026-08-19
+
+### Added — two more advisory rules, taking real-failure coverage to 23.5%
+
+sql-schema-guess (7 hits in 24h) and agent-schema-violation (6). Replayed against
+the real failures of the last day the advisory now speaks on 42 of 179, up from
+29. A guessed column fails the whole query, so each guess costs another round
+trip to production and the hit rate does not improve — one agent missed seven in
+a row where one introspection query answered all seven. A schema violation reads
+as the agent misbehaving and is usually the contract being wrong.
+
 ## [8.85.0] - 2026-08-19
 
 ### Added — the failure advisory covers four classes, and now the browser too
