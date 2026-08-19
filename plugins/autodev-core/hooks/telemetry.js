@@ -83,11 +83,11 @@ try {
     // that rule is load-bearing, which is the per-call cost of printing.
     try {
         if (failed) {
-            const { adviseOnTmpSplit } = require(path.join(__dirname, '..', 'scripts', 'tmp-path-advisory.js'));
-            const advice = adviseOnTmpSplit(event.tool, toolResponse, failed);
+            const { adviseOnToolFailure } = require(path.join(__dirname, '..', 'scripts', 'tool-failure-advisory.js'));
+            const advice = adviseOnToolFailure(event.tool, toolResponse, failed);
             if (advice) {
                 process.stdout.write(JSON.stringify({
-                    hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: advice },
+                    hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: advice.advice },
                 }));
             }
         }

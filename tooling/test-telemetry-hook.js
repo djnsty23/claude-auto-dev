@@ -161,7 +161,8 @@ check('the ordinary happy path prints nothing at all',
 // own, so driving the module only through the hook leaves the module's guard
 // untestable — both could be deleted and the suite stayed green. Verified by
 // mutation, which is the only reason this section exists.
-const { adviseOnTmpSplit } = require('../plugins/autodev-core/scripts/tmp-path-advisory.js');
+const { adviseOnToolFailure } = require('../plugins/autodev-core/scripts/tool-failure-advisory.js');
+const adviseOnTmpSplit = (t, r, f) => { const a = adviseOnToolFailure(t, r, f); return a && a.id === 'tmp-path-split' ? a.advice : null; };
 const SIG = "Error: Cannot find module '/tmp/ai.json'";
 
 check('module: advises on a failed Bash call carrying the signature',
@@ -173,6 +174,38 @@ check('module: silent on a failure with no /tmp signature',
   adviseOnTmpSplit('Bash', 'Error: connection refused', true) === null);
 check('module: silent when the signature is buried past the head of a long log',
   adviseOnTmpSplit('Bash', 'x'.repeat(900) + SIG, true) === null);
+
+// shell-quoting joins the same advisory: 9 sessions in 24h, already documented,
+// not falling. The negative matters more than the positive — this prints from a
+// hook that runs on every call in the session.
+// The "Error: Exit code N" prefix is not decoration — measured 2026-08-19,
+// ALL 260 failed tool results in 24h are strings beginning "Error: ". A fixture
+// without it is not a failed call and the hook correctly ignores it, which is
+// how the first version of this case failed for the right reason.
+const QUOTE_ERR = "Error: Exit code 2 /usr/bin/bash: -c: line 104: unexpected EOF while looking for matching quote";
+check('module: advises on a quoting collapse',
+  (adviseOnToolFailure('Bash', QUOTE_ERR, true) || {}).id === 'shell-quoting');
+check('module: silent when the same text came from a call that SUCCEEDED',
+  adviseOnToolFailure('Bash', QUOTE_ERR, false) === null);
+const quoteHook = advise({ tool_name: 'Bash', tool_input: {}, tool_response: QUOTE_ERR });
+check('the hook emits the quoting advisory end to end',
+  /Write the script to a file/.test(quoteHook.ctx || ''), String(quoteHook.ctx).slice(0, 80));
+
+// The browser rules are tool-agnostic, so they must be driven with a non-Bash
+// tool name — a rule that only ever fired on Bash would be silently dead for the
+// surface it was written for.
+const CHROME_ERR = "Error: Multiple Chrome browsers are connected to this account and none has been selected";
+const NAV_ERR = "Error: Failed to execute JavaScript: Inspected target navigated or closed";
+check('module: a browser rule fires for an MCP browser tool, not just Bash',
+  (adviseOnToolFailure('mcp__claude-in-chrome__computer', CHROME_ERR, true) || {}).id === 'browser-blocked-on-user');
+check('module: names the self-destroying eval',
+  (adviseOnToolFailure('mcp__claude-in-chrome__javascript_tool', NAV_ERR, true) || {}).id === 'browser-self-destroyed-eval');
+check('module: browser rules stay silent on a call that SUCCEEDED',
+  adviseOnToolFailure('mcp__claude-in-chrome__computer', CHROME_ERR, false) === null);
+// Paired negative for the tool filter: the Bash-only rules must NOT fire for a
+// browser tool, or `tools` is decorative.
+check('module: a Bash-only rule does not fire for a browser tool',
+  adviseOnToolFailure('mcp__claude-in-chrome__computer', "Error: Cannot find module '/tmp/x.json'", true) === null);
 
 // An unreachable exporter must not delay or fail the call.
 const t0 = Date.now();
