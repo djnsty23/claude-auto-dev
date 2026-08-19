@@ -120,6 +120,60 @@ check('a successful call is still ok:true', okOf(fine) === true, fine.lines[0]);
 const noisy = run({ tool_name: 'Bash', tool_input: {}, tool_response: { stdout: 'Error: 0 found', is_error: false } });
 check('  stdout that mentions an error does not fake a failure', okOf(noisy) === true, noisy.lines[0]);
 
+// ---- the /tmp advisory ----
+// It rides in this hook instead of its own because a dedicated Bash hook costs
+// ~6.3 min/day here. The cases that matter are therefore about SILENCE: this
+// hook prints on every tool call in the whole session, so a false positive is
+// far more expensive than a missed advisory.
+const advise = (payload) => {
+  const r = run(payload);
+  let out = null;
+  try { out = JSON.parse(r.stdout || 'null'); } catch { /* asserted below */ }
+  return { r, ctx: out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext };
+};
+
+const tmpFail = advise({ tool_name: 'Bash', tool_input: {},
+  tool_response: "Error: Cannot find module '/tmp/ai.json'" });
+check('a failed /tmp read gets the split explained', /\/tmp split|C:\tmp/.test(tmpFail.ctx || ''), String(tmpFail.ctx).slice(0, 90));
+check('  and it is still recorded as a normal telemetry row', tmpFail.r.lines.length === 1);
+check('  and the hook still exits 0', tmpFail.r.status === 0);
+
+// Paired negatives. Each is a case the advisory must NOT fire on, and together
+// they are why this can print from a hook that runs on every single call.
+// This negative MUST carry the signature, or it passes on the signature check
+// and never reaches the failed-only guard it claims to test. Verified by
+// mutation: deleting `if (!failed)` turns this red. The first version used
+// 'wrote /tmp/x.json ok', which matches no signature — so both guards could be
+// removed and the suite stayed green.
+check('a SUCCESSFUL command whose stdout CONTAINS the signature says nothing',
+  advise({ tool_name: 'Bash', tool_input: {},
+    tool_response: "grep found: Cannot find module '/tmp/ai.json'" }).ctx == null);
+check('a failure that is NOT the /tmp split says nothing',
+  advise({ tool_name: 'Bash', tool_input: {}, tool_response: 'Error: connection refused' }).ctx == null);
+check('a non-Bash tool says nothing',
+  advise({ tool_name: 'Read', tool_input: {}, tool_response: "Error: Cannot find module '/tmp/ai.json'" }).ctx == null);
+check('the ordinary happy path prints nothing at all',
+  (run({ tool_name: 'Bash', tool_input: {}, tool_response: 'ok' }).stdout || '') === '');
+
+// ---- the advisory module, driven DIRECTLY ----
+// The hook guards the call with its own `if (failed)` fast-path, which skips a
+// require on the ~98% of calls that succeed. That guard SHADOWS the module's
+// own, so driving the module only through the hook leaves the module's guard
+// untestable — both could be deleted and the suite stayed green. Verified by
+// mutation, which is the only reason this section exists.
+const { adviseOnTmpSplit } = require('../plugins/autodev-core/scripts/tmp-path-advisory.js');
+const SIG = "Error: Cannot find module '/tmp/ai.json'";
+
+check('module: advises on a failed Bash call carrying the signature',
+  typeof adviseOnTmpSplit('Bash', SIG, true) === 'string');
+check('module: SILENT when the same text came from a call that SUCCEEDED',
+  adviseOnTmpSplit('Bash', SIG, false) === null);
+check('module: silent for a non-Bash tool', adviseOnTmpSplit('Read', SIG, true) === null);
+check('module: silent on a failure with no /tmp signature',
+  adviseOnTmpSplit('Bash', 'Error: connection refused', true) === null);
+check('module: silent when the signature is buried past the head of a long log',
+  adviseOnTmpSplit('Bash', 'x'.repeat(900) + SIG, true) === null);
+
 // An unreachable exporter must not delay or fail the call.
 const t0 = Date.now();
 const slow = run({ tool_name: 'Read', tool_input: { file_path: 'x' } }, { CLAUDE_OTEL_ENDPOINT: 'http://127.0.0.1:9/none' });

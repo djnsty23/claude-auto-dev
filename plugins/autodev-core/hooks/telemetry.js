@@ -74,6 +74,25 @@ try {
         ok: !failed,
     };
 
+    // One advisory rides along here rather than in a hook of its own. This hook
+    // already spawns on every tool call, and a dedicated PostToolUse hook on
+    // Bash would cost ~6.3 minutes of wall clock a day on this machine (64ms a
+    // spawn, 5,923 Bash calls measured) to prevent a class costing about five.
+    // It stays silent unless a FAILED Bash call carries the /tmp signature —
+    // roughly 0.15% of calls — so "telemetry does not print" still holds where
+    // that rule is load-bearing, which is the per-call cost of printing.
+    try {
+        if (failed) {
+            const { adviseOnTmpSplit } = require(path.join(__dirname, '..', 'scripts', 'tmp-path-advisory.js'));
+            const advice = adviseOnTmpSplit(event.tool, toolResponse, failed);
+            if (advice) {
+                process.stdout.write(JSON.stringify({
+                    hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: advice },
+                }));
+            }
+        }
+    } catch { /* an advisory must never be why a tool call failed */ }
+
     try {
         const dir = path.join(process.cwd(), '.claude', 'reports');
         fs.mkdirSync(dir, { recursive: true });
