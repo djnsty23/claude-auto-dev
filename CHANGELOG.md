@@ -1,5 +1,45 @@
 # Changelog
 
+## [8.84.0] - 2026-08-19
+
+### Added — the Windows /tmp split gets named when it bites
+
+13 distinct sessions hit it in 24h, one each, and it is already documented in an
+always-loaded rules file. That is the finding: a rule in context for every
+session that still does not prevent the failure will not be fixed by more prose.
+It survives because the error text misdirects — Git Bash resolves /tmp inside
+its own root while Node reads it as C:	mp, so the message is "Cannot find
+module '/tmp/ai.json'", which reads as "the file was not created" and sends you
+to debug the writer.
+
+Not its own hook, by measurement: one Node spawn costs 64ms here and Bash is 70%
+of tool calls (5,923/day), so a dedicated PostToolUse hook would spend ~6.3
+minutes of wall clock a day to prevent a class costing about five. It is a pure
+function called from the hook that already spawns, and it speaks only on a
+failed Bash call carrying the signature — about 0.15% of calls.
+
+### Changed — the shell catch-all was about half fiction
+
+`shell-nonzero-exit` led every report with 28 sessions and 47 hits behind the
+advice "check whether the exit code IS the answer". Measured across 100 shell
+exits in 24h, it split three ways: `command-not-found` (126/127, never "the
+answer"), `shell-exit-may-be-the-answer` (exit 1 or 2 with output and no error
+marker — grep exits 1 on no-match, and an && chain turns that answer into a
+failed command), and `shell-fault`, which now means what its name says. On the
+same window that is 17 sessions of answers-shaped-like-errors against 13 of real
+faults.
+
+Class tests may now be predicates as well as regexes, since that split needs the
+exit code AND the presence of an error marker, and no single regex states both.
+
+### Fixed — two remedies that would not have helped
+
+From a post-mortem of a session that spent two hours retrying browser calls
+against an error whose own text says a user must pick a browser: that class is a
+blocked decision, not flakiness. And "Inspected target navigated or closed" is
+frequently self-inflicted — a script that calls location.reload() then awaits has
+destroyed the context it runs in. Navigate in one call, evaluate in the next.
+
 ## [8.83.0] - 2026-08-19
 
 ### Added — the learn loop now measures in-session failures, not just committed ones
