@@ -126,16 +126,45 @@ function auditSchedules() {
 // ------------------------------------------------------------- settings
 // An allow rule that can express everything a deny rule forbids makes the deny
 // list decorative. These are the shapes that shipped in a real template.
+// Two classes, and the difference decides whether narrowing is a real fix.
+//
+//   always: true  — the command's PURPOSE is arbitrary execution, so no
+//   argument makes it safe. `Bash(sh -c *)` is every bit as total as
+//   `Bash(sh *)`, and the only honest advice is to delete the rule.
+//
+//   always: false — an ordinary command where the bare wildcard is the whole
+//   problem. `Bash(export *)` also allows `export X=1; <anything>` because the
+//   rule matches a prefix; `Bash(export MSYS_NO_PATHCONV=*)` allows one
+//   assignment and nothing else.
+//
+// The distinction was missing, and its absence made this check's own advice
+// impossible to follow: the fix line said "narrow it to the specific command
+// you need" while the matcher keyed on the command NAME, so a narrowed rule
+// stayed flagged and deletion was the only thing that ever cleared a finding.
+// Detection was right; the prescribed cure had never been run against the
+// detector. Measured on a real settings.json 2026-08-19 — three fail-severity
+// findings, none of which narrowing could clear.
 const SHELL_ESCAPES = [
-    { re: /^Bash\((?:ba)?sh\s/, why: 'runs any command, including every denied one' },
-    { re: /^Bash\(source\s/, why: 'same, via a sourced script' },
-    { re: /^Bash\(eval\s/, why: 'arbitrary evaluation' },
+    { re: /^Bash\((?:ba)?sh\s/, why: 'runs any command, including every denied one', always: true },
+    { re: /^Bash\(source\s/, why: 'same, via a sourced script', always: true },
+    { re: /^Bash\(eval\s/, why: 'arbitrary evaluation', always: true },
     { re: /^Bash\((?:curl|wget)\s/, why: 'fetch-and-execute, and an exfiltration path' },
     { re: /^Bash\(export\s/, why: 'can rewrite PATH for later commands' },
     { re: /^Bash\(chmod\s/, why: 'makes any written file executable' },
     { re: /^Bash\(rm\s+-f/, why: 'deletion, usually sitting above a deny list about deletion' },
-    { re: /^WebFetch\(domain:\*\)/, why: 'blanket approval for every domain' },
+    { re: /^WebFetch\(domain:\*\)/, why: 'blanket approval for every domain', always: true },
 ];
+
+// A rule is unconstrained when everything after the command and its flags is a
+// bare '*' (or nothing at all). Flags are dropped first so `Bash(rm -f *)` and
+// `Bash(chmod +x *)` still read as unconstrained — the wildcard is the target,
+// and a flag does not narrow which files it hits.
+function unconstrainedRule(rule) {
+    const m = rule.match(/^\w+\(([^)]*)\)$/);
+    if (!m) return true;
+    const rest = m[1].trim().split(/\s+/).slice(1).filter((t) => !/^[-+]/.test(t));
+    return rest.length === 0 || (rest.length === 1 && rest[0] === '*');
+}
 
 function auditSettings() {
     const p = path.join(CONFIG, 'settings.json');
@@ -146,10 +175,12 @@ function auditSettings() {
 
     for (const rule of allow) {
         for (const esc of SHELL_ESCAPES) {
-            if (esc.re.test(rule)) {
+            if (esc.re.test(rule) && (esc.always || unconstrainedRule(rule))) {
                 add('settings', deny.length ? 'fail' : 'warn',
                     `allow rule "${rule}" ${esc.why}${deny.length ? ` — and there are ${deny.length} deny rules it can bypass` : ''}`,
-                    'remove the rule, or narrow it to the specific command you need');
+                    esc.always
+                        ? 'delete the rule — this command runs arbitrary code, so no argument narrows it'
+                        : 'constrain the argument (e.g. Bash(export MSYS_NO_PATHCONV=*)) rather than leaving a bare *, or delete the rule');
             }
         }
         // A path rule pointing at something that no longer exists is dead weight

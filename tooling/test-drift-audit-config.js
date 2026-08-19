@@ -104,6 +104,47 @@ function runFull(cfg, extra = []) {
     check('a clean settings.json produces no settings finding', !/allow rule/.test(out));
 }
 
+// Narrowing has to actually clear the finding, because that is what the fix
+// line tells the reader to do. It did not: the matcher keyed on the command
+// NAME, so `Bash(export SP=*)` was reported exactly like `Bash(export *)` and
+// deletion was the only move that ever worked. Advice a tool gives has to be
+// run against the tool.
+{
+    const bare = run(config({ 'settings.json': {
+        permissions: { allow: ['Bash(export *)'], deny: ['Bash(rm *)'] } } }));
+    const narrowed = run(config({ 'settings.json': {
+        permissions: { allow: ['Bash(export MSYS_NO_PATHCONV=*)'], deny: ['Bash(rm *)'] } } }));
+    check('a bare-wildcard export IS reported', /allow rule/.test(bare));
+    check('  narrowing it to one variable CLEARS the finding', !/allow rule/.test(narrowed));
+
+    const bareFetch = run(config({ 'settings.json': {
+        permissions: { allow: ['Bash(wget *)'], deny: ['Bash(rm *)'] } } }));
+    const narrowFetch = run(config({ 'settings.json': {
+        permissions: { allow: ['Bash(wget https://api.github.com/*)'], deny: ['Bash(rm *)'] } } }));
+    check('a bare-wildcard wget IS reported', /allow rule/.test(bareFetch));
+    check('  pinning it to one host CLEARS the finding', !/allow rule/.test(narrowFetch));
+}
+
+// The other class: narrowing must NOT clear a command whose purpose is running
+// arbitrary code. Without this the change above would be a way to silence every
+// finding by adding an argument.
+{
+    const narrowedShell = run(config({ 'settings.json': {
+        permissions: { allow: ['Bash(bash -c *)'], deny: ['Bash(rm *)'] } } }));
+    check('an argument does NOT clear bash -c — it still runs anything',
+        /allow rule/.test(narrowedShell));
+    const narrowedEval = run(config({ 'settings.json': {
+        permissions: { allow: ['Bash(eval "$X")'], deny: ['Bash(rm *)'] } } }));
+    check('  nor eval', /allow rule/.test(narrowedEval));
+}
+
+// Flags are not constraints: the wildcard is still the target.
+{
+    const out = run(config({ 'settings.json': {
+        permissions: { allow: ['Bash(rm -f *)'], deny: ['Bash(git push *)'] } } }));
+    check('a flag does not count as narrowing (rm -f * still reported)', /allow rule/.test(out));
+}
+
 // ------------------------------------------------------------ auditSchedules
 
 {
