@@ -1,5 +1,29 @@
 # Changelog
 
+## [8.89.0] - 2026-08-19
+
+### Added — `--by-cost`, and a cap on the advisory
+
+The miner ranked by frequency and breadth, so a class that fails fast ranked
+level with one burning two minutes a hit. On the first real run the two views
+disagree exactly as expected: `command-timeout` is the top cost class at 36.5
+minutes in 24h with a 130s median, while ranking sixth by breadth. Fourteen
+two-minute timeouts is a real cost no frequency ranking would surface.
+
+Timing pairs a `tool_use` timestamp with its result, because the transcript's
+only `durationMs` belongs to attachments and is not tool duration. It measures
+WALL CLOCK INCLUDING PERMISSION WAITS and the header says so rather than leaving
+the reader to assume. The worry that permission prompts would dominate was
+unfounded — denials have a 1.0s median, because a denial is fast. Median, not
+mean, so one call left pending overnight cannot own the ranking.
+
+The advisory is capped at six rules; a seventh earns its place on cost per hit,
+never frequency, and must name which rule it replaces. The weekly review may now
+open a PR proposing one rule, and may never merge — report-only has a known
+failure mode in this repo, where a correct detection was filed as a warning
+nobody read.
+
+
 ## [8.88.0] - 2026-08-19
 
 ### Added — show-your-work and writing-for-agents
