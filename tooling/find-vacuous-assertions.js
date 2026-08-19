@@ -138,11 +138,30 @@ const [subject, suite] = process.argv.slice(2);
 // instead of running. A gate whose failure mode is a stack trace is a gate nobody
 // runs, so say what it wants and exit cleanly.
 if (!subject || !suite) {
-    console.error('\nUsage: node tooling/find-vacuous-assertions.js <subject.js> <suite.js>\n');
+    console.error('\nUsage: node tooling/find-vacuous-assertions.js <subject.js> <suite.js>');
+    console.error('   or: npm run check:vacuity -- <subject.js> <suite.js>\n');
     console.error('Mutates <subject.js> and checks that <suite.js> notices. Both are required,');
     console.error('and both must be committed — the subject is restored from git.\n');
     console.error('Example:');
-    console.error('  node tooling/find-vacuous-assertions.js tooling/check-superseded.js tooling/test-superseded.js\n');
+    console.error('  npm run check:vacuity -- tooling/check-superseded.js tooling/test-superseded.js\n');
+
+    // The npm form is worth spelling out, because `npm run check:vacuity` with
+    // no arguments lands here and reads like a broken script rather than a
+    // script waiting for arguments. It is not broken; npm just needs `--`
+    // before them.
+    //
+    // The suite list makes the next step copy-pasteable. A gate you have to
+    // reconstruct an invocation for is a gate nobody runs, which is the same
+    // failure this tool exists to find.
+    try {
+        const suites = fs.readdirSync(__dirname)
+            .filter((f) => /^test-.*\.js$/.test(f) && f !== 'test-all.js');
+        console.error(`Suites available (${suites.length}):`);
+        for (const s of suites) console.error(`  tooling/${s}`);
+        console.error('\nOne suite at a time is the contract. A subject covered by TWO suites will');
+        console.error('report every mutant the other suite catches as a survivor, so sweep both and');
+        console.error('intersect — the single-suite number always overstates the gap.\n');
+    } catch { /* listing is a convenience, not the contract */ }
     process.exit(2);
 }
 
