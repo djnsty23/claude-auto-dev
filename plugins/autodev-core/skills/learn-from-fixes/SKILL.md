@@ -129,3 +129,43 @@ Report-only rules for the unattended run:
   unreviewed rule is a guess wearing a rule's clothes.
 - End the run by touching the scheduled task's `.last-run` heartbeat, clean or
   not, so `drift-audit` can tell a quiet week from a dead schedule.
+
+### The other half: what went wrong IN the session
+
+`mine-fixes` reads git, so it can only see failures that survived long enough to
+be committed and then fixed. The failures that cost the most time never get
+there — an Edit refused because the file was never read, a browser call made
+before its precondition existed, a query naming a column that does not exist.
+They are paid for in retries inside a session and leave no trace in history.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/analyze-session-patterns.js" --days 7 --json
+```
+
+Two differences from `mine-fixes` that change how it is run and read:
+
+- **It is machine-wide, not per-repo.** It reads the transcript tree, so run it
+  ONCE per routine rather than once per repo — looping it over repos reports the
+  same fleet numbers N times and makes a single stuck session look systemic.
+- **Rank by `sessions`, not `count`.** A class hitting twenty sessions once each
+  is a fleet problem worth a rule; one hitting a single session forty times is
+  that session having a bad day, and the output flags the second case as
+  concentration so it cannot be misread as the first.
+
+Report-only, with the same rules as above, plus two specific to this tool:
+
+- **Quote the population, never a bare percentage.** The output leads with files
+  scanned, lines skipped as outside the window, tool results and the error rate
+  for a reason: this tool has already produced two confidently wrong readings —
+  a denominator that counted only error-bearing lines (so "783 of 783 failed"),
+  and a window that filtered by file mtime while counting events months older.
+  A share with no denominator beside it is how both survived review.
+- **Check `--by-day` before proposing anything.** A class that is already falling
+  needs no new rule; something has fixed it. The Bash denylist removal shows the
+  shape to look for — 40, 34, 2, 1 across four days while the daily error total
+  held, so the fall was the change and not a quiet weekend. Propose work for
+  classes that are flat or rising, and say which day the series starts.
+
+A class whose fix is already written down and which is still flat is the useful
+finding: it means the rule exists and is not reaching anyone, so the answer is a
+gate or a hook rather than another paragraph.

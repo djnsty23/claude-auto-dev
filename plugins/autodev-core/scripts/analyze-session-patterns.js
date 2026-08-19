@@ -14,7 +14,7 @@
 // per-project .claude/reports/telemetry-*.jsonl only ever sees its own project.
 //
 // Usage:
-//   node tooling/analyze-session-patterns.js [--days N] [--json] [--root PATH]
+//   node plugins/autodev-core/scripts/analyze-session-patterns.js [--days N] [--json]
 //                                            [--min N] [--project SUBSTR]
 //
 // Pure Node, no dependencies, read-only. Never writes anything.

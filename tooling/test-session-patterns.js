@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Suite for tooling/analyze-session-patterns.js.
+// Suite for plugins/autodev-core/scripts/analyze-session-patterns.js.
 //
 // The property that carries the weight is WINDOWING. The first version of this
 // tool filtered by file mtime and then counted every event inside the file, so a
@@ -19,7 +19,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TOOL = path.resolve(__dirname, 'analyze-session-patterns.js');
+const TOOL = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'analyze-session-patterns.js');
 let pass = 0, fail = 0;
 const check = (label, ok, detail) => {
     if (ok) { pass++; console.log('  ok   ' + label); }
