@@ -1,5 +1,22 @@
 # Changelog
 
+## [8.88.0] - 2026-08-19
+
+### Added — show-your-work and writing-for-agents
+
+show-your-work records choices as they are made, the complement to
+check:patterns reading failures afterwards. Append-only TSV, one row per
+decision, rejections included, since a rejection records a road not taken that
+nothing else captures. Not hook-enforced on purpose: a decision log a hook
+writes is a transcript with extra steps.
+
+writing-for-agents governs document architecture for documents an AGENT
+executes, a different axis from rules/writing-style.md, which governs prose for
+people. Its central claim: a pointer's wording, not its target, decides whether
+material is ever reached, so a must-have behind a weak pointer is a variance bug.
+check:triggers measures exactly that, and now reports about 3,668 tokens of skill
+descriptions resident every session.
+
 ## [8.87.0] - 2026-08-19
 
 ### Added — wizard, grilling, and check:triggers
