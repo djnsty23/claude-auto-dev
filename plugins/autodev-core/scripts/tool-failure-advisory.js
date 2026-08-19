@@ -34,6 +34,16 @@
 // signatures are unambiguous on their own, and the browser surface spans several
 // MCP servers whose tool names would otherwise need enumerating — and
 // re-enumerating every time one is added.
+// THE STOPPING RULE (decided 2026-08-19). Six rules is the cap, and a seventh
+// earns its place on COST PER HIT, never on frequency. The two rules that
+// justified themselves did so because one class cost a session two hours
+// across two hits; a class a session shrugs off and recovers from unaided is
+// noise on a hook that evaluates every rule on every failed call. If a new
+// class is genuinely worth an advisory, ask first which existing rule it
+// replaces.
+//
+// The measurement to run before proposing one: npm run check:patterns -- --by-cost.
+// Breadth and cost disagree, and cost is the one that matters here.
 const RULES = [
     {
         id: 'tmp-path-split',

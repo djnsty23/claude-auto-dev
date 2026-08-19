@@ -509,6 +509,60 @@ function checkHookSpawnsHidden() {
   for (const e of exposed) console.log(`         ${e}`);
 }
 
+// A project slug encodes an absolute path with every separator replaced by '-'.
+// Reversing it without putting the drive letter back yields a rooted path with
+// NO DRIVE, and on Windows that is drive-RELATIVE: it resolves against whatever
+// drive the process happens to be on.
+//
+// That shipped and hid for as long as the code existed. drift-audit found its
+// projects when cwd was on C: and missed them from a D: workspace, so the
+// Windows CI job discovered zero projects, every finding vanished, and the
+// assertions expecting no finding passed vacuously — a green half of a suite
+// that was structurally incapable of firing.
+//
+// Scoped to the slug reversal itself rather than to bare-slash concatenation:
+// measured against this tree, a '/' + x scan returned 4 hits and all 4 were
+// legitimate (a display key, a substring test, and the two guarded fallbacks).
+// This prints its population, so "nothing found" cannot masquerade as "clean".
+function checkSlugReversalRestoresDrive() {
+  const REVERSAL = /\.replace\(\/-\/g,\s*['"]\/['"]\)/g;
+  const DRIVE_RESTORE = /\^\(\[A-Za-z\]\)--/;
+
+  const files = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === 'node_modules') continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.js')) files.push(p);
+    }
+  };
+  walk(PLUGINS_DIR);
+
+  let sites = 0;
+  const carriers = [];
+  const naked = [];
+
+  for (const f of files) {
+    const src = fs.readFileSync(f, 'utf8');
+    const hits = src.match(REVERSAL);
+    if (!hits) continue;
+    sites += hits.length;
+    const rel = path.relative(ROOT, f).replace(/\\/g, '/');
+    carriers.push(rel);
+    if (!DRIVE_RESTORE.test(src)) naked.push(rel);
+  }
+
+  if (!sites) {
+    return log('WARN', `Slug reversal: 0 site(s) found across ${files.length} plugin script(s) — the scan matched nothing, so it proves nothing`);
+  }
+  if (!naked.length) {
+    return log('PASS', `Slug reversal: ${sites} site(s) across ${carriers.length} file(s), all restore the drive letter`);
+  }
+  log('FAIL', `${naked.length} of ${carriers.length} file(s) reverse a project slug without restoring the drive letter (drive-relative on Windows):`);
+  for (const n of naked) console.log(`         ${n}`);
+}
+
 // ---------------------------------------------------------------- run
 
 console.log('Validating autodev marketplace...\n');
@@ -526,6 +580,7 @@ checkNoPrivateNames();
 checkNoStaleMutationBackups();
 checkUntestedHooks();
 checkHookSpawnsHidden();
+checkSlugReversalRestoresDrive();
 
 console.log(`\nSummary: ${passCount} PASS, ${failCount} FAIL, ${warnCount} WARN`);
 process.exit(failCount > 0 ? 1 : 0);

@@ -38,6 +38,18 @@ function line(ts, { error = null, ok = false } = {}) {
     return JSON.stringify({ type: 'user', timestamp: ts, message: { role: 'user', content: [block] } });
 }
 
+// A tool_use carrying its own timestamp. Pricing a failure needs the pair:
+// the request time and the result time, matched by tool_use_id.
+function useLine(ts, id) {
+    return JSON.stringify({ type: 'assistant', timestamp: ts,
+        message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: {} }] } });
+}
+
+function resultLine(ts, id, error) {
+    return JSON.stringify({ type: 'user', timestamp: ts,
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: error }] } });
+}
+
 function fixture(lines) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sesspat-'));
     const proj = path.join(root, 'C--Users-x-code-demo');
@@ -123,6 +135,30 @@ check('  exit 127 is its own class, never "maybe the answer"',
     /command-not-found/.test(shellOut.out), shellOut.out.slice(0, 400));
 check('  an exit carrying a Traceback IS a fault',
     /shell-fault/.test(shellOut.out), shellOut.out.slice(0, 400));
+
+// ---- wall-clock cost ----
+// Breadth and cost disagree, which is the whole reason this view exists: on
+// real data the top cost class was sixth by breadth. The fixture makes the
+// cheap class MORE frequent than the expensive one, so a ranking that
+// secretly sorts by count cannot pass.
+const cost = fixture([
+    useLine(iso(3600000), 'slow1'),
+    resultLine(iso(3600000 - 120000), 'slow1', 'Error: Exit code 143 Command timed out after 2m 0s'),
+    useLine(iso(3000000), 'fast1'),
+    resultLine(iso(3000000 - 1000), 'fast1', 'Error: Cannot find module ' + String.fromCharCode(39) + '/tmp/a.json' + String.fromCharCode(39)),
+    useLine(iso(2900000), 'fast2'),
+    resultLine(iso(2900000 - 1000), 'fast2', 'Error: Cannot find module ' + String.fromCharCode(39) + '/tmp/b.json' + String.fromCharCode(39)),
+]);
+const costOut = run(cost, ['--days', '1', '--no-examples', '--by-cost']);
+check('prices failures in wall clock and says how many it could price',
+    /could be priced in wall clock/.test(costOut.out), costOut.out.slice(0, 300));
+const costBlock = costOut.out.slice(costOut.out.indexOf('WALL-CLOCK COST'));
+const slowAt = costBlock.indexOf('command-timeout');
+const fastAt = costBlock.indexOf('tmp-path-split');
+check('  the slow class outranks the more FREQUENT cheap one',
+    slowAt !== -1 && fastAt !== -1 && slowAt < fastAt, costBlock.slice(0, 260));
+check('  and the cost view is opt-in, absent without the flag',
+    !/WALL-CLOCK COST/.test(run(cost, ['--days', '1', '--no-examples']).out));
 
 // ---- privacy ----
 const SECRET = 'sk-live-CANARY-51N3z9';

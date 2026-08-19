@@ -259,10 +259,14 @@ const stats = {
     linesBeforeWindow: 0,
     toolResults: 0,
     errors: 0,
+    timed: 0,
 };
 const byClass = new Map();   // id -> { count, sessions:Set, perSession:Map, examples }
 const bySession = new Map(); // session file -> { errors, classes:Map }
 const byDay = new Map();     // YYYY-MM-DD -> Map(classId -> count)
+// tool_use id -> its timestamp, so an error can be priced in wall clock.
+// Filled on the same forward pass: a tool_use always precedes its result.
+const useTs = new Map();
 
 for (const f of files) {
     let raw;
@@ -287,6 +291,17 @@ for (const f of files) {
         // parsing 145k lines to get a total is the slow way round.
         let at = -1;
         while ((at = ln.indexOf('"type":"tool_result"', at + 1)) !== -1) stats.toolResults++;
+        // Capture tool_use times so a failure can be priced. Same prefilter
+        // discipline as below: only lines that can carry one are parsed.
+        if (ln.indexOf('"type":"tool_use"') !== -1) {
+            try {
+                const u = JSON.parse(ln);
+                const uc = u && u.message && u.message.content;
+                if (Array.isArray(uc) && typeof u.timestamp === 'string') {
+                    for (const b of uc) if (b && b.type === 'tool_use' && b.id) useTs.set(b.id, Date.parse(u.timestamp));
+                }
+            } catch { /* a malformed line is not worth failing the scan */ }
+        }
         // Cheap pre-filter: parsing 145k JSON lines to find a few hundred is waste.
         if (ln.indexOf('"is_error":true') === -1) continue;
         let d;
@@ -302,10 +317,22 @@ for (const f of files) {
             text = String(text == null ? '' : text);
             const id = classify(text);
 
-            if (!byClass.has(id)) byClass.set(id, { count: 0, sessions: new Set(), perSession: new Map(), examples: [] });
+            // Wall clock from request to result. It INCLUDES any permission
+            // prompt and user think-time, which is the honest metric for how
+            // long the work was blocked, but is not tool execution time and
+            // must never be reported as such. Median, not mean: one call left
+            // pending overnight would otherwise own the ranking.
+            const startedAt = useTs.get(b.tool_use_id);
+            const endedAt = typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : NaN;
+            const elapsed = (startedAt && !Number.isNaN(endedAt) && endedAt >= startedAt)
+                ? endedAt - startedAt : null;
+            if (elapsed !== null) stats.timed++;
+
+            if (!byClass.has(id)) byClass.set(id, { count: 0, sessions: new Set(), perSession: new Map(), examples: [], ms: [] });
             const c = byClass.get(id);
             c.count++;
             c.sessions.add(sessionKey);
+            if (elapsed !== null) c.ms.push(elapsed);
             c.perSession.set(sessionKey, (c.perSession.get(sessionKey) || 0) + 1);
             if (c.examples.length < 3) {
                 const ex = redact(text.replace(/\s+/g, ' ').trim()).slice(0, 160);
@@ -335,12 +362,18 @@ const ranked = [...byClass.entries()]
         // gross count describes that session rather than the fleet. Carry the
         // top contributor's share so the ranking cannot be silently misread.
         const top = [...v.perSession.entries()].sort((a, b) => b[1] - a[1])[0] || ['', 0];
+        const sorted = [...v.ms].sort((x, y) => x - y);
+        const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+        const totalMs = v.ms.reduce((acc, x) => acc + x, 0);
         return {
             id,
             count: v.count,
             sessions: v.sessions.size,
             top_session: top[0],
             top_session_share: v.count ? top[1] / v.count : 0,
+            median_s: median === null ? null : Math.round(median / 100) / 10,
+            total_min: Math.round(totalMs / 6000) / 10,
+            timed: v.ms.length,
             fix: (CLASSES.find((c) => c.id === id) || {}).fix || '',
             examples: v.examples,
         };
@@ -376,6 +409,7 @@ console.log(`population: ${stats.filesInWindow} of ${stats.filesSeen} transcript
     + `${stats.lines} lines read (${stats.linesBeforeWindow} older than the window, skipped),`);
 console.log(`            ${stats.toolResults} tool results IN WINDOW, ${stats.errors} errored`
     + `${stats.toolResults ? ` (${((stats.errors / stats.toolResults) * 100).toFixed(1)}%)` : ''}\n`);
+console.log(`            ${stats.timed} of those errors could be priced in wall clock (tool_use to tool_result, permission waits included)`);
 
 if (stats.filesSeen === 0) {
     console.log('PROBE BLIND — no transcripts found at all. Wrong --root, or this is not the machine that ran them.');
@@ -413,6 +447,23 @@ if (!NO_EXAMPLES) {
         console.log('    add a CLASSES entry, or the ranking silently under-counts what you hit.');
         for (const ex of un.examples) console.log(`    saw: ${ex}`);
     }
+}
+
+// Cost view. Breadth answers 'how many sessions trip on this'; this answers
+// 'how long were they stuck', and the two disagree. The most expensive class
+// measured on this machine cost two hours across two hits, which any
+// frequency ranking buries.
+if (args.includes('--by-cost')) {
+    const byCost = [...ranked].filter((r) => r.timed > 0).sort((a, b) => b.total_min - a.total_min);
+    console.log('');
+    console.log('ranked by WALL-CLOCK COST (includes permission waits; NOT execution time)');
+    console.log(pad('class', 32) + pad('total min', 11) + pad('median s', 10) + 'timed/hits');
+    console.log('-'.repeat(70));
+    for (const r of byCost) {
+        console.log(pad(r.id, 32) + pad(r.total_min, 11) + pad(r.median_s, 10) + r.timed + '/' + r.count);
+    }
+    console.log('');
+    console.log('Median, not mean: one call left pending overnight would own a mean.');
 }
 
 if (args.includes('--by-day')) {

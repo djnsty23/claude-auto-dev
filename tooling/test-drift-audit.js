@@ -110,6 +110,19 @@ function makeRepo(name) {
     return repo;
 }
 
+// The fixture's slug has to be the shape Claude Code actually produces, or this
+// suite quietly stops testing production. Asserting it here rather than trusting
+// the expression above: the drive-less variant that used to be built round-
+// tripped only because cwd and %TEMP% happened to share a drive, and nothing
+// said otherwise until a D: workspace made 12 assertions fail and the other 14
+// pass vacuously. A shape this cheap to check should not be inferred.
+{
+    const sample = TMP.replace(/^([A-Za-z]):/, '$1-').replace(/[\\/]/g, '-');
+    const win = process.platform === 'win32';
+    check(`fixture slug is the production shape (${win ? 'C--Users-…' : '-tmp-…'})`,
+        (win ? /^[A-Za-z]--/ : /^-/).test(sample));
+}
+
 const writePrd = (repo, stories) =>
     fs.writeFileSync(path.join(repo, 'prd.json'), JSON.stringify({ stories }, null, 2) + '\n');
 
