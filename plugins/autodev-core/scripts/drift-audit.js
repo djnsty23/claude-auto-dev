@@ -500,6 +500,7 @@ function pathFromSlug(slug) {
     return '/' + slug.replace(/^-/, '').replace(/-/g, '/');
 }
 
+const found = [];
 try {
     const projects = path.join(CONFIG, 'projects');
     for (const slug of fs.existsSync(projects) ? fs.readdirSync(projects) : []) {
@@ -508,9 +509,44 @@ try {
         let repo = null;
         try { repo = pathFromTranscripts(dir); } catch { /* fall through to the slug */ }
         if (!repo) repo = pathFromSlug(slug);
-        if (fs.existsSync(path.join(repo, '.git'))) auditPrd(repo);
+        if (fs.existsSync(path.join(repo, '.git'))) found.push(repo);
     }
 } catch { /* discovery is best-effort */ }
+
+// One repo, many checkouts. A .claude/worktrees/* entry is a git worktree of
+// the project it sits inside, and every worktree shares that project's
+// prd.json — so auditing each one reported the same backlog once per checkout.
+// Measured on a real machine 2026-08-19: 34 repos reporting, 29 of them
+// worktrees, and 103 prd findings describing about a dozen actual projects.
+// A tracker warning repeated eleven times is not eleven warnings.
+//
+// `rev-parse --git-common-dir` is the identity every checkout of a repo agrees
+// on: a worktree returns the parent's absolute .git, the main checkout returns
+// a relative '.git'. Resolving both against their own directory yields the same
+// key. Audit the MAIN checkout where there is one, so the finding names the
+// path someone would actually open rather than a scratch worktree.
+//
+// Both sides go through realpathSync.NATIVE, and the `.native` is the whole
+// point. Windows hands out 8.3 short names — a GitHub runner's %TEMP% is
+// `C:\Users\RUNNER~1\AppData\Local\Temp` — while git answers with the long
+// form, `C:\Users\runneradmin\...`. Plain realpathSync leaves a short name
+// alone (measured: `C:/PROGRA~1` in, `C:\PROGRA~1` out); only `.native`
+// expands it to `C:\Program Files`. Comparing raw strings therefore compared
+// two spellings of one directory and never matched, which is why the first
+// version of this deduplicated locally and did nothing on CI.
+const canonical = new Map();
+const canonPath = (p) => {
+    try { return fs.realpathSync.native(p).toLowerCase(); }
+    catch { return path.resolve(p).toLowerCase(); }
+};
+for (const repo of found) {
+    const common = g(repo, 'rev-parse --git-common-dir');
+    const key = canonPath(path.resolve(repo, common || '.git'));
+    const isMain = key === canonPath(path.resolve(repo, '.git'));
+    const seen = canonical.get(key);
+    if (!seen || (isMain && !seen.isMain)) canonical.set(key, { repo, isMain });
+}
+for (const { repo } of canonical.values()) auditPrd(repo);
 
 if (asJson) { console.log(JSON.stringify({ configDir: CONFIG, findings }, null, 2)); process.exit(findings.some((f) => f.severity === 'fail') ? 1 : 0); }
 

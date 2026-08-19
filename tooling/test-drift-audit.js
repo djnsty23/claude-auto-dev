@@ -54,9 +54,9 @@
 // Do NOT read 49 as the gap. The tool takes one suite at a time, so every
 // mutant the OTHER suite catches shows up here as a survivor — its own header
 // says so. Spot-checked rather than assumed: the sweep reported the worktree
-// dedupe at line 532 (`===` -> `!==`) as surviving, and running the prd suite
-// against that exact mutant turns "names the main checkout" red. One suite's
-// survivor list is an upper bound, never the answer.
+// dedupe's isMain comparison (`===` -> `!==`) as surviving, and running the prd
+// suite against that exact mutant turns "names the main checkout" red. One
+// suite's survivor list is an upper bound, never the answer.
 //
 // Two of the original seven are now closed — the branch-name filter and
 // `if (skipped)`, both pinned by the branch-scan cases at the end of this file.
@@ -494,6 +494,41 @@ const forRepo = (findings, name) => (findings || [])
     for (let i = 0; i < 3; i++) git(repo, `update-ref refs/remotes/origin/c${i} refs/heads/main`);
     check('fewer branches than the cap → no cap notice',
         !forRepo(run(), 'fewbranches').some((x) => /older remote branch\(es\) not checked/.test(x.detail)));
+}
+
+// ───────────────── one repo with many checkouts is audited once, not per checkout
+//
+// Built with a REAL `git worktree add`, not a copied directory: the whole point
+// is that a worktree's .git is a FILE pointing at the parent, and that
+// `rev-parse --git-common-dir` returns the parent's .git from inside it. A
+// copied tree would have its own .git, produce a different key, and the test
+// would pass while proving nothing about worktrees.
+{
+    const repo = makeRepo('parentrepo');
+    commitPrd(repo, { 'S-1': story(null, 'original') }, 90, 'chore: prd');
+    filler(repo, 5, 0);
+
+    // The worktree lives outside the parent so its own slug registration is
+    // what surfaces it, exactly as .claude/worktrees entries do in practice.
+    const wt = path.join(TMP, 'childcheckout');
+    git(repo, `worktree add -q --detach "${wt}"`);
+    fs.mkdirSync(path.join(CONFIG, 'projects',
+        wt.replace(/^([A-Za-z]):/, '$1-').replace(/[\\/]/g, '-')), { recursive: true });
+
+    // Scoped to these two checkouts: run() returns the prd findings for EVERY
+    // fixture in this file, and half of them are deliberately stale, so an
+    // unscoped count measures the whole suite rather than this case.
+    const f = [...forRepo(run(), 'parentrepo'), ...forRepo(run(), 'childcheckout')];
+    const warns = f.filter((x) => /untouched >30d/.test(x.detail));
+    check('a repo and its worktree produce ONE staleness finding, not two', warns.length === 1);
+    check('  and it names the main checkout, not the worktree',
+        warns.length === 1 && /^parentrepo:/.test(warns[0].detail));
+
+    // The control: the worktree really was discoverable on its own terms, so
+    // "one finding" means deduplicated and not simply never found.
+    check('  the control: the worktree is a real checkout of the same repo',
+        fs.existsSync(path.join(wt, 'prd.json')) &&
+        fs.statSync(path.join(wt, '.git')).isFile());
 }
 
 let pass = 0, fail = 0;
