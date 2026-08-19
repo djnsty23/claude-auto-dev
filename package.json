@@ -25,6 +25,7 @@
     "check:superseded": "node tooling/check-superseded.js",
     "check:agent-cost": "node tooling/analyze-agent-cost.js",
     "check:patterns": "node plugins/autodev-core/scripts/analyze-session-patterns.js",
+    "check:triggers": "node tooling/check-skill-triggers.js",
     "check:runtime": "node tooling/check-runtime.js",
     "actions:cost": "node tooling/analyze-actions-cost.js",
     "check:agent-budget": "node tooling/agent-budget.js"
