@@ -1,5 +1,56 @@
 # Changelog
 
+## [8.82.0] - 2026-08-19
+
+### Fixed — telemetry recorded a failure exactly zero times, and its suite agreed
+
+Both PostToolUse hooks read `tool_output` and `tool_error`. The CLI sends
+`tool_response` and no error flag at all — the payload it builds is
+`{ hook_event_name, tool_name, tool_input, tool_response, tool_use_id,
+duration_ms, session_id, ... }`, read out of the shipping binary rather than
+inferred. So `output_size` was 0 and `ok` was true in 878 of 878 rows written on
+one machine: the field whose only job is to mark a FAILED tool call had never
+once fired, and every quiet reading taken from it described the reader.
+`memory-capture` fed the same dead key to its classifier, so every stored
+observation was classified against an empty result string.
+
+The suite could not have caught it. It hand-fed `tool_output`/`tool_error` and
+asserted `ok:false` against a shape that does not exist — a fixture cannot test a
+contract it gets wrong. Every case now uses the real key names, with paired
+negatives so the new assertions cannot pass by `ok` simply being always false.
+Verified by mutation: restoring the old key turns exactly three assertions red,
+and the mutant emits `output_size:0, duration_ms:null, ok:true` — the signature
+of all 878 real rows.
+
+`duration_ms` is now recorded; the CLI measures it and the hook was discarding
+it, which left the harness unable to say which tool calls cost wall-clock.
+
+### Added — `check:patterns`, the other half of the learn loop
+
+`mine-fixes` ranks what shipped broken and got fixed afterwards. Nothing ranked
+what goes wrong DURING a session and never reaches a commit: an Edit refused
+because the file was never read, a hook-blocked command, a browser probe against
+a pane that is not composited, a two-minute timeout. `check:patterns` reads the
+transcript tree — the only surface that sees every session on a machine at once,
+subagents included — and ranks failure classes by SESSIONS AFFECTED, because
+gross hits let one stuck session set the agenda for the whole fleet.
+
+Two measurement bugs were found by running it and disbelieving the output, and
+both are now the properties its suite holds. The denominator counted tool
+results only on lines that had already matched the error filter, reporting "783
+of 783 errored" — a share of itself. And it windowed by file mtime, then counted
+every event in the file: a transcript is appended to for months under one name,
+so a "last 2 days" scan counted failures from five weeks earlier and invented a
+runaway session. Windowing is per-event now, off the event's own timestamp.
+
+`--by-day` answers the question a refinement loop needs: did the change move the
+class it targeted? It already paid for itself — `hook-blocked-command` runs 40,
+34, 2, 1 across Aug 16-19 while the daily error total held at 180, 89, 100, so
+the Bash denylist removal worked and it is not an artifact of a quiet day.
+
+Population is printed first and an empty root reports PROBE BLIND with a
+non-zero exit, so a zero is never mistaken for a clean bill of health.
+
 ## [8.81.0] - 2026-08-18
 
 ### Added — plugin drift now surfaces where the user actually looks
