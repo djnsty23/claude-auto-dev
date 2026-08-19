@@ -74,9 +74,19 @@ const CLASSES = [
         fix: "The harness's own guard, working as designed. Route settings changes through the documented path instead of retrying the edit.",
     },
     {
-        id: 'browser-no-site',
-        test: /No site is open in this tab|Inspected target navigated or closed|Server not found\. No running servers/i,
-        fix: 'Browser state was assumed rather than established. navigate/preview_start first, and re-assert state after any navigation — an isolated context does not survive one.',
+        // Merged from the old browser-no-site and browser-no-preview. Triage of
+        // 25 unclassified errors found 14 were browser failures and every one
+        // was the same mistake wearing a different message: a call whose
+        // precondition had not been established, or had expired. Splitting them
+        // by wording produced classes with one identical fix, which is one class.
+        id: 'browser-state-not-established',
+        test: /No site is open in this tab|Inspected target navigated or closed|Server not found\. No running servers|No preview is open|tab group no longer exists|not found — it may be stale|pinned to a local file preview|no read_page tree cached|requires a prior computer\{action:"screenshot"\}|navigation to \S+ was denied/i,
+        fix: 'A browser call ran before its precondition existed, or after it expired. Establish state first (preview_start / navigate / read_page / screenshot) and RE-assert it after any navigation — tab groups, serverIds and cached trees do not survive one.',
+    },
+    {
+        id: 'browser-renderer-hung',
+        test: /renderer may be frozen|No browser responded within the timeout|CDP sendCommand .* timed out|timed out after \d+s\.? The (?:preview|Browser pane)/i,
+        fix: 'The page or the pane stopped responding, which is not the same as a wrong call — retrying the identical command is the one thing that cannot help. Check console logs, then reload the tab or restart the browser surface.',
     },
     {
         id: 'hook-blocked-command',
@@ -94,9 +104,24 @@ const CLASSES = [
         fix: 'The in-app Browser pane cannot screenshot while it is not displayed. Use chrome-devtools for screenshots, or bring the pane forward first.',
     },
     {
-        id: 'browser-no-preview',
-        test: /No preview is open/i,
-        fix: 'Call preview_start with {url} before navigate/read_page. A navigate against a closed pane always costs a wasted round trip.',
+        id: 'browser-script-error',
+        test: /javascript_tool failed|Failed to fetch at <anonymous>|has already been declared/i,
+        fix: 'The injected script itself threw. Note the page keeps one scope across calls, so a re-run of the same `const` is a redeclaration error rather than a fresh start — wrap in an IIFE.',
+    },
+    {
+        id: 'sql-schema-guess',
+        test: /42703|column \S+ does not exist|relation \S+ does not exist/i,
+        fix: 'The query named a column the table does not have. Introspect the schema once (information_schema, or a select * limit 1) instead of paying a failed round trip per guessed column — seven in a row on one agent is the observed worst case.',
+    },
+    {
+        id: 'shell-quoting',
+        test: /unexpected EOF while looking for matching|unterminated quoted string|syntax error near unexpected token/i,
+        fix: 'Quoting collapsed in a long one-liner. Write the script to a file and run that; the same text behaves differently in Git Bash, cmd and PowerShell.',
+    },
+    {
+        id: 'agent-schema-violation',
+        test: /Output does not match required schema/i,
+        fix: 'A subagent returned a shape its schema forbids. Usually an over-strict additionalProperties or a required field the prompt never asked the agent to produce — fix the contract, not the agent.',
     },
     {
         id: 'browser-chrome-unselected',
@@ -124,7 +149,11 @@ const CLASSES = [
         // a typo, so it is the only path-failure a guard could plausibly catch.
         // Kept separate so its frequency can be measured rather than assumed.
         id: 'tmp-path-split',
-        test: /[A-Za-z]:\\+tmp[\\/]|open '[A-Za-z]:\\tmp|cannot open '\/[^/]+\.(txt|json|log)'/i,
+        // The commonest form is a bare POSIX /tmp path that Node could not
+        // resolve — "Cannot find module '/tmp/ai.json'". The first version of
+        // this pattern only matched the C:\tmp spelling, so it missed exactly
+        // the case the rule exists for and filed it under shell-nonzero-exit.
+        test: /[A-Za-z]:\\+tmp[\\/]|open '[A-Za-z]:\\tmp|(?:Cannot find module|ENOENT[^\n]*open|cannot open) '\/tmp\/|cannot open '\/[^/]+\.(txt|json|log)'/i,
         fix: 'Git Bash resolves /tmp differently from Node/Python on Windows: the shell writes /tmp/x, the reader looks in C:\\tmp\\x. Use the session scratchpad absolute path on both sides.',
     },
     {
@@ -324,14 +353,14 @@ if (stats.errors === 0) {
 
 const pad = (s, n) => String(s).padEnd(n);
 console.log('ranked by SESSIONS AFFECTED (breadth), not gross hits');
-console.log(pad('class', 28) + pad('sessions', 10) + pad('hits', 7) + pad('of errs', 9) + 'concentration');
-console.log('-'.repeat(78));
+console.log(pad('class', 32) + pad('sessions', 10) + pad('hits', 7) + pad('of errs', 9) + 'concentration');
+console.log('-'.repeat(82));
 for (const r of ranked) {
     const share = ((r.count / stats.errors) * 100).toFixed(1) + '%';
     const conc = r.top_session_share >= 0.5
         ? `${(r.top_session_share * 100).toFixed(0)}% from ONE session`
         : '';
-    console.log(pad(r.id, 28) + pad(r.sessions, 10) + pad(r.count, 7) + pad(share, 9) + conc);
+    console.log(pad(r.id, 32) + pad(r.sessions, 10) + pad(r.count, 7) + pad(share, 9) + conc);
 }
 
 if (!NO_EXAMPLES) {
