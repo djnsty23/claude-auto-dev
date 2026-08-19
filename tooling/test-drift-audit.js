@@ -48,8 +48,8 @@
 // grew, so the mutant population is not the same one they describe:
 //
 //   config suite alone   111 mutants · 62 caught · 49 survived   (~5 min)
-//   prd suite alone      not re-run: the suite takes 112s, so the sweep is
-//                        ~2.7h with the subject sitting mutated throughout
+//   prd suite alone      affordable again: this suite now runs in 46s, down
+//                        from 112s, so the sweep is ~85 min rather than ~2.7h
 //
 // Do NOT read 49 as the gap. The tool takes one suite at a time, so every
 // mutant the OTHER suite catches shows up here as a survivor — its own header
@@ -69,9 +69,17 @@
 // observable behaviour, so closing them means restructuring the error handling,
 // not writing a better test.
 //
-// The 112s runtime is what makes the prd sweep unaffordable, and it is mostly
-// git fixture setup. Speeding the suite up is the lever that makes this gate
-// routinely runnable; adding more fixtures makes it less so.
+// The runtime WAS what made the prd sweep unaffordable. Profiling said the cost
+// was neither the assertions nor git-the-tool but process spawning: 607 git
+// calls costing 41.5s on the fixture side, against 64.3s inside sixteen audit
+// runs that kept re-walking repos which had not changed. Giving each case its
+// own config directory made the audit half proportional to the case instead of
+// to the whole file, and 112s became 46s.
+//
+// Two things that looked like the answer and were not, both measured rather
+// than argued: memoising run() saved 8s, and replacing filler's write-add-commit
+// with an empty commit saved about 1s. The quadratic re-walk was the cost.
+// Adding fixtures to a SHARED config is what makes this gate unrunnable again.
 //
 // Run: node tooling/test-drift-audit.js
 
@@ -85,8 +93,39 @@ const AUDIT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts'
 // No dashes in the prefix: drift-audit reverses a path into a project slug by
 // swapping '-' for '/', so a dash anywhere in the temp path breaks discovery.
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'driftaudit')));
-const CONFIG = path.join(TMP, 'claudeconfig');
-fs.mkdirSync(path.join(CONFIG, 'projects'), { recursive: true });
+
+// Each case gets its OWN config directory, so an audit run only walks the repos
+// that case registered.
+//
+// With one shared config the cost was quadratic: every run() re-audited every
+// repo created so far, fifteen by the end. Profiled at 607 git calls costing
+// 41.5s on the fixture side against 64.3s inside sixteen audit runs — the audit
+// half was almost entirely re-walking repos that had not changed since the last
+// time it walked them. This suite is spawn-bound on Windows, so the fix is to
+// spawn less, not to spawn faster.
+//
+// The rotation is driven by run(), not by each case remembering to ask: once a
+// run has happened, the next makeRepo starts a new case. Cases that build
+// several repos before asserting keep sharing one config, which is what they
+// need; the two cases that register a slug by hand call makeRepo first, so they
+// land in the current config.
+let configSeq = 0;
+let CONFIG;
+let configUsed = true;
+
+function freshConfig() {
+    const c = path.join(TMP, `claudeconfig${configSeq++}`);
+    fs.mkdirSync(path.join(c, 'projects'), { recursive: true });
+    return c;
+}
+
+function startCaseIfNeeded() {
+    if (!configUsed) return;
+    CONFIG = freshConfig();
+    configUsed = false;
+    auditCache = null;
+    auditDirty = true;
+}
 
 const cases = [];
 const check = (label, ok) => cases.push([label, ok]);
@@ -100,7 +139,22 @@ const now = Math.floor(Date.now() / 1000);
 // failure — a silently rescaled cap is exactly what this pins.
 const PRD_BRANCH_SCAN_LOCAL = 40;
 
+// Every audit run walks EVERY fixture repo registered so far, and this file
+// registers fifteen of them, so 18 run() sites cost 18 full sweeps — the suite
+// spent 112s almost entirely re-auditing repos that had not changed. That
+// runtime is what put the mutation sweep over this subject at ~2.7 hours and
+// therefore out of reach, so it is worth removing.
+//
+// The cache is invalidated by git() itself rather than by each caller
+// remembering to say so. Every fixture mutation in this file goes through
+// git() — init, commit, update-ref, worktree add — so marking it there cannot
+// be forgotten the way an explicit touch() can. Read-only git calls also
+// invalidate, which only costs an extra sweep and never a stale answer.
+let auditDirty = true;
+let auditCache = null;
+
 function git(repo, args, atEpoch) {
+    auditDirty = true;
     const env = { ...process.env };
     if (atEpoch) {
         const iso = new Date(atEpoch * 1000).toISOString();
@@ -113,6 +167,7 @@ function git(repo, args, atEpoch) {
 // A git repo with no entry under CONFIG/projects — for cases that register
 // themselves some other way, or test that discovery does not find them.
 function makeRepoUnregistered(name) {
+    startCaseIfNeeded();
     const repo = path.join(TMP, name);
     fs.mkdirSync(repo, { recursive: true });
     git(repo, 'init -q -b main');
@@ -168,30 +223,41 @@ function commitPrd(repo, stories, daysAgo, msg) {
     git(repo, `commit -q -m "${msg}"`, at);
 }
 
-// Filler commits so `commits since` has something to count. Filenames carry a
-// global counter — reusing f0.txt across two filler() calls writes identical
-// content, and `git commit` then fails with "nothing to commit" rather than
-// producing the empty commit the test wanted.
+// Filler commits so `commits since` has something to count.
+//
+// --allow-empty rather than writing a file and adding it. Everything downstream
+// counts COMMITS — `rev-list --count <sha>..HEAD` for the activity signal, and
+// `log -1 -- prd.json` for the file age — and neither looks at what a filler
+// commit touched. That is two git processes per commit down to one, which
+// matters because this suite is spawn-bound on Windows: profiled at 607 git
+// calls costing 41.5s, roughly 68ms of process startup each.
+//
+// It also retires the reason the old version needed a unique filename per
+// commit: re-writing identical content made `git commit` fail with "nothing to
+// commit", which is precisely the case --allow-empty states outright. The
+// counter stays only to keep commit subjects distinct.
 let fillerSeq = 0;
 function filler(repo, n, daysAgo) {
     for (let i = 0; i < n; i++) {
         const at = now - daysAgo * DAY + i;
-        const f = `f${fillerSeq++}.txt`;
-        fs.writeFileSync(path.join(repo, f), String(fillerSeq));
-        git(repo, `add ${f}`, at);
-        git(repo, `commit -q -m "chore: filler ${f}"`, at);
+        git(repo, `commit -q --allow-empty -m "chore: filler ${fillerSeq++}"`, at);
     }
 }
 
 const story = (passes, detail = 'x') => ({ title: 't', passes, detail });
 
 function run() {
+    if (!auditDirty) return auditCache;
     const r = spawnSync(process.execPath, [AUDIT, '--json'], {
         encoding: 'utf8',
         env: { ...process.env, CLAUDE_CONFIG_DIR: CONFIG },
+        maxBuffer: 32 * 1024 * 1024,
     });
-    try { return JSON.parse(r.stdout).findings.filter((f) => f.area === 'prd'); }
-    catch { return null; }
+    try { auditCache = JSON.parse(r.stdout).findings.filter((f) => f.area === 'prd'); }
+    catch { auditCache = null; }
+    auditDirty = false;
+    configUsed = true;
+    return auditCache;
 }
 // Findings name their repo two ways: "<repo>: …" for most, "<repo>/prd.json …"
 // for the parse failure. Match both, or the parse test silently sees an empty
@@ -343,10 +409,20 @@ const forRepo = (findings, name) => (findings || [])
 }
 
 // ───────────────────────── 10. the run is read-only and must not mutate a repo
+//
+// Builds its own repo rather than reaching for case 3's. Each case now gets its
+// own config directory, so a repo from an earlier case is no longer registered
+// here — and an unregistered repo is never audited, which would make
+// "before === after" true for the one reason that proves nothing.
 {
-    const repo = path.join(TMP, 'stale');
+    const repo = makeRepo('readonly');
+    commitPrd(repo, { 'S-1': story(null) }, 90, 'chore: prd');
+    filler(repo, 12, 0);
     const before = git(repo, 'status --porcelain') + git(repo, 'rev-parse HEAD');
-    run();
+    // The control: this repo really is being audited, so the comparison below
+    // is about the audit leaving it alone and not about it being ignored.
+    check('  the control: this repo IS audited (it has a finding to leave alone)',
+        forRepo(run(), 'readonly').length > 0);
     const after = git(repo, 'status --porcelain') + git(repo, 'rev-parse HEAD');
     check('audit does not modify the repo it inspects', before === after);
 }
