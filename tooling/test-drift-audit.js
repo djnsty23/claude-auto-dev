@@ -47,27 +47,43 @@
 // RE-MEASURED 2026-08-19, and the numbers above are now HISTORY — the subject
 // grew, so the mutant population is not the same one they describe:
 //
-//   config suite alone   111 mutants · 62 caught · 49 survived   (~5 min)
-//   prd suite alone      affordable again: this suite now runs in 46s, down
-//                        from 112s, so the sweep is ~85 min rather than ~2.7h
+//   prd suite alone      112 mutants · 59 caught · 53 survived
+//   config suite alone   112 mutants · 63 caught · 49 survived
+//   caught by EITHER     107 of 112
+//   survives BOTH          5   <- the real remaining gap
 //
-// Do NOT read 49 as the gap. The tool takes one suite at a time, so every
-// mutant the OTHER suite catches shows up here as a survivor — its own header
-// says so. Spot-checked rather than assumed: the sweep reported the worktree
-// dedupe's isMain comparison (`===` -> `!==`) as surviving, and running the prd
-// suite against that exact mutant turns "names the main checkout" red. One
-// suite's survivor list is an upper bound, never the answer.
+// Do NOT read 53 or 49 as the gap. The tool takes one suite at a time, so every
+// mutant the OTHER suite catches is reported here as a survivor. Only the
+// intersection means anything, and both sweeps above were run against the SAME
+// subject so the two sets are comparable — an earlier pair was not, because the
+// file grew between them.
+//
+// The parser that intersected them undercounted 53 as 32 on its first attempt.
+// It now asserts its own total against each sweep's headline before printing,
+// because a count that cannot check itself is a guess.
 //
 // Two of the original seven are now closed — the branch-name filter and
 // `if (skipped)`, both pinned by the branch-scan cases at the end of this file.
 // Closing the filter turned up a live bug rather than dead code: see
 // docs/decisions.md, "a remote's HEAD is filtered by shape, not by name".
 //
-// The honest remaining list is the env fallback and the three catch-masked
-// guards. The catch-masked ones cannot be closed by adding assertions — a
-// mutation inside a try whose catch swallows everything produces identical
-// observable behaviour, so closing them means restructuring the error handling,
-// not writing a better test.
+// Three of the five were read and are the boring kind: the HOME||USERPROFILE
+// fallback whose branches hold the same value anywhere this runs, and two guards
+// for states no fixture reaches. A fourth — the `&&` in the worktree dedupe's
+// precedence rule — is genuinely EQUIVALENT here, since the main checkout wins
+// under either operator whenever one of the two repos is the main one.
+//
+// The fifth was not equivalent and was worth the whole exercise. Mutating
+// `if (!market || !market.installLocation)` to `&&` makes the audit dereference
+// an undefined market, throw, and print nothing — and the config suite's
+// assertion was `!/thing@ghost/`, which is true of a process that died on line
+// one. A test whose own comment said "skipped, not crashed on" checked only the
+// first half. Both negative assertions there now also require the report header,
+// so a dead process cannot satisfy them. See docs/decisions.md.
+//
+// The general form, which is why this is written down: A NEGATIVE ASSERTION
+// NEEDS A POSITIVE CONTROL IN THE SAME BREATH. "X did not appear" is satisfied
+// by X not appearing, and equally by nothing appearing at all.
 //
 // The runtime WAS what made the prd sweep unaffordable. Profiling said the cost
 // was neither the assertions nor git-the-tool but process spawning: 607 git

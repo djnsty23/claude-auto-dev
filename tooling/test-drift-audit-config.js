@@ -276,14 +276,31 @@ function runFull(cfg, extra = []) {
         'plugins/installed_plugins.json': {
             plugins: { 'thing@ghost': [{ version: '1.0.0', gitCommitSha: 'abc' }] } },
     });
+    // "Skipped, not crashed on" needs BOTH halves asserted, and only one of them
+    // was. A crash prints a stack and no report, so `!/thing@ghost/` is true of
+    // a script that died on line 1 — the assertion passed for the wrong reason.
+    //
+    // Not hypothetical: the || in `if (!market || !market.installLocation)` is
+    // exactly what stops the second test dereferencing an undefined market.
+    // Mutating it to && makes this fixture throw a TypeError with zero stdout,
+    // and the old assertion stayed green. It was one of five mutants surviving
+    // both suites in the 2026-08-19 sweep.
+    //
+    // "Drift audit —" is the report header, printed only once the run reaches
+    // the reporting stage, so it separates a quiet skip from a dead process.
+    const orphanOut = run(orphanMarket);
     check('an entry whose marketplace is unknown is skipped quietly',
-        !/thing@ghost/.test(run(orphanMarket)));
+        !/thing@ghost/.test(orphanOut));
+    check('  and the run COMPLETED rather than crashing on it',
+        /Drift audit —/.test(orphanOut));
 }
 
 // No plugin files at all — the normal state on a fresh machine.
 {
+    const bareOut = run(config({ 'settings.json': {} }));
     check('a config with no plugin files produces no plugin findings',
-        !/is installed at/.test(run(config({ 'settings.json': {} }))));
+        !/is installed at/.test(bareOut));
+    check('  and that run COMPLETED too', /Drift audit —/.test(bareOut));
 }
 
 // ---------------------------------------------------------------- report

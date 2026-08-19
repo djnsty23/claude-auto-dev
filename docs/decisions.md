@@ -3,6 +3,151 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-08-19 — the mutation gap is 5 of 112, and one was a vacuous assertion
+
+Both suites re-swept against the same subject, because the figures in
+`test-drift-audit.js` described a file that had since grown:
+
+| measured against | mutants | caught | survived |
+|---|---|---|---|
+| prd suite (`test-drift-audit.js`) | 112 | 59 | 53 |
+| config suite (`test-drift-audit-config.js`) | 112 | 63 | 49 |
+| **either suite** | 112 | **107** | **5** |
+
+**Neither 53 nor 49 is the gap.** The tool takes one suite at a time, so every
+mutant the other suite catches is reported as a survivor. Only the intersection
+means anything, and it is 5.
+
+The parser that computed it undercounted on the first attempt — 32 of 53 — and
+that was caught by making it assert its own total against the sweep's headline
+before printing. A count that cannot check itself is a guess.
+
+The five, read individually rather than reported as a number:
+
+- `HOME || USERPROFILE` — both branches hold the same value in any environment
+  this runs in. Closable only by an environment no test would otherwise create.
+- `if (!lastPrd || !lastPrdTs) return;` and the `|| {}` in the age-cache write —
+  guards for states no fixture reaches, one of them inside a `catch`.
+- The `&&` in the worktree dedupe's precedence rule — genuinely equivalent here:
+  with either operator the main checkout still wins, because both branches agree
+  whenever one of the two repos is the main one.
+- `if (!market || !market.installLocation)` — **not equivalent, and it exposed a
+  vacuous test.** Mutated to `&&`, the audit dereferences an undefined market,
+  throws a TypeError and prints nothing. The assertion above it read
+  `!/thing@ghost/.test(out)`, which is true of a process that died on line 1 —
+  so a test whose own comment said "skipped, not crashed on" only ever checked
+  the first half.
+
+That last one is fixed: both negative assertions now also require the report
+header `Drift audit —`, which only prints once a run reaches the reporting
+stage. Verified by re-injecting the mutant — the suite goes red on the new
+assertion specifically. Four remain, and they are the boring kind.
+
+The lesson generalises past this file: **a negative assertion needs a positive
+control in the same breath.** "X did not appear" is satisfied by X not appearing
+and equally by nothing appearing at all.
+
+## 2026-08-19 — a large catalog is summarised, not enumerated
+
+"Published in a marketplace you use but not installed" had already been scoped
+once, from every known catalog down to adopted ones. That was still the wrong
+cut. Measured: `claude-plugins-official` carries 286 plugins with 27 installed
+and produced **259 of the audit's 277 findings** — 95% of the output, burying
+the 14 warnings underneath it.
+
+The scoping conflated two things. Adopting most of a marketplace and missing a
+few *is* drift. Cherry-picking from a large general catalog is what a catalog is
+for. They are separated by count, not by adoption, so past five uninstalled the
+finding collapses to one line naming the ratio.
+
+The case the check exists for survives — a 3-plugin marketplace missing one
+still names it. Both sides are pinned, plus a fully-installed marketplace, so
+the summary cannot fire on zero.
+
+## 2026-08-19 — each test case gets its own config directory
+
+`test-drift-audit.js` re-audited every repo it had ever created on every `run()`
+— fifteen by the end — so cost grew with the square of the file. 112s to 46s by
+giving each case its own config, and the CI job went 3m23s to 1m54s.
+
+Profiled first, and the profile killed two plausible theories: memoising `run()`
+saved 8s, replacing filler's write-add-commit with a single empty commit saved
+about 1s. The real cost was 64.3s inside sixteen audit runs re-walking unchanged
+repos against 41.5s of fixture git calls. **This suite is spawn-bound on
+Windows**, so the fix is to spawn less, not to spawn faster. Adding fixtures to a
+shared config is what would make it slow again.
+
+One trap in the refactor, worth stating because it would have been invisible:
+the read-only case asserted "the audit does not modify the repo it inspects"
+using *another case's* repo. Under isolation that repo is no longer registered,
+and an unregistered repo is trivially unmodified — the assertion would have
+passed forever for the wrong reason. It now builds its own fixture and carries a
+control asserting the repo **is** audited.
+
+Verified the faster suite did not go blind: deleting the drive branch from
+`pathFromSlug` still turns 18 assertions red.
+
+## 2026-08-19 — a permission rule's fix line has to be runnable
+
+The settings check told the reader to "narrow it to the specific command you
+need" while matching on the command NAME. So `Bash(export SP=*)` was reported
+identically to `Bash(export *)`, and deletion was the only action that ever
+cleared a finding. The detection was right; the prescribed cure had never been
+run against the detector.
+
+Rules now split in two. Commands whose purpose *is* arbitrary execution — `sh`,
+`bash`, `source`, `eval`, and `WebFetch(domain:*)` — stay flagged whatever
+argument they carry, and their fix line says delete rather than narrow. Everything
+else is flagged only when the argument is a bare wildcard, which is where the
+escalation actually lives: a prefix match on `export *` also admits
+`export X=1; <anything>`. Flags are not constraints, so `rm -f *` and
+`chmod +x *` still fire.
+
+Found by trying to follow the advice on a real settings.json — three
+fail-severity findings, none of which narrowing could clear.
+
+## 2026-08-19 — settings.json was never in the backup mirror
+
+The backup protocol says `~/.claude` changes are mirrored to `claude-memory`.
+`settings.json` was not in the allowlist, so the single file holding the
+permission allow/deny lists was the one file a reinstall would not restore. It
+surfaced only because the permission tightening was mirrored and then checked —
+the sync reported success and carried none of it.
+
+It cannot be copied verbatim: two hook commands hold an absolute
+`C:\Users\<name>\…` path, and committed files must not carry local home paths.
+The mirror now rewrites them to `%USERPROFILE%` in the copy only, leaving the
+live file untouched.
+
+Two failures on the way in, both caught by verifying rather than trusting the
+"pushed" line:
+
+- PowerShell's `-replace '\\', '\\\\'` emits **four** backslashes, not two, so
+  the substitution missed and the guard correctly refused to mirror. Use
+  `.NET String.Replace` for literal work; `-replace` treats the replacement as a
+  pattern.
+- `Set-Content -Encoding UTF8` writes a **BOM**, and a BOM makes the file invalid
+  JSON. The mirror parsed as garbage — a backup that cannot be restored, which is
+  the one thing a backup may not be. Now written with `WriteAllText` and a
+  BOM-less encoder.
+
+## 2026-08-19 — CLAUDE_CODE_SUBAGENT_MODEL is set to opus
+
+Recorded here because a session keeps re-deriving it. `~/.claude/settings.json`
+sets `env.CLAUDE_CODE_SUBAGENT_MODEL = "opus"`, and the variable is **live in the
+running process** — not merely present in a config file.
+
+This is the shape of override that would explain the standing note that subagent
+model pinning has no effect: every subagent forced to one model regardless of its
+frontmatter or the Agent tool's `model` parameter, which is exactly what 37,795
+subagent calls on disk show.
+
+**Not yet proven to be the cause.** Settings-supplied env is applied at session
+start, so the discriminating test — unset it, launch a pinned agent, grep that
+subagent's transcript for `"model"` — needs a fresh session. Until that runs this
+is an active override with the right name and value, which is more than the
+previous "cause undetermined" and less than a demonstrated cause.
+
 ## 2026-08-19 — a remote's HEAD is filtered by shape, not by name
 
 `prdCarrierBranches` filtered remote refs with `!/\/HEAD$/.test(b)` alongside
