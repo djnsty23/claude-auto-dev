@@ -1,5 +1,21 @@
 # Changelog
 
+## [8.87.0] - 2026-08-19
+
+### Added — wizard, grilling, and check:triggers
+
+Adapted from a review of mattpocock/skills (MIT) rather than installed wholesale;
+most of that repo duplicates something already here. wizard hands work back when
+it is blocked on a human, which is the constructive half of the most expensive
+class measured today (a session retried for two hours against an error that asked
+for a human decision). grilling attacks a plan's premise before it becomes code —
+the gap where review checks the diff against the plan and tests check the code
+against the spec, and both pass while the spec answers the wrong question.
+
+check:triggers prices the skill set: 13,886 bytes of description and when_to_use,
+about 3,472 tokens, resident every session whether or not a skill loads. A
+description is a trigger, not a summary, and 54 of 55 already name a condition.
+
 ## [8.86.0] - 2026-08-19
 
 ### Added — two more advisory rules, taking real-failure coverage to 23.5%
