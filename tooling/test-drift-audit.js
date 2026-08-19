@@ -44,6 +44,35 @@
 // value in any test environment, three guards masked by the catch around them,
 // the branch-name filter, and `if (skipped)`.
 //
+// RE-MEASURED 2026-08-19, and the numbers above are now HISTORY — the subject
+// grew, so the mutant population is not the same one they describe:
+//
+//   config suite alone   111 mutants · 62 caught · 49 survived   (~5 min)
+//   prd suite alone      not re-run: the suite takes 112s, so the sweep is
+//                        ~2.7h with the subject sitting mutated throughout
+//
+// Do NOT read 49 as the gap. The tool takes one suite at a time, so every
+// mutant the OTHER suite catches shows up here as a survivor — its own header
+// says so. Spot-checked rather than assumed: the sweep reported the worktree
+// dedupe at line 532 (`===` -> `!==`) as surviving, and running the prd suite
+// against that exact mutant turns "names the main checkout" red. One suite's
+// survivor list is an upper bound, never the answer.
+//
+// Two of the original seven are now closed — the branch-name filter and
+// `if (skipped)`, both pinned by the branch-scan cases at the end of this file.
+// Closing the filter turned up a live bug rather than dead code: see
+// docs/decisions.md, "a remote's HEAD is filtered by shape, not by name".
+//
+// The honest remaining list is the env fallback and the three catch-masked
+// guards. The catch-masked ones cannot be closed by adding assertions — a
+// mutation inside a try whose catch swallows everything produces identical
+// observable behaviour, so closing them means restructuring the error handling,
+// not writing a better test.
+//
+// The 112s runtime is what makes the prd sweep unaffordable, and it is mostly
+// git fixture setup. Speeding the suite up is the lever that makes this gate
+// routinely runnable; adding more fixtures makes it less so.
+//
 // Run: node tooling/test-drift-audit.js
 
 const { spawnSync, execSync } = require('child_process');
