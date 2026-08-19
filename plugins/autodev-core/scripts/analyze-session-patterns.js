@@ -85,7 +85,7 @@ const CLASSES = [
         // by wording produced classes with one identical fix, which is one class.
         id: 'browser-state-not-established',
         test: /No site is open in this tab|Inspected target navigated or closed|Server not found\. No running servers|No preview is open|tab group no longer exists|not found — it may be stale|pinned to a local file preview|no read_page tree cached|requires a prior computer\{action:"screenshot"\}|navigation to \S+ was denied/i,
-        fix: 'A browser call ran before its precondition existed, or after it expired. Establish state first (preview_start / navigate / read_page / screenshot) and RE-assert it after any navigation — tab groups, serverIds and cached trees do not survive one.',
+        fix: 'A browser call ran before its precondition existed, or after it expired. Establish state first (preview_start / navigate / read_page / screenshot) and RE-assert it after any navigation — tab groups, serverIds and cached trees do not survive one. "Inspected target navigated or closed" is often SELF-inflicted: a script that calls location.reload() or navigates and then awaits has destroyed the context it is running in, so it can never return. Navigate in one call, evaluate in the next.',
     },
     {
         id: 'browser-renderer-hung',
@@ -130,7 +130,7 @@ const CLASSES = [
     {
         id: 'browser-chrome-unselected',
         test: /Multiple Chrome browsers are connected/i,
-        fix: 'select_browser once at the start of a browser task; every subsequent call fails identically until you do.',
+        fix: 'BLOCKED ON A USER DECISION, not a bug: the message says AskUserQuestion is required, and every browser call fails identically until someone picks a browser. Observed 2026-08-19: a session spent two hours retrying browser calls against this instead of asking. Ask, or stop the browser work and say why.',
     },
     {
         id: 'js-top-level-await',
