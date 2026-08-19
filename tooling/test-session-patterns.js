@@ -102,6 +102,28 @@ const deepOut = run(deep, ['--days', '1', '--no-examples']);
 check('a long output that merely MENTIONS ENOENT is not called a missing file',
     !/file-missing/.test(deepOut.out), deepOut.out.slice(0, 300));
 
+// ---- the shell three-way split ----
+// The catch-all used to hold 28% of all errors with the advice "check whether
+// the exit code IS the answer", which is a shrug rather than a class. These
+// three cases pin the split. They also exist because the first implementation
+// was broken in a way no probe caught: a `` in both regexes collapsed into a
+// literal BACKSPACE byte during a scripted patch, so the patterns silently
+// matched nothing and everything fell through to the catch-all. A control
+// character renders as empty in a terminal, so the source LOOKED right in every
+// dump — only classifying known input revealed it.
+const shell = fixture([
+    line(iso(3600_000), { error: 'Exit code 2 === branch === abc123 some real output' }),
+    line(iso(3600_000), { error: 'Exit code 127 nope: command not found' }),
+    line(iso(3600_000), { error: 'Exit code 1 Traceback (most recent call last): boom' }),
+]);
+const shellOut = run(shell, ['--days', '1', '--no-examples']);
+check('a non-zero exit with real output and no error marker is not called a fault',
+    /shell-exit-may-be-the-answer/.test(shellOut.out), shellOut.out.slice(0, 400));
+check('  exit 127 is its own class, never "maybe the answer"',
+    /command-not-found/.test(shellOut.out), shellOut.out.slice(0, 400));
+check('  an exit carrying a Traceback IS a fault',
+    /shell-fault/.test(shellOut.out), shellOut.out.slice(0, 400));
+
 // ---- privacy ----
 const SECRET = 'sk-live-CANARY-51N3z9';
 const leaky = fixture([

@@ -52,6 +52,10 @@ const ROOT = flag('root', path.join(os.homedir(), '.claude', 'projects'));
 // `fix` is what would stop the class recurring. It is the payload: a ranked list
 // with no remedy is a complaint.
 // ---------------------------------------------------------------------------
+// What separates a shell fault from a shell ANSWER. Deliberately narrow: these
+// are markers a failing program emits, not words that merely appear in output.
+const ERROR_MARKER = /Traceback|node:internal|at Object\.<anonymous>|SyntaxError|TypeError|ReferenceError|fatal:|error:|Error:/;
+
 const CLASSES = [
     {
         id: 'edit-before-read',
@@ -171,12 +175,32 @@ const CLASSES = [
         test: /getaddrinfo|ENOTFOUND|ECONNREFUSED|Max retries exceeded|Failed to resolve/i,
         fix: 'No egress from this shell. Prefer a local ground truth; do not report a network failure as an empty result.',
     },
-    // Catch-all LAST: a non-zero shell exit that no class above explains. Note a
-    // counting grep exits 1 on no-match, so some of these are answers, not faults.
     {
-        id: 'shell-nonzero-exit',
+        // 127 = command not found, 126 = found but not executable. Split out
+        // because the fix is specific and nothing else in the shell family
+        // shares it: 15 of 100 shell exits in 24h, and they are never "the
+        // answer" — a missing binary is always a fault.
+        id: 'command-not-found',
+        test: /^Exit code 12[67](?![0-9])/im,
+        fix: 'The binary is missing or not executable on this machine, not wrong. Check the tool is installed and on PATH before rewriting the command around it.',
+    },
+    {
+        // The split that stops the shell catch-all being half fiction. Measured
+        // over 100 shell exits in 24h: 34 carried an error marker, 37 were an
+        // exit of 1 or 2 with real output and no marker at all. The second group
+        // is dominated by commands where a NON-ZERO EXIT IS THE ANSWER — grep
+        // exits 1 on no-match, `git diff --quiet` exits 1 when there ARE
+        // differences — usually surfaced because the command was chained with &&
+        // so the whole chain reports failure after doing exactly what was asked.
+        id: 'shell-exit-may-be-the-answer',
+        test: (head) => /^Exit code [12](?![0-9])/im.test(head) && !ERROR_MARKER.test(head),
+        fix: 'Probably not a fault: grep/diff --quiet/test/cmp all exit non-zero to REPORT something, and an && chain turns that answer into a failed command. Read the output before reacting to the badge; use ; or || true when the count is the point.',
+    },
+    // Catch-all LAST: a non-zero shell exit carrying an actual error marker.
+    {
+        id: 'shell-fault',
         test: /^Exit code [1-9]/im,
-        fix: 'Check whether the non-zero exit IS the answer (grep/diff --quiet/test exit 1 on "found nothing") before treating it as a fault.',
+        fix: 'A real non-zero exit with error text. Read the marker (Traceback, fatal:, SyntaxError) rather than re-running the command unchanged.',
     },
 ];
 
@@ -191,9 +215,15 @@ const redact = (s) => REDACT.reduce((acc, [re, to]) => acc.replace(re, to), s);
 // that happens to contain the word ENOENT three screens down is not an ENOENT
 // failure, and matching deep into the body mislabels long outputs as whatever
 // they happen to mention.
+// A `test` may be a RegExp or a predicate over the head. The predicate form
+// exists because the shell classes need two factors — the exit code AND whether
+// the output carries an error marker — and no single regex states both.
 function classify(text) {
     const head = text.slice(0, 400);
-    for (const c of CLASSES) if (c.test.test(head)) return c.id;
+    for (const c of CLASSES) {
+        const hit = typeof c.test === 'function' ? c.test(head) : c.test.test(head);
+        if (hit) return c.id;
+    }
     return 'unclassified';
 }
 
