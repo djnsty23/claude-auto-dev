@@ -410,14 +410,12 @@ auditSettings();
 //
 // The slug is the project path with every separator replaced by '-', which is
 // not reversible: '/home/my-project' and '/home/my/project' produce the same
-// slug, and on Windows 'C:\Users\x' becomes 'C--Users-x', which the old
-// reversal turned into '/C//Users/x'. That path never exists, existsSync
-// returned false, and the catch below swallowed it — so on Windows this
-// discovered zero projects and said nothing, for as long as it has existed.
+// slug. That much is unfixable, which is why transcripts come first.
 //
 // The session transcripts inside each slug directory record the real cwd. Read
 // that instead of reconstructing it. The reversal stays as a fallback for slug
-// directories with no transcript yet.
+// directories with no transcript yet — see pathFromSlug for what it can and
+// cannot recover.
 function pathFromTranscripts(dir) {
     let newest = null;
     for (const f of fs.readdirSync(dir)) {
@@ -437,6 +435,31 @@ function pathFromTranscripts(dir) {
     return null;
 }
 
+// Reverse a slug back into a path.
+//
+// A POSIX path starts at the root, so its slug carries a leading '-'
+// ('/home/x' -> '-home-x'). A Windows path starts at the drive, so its slug
+// does not ('C:\Users\x' -> 'C--Users-x'). That leading '-' is therefore the
+// discriminator, and it needs no platform check: a POSIX slug can never begin
+// with a bare letter.
+//
+// Restoring the drive letter is the whole point. Dropping it produced
+// '/C//Users/x', which never existed — and the drive-less '/Users/x' that
+// looks like a fix is worse, because on Windows a rooted path with no drive is
+// DRIVE-RELATIVE: it resolves against the current drive. The same slug then
+// finds a repo when cwd is on C: and misses it when cwd is on D:. That is
+// exactly why this suite passed locally and on Linux CI while failing on the
+// Windows runner, whose workspace is D:\a\... and whose temp dir is on C:.
+// Discovery found zero projects there, so every finding silently vanished.
+//
+// Still lossy on both platforms: any directory containing a real '-' reverses
+// wrong. Callers verify the result exists before acting on it.
+function pathFromSlug(slug) {
+    const drive = /^([A-Za-z])--(.*)$/.exec(slug);
+    if (drive) return drive[1] + ':/' + drive[2].replace(/-/g, '/');
+    return '/' + slug.replace(/^-/, '').replace(/-/g, '/');
+}
+
 try {
     const projects = path.join(CONFIG, 'projects');
     for (const slug of fs.existsSync(projects) ? fs.readdirSync(projects) : []) {
@@ -444,7 +467,7 @@ try {
         if (!fs.statSync(dir).isDirectory()) continue;
         let repo = null;
         try { repo = pathFromTranscripts(dir); } catch { /* fall through to the slug */ }
-        if (!repo) repo = '/' + slug.replace(/^-/, '').replace(/-/g, '/');
+        if (!repo) repo = pathFromSlug(slug);
         if (fs.existsSync(path.join(repo, '.git'))) auditPrd(repo);
     }
 } catch { /* discovery is best-effort */ }

@@ -88,22 +88,24 @@ function makeRepoUnregistered(name) {
 
 function makeRepo(name) {
     const repo = makeRepoUnregistered(name);
-    // Register it for discovery, exactly as drift-audit reverses the slug.
+    // Register it for discovery, exactly as Claude Code encodes a project path:
+    // ':' and every separator become '-', so `C:\Users\x` -> `C--Users-x` and
+    // `/tmp/x` -> `-tmp-x`. The drive letter STAYS.
     //
-    // Both separators and the drive letter have to go. On Windows `repo` is
-    // `C:\…\clean`, so a forward-slash-only replace left the slug as a full
-    // absolute path and mkdir tried to create `…/projects/C:\Users\…` — an
-    // absolute path nested inside another, which is why this suite crashed on
-    // every Windows run rather than failing an assertion.
+    // An earlier version stripped it, producing a drive-less `-Users-…`. That
+    // round-tripped only by luck: drift-audit rebuilt it as `/Users/…`, which on
+    // Windows is drive-RELATIVE, so it resolved against whatever drive the
+    // process was on. Locally cwd and %TEMP% are both C: and every case passed;
+    // on the Windows runner cwd is `D:\a\…` while %TEMP% is on C:, so all 8
+    // fixtures resolved to a nonexistent `D:\Users\…`, discovery returned zero
+    // projects, and the 12 assertions that expect a finding failed while the 14
+    // that expect none passed vacuously.
     //
-    // Dropping the drive letter keeps the round-trip working, because
-    // drift-audit.js:388 rebuilds the path as '/' + slug and Windows resolves a
-    // drive-less rooted path against the current drive. That is also the
-    // limit of it: a real Windows slug is `C--Users-…`, which that line turns
-    // into `/C//Users/…` and never finds. Project discovery does not work on
-    // Windows in production, and the slug scheme is lossy on both platforms —
-    // any directory containing a dash reverses wrong.
-    const slug = repo.replace(/^[A-Za-z]:/, '').replace(/[\\/]/g, '-');
+    // Keeping the drive letter also means this exercises the real production
+    // slug rather than a shape that only ever existed in this file. Still lossy
+    // on both platforms: any directory containing a dash reverses wrong, which
+    // is why TMP is built with a dash-free prefix.
+    const slug = repo.replace(/^([A-Za-z]):/, '$1-').replace(/[\\/]/g, '-');
     fs.mkdirSync(path.join(CONFIG, 'projects', slug), { recursive: true });
     return repo;
 }
@@ -332,7 +334,15 @@ const forRepo = (findings, name) => (findings || [])
     fs.writeFileSync(path.join(slugDir, 'session.jsonl'),
         JSON.stringify({ type: 'user', cwd: repo, message: { role: 'user', content: 'hi' } }) + '\n');
 
-    const reversed = '/' + 'C--totally-unreversible-slug'.replace(/^-/, '').replace(/-/g, '/');
+    // The control has to run the reversal drift-audit ACTUALLY uses, not the one
+    // it used to. Mirror pathFromSlug here; against the old drive-less version
+    // this would assert that a path the script no longer builds is missing,
+    // which is true of any string and proves nothing.
+    const SLUG = 'C--totally-unreversible-slug';
+    const drive = /^([A-Za-z])--(.*)$/.exec(SLUG);
+    const reversed = drive
+        ? drive[1] + ':/' + drive[2].replace(/-/g, '/')
+        : '/' + SLUG.replace(/^-/, '').replace(/-/g, '/');
     check('the control: slug reversal alone could NOT find this repo',
         !fs.existsSync(path.join(reversed, '.git')));
     check('repo discovered via the transcript cwd',

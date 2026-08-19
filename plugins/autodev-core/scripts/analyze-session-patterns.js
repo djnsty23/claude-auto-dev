@@ -367,6 +367,11 @@ if (AS_JSON) {
 // Population FIRST. A ranked list with no denominator is indistinguishable from
 // a probe that returned nothing — print what was scanned, per rule-gate-integrity.
 console.log(`session-pattern scan — last ${DAYS} day(s), root ${ROOT}`);
+// The registry of sessions is machine-local, so this reads THIS box only.
+// Saying "fleet" while covering one of two machines is the same error as
+// quoting a 7-day average as current state: the number is real and it
+// describes something narrower than the word attached to it.
+console.log(`scope: this machine only (${os.hostname()}) — sessions on other machines are invisible from here`);
 console.log(`population: ${stats.filesInWindow} of ${stats.filesSeen} transcripts touched in window, `
     + `${stats.lines} lines read (${stats.linesBeforeWindow} older than the window, skipped),`);
 console.log(`            ${stats.toolResults} tool results IN WINDOW, ${stats.errors} errored`

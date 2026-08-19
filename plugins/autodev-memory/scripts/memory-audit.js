@@ -35,6 +35,16 @@ function decodeProjectDir(slug) {
     // Claude encodes an absolute path by replacing separators with '-'. That is
     // lossy (a real '-' in a directory name is indistinguishable), so treat the
     // decoded path as a best guess and verify it exists before acting on it.
+    //
+    // A POSIX slug carries a leading '-' ('/home/x' -> '-home-x'); a Windows
+    // one starts at the drive instead ('C:\Users\x' -> 'C--Users-x'). Put the
+    // drive letter back rather than emitting a rooted path without one — on
+    // Windows '/Users/x' is drive-relative and resolves against whichever drive
+    // the process happens to be on, so the same slug resolves differently from
+    // a D: workspace than from a C: one. Mirrors pathFromSlug in
+    // autodev-core/scripts/drift-audit.js; keep the two in step.
+    const drive = /^([A-Za-z])--(.*)$/.exec(slug);
+    if (drive) return drive[1] + ':/' + drive[2].replace(/-/g, '/');
     return '/' + slug.replace(/^-/, '').replace(/-/g, '/');
 }
 
