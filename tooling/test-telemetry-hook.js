@@ -207,6 +207,19 @@ check('module: browser rules stay silent on a call that SUCCEEDED',
 check('module: a Bash-only rule does not fire for a browser tool',
   adviseOnToolFailure('mcp__claude-in-chrome__computer', "Error: Cannot find module '/tmp/x.json'", true) === null);
 
+// The last two rules. Both are tool-agnostic: the SQL failures arrive through
+// Bash (a script hitting the REST API), the schema violations through the agent
+// layer, so pinning either to a tool name would make it dead on arrival.
+const SQL_ERR = "Error: Exit code 127 HTTP 400: Failed to run sql query: ERROR: 42703: column anon_fingerprint does not exist";
+const SCHEMA_ERR = "Error: Output does not match required schema: root: must NOT have additional properties";
+check('module: names a guessed column',
+  (adviseOnToolFailure('Bash', SQL_ERR, true) || {}).id === 'sql-schema-guess');
+check('module: names a subagent schema mismatch',
+  (adviseOnToolFailure('Task', SCHEMA_ERR, true) || {}).id === 'agent-schema-violation');
+check('module: both stay silent on a call that SUCCEEDED',
+  adviseOnToolFailure('Bash', SQL_ERR, false) === null
+  && adviseOnToolFailure('Task', SCHEMA_ERR, false) === null);
+
 // An unreachable exporter must not delay or fail the call.
 const t0 = Date.now();
 const slow = run({ tool_name: 'Read', tool_input: { file_path: 'x' } }, { CLAUDE_OTEL_ENDPOINT: 'http://127.0.0.1:9/none' });

@@ -97,6 +97,36 @@ const RULES = [
             + 'the script that just failed navigated itself. Navigate in one call, evaluate '
             + 'in the next, and re-establish the tab reference in between.',
     },
+    {
+        id: 'sql-schema-guess',
+        tools: null,
+        // 4 sessions, 7 hits. One agent guessed seven column names in a row,
+        // each costing a full failed round trip to a production database, when
+        // one introspection query would have answered all seven.
+        signatures: [
+            /42703/,
+            /column [^ ]+ does not exist/i,
+            /relation [^ ]+ does not exist/i,
+        ],
+        advice: 'The query named something the schema does not have. Guessing the next '
+            + 'column name costs another full round trip and the failure rate does not '
+            + 'improve — one agent was observed missing seven in a row. Introspect once '
+            + '(information_schema.columns, or select * limit 1) and read the real names, '
+            + 'then write the query. Note a column name is not a contract either: check '
+            + 'what WRITES it before grouping by it.',
+    },
+    {
+        id: 'agent-schema-violation',
+        tools: null,
+        // 6 sessions. Reads as the agent misbehaving; usually the contract is
+        // wrong, which is why the remedy points at the schema first.
+        signatures: [/Output does not match required schema/i],
+        advice: 'Usually the CONTRACT is wrong, not the agent: an additionalProperties that '
+            + 'forbids a field the prompt invited, or a required field the prompt never '
+            + 'asked the agent to produce. Read the schema against the prompt that was sent '
+            + 'before re-running — a retry against the same mismatched pair fails the same '
+            + 'way.',
+    },
 ];
 
 /**
