@@ -129,6 +129,53 @@ gate('gates-ran', 'this file is wired into something that runs it', () => {
     }
 });
 
+gate('workflow-valid', 'CI workflow files are ones GitHub will actually accept', () => {
+    // A workflow GitHub REJECTS fails in 0 seconds with zero jobs and NO LOG, because it is
+    // refused before a job is created or the triggers are even evaluated. Nothing readable tells
+    // you. Measured in fatboyslim 2026-08-20: ios-simshots.yml carried two top-level
+    // `concurrency:` blocks for three days — a second added with its rationale, the first not
+    // removed — and every push produced a 0s red that also marked every open PR UNSTABLE. Sixty
+    // gates in that repo, and none of them looked at the files that RUN the gates.
+    //
+    // A LINE SCAN, NOT A PARSE, deliberately. YAML parsers ACCEPT duplicate keys and keep the
+    // last, so they call a rejected file valid — a yaml.safe_load check printed "YAML OK" on that
+    // exact dead file. Node has no YAML in its builtins either, and this template must stay
+    // dependency-free. Top-level keys are the only thing at column 0 in these files (a block
+    // scalar must indent past its key), so the scan is exact for the class it covers.
+    //
+    // Scope is that class and should stay there: this is not a workflow linter.
+    const dir = path.join(ROOT, '.github', 'workflows');
+    if (!fs.existsSync(dir)) return soft('no .github/workflows — nothing to validate');
+    const files = fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+    if (!files.length) return soft('.github/workflows holds no .yml files');
+    let keys = 0;
+    let dups = 0;
+    files.forEach((f) => {
+        const at = new Map();
+        fs.readFileSync(path.join(dir, f), 'utf8').split('\n').forEach((line, i) => {
+            const m = line.match(/^([A-Za-z_][A-Za-z0-9_.-]*):/);
+            if (!m) return;
+            keys++;
+            if (at.has(m[1])) {
+                dups++;
+                fail(`${f} declares top-level "${m[1]}" twice, at lines ${at.get(m[1])} and ${i + 1}. `
+                    + 'GitHub REJECTS the file — the run fails in 0s with no jobs and no log, so nothing '
+                    + 'tells you. Delete one; keep whichever carries the reasoning.');
+            } else at.set(m[1], i + 1);
+        });
+        if (!at.has('jobs')) fail(`${f} has no top-level "jobs" — GitHub rejects it the same silent way`);
+        // `on:` is YAML 1.1's boolean true, which is why a parser-based check would look for both.
+        // This scan reads raw text, so `on` is the literal; `true` covers a quoted variant.
+        if (!at.has('on') && !at.has('true')) fail(`${f} has no trigger ("on") — same silent rejection`);
+    });
+    // The population, so a scan that matched nothing is not mistakable for a clean repo — and it
+    // must AGREE with the findings above it. The first draft printed "no duplicates" unconditionally,
+    // so a run that had just named a duplicate contradicted itself one line later. A summary that
+    // can disagree with its own findings is worse than no summary.
+    ok(`${files.length} workflow file(s), ${keys} top-level key(s), `
+        + (dups ? `${dups} DUPLICATE(S) — see above` : 'no duplicates'));
+});
+
 // EXAMPLE — delete once you have real gates.
 //
 // gate('parity', 'every surface that shows day total imports the one function', () => {

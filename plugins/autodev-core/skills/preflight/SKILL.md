@@ -22,8 +22,18 @@ fix-per-feature ratios. Gates that fail a build are what changes outcomes.
 
 1. **Find out what to gate.** Run `/learn-from-fixes` first. Gate the top two or
    three classes for *this* repo, not a generic list. If the user insists on
-   starting without that analysis, gate only `syntax` and `gates-ran` and say
-   plainly that the rest is guesswork until there is history to read.
+   starting without that analysis, gate only `syntax`, `gates-ran` and
+   `workflow-valid` and say plainly that the rest is guesswork until there is
+   history to read.
+
+   Those three are the template's defaults because none of them has to know
+   anything about the repo. `workflow-valid` is the one worth a sentence: a
+   workflow file GitHub refuses fails in **0 seconds, with no jobs and no log**,
+   so nothing readable tells you it happened. Measured in one repo on
+   2026-08-20 — a duplicate top-level `concurrency:` key left a workflow dead
+   for three days while marking every open PR `UNSTABLE`, past sixty other
+   gates. It is a line scan rather than a parse on purpose: YAML parsers accept
+   duplicate keys and keep the last, so they call a rejected file valid.
 
 2. **Copy the template** to `scripts/preflight.js`:
 
