@@ -1,5 +1,51 @@
 # Changelog
 
+## [8.90.0] - 2026-08-20
+
+### Added — `workflow-valid`, a gate on the files that run the gates
+
+A workflow file GitHub REJECTS fails in 0 seconds with zero jobs and no log,
+because it is refused before a job is created or its triggers are even
+evaluated. Nothing readable tells you it happened.
+
+Measured in fatboyslim: `ios-simshots.yml` carried two top-level `concurrency:`
+blocks for three days — a second added with its cost rationale, the first not
+removed — and every push produced a 0s red that also held every open PR at
+`mergeStateStatus=UNSTABLE`. That repo has sixty gates and none of them read the
+files that run the gates, which is why this ships in the template rather than in
+one project. The tell that it had never run: its only trigger is
+`workflow_dispatch`, so the push-event runs were GitHub failing to parse it
+badly enough that it could not tell whether to run it at all.
+
+The defect also could not have been caught by review. Both diffs were correct
+alone — one PR added a concurrency block, and a branch authored before that PR
+existed added an identical one. It exists only in the union, which is the exact
+shape a gate catches and a reading does not.
+
+A LINE SCAN, NOT A PARSE, and that is load-bearing. YAML parsers accept
+duplicate keys and keep the last, so they call a rejected file valid — a
+`yaml.safe_load` check printed "YAML OK" on that dead file. Node has no YAML in
+its builtins either and this template stays dependency-free. Top-level keys are
+the only thing at column 0 in a workflow, since a block scalar must indent past
+its key, so the scan is exact for the class it covers. It also catches a missing
+`jobs` or trigger, both the same silent rejection. It is not a workflow linter
+and should not grow into one.
+
+Ships as a third default beside `syntax` and `gates-ran` because, like them, it
+needs to know nothing about the repo — and it sits next to `gates-ran`, which
+already reads `.github/workflows` to prove preflight is wired into CI. That gate
+asks whether CI references preflight; this one asks whether CI can start at all.
+
+Its summary agrees with its own findings: the first draft printed "no
+duplicates" unconditionally, so a run that had just named a duplicate
+contradicted itself one line later.
+
+Mutation-tested across all three branches — duplicate key, missing `jobs`,
+missing trigger — plus a clean control. Swept 215 workflow files across 42
+`.github/workflows` directories before writing it: the only rejects were stale
+pre-fix copies of that same file, so this is a rare defect with an expensive
+silence rather than a common one.
+
 ## [8.89.0] - 2026-08-19
 
 ### Added — `--by-cost`, and a cap on the advisory
