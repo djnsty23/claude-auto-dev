@@ -118,11 +118,11 @@ check('a long output that merely MENTIONS ENOENT is not called a missing file',
 // The catch-all used to hold 28% of all errors with the advice "check whether
 // the exit code IS the answer", which is a shrug rather than a class. These
 // three cases pin the split. They also exist because the first implementation
-// was broken in a way no probe caught: a `` in both regexes collapsed into a
-// literal BACKSPACE byte during a scripted patch, so the patterns silently
-// matched nothing and everything fell through to the catch-all. A control
-// character renders as empty in a terminal, so the source LOOKED right in every
-// dump — only classifying known input revealed it.
+// was broken in a way no probe caught: a word-boundary escape (backslash-b) in
+// both regexes collapsed into a literal BACKSPACE byte during a scripted patch,
+// so the patterns silently matched nothing and everything fell through to the
+// catch-all. A control character renders as empty in a terminal, so the source
+// LOOKED right in every dump — only classifying known input revealed it.
 const shell = fixture([
     line(iso(3600_000), { error: 'Exit code 2 === branch === abc123 some real output' }),
     line(iso(3600_000), { error: 'Exit code 127 nope: command not found' }),
