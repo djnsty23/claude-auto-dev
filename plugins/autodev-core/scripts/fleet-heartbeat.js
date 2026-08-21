@@ -32,6 +32,21 @@ const DIR = process.env.AUTODEV_FLEET_DIR || path.join(HOME, '.claude', 'fleet')
 const RETAIN_DAYS = 7;
 const PRUNE_EVERY = 25;
 
+// A real cliSessionId is a UUID. This matters because other sessions in this
+// repo drive the Stop hook with FIXTURE payloads while testing it — transcripts
+// named sess.jsonl, clean.jsonl, carried.jsonl — and without this check the
+// heartbeat store fills with records for sessions that never existed. Found
+// after a restart: 5 of 13 files were fixture residue, inflating the coverage
+// number the board reasons about.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Heartbeats are named for their session. Dotfiles in the same directory are
+// NOTIFIER state (.notified.json, .notify-last-run.json) and must never be read
+// as heartbeats — nor pruned as stale ones, which would silently wipe the
+// notifier's dedup memory every 7 days.
+const isHeartbeatFile = (name) =>
+    !name.startsWith('.') && name.endsWith('.json') && UUID_RE.test(name.slice(0, -5));
+
 /**
  * Drop records for sessions that stopped talking a week ago. Cheap and rare:
  * a readdir plus a stat per entry, on roughly one call in twenty-five.
@@ -41,7 +56,7 @@ function prune() {
     let entries;
     try { entries = fs.readdirSync(DIR); } catch { return; }
     for (const name of entries) {
-        if (!name.endsWith('.json')) continue;
+        if (!isHeartbeatFile(name)) continue;
         const p = path.join(DIR, name);
         try {
             if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p);
@@ -64,7 +79,8 @@ function write(payload, cwd) {
         const id = transcript
             ? path.basename(transcript, '.jsonl')
             : (payload && payload.session_id) || null;
-        if (!id) return null;
+        // Must be a real session id, not a fixture name — see UUID_RE above.
+        if (!id || !UUID_RE.test(id)) return null;
 
         fs.mkdirSync(DIR, { recursive: true });
 
@@ -98,8 +114,11 @@ function readAll() {
     let entries;
     try { entries = fs.readdirSync(DIR); } catch { return out; }
     for (const name of entries) {
-        if (!name.endsWith('.json')) continue;
-        try { out.push(JSON.parse(fs.readFileSync(path.join(DIR, name), 'utf8'))); } catch { /* skip */ }
+        if (!isHeartbeatFile(name)) continue;
+        try {
+            const rec = JSON.parse(fs.readFileSync(path.join(DIR, name), 'utf8'));
+            if (rec && rec.cliSessionId) out.push(rec);
+        } catch { /* skip */ }
     }
     return out.sort((a, b) => String(b.stoppedAt).localeCompare(String(a.stoppedAt)));
 }

@@ -61,8 +61,18 @@ function loadSessionIndex() {
             let rec; try { rec = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { continue; }
             if (!rec.cliSessionId) continue;
             const pr = Array.isArray(rec.prs) && rec.prs.length ? rec.prs[rec.prs.length - 1] : null;
+            // Liveness, readable from disk. `isRunning` is runtime-only and
+            // needs an MCP call, but the desktop record's lastActivityAt ticks
+            // while a session is alive. `[measured]` over 490 records with 9
+            // running: running max 324s, not-running min 865s — cleanly
+            // separable, so a 600s cut has ~2x margin either side. (The file's
+            // own mtime does NOT separate them; use the field.)
+            const beat = Number(rec.lastActivityAt) || 0;
+            const likelyRunning = beat > 0 && (Date.now() - beat) < 600000;
+
             index.set(rec.cliSessionId, {
                 addressableId: rec.sessionId,      // what send_message accepts
+                likelyRunning,
                 title: rec.title || null,
                 worktreeName: rec.worktreeName || null,
                 originCwd: rec.originCwd || null,
@@ -215,7 +225,13 @@ function classify(s) {
     // same concept meant a session merely mid-turn at 10m read as stalled —
     // caught on real data, where "Mac and device sessions" was flagged while it
     // was simply still working.
-    const actionable = !!s.addressableId
+    // A session that is NOT RUNNING cannot be stalled — it is simply over, and
+    // the two look identical on disk. Measured after a restart: both 'stalled'
+    // verdicts were sessions killed by the restart, whose last transcript write
+    // postdates their last Stop hook. A restart mass-produces that pattern, so
+    // without this gate the board goes red across the fleet every time you
+    // restart, which is precisely when you least want noise.
+    const actionable = !!s.addressableId && s.likelyRunning === true
         && s.idleMinutes >= STALL_MIN && s.idleMinutes <= STALL_MAX;
     if (actionable && s.endedCleanly === false) return 'stalled';
     if (actionable && s.endedCleanly === null && s.lastRole === 'user') return 'stalled';
