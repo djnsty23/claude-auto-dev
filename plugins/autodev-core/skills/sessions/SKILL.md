@@ -77,6 +77,35 @@ is intact either way, but a deep one re-bills its whole context on every turn an
 carries its own accumulated wrong turns; `RESUME.md` and `DECISIONS.md` carry the
 conclusions without the cost.
 
+## The reach limit, and the one case where the script writes
+
+`archive_session` reaches only the workspace directory the app currently tracks
+— measured at ~70 of 482 records, and `limit` does not change it. The cause is
+structural, not a cap: sessions live under `<store>/<workspace>/`, the app holds
+one workspace, and everything in the others returns "not found".
+
+Age does NOT predict this. Four-day-old records were unreachable while older ones
+were not. The directory decides.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/session-sweep.js" --archive-orphaned
+```
+
+This is the ONLY mode in which the script mutates anything. It marks SAFE records
+archived by string-replacing `"isArchived":false` in the store JSON, and **only**
+for orphaned workspaces. It still never touches a git worktree.
+
+Why it is safe there and nowhere else: the app never loaded those records, so it
+holds nothing to overwrite them with. Records in the live workspace are skipped
+and still require `archive_session`. If two workspaces are both recently active,
+the script treats neither as orphaned — that is a shape it does not model, and
+the safe reading is to leave both alone.
+
+A string replace, not parse-then-stringify: reserializing rewrites field order
+and escaping across a file the app owns, so any breakage would be
+indistinguishable from the change being made. Take a copy of the store first;
+it is around 50MB.
+
 ## Step 3 — archive, only the SAFE list
 
 For each SAFE row, call `archive_session` with its `sessionId`. Never archive a
