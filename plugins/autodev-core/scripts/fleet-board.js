@@ -100,6 +100,13 @@ border:1px solid var(--accent);border-radius:5px;padding:4px 9px;cursor:pointer;
 .go:hover{background:var(--accent-soft)}
 .go:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .na{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3)}
+.machines{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.mach{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:5px 10px}
+.mach b{color:var(--ink)}
+.mach.hot{border-color:var(--blocked-edge)}
+.mach.hot b{color:var(--blocked)}
+.mach.stale{opacity:.6}
+.mach i{font-style:normal;opacity:.75}
 .empty{padding:34px 18px;text-align:center;color:var(--ink-3)}
 .empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:5px;font-weight:500}
 footer{margin-top:16px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3)}
@@ -108,6 +115,7 @@ footer{margin-top:16px;font-family:"IBM Plex Mono",monospace;font-size:11px;colo
   <div><h1>Fleet</h1><div class="sub" id="scanline">loading&hellip;</div></div>
   <div class="counts" id="counts"></div>
 </header>
+<div id="machines" class="machines"></div>
 <div class="rows" id="rows"><div class="empty">loading&hellip;</div></div>
 <footer id="foot"></footer>
 </div>
@@ -183,6 +191,20 @@ function render(d){
     return out + '</div>';
   }).join('');
   document.getElementById('rows').innerHTML = html;
+  // Other machines. Always stamp the AGE — a stale count read as current is the
+  // whole failure mode of a synced status file, and this one rides a 4-hourly
+  // sync rather than a live connection.
+  var mHtml = '';
+  if (d.machines && d.machines.length) {
+    mHtml = d.machines.map(function(m){
+      var age = Math.round((Date.now() - Date.parse(m.publishedAt))/60000);
+      var stale = age > 360;
+      return '<span class="mach'+(m.blocked?' hot':'')+(stale?' stale':'')+'">'+
+        esc(m.host)+': <b>'+m.blocked+'</b> blocked / '+m.sessions+
+        ' <i>as of '+(age<60?age+'m':Math.round(age/60)+'h')+' ago</i></span>';
+    }).join('');
+  }
+  document.getElementById('machines').innerHTML = mHtml;
   document.getElementById('foot').textContent =
     'read-only \\u00b7 a blocked session cannot receive a message, so go to it rather than answering from here';
 }
@@ -212,7 +234,16 @@ const server = http.createServer((req, res) => {
     if (req.url.startsWith('/api/fleet')) {
         let body;
         try {
-            body = JSON.stringify(scanFleet(DAYS));
+            const fleet = scanFleet(DAYS);
+            // Other machines publish COUNTS ONLY — see fleet-publish.js for why
+            // nothing identifying can cross a git remote. Absent is normal: the
+            // other host may simply not be publishing.
+            try {
+                const { readAll, DIR } = require(path.join(__dirname, 'fleet-publish.js'));
+                fleet.machines = readAll().filter((m) => m.host !== require('os').hostname());
+                fleet.machinesDir = DIR;
+            } catch { fleet.machines = []; }
+            body = JSON.stringify(fleet);
         } catch (e) {
             res.writeHead(500, { 'content-type': 'application/json' });
             return res.end(JSON.stringify({ error: e.message }));
