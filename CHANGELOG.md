@@ -1,5 +1,44 @@
 # Changelog
 
+## [8.101.0] - 2026-08-22
+
+### Fixed — a restart made `stalled` fire on sessions that had simply ended
+
+Found by running the post-restart checks rather than by a report, which is the
+point of writing them down.
+
+A session killed by a restart has a transcript write postdating its last Stop
+hook, so `endedCleanly` is false — and on disk that is indistinguishable from a
+turn that hung. Both live `stalled` verdicts were exactly this, both
+`isRunning: false`. A restart mass-produces the pattern, so the board would have
+gone red across the fleet at the moment noise is least wanted.
+
+`stalled` now requires liveness. `isRunning` is runtime-only, but the desktop
+record's `lastActivityAt` ticks while a session is alive. `[measured]` over 490
+records with 9 running: **running max 324s, not-running min 865s** — cleanly
+separable, so a 600s cut carries ~2x margin either side. The file's own mtime
+does NOT separate them (running max 323s against not-running min 103s); it has to
+be the field.
+
+The first probe reported a false overlap, because `list_sessions` **excludes the
+current session** — so this session counted as not-running while being the
+freshest record on disk. Corrected, the gate reproduces `list_sessions` exactly:
+9 `likelyRunning` against its 8 reported plus self.
+
+### Fixed — 5 of 13 files in the heartbeat store were not heartbeats
+
+Other sessions here drive the Stop hook with FIXTURE payloads while testing it,
+so the store had accumulated `s.json`, `sess.json`, `clean.json`,
+`carried.json` and `nope.json`. That inflated the coverage figure the board
+reasons about from 8 to 13, and crashed the CLI listing.
+
+`write()` now requires a UUID. That makes any fixture payload harmless rather
+than requiring every harness in the repo to know this file exists.
+
+`readAll()` was also picking up the notifier's own dotfiles, and `prune()` would
+have **deleted them as stale heartbeats after 7 days** — silently wiping the
+notifier's dedup memory, which is what stops it repeating itself.
+
 ## [8.100.0] - 2026-08-21
 
 ### Released so the runtime can reach the fleet work — a same-version sha drift
