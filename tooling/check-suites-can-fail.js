@@ -222,7 +222,17 @@ for (const suite of suites) {
 
     const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(__dirname, suite));
     if (!subjects.length) {
-        rows.push({ suite, status: 'NO-SUBJECT', note: 'references no plugin source — nothing to stub' });
+        // Worded as a deficiency, and counted as a failure, because the previous
+        // wording — "references no plugin source — nothing to stub" — read as a
+        // considered exemption. Two readers in one day took it that way and
+        // reported "0 cannot fail" over three unchecked suites. A gate that skips
+        // silently and labels the skip reassuringly converts ABSENT coverage into
+        // REPORTED coverage, which is strictly worse than having no opinion.
+        rows.push({
+            suite,
+            status: 'UNCHECKED',
+            note: 'subject not derived — this suite is NOT verified. Add it to SUBJECT_OVERRIDES.',
+        });
         continue;
     }
 
@@ -272,10 +282,15 @@ if (after) {
 console.log('\nCan each suite fail?\n');
 let bad = 0;
 for (const r of rows) {
-    const mark = r.status === 'ok' ? '✓' : r.status === 'NO-SUBJECT' ? '·' : '✗';
-    if (r.status === 'VACUOUS' || r.status === 'RED') bad++;
+    // Anything that is not 'ok' means this script did not establish that the
+    // suite can fail. There is no third category: a skip is an absence of
+    // evidence, and printing it beside the passes is how it gets read as one.
+    const mark = r.status === 'ok' ? '✓' : '✗';
+    if (r.status !== 'ok') bad++;
     console.log(`  ${mark} ${r.suite.padEnd(30)} ${r.status.padEnd(9)} ${VERBOSE || r.status !== 'ok' ? r.note : ''}`);
 }
-const unmapped = rows.filter((r) => r.status === 'NO-SUBJECT').length;
-console.log(`\n${rows.length} suite(s) · ${bad} cannot fail or are already red · ${unmapped} with no subject · tree restored clean\n`);
+const unchecked = rows.filter((r) => r.status === 'UNCHECKED' || r.status === 'NO-SUBJECT').length;
+const verified = rows.length - bad;
+console.log(`\n${rows.length} suite(s) · ${verified} verified able to fail · ${bad} NOT verified` +
+            (unchecked ? ` (${unchecked} with no derivable subject)` : '') + ` · tree restored clean\n`);
 process.exit(bad ? 1 : 0);
