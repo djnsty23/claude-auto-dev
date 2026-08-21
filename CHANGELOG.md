@@ -1,5 +1,31 @@
 # Changelog
 
+## [8.94.0] - 2026-08-21
+
+### Changed — scheduled sessions age out in days, not weeks
+
+`sessions` held every session to one 14-day clock. But the population is not one
+kind of thing: **261 of ~480 records carry a `scheduledTaskId`** — morning
+briefings, daily digests, review pulses — and those are disposable by
+construction, because the task that made them will make another tomorrow.
+Treating them like hand-started work meant the list silted up with yesterday's
+digests, which is most of what was there.
+
+Scheduled sessions now age out at `--ephemeral-days` (default **2**);
+hand-started work keeps `--stale-days` (default **14**).
+
+Detection is the `scheduledTaskId` field, not a regex over titles. A regex would
+miss a renamed task and would catch hand-started work that happens to be called
+"daily digest" — the field records who launched the session, which is the
+question actually being asked.
+
+Also honours `autoArchiveExempt`, a flag the app already sets. A tool that
+invents a second opt-out beside an existing one just creates two places to look.
+
+Paired with a weekly `session-sweep-weekly` scheduled task that archives only
+finished SCHEDULED residue on its own judgement, and reports finished
+hand-started sessions for a human call rather than acting on them.
+
 ## [8.93.0] - 2026-08-21
 
 ### Added — `sessions`, which archives finished work without discarding live work
