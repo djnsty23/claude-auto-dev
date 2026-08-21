@@ -1,0 +1,75 @@
+---
+name: fleet
+description: Shows every Claude Code session on this machine and which ones are blocked on an unanswered question. Use when asked what other sessions are doing, which are waiting, or to open the fleet board.
+when_to_use: "Invoked when the user says \"fleet\", asks which sessions are waiting or blocked, or asks to open the session board."
+allowed-tools: Bash
+user-invocable: true
+---
+
+# Fleet
+
+One view of every session on this machine, and the unanswered question each
+blocked one is sitting on.
+
+## The common case — just answer the question
+
+Most of the time the user wants the answer, not a browser. Run:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/scripts/fleet-status.js" --pending
+```
+
+That prints only the blocked sessions with their questions and options, plus the
+population it scanned. **Report the population line.** A bare "nothing is
+blocked" is indistinguishable from a probe that read nothing.
+
+For the whole fleet, drop `--pending`. `--days N` widens the window (default 2).
+
+## The board
+
+For a live view that refreshes off disk every 15 seconds:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/scripts/fleet-board.js"
+```
+
+Serves `http://127.0.0.1:7717` on loopback only. Blocked sessions sort first and
+expand to show their question inline.
+
+## Notifications
+
+A pending panel is perishable — measured, panels were answered inside fifteen
+minutes — so a board you must remember to open misses the window it exists for.
+To be tapped instead:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/scripts/fleet-notify.js" --watch 120
+```
+
+Fires once per panel, not per scan. `--dry` prints what would fire without
+notifying; `--test` sends one sample toast.
+
+## What to tell the user, and what not to
+
+**Never offer to answer a blocked session's question for them.** Measured
+2026-08-21: `send_message` reaches an idle session in ~20 seconds and does not
+reach a busy one at all — over 482 seconds and 166KB of transcript growth it
+never arrived. An AskUserQuestion panel does not end a turn, so a session cycling
+through panels may never reach the boundary where queued mail is delivered.
+
+The sessions most worth answering are exactly the ones that cannot receive an
+answer. Tell the user **which session to go to**. If a row says "not addressable"
+it has no desktop record and cannot be messaged even when idle.
+
+## States
+
+| State | Means |
+|---|---|
+| `blocked` | an unanswered panel. Proven by the transcript, not inferred. |
+| `working` | the transcript grew in the last few minutes. |
+| `stalled` | a turn started and never ended, or the user spoke last and nothing followed. The one worth surfacing — it can mean a dead session. |
+| `done` | merged PR, quiet an hour. |
+| `waiting` | it spoke last and stopped. The normal resting state. |
+
+`stalled` is policy rather than measurement and lives in `classify()` in
+`fleet-status.js`. It is five lines and safe to change.

@@ -24,7 +24,11 @@ const fs = require('fs');
 const path = require('path');
 
 const HOME = process.env.USERPROFILE || process.env.HOME;
-const DIR = path.join(HOME, '.claude', 'fleet');
+// Overridable so a test cannot write into the live directory. It could before,
+// and it did: a test heartbeat for a REAL session id made the board report that
+// session as stalled off fabricated data. Planted test data must never be able
+// to reach the surface being tested.
+const DIR = process.env.AUTODEV_FLEET_DIR || path.join(HOME, '.claude', 'fleet');
 const RETAIN_DAYS = 7;
 const PRUNE_EVERY = 25;
 

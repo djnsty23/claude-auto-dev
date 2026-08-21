@@ -187,6 +187,17 @@ function readTranscript(file) {
 function classify(s) {
     if (s.pending) return 'blocked';
     if (s.idleMinutes <= 3) return 'working';
+
+    // A heartbeat REFINES the timing heuristic; it never replaces it. When the
+    // Stop hook fired at or after the last write, the turn finished — so the
+    // session is resting, not stalled, however long it has been quiet.
+    if (s.endedCleanly === true && s.prState !== 'MERGED') return 'waiting';
+
+    // endedCleanly === false is the strong signal: the transcript grew after the
+    // last recorded turn end, so a turn started and never finished.
+    if (s.endedCleanly === false && s.idleMinutes >= 10) return 'stalled';
+
+    // null (no heartbeat yet) falls back to the timing-only heuristic.
     if (s.lastRole === 'user' && s.idleMinutes >= 15) return 'stalled';
     if (s.prState === 'MERGED' && s.idleMinutes >= 60) return 'done';
     return 'waiting';
@@ -208,6 +219,16 @@ function scanFleet(days) {
     const sessions = [];
     const index = loadSessionIndex();
 
+    // Heartbeats say a turn ENDED; an mtime only says the file grew. Absent
+    // until the plugin restart that installs the hook, so every consumer must
+    // treat "no heartbeat" as UNKNOWN rather than as "did not end cleanly" -
+    // an unrecognised state must never fall through to the confident reading.
+    let beats = new Map();
+    try {
+        const { readAll } = require(path.join(__dirname, 'fleet-heartbeat.js'));
+        beats = new Map(readAll().map((h) => [h.cliSessionId, h]));
+    } catch { /* heartbeat module absent - everything stays unknown */ }
+
     for (const dir of fs.readdirSync(ROOT)) {
         const d = path.join(ROOT, dir);
         let st; try { st = fs.statSync(d); } catch { continue; }
@@ -226,6 +247,15 @@ function scanFleet(days) {
             rec.idleMinutes = Math.round((Date.now() - fst.mtimeMs) / 60000);
             rec.isRunning = null;
             Object.assign(rec, index.get(rec.sessionId) || { addressableId: null, title: null });
+
+            const hb = beats.get(rec.sessionId);
+            rec.stoppedAt = hb ? hb.stoppedAt : null;
+            // true  = the Stop hook fired at or after the last write, so the turn
+            //         finished rather than being cut off
+            // false = the transcript grew AFTER the last recorded turn end
+            // null  = no heartbeat at all; say nothing
+            rec.endedCleanly = hb ? (Date.parse(hb.stoppedAt) >= fst.mtimeMs - 2000) : null;
+
             rec.state = classify(rec);
             sessions.push(rec);
         }

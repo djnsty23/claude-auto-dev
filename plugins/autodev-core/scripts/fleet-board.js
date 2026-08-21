@@ -114,6 +114,13 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function proj(cwd){ if(!cwd) return '?'; var p=cwd.split(/[\\\\/]/);
   var i=p.indexOf('.claude'); return i>0?p[i-1]:p[p.length-1]; }
+// Three states, and the absent one must read as absent rather than as bad news:
+// a session with no heartbeat is simply one the Stop hook has not run in yet.
+function hb(s){
+  if(s.endedCleanly===true)  return ' \\u00b7 turn ended';
+  if(s.endedCleanly===false) return ' \\u00b7 <b style="color:var(--stalled)">turn never ended</b>';
+  return '';
+}
 function render(d){
   var pop=d.population;
   document.getElementById('scanline').textContent =
@@ -135,7 +142,7 @@ function render(d){
       '<div class="st"><span class="pill '+esc(s.state)+'">'+esc(s.state)+'</span></div>'+
       '<div class="bd"><div class="ttl">'+esc(s.title || proj(s.cwd))+'</div>'+
       '<div class="meta">'+esc(proj(s.cwd))+(s.gitBranch?' \\u00b7 '+esc(s.gitBranch):'')+
-      (s.prNumber?' \\u00b7 PR #'+esc(s.prNumber):'')+'</div></div>'+
+      (s.prNumber?' \\u00b7 PR #'+esc(s.prNumber):'')+hb(s)+'</div></div>'+
       '<div class="mt"><span class="age">'+s.idleMinutes+'m</span></div>';
     if(s.pending){
       out += '<div class="panel">';
