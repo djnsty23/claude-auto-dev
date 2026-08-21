@@ -1,0 +1,169 @@
+---
+name: rule-local-first
+description: "Verification happens on this machine, in a browser you drive, before anything is pushed. Covers the local gate, the batched publish cadence, why GitHub Actions is not the gate, and how to manage browser cookie state so a restored session cannot fake a pass. Load before verifying a change, before pushing, and before any visual check."
+when_to_use: "Always-on background rules for finishing and shipping work. Not user-invocable."
+user-invocable: false
+allowed-tools: Read, Grep, Glob, Bash
+---
+
+# Local-first verification
+
+Portable copy of `~/.claude/rules/local-first.md`, which is `@`-imported on the Windows
+box and therefore invisible to any other machine. Keep the two in sync. Two passages are
+host-specific and named as such where they appear: the `ClaudeMemorySync` scheduled task
+and the per-repo gate names.
+
+Added 2026-08-21, on Andy's instruction: *"always test locally and run visual checks in
+Claude's browser… no more pushes, no more GitHub Actions."*
+
+## The gate is a local run you watched
+
+A change is done when it ran on this machine and you looked at it. Not when a workflow
+went green, not when a deploy succeeded, and not when the diff reads correctly.
+
+For anything with a UI, in this order:
+
+1. Run it locally through `preview_start` with a `.claude/launch.json` entry — never a
+   dev server backgrounded through Bash, which nothing then owns or stops.
+2. Size the viewport first (see below), then drive the real surface: `navigate`,
+   `read_page`, click the actual controls rather than calling internal functions.
+3. Read `read_console_messages` and `read_network_requests` before claiming anything.
+4. Screenshot at 390 and 414, per `agent-quality.md` 10b.
+5. Then say it works.
+
+For anything without a UI, the local gate is the project's own checks — typecheck,
+build, tests, preflight — run here and read here.
+
+**The gate has one name: `npm run gate`**, or `npm run preflight` in a repo that already
+uses that name. One command, chained with `&&`, covering exactly what the repo's CI used to
+run. If a repo has no such script, writing it is the first task, not an optional tidy-up —
+a gate spread across seven commands is a gate that gets run partially. As of 2026-08-21
+`fatboyslim` has `preflight` and `spotivibly` has `gate`.
+
+Start it with `preview_start`, whose entry lives in that repo's `.claude/launch.json`. Read
+the port out of the app's own config rather than assuming a framework default — spotivibly
+serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a way
+that looks like a broken app.
+
+## Pushing
+
+Commits stay local. An ad-hoc `git push`, PR or merge needs Andy to say so in that turn.
+"It is ready to push" is a status line, not a licence.
+
+The batched publish below is the one exception, and only halfway: he set the *trigger*, so
+you do not re-ask whether batching is allowed. You still present the manifest and get a yes
+before it goes, because these repos deploy on push (Fly, Pages, release gates) and
+`agent-quality.md` rule 4 does not bend for a cadence. The win is one confirmation per
+batch instead of one per commit.
+
+This does not cancel `agent-quality.md` rule 8. That rule covers the case where he says
+push, and it still means do it without re-asking. What changed is the default ending of
+a task: a verified local state, not a remote one.
+
+**Carve-out:** the config mirror to `~/claude-memory` (`rules/backup-protocol.md`) is a
+backup of this machine, not shipping code, and it is why a reinstall is survivable. The
+`ClaudeMemorySync` task that pushed it every 4h was **disabled 2026-08-21**, so the mirror
+is now a manual, same-session obligation again. That is how it rotted to 49-of-157 files
+last time — so mirror when you edit, do not trust a timer that is no longer running.
+
+## Publishing — batched, never on a clock
+
+Andy, 2026-08-21: *"what if we commit once per day as a daily publish or when we queue
+2-5 items that need prod validation."* Commits stay local and accumulate. A **publish** is
+the deliberate push of that batch.
+
+**Publish when the queue reaches 2-5 items, or when the oldest item in it turns 24h —
+whichever comes first.** Not on a schedule. A daily push with an empty queue is a push for
+its own sake, which is the habit this rule exists to break; the day is a deadline on the
+queue, not a cadence for the repo.
+
+An item earns a place in the queue only if local verification **structurally cannot**
+answer it. That list is short and enumerable, and it is the whole test:
+
+- live payment flows, and anything keyed to a production Stripe object
+- OAuth redirect URIs and webhooks registered against a production domain
+- edge, CDN and cache behaviour that does not exist on localhost
+- scheduled functions and crons, which have no local trigger
+- push notifications, store builds, TestFlight
+- anything whose input is real production data
+
+"I would feel better seeing it live" is not on that list. If a local run can answer it, it
+is answered locally and never reaches the queue.
+
+The queue lives at `.claude/publish-queue.md` **in the repo it belongs to** — one file per
+repo, each line naming the change and which item above it needs. It cannot live in chat: a
+session that did not have the conversation cannot see it, and the next session is the one
+that will publish. Queues are per-repo, so only repos with a non-empty queue publish.
+
+**Before a publish, run the local gate over the whole batch, not per-commit.** Each commit
+was already verified alone; batching moves the risk to the integration between them, and
+that is precisely what the disabled CI used to grade. A batch that has not been run as a
+batch has not been verified.
+
+## GitHub Actions
+
+Do not add a workflow. Do not diagnose a bug by pushing and reading the run. Do not wait
+on one. If a repo already carries workflows, their result is not evidence here and their
+absence is not a blocker.
+
+The reasoning is measured, not aesthetic. A CI run answers "did it pass on a machine you
+cannot see", and `verification-traps.md` carries four separate ways that answer misleads:
+a blocked run and a red test look identical, `startup_failure` renders as an ordinary red
+X, `billable.total_ms` is always 0, and a rendered-geometry gate reports different numbers
+on a different OS. The local run produces the same signal without any of that.
+
+`ClaudeActionsSpendGuard` stays enabled. It costs nothing and it is the thing that says a
+repo has started burning again.
+
+## Browser state — cookies stay ON, the jar gets reset
+
+`[measured]` 2026-08-21 in the in-app Browser pane:
+
+- `navigator.cookieEnabled` is **true**. Cookies write, survive a cross-origin round trip
+  (`example.com` → `example.net` → back), and survive a reload. localStorage likewise.
+- There is **one profile shared by every tab**. A cookie set in the seed tab was readable
+  in a freshly created background tab that had never visited the origin.
+- There is **no incognito or isolated-context option** in this toolset.
+
+So the question is not whether to enable cookies. They are on, and you want them on — most
+surfaces worth looking at sit behind a login, and a shared jar means signing in once for a
+whole session of checks instead of once per navigation.
+
+The risk is the shared jar, and it already has an entry in `verification-traps.md`: *a
+success that skips the code path proves nothing*. A restored session and a working sign-in
+are identical from outside and opposite in value.
+
+**The rule:** persist the session for feature checks; reset the jar before any check whose
+subject is first contact — sign-in, signup, consent, onboarding, paywall, empty state, or
+anything gated on whether this user has seen X before.
+
+Reset, then assert it came back empty — the assert is the point, not the clear:
+
+```js
+(() => {
+  document.cookie.split(';').forEach(c => {
+    const k = c.split('=')[0].trim();
+    if (k) document.cookie = k + '=; path=/; max-age=0';
+  });
+  localStorage.clear(); sessionStorage.clear();
+  return { cookie: document.cookie, ls: localStorage.length, w: innerWidth };
+})()
+```
+
+Two things it cannot do: clear an `HttpOnly` cookie — and the session cookie usually is one
+— or clear another origin's jar. When the check genuinely needs a cold profile, use
+chrome-devtools `new_page {isolatedContext}`. That is the only real isolation available.
+
+Suppress tours, consent banners and onboarding by setting the app's own already-seen flag
+in an init script **before** navigating. Dismissing one after the fact is a race, and
+`verification-traps.md` has the incident where it hid a working P1 behind a false red.
+
+## The viewport is 0x0 until you resize it
+
+`[measured]` the same day: a foreground tab and a background tab both reported
+`innerWidth: 0, innerHeight: 0`. One `resize_window` call fixed it — 375x812, dpr 2.
+
+So every visual check opens with `resize_window`, and every call that measures geometry
+prints `innerWidth`/`innerHeight` beside the number it measured. A rect compared against a
+zero-height window answers `false` for an element that is plainly there — and a red gets
+acted on rather than challenged, which is worse than a false green.
