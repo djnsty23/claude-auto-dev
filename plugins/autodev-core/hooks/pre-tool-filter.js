@@ -38,6 +38,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Module-level constants — compiled once, reused on every tool call
 
@@ -106,7 +107,19 @@ try {
     // if there isn't one.
     //
     // The list is READ FROM that script rather than copied here, so the hook and
-    // the gate cannot drift apart. Adding a name to NAMES arms both at once.
+    // the gate cannot drift apart. Adding a digest to DIGESTS arms both at once.
+    //
+    // READ AS TEXT, NEVER `require`d. Loading it would execute a file found by
+    // walking up to 40 directories from whatever the user is editing — which is
+    // any repo they happen to have cloned. Parsing is the only safe reading of
+    // an untrusted path, so the normalise-and-hash below is a deliberate copy of
+    // the checker's, kept honest by tests rather than by sharing the module.
+    //
+    // Two formats are accepted: DIGESTS (2026-08-22 onward) and the older
+    // plaintext NAMES. This hook ships INSTALLED, so it can be older or newer
+    // than the checker it finds — and when it understands neither format it says
+    // so on stderr instead of passing quietly, because a check that silently
+    // stopped covering anything is worse than one that is absent.
     //
     // FAIL OPEN, unlike the rest of this hook. Everything above fails closed,
     // because a filter that cannot read its input must not pass a dangerous
@@ -134,18 +147,54 @@ try {
                 // The denylist file IS the list; editing it must not trip on itself.
                 if (checker && path.resolve(filePath) !== checker) {
                     const listSrc = fs.readFileSync(checker, 'utf8');
-                    const block = listSrc.match(/const NAMES = \[([\s\S]*?)\]/);
-                    const names = block ? [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
-                    if (names.length) {
-                        const hit = new RegExp('\\b(' + names.join('|') + ')\\b', 'i').exec(content);
-                        if (hit) {
-                            process.stderr.write(
-                                `Blocked: this write puts the private project name "${hit[1]}" into `
-                                + `${path.relative(dir, path.resolve(filePath))}, which is a PUBLIC repo.\n`
-                                + `Anonymise it (Project A/B/C, keeping the numbers and the product shape), or add\n`
-                                + `a reviewed exemption to ALLOW in tooling/check-no-private-names.js.\n`);
-                            process.exit(2);
+                    const quoted = (name) => {
+                        const block = listSrc.match(new RegExp('const ' + name + ' = \\[([\\s\\S]*?)\\]'));
+                        return block ? [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
+                    };
+                    const digests = new Set(quoted('DIGESTS'));
+                    const names = quoted('NAMES');
+
+                    let hit = null;
+                    if (digests.size) {
+                        const prefix = (listSrc.match(/const PREFIX = '([^']*)'/) || [, ''])[1];
+                        const len = Number((listSrc.match(/const DIGEST_LEN = (\d+)/) || [, 16])[1]);
+                        const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const dig = (s) => crypto.createHash('sha256')
+                            .update(prefix + norm(s)).digest('hex').slice(0, len);
+                        outer:
+                        for (const line of content.split('\n')) {
+                            const toks = line.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+                            for (let i = 0; i < toks.length; i++) {
+                                let joined = '';
+                                for (let k = 0; k < 3 && i + k < toks.length; k++) {
+                                    joined += toks[i + k];
+                                    if (digests.has(dig(joined))) { hit = joined; break outer; }
+                                }
+                            }
                         }
+                    } else if (names.length) {
+                        // Legacy plaintext checker. The `names.length` guard matters:
+                        // an empty list builds \b()\b, which matches at every word
+                        // boundary and would block every write in the repo.
+                        const m = new RegExp('\\b(' + names.join('|') + ')\\b', 'i').exec(content);
+                        hit = m ? m[1] : null;
+                    } else if (!/const (DIGESTS|NAMES) = \[\s*\]/.test(listSrc)) {
+                        // Neither format parsed, and it is not a legitimately empty
+                        // list — so this hook does not understand this checker and is
+                        // covering nothing. Say it; do not report silence as safety.
+                        process.stderr.write(
+                            `pre-tool-filter: found ${checker} but could not read its denylist in `
+                            + `either supported format — this write was NOT checked for private names. `
+                            + `Update the plugin, or run the checker directly.\n`);
+                    }
+
+                    if (hit) {
+                        process.stderr.write(
+                            `Blocked: this write puts the private project name "${hit}" into `
+                            + `${path.relative(dir, path.resolve(filePath))}, which is a PUBLIC repo.\n`
+                            + `Anonymise it (Project A/B/C, keeping the numbers and the product shape), or add\n`
+                            + `a reviewed exemption to ALLOW in tooling/check-no-private-names.js.\n`);
+                        process.exit(2);
                     }
                 }
             }

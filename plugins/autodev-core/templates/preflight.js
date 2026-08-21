@@ -132,7 +132,7 @@ gate('gates-ran', 'this file is wired into something that runs it', () => {
 gate('workflow-valid', 'CI workflow files are ones GitHub will actually accept', () => {
     // A workflow GitHub REJECTS fails in 0 seconds with zero jobs and NO LOG, because it is
     // refused before a job is created or the triggers are even evaluated. Nothing readable tells
-    // you. Measured in fatboyslim 2026-08-20: ios-simshots.yml carried two top-level
+    // you. Measured in one product repo 2026-08-20: ios-simshots.yml carried two top-level
     // `concurrency:` blocks for three days — a second added with its rationale, the first not
     // removed — and every push produced a 0s red that also marked every open PR UNSTABLE. Sixty
     // gates in that repo, and none of them looked at the files that RUN the gates.

@@ -20,102 +20,271 @@
 // small, exact, and the failure mode is benign — you add a name when you start
 // a project, and forget one only for a project this repo never discusses.
 //
-// Extend NAMES when you take on a new private codebase.
+// ---------------------------------------------------------------------------
+// WHY THE LIST IS HASHED. DO NOT "RESTORE" THE PLAINTEXT FOR READABILITY.
+// ---------------------------------------------------------------------------
 //
-// Usage: node tooling/check-no-private-names.js [--list]
+// Until 2026-08-22 this file listed the names in plaintext, and it was the
+// worst leak in the repo: the file that exists to stop a public artefact naming
+// a client was itself the public artefact naming them. A denylist discloses
+// exactly what it protects. Anyone auditing this repo for a client list would
+// have found the canonical, curated one right here — shorter and more reliable
+// than grepping for it.
+//
+// So the names are stored as digests. A token is normalised and hashed, and the
+// digest is compared against DIGESTS. The detector keeps working with no name
+// written down anywhere in the tree. Two consequences worth knowing:
+//
+//   * The self-exemption is gone. This file used to be in ALLOW because it "IS
+//     the list"; it no longer contains a name, so it is scanned like everything
+//     else. The check now covers itself.
+//   * You cannot read the list. That is the feature. `--list` prints digests.
+//
+// HONEST LIMIT: the hash is unsalted, so this is obfuscation, not secrecy. A
+// determined reader with a wordlist of plausible project names can confirm a
+// guess. It is unsalted deliberately — a salt kept in the repo protects nothing,
+// and a salt kept out of it means nobody else can run `--digest` or reproduce a
+// check. What this buys is real and bounded: the repo no longer HANDS OVER the
+// list, and a digest pasted into a search engine returns nothing, because
+// PREFIX below is mixed in before hashing. Treat it as "you must already know
+// the name to confirm it", never as "the name is secret".
+//
+// ADD A NAME WITHOUT EVER COMMITTING IT:
+//
+//   node tooling/check-no-private-names.js --digest <name>
+//
+// It prints one hex line. Append that line to DIGESTS. The name itself never
+// enters the repo, the diff, or the commit message. `--digest` also reads stdin
+// when given no argument, if you would rather keep it out of shell history too.
+//
+// Usage:
+//   node tooling/check-no-private-names.js                  scan the work tree
+//   node tooling/check-no-private-names.js --list           print the digests
+//   node tooling/check-no-private-names.js --digest <name>  print one digest
+//   node tooling/check-no-private-names.js --check-text F   scan one file's text
+//   node tooling/check-no-private-names.js --check-message F  ditto, for a commit
+//                                                             message (# lines
+//                                                             are ignored)
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 
-// Private codebases discussed in this repo's docs, and anything else that
-// should never appear in a public artefact. Case-insensitive, word-bounded.
-const NAMES = [
-    'fitmito',
-    'spotivibly',
-    'ecommercebenchmark',
-    'shopifybenchmark',
-    'crobenchmark',
-    'omniconvert',
+// Mixed in before hashing so a digest here is not the bare sha256 of a common
+// word, which any online lookup table would resolve instantly. Not a secret and
+// not a salt — it is in the file, on purpose, so `--digest` is reproducible by
+// anyone holding the name. Changing it invalidates every digest below.
+const PREFIX = 'autodev/no-private-names/v1:';
+const DIGEST_LEN = 16; // 64 bits — collision odds against a 10-entry list are ~1e-14
+
+// Normalisation happens on BOTH sides or nothing ever matches: the candidate
+// token from the scanned text and the name passed to `--digest` go through this
+// same function. Lowercase, then drop everything that is not a letter or digit,
+// so `Zarble-Widget`, `zarble_widget` and `ZARBLEWIDGET` all reduce to one form.
+// (Examples here are synthetic on purpose — this file is scanned like any other,
+// and a real name in a comment would be the leak all over again.)
+const normalise = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const digest = (s) =>
+    crypto.createHash('sha256').update(PREFIX + normalise(s)).digest('hex').slice(0, DIGEST_LEN);
+
+// Private codebases discussed in this repo's docs, and anything else that should
+// never appear in a public artefact. Digests, not names — see the block above.
+// Case-insensitive and punctuation-insensitive by construction.
+//
+// Sorted, so the order carries no information either — an append-ordered list
+// would say which entries are recent, and "recent" is a hint about which project
+// is active. Re-sort after adding one.
+const DIGESTS = [
+    '12fb5ca517035265',
+    '3a437ea789246759',
+    '7c4cb7e522b20b38',
+    '935adb84abd3322e',
+    '97a5e8ca41e11721',
+    'a09c341cc3da5c56',
+    'a877b9437d9736a4',
+    'b10fb05467abe0a2',
+    'c8b7aa8568bc0bfe',
 ];
+const DIGEST_SET = new Set(DIGESTS);
 
-// Files that may legitimately carry a name: none today. Kept so an exemption is
-// a deliberate, reviewed line rather than a regex someone loosened.
-const ALLOW = new Set([
-    'tooling/check-no-private-names.js',   // this file IS the list
-]);
+// Files that may legitimately carry a name: none today, and none needed — this
+// file no longer holds any. Kept so an exemption is a deliberate, reviewed line
+// rather than a regex someone loosened.
+const ALLOW = new Set([]);
 
-// Tracked files PLUS untracked-but-not-ignored ones.
+// Candidate tokens from one line of text.
 //
-// `git ls-files` alone was the gap, and it let a real leak through the same day
-// this file shipped: a handoff doc naming all three private repos was written,
-// `validate.js` was run and passed, and only THEN was the file `git add`ed and
-// pushed to the public remote. The check could not see it, because it was not
-// tracked yet — which is precisely the moment a new file needs checking. The
-// window is every new file, every time, and it closed only after the push.
-//
-// `--others --exclude-standard` adds untracked files while still honouring
-// .gitignore, so scratch and build output stay out.
-// Returns [] rather than throwing when git is unavailable or this is not a work
-// tree. The throw was worse than the false pass it replaced: an uncaught
-// ENOENT/fatal killed the script before the population floor below could give a
-// readable refusal, so the failure mode was a stack trace instead of an answer.
-const listed = (args) => {
-    try {
-        return execSync(`git ls-files ${args}`, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-            .split('\n').filter(Boolean);
-    } catch { return []; }
-};
-const tracked = [...new Set([...listed(''), ...listed('--others --exclude-standard')])];
-
-// POPULATION FLOOR. `git ls-files` returning nothing — run outside a work tree,
-// a broken git, an empty index — would make this report "0 files, clean" and
-// exit 0. A false all-clear on a PUBLIC repo is the one answer this check must
-// never give, and it is indistinguishable from a real pass in the output.
-if (!tracked.length && !process.argv.includes('--list')) {
-    console.error('\n[no-private-names] REFUSING: git listed 0 files.\n');
-    console.error('This check cannot clear a repo it could not read. Verify you are inside the');
-    console.error('work tree and that `git ls-files` returns something.\n');
-    process.exit(1);
+// Unigrams reproduce the old `\b(name)\b` behaviour. Adjacent pairs and triples
+// are joined as well, which the regex version could not do: two of the entries
+// below are compound product names whose real-world spelling has a space or a
+// dot in it, so the plaintext detector matched the squashed form and missed the
+// way the name is actually written. `Some Product`, `some-product` and
+// `SomeProduct` are one candidate here. Measured on this tree: the n-gram pass
+// found one genuine leak the word-boundary regex could not see.
+const N = 3;
+function candidates(line) {
+    const toks = line.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const out = [];
+    for (let i = 0; i < toks.length; i++) {
+        let joined = '';
+        for (let k = 0; k < N && i + k < toks.length; k++) {
+            joined += toks[i + k];
+            out.push(joined);
+        }
+    }
+    return out;
 }
 
-if (process.argv.includes('--list')) {
-    console.log(NAMES.join('\n'));
-    process.exit(0);
+// Hashing every token of a 200-file tree is the only cost this check has, and
+// token repetition is enormous in prose, so memoise. Measured: the cache turns
+// ~500k hashes into ~40k.
+const memo = new Map();
+function isListed(token) {
+    let d = memo.get(token);
+    if (d === undefined) { d = digest(token); memo.set(token, d); }
+    return DIGEST_SET.has(d);
 }
 
-const re = new RegExp('\\b(' + NAMES.join('|') + ')\\b', 'gi');
-const hits = [];
-
-for (const rel of tracked) {
-    if (ALLOW.has(rel)) continue;
-    const full = path.join(ROOT, rel);
-    let src;
-    // Binary and unreadable files are not text to scan; skip rather than throw.
-    try { src = fs.readFileSync(full, 'utf8'); } catch { continue; }
-    if (src.includes('\0')) continue;
-
-    const lines = src.split('\n');
-    lines.forEach((line, i) => {
-        re.lastIndex = 0;
-        const m = re.exec(line);
-        if (m) hits.push({ rel, ln: i + 1, name: m[1], text: line.trim().slice(0, 90) });
+// Returns [{ ln, token, text }] for one blob of text. Exported for reuse.
+function scanText(src) {
+    const found = [];
+    src.split('\n').forEach((line, i) => {
+        for (const c of candidates(line)) {
+            if (isListed(c)) {
+                found.push({ ln: i + 1, token: c, text: line.trim().slice(0, 90) });
+                return; // one report per line, as before
+            }
+        }
     });
+    return found;
 }
 
-if (!hits.length) {
-    console.log(`[no-private-names] ${tracked.length} files (tracked + untracked), ${NAMES.length} names — clean`);
-    process.exit(0);
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
+function main(argv) {
+    if (argv.includes('--digest')) {
+        const i = argv.indexOf('--digest');
+        const word = argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')
+            ? argv[i + 1]
+            : fs.readFileSync(0, 'utf8').trim();
+        if (!normalise(word)) {
+            console.error('--digest: give a name, as an argument or on stdin');
+            return 1;
+        }
+        console.log(digest(word));
+        return 0;
+    }
+
+    if (argv.includes('--list')) {
+        // Digests, never names. A caller that wants to know HOW MANY names are
+        // armed can count these lines; a caller that wants the names cannot.
+        console.log(DIGESTS.join('\n'));
+        return 0;
+    }
+
+    // Scan a single file's text — used by the commit-msg hook, so the hook does
+    // not have to reimplement normalisation in shell and drift from it.
+    const textFlag = argv.find((a) => a === '--check-text' || a === '--check-message');
+    if (textFlag) {
+        const file = argv[argv.indexOf(textFlag) + 1];
+        if (!file || !fs.existsSync(file)) {
+            console.error(`${textFlag}: no such file: ${file}`);
+            return 2;
+        }
+        let src = fs.readFileSync(file, 'utf8');
+        // git's own template comments never become part of a commit message.
+        if (textFlag === '--check-message') {
+            src = src.split('\n').map((l) => (l.startsWith('#') ? '' : l)).join('\n');
+        }
+        const found = scanText(src);
+        if (!found.length) return 0;
+        for (const h of found) console.error(`  ${h.ln}: ${h.text}`);
+        return 1;
+    }
+
+    // Tracked files PLUS untracked-but-not-ignored ones.
+    //
+    // `git ls-files` alone was the gap, and it let a real leak through the same
+    // day this file shipped: a handoff doc naming all three private repos was
+    // written, `validate.js` was run and passed, and only THEN was the file
+    // `git add`ed and pushed to the public remote. The check could not see it,
+    // because it was not tracked yet — which is precisely the moment a new file
+    // needs checking. The window is every new file, every time, and it closed
+    // only after the push.
+    //
+    // `--others --exclude-standard` adds untracked files while still honouring
+    // .gitignore, so scratch and build output stay out.
+    // Returns [] rather than throwing when git is unavailable or this is not a
+    // work tree. The throw was worse than the false pass it replaced: an
+    // uncaught ENOENT/fatal killed the script before the population floor below
+    // could give a readable refusal, so the failure mode was a stack trace
+    // instead of an answer.
+    const listed = (args) => {
+        try {
+            return execSync(`git ls-files ${args}`, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+                .split('\n').filter(Boolean);
+        } catch { return []; }
+    };
+    const tracked = [...new Set([...listed(''), ...listed('--others --exclude-standard')])];
+
+    // POPULATION FLOOR. `git ls-files` returning nothing — run outside a work
+    // tree, a broken git, an empty index — would make this report "0 files,
+    // clean" and exit 0. A false all-clear on a PUBLIC repo is the one answer
+    // this check must never give, and it is indistinguishable from a real pass
+    // in the output.
+    if (!tracked.length) {
+        console.error('\n[no-private-names] REFUSING: git listed 0 files.\n');
+        console.error('This check cannot clear a repo it could not read. Verify you are inside the');
+        console.error('work tree and that `git ls-files` returns something.\n');
+        return 1;
+    }
+
+    // Same floor, one level down: a denylist that has been emptied by a bad
+    // edit would clear every file in the repo and look identical to a pass.
+    if (!DIGESTS.length) {
+        console.error('\n[no-private-names] REFUSING: the denylist is empty.\n');
+        console.error('Add digests with --digest, or delete this check deliberately.\n');
+        return 1;
+    }
+
+    const hits = [];
+    let scanned = 0;
+    for (const rel of tracked) {
+        if (ALLOW.has(rel)) continue;
+        const full = path.join(ROOT, rel);
+        let src;
+        // Binary and unreadable files are not text to scan; skip rather than throw.
+        try { src = fs.readFileSync(full, 'utf8'); } catch { continue; }
+        if (src.includes('\0')) continue;
+        scanned++;
+        for (const h of scanText(src)) hits.push({ rel, ...h });
+    }
+
+    if (!hits.length) {
+        // Print the population, not just the verdict: a check that reports only
+        // "clean" is indistinguishable from one that read nothing.
+        console.log(`[no-private-names] ${scanned} of ${tracked.length} files read, `
+            + `${memo.size} distinct candidate tokens, ${DIGESTS.length} names — clean`);
+        return 0;
+    }
+
+    console.error(`\n[no-private-names] ${hits.length} occurrence(s) of a private project name in a PUBLIC repo:\n`);
+    for (const h of hits) console.error(`  ${h.rel}:${h.ln}\n      ${h.text}`);
+    console.error(
+        '\nAnonymise them (Project A/B/C, keeping the numbers and the product shape), or add a\n'
+        + 'reviewed exemption to ALLOW in tooling/check-no-private-names.js.\n'
+        + '\nNote: this catches the working tree only. Names already in git history stay there —\n'
+        + 'redaction is not removal, and a history rewrite is a separate, deliberate decision.\n'
+    );
+    return 1;
 }
 
-console.error(`\n[no-private-names] ${hits.length} occurrence(s) of a private project name in a PUBLIC repo:\n`);
-for (const h of hits) console.error(`  ${h.rel}:${h.ln}  (${h.name})\n      ${h.text}`);
-console.error(
-    '\nAnonymise them (Project A/B/C, keeping the numbers and the product shape), or add a\n'
-    + 'reviewed exemption to ALLOW in tooling/check-no-private-names.js.\n'
-    + '\nNote: this catches the working tree only. Names already in git history stay there —\n'
-    + 'redaction is not removal, and a history rewrite is a separate, deliberate decision.\n'
-);
-process.exit(1);
+module.exports = { PREFIX, DIGEST_LEN, DIGESTS, normalise, digest, candidates, scanText };
+
+if (require.main === module) process.exit(main(process.argv.slice(2)));

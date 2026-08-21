@@ -21,6 +21,15 @@
 # the copy in the commit message went through unchecked and was pushed. Nothing
 # was checking it. Now something is.
 #
+# WHY THIS DELEGATES INSTEAD OF GREPPING.
+#
+# It used to read the denylist out of the checker with sed and build a regex.
+# That stopped being possible on 2026-08-22, when the list became DIGESTS rather
+# than names — there is no longer a plaintext list to read, which is the whole
+# point. Matching now needs the checker's own normalise-and-hash, so the hook
+# calls the checker instead of reimplementing it in shell. One implementation,
+# no drift, and the shell never has to hold a name.
+#
 # Enable (not automatic on clone):
 #   git config core.hooksPath tooling/githooks
 #
@@ -30,30 +39,36 @@ MSG_FILE="$1"
 ROOT="$(git rev-parse --show-toplevel)"
 CHECKER="$ROOT/tooling/check-no-private-names.js"
 
+# Inert where there is no gate to delegate to — this hook is installed per-clone
+# via core.hooksPath and must not break another repo.
 [ -f "$CHECKER" ] || exit 0
 
-# Read the denylist from the checker itself rather than copying it, so the hook
-# and the gate cannot drift. Comment lines are stripped first: the checker's own
-# prose explains what it does and would otherwise contribute stray quoted words.
-NAMES=$(sed -n '/^const NAMES = \[/,/^\];/p' "$CHECKER" | grep -v '^\s*//' | grep -oE "'[^']+'" | tr -d "'" | paste -sd '|' -)
+# --check-message ignores '#' lines (git's template comments never reach the
+# message) and prints "  <line-no>: <line>" for every hit. Exit 1 means a hit,
+# exit 2 means the hook was called wrong — neither is a reason to pass.
+HITS=$(node "$CHECKER" --check-message "$MSG_FILE" 2>&1)
+STATUS=$?
 
-[ -n "$NAMES" ] || exit 0
+[ "$STATUS" -eq 0 ] && exit 0
 
-# Ignore comment lines git adds to the template; they never reach the message.
-HITS=$(grep -v '^#' "$MSG_FILE" | grep -inE "\b($NAMES)\b")
-
-if [ -n "$HITS" ]; then
-    echo ""
+echo ""
+if [ "$STATUS" -eq 1 ]; then
     echo "commit-msg: this message names a private project, and this repo is PUBLIC."
     echo ""
-    echo "$HITS" | sed 's/^/  /'
+    echo "$HITS"
     echo ""
     echo "A commit message cannot be fixed after the fact the way a file can —"
     echo "redaction is not removal. Anonymise now (Project A/B/C, keeping the"
     echo "numbers and the product shape)."
+else
+    # An unrecognised failure is the DANGEROUS case, not the safe one: a checker
+    # that cannot run has not cleared anything. Refuse rather than pass.
+    echo "commit-msg: the private-name checker could not run, so nothing was checked."
     echo ""
-    echo "Deliberate exception: git commit --no-verify"
-    exit 1
+    echo "$HITS"
+    echo ""
+    echo "This repo is PUBLIC. A check that did not run is not a check that passed."
 fi
-
-exit 0
+echo ""
+echo "Deliberate exception: git commit --no-verify"
+exit 1

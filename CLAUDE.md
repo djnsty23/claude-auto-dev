@@ -125,6 +125,12 @@ you started work; in a shared clone it moves under you.
   which is on the backup allowlist and so survives a reinstall anyway. Generalising
   usually strengthens the guidance: the portable form warns a reader about THEIR repos,
   where the specific form only reports on someone else's.
+  **The denylist is stored as digests, not names** — a plaintext denylist in a public
+  repo discloses precisely what it protects, which is what this one did until
+  2026-08-22. Add a name without ever committing it:
+  `node tooling/check-no-private-names.js --digest <name>` prints one hex line; append
+  it to `DIGESTS` and re-sort. It reads stdin when given no argument, if you want the
+  name out of shell history too. Do not "restore" the plaintext for readability.
 - **Never `git commit --amend` here.** Several sessions commit to this clone at
   once and HEAD moves in seconds, so an amend can land on a commit that stopped
   being yours. 2026-08-21 one did: it rewrote another session's release message

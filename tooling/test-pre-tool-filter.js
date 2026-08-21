@@ -89,7 +89,50 @@ const brokenRepo = path.join(fixture, 'broken');
 fs.mkdirSync(path.join(brokenRepo, 'tooling', 'check-no-private-names.js'), { recursive: true });
 fs.mkdirSync(path.join(brokenRepo, 'docs'), { recursive: true });
 
+// A guarded repo in the HASHED format, which is what the real checker has used
+// since 2026-08-22. The fixture above stays because an installed copy of this
+// hook can meet an older checker, but this one is the format that ships — and a
+// test that only exercised the legacy branch would go on passing while the path
+// that actually runs was broken.
+//
+// The digests are computed with the real checker's own `digest()` rather than
+// pasted in, so a change to PREFIX or DIGEST_LEN cannot leave this fixture
+// asserting against a scheme nothing uses any more. The names are synthetic,
+// with a two-word one to cover the n-gram join the plaintext regex could not do.
+const { digest } = require('./check-no-private-names.js');
+const hashedRepo = path.join(fixture, 'hashed');
+fs.mkdirSync(path.join(hashedRepo, 'tooling'), { recursive: true });
+fs.mkdirSync(path.join(hashedRepo, 'docs'), { recursive: true });
+fs.writeFileSync(path.join(hashedRepo, 'tooling', 'check-no-private-names.js'),
+  "const PREFIX = 'autodev/no-private-names/v1:';\n"
+  + 'const DIGEST_LEN = 16;\n'
+  + 'const DIGESTS = [\n'
+  + ['zarblewidget', 'quibnorth', 'plinth harrow']
+      .map((n) => `    '${digest(n)}',\n`).join('')
+  + '];\n');
+
+// A guarded repo whose checker is in NEITHER format — the hook must say it
+// checked nothing rather than pass quietly. Still exit 0 (this block fails
+// open by design), but with a warning on stderr, asserted below.
+const unknownFormatRepo = path.join(fixture, 'unknownformat');
+fs.mkdirSync(path.join(unknownFormatRepo, 'tooling'), { recursive: true });
+fs.mkdirSync(path.join(unknownFormatRepo, 'docs'), { recursive: true });
+fs.writeFileSync(path.join(unknownFormatRepo, 'tooling', 'check-no-private-names.js'),
+  '// a future format this hook has never heard of\nconst RULES = new Map();\n');
+
 cases.push(
+  // ---- hashed format: the one that actually ships ----
+  ['hashed denylist blocks a name', 'Write',
+    { file_path: path.join(hashedRepo, 'docs/handoff.md'), content: 'the zarblewidget audit found 22 things' }, 2],
+  ['hashed denylist is case- and punctuation-insensitive', 'Write',
+    { file_path: path.join(hashedRepo, 'docs/handoff.md'), content: 'Zarble-Widget ships tomorrow' }, 2],
+  ['hashed denylist joins adjacent words', 'Write',
+    { file_path: path.join(hashedRepo, 'docs/handoff.md'), content: 'ask the Plinth Harrow team' }, 2],
+  ['hashed denylist allows clean content', 'Write',
+    { file_path: path.join(hashedRepo, 'docs/handoff.md'), content: 'the Project A audit found 22 things' }, 0],
+  ['hashed denylist does not fire on a substring', 'Write',
+    { file_path: path.join(hashedRepo, 'docs/handoff.md'), content: 'zarblewidgetry is not a project' }, 0],
+
   ['private name in a guarded repo blocked', 'Write',
     { file_path: path.join(guarded, 'docs/handoff.md'), content: 'the zarblewidget audit found 22 things' }, 2],
   ['second name in the list also blocked', 'Write',
@@ -166,6 +209,26 @@ for (const [label, tool, input, expected] of cases) {
   const ok = r.status === 0 && (r.stderr || '') === '';
   if (ok) pass++; else fail++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  a clean write is silent, not just allowed  `
+    + `(exit ${r.status}, stderr ${JSON.stringify((r.stderr || '').slice(0, 40))})`);
+}
+
+// An UNREADABLE denylist format must announce itself, not pass quietly.
+//
+// This block fails open by design, so exit code cannot distinguish "checked and
+// clean" from "understood nothing and checked nothing". That is the shape where
+// an honest-looking skip converts absent coverage into reported coverage, so the
+// assertion is on the warning, not on the status.
+{
+  const r = spawnSync('node', [HOOK], {
+    input: JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: path.join(unknownFormatRepo, 'docs/a.md'), content: 'anything at all' },
+    }),
+    encoding: 'utf8',
+  });
+  const ok = r.status === 0 && /was NOT checked/.test(r.stderr || '');
+  if (ok) pass++; else fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  an unreadable denylist format warns instead of passing quietly  `
     + `(exit ${r.status}, stderr ${JSON.stringify((r.stderr || '').slice(0, 40))})`);
 }
 

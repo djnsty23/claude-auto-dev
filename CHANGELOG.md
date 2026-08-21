@@ -437,7 +437,7 @@ A workflow file GitHub REJECTS fails in 0 seconds with zero jobs and no log,
 because it is refused before a job is created or its triggers are even
 evaluated. Nothing readable tells you it happened.
 
-Measured in fatboyslim: `ios-simshots.yml` carried two top-level `concurrency:`
+Measured in one product repo: `ios-simshots.yml` carried two top-level `concurrency:`
 blocks for three days — a second added with its cost rationale, the first not
 removed — and every push produced a 0s red that also held every open PR at
 `mergeStateStatus=UNSTABLE`. That repo has sixty gates and none of them read the
@@ -2791,8 +2791,8 @@ Total skills: 39 | Version: 4.9.4
 - **Total skills**: 36 (was 35)
 
 ### Changed
-- Updated muzic.ai, reelr, cloud-connect-build to v4.6
-- Removed stale skills folder from cloud-connect-build
+- Updated three consuming projects to v4.6
+- Removed a stale skills folder from one of them
 
 ---
 
