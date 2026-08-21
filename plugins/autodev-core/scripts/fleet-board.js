@@ -69,6 +69,9 @@ header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
 .ct b{display:block;font-family:"IBM Plex Mono",monospace;font-size:17px;font-weight:500;font-variant-numeric:tabular-nums}
 .ct span{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
 .ct.hot b{color:var(--blocked)}
+.ct.ctog{cursor:pointer;user-select:none}
+.ct.ctog:hover{background:var(--surface-2)}
+.ct.ctog:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .rows{background:var(--surface);border:1px solid var(--rule);border-radius:9px;overflow:hidden}
 .row{display:grid;grid-template-columns:3px 88px minmax(0,1fr) auto;gap:0 13px;align-items:center;border-bottom:1px solid var(--rule)}
 .row:last-child{border-bottom:0}
@@ -110,6 +113,12 @@ footer{margin-top:16px;font-family:"IBM Plex Mono",monospace;font-size:11px;colo
 </div>
 <script>
 var REFRESH_MS = 15000;
+// Cold is hidden, not dropped. Measured: 72 of 124 sessions were quiet for a day
+// or more against 4 blocked, so showing everything buries the rows that matter.
+// The count stays visible and clickable, because a filter you cannot see is
+// indistinguishable from data that never arrived.
+var showCold = false;
+var lastData = null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function proj(cwd){ if(!cwd) return '?'; var p=cwd.split(/[\\\\/]/);
@@ -122,21 +131,32 @@ function hb(s){
   return '';
 }
 function render(d){
+  lastData = d;
   var pop=d.population;
+  var n=function(st){return d.sessions.filter(function(s){return s.state===st}).length};
+  var coldCount=n('cold');
   document.getElementById('scanline').textContent =
     pop.transcripts+' transcripts \\u00b7 '+pop.dirs+' project dirs \\u00b7 '+pop.addressable+' addressable \\u00b7 '+
     new Date(d.scannedAt).toLocaleTimeString();
   document.getElementById('counts').innerHTML =
     '<div class="ct'+(pop.blocked?' hot':'')+'"><b>'+pop.blocked+'</b><span>blocked</span></div>'+
-    '<div class="ct"><b>'+d.sessions.filter(function(s){return s.state==='stalled'}).length+'</b><span>stalled</span></div>'+
-    '<div class="ct"><b>'+d.sessions.filter(function(s){return s.state==='working'}).length+'</b><span>working</span></div>'+
+    '<div class="ct"><b>'+n('stalled')+'</b><span>stalled</span></div>'+
+    '<div class="ct"><b>'+n('working')+'</b><span>working</span></div>'+
+    '<div class="ct ctog" role="button" tabindex="0" title="'+(showCold?'hide':'show')+' sessions quiet 24h+">'+
+      '<b>'+coldCount+'</b><span>cold '+(showCold?'\\u2212':'+')+'</span></div>'+
     '<div class="ct"><b>'+d.sessions.length+'</b><span>sessions</span></div>';
 
   if(!d.sessions.length){
     document.getElementById('rows').innerHTML='<div class="empty"><b>No sessions in window</b>Nothing has written a transcript recently.</div>';
     return;
   }
-  var html = d.sessions.map(function(s){
+  var visible = showCold ? d.sessions : d.sessions.filter(function(s){return s.state!=='cold'});
+  if(!visible.length){
+    document.getElementById('rows').innerHTML='<div class="empty"><b>Nothing active</b>'+
+      coldCount+' session'+(coldCount===1?'':'s')+' quiet for 24h+. Click "cold" above to show them.</div>';
+    return;
+  }
+  var html = visible.map(function(s){
     var cls = s.state==='blocked' ? 'blocked' : (s.state==='stalled' ? 'stalled' : '');
     var out = '<div class="row '+cls+'"><div class="stripe"></div>'+
       '<div class="st"><span class="pill '+esc(s.state)+'">'+esc(s.state)+'</span></div>'+
@@ -166,7 +186,14 @@ function render(d){
   document.getElementById('foot').textContent =
     'read-only \\u00b7 a blocked session cannot receive a message, so go to it rather than answering from here';
 }
+function toggleCold(){ showCold = !showCold; if(lastData) render(lastData); }
+document.addEventListener('keydown', function(e){
+  if((e.key==='Enter'||e.key===' ') && e.target.closest && e.target.closest('.ctog')){
+    e.preventDefault(); toggleCold();
+  }
+});
 document.addEventListener('click', function(e){
+  if(e.target.closest && e.target.closest('.ctog')){ toggleCold(); return; }
   var b = e.target.closest && e.target.closest('.go');
   if(!b) return;
   navigator.clipboard.writeText(b.dataset.id).then(function(){

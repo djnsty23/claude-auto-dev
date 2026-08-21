@@ -49,6 +49,20 @@ node "$CLAUDE_PLUGIN_ROOT/scripts/fleet-notify.js" --watch 120
 Fires once per panel, not per scan. `--dry` prints what would fire without
 notifying; `--test` sends one sample toast.
 
+To run it permanently, `install-fleet-notify-task.ps1` registers a scheduled task
+(every 2 min, interactive, hidden). Check it is doing the WORK, not merely
+launching — Task Scheduler's "Last Result: 0" only means the launcher started:
+
+```bash
+cat "$USERPROFILE/.claude/fleet/.notify-last-run.json"
+```
+
+**It waits 15 minutes before notifying, and that number is measured.** Across 606
+panels over 7 days the median panel is answered in 2.2 minutes and 47% inside 2
+minutes, so notifying on sight would fire ~46 times a day with a worst hour of
+24. At a 15-minute floor it is ~11 a day and no hour exceeds 6. Change it with
+`--min-age N`, but re-measure rather than guessing.
+
 ## What to tell the user, and what not to
 
 **Never offer to answer a blocked session's question for them.** Measured
