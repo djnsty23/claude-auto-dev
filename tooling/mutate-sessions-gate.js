@@ -65,12 +65,27 @@ const MUTANTS = [
   {
     name: 'merged floor removed (a PR that merged minutes ago counts as finished)',
     apply: (s) => s.replace(
-      '  if (prs.length && prs.every(settled) && ageDays * 24 < MERGED_MIN_HOURS) {',
+      '  if (prs.length && prs.every(settled) && idleMinutes < MERGED_MIN_MINUTES) {',
       '  if (false) { // MUTANT'
     ),
     mustFail: ['merged-warm: state'],
     // The cold half of the pair must survive, or this is just "broke merged".
     mustPass: ['merged-cold: state'],
+  },
+  {
+    // The opposite defect, and the one that actually shipped: the floor exists
+    // but is sized in half-days, so finished sessions read ACTIVE for hours.
+    // Removing the floor and OVERSIZING it are different bugs and a suite that
+    // only catches the first will not notice the second coming back.
+    name: 'merged floor oversized back to 12h (finished sessions read ACTIVE for half a day)',
+    apply: (s) => s.replace(
+      'const DEFAULT_MERGED_MIN_MINUTES = 30;',
+      'const DEFAULT_MERGED_MIN_MINUTES = 720; // MUTANT'
+    ),
+    mustFail: ['merged floor releases a session idle for hours'],
+    // The warm case must still be held back and the cold one still released, or
+    // this mutant broke the verdict rather than the floor's size.
+    mustPass: ['merged-warm: state', 'merged-cold: state'],
   },
   {
     name: 'workspace guard removed (--archive-orphaned writes the LIVE workspace too)',

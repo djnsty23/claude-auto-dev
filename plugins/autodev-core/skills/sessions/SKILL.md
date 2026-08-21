@@ -44,10 +44,20 @@ Three thresholds, because "finished" and "cold" are different questions:
   tomorrow — and they dominate the population: on the machine this was built
   for, 261 of ~480 records carried a `scheduledTaskId`.
 
-- **`--merged-min-hours` (default 12)** floors the MERGED verdict. A settled PR
-  bypasses the idle clock entirely, so without this a session whose PR merged
+- **`--merged-min-minutes` (default 30)** floors the MERGED verdict. A settled
+  PR bypasses the idle clock entirely, so without this a session whose PR merged
   three minutes ago reads as finished while its author is still working in it —
   measured on two real sessions. Finished is not the same as cold; it needs both.
+
+  The floor is in **minutes** because what it guards is a liveness ping.
+  `lastActivityAt` is refreshed by the app only while a session is actually
+  running, and it freezes the moment one stops — so a record hours stale is not
+  someone typing slowly, it is a session the app is no longer running. The floor
+  was 12 **hours** until 2026-08-22, which conflated the two: measured over 42
+  live records, four sessions with every PR settled and clean pushed worktrees
+  sat unarchivable at 1-9h idle, and not one record in the population fell
+  between 4h and 24h — so the extra eleven hours bought no discrimination, only
+  false ACTIVEs. `--merged-min-hours` is still accepted as the retired spelling.
 
 Detection is structural (`scheduledTaskId`), never a title regex. A regex would
 miss renamed tasks and catch hand-started work that happens to be called

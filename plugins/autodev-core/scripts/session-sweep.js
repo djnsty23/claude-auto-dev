@@ -51,7 +51,38 @@ const EPHEMERAL_DAYS = parseInt(opt('--ephemeral-days', '2'), 10);
 // while its author is plainly still working in it. Measured: two sessions
 // qualified as MERGED with last activity 3 minutes earlier. Finished is not
 // the same as cold; require both.
-const MERGED_MIN_HOURS = parseInt(opt('--merged-min-hours', '12'), 10);
+//
+// The floor compensates for a PING, not for a workday, and that is what sets
+// the unit. `lastActivityAt` is a liveness ping the app refreshes only while a
+// session is actually running, and it FREEZES the moment one stops. Measured
+// over 490 records with 9 running: running max 324s, not-running min 865s —
+// cleanly separable (the same measurement the `stalled` gate is built on). So a
+// record hours stale is not someone typing slowly; it is a session the app is
+// no longer running, and the floor only has to outlast a ping interval.
+//
+// It was 12 HOURS, which conflated "still being typed in" with "finished this
+// morning". Measured over 42 live records: four sessions with every PR settled
+// and clean pushed worktrees sat unarchivable at 1-9h idle, and NOT ONE record
+// in the whole population fell between 4h and 24h — so the extra eleven hours
+// bought no discrimination at all, only false ACTIVEs.
+//
+// 30 minutes is 5.5x the observed running maximum and 2x the not-running
+// minimum, so it clears both sides of that split. It is deliberately NOT tuned
+// to the gap in today's snapshot: derive it from the ping cadence, or the next
+// population shift silently re-opens this bug.
+const DEFAULT_MERGED_MIN_MINUTES = 30;
+function mergedMinMinutes() {
+  // `--merged-min-hours` is the retired spelling. Honour it rather than
+  // dropping it: a flag silently ignored would restore the old default's bug
+  // with nothing on screen to say so.
+  const raw = flag('--merged-min-hours')
+    ? parseFloat(opt('--merged-min-hours', '')) * 60
+    : parseFloat(opt('--merged-min-minutes', String(DEFAULT_MERGED_MIN_MINUTES)));
+  // An unparseable value must not reach the comparison. NaN makes every `<`
+  // false, which would disable the floor entirely — failing OPEN, silently.
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_MERGED_MIN_MINUTES;
+}
+const MERGED_MIN_MINUTES = mergedMinMinutes();
 const AS_JSON = flag('--json');
 const WRITE_RESUME = flag('--write-resume');
 // The ONLY mode in which this script mutates anything. Off by default and never
@@ -286,11 +317,16 @@ function classify(s, prStates) {
   // note it separately so the reason stays honest.
   const settled = (p) => ['MERGED', 'CLOSED'].includes(stateOf(p));
 
+  // Idle time, in the unit the floor is actually expressed in. Reporting this
+  // in hours rounded the real case — a PR merged 3 minutes ago — to "0h ago",
+  // which reads as a bug in the sweep rather than as the floor doing its job.
+  const idleMinutes = ageDays * 24 * 60;
+
   let state, why;
-  if (prs.length && prs.every(settled) && ageDays * 24 < MERGED_MIN_HOURS) {
+  if (prs.length && prs.every(settled) && idleMinutes < MERGED_MIN_MINUTES) {
     // Settled but still warm: treat as ACTIVE, not finished.
     state = 'ACTIVE';
-    why = `PRs settled but active ${Math.round(ageDays * 24)}h ago (< ${MERGED_MIN_HOURS}h floor)`;
+    why = `PRs settled but active ${Math.round(idleMinutes)}m ago (< ${MERGED_MIN_MINUTES}m floor)`;
   } else if (prs.length && prs.every(settled)) {
     state = 'MERGED';
     why = `PR ${prs.map((p) => '#' + p.prNumber + (stateOf(p) === 'CLOSED' ? '(closed)' : '')).join(', ')} settled`;

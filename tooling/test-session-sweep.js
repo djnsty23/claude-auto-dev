@@ -186,10 +186,21 @@ function run() {
   // A settled PR bypasses the idle clock, so "merged" alone would call a session
   // finished while its author is still in it — measured on two real sessions
   // whose PRs had merged three minutes earlier. The floor requires finished AND
-  // cold. Both records carry identical PRs and differ only in age, so a bug that
-  // ignores the floor cannot satisfy the pair.
+  // cold. All three records carry identical PRs and differ only in age, so a bug
+  // that ignores the floor cannot satisfy the set.
+  //
+  // What the floor guards is a liveness PING, not a workday: `lastActivityAt`
+  // freezes when a session stops running, so hours of it mean "the app is not
+  // running this", not "someone is typing slowly". `merged-idle` is the
+  // regression — at 2h it sat inside the old 12-HOUR floor and read ACTIVE,
+  // which left finished sessions unarchivable for half a day. This fixture was
+  // itself part of the bug: `merged-warm` used to be 0.1 DAYS (2.4h), which
+  // encoded exactly the wrong model of what "still warm" means.
   const MERGED_PRS = [{ prNumber: 1, repo: 'suite-nonexistent/repo', state: 'MERGED' }];
-  cases.push({ id: 'merged-warm', wt: null, prs: MERGED_PRS, ageDays: 0.1, expectState: 'ACTIVE' });
+  const WARM_MIN = 3;         // the measured incident, exactly
+  const IDLE_MIN = 2 * 60;    // finished, and the app has stopped pinging it
+  cases.push({ id: 'merged-warm', wt: null, prs: MERGED_PRS, ageDays: WARM_MIN / 1440, expectState: 'ACTIVE' });
+  cases.push({ id: 'merged-idle', wt: null, prs: MERGED_PRS, ageDays: IDLE_MIN / 1440, expectState: 'MERGED' });
   cases.push({ id: 'merged-cold', wt: null, prs: MERGED_PRS, ageDays: 3, expectState: 'MERGED' });
 
   // Anchors WS_LIVE as the workspace the app is using: it owns the newest record.
@@ -241,9 +252,41 @@ function run() {
   const hand = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'hand-active')]);
   check('ephemeral clock separates the pair', sched && hand && sched.state !== hand.state, true);
 
-  const warm = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'merged-warm')]);
-  const cold = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'merged-cold')]);
+  const byId = (id) => rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === id)]);
+  const warm = byId('merged-warm');
+  const idle = byId('merged-idle');
+  const cold = byId('merged-cold');
   check('merged floor separates the pair', warm && cold && warm.state !== cold.state, true);
+  // The regression this floor's SIZE caused: settled, quiet for hours, and
+  // still called ACTIVE. Same PRs as the warm record, so only idle time can
+  // explain a difference.
+  check('merged floor releases a session idle for hours', idle && idle.state, 'MERGED');
+
+  // The pair must STRADDLE the floor the subject actually ships with. Restating
+  // the number here would let the two halves drift onto the same side of it and
+  // leave a green that asserts nothing — so read it out of the subject. If it
+  // cannot be found, FAIL rather than skip: a reassuring skip converts absent
+  // coverage into reported coverage.
+  const floorSrc = fs.readFileSync(SCRIPT, 'utf8').match(/DEFAULT_MERGED_MIN_MINUTES\s*=\s*(\d+(?:\.\d+)?)/);
+  check('floor default is readable from the subject', !!floorSrc, true);
+  const FLOOR_MIN = floorSrc ? parseFloat(floorSrc[1]) : NaN;
+  check(`warm fixture (${WARM_MIN}m) sits INSIDE the shipped floor`, WARM_MIN < FLOOR_MIN, true);
+  check(`idle fixture (${IDLE_MIN}m) sits OUTSIDE the shipped floor`, IDLE_MIN > FLOOR_MIN, true);
+
+  // The floor is a number read off the command line, and NaN would make every
+  // `<` comparison false — disabling it SILENTLY rather than loudly. Drive a
+  // garbage value through the real flag and assert the warm record is still
+  // held back. Fails open otherwise, which is the direction that loses work.
+  const bad = spawnSync(process.execPath, [SCRIPT, '--json', '--merged-min-minutes', 'garbage'], {
+    encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: STORE, SESSION_SWEEP_OWNER: '' },
+    timeout: 180000,
+  });
+  let badRows = [];
+  try { badRows = JSON.parse(bad.stdout || '[]'); } catch { /* asserted below */ }
+  check('unparseable floor value: still classified a population', badRows.length, cases.length);
+  const badWarm = badRows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'merged-warm')]);
+  check('unparseable floor value falls back, floor still holds', badWarm && badWarm.state, 'ACTIVE');
 
   // ---- --archive-orphaned -------------------------------------------------
   const orphanCase = cases.find((c) => c.id === 'orphan-ws-safe');
