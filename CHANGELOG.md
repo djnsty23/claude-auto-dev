@@ -1,5 +1,39 @@
 # Changelog
 
+## [8.99.0] - 2026-08-21
+
+### Added — `--archive-orphaned`, for the sessions the app can no longer reach
+
+`archive_session` sees about **70 of 482** records, and `limit` does not change
+it. The cause turned out to be structural rather than a cap: sessions live under
+`<store>/<workspace>/`, the app tracks one workspace, and everything in the
+others answers "not found". Measured, the directory predicts reachability
+exactly — 5/5 reachable in the live dir, 5/5 unreachable across two orphaned
+ones. **Age predicts nothing**: four-day-old records were unreachable while much
+older ones were not.
+
+So the weekly task could never clear those rows at all, and they silt up
+untouched — 231 of them on this machine.
+
+`--archive-orphaned` marks SAFE records archived by editing the store, for
+orphaned workspaces only. Off by default, never implied, and it still touches no
+git worktree.
+
+It is safe exactly where it is permitted: the app never loaded those records, so
+it holds nothing to overwrite them with. Live-workspace rows are skipped and
+still go through `archive_session`. When two workspaces are both recently active
+it treats **neither** as orphaned — an unmodelled shape is a reason to touch
+nothing, not a reason to guess.
+
+A string replace rather than parse-then-stringify, deliberately: reserializing
+rewrites field order and escaping across a file the app owns, which would make
+any breakage indistinguishable from the change under test.
+
+The suite gains two rows identical but for their workspace, so "wrote the right
+one" cannot be confused with "wrote anything". Measured on the real store: 215
+written, **0 parse failures, 0 reverts**, and the app kept listing its own
+sessions normally throughout.
+
 ## [8.98.0] - 2026-08-21
 
 ### Added — the fleet taps you, instead of waiting to be opened
