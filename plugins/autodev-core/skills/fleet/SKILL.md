@@ -63,6 +63,27 @@ minutes, so notifying on sight would fire ~46 times a day with a worst hour of
 24. At a 15-minute floor it is ~11 a day and no hour exceeds 6. Change it with
 `--min-age N`, but re-measure rather than guessing.
 
+## Other machines
+
+The session registry is machine-local, so this board covers ONE host unless
+another machine publishes. Check what has:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/scripts/fleet-publish.js" --read
+```
+
+Publishing is **counts only** — no titles, branches, paths or panel text —
+because `claude-auto-dev` is public and the fleet contains client work. Do not
+widen the payload; a test derives its forbidden strings from the live fleet and
+will fail rather than leak. `--push` sends it immediately when the counts change
+(it holds when they have not, which is what makes it safe on a timer);
+without it the file waits for ClaudeMemorySync's ~4h push.
+
+Setting up a second machine: `docs/fleet-cross-machine.md`.
+
+**Every remote figure must be shown with its age.** It rides a periodic git push,
+not a live connection, so a synced count read as current is the failure mode.
+
 ## What to tell the user, and what not to
 
 **Never offer to answer a blocked session's question for them.** Measured

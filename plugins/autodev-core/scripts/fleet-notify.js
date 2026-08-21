@@ -84,6 +84,16 @@ function setNotifier(fn) { notifier = fn; }
 function toast(title, body) {
     if (notifier) { notifier(title, body); return; }
     if (DRY) { console.log(`  [dry] ${title} :: ${body}`); return; }
+    // Windows-only today: toast.ps1 uses the WinRT notifier. Say so plainly
+    // rather than letting the powershell spawn fail with a confusing message —
+    // the macOS equivalent is `osascript -e 'display notification ...'` and
+    // nobody has written it. fleet-publish.js is platform-neutral, so a Mac can
+    // still contribute to the board without this. See docs/fleet-cross-machine.md
+    if (process.platform !== 'win32') {
+        console.error(`  notifications are Windows-only (this is ${process.platform}); `
+            + 'nothing was sent. Publishing still works — see docs/fleet-cross-machine.md');
+        return;
+    }
     try {
         execFileSync('powershell', [
             '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', TOAST,

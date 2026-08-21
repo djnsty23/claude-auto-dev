@@ -37,6 +37,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { scanFleet } = require(path.join(__dirname, 'fleet-status.js'));
 
 const HOME = process.env.USERPROFILE || process.env.HOME;
@@ -85,6 +86,48 @@ function summarise(fleet) {
     };
 }
 
+/**
+ * The comparison key that decides whether anything actually CHANGED.
+ *
+ * `publishedAt` is excluded deliberately, and this is the whole push-loop guard:
+ * it differs on every single run, so comparing raw content would commit and push
+ * every 5 minutes forever while reporting "changed". What matters is the counts.
+ */
+function meaningful(rec) {
+    if (!rec) return null;
+    const copy = Object.assign({}, rec);
+    delete copy.publishedAt;
+    return JSON.stringify(copy);
+}
+
+/**
+ * Commit and push one file, and nothing else.
+ *
+ * `git add <path>` by path, never `-A`: claude-memory is written by the
+ * ClaudeMemorySync task and by hand, and sweeping someone else's in-flight work
+ * into an automated commit is a real hazard in a shared repo.
+ *
+ * Every failure is non-fatal. A publish that cannot reach the network has still
+ * written the file locally, and the 4-hourly sync remains the backstop.
+ */
+function push(file) {
+    const repo = path.dirname(DIR);
+    const rel = path.relative(repo, file).split(path.sep).join('/');
+    const run = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
+    try {
+        run(['add', '--', rel]);
+        // Nothing staged means nothing to do — belt and braces behind meaningful().
+        try { run(['diff', '--cached', '--quiet', '--', rel]); return 'nothing staged'; }
+        catch { /* non-zero exit here means there ARE staged changes */ }
+        run(['commit', '-m', `chore(fleet): status from ${os.hostname()}`, '--', rel]);
+        run(['push', 'origin', 'HEAD']);
+        return 'pushed';
+    } catch (e) {
+        const msg = (e.stderr || e.message || '').toString().trim().split('\n').pop();
+        return 'push failed (file still written locally): ' + msg;
+    }
+}
+
 function readAll() {
     let names;
     try { names = fs.readdirSync(DIR); } catch { return []; }
@@ -116,12 +159,28 @@ function main() {
 
     fs.mkdirSync(DIR, { recursive: true });
     const file = path.join(DIR, summary.host + '.json');
+
+    // Read the PREVIOUS record before overwriting, so we can tell a real change
+    // from another identical heartbeat.
+    let previous = null;
+    try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first run */ }
+    const changed = meaningful(previous) !== meaningful(summary);
+
     const tmp = file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(summary, null, 1) + '\n');
     fs.renameSync(tmp, file);
     console.log(`published ${summary.blocked} blocked / ${summary.sessions} sessions -> ${file}`);
-    console.log('  (ClaudeMemorySync commits and pushes this within ~4h)');
+
+    if (!has('--push')) {
+        console.log('  (ClaudeMemorySync commits and pushes this within ~4h; --push to send it now)');
+        return;
+    }
+    if (!changed) {
+        console.log('  counts unchanged — not pushing');
+        return;
+    }
+    console.log('  counts changed — ' + push(file));
 }
 
 if (require.main === module) main();
-module.exports = { summarise, readAll, DIR };
+module.exports = { summarise, readAll, meaningful, push, DIR };
