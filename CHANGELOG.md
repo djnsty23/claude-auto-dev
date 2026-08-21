@@ -1,5 +1,22 @@
 # Changelog
 
+## [8.96.0] - 2026-08-21
+
+### Fixed — a PR that merged three minutes ago is finished, but it is not cold
+
+`sessions` treated a settled PR as proof a session was done, and that verdict
+bypassed the idle clock entirely. Measured on two real sessions today: every PR
+merged, worktree clean and pushed, last activity **three minutes earlier**. Both
+qualified as archivable while their author was plainly still working in them.
+
+Being finished with the PRs is not being finished with the session.
+`--merged-min-hours` (default **12**) now requires both. Inside the floor the
+verdict is ACTIVE and the reason names the hours, so it cannot be mistaken for
+an ordinary recency call.
+
+This mattered because the weekly task acts on its own judgement. Without the
+floor, its blast radius included work finished an hour before it ran.
+
 ## [8.95.0] - 2026-08-21
 
 ### Added — one view of every session, and a heartbeat that costs nothing
