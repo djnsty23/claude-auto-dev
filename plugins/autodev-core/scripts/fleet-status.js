@@ -166,13 +166,87 @@ function readTranscript(file) {
  * red overnight, which is how a status board gets muted - the failure mode
  * rules/agent-quality.md 22b exists to prevent.
  *
- * Return one of: 'blocked' | 'idle' | 'working' | 'done' | 'unknown'
+ * WHAT IS ENCODED BELOW is a starting policy, not a finding. Overrule it freely -
+ * it is five lines and everything else in this file is independent of it.
+ *
+ * 'blocked'  an unanswered panel. The only state proven by the transcript rather
+ *            than inferred from timing.
+ * 'working'  the transcript grew in the last few minutes. Says nothing about
+ *            whether progress is good, only that something is being written.
+ * 'stalled'  YOU spoke last and nothing has happened since. This is the state
+ *            worth surfacing and the one a pure staleness sort hides: it is
+ *            either a long build or a session that died mid-task, and those are
+ *            indistinguishable from here. Better to show it and be wrong twice a
+ *            day than to bury a dead session under quiet ones.
+ * 'done'     merged PR and quiet for an hour. Deliberately narrow: without the
+ *            PR evidence this would just be a staleness cutoff painting every
+ *            finished session red overnight, which is how a board gets muted.
+ * 'waiting'  everything else - it spoke last and stopped. The common resting
+ *            state, and intentionally the quietest.
  */
 function classify(s) {
-    return 'unknown';   // <- replace me
+    if (s.pending) return 'blocked';
+    if (s.idleMinutes <= 3) return 'working';
+    if (s.lastRole === 'user' && s.idleMinutes >= 15) return 'stalled';
+    if (s.prState === 'MERGED' && s.idleMinutes >= 60) return 'done';
+    return 'waiting';
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Scan the whole fleet. Extracted from main() so the board server can call it
+ * in-process rather than shelling out and re-parsing its own JSON.
+ *
+ * @param {number} days how far back to look
+ */
+function scanFleet(days) {
+    const cutoff = Date.now() - days * 864e5;
+    if (!fs.existsSync(ROOT)) return { population: { dirs: 0, transcripts: 0, withPanels: 0, blocked: 0, addressable: 0 }, sessions: [] };
+
+    let scannedDirs = 0, scannedFiles = 0;
+    const sessions = [];
+    const index = loadSessionIndex();
+
+    for (const dir of fs.readdirSync(ROOT)) {
+        const d = path.join(ROOT, dir);
+        let st; try { st = fs.statSync(d); } catch { continue; }
+        if (!st.isDirectory()) continue;
+        scannedDirs++;
+
+        for (const f of fs.readdirSync(d)) {
+            if (!f.endsWith('.jsonl')) continue;
+            const p = path.join(d, f);
+            let fst; try { fst = fs.statSync(p); } catch { continue; }
+            if (fst.mtimeMs < cutoff) continue;
+            scannedFiles++;
+
+            const rec = readTranscript(p);
+            if (!rec) continue;
+            rec.idleMinutes = Math.round((Date.now() - fst.mtimeMs) / 60000);
+            rec.isRunning = null;
+            Object.assign(rec, index.get(rec.sessionId) || { addressableId: null, title: null });
+            rec.state = classify(rec);
+            sessions.push(rec);
+        }
+    }
+
+    // Blocked first, then longest-waiting.
+    sessions.sort((a, b) => (b.pending ? 1 : 0) - (a.pending ? 1 : 0) || a.idleMinutes - b.idleMinutes);
+
+    return {
+        scannedAt: new Date().toISOString(),
+        population: {
+            dirs: scannedDirs,
+            transcripts: scannedFiles,
+            withPanels: sessions.filter((s) => s.panelCount).length,
+            blocked: sessions.filter((s) => s.pending).length,
+            // If this is 0 the board is read-only: nothing can be messaged.
+            addressable: sessions.filter((s) => s.addressableId).length,
+        },
+        sessions,
+    };
+}
 
 function main() {
     if (!fs.existsSync(ROOT)) {
@@ -250,4 +324,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { readTranscript, classify };
+module.exports = { readTranscript, classify, scanFleet, loadSessionIndex };

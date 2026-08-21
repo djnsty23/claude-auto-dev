@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+/**
+ * fleet-board.js - the dispatch list, served locally and read live off disk.
+ *
+ * READ-ONLY BY MEASUREMENT, not by caution. A/B tested 2026-08-21 with one
+ * instrument and two targets:
+ *
+ *   busy session (mid-turn, sitting on a panel)  -> send_message says "queued",
+ *      and over 482s, 49 polls and 166KB of transcript growth it never arrived.
+ *   idle session (70m, assistant spoke last)     -> send_message says "sent",
+ *      delivered and acked in 20s.
+ *
+ * A panel does not end a turn - answering one feeds a tool_result back into the
+ * same turn - so a session in an options-protocol loop may never reach the
+ * boundary where queued mail is delivered. The sessions you most want to answer
+ * are exactly the ones that cannot receive an answer. So this board tells you
+ * WHICH session to go to; it does not pretend to answer for you.
+ *
+ * Usage:
+ *   node fleet-board.js               # serve on 7717
+ *   node fleet-board.js --port 8080
+ *   node fleet-board.js --days 3
+ *
+ * No dependencies, no build step, binds loopback only.
+ */
+'use strict';
+const http = require('http');
+const path = require('path');
+const { scanFleet } = require(path.join(__dirname, 'fleet-status.js'));
+
+const argv = process.argv.slice(2);
+const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
+const PORT = Number(val('--port', 7717));
+const DAYS = Number(val('--days', 2));
+
+const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+const PAGE = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fleet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{--ground:#EDF0F3;--surface:#fff;--surface-2:#F5F7F9;--ink:#10151B;--ink-2:#3D4854;--ink-3:#6B7885;
+--rule:#DCE2E8;--rule-2:#C6D0D9;--accent:#0F6E7E;--accent-soft:#DCEEF1;
+--blocked:#B23A0E;--blocked-bg:#FBE9E0;--blocked-edge:#E8A886;--stalled:#8A6D1F;--stalled-bg:#FBF3DC;
+--working:#0F6E7E;--idle:#7A8794;--done:#2F6B4F}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--ground:#0C1116;--surface:#131A21;--surface-2:#1A232C;
+--ink:#E6EDF3;--ink-2:#A9B7C4;--ink-3:#7A8894;--rule:#253039;--rule-2:#31404C;--accent:#4FC3D4;--accent-soft:#12333A;
+--blocked:#FF8A4C;--blocked-bg:#361D11;--blocked-edge:#7A4526;--stalled:#D9B24C;--stalled-bg:#2E2712;
+--working:#4FC3D4;--idle:#6E7C89;--done:#6FBF95}}
+:root[data-theme="dark"]{--ground:#0C1116;--surface:#131A21;--surface-2:#1A232C;
+--ink:#E6EDF3;--ink-2:#A9B7C4;--ink-3:#7A8894;--rule:#253039;--rule-2:#31404C;--accent:#4FC3D4;--accent-soft:#12333A;
+--blocked:#FF8A4C;--blocked-bg:#361D11;--blocked-edge:#7A4526;--stalled:#D9B24C;--stalled-bg:#2E2712;
+--working:#4FC3D4;--idle:#6E7C89;--done:#6FBF95}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.5}
+.wrap{max-width:1000px;margin:0 auto;padding:26px 20px 70px}
+h1{font-size:21px;font-weight:600;letter-spacing:-.02em;margin:0 0 3px}
+.sub{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.counts{display:flex;gap:0;border:1px solid var(--rule);border-radius:7px;overflow:hidden;background:var(--surface)}
+.ct{padding:7px 14px;border-right:1px solid var(--rule);text-align:center}
+.ct:last-child{border-right:0}
+.ct b{display:block;font-family:"IBM Plex Mono",monospace;font-size:17px;font-weight:500;font-variant-numeric:tabular-nums}
+.ct span{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+.ct.hot b{color:var(--blocked)}
+.rows{background:var(--surface);border:1px solid var(--rule);border-radius:9px;overflow:hidden}
+.row{display:grid;grid-template-columns:3px 88px minmax(0,1fr) auto;gap:0 13px;align-items:center;border-bottom:1px solid var(--rule)}
+.row:last-child{border-bottom:0}
+.stripe{align-self:stretch}
+.row.blocked{background:var(--blocked-bg)}.row.blocked .stripe{background:var(--blocked)}
+.row.stalled{background:var(--stalled-bg)}.row.stalled .stripe{background:var(--stalled)}
+.st{padding:10px 0 10px 13px}.bd{padding:10px 0;min-width:0}.mt{padding:10px 15px 10px 0;text-align:right;white-space:nowrap}
+.pill{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;letter-spacing:.05em;
+text-transform:uppercase;padding:2px 7px;border-radius:3px;border:1px solid var(--rule-2);color:var(--ink-3);background:var(--surface-2)}
+.pill.blocked{color:var(--blocked);border-color:var(--blocked-edge);background:var(--surface)}
+.pill.stalled{color:var(--stalled);border-color:var(--stalled);background:var(--surface)}
+.pill.working{color:var(--working);border-color:var(--accent);background:var(--accent-soft)}
+.pill.done{color:var(--done)}
+.ttl{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.age{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.row.blocked .age{color:var(--blocked);font-weight:500}
+.panel{grid-column:2/-1;padding:0 15px 14px 0}
+.q{font-size:14px;font-weight:500;margin:0 0 8px}
+.opt{display:flex;gap:8px;align-items:flex-start;background:var(--surface);border:1px solid var(--rule);border-radius:5px;padding:6px 10px;margin-bottom:5px}
+.opt .k{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);border:1px solid var(--rule-2);border-radius:3px;padding:0 5px;flex:none;margin-top:2px}
+.opt .l{font-size:13px}
+.opt .d{font-size:12.5px;color:var(--ink-3);line-height:1.45;margin-top:2px}
+.go{font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;font-weight:500;color:var(--accent);background:var(--surface);
+border:1px solid var(--accent);border-radius:5px;padding:4px 9px;cursor:pointer;margin-top:8px}
+.go:hover{background:var(--accent-soft)}
+.go:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.na{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3)}
+.empty{padding:34px 18px;text-align:center;color:var(--ink-3)}
+.empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:5px;font-weight:500}
+footer{margin-top:16px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3)}
+</style></head><body><div class="wrap">
+<header>
+  <div><h1>Fleet</h1><div class="sub" id="scanline">loading&hellip;</div></div>
+  <div class="counts" id="counts"></div>
+</header>
+<div class="rows" id="rows"><div class="empty">loading&hellip;</div></div>
+<footer id="foot"></footer>
+</div>
+<script>
+var REFRESH_MS = 15000;
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function proj(cwd){ if(!cwd) return '?'; var p=cwd.split(/[\\\\/]/);
+  var i=p.indexOf('.claude'); return i>0?p[i-1]:p[p.length-1]; }
+function render(d){
+  var pop=d.population;
+  document.getElementById('scanline').textContent =
+    pop.transcripts+' transcripts \\u00b7 '+pop.dirs+' project dirs \\u00b7 '+pop.addressable+' addressable \\u00b7 '+
+    new Date(d.scannedAt).toLocaleTimeString();
+  document.getElementById('counts').innerHTML =
+    '<div class="ct'+(pop.blocked?' hot':'')+'"><b>'+pop.blocked+'</b><span>blocked</span></div>'+
+    '<div class="ct"><b>'+d.sessions.filter(function(s){return s.state==='stalled'}).length+'</b><span>stalled</span></div>'+
+    '<div class="ct"><b>'+d.sessions.filter(function(s){return s.state==='working'}).length+'</b><span>working</span></div>'+
+    '<div class="ct"><b>'+d.sessions.length+'</b><span>sessions</span></div>';
+
+  if(!d.sessions.length){
+    document.getElementById('rows').innerHTML='<div class="empty"><b>No sessions in window</b>Nothing has written a transcript recently.</div>';
+    return;
+  }
+  var html = d.sessions.map(function(s){
+    var cls = s.state==='blocked' ? 'blocked' : (s.state==='stalled' ? 'stalled' : '');
+    var out = '<div class="row '+cls+'"><div class="stripe"></div>'+
+      '<div class="st"><span class="pill '+esc(s.state)+'">'+esc(s.state)+'</span></div>'+
+      '<div class="bd"><div class="ttl">'+esc(s.title || proj(s.cwd))+'</div>'+
+      '<div class="meta">'+esc(proj(s.cwd))+(s.gitBranch?' \\u00b7 '+esc(s.gitBranch):'')+
+      (s.prNumber?' \\u00b7 PR #'+esc(s.prNumber):'')+'</div></div>'+
+      '<div class="mt"><span class="age">'+s.idleMinutes+'m</span></div>';
+    if(s.pending){
+      out += '<div class="panel">';
+      s.pending.questions.forEach(function(q){
+        out += '<p class="q">'+esc(q.question)+'</p>';
+        q.options.forEach(function(o,i){
+          out += '<div class="opt"><span class="k">'+(i+1)+'</span><div><div class="l">'+esc(o.label)+'</div>'+
+                 (o.description?'<div class="d">'+esc(o.description)+'</div>':'')+'</div></div>';
+        });
+      });
+      // Deliberately not an answer control: a blocked session cannot receive a
+      // message, so this copies the id you need to find it in the app instead.
+      out += s.addressableId
+        ? '<button class="go" data-id="'+esc(s.addressableId)+'">Copy session id</button>'
+        : '<div class="na">no desktop record \\u2014 cannot be addressed</div>';
+      out += '</div>';
+    }
+    return out + '</div>';
+  }).join('');
+  document.getElementById('rows').innerHTML = html;
+  document.getElementById('foot').textContent =
+    'read-only \\u00b7 a blocked session cannot receive a message, so go to it rather than answering from here';
+}
+document.addEventListener('click', function(e){
+  var b = e.target.closest && e.target.closest('.go');
+  if(!b) return;
+  navigator.clipboard.writeText(b.dataset.id).then(function(){
+    var t=b.textContent; b.textContent='Copied'; setTimeout(function(){b.textContent=t;},1200);
+  }, function(){ b.textContent = b.dataset.id; });
+});
+function tick(){
+  fetch('/api/fleet').then(function(r){return r.json();}).then(render).catch(function(e){
+    document.getElementById('scanline').textContent='scan failed: '+e.message;
+  });
+}
+tick(); setInterval(tick, REFRESH_MS);
+</script></body></html>`;
+
+const server = http.createServer((req, res) => {
+    if (req.url.startsWith('/api/fleet')) {
+        let body;
+        try {
+            body = JSON.stringify(scanFleet(DAYS));
+        } catch (e) {
+            res.writeHead(500, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify({ error: e.message }));
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(body);
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(PAGE);
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+    const t0 = Date.now();
+    const first = scanFleet(DAYS);
+    console.log(`fleet board on http://127.0.0.1:${PORT}`);
+    console.log(`  first scan: ${first.population.transcripts} transcripts, `
+        + `${first.population.blocked} blocked, ${first.population.addressable} addressable `
+        + `(${Date.now() - t0}ms)`);
+});
+
+module.exports = { esc };
