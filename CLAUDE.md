@@ -97,6 +97,15 @@ a subprocess, following `tooling/test-pre-tool-filter.js`.
 `marketplace.json` and every `plugins/*/plugin.json`, enumerating plugins from
 disk. Hand-editing is how a release got tagged on a commit that failed validate.
 
+**A version number is a plugin-cache key, so two trees must never share one.**
+2026-08-21: two sessions released 8.98.0 from this clone within minutes, with
+different trees. The cache is keyed on the number, so `claude plugin update`
+reported *"already at the latest version"* and installed a build missing one
+session's change entirely — a green message describing a number rather than the
+code behind it. It took a throwaway 8.97.0 earlier the same day to move the key
+for the same reason. **Re-read `VERSION` immediately before `bump.js`**, not when
+you started work; in a shared clone it moves under you.
+
 ## Conventions that have actually cost something
 
 - **macOS `realpathSync`**: `/var/folders` and `/private/var/folders` are the same
@@ -108,6 +117,14 @@ disk. Hand-editing is how a release got tagged on a commit that failed validate.
 - **This repo is PUBLIC.** `check-no-private-names.js` gates the tree and
   `tooling/githooks/commit-msg` gates messages. Enable both per clone:
   `git config core.hooksPath tooling/githooks`.
+- **Never `git commit --amend` here.** Several sessions commit to this clone at
+  once and HEAD moves in seconds, so an amend can land on a commit that stopped
+  being yours. 2026-08-21 one did: it rewrote another session's release message
+  and absorbed their version bump. Recoverable (safety branch, `--mixed` reset to
+  `origin/main`, re-commit) but it left a stray `wip:` message permanently in
+  shared history. Commit small and forward; never rewrite.
+- **Stage explicit paths, never `git add -A`** — the same concurrency sweeps
+  another session's in-flight work into your commit.
 - Avoid nested quoting in `node -e`; write a scratch file.
 
 ## Product repos
