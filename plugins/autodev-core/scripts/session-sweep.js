@@ -22,7 +22,10 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const STORE = path.join(
+// SESSION_SWEEP_STORE exists so the suite can drive a synthetic population
+// through the REAL code path. The safety check is the whole point of this
+// script, and a check nothing has ever seen fail is not a check.
+const STORE = process.env.SESSION_SWEEP_STORE || path.join(
   process.env.APPDATA || path.join(process.env.HOME || '', '.config'),
   'Claude',
   'claude-code-sessions'
