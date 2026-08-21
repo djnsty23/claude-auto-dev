@@ -1,7 +1,7 @@
 {
   "name": "autodev-memory",
   "description": "Cross-session project memory: observation capture, semantic search, domain-knowledge briefs, and repo-backed backup.",
-  "version": "8.90.0",
+  "version": "8.91.0",
   "author": {
     "name": "djnsty23",
     "url": "https://github.com/djnsty23"

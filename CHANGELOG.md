@@ -1,5 +1,54 @@
 # Changelog
 
+## [8.91.0] - 2026-08-21
+
+### Added — `queue-drained`, a post-commit report on what was selected and not delivered
+
+An item picked from an options panel is a work order, not a topic. The delivery
+contract says report against that list every turn, and nothing enforced it.
+
+Measured on 2026-08-20: `Write up the session as a lessons entry` was selected,
+then offered again in two later panels before it was finally done. The slip sat
+in the transcript the whole time, and nothing was reading the transcript.
+
+The hook runs after `git commit` and prints two findings of deliberately
+different strength:
+
+- **CARRY-FORWARD is exact.** A label selected in two SEPARATE panels was
+  re-offered, and an item is only re-offered because it was not delivered. No
+  semantics and no judgement — the transcript proves it.
+- **QUEUE is advisory.** It prints the most recent panel's picks and says in its
+  own output that it cannot tell delivered from undelivered. A check that guessed
+  at delivery would be wrong often enough to get muted, and a muted check catches
+  nothing.
+
+It never splits the answer string on commas, because labels contain commas
+(`Merge #17, then clear #16`); it tests each panel's own labels for containment
+instead. Measured across 103 real panels: no label shadows another, so
+containment is exact here rather than merely convenient. The selftest plants a
+comma inside a label so a comma-splitting mutant dies on it.
+
+Always exits 0 — PostToolUse informs, and a false positive must never come
+between a successful commit and the person who made it. An unreadable transcript
+reports NOT RUN rather than passing silently.
+
+Gating is on the command text, since the hook matcher only sees the tool name. A
+regex matching option tokens alone missed `git -C <path> commit`, the common
+shape on this machine, so it skips tokens non-greedily. Twelve command shapes are
+asserted, negatives included.
+
+Run it by hand with `npm run check:queue` (selftest), or against a transcript
+with `node plugins/autodev-core/scripts/check-queue-drained.js --transcript <path>`.
+
+### Fixed — the CI fixtures in `test-preflight-template` had no trigger
+
+Both fixtures wrote a workflow body of `jobs:` alone. 8.90.0's `workflow-valid`
+hard-fails a workflow with no top-level `on:`, so those fixtures stopped being
+valid workflows the moment that gate shipped, and the assertion `and it is a
+warning, not a failure` began measuring workflow-valid's verdict instead of the
+ci-coverage warning it names. The gate is right and the fixture was wrong. Both
+fixtures are corrected, not only the one that went red.
+
 ## [8.90.0] - 2026-08-20
 
 ### Added — `workflow-valid`, a gate on the files that run the gates
