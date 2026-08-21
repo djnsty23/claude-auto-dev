@@ -212,8 +212,41 @@ function runStop(transcriptPath) {
     check('a missing transcript adds no systemMessage', !!r.parsed && r.parsed.systemMessage === undefined, 'systemMessage present');
 }
 
+console.log('\n=== --sweep over a controlled population ===');
+
+{
+    // A projects root with exactly two sessions: one carrying an item forward,
+    // one clean. Controlled, so the counts below are exact rather than "some".
+    const root = path.join(tmp, 'projects');
+    fs.mkdirSync(path.join(root, 'proj-a'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'proj-b'), { recursive: true });
+    fs.copyFileSync(carried, path.join(root, 'proj-a', 'aaaaaaaa-1111.jsonl'));
+    fs.copyFileSync(clean, path.join(root, 'proj-b', 'bbbbbbbb-2222.jsonl'));
+    // A file with no panel at all, to prove the prefilter counts it as skipped
+    // rather than silently dropping it from the population.
+    fs.writeFileSync(path.join(root, 'proj-b', 'cccccccc-3333.jsonl'), JSON.stringify({ message: { content: [] } }) + '\n');
+
+    const script = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-queue-drained.js');
+    const res = spawnSync('node', [script, '--sweep', '--root', root], { encoding: 'utf8', windowsHide: true });
+    const out = res.stdout || '';
+
+    check('sweep prints the population it walked', /2 project dir\(s\), 3 transcript\(s\)/.test(out), `out=${JSON.stringify(out.slice(0, 200))}`);
+    check('sweep separates analysed from skipped', /2 held a panel[^\n]*1 had none/.test(out), `out=${JSON.stringify(out.slice(0, 300))}`);
+    check('sweep names the carried item', out.includes(CARRIED), 'carried label absent');
+    check('sweep counts exactly one open item', /OPEN AT SESSION END: 1 item/.test(out), `out=${JSON.stringify(out.slice(0, 400))}`);
+    check('sweep does not flag the clean session', !out.includes('proj-b'), 'clean session appeared in findings');
+    check('sweep exits 0', res.status === 0, `exit=${res.status}`);
+}
+
+{
+    // An unreadable root must say so, not report a clean sweep.
+    const script = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-queue-drained.js');
+    const res = spawnSync('node', [script, '--sweep', '--root', path.join(tmp, 'no-such-root')], { encoding: 'utf8', windowsHide: true });
+    check('sweep says NOT RUN on a missing root', (res.stdout || '').includes('NOT RUN'), `out=${JSON.stringify((res.stdout || '').slice(0, 120))}`);
+}
+
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ }
 
-const total = 29;
+const total = 36;
 console.log(`\ntest-queue-drained: ${failures ? `FAIL (${failures} of ${total})` : `PASS (${total} assertions)`}\n`);
 process.exit(failures ? 1 : 0);

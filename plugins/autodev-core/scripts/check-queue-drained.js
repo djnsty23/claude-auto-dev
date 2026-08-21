@@ -23,6 +23,7 @@
  */
 'use strict';
 const fs = require('fs');
+const path = require('path');
 
 const STOP_RE = /^stop here/i;
 const RECOMMENDED_RE = /\s*\(recommended\)\s*$/i;
@@ -197,6 +198,96 @@ function selftest() {
     return failures.length ? 1 : 0;
 }
 
+/* -------------------------------------------------------------------- sweep */
+
+/**
+ * Walk every transcript under a projects root and report carried-forward items.
+ * Reuses analyse(), so the sweep and the live hook cannot disagree.
+ *
+ * Two tiers, because they are NOT the same claim:
+ *   carried forward    re-offered, so undelivered AT THE TIME. Many land later.
+ *                      This is history, not a backlog.
+ *   open at session end also picked in the FINAL panel. Tighter, still not proof -
+ *                      an item picked last can be delivered before the session
+ *                      ends, and one measured case did exactly that. Candidates
+ *                      for triage, never a to-do list.
+ */
+function sweep(root, out = console.log) {
+    const NEEDLE = 'AskUserQuestion';
+    const ANSWER = 'questions have been answered';
+    let dirs = 0, files = 0, scanned = 0, skipped = 0, bytes = 0, panels = 0, errors = 0;
+    const hits = [];
+
+    let entries;
+    try { entries = fs.readdirSync(root); } catch {
+        out(`[sweep] NOT RUN - cannot read ${root}`);
+        return null;
+    }
+
+    for (const dir of entries) {
+        const full = path.join(root, dir);
+        let st; try { st = fs.statSync(full); } catch { continue; }
+        if (!st.isDirectory()) continue;
+        dirs++;
+
+        let inner; try { inner = fs.readdirSync(full); } catch { continue; }
+        for (const f of inner) {
+            if (!f.endsWith('.jsonl')) continue;
+            files++;
+            const p = path.join(full, f);
+            let raw;
+            try { raw = fs.readFileSync(p, 'utf8'); } catch { errors++; continue; }
+            bytes += raw.length;
+            // A transcript with no panel cannot carry a finding.
+            if (raw.indexOf(NEEDLE) === -1) { skipped++; continue; }
+            scanned++;
+
+            const records = [];
+            for (const line of raw.split('\n')) {
+                if (!line) continue;
+                if (line.indexOf(NEEDLE) === -1 && line.indexOf(ANSWER) === -1) continue;
+                try { records.push(JSON.parse(line)); } catch { /* partial write */ }
+            }
+
+            let r;
+            try { r = analyse(records); } catch { errors++; continue; }
+            panels += r.panelCount;
+            if (!r.carried.length) continue;
+
+            let date = null;
+            try { date = fs.statSync(p).mtime.toISOString().slice(0, 10); } catch { /* ignore */ }
+            const standing = new Set(r.standing.map((s) => s.toLowerCase()));
+            hits.push({
+                project: dir, session: f.replace('.jsonl', ''), date,
+                carried: r.carried,
+                openAtEnd: r.carried.filter((c) => standing.has(c.label.toLowerCase())),
+            });
+        }
+    }
+
+    // Population first, so a zero is a measurement and not a broken walk.
+    out(`[sweep] ${dirs} project dir(s), ${files} transcript(s), ${(bytes / 1048576).toFixed(0)} MB read.`);
+    out(`[sweep] ${scanned} held a panel and were analysed, ${skipped} had none, ${errors} unreadable, ${panels} panel(s) total.`);
+
+    if (!hits.length) {
+        out('[sweep] no carried-forward item in any transcript.');
+        return { dirs, files, panels, hits };
+    }
+
+    hits.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const open = hits.filter((h) => h.openAtEnd.length);
+    const nCarried = hits.reduce((n, h) => n + h.carried.length, 0);
+    const nOpen = open.reduce((n, h) => n + h.openAtEnd.length, 0);
+
+    out(`[sweep] CARRIED FORWARD: ${nCarried} item(s) in ${hits.length} session(s) - undelivered at the time, many landed later.`);
+    out(`[sweep] OPEN AT SESSION END: ${nOpen} item(s) in ${open.length} session(s) - candidates for triage, not a backlog.`);
+    for (const h of open) {
+        out(`          ${h.date}  ${h.project}  (session ${h.session.slice(0, 8)})`);
+        for (const c of h.openAtEnd) out(`            - "${c.label}"  (${c.panels} panels)`);
+    }
+    return { dirs, files, panels, hits, open };
+}
+
 /* --------------------------------------------------------------------- main */
 
 function transcriptFrom(argv) {
@@ -215,6 +306,17 @@ function transcriptFrom(argv) {
 if (require.main === module) {
     const argv = process.argv.slice(2);
     if (argv.includes('--selftest')) process.exit(selftest());
+
+    if (argv.includes('--sweep')) {
+        const i = argv.indexOf('--root');
+        const root = (i !== -1 && argv[i + 1])
+            ? argv[i + 1]
+            : path.join(process.env.CLAUDE_CONFIG_DIR
+                || path.join(process.env.USERPROFILE || process.env.HOME || '', '.claude'), 'projects');
+        sweep(root);
+        process.exit(0);
+    }
+
     const file = transcriptFrom(argv);
     if (!file || !fs.existsSync(file)) {
         console.log('[queue] NOT RUN - no readable transcript (need --transcript or hook stdin transcript_path).');
