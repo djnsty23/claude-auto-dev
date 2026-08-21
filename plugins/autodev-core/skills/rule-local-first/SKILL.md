@@ -39,8 +39,8 @@ uses that name. One command, chained with `&&`, covering exactly what the repo's
 run. If a repo has no such script, writing it is the first task, not an optional tidy-up —
 a gate spread across seven commands is a gate that gets run partially.
 
-**`spotivibly` does NOT have a `gate` script — `[measured]` 2026-08-22.** This line used to
-claim it did, as of 2026-08-21. It is absent from the working branch and from `origin/main`:
+**One of the repos named here does NOT have the `gate` script this line used to
+claim — `[measured]` 2026-08-22, corrected from 2026-08-21.** It is absent from the working branch and from `origin/main`:
 `git show origin/main:package.json` lists 40 scripts and `gate` is not one of them. Until it
 is written, the gate on that repo is the chain by hand:
 
@@ -57,8 +57,8 @@ in the past tense, and every session since read it as done. Check `package.json`
 invoking a script name from memory.
 
 Start it with `preview_start`, whose entry lives in that repo's `.claude/launch.json`. Read
-the port out of the app's own config rather than assuming a framework default — spotivibly
-serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a way
+the port out of the app's own config rather than assuming a framework default. One app
+here serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a way
 that looks like a broken app.
 
 ## Pushing
@@ -113,7 +113,7 @@ Queues are per-repo, so only repos with a non-empty queue publish.
 
 **Root, NOT `.claude/publish-queue.md`** — this rule said `.claude/` until 2026-08-22 and
 that path defeats the rule's own reason for existing. `[measured]` `.claude/` is gitignored
-in every repo checked (spotivibly, fatboyslim, betsetgo, analytics), and
+in every one of the four repos checked, and
 `rules/file-organization.md` explicitly instructs adding it, because that directory is
 ephemeral tooling state. A queue there is never committed, so it is invisible to a session
 on another machine — the precise failure the paragraph above warns about, reintroduced by
