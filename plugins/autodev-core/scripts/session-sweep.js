@@ -40,6 +40,9 @@ const opt = (n, d) => {
 };
 
 const STALE_DAYS = parseInt(opt('--stale-days', '14'), 10);
+// Scheduled sessions are disposable by construction — the task regenerates them
+// tomorrow — so they get a much shorter clock than hand-started work.
+const EPHEMERAL_DAYS = parseInt(opt('--ephemeral-days', '2'), 10);
 const AS_JSON = flag('--json');
 const WRITE_RESUME = flag('--write-resume');
 
@@ -212,6 +215,11 @@ const DAY = 86400000;
 function classify(s, prStates) {
   const ageDays = (now - (s.lastActivityAt || s.createdAt || now)) / DAY;
   const prs = Array.isArray(s.prs) ? s.prs : [];
+  // A session the app itself launched from a schedule. Structural, not a title
+  // regex: 261 records carry `scheduledTaskId` (e.g. "coordinator-pulse"), and a
+  // regex over titles would both miss renamed tasks and catch hand-started work
+  // that happens to be called "daily digest".
+  const ephemeral = !!s.scheduledTaskId;
   // Live state wins over the on-disk snapshot; the snapshot is the fallback.
   const stateOf = (p) =>
     prStates.get(`${p.repo}#${p.prNumber}`) || (p.state || p.prState || '').toUpperCase();
@@ -228,15 +236,17 @@ function classify(s, prStates) {
   } else if (prs.some((p) => stateOf(p) === 'OPEN')) {
     state = 'PR-OPEN';
     why = `PR ${prs.filter((p) => stateOf(p) === 'OPEN').map((p) => '#' + p.prNumber).join(', ')} still open`;
-  } else if (ageDays >= STALE_DAYS) {
+  } else if (ageDays >= (ephemeral ? EPHEMERAL_DAYS : STALE_DAYS)) {
     state = 'STALE';
-    why = `no activity ${Math.floor(ageDays)}d`;
+    why = ephemeral
+      ? `scheduled task "${s.scheduledTaskId}", idle ${Math.floor(ageDays)}d`
+      : `no activity ${Math.floor(ageDays)}d`;
   } else {
     state = 'ACTIVE';
     why = `active ${Math.floor(ageDays)}d ago`;
   }
 
-  return { state, why, ageDays, prs };
+  return { state, why, ageDays, prs, ephemeral };
 }
 
 // -------------------------------------------------------------------- resume
@@ -280,7 +290,12 @@ const rows = live.map((s) => {
   const finished = c.state === 'MERGED' || c.state === 'STALE';
   const thirdParty = finished ? isThirdParty(s) : false;
   const risk = finished ? worktreeRisk(s) : null;
-  return { s, c, risk, thirdParty, safe: finished && !thirdParty && risk === null };
+  // The app has its own opt-out. Honour it rather than inventing a second one.
+  const exempt = s.autoArchiveExempt === true;
+  return {
+    s, c, risk, thirdParty, exempt,
+    safe: finished && !thirdParty && !exempt && risk === null,
+  };
 });
 
 if (AS_JSON) {
@@ -293,6 +308,8 @@ if (AS_JSON) {
     why: r.c.why,
     ageDays: Math.floor(r.c.ageDays),
     thirdParty: r.thirdParty,
+    ephemeral: r.c.ephemeral,
+    exempt: r.exempt,
     risk: r.risk,
     safe: r.safe,
   })), null, 2));
@@ -305,7 +322,7 @@ console.log(`POPULATION: ${all.length} session records on disk, ${live.length} n
 console.log(`Store: ${STORE}`);
 console.log(`Denylist: ${DENY.length} entr${DENY.length === 1 ? 'y' : 'ies'} from ${DENYLIST_FILE}`);
 console.log(`PR states refreshed live: ${prStates.size} (0 means gh was unavailable — verdicts fell back to the stale on-disk snapshot)`);
-console.log(`Staleness threshold: ${STALE_DAYS}d\n`);
+console.log(`Staleness threshold: ${STALE_DAYS}d for hand-started work, ${EPHEMERAL_DAYS}d for scheduled tasks\n`);
 
 const order = { MERGED: 0, STALE: 1, 'PR-OPEN': 2, ACTIVE: 3 };
 rows.sort((a, b) => (order[a.c.state] - order[b.c.state]) || (b.c.ageDays - a.c.ageDays));
@@ -314,7 +331,7 @@ const pad = (v, n) => String(v == null ? '' : v).slice(0, n).padEnd(n);
 console.log(pad('VERDICT', 9) + pad('AGE', 6) + pad('TITLE', 40) + pad('DISPOSITION', 22) + 'PROJECT');
 console.log('-'.repeat(112));
 for (const r of rows) {
-  const disp = r.safe ? 'SAFE' : r.thirdParty ? 'third-party' : (r.risk || 'keep');
+  const disp = r.safe ? 'SAFE' : r.exempt ? 'exempt' : r.thirdParty ? 'third-party' : (r.risk || 'keep');
   console.log(
     pad(r.c.state, 9) +
     pad(Math.floor(r.c.ageDays) + 'd', 6) +

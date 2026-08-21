@@ -32,9 +32,21 @@ Verdicts:
 | verdict | meaning |
 |---|---|
 | `MERGED` | every PR settled (merged or closed) — finished |
-| `STALE` | no PR, no activity for `--stale-days` (default 14) |
+| `STALE` | no PR, and idle past its threshold |
 | `PR-OPEN` | at least one PR still open — **not** finished |
 | `ACTIVE` | recent activity — leave alone |
+
+Two thresholds, because two kinds of session:
+
+- **`--stale-days` (default 14)** for hand-started work.
+- **`--ephemeral-days` (default 2)** for sessions the app launched from a
+  schedule. These are disposable by construction — the task regenerates them
+  tomorrow — and they dominate the population: on the machine this was built
+  for, 261 of ~480 records carried a `scheduledTaskId`.
+
+Detection is structural (`scheduledTaskId`), never a title regex. A regex would
+miss renamed tasks and catch hand-started work that happens to be called
+"daily digest".
 
 Disposition is separate from verdict, and it is the one that decides:
 
@@ -44,10 +56,7 @@ Disposition is separate from verdict, and it is the one that decides:
   the user commit or push first.
 - `third-party` — remote is not the operator's own account. Excluded entirely;
   client work is not swept by a tool.
-
-`--stale-days` is the tuning knob. Default 14 is deliberately conservative;
-raise it when in doubt, because a false MERGED is unrecoverable and a false
-ACTIVE costs nothing.
+- `exempt` — the session carries the app's own `autoArchiveExempt` flag.
 
 ## Step 2 — resume stubs before archiving, not after
 
