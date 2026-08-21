@@ -12,7 +12,6 @@ Portable copy of `~/.claude/rules/local-first.md`, which is `@`-imported on the 
 box and therefore invisible to any other machine. Keep the two in sync. Two passages are
 host-specific and named as such where they appear: the `ClaudeMemorySync` scheduled task
 and the per-repo gate names.
-
 Added 2026-08-21, on Andy's instruction: *"always test locally and run visual checks in
 Claude's browser… no more pushes, no more GitHub Actions."*
 
@@ -37,14 +36,29 @@ build, tests, preflight — run here and read here.
 **The gate has one name: `npm run gate`**, or `npm run preflight` in a repo that already
 uses that name. One command, chained with `&&`, covering exactly what the repo's CI used to
 run. If a repo has no such script, writing it is the first task, not an optional tidy-up —
-a gate spread across seven commands is a gate that gets run partially. Both names are in
-use across the private repos here — one uses `preflight`, another uses `gate` — so read the
-repo's package.json rather than assuming which.
+a gate spread across seven commands is a gate that gets run partially.
+
+**`spotivibly` does NOT have a `gate` script — `[measured]` 2026-08-22.** This line used to
+claim it did, as of 2026-08-21. It is absent from the working branch and from `origin/main`:
+`git show origin/main:package.json` lists 40 scripts and `gate` is not one of them. Until it
+is written, the gate on that repo is the chain by hand:
+
+```bash
+npm run typecheck && npm run test && npm run build
+```
+
+`typecheck` is the load-bearing one there, because `build` runs only `tsconfig.app.json` and
+`tsconfig.node.json` — it skips `tsconfig.api.json`, so an `api/` change can build clean and
+still be broken.
+
+This is rule 20c one layer up: a claim about tooling that was *going to be* added got written
+in the past tense, and every session since read it as done. Check `package.json` before
+invoking a script name from memory.
 
 Start it with `preview_start`, whose entry lives in that repo's `.claude/launch.json`. Read
-the port out of the app's own config rather than assuming a framework default. One app
-here serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a
-way that looks like a broken app.
+the port out of the app's own config rather than assuming a framework default — spotivibly
+serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a way
+that looks like a broken app.
 
 ## Pushing
 
@@ -91,10 +105,19 @@ answer it. That list is short and enumerable, and it is the whole test:
 "I would feel better seeing it live" is not on that list. If a local run can answer it, it
 is answered locally and never reaches the queue.
 
-The queue lives at `.claude/publish-queue.md` **in the repo it belongs to** — one file per
-repo, each line naming the change and which item above it needs. It cannot live in chat: a
-session that did not have the conversation cannot see it, and the next session is the one
-that will publish. Queues are per-repo, so only repos with a non-empty queue publish.
+The queue lives at **`PUBLISH-QUEUE.md` in the repo root** — one file per repo, each line
+naming the change and which item above it needs. It cannot live in chat: a session that did
+not have the conversation cannot see it, and the next session is the one that will publish.
+Queues are per-repo, so only repos with a non-empty queue publish.
+
+**Root, NOT `.claude/publish-queue.md`** — this rule said `.claude/` until 2026-08-22 and
+that path defeats the rule's own reason for existing. `[measured]` `.claude/` is gitignored
+in every repo checked (spotivibly, fatboyslim, betsetgo, analytics), and
+`rules/file-organization.md` explicitly instructs adding it, because that directory is
+ephemeral tooling state. A queue there is never committed, so it is invisible to a session
+on another machine — the precise failure the paragraph above warns about, reintroduced by
+its own filename. The queue is durable shared state, not tooling scratch; it belongs where
+git can carry it.
 
 **Before a publish, run the local gate over the whole batch, not per-commit.** Each commit
 was already verified alone; batching moves the risk to the integration between them, and
@@ -168,3 +191,29 @@ So every visual check opens with `resize_window`, and every call that measures g
 prints `innerWidth`/`innerHeight` beside the number it measured. A rect compared against a
 zero-height window answers `false` for an element that is plainly there — and a red gets
 acted on rather than challenged, which is worse than a false green.
+
+## Two limits on the browser pass — measured 2026-08-22
+
+**`preview_start` reads the launch.json of the SESSION's working directory**, not of the
+repo under test. A `.claude/launch.json` sitting inside the repo you are checking is
+unreachable from a session rooted anywhere else, and the error you get names a port from
+the wrong config, which reads like a port conflict rather than a lookup miss. Either work
+from the repo's directory, or add an entry that runs
+`npm --prefix <absolute-repo-path> run dev`.
+
+Pick the port explicitly and check it first. Other sessions hold ports — 8080 and 7717 were
+both taken, by another chat's dev server and by the fleet board. `preview_start` refuses
+rather than picking a free one.
+
+**Screenshots need a displayed pane.** In a non-interactive session
+`computer{action:"screenshot"}` times out with *"the Browser pane is not displayed, so the
+page is not compositing frames"*, and `tabs_select` does not fix it. Everything else works —
+`read_page`, `javascript_tool` geometry, `read_console_messages`, `read_network_requests`.
+
+So the 390/414 screenshot step in `agent-quality.md` 10b **cannot be satisfied here**. Do
+the DOM-level pass, which catches overflow, tap targets, console errors and failed requests,
+and then say plainly that no screenshot was taken. Never substitute a diff read for it.
+
+**And check what a surface needs before promising to look at it.** A results screen that
+only exists after a live API call cannot be reached locally at all; the honest output is
+"verified the input surface, did not verify the subject", not a pass.
