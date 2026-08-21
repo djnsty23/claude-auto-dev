@@ -37,13 +37,14 @@ build, tests, preflight — run here and read here.
 **The gate has one name: `npm run gate`**, or `npm run preflight` in a repo that already
 uses that name. One command, chained with `&&`, covering exactly what the repo's CI used to
 run. If a repo has no such script, writing it is the first task, not an optional tidy-up —
-a gate spread across seven commands is a gate that gets run partially. As of 2026-08-21
-`fatboyslim` has `preflight` and `spotivibly` has `gate`.
+a gate spread across seven commands is a gate that gets run partially. Both names are in
+use across the private repos here — one uses `preflight`, another uses `gate` — so read the
+repo's package.json rather than assuming which.
 
 Start it with `preview_start`, whose entry lives in that repo's `.claude/launch.json`. Read
-the port out of the app's own config rather than assuming a framework default — spotivibly
-serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a way
-that looks like a broken app.
+the port out of the app's own config rather than assuming a framework default. One app
+here serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a
+way that looks like a broken app.
 
 ## Pushing
 
