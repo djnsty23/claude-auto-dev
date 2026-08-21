@@ -92,6 +92,14 @@ try {
                 }
             }
         } catch { /* a queue note must never strand a turn */ }
+
+        // Record that this turn ENDED. A transcript mtime says the file grew,
+        // which is not the same thing and cannot tell working from waiting.
+        // Metadata only, no transcript read: check-queue-drained above already
+        // read that file, and it can run to several megabytes.
+        try {
+            require(path.join(__dirname, '..', 'scripts', 'fleet-heartbeat.js')).write(payload, cwd);
+        } catch { /* a heartbeat must never strand a turn */ }
     } catch { /* no or malformed payload — fall back to process.cwd() */ }
 
     const autoFlag = path.join(cwd, '.claude', 'auto-active');

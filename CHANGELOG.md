@@ -1,5 +1,54 @@
 # Changelog
 
+## [8.95.0] - 2026-08-21
+
+### Added — one view of every session, and a heartbeat that costs nothing
+
+`check-queue-drained` only ever sees the transcript it was handed, so nothing on
+this machine could answer the question you actually have with seventeen sessions
+running: which one is waiting on me right now.
+
+`scripts/fleet-status.js` reads every transcript in one pass and reports the
+sessions blocked on an unanswered panel. Detection is the exact inverse of the
+queue check — that one collects panels which *received* a `tool_result`, this one
+collects the `tool_use` whose id never got one. Measured on this machine: 39
+transcripts across 78 project dirs, 31 of which raise panels.
+
+Two things learned building it, both encoded rather than written down:
+
+**A pending panel is short-lived.** Two caught at 19:24 were answered inside
+fifteen minutes. A board that only refreshes when opened will usually show an
+empty fleet and report nothing, which is why the population line prints what was
+scanned — a report that prints only a verdict cannot be told apart from one that
+found nothing.
+
+**A transcript is not addressable.** The id that `send_message` accepts is
+`local_<uuid>`, and it lives in the desktop session store, joined to a transcript
+only by that record's `cliSessionId`. Checking that a transcript's internal
+`sessionId` matches its own filename looks like a mapping check and is vacuous —
+it compares a file to itself. 28 of 39 sessions resolve; the other 11 can be
+displayed but never messaged, and the output says so rather than offering a dead
+control.
+
+### Added — `scripts/fleet-heartbeat.js`, written from the Stop hook
+
+An mtime says a transcript grew. It cannot say a turn *ended*, and those look
+identical from outside. The Stop hook fires exactly when a session stops working
+and starts waiting, so that is where the heartbeat is written.
+
+It deliberately does not read the transcript: `check-queue-drained` already reads
+that file on every Stop and they run to ~4.7MB, so a second full read inside a
+5s-timeout hook is the expensive mistake. Metadata only, write-then-rename so a
+reader cannot catch a half-written record, pruned after 7 days.
+
+No model turn is involved anywhere, which is the whole point. A heartbeat that
+woke each session to self-report would re-ingest its context — roughly 405k
+tokens — to say one line.
+
+Mutation-tested rather than asserted: with `write()` throwing, with the module
+unloadable, and with the file deleted outright, the Stop hook still emits
+`{"decision":"approve"}` in all three cases. An unfired guard is a claim.
+
 ## [8.94.0] - 2026-08-21
 
 ### Changed — scheduled sessions age out in days, not weeks
