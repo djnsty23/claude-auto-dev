@@ -1,5 +1,58 @@
 # Changelog
 
+## [8.98.0] - 2026-08-21
+
+### Added — the fleet taps you, instead of waiting to be opened
+
+A pending panel is perishable. Three scans minutes apart found 2 blocked, then 0,
+then 1, and two panels caught at 19:24 were answered inside fifteen minutes. A
+board you have to remember to open misses exactly the window it exists for.
+
+`scripts/fleet-notify.js` fires a Windows toast when a session becomes blocked.
+**Once per panel, never once per scan** — the state key is `sessionId + askedAt`,
+so re-scanning an open panel is silent, a new panel in the same session notifies
+again, and an unblock prunes the state so a later re-block notifies. A notifier
+that repeats gets muted, and a muted notifier is worse than none because it also
+stops you checking by hand.
+
+That dedup is tested, and the test earned its keep: `pass()` returned early when
+nothing was fresh, **before** writing state, so the prune lived only in memory —
+a session that unblocked stayed marked seen forever. Ten assertions now cover it,
+including that a FAILED notify must not record state or the retry is lost.
+
+`scripts/toast.ps1` uses the WinRT notifier rather than BurntToast, which is not
+installed here and would make this fail closed on a fresh machine.
+
+### Changed — fleet-status reads the heartbeat, three-valued
+
+`true` = the Stop hook fired at or after the last write, so the turn finished.
+`false` = the transcript grew after the last recorded turn end. `null` = no
+heartbeat; say nothing.
+
+**`null` falls back to the timing heuristic rather than to the confident
+reading.** Every session is `null` until the hook has run in it, so a
+fall-through would have invented "stalled" across the entire fleet on the first
+run. All three branches are unit-tested.
+
+### Fixed — planted test data could reach the surface under test
+
+A test wrote a heartbeat for a REAL session id into the live directory, and the
+board duly reported that session as stalled off fabricated data. `AUTODEV_FLEET_DIR`
+now lets tests write elsewhere.
+
+The contamination was findable because real hook payloads carry Windows
+backslashes while the test payloads used forward slashes — worth remembering as a
+provenance marker when auditing this directory by hand.
+
+### Added — the `/fleet` skill
+
+Leads with `--pending` rather than the board, because most of the time the answer
+is wanted and not a browser. It tells the reader to report the population line: a
+bare "nothing is blocked" is indistinguishable from a probe that read nothing.
+
+It also carries the standing instruction not to offer to answer a blocked
+session's question — see 8.96.0 for why that cannot work.
+
 ## [8.97.0] - 2026-08-21
 
 ### Fixed — version-number collision left the previous fix uninstalled
