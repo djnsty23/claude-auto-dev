@@ -39,7 +39,12 @@ function check(name, actual, expected) {
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-suite-'));
 const BARE = path.join(ROOT, 'github.com', 'origin.git');
 const MAIN = path.join(ROOT, 'checkout');
-const STORE = path.join(ROOT, 'store', 'workspace', 'win');
+// Two workspace dirs under one store root. The app tracks exactly one, and which
+// one a record sits in decides whether --archive-orphaned may write it. LIVE is
+// anchored by a recent record; OLD carries only stale ones.
+const STORE = path.join(ROOT, 'store');
+const WS_LIVE = 'live-workspace';
+const WS_OLD = 'orphaned-workspace';
 
 function sh(cmd, cwd) {
   return execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -155,7 +160,13 @@ function writeSession(c, i) {
   // documented fallback rather than requiring network in the suite.
   if (c.prs) rec.prs = c.prs;
   if (c.ageDays != null) rec.lastActivityAt = Date.now() - c.ageDays * 86400000;
-  fs.writeFileSync(path.join(STORE, `${rec.sessionId}.json`), JSON.stringify(rec), 'utf8');
+  const dir = path.join(STORE, c.workspace || WS_LIVE, 'sub');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${rec.sessionId}.json`);
+  // Minified, exactly as the app writes it: --archive-orphaned does a string
+  // replace on `"isArchived":false`, so the spacing has to match reality.
+  fs.writeFileSync(file, JSON.stringify(rec), 'utf8');
+  c.__file = file;
   return rec.sessionId;
 }
 
@@ -180,6 +191,14 @@ function run() {
   const MERGED_PRS = [{ prNumber: 1, repo: 'suite-nonexistent/repo', state: 'MERGED' }];
   cases.push({ id: 'merged-warm', wt: null, prs: MERGED_PRS, ageDays: 0.1, expectState: 'ACTIVE' });
   cases.push({ id: 'merged-cold', wt: null, prs: MERGED_PRS, ageDays: 3, expectState: 'MERGED' });
+
+  // Anchors WS_LIVE as the workspace the app is using: it owns the newest record.
+  cases.push({ id: 'ws-anchor', wt: null, ageDays: 0, expectState: 'ACTIVE' });
+  // Two identical safe rows differing ONLY by workspace. --archive-orphaned must
+  // write the orphaned one and must NOT touch the live one — the app holds live
+  // records in memory, so writing them is both futile and a corruption risk.
+  cases.push({ id: 'orphan-ws-safe', wt: null, workspace: WS_OLD, ageDays: 40, expectState: 'STALE' });
+  cases.push({ id: 'live-ws-safe', wt: null, workspace: WS_LIVE, ageDays: 40, expectState: 'STALE' });
 
   const ids = cases.map((c, i) => writeSession(c, i));
 
@@ -225,6 +244,33 @@ function run() {
   const warm = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'merged-warm')]);
   const cold = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'merged-cold')]);
   check('merged floor separates the pair', warm && cold && warm.state !== cold.state, true);
+
+  // ---- --archive-orphaned -------------------------------------------------
+  const orphanCase = cases.find((c) => c.id === 'orphan-ws-safe');
+  const liveCase = cases.find((c) => c.id === 'live-ws-safe');
+  const readArchived = (c) => {
+    try { return JSON.parse(fs.readFileSync(c.__file, 'utf8')).isArchived; }
+    catch { return 'unreadable'; }
+  };
+
+  // Without the flag, nothing may be written at all.
+  check('no flag: orphaned record untouched', readArchived(orphanCase), false);
+  check('no flag: live record untouched', readArchived(liveCase), false);
+
+  const w = spawnSync(process.execPath, [SCRIPT, '--archive-orphaned'], {
+    encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: STORE, SESSION_SWEEP_OWNER: '' },
+    timeout: 180000,
+  });
+  if (w.status !== 0) {
+    failures.push(`--archive-orphaned exited ${w.status}\n${(w.stderr || '').slice(0, 400)}`);
+  } else {
+    check('archive-orphaned: orphaned record IS archived', readArchived(orphanCase), true);
+    // The one that matters. A pass here with the previous line failing would
+    // mean the write works but hits the wrong workspace.
+    check('archive-orphaned: LIVE record NOT archived', readArchived(liveCase), false);
+    check('archive-orphaned: file still parses', typeof readArchived(orphanCase), 'boolean');
+  }
 }
 
 function cleanup() {

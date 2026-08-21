@@ -54,6 +54,10 @@ const EPHEMERAL_DAYS = parseInt(opt('--ephemeral-days', '2'), 10);
 const MERGED_MIN_HOURS = parseInt(opt('--merged-min-hours', '12'), 10);
 const AS_JSON = flag('--json');
 const WRITE_RESUME = flag('--write-resume');
+// The ONLY mode in which this script mutates anything. Off by default and never
+// implied: it marks SAFE records archived by editing the store, for workspaces
+// the app no longer tracks. It still never touches a git worktree.
+const ARCHIVE_ORPHANED = flag('--archive-orphaned');
 
 function loadDenylist() {
   try {
@@ -70,20 +74,64 @@ const DENY = loadDenylist();
 function collectSessions() {
   const out = [];
   if (!fs.existsSync(STORE)) return out;
-  const walk = (dir, depth) => {
+  const walk = (dir, depth, workspace) => {
     if (depth > 4) return;
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) walk(full, depth + 1);
+      // The workspace is the FIRST path segment under the store root. It is the
+      // unit the app tracks, and which one a record sits in decides whether the
+      // app holds it in memory.
+      if (e.isDirectory()) walk(full, depth + 1, depth === 0 ? e.name : workspace);
       else if (e.isFile() && /^local_.*\.json$/.test(e.name)) {
-        try { out.push(JSON.parse(fs.readFileSync(full, 'utf8'))); } catch { /* skip unreadable */ }
+        try {
+          const rec = JSON.parse(fs.readFileSync(full, 'utf8'));
+          rec.__file = full;
+          rec.__workspace = workspace;
+          out.push(rec);
+        } catch { /* skip unreadable */ }
       }
     }
   };
-  walk(STORE, 0);
+  walk(STORE, 0, null);
   return out;
+}
+
+/**
+ * Which workspace directory is the app actually using?
+ *
+ * Measured: the MCP tools see exactly ONE workspace dir — 5/5 known-reachable
+ * sessions in it, 5/5 known-unreachable across the others. Age does not predict
+ * reachability; the directory does. Records outside the live workspace were
+ * never loaded by the app, which is what makes writing them safe.
+ *
+ * Current = the workspace owning the most recently active record. Any OTHER
+ * workspace with recent activity is treated as live too, not orphaned — if two
+ * dirs are both warm, something is going on that this heuristic does not model,
+ * and the safe reading is "do not touch either".
+ */
+function detectWorkspaces(sessions) {
+  const newest = new Map();
+  for (const s of sessions) {
+    const ws = s.__workspace;
+    if (!ws) continue;
+    const t = s.lastActivityAt || s.createdAt || 0;
+    if (t > (newest.get(ws) || 0)) newest.set(ws, t);
+  }
+  if (!newest.size) return { current: null, orphaned: new Set(), newest };
+
+  let current = null, best = -1;
+  for (const [ws, t] of newest) if (t > best) { best = t; current = ws; }
+
+  const RECENT = 2 * DAY;
+  const orphaned = new Set();
+  for (const [ws, t] of newest) {
+    if (ws === current) continue;
+    if (best - t < RECENT) continue;   // also warm: fail closed, leave it alone
+    orphaned.add(ws);
+  }
+  return { current, orphaned, newest };
 }
 
 // ------------------------------------------------------------- git inspection
@@ -295,8 +343,44 @@ carries the conclusions without the cost.
 
 const all = collectSessions();
 const live = all.filter((s) => !s.isArchived);
+const { current: currentWorkspace, orphaned: orphanedWorkspaces } = detectWorkspaces(all);
 
 const prStates = refreshPrStates(live);
+
+/**
+ * Mark SAFE records archived by editing the store, for orphaned workspaces only.
+ *
+ * A string replace, deliberately, not parse-then-stringify: reserializing would
+ * rewrite field order and escaping across a file the app owns, so any breakage
+ * would be indistinguishable from the one change being made. Anything whose
+ * shape does not match exactly one needle is skipped rather than guessed at.
+ */
+function archiveOrphaned(rows) {
+  const NEEDLE = '"isArchived":false';
+  const done = [];
+  const skipped = [];
+
+  for (const r of rows) {
+    if (!r.safe) continue;
+    const ws = r.s.__workspace;
+    if (!ws || ws === currentWorkspace || !orphanedWorkspaces.has(ws)) {
+      skipped.push([r.s.title, 'app tracks this workspace — use archive_session']);
+      continue;
+    }
+    let raw;
+    try { raw = fs.readFileSync(r.s.__file, 'utf8'); } catch { skipped.push([r.s.title, 'unreadable']); continue; }
+    if ((raw.split(NEEDLE).length - 1) !== 1) { skipped.push([r.s.title, 'unexpected shape']); continue; }
+    try {
+      fs.writeFileSync(r.s.__file, raw.replace(NEEDLE, '"isArchived":true'), 'utf8');
+      JSON.parse(fs.readFileSync(r.s.__file, 'utf8'));   // prove it still parses
+      done.push(r.s.title);
+    } catch (e) {
+      try { fs.writeFileSync(r.s.__file, raw, 'utf8'); } catch { /* caller holds a backup */ }
+      skipped.push([r.s.title, 'write failed: ' + e.message]);
+    }
+  }
+  return { done, skipped };
+}
 
 const rows = live.map((s) => {
   const c = classify(s, prStates);
@@ -335,7 +419,8 @@ console.log(`POPULATION: ${all.length} session records on disk, ${live.length} n
 console.log(`Store: ${STORE}`);
 console.log(`Denylist: ${DENY.length} entr${DENY.length === 1 ? 'y' : 'ies'} from ${DENYLIST_FILE}`);
 console.log(`PR states refreshed live: ${prStates.size} (0 means gh was unavailable — verdicts fell back to the stale on-disk snapshot)`);
-console.log(`Staleness threshold: ${STALE_DAYS}d for hand-started work, ${EPHEMERAL_DAYS}d for scheduled tasks\n`);
+console.log(`Staleness threshold: ${STALE_DAYS}d for hand-started work, ${EPHEMERAL_DAYS}d for scheduled tasks`);
+console.log(`Live workspace: ${currentWorkspace || '(undetermined)'} — ${orphanedWorkspaces.size} orphaned workspace(s) alongside it\n`);
 
 const order = { MERGED: 0, STALE: 1, 'PR-OPEN': 2, ACTIVE: 3 };
 rows.sort((a, b) => (order[a.c.state] - order[b.c.state]) || (b.c.ageDays - a.c.ageDays));
@@ -379,4 +464,19 @@ if (WRITE_RESUME) {
   console.log(`\nWrote ${n} resume stub${n === 1 ? '' : 's'} to ${outDir}`);
 }
 
-console.log('\nNothing was archived. Pass the SAFE list to archive_session to act on it.');
+if (ARCHIVE_ORPHANED) {
+  const { done, skipped } = archiveOrphaned(rows);
+  console.log(`\n--- --archive-orphaned ---`);
+  console.log(`marked archived in the store: ${done.length}`);
+  console.log(`left for archive_session    : ${skipped.filter((x) => /app tracks/.test(x[1])).length}`);
+  const other = skipped.filter((x) => !/app tracks/.test(x[1]));
+  if (other.length) {
+    console.log(`skipped for other reasons  : ${other.length}`);
+    for (const [t, why] of other.slice(0, 10)) console.log(`  - ${t}: ${why}`);
+  }
+  console.log('\nNo git worktree was touched. Records in the live workspace are untouched');
+  console.log('and still require archive_session.');
+} else {
+  console.log('\nNothing was archived. Pass the SAFE list to archive_session to act on it,');
+  console.log('or re-run with --archive-orphaned to clear the ones the app no longer tracks.');
+}

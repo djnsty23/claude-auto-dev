@@ -73,6 +73,17 @@ const MUTANTS = [
     mustPass: ['merged-cold: state'],
   },
   {
+    name: 'workspace guard removed (--archive-orphaned writes the LIVE workspace too)',
+    apply: (s) => s.replace(
+      "    if (!ws || ws === currentWorkspace || !orphanedWorkspaces.has(ws)) {",
+      '    if (false) { // MUTANT'
+    ),
+    mustFail: ['archive-orphaned: LIVE record NOT archived'],
+    // The orphaned half must still be written, or this just broke the feature
+    // rather than removing the guard specifically.
+    mustPass: ['archive-orphaned: orphaned record IS archived'],
+  },
+  {
     name: 'fail-open on unreadable git (unknown treated as safe)',
     apply: (s) => s.replace(
       "  if (status === null) return 'git-unreadable';",
