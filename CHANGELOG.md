@@ -1,5 +1,45 @@
 # Changelog
 
+## [8.100.0] - 2026-08-21
+
+### Released so the runtime can reach the fleet work — a same-version sha drift
+
+No new code of its own. Four commits landed on main after the `chore(release):
+8.99.0` commit and were unreachable by every installed session, because the
+plugin cache is keyed on the version and the pin named the release commit.
+
+`claude plugin update autodev-core@autodev` reported **"already at the latest
+version (8.99.0)"** and changed nothing. It compares version STRINGS, so a
+same-version sha bump is invisible to it. Measured by bytes rather than argued:
+the cached `fleet-status.js` was 15888 bytes, byte-identical to the pinned sha,
+where the newer tree is 17316 — and `install-fleet-notify-task.ps1` plus
+`fleet-notify-hidden.vbs` were absent from the cache entirely.
+
+That first file is the scheduled-task installer for the fleet notifier, which is
+the fix for the notifier having no host. It had been committed, pushed, and
+unreachable.
+
+Riding in this release, all authored by another session on this shared clone:
+
+- `a59bb31` schedule the notifier, and retune classify against real data
+- `0081168` wait 15m before notifying, and hide cold rows by default
+- `605ff9a` cross-machine status, as counts only
+- `596815b` docs: two hazards this clone produced today, both concurrency
+
+### Fixed — two plugin pins that were ten releases stale
+
+`autodev-memory` and `autodev-stack` were pinned at **8.89.0** while their 8.99.0
+trees already sat in the cache, so every session since had loaded stale copies of
+both. `claude plugin update` moved them correctly — the stale-pin case does work,
+it is only the same-version case above that does not.
+
+### Known — `check:runtime` cannot see either failure
+
+It reads the cache DIRECTORY (is the highest version present?) and content
+markers, never `installed_plugins.json`. It passed throughout both problems
+above. To verify what will actually load, read the pin and byte-compare the
+cached file against the sha it names.
+
 ## [8.99.0] - 2026-08-21
 
 ### Added — `--archive-orphaned`, for the sessions the app can no longer reach
