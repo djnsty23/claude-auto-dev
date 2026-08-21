@@ -440,16 +440,38 @@ for (const r of rows) {
 }
 
 const safe = rows.filter((r) => r.safe);
-const blocked = rows.filter((r) => !r.safe && (r.c.state === 'MERGED' || r.c.state === 'STALE'));
+const finished = rows.filter((r) => !r.safe && (r.c.state === 'MERGED' || r.c.state === 'STALE'));
+
+// Two very different things were sharing one list, and the permanent one drowns
+// the urgent one. `blocked` means WORK EXISTS IN EXACTLY ONE PLACE — act on it.
+// `excluded` means third-party or opted-out: correct, permanent, and identical
+// every run. Five such rows appeared under BLOCKED every time, so a reader
+// learns to skip the section that is the only place a real warning can appear.
+const blocked = finished.filter((r) => !r.thirdParty && !r.exempt);
+const excluded = finished.filter((r) => r.thirdParty || r.exempt);
 
 console.log('\n--- SUMMARY ---');
 for (const st of ['MERGED', 'STALE', 'PR-OPEN', 'ACTIVE']) {
   console.log(`${st.padEnd(9)} ${rows.filter((r) => r.c.state === st).length}`);
 }
 console.log(`\nSAFE TO ARCHIVE: ${safe.length}`);
-console.log(`BLOCKED (finished, but worktree is not disposable): ${blocked.length}`);
+console.log(`BLOCKED — work exists in exactly one place, act on these: ${blocked.length}`);
 for (const b of blocked) {
-  console.log(`  - ${b.s.title} — ${b.thirdParty ? 'third-party remote' : b.risk}`);
+  console.log(`  - ${b.s.title} — ${b.risk}`);
+  if (b.s.worktreePath) console.log(`      ${b.s.worktreePath}`);
+}
+if (!blocked.length) console.log('  (none — every finished own-repo session is committed and pushed)');
+
+// Counted, never listed. It is the same rows every run; naming them each time is
+// what taught the reader to skip the section above.
+console.log(`\nExcluded by policy (third-party remote or autoArchiveExempt): ${excluded.length}`);
+if (excluded.length) {
+  console.log('  Permanent and expected. Re-run with --list-excluded to see them.');
+  if (flag('--list-excluded')) {
+    for (const e of excluded) {
+      console.log(`  - ${e.s.title} — ${e.exempt ? 'autoArchiveExempt' : 'third-party remote'}`);
+    }
+  }
 }
 
 if (WRITE_RESUME) {

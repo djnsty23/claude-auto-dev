@@ -61,6 +61,13 @@ Disposition is separate from verdict, and it is the one that decides:
   the user commit or push first.
 - `third-party` — remote is not the operator's own account. Excluded entirely;
   client work is not swept by a tool.
+
+BLOCKED and EXCLUDED are reported separately, and the split matters. BLOCKED
+means work exists in exactly one place — act on it. EXCLUDED (third-party or
+`autoArchiveExempt`) is permanent and identical every run, so it is counted and
+not listed; `--list-excluded` names them. They shared one list originally, and
+five permanent rows appeared under BLOCKED every single run, which teaches a
+reader to skip the one section where a real warning can appear.
 - `exempt` — the session carries the app's own `autoArchiveExempt` flag.
 
 ## Step 2 — resume stubs before archiving, not after
