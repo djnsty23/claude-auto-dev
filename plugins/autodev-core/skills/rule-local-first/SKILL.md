@@ -39,7 +39,7 @@ uses that name. One command, chained with `&&`, covering exactly what the repo's
 run. If a repo has no such script, writing it is the first task, not an optional tidy-up —
 a gate spread across seven commands is a gate that gets run partially.
 
-**`spotivibly` does NOT have a `gate` script — `[measured]` 2026-08-22.** This line used to
+**`the music product` does NOT have a `gate` script — `[measured]` 2026-08-22.** This line used to
 claim it did, as of 2026-08-21. It is absent from the working branch and from `origin/main`:
 `git show origin/main:package.json` lists 40 scripts and `gate` is not one of them. Until it
 is written, the gate on that repo is the chain by hand:
@@ -57,7 +57,7 @@ in the past tense, and every session since read it as done. Check `package.json`
 invoking a script name from memory.
 
 Start it with `preview_start`, whose entry lives in that repo's `.claude/launch.json`. Read
-the port out of the app's own config rather than assuming a framework default — spotivibly
+the port out of the app's own config rather than assuming a framework default — the music product
 serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a way
 that looks like a broken app.
 
@@ -126,7 +126,7 @@ Queues are per-repo, so only repos with a non-empty queue publish.
 
 **Root, NOT `.claude/publish-queue.md`** — this rule said `.claude/` until 2026-08-22 and
 that path defeats the rule's own reason for existing. `[measured]` `.claude/` is gitignored
-in every repo checked (spotivibly, fatboyslim, betsetgo, analytics), and
+in every repo checked (the music product, the fitness product, the wagering product, analytics), and
 `rules/file-organization.md` explicitly instructs adding it, because that directory is
 ephemeral tooling state. A queue there is never committed, so it is invisible to a session
 on another machine — the precise failure the paragraph above warns about, reintroduced by
@@ -243,17 +243,17 @@ accurately and publishing it pull in opposite directions.
 The portable half lives in the skill. Everything below is the half that cannot.
 
 **Which repo has which gate script** `[measured 2026-08-22]`
-- `fatboyslim` — `preflight`
-- `spotivibly` — **no `gate` script**, despite this rule claiming one on 2026-08-21.
+- `the fitness product` — `preflight`
+- `the music product` — **no `gate` script**, despite this rule claiming one on 2026-08-21.
   Absent from the working branch and from `origin/main`; `git show
   origin/main:package.json` lists 40 scripts and `gate` is not among them. Until it
   is written, its gate is `npm run typecheck && npm run test && npm run build`.
 
-**Ports** — `spotivibly` serves vite on **8080**, not the 5173 default. A preview
+**Ports** — `the music product` serves vite on **8080**, not the 5173 default. A preview
 pointed at 5173 fails in a way that looks like a broken app.
 
-**`.claude/` is gitignored** in every one of the four repos checked — `spotivibly`,
-`fatboyslim`, `betsetgo`, `analytics` — which is why `publish-queue.md` belongs at
+**`.claude/` is gitignored** in every one of the four repos checked — `the music product`,
+`the fitness product`, `the wagering product`, `analytics` — which is why `publish-queue.md` belongs at
 the repo ROOT. A queue inside `.claude/` is never committed, so it is invisible to
 a session on another machine: the exact failure the publishing section warns about,
 reintroduced by its own filename.
@@ -269,7 +269,7 @@ that says a repo has started burning Actions minutes again.
 
 ## A tap-target sweep built on getBoundingClientRect reports false positives
 
-`[measured]` 2026-08-22, spotivibly. A rect-based sweep flagged four controls on `/generate`
+`[measured]` 2026-08-22, the music product. A rect-based sweep flagged four controls on `/generate`
 as under the 44px minimum. All four were fine. The project defines a `.tap-target::after`
 utility that expands the hit area to 44x44 under `@media (pointer: coarse)`, and **84
 controls carry it** — `getBoundingClientRect()` returns the element's own box and cannot see
@@ -300,7 +300,7 @@ wrong tool for a dense footer.
 
 ## Do not switch branches in a clone another session is using
 
-`[measured]` 2026-08-22. I checked out five branches in spotivibly's main clone over one
+`[measured]` 2026-08-22. I checked out five branches in the music product's main clone over one
 session. It was not idle: uncommitted work on `clientIp.ts`, `rateLimiter.ts` and a test
 vector file appeared in that tree while I worked, from another session. Uncommitted changes
 travel across a checkout, so nothing was lost — but the branch moved under someone else's
