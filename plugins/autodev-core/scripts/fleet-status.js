@@ -24,6 +24,7 @@
  *   node fleet-status.js --json          # machine-readable, for the interface
  *   node fleet-status.js --days 2        # how far back to scan (default 2)
  *   node fleet-status.js --pending       # only sessions blocked on a panel
+ *   node fleet-status.js --all           # include archived sessions (hidden by default)
  *
  * Always exits 0. This is a report, never a gate.
  */
@@ -94,6 +95,16 @@ const has = (f) => argv.includes(f);
 const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 
 const DAYS = Number(val('--days', 2));
+
+// Archived sessions are finished and unreachable, so they are noise on a board
+// whose job is "who is waiting on you". The record already carried isArchived —
+// it was collected and never read, which is the shape of a filter that was
+// intended and did not land.
+//
+// It only became visible when a sweep archived 258 sessions in one evening:
+// measured immediately after, 6 of the 12 rows on this board were archived, so
+// half the display was dead. Neither change contains the defect on its own.
+const SHOW_ARCHIVED = has('--all');
 const CUTOFF = Date.now() - DAYS * 864e5;
 
 /**
@@ -288,6 +299,9 @@ function scanFleet(days) {
             rec.idleMinutes = Math.round((Date.now() - fst.mtimeMs) / 60000);
             rec.isRunning = null;
             Object.assign(rec, index.get(rec.sessionId) || { addressableId: null, title: null });
+            // A session with no index entry has isArchived undefined, not false —
+            // unmatched rows stay visible rather than being hidden by a lookup miss.
+            if (rec.isArchived && !SHOW_ARCHIVED) continue;
 
             const hb = beats.get(rec.sessionId);
             rec.stoppedAt = hb ? hb.stoppedAt : null;
@@ -325,7 +339,7 @@ function main() {
         process.exit(0);
     }
 
-    let scannedDirs = 0, scannedFiles = 0;
+    let scannedDirs = 0, scannedFiles = 0, archivedHidden = 0;
     const sessions = [];
     const index = loadSessionIndex();
 
@@ -347,6 +361,7 @@ function main() {
             rec.idleMinutes = Math.round((Date.now() - fst.mtimeMs) / 60000);
             rec.isRunning = null;   // runtime-only; filled in by the caller from list_sessions
             Object.assign(rec, index.get(rec.sessionId) || { addressableId: null, title: null });
+            if (rec.isArchived && !SHOW_ARCHIVED) { archivedHidden++; continue; }
             rec.state = classify(rec);
             sessions.push(rec);
         }
@@ -367,6 +382,7 @@ function main() {
                 blocked: sessions.filter((s) => s.pending).length,
                 // If this is 0 the board is read-only: nothing can be messaged.
                 addressable: sessions.filter((s) => s.addressableId).length,
+                archivedHidden,
             },
             sessions: shown,
         }, null, 2));
@@ -377,6 +393,12 @@ function main() {
     // found nothing (rules/agent-quality.md 22c), so always print the population.
     console.log('scanned ' + scannedFiles + ' transcripts in ' + scannedDirs + ' project dirs, last ' + DAYS + 'd');
     console.log(sessions.filter((s) => s.pending).length + ' blocked on an unanswered panel');
+    // Say what was hidden. A board that quietly drops rows is indistinguishable
+    // from one with nothing to show — the same trap this file's population line
+    // already guards against.
+    if (archivedHidden) {
+        console.log(archivedHidden + ' archived session(s) hidden (--all to show)');
+    }
     console.log('');
 
     for (const s of shown) {
