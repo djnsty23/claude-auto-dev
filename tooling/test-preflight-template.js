@@ -116,7 +116,9 @@ check('syntax gate catches an unparseable file', r.status === 1 && /does not par
     const dir = project();
     fs.mkdirSync(path.join(dir, '.github', 'workflows'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.github', 'workflows', 'ci.yml'),
-        'jobs:\n  build:\n    steps:\n      - run: npm test\n');
+        // `on:` is required or workflow-valid (8.90.0) hard-fails this fixture, which
+        // would make the ci-coverage assertion below measure the WRONG gate's verdict.
+        'on: push\njobs:\n  build:\n    steps:\n      - run: npm test\n');
     const r = run(dir);
     check('CI that never mentions preflight is warned about', /only guards local runs/.test(r.out));
     check('  and it is a warning, not a failure', r.status === 0);
@@ -125,7 +127,7 @@ check('syntax gate catches an unparseable file', r.status === 1 && /does not par
     const dir2 = project();
     fs.mkdirSync(path.join(dir2, '.github', 'workflows'), { recursive: true });
     fs.writeFileSync(path.join(dir2, '.github', 'workflows', 'ci.yml'),
-        'jobs:\n  build:\n    steps:\n      - run: npm run preflight\n');
+        'on: push\njobs:\n  build:\n    steps:\n      - run: npm run preflight\n');
     const r2 = run(dir2);
     check('CI that runs preflight is acknowledged', /referenced by CI/.test(r2.out));
     check('  and does not warn', !/only guards local runs/.test(r2.out));
