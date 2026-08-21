@@ -25,10 +25,14 @@ const FLEET = path.join(
   'fleet-status.js',
 );
 
+// Generic filler only. Project names used to be listed here too, which put
+// private repo names — including a client's — into a PUBLIC repo, and hardcoded
+// this machine's project list into a script meant to run anywhere. They are
+// derived from the sessions themselves below instead.
 const STOP = new Set(
   ('the a an and or for to of in on with from into session sessions claude code fix fixes ' +
     'update updates check checks run runs new all set setup and2 status work works item items ' +
-    'spotivibly fatboyslim autodev growceanu shopify benchmark glow untitled')
+    'untitled')
     .split(/\s+/),
 );
 
@@ -46,12 +50,19 @@ function repoOf(r) {
   const m = String(r.originCwd || r.cwd || '').match(/code[\\/]([^\\/]+)/i);
   return m ? m[1] : '(none)';
 }
+// A repo's own name is not evidence that two sessions overlap — every session in
+// that repo carries it. Derived from the live set rather than listed, so it needs
+// no maintenance and names no repo in this file.
+const PROJECT_WORDS = new Set(
+  live.flatMap((r) => repoOf(r).toLowerCase().split(/[^a-z0-9]+/)).filter(Boolean),
+);
+
 function tokens(r) {
   return new Set(
     String(r.title || '')
       .toLowerCase()
       .split(/[^a-z0-9]+/)
-      .filter((w) => w.length > 3 && !STOP.has(w)),
+      .filter((w) => w.length > 3 && !STOP.has(w) && !PROJECT_WORDS.has(w)),
   );
 }
 
