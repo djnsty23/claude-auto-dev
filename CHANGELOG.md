@@ -45,6 +45,33 @@ On the first real run against 479 records it cleared 216 and caught two sessions
 holding work that existed nowhere else — one with uncommitted files, one with a
 local-only commit.
 
+### Added — `check-queue-drained --sweep`, over every transcript
+
+Landed in `5f568bb`, which was on `main` before this release was cut, so it ships
+here. It walks a projects root and reports options-protocol items that were
+selected and then offered again. Measured on this machine: 78 project dirs, 166
+transcripts, 1,780 MB, 844 answered panels.
+
+Two tiers, because they are not the same claim and collapsing them would
+manufacture a to-do list out of history:
+
+- **carried forward** — re-offered, so undelivered *at the time*. 49 items. Many
+  landed later; this is history, not a backlog.
+- **open at session end** — also picked in the *final* panel. 14 items. Tighter,
+  and still not proof: an item picked last can be delivered before the session
+  ends, and a measured case did exactly that — "Write up the session as a lessons
+  entry" appears in this tier and demonstrably shipped.
+
+Both lines label which tier they are, so neither can be read as the other. It
+reuses `analyse()`, so the sweep and the post-commit hook cannot disagree about
+what counts as a selection. Population is printed before any finding, and the
+prefilter's skipped count sits beside the analysed count, so a small number is
+distinguishable from a broken walk. A missing root reports NOT RUN.
+
+The suite runs it over a controlled root of exactly three transcripts — one
+carrying, one clean, one with no panel — so the asserted counts are exact rather
+than "some". 36 assertions.
+
 ## [8.92.0] - 2026-08-21
 
 ### Changed — the queue report rides on hooks that already spawn
