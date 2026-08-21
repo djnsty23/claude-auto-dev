@@ -39,14 +39,17 @@ uses that name. One command, chained with `&&`, covering exactly what the repo's
 run. If a repo has no such script, writing it is the first task, not an optional tidy-up —
 a gate spread across seven commands is a gate that gets run partially.
 
-**One of the repos named here does NOT have the `gate` script this line used to
-claim — `[measured]` 2026-08-22, corrected from 2026-08-21.** It is absent from the working branch and from `origin/main`:
-`git show origin/main:package.json` lists 40 scripts and `gate` is not one of them. Until it
-is written, the gate on that repo is the chain by hand:
+**Verify the script exists before invoking it by name.** A repo that "has a gate"
+in your memory may not have one in its `package.json` — check `origin/main`, not
+recollection. Until it is written, the gate there is the chain by hand:
 
 ```bash
 npm run typecheck && npm run test && npm run build
 ```
+
+Which repos on a given machine have `gate`, which have `preflight`, and which have
+neither is operator-specific and belongs in that operator's own rules file, not in
+this skill.
 
 `typecheck` is the load-bearing one there, because `build` runs only `tsconfig.app.json` and
 `tsconfig.node.json` — it skips `tsconfig.api.json`, so an `api/` change can build clean and
@@ -76,11 +79,12 @@ This does not cancel `agent-quality.md` rule 8. That rule covers the case where 
 push, and it still means do it without re-asking. What changed is the default ending of
 a task: a verified local state, not a remote one.
 
-**Carve-out:** the config mirror to `~/claude-memory` (`rules/backup-protocol.md`) is a
-backup of this machine, not shipping code, and it is why a reinstall is survivable. The
-`ClaudeMemorySync` task that pushed it every 4h was **disabled 2026-08-21**, so the mirror
-is now a manual, same-session obligation again. That is how it rotted to 49-of-157 files
-last time — so mirror when you edit, do not trust a timer that is no longer running.
+**Carve-out:** a mirror of your own config to a backup repo is not shipping code,
+and it is what makes a reinstall survivable — so it is exempt from the rule above.
+If the mirror runs on a timer, know whether that timer is still enabled: a
+disabled sync is indistinguishable from a working one until you need it, and the
+obligation quietly reverts to being manual and same-session. The repo, the task
+name and its current state are operator-specific; keep them in your own rules.
 
 ## Publishing — batched, never on a clock
 
