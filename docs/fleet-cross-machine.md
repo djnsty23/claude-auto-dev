@@ -40,15 +40,25 @@ regardless of where it lands.
 
 ## Setup on macOS
 
-### 1. Clone what is needed
+### 1. Clone this repo, and have a private sync location ready
 
 ```bash
 git clone https://github.com/djnsty23/claude-auto-dev.git ~/claude-auto-dev
-git clone https://github.com/djnsty23/claude-memory.git ~/claude-memory
 ```
 
-`claude-memory` is the private repo the status file rides in. `fleet-publish.js`
-writes to `~/claude-memory/fleet/<hostname>.json`.
+You also need somewhere private for the status file to ride in — a private git
+repo both machines already sync. **This document does not name it**, because this
+repo is public and pointing at a private one from here is exactly the leak the
+payload rules below exist to prevent.
+
+`fleet-publish.js` defaults to `~/claude-memory/fleet/`. Point it wherever your
+private sync location actually is:
+
+```bash
+export AUTODEV_FLEET_PUBLISH_DIR="$HOME/<your-private-sync-repo>/fleet"
+```
+
+Set it in the launchd job too (step 4) — launchd does not read your shell profile.
 
 ### 2. Check it reads your sessions
 
@@ -113,7 +123,7 @@ Same discipline as the Windows side: a scheduler reporting success means the
 process started, not that it did anything. The artifact is the file's timestamp.
 
 ```bash
-ls -l ~/claude-memory/fleet/
+ls -l "$AUTODEV_FLEET_PUBLISH_DIR"
 node ~/claude-auto-dev/plugins/autodev-core/scripts/fleet-publish.js --read
 ```
 
@@ -121,8 +131,8 @@ If the file is not being refreshed, read `/tmp/fleet-publish.err`.
 
 ### 6. Let it reach the other machine
 
-The file only becomes visible elsewhere once `claude-memory` is pushed. On
-Windows the `ClaudeMemorySync` task does that every ~4h. On macOS there is no
+The file only becomes visible elsewhere once that private repo is pushed. On
+Windows a scheduled sync task does that every ~4h. On macOS there is no
 equivalent yet, so either commit and push it yourself, or add a second launchd
 job that does. **Until it is pushed, nothing crosses.**
 
