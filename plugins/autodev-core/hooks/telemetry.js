@@ -81,17 +81,51 @@ try {
     // It stays silent unless a FAILED Bash call carries the /tmp signature —
     // roughly 0.15% of calls — so "telemetry does not print" still holds where
     // that rule is load-bearing, which is the per-call cost of printing.
+    // Both advisories collect into ONE stdout write. Two JSON objects on one
+    // stream is not parseable output, so this must stay a single write however
+    // many riders are added later.
+    const notes = [];
+
     try {
         if (failed) {
             const { adviseOnToolFailure } = require(path.join(__dirname, '..', 'scripts', 'tool-failure-advisory.js'));
             const advice = adviseOnToolFailure(event.tool, toolResponse, failed);
-            if (advice) {
-                process.stdout.write(JSON.stringify({
-                    hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: advice.advice },
-                }));
-            }
+            if (advice) notes.push(advice.advice);
         }
     } catch { /* an advisory must never be why a tool call failed */ }
+
+    // Second rider, same reasoning as the first and the same measurement: after
+    // a `git commit`, report the options-protocol queue. It shipped in 8.91.0 as
+    // its own PostToolUse hook on Bash and that was the wrong shape by this
+    // file's own note above — a measured ~56ms per Bash call, every call, for a
+    // report that fires only on commits.
+    //
+    // Gating is on the command because a hook matcher only ever sees the TOOL
+    // name. The token skip is non-greedy so `git -C <path> commit` matches; an
+    // options-only pattern missed exactly that shape, which is the common one
+    // here.
+    try {
+        const cmd = (toolInput && typeof toolInput.command === 'string') ? toolInput.command : '';
+        const isCommit = /(^|[;&|]|\s)git\s+(?:\S+\s+)*?commit\b/.test(cmd) && !/--dry-run\b/.test(cmd);
+        if (event.tool === 'Bash' && isCommit) {
+            const transcript = data.transcript_path || data.transcriptPath;
+            if (transcript && fs.existsSync(transcript)) {
+                const { report } = require(path.join(__dirname, '..', 'scripts', 'check-queue-drained.js'));
+                const lines = [];
+                report(transcript, (l) => lines.push(l));
+                if (lines.length) notes.push(lines.join('\n'));
+            } else {
+                // Could-not-run is reported, never passed off as nothing to report.
+                notes.push('[queue] NOT RUN after commit - no readable transcript.');
+            }
+        }
+    } catch { /* the queue report must never be why a commit looks failed */ }
+
+    if (notes.length) {
+        process.stdout.write(JSON.stringify({
+            hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: notes.join('\n\n') },
+        }));
+    }
 
     try {
         const dir = path.join(process.cwd(), '.claude', 'reports');

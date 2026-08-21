@@ -9,14 +9,29 @@
 const fs = require('fs');
 const path = require('path');
 
-function approve() {
-    console.log(JSON.stringify({ decision: 'approve' }));
+// A carried-forward options-protocol item, if the transcript shows one. It rides
+// on whatever decision this hook was already going to emit, rather than as a
+// second Stop hook: `systemMessage` carries no decision, so it cannot fight
+// stop-auto-check's approve/block, and there is no extra process.
+//
+// Only the EXACT finding is surfaced here - an item selected in two separate
+// panels, which is proof it was re-offered. The advisory queue print stays on
+// the commit path. A Stop hook fires far more often than a commit does, and a
+// check that speaks every turn is one that gets ignored.
+let carryNote = null;
+
+function decide(o) {
+    if (carryNote) o.systemMessage = carryNote;
+    console.log(JSON.stringify(o));
     process.exit(0);
 }
 
+function approve() {
+    decide({ decision: 'approve' });
+}
+
 function block(reason) {
-    console.log(JSON.stringify({ decision: 'block', reason }));
-    process.exit(0);
+    decide({ decision: 'block', reason });
 }
 
 // A pending story untouched for this long is not active work.
@@ -61,6 +76,22 @@ try {
     try {
         const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
         if (payload && payload.cwd) cwd = payload.cwd;
+
+        // Computed BEFORE any approve()/block() below, since most turns exit at
+        // the first one. Wrapped separately: a queue note must never be the
+        // reason a turn cannot end.
+        try {
+            const transcript = payload && (payload.transcript_path || payload.transcriptPath);
+            if (transcript && fs.existsSync(transcript)) {
+                const { analyse } = require(path.join(__dirname, '..', 'scripts', 'check-queue-drained.js'));
+                const r = analyse(transcript);
+                if (r.carried.length) {
+                    const items = r.carried.map((c) => `"${c.label}" (${c.panels} panels)`).join(', ');
+                    carryNote = `[queue] ${r.carried.length} selected item(s) offered again without being delivered: `
+                        + `${items}. Say where each one stands before the turn ends.`;
+                }
+            }
+        } catch { /* a queue note must never strand a turn */ }
     } catch { /* no or malformed payload — fall back to process.cwd() */ }
 
     const autoFlag = path.join(cwd, '.claude', 'auto-active');
