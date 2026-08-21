@@ -1,5 +1,50 @@
 # Changelog
 
+## [8.93.0] - 2026-08-21
+
+### Added — `sessions`, which archives finished work without discarding live work
+
+Sessions accumulate. This machine held **302 unarchived** against the ~70 the
+app's own list surfaces, going back three months, and roughly three quarters of
+them were cron residue — morning briefings and daily digests that regenerate on
+their own.
+
+The command classifies them, checks their worktrees, writes resume stubs, and
+hands a vetted list to `archive_session`. It archives nothing itself, so a bug
+in it cannot delete a worktree.
+
+**The classification was never the hard part.** `archive_session` removes the
+session's git worktree, so the real question is which worktrees are disposable,
+and three measurements shaped that check:
+
+- **PR state on disk is a snapshot, not current state.** One PR was cached
+  `MERGED` in one session and `OPEN` in another on the same day; the forge said
+  `MERGED`. States now refresh live, one `gh pr list` per repo rather than one
+  per PR. That alone moved five sessions out of the wrong bucket.
+- **The recorded branch is not always the checked-out branch.** Two worktrees of
+  six sat on a different branch than their record named, so checking the record
+  inspected a branch the worktree was not on — which invented blocks, and could
+  equally have cleared a branch nobody ever checked. It reads live HEAD now.
+- **The default branch is not always `main`.** One repo's real default is a
+  long-lived feature branch, with its `main` **7694 commits behind**; a
+  hardcoded base would have reported 7694 orphan commits. It asks git, then the
+  forge, then fails closed rather than guessing.
+
+**Stashes are deliberately not a blocker**, and that is not an oversight.
+`refs/stash` lives in the common git dir, so every worktree of a repo sees the
+same list and removing one loses none of it — measured across a main checkout
+and two siblings, all reporting the identical four entries. Blocking on it would
+strand every worktree in any repo that had ever stashed, and protect nothing.
+
+Unknown states fail closed throughout: an unreadable worktree is unsafe, never
+safe. Third-party work is excluded by **git remote** rather than by project
+name, which is both the more durable tell and the reason no client identifier
+appears in this public repo.
+
+On the first real run against 479 records it cleared 216 and caught two sessions
+holding work that existed nowhere else — one with uncommitted files, one with a
+local-only commit.
+
 ## [8.92.0] - 2026-08-21
 
 ### Changed — the queue report rides on hooks that already spawn
