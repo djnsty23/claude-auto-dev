@@ -12,6 +12,7 @@ Portable copy of `~/.claude/rules/local-first.md`, which is `@`-imported on the 
 box and therefore invisible to any other machine. Keep the two in sync. Two passages are
 host-specific and named as such where they appear: the `ClaudeMemorySync` scheduled task
 and the per-repo gate names.
+
 Added 2026-08-21, on Andy's instruction: *"always test locally and run visual checks in
 Claude's browser… no more pushes, no more GitHub Actions."*
 
