@@ -1,5 +1,22 @@
 # Changelog
 
+## [8.97.0] - 2026-08-21
+
+### Fixed — version-number collision left the previous fix uninstalled
+
+8.96.0 was published twice from two sessions working the same clone. The cache
+is keyed by version, so the copy that won held the ephemeral rule but **not**
+the merged-hours floor that 8.96.0's own changelog describes — and
+`plugin update` reported "already at the latest version (8.96.0)" because the
+numbers matched. A fix on main, a stale build installed, and a green update
+message saying nothing was wrong.
+
+No code change here beyond the version. It exists so the cache key moves and
+the floor actually reaches the runtime.
+
+Worth remembering when several sessions share one clone: a version number is a
+cache key, and two different trees must never share one.
+
 ## [8.96.0] - 2026-08-21
 
 ### Fixed — a PR that merged three minutes ago is finished, but it is not cold
