@@ -46,6 +46,12 @@ const STALE_DAYS = parseInt(opt('--stale-days', '14'), 10);
 // Scheduled sessions are disposable by construction — the task regenerates them
 // tomorrow — so they get a much shorter clock than hand-started work.
 const EPHEMERAL_DAYS = parseInt(opt('--ephemeral-days', '2'), 10);
+// A settled PR makes a session finished, and that bypasses the idle clock
+// entirely — so a session whose PR merged three minutes ago reads as MERGED
+// while its author is plainly still working in it. Measured: two sessions
+// qualified as MERGED with last activity 3 minutes earlier. Finished is not
+// the same as cold; require both.
+const MERGED_MIN_HOURS = parseInt(opt('--merged-min-hours', '12'), 10);
 const AS_JSON = flag('--json');
 const WRITE_RESUME = flag('--write-resume');
 
@@ -233,7 +239,11 @@ function classify(s, prStates) {
   const settled = (p) => ['MERGED', 'CLOSED'].includes(stateOf(p));
 
   let state, why;
-  if (prs.length && prs.every(settled)) {
+  if (prs.length && prs.every(settled) && ageDays * 24 < MERGED_MIN_HOURS) {
+    // Settled but still warm: treat as ACTIVE, not finished.
+    state = 'ACTIVE';
+    why = `PRs settled but active ${Math.round(ageDays * 24)}h ago (< ${MERGED_MIN_HOURS}h floor)`;
+  } else if (prs.length && prs.every(settled)) {
     state = 'MERGED';
     why = `PR ${prs.map((p) => '#' + p.prNumber + (stateOf(p) === 'CLOSED' ? '(closed)' : '')).join(', ')} settled`;
   } else if (prs.some((p) => stateOf(p) === 'OPEN')) {

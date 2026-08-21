@@ -150,6 +150,10 @@ function writeSession(c, i) {
   if (c.wt) rec.worktreePath = c.wt;
   if (c.exempt) rec.autoArchiveExempt = true;
   if (c.scheduledTaskId) rec.scheduledTaskId = c.scheduledTaskId;
+  // The repo slug is deliberately unresolvable, so refreshPrStates() fails for
+  // it and the cached state below is what gets used. That exercises the
+  // documented fallback rather than requiring network in the suite.
+  if (c.prs) rec.prs = c.prs;
   if (c.ageDays != null) rec.lastActivityAt = Date.now() - c.ageDays * 86400000;
   fs.writeFileSync(path.join(STORE, `${rec.sessionId}.json`), JSON.stringify(rec), 'utf8');
   return rec.sessionId;
@@ -167,6 +171,15 @@ function run() {
   const EPH_AGE = 5;
   cases.push({ id: 'sched-stale', wt: null, scheduledTaskId: 'suite-task', ageDays: EPH_AGE, expectState: 'STALE' });
   cases.push({ id: 'hand-active', wt: null, ageDays: EPH_AGE, expectState: 'ACTIVE' });
+
+  // A settled PR bypasses the idle clock, so "merged" alone would call a session
+  // finished while its author is still in it — measured on two real sessions
+  // whose PRs had merged three minutes earlier. The floor requires finished AND
+  // cold. Both records carry identical PRs and differ only in age, so a bug that
+  // ignores the floor cannot satisfy the pair.
+  const MERGED_PRS = [{ prNumber: 1, repo: 'suite-nonexistent/repo', state: 'MERGED' }];
+  cases.push({ id: 'merged-warm', wt: null, prs: MERGED_PRS, ageDays: 0.1, expectState: 'ACTIVE' });
+  cases.push({ id: 'merged-cold', wt: null, prs: MERGED_PRS, ageDays: 3, expectState: 'MERGED' });
 
   const ids = cases.map((c, i) => writeSession(c, i));
 
@@ -208,6 +221,10 @@ function run() {
   const sched = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'sched-stale')]);
   const hand = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'hand-active')]);
   check('ephemeral clock separates the pair', sched && hand && sched.state !== hand.state, true);
+
+  const warm = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'merged-warm')]);
+  const cold = rows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'merged-cold')]);
+  check('merged floor separates the pair', warm && cold && warm.state !== cold.state, true);
 }
 
 function cleanup() {

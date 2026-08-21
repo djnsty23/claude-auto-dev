@@ -36,13 +36,18 @@ Verdicts:
 | `PR-OPEN` | at least one PR still open — **not** finished |
 | `ACTIVE` | recent activity — leave alone |
 
-Two thresholds, because two kinds of session:
+Three thresholds, because "finished" and "cold" are different questions:
 
 - **`--stale-days` (default 14)** for hand-started work.
 - **`--ephemeral-days` (default 2)** for sessions the app launched from a
   schedule. These are disposable by construction — the task regenerates them
   tomorrow — and they dominate the population: on the machine this was built
   for, 261 of ~480 records carried a `scheduledTaskId`.
+
+- **`--merged-min-hours` (default 12)** floors the MERGED verdict. A settled PR
+  bypasses the idle clock entirely, so without this a session whose PR merged
+  three minutes ago reads as finished while its author is still working in it —
+  measured on two real sessions. Finished is not the same as cold; it needs both.
 
 Detection is structural (`scheduledTaskId`), never a title regex. A regex would
 miss renamed tasks and catch hand-started work that happens to be called

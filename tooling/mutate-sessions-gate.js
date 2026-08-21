@@ -63,6 +63,16 @@ const MUTANTS = [
     mustFail: ['sched-stale: state'],
   },
   {
+    name: 'merged floor removed (a PR that merged minutes ago counts as finished)',
+    apply: (s) => s.replace(
+      '  if (prs.length && prs.every(settled) && ageDays * 24 < MERGED_MIN_HOURS) {',
+      '  if (false) { // MUTANT'
+    ),
+    mustFail: ['merged-warm: state'],
+    // The cold half of the pair must survive, or this is just "broke merged".
+    mustPass: ['merged-cold: state'],
+  },
+  {
     name: 'fail-open on unreadable git (unknown treated as safe)',
     apply: (s) => s.replace(
       "  if (status === null) return 'git-unreadable';",
