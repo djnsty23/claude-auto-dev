@@ -117,6 +117,14 @@ you started work; in a shared clone it moves under you.
 - **This repo is PUBLIC.** `check-no-private-names.js` gates the tree and
   `tooling/githooks/commit-msg` gates messages. Enable both per clone:
   `git config core.hooksPath tooling/githooks`.
+  When a rule keeps failing that gate, stop redacting and split it. `rule-local-first`
+  needed three redactions in one evening before the real problem showed: one document
+  was trying to be two. **The test is "would this sentence still be true and useful on
+  a machine that is not this one?"** Yes → it ships here. No — it names a repo, a port,
+  a task, a backup target, or counts this operator's projects — → `~/.claude/rules/`,
+  which is on the backup allowlist and so survives a reinstall anyway. Generalising
+  usually strengthens the guidance: the portable form warns a reader about THEIR repos,
+  where the specific form only reports on someone else's.
 - **Never `git commit --amend` here.** Several sessions commit to this clone at
   once and HEAD moves in seconds, so an amend can land on a commit that stopped
   being yours. 2026-08-21 one did: it rewrote another session's release message
