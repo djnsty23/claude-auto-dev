@@ -184,22 +184,47 @@ function readTranscript(file) {
  * 'waiting'  everything else - it spoke last and stopped. The common resting
  *            state, and intentionally the quietest.
  */
+// Tuned against the real distribution 2026-08-21 (124 sessions over 7 days),
+// because the first cut was measurably wrong. See the numbers in the comment
+// block below each threshold.
+const WORKING_MAX = 3;      // minutes
+const STALL_MIN = 15;
+const STALL_MAX = 240;      // past this it is not stalled, it is over
+const COLD_MIN = 1440;      // a day
+
 function classify(s) {
     if (s.pending) return 'blocked';
-    if (s.idleMinutes <= 3) return 'working';
+    if (s.idleMinutes <= WORKING_MAX) return 'working';
 
     // A heartbeat REFINES the timing heuristic; it never replaces it. When the
     // Stop hook fired at or after the last write, the turn finished — so the
     // session is resting, not stalled, however long it has been quiet.
-    if (s.endedCleanly === true && s.prState !== 'MERGED') return 'waiting';
+    if (s.endedCleanly === true && s.prState !== 'MERGED' && s.idleMinutes < COLD_MIN) return 'waiting';
 
-    // endedCleanly === false is the strong signal: the transcript grew after the
-    // last recorded turn end, so a turn started and never finished.
-    if (s.endedCleanly === false && s.idleMinutes >= 10) return 'stalled';
+    // 'stalled' must be ACTIONABLE, and the first version was not. Measured: it
+    // flagged 15 sessions, every one idle between 591 and 7,688 minutes — ten
+    // hours to five days — and every one with no desktop record. Those are not
+    // sessions that died mid-task, they are sessions that are simply finished.
+    // The threshold was also inert: 14 sessions matched at >=5m and the same 14
+    // at >=60m, so the number was decorative.
+    //
+    // Two conditions make it mean something: an upper bound, and a session you
+    // can actually go to. An unaddressable session cannot be rescued, so calling
+    // it stalled only costs the reader attention.
+    // ONE floor for both branches. Two different floors (10m and 15m) for the
+    // same concept meant a session merely mid-turn at 10m read as stalled —
+    // caught on real data, where "Mac and device sessions" was flagged while it
+    // was simply still working.
+    const actionable = !!s.addressableId
+        && s.idleMinutes >= STALL_MIN && s.idleMinutes <= STALL_MAX;
+    if (actionable && s.endedCleanly === false) return 'stalled';
+    if (actionable && s.endedCleanly === null && s.lastRole === 'user') return 'stalled';
 
-    // null (no heartbeat yet) falls back to the timing-only heuristic.
-    if (s.lastRole === 'user' && s.idleMinutes >= 15) return 'stalled';
     if (s.prState === 'MERGED' && s.idleMinutes >= 60) return 'done';
+
+    // 86 of 124 sessions were quiet for 12h+. Calling them all 'waiting' buries
+    // the handful that are genuinely resting between turns.
+    if (s.idleMinutes >= COLD_MIN) return 'cold';
     return 'waiting';
 }
 

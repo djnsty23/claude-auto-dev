@@ -66,10 +66,18 @@ it has no desktop record and cannot be messaged even when idle.
 | State | Means |
 |---|---|
 | `blocked` | an unanswered panel. Proven by the transcript, not inferred. |
-| `working` | the transcript grew in the last few minutes. |
-| `stalled` | a turn started and never ended, or the user spoke last and nothing followed. The one worth surfacing — it can mean a dead session. |
+| `working` | the transcript grew in the last 3 minutes. |
+| `stalled` | a turn started and never ended, or the user spoke last and nothing followed — **and** the session is reachable and quiet for 15–240 minutes. The one worth surfacing. |
 | `done` | merged PR, quiet an hour. |
 | `waiting` | it spoke last and stopped. The normal resting state. |
+| `cold` | quiet for a day or more. Most of the fleet, and deliberately the quietest. |
 
-`stalled` is policy rather than measurement and lives in `classify()` in
-`fleet-status.js`. It is five lines and safe to change.
+`classify()` in `fleet-status.js` holds these, tuned against the real
+distribution (124 sessions over 7 days) rather than guessed.
+
+**Why `stalled` carries two extra conditions.** Unbounded, it flagged 15 sessions
+— every one idle between 10 hours and 5 days, none with a desktop record, so none
+reachable. Those are finished, not stuck. And the threshold was inert: 14 matched
+at `>=5m` and the same 14 at `>=60m`, so the number was decorative. Bounding it to
+240 minutes and requiring an addressable id took it to 1. If you loosen it, check
+the distribution again rather than the verdict.

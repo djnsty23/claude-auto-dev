@@ -97,6 +97,25 @@ function pass() {
     console.log(`${new Date().toISOString()}  ${fleet.population.transcripts} transcripts, `
         + `${blocked.length} blocked, ${fresh.length} new`);
 
+    // A run marker, written EVERY pass whether or not anything fired.
+    //
+    // Without it this is unauditable when scheduled: Task Scheduler's result
+    // code reports whether the LAUNCHER started, not whether the work ran, so a
+    // wscript that spawns a node that dies instantly still reports 0. And on a
+    // quiet fleet the notifier's only other output is silence — indistinguishable
+    // from never having run. The marker is the artifact to check.
+    try {
+        fs.mkdirSync(path.dirname(STATE), { recursive: true });
+        fs.writeFileSync(path.join(path.dirname(STATE), '.notify-last-run.json'),
+            JSON.stringify({
+                at: new Date().toISOString(),
+                transcripts: fleet.population.transcripts,
+                blocked: blocked.length,
+                fresh: fresh.length,
+                dry: DRY,
+            }) + '\n');
+    } catch { /* an unwritable marker must not stop a notification */ }
+
     // The prune must be PERSISTED even when nothing new fires, or a session that
     // unblocks stays marked seen forever and re-blocking is silent. Returning
     // early here without writing was a real bug, caught by the dedup test.
