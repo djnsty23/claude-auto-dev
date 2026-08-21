@@ -1,5 +1,38 @@
 # Changelog
 
+## [8.92.0] - 2026-08-21
+
+### Changed — the queue report rides on hooks that already spawn
+
+8.91.0 shipped `queue-drained` as its own PostToolUse hook on `Bash`. That was
+the wrong shape by `telemetry.js`'s own note, which had already measured the
+trade: a dedicated Bash hook costs roughly 6.3 minutes of wall clock a day on
+this machine (64 ms a spawn, 5,923 Bash calls measured) to carry something that
+fires only on commits. Measured again for this one: **56 ms median on the silent
+path**, on every Bash call. The standalone hook is gone.
+
+**Post-commit, in `telemetry.js`.** Both riders — the tool-failure advisory and
+the queue report — now collect into ONE stdout write. Two JSON objects on one
+stream is not parseable output, so the suite asserts that a call triggering BOTH
+still emits exactly one valid object. That assertion first asserts both riders
+actually fired, or it would pass vacuously whenever only one did, which is most
+of the time.
+
+**At Stop, in `stop-auto-check.js`,** and only the EXACT finding: an item
+selected in two separate panels, which is proof it was re-offered. It rides as
+`systemMessage` on the decision that hook was already emitting, so it carries no
+decision of its own and cannot fight `approve`/`block`. The advisory queue print
+stays on the commit path — Stop fires far more often than a commit does, and a
+check that speaks every turn is one that gets ignored.
+
+Both additions are separately wrapped. A queue note must never be why a tool call
+looks failed, nor why a turn cannot end. Asserted directly: a missing transcript
+still approves, and the decision survives untouched in every case.
+
+29 assertions, up from 15. Three injected mutants — gating always false, two
+stdout writes, the stop note never set — are each killed by the assertion written
+for it, and the 48-assertion `stop-auto-check` suite is unchanged and green.
+
 ## [8.91.0] - 2026-08-21
 
 ### Added — `queue-drained`, a post-commit report on what was selected and not delivered
