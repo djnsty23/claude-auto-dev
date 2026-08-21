@@ -284,3 +284,25 @@ tap-target, 15 not, 13 of those footer links"* cannot be misread the way a bare 
 And before prescribing a fix, read what the existing utility says it costs — this one
 documents that expanded regions overlap in clusters tighter than 8px, which makes it the
 wrong tool for a dense footer.
+
+## Do not switch branches in a clone another session is using
+
+`[measured]` 2026-08-22. I checked out five branches in spotivibly's main clone over one
+session. It was not idle: uncommitted work on `clientIp.ts`, `rateLimiter.ts` and a test
+vector file appeared in that tree while I worked, from another session. Uncommitted changes
+travel across a checkout, so nothing was lost — but the branch moved under someone else's
+feet, repeatedly, with no signal to them.
+
+That repo carries **18 worktrees under `.claude/worktrees/`** precisely so parallel sessions
+do not share one tree, and two of the dev servers running during this session were serving
+from them. The convention was there and I did not use it.
+
+**So: before checking out anything in a shared clone, run `git status`.** A dirty tree you
+did not dirty means someone is in there. Create a worktree instead
+(`git worktree add .claude/worktrees/<topic> <branch>`), or do the work in a branch you
+never leave. Verification that needs several branches — a batch integration, a PR
+comparison — should always be a worktree.
+
+Corollary: a dev server's working directory tells you which tree it serves. Check it before
+assuming the app on a port reflects your checkout, and before blaming a port conflict on
+yourself.
