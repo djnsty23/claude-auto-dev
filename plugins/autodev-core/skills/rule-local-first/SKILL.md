@@ -39,17 +39,14 @@ uses that name. One command, chained with `&&`, covering exactly what the repo's
 run. If a repo has no such script, writing it is the first task, not an optional tidy-up —
 a gate spread across seven commands is a gate that gets run partially.
 
-**Verify the script exists before invoking it by name.** A repo that "has a gate"
-in your memory may not have one in its `package.json` — check `origin/main`, not
-recollection. Until it is written, the gate there is the chain by hand:
+**`spotivibly` does NOT have a `gate` script — `[measured]` 2026-08-22.** This line used to
+claim it did, as of 2026-08-21. It is absent from the working branch and from `origin/main`:
+`git show origin/main:package.json` lists 40 scripts and `gate` is not one of them. Until it
+is written, the gate on that repo is the chain by hand:
 
 ```bash
 npm run typecheck && npm run test && npm run build
 ```
-
-Which repos on a given machine have `gate`, which have `preflight`, and which have
-neither is operator-specific and belongs in that operator's own rules file, not in
-this skill.
 
 `typecheck` is the load-bearing one there, because `build` runs only `tsconfig.app.json` and
 `tsconfig.node.json` — it skips `tsconfig.api.json`, so an `api/` change can build clean and
@@ -60,8 +57,8 @@ in the past tense, and every session since read it as done. Check `package.json`
 invoking a script name from memory.
 
 Start it with `preview_start`, whose entry lives in that repo's `.claude/launch.json`. Read
-the port out of the app's own config rather than assuming a framework default. One app
-here serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a way
+the port out of the app's own config rather than assuming a framework default — spotivibly
+serves vite on **8080**, not 5173, and a preview pointed at the wrong port fails in a way
 that looks like a broken app.
 
 ## Pushing
@@ -79,12 +76,11 @@ This does not cancel `agent-quality.md` rule 8. That rule covers the case where 
 push, and it still means do it without re-asking. What changed is the default ending of
 a task: a verified local state, not a remote one.
 
-**Carve-out:** a mirror of your own config to a backup repo is not shipping code,
-and it is what makes a reinstall survivable — so it is exempt from the rule above.
-If the mirror runs on a timer, know whether that timer is still enabled: a
-disabled sync is indistinguishable from a working one until you need it, and the
-obligation quietly reverts to being manual and same-session. The repo, the task
-name and its current state are operator-specific; keep them in your own rules.
+**Carve-out:** the config mirror to `~/claude-memory` (`rules/backup-protocol.md`) is a
+backup of this machine, not shipping code, and it is why a reinstall is survivable. The
+`ClaudeMemorySync` task that pushed it every 4h was **disabled 2026-08-21**, so the mirror
+is now a manual, same-session obligation again. That is how it rotted to 49-of-157 files
+last time — so mirror when you edit, do not trust a timer that is no longer running.
 
 ## Publishing — batched, never on a clock
 
@@ -117,7 +113,7 @@ Queues are per-repo, so only repos with a non-empty queue publish.
 
 **Root, NOT `.claude/publish-queue.md`** — this rule said `.claude/` until 2026-08-22 and
 that path defeats the rule's own reason for existing. `[measured]` `.claude/` is gitignored
-in every one of the four repos checked, and
+in every repo checked (spotivibly, fatboyslim, betsetgo, analytics), and
 `rules/file-organization.md` explicitly instructs adding it, because that directory is
 ephemeral tooling state. A queue there is never committed, so it is invisible to a session
 on another machine — the precise failure the paragraph above warns about, reintroduced by
@@ -222,3 +218,69 @@ and then say plainly that no screenshot was taken. Never substitute a diff read 
 **And check what a surface needs before promising to look at it.** A results screen that
 only exists after a live API call cannot be reached locally at all; the honest output is
 "verified the input surface, did not verify the subject", not a pass.
+
+## This machine's specifics
+
+Kept HERE, not in the `rule-local-first` plugin skill. That skill ships in a
+PUBLIC repo, and these facts name private and client repos. Three separate
+redactions were needed on 2026-08-22 before the split; the tension is structural,
+not carelessness — the guidance is genuinely *about* specific repos, so writing it
+accurately and publishing it pull in opposite directions.
+
+The portable half lives in the skill. Everything below is the half that cannot.
+
+**Which repo has which gate script** `[measured 2026-08-22]`
+- `fatboyslim` — `preflight`
+- `spotivibly` — **no `gate` script**, despite this rule claiming one on 2026-08-21.
+  Absent from the working branch and from `origin/main`; `git show
+  origin/main:package.json` lists 40 scripts and `gate` is not among them. Until it
+  is written, its gate is `npm run typecheck && npm run test && npm run build`.
+
+**Ports** — `spotivibly` serves vite on **8080**, not the 5173 default. A preview
+pointed at 5173 fails in a way that looks like a broken app.
+
+**`.claude/` is gitignored** in every one of the four repos checked — `spotivibly`,
+`fatboyslim`, `betsetgo`, `analytics` — which is why `publish-queue.md` belongs at
+the repo ROOT. A queue inside `.claude/` is never committed, so it is invisible to
+a session on another machine: the exact failure the publishing section warns about,
+reintroduced by its own filename.
+
+**The config mirror** to `~/claude-memory` is the reinstall survival kit and is
+exempt from the no-push rule. The `ClaudeMemorySync` task that pushed it every 4h
+was **disabled 2026-08-21**, so mirroring is a manual, same-session obligation
+again — that is how it rotted to 49-of-157 files last time. Do not trust a timer
+that is no longer running.
+
+**`ClaudeActionsSpendGuard` stays enabled.** It costs nothing and it is the thing
+that says a repo has started burning Actions minutes again.
+
+## A tap-target sweep built on getBoundingClientRect reports false positives
+
+`[measured]` 2026-08-22, spotivibly. A rect-based sweep flagged four controls on `/generate`
+as under the 44px minimum. All four were fine. The project defines a `.tap-target::after`
+utility that expands the hit area to 44x44 under `@media (pointer: coarse)`, and **84
+controls carry it** — `getBoundingClientRect()` returns the element's own box and cannot see
+a pseudo-element, so every one of them reads as undersized.
+
+This is the pseudo-element blindness already known for `::before`/`::after` *text*, applied
+to hit areas. Acting on it would have changed working code, which is worse than the nothing
+a false green produces.
+
+Measure the effective target, and prove it behaviourally:
+
+```js
+matchMedia('(pointer: coarse)').matches   // assert FIRST — expansion is absent on a mouse
+const after = getComputedStyle(el, '::after');
+const r = el.getBoundingClientRect();
+const hit = document.elementFromPoint(r.left + r.width/2, r.top + r.height/2 - 20);
+const ok = after.minWidth === '44px' && after.minHeight === '44px' && (hit === el || el.contains(hit));
+```
+
+20px above centre sits outside a 36px box and inside a 44px one, so `elementFromPoint`
+returning the control is proof rather than inference.
+
+Then print the population, not a verdict: *"25 undersized visual boxes, 10 covered by
+tap-target, 15 not, 13 of those footer links"* cannot be misread the way a bare count can.
+And before prescribing a fix, read what the existing utility says it costs — this one
+documents that expanded regions overlap in clusters tighter than 8px, which makes it the
+wrong tool for a dense footer.
