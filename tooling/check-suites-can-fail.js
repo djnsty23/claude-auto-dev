@@ -50,6 +50,19 @@ const SUBJECT_OVERRIDES = {
     // "silent skip" failure this whole file exists to prevent, reappearing in it.
     'test-githooks.js': ['tooling/githooks/commit-msg'],
     'test-validate.js': ['tooling/validate.js'],
+
+    // Same failure, found again 2026-08-21 — and found by reading this comment
+    // rather than the output, because NO-SUBJECT's note ("references no plugin
+    // source — nothing to stub") reads like a category of suite that has nothing
+    // to check. It is not. It is the silent-skip signature, and three more
+    // tooling suites were sitting behind it, unverified, while the summary line
+    // said "0 cannot fail".
+    //
+    // If you add a suite over anything in tooling/, it lands here or it is not
+    // checked at all. deriveSubjects() only scans plugins/ and templates/.
+    'test-runner-guard.js': ['tooling/test-all.js'],
+    'test-superseded.js': ['tooling/check-superseded.js'],
+    'test-version-drift.js': ['tooling/check-version-drift.js'],
 };
 
 function deriveSubjects(suiteFile) {
