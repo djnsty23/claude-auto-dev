@@ -174,6 +174,38 @@ depends on.
 `validate` fails while a `*.vacuity-backup` exists. If you kill a run, `pkill -9` then
 `pgrep` to confirm — a survivor rewrites the file underneath you.
 
+## Running a fleet
+
+When several sessions run at once, they cannot see each other. These read the
+same transcripts the app writes and answer the questions that causes.
+
+| Script | Answers |
+|---|---|
+| `fleet-status.js` | Which sessions are live, and which are blocked on an unanswered question |
+| `fleet-overlap.js` | Which two sessions are working the same ground, scored on three separate signals |
+| `watch-panels.js` | Emits one line per NEWLY blocked session, for the Monitor tool |
+| `brain-brief.js` | Regenerates the volatile half of a handoff: fleet, ownership, open PRs, uncommitted work |
+| `steer-log.js` | Whether cross-session advice arrived before or after the work it described |
+| `quota-tripwire.js` | One alert when weekly usage is 30-50 minutes from exhaustion |
+
+They live in `plugins/autodev-core/scripts/`. Two design rules they all follow,
+learned by getting them wrong first:
+
+**Print the population, not a verdict.** "212 of 212 files read, 9 names, clean"
+can be judged. "clean" cannot be told apart from a check that ran on nothing.
+
+**Distinguish "checked, none found" from "could not check".** Silence must never
+read as clean. Each script reports a missing dependency or an unreadable input in
+place rather than returning an empty result.
+
+`fleet-overlap.js` scores three signals separately rather than blending them,
+because they mean different things: two sessions on one branch will collide, two
+in one repo might, and two sharing a word in their titles probably will not.
+
+`watch-panels.js` takes `--self <sessionId>` or `AUTODEV_SELF_SESSION` so it does
+not report your own questions back to you, and persists its dedup state to disk so
+restarting it does not re-raise what you already answered.
+
 ## Updates
 
 ```
