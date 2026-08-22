@@ -159,29 +159,42 @@ try {
                     // catastrophic-backtracking bomb that would then fire on every
                     // single write.
                     //
-                    // Three limits. Drop anything carrying a regex metacharacter (a
-                    // denylist entry is a project NAME, not a pattern), drop anything
-                    // implausibly long, and cap the count so the alternation itself
-                    // cannot become the pathology. Escaping the survivors is redundant
-                    // with the first filter on purpose: if the two ever drift, the
-                    // escape still holds.
-                    const NAME_META = /[.*+?^${}()|[\]\\]/;
+                    // ESCAPING is the defence, not rejection. Every metacharacter is
+                    // escaped, so `(a+)+$` becomes the literal `\(a\+\)\+\$` — no
+                    // backtracking, no bomb. The first version ALSO rejected any entry
+                    // containing a metacharacter, and `.` is one: a private project
+                    // name is very often a domain (example.io, acme.ai), so that filter
+                    // silently removed exactly the entries this hook exists to catch.
+                    // It made the hook quieter and less protective at once.
+                    //
+                    // What survives is the two limits escaping cannot supply: a length
+                    // cap per entry and a cap on the alternation's size, so the
+                    // alternation itself cannot become the pathology. An empty entry is
+                    // dropped too — `a||b` matches at every word boundary, the same
+                    // failure the `names.length` guard below exists for.
                     const MAX_NAME_LEN = 64;
                     const MAX_NAMES = 500;
                     const rawNames = quoted('NAMES');
-                    const names = rawNames
-                        .filter((n) => n.length <= MAX_NAME_LEN && !NAME_META.test(n))
+                    const kept = rawNames.filter((n) => n.length > 0 && n.length <= MAX_NAME_LEN);
+                    const names = kept
                         .slice(0, MAX_NAMES)
                         .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
                     // Never report a narrowed denylist as full coverage. A silent skip
                     // turns absent checking into reported checking, which is worse than
-                    // no opinion at all.
-                    if (names.length !== rawNames.length) {
+                    // no opinion at all. Say WHICH entries went, not just how many —
+                    // a bare count cannot be acted on. Each is shown truncated, because
+                    // stderr ends up in transcripts and these are private names.
+                    const dropped = [
+                        ...rawNames.filter((n) => n.length === 0 || n.length > MAX_NAME_LEN)
+                            .map((n) => `${n.slice(0, 3)}…(${n.length} chars, over the ${MAX_NAME_LEN} cap)`),
+                        ...kept.slice(MAX_NAMES).map((n) => `${n.slice(0, 3)}…(past the ${MAX_NAMES} cap)`),
+                    ];
+                    if (dropped.length) {
                         process.stderr.write(
-                            `pre-tool-filter: ignored ${rawNames.length - names.length} of `
-                            + `${rawNames.length} denylist entries in ${checker} (regex metacharacter, `
-                            + `over ${MAX_NAME_LEN} chars, or past the ${MAX_NAMES} cap) — those names `
-                            + `were NOT checked for in this write.\n`);
+                            `pre-tool-filter: ignored ${dropped.length} of ${rawNames.length} denylist `
+                            + `entries in ${checker} — those names were NOT checked for in this write: `
+                            + `${dropped.slice(0, 10).join(', ')}`
+                            + `${dropped.length > 10 ? `, +${dropped.length - 10} more` : ''}\n`);
                     }
 
                     let hit = null;

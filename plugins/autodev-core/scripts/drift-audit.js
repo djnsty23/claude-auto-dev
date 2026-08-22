@@ -404,7 +404,17 @@ function prdCarrierBranches(repo) {
         //
         // Requiring a '/' drops all of them: a real remote branch shortens to
         // `<remote>/<branch>` and a remote HEAD shortens to a bare remote name.
-        .filter((b) => b && b.includes('/') && b !== base);
+        //
+        // And drop anything beginning with '-'. `b` becomes a BARE POSITIONAL at
+        // the `log -1 --format=%ad ... b` call below, and git reads a leading
+        // dash there as an option: measured on git 2.54, a bogus flag in that
+        // slot exits 128 "unrecognized argument" rather than being taken as a
+        // rev. Requiring a '/' already makes this hard to reach from a clone
+        // (`origin/--evil` shortens with the remote name in front), but a
+        // dash-named remote would produce `-x/branch`, and the guard costs one
+        // comparison. Rejecting beats `--end-of-options` here because it needs no
+        // particular git version.
+        .filter((b) => b && b.includes('/') && !b.startsWith('-') && b !== base);
 
     const scanned = all.slice(0, PRD_BRANCH_SCAN);
     const carriers = [];

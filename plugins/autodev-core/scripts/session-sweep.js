@@ -256,8 +256,28 @@ function worktreeRisk(s) {
   // worktree is not on — which produced false blocks here, and would just as
   // easily clear a branch nobody ever checked.
   const branch = git(wt, ['rev-parse', '--abbrev-ref', 'HEAD']) || s.branch;
+
+  // A ref may legally begin with '-', and that is ARGUMENT injection, not shell
+  // injection — execFileSync does not help, because the shell was never the
+  // vector. `git branch -- '--upload-pack=x'` is refused, but
+  // `git update-ref refs/heads/--upload-pack=x HEAD` succeeds and rev-parse then
+  // hands the name straight back. Passed as a bare positional, git's option
+  // parser can read it as a FLAG rather than a ref.
+  //
+  // Measured on git 2.54.0.windows.1, with a bogus flag as the value: `ls-remote
+  // --heads origin <flag>` treats it as positional (ls-remote stops parsing
+  // options at the repository argument — the same flag placed BEFORE `origin`
+  // exits 129 "unknown option"), while `log -1 --format=%ad <flag>` exits 128 on
+  // it. So whether a leading dash is dangerous depends on the subcommand and the
+  // git version, which is not a property to depend on. Refuse the value instead,
+  // and fail CLOSED: a branch name we will not hand to git is a branch we cannot
+  // clear for deletion.
+  if (branch && branch.startsWith('-')) return 'branch-name-unsafe';
+
   if (branch && branch !== 'HEAD') {
-    const onRemote = git(wt, ['ls-remote', '--heads', 'origin', branch]);
+    // `--` after the repository closes the positional list explicitly. Measured:
+    // a normal branch still matches through it.
+    const onRemote = git(wt, ['ls-remote', '--heads', 'origin', '--', branch]);
     if (onRemote) {
       const unpushed = git(wt, ['log', '--oneline', `origin/${branch}..HEAD`]);
       if (unpushed && unpushed.length > 0) {
@@ -281,7 +301,13 @@ function worktreeRisk(s) {
         // owner/repo shaped falls through as the whole URL rather than as an
         // empty string. Require the owner/repo shape and skip `gh` otherwise —
         // an unrecognised remote must not become an argument.
-        if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(slug)) {
+        //
+        // Each half must START with an alphanumeric. The previous shape allowed
+        // a leading dash, so `-a/-b` and `--json/x` passed — and `slug` is a
+        // POSITIONAL argument to `gh repo view`, where a leading dash is read as
+        // a flag. Owner and repo names cannot begin with a dash on GitHub, so
+        // nothing legitimate is lost.
+        if (/^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(slug)) {
           try {
             const d = execFileSync('gh',
               ['repo', 'view', slug, '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],

@@ -75,7 +75,22 @@ fs.mkdirSync(path.join(guarded, 'docs'), { recursive: true });
 fs.mkdirSync(path.join(unguarded, 'docs'), { recursive: true });
 
 const checkerPath = path.join(guarded, 'tooling', 'check-no-private-names.js');
-fs.writeFileSync(checkerPath, "const NAMES = [\n    'zarblewidget',\n    'quibnorth',\n];\n");
+// The third entry is DOTTED on purpose. A private project name is very often a
+// domain, and the first version of the ReDoS guard rejected any entry carrying a
+// regex metacharacter — which includes '.'. That made this hook drop exactly the
+// entries it exists to catch, silently, while still reporting a clean pass.
+// Escaping handles a dot correctly; rejection was the over-broad half.
+fs.writeFileSync(checkerPath,
+  "const NAMES = [\n    'zarblewidget',\n    'quibnorth',\n    'plinthworks.io',\n];\n");
+
+// A denylist carrying an entry the caps DO drop: over MAX_NAME_LEN (64). The
+// hook must still block the entries it kept AND say on stderr which one it did
+// not check — a narrowed denylist reported as full coverage is worse than none.
+const cappedRepo = path.join(fixture, 'capped');
+fs.mkdirSync(path.join(cappedRepo, 'tooling'), { recursive: true });
+fs.mkdirSync(path.join(cappedRepo, 'docs'), { recursive: true });
+fs.writeFileSync(path.join(cappedRepo, 'tooling', 'check-no-private-names.js'),
+  "const NAMES = [\n    'quibnorth',\n    '" + 'q'.repeat(65) + "',\n];\n");
 
 // A guarded repo whose checker cannot be read — proves this block fails OPEN.
 // A guarded repo whose denylist is EMPTY — a legitimate state for a repo that
@@ -149,6 +164,15 @@ cases.push(
   // Word-bounded: a substring is not a hit.
   ['substring of a name allowed', 'Write',
     { file_path: path.join(guarded, 'docs/handoff.md'), content: 'zarblewidgetry is not a project' }, 0],
+  // A DOTTED denylist entry must be checked, not dropped. This is the case the
+  // metacharacter rejection silently removed: the hook went quiet and less
+  // protective in the same change.
+  ['a dotted denylist name is blocked', 'Write',
+    { file_path: path.join(guarded, 'docs/handoff.md'), content: 'we host it on plinthworks.io now' }, 2],
+  // ...and the dot must still be a LITERAL, not the regex wildcard it would be
+  // if the escape were dropped. If '.' matched any character, this would block.
+  ['a dotted name does not match an arbitrary character', 'Write',
+    { file_path: path.join(guarded, 'docs/handoff.md'), content: 'the plinthworksXio release' }, 0],
   // The denylist file IS the list; editing it must not trip on itself.
   ['the denylist file itself allowed', 'Write',
     { file_path: checkerPath, content: "const NAMES = ['zarblewidget'];" }, 0],
@@ -230,6 +254,55 @@ for (const [label, tool, input, expected] of cases) {
   if (ok) pass++; else fail++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  an unreadable denylist format warns instead of passing quietly  `
     + `(exit ${r.status}, stderr ${JSON.stringify((r.stderr || '').slice(0, 40))})`);
+}
+
+// The ReDoS guard, which the metacharacter-rejection change put at risk.
+//
+// Removing that rejection means `(a+)+$` now reaches the escaper instead of
+// being thrown away. Escaping is what makes it safe — `\(a\+\)\+\$` is a literal
+// and cannot backtrack — but "is safe" was previously an argument, not a
+// measurement, and this suite had no timing case at all. So measure it: a
+// denylist entry that is a catastrophic-backtracking bomb must not hang the
+// hook. The bound is deliberately loose (2s against a 20s hook timeout) so this
+// is a hang detector, not a performance benchmark that flakes on a busy machine.
+{
+  const bombRepo = path.join(fixture, 'bomb');
+  fs.mkdirSync(path.join(bombRepo, 'tooling'), { recursive: true });
+  fs.mkdirSync(path.join(bombRepo, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(bombRepo, 'tooling', 'check-no-private-names.js'),
+    "const NAMES = [\n    '(a+)+$',\n];\n");
+  const t0 = Date.now();
+  const r = spawnSync('node', [HOOK], {
+    input: JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: path.join(bombRepo, 'docs/a.md'), content: 'a'.repeat(40) + 'b' },
+    }),
+    encoding: 'utf8',
+    timeout: 20000,
+  });
+  const ms = Date.now() - t0;
+  const ok = r.status === 0 && ms < 2000;
+  if (ok) pass++; else fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  a backtracking-bomb denylist entry does not hang the hook  `
+    + `(exit ${r.status}, ${ms}ms)`);
+}
+
+// A denylist entry the caps DO drop must be REPORTED, not dropped silently, and
+// the entries that survived must still be checked. Absent coverage reported as
+// coverage is the failure this warning exists for.
+{
+  const blocked = spawnSync('node', [HOOK], {
+    input: JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: path.join(cappedRepo, 'docs/a.md'), content: 'quibnorth ships tomorrow' },
+    }),
+    encoding: 'utf8',
+  });
+  const ok = blocked.status === 2 && /was NOT checked|were NOT checked/.test(blocked.stderr || '')
+    && /over the 64 cap/.test(blocked.stderr || '');
+  if (ok) pass++; else fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  an over-long entry is named on stderr while the rest still block  `
+    + `(exit ${blocked.status}, stderr ${JSON.stringify((blocked.stderr || '').slice(0, 90))})`);
 }
 
 // The fail-CLOSED parse guard. Every case above builds its input with
