@@ -99,7 +99,10 @@ gate('syntax', 'every shipped script parses', () => {
             else if (/\.(js|mjs|cjs)$/.test(e.name)) {
                 n++;
                 try {
-                    cp.execSync(`node --check "${full}"`, { stdio: ['ignore', 'ignore', 'pipe'] });
+                    // execFileSync, not execSync: `full` comes from readdirSync and a
+                    // double quote is legal in a POSIX filename, so shell quoting here is
+                    // decorative. argv form never reaches a shell.
+                    cp.execFileSync('node', ['--check', full], { stdio: ['ignore', 'ignore', 'pipe'] });
                 } catch (e2) {
                     fail(`${rel(full)} does not parse: ${String(e2.stderr).split('\n')[0]}`);
                 }

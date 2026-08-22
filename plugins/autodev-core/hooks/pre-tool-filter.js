@@ -152,7 +152,37 @@ try {
                         return block ? [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
                     };
                     const digests = new Set(quoted('DIGESTS'));
-                    const names = quoted('NAMES');
+
+                    // NAMES comes from a file in whatever repo is being edited, so on a
+                    // cloned repo it is attacker text — and it used to be concatenated
+                    // into a RegExp unescaped. `const NAMES = ['(a+)+$']` is a
+                    // catastrophic-backtracking bomb that would then fire on every
+                    // single write.
+                    //
+                    // Three limits. Drop anything carrying a regex metacharacter (a
+                    // denylist entry is a project NAME, not a pattern), drop anything
+                    // implausibly long, and cap the count so the alternation itself
+                    // cannot become the pathology. Escaping the survivors is redundant
+                    // with the first filter on purpose: if the two ever drift, the
+                    // escape still holds.
+                    const NAME_META = /[.*+?^${}()|[\]\\]/;
+                    const MAX_NAME_LEN = 64;
+                    const MAX_NAMES = 500;
+                    const rawNames = quoted('NAMES');
+                    const names = rawNames
+                        .filter((n) => n.length <= MAX_NAME_LEN && !NAME_META.test(n))
+                        .slice(0, MAX_NAMES)
+                        .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+                    // Never report a narrowed denylist as full coverage. A silent skip
+                    // turns absent checking into reported checking, which is worse than
+                    // no opinion at all.
+                    if (names.length !== rawNames.length) {
+                        process.stderr.write(
+                            `pre-tool-filter: ignored ${rawNames.length - names.length} of `
+                            + `${rawNames.length} denylist entries in ${checker} (regex metacharacter, `
+                            + `over ${MAX_NAME_LEN} chars, or past the ${MAX_NAMES} cap) — those names `
+                            + `were NOT checked for in this write.\n`);
+                    }
 
                     let hit = null;
                     if (digests.size) {

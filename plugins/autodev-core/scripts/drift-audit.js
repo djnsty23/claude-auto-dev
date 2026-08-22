@@ -13,7 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 
 const asJson = process.argv.includes('--json');
 const HOME = process.env.HOME || process.env.USERPROFILE;
@@ -253,9 +253,15 @@ function auditSettings() {
 const PRD_COMMIT_SCAN = 120;
 const PRD_BRANCH_SCAN = 40;   // most-recent remote branches checked for carriers
 
+// argv form, never a shell. `args` is an ARRAY. Branch names harvested from
+// for-each-ref are attacker-controlled on any repo you did not write — `evil;id;x`,
+// ``evil`id`x`` and `evil$(id)x` are all legal git refs that survive push → clone →
+// for-each-ref — and the old `execSync('git ' + args)` handed them to /bin/sh -c.
+// execFileSync passes each element as one literal argument, so a metacharacter is
+// data rather than syntax.
 const g = (repo, args) => {
     try {
-        return execSync('git ' + args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     } catch { return ''; }
 };
 
@@ -292,7 +298,7 @@ function storyValues(text, ids) {
 // and measured, it returned exactly the current answer in all three repos,
 // because a single incremental story-close resets it just as a bulk edit does.
 function pendingStoryAges(repo, pendingIds) {
-    const revs = g(repo, `log -${PRD_COMMIT_SCAN} --format=%H%x09%ct -- prd.json`)
+    const revs = g(repo, ['log', `-${PRD_COMMIT_SCAN}`, '--format=%H%x09%ct', '--', 'prd.json'])
         .split('\n').filter(Boolean)
         .map((l) => { const [h, t] = l.split('\t'); return { h, t: Number(t) }; });
 
@@ -300,7 +306,7 @@ function pendingStoryAges(repo, pendingIds) {
     const lastEdit = {};
     let newer = null;
     for (const { h, t } of revs) {
-        const text = g(repo, `show ${h}:prd.json`);
+        const text = g(repo, ['show', `${h}:prd.json`]);
         if (!text) continue;
         const vals = storyValues(text, pendingIds);
         // A revision where prd.json did not parse tells us nothing about any
@@ -356,10 +362,10 @@ function writeAgeCache(repo, byId, scanDepth) {
 // The repo's default branch, as a remote ref. Falls back through the usual
 // names and finally to HEAD, so a repo with no origin still gets an answer.
 function defaultRef(repo) {
-    const sym = g(repo, 'symbolic-ref refs/remotes/origin/HEAD');
+    const sym = g(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD']);
     if (sym) return sym.replace(/^refs\/remotes\//, '');
     for (const c of ['origin/main', 'origin/master']) {
-        if (g(repo, `rev-parse --verify --quiet ${c}`)) return c;
+        if (g(repo, ['rev-parse', '--verify', '--quiet', c])) return c;
     }
     return 'HEAD';
 }
@@ -383,7 +389,11 @@ function defaultRef(repo) {
 // other held a finished P0 investigation. Both were worth surfacing.
 function prdCarrierBranches(repo) {
     const base = defaultRef(repo);
-    const all = g(repo, `for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes`)
+    // The format loses its single quotes: there is no shell to strip them now, so
+    // keeping them would make git emit them literally. The `.replace(/'/g, '')`
+    // below stays — it was what made this work on Windows, where cmd.exe never
+    // stripped them either — and is now a no-op on both platforms.
+    const all = g(repo, ['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/remotes'])
         .split('\n').map((b) => b.replace(/'/g, '').trim())
         // A remote's HEAD is not a branch. `%(refname:short)` renders
         // refs/remotes/origin/HEAD as `origin` and refs/remotes/upstream/HEAD as
@@ -399,10 +409,10 @@ function prdCarrierBranches(repo) {
     const scanned = all.slice(0, PRD_BRANCH_SCAN);
     const carriers = [];
     for (const b of scanned) {
-        const ahead = Number(g(repo, `rev-list --count ${base}..${b}`)) || 0;
+        const ahead = Number(g(repo, ['rev-list', '--count', `${base}..${b}`])) || 0;
         if (!ahead) continue;
-        if (!g(repo, `diff --name-only ${base}...${b} -- prd.json`)) continue;
-        carriers.push({ b, ahead, base, date: g(repo, `log -1 --format=%ad --date=format:%Y-%m-%d ${b}`) });
+        if (!g(repo, ['diff', '--name-only', `${base}...${b}`, '--', 'prd.json'])) continue;
+        carriers.push({ b, ahead, base, date: g(repo, ['log', '-1', '--format=%ad', '--date=format:%Y-%m-%d', b]) });
     }
     return { carriers, base, scanned: scanned.length, skipped: all.length - scanned.length };
 }
@@ -468,11 +478,11 @@ function auditPrd(repo) {
     // Count by RANGE, not --since. `--since` filters on COMMITTER date, so a
     // rebased commit falls outside a window that <sha>..HEAD includes. Measured
     // across three repos the two disagreed by +2, -1 and 0 — it errs both ways.
-    const lastPrd = g(repo, 'log -1 --format=%H -- prd.json');
-    const lastPrdTs = Number(g(repo, 'log -1 --format=%ct -- prd.json'));
+    const lastPrd = g(repo, ['log', '-1', '--format=%H', '--', 'prd.json']);
+    const lastPrdTs = Number(g(repo, ['log', '-1', '--format=%ct', '--', 'prd.json']));
     if (!lastPrd || !lastPrdTs) return;
     const fileAge = Math.floor((Date.now() / 1000 - lastPrdTs) / 86400);
-    const commitsSince = Number(g(repo, `rev-list --count ${lastPrd}..HEAD`)) || 0;
+    const commitsSince = Number(g(repo, ['rev-list', '--count', `${lastPrd}..HEAD`])) || 0;
     if (fileAge >= 3 && commitsSince >= 10) {
         add('prd', 'info',
             `${name}: prd.json last changed ${fileAge}d ago with ${commitsSince} commit(s) since`,
@@ -578,7 +588,7 @@ const canonPath = (p) => {
     catch { return path.resolve(p).toLowerCase(); }
 };
 for (const repo of found) {
-    const common = g(repo, 'rev-parse --git-common-dir');
+    const common = g(repo, ['rev-parse', '--git-common-dir']);
     const key = canonPath(path.resolve(repo, common || '.git'));
     const isMain = key === canonPath(path.resolve(repo, '.git'));
     const seen = canonical.get(key);
