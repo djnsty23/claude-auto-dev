@@ -16,6 +16,11 @@ handoff-*.md
 # Local settings overrides
 .claude/settings.local.json
 
+# Agent worktrees. Nested git dirs, created per-agent by workflow isolation and by
+# `git worktree add`. Ignored narrowly rather than ignoring .claude/ wholesale,
+# because the two entries above show the partial tracking here is deliberate.
+.claude/worktrees/
+
 # Session analytics
 ledger.json
 
