@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "8.101.0",
+  "version": "8.102.0",
   "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
   "private": true,
   "keywords": [

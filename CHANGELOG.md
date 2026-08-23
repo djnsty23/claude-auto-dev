@@ -1,5 +1,51 @@
 # Changelog
 
+## [8.102.0] - 2026-08-23
+
+### Fixed — the queue advisory reprinted itself until it stopped being read
+
+[measured 2026-08-23] `check-queue-drained` fired six times in one session with
+a byte-identical four-item standing list, because the queue genuinely had not
+changed. A detector that reprints itself unchanged is one the reader learns to
+skim, which is how a real finding gets missed later — the muted-scanner failure
+`rules/security.md` already records, arriving from the other direction.
+
+An unchanged advisory now collapses to one line carrying its repeat count.
+The count is the signal: "unchanged (4 item(s), 6 consecutive commits)" says
+more than a sixth identical reprint.
+
+What it deliberately does NOT do is detect delivery. Matching prose against
+labels is guesswork, and guessing wrong hides live work, so the check still
+cannot tell delivered from undelivered and still says so. CARRIED FORWARD is
+never demoted — that finding is exact, and demoting it would be hiding.
+
+Fails open by construction: no state file, unreadable state, and every caller
+that passes none all get the full report. The worst case is the noise this
+exists to reduce, never silence.
+
+Selftest 6 → 12 assertions. The original six passed whether or not the feature
+worked at all. Mutation-tested: replacing `if (repeats > 0)` with `if (false)`
+turns two of the new assertions red, and reverting restores PASS.
+
+### Fixed — three `.claude` paths named private and client projects in a PUBLIC repo
+
+`check-no-private-names` was failing on the working tree: a generated report
+(8 hits, one a CLIENT name), `.claude/RESUME.md` (8), and `.claude/launch.json`
+(4). None were tracked and nothing was published, but `.claude/` is only
+partially ignored here by design, and several sessions commit to this clone at
+once — so each was one `git add -A` from the published tree.
+
+Added individually in the established style rather than reverting to ignoring
+`.claude/` wholesale, per d4123dc's own instruction to read what a rule
+compensates for before widening it.
+
+### Merged — two clones had diverged after d4123dc
+
+Parallel unpushed lines existed in two clones, neither aware of the other:
+the queue and gitignore fixes here, the heal worktree-trap docs and the brain
+boot command there. Reconciled before bumping, because a version number is a
+plugin-cache key and releasing from either line alone would publish a build
+missing the other's work under a number claiming to contain it.
 ## [8.101.0] - 2026-08-22
 
 ### Fixed — a restart made `stalled` fire on sessions that had simply ended
