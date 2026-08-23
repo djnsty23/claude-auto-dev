@@ -58,3 +58,20 @@ build/
 
 # find-vacuous-assertions.js crash-recovery backups
 *.vacuity-backup
+
+# Generated reports. rules/file-organization.md gives these 7-day retention and
+# they are never tracked (0 files under .claude/ are). They are ignored because
+# this repo is PUBLIC and a generated report quotes whatever it swept -- one here
+# named a CLIENT project 8 times, which check-no-private-names caught in the
+# working tree. Ignoring the directory closes the exposure rather than hiding it:
+# the checker uses --exclude-standard, so an ignored file cannot be staged at all.
+.claude/reports/
+
+# Session handoff. Names the repos a session was working across, which in this
+# estate includes private and client codebases. Never tracked; ignored so it
+# cannot be staged into a PUBLIC repo by a careless `git add -A`.
+.claude/RESUME.md
+
+# preview_start config. Its entries carry absolute paths to whichever repos this
+# machine serves, so it names private projects by construction.
+.claude/launch.json
