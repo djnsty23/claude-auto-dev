@@ -89,6 +89,29 @@ cries wolf gets muted, which is how the real one gets missed.
 runtime, live RLS policies, or deployed configuration. Silence must never be reported
 as clean.
 
+## The worktree trap — read this before the fix stage
+
+`isolation: 'worktree'` on an agent creates the worktree from **the session's own
+repo**, not from the repo the agent is being pointed at. If the session's cwd is not
+a git repository, every fix agent dies with *"Cannot create agent worktree: not in a
+git repository"* — after the find and verify stages have already been paid for.
+
+That is exactly what happened on the first real run, 2026-08-22: two fix agents
+errored on a session rooted in a directory that held only `.claude/` state and no
+`.git`. The findings survived in the journal, but the fix stage was lost.
+
+So the fix agent creates its own worktree explicitly, inside the target repo:
+
+```bash
+cd "<target repo>"
+git status --short    # a dirty tree you did not dirty means another session is here
+git worktree add .claude/worktrees/<topic> -b fix/<topic>
+```
+
+Add `.claude/worktrees/` to that repo's `.gitignore` first if it is not there — a
+nested git directory sitting untracked in a repo where sessions run `git add -A` is
+one careless stage from being committed.
+
 ## Fixes commit, they do not push
 
 Each fix agent works in its own git worktree, because other sessions have
