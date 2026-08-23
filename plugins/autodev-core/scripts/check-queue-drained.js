@@ -97,7 +97,39 @@ function analyse(source) {
     };
 }
 
-function report(source, out = console.log) {
+/**
+ * Repeat-suppression for the ADVISORY half only.
+ *
+ * [measured 2026-08-23] this check fired six times in one session with a
+ * byte-identical four-item list, because the standing order genuinely had not
+ * changed. A detector that reprints itself unchanged is one the reader learns
+ * to skim, which is how a real finding gets missed later — the same failure
+ * rules/security.md records about a muted scanner. So an unchanged advisory is
+ * DEMOTED to one line carrying its repeat count, never hidden, and the count
+ * itself becomes the signal: "unchanged x6" says more than a sixth reprint.
+ *
+ * Only the advisory is demoted. CARRIED FORWARD is exact and always prints in
+ * full — demoting an exact finding would be hiding, not tidying.
+ *
+ * FAILS OPEN by construction: any unreadable or unwritable state, and every
+ * caller that passes no stateFile at all (the sweep, the selftest), gets the
+ * full report. The worst case is the noise this exists to reduce, never silence.
+ */
+function repeatState(stateFile, fingerprint) {
+    if (!stateFile) return { repeats: 0, changed: true };
+    try {
+        const prev = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+        const changed = prev.fingerprint !== fingerprint;
+        const repeats = changed ? 0 : (prev.repeats || 0) + 1;
+        fs.writeFileSync(stateFile, JSON.stringify({ fingerprint, repeats }), 'utf8');
+        return { repeats, changed };
+    } catch {
+        try { fs.writeFileSync(stateFile, JSON.stringify({ fingerprint, repeats: 0 }), 'utf8'); } catch { /* fail open */ }
+        return { repeats: 0, changed: true };
+    }
+}
+
+function report(source, out = console.log, stateFile = null) {
     const r = analyse(source);
 
     // Population first, so a zero is distinguishable from a no-op (rule 22c).
@@ -117,9 +149,15 @@ function report(source, out = console.log) {
     }
 
     if (r.standing.length) {
-        out(`[queue] standing work order (most recent panel), ${r.standing.length} item(s):`);
-        for (const l of r.standing) out(`          - ${l}`);
-        out('        Advisory: this check cannot tell delivered from undelivered. Report against the list.');
+        const fp = JSON.stringify(r.standing.slice().sort());
+        const { repeats } = repeatState(stateFile, fp);
+        if (repeats > 0) {
+            out(`[queue] standing work order unchanged (${r.standing.length} item(s), ${repeats + 1} consecutive commits). Still open; still yours to report against.`);
+        } else {
+            out(`[queue] standing work order (most recent panel), ${r.standing.length} item(s):`);
+            for (const l of r.standing) out(`          - ${l}`);
+            out('        Advisory: this check cannot tell delivered from undelivered. Report against the list.');
+        }
     } else {
         out('[queue] most recent panel selected only "stop here" - queue is drained.');
     }
@@ -192,9 +230,54 @@ function selftest() {
     const empty = analyse([]);
     check('empty transcript reports zero panels', empty.panelCount === 0, `got ${empty.panelCount}`);
 
+    /* 5. THE NEW BEHAVIOUR. Without these the four above pass whether or not
+          repeat-suppression works at all - a selftest that does not enter the
+          code it ships is the vacuity this file's own header warns about. */
+    const os = require('os');
+    const tmp = path.join(os.tmpdir(), 'autodev-queue-selftest-' + process.pid + '.json');
+    try { fs.unlinkSync(tmp); } catch { /* first run */ }
+    const src = fixture([
+        [[COMMA, OTHER, 'Stop here'], [COMMA, OTHER]],
+        [[COMMA, 'Something else'], [COMMA]],
+    ]);
+    const cap = () => { const L = []; report(src, (s) => L.push(s), tmp); return L.join(String.fromCharCode(10)); };
+
+    const first = cap();
+    check('first run prints the standing list in full',
+        first.includes('standing work order (most recent panel)'), 'was demoted on first sight');
+
+    const second = cap();
+    check('an UNCHANGED advisory is demoted on the next run',
+        second.includes('standing work order unchanged') && !second.includes('(most recent panel)'),
+        'reprinted identically - the muting failure this exists to stop');
+    check('the demoted line still carries the repeat count',
+        second.includes('2 consecutive commits'), second.slice(0, 120));
+
+    check('CARRIED FORWARD is NEVER demoted, even when the advisory is',
+        second.includes('CARRIED FORWARD'), 'an exact finding was suppressed - that is hiding, not tidying');
+
+    /* Planted change derived FROM the real labels, so it cannot collide with
+       them by construction (22c-i) rather than by my choosing an unused string. */
+    const changedSrc = fixture([
+        [[COMMA, OTHER, 'Stop here'], [COMMA, OTHER]],
+        [[COMMA + ' (revised)', 'Something else'], [COMMA + ' (revised)']],
+    ]);
+    const L3 = []; report(changedSrc, (s) => L3.push(s), tmp);
+    check('a CHANGED advisory prints in full again',
+        L3.join(String.fromCharCode(10)).includes('standing work order (most recent panel)'), 'stayed demoted after the list changed');
+
+    /* Fail-open: no state file at all must behave like a first run, forever. */
+    const L4 = []; report(src, (s) => L4.push(s), null);
+    const L5 = []; report(src, (s) => L5.push(s), null);
+    check('no state file means never demoted (fails open)',
+        L4.join(String.fromCharCode(10)).includes('(most recent panel)') && L5.join(String.fromCharCode(10)).includes('(most recent panel)'),
+        'suppressed without state - it must fail toward noise, never toward silence');
+
+    try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+
     console.log(failures.length
         ? `selftest: FAIL (${failures.length})`
-        : 'selftest: PASS - 6 assertions, positive and negative both exercised');
+        : 'selftest: PASS - 12 assertions, positive and negative both exercised');
     return failures.length ? 1 : 0;
 }
 
@@ -322,7 +405,12 @@ if (require.main === module) {
         console.log('[queue] NOT RUN - no readable transcript (need --transcript or hook stdin transcript_path).');
         process.exit(0);
     }
-    report(file);
+    /* State lives in the OS temp dir, keyed by transcript path: it is ephemeral
+       tooling state, it must not pollute a user's repo, and losing it costs one
+       full reprint rather than a missed finding. */
+    const key = require('crypto').createHash('sha256').update(path.resolve(file)).digest('hex').slice(0, 16);
+    const stateFile = path.join(require('os').tmpdir(), 'autodev-queue-' + key + '.json');
+    report(file, console.log, stateFile);
     process.exit(0);
 }
 
