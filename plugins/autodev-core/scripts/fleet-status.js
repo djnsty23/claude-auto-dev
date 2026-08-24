@@ -263,6 +263,30 @@ function classify(s) {
  *
  * @param {number} days how far back to look
  */
+// ONE loader, because two copies is how this broke.
+//
+// scanFleet was extracted from main() so the board server could call it, and
+// heartbeats were then added to the EXTRACTION only. main() kept scanning
+// transcripts and never learned about them, so on the CLI path endedCleanly
+// stayed undefined while both stalled branches in classify() test === false
+// and === null. `fleet-status --stalled` could not report a stalled session at
+// all -- not a check that failed, a check structurally unable to fire.
+//
+// `[measured 2026-08-24]` the divergence was exactly two fields, endedCleanly
+// and stoppedAt. main() set nothing scanFleet did not, so it was a strict
+// subset -- which is what a silent drift after an extraction looks like.
+// tooling/test-fleet-status.js asserts the two agree; do not re-duplicate this.
+function loadHeartbeats() {
+    // Heartbeats say a turn ENDED; an mtime only says the file grew. Absent
+    // until the plugin restart that installs the hook, so every consumer must
+    // treat 'no heartbeat' as UNKNOWN rather than as 'did not end cleanly' -
+    // an unrecognised state must never fall through to the confident reading.
+    try {
+        const { readAll } = require(path.join(__dirname, 'fleet-heartbeat.js'));
+        return new Map(readAll().map((h) => [h.cliSessionId, h]));
+    } catch { return new Map(); }   // module absent - everything stays unknown
+}
+
 function scanFleet(days) {
     const cutoff = Date.now() - days * 864e5;
     if (!fs.existsSync(ROOT)) return { population: { dirs: 0, transcripts: 0, withPanels: 0, blocked: 0, addressable: 0 }, sessions: [] };
@@ -275,11 +299,7 @@ function scanFleet(days) {
     // until the plugin restart that installs the hook, so every consumer must
     // treat "no heartbeat" as UNKNOWN rather than as "did not end cleanly" -
     // an unrecognised state must never fall through to the confident reading.
-    let beats = new Map();
-    try {
-        const { readAll } = require(path.join(__dirname, 'fleet-heartbeat.js'));
-        beats = new Map(readAll().map((h) => [h.cliSessionId, h]));
-    } catch { /* heartbeat module absent - everything stays unknown */ }
+    const beats = loadHeartbeats();
 
     for (const dir of fs.readdirSync(ROOT)) {
         const d = path.join(ROOT, dir);
@@ -342,6 +362,7 @@ function main() {
     let scannedDirs = 0, scannedFiles = 0, archivedHidden = 0;
     const sessions = [];
     const index = loadSessionIndex();
+    const beats = loadHeartbeats();   // main() went without these; see loadHeartbeats
 
     for (const dir of fs.readdirSync(ROOT)) {
         const d = path.join(ROOT, dir);
@@ -362,6 +383,9 @@ function main() {
             rec.isRunning = null;   // runtime-only; filled in by the caller from list_sessions
             Object.assign(rec, index.get(rec.sessionId) || { addressableId: null, title: null });
             if (rec.isArchived && !SHOW_ARCHIVED) { archivedHidden++; continue; }
+            const hb = beats.get(rec.sessionId);
+            rec.stoppedAt = hb ? hb.stoppedAt : null;
+            rec.endedCleanly = hb ? (Date.parse(hb.stoppedAt) >= fst.mtimeMs - 2000) : null;
             rec.state = classify(rec);
             sessions.push(rec);
         }
