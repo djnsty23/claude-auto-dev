@@ -139,23 +139,97 @@ if (worktrees) {
         '', '```', worktrees, '```', '');
 }
 
-lines.push(
-    '## What a reader should do first',
-    '',
-    '1. `git fetch`, then re-check the two sections above. They decay fastest.',
-    '2. Run the gate before believing anything is green. Check `package.json` for',
-    '   its name at the commit you are on rather than assuming one.',
-    '3. Read `CHANGELOG.md` and recent commit bodies: this project puts the',
-    '   reasoning in the commit, not in a separate design note.',
-    '',
-);
+// The closing advice is DERIVED, not fixed.
+//
+// It used to prescribe a gate script and CHANGELOG.md unconditionally. Reported
+// 2026-08-25 by a session in a GTM/analytics engagement with neither: a reader
+// following it "burns its first minutes looking for files that do not exist".
+// That is this script's own failure mode turned on itself - it exists to stop
+// unverified things rendering as fact, and its last section asserted two.
+//
+// So look before prescribing, and when nothing is found say THAT rather than
+// falling silent: a missing section reads as "nothing to do here".
+const hasFile = (f) => { try { return fs.statSync(path.join(CWD, f)).isFile(); } catch { return false; } };
+
+let scripts = null;
+if (hasFile('package.json')) {
+    try { scripts = JSON.parse(fs.readFileSync(path.join(CWD, 'package.json'), 'utf8')).scripts || {}; }
+    catch { scripts = null; }
+}
+// Order matters, and `validate` goes LAST on purpose. It is often a real script
+// AND a subset of the fuller run - in this repo `npm test` runs every suite and
+// then validate, so naming validate would send a reader to a narrower gate that
+// still passes. Prefer the name that means "everything".
+const gateName = scripts
+    ? ['gate', 'preflight', 'test', 'validate'].filter((n) => scripts[n])[0] || null
+    : null;
+
+const docs = ['CHANGELOG.md', 'DECISIONS.md', 'README.md', 'TASKS.md', 'SPEC.md'].filter(hasFile);
+
+const steps = ['1. `git fetch`, then re-check the sections above. They decay fastest.'];
+let n = 2;
+if (gateName) {
+    steps.push(n++ + '. Run `npm run ' + gateName + '` before believing anything is green.'
+        + ' That name was read from `package.json` here, not assumed.');
+} else if (scripts) {
+    steps.push(n++ + '. `package.json` exists but names no gate, preflight, validate or'
+        + ' test script, so there is nothing standard to run. Do not go looking for one.');
+} else {
+    steps.push(n++ + '. There is no `package.json` here, so this is not a code project'
+        + ' and there is no gate to run. Do not spend the first minutes hunting for one.');
+}
+if (docs.length) {
+    steps.push(n++ + '. Read ' + docs.map((d) => '`' + d + '`').join(', ')
+        + ' - present in this directory, checked rather than assumed.');
+}
+if (inRepo) {
+    steps.push(n++ + '. Read recent commit bodies. Many projects put the reasoning there'
+        + ' rather than in a separate design note.');
+}
+
+lines.push('## What a reader should do first', '');
+lines.push.apply(lines, steps);
+lines.push('');
+lines.push('_These steps were derived from what is actually in `' + CWD + '`._');
+lines.push('');
 
 const doc = lines.join('\n');
+
+// The marker that says a RESUME.md is OURS and safe to replace.
+//
+// `[measured 2026-08-25]` by a peer, an hour after this shipped: RESUME.md is a
+// project-doc convention in at least two repos here, and one keeps a 2,427-line
+// hand-written handoff there under version control. A bare run replaced it with
+// a 3kB snapshot. Restored with `git checkout`, nothing survived - but the file
+// was TRACKED and the script did not look.
+//
+// Refusing on "tracked" alone would be wrong the other way: this repo commits
+// its own generated RESUME.md deliberately, and a tool that cannot update its
+// own output is a tool nobody runs twice. So the test is authorship, not
+// tracking - overwrite what we wrote, never what a person wrote.
+const MARKER = 'Written by `session-exit.js`';
+
+function refuseToClobber(out) {
+    let existing;
+    try { existing = fs.readFileSync(out, 'utf8'); } catch { return null; }   // absent: fine
+    if (existing.indexOf(MARKER) !== -1) return null;                          // ours: fine
+    try {
+        execFileSync('git', ['ls-files', '--error-unmatch', '--', out],
+            { cwd: path.dirname(out), stdio: 'pipe' });
+    } catch { return null; }   // not tracked: a stray local file, fine to replace
+    return 'REFUSING to overwrite ' + out + '\n'
+        + '  It is tracked by git and was not written by this script.\n'
+        + '  A hand-written project handoff at RESUME.md is a convention in some\n'
+        + '  repos, and replacing one loses work no snapshot can reconstruct.\n'
+        + '  Write elsewhere with --out <path>, or --force if you are certain.';
+}
 
 if (has('--print')) {
     process.stdout.write(doc);
 } else {
     const out = path.resolve(val('--out', path.join(CWD, 'RESUME.md')));
+    const refusal = has('--force') ? null : refuseToClobber(out);
+    if (refusal) { console.error(refusal); process.exit(3); }
     fs.writeFileSync(out, doc, 'utf8');
     console.log('wrote ' + out + ' (' + doc.length + ' bytes)');
     console.log('  measured: '
