@@ -34,12 +34,28 @@
 //   PRUNE     drops heartbeats past the retention window and MUST NOT drop the
 //             notifier's dedup memory, which lives beside them and would be
 //             silently wiped every 7 days.
+//   LOCATE    where the store lives is itself behaviour: AUTODEV_FLEET_DIR wins,
+//             then USERPROFILE, then HOME. The whole suite rests on the first of
+//             those, and the other two are the only thing standing between a
+//             Windows box and a Unix one, so all three are asserted against the
+//             exported DIR rather than assumed.
 //
 // Method: drive the subject as a SUBPROCESS. write() goes through the real Stop
 // hook, so the production call site is what is under test. readAll() goes
-// through the script's own CLI. prune() needs a tiny driver, because in
-// production it fires on roughly one write in twenty-five off a wall-clock
-// modulus — not something a test can wait for.
+// through the script's own CLI. prune() and DIR need a tiny driver, which calls
+// the named export when it is a function and prints it when it is not.
+//
+// ONE MUTANT IS KNOWINGLY LEFT ALIVE, so the next reader does not re-litigate
+// it: line 104, `Math.floor(Date.now() / 1000) % PRUNE_EVERY === 0` flipped to
+// `!== 0`. That gate is wall-clock, and its input only moves once per SECOND —
+// twenty-five rapid writes inside one second all read the same modulus. Killing
+// the mutant therefore means busy-waiting up to 25s for an aligned second and
+// asserting a deletion happened, in a suite that is part of `npm test`; and the
+// assertion would straddle a second boundary whenever the write is slow, so it
+// would buy a flake as well as the delay. The flip is a FREQUENCY change (prune
+// on 24 seconds in 25 instead of 1), not a correctness change: prune() itself is
+// idempotent, is driven directly and exhaustively below, and deletes nothing
+// that is inside the window however often it runs. Left alive deliberately.
 //
 // Run: node tooling/test-fleet-heartbeat.js
 
@@ -56,6 +72,12 @@ const FLEET = path.join(ROOT, 'fleet');
 const PROJ = path.join(ROOT, 'proj');
 const DRIVER = path.join(ROOT, 'drive-heartbeat.js');
 const MISSING = path.join(ROOT, 'no-such-fleet');
+// Its own store, so the session_id fallback can be counted exactly without
+// perturbing the population every other assertion here is stated against.
+const FALLBACK = path.join(ROOT, 'fleet-fallback');
+// Never created — DIR is computed at module load and nothing writes it.
+const HOME_WIN = path.join(ROOT, 'home-userprofile');
+const HOME_NIX = path.join(ROOT, 'home-unix');
 
 let passed = 0;
 let failed = 0;
@@ -78,6 +100,21 @@ const drive = (fn, dir = FLEET) => spawnSync(process.execPath, [DRIVER, SUBJECT,
     encoding: 'utf8', env: envFor(dir), windowsHide: true,
 });
 
+// For the DIR assertions only: start from a child env with all three location
+// variables REMOVED — case-insensitively, since Windows reports them in
+// whatever case it stored — then set back exactly the ones under test.
+const envLocating = (vars) => {
+    const env = { ...process.env };
+    for (const k of Object.keys(env)) {
+        if (/^(AUTODEV_FLEET_DIR|USERPROFILE|HOME)$/i.test(k)) delete env[k];
+    }
+    return Object.assign(env, vars);
+};
+const dirWith = (vars) => spawnSync(process.execPath, [DRIVER, SUBJECT, 'DIR'], {
+    encoding: 'utf8', env: envLocating(vars), windowsHide: true,
+});
+const store = (home) => path.join(home, '.claude', 'fleet');
+
 const ls = (dir = FLEET) => (fs.existsSync(dir) ? fs.readdirSync(dir).sort() : []);
 const plant = (name, rec) => {
     fs.mkdirSync(FLEET, { recursive: true });
@@ -95,14 +132,18 @@ const C = '33333333-3333-4333-8333-333333333333';
 const D = '44444444-4444-4444-8444-444444444444';
 const E = '55555555-5555-4555-8555-555555555555';
 const F = '66666666-6666-4666-8666-666666666666';
+const G = '77777777-7777-4777-8777-777777777777';
+const H = '88888888-8888-4888-8888-888888888888';
+const I = '99999999-9999-4999-8999-999999999999';
 
 function run() {
     fs.mkdirSync(PROJ, { recursive: true });
     fs.writeFileSync(DRIVER,
         '// spawned by tooling/test-fleet-heartbeat.js\n'
         + 'const hb = require(process.argv[2]);\n'
-        + 'const out = hb[process.argv[3]]();\n'
-        + 'if (out !== undefined) process.stdout.write(JSON.stringify(out));\n', 'utf8');
+        + 'const m = hb[process.argv[3]];\n'
+        + "const out = typeof m === 'function' ? m() : m;\n"
+        + "if (out !== undefined) process.stdout.write(typeof out === 'string' ? out : JSON.stringify(out));\n", 'utf8');
 
     console.log('\n=== write: a turn end is recorded through the real Stop hook ===');
 
@@ -149,6 +190,28 @@ function run() {
     const rN = stop({ session_id: 'test', cwd: PROJ, hook_event_name: 'Stop' });
     check('a non-UUID session_id with no transcript writes nothing',
         ls().length === before && rN.status === 0, `dir=${JSON.stringify(ls())} exit=${rN.status}`);
+
+    console.log('\n=== write: session_id is the fallback when no transcript is named ===');
+
+    // The negative above (a non-UUID session_id) cannot see this branch working,
+    // because "rejected at the UUID guard" and "never read at all" produce the
+    // same empty directory. Only a VALID session_id with no transcript separates
+    // them. Written into its own store so the population asserted below is
+    // exactly one file and nothing later has to be restated.
+    const rG = stop({ session_id: G, cwd: PROJ, hook_event_name: 'Stop', stop_hook_active: false }, FALLBACK);
+    check('a UUID session_id with no transcript writes exactly one heartbeat',
+        ls(FALLBACK).length === 1 && ls(FALLBACK)[0] === G + '.json',
+        `exit=${rG.status} dir=${JSON.stringify(ls(FALLBACK))}`);
+
+    let recG = {};
+    try { recG = JSON.parse(fs.readFileSync(path.join(FALLBACK, G + '.json'), 'utf8')); } catch (e) { recG = { __err: e.message }; }
+    check('the fallback record keys on the session_id STRING, not the payload',
+        recG.cliSessionId === G, `got ${JSON.stringify(recG.cliSessionId)}`);
+    check('the fallback record carries a null transcript rather than inventing one',
+        recG.transcript === null, `got ${JSON.stringify(recG.transcript)}`);
+    check('the fallback record still carries the cwd and a fresh timestamp',
+        recG.cwd === PROJ && Number.isFinite(Date.parse(recG.stoppedAt)),
+        `cwd=${JSON.stringify(recG.cwd)} stoppedAt=${JSON.stringify(recG.stoppedAt)}`);
 
     console.log('\n=== read: population, filtering and order ===');
 
@@ -233,6 +296,55 @@ function run() {
     check('a half-written record is skipped, not fatal',
         cd.status === 0 && (cd.stdout || '').includes('3 heartbeat(s) in '),
         `exit=${cd.status} out=${JSON.stringify((cd.stdout || '').slice(0, 160))}`);
+
+    console.log('\n=== read: a UUID-named file is not yet a heartbeat RECORD ===');
+
+    // The filename says which session a record claims to be; the cliSessionId
+    // inside it is what the board joins on. A file can pass the name filter and
+    // still be unusable — a truncated write that happened to close its brace, or
+    // an older record shape. Neither is a corruption the CLI can survive by
+    // luck: it prints `cliSessionId.slice(0, 8)` for every record it accepts, so
+    // accepting one without the field takes the whole read down.
+    plant(H + '.json', { cwd: 'MARKER-NO-ID', stoppedAt: '2999-01-01T00:00:00.000Z' });
+    fs.writeFileSync(path.join(FLEET, I + '.json'), 'null\n', 'utf8');
+
+    const cs = cli();
+    check('the population is unchanged by a UUID-named file with no cliSessionId',
+        (cs.stdout || '').includes('3 heartbeat(s) in '),
+        `out=${JSON.stringify((cs.stdout || '').slice(0, 200))}`);
+    check('an id-less record never reaches the board',
+        !(cs.stdout || '').includes('MARKER-NO-ID'), 'a record with no session id was listed');
+    check('a literal null record is skipped rather than dereferenced',
+        cs.status === 0 && !(cs.stderr || '').trim(),
+        `exit=${cs.status} err=${JSON.stringify((cs.stderr || '').slice(0, 200))}`);
+
+    console.log('\n=== locate: AUTODEV_FLEET_DIR, then USERPROFILE, then HOME ===');
+
+    // Nothing above can see this: every spawn here sets AUTODEV_FLEET_DIR, so
+    // the home-directory branch is never evaluated. These three drive DIR with
+    // that override removed. DIR is computed at load and creates nothing, so the
+    // two home paths never need to exist.
+    const dOverride = dirWith({ AUTODEV_FLEET_DIR: FLEET, USERPROFILE: HOME_WIN, HOME: HOME_NIX });
+    check('AUTODEV_FLEET_DIR outranks both home variables',
+        dOverride.status === 0 && dOverride.stdout === FLEET,
+        `exit=${dOverride.status} got ${JSON.stringify(dOverride.stdout)} want ${JSON.stringify(FLEET)}`);
+
+    const dWin = dirWith({ USERPROFILE: HOME_WIN, HOME: HOME_NIX });
+    check('with both set, the store hangs off USERPROFILE',
+        dWin.status === 0 && dWin.stdout === store(HOME_WIN),
+        `exit=${dWin.status} got ${JSON.stringify(dWin.stdout)} want ${JSON.stringify(store(HOME_WIN))}`);
+
+    // USERPROFILE is EMPTIED here rather than deleted, and that is not a
+    // shortcut. libuv keeps a required-variable list on Windows and copies
+    // USERPROFILE in from the parent whenever a spawned child's env omits it —
+    // measured: deleting the key yields the real profile path in the child,
+    // setting it to '' yields ''. So "absent" is unreachable through spawn on
+    // this platform and "" is the falsy state the fallback actually meets.
+    const dNix = dirWith({ USERPROFILE: '', HOME: HOME_NIX });
+    check('with USERPROFILE empty, it falls back to HOME rather than to nothing',
+        dNix.status === 0 && dNix.stdout === store(HOME_NIX),
+        `exit=${dNix.status} got ${JSON.stringify(dNix.stdout)} want ${JSON.stringify(store(HOME_NIX))}`
+        + ` err=${JSON.stringify((dNix.stderr || '').slice(0, 160))}`);
 }
 
 try {
