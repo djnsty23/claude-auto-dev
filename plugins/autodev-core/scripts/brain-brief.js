@@ -777,8 +777,21 @@ async function sectionWork(repos) {
         totalWt + ' worktree(s) checked');
     say('              ' + interesting + ' carrying uncommitted or unpushed work, ' + clean +
         ' clean and pushed, ' + unreadable + ' UNREADABLE');
-    say('  "only here" = commits reachable from no origin ref, as of this clone\'s last');
-    say('  fetch. A stale fetch inflates it, so each repo prints its fetch age.');
+    say('  "unreachable" = no origin ref holds this commit BY SHA, as of this');
+    say('  last fetch of this clone. A stale fetch inflates it, so each repo prints its age.');
+    say('');
+    say('  THAT IS AN ANCESTRY CLAIM, NOT A CONTENT ONE, AND THE TWO DIVERGE HARD.');
+    say('  After any history rewrite - a rebase, a squash-merge, a filter - the same');
+    say('  diffs sit on origin under new SHAs, and every one of them is counted here.');
+    say('  [measured 2026-08-24] a worktree reported 2518. 2378 of its non-merge');
+    say('  commits were patch-id identical to commits already on the live trunk, and');
+    say('  10 were genuinely stranded. The number was real and 250x the real answer.');
+    say('');
+    say('  Before treating a count here as lost work, ask git about CONTENT:');
+    say('    git -C <worktree> cherry -v origin/HEAD HEAD');
+    say('  Lines starting + are absent upstream. Lines starting - are the same change');
+    say('  already up there under another SHA. Resolve origin/HEAD rather than assuming');
+    say('  origin/main: one repo here has a main two months behind its real trunk.');
     say('');
 
     for (const r of rendered) {
@@ -807,7 +820,7 @@ async function sectionWork(repos) {
             if (s.conflicted) bits.push(s.conflicted + ' CONFLICTED');
             if (s.ahead) bits.push(s.ahead + ' ahead of upstream');
             if (s.behind) bits.push(s.behind + ' behind upstream');
-            if (s.onlyLocal) bits.push(s.onlyLocal + ' commit(s) ONLY HERE (on no origin ref)');
+            if (s.onlyLocal) bits.push(s.onlyLocal + ' commit(s) unreachable from any origin ref (CONTENT NOT CHECKED)');
             if (s.riskNote) bits.push(s.riskNote);
             say('    ' + label + '  [' + (s.branch || '?') + (s.upstream ? ' -> ' + s.upstream : ' -> no upstream') + ']');
             say('        ' + (bits.length ? bits.join(', ') : 'nothing') + '');
