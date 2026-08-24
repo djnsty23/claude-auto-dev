@@ -1,5 +1,59 @@
 # Changelog
 
+## [8.105.0] - 2026-08-24
+
+### Fixed — three instruments claimed a layer they had not measured
+
+One class, found three times in this repo's own tooling. A measurement is real,
+its label names a different thing, and the reader acts on the label.
+
+**`brain-brief` called an ancestry count "ONLY HERE".**
+`rev-list --not --remotes=origin` answers "does any origin ref hold this SHA".
+The output called that "commits ONLY HERE", which reads as "this work exists
+nowhere else". `[measured 2026-08-24]` a worktree reported 2518; against the
+repo's live trunk, 2378 of its non-merge commits were patch-id identical to
+commits already up there from a history rewrite, and ten were genuinely
+stranded. The number was correct and 250x the answer being sought. The metric is
+unchanged — the comment above it had already rejected switching to a base
+branch, and that reasoning still holds. The row now says "unreachable from any
+origin ref (CONTENT NOT CHECKED)" and the legend names the discriminating
+command, with a warning to resolve `origin/HEAD` rather than assume
+`origin/main`: one repo here has a `main` two months behind its trunk, and
+comparing against it inverts the verdict.
+
+**`drift-audit` printed an all-clear with no denominator.** On zero findings it
+said "plugins, schedules and settings are all current" and exited 0. A run whose
+auditors bailed early printed the identical sentence to one that checked
+everything. Every auditor now records what it examined, a guard that bails
+records NOT CHECKED, and the census loop is unconditional and above the branch,
+so an all-clear cannot print without it by construction.
+
+**`check:functions` could not see the files with the worst coverage.** Its
+denominator was the coverage map itself, so a module nothing loads contributed
+to neither numerator nor denominator — absent rather than uncovered, while the
+headline called it "named functions in plugin sources". Measured: 42 source
+files, 29 executed, **13 never loaded**, all of them scripts. Also fixes the
+attribution branch, which never fired on Windows because V8 emits
+`file:///C:/...` — 0 of 13 entries attributed by path before, 13 of 13 after.
+
+### Added — coverage for eight functions no suite entered
+
+None was dead; all had live callers, which is why they got tests rather than an
+exemption list. `fleet-heartbeat.js` is required by the wired Stop hook and had
+no suite at all. New `tooling/test-fleet-heartbeat.js`; `test-queue-drained` and
+`test-session-sweep` gain the paths that reached the rest. 8 never-called → 1,
+the documented floor. 12 mutants planted, 11 killed, the twelfth documented as
+an equivalent mutant rather than hidden.
+
+### Changed — `/brain`'s boot sequence has an ending
+
+It gathered state and stopped, which is the vacuum its own role section warns
+about. `[measured 2026-08-24]` a session read that warning during boot and one
+turn later authored itself a four-item work list. The boot now ends with a
+defined action: report the state, ask which sessions should start, do not author
+a work list for yourself — and report the live-session headcount as a finding
+rather than a caveat.
+
 ## [8.104.0] - 2026-08-24
 
 ### Fixed — the boot skill taught a retired role, and its core step never ran
