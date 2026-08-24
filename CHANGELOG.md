@@ -1,5 +1,69 @@
 # Changelog
 
+## [8.110.0] - 2026-08-25
+
+### Added — `/auto-brain`, for running the fleet across an unattended window
+
+Built rather than improvised, on the instruction *"don't start it blindly, we
+need to build a workflow that works."*
+
+The constraint it is designed around: two peer sessions evaluated an overseer
+independently and both scored the **coordinating** half at zero. Every wrong
+steer was a claim about a session's own tree, branch, queue or intent; every
+useful one was a fact about code, git or platform metadata. So this coordinates
+by **distributing measured facts and asking**, never by asserting state. A brief
+containing a sentence about what a session has done is wrong by construction.
+
+`auto-brain-survey.js` reads every git repo under the code root: branch, trunk,
+ahead/behind, dirty count, worktrees, gate script names, open PRs, and the
+presence and age of `RESUME.md` / `PUBLISH-QUEUE.md` / `prd.json` / `TASKS.md`.
+It prints `COULD NOT CHECK` rather than a zero wherever a probe cannot answer,
+because "no open PRs" and "gh cannot answer for a bitbucket remote" are opposite
+facts that become the same brief once flattened.
+
+Three flags, each changing how a repo may be worked: a **client remote** (never
+push to a personal remote), a **trunk that is not main/master** (one repo here
+has a `main` two months behind its real trunk, and comparing against the wrong
+one inverts verdicts rather than merely dating them), and a **large
+`RESUME.md`** — one is 458KB and hand-written.
+
+The skill requires one approval before dispatch, and carries a correction found
+while using it: **cwd is where a session started, not where its work is.** A
+session listed under one repo's worktree reported twelve commits in another, so
+filing by cwd would have briefed it on the wrong project and left the other —
+which had an open mergeable PR — looking ownerless.
+
+Every brief must carry: commits stay local, no push or deploy or production
+mutation, run the repo's own named gate, escalate rather than resolve, write
+`RESUME.md` at the end, and say plainly if the brief is wrong for that repo.
+
+### Fixed — a `0x01` in a commit subject moved the wrong class to the top
+
+`mine-fixes` frames records with `--format=%x00%H%x01%ct%x01%s` and destructured
+three fields. Git preserves a literal `0x01` inside a commit subject — measured,
+not assumed — so such a subject split into four or more parts, the destructure
+kept three, and everything past the embedded byte was discarded.
+
+The record was **not dropped**, which is what made it quiet: it still counted as
+a fix and as rework, inflating the totals the ranking is read against, while its
+truncated subject matched no class and vanished from the ranking itself.
+
+This script decides which failure class a project builds a gate for, so that is
+not cosmetic. Measured: repairing the split moves `cache / key scoping` from 2
+to 4, **overtaking** `ordering / async race` at 3. The top class was wrong, and
+a team acting on it would have gated the second-most-common failure while the
+first went unguarded.
+
+The suite had pinned the misparse deliberately. Those assertions are updated
+rather than deleted, the one reading "a subject split by the format separator
+LOSES its class evidence" is inverted, and a new one pins the reordering by
+**meaning** — the top class must be the one containing that subject, byte-for-
+byte — so a regression fails on what matters rather than on a ranking string.
+
+One vacuous assertion found while doing it: the bar-width checks had no trailing
+anchor, and a short bar is a prefix of every longer bar, so they passed both
+with and without the fix.
+
 ## [8.109.0] - 2026-08-25
 
 ### Fixed — `session-exit.js` overwrote a hand-written RESUME.md
