@@ -7,9 +7,9 @@ not answer says so rather than rendering as empty.
 | field | value |
 |---|---|
 | directory | `C:\Users\nstyp\Downloads\code\autodev` |
-| branch | `release/8.108.0` |
-| upstream | `origin/release/8.108.0` |
-| HEAD committed | 2026-08-25T00:41:30+03:00 |
+| branch | `release/8.109.0` |
+| upstream | `origin/release/8.109.0` |
+| HEAD committed | 2026-08-25T00:57:54+03:00 |
 
 **Re-read before acting on any of this.** A resume file is a snapshot, and
 the two facts most likely to have moved are the two below: someone may have
@@ -21,16 +21,6 @@ None. A real zero: the command ran and returned nothing.
 
 ## Uncommitted changes
 
-- `M .claude-plugin/marketplace.json`
-- ` M CHANGELOG.md`
-- ` M RESUME.md`
-- ` M VERSION`
-- ` M package.json`
-- ` M plugins/autodev-core/.claude-plugin/plugin.json`
-- ` M plugins/autodev-core/scripts/session-exit.js`
-- ` M plugins/autodev-memory/.claude-plugin/plugin.json`
-- ` M plugins/autodev-stack/.claude-plugin/plugin.json`
-- ` M tooling/test-session-exit.js`
 - `?? --`
 - `?? .claude/`
 
@@ -46,7 +36,7 @@ touching it: a dirty tree you did not dirty means someone is in there.
 ```
 C:/Users/nstyp/claude-auto-dev                                 86bbe22 [main]
 C:/Users/nstyp/claude-auto-dev/.claude/worktrees/fix-injection 106467f [fix/shell-injection-in-shipped-scripts]
-C:/Users/nstyp/Downloads/code/autodev                          315fd5f [release/8.108.0]
+C:/Users/nstyp/Downloads/code/autodev                          6aeeedd [release/8.109.0]
 ```
 
 ## What a reader should do first

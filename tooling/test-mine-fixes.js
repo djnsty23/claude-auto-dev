@@ -32,22 +32,31 @@
 // in seconds between commits and inferring it from "when the fixture happened
 // to be built" would make the whole suite a clock test.
 //
-// THE PLANTED MALFORMED RECORDS, AND WHAT THEY DEMONSTRATE.
+// THE PLANTED SEPARATOR-BEARING RECORDS, AND WHAT THEY GUARD.
 //
-// The parser frames records with `--format=%x00%H%x01%ct%x01%s`, then does
-// `lines[0].split('\x01')` and destructures three fields. Git preserves a
-// literal 0x01 byte inside a commit subject - measured, not assumed - so a
-// subject containing one splits into FOUR parts and everything past the first
-// 0x01 is discarded. The record is not dropped: it is still counted as a fix,
-// still counted as rework, and silently contributes to no class at all.
+// The parser frames records with `--format=%x00%H%x01%ct%x01%s`. Git preserves
+// a literal 0x01 byte inside a commit subject - measured, not assumed - so such
+// a subject splits into FOUR or more parts. `lines[0].split('\x01')`
+// destructured into three fields, which kept the hash, the timestamp and only
+// the fragment in FRONT of the embedded byte; the rest was discarded. The
+// record was never dropped, which is what made the loss quiet: it still counted
+// as a fix and as rework, so it inflated the totals the ranking is read
+// against, while its truncated subject matched no class and it vanished from
+// the ranking itself.
 //
-// Two such commits are planted, and their hidden halves both carry
-// `cache / key scoping` evidence. With them read correctly that class would
-// score 4 against `ordering / async race`'s 3 and would rank FIRST. As shipped
-// it scores 2 and ranks second. So `cache / key scoping` being 2 rather than 4
-// is this suite's pin on the misparse, and the edit that turns it red is the
-// obvious repair: a separator git cannot lose, or a split with a field limit.
-// The behaviour is pinned rather than endorsed - see the report at the bottom.
+// THAT DEFECT IS FIXED. The parser now rejoins everything past the second
+// separator (`parts.slice(2).join('\x01')`), so the whole subject reaches the
+// classifier.
+//
+// Two such commits are planted, and both carry `cache / key scoping` evidence
+// behind the embedded byte. Read correctly that class scores 4 against
+// `ordering / async race`'s 3 and ranks FIRST; truncated it scored 2 and ranked
+// second. So this suite guards the REORDERING, not just the number - the top
+// slot going to the wrong class is the whole hazard this script exists to
+// avoid, and a ranking is the shape of answer that is never obviously wrong.
+// The pin is written by MEANING where it can be: the top-ranked class must be
+// the one whose evidence includes GHOST_SUBJECT, asserted byte-for-byte, so a
+// regression that re-truncates cannot satisfy it by coincidence.
 
 'use strict';
 
@@ -134,6 +143,12 @@ function commit(offsetSeconds, subject, files) {
 // one is not exotic: anything pasted out of a log or a terminal capture can.
 const SEP = '\x01';
 
+// The planted subject, written ONCE. The fixture commits this exact string and
+// the assertions compare against this exact string, so a parser that truncates
+// at the separator cannot satisfy them - the surviving half is a different
+// value, not a shorter spelling of the same one.
+const GHOST_SUBJECT = `fix(ghost): tidy${SEP} the stale cache key for the tenant`;
+
 function buildRepo() {
     fs.mkdirSync(REPO, { recursive: true });
     fs.mkdirSync(NOHOOKS, { recursive: true });
@@ -167,10 +182,10 @@ function buildRepo() {
     // --- counted as an engineering commit, but neither feature nor fix.
     commit(11 * HOUR, 'wip poking at things', ['src/misc.js']);
 
-    // --- the two malformed records. Everything after SEP is discarded, so the
-    //     `cache` evidence in each never reaches the ranking.
-    commit(2 * HOUR + 2 * DAY + HOUR,
-        `fix(ghost): tidy${SEP} the stale cache key for the tenant`, ['src/queue.js']);
+    // --- the two separator-bearing records. The `cache` evidence in each sits
+    //     AFTER the embedded SEP, so it reaches the ranking only if the parser
+    //     rejoins the tail instead of dropping it.
+    commit(2 * HOUR + 2 * DAY + HOUR, GHOST_SUBJECT, ['src/queue.js']);
 
     // --- a cache fix 2.04 days after its feature: inside the 3-day default,
     //     outside a 1-day window. This is what makes --window-days observable.
@@ -280,23 +295,38 @@ try {
         // -------------------------------------------------------------------
         ranked = (j.classes || []).map((c) => `${c.name}=${c.count}`).join(', ');
         eq('the ranking is ordered by evidence, strongest class first', ranked,
-            'ordering / async race=3, cache / key scoping=2, '
+            'cache / key scoping=4, ordering / async race=3, '
             + 'duplicated derivation=1, cross-surface consistency=1');
 
-        eq('the top class carries three rework commits',
+        eq('the runner-up class carries three rework commits',
             classCount(j, 'ordering / async race'), 3);
 
-        // THE MISPARSE PIN. Two rework records carry `stale cache key` /
-        // `tenant` evidence behind a 0x01 in their subject. Read correctly this
-        // is 4 and outranks ordering; as shipped the evidence is discarded.
-        eq('a subject split by the format separator loses its class evidence',
-            classCount(j, 'cache / key scoping'), 2);
+        // THE PARSE PIN, and the sharpest assertion here. Two rework records
+        // carry `stale cache key` / `tenant` evidence AFTER a literal 0x01 in
+        // their subject. Truncating at that byte drops this class to 2 and hands
+        // the top slot to `ordering / async race` - a wrong answer that reads
+        // exactly like a right one, because a ranking never looks broken.
+        eq('a subject carrying the format separator keeps its class evidence',
+            classCount(j, 'cache / key scoping'), 4);
 
-        // ...and the malformed records are not dropped, which is what makes the
-        // loss invisible: the population says 8, the ranking saw 6.
-        check('...while the malformed records still count as rework',
+        // Pinned by MEANING rather than by the number above: the class that ends
+        // up on top must be the one the separator-bearing subject scores, and
+        // that subject must appear whole. A parser that keeps only the fragment
+        // in front of the 0x01 fails the byte-for-byte comparison, so this
+        // cannot be satisfied by a count that happens to reach 4 some other way.
+        const top = (j.classes || [])[0] || {};
+        check('the top-ranked class is the one the separator-bearing subject scores',
+            top.name === 'cache / key scoping'
+            && (top.examples || []).includes(GHOST_SUBJECT),
+            `top ${clip(JSON.stringify(top))}`);
+
+        // The separator-bearing records were never dropped from the population,
+        // which is what made the old loss invisible: rework said 8 while the
+        // ranking had seen 6. The rework count is UNCHANGED by the fix - 8 then,
+        // 8 now - so the only thing that moved is where those two records land.
+        check('...while those records still count as rework, and now reach the ranking too',
             j.reworkCount === 8
-            && !JSON.stringify(j.classes).includes('fix(ghost)'),
+            && JSON.stringify(j.classes).includes('fix(ghost)'),
             `reworkCount ${j.reworkCount}, classes ${clip(JSON.stringify(j.classes))}`);
 
         // One fix matches two class regexes and the loop has no `break`.
@@ -337,19 +367,22 @@ try {
 
         // The bar length encodes the count against the leader, so an off-by-one
         // in either number changes the drawn width.
+        // The trailing \n is load-bearing. A bar is a run of one repeated
+        // character, so without an end anchor a short expectation is a PREFIX of
+        // every longer bar and the assertion cannot fail on a widened one.
         const bar = (count, max) => '█'.repeat(Math.max(1, Math.round(count / max * 28)));
         check('the top class is drawn at full width',
-            r.stdout.includes(`   3  ${'ordering / async race'.padEnd(28)} ${bar(3, 3)}`),
+            r.stdout.includes(`   4  ${'cache / key scoping'.padEnd(28)} ${bar(4, 4)}\n`),
             clip(r.stdout));
-        check('...and the second class at two thirds of it',
-            r.stdout.includes(`   2  ${'cache / key scoping'.padEnd(28)} ${bar(2, 3)}`),
+        check('...and the second class at three quarters of it',
+            r.stdout.includes(`   3  ${'ordering / async race'.padEnd(28)} ${bar(3, 4)}\n`),
             clip(r.stdout));
 
         check('classes are printed strongest first',
-            r.stdout.indexOf('ordering / async race') >= 0
-            && r.stdout.indexOf('ordering / async race') < r.stdout.indexOf('cache / key scoping'),
-            `ordering at ${r.stdout.indexOf('ordering / async race')}, `
-            + `cache at ${r.stdout.indexOf('cache / key scoping')}`);
+            r.stdout.indexOf('cache / key scoping') >= 0
+            && r.stdout.indexOf('cache / key scoping') < r.stdout.indexOf('ordering / async race'),
+            `cache at ${r.stdout.indexOf('cache / key scoping')}, `
+            + `ordering at ${r.stdout.indexOf('ordering / async race')}`);
 
         // Examples are the evidence a reader checks the ranking against.
         check('each class is evidenced by the subjects that scored it',
@@ -357,8 +390,12 @@ try {
             && r.stdout.includes('    · fix(panel): await the sequence before the first paint')
             && r.stdout.includes('    · fix(queue): guard the race between drain and enqueue'),
             clip(r.stdout));
-        check('a misparsed subject is never offered as evidence',
-            !r.stdout.includes('fix(ghost)'), clip(r.stdout));
+        // The reader checks a ranking against its evidence, so the record that
+        // moved the top slot has to be visible there - and visible WHOLE. The
+        // embedded 0x01 is printed as-is; the half after it is the half that
+        // carries the class evidence.
+        check('a separator-bearing subject is offered as evidence, whole',
+            r.stdout.includes(`    · ${GHOST_SUBJECT}`), clip(r.stdout));
 
         check('hot files are listed with their rework counts',
             r.stdout.includes('     3  src/queue.js') && r.stdout.includes('     1  src/report.js'),
@@ -381,7 +418,7 @@ try {
         eq('a one-day window rejects the three fixes that landed 2.04 days later',
             tight.reworkCount, 5);
         eq('...which moves the reported percentage too', tight.reworkPct, 56);
-        eq('...and drops a class from two records to one',
+        eq('...and drops the leading class from four records to one',
             classCount(tight, 'cache / key scoping'), 1);
         eq('...while the class that was never near the boundary is unmoved',
             classCount(tight, 'ordering / async race'), 3);

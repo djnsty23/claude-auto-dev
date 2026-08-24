@@ -36,7 +36,23 @@ const all = [];
 for (const rec of RAW.split('\x00')) {
     if (!rec.trim()) continue;
     const lines = rec.split('\n');
-    const [hash, ts, subject] = lines[0].split('\x01');
+    // The subject is everything AFTER the second separator, rejoined.
+    //
+    // This destructured three fields, and git preserves a literal 0x01 inside a
+    // commit subject — measured, not assumed. Such a subject split into four or
+    // more parts, the destructure kept three, and everything past the embedded
+    // byte was discarded. The record was not dropped, which is what made it
+    // quiet: it still counted as a fix and as rework, but its truncated subject
+    // matched no class, so it vanished from the ranking while inflating the
+    // totals the ranking is read against.
+    //
+    // The whole job of this script is deciding which failure class a project
+    // builds a gate for. A record that counts but cannot be classified moves the
+    // wrong class to the top, and that is not visible in the output.
+    const parts = lines[0].split('\x01');
+    const hash = parts[0];
+    const ts = parts[1];
+    const subject = parts.slice(2).join('\x01');
     if (!hash) continue;
     all.push({ hash, ts: Number(ts), subject: subject || '', files: lines.slice(1).filter(Boolean) });
 }
