@@ -1,5 +1,85 @@
 # Changelog
 
+## [8.103.0] - 2026-08-24
+
+### Fixed — nine rules called themselves "Always-on" with nothing to load them
+
+CLAUDE.md states that `rule-*` skills are always-on, auto-loaded by a `paths:`
+glob. `[measured 2026-08-24]` **12 skills claimed Always-on in `when_to_use`, 3
+declared a paths trigger, and 9 declared no trigger of any kind.** All nine are
+also `user-invocable: false`, so nothing reaches them except the model electing
+to call `Skill` by description. Across 212 transcripts, `rule-*` skills were
+explicitly invoked **3 times in total**.
+
+Among the nine: `rule-gate-integrity`, `rule-diagnosis` and `rule-verification`
+— the three that describe this exact failure. A mechanism structurally incapable
+of firing, wearing a label that reads as coverage.
+
+`when_to_use` on the nine now names the moment to load rather than asserting a
+guarantee no mechanism provides. No paths globs were invented to make the claim
+true: "the moment you are about to say why something is happening" has no file
+glob, and a fake one is worse than an honest description.
+
+`validate` now fails any skill claiming Always-on without a `paths:` trigger.
+Its first run reported exactly the nine predicted, which is the point of running
+a gate before believing it rather than after.
+
+One distinction worth not collapsing: on the machine this was measured on, the
+`@`-imported `~/.claude/rules/*.md` DID load, and four documented traps recurred
+anyway. The portable plugin copies mostly never load at all. Loading is
+necessary and demonstrably not sufficient.
+
+### Added — SessionStart says when someone else is already in this repo
+
+Sessions cannot see each other, so two agents routinely edit the same lines in
+different worktrees and neither learns until a cleanup PR deletes one of them.
+One line now reports other worktrees by branch and origin branches not merged
+into main.
+
+Local refs only, deliberately: `ls-remote` and `gh` are the authoritative
+registries and both are network calls, and this runs on every session start. So
+the output says "as of the last fetch" and names the authoritative commands
+rather than implying a freshness it does not have.
+
+The negative case is the point. A line that appeared unconditionally would train
+every session to skip it, and then it is worse than absent. A solitary clone
+gets nothing, and that silence is asserted. Mutation-tested: never-emit turns 5
+assertions red, always-emit turns the silence assertion red.
+
+### Fixed — telemetry wrote its report wherever the shell happened to be
+
+The report path was built from `process.cwd()`, which follows the session's
+shell. Every directory a session cd'd into was quietly collecting a
+`.claude/reports/`.
+
+Found only because one broke the gate: a session cd'd into
+`plugins/autodev-core/skills/` to read frontmatter, the next tool call planted a
+telemetry file there, and `validate` enumerated it as a skill directory with no
+SKILL.md. Nothing else would ever have reported it.
+
+The payload's cwd is the session's own directory and does not follow the shell,
+so it is preferred; walking up to the nearest `.git` collapses a deep start onto
+one location per repo. The walk is bounded at 40 rungs — a symlink cycle must
+not spin a hook that runs on every tool call.
+
+`pluginDirs()` and `skillDirs()` now also skip dot-directories, so a stray one
+cannot break the gate again.
+
+Mutation-tested by restoring the original bug: 4 assertions fail, and the 2
+fallback assertions correctly survive, because the fix does not change behaviour
+when there is no repo above the start directory.
+
+`event.cwd` deliberately still records `process.cwd()`. That answers "where did
+this tool call run", a different question from "which project owns this report",
+and conflating them would silently change the meaning of 878 existing rows.
+
+### Added — RESUME.md, split so the public half can be public
+
+`check-no-private-names.js` caught the first draft naming two private projects on
+four lines. The machine-specific half moved to `~/.claude/memory/`. Refreshed
+again once the state it described had moved, because a handoff that reports
+superseded state is the failure it exists to prevent.
+
 ## [8.102.0] - 2026-08-23
 
 ### Fixed — the queue advisory reprinted itself until it stopped being read
