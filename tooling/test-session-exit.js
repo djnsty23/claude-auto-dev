@@ -185,12 +185,37 @@ try {
     }
 
     {
-        // Untracked is not precious: a stray local RESUME.md is replaceable.
+        // A SMALL untracked foreign file is a stray. Replaceable.
         const repo = newRepo('untracked-resume');
         fs.writeFileSync(path.join(repo, 'RESUME.md'), 'scratch\n');
         const r = run(repo, []);
-        check('an UNTRACKED foreign RESUME.md is replaced without ceremony', r.status === 0,
+        check('a small UNTRACKED foreign RESUME.md is replaced without ceremony', r.status === 0,
             'status ' + r.status);
+    }
+
+    // ---- a LARGE untracked file is the hole the first guard left open -------
+    //
+    // `[measured 2026-08-25]` The first version keyed on tracking alone. A peer
+    // named the gap the same hour: "a repo where RESUME.md is untracked loses it
+    // outright." Tracking is what made the first incidents RECOVERABLE, not what
+    // made them wrong — a guard that only fires where `git restore` would have
+    // saved you anyway protects the case that needed it least.
+    //
+    // The file destroyed in the third incident was 458 KB / 6,132 lines against
+    // a 5 KB snapshot. Two orders of magnitude is a hard stop, not a warning.
+    {
+        const repo = newRepo('untracked-huge');
+        const doc = path.join(repo, 'RESUME.md');
+        const original = 'A hand-maintained cold-start document.\n' + 'x'.repeat(40000);
+        fs.writeFileSync(doc, original);
+        // Deliberately NOT committed: this is the unrecoverable case.
+        const r = run(repo, []);
+        check('a LARGE untracked foreign file is refused too', r.status === 3, 'status ' + r.status);
+        check('  and is byte-identical afterwards', fs.readFileSync(doc, 'utf8') === original);
+        has('  and the refusal cites the size, not tracking', r.err, 'far larger than the');
+        has('  and says an untracked one is unrecoverable', r.err, 'not recoverable at all');
+        const f = run(repo, ['--force']);
+        check('  --force still overrides', f.status === 0, 'status ' + f.status);
     }
 
     // ---- the closing advice must be DERIVED, not prescribed -----------------
