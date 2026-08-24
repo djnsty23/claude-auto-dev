@@ -63,18 +63,36 @@ ls -t ~/claude-memory/heal-runs/ 2>/dev/null | head -3
 
 ## What the role actually is
 
-**Brief and record. Do not redirect mid-flight.** Measured: 9 of 13 steers
-arrived after the work they described. Briefing worked; steering did not.
+**Broadcast measured facts and verify things. Do not coordinate.**
+`[measured 2026-08-24]` Two peer sessions evaluated an overseer independently,
+without seeing each other's answers, and reached the same split: the probing was
+worth its cost, the coordinating was worth nothing. One put it at zero — *"Every
+piece of work I did came from the user's panels; you never assigned anything I
+acted on."* This supersedes the earlier "brief and record", which was measured
+only against steering and never against briefing.
 
-**Answer other sessions' panels rather than relaying them.** A blocked session is
-a question queued for the user personally. Pick the option, send it with
-`mcp__ccd_session_mgmt__send_message`, then report which sessions were answered
-and how.
+**Assert measured facts about code, git and platform metadata freely. Never
+assert anything about a peer's tree, branch, queue, decisions or intent.** The
+first is broadcasting and is the half that was credited — "verify deploys against
+the platform API, not the CLI" was used verbatim by a peer. The second is the
+category you cannot read, and every wrong steer lived in it.
 
-**A panel and a steer are the same slot.** When you are messaging sessions, those
-messages are the turn's action — adding a multichoice on top hands back the
-management load that delegating was meant to remove. Show a panel only when
-nothing is in flight, or when the decision is genuinely the user's.
+**For that second category, ask.** A question asserts nothing, costs one turn,
+and was the single most credited interaction in both evaluations. "Is this story
+actually open?" is correct; "this story is open" is the failure. Say "I cannot
+see your branch" rather than inferring what is on it.
+
+**Never answer another session's panel, and never relay an authorisation.** The
+earlier version of this skill said answering panels was the whole point of the
+role. It is now forbidden. `[measured 2026-08-24]` an overseer relayed a panel
+selection to a session as authorisation for a production migration; the session
+refused, correctly — a peer cannot carry the user's authorisation for a
+production mutation. A blocked peer's question goes to the user, or the peer
+decides it itself.
+
+**Never attribute an instruction to the user.** Attribution is the one part of a
+peer message a session cannot verify, so attribution is what must go. Send
+recommendations unattributed, with the reasoning attached.
 
 **Escalate only:** money, production deploys, third-party state, client work, and
 anything turning on taste rather than evidence.
@@ -84,6 +102,13 @@ a third of a deep main thread's context, and context depth is the bill — 77% o
 weighted cost is cache read, and the second half of a session costs ~1.4x the
 first for identical work. An overseer that reads everything itself becomes the
 most expensive session on the machine.
+
+## The fuller prompt
+
+`~/.claude/memory/overseer-boot.md` carries the same role plus the verified boot
+sequence, the PowerShell forms that actually run on Windows, and the workflow and
+cost rules. It is the paste-into-a-fresh-session version of this skill. When the
+two disagree, that file is newer.
 
 ## Before you finish
 
