@@ -1,5 +1,69 @@
 # Changelog
 
+## [8.107.0] - 2026-08-24
+
+### Fixed — a guard against a commit-push loop that counted the clock
+
+`fleet-publish`'s `meaningful()` is the only thing standing between a timed
+`--push` and a commit on every run. It compared the whole record with
+`publishedAt` removed — and `oldestBlockedMin` is in that record. That value
+ticks up every minute a panel stays open, so **while anything was blocked, every
+run committed and pushed** to a real remote.
+
+Measured: two records differing only 199 vs 200 read as "counts changed —
+pushed", while a `publishedAt`-only control correctly read as unchanged.
+
+Fixed as an **allowlist** of the fields that constitute state, not by excluding
+one more field. The direction is the fix: a denylist fails open, so the next
+time-varying field anyone adds silently re-arms the loop against GitHub. An
+allowlist fails closed — a new state field is merely late.
+
+The existing suite already asserted that a `publishedAt`-only difference does
+not push, and was green throughout. That assertion tested the one field already
+excluded. **A test of the case that works says nothing about the case that does
+not.**
+
+### Fixed — `fleet-overlap` invoked a different clone's `fleet-status`
+
+`FLEET` was a hardcoded absolute path through `USERPROFILE` to one checkout, for
+a file that is a **sibling in the same plugin**. So the installed plugin ran
+`~/claude-auto-dev`'s parser rather than the one shipped beside it — a released
+version did not run its own code — any clone silently read a different
+checkout's parser, and a machine without `USERPROFILE` threw on load.
+
+Second half, and the one that could mislead rather than merely misbehave: a
+failed child crashed with a stack trace and printed **nothing on stdout**. A
+session reading stdout saw an empty result, which reads as "no overlaps". It now
+prints `COULD NOT CHECK`, names the subject and reason, says "This is NOT no
+overlapping pairs. Nothing was scanned.", and exits 2.
+
+Two suites went red, and the reason is worth keeping: **both forced their
+failure scenarios through the bug.** A test that needs a defect to reach its
+unhappy path passes for the wrong reason and blocks the fix. Neither was
+weakened — both now copy the subject beside the siblings they control, so no
+testability seam was added to `plugins/`.
+
+### Added — `check:drift`, which detects the shape of the 8.106.0 bug
+
+Two functions in one file assigning to the same record, field sets overlapping,
+one a strict subset of the other. Validated both directions: against the pre-fix
+blob it names the real defect exactly; against the repo it reports 42 files, 193
+functions, 0 pairs. Its first run found a false positive
+(`Object.assign(defaults(), o)`), fixed by widening the parser rather than by an
+exception list — a blanket skip would have blinded it to the only bug it has
+ever caught.
+
+Deliberately **not** wired into `validate`: a subset can be intentional, so a
+hit is a question, and a question-raiser wired as a hard gate teaches people to
+silence it.
+
+### Added — suites for three more never-loaded scripts
+
+`fleet-overlap` (70), `fleet-publish` (128), `quota-tripwire` (178). Coverage
+moved from 29 of 42 plugin files executed to 35, and never-loaded from 13 to 7.
+The never-called function count rose from 1 to 3 because newly-loaded files
+brought their own uncovered functions — previously invisible, now counted.
+
 ## [8.106.0] - 2026-08-24
 
 ### Fixed — `fleet-status --stalled` could not report a stalled session at all

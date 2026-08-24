@@ -16,14 +16,19 @@
 const { execFileSync } = require('child_process');
 const path = require('path');
 
-const FLEET = path.join(
-  process.env.USERPROFILE,
-  'claude-auto-dev',
-  'plugins',
-  'autodev-core',
-  'scripts',
-  'fleet-status.js',
-);
+// fleet-status.js is a SIBLING in this plugin, so resolve it as one.
+//
+// This used to be path.join(process.env.USERPROFILE, 'claude-auto-dev', ...) -
+// a hardcoded absolute path to one clone on one machine. Three things followed,
+// none of them announced: the INSTALLED plugin invoked the fleet-status in
+// ~/claude-auto-dev rather than the one shipped beside it, so a released
+// version did not run its own code; any clone silently read a different
+// checkout's parser; and on a machine where USERPROFILE is unset, path.join
+// throws a TypeError on load rather than reporting anything.
+//
+// __dirname is right because this is a same-plugin sibling. CLAUDE.md's warning
+// about ${CLAUDE_PLUGIN_ROOT} is about CROSS-plugin paths and does not apply.
+const FLEET = path.join(__dirname, 'fleet-status.js');
 
 // Generic filler only. Project names used to be listed here too, which put
 // private repo names — including a client's — into a PUBLIC repo, and hardcoded
@@ -36,11 +41,38 @@ const STOP = new Set(
     .split(/\s+/),
 );
 
-const raw = execFileSync(process.execPath, [FLEET, '--days', '2', '--json'], {
-  encoding: 'utf8',
-  maxBuffer: 64 * 1024 * 1024,
-});
-const d = JSON.parse(raw);
+// A crash here used to print a stack trace and NOTHING on stdout - no
+// population line, no pair count. A session reading stdout saw an empty result,
+// which reads as "no overlaps". That is the false zero this repo's own rules
+// warn about, in the script the brain skill tells every session to run at boot.
+//
+// Fail LOUD and SPECIFIC instead: say the check could not run, and exit
+// non-zero. An unrecognised state must never fall through to the reassuring
+// reading.
+let raw;
+try {
+  raw = execFileSync(process.execPath, [FLEET, '--days', '2', '--json'], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+} catch (e) {
+  console.log('COULD NOT CHECK overlap - fleet-status did not run');
+  console.log('  subject: ' + FLEET);
+  console.log('  reason:  ' + (e && e.message ? e.message.split('\n')[0] : e));
+  console.log('  This is NOT "no overlapping pairs". Nothing was scanned.');
+  process.exit(2);
+}
+
+let d;
+try {
+  d = JSON.parse(raw);
+} catch (e) {
+  console.log('COULD NOT CHECK overlap - fleet-status emitted no parseable JSON');
+  console.log('  subject: ' + FLEET);
+  console.log('  got ' + raw.length + ' byte(s): ' + JSON.stringify(raw.slice(0, 120)));
+  console.log('  This is NOT "no overlapping pairs". Nothing was scanned.');
+  process.exit(2);
+}
 const all = Array.isArray(d) ? d : d.sessions || d.rows || [];
 
 // Only sessions that are actually alive: not archived, and touched in the last day.
