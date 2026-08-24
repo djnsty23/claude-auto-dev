@@ -283,4 +283,20 @@ if (has('--peers')) {
     say('  Find them with list_sessions. Join on cwd AND branch, never on id:');
     say('  pipe names and session-list ids are separate identifier spaces and');
     say('  nothing joins them, so one session can look like two.');
+    say('');
+    say('  PUT YOUR OWN SESSION ID IN EVERY MESSAGE YOU SEND.');
+    say('  [measured 2026-08-25] four peers were asked to report; every one that');
+    say('  answered said the sender id did not resolve, because they reached for');
+    say('  ListAgents - which lists in-process SUBAGENTS, not sessions. They had');
+    say('  to guess the sender by title, and one nearly gave up. A request with');
+    say('  no return address is a request that arrives and cannot be answered.');
+    say('');
+    say('    Reply to: mcp__ccd_session_mgmt__send_message, session_id <yours>');
+    say('');
+    say('  ASK FOR SHORT ROLLING SUMMARIES, not only a report at the end.');
+    say('  One message per COMPLETED UNIT of work - not per commit, not on a');
+    say('  timer. Three to five lines: what changed, what was verified with the');
+    say('  command and what it printed, and what is next or blocked. The long');
+    say('  four-part report is for going idle. Say "short" and mean it, or every');
+    say('  update costs both sides a full turn and awareness stops being cheap.');
 }
