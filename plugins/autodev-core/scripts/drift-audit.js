@@ -31,10 +31,19 @@ const readJSON = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
 const PLUGIN_NAME_LIMIT = 5;
 
 // ---------------------------------------------------------------- plugins
+// A verdict with no denominator cannot be told apart from a check that ran on
+// nothing. Every auditor records what it EXAMINED here, and a guard that bails
+// records NOT CHECKED rather than silently contributing zero - because "found
+// no drift" and "never looked" print identically otherwise, and this script is
+// the nightly instrument the Stop hook leans on.
+const census = [];
+let prdAudited = 0, prdSkipped = 0;
+
 function auditPlugins() {
     const installed = readJSON(path.join(CONFIG, 'plugins', 'installed_plugins.json'));
     const markets = readJSON(path.join(CONFIG, 'plugins', 'known_marketplaces.json'));
-    if (!installed || !installed.plugins) return;
+    if (!installed || !installed.plugins) { census.push('plugins: NOT CHECKED (installed_plugins.json unreadable)'); return; }
+    census.push('plugins: ' + Object.keys(installed.plugins).length + ' installed');
 
     for (const [key, entries] of Object.entries(installed.plugins)) {
         const e = (entries || [])[0];
@@ -108,8 +117,10 @@ function auditPlugins() {
 // ------------------------------------------------------- scheduled tasks
 function auditSchedules() {
     const dir = path.join(CONFIG, 'scheduled-tasks');
-    if (!fs.existsSync(dir)) return;
-    for (const id of fs.readdirSync(dir)) {
+    if (!fs.existsSync(dir)) { census.push('schedules: NOT CHECKED (no scheduled-tasks dir)'); return; }
+    const taskIds = fs.readdirSync(dir);
+    census.push('schedules: ' + taskIds.length + ' task dir(s)');
+    for (const id of taskIds) {
         const skill = path.join(dir, id, 'SKILL.md');
         if (!fs.existsSync(skill)) continue;
 
@@ -194,8 +205,9 @@ function unconstrainedRule(rule) {
 function auditSettings() {
     const p = path.join(CONFIG, 'settings.json');
     const s = readJSON(p);
-    if (!s) return;
+    if (!s) { census.push('settings: NOT CHECKED (settings.json unreadable)'); return; }
     const allow = (s.permissions && s.permissions.allow) || [];
+    census.push('settings: settings.json read, ' + allow.length + ' permission entries');
     const deny = (s.permissions && s.permissions.deny) || [];
 
     for (const rule of allow) {
@@ -397,7 +409,8 @@ function prdCarrierBranches(repo) {
 
 function auditPrd(repo) {
     const prdPath = path.join(repo, 'prd.json');
-    if (!fs.existsSync(prdPath)) return;
+    if (!fs.existsSync(prdPath)) { prdSkipped++; return; }
+    prdAudited++;
     const name = path.basename(repo);
 
     const prd = readJSON(prdPath);
@@ -572,6 +585,8 @@ for (const repo of found) {
     if (!seen || (isMain && !seen.isMain)) canonical.set(key, { repo, isMain });
 }
 for (const { repo } of canonical.values()) auditPrd(repo);
+census.push('prd: ' + prdAudited + ' repo(s) with a prd.json, ' + prdSkipped + ' without, from ' +
+    canonical.size + ' distinct repo(s)');
 
 if (asJson) { console.log(JSON.stringify({ configDir: CONFIG, findings }, null, 2)); process.exit(findings.some((f) => f.severity === 'fail') ? 1 : 0); }
 
@@ -579,7 +594,9 @@ const order = { fail: 0, warn: 1, info: 2 };
 findings.sort((a, b) => order[a.severity] - order[b.severity]);
 
 console.log(`\nDrift audit — ${CONFIG}\n`);
-if (!findings.length) { console.log('  ✓ plugins, schedules and settings are all current\n'); process.exit(0); }
+for (const line of census) console.log('  ' + line);
+console.log('');
+if (!findings.length) { console.log('  no drift found in the population above\n'); process.exit(0); }
 
 let lastArea = '';
 for (const f of findings) {
