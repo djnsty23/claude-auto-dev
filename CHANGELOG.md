@@ -1,5 +1,56 @@
 # Changelog
 
+## [8.106.0] - 2026-08-24
+
+### Fixed — `fleet-status --stalled` could not report a stalled session at all
+
+`scanFleet()` was extracted from `main()` so the board server could call it
+in-process. Heartbeats were then added to the **extraction only**. `main()` kept
+scanning transcripts and never learned about them, so on the CLI path
+`endedCleanly` stayed `undefined` while both stalled branches in `classify()`
+test `=== false` and `=== null`. Neither matches `undefined`.
+
+That is not a check that failed. It is a check structurally unable to fire, and
+from the outside it is indistinguishable from a healthy fleet — the failure mode
+that costs most, because it looks like good news.
+
+The divergence was measured rather than guessed: `scanFleet` set `endedCleanly`
+and `stoppedAt`, `main()` set neither, and `main()` set nothing `scanFleet` did
+not. A strict subset, which is what silent drift after an extraction looks like.
+Both now share one `loadHeartbeats()`, so there is no second copy to diverge.
+
+**Why the suite did not catch it, which is the part worth keeping.** All 121
+assertions passed both before and after the fix. Every stalled assertion calls
+`classify()` directly with a synthetic object, and the heartbeat fixtures were
+only ever reached through the helper that goes via `scanFleet`. **A classifier
+test cannot see a feeder that never calls it.** Coverage of a function is not
+coverage of its wiring.
+
+The first replacement assertion was itself vacuous — it checked that
+`endedCleanly` was *present* in `--json`, and with an empty map the assignment
+still yields `null`, so restoring the bug left it green. Mutation caught that,
+reading it did not. The surviving assertion checks the **value** against
+fixtures whose heartbeats disagree, and restoring the bug now fails exactly 3 of
+125 with the diagnostic.
+
+### Added — suites for the three unloaded scripts an overseer session depends on
+
+`check:functions` reported 13 plugin scripts no suite loads. These three were
+ranked by what breaking them would cost: `fleet-status.js` is the single
+transcript parser under six consumers, `brain-brief.js` opens every overseer
+session, and `fleet-notify.js` fires real toasts where broken dedup either mutes
+the user or hides a blocked session.
+
+278 assertions, all behavioural, all driven as subprocesses against fixtures in
+a temp dir — none reads this machine's live git state, transcripts or session
+list, so none can pass for the wrong reason on a quiet day. Mutation-tested on
+scratch copies: 7 killed on fleet-status, 10 with zero survivors on
+fleet-notify.
+
+Nine scripts remain uncovered and are named rather than quietly dropped:
+fleet-publish, fleet-overlap, quota-tripwire, watch-panels, mine-fixes,
+claudemd-audit, steer-log, telemetry-report, fleet-board.
+
 ## [8.105.0] - 2026-08-24
 
 ### Fixed — three instruments claimed a layer they had not measured
