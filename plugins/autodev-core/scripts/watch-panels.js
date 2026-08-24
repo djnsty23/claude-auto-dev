@@ -14,13 +14,13 @@
 const { execFileSync } = require('child_process');
 const path = require('path');
 
-const SCRIPTS = path.join(
-  process.env.USERPROFILE,
-  'claude-auto-dev',
-  'plugins',
-  'autodev-core',
-  'scripts',
-);
+// fleet-status.js is a SIBLING in this plugin. Resolving it through
+// process.env.USERPROFILE + 'claude-auto-dev' meant the INSTALLED plugin ran one
+// specific clone's parser rather than the one shipped beside it, so a released
+// version did not run its own code - and with USERPROFILE unset, path.join threw
+// at module load before anything could report why. Same defect as the one
+// removed from fleet-overlap.js; see BUG-CLASSES 28.
+const SCRIPTS = __dirname;
 const FLEET_STATUS = path.join(SCRIPTS, 'fleet-status.js');
 const INTERVAL_MS = 60_000;
 
@@ -80,8 +80,16 @@ function scan() {
     consecutiveErrors++;
     // An empty result from a failed probe is a claim about the probe, not the
     // world. Only shout once it is persistent, so one transient miss is quiet.
-    if (consecutiveErrors === 3) {
-      console.log(`WATCHER-ERROR three consecutive scans failed: ${String(err.message).slice(0, 160)}`);
+    //
+    // This was `=== 3`, which fires EXACTLY ONCE, ever. A fleet-status broken
+    // for hours announced itself at minute three and then went silent, so the
+    // watcher looked healthy and quiet while it was scanning nothing - the
+    // muted-detector failure this branch exists to prevent, reintroduced by the
+    // branch itself. Re-announce on a bounded cadence instead: at 3, then every
+    // 30 (half-hourly at the 60s interval), and SAY how long it has been broken
+    // so the repeat is distinguishable from a fresh failure.
+    if (consecutiveErrors === 3 || (consecutiveErrors > 3 && consecutiveErrors % 30 === 0)) {
+      console.log(`WATCHER-ERROR ${consecutiveErrors} consecutive scans failed: ${String(err.message).slice(0, 160)}`);
     }
     return;
   }
