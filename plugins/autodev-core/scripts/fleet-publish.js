@@ -93,11 +93,28 @@ function summarise(fleet) {
  * it differs on every single run, so comparing raw content would commit and push
  * every 5 minutes forever while reporting "changed". What matters is the counts.
  */
+// The fields that constitute STATE, as an allowlist rather than a list of
+// exclusions. That direction is the whole fix.
+//
+// This compared every field except publishedAt, and oldestBlockedMin is in the
+// record. That value ticks up every minute a panel stays open, so while
+// ANYTHING was blocked the key differed on every run and a timed --push
+// committed and pushed each time. Measured 2026-08-24: two records differing
+// only 199 vs 200 read as "counts changed - pushed", while a publishedAt-only
+// difference correctly read as unchanged.
+//
+// A denylist fails OPEN - the next time-varying field anyone adds re-arms the
+// push loop, silently, against a remote. An allowlist fails CLOSED: a genuinely
+// new state field simply does not trigger a publish until it is named here,
+// which is late rather than wrong. Late is the failure to prefer when the other
+// one writes to GitHub every minute.
+const STATE_FIELDS = ['host', 'platform', 'windowDays', 'sessions', 'blocked', 'byState', 'schema'];
+
 function meaningful(rec) {
     if (!rec) return null;
-    const copy = Object.assign({}, rec);
-    delete copy.publishedAt;
-    return JSON.stringify(copy);
+    const state = {};
+    for (const k of STATE_FIELDS) state[k] = rec[k];
+    return JSON.stringify(state);
 }
 
 /**
