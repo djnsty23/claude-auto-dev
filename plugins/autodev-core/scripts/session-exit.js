@@ -209,18 +209,46 @@ const doc = lines.join('\n');
 // tracking - overwrite what we wrote, never what a person wrote.
 const MARKER = 'Written by `session-exit.js`';
 
-function refuseToClobber(out) {
+// Anything we are about to write is a snapshot of a few kB. A foreign file much
+// larger than that is a document somebody maintains.
+const SUSPICIOUS_BYTES = 20000;
+
+function refuseToClobber(out, aboutToWrite) {
     let existing;
     try { existing = fs.readFileSync(out, 'utf8'); } catch { return null; }   // absent: fine
     if (existing.indexOf(MARKER) !== -1) return null;                          // ours: fine
+
+    let tracked = true;
     try {
         execFileSync('git', ['ls-files', '--error-unmatch', '--', out],
             { cwd: path.dirname(out), stdio: 'pipe' });
-    } catch { return null; }   // not tracked: a stray local file, fine to replace
+    } catch { tracked = false; }
+
+    // SIZE, not just tracking. The first version of this guard refused only when
+    // the target was tracked, and a peer named the hole immediately: a repo
+    // where RESUME.md is untracked "loses it outright". Tracking is what made
+    // the first two incidents RECOVERABLE, not what made them wrong — and a
+    // guard that only fires where `git restore` would have saved you anyway is
+    // protecting the case that needed it least.
+    //
+    // `[measured 2026-08-25]` the file destroyed in the third incident was
+    // 458 KB and 6,132 lines against a 5 KB snapshot. Two orders of magnitude is
+    // not a warning, it is a hard stop.
+    const huge = existing.length >= SUSPICIOUS_BYTES
+        && existing.length > (aboutToWrite || 0) * 4;
+
+    if (!tracked && !huge) return null;   // small, foreign, untracked: replaceable
+
+    const why = tracked && huge ? 'It is tracked by git AND is ' + existing.length + ' bytes'
+        : tracked ? 'It is tracked by git'
+        : 'It is ' + existing.length + ' bytes — far larger than the ' + aboutToWrite
+            + ' this would write';
     return 'REFUSING to overwrite ' + out + '\n'
-        + '  It is tracked by git and was not written by this script.\n'
+        + '  ' + why + ', and it was not written by this script.\n'
         + '  A hand-written project handoff at RESUME.md is a convention in some\n'
-        + '  repos, and replacing one loses work no snapshot can reconstruct.\n'
+        + '  repos — one is 458 KB and is named in its CLAUDE.md as the cold-start\n'
+        + '  entry point. Replacing one loses work no snapshot reconstructs, and\n'
+        + '  an untracked one is not recoverable at all.\n'
         + '  Write elsewhere with --out <path>, or --force if you are certain.';
 }
 
@@ -228,7 +256,7 @@ if (has('--print')) {
     process.stdout.write(doc);
 } else {
     const out = path.resolve(val('--out', path.join(CWD, 'RESUME.md')));
-    const refusal = has('--force') ? null : refuseToClobber(out);
+    const refusal = has('--force') ? null : refuseToClobber(out, doc.length);
     if (refusal) { console.error(refusal); process.exit(3); }
     fs.writeFileSync(out, doc, 'utf8');
     console.log('wrote ' + out + ' (' + doc.length + ' bytes)');

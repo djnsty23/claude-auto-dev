@@ -1,5 +1,49 @@
 # Changelog
 
+## [8.111.0] - 2026-08-25
+
+### Fixed — the clobber guard protected only the recoverable case
+
+8.109.0 refused to overwrite a foreign `RESUME.md` when it was **tracked**. A
+peer named the hole within the hour: *"a repo where RESUME.md is untracked loses
+it outright."*
+
+That is right, and it inverts what the first guard was for. Tracking is what made
+the earlier incidents **recoverable** — `git restore` brought both files back. A
+guard that fires only where git would have saved you anyway is protecting the
+case that needed it least, while the unrecoverable case walks through.
+
+Now keyed on **size as well as tracking**, still with authorship first: a foreign
+file at or above 20 KB and more than 4x what is about to be written is refused
+whether or not git knows about it. `[measured 2026-08-25]` the third incident
+destroyed a **458 KB / 6,132-line** hand-maintained cold-start document, named in
+its own `CLAUDE.md` as the entry point, against a 5 KB snapshot. Two orders of
+magnitude is a hard stop, not a warning.
+
+Three sessions hit this in one evening. Two were bitten and recovered; the third
+read the source before running it and reported the hazard instead. All three
+independently made the same point: **the default output path is the danger, not
+the write.** `RESUME.md` is precisely the filename a project most often already
+owns and hand-wrote, and the same holds for `NOTES.md`, `TODO.md`, `CHANGELOG.md`.
+
+Worth recording alongside it, because it is why the failure was silent: the
+script printed `wrote RESUME.md (5207 bytes)`, which **reads as success**. A
+session that ran it and then committed would have buried a 6,114-line deletion
+inside an unrelated commit with nothing to trace it back to.
+
+### Changed — the fleet survey says what it cannot see
+
+`[measured 2026-08-25]` A session whose cwd is a repo the survey lists does all
+of its work in a project **on a different drive**. Briefing it from the survey
+described the wrong repo entirely — right facts, wrong subject.
+
+The scan is one directory deep under one root, so a repo absent from it is not a
+repo nobody is working in. It now says so at the top, and points at `--root`.
+This is the same class as the note already in `/auto-brain` step 2 — cwd is
+where a session started, not where its work is — arriving from a second
+direction: the join is not the only thing that can be wrong, the **population**
+can be too.
+
 ## [8.110.0] - 2026-08-25
 
 ### Added — `/auto-brain`, for running the fleet across an unattended window

@@ -125,9 +125,18 @@ if (has('--json')) {
 
 console.log('\nAUTO-BRAIN SURVEY');
 console.log('  root: ' + ROOT);
-console.log('  population: ' + list.length + ' git repo(s) found');
+console.log('  population: ' + list.length + ' git repo(s) found UNDER THAT ROOT');
 console.log('  Everything below is READ from git and gh. Nothing here knows what a');
-console.log('  session is doing — join on cwd AND branch, then ASK about the rest.\n');
+console.log('  session is doing — join on cwd AND branch, then ASK about the rest.');
+console.log('');
+console.log('  !! THIS SCAN IS ONE DIRECTORY DEEP UNDER ONE ROOT, AND A SESSION MAY');
+console.log('     BE WORKING SOMEWHERE IT CANNOT SEE. [measured 2026-08-25] a session');
+console.log('     whose cwd was a repo listed below does all of its work in a project');
+console.log('     on a DIFFERENT DRIVE. Briefing it from this output described the');
+console.log('     wrong repo entirely — right facts, wrong subject.');
+console.log('     A repo absent here is not a repo nobody is working in. Ask each');
+console.log('     session which project it is actually in before briefing it, and');
+console.log('     pass --root to cover another tree.\n');
 
 for (const r of results) {
     console.log('### ' + r.name + (r.isClient ? '   [CLIENT — bitbucket remote]' : ''));
