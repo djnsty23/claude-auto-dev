@@ -1,7 +1,7 @@
 ---
 name: rule-file-organization
 description: Where generated files belong. Archives, backups, handoffs, reports, and screenshots go under .claude/, never the project root. Load before writing any generated artifact.
-when_to_use: "Always-on background rules. Not user-invocable."
+when_to_use: "Before writing any generated file: archives, backups, handoffs, reports, screenshots."
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

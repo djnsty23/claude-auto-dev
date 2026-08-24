@@ -59,7 +59,12 @@ function parseFrontmatter(content) {
 function pluginDirs() {
   return fs
     .readdirSync(PLUGINS_DIR, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+    // Dot-directories are never plugins or skills. The telemetry hook
+    // writes `.claude/reports/` relative to process.cwd(), so any session
+    // whose shell has cd'd in here plants one - and without this filter
+    // validate reports it as "skill directory has no SKILL.md", failing the
+    // gate for a file nobody committed. [measured 2026-08-24]
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
     .map((e) => e.name);
 }
 
@@ -68,7 +73,7 @@ function skillDirs(plugin) {
   if (!fs.existsSync(d)) return [];
   return fs
     .readdirSync(d, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
     .map((e) => e.name);
 }
 
@@ -203,6 +208,24 @@ function checkSkillFrontmatter() {
         log('FAIL', `${rel}: "triggers" is not a Claude Code frontmatter field — use when_to_use`);
         ok = false;
       }
+      // "Always-on" is a claim about LOADING, and loading needs a trigger.
+      // A skill that is not user-invocable and declares no `paths:` glob loads
+      // only when the model chooses to call it. That is model-invoked, not
+      // always-on, and saying otherwise converts absent coverage into reported
+      // coverage — a reader stops asking whether the rule was in context.
+      //
+      // `[measured 2026-08-24]` 12 skills claimed "Always-on"; 3 declared a
+      // paths glob; 9 had no trigger of any kind. Among the 9 were
+      // rule-gate-integrity, rule-diagnosis and rule-verification — the three
+      // that describe this exact failure. Across 212 transcripts, rule-* skills
+      // were explicitly invoked 3 times in total.
+      const alwaysOn = /always-on/i.test(String(fm.when_to_use || ''));
+      const hasPathTrigger = Array.isArray(fm.paths) && fm.paths.length > 0;
+      if (alwaysOn && !hasPathTrigger) {
+        log('FAIL', `${rel}: when_to_use claims "Always-on" but declares no "paths:" trigger — nothing loads it automatically. Say when to load it instead.`);
+        ok = false;
+      }
+
       // Both invocation paths off makes a skill unreachable by anyone.
       if (String(fm['user-invocable']) === 'false' && String(fm['disable-model-invocation']) === 'true') {
         log('FAIL', `${rel}: user-invocable:false AND disable-model-invocation:true — nothing can ever load this skill`);

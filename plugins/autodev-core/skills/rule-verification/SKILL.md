@@ -1,7 +1,7 @@
 ---
 name: rule-verification
 description: "What counts as done for each kind of change: the required verification per task type, and the six cross-cutting checks that apply to every task. Load before marking any task complete."
-when_to_use: "Always-on background rules for finishing work. Not user-invocable."
+when_to_use: "Before claiming a change is done — pick the verification its task type actually requires."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---

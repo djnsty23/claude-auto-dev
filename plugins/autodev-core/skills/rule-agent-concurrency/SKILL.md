@@ -1,7 +1,7 @@
 ---
 name: rule-agent-concurrency
 description: "How many agents to spawn, at which model and effort, so a fan-out does not burn the session's limits. Load before spawning subagents, running a workflow, or dispatching background sessions."
-when_to_use: "Always-on background rules for any fan-out. Not user-invocable."
+when_to_use: "Before spawning subagents, running a workflow, or fanning work out across agents."
 user-invocable: false
 allowed-tools: Read, Bash
 ---

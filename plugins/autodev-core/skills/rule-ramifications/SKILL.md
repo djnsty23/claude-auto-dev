@@ -1,7 +1,7 @@
 ---
 name: rule-ramifications
 description: "The eight ways a change passes typecheck, build, and a clean console and is still wrong. Derived from 3,127 fix commits across three production repos. Load before implementing a feature and again before calling it done."
-when_to_use: "Always-on background rules for implementing and finishing any feature. Not user-invocable."
+when_to_use: "Before calling a change complete, especially when typecheck, build and console are all clean."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---
