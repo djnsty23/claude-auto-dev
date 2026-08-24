@@ -423,7 +423,13 @@ function runFull(cfg, extra = []) {
 {
     const clean = runFull(config({ 'settings.json': { permissions: { allow: ['Bash(npm test)'], deny: [] } } }));
     check('a clean config exits 0', clean.status === 0);
-    check('  and says everything is current', /are all current/.test(clean.out));
+    check('  and says so WITHOUT claiming more than it measured',
+        /no drift found in the population above/.test(clean.out));
+    // The whole point of the census: a clean run must be distinguishable from a
+    // check that ran on nothing. Without this, deleting the census restores a
+    // bare all-clear and every suite still passes.
+    check('  and prints the population it scanned on the CLEAN path',
+        /settings: settings\.json read, \d+ permission entries/.test(clean.out));
 
     const failing = runFull(config({ 'settings.json': {
         permissions: { allow: ['Bash(bash -c *)'], deny: ['Bash(rm *)'] } } }));

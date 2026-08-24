@@ -130,6 +130,39 @@ would fire, `--test` for exactly one sample.
 Get-ChildItem "$env:USERPROFILE\claude-memory\heal-runs\" | Sort-Object LastWriteTime -Descending | Select-Object -First 3
 ```
 
+## When the boot finishes — the terminal action is a question
+
+The boot gathers state and then stops. That is a vacuum, and the role section
+above says in as many words that a session holding an overseer identity with no
+work will reinvent coordination to fill it.
+
+`[measured 2026-08-24]` A session read that sentence during its own boot and
+then, one turn later, authored itself a four-item work list and offered it as a
+panel. The user's correction: the first panel should be about which sessions to
+start. Loading the rule was not enough to fire it, because nothing in the boot
+said what to do once the boot was done.
+
+So the boot has exactly one correct ending, and it is not a proposal:
+
+1. **Report the state you measured.** Fleet, ownership, open PRs, uncommitted
+   work. Each with the population it scanned, and each COULD-NOT-CHECK named
+   rather than folded in with the real zeros.
+2. **Ask which sessions should start.** That is the user's decision and the only
+   question a freshly booted overseer is positioned to ask. Ground every option
+   in a fact the boot measured: a repo with open PRs and no live session, a repo
+   with dirty worktrees and no owner, a repo where a new session would land on
+   top of sessions already live there.
+3. **Do not author a work list for yourself.** Verifying is real work and it is
+   yours, but it arrives from the user in this session. A queue assembled from
+   gaps you noticed is coordination wearing a verification costume, and the role
+   section retired coordination on measurement.
+
+**Report the headcount as a finding, not a caveat.** If the live session count
+sits over the working ceiling, that is probably the largest cost item on the
+board — a session's second half costs about 1.4x its first for identical work,
+so concurrency multiplies a per-session quadratic rather than amortising it. It
+belongs in the report, not in a parenthesis attached to a panel.
+
 ## Standing rules, each with its measurement
 
 **Re-fetch immediately before sending any message that reports state.** Not

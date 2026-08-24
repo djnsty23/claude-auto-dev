@@ -89,6 +89,11 @@ const asJson = process.argv.includes('--json');
 
 // basename -> plugin-relative path, for attributing copies back to their source.
 // Ambiguous basenames are dropped rather than guessed.
+// Every plugin source file, deduped by nothing. SOURCE_BY_BASENAME drops
+// ambiguous basenames, which is right for ATTRIBUTION and wrong for a
+// population: a file this check never sees is exactly the file worth naming.
+const ALL_SOURCES = new Set();
+
 const SOURCE_BY_BASENAME = (() => {
     const map = new Map(); const dupes = new Set();
     const walk = (dir) => {
@@ -97,6 +102,7 @@ const SOURCE_BY_BASENAME = (() => {
             const full = path.join(dir, e.name);
             if (e.isDirectory()) { walk(full); continue; }
             if (!/\.(js|mjs|cjs)$/.test(e.name)) continue;
+            ALL_SOURCES.add(path.relative(ROOT, full));
             if (map.has(e.name)) dupes.add(e.name);
             else map.set(e.name, path.relative(ROOT, full));
         }
@@ -117,13 +123,21 @@ const run = spawnSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js
 // A function counts as EXECUTED if any process entered it. Suites spawn their
 // subjects, so the hits are spread across hundreds of dumps.
 const seen = new Map();   // "relPath::functionName" -> {file, name, count}
+const filesWithCoverage = new Set();   // ran at all, named functions or not
 
 for (const f of fs.readdirSync(covDir)) {
     let data;
     try { data = JSON.parse(fs.readFileSync(path.join(covDir, f), 'utf8')); } catch { continue; }
     for (const script of data.result || []) {
         if (!script.url || !script.url.startsWith('file://')) continue;
-        const abs = decodeURIComponent(script.url.slice('file://'.length));
+        // V8 emits file:///C:/... on Windows - a LEADING SLASH and forward
+        // slashes - so a raw startsWith against path.join(ROOT,'plugins') never
+        // matched there and every file fell through to basename attribution.
+        // That fallback DROPS ambiguous basenames, so the day two plugins share
+        // a filename both would vanish from this check without a word.
+        let abs = decodeURIComponent(script.url.slice('file://'.length));
+        if (abs.charAt(0) === '/' && abs.charAt(2) === ':') abs = abs.slice(1);
+        abs = path.resolve(abs);
         if (abs.includes('/node_modules/')) continue;
 
         // Suites that build a fake plugin root COPY the script into a temp dir
@@ -140,6 +154,8 @@ for (const f of fs.readdirSync(covDir)) {
             rel = owner;
         }
 
+        filesWithCoverage.add(rel);
+
         for (const fn of script.functions || []) {
             // The unnamed top-level wrapper is the module body, not a function
             // anyone declared; counting it would report every file as covered.
@@ -153,6 +169,25 @@ for (const f of fs.readdirSync(covDir)) {
 }
 fs.rmSync(covDir, { recursive: true, force: true });
 
+// THE BLIND SPOT THIS CHECK USED TO HIDE.
+//
+// `seen` is built from V8 coverage dumps, so it holds only files some process
+// LOADED. A module no suite requires and no CLI spawn runs contributes nothing
+// to the numerator AND nothing to the denominator - it is not weakly covered, it
+// is absent. The old headline called that population 'named functions in plugin
+// sources' while it had never scanned a source file.
+//
+// Measured 2026-08-24: fleet-status.js is exactly this. Nothing the suite drives
+// requires it, so every function in it read as perfect coverage by not being there.
+// THREE buckets, because two conflate distinct facts. A file V8 never recorded
+// did not run. A file V8 recorded but that yields no NAMED function ran fine and
+// simply has nothing for this census to count - post-tool-typecheck.js is that
+// case, 13 script entries and 13 module wrappers. Calling the second 'never
+// loaded' is a false positive, and a detector that cries wolf gets muted.
+const loadedFiles = new Set([...seen.values()].map((f) => f.file));
+const neverLoaded = [...ALL_SOURCES].filter((f) => !filesWithCoverage.has(f)).sort();
+const loadedNoNamed = [...filesWithCoverage].filter((f) => !loadedFiles.has(f)).sort();
+
 const all = [...seen.values()];
 const dead = all.filter((f) => f.count === 0).sort((a, b) =>
     a.file.localeCompare(b.file) || a.name.localeCompare(b.name));
@@ -161,6 +196,10 @@ const dead = all.filter((f) => f.count === 0).sort((a, b) =>
 if (asJson) {
     console.log(JSON.stringify({
         suitePassed: run.status === 0,
+        sourceFiles: ALL_SOURCES.size,
+        filesLoaded: loadedFiles.size,
+        filesNeverLoaded: neverLoaded,
+        filesLoadedNoNamedFunctions: loadedNoNamed,
         functionsSeen: all.length,
         executed: all.length - dead.length,
         untested: dead,
@@ -174,12 +213,26 @@ if (run.status !== 0) {
     process.exit(2);
 }
 
-console.log(`\n${all.length} named function(s) in plugin sources · `
-    + `${all.length - dead.length} executed by the suite · ${dead.length} NEVER CALLED\n`);
+console.log(`\n${ALL_SOURCES.size} source file(s) in plugins/ · ${filesWithCoverage.size} executed · ${neverLoaded.length} NEVER LOADED · ${loadedNoNamed.length} ran but declare no named function`);
+console.log(`${all.length} named function(s) IN THE LOADED FILES · ${all.length - dead.length} executed · ${dead.length} NEVER CALLED\n`);
+
+if (neverLoaded.length) {
+    console.log('  NEVER LOADED - not one line of these ran, so nothing in them is checked:');
+    for (const f of neverLoaded) console.log(`      ? ${f}`);
+    console.log('  These are UNVERIFIED, not covered. Drive them from a suite.');
+}
+if (loadedNoNamed.length) {
+    console.log('  LOADED but contributing no named function to the census:');
+    for (const f of loadedNoNamed) console.log(`      - ${f}`);
+    console.log('  These RAN. V8 recorded only the module wrapper, so they are outside'
+        + ' this check rather than untested by it.' + `\n`);
+}
 
 if (!dead.length) {
-    console.log('Every named function in every plugin source is entered by the suite.\n');
-    process.exit(0);
+    console.log(neverLoaded.length
+        ? `Every named function in the ${loadedFiles.size} LOADED file(s) is entered by the suite. ${neverLoaded.length} file(s) above were never loaded and remain unchecked.\n`
+        : 'Every named function in every plugin source is entered by the suite.\n');
+    process.exit(neverLoaded.length ? 1 : 0);
 }
 
 let lastFile = '';
