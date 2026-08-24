@@ -610,6 +610,33 @@ try {
         eq('...a zero dir population', r.json && r.json.population.dirs, 0);
         eq('...and does not crash', r.status, 0);
     }
+
+    // ---- the CLI must READ heartbeats, not merely emit the fields ----
+    //
+    // Every stalled assertion above calls classify() with a synthetic object, and
+    // the heartbeat fixtures below were only ever reached through drive(), which
+    // goes via scanFleet(). So 121 assertions passed while the CLI could not
+    // report stalled AT ALL: main() loaded no heartbeats, endedCleanly stayed
+    // undefined, and both stalled branches test === false and === null.
+    //
+    // A first attempt asserted merely that the fields were PRESENT in --json.
+    // That was vacuous: with an empty beats map the assignment still yields null,
+    // so restoring the bug left it green. The observable that separates the two
+    // is the VALUE, against fixtures whose heartbeats disagree with each other.
+    {
+        const r = cliJson(['--all']);
+        const by = {};
+        for (const s of (r.json && r.json.sessions) || []) by[s.sessionId] = s;
+        check('--all returns the heartbeat fixtures', !!by[ID22] && !!by[ID33],
+            'ids: ' + Object.keys(by).join(','));
+        eq('a heartbeat AFTER the last write reads endedCleanly true',
+            by[ID22] && by[ID22].endedCleanly, true);
+        eq('a heartbeat BEFORE the last write reads endedCleanly false',
+            by[ID33] && by[ID33].endedCleanly, false);
+        check('...and stoppedAt is carried through, not dropped',
+            !!(by[ID22] && by[ID22].stoppedAt), 'stoppedAt: ' + (by[ID22] && by[ID22].stoppedAt));
+    }
+
 } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
 }
