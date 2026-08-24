@@ -144,6 +144,82 @@ try {
         has('...and every section reports unreadable', r.out, '**COULD NOT READ.**');
     }
 
+    // ---- it must not eat a hand-written RESUME.md ---------------------------
+    //
+    // `[measured 2026-08-25]` a peer ran this an hour after it shipped and it
+    // replaced a TRACKED, hand-written 2,427-line project handoff with a 3kB
+    // snapshot. RESUME.md as a project doc is a convention in more than one repo
+    // here, so the collision is likely rather than exotic.
+    //
+    // The test is AUTHORSHIP, not tracking. Refusing on tracked alone would stop
+    // the tool updating its own committed output, and a tool that cannot run
+    // twice is one nobody runs once.
+    {
+        const repo = newRepo('handwritten');
+        const doc = path.join(repo, 'RESUME.md');
+        const original = 'A hand-written project handoff.\nReal work nobody can reconstruct.\n';
+        fs.writeFileSync(doc, original);
+        git(repo, ['add', 'RESUME.md']);
+        git(repo, ['commit', '-qm', 'the handoff']);
+
+        const r = run(repo, []);
+        check('it REFUSES to overwrite a tracked file it did not write', r.status === 3,
+            'status ' + r.status);
+        check('  and the file is byte-identical afterwards',
+            fs.readFileSync(doc, 'utf8') === original);
+        has('  and says why, on stderr', r.err, 'REFUSING to overwrite');
+        has('  and names the escape hatches', r.err, '--out');
+
+        // --force is the escape hatch, and it must actually work or the refusal
+        // becomes a dead end rather than a guard.
+        const f = run(repo, ['--force']);
+        check('  --force overrides it', f.status === 0, 'status ' + f.status);
+        check('  ...and the file is genuinely replaced',
+            fs.readFileSync(doc, 'utf8') !== original);
+
+        // Now the file carries our marker, so a plain rerun must succeed. This
+        // is the half a tracking-only check would break.
+        const again = run(repo, []);
+        check('  a rerun over OUR OWN output needs no --force', again.status === 0,
+            'status ' + again.status);
+    }
+
+    {
+        // Untracked is not precious: a stray local RESUME.md is replaceable.
+        const repo = newRepo('untracked-resume');
+        fs.writeFileSync(path.join(repo, 'RESUME.md'), 'scratch\n');
+        const r = run(repo, []);
+        check('an UNTRACKED foreign RESUME.md is replaced without ceremony', r.status === 0,
+            'status ' + r.status);
+    }
+
+    // ---- the closing advice must be DERIVED, not prescribed -----------------
+    //
+    // Reported by a peer working a GTM/analytics engagement with no package.json
+    // and no CHANGELOG: the advice told them to run a gate and read a changelog,
+    // so a reader "burns its first minutes looking for files that do not exist".
+    // This script exists to stop unverified things rendering as fact, and its
+    // last section asserted two.
+    {
+        const bare = newRepo('no-code');
+        const r = run(bare, ['--print']);
+        has('with no package.json it SAYS there is no gate', r.out, 'no `package.json` here');
+        has('  and tells the reader not to go hunting', r.out, 'hunting');
+        lacks('  and does not prescribe a gate', r.out, 'before believing anything is green');
+        lacks('  and does not prescribe CHANGELOG.md', r.out, 'Read `CHANGELOG.md`');
+
+        const coded = newRepo('with-gate');
+        fs.writeFileSync(path.join(coded, 'package.json'),
+            JSON.stringify({ name: 'x', scripts: { test: 'echo t', validate: 'echo v' } }));
+        fs.writeFileSync(path.join(coded, 'CHANGELOG.md'), '# c\n');
+        const r2 = run(coded, ['--print']);
+        has('with a package.json it names the script it READ', r2.out, 'npm run test');
+        lacks('  preferring the fuller run over validate', r2.out, 'npm run validate');
+        has('  and lists only docs that exist', r2.out, '`CHANGELOG.md`');
+        lacks('  not ones that do not', r2.out, '`DECISIONS.md`');
+        has('  and says the steps were derived', r2.out, 'derived from what is actually in');
+    }
+
     // ---- the peer block must refuse to speak for peers ----------------------
     {
         const repo = newRepo('peers');

@@ -1,5 +1,46 @@
 # Changelog
 
+## [8.109.0] - 2026-08-25
+
+### Fixed — `session-exit.js` overwrote a hand-written RESUME.md
+
+Shipped in 8.108.0, reported by a peer within the hour, measured rather than
+theorised: a bare run replaced a **tracked, hand-written 2,427-line project
+handoff** with a 3kB snapshot. Recovered with `git checkout`, nothing survived —
+but only because that session noticed.
+
+`RESUME.md` as a project doc is a convention in more than one repo here, and at
+least one `CLAUDE.md` points new sessions at it as the first thing to read. So
+the collision is likely, not exotic. Eight sessions had been told to run the
+script.
+
+**The guard is keyed on AUTHORSHIP, not on tracking**, and that distinction is
+the fix rather than a detail. Refusing on "tracked" alone would stop the tool
+updating its own committed output, and a tool that cannot run twice is one
+nobody runs once. It now refuses only when the target exists, is tracked by git,
+and does **not** carry this script's own marker — exit 3, file untouched, with
+`--out` and `--force` both named in the refusal. Mutation-tested three ways:
+removing the guard fails 4 assertions, keying it on tracking alone fails the
+rerun-over-our-own-output assertion, and both directions are pinned.
+
+### Fixed — the closing advice prescribed files it never checked for
+
+Reported by a session working a GTM/analytics engagement with no `package.json`
+and no `CHANGELOG.md`: the generated advice told the reader to run a gate and
+read a changelog, so a next session "burns its first minutes looking for files
+that do not exist".
+
+This script exists to stop unverified things rendering as fact, and its last
+section asserted two. The steps are now **derived** from what is present:
+the gate script is read out of `package.json` and named, or the file's absence
+is stated outright so nobody goes hunting; only docs that exist are listed; and
+the section closes by saying the steps were derived from that directory.
+
+`validate` is deliberately last in the gate-name preference. It is often a real
+script *and* a subset of the fuller run — here `npm test` runs every suite and
+then validate, so naming validate would send a reader to a narrower gate that
+still passes.
+
 ## [8.108.0] - 2026-08-25
 
 ### Added — an exit procedure, because there was none
