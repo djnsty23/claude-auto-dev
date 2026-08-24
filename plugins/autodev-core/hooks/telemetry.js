@@ -127,8 +127,35 @@ try {
         }));
     }
 
+    // Resolve the report directory against the PROJECT, not the shell.
+    //
+    // `process.cwd()` follows the session's shell, which moves whenever a Bash
+    // call cds somewhere. `[measured 2026-08-24]` that planted a
+    // `.claude/reports/` inside plugins/autodev-core/skills/ and broke
+    // validate, which enumerated it as a skill directory with no SKILL.md.
+    // Every directory a session had visited was quietly collecting one.
+    //
+    // The payload's cwd is the SESSION's own directory and does not follow the
+    // shell, so it is preferred. Walking up to the nearest `.git` then
+    // collapses a start deep inside a repo onto one location per repo. With no
+    // repo above it, the start directory is used unchanged - which is the case
+    // the suite exercises, and why this change is invisible to it.
+    const reportRoot = (() => {
+        let dir;
+        try { dir = path.resolve(data.cwd || process.cwd()); } catch { return process.cwd(); }
+        const start = dir;
+        // Bounded: a symlink cycle must not spin a hook that runs on every tool call.
+        for (let i = 0; i < 40; i++) {
+            try { if (fs.existsSync(path.join(dir, '.git'))) return dir; } catch { /* unreadable rung */ }
+            const up = path.dirname(dir);
+            if (up === dir) break;
+            dir = up;
+        }
+        return start;
+    })();
+
     try {
-        const dir = path.join(process.cwd(), '.claude', 'reports');
+        const dir = path.join(reportRoot, '.claude', 'reports');
         fs.mkdirSync(dir, { recursive: true });
         fs.appendFileSync(path.join(dir, `telemetry-${event.ts.slice(0, 10)}.jsonl`), JSON.stringify(event) + '\n');
     } catch { /* a full disk must not break the session */ }

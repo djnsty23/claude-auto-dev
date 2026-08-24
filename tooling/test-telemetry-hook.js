@@ -227,5 +227,62 @@ check('an unreachable OTLP endpoint still exits 0', slow.status === 0, 'exit ' +
 check('  and still writes locally', slow.lines.length === 1);
 check('  and does not hang the tool call', Date.now() - t0 < 5000, `${Date.now() - t0}ms`);
 
+// ---- where the report is written ----
+//
+// The hook used to build its path from process.cwd(), which follows the
+// session's SHELL. A Bash call that cds anywhere left a .claude/reports/ there,
+// and one landed inside plugins/autodev-core/skills/ and broke validate. These
+// assert the report lands once per repo, at the repo root, regardless of where
+// the shell or the payload starts.
+{
+  const mk = (...parts) => { const d = path.join(...parts); fs.mkdirSync(d, { recursive: true }); return d; };
+  const reportsIn = (root) => {
+    const dir = path.join(root, '.claude', 'reports');
+    return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  };
+  const fire = (spawnCwd, payloadCwd) => spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({
+      tool_name: 'Bash',
+      tool_input: { command: 'x' },
+      tool_response: 'y',
+      ...(payloadCwd === undefined ? {} : { cwd: payloadCwd }),
+    }),
+    encoding: 'utf8',
+    cwd: spawnCwd,
+    env: { ...process.env, CLAUDE_TELEMETRY_DISABLED: '', CLAUDE_OTEL_ENDPOINT: '' },
+  });
+
+  // A repo whose shell has wandered into a subdirectory.
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telem-repo-')));
+  mk(repo, '.git');
+  const deep = mk(repo, 'plugins', 'core', 'skills');
+
+  // Control: the fixture is a repo as far as the hook is concerned.
+  check('report-root: the .git fixture exists (control)', fs.existsSync(path.join(repo, '.git')));
+
+  let r = fire(deep, deep);
+  check('a payload deep in a repo writes at the repo ROOT', r.status === 0 && reportsIn(repo).length === 1);
+  check('  and writes nothing into the subdirectory', reportsIn(deep).length === 0);
+
+  // The shell wandering must not move the report: payload cwd is the session's.
+  const repo2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telem-repo2-')));
+  mk(repo2, '.git');
+  const stray = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telem-stray-')));
+  r = fire(stray, repo2);
+  check('a wandering shell does not move the report', r.status === 0 && reportsIn(repo2).length === 1);
+  check('  and leaves the wandered-into directory clean', reportsIn(stray).length === 0);
+
+  // No repo above it: the start directory is used, unchanged.
+  const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telem-bare-')));
+  r = fire(bare, bare);
+  check('with no repo above it, the start directory is used', r.status === 0 && reportsIn(bare).length === 1);
+
+  // No payload cwd at all — the 7.x shape must still write somewhere valid.
+  const legacy = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telem-legacy-')));
+  r = fire(legacy, undefined);
+  check('a payload with no cwd still writes, from process.cwd()',
+    r.status === 0 && reportsIn(legacy).length === 1);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
