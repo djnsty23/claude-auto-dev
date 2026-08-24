@@ -39,7 +39,8 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'brain-brief.js');
+const SCRIPT_DIR = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts');
+const SUBJECT = path.join(SCRIPT_DIR, 'brain-brief.js');
 const THIN = '-'.repeat(78);
 
 let pass = 0, fail = 0;
@@ -148,6 +149,45 @@ buildRepo(CLEAN_REPO, false);
     const t = (Date.now() - 3 * 3600 * 1000) / 1000;
     fs.utimesSync(fh, t, t);
 }
+
+/**
+ * A COPY of the shipped brain-brief.js, planted beside a fleet-overlap.js that
+ * refuses to run. That is how the `!r.ok` branch of the overlap child is reached
+ * without touching plugins/.
+ *
+ * brain-brief resolves BOTH its siblings off its own __dirname - fleet-status.js
+ * for the transcript parse and fleet-overlap.js for the scoring - so the
+ * directory a copy sits in IS the seam, and the real fleet-status has to travel
+ * with it (together with fleet-heartbeat.js, which fleet-status itself requires
+ * off __dirname) or section 1 goes blind for the wrong reason.
+ *
+ * The stub mirrors what the real fleet-overlap.js does when its own child fails:
+ * the COULD NOT CHECK block on STDOUT, exit 2. So this exercises the exact shape
+ * production emits, and the assertions can check that brain-brief neither
+ * swallows it nor renders that stdout as a scoring result.
+ *
+ * Earlier this was forced by pointing USERPROFILE at a home with no
+ * claude-auto-dev in it, back when fleet-overlap hardcoded an absolute path
+ * under USERPROFILE. That path was a production defect and is gone; copying the
+ * subject replaces the seam without asking plugins/ to carry a test-only
+ * override.
+ */
+function briefWithFailingOverlap() {
+    const dir = path.join(ROOT, 'subject-overlap-fails');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const f of ['brain-brief.js', 'fleet-status.js', 'fleet-heartbeat.js']) {
+        fs.copyFileSync(path.join(SCRIPT_DIR, f), path.join(dir, f));
+    }
+    fs.writeFileSync(path.join(dir, 'fleet-overlap.js'), [
+        "'use strict';",
+        "process.stdout.write('COULD NOT CHECK overlap - fleet-status did not run\\n');",
+        "process.stdout.write('  This is NOT \"no overlapping pairs\". Nothing was scanned.\\n');",
+        'process.exit(2);',
+        '',
+    ].join('\n'));
+    return path.join(dir, 'brain-brief.js');
+}
+const BRIEF_OVERLAP_FAILS = briefWithFailingOverlap();
 
 // The stub gh, plus per-scenario working directories that decide what it prints.
 const GH_BIN = path.join(ROOT, 'ghbin');
@@ -275,7 +315,7 @@ function runBrief(opts) {
     env.HOME = opts.home;
     env.APPDATA = path.join(opts.home, 'AppData');
     env.AUTODEV_FLEET_DIR = path.join(opts.home, '.claude', 'fleet');
-    const r = spawnSync(process.execPath, [SUBJECT, ...(opts.args || [])], {
+    const r = spawnSync(process.execPath, [opts.subject || SUBJECT, ...(opts.args || [])], {
         cwd: opts.cwd, env, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
     });
     return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
@@ -299,7 +339,12 @@ try {
     }
 
     // -----------------------------------------------------------------------
-    // A. the full report: stale handoff, a live fleet, PRs, dirty worktree
+    // A. the full report: stale handoff, a live fleet, PRs, dirty worktree.
+    //
+    // This is the only scenario that does not pass --no-overlap, so it is the
+    // one that drives the overlap child. It runs the COPY planted above, whose
+    // fleet-overlap.js sibling always fails - the report must carry that failure
+    // through to the reader rather than quietly dropping the section.
     // -----------------------------------------------------------------------
     const homeA = makeHome('a', {
         memoryDir: true,
@@ -317,7 +362,9 @@ try {
         pr(14, { statusCheckRollup: [{ conclusion: 'STARTUP_FAILURE' }, { conclusion: 'SUCCESS' }, { status: 'IN_PROGRESS' }] }),
         pr(15, { isDraft: true, mergeable: 'CONFLICTING', statusCheckRollup: [{ conclusion: '' }, {}] }),
     ]);
-    const A = runBrief({ home: homeA, cwd: workA, path: WITH_GH, args: [] });
+    const A = runBrief({
+        home: homeA, cwd: workA, path: WITH_GH, args: [], subject: BRIEF_OVERLAP_FAILS,
+    });
 
     check('A: a full report exits 0', A.status === 0, 'exit ' + A.status + ' stderr ' + A.stderr.slice(0, 200));
     hasText('A: prints the closing population reminder', A.stdout,
@@ -359,6 +406,11 @@ try {
         'COULD NOT CHECK - overlap scoring (same branch / same repo / same topic)');
     hasText('A: says what survives when only the scoring is missing', a2,
         'The branch listing above still stands - only the SCORING is missing.');
+    // The reason has to carry the child's own exit status, or every different
+    // way the child can fail renders as one indistinguishable message.
+    matches('A: names the exit status the overlap child failed with', a2, /reason: exit 2:/);
+    lacksText('A: a failed child\'s stdout is never rendered as a scoring result', a2,
+        'overlap scoring (from fleet-overlap.js');
 
     // repo set
     hasText('A: repo set counts what sections 3 and 4 will cover', A.stdout, 'population: 1 repo(s) discovered');

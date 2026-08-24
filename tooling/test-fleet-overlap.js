@@ -20,26 +20,45 @@
 // THE SEAM, AND WHY IT IS THE REAL ONE.
 //
 // fleet-overlap.js has no exports and no arguments. Its only input is
-// `execFileSync(node, [<USERPROFILE>/claude-auto-dev/.../fleet-status.js,
-// '--days','2','--json'])`, read at module load. So pointing USERPROFILE at a
-// fixture home replaces its entire world, and every assertion here is on the
+// `execFileSync(node, [path.join(__dirname, 'fleet-status.js'),
+// '--days','2','--json'])`, read at module load. fleet-status is a same-plugin
+// SIBLING and is resolved as one, so the seam is the DIRECTORY the subject sits
+// in: copy fleet-overlap.js next to whichever fleet-status.js a scenario wants
+// and __dirname resolves to that copy's home. Every assertion here is on the
 // stdout of the real CLI end to end - never a helper called directly, because
 // there is no helper to call.
 //
-// Two fixture homes, deliberately:
+// This used to be done by pointing USERPROFILE at a fixture home, back when the
+// subject hardcoded <USERPROFILE>/claude-auto-dev/.../fleet-status.js. That path
+// was a production defect - an installed plugin invoked a different clone's
+// parser, and a machine with no USERPROFILE threw on load - so it is gone, and
+// with it that seam. Copying the subject replaces it WITHOUT asking plugins/ to
+// carry an env-var override that exists only for this file's benefit.
 //
-//   realhome   carries a COPY of the real fleet-status.js and fleet-heartbeat.js
-//              over a synthetic transcript tree. This is the wiring test: it
-//              proves fleet-overlap reads the field names fleet-status actually
-//              emits. Rename `originCwd` upstream and this half goes red, which
-//              is the whole point - a suite that only ever fed the detector its
-//              own hand-written JSON would keep passing while the join rotted.
+// Two planted subjects, deliberately:
 //
-//   stubhome   carries a stub fleet-status.js that prints a fixture payload and
-//              logs its own argv. This is the policy test: score boundaries,
-//              stopwords and the live cutoff need session shapes that are
-//              tedious to produce through real transcripts and exact when
-//              handed over directly.
+//   subject-real   sits beside a COPY of the real fleet-status.js and
+//                  fleet-heartbeat.js, over a synthetic transcript tree in a
+//                  fixture HOME. This is the wiring test: it proves
+//                  fleet-overlap reads the field names fleet-status actually
+//                  emits. Rename `gitBranch` upstream and this half goes red -
+//                  measured, 64 passed / 6 failed - which is the whole point: a
+//                  suite that only ever fed the detector its own hand-written
+//                  JSON would keep passing while the join rotted.
+//
+//                  NOT `originCwd`, though an earlier version of this comment
+//                  said so. repoOf() reads `r.originCwd || r.cwd`, and the
+//                  fixture deliberately leaves one session without originCwd to
+//                  exercise that fallback, so renaming the field upstream is
+//                  absorbed rather than caught. Measured: that mutant SURVIVES.
+//                  Left as a fallback worth having, but do not cite this suite
+//                  as proof that field name is pinned - it is not.
+//
+//   subject-stub   sits beside a stub fleet-status.js that prints a fixture
+//                  payload and logs its own argv. This is the policy test: score
+//                  boundaries, stopwords and the live cutoff need session shapes
+//                  that are tedious to produce through real transcripts and
+//                  exact when handed over directly.
 //
 // Neither half reads this machine's transcripts, session records or heartbeat
 // store, so the suite cannot pass on a quiet day for the wrong reason.
@@ -76,6 +95,8 @@ const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-overlap-'));
 
 const REAL_HOME = path.join(fixture, 'realhome');
 const STUB_HOME = path.join(fixture, 'stubhome');
+const REAL_DIR = path.join(fixture, 'subject-real');   // subject + real fleet-status
+const STUB_DIR = path.join(fixture, 'subject-stub');   // subject + stub fleet-status
 const APPDIR = path.join(fixture, 'appdata');
 const FLEETDIR = path.join(fixture, 'fleet');          // empty: no heartbeats
 const PAYLOAD = path.join(fixture, 'payload.json');
@@ -84,10 +105,17 @@ const ARGVLOG = path.join(fixture, 'argv.json');
 const STORE = path.join(APPDIR, 'Claude', 'claude-code-sessions');
 const PROJ = path.join(REAL_HOME, '.claude', 'projects', 'proj');
 
-// fleet-overlap.js hardcodes this install path; it is not derived from
-// __dirname. That is the seam, so it is spelled out rather than computed.
-const installed = (home) =>
-    path.join(home, 'claude-auto-dev', 'plugins', 'autodev-core', 'scripts');
+/**
+ * Plant a copy of the SHIPPED subject in `dir`. Whatever fleet-status.js the
+ * caller then writes beside it is the one the copy will resolve, because the
+ * subject joins its own __dirname. The subject itself is never modified - the
+ * bytes under test are the bytes that ship.
+ */
+function plantSubject(dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(SUBJECT, path.join(dir, 'fleet-overlap.js'));
+    return path.join(dir, 'fleet-overlap.js');
+}
 
 // Real ids are UUIDs, and fleet-heartbeat.js refuses any other shape, so a
 // fixture using friendly names would exercise a path nothing ships.
@@ -140,14 +168,15 @@ function writeRecord(name, rec) {
 }
 
 function buildRealHome() {
-    const dir = installed(REAL_HOME);
-    fs.mkdirSync(dir, { recursive: true });
+    plantSubject(REAL_DIR);
     fs.mkdirSync(PROJ, { recursive: true });
     fs.mkdirSync(STORE, { recursive: true });
     fs.mkdirSync(FLEETDIR, { recursive: true });
 
-    fs.copyFileSync(REAL_STATUS, path.join(dir, 'fleet-status.js'));
-    fs.copyFileSync(REAL_HEARTBEAT, path.join(dir, 'fleet-heartbeat.js'));
+    // fleet-status.js requires fleet-heartbeat.js off its own __dirname, so the
+    // pair travels together or the copy loads a different clone's heartbeat.
+    fs.copyFileSync(REAL_STATUS, path.join(REAL_DIR, 'fleet-status.js'));
+    fs.copyFileSync(REAL_HEARTBEAT, path.join(REAL_DIR, 'fleet-heartbeat.js'));
 
     // A1 and A2 share repo AND branch: the hardest evidence, score 105.
     writeTranscript(A1, [opening(A1, 'C:/code/orchard', 'feature/prune'), panel(A1, 'toolu_a1')], 5);
@@ -179,9 +208,9 @@ function buildRealHome() {
 }
 
 function buildStubHome() {
-    const dir = installed(STUB_HOME);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'fleet-status.js'), [
+    plantSubject(STUB_DIR);
+    fs.mkdirSync(STUB_HOME, { recursive: true });
+    fs.writeFileSync(path.join(STUB_DIR, 'fleet-status.js'), [
         '#!/usr/bin/env node',
         "'use strict';",
         "const fs = require('fs');",
@@ -233,8 +262,8 @@ function canary() {
 // Subprocess helpers. Nothing here requires the subject in-process.
 // ---------------------------------------------------------------------------
 
-function run(home, extra) {
-    const r = spawnSync(process.execPath, [SUBJECT], {
+function run(subjectDir, home, extra) {
+    const r = spawnSync(process.execPath, [path.join(subjectDir, 'fleet-overlap.js')], {
         encoding: 'utf8',
         env: {
             ...process.env,
@@ -251,7 +280,7 @@ function run(home, extra) {
 /** Run the detector's real CLI over an exact payload from the stub. */
 function runPayload(payload) {
     fs.writeFileSync(PAYLOAD, JSON.stringify(payload, null, 2));
-    return run(STUB_HOME, { OVERLAP_FIXTURE: PAYLOAD, OVERLAP_ARGV_LOG: ARGVLOG });
+    return run(STUB_DIR, STUB_HOME, { OVERLAP_FIXTURE: PAYLOAD, OVERLAP_ARGV_LOG: ARGVLOG });
 }
 
 /** The common case: a session list inside the envelope fleet-status emits. */
@@ -278,7 +307,7 @@ try {
     // detector's own parse, filter, pairing and report.
     // -----------------------------------------------------------------------
     {
-        const r = run(REAL_HOME);
+        const r = run(REAL_DIR, REAL_HOME);
         eq('the detector exits 0 over a real transcript tree', r.status, 0);
 
         check('it prints the population it scanned and what "live" means',
