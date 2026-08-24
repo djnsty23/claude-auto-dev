@@ -1,5 +1,46 @@
 # Changelog
 
+## [8.104.0] - 2026-08-24
+
+### Fixed — the boot skill taught a retired role, and its core step never ran
+
+`/brain` is the versioned boot path, so a fresh overseer session reads it before
+anything else. Two defects, and the second had been there since the skill was
+written.
+
+**It taught the behaviour that was retired.** The role section said *"Answer
+other sessions' panels rather than relaying them. A blocked session is a
+question queued for the user personally. Pick the option, send it."*
+`[measured 2026-08-24]` an overseer did exactly that, relaying a panel selection
+as authorisation for a production migration. The session refused, correctly: a
+peer cannot carry the user's authorisation for a production mutation.
+
+**Step 2 could not have run as typed.** It invoked its scripts through
+`${CLAUDE_PLUGIN_ROOT}`, and that variable is **not set** in the Bash tool's
+environment — verified against a control in the same probe, where `USERPROFILE`
+was set. The one step whose facts are true right now was the one step that
+failed. Replaced with the marketplace install path, deterministic because this
+plugin ships in its own marketplace, and confirmed by running `fleet-overlap.js`
+from it.
+
+**The role is now the measured split.** Two peer sessions evaluated an overseer
+independently, without seeing each other's answers, and reached the same
+conclusion: the probing was worth its cost, the coordinating was worth nothing.
+Assert measured facts about code, git and platform metadata freely; never assert
+anything about a peer's tree, branch, queue, decisions or intent; for that
+second category, ask, because a question asserts nothing and was the most
+credited interaction in both evaluations.
+
+**Every fence is now PowerShell.** The fleet runs on Windows and the skill was
+handing out bash. Each command was executed before being written down, including
+`-Encoding UTF8`, without which PowerShell 5.1 renders the file's punctuation as
+replacement characters. The macOS and Linux translation is one line at the top
+rather than a second copy.
+
+The boot sequence, the standing rules with their measurements, the never-list,
+the shared-clone hazard and the workflow spend rules are folded in, so the
+versioned artifact and the paste-able one no longer drift.
+
 ## [8.103.0] - 2026-08-24
 
 ### Fixed — nine rules called themselves "Always-on" with nothing to load them
