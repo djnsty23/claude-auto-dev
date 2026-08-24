@@ -152,6 +152,75 @@ try {
         }
     } catch { /* not a git repo, or git unavailable */ }
 
+    // ---- Parallel work on this repo ----
+    //
+    // Sessions cannot see each other, so two agents routinely edit the same
+    // lines in different worktrees and neither learns until a cleanup PR
+    // deletes one of them. A peer's assessment of a coordinating overseer,
+    // `[measured 2026-08-24]`: "Three sessions still independently fixed the
+    // same vi.mock lines; preventing that is the whole premise, and you had no
+    // more visibility than I did."
+    //
+    // LOCAL REFS ONLY, deliberately. `git ls-remote` and `gh pr list` are the
+    // authoritative registries, and they are network calls — this runs on every
+    // session start, so it reads remote-tracking refs from disk instead. The
+    // cost is that they are only as fresh as the last fetch, which the output
+    // states rather than glosses: a stale count read as current is worse than
+    // no count. The commands that ARE authoritative are named so the reader can
+    // run them when the answer matters.
+    try {
+        const git = (args) => execFileSync('git', args, {
+            cwd,
+            timeout: 5000,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+        }).toString();
+
+        // Compare worktree ROOTS, not cwd — a session's shell is often deeper
+        // in the tree. realpathSync because macOS reports /var and
+        // /private/var for the same directory and they must compare equal.
+        let here = null;
+        try { here = fs.realpathSync(git(['rev-parse', '--show-toplevel']).trim()); } catch { /* not a worktree */ }
+
+        const others = [];
+        for (const block of git(['worktree', 'list', '--porcelain']).split(/\n\s*\n/)) {
+            const wt = /^worktree (.+)$/m.exec(block);
+            if (!wt) continue;
+            let root = wt[1].trim();
+            try { root = fs.realpathSync(root); } catch { /* pruned or unreachable */ }
+            if (here && root === here) continue;
+            const br = /^branch refs\/heads\/(.+)$/m.exec(block);
+            others.push(br ? br[1].trim() : '(detached)');
+        }
+
+        // Branches on the remote that main has not absorbed. Errors when there
+        // is no origin/main at all, which is a normal state for a fresh clone.
+        let unmerged = [];
+        try {
+            unmerged = git(['branch', '-r', '--no-merged', 'origin/main', '--format=%(refname:short)'])
+                .split('\n')
+                .map((s) => s.trim())
+                .filter((s) => s && !s.includes('->') && s !== 'origin/main');
+        } catch { /* no origin/main — nothing to compare against */ }
+
+        if (others.length > 0 || unmerged.length > 0) {
+            const parts = [];
+            if (others.length > 0) {
+                const shown = others.slice(0, 5).join(', ');
+                const more = others.length > 5 ? `, +${others.length - 5} more` : '';
+                parts.push(`${others.length} other worktree${others.length === 1 ? '' : 's'} (${shown}${more})`);
+            }
+            if (unmerged.length > 0) {
+                parts.push(`${unmerged.length} origin branch${unmerged.length === 1 ? '' : 'es'} not merged into main`);
+            }
+            context.push(
+                `Parallel work, from local refs as of the last fetch: ${parts.join('; ')}. `
+                + 'Someone may already be on what you are about to start — the authoritative check is '
+                + '`git ls-remote --heads origin` and `gh pr list --state all`.',
+            );
+        }
+    } catch { /* not a git repo, git unavailable, or an unparseable worktree list */ }
+
     // NOTE: two things used to happen here and no longer do.
     //
     // 1. `.env.local` was parsed into process.env. A hook runs in its own
