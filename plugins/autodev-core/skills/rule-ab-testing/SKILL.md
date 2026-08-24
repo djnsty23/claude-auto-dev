@@ -1,7 +1,7 @@
 ---
 name: rule-ab-testing
 description: "Every proposal gets measured against the current approach and at least one variant before it is adopted, and the measurement is reported. Load before recommending a change, writing a detector, or claiming something is cheap, fast, or better."
-when_to_use: "Always-on. Applies to any recommendation, gate, detector, or performance claim. Not user-invocable."
+when_to_use: "Before adopting any recommendation, gate, detector or performance claim — measure it against the current approach and at least one variant first."
 user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
 ---

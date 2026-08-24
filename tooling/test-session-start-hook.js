@@ -293,6 +293,81 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
         out !== null && out.hookSpecificOutput === undefined);
 }
 
+// ---- Parallel work surface ----
+//
+// The point of this block is the NEGATIVE case: a solitary clone must say
+// nothing. A line that appears unconditionally would train every session to
+// skip it, and then it is worse than absent. So each assertion below follows a
+// specific state change, and the silence before it is asserted too.
+{
+    const gitp = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+    const G = path.join(TMP, 'gitproj');
+    const ORIGIN = path.join(TMP, 'origin.git');
+    fs.mkdirSync(G, { recursive: true });
+
+    gitp(['init', '-q', '-b', 'main'], G);
+    gitp(['config', 'user.email', 'suite@example.invalid'], G);
+    gitp(['config', 'user.name', 'suite'], G);
+    gitp(['config', 'commit.gpgsign', 'false'], G);
+    fs.writeFileSync(path.join(G, 'f.txt'), 'one\n');
+    gitp(['add', '.'], G);
+    gitp(['commit', '-q', '-m', 'init'], G);
+    gitp(['init', '-q', '--bare', ORIGIN], TMP);
+    gitp(['remote', 'add', 'origin', ORIGIN], G);
+    gitp(['push', '-q', 'origin', 'main'], G);
+
+    const ctxOf = (cwd, id) =>
+        parse(run({ cwd, session_id: id, hook_event_name: 'SessionStart' }, cwd))
+            ?.hookSpecificOutput?.additionalContext || '';
+
+    // Known-positive that the fixture is real: git must actually be usable here.
+    check('parallel: the git fixture built (control)',
+        gitp(['rev-parse', '--show-toplevel'], G).status === 0);
+
+    check('a solitary clone emits no parallel-work line',
+        !ctxOf(G, 'p1').includes('Parallel work'));
+
+    // One unmerged branch on the remote.
+    gitp(['checkout', '-q', '-b', 'feature/x'], G);
+    fs.writeFileSync(path.join(G, 'f.txt'), 'two\n');
+    gitp(['commit', '-qam', 'x'], G);
+    gitp(['push', '-q', 'origin', 'feature/x'], G);
+    gitp(['checkout', '-q', 'main'], G);
+
+    let ctx = ctxOf(G, 'p2');
+    check('an unmerged origin branch is counted, singular',
+        /1 origin branch not merged into main/.test(ctx));
+    check('and it names the authoritative check rather than implying freshness',
+        ctx.includes('as of the last fetch') && ctx.includes('git ls-remote --heads origin'));
+
+    // A sibling worktree.
+    const WT = path.join(TMP, 'wt-sibling');
+    gitp(['worktree', 'add', '-q', WT, 'feature/x'], G);
+
+    ctx = ctxOf(G, 'p3');
+    check('a sibling worktree is counted and named',
+        /1 other worktree \(feature\/x\)/.test(ctx));
+
+    ctx = ctxOf(WT, 'p4');
+    check('a worktree reports its sibling, never itself',
+        /1 other worktree \(main\)/.test(ctx));
+
+    // Removing it must remove the claim — a count that only ever grows is not
+    // measuring anything.
+    gitp(['worktree', 'remove', '--force', WT], G);
+    ctx = ctxOf(G, 'p5');
+    check('removing the worktree drops the worktree clause',
+        !ctx.includes('other worktree') && /1 origin branch not merged/.test(ctx));
+
+    // A directory that is not a repo at all must stay silent and exit 0.
+    const NOTGIT = path.join(TMP, 'notgit');
+    fs.mkdirSync(NOTGIT, { recursive: true });
+    const rp = run({ cwd: NOTGIT, session_id: 'p6', hook_event_name: 'SessionStart' }, NOTGIT);
+    check('a non-repo directory: exit 0, no parallel-work line',
+        rp.status === 0 && !(parse(rp)?.hookSpecificOutput?.additionalContext || '').includes('Parallel work'));
+    check('a non-repo directory writes nothing to stderr', rp.stderr === '');
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);

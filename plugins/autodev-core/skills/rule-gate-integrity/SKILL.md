@@ -1,7 +1,7 @@
 ---
 name: rule-gate-integrity
 description: "Four ways a gate, test, or generator check passes while proving nothing: grading a copy of itself, passing on emptiness, a canary firing for the wrong reason, and a summary line read as a verdict. Load before writing a gate, a mutation harness, or any check that guards generated output."
-when_to_use: "Always-on background rules for writing gates and harnesses. Not user-invocable."
+when_to_use: "Before writing a gate, test, detector or harness — and again when one reports green."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---
