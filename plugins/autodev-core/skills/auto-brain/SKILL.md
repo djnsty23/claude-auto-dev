@@ -111,10 +111,25 @@ turn finishes" for a busy one. It never interrupts a turn, so there is no reason
 to time dispatch around what a session is doing. It still costs that session a
 full turn, so do not send twice for the same reason.
 
-**Include your own session id so they can reply.** `[measured]` both peers who
-answered a dispatch said the sender id did not resolve — they had tried
-`ListAgents`, which lists in-process subagents rather than sessions. Give them
-`mcp__ccd_session_mgmt__send_message` and your `local_...` id explicitly.
+**Include your own session id so they can reply.** `[measured 2026-08-25]` four
+peers were dispatched; **every one that answered said the sender id did not
+resolve.** They had reached for `ListAgents`, which lists in-process subagents
+rather than sessions, and nothing joins those two identifier spaces. Each had to
+guess the sender by title and one nearly gave up. A request with no return
+address is a request that arrives and cannot be answered.
+
+    Reply to: mcp__ccd_session_mgmt__send_message, session_id <yours>
+
+**Ask for SHORT rolling summaries, not only a report at the end.** `[stated
+2026-08-25]` — *"to send you short summaries with what they did so that you're
+aware at all times."* One message per **completed unit of work**: not per
+commit, not on a timer. Three to five lines — what changed, what was verified
+with the command and what it printed, what is next or blocked.
+
+Define "short" when you ask, or it will not be. The long four-part report is for
+going idle; a rolling update that grows into one costs both sides a full turn
+each time and awareness stops being cheap. At a deep context that is the
+dominant cost of coordinating at all.
 
 ### 6. Collect — do not poll
 
