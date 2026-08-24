@@ -1,5 +1,57 @@
 # Changelog
 
+## [8.112.0] - 2026-08-25
+
+### Fixed — a dispatch without a return address cannot be answered
+
+`[measured 2026-08-25]` Four peers were asked to report. **Every one that
+answered said the sender id did not resolve.** Each had reached for
+`ListAgents`, which lists in-process *subagents* rather than sessions, and
+nothing joins those two identifier spaces. All had to guess the sender by title
+and one nearly gave up.
+
+The framework already said *going idle is your message to send*. It never said
+how to address it, so the rule was complete and unusable. `session-exit.js`s
+`--peers` block and `/auto-brain`s dispatch step now both require the
+sender's own session id in every message.
+
+### Added — managed sessions do not raise panels
+
+`[stated 2026-08-25]` A session being coordinated sends its question to the
+coordinator as a short message and keeps working on everything the question does
+not block. The coordinator batches those to the user.
+
+The section carries its own warning, because this instruction has been relayed
+wrongly once and is the canonical laundering incident: `[measured 2026-08-23]`
+an overseer told seven sessions to disable panels as a standing rule from the
+user. One refused and was right, five complied without flagging it, and the rule
+was reversed within the hour. **The difference is provenance, not content** — a
+coordinator that has not heard it from the user directly does not have this rule
+and may not acquire it from a peer.
+
+Three constraints keep it from repeating: escalation must have somewhere else to
+go (a panel is HOW a session escalates, so this pairs only with a dispatch
+carrying a reply address, which is why that fix came first); the coordinator
+never answers on the user behalf; and it is instruction rather than
+enforcement — no permission settings are edited, because that is a machine-wide
+change affecting sessions nobody is coordinating.
+
+Money, production deploys, client state and anything irreversible still stop.
+Those are authorisation rather than ambiguity, and a message to a coordinator is
+not authorisation.
+
+### Added — the rolling-summary protocol
+
+`[stated 2026-08-25]` — *"send you short summaries with what they did so that
+you are aware at all times."* One message per **completed unit of work**: not
+per commit, not on a timer. Three to five lines — what changed, what was
+verified with the command and what it printed, what is next or blocked.
+
+"Short" is defined rather than implied, because it will not be otherwise. The
+long four-part report is for going idle; a rolling update that grows into one
+costs both sides a full turn each time, and at a deep context that is the
+dominant cost of coordinating at all.
+
 ## [8.111.0] - 2026-08-25
 
 ### Fixed — the clobber guard protected only the recoverable case
