@@ -1,5 +1,78 @@
 # Changelog
 
+## [8.108.0] - 2026-08-25
+
+### Added — an exit procedure, because there was none
+
+Turn-level state saves itself (the Stop hook writes a fleet heartbeat) and an
+*archived* session gets a stub from `session-sweep --write-resume`. A **live**
+session ending had nothing: what was unpushed, what was open, what was decided,
+all of it in a transcript nobody reads.
+
+`session-exit.js` writes `RESUME.md` from state it **reads** — branch, unpushed
+commits against the tracked upstream, uncommitted files, open PRs, worktrees.
+Never from recollection, and that is the point rather than a detail. `[measured
+2026-08-24]` a session reported "four unpushed commits" from memory; the
+measured answer was one.
+
+**Null is not empty, and that is the whole design.** "No unpushed commits" and
+"git was never asked" are opposite facts that flatten to the same blank section,
+and the blank is the one a reader trusts. Every section renders three ways:
+populated, `None. A real zero: the command ran and returned nothing`, or
+`COULD NOT READ` naming why. No upstream tracked, `gh` unauthenticated, and
+not-a-git-repo each say so rather than rendering as clean.
+
+**It writes one file: its own.** `--peers` prints the request to send rather
+than pretending to write theirs. A session cannot read a peer's working tree,
+uncommitted changes or decisions — asserting them is how every wrong steer gets
+made — so it asks, and warns against joining peers on id, since pipe names and
+session-list ids are separate identifier spaces and one session can look like
+two.
+
+26 assertions against throwaway git repos including a bare origin. Mutation:
+collapsing null onto the empty branch, the exact edit a careless refactor makes,
+fails 3 of 26 and they are the three pinning the distinction.
+
+`/brain`'s "Before you finish" now runs it instead of describing what a handoff
+should contain.
+
+### Fixed — `watch-panels` reported a broken fleet-status once, then went silent
+
+`if (consecutiveErrors === 3)` fires exactly once, ever. The intent above it is
+right — "only shout once it is persistent" — but a fleet-status broken for hours
+announced itself at minute three and then said nothing, so the watcher looked
+healthy and quiet while it was scanning nothing. That is the muted-detector
+failure the branch exists to prevent, reintroduced by the branch itself. It now
+re-announces at 3 then every 30, carrying the count so a repeat is
+distinguishable from a fresh failure.
+
+It also carried the **class 28** defect fixed in `fleet-overlap` earlier:
+`SCRIPTS` was built from `process.env.USERPROFILE` with no fallback, pointing at
+one specific clone. Found by running that class's own detection across the repo
+— the step the registry instructs and I had skipped. The sweep validated the
+entry's triage too: 16 hits, 14 legitimate home targets, 1 prose false positive,
+1 real defect.
+
+### Added — suites for the last six never-loaded scripts
+
+`watch-panels` 53, `fleet-board` 62, `mine-fixes` 45, `telemetry-report` 66,
+`claudemd-audit` 48, `steer-log` 85. The `claudemd-audit` one is the notable
+one: eight precision rules, each learned from a false positive, each now pinned
+by the fixture it exists to suppress *beside* a control in the same repo that
+must still fire.
+
+**Coverage: 13 never-loaded plugin files → 3.** `check:functions` also gained a
+caveat on that list — V8 writes its dump on normal exit, never on SIGTERM, so a
+long-running subject a suite `kill()`s produces no coverage and lands there
+despite being exercised. `watch-panels` and `fleet-board` carry 115 assertions
+between them and appear in it.
+
+**A defect found and deliberately left alone**, pinned as-is: git preserves a
+literal `0x01` in a commit subject, and `mine-fixes` splits on `0x01` into three
+fields — such a commit counts as a fix and as rework but reaches no class.
+Mutation-proved: repairing it reorders the ranking, which is the wrong-class-on-
+top hazard the script exists to avoid.
+
 ## [8.107.0] - 2026-08-24
 
 ### Fixed — a guard against a commit-push loop that counted the clock

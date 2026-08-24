@@ -9,7 +9,7 @@ not answer says so rather than rendering as empty.
 | directory | `C:\Users\nstyp\Downloads\code\autodev` |
 | branch | `release/8.107.0` |
 | upstream | `origin/release/8.107.0` |
-| HEAD committed | 2026-08-25T00:14:37+03:00 |
+| HEAD committed | 2026-08-25T00:34:15+03:00 |
 
 **Re-read before acting on any of this.** A resume file is a snapshot, and
 the two facts most likely to have moved are the two below: someone may have
@@ -17,13 +17,13 @@ pushed, and someone may have merged.
 
 ## Unpushed commits
 
+- `3309814 feat(session-exit): write a RESUME file from measured state, and ask peers for theirs`
 - `4b4605c fix(watch-panels): it reported a broken fleet-status ONCE, then went silent`
 
 ## Uncommitted changes
 
 - `?? --`
 - `?? .claude/`
-- `?? plugins/autodev-core/scripts/session-exit.js`
 
 ## Open PRs
 
@@ -37,7 +37,7 @@ touching it: a dirty tree you did not dirty means someone is in there.
 ```
 C:/Users/nstyp/claude-auto-dev                                 86bbe22 [main]
 C:/Users/nstyp/claude-auto-dev/.claude/worktrees/fix-injection 106467f [fix/shell-injection-in-shipped-scripts]
-C:/Users/nstyp/Downloads/code/autodev                          4b4605c [release/8.107.0]
+C:/Users/nstyp/Downloads/code/autodev                          3309814 [release/8.107.0]
 ```
 
 ## What a reader should do first
