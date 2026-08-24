@@ -245,8 +245,88 @@ console.log('\n=== --sweep over a controlled population ===');
     check('sweep says NOT RUN on a missing root', (res.stdout || '').includes('NOT RUN'), `out=${JSON.stringify((res.stdout || '').slice(0, 120))}`);
 }
 
+console.log('\n=== --selftest: the detector proves it can fire ===');
+
+{
+    const script = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-queue-drained.js');
+    const res = spawnSync('node', [script, '--selftest'], { encoding: 'utf8', windowsHide: true });
+    const out = res.stdout || '';
+
+    check('selftest exits 0', res.status === 0, `exit=${res.status} tail=${JSON.stringify(out.slice(-200))}`);
+    check('selftest reports PASS', /selftest: PASS/.test(out), `tail=${JSON.stringify(out.slice(-200))}`);
+    check('no selftest assertion failed', !/^ {2}FAIL/m.test(out), `out=${JSON.stringify(out.slice(0, 400))}`);
+
+    // The count in the PASS line is a claim about how much ran. Compare it
+    // against the ok lines actually printed rather than restating a number
+    // here: an assertion added without updating the message, or one that stops
+    // being reached, then shows up as a mismatch instead of passing quietly.
+    const okLines = (out.match(/^ {2}ok {2}/gm) || []).length;
+    const claimed = (out.match(/PASS - (\d+) assertions/) || [])[1];
+    check('selftest ran every assertion its summary claims',
+        !!claimed && okLines === Number(claimed), `printed ${okLines} ok line(s), claims ${claimed}`);
+
+    // The comma-in-a-label case is the regression the selftest exists for. If
+    // someone deletes it the count above still reconciles, so name it.
+    check('selftest still exercises the comma-label regression',
+        out.includes('a label containing a comma survives matching'), 'the named assertion is gone');
+}
+
+console.log('\n=== the CLI entry points: --transcript and hook stdin ===');
+
+// The CLI keys its repeat-suppression state on the resolved transcript path, in
+// the OS temp dir. Each route gets its OWN fixture so neither run demotes the
+// other's advisory, and both keys are removed at the end.
+const cliCopy = path.join(tmp, 'cli-carried.jsonl');
+const stdinCopy = path.join(tmp, 'stdin-carried.jsonl');
+fs.copyFileSync(carried, cliCopy);
+fs.copyFileSync(carried, stdinCopy);
+const stateFileFor = (f) => path.join(os.tmpdir(), 'autodev-queue-'
+    + require('crypto').createHash('sha256').update(path.resolve(f)).digest('hex').slice(0, 16) + '.json');
+
+{
+    const script = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-queue-drained.js');
+    const res = spawnSync('node', [script, '--transcript', cliCopy], { encoding: 'utf8', windowsHide: true });
+    const out = res.stdout || '';
+
+    check('--transcript exits 0', res.status === 0, `exit=${res.status}`);
+    check('--transcript prints the exact population it scanned',
+        /\[queue\] 2 answered panel\(s\) scanned, 3 actionable selection\(s\)\./.test(out),
+        `out=${JSON.stringify(out.slice(0, 200))}`);
+    check('--transcript names the carried item', out.includes(CARRIED), `out=${JSON.stringify(out.slice(0, 300))}`);
+    check('--transcript prints the standing list in full on first sight',
+        out.includes('standing work order (most recent panel)'), `out=${JSON.stringify(out.slice(0, 400))}`);
+}
+
+{
+    // The production route: a hook pipes its payload in and passes no flags.
+    const script = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-queue-drained.js');
+    const res = spawnSync('node', [script], {
+        input: JSON.stringify({ transcript_path: stdinCopy }),
+        encoding: 'utf8', windowsHide: true,
+    });
+    const out = res.stdout || '';
+
+    check('a transcript_path on stdin is honoured', out.includes('CARRIED FORWARD'), `out=${JSON.stringify(out.slice(0, 300))}`);
+    check('the stdin route names the same carried item', out.includes(CARRIED), `out=${JSON.stringify(out.slice(0, 300))}`);
+    check('the stdin route exits 0', res.status === 0, `exit=${res.status}`);
+}
+
+{
+    const script = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-queue-drained.js');
+    const res = spawnSync('node', [script, '--transcript', path.join(tmp, 'no-such-transcript.jsonl')], {
+        encoding: 'utf8', windowsHide: true,
+    });
+    const out = res.stdout || '';
+    check('an unreadable transcript says NOT RUN rather than reporting nothing found',
+        out.includes('[queue] NOT RUN'), `out=${JSON.stringify(out.slice(0, 200))}`);
+    check('and still exits 0', res.status === 0, `exit=${res.status}`);
+}
+
+for (const f of [cliCopy, stdinCopy]) {
+    try { fs.unlinkSync(stateFileFor(f)); } catch { /* never written, or already gone */ }
+}
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ }
 
-const total = 36;
+const total = 50;
 console.log(`\ntest-queue-drained: ${failures ? `FAIL (${failures} of ${total})` : `PASS (${total} assertions)`}\n`);
 process.exit(failures ? 1 : 0);

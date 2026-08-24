@@ -288,6 +288,54 @@ function run() {
   const badWarm = badRows.find((r) => r.sessionId === ids[cases.findIndex((c) => c.id === 'merged-warm')]);
   check('unparseable floor value falls back, floor still holds', badWarm && badWarm.state, 'ACTIVE');
 
+  // ---- --write-resume -----------------------------------------------------
+  // Runs BEFORE --archive-orphaned on purpose: that flag marks SAFE records
+  // archived, which drops them out of `live` and would leave this with nothing
+  // to write. The stub is the handoff a reader gets INSTEAD of the transcript,
+  // so an empty or unattributed one is the failure worth catching.
+  {
+    const RESUME_CWD = path.join(ROOT, 'resume-cwd');
+    fs.mkdirSync(RESUME_CWD, { recursive: true });
+    const w = spawnSync(process.execPath, [SCRIPT, '--write-resume'], {
+      encoding: 'utf8',
+      cwd: RESUME_CWD,               // stubs land under the CALLER's cwd
+      env: { ...process.env, SESSION_SWEEP_STORE: STORE, SESSION_SWEEP_OWNER: '' },
+      timeout: 180000,
+    });
+    const out = w.stdout || '';
+    check('write-resume exits 0', w.status, 0);
+
+    // Derived from the same run's own JSON verdicts, never restated: if the
+    // safe set changes, the expectation moves with it instead of going stale.
+    const safeRows = rows.filter((r) => r.safe);
+    check('the safe set is non-empty, so the count below is not vacuous', safeRows.length > 0, true);
+    check('it reports one stub per SAFE row',
+      new RegExp(`Wrote ${safeRows.length} resume stub`).test(out), true);
+
+    const outDir = path.join(RESUME_CWD, '.claude', 'handoffs');
+    const written = fs.existsSync(outDir) ? fs.readdirSync(outDir).filter((f) => f.endsWith('.md')) : [];
+    check('that many files really exist on disk', written.length, safeRows.length);
+
+    // The clean-pushed case is SAFE, so it must have a stub — and the stub has
+    // to carry what a reader needs to pick the work back up. A file that exists
+    // but names no session is worse than none.
+    const stubFile = path.join(outDir, 'resume-suite-clean-pushed.md');
+    check('the SAFE clean-pushed session got a stub', fs.existsSync(stubFile), true);
+    const stub = fs.existsSync(stubFile) ? fs.readFileSync(stubFile, 'utf8') : '';
+    const cleanId = ids[cases.findIndex((c) => c.id === 'clean-pushed')];
+    check('the stub is titled for the session', stub.includes('# RESUME — suite:clean-pushed'), true);
+    check('the stub names the session id it belongs to', stub.includes(cleanId), true);
+    check('the stub carries the verdict that made it safe', /\| verdict \| STALE/.test(stub), true);
+    check('the stub records the worktree risk explicitly', stub.includes('| worktree risk | none |'), true);
+    check('the stub points at the worktree on disk',
+      stub.includes(cases.find((c) => c.id === 'clean-pushed').wt), true);
+
+    // A BLOCKED row must never get a stub: a handoff for a session whose work
+    // exists in exactly one place reads as "archived and handed over".
+    check('no stub for the dirty (blocked) session',
+      fs.existsSync(path.join(outDir, 'resume-suite-dirty.md')), false);
+  }
+
   // ---- --archive-orphaned -------------------------------------------------
   const orphanCase = cases.find((c) => c.id === 'orphan-ws-safe');
   const liveCase = cases.find((c) => c.id === 'live-ws-safe');
