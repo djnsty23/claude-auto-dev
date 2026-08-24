@@ -272,3 +272,26 @@ available.
 Refresh the volatile facts in the kickoff, and write anything non-obvious into a
 registry rather than into the conversation. A decision that lives only in chat
 is invisible to every session that did not have it.
+
+**Run the exit procedure rather than composing one.** `[measured 2026-08-24]` a
+session reported "four unpushed commits" from memory; the measured answer was
+one. State recalled at the end of a long turn is the least reliable state there
+is, and a handoff written from it is that error made durable.
+
+```powershell
+node "$B\session-exit.js" --peers
+```
+
+It writes `RESUME.md` in the working directory from state it READS — branch,
+unpushed commits against the tracked upstream, uncommitted files, open PRs,
+worktrees — and it distinguishes three outcomes per section rather than two.
+"No unpushed commits" and "git was never asked" are opposite facts that flatten
+to the same blank, so an unanswerable section says COULD NOT READ and names why.
+Take the blank as a hazard wherever you see one elsewhere.
+
+**It writes one file: yours.** `--peers` prints a request to send, not a report
+to file on anyone's behalf. You cannot read a peer's working tree, uncommitted
+changes or decisions, so ask each addressable session to run it and answer for
+itself. Asking asserts nothing and costs one turn; guessing becomes built work.
+Join peers on cwd AND branch when you do — ids from the pipe and from the
+session list are separate identifier spaces, so one session can look like two.

@@ -219,7 +219,12 @@ console.log(`${all.length} named function(s) IN THE LOADED FILES · ${all.length
 if (neverLoaded.length) {
     console.log('  NEVER LOADED - not one line of these ran, so nothing in them is checked:');
     for (const f of neverLoaded) console.log(`      ? ${f}`);
-    console.log('  These are UNVERIFIED, not covered. Drive them from a suite.');
+    console.log('  These are UNVERIFIED, not covered - UNLESS a suite drives them as a subprocess it KILLS.');
+    console.log('  V8 writes its dump on normal exit, never on SIGTERM, so a long-running');
+    console.log('  subject (a monitor, a server) that a suite kills produces no coverage at');
+    console.log('  all and lands here despite being exercised. Measured 2026-08-25:');
+    console.log('  watch-panels.js and fleet-board.js carry 53 and 62 behavioural assertions');
+    console.log('  and appear above. Check for a tooling/test-<name>.js before writing one.');
 }
 if (loadedNoNamed.length) {
     console.log('  LOADED but contributing no named function to the census:');
