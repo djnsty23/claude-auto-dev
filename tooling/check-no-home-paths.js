@@ -63,6 +63,8 @@ const PLACEHOLDER = new Set([
     'x', 'y', 'me', 'user', 'username', 'USERNAME', 'name', 'NAME',
     'changeme', 'CHANGEME', 'runner', 'RUNNER', 'runneradmin',
     'my-project', 'someone', 'yourname', 'you', 'foo', 'bar', 'test',
+    // Standard fake names. A release note describing this check will use one.
+    'jbloggs', 'jdoe', 'johndoe', 'janedoe', 'alice', 'bob',
 ]);
 
 // A trailing ellipsis is the other documentation form: `C:\Users\...`.
@@ -72,9 +74,21 @@ function isPlaceholder(seg) {
     return PLACEHOLDER.has(seg) || PLACEHOLDER.has(seg.toLowerCase()) || ELLIPSIS.test(seg);
 }
 
+// Returns null when git cannot answer, never an empty list.
+//
+// The first version let execFileSync throw, so the whole check died in any tree
+// without git — including the fixture copies `test-validate` builds, which
+// turned "no git here" into two red suites. A crash and a clean zero are both
+// wrong answers to "are there home paths"; the right one is COULD NOT CHECK,
+// which is the same distinction this repo's other gates already make and which
+// I skipped while writing a gate about not skipping it.
 function tracked() {
-    const out = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' });
-    return out.split('\n').map((s) => s.trim()).filter(Boolean);
+    try {
+        const out = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' });
+        return out.split('\n').map((s) => s.trim()).filter(Boolean);
+    } catch {
+        return null;
+    }
 }
 
 function scan(files) {
@@ -133,6 +147,14 @@ if (process.argv.includes('--selftest')) {
 }
 
 const files = tracked();
+if (files === null) {
+    // Exit 0: this is not a failure of the tree, it is the absence of a way to
+    // enumerate it. Saying so beats both crashing and reporting a clean zero.
+    console.log('[no-home-paths] COULD NOT CHECK — git could not list tracked files here.');
+    console.log('  Not a git repository, or git is unavailable. This is NOT a clean result.');
+    process.exit(0);
+}
+
 const { scanned, hits } = scan(files);
 
 if (hits.length) {

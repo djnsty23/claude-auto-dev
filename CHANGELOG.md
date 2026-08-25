@@ -35,7 +35,7 @@ being silenced within a day, which is the failure that actually loses a leak. A
 short real username still fires — `abc` is not on the list.
 
 Verified both directions: clean across 236 tracked files, and a planted
-`C:/Users/jbloggs` is caught. The selftest pins four shapes it must catch and
+lookalike under a realistic username is caught. The selftest pins four shapes it must catch and
 three near-misses it must not, because a check that flags the word "home" in
 prose is one somebody silences.
 
