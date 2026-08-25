@@ -408,6 +408,19 @@ function checkNoLegacyArtifacts() {
 // This repo is public and the codebases it learned from are not. Delegates to
 // the dedicated checker so there is exactly one denylist, not a copy here that
 // drifts from it.
+// No tracked file may carry anyone's home directory. This repo is PUBLIC, and
+// checkNoPrivateNames protects project NAMES rather than paths -- a home
+// directory is neither a name nor a secret, so nothing was looking at it.
+// A generator added 2026-08-25 wrote one into a committed RESUME.md and it
+// survived the whole suite.
+function checkNoHomePaths() {
+  const script = path.join(ROOT, 'tooling', 'check-no-home-paths.js');
+  if (!fs.existsSync(script)) return log('WARN', 'check-no-home-paths.js is missing');
+  const r = cp.spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  if (r.status === 0) log('PASS', (r.stdout || '').trim().replace(/^\[no-home-paths\]\s*/, 'No home paths: '));
+  else log('FAIL', 'a home path appears in a tracked file — run node tooling/check-no-home-paths.js');
+}
+
 function checkNoPrivateNames() {
   const script = path.join(ROOT, 'tooling', 'check-no-private-names.js');
   if (!fs.existsSync(script)) return log('WARN', 'check-no-private-names.js is missing');
@@ -600,6 +613,7 @@ checkShellGlobQuoting();
 checkAgents();
 checkNoLegacyArtifacts();
 checkNoPrivateNames();
+checkNoHomePaths();
 checkNoStaleMutationBackups();
 checkUntestedHooks();
 checkHookSpawnsHidden();

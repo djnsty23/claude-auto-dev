@@ -37,6 +37,24 @@ const val = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] 
 
 const CWD = process.cwd();
 
+// RESUME.md gets COMMITTED, and a committed file must not carry a home path.
+//
+// `[measured 2026-08-25]` this script put `C:\Users\<name>\...` into the one
+// RESUME.md it had written, in a PUBLIC repo. The private-name gate did not
+// catch it — that gate protects project NAMES, and a home directory is neither
+// a project name nor a secret, so nothing was looking. It was the only personal
+// path in 246 tracked files, and this script put it there.
+//
+// Redact rather than omit: a reader still needs to know WHICH directory the
+// snapshot describes, and `~/code/thing` answers that without naming anyone.
+const HOMEDIR = process.env.USERPROFILE || process.env.HOME || '';
+function tilde(p) {
+    if (!HOMEDIR || !p) return p;
+    const norm = (s) => s.split(path.sep).join('/');
+    const a = norm(p), b = norm(HOMEDIR);
+    return a.toLowerCase().startsWith(b.toLowerCase()) ? '~' + a.slice(b.length) : a;
+}
+
 function run(cmd, a) {
     try {
         return execFileSync(cmd, a, { cwd: CWD, encoding: 'utf8', stdio: 'pipe' }).trim();
@@ -100,7 +118,7 @@ const lines = [
     '',
     '| field | value |',
     '|---|---|',
-    '| directory | `' + CWD + '` |',
+    '| directory | `' + tilde(CWD) + '` |',
     '| branch | ' + (branch ? '`' + branch + '`' : '_not a git repo_') + ' |',
     '| upstream | ' + (upstream ? '`' + upstream + '`' : '_none tracked_') + ' |',
     '| HEAD committed | ' + (headWhen || '_not read_') + ' |',
@@ -136,7 +154,7 @@ if (worktrees) {
     lines.push('## Worktrees', '',
         'Another session may hold one of these. Run `git status` in a tree before',
         'touching it: a dirty tree you did not dirty means someone is in there.',
-        '', '```', worktrees, '```', '');
+        '', '```', worktrees.split('\n').map(tilde).join('\n'), '```', '');
 }
 
 // The closing advice is DERIVED, not fixed.
@@ -190,7 +208,7 @@ if (inRepo) {
 lines.push('## What a reader should do first', '');
 lines.push.apply(lines, steps);
 lines.push('');
-lines.push('_These steps were derived from what is actually in `' + CWD + '`._');
+lines.push('_These steps were derived from what is actually in `' + tilde(CWD) + '`._');
 lines.push('');
 
 const doc = lines.join('\n');
