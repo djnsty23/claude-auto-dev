@@ -1,5 +1,44 @@
 # Changelog
 
+## [8.114.0] - 2026-08-25
+
+### Fixed — a generator wrote a home path into a PUBLIC repo
+
+`session-exit.js`, shipped the same day, put an absolute home directory into a
+committed `RESUME.md` — twice in the header table and again inside an embedded
+`git worktree list`. It was the **only** personal path in 246 tracked files and
+it survived the entire suite.
+
+Nothing was looking. `check-no-private-names` protects project NAMES and stores
+them as digests, which is right for names and blind to paths by construction: a
+home directory is neither a project name nor a secret.
+
+The generator now renders `~/Downloads/code/thing`. Redacted rather than
+omitted — a reader still needs to know WHICH directory a snapshot describes;
+they do not need to know whose.
+
+### Added — `check-no-home-paths`, and its first run was 0% precision
+
+Matches the SHAPE rather than a username, so it fires for any user on any
+machine including a CI runner. Wired into `validate` as a hard gate.
+
+**Its first run reported 24 hits and every one was a placeholder** —
+`/Users/...`, `C:/Users/x`, `/Users/CHANGEME`, `C:\\Users\\RUNNER`,
+`/home/my-project`. Zero true positives. Documentation about home paths has to
+be able to show one, and a rule-windows skill that cannot print the shape cannot
+teach the rule it exists for.
+
+So it carries a placeholder exception list, with the reasoning in the source,
+because an exception list is usually the wrong answer. What it could hide is a
+real person named `x` or `runneradmin`; what it prevents is a 0%-precision check
+being silenced within a day, which is the failure that actually loses a leak. A
+short real username still fires — `abc` is not on the list.
+
+Verified both directions: clean across 236 tracked files, and a planted
+lookalike under a realistic username is caught. The selftest pins four shapes it must catch and
+three near-misses it must not, because a check that flags the word "home" in
+prose is one somebody silences.
+
 ## [8.113.0] - 2026-08-25
 
 ### Fixed — `/auto-brain` told coordinators to read a field that cannot answer
