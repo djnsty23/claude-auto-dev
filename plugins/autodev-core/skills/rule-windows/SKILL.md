@@ -4,6 +4,8 @@ description: "Windows-specific development rules: cmd /c wrappers for MCP, dev s
 when_to_use: "Background rules that apply only on Windows hosts. Not user-invocable."
 user-invocable: false
 allowed-tools: Read, Grep, Glob
+paths:
+  - "**/*.ps1"
 ---
 
 ## MCP Servers

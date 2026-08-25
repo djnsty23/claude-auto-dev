@@ -227,8 +227,26 @@ function checkSkillFrontmatter() {
       }
 
       // Both invocation paths off makes a skill unreachable by anyone.
-      if (String(fm['user-invocable']) === 'false' && String(fm['disable-model-invocation']) === 'true') {
-        log('FAIL', `${rel}: user-invocable:false AND disable-model-invocation:true — nothing can ever load this skill`);
+      //
+      // The second conjunct used to be `disable-model-invocation === 'true'`,
+      // and that field appears ZERO times anywhere in plugins/ — so this gate
+      // could not fire, and had never fired. It read as coverage of exactly the
+      // defect it could not see. `[measured 2026-08-25]` a sweep found NINE
+      // skills in the real shape: user-invocable:false with no paths glob, so
+      // no user can type them and no file read loads them. Among them were
+      // rule-verification, rule-gate-integrity and rule-diagnosis — the three
+      // skills that exist to describe this failure.
+      //
+      // Model-invocation is still possible in principle, via the skill listing.
+      // It is not a delivery route you can rely on: that listing is budget-
+      // capped at ~1% of the context window, descriptions are dropped
+      // least-invoked-first, and `[measured]` all ~56 autodev-core skills
+      // currently arrive as bare names with no description at all. A trigger
+      // that depends on text the harness has already discarded is not a trigger.
+      //
+      // So: a skill must be typeable, or loadable from a path. One or the other.
+      if (String(fm['user-invocable']) === 'false' && !hasPathTrigger) {
+        log('FAIL', `${rel}: user-invocable:false and no "paths:" glob — no user can type it and no file read loads it. Add a paths glob, or set user-invocable:true.`);
         ok = false;
       }
     }

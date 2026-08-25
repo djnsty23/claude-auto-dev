@@ -4,6 +4,11 @@ description: "The eight ways a change passes typecheck, build, and a clean conso
 when_to_use: "Before calling a change complete, especially when typecheck, build and console are all clean."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
+paths:
+  - "**/*.tsx"
+  - "**/*.jsx"
+  - "**/*.vue"
+  - "**/*.svelte"
 ---
 
 # Ramifications

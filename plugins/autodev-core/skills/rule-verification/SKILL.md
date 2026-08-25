@@ -4,6 +4,8 @@ description: "What counts as done for each kind of change: the required verifica
 when_to_use: "Before claiming a change is done — pick the verification its task type actually requires."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
+paths:
+  - "**/prd.json"
 ---
 
 # Verification Rules
