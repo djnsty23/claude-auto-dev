@@ -1,5 +1,85 @@
 # Changelog
 
+## [8.119.0] - 2026-08-25
+
+### Corrected: v8.117.0 shipped a skill-invocation number that read one channel of two
+
+`[measured 2026-08-25]` The `phase` skill and the 8.117.0 notes both said that
+across 555 transcripts in seven days, exactly ONE of this plugin's invocable
+skills had ever been invoked.
+
+That is true of the Skill-tool channel and false as a statement about usage. A
+person typing `/autodev-core:brain` is not recorded in the `"skill"` field at
+all. It lands in a `<command-name>` block, and the naive grep never looked there.
+
+The control that caught it: `autodev-core:brain` appears **2,138 times** in the
+raw transcripts and **zero times** in the field the claim was counted from. It
+was invoked 17 times in the window. `audit` 11 times. `auto-brain` 3.
+
+Corrected figure, both channels, 558 transcripts and 744 MB:
+
+| | reached |
+|---|---|
+| by the MODEL choosing (Skill tool) | **1** of 45 (`rule-diagnosis`, once) |
+| by a PERSON typing a slash command | **3** of 45 (`brain`, `audit`, `auto-brain`) |
+| by neither | **41** of 45 |
+
+The split is the finding, not the total. A handful of skills are reachable by
+hand and the model-initiated channel is effectively dead, and those are different
+problems needing different fixes. A merged count cannot tell you which you have,
+which is why the report now prints them separately and always will.
+
+### Added: analyze-skill-invocations, so this is tracked rather than re-derived
+
+`npm run check:skills` for the selftest; run it directly for the real number. It
+reads both channels, separates auto-loaded `rule-*` hits from chosen ones, prints
+the population it scanned, and refuses to report a zero TOTAL as a finding: a
+zero exits **2** (PROBE BROKEN, the field name probably changed) rather than
+**1** (a real reachability finding). Those two look identical in output and are
+opposite in meaning.
+
+Mutation tested against the historical bug itself. Dropping the command channel
+kills five assertions including "a skill reached ONLY by slash command is counted
+as fired". Counting `rule-*` auto-loads as chosen kills its own assertion.
+Reporting a zero total as a finding kills the PROBE BROKEN pair.
+
+### Changed: workflow-liveness now covers loops and tasks, not only Actions
+
+A loop can live in three places and 8.118.0 could only see one of them.
+
+- `--repo owner/name` GitHub Actions workflows carrying a cron, as before
+- `--log label=path=minutes` anything whose file mtime advances when it runs.
+  The portable one, and the only kind that can see a loop living nowhere an API
+  does. It reads MTIME rather than parsing timestamps out of the file, because a
+  log written by `cmd` carries a locale-formatted date and a parser that failed
+  on an unfamiliar one would report NEVER RAN for a healthy job.
+- `--task name=minutes` a Windows scheduled task, judged on ATTENDANCE ONLY.
+  `[measured]` a task whose script exits 1 still reports `LastTaskResult=0`,
+  because `wscript.exe` returns its own status rather than the child's. A monitor
+  keyed on that field would show a permanently green job that reports a finding
+  every day, so this reads `LastRunTime` and nothing else.
+
+New verdict **MISSING**, and it is fatal. A subject that is named and absent is a
+misconfiguration, and the premise of this whole tool is that a thing which
+silently is not there looks identical to a thing that is fine. UNKNOWN stays
+non-fatal on purpose: it means the subject exists and only its cadence could not
+be read, and making that red would leave the check permanently red for any
+monthly cron. A permanently red gate gets muted.
+
+Also fixed: PowerShell's error text printed above the report and buried the
+verdict, and a diagnostic dumped an entire command line onto the row it belonged
+to.
+
+### Verified
+
+`npm test`: **48/48 suites, exit 0**, before and after the bump.
+
+Both new suites are hermetic, driving their scripts as subprocesses against
+fixture trees rather than this machine's real state. Live run of the extended
+liveness check: 23 subjects across 3 repos, 2 logs and 3 tasks, with the log and
+task readings of the same two jobs agreeing exactly at 11m and 94m from
+independent sources.
+
 ## [8.118.0] - 2026-08-25
 
 ### Added: workflow-liveness, because a job that never runs emits nothing
