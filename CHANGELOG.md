@@ -1,5 +1,57 @@
 # Changelog
 
+## [8.122.0] - 2026-08-25
+
+### Fixed: a timing budget that produced false reds under load, after two wrong fixes
+
+`test-image-scan-hook` asserts the hook's own work stays under 150 ms. It failed
+during a full `test-all` at samples 286/475/437 against a 202 ms budget while
+passing standalone, and the hook was healthy the whole time.
+
+The existing design was already careful: it measured Node startup as a baseline,
+budgeted +150 ms on top, and took min-of-3 on both sides specifically to survive
+a spike. It still failed, because ALL THREE samples were slow, so taking the
+minimum could not help.
+
+**Two fixes were attempted and both disproved by running them.** Recorded in the
+file, because each looked correct and reading why is cheaper than repeating them.
+
+1. **Min of the per-pair differences.** Biased low: the minimum lands on
+   whichever pair had the slowest baseline. Produced -182.8 ms from a 60 ms hook
+   against a 243 ms bare node, and an assertion that goes hundreds of
+   milliseconds negative sails through the regression it exists to catch.
+2. **Interleaved floor-to-floor, min(total) minus min(bare).** Still flaked, at
+   188.6 ms from floors of 234 total against 46 bare, on an unmutated hook.
+   Alternating samples land on opposite phases when load oscillates faster than
+   the sampling.
+
+The root problem is that no wall-clock comparison across separate process spawns
+is reliable on a loaded machine. More samples raise the cost without removing the
+failure.
+
+**So it now refuses to judge when the machine is too noisy, and says so.**
+Detected from the baseline's own spread, which needs no knowledge of the hook: a
+bare-node max/min above 2.5x prints NOT MEASURED for that case. A false red is
+worse than a false green here, because it looks like diligence, so it gets acted
+on, and the action is a change to working code.
+
+**Skipping every case is not a pass.** If no case was measurable the check had no
+subject, so it fails rather than reporting green, which stops absent coverage
+reading as coverage.
+
+### Verified
+
+Two consecutive full `npm test` runs: **48/48, exit 0**, with the noise gate
+skipping 2 cases in one run and 4 in the other under real parallel load. That is
+the condition the old assertion failed on.
+
+Mutation tested both ways. A 400 ms delay injected into the hook fails the budget
+at 404.4 ms in the first clean window it gets. Forcing every case unmeasurable
+fails on "0 of 7 timed" rather than passing silently.
+
+Measured incidentally: the hook's actual own work is **2.5 to 8.3 ms**, not the
+234 ms the old assertion implied. It was reporting machine load.
+
 ## [8.121.0] - 2026-08-25
 
 ### Investigated: why 41 of 45 skills never fire, and why both obvious fixes are wrong
