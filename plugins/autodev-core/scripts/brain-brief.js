@@ -157,7 +157,7 @@ async function pool(items, limit, fn) {
 
 function hours(ms) { return Math.round((ms / 3600000) * 10) / 10; }
 function shortAge(min) {
-    if (min < 60) return min + 'm';
+    if (min < 60) return Math.round(min) + 'm';
     if (min < 1440) return (Math.round(min / 6) / 10) + 'h';
     return (Math.round(min / 144) / 10) + 'd';
 }
@@ -466,20 +466,23 @@ async function sectionOwnership(fleet, repoIndex) {
 
 function readRepoConfig() {
     if (!isFile(CONFIG_PATH)) {
-        return { repos: [], note: 'no config at ' + CONFIG_PATH + ' - add {"repos":["<path>",...]} to cover repos with no live session' };
+        return { repos: [], retired: [], note: 'no config at ' + CONFIG_PATH + ' - add {"repos":["<path>",...]} to cover repos with no live session' };
     }
     try {
         const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
         const list = Array.isArray(parsed) ? parsed : (parsed.repos || []);
+        const retired = Array.isArray(parsed) ? [] : (parsed.retired || []);
         const good = [], bad = [];
         for (const p of list) (isDir(p) ? good : bad).push(p);
         return {
             repos: good,
+            retired,
             note: 'config ' + CONFIG_PATH + ': ' + list.length + ' listed, ' + good.length + ' present' +
-                (bad.length ? ', MISSING: ' + bad.join(', ') : ''),
+                (bad.length ? ', MISSING: ' + bad.join(', ') : '') +
+                (retired.length ? ', ' + retired.length + ' retired (named below, not a gap)' : ''),
         };
     } catch (e) {
-        return { repos: [], note: 'COULD NOT READ config ' + CONFIG_PATH + ': ' + e.message };
+        return { repos: [], retired: [], note: 'COULD NOT READ config ' + CONFIG_PATH + ': ' + e.message };
     }
 }
 
@@ -513,6 +516,26 @@ async function resolveRoots(dirs) {
 
 async function discoverRepos(fleet) {
     const cfg = readRepoConfig();
+
+    // A retired repo is excluded ON PURPOSE, and it is named in the output for
+    // that reason. Dropping it silently would leave a future session unable to
+    // tell a deliberate retirement from a config someone edited by accident,
+    // which is the shape where an absent check reads as a passing one.
+    //
+    // Resolve each retired path to its repo ROOT before excluding, so the
+    // exclusion still holds for a repo reached through a worktree or a session
+    // cwd rather than through the literal path in the config.
+    const retiredRoots = new Set();
+    const retiredNames = [];
+    for (const rp of cfg.retired || []) {
+        if (!isDir(rp)) { retiredNames.push(baseName(rp) + '   (path gone, nothing to exclude)'); continue; }
+        const rr = await run('git', ['-C', rp, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: rp });
+        if (!rr.ok) { retiredNames.push(baseName(rp) + '   (not a git tree, nothing to exclude)'); continue; }
+        const rroot = path.normalize(path.dirname(rr.stdout.trim()));
+        retiredRoots.add(rroot);
+        retiredNames.push(baseName(rroot));
+    }
+
     const sessionDirs = fleet.error ? [] : fleet.data.sessions
         .filter((s) => !s.isArchived && s.idleMinutes < LIVE_MINUTES)
         .map((s) => s.originCwd || s.cwd)
@@ -536,10 +559,26 @@ async function discoverRepos(fleet) {
         index.set(p, root);
     }
 
+    for (const root of [...roots.keys()]) if (retiredRoots.has(root)) roots.delete(root);
+
+    // "Recently worked on" is a claim about commits, so read commits. The newest
+    // commit on ANY ref beats a branch tip: work in flight usually sits on a
+    // side branch, and last-fetch time measures the survey rather than the work.
+    const list = [...roots.entries()].map(([root, how]) => ({ root, how, name: baseName(root), lastCommit: null }));
+    await pool(list, 8, async (r) => {
+        const out = await run('git', ['-C', r.root, 'log', '-1', '--format=%ct', '--all'], { cwd: r.root });
+        const t = out.ok ? Number(String(out.stdout).trim()) : NaN;
+        r.lastCommit = Number.isFinite(t) && t > 0 ? t : null;
+    });
+    // Newest first. A repo whose date could not be read sorts LAST, never first:
+    // an unreadable date is not a fresh one, and the top of this list is what a
+    // panel offers first.
+    list.sort((a, b) => (b.lastCommit || 0) - (a.lastCommit || 0) || a.name.localeCompare(b.name));
+
     return {
         index,
-        repos: [...roots.entries()].map(([root, how]) => ({ root, how, name: baseName(root) }))
-            .sort((a, b) => a.name.localeCompare(b.name)),
+        repos: list,
+        retired: retiredNames,
         note: cfg.note,
         sessionDirsTried: tried,
         sessionDirsFailed: failed,
@@ -858,7 +897,17 @@ async function main() {
     say('  session cwds resolved to a git root: ' + (disco.sessionDirsTried - disco.sessionDirsFailed) +
         ' of ' + disco.sessionDirsTried + (disco.sessionDirsFailed ? '  (' + disco.sessionDirsFailed + ' FAILED)' : ''));
     for (const f of disco.sessionDirFailures || []) say('     ? ' + f.dir + '  ->  ' + f.reason);
-    for (const r of disco.repos) say('   - ' + r.name + '   [' + r.how + ']   ' + r.root);
+    say('  sorted: most recently worked on first, by newest commit on any ref');
+    for (const r of disco.repos) {
+        const age = r.lastCommit
+            ? shortAge((Date.now() / 1000 - r.lastCommit) / 60) + ' since last commit'
+            : 'last commit UNREADABLE';
+        say('   - ' + r.name.padEnd(20) + ' ' + age.padEnd(28) + ' [' + r.how + ']   ' + r.root);
+    }
+    if ((disco.retired || []).length) {
+        say('  RETIRED - excluded on purpose by config. This is a decision, not a gap:');
+        for (const n of disco.retired) say('     ~ ' + n);
+    }
     if (disco.missing.length) {
         say('  NOT COVERED - asked for but unusable:');
         for (const m of disco.missing) say('   ! ' + m.p + '   [' + m.how + ']  ' + (m.reason || 'not a directory'));

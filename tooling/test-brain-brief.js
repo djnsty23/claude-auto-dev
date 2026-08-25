@@ -415,7 +415,14 @@ try {
     // repo set
     hasText('A: repo set counts what sections 3 and 4 will cover', A.stdout, 'population: 1 repo(s) discovered');
     hasText('A: reports the config file it read and what was present', A.stdout, ': 1 listed, 1 present');
-    hasText('A: attributes the repo to the session cwd that revealed it', A.stdout, 'fixture-repo-dirty   [session cwd]');
+    // Name and provenance must stay on ONE line. Asserting the exact spacing
+    // instead would make every column-width change look like a lost attribution.
+    matches('A: attributes the repo to the session cwd that revealed it', A.stdout,
+        /^ +- fixture-repo-dirty .*\[session cwd\]/m);
+    matches('A: dates each repo so the panel can be ordered by recency', A.stdout,
+        /^ +- fixture-repo-dirty .*(since last commit|last commit UNREADABLE)/m);
+    hasText('A: says which order the repo set is in', A.stdout,
+        'sorted: most recently worked on first');
     hasText('A: counts session cwds it could resolve to a git root', A.stdout,
         'session cwds resolved to a git root: 1 of 1');
     hasText('A: names a directory it was asked about and could not use', A.stdout,
@@ -561,7 +568,10 @@ try {
     // -----------------------------------------------------------------------
     const homeD = makeHome('d', {
         memoryDir: true,
-        config: JSON.stringify({ repos: [DIRTY_REPO, path.join(ROOT, 'no-such-repo')] }),
+        config: JSON.stringify({
+            repos: [DIRTY_REPO, CLEAN_REPO, path.join(ROOT, 'no-such-repo')],
+            retired: [CLEAN_REPO],
+        }),
     });
     const workD = workDir('d', null);
     const D = runBrief({ home: homeD, cwd: workD, path: NO_GH, args: ['--no-overlap'] });
@@ -578,8 +588,19 @@ try {
 
     hasText('D: a configured repo that is not on disk is named as missing', D.stdout, ', MISSING: ');
     hasText('D: attributes a repo found only through the config file', D.stdout, '[config]');
+
+    // A retired repo is excluded ON PURPOSE, so it must be NAMED as retired and
+    // must not reach the sections that cover work. Dropping it silently would
+    // leave a reader unable to tell a decision from a config edited by accident.
+    hasText('D: says a retired repo was excluded deliberately', D.stdout,
+        'RETIRED - excluded on purpose by config. This is a decision, not a gap:');
+    hasText('D: names the retired repo rather than dropping it', D.stdout, '~ fixture-repo-clean');
+    hasText('D: counts the retired repo in the config note', D.stdout, '1 retired (named below, not a gap)');
+    hasText('D: a retired repo does not inflate the covered population', D.stdout,
+        'population: 1 repo(s) discovered');
     const d4 = section(D.stdout, '4. UNCOMMITTED AND UNPUSHED');
     hasText('D: a blind PR section does not stop the git section from running', d4, '2 ahead of upstream');
+    lacksText('D: a retired repo is never scanned for work', d4, 'fixture-repo-clean');
 
     // -----------------------------------------------------------------------
     // E. gh present but the per-repo call fails — one repo blind, not zero PRs

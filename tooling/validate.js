@@ -255,6 +255,74 @@ function checkSkillFrontmatter() {
   if (ok) log('PASS', `Skill frontmatter: ${total} skills validated`);
 }
 
+/**
+ * A skill that points at another skill by name must point at one that exists.
+ *
+ * `[measured 2026-08-25]` The `phase` skill shipped four names resolving to
+ * nothing: `fix`, `pr-review`, `deploy` and `clean`. Its whole subject is that
+ * an unreachable skill is indistinguishable from an absent one, so a dead
+ * pointer inside it is the exact failure it was written to describe. Nothing
+ * here caught it: checkSkillFrontmatter validates a skill against itself, and
+ * checkScriptReferences resolves plugin-relative FILE paths only.
+ *
+ * Scope is deliberately narrow. It reads lines beginning `Existing:` plus the
+ * line after, that being the one convention in this tree for listing sibling
+ * skills. So it covers whatever adopts that convention and nothing else, which
+ * is why it prints the file count it scanned and reports NOT CHECKED rather
+ * than PASS when it finds none. A gate with no subject that says PASS turns
+ * absent coverage into reported coverage.
+ *
+ * EXTERNAL_SKILLS holds names that are real but live in the harness rather than
+ * this repo. Keep it short and justify each entry; a long allowlist is how a
+ * gate loses the ability to fail.
+ */
+const EXTERNAL_SKILLS = new Set([
+  'artifact-design',  // Anthropic built-in, cited by the design phase
+]);
+
+function checkSkillCrossReferences() {
+  let filesScanned = 0;
+  let namesChecked = 0;
+  let ok = true;
+
+  const known = new Set();
+  for (const plug of pluginDirs()) for (const name of skillDirs(plug)) known.add(name);
+
+  for (const plug of pluginDirs()) {
+    for (const name of skillDirs(plug)) {
+      const file = path.join(PLUGINS_DIR, plug, 'skills', name, 'SKILL.md');
+      if (!fs.existsSync(file)) continue;
+      const rel = 'plugins/' + plug + '/skills/' + name + '/SKILL.md';
+      const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+
+      let touched = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (!/^Existing:/.test(lines[i])) continue;
+        touched = true;
+        // The convention wraps. A line-oriented probe cannot see a list that
+        // spans lines, so read the continuation line as part of the same block.
+        const block = lines[i] + ' ' + (lines[i + 1] || '');
+        for (const m of block.matchAll(/`([^`]+)`/g)) {
+          const ref = m[1].replace(/^\//, '').trim();
+          if (!ref) continue;
+          namesChecked++;
+          if (!known.has(ref) && !EXTERNAL_SKILLS.has(ref)) {
+            log('FAIL', rel + ': lists "' + ref + '" as an existing skill, and no skill by that name exists in any plugin. Remove it, or add it to EXTERNAL_SKILLS in validate.js with the reason.');
+            ok = false;
+          }
+        }
+      }
+      if (touched) filesScanned++;
+    }
+  }
+
+  if (filesScanned === 0) {
+    log('FAIL', 'Skill cross-references: NOT CHECKED - no SKILL.md carries an "Existing:" line, so this gate had no subject. That is not a pass.');
+    return;
+  }
+  if (ok) log('PASS', 'Skill cross-references: ' + namesChecked + ' name(s) across ' + filesScanned + ' file(s) resolve to a real skill');
+}
+
 function checkHookWiring() {
   const VALID_EVENTS = new Set([
     'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'StopFailure',
@@ -625,6 +693,7 @@ checkVersionSync();
 checkMarketplace();
 checkPluginManifests();
 checkSkillFrontmatter();
+checkSkillCrossReferences();
 checkHookWiring();
 checkScriptReferences();
 checkShellGlobQuoting();
