@@ -190,17 +190,19 @@ assert('case 2 uses base directive (not auto)', !results[1].context.includes('AU
 // which swings by 5-10x between an idle laptop and a loaded CI runner. Measure
 // this machine's bare `node` startup first and budget the hook's OWN work
 // against that, so the assertion tracks the thing that can actually regress.
-const baselineRuns = [];
-for (let i = 0; i < 3; i++) {
+const timeBareNode = () => {
     const t0 = process.hrtime.bigint();
     spawnSync('node', ['-e', ''], { encoding: 'utf8' });
-    baselineRuns.push(Number(process.hrtime.bigint() - t0) / 1e6);
-}
-const baseline = Math.min(...baselineRuns);
-const budget = baseline + 150;
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+};
+
+// The allowance for the hook's OWN work, on top of whatever Node startup costs
+// right now. Deliberately unchanged: raising it hides a real regression of up to
+// the new margin, which the note below already rejected once.
+const OWN_WORK_BUDGET_MS = 150;
 
 console.log('');
-console.log('Node startup baseline: ' + baseline.toFixed(1) + ' ms  →  budget ' + budget.toFixed(1) + ' ms');
+console.log('Node startup, min of 3 taken now: ' + Math.min(timeBareNode(), timeBareNode(), timeBareNode()).toFixed(1) + ' ms');
 
 // Compare FLOOR to FLOOR, and never on a single sample.
 //
@@ -220,18 +222,83 @@ console.log('Node startup baseline: ' + baseline.toFixed(1) + ' ms  →  budget 
 //
 // Rejected: raising the 150 ms constant. That hides a real regression of up to
 // the new margin and would still flake on a large enough spike.
-const TIMING_SAMPLES = 3;
+//
+// `[measured 2026-08-25]` The min-of-3 above was still not enough, and the reason
+// is a flaw in HOW the two floors were compared rather than in the floors
+// themselves. This failed under a full `test-all` at samples 286/475/437 against
+// a 202 ms budget: ALL THREE were slow, so taking the minimum could not help.
+//
+// The baseline was measured ONCE, up front, and then compared against timings
+// taken later. When load rises in between, the two sides of the comparison are
+// measured under different conditions, which is precisely what the note above
+// claimed could not happen. A stale floor is not a floor.
+//
+// TWO MORE ATTEMPTS FAILED HERE. Both are recorded because each looked correct
+// and each was disproved by running it, which is cheaper to read than to repeat.
+//
+// Attempt 2, min of the per-pair DIFFERENCES: biased low. The minimum lands on
+// whichever pair had the slowest baseline, and it produced -182.8 ms from a pair
+// of 60 ms hook against 243 ms bare node. An assertion that can go hundreds of
+// milliseconds negative sails through the regression it exists to catch.
+//
+// Attempt 3, interleaved floor-to-floor, min(total) - min(bare): still flakes. It
+// reported 188.6 ms from floors of 234 total against 46 bare, on an UNMUTATED
+// hook. Alternating samples can land on opposite phases when load oscillates
+// faster than the sampling, so the two floors are not comparable even when taken
+// in the same window.
+//
+// THE ROOT PROBLEM: no wall-clock comparison across separate process spawns is
+// reliable on a loaded machine, because the samples are not simultaneous and the
+// load varies on a shorter timescale than the sampling. More samples raise the
+// cost without removing the failure.
+//
+// So this now REFUSES TO JUDGE when the machine is too noisy to time anything,
+// and says so. Detected from the baseline's own spread, which needs no knowledge
+// of the hook. A budget that reports NOT MEASURED under load never produces a
+// false red, and a false red is worse than a false green here: it looks like
+// diligence, so it gets acted on, and the action is a change to working code.
+const TIMING_SAMPLES = 5;
+const NOISE_CEILING = 2.5;   // max/min bare-node spread we will still time under
+let timedCases = 0;
+
 for (let i = 0; i < caseSpecs.length; i++) {
     const [, transcriptPath, opts] = caseSpecs[i];
-    const samples = [];
-    for (let s = 0; s < TIMING_SAMPLES; s++) samples.push(timeOnce(transcriptPath, opts));
-    const best = Math.min(...samples);
+    const totals = [];
+    const bares = [];
+    for (let s = 0; s < TIMING_SAMPLES; s++) {
+        bares.push(timeBareNode());
+        totals.push(timeOnce(transcriptPath, opts));
+    }
+    const bareFloor = Math.min(...bares);
+    const spread = Math.max(...bares) / bareFloor;
+    const ownWork = Math.min(...totals) - bareFloor;
+
+    if (spread > NOISE_CEILING) {
+        // Worded as a deficiency, not a category. "Not applicable" invites
+        // agreement; NOT MEASURED invites someone to re-run it on a quiet box.
+        console.log('  NOT MEASURED  case ' + (i + 1) + ' timing is unjudgeable: bare-node spread '
+            + spread.toFixed(1) + 'x over ' + TIMING_SAMPLES + ' samples (ceiling '
+            + NOISE_CEILING + 'x). The machine is too loaded to time a subprocess.');
+        continue;
+    }
+    timedCases++;
     assert(
-        'case ' + (i + 1) + ' within budget (best of ' + TIMING_SAMPLES + ': ' + best.toFixed(1)
-        + ' ms of ' + budget.toFixed(1) + ' ms; samples ' + samples.map((n) => n.toFixed(0)).join('/') + ')',
-        best < budget
+        'case ' + (i + 1) + ' own work within budget (' + ownWork.toFixed(1) + ' ms of '
+        + OWN_WORK_BUDGET_MS + ' ms; floors ' + Math.min(...totals).toFixed(0) + ' total - '
+        + bareFloor.toFixed(0) + ' bare, spread ' + spread.toFixed(1) + 'x)',
+        ownWork < OWN_WORK_BUDGET_MS
     );
 }
+
+// Skipping every case is not a pass. If the machine was too loaded to time even
+// one, this check had NO subject, and a gate with no subject reporting green is
+// how absent coverage becomes reported coverage. Fail instead, so somebody re-runs
+// it somewhere quiet rather than reading silence as health.
+assert(
+    'the timing budget had at least one measurable case (' + timedCases + ' of '
+    + caseSpecs.length + ' timed; the rest were too noisy)',
+    timedCases > 0
+);
 
 // --- the error path. fail() was reported never entered by check:functions.
 //
