@@ -1,5 +1,43 @@
 # Changelog
 
+## [8.113.0] - 2026-08-25
+
+### Fixed — `/auto-brain` told coordinators to read a field that cannot answer
+
+`isRunning` is not a boolean. It has at least four meanings and
+`list_sessions` cannot tell them apart: working, wedged, **blocked on a panel**,
+and errored out.
+
+`[measured 2026-08-25]` A dead-man's check built on `list_sessions` reported a
+panel-blocked session as dead across **ten consecutive checks**, each more
+confident than the last. It was alive the whole time and resumed the moment
+someone answered the panel. `fleet-status.js --pending` detects panel-blocking
+directly and was already installed — the check simply never asked it.
+
+Three rules follow, all measured the same night:
+
+**A repeated observation is one observation.** Ten reads of the same frozen
+timestamp is one data point. Identical evidence must not raise confidence across
+checks — that is what turned a wrong reading into a settled verdict.
+
+**Read the worktree, not the report.** Both sessions that went quiet had done
+their best work AFTER their last report and never got to send it. One `git log`
+each found a design census and a working prototype. Reports are the lossy
+channel; commits are the durable one.
+
+**Message cost is asymmetric.** A message is nearly free to send and expensive to
+receive — it arrives as a full user turn at the RECEIVER's context depth. One
+session was sent nine messages and another six as direction evolved; both were
+`opus-5` at `xhigh` effort, 31 and 50 hours old, and both went silent holding
+unreported work. `get_session` carries `createdAt`, `model` and `effort`;
+`list_sessions` carries none of them, so a sender is blind to the cost by
+default. Consolidate to one message per direction change, and past three to one
+session in an hour, batch.
+
+Rolling summaries gain the same correction: **commit before reporting**, because
+a report is sent at the end of a unit and a session that dies mid-unit sends
+nothing.
+
 ## [8.112.0] - 2026-08-25
 
 ### Fixed — a dispatch without a return address cannot be answered

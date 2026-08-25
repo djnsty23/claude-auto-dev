@@ -126,19 +126,74 @@ aware at all times."* One message per **completed unit of work**: not per
 commit, not on a timer. Three to five lines — what changed, what was verified
 with the command and what it printed, what is next or blocked.
 
+**And do not let a rolling summary become the only record.** `[measured
+2026-08-25]` two sessions went quiet still holding their best work, because the
+report is sent at the END of a unit and a session that dies mid-unit sends
+nothing. Ask them to COMMIT before reporting, so the durable artefact exists
+whether or not the message does. A commit survives a session; a queued message
+does not.
+
 Define "short" when you ask, or it will not be. The long four-part report is for
 going idle; a rolling update that grows into one costs both sides a full turn
 each time and awareness stops being cheap. At a deep context that is the
 dominant cost of coordinating at all.
 
-### 6. Collect — do not poll
+### 6. Collect — do not poll, and read the right field
 
 Peers self-report when they go idle. If a session has been quiet and it matters,
 send **one** message and move on. Polling costs a wake-up per session per
 interval and is wrong the moment one wakes between polls.
 
-Reading `list_sessions` for `lastActivityAt` and `isRunning` is free and is not
-polling — it touches nobody. Use that to see who has woken.
+Reading session state is free and is not polling — it touches nobody. But read
+the field that answers the question:
+
+**`isRunning` IS NOT A BOOLEAN.** It has at least four meanings and
+`list_sessions` cannot tell them apart:
+
+| what you see | what it can mean |
+|---|---|
+| `isRunning: true`, timestamp moving | working |
+| `isRunning: true`, timestamp frozen | wedged, **or blocked on a panel**, or one long tool call |
+| `isRunning: false`, recent | finished a turn |
+| `isRunning: false`, old | idle, **or errored out** |
+
+`[measured 2026-08-25]` A dead-man's check built on `list_sessions` reported a
+**panel-blocked** session as dead across ten consecutive checks, each more
+confident than the last. It was alive the whole time and resumed the moment
+someone answered. **`fleet-status.js --pending` detects panel-blocking directly**
+and was already installed; the check simply did not ask it.
+
+    node "$B\fleet-status.js" --pending --days 2
+
+**A repeated observation is one observation.** Ten reads of the same frozen
+timestamp is one data point, not ten. Do not let identical evidence raise
+confidence across checks — that is what turned a wrong reading into a settled
+verdict.
+
+**Read the WORKTREE, not the report.** Both sessions that went quiet that night
+had done their best work after their last report and never got to send it. One
+`git log` in each worktree found a design census and a working prototype that no
+amount of waiting would have delivered. Reports are the lossy channel; commits
+are the durable one.
+
+### 7. Message cost is asymmetric — count what you send
+
+A message is nearly free to send and expensive to receive: it arrives as a full
+user turn at the RECEIVER's context depth, not yours.
+
+`[measured 2026-08-25]` One session was sent **nine** messages and another six as
+direction evolved. Both were `opus-5` at `xhigh` effort, 31 and 50 hours old.
+One errored outright; both went silent, and both were holding unreported work.
+
+**Before dispatching to a session you did not start, read `get_session`.** It
+carries `createdAt`, `model` and `effort`; `list_sessions` carries none of them,
+so the sender is blind to the cost by default.
+
+**Consolidate: one message per direction change, not one per thought.** Past
+three to a single session in an hour, stop and batch. When direction is still
+moving, wait until it settles — a relayed steer that arrives after the work is
+worse than one that arrives late, and the measured relay latency on taste-driven
+work is nine addenda for one task.
 
 ## Panels: managed sessions do not raise them
 
