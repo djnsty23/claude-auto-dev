@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "8.118.0",
+  "version": "8.119.0",
   "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
   "private": true,
   "keywords": [
@@ -21,6 +21,7 @@
     "check:vacuity": "node tooling/find-vacuous-assertions.js",
     "check:hooks": "node tooling/find-untested-hooks.js",
     "check:liveness": "node plugins/autodev-core/scripts/workflow-liveness.js --selftest",
+    "check:skills": "node plugins/autodev-core/scripts/analyze-skill-invocations.js --selftest",
     "check:versions": "node tooling/check-version-drift.js",
     "check:functions": "node tooling/find-untested-functions.js",
     "check:drift": "node tooling/find-record-drift.js",

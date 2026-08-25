@@ -14,10 +14,19 @@ One keyword, two or three sentences, and the skills that already exist for it.
 
 ## Why this exists
 
-`[measured 2026-08-25]` Across **555 transcripts over seven days**, 15 distinct
-skills were invoked. Exactly **one** belonged to this plugin: `rule-diagnosis`,
-once. The other **36** user-invocable skills here fired zero times. What sessions
-did reach for was `artifact-design`, 34 times, and the knowledge bases.
+`[measured 2026-08-25]` Across **558 transcripts over seven days**, **4 of this
+plugin's 45 user-invocable skills fired at all.** The other 41 fired zero times.
+
+The split matters more than the total. Of those four, exactly **one** was reached
+by the model choosing it (`rule-diagnosis`, once). The other three were reached
+only because a person typed a slash command: `brain` 17 times, `audit` 11,
+`auto-brain` 3. A few skills are reachable by hand; the model-initiated channel
+is effectively dead. Those are different problems with different fixes.
+
+An earlier version of this paragraph said "exactly one of 37 invocable skills".
+That read only the Skill-tool channel and missed slash commands entirely, which
+is the same defect this file is about: a measurement that answers a neighbouring
+question and gets reported as the whole picture.
 
 They are not bad skills. They are unreachable ones: a skill nobody remembers to
 invoke is indistinguishable from a skill that does not exist, and the same
@@ -131,19 +140,20 @@ machine, not a summary of good practice. When a phase's advice stops earning its
 place, cut it. A phase carrying six sentences is one nobody reads, and this
 file becomes another skill that never fires.
 
-**Re-measure rather than trusting this.** Invocation is countable:
+**Re-measure rather than trusting this.** Invocation is countable, and there is
+a script for it that reads both channels, separates auto-loaded `rule-*` hits
+from chosen ones, prints the population it scanned, and refuses to report a zero
+total as a finding:
 
 ```bash
-find ~/.claude/projects -name '*.jsonl' -newermt '7 days ago' -print0 \
-  | xargs -0 grep -ohE '"skill":"[a-z0-9:_-]+"' | sort | uniq -c | sort -rn
+node plugins/autodev-core/scripts/analyze-skill-invocations.js --days 30
 ```
 
-**Two things that field will not tell you.** It records auto-loaded `rule-*`
-skills alongside real user invocations, so a hit is not proof anybody typed
-anything: `rule-thumb-first` shows twice in the run above and is
-`user-invocable: false`. And an empty result is a claim about the probe, so read
-the control before believing a zero. `artifact-design` should be in the output;
-if it is not, the field name has changed and the whole count is meaningless.
+**Do not hand-roll a grep for this.** The obvious one-liner greps `"skill":"..."`
+and that is the Skill-tool channel only. A person typing `/autodev-core:brain` is
+recorded as a `<command-name>` block instead, so the naive count reports zero for
+a skill invoked seventeen times. That is exactly how the first version of the
+paragraph above came out tenfold too low.
 
-If this skill is not in that list a month from now, it failed the same way the
-other 36 did, and the answer is not to write a 38th.
+If this skill is not in that output a month from now, it failed the same way the
+other 41 did, and the answer is not to write a 46th.
