@@ -1,5 +1,89 @@
 # Changelog
 
+## [8.116.0] - 2026-08-25
+
+### Fixed — most of this plugin's rules could reach nobody, and the gate for it could not fire
+
+Nine skills sat in the unreachable shape: `user-invocable: false` with no
+`paths:` glob. No user can type them, and no file read loads them. Among the
+nine were `rule-verification`, `rule-gate-integrity` and `rule-diagnosis` — the
+three skills that exist to describe this exact failure.
+
+**The documented delivery never existed.** `docs/rules.md` and an earlier
+changelog entry both assert these auto-load via globs. Searching the history for
+the string finds **no commit that ever added one**. The contract was written
+down and never wired, which is worse than a broken mechanism, because nothing
+looks wrong.
+
+**The gate was vacuous.** `validate.js` required `user-invocable:false` **and**
+`disable-model-invocation:true`. That second field appears **zero times**
+anywhere in `plugins/`, so the conjunction could never be satisfied and the check
+had never fired once — while reading as coverage of precisely the defect it could
+not see. Second instance of that shape here.
+
+Repaired to fail on `user-invocable:false` with no glob, and **mutation-tested
+rather than trusted**: control exit 0, glob stripped from one skill exit 1 naming
+that file, restored exit 0. The previous version passed all three.
+
+Seven skills got globs chosen for where the work happens. Two did not, and that
+is a finding rather than an omission: `rule-diagnosis` and `rule-options-protocol`
+govern speech acts — stating a cause, ending a turn — which read no file. A glob
+for them would be a lie that passes the gate. They are `user-invocable: true`.
+
+**Model-invocation is not a fallback.** The skill listing is capped near 1% of
+the context window and drops descriptions least-invoked-first. Measured by direct
+probe of a live agent's own context: **all ~56 core skills arrive as bare names
+with no description**. A trigger that depends on text the harness has already
+discarded is not a trigger.
+
+### Removed — six skills that deferred to a harness built-in
+
+`fix`, `pr-review`, `monitoring`, `deploy`, `env-vars`, `clean`. Each one's own
+body handed off to a built-in that already exists and already fires, or to a
+sibling that supersedes it. All six had zero references in the tree and zero
+invocations across 75 measured transcripts.
+
+Deliberately a falsification test rather than the full plan: if freeing six
+entries does not bring descriptions back, the pressure is dominated by
+account-level plugins outside this repo and further cutting here is aimed at the
+wrong tree. The fourteen proposed merges are **not** done, on purpose.
+
+### Added — `rule-report-shell`
+
+The house shell for any HTML report an agent publishes, auto-loading on
+`**/*.html` so a session picks it up when it is about to write one. Ships a
+working template rather than prose describing one.
+
+Four findings are baked in, each measured on a rendered page. Scrollbars do not
+inherit a page theme, so a dark page gets the OS light scrollbar — a white rail
+down a near-black code well; no repo checked had any scrollbar styling at all.
+The published `0fr` → `1fr` grid disclosure **cannot work** inside a column-flex
+card: `overflow:hidden` is what the collapse needs and it zeroes the child's
+automatic minimum, so the expand resolves to 0px, while `overflow:visible` fixes
+the expand at 500.422px and leaves the collapse stuck open. One direction or the
+other, never both. The shell uses `max-height` read from `scrollHeight` at click
+time. Rhythm is a ratio — space between sections is 3× the space within them.
+
+### Fixed — `heal-sweep.workflow.js` pinned no model on any agent
+
+All three `agent()` calls inherited the session model, so a session on a
+premium-priced model ran the whole sweep at roughly 5× intended cost, silently.
+Inheritance is invisible in the script **and** in the result: nothing in a
+workflow's output records which model ran it, so the error is undetectable after
+the fact.
+
+`rule-agent-concurrency` also gained the measured cost of a fan-out: 280 agents
+returned 3.5M characters — about 880k tokens — into main threads, median 12,933
+and 60% over 10k. Agents that wrote a file and returned a path averaged 5,217
+against 13,389 for those that did not. Serial refine chains duplicate where
+parallel ones do not (mean similarity 0.072 against 0.008), and agent loss is the
+quota wall rather than width.
+
+**Known incomplete:** that skill's `**/*.workflow.js` glob matches zero files in
+five consumer repos measured and one here, so it fires only inside this repo and
+never where agents are actually spawned. The shape of the defect is closed; the
+defect is not. Cross-references are the real fix, tracked in `docs/sweep/`.
+
 ## [8.115.0] - 2026-08-25
 
 ### Added — `brain-panels`, and the boot now self-heals it
