@@ -1,5 +1,79 @@
 # Changelog
 
+## [8.117.0] - 2026-08-25
+
+### Added: a phase entry point, and the gate that caught it lying
+
+`phase` is a one-word entry point. Say `spec`, `design`, `build`, `verify`,
+`ship` or `audit` and it returns the two or three sentences that change the work
+in that phase, plus the skills that already exist for it. It exists because
+reaching for a skill requires remembering it exists, and the measurement says
+nobody does.
+
+**Its own premise was re-measured before it landed rather than taken on trust.**
+Over 555 transcripts in seven days, 15 distinct skills were invoked and exactly
+one belonged to this plugin: `rule-diagnosis`, once. The other 36 user-invocable
+skills fired zero times. What sessions did reach for was `artifact-design`, 34
+times, and the knowledge bases. The draft claimed 40 invocable with 38 at zero,
+which was the right shape and the wrong numbers, and a wrong number in a shipped
+public skill is the thing to fix before landing rather than after.
+
+**The draft also listed four skills that do not exist**: `fix`, `pr-review`,
+`deploy` and `clean`. A skill whose entire subject is that an unreachable skill
+is indistinguishable from an absent one, shipping four pointers to nothing. That
+is the failure it was written to describe, arriving inside it.
+
+### Added: checkSkillCrossReferences, because nothing here could see that
+
+`validate.js` had no check that could catch it. `checkSkillFrontmatter`
+validates a skill against itself, and `checkScriptReferences` resolves
+plugin-relative FILE paths only. Neither reads one skill's claim about another.
+
+The new gate reads lines beginning `Existing:` plus their wrapped continuation,
+because a line-oriented probe cannot see a list that spans lines, and resolves
+every backticked name against the skills on disk. Scope is deliberately narrow,
+so it prints the population it scanned (33 names across 1 file) and reports NOT
+CHECKED rather than PASS when no file uses the convention. A gate with no
+subject that says PASS turns absent coverage into reported coverage.
+
+Mutation tested rather than trusted: reintroducing `fix` produces a FAIL naming
+the file and the name, an invented name does the same, and the clean tree passes.
+
+### Changed: brain-brief orders the repo set by recency, and can retire a repo
+
+The repo set now sorts most recently worked on first, by the newest commit on
+any ref, printing that age beside each name. Newest commit rather than branch
+tip because work in flight usually sits on a side branch, and rather than last
+fetch time because that measures the survey instead of the work. A repo whose
+date cannot be read sorts LAST, never first: an unreadable date is not a fresh
+one, and the top of that list is what a panel offers first.
+
+Config gains a `retired` array. A retired repo is excluded from every section
+and NAMED under RETIRED rather than dropped, so a later reader can tell a
+decision from a config someone edited by accident. Retired paths resolve to
+their repo root before exclusion, so the exclusion still holds for a repo
+reached through a worktree or a session cwd.
+
+`shortAge` stopped leaking floats into its minutes branch, which was rendering
+`22.254466664791106m`.
+
+### Changed: the brain boot's first question is multi-select and recency-ordered
+
+Projects are not mutually exclusive, so a single-select over them manufactures a
+backlog out of a choice that did not need making. And ordering by leverage
+instead of recency is the overseer's opinion smuggled into the sort, which is
+the coordination half of the role that two independent peer evaluations valued
+at zero. The order now comes from the survey rather than from a judgement.
+
+The boot never offers a retired repo.
+
+### Verified
+
+`npm test`: 46/46 suites, exit 0. `validate`: 19 PASS, 0 FAIL. The brain-brief
+suite gained five assertions and one negative; breaking the retired exclusion
+kills two of them, and breaking the RETIRED print block kills a third, which is
+one assertion per behaviour rather than one covering both.
+
 ## [8.116.0] - 2026-08-25
 
 ### Fixed — most of this plugin's rules could reach nobody, and the gate for it could not fire

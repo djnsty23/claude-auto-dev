@@ -188,18 +188,32 @@ So the boot has exactly one correct ending, and it is not a proposal:
 1. **Report the state you measured.** Fleet, ownership, open PRs, uncommitted
    work. Each with the population it scanned, and each COULD-NOT-CHECK named
    rather than folded in with the real zeros.
-2. **Ask which PROJECT first, then which sessions.** `[stated 2026-08-25]` —
-   project selection should be one of the boot's choices. It is the upstream
-   question: sessions follow from a project, and a panel asking "which sessions
-   should start" while the project is unsettled is asking about the wrong layer.
+2. **Ask which PROJECTS first, then which sessions.** `[stated 2026-08-25]`
+   project selection is one of the boot's choices. It is the upstream question:
+   sessions follow from a project, and a panel asking "which sessions should
+   start" while the project is unsettled asks about the wrong layer.
 
-   Ground every option in something the survey printed — a repo with open PRs
-   and nobody on it, a repo far behind its trunk, a repo with a governed publish
-   queue that has gone stale, a repo whose gate has not been run. A list of repo
-   names is not a panel; a list of repos with the fact that makes each one
-   urgent is.
+   **That first question is `multiSelect: true`, and its options are ordered
+   most recently worked on first.** `[stated 2026-08-25]` Both halves matter.
+   Projects are not alternatives, so forcing one choice manufactures a backlog
+   out of work that could have been dispatched together. And recency is the
+   ordering the user actually thinks in, where a leverage ranking is the
+   overseer's opinion smuggled into the sort. `brain-brief.js` prints the repo
+   set in exactly that order, with the age since the newest commit on any ref
+   beside each name, so take the order from its output rather than composing one.
 
-   Then, once the project is chosen, ask which sessions. That is the user's
+   Ground every option in something the survey printed: a repo with open PRs and
+   nobody on it, a repo far behind its trunk, a repo with a governed publish
+   queue gone stale, a repo whose gate has not been run. A list of repo names is
+   not a panel. A list of repos with the fact that makes each one urgent is.
+
+   **A retired repo is never offered.** `brain-brief.js` reads a `retired` array
+   from `~/.claude/brain-brief.json` and prints those names under RETIRED,
+   excluded on purpose. They are named rather than dropped so a later session can
+   tell a decision from a config edited by accident, and re-offering one is the
+   overseer proposing work the user has already closed.
+
+   Then, once the projects are chosen, ask which sessions. That is the user's
    decision and the only remaining question a freshly booted overseer is
    positioned to ask.
 3. **Do not author a work list for yourself.** Verifying is real work and it is
