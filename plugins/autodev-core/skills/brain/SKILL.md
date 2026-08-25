@@ -55,6 +55,23 @@ first for identical work. Past ~300k, finish the step, write RESUME.md and start
 fresh. Three concurrent sessions maximum. An overseer that reads everything
 itself becomes the most expensive session on the machine.
 
+## Where to start the session
+
+**In the autodev clone's root**, not in the code directory above it.
+
+The Brain's own work product is autodev commits — `[measured 2026-08-25]` 24 in
+one session across nine releases. Starting a directory up means `session-exit.js`
+reports COULD NOT READ for every section, because there is no repo at the cwd,
+and every framework fix needs a `cd` before it can be committed. The fleet survey
+takes `--root` and defaults to the code directory regardless of where you start,
+so nothing is lost.
+
+The tradeoff, stated so it is a choice rather than an accident: being *inside*
+autodev biases attention toward autodev work. That is usually right for this
+role and occasionally not — when the session is really about a product repo, say
+so out loud rather than drifting into tooling because that is what is under the
+cursor.
+
 ## Boot sequence
 
 **Run every step before saying anything about fleet state.** Step 2 is the only
@@ -124,7 +141,31 @@ Other scripts sit beside those three and were not run at boot. One warning:
 `fleet-notify.js` fires real Windows toasts at the user. Use `--dry` to see what
 would fire, `--test` for exactly one sample.
 
-### 3. The newest heal run, if there is one
+### 3. Is a previous session's panel block still set?
+
+```powershell
+node "$B\brain-panels.js" --status
+```
+
+`brain-panels.js --off` denies `AskUserQuestion` in the managed repos so a
+coordinated session cannot stop on a panel overnight. `--on` restores from a
+marker recording the prior state.
+
+**A marker found at boot means a previous session set it and never restored.**
+That is the failure mode the tool is designed against: panels staying off
+silently in repos nobody is coordinating any more, with nothing to announce it.
+There is deliberately NO SessionEnd hook doing this automatically — the hook
+fires for every session, so a MANAGED session ending would revert the block that
+is supposed to be constraining it. Self-healing at boot is the correct place.
+
+If `--status` shows a marker, say so and restore with `--on` unless this session
+is continuing that same coordination.
+
+Note it never denies panels in the coordinator's own repo. A panel is how the
+coordinator reaches the user; a coordinator that cannot ask has lost the one
+channel that carries a decision.
+
+### 4. The newest heal run, if there is one
 
 ```powershell
 Get-ChildItem "$env:USERPROFILE\claude-memory\heal-runs\" | Sort-Object LastWriteTime -Descending | Select-Object -First 3
@@ -147,11 +188,20 @@ So the boot has exactly one correct ending, and it is not a proposal:
 1. **Report the state you measured.** Fleet, ownership, open PRs, uncommitted
    work. Each with the population it scanned, and each COULD-NOT-CHECK named
    rather than folded in with the real zeros.
-2. **Ask which sessions should start.** That is the user's decision and the only
-   question a freshly booted overseer is positioned to ask. Ground every option
-   in a fact the boot measured: a repo with open PRs and no live session, a repo
-   with dirty worktrees and no owner, a repo where a new session would land on
-   top of sessions already live there.
+2. **Ask which PROJECT first, then which sessions.** `[stated 2026-08-25]` —
+   project selection should be one of the boot's choices. It is the upstream
+   question: sessions follow from a project, and a panel asking "which sessions
+   should start" while the project is unsettled is asking about the wrong layer.
+
+   Ground every option in something the survey printed — a repo with open PRs
+   and nobody on it, a repo far behind its trunk, a repo with a governed publish
+   queue that has gone stale, a repo whose gate has not been run. A list of repo
+   names is not a panel; a list of repos with the fact that makes each one
+   urgent is.
+
+   Then, once the project is chosen, ask which sessions. That is the user's
+   decision and the only remaining question a freshly booted overseer is
+   positioned to ask.
 3. **Do not author a work list for yourself.** Verifying is real work and it is
    yours, but it arrives from the user in this session. A queue assembled from
    gaps you noticed is coordination wearing a verification costume, and the role
