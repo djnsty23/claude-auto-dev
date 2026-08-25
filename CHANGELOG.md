@@ -1,5 +1,60 @@
 # Changelog
 
+## [8.121.0] - 2026-08-25
+
+### Investigated: why 41 of 45 skills never fire, and why both obvious fixes are wrong
+
+`[measured 2026-08-25]` Across 565 transcripts. Two intuitive remedies were
+attempted and both were stopped by evidence, so the write-up exists to keep them
+from being re-attempted on the same reasoning.
+
+**Established.** The skill listing is recorded in transcripts, and descriptions
+are selectively dropped from it. Proof is one listing showing bare names beside a
+single described skill. Survival is a stable per-skill property, from 98% for
+`rule-diagnosis` down to 1.7% for `a11y`, and it predicts MODEL invocation
+specifically: the only skill the model chose was the one at 98%, and everything at
+6% or below got zero.
+
+**Invocation does not buy survival**, which rules out the obvious confound.
+`brain` fired 17 times at 12% survival and `audit` 11 times at 2.4%. Causation
+runs description to model-reach, not the reverse.
+
+**The mechanism is opaque from outside.** Eliminated by test: invocation count
+(inverted), frontmatter shape (identical field sets), recency (11 skills modified
+the same day do not survive), description length (the longest does not survive,
+the second longest does), the memory database (one row, written that morning from
+a command's stdout), and repo-file contamination (`a11y` appears in more repo
+files and still scores 9 against 506).
+
+**Cutting the dead skills is circular.** The criterion yields 28 candidates
+including `auto` at 518 lines, plus `commit`, `preflight`, `ship`, `test` and
+`brainstorm`, which are the primary command vocabulary. A description is dropped,
+so the model cannot choose the skill, so it never fires, so it looks dead, so it
+gets cut. Every step follows and the conclusion is inverted.
+
+**Trimming descriptions is a guess.** It would follow if survival were driven by
+total budget. Nothing supports that and length points the other way. Editing 51
+files to influence an unidentified mechanism is prescribing a fix for an
+unverified cause.
+
+**What works is already in use.** User-typed invocation needs no description at
+all: `audit` at 2.4% survival with 11 invocations, every one typed. So the
+leverage is fewer names worth remembering rather than more skills or shorter
+descriptions. Which is also why `phase` cannot rescue itself, having entered a
+listing that already drops 47 of 51.
+
+Written up in `skills/phase/references/why-skills-do-not-fire.md`, with the
+single-variable test that would settle the mechanism if anyone wants to run it.
+
+### Verified
+
+`npm test`: 48/48 suites, exit 0.
+
+Noted while gating, not fixed: `test-image-scan-hook` carries a wall-clock budget
+assertion (202ms) that fails under machine load inside the parallel runner. It
+measured 286ms during a busy moment and passes alone. A timing budget inside a
+parallel test runner is a latent flake, and it is unrelated to this change.
+
 ## [8.120.0] - 2026-08-25
 
 ### Decided: `audit` stays an SOP-in-a-skill, and the reason is measured
