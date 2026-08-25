@@ -1,5 +1,44 @@
 # Changelog
 
+## [8.115.0] - 2026-08-25
+
+### Added — `brain-panels`, and the boot now self-heals it
+
+A managed session that stops on a panel blocks until a human looks, and
+overnight nobody does. Asking it not to panel is a convention; `brain-panels.js`
+is the enforcement. `--off` denies `AskUserQuestion` in the managed repos, `--on`
+restores from a marker recording the prior state verbatim.
+
+**Per-project, never machine-wide.** A user-level deny would strip the
+coordinator's own panels, and the panel is how the coordinator reaches the user —
+turning it off silences the one channel that carries a decision. The
+coordinator's repo is excluded by name.
+
+**Restorable by any session, not only the one that set it.** `[measured
+2026-08-25]` two sessions died the same night without a clean exit, one
+mid-queue. A revert that depends on a clean exit is a revert that does not
+happen.
+
+**Deliberately no SessionEnd hook.** That hook fires for every session, so a
+MANAGED session ending would revert the block meant to constrain it. `/brain`
+checks for a stale marker at boot instead, which is the correct place: a marker
+found there means a previous session set it and never restored.
+
+### Changed — the boot asks which PROJECT before which sessions
+
+`[stated 2026-08-25]`. Project is the upstream question; sessions follow from it,
+and asking "which sessions should start" while the project is unsettled asks
+about the wrong layer. Options must be grounded in something the survey printed
+— a list of repo names is not a panel; a list of repos with the fact that makes
+each one urgent is.
+
+### Changed — start the session in the autodev clone root
+
+The Brain's own output is autodev commits: 24 in one session across nine
+releases. A directory higher, `session-exit.js` reports COULD NOT READ for every
+section and each fix needs a `cd` first. The tradeoff is stated in the skill
+rather than left implicit: being inside autodev biases attention toward tooling.
+
 ## [8.114.0] - 2026-08-25
 
 ### Fixed — a generator wrote a home path into a PUBLIC repo
