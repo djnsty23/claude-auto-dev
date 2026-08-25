@@ -4,6 +4,8 @@ description: "How many agents to spawn, at which model and effort, so a fan-out 
 when_to_use: "Before spawning subagents, running a workflow, or fanning work out across agents."
 user-invocable: false
 allowed-tools: Read, Bash
+paths:
+  - "**/*.workflow.js"
 ---
 
 # Agent concurrency
@@ -60,6 +62,64 @@ workflow). Spend `xhigh` on the one agent whose judgement decides the outcome,
 3. **Prefer sequential when order matters.** Parallel agents cannot see each
    other's findings; if agent 2's work depends on agent 1's, running them at once
    just produces two half-informed answers.
+
+## What an agent RETURNS is the cost, not which model ran it
+
+`[measured 2026-08-25]` over **280 agents across 52 workflow runs**: returns
+totalled 3,524,077 characters, roughly **880k tokens fed back into main
+threads**. Median return **12,933 chars**, p90 30,873, max 65,399. **60% exceed
+10k.** One run of 30 agents returned 658,588 chars — about 165k tokens — into a
+single thread, which then re-reads them on every subsequent turn.
+
+That is why model tier is the wrong lever. A main-thread request already
+re-reads ~405k tokens to emit ~1,000; the return is what grows that number
+permanently.
+
+**Write the artifact to a file; return the path and a summary.** Agents that
+called Write or Edit returned a median **5,217** chars. Agents that wrote
+nothing returned **13,389** — 2.6× more. Only 20% of agents wrote anything, and
+the write-less 79% produced **86% of all returned characters**.
+
+The specific failure to avoid: **88 returns named a file path *and* still
+exceeded 10k chars.** They wrote the file, then pasted the contents anyway.
+Naming the path is the point; the paste undoes it.
+
+Budget each return explicitly in the prompt — 400–800 characters is enough for a
+path, a count, and the two or three things the caller must decide on. And note
+the **2,048-character cap is per schema string field, not a payload budget**:
+65,399-char returns exist, so a schema does not protect you. A field that
+truncates does so silently, mid-token, and the retry loop then burns five full
+generations against the same wall.
+
+Never interpolate a large blob into a downstream prompt.
+`JSON.stringify(x, null, 1).slice(0, 90000)` is 90k characters of prompt on
+every call that touches it.
+
+## Serial chains duplicate; parallel ones do not
+
+The intuition is backwards, and this corrects point 3 above rather than
+replacing it. `[measured]` mean pairwise similarity between parallel agents'
+returns was **0.008** (max 0.060 across 51 pairs). Serial chains averaged
+**0.072**, with peaks of 0.710, 0.672 and 0.546 — and every pair above 0.25 sat
+in a serial refine chain. One chain returned 113,915 characters re-emitting
+substantially the same document **fifteen times**.
+
+So sequencing is still right when order matters. But **a serial stage must pass
+a delta, never the artifact** — what changed and why, not the document again.
+The next stage can read the file.
+
+## Losing agents: it is the quota wall, not the width
+
+`[measured]` 42 of 280 agents (15%) were lost — 20,680 agent-seconds and 1,119
+tool calls, journaled as nothing, because the journal records a result only on
+completion. **20 of them carry a `<synthetic>` row reading "You've hit your
+session limit", and 0 of those 20 journaled.** That is 48% of all lost work from
+one cause, and it is greppable after the fact.
+
+Resist reading a loss *rate* by shape as evidence about width: 1-agent runs lost
+**67%** while a 16-wide 30-agent run kept **30 of 30**. Width sizes the blast
+radius of an interruption; it does not predict one. The caps above stand on
+usage limits and on second-wave-beats-bigger-wave, not on a loss rate.
 
 ## Workflows specifically
 
