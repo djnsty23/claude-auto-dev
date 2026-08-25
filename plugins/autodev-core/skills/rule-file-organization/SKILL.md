@@ -4,6 +4,10 @@ description: Where generated files belong. Archives, backups, handoffs, reports,
 when_to_use: "Before writing any generated file: archives, backups, handoffs, reports, screenshots."
 user-invocable: false
 allowed-tools: Read, Grep, Glob
+paths:
+  - "**/prd.json"
+  - "**/.claude/**/*.md"
+  - "**/.claude/**/*.json"
 ---
 
 ## Never Put in Project Root

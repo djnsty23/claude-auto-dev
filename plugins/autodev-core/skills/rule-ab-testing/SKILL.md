@@ -4,6 +4,11 @@ description: "Every proposal gets measured against the current approach and at l
 when_to_use: "Before adopting any recommendation, gate, detector or performance claim — measure it against the current approach and at least one variant first."
 user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
+paths:
+  - "**/*.tsx"
+  - "**/*.jsx"
+  - "**/experiment*.ts"
+  - "**/ab-*.ts"
 ---
 
 # Measure it against something

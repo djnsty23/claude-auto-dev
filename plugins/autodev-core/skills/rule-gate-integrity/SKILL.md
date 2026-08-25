@@ -4,6 +4,11 @@ description: "Four ways a gate, test, or generator check passes while proving no
 when_to_use: "Before writing a gate, test, detector or harness — and again when one reports green."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
+paths:
+  - "**/check-*.js"
+  - "**/find-*.js"
+  - "**/test-*.js"
+  - "**/preflight*.js"
 ---
 
 # A gate that cannot fail is not a gate

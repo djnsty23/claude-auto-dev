@@ -4,6 +4,10 @@ description: "Verification happens on this machine, in a browser you drive, befo
 when_to_use: "Before verifying, pushing, or calling any work done."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
+paths:
+  - "**/*.workflow.js"
+  - "**/.claude/launch.json"
+  - "**/PUBLISH-QUEUE.md"
 ---
 
 # Local-first verification

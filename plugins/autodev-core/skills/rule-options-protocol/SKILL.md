@@ -2,7 +2,7 @@
 name: rule-options-protocol
 description: "How to end a turn: a clickable AskUserQuestion panel of vetted, complementary options with a recommendation in every block."
 when_to_use: "Before ending a turn that asks the user for direction."
-user-invocable: false
+user-invocable: true
 allowed-tools: Read, Grep, Glob
 ---
 

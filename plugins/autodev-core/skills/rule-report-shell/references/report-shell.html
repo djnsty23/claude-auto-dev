@@ -1,0 +1,489 @@
+<title>Verification Report Shell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* ============================================================
+   1. TOKENS — dark-first. Bare :root is the committed default;
+      light is the swap, guarded in both directions.
+   ============================================================ */
+:root{
+  --ground:#0d0f0e;      /* near-black, faint green bias: chosen, not inherited */
+  --surface:#161a18;
+  --raise:#1b201d;
+  --well:#121614;
+  --line:#252b28;
+  --line-soft:#1e2421;
+
+  --ink:#e9ede9;
+  --ink-dim:#96a19b;
+  --ink-faint:#69736e;
+
+  --accent:#3ddc84;
+  --blocker:#ff6f5e;
+  --warn:#f0b429;
+  --safe:#3ddc84;
+  --info:#7aa2f7;
+
+  --scroll-track:#141816;
+  --scroll-thumb:#333c37;
+  --scroll-thumb-hi:#465149;
+
+  --measure:66ch;
+  --r:11px;
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --ground:#fbfcfb;--surface:#fff;--raise:#f4f6f4;--well:#f2f5f3;
+    --line:#e0e5e1;--line-soft:#ecefec;
+    --ink:#121614;--ink-dim:#5a635e;--ink-faint:#858d88;
+    --accent:#12894c;--blocker:#c9372c;--warn:#a86a05;--safe:#12894c;--info:#3554a5;
+    --scroll-track:#eceeec;--scroll-thumb:#c3c9c5;--scroll-thumb-hi:#a8b0aa;
+  }
+}
+:root[data-theme="light"]{
+  --ground:#fbfcfb;--surface:#fff;--raise:#f4f6f4;--well:#f2f5f3;
+  --line:#e0e5e1;--line-soft:#ecefec;
+  --ink:#121614;--ink-dim:#5a635e;--ink-faint:#858d88;
+  --accent:#12894c;--blocker:#c9372c;--warn:#a86a05;--safe:#12894c;--info:#3554a5;
+  --scroll-track:#eceeec;--scroll-thumb:#c3c9c5;--scroll-thumb-hi:#a8b0aa;
+}
+
+/* ============================================================
+   2. THE SCROLLBAR FIX — default bars render in the OS palette,
+      which is light, so every dark well had a white rail.
+   ============================================================ */
+*{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) var(--scroll-track);}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:var(--scroll-track);border-radius:999px;}
+::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:999px;border:2px solid var(--scroll-track);background-clip:padding-box;}
+::-webkit-scrollbar-thumb:hover{background:var(--scroll-thumb-hi);}
+::-webkit-scrollbar-corner{background:var(--scroll-track);}
+
+/* ============================================================
+   3. BASE
+   ============================================================ */
+body{
+  background:var(--ground);color:var(--ink);
+  font:400 16px/1.62 "IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;padding:0 24px 100px;
+}
+.page{max-width:940px;margin:0 auto;}
+p{margin:0;max-width:var(--measure);}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:5px;}
+code{
+  font:500 .86em/1.4 "IBM Plex Mono",ui-monospace,monospace;
+  background:var(--well);border:1px solid var(--line-soft);
+  padding:.12em .4em;border-radius:5px;white-space:nowrap;
+}
+
+/* ============================================================
+   4. MASTHEAD
+   ============================================================ */
+.masthead{padding:56px 0 38px;border-bottom:1px solid var(--line);}
+.lockup{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;margin-bottom:26px;}
+.brand{font:800 21px/1 Archivo,ui-sans-serif,sans-serif;letter-spacing:-.02em;}
+.brand em{font-style:normal;color:var(--accent);}
+.meta{font:500 11px/1 "IBM Plex Mono",ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);}
+h1{margin:0;font:700 clamp(30px,4.5vw,49px)/1.07 Archivo,sans-serif;letter-spacing:-.028em;text-wrap:balance;max-width:19ch;}
+.standfirst{margin-top:18px;font-size:17px;color:var(--ink-dim);}
+
+/* ============================================================
+   5. RHYTHM — space between sections is 3x space within them.
+   ============================================================ */
+.page > section{margin-top:68px;}
+.eyebrow{
+  display:flex;align-items:center;gap:14px;margin-bottom:22px;
+  font:500 11px/1 "IBM Plex Mono",ui-monospace,monospace;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--ink-faint);
+}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--line);}
+.count{color:var(--accent);font-variant-numeric:tabular-nums;}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));}
+.stack{display:flex;flex-direction:column;gap:16px;}
+
+/* ============================================================
+   6. THE CARD — summary is ALL that shows. Detail is earned.
+   ============================================================ */
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  display:flex;flex-direction:column;cursor:pointer;
+  transition:border-color .25s var(--ease),background .25s var(--ease);
+}
+/* The whole card is the hit area, so it must read as one. Text stays
+   selectable — the handler bails when a selection exists. */
+.card:hover{
+  border-color:color-mix(in srgb,var(--accent) 26%,var(--line));
+  background:color-mix(in srgb,var(--raise) 55%,var(--surface));
+}
+.card:hover .more{color:var(--ink);}
+.card .well,.card .btn,.card a{cursor:auto;}
+.card .btn{cursor:pointer;}
+.card.is-blocker{border-color:color-mix(in srgb,var(--blocker) 40%,var(--line));}
+.card.is-warn{border-color:color-mix(in srgb,var(--warn) 32%,var(--line));}
+.card.is-info{border-color:color-mix(in srgb,var(--info) 30%,var(--line));}
+.card-head{padding:20px 22px;display:flex;flex-direction:column;gap:11px;}
+.chips{display:flex;flex-wrap:wrap;gap:7px;}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font:600 10px/1 "IBM Plex Mono",ui-monospace,monospace;
+  letter-spacing:.11em;text-transform:uppercase;
+  padding:5px 9px;border-radius:999px;border:1px solid var(--line);color:var(--ink-dim);
+}
+.chip::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;}
+.chip.blocker{color:var(--blocker);border-color:color-mix(in srgb,var(--blocker) 42%,transparent);}
+.chip.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 42%,transparent);}
+.chip.safe{color:var(--safe);border-color:color-mix(in srgb,var(--safe) 42%,transparent);}
+.chip.info{color:var(--info);border-color:color-mix(in srgb,var(--info) 42%,transparent);}
+.chip.mute::before{display:none;}
+.card h3{margin:0;font:600 16.5px/1.34 "IBM Plex Sans",sans-serif;letter-spacing:-.01em;text-wrap:balance;}
+.summary{font-size:14.5px;color:var(--ink-dim);}
+.summary strong{color:var(--ink);font-weight:600;}
+
+/* --- the disclosure -------------------------------------
+   NOT the 0fr->1fr grid trick. Measured 2026-08-25: inside a
+   column-flex card that technique cannot do both jobs, because
+   the `overflow:hidden` it needs for the COLLAPSE zeroes the
+   child's automatic minimum, so `1fr` resolves to 0px on the
+   EXPAND. Removing the clip fixes expansion (500.422px) and
+   breaks collapse (0fr also resolves to 500px). One or the
+   other, never both.
+   So: max-height, with the value measured from scrollHeight at
+   click time rather than guessed as a magic number. A guessed
+   cap silently truncates the longest card, which is exactly the
+   card worth reading.
+   -------------------------------------------------------- */
+.reveal{
+  max-height:0;overflow:hidden;
+  transition:max-height .42s var(--ease);
+}
+.reveal-inner{overflow:visible;}
+.detail{
+  margin:0;padding:0 22px 20px;list-style:none;
+  display:flex;flex-direction:column;gap:11px;
+}
+.detail li{
+  position:relative;padding-left:19px;font-size:14px;line-height:1.6;color:var(--ink-dim);
+  opacity:0;transform:translateY(-7px);
+  transition:opacity .34s var(--ease),transform .34s var(--ease);
+}
+.detail li::before{
+  content:"";position:absolute;left:0;top:.62em;
+  width:6px;height:1.5px;border-radius:1px;background:var(--accent);opacity:.75;
+}
+/* the stagger: each bullet fades down one after the other */
+.card[data-open="true"] .detail li{opacity:1;transform:none;}
+.card[data-open="true"] .detail li:nth-child(1){transition-delay:.08s;}
+.card[data-open="true"] .detail li:nth-child(2){transition-delay:.15s;}
+.card[data-open="true"] .detail li:nth-child(3){transition-delay:.22s;}
+.card[data-open="true"] .detail li:nth-child(4){transition-delay:.29s;}
+.card[data-open="true"] .detail li:nth-child(5){transition-delay:.36s;}
+.card[data-open="true"] .detail li:nth-child(6){transition-delay:.43s;}
+
+.more{
+  margin:0 22px 18px;align-self:flex-start;background:none;border:0;padding:4px 0;
+  font:600 12.5px/1 "IBM Plex Sans",sans-serif;color:var(--accent);cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px;
+}
+.more .caret{
+  display:inline-block;width:7px;height:7px;border-right:1.5px solid currentColor;
+  border-bottom:1.5px solid currentColor;transform:rotate(45deg) translate(-1px,-1px);
+  transition:transform .3s var(--ease);
+}
+.card[data-open="true"] .more .caret{transform:rotate(-135deg) translate(-2px,-2px);}
+.more:hover{color:var(--ink);}
+.more .lbl-less{display:none;}
+.card[data-open="true"] .more .lbl-more{display:none;}
+.card[data-open="true"] .more .lbl-less{display:inline;}
+
+/* ============================================================
+   7. TABLE
+   ============================================================ */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px;}
+thead th{
+  text-align:left;padding:12px 18px;background:var(--raise);
+  font:500 10px/1 "IBM Plex Mono",ui-monospace,monospace;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-faint);border-bottom:1px solid var(--line);white-space:nowrap;
+}
+tbody td{padding:14px 18px;border-bottom:1px solid var(--line-soft);vertical-align:top;color:var(--ink-dim);}
+tbody tr:last-child td{border-bottom:0;}
+tbody tr{transition:background .18s var(--ease);}
+tbody tr:hover{background:var(--raise);}
+td:first-child{color:var(--ink);}
+.verdict{font:600 11px/1 "IBM Plex Mono",ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;}
+.v-blocker{color:var(--blocker);}.v-warn{color:var(--warn);}.v-safe{color:var(--safe);}
+
+/* ============================================================
+   8. COPY BLOCKS — collapsed by default. The code is the detail.
+   ============================================================ */
+.copyblock{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);}
+.copyblock .card-head{padding:20px 22px 16px;}
+.well{margin:0 16px;background:var(--well);border:1px solid var(--line-soft);border-radius:8px;max-height:300px;overflow:auto;}
+.well pre{margin:0;padding:17px 19px;font:400 12.5px/1.72 "IBM Plex Mono",ui-monospace,monospace;color:var(--ink-dim);white-space:pre;}
+.copyfoot{display:flex;align-items:center;gap:13px;padding:15px 22px 19px;flex-wrap:wrap;}
+.btn{font:600 13px/1 "IBM Plex Sans",sans-serif;background:var(--ink);color:var(--ground);border:0;padding:10px 15px;border-radius:7px;cursor:pointer;transition:background .2s var(--ease);}
+.btn:hover{background:var(--accent);}
+.btn.copied{background:var(--accent);}
+.hint{font-size:12.5px;color:var(--ink-faint);}
+
+/* ============================================================
+   9. PULLOUT + SOURCES
+   ============================================================ */
+.pullout{border-left:2px solid var(--accent);padding:3px 0 3px 21px;color:var(--ink-dim);font-size:15px;}
+.pullout strong{color:var(--ink);font-weight:600;}
+.sources{margin-top:68px;padding-top:22px;border-top:1px solid var(--line);font-size:12.5px;line-height:1.85;color:var(--ink-faint);}
+.sources code{font-size:11.5px;background:transparent;}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation:none!important;transition-duration:.01ms!important;transition-delay:0s!important;}
+}
+@media (max-width:640px){
+  body{padding:0 17px 76px;}
+  .masthead{padding:36px 0 28px;}
+  .page > section{margin-top:52px;}
+}
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="lockup">
+      <span class="brand">Ecommerce<em>Benchmark</em></span>
+      <span class="meta">Nexus v3 changelog &middot; Verified against EB code &middot; 2026-08-25</span>
+    </div>
+    <h1>One blocker, one question, and a score shift that would have landed silently</h1>
+    <p class="standfirst">Read against our own adapters, not the changelog alone. Three of my first-pass claims did not survive checking.</p>
+  </header>
+
+  <section>
+    <div class="eyebrow">What we found <span class="count">3</span></div>
+    <div class="grid">
+
+      <article class="card is-blocker" data-open="false">
+        <div class="card-head">
+          <div class="chips"><span class="chip blocker">Blocking</span><span class="chip mute">Before rollout</span></div>
+          <h3><code>not_measurable_google_only</code> is unrecognised</h3>
+          <p class="summary">An unknown warning code falls through to the renderer, which prints a <strong>real</strong> <code>medianDaysActive</code> on a prospect-facing audit.</p>
+        </div>
+        <div class="reveal"><div class="reveal-inner"><ul class="detail">
+          <li>Our null-score handler checks the warning vocabulary; no match returns null and the guard block is skipped.</li>
+          <li>Execution continues into the per-metric renderer, which reads <code>rawValue</code>.</li>
+          <li>That is the one case where Nexus <strong>deliberately keeps</strong> a real value, so the fall-through renders it graded.</li>
+          <li>Partial cover exists by value heuristic: suppressed above 270 days Google-inclusive, 180 google-only.</li>
+          <li>A pinned test asserts the opposite case stays unsuppressed &mdash; google-only at a 128 day median keeps the metric.</li>
+          <li>So a store in that band gets a grade from us on data Nexus has marked unscoreable.</li>
+        </ul></div></div>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">The trace</span><span class="lbl-less">Less</span></button>
+      </article>
+
+      <article class="card is-warn" data-open="false">
+        <div class="card-head">
+          <div class="chips"><span class="chip warn">Lower severity</span></div>
+          <h3><code>meta_fetch_under_delivered</code> is also unrecognised</h3>
+          <p class="summary">It nulls no score, so it cannot fabricate. We want it wired for the <strong>signal</strong>, not for safety.</p>
+        </div>
+        <div class="reveal"><div class="reveal-inner"><ul class="detail">
+          <li>It marks <code>inputAdCount</code> as a lower bound rather than a count.</li>
+          <li>Same thread as the <code>creativesCount</code> cap we already handle.</li>
+          <li>Missing it costs precision, never correctness.</li>
+        </ul></div></div>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Why wire it</span><span class="lbl-less">Less</span></button>
+      </article>
+
+      <article class="card is-info" data-open="false">
+        <div class="card-head">
+          <div class="chips"><span class="chip info">Question, not a defect</span></div>
+          <h3>Is the <code>daysActive</code> widening scoped to <code>kingAds[]</code>?</h3>
+          <p class="summary">Safe there. But competitor-synthesis carries its own <code>daysActive</code>, and we render one <strong>raw</strong>.</p>
+        </div>
+        <div class="reveal"><div class="reveal-inner"><ul class="detail">
+          <li>Our helper treats any non-finite value as unknown; a comment in it already anticipates v3.</li>
+          <li><code>evergreen[].daysActive</code> is rendered raw and sorted on, with no guard.</li>
+          <li>Safe only because the widening does not reach it &mdash; an assumption until they confirm.</li>
+        </ul></div></div>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Detail</span><span class="lbl-less">Less</span></button>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Every v3 change, against our code</div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>V3 change</th><th>What we do today</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td><code>not_measurable_google_only</code></td><td>0 references. Unknown code falls through to the renderer, which reads the kept <code>rawValue</code>.</td><td class="verdict v-blocker">Blocker</td></tr>
+          <tr><td><code>meta_fetch_under_delivered</code></td><td>0 references. Nulls nothing; we lose the lower-bound signal.</td><td class="verdict v-warn">Wire it</td></tr>
+          <tr><td><code>kingAds[].daysActive</code> &rarr; nullable</td><td><code>kingAdsRuntimeDays()</code> returns unknown for any non-finite value.</td><td class="verdict v-safe">Safe</td></tr>
+          <tr><td><code>snapshot.version</code> &rarr; 3</td><td><code>MAX_KNOWN_SCHEMA</code> is 2. We accept, render, and log one warning per worker boot.</td><td class="verdict v-safe">Safe, then bump</td></tr>
+          <tr><td>Google-only returns <code>score: null</code></td><td>Changes our recompute input set <em>and</em> its composite; flips severity for more stores.</td><td class="verdict v-warn">Baseline first</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Claims I had wrong on the first pass <span class="count">3</span></div>
+    <div class="grid">
+      <article class="card" data-open="false">
+        <div class="card-head">
+          <div class="chips"><span class="chip mute">Corrected</span></div>
+          <h3>&ldquo;<code>objection</code> is the blocked ask unblocking&rdquo;</h3>
+          <p class="summary">Wrong surface. We <strong>already</strong> consume an <code>objection</code> dimension.</p>
+        </div>
+        <div class="reveal"><div class="reveal-inner"><ul class="detail">
+          <li>Ours lives in competitor synthesis and has done for months.</li>
+          <li>The v3 one is a <em>cohort-distribution</em> dimension &mdash; different payload, different surface.</li>
+        </ul></div></div>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">What it does</span><span class="lbl-less">Less</span></button>
+      </article>
+      <article class="card" data-open="false">
+        <div class="card-head">
+          <div class="chips"><span class="chip mute">Corrected</span></div>
+          <h3>&ldquo;We are safe on <code>daysActive</code>&rdquo;</h3>
+          <p class="summary">True for <code>kingAds[]</code> &mdash; and I had grepped only <strong>two files</strong>.</p>
+        </div>
+        <div class="reveal"><div class="reveal-inner"><ul class="detail">
+          <li><code>evergreen[].daysActive</code> is rendered raw and sorted on, with no guard.</li>
+          <li>Safe only because the widening does not reach it, which is an assumption.</li>
+        </ul></div></div>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Where it stops</span><span class="lbl-less">Less</span></button>
+      </article>
+      <article class="card" data-open="false">
+        <div class="card-head">
+          <div class="chips"><span class="chip mute">Corrected</span></div>
+          <h3>&ldquo;v3 is B-20 being delivered&rdquo;</h3>
+          <p class="summary">The ID resolves, the story exists, and only the <strong>title</strong> disagrees.</p>
+        </div>
+        <div class="reveal"><div class="reveal-inner"><ul class="detail">
+          <li><code>creative.ts:3068</code> cites dev-handoff B-20 as the ask to null these server-side.</li>
+          <li>B-20 is a GA4 attribution story. The cite is stale, not wrong-by-fabrication.</li>
+        </ul></div></div>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Detail</span><span class="lbl-less">Less</span></button>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Copy blocks</div>
+    <div class="stack">
+      <div class="copyblock card" data-open="false">
+        <div class="card-head">
+          <h3>1 &middot; Reply to Valentin M.</h3>
+          <p class="summary">One blocker, one question, one thing to coordinate. Nothing asks him to change the release.</p>
+        </div>
+        <div class="reveal"><div class="reveal-inner">
+          <div class="well"><pre>## Verified against our code
+
+One blocker, one question, everything else clear.
+
+### BLOCKER: `not_measurable_google_only`
+
+We do not recognise it, and our null-score handler falls
+through to the per-metric renderer when a code is unknown.
+Since that warning is the one case where you deliberately
+KEEP a real `rawValue`, the fall-through renders your real
+`medianDaysActive` as a graded finding.
+
+We have a pinned test asserting the opposite case stays
+unsuppressed: **google-only at a 128 day median keeps the
+metric.** So a store in that band gets a grade from us on
+data you have marked unscoreable.
+
+One entry on our side and we ship it before you roll.</pre></div>
+          <div class="copyfoot"><button class="btn" type="button">Copy markdown</button><span class="hint">Paste into Slack or the ticket</span></div>
+        </div></div>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Show the draft</span><span class="lbl-less">Hide</span></button>
+      </div>
+
+      <div class="copyblock card" data-open="false">
+        <div class="card-head">
+          <h3>2 &middot; Our work queue, in dependency order</h3>
+          <p class="summary">Seven items. Only <strong>1 and 2</strong> have a deadline, and both are ours alone.</p>
+        </div>
+        <div class="reveal"><div class="reveal-inner">
+          <div class="well"><pre>## Nexus v3 — EB work queue
+
+| # | Work | Gate | Owner |
+|---|---|---|---|
+| 1 | Add both warning codes to `resolveNullScoreReason` | Before rollout | EB |
+| 2 | Baseline composites so the v3 shift is measurable | Before rollout | EB |
+| 3 | Bump `MAX_KNOWN_SCHEMA` 2 → 3 | After validating | EB |
+| 4 | Update the limitation in `evalPrompts.ts:249` | When `objection` lands | EB |
+| 5 | Consume `platformIds.resolvedBy.first_match` | After rollout | EB |
+| 6 | Fix the stale `B-20` cite at `creative.ts:3068` | Anytime | EB |
+| 7 | Adopt a Nexus `tier` on batch paths | Blocked on Nexus | Nexus |</pre></div>
+          <div class="copyfoot"><button class="btn" type="button">Copy markdown</button><span class="hint">For the handoff or a ticket</span></div>
+        </div></div>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Show the queue</span><span class="lbl-less">Hide</span></button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="pullout"><strong>Worth saying to Vali directly:</strong> this changelog did its job. It announces before rollout, names the one non-additive change instead of burying it, and records the v2 failure retroactively so the omission is legible. The single blocker is a code string we now have months earlier than we would have found it by watching a render break &mdash; which is what happened with v2.</p>
+  </section>
+
+  <footer class="sources">
+    Sources: <code>benchmark-partner-changelog.md</code> (v3, pending rollout), read against <code>src/lib/adapters/creative.ts</code>, <code>src/lib/vendors/nexus.ts</code> and the pinned tests in <code>creativeGuard.test.ts</code>. Line numbers against <code>origin/main</code> at <code>6df92d4b</code>. One figure is deliberately absent: our exposure count for google-only snapshots, because the probe returned an implausible 1,507 of 1,507 and its control failed on a domain known to hold data, so it was discarded rather than reported.
+  </footer>
+
+</div>
+
+<script>
+// ONE handler per card, on the card itself. The button sits inside it, so a
+// click on the button bubbles here — it is the visible affordance, never the
+// only hit area. Anything else needs two handlers kept in sync, which is how
+// data-open and max-height drift apart.
+function toggle(card){
+  var reveal = card.querySelector('.reveal');
+  var inner  = card.querySelector('.reveal-inner');
+  var btn    = card.querySelector('.more');
+  var open   = card.getAttribute('data-open') === 'true';
+
+  if(open){
+    // pin the current height first so the transition has a start value
+    reveal.style.maxHeight = inner.scrollHeight + 'px';
+    void reveal.offsetHeight;
+    reveal.style.maxHeight = '0px';
+  } else {
+    reveal.style.maxHeight = inner.scrollHeight + 'px';
+  }
+  card.setAttribute('data-open', open ? 'false' : 'true');
+  if(btn) btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+}
+
+document.querySelectorAll('.card').forEach(function(card){
+  card.addEventListener('click', function(e){
+    // never hijack a real control, a link, or scrolling/selecting inside a code well
+    if(e.target.closest('.btn, .well, a')) return;
+    // if the reader is selecting text, they are reading, not toggling
+    var sel = window.getSelection();
+    if(sel && sel.toString().length > 0) return;
+    toggle(card);
+  });
+});
+
+// An open card must not clip when the window reflows text to more lines.
+addEventListener('resize', function(){
+  document.querySelectorAll('.card[data-open="true"]').forEach(function(card){
+    var reveal = card.querySelector('.reveal');
+    var inner = card.querySelector('.reveal-inner');
+    reveal.style.maxHeight = inner.scrollHeight + 'px';
+  });
+});
+document.querySelectorAll('.btn').forEach(function(b){
+  b.addEventListener('click', function(){
+    var pre = b.closest('.reveal-inner').querySelector('pre');
+    if(!pre) return;
+    navigator.clipboard.writeText(pre.textContent).then(function(){
+      var t = b.textContent; b.textContent = 'Copied'; b.classList.add('copied');
+      setTimeout(function(){ b.textContent = t; b.classList.remove('copied'); }, 1600);
+    });
+  });
+});
+</script>

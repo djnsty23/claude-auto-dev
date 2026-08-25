@@ -219,7 +219,7 @@ ${RULES}
 
 READ-ONLY in this stage. Do not edit, commit, or switch branches — other live
 sessions have uncommitted work in this clone. You are finding, not fixing.`,
-    { label: `find:${repo.name}`, phase: 'Surface', schema: FIND_SCHEMA }
+    { label: `find:${repo.name}`, phase: 'Surface', schema: FIND_SCHEMA, model: 'opus', effort: 'high' }
   ),
 
   // STAGE 2 — adversarial reachability check
@@ -264,7 +264,7 @@ MISSED? Externally reachable only. Same evidence bar.
 ${RULES}
 
 READ-ONLY. You are judging, not fixing.`,
-      { label: `verify:${repo.name}`, phase: 'Verify', schema: VERIFY_SCHEMA }
+      { label: `verify:${repo.name}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: 'opus', effort: 'xhigh' }
     ).then(v => ({ ...v, _surface: found, _repo: repo }))
   },
 
@@ -329,7 +329,7 @@ HOW TO WORK:
    outcome than a compliant change that breaks a paying product.
 
 ${RULES}`,
-      { label: `fix:${repo.name}`, phase: 'Fix', schema: FIX_SCHEMA, isolation: 'worktree' }
+      { label: `fix:${repo.name}`, phase: 'Fix', schema: FIX_SCHEMA, isolation: 'worktree', model: 'opus', effort: 'high' }
     ).then(f => ({ ...f, _verified: verified }))
   }
 )
