@@ -1,5 +1,50 @@
 # Changelog
 
+## [8.118.0] - 2026-08-25
+
+### Added: workflow-liveness, because a job that never runs emits nothing
+
+`[measured 2026-08-25]` Every scheduled workflow across three repos stopped on
+2026-08-21 and nothing said so for four days. A production error monitor on a
+15-minute cron ran zero times out of roughly 380 expected.
+
+The reason nobody noticed is structural rather than careless. `gh run list`
+returns runs that HAPPENED. A job that is never scheduled produces no row at
+all, so the repo reads as quiet, and quiet is indistinguishable from healthy.
+
+That inverts the usual intuition about noisy failures. The failing runs were the
+harmless ones, because a failure still creates a row a person can see. The
+damaging failure emitted nothing anywhere. So the question this asks is not "are
+runs failing" but "when did this workflow last run, against how often it claims
+to run", which is a different query, and nothing was asking it.
+
+Four choices in the implementation, each one a rule already learned here:
+
+- An unreadable cron reports UNKNOWN and never healthy. Letting an unanticipated
+  state fall through to fine is how `startup_failure` hid an outage across three
+  merges. The summary line counts unjudgeable rows separately and says in as
+  many words that they are not passing rows.
+- NO RUNS AT ALL is its own verdict. "Never ran" and "ran and is current" are
+  opposite facts that would otherwise both produce an empty overdue list.
+- Every run prints the population it scanned, so a clean report is
+  distinguishable from a probe that found nothing.
+- A missing `gh` is COULD NOT CHECK with a non-zero exit, never a pass.
+
+First live run found 5 overdue or never-run across 3 repos and 18 workflows,
+with zero false positives. Both suspicious rows were triaged rather than tuned
+away: `browser-gates` really does carry a weekly cron 80 lines below its push
+trigger, and `Edge Mutation Sweep` really has no runs, confirmed against a
+known-positive control on a workflow that does.
+
+### Verified
+
+`npm test`: 47/47 suites, exit 0, before and after the bump. The new suite is
+hermetic, driving the script as a subprocess through `--selftest`, the usage
+path, and an emptied PATH so `gh` cannot resolve. It is mutation tested: making
+an unreadable cron guess 1440 instead of returning null kills the assertion
+written for that, and making a missing `gh` print a reassuring line kills the
+one written for that.
+
 ## [8.117.0] - 2026-08-25
 
 ### Added: a phase entry point, and the gate that caught it lying
