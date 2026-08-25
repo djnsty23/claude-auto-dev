@@ -1,5 +1,42 @@
 # Changelog
 
+## [8.120.0] - 2026-08-25
+
+### Decided: `audit` stays an SOP-in-a-skill, and the reason is measured
+
+The question was whether to rewrite `audit` as a Workflow script. It has the
+clearest DAG of any skill here, and the case looked strong: the size gate is
+prose so nothing enforces the agent count, there is no verifier node, and
+per-dimension output is free-form so aggregation is the model re-reading prose.
+
+The outcome data says no. Graded on results rather than on how tidy the mechanism
+looks, across two mature product repos and **288 audit-generated stories**:
+
+| | audit-generated | hand-generated |
+|---|---|---|
+| Project A | 123 stories, 110 done (89%), 11 failed, 0 deferred | 41 stories, 40 done |
+| Project B | 165 stories, 151 done (92%), 2 deferred (1.2%) | 48 stories, 9 deferred (18.8%) |
+
+`deferred` means somebody looked at the story and decided not to do it, so it is
+the closest proxy available for a finding not worth having. Audit findings are
+deferred **15x less often** than hand-written work. A missing verifier node
+should surface as noise people decline to act on, and it does not.
+
+So the port is not worth building. Rewriting a mechanism with an 89-92%
+completion rate, to fix defects the data does not show, optimises something that
+is not broken.
+
+Written up in `skills/audit/references/why-this-stays-a-skill.md`, including the
+two limits of the `deferred` proxy, three specific falsifiable conditions that
+would justify revisiting, and the generalisable half: code-as-graph earns its
+place where the EDGES must be enforced, and an SOP is adequate where a person
+reads the output and would notice a missing step.
+
+One thing deliberately NOT claimed: that the size gate is ignored in practice.
+The obvious probe counts string mentions in a transcript rather than tool calls,
+so a session that merely READ the skill file scores as though it had launched
+agents. That needs the structured records, not a grep.
+
 ## [8.119.0] - 2026-08-25
 
 ### Corrected: v8.117.0 shipped a skill-invocation number that read one channel of two
