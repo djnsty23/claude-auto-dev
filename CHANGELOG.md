@@ -1,5 +1,60 @@
 # Changelog
 
+## [8.125.0] - 2026-08-27
+
+### Fixed: six externally-reachable holes in shipped scripts, closed five days late
+
+The fix was written on 2026-08-22 and never reached this trunk. It sat on a
+branch with no upstream, on one disk, while every installed plugin kept the
+vulnerable form. Nothing announced that, because a branch that was never pushed
+looks exactly like a branch that was never needed.
+
+These files run inside other people's sessions, from a public repo, against
+repos their agent cloned, so every input below is attacker-controlled there.
+
+**Shell injection.** `execSync` spawns `/bin/sh -c` on POSIX, so quoting around
+an interpolated value is decorative: a double quote is legal in a filename, and
+`;`, `$()` and a backtick are legal in a git ref. The argv form of
+`execFileSync` never builds a command line, so the same bytes arrive as one
+literal argument. Converted in `templates/preflight.js` (`node --check` over
+readdirSync output), `scripts/drift-audit.js` (all 12 call sites, fed by
+for-each-ref) and `scripts/session-sweep.js` (all 8 call sites, fed by the
+checked-out branch). `session-sweep` also validates the gh slug, because
+`String.replace` returns its input unchanged on no-match, so a remote that is
+not owner/repo shaped previously fell through as the whole URL.
+
+**Context injection.** `session-start.js` read `prd.json` from whatever repo was
+the working directory and emitted story ids, titles and parse errors as
+additionalContext, before the first user turn, framed by the file's own header
+as state to reason about. Fields are now capped at 80 characters with newlines
+and control characters stripped, and the block is fenced as untrusted data.
+`memory-session-start.js` and `inbox-watch.js` had the same shape and got the
+same treatment.
+
+**DNS rebinding.** `fleet-board.js` binds 127.0.0.1, which stops other hosts and
+does nothing about the browser on this one. It now checks Host, refuses any
+request carrying Origin, and allows GET only.
+
+### How it was verified, and what that does not cover
+
+Both commits cherry-picked with no conflict onto a trunk roughly 90 commits
+ahead. That is a fact about text and says nothing about meaning, so it is not
+the evidence.
+
+`npm test` passed 55 of 55 suites including `validate`.
+
+The evidence is a mutation test, because a green gate is a claim rather than
+proof. Restoring main's vulnerable `drift-audit.js` and `session-sweep.js` into
+the fixed tree and running `tooling/test-argv-injection.js` alone gave exit 1
+with 12 passed and 4 failed. The same suite on the fixed tree gives exit 0 with
+29 passed. The four kills are the ls-remote `--` separator, the dash-leading
+branch refusal, the slug validator, and the dash-leading remote-ref filter, so
+that suite detects the real defect rather than passing regardless.
+
+Not covered: the six original live reproductions (a hostile ref, a hostile
+`prd.json`, a Host-header request against an unpatched board) were measured by
+the author on 2026-08-22 and were not re-run here.
+
 ## [8.124.0] - 2026-08-26
 
 ### Fixed: a heal fix-agent isolated the wrong repo
