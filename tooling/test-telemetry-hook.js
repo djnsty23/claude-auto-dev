@@ -220,6 +220,66 @@ check('module: both stay silent on a call that SUCCEEDED',
   adviseOnToolFailure('Bash', SQL_ERR, false) === null
   && adviseOnToolFailure('Task', SCHEMA_ERR, false) === null);
 
+// ---- shell-exit-may-be-the-answer, the seventh rule ----
+// 90 sessions, flat against baseline despite a whole section of
+// verification-traps.md. Its signature is only "exit 1 or 2", so the negatives
+// below carry the rule — a positive-only suite would pass on a rule that told
+// sessions a failed `ls` was "probably the answer".
+//
+// The FIRING CONDITION is the part that needed measuring, not the wording.
+// `tool_response` is "Error: " + content on 100% of 489 measured failures, and
+// the analyzer's ERROR_MARKER contains /Error:/ — so a rule that tested the raw
+// string would match its own prefix and NEVER fire, with every fixture here
+// still green. This first case is the one that proves it fires at all.
+const EXIT_ANSWER = 'Error: Exit code 1 === which repos carry a client-IP derivation? === project-a: 0 project-b: 0';
+check('module: names an exit code that is probably the answer',
+  (adviseOnToolFailure('Bash', EXIT_ANSWER, true) || {}).id === 'shell-exit-may-be-the-answer');
+check('module: silent when the same text came from a call that SUCCEEDED',
+  adviseOnToolFailure('Bash', EXIT_ANSWER, false) === null);
+check('module: fires on the bare form too, if the harness ever drops the prefix',
+  (adviseOnToolFailure('Bash', 'Exit code 2 0', true) || {}).id === 'shell-exit-may-be-the-answer');
+
+// Paired negatives. Each is a REAL fault that also exits 1 or 2, and each was
+// observed in the 7-day corpus this rule was calibrated against. If any of
+// these starts advising, the rule is telling a session to ignore a real error.
+const REAL_FAULTS = [
+  ["Error: Exit code 2 ls: cannot access '/nope/': No such file or directory", 'missing path'],
+  ["Error: Exit code 2 sed: can't read src/x.tsx: No such file or directory", 'unreadable file'],
+  ['Error: Exit code 1 /usr/bin/bash: line 1: frobnicate: command not found', 'missing binary'],
+  ['Error: Exit code 1 sed: unknown option -- 2 Usage: sed [OPTION]...', 'bad flag'],
+  ['Error: Exit code 1 CONFLICT (content): Merge conflict in docs/x.xml Automatic merge failed', 'merge conflict'],
+  ['Error: Exit code 1 commit-msg: this message names a private project, and this repo is PUBLIC.', 'blocked commit'],
+  ['Error: Exit code 1 node:internal/modules/cjs/loader:1479 throw err; ^ Error: Cannot find module', 'node stack'],
+  ['Error: Exit code 1 Traceback (most recent call last): File "<string>", line 2', 'python traceback'],
+  ['Error: Exit code 128 fatal: a branch named x already exists', 'git fatal'],
+];
+for (const [txt, label] of REAL_FAULTS) {
+  check('module: does NOT call a real fault the answer — ' + label,
+    (adviseOnToolFailure('Bash', txt, true) || {}).id !== 'shell-exit-may-be-the-answer',
+    String((adviseOnToolFailure('Bash', txt, true) || {}).id));
+}
+
+// Ordering: this rule is last, so a quoting collapse (which also exits 2) must
+// still reach shell-quoting. Measured: 93 of them in 7 days would otherwise
+// land here, each getting exactly the wrong advice.
+check('module: a quoting collapse still belongs to shell-quoting, not to exit-code',
+  (adviseOnToolFailure('Bash', QUOTE_ERR, true) || {}).id === 'shell-quoting');
+check('module: a /tmp split still belongs to tmp-path-split',
+  (adviseOnToolFailure('Bash', "Error: Exit code 1 Cannot find module '/tmp/ai.json'", true) || {}).id === 'tmp-path-split');
+check('module: exit codes other than 1 and 2 are not this rule',
+  (adviseOnToolFailure('Bash', 'Error: Exit code 143 Command timed out after 2m 0s', true) || {}).id !== 'shell-exit-may-be-the-answer');
+check('module: a Bash-only rule, so it does not fire for a browser tool',
+  adviseOnToolFailure('mcp__claude-in-chrome__computer', EXIT_ANSWER, true) === null);
+
+// `unless` must be OPTIONAL — the other six rules carry none, and a matcher that
+// required it would silence all of them. Mutation-checked: deleting the
+// `rule.unless &&` guard makes this fail.
+check('module: rules WITHOUT an unless still advise',
+  (adviseOnToolFailure('Bash', "Error: Cannot find module '/tmp/x.json'", true) || {}).id === 'tmp-path-split');
+const exitHook = advise({ tool_name: 'Bash', tool_input: {}, tool_response: EXIT_ANSWER });
+check('the hook emits the exit-code advisory end to end',
+  /probably the ANSWER/.test(exitHook.ctx || ''), String(exitHook.ctx).slice(0, 80));
+
 // An unreachable exporter must not delay or fail the call.
 const t0 = Date.now();
 const slow = run({ tool_name: 'Read', tool_input: { file_path: 'x' } }, { CLAUDE_OTEL_ENDPOINT: 'http://127.0.0.1:9/none' });

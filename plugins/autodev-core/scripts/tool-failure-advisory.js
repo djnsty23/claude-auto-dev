@@ -42,6 +42,23 @@
 // class is genuinely worth an advisory, ask first which existing rule it
 // replaces.
 //
+// THIS FILE NOW CARRIES SEVEN, AND THE REPLACEMENT IS UNRESOLVED (2026-08-26).
+// shell-exit-may-be-the-answer was added on the cost test above: 0.22 min/hit,
+// ahead of five of the six that were already here, and third by total cost.
+// The stopping rule asks which one it replaces and this change does not answer
+// that — deliberately, because the honest candidate cannot be settled from the
+// data this hook can see.
+//
+// The candidate is agent-schema-violation: 0.02 min/hit, the lowest of all 16
+// measured classes, and falling. But the wall-clock probe prices a failure at
+// tool_use → tool_result, and that class's real cost is a WORKFLOW RUN that
+// dies at the retry cap after the work is already finished — which the probe
+// records as a 0.2s schema error and nothing more. Removing it on that number
+// would be trusting a measurement about the wrong layer.
+//
+// So: seven is over the cap by one, on purpose, pending a human call on whether
+// agent-schema-violation goes. Do not read this as the cap being lifted.
+//
 // The measurement to run before proposing one: npm run check:patterns -- --by-cost.
 // Breadth and cost disagree, and cost is the one that matters here.
 const RULES = [
@@ -137,6 +154,44 @@ const RULES = [
             + 'before re-running — a retry against the same mismatched pair fails the same '
             + 'way.',
     },
+    {
+        // LAST on purpose. Its signature is the weakest in the file — "exit 1 or
+        // 2" — so every rule above must get first refusal, exactly as the
+        // analyzer ranks this class behind shell-quoting, file-missing and
+        // command-not-found. Measured 2026-08-26 over 7 days: 93 quoting
+        // collapses and 26 /tmp splits are claimed above and never reach here.
+        //
+        // 90 sessions, 161 hits, FLAT against the 2026-08-19 baseline despite an
+        // entire section of rules/verification-traps.md devoted to it. That is
+        // the evidence prose is not reaching anyone. Cost is 34.9 min/week,
+        // third by total, and 0.22 min/hit — above five of the six rules above.
+        id: 'shell-exit-may-be-the-answer',
+        tools: ['Bash'],
+        signatures: [/^(?:Error:\s*)?Exit code [12](?![0-9])/],
+        // The prefix comes off BEFORE the marker test. `tool_response` is
+        // "Error: " + content on 100% of 489 measured failures, and the
+        // analyzer's ERROR_MARKER contains /Error:/ — so testing the raw string
+        // matches its own prefix every time and this rule could never fire.
+        // That is the whole reason `unless` is a function and not a regex list.
+        //
+        // UPSTREAM_FAULT does the job that ORDERING does in the analyzer, where
+        // file-missing, command-not-found and not-a-git-repo all rank ahead of
+        // this class and absorb those faults first. This file has no such rules,
+        // so without these the advice would land on a failed ls, sed, cd or
+        // merge — telling a session "probably not a fault" about a real one.
+        unless: (head) => {
+            const ERROR_MARKER = /Traceback|node:internal|at Object\.<anonymous>|SyntaxError|TypeError|ReferenceError|fatal:|error:|Error:/;
+            const UPSTREAM_FAULT = /No such file or directory|cannot access|can't read|cannot open|cannot stat|command not found|Permission denied|unknown option|invalid option|\bUsage: |not a git repository|\bE(?:NOENT|ACCES|NOTDIR|NAMETOOLONG|ISDIR|PERM)\b|CONFLICT \(|Automatic merge failed|\bcommit-msg:|\bpre-commit:/i;
+            return ERROR_MARKER.test(head.replace(/^Error:\s*/i, '')) || UPSTREAM_FAULT.test(head);
+        },
+        advice: 'Read the output before reacting to the badge — this exit code is probably '
+            + 'the ANSWER, not a fault. grep, diff --quiet, test and cmp all exit non-zero '
+            + 'to REPORT something, and no output carrying an error marker reached this '
+            + 'rule. In an && chain that answer becomes a failed command and the red badge '
+            + 'stops you reading the number you asked for. Use ; between steps, or '
+            + '|| true when the count is the point. Do not re-run or rewrite the command '
+            + 'before checking whether it already answered.',
+    },
 ];
 
 /**
@@ -160,7 +215,13 @@ function adviseOnToolFailure(toolName, toolResponse, failed) {
     const head = text.slice(0, 600);
     for (const rule of RULES) {
         if (rule.tools && !rule.tools.includes(toolName)) continue;
-        if (rule.signatures.some((re) => re.test(head))) return { id: rule.id, advice: rule.advice };
+        if (!rule.signatures.some((re) => re.test(head))) continue;
+        // `unless` is for a rule whose signature is necessary but not sufficient.
+        // Only shell-exit-may-be-the-answer needs it: "exit 1 or 2" is the whole
+        // signature, and what separates an answer from a fault is what ELSE the
+        // output carries. A rule without `unless` behaves exactly as before.
+        if (rule.unless && rule.unless(head)) continue;
+        return { id: rule.id, advice: rule.advice };
     }
     return null;
 }
