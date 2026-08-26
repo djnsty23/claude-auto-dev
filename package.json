@@ -32,7 +32,8 @@
     "check:triggers": "node tooling/check-skill-triggers.js",
     "check:runtime": "node tooling/check-runtime.js",
     "actions:cost": "node tooling/analyze-actions-cost.js",
-    "check:agent-budget": "node tooling/agent-budget.js"
+    "check:agent-budget": "node tooling/agent-budget.js",
+    "check:verdicts": "node plugins/autodev-core/scripts/check-scheduled-verdicts.js --selftest"
   },
   "author": "djnsty23",
   "license": "MIT",
