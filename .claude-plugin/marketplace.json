@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Autonomous development workflow for Claude Code — sprint execution, quality audits, memory, and stack integrations.",
-    "version": "8.123.0"
+    "version": "8.124.0"
   },
   "plugins": [
     {

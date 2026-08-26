@@ -100,7 +100,21 @@ That is exactly what happened on the first real run, 2026-08-22: two fix agents
 errored on a session rooted in a directory that held only `.claude/` state and no
 `.git`. The findings survived in the journal, but the fix stage was lost.
 
-So the fix agent creates its own worktree explicitly, inside the target repo:
+**The worse case is the one that does NOT error.** When the session's cwd *is* a
+git repo, the agent gets a worktree of the wrong repo, notices nothing, and edits
+the target's main clone — precisely where other live sessions keep uncommitted
+work. A crash is recoverable; a silent write into somebody else's tree is not.
+
+**Fixed in the script 2026-08-26.** This document prescribed the remedy from the
+day the trap was found, and the script did not carry it for four days, because no
+suite read that file. The 2026-08-26 sweep worked around it by hand in all four
+fix agents before it was fixed properly. `tooling/test-workflow-isolation.js` now
+fails any workflow that points an agent at a caller-supplied `repo.path` while
+asking for `isolation: 'worktree'`, so the next such workflow is covered the day
+it lands rather than the day it misfires. Written as a rule about the pattern, not
+an allowlist of filenames.
+
+The fix agent creates its own worktree explicitly, inside the target repo:
 
 ```bash
 cd "<target repo>"

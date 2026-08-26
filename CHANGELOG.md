@@ -1,5 +1,49 @@
 # Changelog
 
+## [8.124.0] - 2026-08-26
+
+### Fixed: a heal fix-agent isolated the wrong repo
+
+`isolation: 'worktree'` builds the worktree from the **session's** repo, never
+from the repo named in the agent's prompt. Every heal fix agent is pointed at a
+different repo via `repo.path`, so the flag isolated the wrong tree and the agent
+then edited the target's main clone, which is exactly where other live sessions
+keep uncommitted work.
+
+The crashing case was already known: on a session whose cwd is not a git repo,
+every fix agent dies with *"Cannot create agent worktree: not in a git
+repository"* after the find and verify stages have been paid for, which is how
+the first real run lost its whole fix stage on 2026-08-22. The silent case is
+worse and was not documented: when the session's cwd *is* a git repo, nothing
+errors and the writes land in somebody else's tree.
+
+The fix agent now creates its own worktree inside `repo.path` and reports the
+resulting `pwd` and branch as the first line of its gate report. Its prompt also
+tells it to branch from the current HEAD unless it has checked the default branch
+carries the code, since a repo whose work lives on a long-running feature branch
+will not have those files on its default branch at all.
+
+`heal/SKILL.md` had prescribed this remedy from the day the trap was found. The
+script did not carry it for four days, because **no suite read that file**. The
+2026-08-26 external sweep worked around it by hand in all four of its fix agents.
+
+### Added: `tooling/test-workflow-isolation.js`
+
+Fails any workflow that points an agent at a caller-supplied `repo.path` while
+asking for `isolation: 'worktree'`. Written as a rule about the pattern rather
+than an allowlist of filenames, so the next such workflow is covered on the day
+it lands rather than the day it misfires.
+
+It prints its population (`N workflow scripts · N agent calls · N foreign-target
+· N isolation uses · N offending`) and **exits non-zero when that population is
+empty**, because a gate with nothing to scan reports PASS and is indistinguishable
+from a healthy tree. Mutation-tested by restoring the real flag: 5/7, failing both
+the general and the specific assertion, then reverted.
+
+### Fixed: the completion line no longer hardcodes a repo count
+
+`${clean.length}/3` under-reported on any sweep that was not three repos.
+
 ## [8.123.0] - 2026-08-26
 
 ### Added: the panel recommendation rule becomes a gate

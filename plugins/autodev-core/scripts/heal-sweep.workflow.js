@@ -297,8 +297,31 @@ ${JSON.stringify((verified?._surface?.findings || []).filter(f => safe.some(s =>
 
 HOW TO WORK:
 
-1. You are in your OWN git worktree. Other sessions are live in the main clone with
-   uncommitted work — never touch it, never switch its branch.
+1. MAKE YOUR OWN WORKTREE INSIDE THE TARGET REPO, BEFORE YOU EDIT ANYTHING. You are
+   NOT already in a worktree of this repo — your shell starts somewhere else, so an
+   edit made without this step lands in the MAIN CLONE, where other live sessions
+   hold uncommitted work. Do exactly this, and do it first:
+
+     cd "${repo.path}"
+     git status --short          # a dirty tree you did not dirty means someone is here
+     git rev-parse --abbrev-ref HEAD
+     grep -q 'worktrees' .gitignore || printf '.claude/worktrees/\\n' >> .gitignore
+     git worktree add .claude/worktrees/heal-<topic> -b fix/heal-<topic>
+     cd .claude/worktrees/heal-<topic>
+     pwd && git rev-parse --abbrev-ref HEAD
+
+   Pick <topic> yourself from the vulnerability class. Report that pwd and that
+   branch as the FIRST LINE of gateResult. NEVER switch the main clone's branch,
+   never commit in it, never edit a file under it outside your worktree.
+
+   Branch from the CURRENT HEAD unless you have checked that the default branch
+   carries the code you are fixing. A repo whose work lives on a long-running
+   feature branch will not have your files on its default branch at all.
+
+   If the repo needs gitignored env files to run its gate (a .env.local, a .env),
+   copy them in from the main clone: a fresh worktree has none, and a suite that
+   fails for a missing env is a red about the tree rather than about your change.
+   A worktree cut from an older base may also need its own dependency install.
 
 2. SURGICAL. Touch only what the vulnerability requires. Do not improve adjacent code
    that is not broken, do not reformat, do not rename. A security fix reviewed
@@ -329,13 +352,24 @@ HOW TO WORK:
    outcome than a compliant change that breaks a paying product.
 
 ${RULES}`,
-      { label: `fix:${repo.name}`, phase: 'Fix', schema: FIX_SCHEMA, isolation: 'worktree', model: 'opus', effort: 'high' }
+      /* ⚠️ NO `isolation: 'worktree'` HERE, DELIBERATELY, AND DO NOT ADD IT BACK.
+         That flag builds the worktree from the SESSION's repo, not from the repo
+         this agent is pointed at. Since `repo.path` is a different repo entirely,
+         the agent would land in a worktree of the wrong tree and then edit the
+         TARGET's main clone — where other live sessions hold uncommitted work.
+         Worse, on a session whose cwd is not a git repo at all, every fix agent
+         dies with "Cannot create agent worktree: not in a git repository", after
+         the find and verify stages have already been paid for. That happened on
+         the first real run, 2026-08-22, and the fix stage was lost.
+         The prompt above tells the agent to make its own worktree INSIDE
+         `repo.path`, which is the only thing that isolates the right tree. */
+      { label: `fix:${repo.name}`, phase: 'Fix', schema: FIX_SCHEMA, model: 'opus', effort: 'high' }
     ).then(f => ({ ...f, _verified: verified }))
   }
 )
 
 const clean = results.filter(Boolean)
-log(`Done. ${clean.length}/3 repos completed the find -> verify -> fix pipeline.`)
+log(`Done. ${clean.length}/${REPOS.length} repos completed the find -> verify -> fix pipeline.`)
 
 return {
   perRepo: clean.map(r => ({
