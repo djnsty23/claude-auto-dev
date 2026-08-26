@@ -7,9 +7,9 @@ not answer says so rather than rendering as empty.
 | field | value |
 |---|---|
 | directory | `~/Downloads/code/autodev` |
-| branch | `release/8.113.0` |
-| upstream | `origin/release/8.113.0` |
-| HEAD committed | 2026-08-25T07:53:22+03:00 |
+| branch | `fix/heal-worktree-isolation` |
+| upstream | `origin/fix/heal-worktree-isolation` |
+| HEAD committed | 2026-08-26T21:26:39+03:00 |
 
 **Re-read before acting on any of this.** A resume file is a snapshot, and
 the two facts most likely to have moved are the two below: someone may have
@@ -21,11 +21,7 @@ None. A real zero: the command ran and returned nothing.
 
 ## Uncommitted changes
 
-- `M RESUME.md`
-- ` M plugins/autodev-core/scripts/session-exit.js`
-- `?? --`
 - `?? .claude/`
-- `?? plugins/autodev-core/scripts/brain-panels.js`
 
 ## Open PRs
 
@@ -39,7 +35,9 @@ touching it: a dirty tree you did not dirty means someone is in there.
 ```
 ~/claude-auto-dev                                 86bbe22 [main]
 ~/claude-auto-dev/.claude/worktrees/fix-injection 106467f [fix/shell-injection-in-shipped-scripts]
-~/Downloads/code/autodev                          7998f02 [release/8.113.0]
+~/claude-auto-dev/.claude/worktrees/rec-quality   cde1997 [rescue/recommendation-quality]
+~/claude-auto-dev/.claude/worktrees/rel-8123      377366b [release/8.123.0]
+~/Downloads/code/autodev                          314bed3 [fix/heal-worktree-isolation]
 ```
 
 ## What a reader should do first
@@ -50,22 +48,3 @@ touching it: a dirty tree you did not dirty means someone is in there.
 4. Read recent commit bodies. Many projects put the reasoning there rather than in a separate design note.
 
 _These steps were derived from what is actually in `~/Downloads/code/autodev`._
-
----
-
-## Cross-repo handoff
-
-`session-exit.js` reads THIS repo only and reported `unpushed UNKNOWN`. Most of
-the 2026-08-26 session's work was in a product repo, which it cannot see.
-
-That handoff is NOT here, deliberately: this repo is public and the detail names
-private repositories, branches and a live ad-conversion id. It lives in the
-product repo's own `RESUME.md`, which is where the session picking the work up
-will already be.
-
-State for THIS repo as of 2026-08-26: `main` carries the home-path detector fix
-(`check-no-private-names.js` now matches the dash-encoded spelling as well as
-the slash-delimited one) and `workflow-liveness.js`, wired as `check:liveness`.
-PRs #34 and #36 are closed with their content on main; #34's swap landed inside
-`tool-failure-advisory.js` rather than as a standalone file, which is why a
-filename search for it comes up empty.
