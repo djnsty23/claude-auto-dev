@@ -67,6 +67,27 @@ build/
 # the checker uses --exclude-standard, so an ignored file cannot be staged at all.
 .claude/reports/
 
+# Three cases the line above does NOT cover, each found by pointing
+# check-no-private-names.js at the working tree on 2026-08-26 after teaching it
+# to flag absolute home paths. All three were untracked-but-not-ignored, and
+# .claude/ is deliberately not ignored wholesale here, so every one of them was
+# a single `git add -A` away from a PUBLIC repo.
+#
+# 1. The DOUBLED path. `.claude/.claude/reports/` is a real directory on disk,
+#    produced by something resolving a relative `.claude` against a cwd that was
+#    already inside one. `.claude/reports/` does not match it. Worth fixing at
+#    the writer too; ignoring it here only stops the leak.
+.claude/.claude/
+
+# 2. Session resume scratch. `.claude/RESUME.md` was already ignored, but files
+#    like `.claude/resume-<topic>.md` were not, and they carry the same content.
+.claude/resume-*.md
+.claude/memory-session-id
+
+# 3. Per-agent memory. Persistent locally and still machine-local state: the
+#    reviewer's own notes carried a full home path.
+.claude/agent-memory/
+
 # Session handoff. Names the repos a session was working across, which in this
 # estate includes private and client codebases. Never tracked; ignored so it
 # cannot be staged into a PUBLIC repo by a careless `git add -A`.

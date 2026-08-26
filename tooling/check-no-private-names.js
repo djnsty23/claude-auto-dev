@@ -253,6 +253,59 @@ function main(argv) {
         return 1;
     }
 
+    // ABSOLUTE HOME PATHS. A separate class from a denylisted name, and the
+    // reason it needs its own detector: this file matches NAMES against digests,
+    // so a path under a user's home directory leaks an account name while being
+    // clean against every digest. The gate reports "clean" and is correct.
+    //
+    // [measured 2026-08-26] a sibling repo was about to track five generator
+    // scripts that had only ever lived in a gitignored directory. They carried
+    // EIGHT hardcoded absolute paths containing the username, plus an output
+    // path pinned to one clone which was itself a live bug: running a generator
+    // from a worktree wrote its output into the main clone. That is the general
+    // shape. Code that was never going to be committed accumulates
+    // machine-specific constants precisely because nothing ever checked it, and
+    // the moment it becomes publishable every one of them ships. Not
+    // hypothetical here: .gitignore deliberately narrows rather than ignoring
+    // .claude/ wholesale, so files under it are one `git add -A` from public.
+    //
+    // IT MATCHES THIS MACHINE'S OWN HOME DIRECTORY, NOT ANY HOME-SHAPED PATH.
+    // The first version matched structurally, on the reasoning that it would
+    // then work on any clone. That was wrong, and its first real run said so:
+    // 31 findings of which the first three were `/Users/CHANGEME/`, a comment
+    // about `'/home/my-project'` normalisation, and `C:\Users\runneradmin\`,
+    // a public CI account. Structural matching cannot tell a personal account
+    // from a placeholder or a shared one, and a detector at that precision gets
+    // muted, after which it misses the real thing. Precision is the whole value.
+    //
+    // Keying on os.homedir() narrows it to the only case that is definitely a
+    // leak from THIS clone, which is also the only case a pre-publish gate on
+    // this machine can be certain about. The cost is real and worth stating: a
+    // path naming a DIFFERENT person's home directory passes here. That is a
+    // deliberate trade of recall for precision, not an oversight.
+    const os = require('os');
+    const LOCAL_USER = path.basename(os.homedir() || '');
+    const HOME_PATH = LOCAL_USER && LOCAL_USER.length >= 3
+        ? new RegExp('[\\\\\\\\/]' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\\\]/g, '\\\\$&') + '[\\\\\\\\/]', 'gi')
+        : null;
+
+    function scanHomePaths(src) {
+        if (!HOME_PATH) return [];
+        const out = [];
+        const lines = src.split('\n');
+        for (let i = 0; i < lines.length; i += 1) {
+            HOME_PATH.lastIndex = 0;
+            if (!HOME_PATH.test(lines[i])) continue;
+            // Redact the account name in the OUTPUT. A gate that prints the
+            // secret it found is a second copy of the leak, and this one's
+            // output lands in transcripts and CI logs.
+            const redacted = lines[i].trim().slice(0, 160)
+                .replace(new RegExp(LOCAL_USER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '<user>');
+            out.push({ ln: i + 1, text: redacted, kind: 'home path' });
+        }
+        return out;
+    }
+
     const hits = [];
     let scanned = 0;
     for (const rel of tracked) {
@@ -263,19 +316,24 @@ function main(argv) {
         try { src = fs.readFileSync(full, 'utf8'); } catch { continue; }
         if (src.includes('\0')) continue;
         scanned++;
-        for (const h of scanText(src)) hits.push({ rel, ...h });
+        for (const h of scanText(src)) hits.push({ rel, kind: 'private name', ...h });
+        for (const h of scanHomePaths(src)) hits.push({ rel, ...h });
     }
 
     if (!hits.length) {
         // Print the population, not just the verdict: a check that reports only
         // "clean" is indistinguishable from one that read nothing.
         console.log(`[no-private-names] ${scanned} of ${tracked.length} files read, `
-            + `${memo.size} distinct candidate tokens, ${DIGESTS.length} names — clean`);
+            + `${memo.size} distinct candidate tokens, ${DIGESTS.length} names, `
+            + `0 absolute home paths (keyed on this machine's home dir) — clean`);
         return 0;
     }
 
-    console.error(`\n[no-private-names] ${hits.length} occurrence(s) of a private project name in a PUBLIC repo:\n`);
-    for (const h of hits) console.error(`  ${h.rel}:${h.ln}\n      ${h.text}`);
+    const names = hits.filter((h) => h.kind === 'private name');
+    const paths = hits.filter((h) => h.kind === 'home path');
+    console.error(`\n[no-private-names] ${hits.length} finding(s) in a PUBLIC repo `
+        + `(${names.length} private name, ${paths.length} absolute home path):\n`);
+    for (const h of hits) console.error(`  [${h.kind}] ${h.rel}:${h.ln}\n      ${h.text}`);
     console.error(
         '\nAnonymise them (Project A/B/C, keeping the numbers and the product shape), or add a\n'
         + 'reviewed exemption to ALLOW in tooling/check-no-private-names.js.\n'
@@ -285,6 +343,6 @@ function main(argv) {
     return 1;
 }
 
-module.exports = { PREFIX, DIGEST_LEN, DIGESTS, normalise, digest, candidates, scanText };
+module.exports = { PREFIX, DIGEST_LEN, DIGESTS, normalise, digest, candidates, scanText, main };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
