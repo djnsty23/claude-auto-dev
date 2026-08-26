@@ -41,7 +41,9 @@ console.log('check-recommendation-quality');
 // --- the script's own selftest must pass as a subprocess ---
 const st = spawnSync('node', [SCRIPT, '--selftest'], { encoding: 'utf8' });
 check('--selftest exits 0', st.status === 0);
-check('--selftest names its case count', /8 cases/.test(st.stdout || ''));
+// Match the SHAPE, not the number. A hardcoded count turns every added
+// case red, which punishes the improvement instead of guarding anything.
+check('--selftest names its case count', /[0-9]+ cases/.test(st.stdout || ''));
 
 // --- the CLI reports a population, not a bare verdict ---
 const run = spawnSync('node', [SCRIPT, '--days', '0'], { encoding: 'utf8' });

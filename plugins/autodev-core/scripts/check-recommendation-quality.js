@@ -55,6 +55,15 @@ const path = require('path');
 
 const RECOMMENDED_RE = /\s*\(recommended\)\s*$/i;
 const isRecommended = (l) => RECOMMENDED_RE.test(String(l).trim());
+
+// The mark also lands at the FRONT of a description, which is the most literal
+// reading of "mark option #1, with the reason in its first clause". Measured
+// 2026-08-26: 24 panels across 242 transcripts did it that way, every one of
+// them on option #1, and a label-only test called all 24 a rules breach. Anchored
+// at the start on purpose - an unanchored /\(recommended\)/ would also match prose
+// discussing the convention, which several of these descriptions do.
+const DESC_RECOMMENDED_RE = /^\s*\(recommended\)/i;
+const isRecommendedDesc = (d) => DESC_RECOMMENDED_RE.test(String(d).trim());
 const clean = (l) => String(l).replace(RECOMMENDED_RE, '').trim();
 
 function arg(flag, fallback) {
@@ -92,6 +101,7 @@ function collectPanels(source) {
                     question: String(q.question || ''),
                     multi: q.multiSelect === true,
                     labels: (q.options || []).map((o) => String(o.label || '')),
+                    descriptions: (q.options || []).map((o) => String(o.description || '')),
                 }));
                 const panel = { id: part.id, questions: qs, selected: null };
                 byId.set(part.id, panel);
@@ -127,7 +137,10 @@ function analyse(panels, sourceName) {
             if (!q.labels.length) continue;
             out.questions += 1;
 
-            const recIdx = q.labels.findIndex(isRecommended);
+            let recIdx = q.labels.findIndex(isRecommended);
+            if (recIdx === -1) {
+                recIdx = (q.descriptions || []).findIndex(isRecommendedDesc);
+            }
             const ctx = {
                 source: sourceName,
                 question: q.question.slice(0, 160),
@@ -266,11 +279,35 @@ function selftest() {
     ]), 'selftest');
     check('unanswered panel is ignored', r.panels === 0 && r.questions === 0);
 
+    // 9. The mark at the FRONT of a description counts, and does not read as a
+    //    breach. The panel below is rule-compliant in every way except that the
+    //    author put the mark where the reason goes.
+    r = analyse(collectPanels(mk('i', [{
+        question: 'Which?', multiSelect: false,
+        options: [
+            { label: 'One', description: '(Recommended) Because it unblocks the rest.' },
+            { label: 'Two', description: 'Slower.' },
+        ],
+    }], ['One'])), 'selftest');
+    check('description mark counts', r.noRecommendation.length === 0 && r.honoured === 1);
+    check('description mark is option 1', r.notFirst.length === 0);
+
+    // 10. The negative half. A description that merely TALKS about the convention
+    //     is not a mark, which is why the pattern is anchored at the start.
+    r = analyse(collectPanels(mk('j', [{
+        question: 'Which?', multiSelect: false,
+        options: [
+            { label: 'One', description: 'Panels without a (Recommended) option read as menus.' },
+            { label: 'Two', description: 'Slower.' },
+        ],
+    }], ['Two'])), 'selftest');
+    check('prose mentioning the mark is not a mark', r.noRecommendation.length === 1);
+
     if (fails.length) {
         console.error('SELFTEST FAILED: ' + fails.join('; '));
         process.exit(1);
     }
-    console.log('selftest ok: 8 cases, each paired with the negative it must not fire on');
+    console.log('selftest ok: 10 cases, each paired with the negative it must not fire on');
     process.exit(0);
 }
 
