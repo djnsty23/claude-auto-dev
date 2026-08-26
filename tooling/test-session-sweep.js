@@ -139,6 +139,34 @@ function buildCases() {
 
   // 8. The app's own opt-out must win over every other signal.
   cases.push({ id: 'exempt', wt: null, expectRisk: null, expectSafe: false, exempt: true });
+
+  // 9. ARGUMENT injection — a checked-out branch whose name begins with '-'.
+  //
+  // This is not shell injection and execFileSync does not help: the shell was
+  // never the vector. A leading dash makes the value an OPTION to git's own
+  // parser when it arrives as a bare positional.
+  //
+  // Reachable, and this fixture is the proof rather than the claim.
+  // `git branch -- '--upload-pack=x'` is refused, but `git update-ref
+  // refs/heads/--upload-pack=x HEAD` succeeds, and `symbolic-ref HEAD` then
+  // makes it the checked-out branch — which is exactly what the sweep reads
+  // with `rev-parse --abbrev-ref HEAD`.
+  //
+  // The expected label is the fail-CLOSED one. A branch name we will not hand
+  // to git is a worktree we cannot clear for deletion, so it must block, and it
+  // must block under its OWN label: asserting only `safe === false` would pass
+  // when some other gate fires and would go quietly dead if this one stopped.
+  {
+    const wt = makeWorktree('dash-branch', 'case-dash-seed');
+    sh('git update-ref "refs/heads/--upload-pack=whoami" HEAD', wt);
+    sh('git symbolic-ref HEAD "refs/heads/--upload-pack=whoami"', wt);
+    // The fixture is only meaningful if git really does hand the name back.
+    const live = sh('git rev-parse --abbrev-ref HEAD', wt);
+    if (live !== '--upload-pack=whoami') {
+      failures.push(`dash-branch fixture did not take: rev-parse returned ${JSON.stringify(live)}`);
+    }
+    cases.push({ id: 'dash-branch', wt, expectRisk: 'branch-name-unsafe', expectSafe: false });
+  }
 }
 
 // A session record old enough to be STALE under the 14d hand-started clock.

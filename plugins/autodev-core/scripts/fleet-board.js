@@ -230,7 +230,40 @@ function tick(){
 tick(); setInterval(tick, REFRESH_MS);
 </script></body></html>`;
 
+// --------------------------------------------------------------- access guard
+//
+// Binding 127.0.0.1 keeps other HOSTS out. It does nothing about the browser
+// already running on this machine, and that is the real exposure: /api/fleet
+// carries sessionIds, absolute cwd paths (which spell out the OS username and
+// client project directory names), branch names, titles, and the verbatim text
+// of every open options panel. Any page the developer visits can point a
+// hostname it controls at 127.0.0.1 — DNS rebinding — and then read all of it
+// with a plain fetch.
+//
+// Three checks, on headers a hostile page cannot set:
+//   Host   — the browser sends the name it dialled. A rebinding page's name is
+//            neither 127.0.0.1 nor localhost, so it fails here.
+//   Origin — browsers attach it to cross-origin requests and omit it on the
+//            same-origin GET this board's own page makes, so its mere presence
+//            means the request came from somewhere else.
+//   Method — this surface is read-only.
+//
+// The board's own page is unaffected: it is served from, and fetches from, the
+// exact origin the user typed.
+const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+
+const deny = (res, code, why) => {
+    res.writeHead(code, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(`${why}\n`);
+};
+
 const server = http.createServer((req, res) => {
+    if (req.method !== 'GET') return deny(res, 405, 'fleet board is read-only: GET only');
+    if (!ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase())) {
+        return deny(res, 403, 'fleet board only answers to 127.0.0.1 or localhost');
+    }
+    if (req.headers.origin) return deny(res, 403, 'fleet board refuses cross-origin requests');
+
     if (req.url.startsWith('/api/fleet')) {
         let body;
         try {

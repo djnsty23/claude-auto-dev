@@ -20,7 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 // SESSION_SWEEP_STORE exists so the suite can drive a synthetic population
 // through the REAL code path. The safety check is the whole point of this
@@ -167,9 +167,14 @@ function detectWorkspaces(sessions) {
 
 // ------------------------------------------------------------- git inspection
 
-function git(cwd, cmd) {
+// argv form, never a shell. `args` is an ARRAY. The live checked-out branch name
+// flows into `ls-remote --heads origin <branch>` below, and a branch name may
+// legally contain `;`, `|`, a backtick or `$(…)` — which the old
+// `execSync(\`git ${cmd}\`)` handed straight to /bin/sh -c. Each array element
+// reaches git as one literal argument, so a metacharacter is data, not syntax.
+function git(cwd, args) {
   try {
-    return execSync(`git ${cmd}`, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch { return null; }
 }
 
@@ -192,8 +197,9 @@ function refreshPrStates(sessions) {
   }
   for (const repo of repos) {
     try {
-      const raw = execSync(
-        `gh pr list --repo ${repo} --state all --limit 300 --json number,state`,
+      const raw = execFileSync(
+        'gh',
+        ['pr', 'list', '--repo', repo, '--state', 'all', '--limit', '300', '--json', 'number,state'],
         { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 60000 }
       );
       for (const pr of JSON.parse(raw)) {
@@ -215,7 +221,7 @@ function refreshPrStates(sessions) {
 function isThirdParty(s) {
   const dir = fs.existsSync(s.worktreePath || '') ? s.worktreePath : s.originCwd || s.cwd;
   if (!dir || !fs.existsSync(dir)) return false;
-  const remote = (git(dir, 'remote get-url origin') || '').toLowerCase();
+  const remote = (git(dir, ['remote', 'get-url', 'origin']) || '').toLowerCase();
   if (!remote) return false;
   if (DENY.some((d) => remote.includes(d) || (s.originCwd || '').toLowerCase().includes(d))) return true;
   const own = (process.env.SESSION_SWEEP_OWNER || '').toLowerCase();
@@ -236,7 +242,7 @@ function worktreeRisk(s) {
   if (!wt) return null;                  // no worktree, nothing to lose
   if (!fs.existsSync(wt)) return null;   // already cleaned up
 
-  const status = git(wt, 'status --porcelain');
+  const status = git(wt, ['status', '--porcelain']);
   if (status === null) return 'git-unreadable';
   if (status.length > 0) {
     const n = status.split('\n').filter(Boolean).length;
@@ -249,11 +255,31 @@ function worktreeRisk(s) {
   // the record was written). Checking the recorded name inspects a branch the
   // worktree is not on — which produced false blocks here, and would just as
   // easily clear a branch nobody ever checked.
-  const branch = git(wt, 'rev-parse --abbrev-ref HEAD') || s.branch;
+  const branch = git(wt, ['rev-parse', '--abbrev-ref', 'HEAD']) || s.branch;
+
+  // A ref may legally begin with '-', and that is ARGUMENT injection, not shell
+  // injection — execFileSync does not help, because the shell was never the
+  // vector. `git branch -- '--upload-pack=x'` is refused, but
+  // `git update-ref refs/heads/--upload-pack=x HEAD` succeeds and rev-parse then
+  // hands the name straight back. Passed as a bare positional, git's option
+  // parser can read it as a FLAG rather than a ref.
+  //
+  // Measured on git 2.54.0.windows.1, with a bogus flag as the value: `ls-remote
+  // --heads origin <flag>` treats it as positional (ls-remote stops parsing
+  // options at the repository argument — the same flag placed BEFORE `origin`
+  // exits 129 "unknown option"), while `log -1 --format=%ad <flag>` exits 128 on
+  // it. So whether a leading dash is dangerous depends on the subcommand and the
+  // git version, which is not a property to depend on. Refuse the value instead,
+  // and fail CLOSED: a branch name we will not hand to git is a branch we cannot
+  // clear for deletion.
+  if (branch && branch.startsWith('-')) return 'branch-name-unsafe';
+
   if (branch && branch !== 'HEAD') {
-    const onRemote = git(wt, `ls-remote --heads origin ${branch}`);
+    // `--` after the repository closes the positional list explicitly. Measured:
+    // a normal branch still matches through it.
+    const onRemote = git(wt, ['ls-remote', '--heads', 'origin', '--', branch]);
     if (onRemote) {
-      const unpushed = git(wt, `log --oneline origin/${branch}..HEAD`);
+      const unpushed = git(wt, ['log', '--oneline', `origin/${branch}..HEAD`]);
       if (unpushed && unpushed.length > 0) {
         return `unpushed(${unpushed.split('\n').length})`;
       }
@@ -267,17 +293,31 @@ function worktreeRisk(s) {
       // default is a long-lived feature branch, and its stale `main` sits 7694
       // commits behind — basing the count on `main` there would invent 7694
       // orphans. Ask git, then ask the forge, then give up rather than guess.
-      let base = (git(wt, 'symbolic-ref refs/remotes/origin/HEAD') || '').replace('refs/remotes/', '');
+      let base = (git(wt, ['symbolic-ref', 'refs/remotes/origin/HEAD']) || '').replace('refs/remotes/', '');
       if (!base) {
-        const slug = (git(wt, 'remote get-url origin') || '').replace(/^.*[:/]([^/]+\/[^/]+?)(\.git)?$/, '$1');
-        try {
-          const d = execSync(`gh repo view ${slug} --json defaultBranchRef -q .defaultBranchRef.name`,
-            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30000 }).trim();
-          if (d) base = `origin/${d}`;
-        } catch { /* fall through to fail-closed below */ }
+        const slug = (git(wt, ['remote', 'get-url', 'origin']) || '').replace(/^.*[:/]([^/]+\/[^/]+?)(\.git)?$/, '$1');
+        // VALIDATE, do not merely extract. `String.replace` returns its input
+        // UNCHANGED when the pattern does not match, so a remote URL that is not
+        // owner/repo shaped falls through as the whole URL rather than as an
+        // empty string. Require the owner/repo shape and skip `gh` otherwise —
+        // an unrecognised remote must not become an argument.
+        //
+        // Each half must START with an alphanumeric. The previous shape allowed
+        // a leading dash, so `-a/-b` and `--json/x` passed — and `slug` is a
+        // POSITIONAL argument to `gh repo view`, where a leading dash is read as
+        // a flag. Owner and repo names cannot begin with a dash on GitHub, so
+        // nothing legitimate is lost.
+        if (/^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(slug)) {
+          try {
+            const d = execFileSync('gh',
+              ['repo', 'view', slug, '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
+              { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30000 }).trim();
+            if (d) base = `origin/${d}`;
+          } catch { /* fall through to fail-closed below */ }
+        }
       }
       if (!base) return 'branch-not-on-remote';             // unknown base: fail closed
-      const orphan = git(wt, `log --oneline ${base}..HEAD`);
+      const orphan = git(wt, ['log', '--oneline', `${base}..HEAD`]);
       if (orphan === null) return 'branch-not-on-remote';   // unreadable: fail closed
       const n = orphan ? orphan.split('\n').filter(Boolean).length : 0;
       if (n > 0) return `orphan-commits(${n})`;
