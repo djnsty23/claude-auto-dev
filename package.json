@@ -34,7 +34,8 @@
     "actions:cost": "node tooling/analyze-actions-cost.js",
     "check:agent-budget": "node tooling/agent-budget.js",
     "check:recommendations": "node plugins/autodev-core/scripts/check-recommendation-quality.js --selftest",
-    "check:verdicts": "node plugins/autodev-core/scripts/check-scheduled-verdicts.js --selftest"
+    "check:verdicts": "node plugins/autodev-core/scripts/check-scheduled-verdicts.js --selftest",
+    "check:reachable": "node plugins/autodev-core/scripts/check-rules-reachable.js --selftest"
   },
   "author": "djnsty23",
   "license": "MIT",

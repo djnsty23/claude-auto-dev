@@ -328,6 +328,10 @@ function checkHookWiring() {
     'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'StopFailure',
     'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PreCompact', 'PostCompact',
     'SubagentStart', 'SubagentStop', 'Notification', 'PermissionRequest',
+    // InstructionsLoaded fires per CLAUDE.md / .claude/rules file as it reaches
+    // context, carrying file_path, load_reason and file_content. Its exit code is
+    // ignored by the harness, so a hook on it can observe and never block.
+    'InstructionsLoaded',
   ]);
 
   for (const p of pluginDirs()) {
