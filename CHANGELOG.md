@@ -1,5 +1,77 @@
 # Changelog
 
+## [8.123.0] - 2026-08-26
+
+### Added: the panel recommendation rule becomes a gate
+
+`rules/options-protocol.md` has required every question block to mark one option
+`(Recommended)` for as long as it has existed. Measured over 242 transcripts and
+1,732 questions, 205 carry no mark at all, running at 12% across the last seven
+days and firing again the morning of the measurement. The rule being written
+down was not the missing piece.
+
+`panel-recommendation.js` is a PreToolUse hook on `AskUserQuestion` that exits 2
+when a multi-option question marks nothing. Exit 2 rather than an advisory,
+because that stderr is the only channel reaching the model in time to fix the
+panel in flight; an advisory ships the wrong panel and corrects the next one,
+which is what the rule already did. A hit costs one retry before the user sees
+anything.
+
+Validated against real panels rather than fixtures alone: 963 compliant panels
+from the transcripts, 0 blocked; 200 unmarked panels, 200 blocked; 0 crashes. A
+gate whose false-positive rate is unmeasured gets muted the first time it is
+wrong about something that matters.
+
+It fails open on every internal error, because it ships installed and a defect
+would eat panels in someone else's session until they reinstall. A missing
+recommendation is a style breach; a swallowed panel is a broken turn.
+`AUTODEV_PANEL_CHECK=off` disables it, since the convention belongs to this
+marketplace rather than to everyone who installs it.
+
+### Fixed: the recommendation detector only looked at one of two spellings
+
+`check-recommendation-quality.js` anchored its pattern to the end of the option
+LABEL. 24 panels put `(Recommended)` at the front of option #1's description
+instead, which is the most literal reading of "mark option #1, with the reason
+in its first clause", and every one was scored as a rules breach. The count
+falls from 229 to 205 and those 24 join the judged pool.
+
+Both spellings now count, each anchored. An unanchored pattern would score a
+description DISCUSSING the convention as a mark, and this repo produces panels
+about panels.
+
+The measurement was real and answered a narrower question than the one being
+asked: not "is there a recommendation" but "is there one where I looked".
+
+### Added: measurement behind the rule
+
+`check-recommendation-quality.js` reports honoured, rejected and swept, printing
+the population it scanned so a zero cannot be mistaken for a probe that found
+nothing. It also established that a PAUSE recommendation is rejected 43 times in
+100 against 9 for everything else.
+
+### Added: an advisory for a shell exit code that is the answer
+
+A counting `grep` returning no match exits 1, so a chain reports failure for a
+successful measurement and the red badge stops the reader before the output that
+answered the question.
+
+### Changed: the advisory cap sits at seven, deliberately
+
+`agent-schema-violation` is the candidate for removal at 0.02 min/hit, but the
+wall-clock probe prices a failure at tool_use to tool_result, while that class's
+real cost is a workflow run dying at the retry cap after the work is finished.
+Removing it on that number would trust a measurement about the wrong layer.
+
+### Fixed: the names gate was clean and blind to home paths
+
+Two spellings of the same detector, and a security gate reporting clean while
+unable to see one of them.
+
+### Added: observe which rules actually load
+
+A dead rule and a loaded one are indistinguishable from the outside.
+
 ## [8.122.0] - 2026-08-25
 
 ### Fixed: a timing budget that produced false reds under load, after two wrong fixes
