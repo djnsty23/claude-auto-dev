@@ -285,8 +285,36 @@ function main(argv) {
     // deliberate trade of recall for precision, not an oversight.
     const os = require('os');
     const LOCAL_USER = path.basename(os.homedir() || '');
+    // TWO SPELLINGS, and the second is the one that actually leaks here.
+    //
+    // The first version matched only slash-delimited paths. That misses the
+    // DASH-ENCODED form Claude Code uses to name project directories,
+    // `C--Users-<name>-Downloads-code-autodev`: the same home path with every
+    // separator rewritten. It appears in transcript paths, config keys and
+    // tooling constants, so it is arguably likelier to be committed than the
+    // slash form.
+    //
+    // [measured 2026-08-26] the shipped detector exited 0 on a planted
+    // dash-encoded username and 1 on a slash-delimited one, in the same file
+    // seconds apart. Found because a peer hit this class in another repo: a
+    // constant holding the encoded form sat twelve lines above the function
+    // that scrubs the slash form out of every file it copies. Their scrubber
+    // covered two of three spellings for months and read as complete.
+    //
+    // The general shape outlasts the fix: a detector that matches one
+    // ENCODING of a value is not a detector for the value. Enumerate the
+    // spellings before deciding a pattern covers it, and test each, because a
+    // partial detector reports clean with total confidence.
     const HOME_PATH = LOCAL_USER && LOCAL_USER.length >= 3
-        ? new RegExp('[\\\\\\\\/]' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\\\]/g, '\\\\$&') + '[\\\\\\\\/]', 'gi')
+        ? [
+            new RegExp('[\\\\\\\\/]' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\\\]/g, '\\\\$&') + '[\\\\\\\\/]', 'gi'),
+            // Dash-encoded. Anchored on a leading dash and followed by a dash
+            // or a boundary, for the same reason the slash form is anchored on
+            // a separator: an unanchored username matches inside unrelated
+            // identifiers, and a noisy check gets muted, which is worse than
+            // the gap it closes.
+            new RegExp('-' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=[-\\b])', 'gi'),
+          ]
         : null;
 
     function scanHomePaths(src) {
@@ -294,8 +322,12 @@ function main(argv) {
         const out = [];
         const lines = src.split('\n');
         for (let i = 0; i < lines.length; i += 1) {
-            HOME_PATH.lastIndex = 0;
-            if (!HOME_PATH.test(lines[i])) continue;
+            let hit = false;
+            for (const re of HOME_PATH) {
+                re.lastIndex = 0;
+                if (re.test(lines[i])) { hit = true; break; }
+            }
+            if (!hit) continue;
             // Redact the account name in the OUTPUT. A gate that prints the
             // secret it found is a second copy of the leak, and this one's
             // output lands in transcripts and CI logs.
