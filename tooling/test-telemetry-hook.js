@@ -207,18 +207,31 @@ check('module: browser rules stay silent on a call that SUCCEEDED',
 check('module: a Bash-only rule does not fire for a browser tool',
   adviseOnToolFailure('mcp__claude-in-chrome__computer', "Error: Cannot find module '/tmp/x.json'", true) === null);
 
-// The last two rules. Both are tool-agnostic: the SQL failures arrive through
-// Bash (a script hitting the REST API), the schema violations through the agent
-// layer, so pinning either to a tool name would make it dead on arrival.
+// sql-schema-guess is tool-agnostic on purpose: those failures arrive through
+// Bash (a script hitting the REST API), so pinning it to a tool name would make
+// it dead on arrival.
 const SQL_ERR = "Error: Exit code 127 HTTP 400: Failed to run sql query: ERROR: 42703: column anon_fingerprint does not exist";
-const SCHEMA_ERR = "Error: Output does not match required schema: root: must NOT have additional properties";
 check('module: names a guessed column',
   (adviseOnToolFailure('Bash', SQL_ERR, true) || {}).id === 'sql-schema-guess');
-check('module: names a subagent schema mismatch',
-  (adviseOnToolFailure('Task', SCHEMA_ERR, true) || {}).id === 'agent-schema-violation');
-check('module: both stay silent on a call that SUCCEEDED',
-  adviseOnToolFailure('Bash', SQL_ERR, false) === null
-  && adviseOnToolFailure('Task', SCHEMA_ERR, false) === null);
+check('module: stays silent on a call that SUCCEEDED',
+  adviseOnToolFailure('Bash', SQL_ERR, false) === null);
+
+// agent-schema-violation was REMOVED 2026-08-26 to hold the cap at six when
+// shell-exit-may-be-the-answer was added: 0.02 min/hit, last of all 16 measured
+// classes on the cost test the stopping rule uses.
+//
+// This is a negative, not a deletion, and the difference matters. The class is
+// still in the ANALYZER's taxonomy, so it keeps appearing in weekly sweeps at
+// ~14th by sessions affected — which reads as an omission to anyone who has not
+// read the tombstone. Deleting the old assertion would leave nothing to say the
+// silence is deliberate; this fails loudly if someone re-adds the rule without
+// also arguing the cap.
+const SCHEMA_ERR = "Error: Output does not match required schema: root: must NOT have additional properties";
+check('module: a subagent schema mismatch is deliberately NOT advised on',
+  adviseOnToolFailure('Task', SCHEMA_ERR, true) === null,
+  String((adviseOnToolFailure('Task', SCHEMA_ERR, true) || {}).id));
+check('module: and the exit-code rule does not pick it up either',
+  (adviseOnToolFailure('Bash', SCHEMA_ERR, true) || {}).id !== 'shell-exit-may-be-the-answer');
 
 // ---- shell-exit-may-be-the-answer, the seventh rule ----
 // 90 sessions, flat against baseline despite a whole section of

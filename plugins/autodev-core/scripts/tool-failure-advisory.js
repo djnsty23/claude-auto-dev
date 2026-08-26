@@ -42,22 +42,16 @@
 // class is genuinely worth an advisory, ask first which existing rule it
 // replaces.
 //
-// THIS FILE NOW CARRIES SEVEN, AND THE REPLACEMENT IS UNRESOLVED (2026-08-26).
-// shell-exit-may-be-the-answer was added on the cost test above: 0.22 min/hit,
-// ahead of five of the six that were already here, and third by total cost.
-// The stopping rule asks which one it replaces and this change does not answer
-// that — deliberately, because the honest candidate cannot be settled from the
-// data this hook can see.
+// THE CAP HELD, AND THE SWAP IS DONE (2026-08-26). shell-exit-may-be-the-answer
+// came in on the cost test above — 0.22 min/hit, ahead of five of the six that
+// were here, and third by total cost — and agent-schema-violation went out at
+// 0.02 min/hit, the lowest of all 16 measured classes. Still six.
 //
-// The candidate is agent-schema-violation: 0.02 min/hit, the lowest of all 16
-// measured classes, and falling. But the wall-clock probe prices a failure at
-// tool_use → tool_result, and that class's real cost is a WORKFLOW RUN that
-// dies at the retry cap after the work is already finished — which the probe
-// records as a 0.2s schema error and nothing more. Removing it on that number
-// would be trusting a measurement about the wrong layer.
-//
-// So: seven is over the cap by one, on purpose, pending a human call on whether
-// agent-schema-violation goes. Do not read this as the cap being lifted.
+// That is the stopping rule working as designed rather than an exception to it:
+// the question "which one does it replace" had an answer, and the answer was
+// the rule the same measurement ranked last. The tombstone below records why,
+// because the class remains in the analyzer's taxonomy and will keep showing up
+// in sweeps looking like an omission.
 //
 // The measurement to run before proposing one: npm run check:patterns -- --by-cost.
 // Breadth and cost disagree, and cost is the one that matters here.
@@ -142,18 +136,26 @@ const RULES = [
             + 'then write the query. Note a column name is not a contract either: check '
             + 'what WRITES it before grouping by it.',
     },
-    {
-        id: 'agent-schema-violation',
-        tools: null,
-        // 6 sessions. Reads as the agent misbehaving; usually the contract is
-        // wrong, which is why the remedy points at the schema first.
-        signatures: [/Output does not match required schema/i],
-        advice: 'Usually the CONTRACT is wrong, not the agent: an additionalProperties that '
-            + 'forbids a field the prompt invited, or a required field the prompt never '
-            + 'asked the agent to produce. Read the schema against the prompt that was sent '
-            + 'before re-running — a retry against the same mismatched pair fails the same '
-            + 'way.',
-    },
+    // REMOVED 2026-08-26: agent-schema-violation, to keep the cap at six when
+    // shell-exit-may-be-the-answer was added below. It was the cheapest rule
+    // here by the file's own test — 0.02 min/hit and a 0.2s median, lowest of
+    // all 16 measured classes, and falling (1.7% of errors against 3.5% at the
+    // 2026-08-19 baseline).
+    //
+    // Do not re-add it from a frequency measurement. The class is STILL in the
+    // analyzer's taxonomy and still ranks 14-ish by sessions affected, so a
+    // future sweep will surface it again looking like an omission. It is not:
+    // the stopping rule at the top of this file admits a rule on COST PER HIT,
+    // and on that test this was last.
+    //
+    // The known objection, recorded so it does not have to be rediscovered: the
+    // wall-clock probe prices a failure tool_use -> tool_result, and this
+    // class's worst case is a workflow run dying at the StructuredOutput retry
+    // cap with the investigation already finished — which the probe sees as a
+    // 0.2s schema error. That cost is real and this file cannot measure it. The
+    // remedy for it is rules/fleet-brief.md (read __unparsedToolInput from the
+    // transcript before re-running anything expensive), not a hook that speaks
+    // after the run is already dead.
     {
         // LAST on purpose. Its signature is the weakest in the file — "exit 1 or
         // 2" — so every rule above must get first refusal, exactly as the
