@@ -1,5 +1,72 @@
 # Changelog
 
+## [8.129.0] - 2026-08-27
+
+Three changes, all from a peer evaluation requested the same day. The peer graded
+this session's messages at one in three earning its cost, and the unflattering
+version was the one asked for.
+
+### Fixed: the Stop note asserted a cause it cannot observe
+
+`stop-auto-check.js` told sessions that N items were "offered again WITHOUT BEING
+DELIVERED". It cannot know that. It reads answered panels, not work, and
+`check-queue-drained.js` says so plainly on its other branch: "this check cannot
+tell delivered from undelivered". One mechanism, asserting a fact in the hook and
+disclaiming it in the script.
+
+A session reported one undelivered item in the same turn the note claimed six.
+Only one can be right and the hook has no way to know which. A re-offer has
+innocent causes: a panel re-listing context, a partial delivery, a user re-picking
+something done. Both surfaces now report the observation and name the limit; the
+ask is unchanged and was always the useful half.
+
+### Added: rule-diagnosis section 4 gains an attribution half
+
+Same principle as the rest of that section, applied to WHO said something rather
+than what is true. Two instances the same day, in opposite directions: a session
+built a brief from a migration header while the answer sat in `AGENTS.md`, then
+the peer critiquing it misattributed two of its errors to a different session,
+with the message in its own context, inside a paragraph headed "if you are writing
+a self-assessment off recall, that is the first thing to re-check".
+
+The peer conceded in one turn and left the better artifact, quoted rather than
+paraphrased: a critique that names WHO did something must cite the message it is
+reading, not recall it. Nothing about having the source available makes you read
+it.
+
+And the half neither party had: peer identity is not self-evident from a message.
+That fleet had two sessions both presenting as a coordinator, so neither could
+attribute an error to the other without checking.
+
+### Added: `--off` refuses to silently deny a live session's only channel
+
+From the peer this happened to: "I only know it happened because you told me. A
+security property that depends on a courtesy is not a property."
+
+8.127.0 made a deny discoverable via the sibling record. Discovery-is-possible and
+discovery-happens are different guarantees, and a session that never thinks to look
+is where one that was never told. `--off` now enumerates live sessions in the
+target locations, refuses if any are awake, names them with ids, and exits 4.
+`--force` overrides, after telling them.
+
+A refusal rather than a notification because the script cannot send messages, and
+making `--off` wait on a channel with a ~48 minute p90 would break the overnight
+case it exists for. Unknown liveness refuses too: an unrecognised state must be the
+dangerous case, and here that is denying a session that is awake.
+
+### Testing
+
+59 assertions across 15 scenarios for brain-panels, up from 47 across 12. Scenario
+14 is the discriminating control for 13 - a cold session must NOT block `--off`, or
+the tool refuses always and is unusable.
+
+One mutation survived the first draft and is the reason scenario 15 exists:
+disabling the could-not-tell branch left the suite green at 55/55, so that safety
+branch was untested and by this repo's own rule was no gate at all. It is now
+covered by copying the subject somewhere `fleet-status.js` is not beside it, so the
+require fails for real - no stub, no env flag, shipped bytes unmodified.
+
+
 ## [8.128.0] - 2026-08-27
 
 ### Added: rule-diagnosis section 4, on which artifact answers the question
