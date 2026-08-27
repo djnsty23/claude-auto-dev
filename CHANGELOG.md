@@ -1,5 +1,66 @@
 # Changelog
 
+## [8.127.0] - 2026-08-27
+
+### Fixed: a panel deny with no expiry outlives the coordination it was for
+
+Five denies were found across two repos, written in one bulk pass 26 hours
+earlier, with the central marker gone. Nothing on disk said when they were set,
+by whom, why, or whether they were still wanted, so no session could safely clear
+them. `--status` read as an all-clear, `--on` could not reach them, and a
+client-work session spent a day unable to ask the operator a question.
+
+The file's own header already named this failure, in these words: panels staying
+off silently, forever, in a repo nobody is coordinating any more, with nothing to
+announce it. It then defended against it with a single central marker, which is a
+single point of failure that duly failed.
+
+**The record now travels with the state.** Each denied location gets a sibling
+`panel-deny.json` beside its settings file, carrying `setAt`, `expiresAt`,
+`reason` and the prior settings verbatim, including "there was no file" so a
+revert can delete rather than leave an empty shell. Losing the marker can no
+longer orphan a deny, because every location accounts for itself.
+
+**A deny must expire.** `--off` refuses without `--hours N` and `--reason "why"`,
+capped at 24 hours because anything longer is a standing configuration change
+rather than a coordination window. `--expire` clears what is past its window and
+only that, and is deliberately safe for any session to run at any time: the
+restore must not depend on the session that set it still being alive.
+
+`isExpired()` treats an absent or unparseable expiry as expired rather than live.
+An unrecognised state must be the dangerous case, and here the dangerous case is
+a deny nobody can account for.
+
+### Changed: `--status` reports three outcomes, and calls a fault a fault
+
+Live, EXPIRED and unaccounted are different facts and only one of them is fine.
+An expired deny prints as a fault with the remedy beside it, rather than as a
+state. A reassuring label on a deficiency converts absent coverage into reported
+coverage, and that is how the last five stood for a day.
+
+### Changed: the precondition for turning panels off, narrowed
+
+`[stated 2026-08-27]` Panels off is only correct while the coordinator is
+genuinely answering for every session, which is the unattended overnight case and
+nothing else. Never while the operator is at the keyboard, and never as a
+standing configuration. A Brain that is verifying or working on one repo is not
+coordinating the fleet, and denying panels then costs sessions their only channel
+to him while buying nothing. Written into the brain skill rather than assumed.
+
+### Testing
+
+47 assertions across 12 scenarios, up from 27 across 8. Two mutations, each
+caught by exactly the intended assertions: dropping the reason requirement, and
+making `--expire` clear live denies too.
+
+Two vacuities were found and fixed before the fix landed. Scenario 9 shared one
+fixture home, so the first bare `--off` created a marker and every later attempt
+hit the marker-exists refusal rather than the check under test, which meant one
+assertion passed against a subject with no reason-check at all. Scenarios 11 and
+12 threw on a missing record instead of failing, aborting the run and reporting
+nothing about anything after them.
+
+
 ## [8.126.0] - 2026-08-27
 
 ### Fixed: panels were denied one directory above where sessions actually run
