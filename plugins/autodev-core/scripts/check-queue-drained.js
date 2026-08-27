@@ -143,7 +143,9 @@ function report(source, out = console.log, stateFile = null) {
     if (r.carried.length) {
         out(`[queue] CARRIED FORWARD - ${r.carried.length} item(s) were selected, then offered again:`);
         for (const c of r.carried) out(`          - "${c.label}" - selected in ${c.panels} separate panels`);
-        out('        An item is only re-offered because it was not delivered. Say where each one stands.');
+        out('        A re-offer is not proof of non-delivery: a panel re-listing context, a');
+        out('        partial delivery, or a user re-picking something done all look the same');
+        out('        from here. This reads panels, not work. Say where each one stands.');
     } else {
         out('[queue] no item was selected twice - nothing measurably carried forward.');
     }

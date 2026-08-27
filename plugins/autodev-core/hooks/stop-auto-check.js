@@ -87,8 +87,27 @@ try {
                 const r = analyse(transcript);
                 if (r.carried.length) {
                     const items = r.carried.map((c) => `"${c.label}" (${c.panels} panels)`).join(', ');
-                    carryNote = `[queue] ${r.carried.length} selected item(s) offered again without being delivered: `
-                        + `${items}. Say where each one stands before the turn ends.`;
+                    // SAY WHAT WAS OBSERVED, NOT WHY IT HAPPENED.
+                    //
+                    // "offered again" is measured: the item was selected in one panel
+                    // and appears in a later one. "without being delivered" is a CAUSE,
+                    // and this hook cannot see delivery at all - it reads panels, not
+                    // work. check-queue-drained.js says so in as many words on its other
+                    // branch ("this check cannot tell delivered from undelivered"), so
+                    // the same mechanism was asserting a fact here and disclaiming it
+                    // there.
+                    //
+                    // `[measured 2026-08-27]` a session reported one undelivered item
+                    // while this note claimed six. Only one of those can be right and
+                    // the hook has no way to know which, so it should not have taken a
+                    // side. A re-offer has innocent causes too: a panel re-listing
+                    // context, a partial delivery, a user re-picking something done.
+                    //
+                    // The ask is unchanged and is the useful half - a session that says
+                    // where each item stands resolves the ambiguity the hook cannot.
+                    carryNote = `[queue] ${r.carried.length} selected item(s) were offered again in a later panel: `
+                        + `${items}. That is a re-offer, not proof of non-delivery - this hook `
+                        + `reads panels, not work. Say where each one stands before the turn ends.`;
                 }
             }
         } catch { /* a queue note must never strand a turn */ }
