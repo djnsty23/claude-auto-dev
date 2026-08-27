@@ -63,7 +63,52 @@ The same applies to success. `✓ Updated 1 marketplace` was printed while nothi
 was fetched — the disk was 53 commits behind both before and after. **A status
 line is a claim, and the artefact is the evidence.**
 
-## 4. Attribute before you repair
+## 4. Ask which artifact ANSWERS the question, before reading one that is near it
+
+Every artifact is authoritative about one layer and silent about the others, and
+the dangerous ones are silent while sounding current. **A migration, a code
+comment, a PR body and a memory file all record what was true WHEN THEY WERE
+WRITTEN.** They do not update when the world moves, and nothing marks the moment
+they stop being true.
+
+For "is this built, and how does it work today", the authoritative sources are the
+repo's own agent-facing instructions — `AGENTS.md`, `CLAUDE.md`, `README` — plus
+the config that activates the thing and the git log. Read those first. They are
+maintained precisely because they are read first.
+
+| the question | what answers it | what merely mentions it |
+|---|---|---|
+| is this capability live? | `AGENTS.md` / `CLAUDE.md`, the env var that switches it, the deploy | a migration header, a TODO, a memory file |
+| which backend does it use? | the config the running code reads | a credentials map, which is authoritative about credentials and silent about consumers |
+| did this land? | `git log`, `gh pr view` | a commit body saying "fixes", a doc saying "planned" |
+
+**The incident.** `[measured 2026-08-27]` A session read the header of a migration
+dated six weeks earlier, which described a data-in-git problem in the present
+tense **as of that date**, and concluded the problem was present now. It wrote a
+brief, a repo document and a memory file all asserting a stalled migration, then
+handed an agent a backfill to run.
+
+The cutover had completed five weeks before. `AGENTS.md` line 123 said so in plain
+text and named the correct project; `CLAUDE.md`, `ROUTINES.md` and `.gitignore`
+agreed. None was read. The brief also named the wrong database, taken from a
+memory file rather than from the repo.
+
+Running it would have overwritten **46 live documents** and reset every
+optimistic-concurrency token, one from version **15085 to 1**.
+
+**Two tells, both cheap.** The session counted 39 old-path call sites and read
+coexistence as *stalling* — but the module's own header explained why both paths
+remain, and that sentence had been quoted into the write-up without being
+connected. And every input it used was secondary: a migration, a comment, its own
+notes. **If no primary source is in your evidence list, you have not checked yet.**
+
+**This is the worse direction of a stale claim.** A stale "already fixed" surfaces
+the moment somebody looks. A stale "not done yet" sends someone to redo finished
+work, and work not attempted emits no failure, no diff and no signal — so it can
+stand indefinitely, and here it very nearly destroyed the thing it meant to
+protect.
+
+## 5. Attribute before you repair
 
 When something goes red after a change, establish *whose* change before fixing or
 reverting. The instinct to fix immediately destroys the evidence.
@@ -77,7 +122,7 @@ and neither was guessable.
 **Bisect one step before theorising.** `HEAD~1` in a worktree, or the same
 command in the state before the change, is usually enough.
 
-## 5. Say what would change your mind
+## 6. Say what would change your mind
 
 Write the disconfirming observation down *before* you go looking. A diagnosis
 with no stated falsifier is a belief.
@@ -86,7 +131,7 @@ This is also the cheapest way to catch a frame error: "if this were true, X woul
 also be true" surfaces the unexamined assumption faster than more evidence for
 the thing you already think.
 
-## 6. A gate is what you add when diagnosis failed
+## 7. A gate is what you add when diagnosis failed
 
 Every gate has a standing cost: it runs on every push, it needs its own tests, it
 can pass while proving nothing, and it competes for attention with the gates that
@@ -115,6 +160,8 @@ diagnosis that was skipped.
 - [ ] I can name the observation that would prove me wrong.
 - [ ] Where sources disagreed, I questioned the frame before the mechanism.
 - [ ] I read the real failure text, not a count or a status line.
+- [ ] At least one PRIMARY source is in my evidence: the agent-facing docs,
+      the activating config, or the git log. Not only a comment or a memory file.
 - [ ] If something went red after a change, I attributed it before fixing it.
 - [ ] Where I could not measure, I said so and said which way I am guessing.
 - [ ] If I am proposing a new gate, I said why diagnosis alone will not hold.
