@@ -565,9 +565,94 @@ function plantSession(home, dir, minutesIdle) {
         f.status === 0 && denies(repo), 'exit ' + f.status);
 }
 
+// ---------- 16. --expire prunes the MARKER too, or --on resurrects what expired
+
+// Added after running the repo's own check:vacuity against this suite: 36 of 90
+// mutants survived, and the sharpest was a dropped negation in expire()'s marker
+// prune - `filter(e => !gone.has(e.repo))` becoming `filter(e => gone.has(...))`.
+// That inversion keeps exactly the expired entries and drops the live ones, so a
+// later --on puts back the deny --expire just cleared. Nothing asserted on it.
+
+{
+    const home = makeHome();
+    const stale = makeRepo(home, 'staleproj');
+    const live = makeRepo(home, 'liveproj');
+    run(home, OFF);
+
+    const rp = path.join(stale, '.claude', 'panel-deny.json');
+    const rec = readJSON(rp);
+    check('16z precondition: a sibling record exists to age', !!rec);
+    if (rec) {
+        rec.expiresAt = new Date(Date.now() - 3600 * 1000).toISOString();
+        fs.writeFileSync(rp, JSON.stringify(rec, null, 2) + '\n', 'utf8');
+    }
+
+    run(home, ['--expire']);
+    const marker = readJSON(path.join(home, '.claude', 'brain-panels-marker.json'));
+    const inMarker = (dir) => !!(marker && (marker.repos || []).some((e) => e.repo === dir));
+
+    check('16a the expired entry is GONE from the marker', !inMarker(stale),
+        'left in, --on below puts the deny straight back');
+    check('16b the live entry SURVIVES in the marker', inMarker(live),
+        'pruned wrongly, --on can no longer restore a deny this tool set - the '
+        + 'exact inversion a dropped negation produces');
+
+    // The behavioural consequence, which is what actually matters and what no
+    // amount of inspecting the marker proves.
+    run(home, ['--on']);
+    check('16c --on does NOT resurrect the expired deny', !denies(stale),
+        'expire cleared it and on brought it back: the round trip is broken');
+    check('16d --on DID restore the live one', !denies(live),
+        'planted positive - if --on restored nothing, 16c passes for the wrong reason');
+}
+
+// ---------- 17. malformed state on disk must not crash the tool
+
+// The vacuity run left a cluster of survivors in the null-safety chains
+// (`j && j.permissions && Array.isArray(...)`), because every fixture until now
+// was well formed, so mutating a guard changed nothing. This exercises the
+// guards with input that is actually broken.
+//
+// Not chasing the remaining survivors beyond this: they are defensive branches
+// whose failure mode is a crash on input this covers, and section 7 of
+// rule-diagnosis is explicit that fewer gates better diagnosed beats more.
+
+{
+    const home = makeHome();
+    const good = makeRepo(home, 'goodproj');
+    const bad = makeRepo(home, 'badproj');
+    const weird = makeRepo(home, 'weirdproj');
+
+    fs.mkdirSync(path.join(bad, '.claude'), { recursive: true });
+    fs.writeFileSync(settingsPath(bad), '{ this is not json', 'utf8');
+    // Valid JSON, wrong SHAPE - permissions.deny a string rather than an array.
+    writeSettings(weird, { permissions: { deny: 'AskUserQuestion' } });
+
+    const r = run(home, ['--status']);
+    check('17a --status survives a corrupt settings file', r.status === 0,
+        'exit ' + r.status + ' stderr=' + JSON.stringify((r.stderr || '').slice(0, 120)));
+    check('17b and reports a population rather than dying', /scanned/.test(r.stdout || ''),
+        (r.stdout || '').slice(0, 120));
+
+    // A deny recorded as a STRING is not a deny list. Treating it as one would
+    // be a false positive; ignoring it silently would be a false negative. The
+    // tool should not count it, because it cannot act on it either.
+    check('17c a wrong-shaped deny is not counted as denied', !denies(weird));
+
+    const o = run(home, OFF);
+    check('17d --off still works alongside malformed neighbours', o.status === 0,
+        'exit ' + o.status);
+    check('17e planted positive: the well-formed repo IS denied', denies(good));
+    check('17f the corrupt file was not silently overwritten with a deny',
+        fs.readFileSync(settingsPath(bad), 'utf8').startsWith('{ this is not json')
+        || denies(bad),
+        'either it was left alone or it was rewritten - both are defensible, but '
+        + 'it must not be half-written');
+}
+
 // ------------------------------------------------------------------- report
 
-console.log('population: ' + (passed + failures.length) + ' assertions across 15 scenarios, subject '
+console.log('population: ' + (passed + failures.length) + ' assertions across 17 scenarios, subject '
     + path.relative(process.cwd(), SUBJECT));
 if (failures.length) {
     console.log('FAIL ' + failures.length + ', pass ' + passed);
