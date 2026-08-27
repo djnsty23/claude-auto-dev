@@ -300,9 +300,47 @@ function run(home, args) {
         'reporting is not licence to prune a rule somebody else set deliberately');
 }
 
+// ------------------- 8. the classifier separates a bulk write from a lone one
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+    const bulkA = makeWorktree(repo, 'bulk-a');
+    const bulkB = makeWorktree(repo, 'bulk-b');
+    const lone = makeWorktree(repo, 'lone-hand');
+
+    for (const d of [bulkA, bulkB, lone]) writeSettings(d, { permissions: { deny: [TOOL] } });
+
+    // Set the times EXPLICITLY rather than trusting three writes to land in the
+    // same millisecond or in different ones. A planted signal that depends on
+    // how fast the fixture happens to run is not a planted signal.
+    const shared = new Date(Date.now() - 30 * 3600 * 1000);
+    const alone = new Date(Date.now() - 5 * 3600 * 1000);
+    fs.utimesSync(settingsPath(bulkA), shared, shared);
+    fs.utimesSync(settingsPath(bulkB), shared, shared);
+    fs.utimesSync(settingsPath(lone), alone, alone);
+
+    const out = (run(home, ['--status']).stdout || '');
+    const lineFor = (name) => (out.split('\n').find((l) => l.includes(name)) || '');
+
+    check('8a a bulk write is called an orphan', /orphan/.test(lineFor('bulk-a')),
+        'line was: ' + JSON.stringify(lineFor('bulk-a')));
+    check('8b it counts the whole cluster, not just the sibling',
+        /orphan, bulk write of 2 /.test(lineFor('bulk-b')),
+        'line was: ' + JSON.stringify(lineFor('bulk-b')));
+
+    // The discriminating half. Without this, 8a passes on a classifier that
+    // labels EVERYTHING an orphan, which is the shape that would license a
+    // blind prune of a rule somebody set deliberately.
+    check('8c a lone recent write is NOT called an orphan', !/orphan/.test(lineFor('lone-hand')),
+        'line was: ' + JSON.stringify(lineFor('lone-hand')));
+    check('8d a lone recent write is flagged as possibly deliberate',
+        /deliberate\?/.test(lineFor('lone-hand')), 'line was: ' + JSON.stringify(lineFor('lone-hand')));
+}
+
 // ------------------------------------------------------------------- report
 
-console.log('population: ' + (passed + failures.length) + ' assertions across 7 scenarios, subject '
+console.log('population: ' + (passed + failures.length) + ' assertions across 8 scenarios, subject '
     + path.relative(process.cwd(), SUBJECT));
 if (failures.length) {
     console.log('FAIL ' + failures.length + ', pass ' + passed);

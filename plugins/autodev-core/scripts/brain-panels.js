@@ -122,24 +122,78 @@ function scanForDenies() {
     return found;
 }
 
-// DECISION POINT - see the panel that accompanied this change.
+// Facts about an unaccounted deny that are cheap to gather, assembled here so
+// the policy below is a decision rather than a research task. Anything needing
+// a transcript read (is a session live in this worktree?) deliberately stays
+// out: it would put a multi-second scan behind every --status.
+function contextFor(loc, siblings) {
+    const sp = settingsPath(loc);
+    let mtime = null;
+    try { mtime = fs.statSync(sp).mtime; } catch { /* unreadable */ }
+    const j = readJSON(sp);
+    const deny = (j && j.permissions && j.permissions.deny) || [];
+
+    // THE STRONGEST SIGNAL, and it is free from the stat above.
+    //
+    // `[measured 2026-08-27]` the five denies found that morning shared an mtime
+    // identical to the NANOSECOND, across two different repos. One instant, five
+    // files: that is a bulk write. Somebody denying panels in the worktree they
+    // were working in would leave five distinct timestamps.
+    //
+    // The two fields below it are weaker than they look. Both real cases carried
+    // an `allow` list beside the deny, with 2 and 31 entries, so "holds only the
+    // deny, therefore machine-written" would have scored both wrong.
+    let sharedInstant = 0;
+    if (mtime) {
+        for (const other of siblings || []) {
+            if (other === loc) continue;
+            try {
+                if (fs.statSync(settingsPath(other)).mtime.getTime() === mtime.getTime()) sharedInstant++;
+            } catch { /* unreadable sibling */ }
+        }
+    }
+
+    return {
+        loc,
+        isWorktree: loc.includes(path.join('.claude', 'worktrees')),
+        // Age of the settings file in hours, or null if it could not be read.
+        ageHours: mtime ? (Date.now() - mtime.getTime()) / 3600000 : null,
+        // How many OTHER unaccounted denies were written at the same instant.
+        // Above zero means a bulk write, which no human hand produces.
+        sharedInstant,
+        denyCount: deny.length,
+        otherKeys: j ? Object.keys(j.permissions || {}).filter((k) => k !== 'deny') : [],
+    };
+}
+
+// DECISION POINT.
 //
-// Given a location that denies panels and a marker that does not account for
-// it, what should this tool say? The two readings are indistinguishable from
-// the filesystem and lead to opposite actions:
+// A location denies panels and the marker does not account for it. Two readings
+// are indistinguishable from the filesystem and lead to opposite actions:
 //
-//   ORPHAN    - a previous run set it and lost its marker. Safe to clear, and
-//               clearing is the whole point of noticing.
-//   DELIBERATE- somebody denied panels in that worktree on purpose. Clearing it
-//               silently overrides a decision, and nothing records that it did.
+//   ORPHAN     - a previous run set it and lost its marker. Safe to clear, and
+//                clearing is the whole point of noticing.
+//   DELIBERATE - somebody denied panels there on purpose. Clearing it silently
+//                overrides a decision, and nothing records that it did.
 //
 // rules/backup-protocol.md hit this exact fork and landed on report-never-prune,
 // because the detector answers "what is set and not in my marker", which is a
-// different question from "what is stale". This follows that precedent: it
-// REPORTS and never clears on its own. Change the return value here to change
-// the policy.
-function classifyUnaccounted(_loc) {
-    return 'unaccounted';
+// different question from "what is stale". The default below follows that
+// precedent. The return value is a label printed by --status; it never gates a
+// write, so a wrong answer here misinforms and cannot destroy anything.
+function classifyUnaccounted(ctx) {
+    // A bulk write is the one thing a human hand cannot produce, so it is the
+    // only signal here that discriminates rather than describes.
+    if (ctx.sharedInstant > 0) {
+        return 'orphan, bulk write of ' + (ctx.sharedInstant + 1) + ' at one instant';
+    }
+    if (ctx.ageHours !== null && ctx.ageHours > 24) {
+        return 'stale ' + Math.round(ctx.ageHours) + 'h, sole author';
+    }
+    // Deliberately a question. Nothing observed here rules out somebody having
+    // set this on purpose, and a label that reads as a verdict would invite
+    // exactly the blind prune this function exists to prevent.
+    return 'deliberate?';
 }
 
 function turnOff() {
@@ -238,7 +292,7 @@ function reportScan(record) {
     console.log('  UNACCOUNTED - denied, but no marker entry explains it. This tool');
     console.log('  did not set these, so --on will not clear them:');
     for (const loc of orphans) {
-        console.log('    [' + classifyUnaccounted(loc) + '] ' + path.relative(CODE, loc));
+        console.log('    [' + classifyUnaccounted(contextFor(loc, orphans)) + '] ' + path.relative(CODE, loc));
     }
     console.log('');
     console.log('  Reported, not cleared. "Not in my marker" is not the same claim');
