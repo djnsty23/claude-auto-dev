@@ -59,17 +59,141 @@ function settingsPath(repo) {
     return path.join(repo, '.claude', 'settings.local.json');
 }
 
+// A worktree is where a session ACTUALLY runs, and it carries its own
+// settings.local.json. Enumerating only the top-level repo therefore denies
+// panels in the one directory no session is sitting in.
+//
+// `[measured 2026-08-27]` a Brain boot found five worktrees still denying this
+// tool while --status reported no marker at all. They had been set by something
+// that reached that deep; this function could not, so --on could never clear
+// them, and three of the five held live sessions.
+//
+// Git marks a linked worktree with a .git FILE rather than a directory, so the
+// existsSync test below is deliberately indifferent to which it is.
+function worktreesOf(repo) {
+    const root = path.join(repo, '.claude', 'worktrees');
+    let entries;
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
+    return entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+        .map((e) => path.join(root, e.name))
+        .filter((d) => fs.existsSync(path.join(d, '.git')));
+}
+
+// Each repo contributes itself plus its worktrees. The coordinator is filtered
+// out BEFORE this expansion, so its worktrees are never reached either - the
+// exclusion has to cover the directory a Brain session is really in, not just
+// the clone it was cut from.
+function expand(repos) {
+    const out = [];
+    for (const r of repos) {
+        out.push(r);
+        for (const w of worktreesOf(r)) out.push(w);
+    }
+    return out;
+}
+
 function managedRepos() {
     const explicit = val('--repos', null);
     if (explicit) {
-        return explicit.split(',').map((n) => path.join(CODE, n.trim())).filter((d) => fs.existsSync(d));
+        return expand(explicit.split(',')
+            .map((n) => path.join(CODE, n.trim()))
+            .filter((d) => fs.existsSync(d)));
     }
     let entries;
     try { entries = fs.readdirSync(CODE, { withFileTypes: true }); } catch { return []; }
-    return entries
+    return expand(entries
         .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !NEVER.has(e.name))
         .map((e) => path.join(CODE, e.name))
-        .filter((d) => fs.existsSync(path.join(d, '.git')));
+        .filter((d) => fs.existsSync(path.join(d, '.git'))));
+}
+
+// Every location that currently denies the tool, whether or not this tool set
+// it. --status alone cannot answer this: it reads the marker, so a deny set by
+// anything else reports as "panels are on". That is not a hypothetical - it is
+// how five worktrees stayed denied through a clean --status on 2026-08-27.
+function scanForDenies() {
+    const found = [];
+    for (const loc of managedRepos()) {
+        const j = readJSON(settingsPath(loc));
+        const deny = j && j.permissions && j.permissions.deny;
+        if (Array.isArray(deny) && deny.indexOf(TOOL) !== -1) found.push(loc);
+    }
+    return found;
+}
+
+// Facts about an unaccounted deny that are cheap to gather, assembled here so
+// the policy below is a decision rather than a research task. Anything needing
+// a transcript read (is a session live in this worktree?) deliberately stays
+// out: it would put a multi-second scan behind every --status.
+function contextFor(loc, siblings) {
+    const sp = settingsPath(loc);
+    let mtime = null;
+    try { mtime = fs.statSync(sp).mtime; } catch { /* unreadable */ }
+    const j = readJSON(sp);
+    const deny = (j && j.permissions && j.permissions.deny) || [];
+
+    // THE STRONGEST SIGNAL, and it is free from the stat above.
+    //
+    // `[measured 2026-08-27]` the five denies found that morning shared an mtime
+    // identical to the NANOSECOND, across two different repos. One instant, five
+    // files: that is a bulk write. Somebody denying panels in the worktree they
+    // were working in would leave five distinct timestamps.
+    //
+    // The two fields below it are weaker than they look. Both real cases carried
+    // an `allow` list beside the deny, with 2 and 31 entries, so "holds only the
+    // deny, therefore machine-written" would have scored both wrong.
+    let sharedInstant = 0;
+    if (mtime) {
+        for (const other of siblings || []) {
+            if (other === loc) continue;
+            try {
+                if (fs.statSync(settingsPath(other)).mtime.getTime() === mtime.getTime()) sharedInstant++;
+            } catch { /* unreadable sibling */ }
+        }
+    }
+
+    return {
+        loc,
+        isWorktree: loc.includes(path.join('.claude', 'worktrees')),
+        // Age of the settings file in hours, or null if it could not be read.
+        ageHours: mtime ? (Date.now() - mtime.getTime()) / 3600000 : null,
+        // How many OTHER unaccounted denies were written at the same instant.
+        // Above zero means a bulk write, which no human hand produces.
+        sharedInstant,
+        denyCount: deny.length,
+        otherKeys: j ? Object.keys(j.permissions || {}).filter((k) => k !== 'deny') : [],
+    };
+}
+
+// DECISION POINT.
+//
+// A location denies panels and the marker does not account for it. Two readings
+// are indistinguishable from the filesystem and lead to opposite actions:
+//
+//   ORPHAN     - a previous run set it and lost its marker. Safe to clear, and
+//                clearing is the whole point of noticing.
+//   DELIBERATE - somebody denied panels there on purpose. Clearing it silently
+//                overrides a decision, and nothing records that it did.
+//
+// rules/backup-protocol.md hit this exact fork and landed on report-never-prune,
+// because the detector answers "what is set and not in my marker", which is a
+// different question from "what is stale". The default below follows that
+// precedent. The return value is a label printed by --status; it never gates a
+// write, so a wrong answer here misinforms and cannot destroy anything.
+function classifyUnaccounted(ctx) {
+    // A bulk write is the one thing a human hand cannot produce, so it is the
+    // only signal here that discriminates rather than describes.
+    if (ctx.sharedInstant > 0) {
+        return 'orphan, bulk write of ' + (ctx.sharedInstant + 1) + ' at one instant';
+    }
+    if (ctx.ageHours !== null && ctx.ageHours > 24) {
+        return 'stale ' + Math.round(ctx.ageHours) + 'h, sole author';
+    }
+    // Deliberately a question. Nothing observed here rules out somebody having
+    // set this on purpose, and a label that reads as a verdict would invite
+    // exactly the blind prune this function exists to prevent.
+    return 'deliberate?';
 }
 
 function turnOff() {
@@ -104,14 +228,22 @@ function turnOff() {
     fs.mkdirSync(path.dirname(MARKER), { recursive: true });
     fs.writeFileSync(MARKER, JSON.stringify(record, null, 2) + '\n', 'utf8');
 
-    console.log('panels DENIED in ' + repos.length + ' repo(s):');
-    for (const r of repos) console.log('  ' + path.basename(r));
+    // Print the population, split by kind. A bare count of "30" cannot tell a
+    // reader whether the worktrees - where the sessions actually are - were
+    // covered at all, which is the failure this tool shipped with.
+    const wt = repos.filter((r) => r.includes(path.join('.claude', 'worktrees')));
+    console.log('panels DENIED in ' + repos.length + ' location(s): '
+        + (repos.length - wt.length) + ' repo(s), ' + wt.length + ' worktree(s)');
+    for (const r of repos) console.log('  ' + path.relative(CODE, r));
     console.log('');
-    console.log('  excluded (the coordinator keeps its panels): ' + [...NEVER].join(', '));
+    console.log('  excluded (the coordinator keeps its panels, worktrees included): ' + [...NEVER].join(', '));
     console.log('  marker: ' + MARKER);
     console.log('');
     console.log('  Restore with --on. Any session can run it, not only this one.');
-    console.log('  A SessionEnd hook also restores, so a crash does not leave this set.');
+    console.log('  NOTHING restores this automatically - there is deliberately no');
+    console.log('  hook, because one would fire for every session and a managed');
+    console.log('  session ending would revert the block constraining it. The');
+    console.log('  marker outlives this process, and a Brain boot checks for it.');
 }
 
 function turnOn() {
@@ -145,18 +277,43 @@ function turnOn() {
     console.log('  set at ' + record.setAt);
 }
 
+// The scan runs on EVERY status, marker or not. A marker-only report is the
+// thing that read as an all-clear while five worktrees stayed denied.
+function reportScan(record) {
+    const accounted = new Set((record && record.repos ? record.repos : []).map((e) => e.repo));
+    const found = scanForDenies();
+    const orphans = found.filter((loc) => !accounted.has(loc));
+
+    console.log('scan: ' + found.length + ' location(s) currently deny ' + TOOL
+        + ' across ' + managedRepos().length + ' scanned, ' + orphans.length + ' unaccounted');
+    if (!orphans.length) return;
+
+    console.log('');
+    console.log('  UNACCOUNTED - denied, but no marker entry explains it. This tool');
+    console.log('  did not set these, so --on will not clear them:');
+    for (const loc of orphans) {
+        console.log('    [' + classifyUnaccounted(contextFor(loc, orphans)) + '] ' + path.relative(CODE, loc));
+    }
+    console.log('');
+    console.log('  Reported, not cleared. "Not in my marker" is not the same claim');
+    console.log('  as "stale", and only one of those is safe to act on blind.');
+}
+
 function status() {
     const record = readJSON(MARKER);
     if (!record) {
         console.log('no marker: this tool has not denied panels anywhere.');
         console.log('population: checked ' + MARKER);
+        reportScan(null);
         return;
     }
     console.log('panels DENIED since ' + record.setAt);
     console.log('population: ' + (record.repos || []).length + ' repo(s)');
     for (const e of record.repos || []) {
-        console.log('  ' + path.basename(e.repo) + (e.existed ? '  (had settings, will be restored)' : '  (no settings, will be removed)'));
+        console.log('  ' + path.relative(CODE, e.repo) + (e.existed ? '  (had settings, will be restored)' : '  (no settings, will be removed)'));
     }
+    console.log('');
+    reportScan(record);
     console.log('');
     console.log('Restore with --on.');
 }
