@@ -96,3 +96,10 @@ build/
 # preview_start config. Its entries carry absolute paths to whichever repos this
 # machine serves, so it names private projects by construction.
 .claude/launch.json
+
+# Design canvases and preview scratch. Product work from OTHER repos lands here
+# while a session iterates on it; this repo is public, so an accidental
+# `git add -A` would publish it. Named narrowly, in the style above, because the
+# partial tracking under .claude/ is deliberate.
+.claude/design/
+.claude/preview/

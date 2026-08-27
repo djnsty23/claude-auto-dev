@@ -1,5 +1,52 @@
 # Changelog
 
+## [8.130.0] - 2026-08-27
+
+One fix, found by a peer session correcting a claim this session had already
+reported upward as fact.
+
+### Fixed: a dirty worktree said nothing about WHEN it was dirtied
+
+`brain-brief.js` section 4 counted 25 worktrees carrying uncommitted work and
+could not separate live work from a derelict tree, because `git status` prints
+"modified" identically for an edit made thirty seconds ago and one abandoned in
+June.
+
+It did exactly that on the run that found it: 11 modified files were reported as
+the only live uncommitted work in the fleet. The session owning that repo checked
+mtime and found all 11 dated 2026-06-01, on a tip 190 commits behind and never
+merged. Abandoned since May, and by then a merge hazard, because two of those
+files had since changed on the trunk.
+
+Same shape as the "unreachable commits" warning printed directly above it in the
+same section. Ancestry, content and RECENCY are three different questions and the
+report answered two of them. The same run had already reduced 688 and 2518
+"unreachable" commits to 10 apiece by asking git about content instead of
+ancestry, so the section's own caveat was working and simply did not cover time.
+
+Each dirty row now carries the newest mtime across its dirty paths with the count
+actually read beside it, so thin evidence reads as thin. Past 30 days it is
+labelled LIKELY ABANDONED, and the population line separates the derelict count
+from the carrying count. A derelict tree is still counted as carrying work: the
+label reframes it and must not hide it, which is asserted rather than assumed.
+
+`dirtyPaths()` handles the two porcelain shapes that fail SILENTLY under a naive
+`slice(3)` - a quoted path, when a space or non-ASCII byte is in the name, and a
+rename, where only the destination exists on disk. Either would have stat'd
+nothing and reported "0 read" rather than erroring.
+
+Verified at both ends of the range in one run: the known positive reads `87d ago
+(11 of 11 read) - LIKELY ABANDONED`, matching the owning session's independent
+check, while a live tree reads `2m ago`. Two inputs, two different outputs, so it
+measured rather than returning a constant. Fleet-wide, 7 of 25.
+
+The suite gains a stale fixture identical to the dirty one except for its mtimes,
+with paired assertions - a script that never labels anything abandoned passes the
+stale half's absence, and one that labels everything passes the fresh half's, so
+neither is evidence alone. Mutation-tested three ways: threshold 99999 (3 fail),
+threshold 0 (3 fail), mtime forced unread (4 fail). 126 pass on revert.
+
+
 ## [8.129.0] - 2026-08-27
 
 Three changes, all from a peer evaluation requested the same day. The peer graded

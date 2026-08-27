@@ -141,6 +141,21 @@ const DIRTY_REPO = path.join(ROOT, 'fixture-repo-dirty');
 const CLEAN_REPO = path.join(ROOT, 'fixture-repo-clean');
 buildRepo(DIRTY_REPO, true);
 buildRepo(CLEAN_REPO, false);
+
+// A repo dirty in exactly the same way as DIRTY_REPO, differing ONLY in when its
+// dirty files were last touched. `git status` cannot tell the two apart - that is
+// the whole point - so the report has to, and the pair is what proves it read an
+// mtime rather than printing a constant. [measured 2026-08-27] a worktree with 11
+// modified files all dated 87 days back was reported upward as live uncommitted
+// work; it had been abandoned since May and had become a merge hazard.
+const STALE_REPO = path.join(ROOT, 'fixture-repo-stale');
+buildRepo(STALE_REPO, true);
+{
+    const old = (Date.now() - 90 * 86400 * 1000) / 1000;
+    for (const f of ['a.txt', 'staged.txt', 'u1.txt', 'u2.txt']) {
+        fs.utimesSync(path.join(STALE_REPO, f), old, old);
+    }
+}
 // A fetch age the report can name. The dirty repo deliberately has none, so the
 // UNKNOWN branch is exercised too.
 {
@@ -464,6 +479,14 @@ try {
     hasText('A: a clone that never fetched says UNKNOWN rather than zero', a4,
         'last fetch UNKNOWN (no FETCH_HEAD)');
     lacksText('A: a dirty repo is not reported as clean', a4, 'all clean and pushed');
+    // The FRESH half of the abandoned-tree pair. Scenario H holds the stale half;
+    // neither is evidence alone, because a script that never labels anything
+    // abandoned passes this one and a script that labels everything passes that.
+    matches('A: a freshly edited dirty tree reports its edit age with the files read', a4,
+        /last edited \d+m ago \(4 of 4 read\)/);
+    lacksText('A: a freshly edited tree is not called abandoned', a4, 'LIKELY ABANDONED');
+    hasText('A: the derelict count is a real zero when every dirty tree is live', a4,
+        'of those, 0 last edited over 30d ago');
 
     // -----------------------------------------------------------------------
     // B. the quiet machine: every zero must carry its denominator
@@ -663,6 +686,33 @@ try {
     check('G: --help exits 0', G.status === 0, 'exit ' + G.status);
     hasText('G: --help prints the usage block', G.stdout, '--no-overlap');
     lacksText('G: --help does not run the scan', G.stdout, '1. FLEET - who is alive');
+
+    // -----------------------------------------------------------------------
+    // H. a derelict tree and a live one are both "dirty" to git
+    //
+    // STALE_REPO is byte-for-byte the same shape as DIRTY_REPO; only the mtimes
+    // differ. So every assertion here that scenario A's fresh half does not also
+    // make would pass against a script that hardcodes the label.
+    // -----------------------------------------------------------------------
+    const homeH = makeHome('h', {
+        memoryDir: true,
+        config: JSON.stringify({ repos: [STALE_REPO] }),
+        transcripts: [],
+    });
+    const workH = workDir('h', []);
+    const H = runBrief({ home: homeH, cwd: workH, path: WITH_GH, args: ['--no-overlap'] });
+    const h4 = section(H.stdout, '4. UNCOMMITTED AND UNPUSHED');
+    check('H: exits 0 on a derelict tree', H.status === 0, 'exit ' + H.status);
+    matches('H: a 90-day-old dirty tree reports its age in days', h4,
+        /last edited (89|90|91)d ago \(4 of 4 read\)/);
+    hasText('H: and is called out as derelict rather than in flight', h4,
+        'LIKELY ABANDONED, not in flight');
+    hasText('H: the derelict count separates it from the carrying count', h4,
+        'of those, 1 last edited over 30d ago');
+    // It is still dirty. The label reframes the work; it must not hide it.
+    hasText('H: a derelict tree is still counted as carrying work', h4,
+        '1 carrying uncommitted or unpushed work');
+    lacksText('H: a derelict tree is never reported as clean', h4, 'all clean and pushed');
 } finally {
     try {
         fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });

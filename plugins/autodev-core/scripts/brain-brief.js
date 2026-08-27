@@ -732,6 +732,70 @@ function parseStatus(text) {
 }
 
 /**
+ * The paths `git status --porcelain=v1` is talking about.
+ *
+ * Two shapes bite a naive slice(3), and both fail SILENTLY - you stat a path
+ * that does not exist, get nothing, and report "0 files read" rather than an
+ * error. Quoted paths (a space or a non-ASCII byte anywhere in the name) arrive
+ * wrapped in double quotes with C-style escapes, and a rename arrives as
+ * `old -> new` where only the second half is on disk.
+ */
+function dirtyPaths(text) {
+    const out = [];
+    for (const l of String(text).split(/\r?\n/)) {
+        if (!l.length || l.startsWith('## ')) continue;
+        let rest = l.slice(3);
+        // A rename or copy names both sides; only the destination exists now.
+        const arrow = rest.indexOf(' -> ');
+        if (arrow !== -1 && (l[0] === 'R' || l[0] === 'C')) rest = rest.slice(arrow + 4);
+        if (rest.startsWith('"') && rest.endsWith('"') && rest.length > 1) {
+            try { rest = JSON.parse(rest); } catch { rest = rest.slice(1, -1); }
+        }
+        if (rest.length) out.push(rest);
+    }
+    return out;
+}
+
+/**
+ * When was this worktree last actually TOUCHED?
+ *
+ * `git status` prints "modified" identically for an edit made thirty seconds ago
+ * and one abandoned in June, so a dirty count cannot separate live work from a
+ * derelict tree. [measured 2026-08-27] one worktree reported 11 modified files
+ * whose mtimes were all 87 days old, on a branch tip 190 commits behind and
+ * never merged. It was reported upward as the only live uncommitted work in the
+ * fleet, and it was abandoned - and by then it had become a merge hazard,
+ * because two of those files had since been changed on the trunk.
+ *
+ * Returns the NEWEST mtime across the dirty paths, plus how many were readable,
+ * so a small "read" count is visible as thin evidence rather than passing for a
+ * confident answer. Directories are stat'd as themselves: an untracked entry can
+ * be a directory, and its own mtime is a fair proxy for when it last changed.
+ */
+function newestDirtyMtime(wt, paths) {
+    let newest = 0, read = 0;
+    for (const rel of paths) {
+        try {
+            const st = fs.statSync(path.join(wt, rel));
+            read++;
+            if (st.mtimeMs > newest) newest = st.mtimeMs;
+        } catch { /* raced, permission-denied, or a path git names and disk does not */ }
+    }
+    return { newestMs: newest || null, read, total: paths.length };
+}
+
+/** Days-and-hours, in the same register as the rest of this report. */
+function ageLabel(ms) {
+    const h = (Date.now() - ms) / 3600000;
+    if (h < 1) return Math.max(1, Math.round(h * 60)) + 'm';
+    if (h < 48) return (h < 10 ? h.toFixed(1) : Math.round(h)) + 'h';
+    return Math.round(h / 24) + 'd';
+}
+
+/** Past this, a dirty tree is more likely derelict than in flight. */
+const STALE_EDIT_DAYS = 30;
+
+/**
  * How long since this clone last heard from the remote.
  *
  * Everything below is measured against origin refs AS LAST FETCHED. A clone that
@@ -789,12 +853,17 @@ async function sectionWork(repos) {
             const risk = await run('git', ['-C', wt, 'rev-list', '--count', 'HEAD', '--not', '--remotes=origin'], { cwd: wt });
             if (risk.ok) s.onlyLocal = Number(risk.stdout.trim());
             else { s.onlyLocal = null; s.riskNote = 'commits-at-risk count UNKNOWN: ' + risk.reason; }
+
+            // A dirty count says nothing about WHEN. Stat the dirty paths so an
+            // abandoned tree is distinguishable from one somebody is typing in.
+            if (s.dirty > 0) s.edit = newestDirtyMtime(wt, dirtyPaths(st.stdout));
+
             return { wt, status: s };
         });
         return { repo, fetched: fetchAge(repo.root), checked };
     });
 
-    let totalWt = 0, unreadable = 0, clean = 0, interesting = 0, repoErrors = 0;
+    let totalWt = 0, unreadable = 0, clean = 0, interesting = 0, repoErrors = 0, staleEdits = 0;
     const rendered = [];
     for (const r of perRepo) {
         if (!r) continue;
@@ -806,7 +875,12 @@ async function sectionWork(repos) {
             if (c.error) { unreadable++; rows.push({ wt: c.wt, error: c.error }); continue; }
             const s = c.status;
             const noteworthy = s.dirty > 0 || s.ahead > 0 || (s.onlyLocal || 0) > 0 || s.riskNote || s.conflicted > 0;
-            if (noteworthy) { interesting++; rows.push({ wt: c.wt, status: s }); }
+            if (noteworthy) {
+                interesting++;
+                if (s.edit && s.edit.newestMs !== null
+                    && (Date.now() - s.edit.newestMs) / 86400000 >= STALE_EDIT_DAYS) staleEdits++;
+                rows.push({ wt: c.wt, status: s });
+            }
             else clean++;
         }
         rendered.push({ repo: r.repo, fetched: r.fetched, rows });
@@ -816,6 +890,8 @@ async function sectionWork(repos) {
         totalWt + ' worktree(s) checked');
     say('              ' + interesting + ' carrying uncommitted or unpushed work, ' + clean +
         ' clean and pushed, ' + unreadable + ' UNREADABLE');
+    say('              of those, ' + staleEdits + ' last edited over ' + STALE_EDIT_DAYS +
+        'd ago - derelict rather than in flight');
     say('  "unreachable" = no origin ref holds this commit BY SHA, as of this');
     say('  last fetch of this clone. A stale fetch inflates it, so each repo prints its age.');
     say('');
@@ -861,6 +937,16 @@ async function sectionWork(repos) {
             if (s.behind) bits.push(s.behind + ' behind upstream');
             if (s.onlyLocal) bits.push(s.onlyLocal + ' commit(s) unreachable from any origin ref (CONTENT NOT CHECKED)');
             if (s.riskNote) bits.push(s.riskNote);
+            if (s.edit) {
+                if (s.edit.newestMs === null) {
+                    bits.push('last edit UNKNOWN: 0 of ' + s.edit.total + ' dirty path(s) could be read');
+                } else {
+                    const days = (Date.now() - s.edit.newestMs) / 86400000;
+                    const evidence = s.edit.read + ' of ' + s.edit.total + ' read';
+                    bits.push('last edited ' + ageLabel(s.edit.newestMs) + ' ago (' + evidence + ')'
+                        + (days >= STALE_EDIT_DAYS ? ' - LIKELY ABANDONED, not in flight' : ''));
+                }
+            }
             say('    ' + label + '  [' + (s.branch || '?') + (s.upstream ? ' -> ' + s.upstream : ' -> no upstream') + ']');
             say('        ' + (bits.length ? bits.join(', ') : 'nothing') + '');
             say('        ' + row.wt);
