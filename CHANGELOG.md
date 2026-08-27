@@ -1,5 +1,74 @@
 # Changelog
 
+## [8.126.0] - 2026-08-27
+
+### Fixed: panels were denied one directory above where sessions actually run
+
+A Brain boot found five worktrees still carrying a deny on `AskUserQuestion`
+while `brain-panels.js --status` reported `no marker: this tool has not denied
+panels anywhere`. Three of the five held live sessions, two of which had been
+waiting over ten hours. A session that cannot raise a panel cannot ask the
+operator anything, and from outside it is indistinguishable from one that is
+still thinking.
+
+Nothing was lying. `managedRepos()` enumerated direct children of the code
+directory; a worktree sits at `<repo>/.claude/worktrees/<name>`, one level
+deeper. So `--off` never wrote one and `--on` could never clear one, and every
+live session in that fleet ran from a worktree. The tool was honest about what
+it checked, and what it checked was narrower than where the state lives.
+
+The coordinator is now filtered out **before** the worktree expansion rather
+than after. Denying panels in the directory a Brain session is really sitting in
+would silence the one channel that carries a decision to the operator.
+
+### Fixed: a banner promising a safety net that does not and must not exist
+
+`--off` printed that a SessionEnd hook also restores this, so a crash could not
+leave it set. No hook anywhere references `brain-panels`, and the brain skill
+records that absence as deliberate: such a hook fires for every session, so a
+managed session ending would revert the very block constraining it.
+
+A reassuring label on a gap is worse than no opinion, because it closes a
+question rather than opening one. The line is replaced by what is true, which is
+that nothing restores this automatically and the marker is what outlives the
+process.
+
+### Added: `--status` scans, rather than only reading its own marker
+
+The marker records what this tool set, so a deny set by anything else reported
+as an all-clear. `--status` now scans every managed location, prints the
+population it scanned, and lists anything the marker cannot explain.
+
+It reports and never clears. "Not in my marker" and "stale" are different
+claims, and only one is safe to act on blind: an orphan misleads, and a pruned
+deliberate rule is gone with nothing recording that it happened.
+
+`classifyUnaccounted()` labels each one on shared mtime. The five found that
+morning carried a timestamp identical to the nanosecond across two different
+repos, which is a bulk write; a person denying panels in the worktree they are
+working in leaves distinct timestamps. `denyCount` and `otherKeys` were
+considered and rejected on the data, having scored both real cases wrong. The
+uncertain branch returns `deliberate?` with the question mark intended.
+
+Known limit: the comparison is millisecond precision, so it catches a bulk write
+and would miss two files written 3ms apart. The failure direction is a missed
+orphan, never a false one.
+
+### Added: `tooling/test-brain-panels.js`
+
+The script shipped without a suite. 27 assertions across 8 scenarios.
+
+Against the unfixed subject it fails on the worktree blindness and quotes the
+false banner verbatim. Three assertions were vacuous in the first draft and were
+tightened before the fix landed, because "worktree no longer denied" passes
+trivially on a subject that never denied it. The banner assertion then fired on
+its own corrected documentation, since explaining why no hook exists requires
+naming the hook, and was rewritten to test the claim rather than the vocabulary.
+
+Two mutations, each caught by exactly the intended assertions: reintroducing the
+banner line fails one, forcing the bulk-write branch always-true fails two.
+
+
 ## [8.125.0] - 2026-08-27
 
 ### Fixed: six externally-reachable holes in shipped scripts, closed five days late
