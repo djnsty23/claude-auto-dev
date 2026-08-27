@@ -310,6 +310,55 @@ function turnOff() {
     }
 
     const repos = managedRepos();
+
+    /* DO NOT SILENTLY TAKE A RUNNING SESSION'S ONLY CHANNEL TO THE OPERATOR.
+     *
+     * `[stated 2026-08-27]` by the session it happened to, and it is the sharper
+     * of its two objections: "I only know it happened because you told me. A
+     * security property that depends on a courtesy is not a property."
+     *
+     * The sibling panel-deny.json makes the deny DISCOVERABLE. That is not the
+     * same guarantee as discovered - a session that never thinks to look is where
+     * one that was never told. This closes the gap the only way a plain script
+     * can: it refuses, names the sessions, and makes denying them a deliberate
+     * act somebody has to take responsibility for.
+     *
+     * It is a REFUSAL rather than a notification because this script cannot send
+     * messages, and making --off wait on a channel whose p90 delivery is ~48
+     * minutes would break the overnight case it exists for. --force is the
+     * override, and it is meant to be used after telling them.
+     *
+     * If liveness cannot be determined the refusal still fires: an unrecognised
+     * state must be the dangerous case, and here the dangerous case is denying a
+     * session that is awake. */
+    if (!has('--force')) {
+        let live = [], couldNotTell = null;
+        try {
+            const { scanFleet, classify } = require(path.join(__dirname, 'fleet-status.js'));
+            const scan = scanFleet(1);
+            live = (scan.sessions || [])
+                .filter((s) => { const st = classify(s); return st === 'working' || st === 'waiting' || st === 'blocked'; })
+                .filter((s) => s.cwd && repos.some((r) => path.resolve(s.cwd) === path.resolve(r)));
+        } catch (e) {
+            couldNotTell = e.message;
+        }
+        if (couldNotTell) {
+            console.error('REFUSING: could not determine which sessions are live (' + couldNotTell + ').');
+            console.error('  Denying panels blind would take a running session its only channel to');
+            console.error('  the operator. Re-run with --force once you have checked.');
+            process.exit(4);
+        }
+        if (live.length) {
+            console.error('REFUSING: ' + live.length + ' live session(s) are in locations this would deny:');
+            for (const s of live) console.error('  ' + path.relative(CODE, s.cwd) + '  [' + (s.sessionId || 'unknown id') + ']');
+            console.error('');
+            console.error('  Denying these takes away the only channel each has to the operator,');
+            console.error('  and the sibling record only makes that DISCOVERABLE, not announced.');
+            console.error('  Tell them first, then re-run with --force.');
+            process.exit(4);
+        }
+    }
+
     const setAt = new Date();
     const expiresAt = new Date(setAt.getTime() + hours * 3600 * 1000).toISOString();
     const record = { setAt: setAt.toISOString(), expiresAt, reason, tool: TOOL, repos: [] };
