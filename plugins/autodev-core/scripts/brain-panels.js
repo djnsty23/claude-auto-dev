@@ -17,23 +17,47 @@
  *    a decision. Each managed repo gets the rule in its own
  *    `.claude/settings.local.json`; the coordinator's repo is excluded by name.
  *
- * 2. It records the PRIOR state in a marker, so restoring never guesses. A
- *    revert that assumes "there was no deny list before" would silently delete
- *    a rule someone added for their own reasons.
+ * 2. It records the PRIOR state, so restoring never guesses. A revert that
+ *    assumes "there was no deny list before" would silently delete a rule
+ *    someone added for their own reasons.
  *
  * 3. It is restorable by ANY session, not only the one that set it. The revert
  *    otherwise depends on a clean exit — and `[measured 2026-08-25]` two
- *    sessions died the same night without one, one of them mid-queue. If the
- *    marker outlives its author, the next session reads it and puts things back.
+ *    sessions died the same night without one, one of them mid-queue.
  *
  * The failure this is designed against is not "panels stay off for an hour". It
  * is panels staying off silently, forever, in a repo nobody is coordinating any
  * more, with nothing to announce it.
  *
- *   node brain-panels.js --off               deny panels in the managed repos
- *   node brain-panels.js --on                restore from the marker
- *   node brain-panels.js --status            what is set, and by whom
- *   node brain-panels.js --off --repos a,b   explicit list rather than the default
+ * THE FIRST DESIGN LOST TO EXACTLY THAT FAILURE — corrected 2026-08-27.
+ *
+ * `[measured]` five denies were found across two repos, all written in one bulk
+ * pass 26 hours earlier, with the central marker gone. Nothing on disk said when
+ * they were set, by whom, why, or whether they were still wanted, so no session
+ * could safely clear them and `--status` read as an all-clear. A client-work
+ * session spent a day unable to ask the operator a question.
+ *
+ * Two things caused it and both are now closed:
+ *
+ *   The prior state lived ONLY in a central marker, which is a single point of
+ *   failure that duly failed. It now ALSO lives in a sibling `panel-deny.json`
+ *   beside each settings file, carrying setAt, expiresAt, reason and the prior
+ *   settings verbatim. State and its justification travel together.
+ *
+ *   A deny had no expiry, so nothing could tell a live one from an abandoned
+ *   one. `--off` now REFUSES without `--hours N` and `--reason "why"`, and any
+ *   session may run `--expire` to clear what is past its window and only that.
+ *
+ * `[stated 2026-08-27]` the operator, narrowing the precondition: panels off is
+ * only correct while the coordinator is genuinely answering for every session.
+ * That is the unattended overnight case and nothing else. Never while he is
+ * working, and never as a standing configuration.
+ *
+ *   node brain-panels.js --off --hours 8 --reason "overnight fleet run"
+ *   node brain-panels.js --on          restore everything this tool set
+ *   node brain-panels.js --expire      clear ONLY denies past their window
+ *   node brain-panels.js --status      live vs EXPIRED vs unaccounted
+ *   node brain-panels.js --repos a,b   an explicit list rather than the default
  */
 const fs = require('fs');
 const path = require('path');
@@ -57,6 +81,58 @@ function readJSON(p) {
 
 function settingsPath(repo) {
     return path.join(repo, '.claude', 'settings.local.json');
+}
+
+// A SIBLING record, written beside the settings file it explains.
+//
+// `[measured 2026-08-27]` five denies were found whose central marker was gone.
+// Nothing on disk could say when they were set, by whom, why, or whether they
+// were still wanted, so no session could safely clear them and they stood for 26
+// hours in repos nobody was coordinating. The central marker was the single point
+// of failure, and it failed.
+//
+// So the record travels WITH the state it describes, and it carries enough to
+// restore without the marker: the prior settings verbatim, including "there was
+// no file", so a revert can delete rather than leave an empty shell.
+function denyRecordPath(repo) {
+    return path.join(repo, '.claude', 'panel-deny.json');
+}
+
+function readDenyRecord(repo) {
+    return readJSON(denyRecordPath(repo));
+}
+
+// Expired means "past the window its author chose". An unreadable or absent
+// expiry counts as EXPIRED, not as live: an unrecognised state must be the
+// dangerous case, and here the dangerous case is a deny nobody can account for.
+function isExpired(rec) {
+    if (!rec || !rec.expiresAt) return true;
+    const t = Date.parse(rec.expiresAt);
+    if (Number.isNaN(t)) return true;
+    return t <= Date.now();
+}
+
+// Put one location back from its own sibling record, marker or no marker.
+function restoreFrom(repo, rec) {
+    const sp = settingsPath(repo);
+    try {
+        if (rec && rec.existed === false) fs.unlinkSync(sp);
+        else if (rec && rec.before) fs.writeFileSync(sp, JSON.stringify(rec.before, null, 2) + '\n', 'utf8');
+        else {
+            // No prior state recorded: strip only our own entry rather than
+            // guessing, so a rule somebody else added survives.
+            const j = readJSON(sp);
+            if (j && j.permissions && Array.isArray(j.permissions.deny)) {
+                j.permissions.deny = j.permissions.deny.filter((d) => d !== TOOL);
+                fs.writeFileSync(sp, JSON.stringify(j, null, 2) + '\n', 'utf8');
+            }
+        }
+    } catch (e) {
+        console.error('  COULD NOT RESTORE ' + sp + ': ' + e.message);
+        return false;
+    }
+    try { fs.unlinkSync(denyRecordPath(repo)); } catch { /* already gone */ }
+    return true;
 }
 
 // A worktree is where a session ACTUALLY runs, and it carries its own
@@ -197,6 +273,33 @@ function classifyUnaccounted(ctx) {
 }
 
 function turnOff() {
+    // A WINDOW AND A REASON ARE REQUIRED.
+    //
+    // `[stated 2026-08-27]` panels off is only correct while the coordinator is
+    // genuinely answering for every session, which is the unattended overnight
+    // case and nothing else. The old bare `--off` could not express that, so a
+    // deny set for one night stood for 26 hours across two repos while nobody
+    // was coordinating, and a client-work session spent a day unable to ask a
+    // question.
+    //
+    // Refusing here is the enforcement. An author who cannot say how long, or
+    // why, is not running the case this exists for.
+    const hours = Number(val('--hours', ''));
+    const reason = val('--reason', '');
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
+        console.error('REFUSING: --off needs --hours N (a window, 0 < N <= 24).');
+        console.error('  A deny with no stated window is the one that outlives its');
+        console.error('  coordination. 24h is the cap because a longer one is a');
+        console.error('  standing config change, not a coordination window.');
+        process.exit(2);
+    }
+    if (!reason || reason.trim().length < 8) {
+        console.error('REFUSING: --off needs --reason "<why>" (at least 8 characters).');
+        console.error('  The next session to find this has to know whether it is still');
+        console.error('  wanted, and only you can say.');
+        process.exit(2);
+    }
+
     if (fs.existsSync(MARKER)) {
         console.error('REFUSING: a marker already exists at ' + MARKER);
         console.error('  Panels are already off, or a previous run never restored them.');
@@ -207,7 +310,9 @@ function turnOff() {
     }
 
     const repos = managedRepos();
-    const record = { setAt: new Date().toISOString(), tool: TOOL, repos: [] };
+    const setAt = new Date();
+    const expiresAt = new Date(setAt.getTime() + hours * 3600 * 1000).toISOString();
+    const record = { setAt: setAt.toISOString(), expiresAt, reason, tool: TOOL, repos: [] };
 
     for (const repo of repos) {
         const sp = settingsPath(repo);
@@ -223,6 +328,19 @@ function turnOff() {
 
         fs.mkdirSync(path.dirname(sp), { recursive: true });
         fs.writeFileSync(sp, JSON.stringify(next, null, 2) + '\n', 'utf8');
+
+        // The sibling carries everything a restore needs, so losing the central
+        // marker can no longer orphan this deny.
+        fs.writeFileSync(denyRecordPath(repo), JSON.stringify({
+            tool: TOOL,
+            setAt: record.setAt,
+            expiresAt: expiresAt,
+            reason: reason,
+            existed: before !== null,
+            before: before,
+            note: 'Set by brain-panels.js. Past expiresAt this is a FAULT, not a state: '
+                + 'any session may clear it with `brain-panels.js --expire`.',
+        }, null, 2) + '\n', 'utf8');
     }
 
     fs.mkdirSync(path.dirname(MARKER), { recursive: true });
@@ -279,24 +397,93 @@ function turnOn() {
 
 // The scan runs on EVERY status, marker or not. A marker-only report is the
 // thing that read as an all-clear while five worktrees stayed denied.
-function reportScan(record) {
-    const accounted = new Set((record && record.repos ? record.repos : []).map((e) => e.repo));
+// Classify every deny found on disk, not only the ones this tool's marker knows
+// about. Three outcomes, never two: LIVE, EXPIRED and UNACCOUNTED are different
+// facts and only one of them is fine.
+function classifyAll() {
     const found = scanForDenies();
-    const orphans = found.filter((loc) => !accounted.has(loc));
-
-    console.log('scan: ' + found.length + ' location(s) currently deny ' + TOOL
-        + ' across ' + managedRepos().length + ' scanned, ' + orphans.length + ' unaccounted');
-    if (!orphans.length) return;
-
-    console.log('');
-    console.log('  UNACCOUNTED - denied, but no marker entry explains it. This tool');
-    console.log('  did not set these, so --on will not clear them:');
-    for (const loc of orphans) {
-        console.log('    [' + classifyUnaccounted(contextFor(loc, orphans)) + '] ' + path.relative(CODE, loc));
+    const live = [], expired = [], unaccounted = [];
+    for (const loc of found) {
+        const rec = readDenyRecord(loc);
+        if (!rec) unaccounted.push(loc);
+        else if (isExpired(rec)) expired.push({ loc, rec });
+        else live.push({ loc, rec });
     }
-    console.log('');
-    console.log('  Reported, not cleared. "Not in my marker" is not the same claim');
-    console.log('  as "stale", and only one of those is safe to act on blind.');
+    return { found, live, expired, unaccounted };
+}
+
+function reportScan() {
+    const { found, live, expired, unaccounted } = classifyAll();
+    console.log('scan: ' + found.length + ' location(s) currently deny ' + TOOL
+        + ' across ' + managedRepos().length + ' scanned, ' + live.length + ' live, '
+        + expired.length + ' EXPIRED, ' + unaccounted.length + ' unaccounted');
+
+    if (live.length) {
+        console.log('');
+        console.log('  LIVE - within the window its author set:');
+        for (const { loc, rec } of live) {
+            console.log('    ' + path.relative(CODE, loc) + '  until ' + rec.expiresAt
+                + '  (' + rec.reason + ')');
+        }
+    }
+
+    // Worded as a fault rather than as a category. A reassuring label on a
+    // deficiency converts absent coverage into reported coverage, and that is how
+    // five of these stood for 26 hours while --status read as an all-clear.
+    if (expired.length) {
+        console.log('');
+        console.log('  !! EXPIRED - past the window its author chose. This is a FAULT,');
+        console.log('     not a state: these sessions cannot ask the operator anything.');
+        for (const { loc, rec } of expired) {
+            console.log('     ' + path.relative(CODE, loc) + '  expired ' + rec.expiresAt
+                + '  (' + rec.reason + ')');
+        }
+        console.log('');
+        console.log('     Clear them: brain-panels.js --expire');
+        console.log('     Any session may run it. It touches ONLY the expired.');
+    }
+
+    if (unaccounted.length) {
+        console.log('');
+        console.log('  UNACCOUNTED - denied, with no record beside it explaining why.');
+        console.log('  This tool did not set these, so it will not clear them:');
+        for (const loc of unaccounted) {
+            console.log('    [' + classifyUnaccounted(contextFor(loc, unaccounted)) + '] '
+                + path.relative(CODE, loc));
+        }
+        console.log('');
+        console.log('  Reported, not cleared. "No record" is not the same claim as');
+        console.log('  "stale", and only one of those is safe to act on blind.');
+    }
+}
+
+// Clear ONLY what is past its window. Deliberately safe for any session to run
+// at any time, which is the point: the restore must not depend on the session
+// that set it still being alive.
+function expire() {
+    const { live, expired, unaccounted } = classifyAll();
+    if (!expired.length) {
+        console.log('nothing expired. ' + live.length + ' live, ' + unaccounted.length
+            + ' unaccounted, 0 cleared.');
+        console.log('population: ' + managedRepos().length + ' location(s) scanned');
+        return;
+    }
+    let cleared = 0;
+    for (const { loc, rec } of expired) if (restoreFrom(loc, rec)) cleared++;
+
+    // Prune the central marker's entries for anything cleared, so a later --on
+    // cannot put back what expired.
+    const record = readJSON(MARKER);
+    if (record && Array.isArray(record.repos)) {
+        const gone = new Set(expired.map((e) => e.loc));
+        record.repos = record.repos.filter((e) => !gone.has(e.repo));
+        if (record.repos.length) fs.writeFileSync(MARKER, JSON.stringify(record, null, 2) + '\n', 'utf8');
+        else { try { fs.unlinkSync(MARKER); } catch { /* gone */ } }
+    }
+
+    console.log('cleared ' + cleared + ' expired deny/denies. ' + live.length
+        + ' live left untouched, ' + unaccounted.length + ' unaccounted left untouched.');
+    console.log('population: ' + managedRepos().length + ' location(s) scanned');
 }
 
 function status() {
@@ -304,7 +491,7 @@ function status() {
     if (!record) {
         console.log('no marker: this tool has not denied panels anywhere.');
         console.log('population: checked ' + MARKER);
-        reportScan(null);
+        reportScan();
         return;
     }
     console.log('panels DENIED since ' + record.setAt);
@@ -313,12 +500,22 @@ function status() {
         console.log('  ' + path.relative(CODE, e.repo) + (e.existed ? '  (had settings, will be restored)' : '  (no settings, will be removed)'));
     }
     console.log('');
-    reportScan(record);
+    reportScan();
     console.log('');
     console.log('Restore with --on.');
 }
 
-if (has('--on')) turnOn();
+if (has('--expire')) expire();
+else if (has('--on')) turnOn();
 else if (has('--status')) status();
 else if (has('--off')) turnOff();
-else { status(); console.log('\nUsage: --off | --on | --status'); }
+else {
+    status();
+    console.log('');
+    console.log('Usage:');
+    console.log('  --off --hours N --reason "why"   deny panels for a bounded window');
+    console.log('  --on                             restore everything this tool set');
+    console.log('  --expire                         clear ONLY denies past their window');
+    console.log('  --status                         what is set, live vs expired vs unaccounted');
+    console.log('  --repos a,b                      an explicit list rather than the default');
+}
