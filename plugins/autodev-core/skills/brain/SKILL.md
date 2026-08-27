@@ -147,19 +147,52 @@ would fire, `--test` for exactly one sample.
 node "$B\brain-panels.js" --status
 ```
 
-`brain-panels.js --off` denies `AskUserQuestion` in the managed repos so a
-coordinated session cannot stop on a panel overnight. `--on` restores from a
-marker recording the prior state.
+`brain-panels.js --off` denies `AskUserQuestion` in the managed repos and their
+worktrees, so a coordinated session cannot stop on a panel overnight.
 
-**A marker found at boot means a previous session set it and never restored.**
-That is the failure mode the tool is designed against: panels staying off
-silently in repos nobody is coordinating any more, with nothing to announce it.
+**The precondition is narrow and it is the whole rule.** `[stated 2026-08-27]`
+Panels off is only correct **while you are genuinely answering for every
+session** — the unattended overnight case and nothing else. Never while the
+operator is at the keyboard, and never as a standing configuration. A Brain that
+is verifying, broadcasting or working on one repo is not coordinating the fleet,
+and denying panels then costs sessions their only channel to him while buying
+nothing.
+
+**`--off` therefore refuses without a window and a reason:**
+
+```powershell
+node "$B\brain-panels.js" --off --hours 8 --reason "overnight fleet run"
+```
+
+`--hours` is capped at 24, because anything longer is a config change rather
+than a coordination window. Each denied location gets a sibling
+`panel-deny.json` beside its settings file recording when it was set, when it
+expires, why, and the prior settings verbatim — so losing the central marker can
+no longer orphan a deny.
+
+**`--status` reports three outcomes, never two: live, EXPIRED and unaccounted.**
+An expired deny is a **fault**, not a state. Any session may clear those, and
+only those:
+
+```powershell
+node "$B\brain-panels.js" --expire
+```
+
+**Why this got tightened.** `[measured 2026-08-27]` five denies were found
+across two repos, written in one bulk pass 26 hours earlier, with the marker
+gone. `--status` read as an all-clear, `--on` could not reach them, and a
+client-work session spent a day unable to ask the operator a question. The tool
+could not see worktrees at all, which is where every live session runs.
+
 There is deliberately NO SessionEnd hook doing this automatically — the hook
 fires for every session, so a MANAGED session ending would revert the block that
-is supposed to be constraining it. Self-healing at boot is the correct place.
+is supposed to be constraining it. Self-healing at boot, plus the expiry, is the
+correct place.
 
-If `--status` shows a marker, say so and restore with `--on` unless this session
-is continuing that same coordination.
+At boot: if `--status` shows anything EXPIRED, run `--expire`. If it shows a
+live deny and you are not continuing that same coordination, restore with
+`--on`. If it shows something unaccounted, report it and let the operator
+decide — "no record" is not the same claim as "stale".
 
 Note it never denies panels in the coordinator's own repo. A panel is how the
 coordinator reaches the user; a coordinator that cannot ask has lost the one

@@ -104,6 +104,11 @@ function writeSettings(dir, obj) {
     return p;
 }
 
+// Read any JSON, or null. Used for the sibling deny records as well as settings.
+function readJSON(p) {
+    try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+}
+
 function readSettings(dir) {
     try { return JSON.parse(fs.readFileSync(settingsPath(dir), 'utf8')); } catch { return null; }
 }
@@ -112,6 +117,10 @@ function denies(dir) {
     const j = readSettings(dir);
     return !!(j && j.permissions && Array.isArray(j.permissions.deny) && j.permissions.deny.includes(TOOL));
 }
+
+// The valid --off invocation. Scenarios 1-8 are about what --off DOES; scenario 9
+// is about what it REFUSES, and deliberately builds its own bare arguments.
+const OFF = ['--off', '--hours', '8', '--reason', 'suite fixture run'];
 
 function run(home, args) {
     return spawnSync(process.execPath, [SUBJECT].concat(args), {
@@ -127,7 +136,7 @@ function run(home, args) {
     const repo = makeRepo(home, 'someproj');
     const wt = makeWorktree(repo, 'feature-branch-a1b2c3');
 
-    const r = run(home, ['--off']);
+    const r = run(home, OFF);
 
     // Planted positive: without this, "the worktree was not denied" is
     // indistinguishable from "--off did nothing".
@@ -145,7 +154,7 @@ function run(home, args) {
     const repo = makeRepo(home, 'someproj');
     const wt = makeWorktree(repo, 'feature-branch-a1b2c3');
 
-    run(home, ['--off']);
+    run(home, OFF);
 
     // The INTERMEDIATE state is asserted first on purpose. Without it, 2b and 2c
     // pass against a subject that never denied the worktree at all - "cleared"
@@ -175,7 +184,7 @@ function run(home, args) {
     const repo = makeRepo(home, 'someproj');
     writeSettings(repo, { permissions: { allow: ['Bash(ls *)'], deny: ['WebFetch'] } });
 
-    run(home, ['--off']);
+    run(home, OFF);
     check('3a planted positive: the tool added its deny alongside the existing one',
         denies(repo) && readSettings(repo).permissions.deny.includes('WebFetch'));
 
@@ -197,7 +206,7 @@ function run(home, args) {
     const coordinator = makeRepo(home, 'claude-auto-dev');
     const coordWt = makeWorktree(coordinator, 'brain-session');
 
-    run(home, ['--off']);
+    run(home, OFF);
 
     check('4a planted positive: the managed repo IS denied', denies(managed));
 
@@ -218,7 +227,7 @@ function run(home, args) {
 {
     const home = makeHome();
     makeRepo(home, 'someproj');
-    const r = run(home, ['--off']);
+    const r = run(home, OFF);
     const out = (r.stdout || '') + (r.stderr || '');
 
     // GROUND TRUTH FIRST. The banner is only wrong relative to the repo, so the
@@ -259,8 +268,8 @@ function run(home, args) {
 {
     const home = makeHome();
     const repo = makeRepo(home, 'someproj');
-    run(home, ['--off']);
-    const r = run(home, ['--off']);
+    run(home, OFF);
+    const r = run(home, OFF);
 
     check('6a second --off exits 3', r.status === 3, 'exit was ' + r.status);
     check('6b the deny is still there, not doubled',
@@ -338,9 +347,131 @@ function run(home, args) {
         /deliberate\?/.test(lineFor('lone-hand')), 'line was: ' + JSON.stringify(lineFor('lone-hand')));
 }
 
+// ---------- 9. --off refuses without an explicit window and a reason
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+
+    // Deliberately bare. Do NOT replace with OFF: this scenario is the one that
+    // asserts the refusal, so the whole point is the missing arguments.
+    const bare = run(home, ['--off']);
+    check('9a bare --off is refused', bare.status !== 0,
+        'a deny with no stated window is the one that outlives its coordination');
+    check('9b nothing was denied by the refused run', !denies(repo),
+        'a refusal that still writes is worse than no refusal');
+
+    // EACH attempt below gets its OWN fixture home. Sharing one lets the first
+    // --off create a marker, after which every later attempt hits the
+    // marker-exists refusal (exit 3) rather than the check under test - so the
+    // assertion passes while measuring something else. Caught on the baseline
+    // run, where 9c passed against a subject with no reason-check at all.
+    const h2 = makeHome(); const r2 = makeRepo(h2, 'someproj');
+    const noReason = run(h2, ['--off', '--hours', '8']);
+    check('9c --hours without --reason is refused', noReason.status !== 0,
+        'exit ' + noReason.status);
+    check('9d the refused no-reason run denied nothing', !denies(r2));
+
+    const h3 = makeHome(); const r3 = makeRepo(h3, 'someproj');
+    const noHours = run(h3, ['--off', '--reason', 'overnight fleet run']);
+    check('9e --reason without --hours is refused', noHours.status !== 0,
+        'a reason without a window still outlives its coordination');
+    check('9f the refused no-hours run denied nothing', !denies(r3));
+
+    // Planted positive. Without it every assertion above passes on a subject that
+    // refuses unconditionally, which is a worse tool than the one being fixed.
+    const h4 = makeHome(); const r4 = makeRepo(h4, 'someproj');
+    const ok = run(h4, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+    check('9g planted positive: --off with both arguments succeeds', ok.status === 0 && denies(r4),
+        'exit ' + ok.status + ' stdout=' + JSON.stringify(ok.stdout));
+}
+
+// ---------- 10. the deny is self-describing, beside the settings it applies to
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+    const wt = makeWorktree(repo, 'a-worktree');
+
+    run(home, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+
+    // THE WHOLE POINT. On 2026-08-27 five denies were found whose central marker
+    // was gone, so nothing could say when they were set, by whom, or whether they
+    // were still wanted. State and its justification have to travel together.
+    for (const [label, dir] of [['repo', repo], ['worktree', wt]]) {
+        const rec = readJSON(path.join(dir, '.claude', 'panel-deny.json'));
+        check('10' + (label === 'repo' ? 'a' : 'b') + ' ' + label + ' carries a sibling record',
+            !!rec, 'no panel-deny.json beside the settings file');
+        check('10' + (label === 'repo' ? 'c' : 'd') + ' ' + label + ' record states when it expires',
+            !!(rec && rec.expiresAt && rec.setAt && rec.reason),
+            JSON.stringify(rec));
+    }
+}
+
+// ---------- 11. an EXPIRED deny is a fault, not a state
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+    run(home, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+
+    // Age it past its window by rewriting the record, then delete the central
+    // marker to reproduce exactly what was found on disk that morning.
+    const rp = path.join(repo, '.claude', 'panel-deny.json');
+    const rec = readJSON(rp);
+    // A missing record must FAIL this scenario, never throw. A suite that dies
+    // here reports nothing about scenario 12, which is most of a baseline run's
+    // value thrown away at the first unbuilt feature.
+    check('11z precondition: a sibling record exists to age', !!rec,
+        'absent, so 11a-c below cannot run; that is scenario 10 failing, surfaced here too');
+    if (rec) {
+        rec.expiresAt = new Date(Date.now() - 3600 * 1000).toISOString();
+        fs.writeFileSync(rp, JSON.stringify(rec, null, 2) + '\n', 'utf8');
+    }
+    try { fs.unlinkSync(path.join(home, '.claude', 'brain-panels-marker.json')); } catch { /* none */ }
+
+    const out = (run(home, ['--status']).stdout || '');
+    check('11a status names the expired deny', /someproj/.test(out), out);
+    check('11b status calls it EXPIRED rather than reporting it as a state',
+        /EXPIRED/.test(out), 'a reassuring label on a fault is how this survived 26 hours: ' + out);
+    check('11c status still works with NO central marker',
+        !/^\s*$/.test(out) && /scan:/.test(out),
+        'the marker being lost is the case this must survive');
+}
+
+// ---------- 12. --expire clears the expired and spares the live
+
+{
+    const home = makeHome();
+    const stale = makeRepo(home, 'staleproj');
+    const live = makeRepo(home, 'liveproj');
+    run(home, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+
+    // Age ONLY staleproj. liveproj is the discriminating control: a sweep that
+    // clears everything would satisfy 12a and is exactly the blind prune this
+    // whole path exists to prevent.
+    const rp = path.join(stale, '.claude', 'panel-deny.json');
+    const rec = readJSON(rp);
+    check('12z precondition: a sibling record exists to age', !!rec,
+        'absent, so the discriminating control below cannot be set up');
+    if (rec) {
+        rec.expiresAt = new Date(Date.now() - 3600 * 1000).toISOString();
+        fs.writeFileSync(rp, JSON.stringify(rec, null, 2) + '\n', 'utf8');
+    }
+
+    const r = run(home, ['--expire']);
+    check('12a the expired deny is cleared', !denies(stale), 'exit ' + r.status + ' ' + r.stdout);
+    check('12b the LIVE deny is untouched', denies(live),
+        'clearing an unexpired deny discards a decision somebody made on purpose');
+    check('12c the cleared sibling record is removed too',
+        !fs.existsSync(path.join(stale, '.claude', 'panel-deny.json')));
+    check('12d the live sibling record survives',
+        fs.existsSync(path.join(live, '.claude', 'panel-deny.json')));
+}
+
 // ------------------------------------------------------------------- report
 
-console.log('population: ' + (passed + failures.length) + ' assertions across 8 scenarios, subject '
+console.log('population: ' + (passed + failures.length) + ' assertions across 12 scenarios, subject '
     + path.relative(process.cwd(), SUBJECT));
 if (failures.length) {
     console.log('FAIL ' + failures.length + ', pass ' + passed);
