@@ -1,7 +1,7 @@
 {
   "name": "autodev-stack",
   "description": "Opinionated integrations for a specific stack: Supabase, Doppler, Stripe, and Remotion.",
-  "version": "8.126.0",
+  "version": "8.127.0",
   "author": {
     "name": "djnsty23",
     "url": "https://github.com/djnsty23"
