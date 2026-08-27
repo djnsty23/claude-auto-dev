@@ -7,9 +7,9 @@ not answer says so rather than rendering as empty.
 | field | value |
 |---|---|
 | directory | `~/Downloads/code/autodev` |
-| branch | `fix/heal-worktree-isolation` |
-| upstream | `origin/fix/heal-worktree-isolation` |
-| HEAD committed | 2026-08-26T21:26:39+03:00 |
+| branch | `test/brain-panels-vacuity-gaps` |
+| upstream | `origin/test/brain-panels-vacuity-gaps` |
+| HEAD committed | 2026-08-27T22:14:01+03:00 |
 
 **Re-read before acting on any of this.** A resume file is a snapshot, and
 the two facts most likely to have moved are the two below: someone may have
@@ -21,6 +21,8 @@ None. A real zero: the command ran and returned nothing.
 
 ## Uncommitted changes
 
+- `M .gitignore`
+- ` M RESUME.md`
 - `?? .claude/`
 
 ## Open PRs
@@ -37,7 +39,9 @@ touching it: a dirty tree you did not dirty means someone is in there.
 ~/claude-auto-dev/.claude/worktrees/fix-injection 106467f [fix/shell-injection-in-shipped-scripts]
 ~/claude-auto-dev/.claude/worktrees/rec-quality   cde1997 [rescue/recommendation-quality]
 ~/claude-auto-dev/.claude/worktrees/rel-8123      377366b [release/8.123.0]
-~/Downloads/code/autodev                          314bed3 [fix/heal-worktree-isolation]
+~/claude-auto-dev/.claude/worktrees/rel-8125      ac691b4 (detached HEAD)
+~/claude-auto-dev/.claude/worktrees/sec-rebase    7d5517c [fix/shipped-script-injection-rebased]
+~/Downloads/code/autodev                          5555d34 [test/brain-panels-vacuity-gaps]
 ```
 
 ## What a reader should do first
