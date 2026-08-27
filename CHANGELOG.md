@@ -1,5 +1,42 @@
 # Changelog
 
+## [8.128.0] - 2026-08-27
+
+### Added: rule-diagnosis section 4, on which artifact answers the question
+
+A migration header, a code comment, a PR body and a memory file all record what
+was true WHEN THEY WERE WRITTEN. They do not update when the world moves, and
+nothing marks the moment they stop being true. For "is this built, and how does it
+work today", the authoritative sources are the repo's own agent-facing
+instructions, the config that activates the thing, and the git log.
+
+`[measured 2026-08-27]` A session read the header of a migration dated six weeks
+earlier, which described a data-in-git problem in the present tense as of that
+date, and concluded the problem was present now. It wrote a brief, a repo document
+and a memory file all asserting a stalled migration, then handed an agent a
+backfill to run against production.
+
+The cutover had completed five weeks earlier. `AGENTS.md` line 123 said so in
+plain text and named the correct database; `CLAUDE.md`, `ROUTINES.md` and
+`.gitignore` agreed. None was read. The brief also named the wrong database, taken
+from a memory file rather than from the repo. Running it would have overwritten 46
+live documents and reset every optimistic-concurrency token, one from version
+15085 to 1.
+
+Two tells were available and free. Coexisting call sites were read as stalling
+while the module's own header explained why both paths remain, a sentence that had
+been quoted into the write-up without being connected. And every input was
+secondary. The closing checklist now requires at least one primary source in the
+evidence: the agent-facing docs, the activating config, or the git log.
+
+This is the worse direction of a stale claim. A stale "already fixed" surfaces the
+moment somebody looks; a stale "not done yet" sends someone to redo finished work,
+and work not attempted emits no failure, no diff and no signal.
+
+Placed at 4 rather than appended, beside "read the actual failure text", because
+both are about which artifact to open. Sections 4-6 renumbered to 5-7.
+
+
 ## [8.127.0] - 2026-08-27
 
 ### Fixed: a panel deny with no expiry outlives the coordination it was for
