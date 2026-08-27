@@ -469,9 +469,105 @@ function run(home, args) {
         fs.existsSync(path.join(live, '.claude', 'panel-deny.json')));
 }
 
+// ---------- 13. --off refuses to silently deny a LIVE session's panels
+
+// Plant a transcript so scanFleet sees a session in `dir`. fleet-status derives
+// its root from USERPROFILE, the same seam the rest of this suite uses, so this
+// stays inside the fixture home.
+function plantSession(home, dir, minutesIdle) {
+    const slug = 'C--fixture-' + path.basename(dir);
+    const d = path.join(home, '.claude', 'projects', slug);
+    fs.mkdirSync(d, { recursive: true });
+    const f = path.join(d, 'sess-' + path.basename(dir) + '.jsonl');
+    const ts = new Date(Date.now() - minutesIdle * 60000).toISOString();
+    fs.writeFileSync(f, JSON.stringify({
+        cwd: dir, sessionId: 'fixture-' + path.basename(dir), timestamp: ts,
+        message: { role: 'assistant', content: [] },
+    }) + '\n', 'utf8');
+    const t = new Date(Date.now() - minutesIdle * 60000);
+    fs.utimesSync(f, t, t);   // idleMinutes comes from the file's mtime
+    return f;
+}
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+    const busy = makeWorktree(repo, 'has-a-live-session');
+    const quiet = makeWorktree(repo, 'nobody-here');
+    plantSession(home, busy, 1);        // 1 minute idle = working
+
+    const r = run(home, OFF);
+    check('13a --off refuses while a live session holds a target', r.status !== 0,
+        'exit ' + r.status + ' - silently denying a running session its only channel to the'
+        + ' operator is the failure this exists to stop');
+    check('13b it names the location it refused over', /has-a-live-session/.test((r.stdout || '') + (r.stderr || '')),
+        'a refusal that does not say WHICH is not actionable');
+    check('13c nothing was denied by the refused run', !denies(busy) && !denies(quiet),
+        'a refusal that still writes is worse than no refusal');
+
+    // --force is the deliberate override, and it must still work: the overnight
+    // case cannot depend on a message channel whose p90 delivery is ~48 minutes.
+    const f = run(home, OFF.concat(['--force']));
+    check('13d --force proceeds', f.status === 0, 'exit ' + f.status);
+    check('13e planted positive: --force denied the live location', denies(busy));
+    check('13f planted positive: --force denied the quiet one too', denies(quiet));
+}
+
+// ---------- 14. a QUIET location is denied without ceremony
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+    const quiet = makeWorktree(repo, 'nobody-here');
+    plantSession(home, quiet, 4000);   // ~2.8 days idle = cold, not live
+
+    const r = run(home, OFF);
+    // The discriminating control for scenario 13: without this, 13a passes on a
+    // subject that refuses unconditionally, which would make --off unusable.
+    check('14a a cold session does not block --off', r.status === 0, 'exit ' + r.status);
+    check('14b and the location IS denied', denies(quiet));
+}
+
+// ---------- 15. liveness it CANNOT determine is treated as the dangerous case
+
+{
+    // Copy the subject somewhere fleet-status.js is NOT beside it, so its
+    // require fails for real. No production seam, no stub, no env flag - the
+    // failure is genuine and the shipped bytes are unmodified.
+    //
+    // This scenario exists because a mutation survived without it: disabling the
+    // could-not-tell branch left the suite green at 55/55. An untested safety
+    // branch is not a safety branch.
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+    const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-lonely-'));
+    const copy = path.join(lone, 'brain-panels.js');
+    fs.copyFileSync(SUBJECT, copy);
+
+    const r = spawnSync(process.execPath, [copy].concat(OFF), {
+        env: Object.assign({}, process.env, { USERPROFILE: home, HOME: home }),
+        encoding: 'utf8',
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+
+    check('15a unknown liveness REFUSES rather than proceeding', r.status !== 0,
+        'exit ' + r.status + ' - an unrecognised state must be the dangerous case');
+    check('15b it says liveness could not be determined', /could not determine/i.test(out), out.slice(0, 160));
+    check('15c nothing was denied', !denies(repo));
+
+    // Planted positive: the same copy, same broken require, must still proceed
+    // under --force. Without this, 15a passes on a subject that refuses always.
+    const f = spawnSync(process.execPath, [copy].concat(OFF).concat(['--force']), {
+        env: Object.assign({}, process.env, { USERPROFILE: home, HOME: home }),
+        encoding: 'utf8',
+    });
+    check('15d planted positive: --force still works with liveness unknown',
+        f.status === 0 && denies(repo), 'exit ' + f.status);
+}
+
 // ------------------------------------------------------------------- report
 
-console.log('population: ' + (passed + failures.length) + ' assertions across 12 scenarios, subject '
+console.log('population: ' + (passed + failures.length) + ' assertions across 15 scenarios, subject '
     + path.relative(process.cwd(), SUBJECT));
 if (failures.length) {
     console.log('FAIL ' + failures.length + ', pass ' + passed);

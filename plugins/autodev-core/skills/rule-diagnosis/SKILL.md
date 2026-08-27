@@ -108,6 +108,32 @@ work, and work not attempted emits no failure, no diff and no signal — so it c
 stand indefinitely, and here it very nearly destroyed the thing it meant to
 protect.
 
+### Same rule for WHO said it: cite the message, never recall it
+
+**Availability is not reading, and having a source in context is not having read
+it.** The failure above used a migration header while the answer sat in
+`AGENTS.md`. The same day, a peer writing a critique of that session
+misattributed two of its errors to a different session — with the message it was
+describing *in its own context window* — inside a paragraph headed "if you are
+writing a self-assessment off recall, that is the first thing to re-check".
+
+It conceded in one turn and left the rule, which is better than the apology:
+
+> A peer critique that names WHO did something must cite the message it is
+> reading, not recall it. Nothing about having the source available makes you
+> read it.
+
+**And peer identity is not self-evident from a message.** That fleet had two
+sessions both presenting as a coordinator. Neither could attribute an error to
+the other without checking, and the peer could not attribute one to the session
+it was grading. Every party assumed identity was obvious: the session about its
+own history, the peer about that session's.
+
+So before writing "you said X" or "that was you": open the message. Before
+accepting "you said X" about yourself: open it too. A critique whose opening
+claim is unverified is worth less than one whose is, and the author is usually
+the last to notice which kind they wrote.
+
 ## 5. Attribute before you repair
 
 When something goes red after a change, establish *whose* change before fixing or
@@ -160,6 +186,8 @@ diagnosis that was skipped.
 - [ ] I can name the observation that would prove me wrong.
 - [ ] Where sources disagreed, I questioned the frame before the mechanism.
 - [ ] I read the real failure text, not a count or a status line.
+- [ ] For any claim about WHO said or did something, I opened the message rather
+      than recalling it.
 - [ ] At least one PRIMARY source is in my evidence: the agent-facing docs,
       the activating config, or the git log. Not only a comment or a memory file.
 - [ ] If something went red after a change, I attributed it before fixing it.
