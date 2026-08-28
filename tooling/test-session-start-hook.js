@@ -277,6 +277,73 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     ctx = go('d5')?.hookSpecificOutput?.additionalContext || '';
     check('fresh clone: no staleness line', !ctx.includes('marketplace update'));
 
+    // ---- THE REAL CATALOG SHAPE ----
+    //
+    // Every fixture above writes a per-plugin `version` field. `bump.js` never
+    // produces one: it writes the version to marketplace.json's TOP-LEVEL
+    // `metadata.version` and to each plugins/*/plugin.json, and leaves the
+    // catalog's plugin entries carrying only name/source/description/keywords.
+    //
+    // So the suite invented a catalog format the real marketplace does not use,
+    // and passed against it while the hook — which read `entry.version` and
+    // bailed when it was missing — did nothing on every real session since the
+    // block was written. [measured 2026-08-28] the installed catalog had
+    // metadata.version "8.131.0" and not one plugin entry with a version.
+    //
+    // These cases use the shape bump.js actually writes.
+    const writeRealCatalog = (v) => fs.writeFileSync(catPath, JSON.stringify({
+        name: 'testmkt',
+        metadata: { description: 'x', version: v },
+        // No `version` on any entry — exactly as bump.js leaves them. The decoy
+        // stays, so a hook matching by anything weaker than the exact name still
+        // fails here.
+        plugins: [{ name: 'autodev-decoy', source: './x' }, { name: 'autodev-core', source: './y' }],
+    }));
+
+    writeRealCatalog(newerVersion);
+    out = go('d7');
+    ctx = out?.hookSpecificOutput?.additionalContext || '';
+    check('real catalog shape: the update line fires from metadata.version',
+        (out?.systemMessage || '').includes(`update available: ${newerVersion}`));
+    check('real catalog shape: context names both versions',
+        ctx.includes(`v${realVersion}`) && ctx.includes(`v${newerVersion}`));
+
+    // The negative, through the identical path, so the positive above cannot be
+    // a hook that simply always speaks.
+    writeRealCatalog(realVersion);
+    out = go('d8');
+    check('real catalog shape, equal version: silent',
+        !(out?.systemMessage || '').includes('update available'));
+
+    // Freshness lived AFTER the `continue` in the same loop body, so the missing
+    // field took this check down with it. Assert it independently, on the real
+    // shape, with no usable version anywhere.
+    fs.writeFileSync(catPath, JSON.stringify({
+        name: 'testmkt',
+        plugins: [{ name: 'autodev-core', source: './y' }],
+    }));
+    const fh = path.join(mkt, '.git', 'FETCH_HEAD');
+    fs.mkdirSync(path.dirname(fh), { recursive: true });
+    fs.writeFileSync(fh, 'x');
+    const stale = (Date.now() - 10 * 86400000) / 1000;
+    fs.utimesSync(fh, stale, stale);
+    ctx = go('d9')?.hookSpecificOutput?.additionalContext || '';
+    check('no version anywhere: staleness is still reported',
+        ctx.includes('/plugin marketplace update testmkt'));
+    // And it must not invent an update out of a version it does not have. Note
+    // the `if (catVersion)` guard in the subject is DEFENSIVE, not load-bearing:
+    // parse(null) yields [NaN], which fails the length-3 test, so the silence
+    // below holds with or without it. Recorded rather than dressed up as a kill.
+    check('no version anywhere: no update line invented',
+        !(go('d10')?.systemMessage || '').includes('update available'));
+
+    // Hand the fixture back exactly as it was found. The zero-bytes-when-clean
+    // assertion further down shares this marketplace directory, and a stale
+    // FETCH_HEAD left behind here makes it fail for a reason that has nothing to
+    // do with what it is testing.
+    const fresh = Date.now() / 1000;
+    fs.utimesSync(fh, fresh, fresh);
+
     // A malformed catalog must never cost the session its banner.
     fs.writeFileSync(catPath, '{ not json');
     const r2 = run({ cwd: proj, session_id: 'd6', hook_event_name: 'SessionStart' }, proj);

@@ -44,13 +44,31 @@ const ROOT = path.join(HOME, '.claude', 'projects');
 // transcript cannot be turned into a message target or a jump-to-session link.
 // Checking that a transcript's internal sessionId equals its own filename looks
 // like a mapping check and is vacuous - it compares a file to itself.
-const SESSION_STORE = path.join(
-    process.env.APPDATA || path.join(HOME, '.config'), 'Claude', 'claude-code-sessions'
-);
+// Resolved, not assumed. This was `APPDATA || ~/.config`, correct on Linux only.
+// On macOS that directory does not exist: loadSessionIndex() walked it, the
+// readdirSync catch swallowed the error, and the resulting empty Map meant EVERY
+// session rendered "(not addressable)" while the boot reported "0 addressable".
+// [measured 2026-08-28] three of those "unaddressable" sessions were messaged
+// successfully within the hour. A path bug was being read as a fact about the fleet.
+// Degrades rather than throws: a missing sibling must leave this reporting
+// "could not read", which the code below already handles, not crash a fleet tool.
+const SESSION_STORE = (() => {
+    try { return require(path.join(__dirname, 'claude-paths.js')).sessionStore(); }
+    catch { return null; }
+})();
 
-/** cliSessionId -> desktop session record. Empty map on any failure. */
+/**
+ * cliSessionId -> desktop session record.
+ *
+ * An empty map means one of two OPPOSITE things: the store is genuinely empty, or
+ * it could not be found. `sessionIndexReadable` records which, so a caller can
+ * refuse to print "0 addressable" over a directory nothing ever opened.
+ */
+let sessionIndexReadable = null;
 function loadSessionIndex() {
     const index = new Map();
+    if (!SESSION_STORE) { sessionIndexReadable = false; return index; }
+    sessionIndexReadable = true;
     const walk = (dir, depth) => {
         if (depth > 3) return;
         let entries;

@@ -176,6 +176,12 @@ function buildRealHome() {
     // fleet-status.js requires fleet-heartbeat.js off its own __dirname, so the
     // pair travels together or the copy loads a different clone's heartbeat.
     fs.copyFileSync(REAL_STATUS, path.join(REAL_DIR, 'fleet-status.js'));
+    // fleet-status.js resolves the desktop session store through claude-paths.js.
+    // A copy without that sibling silently loses the store, so every session comes
+    // back "(not addressable)" and the addressability assertions below fail for a
+    // reason that has nothing to do with the subject. The shipped plugin always
+    // carries the whole scripts directory; the fixture must too.
+    fs.copyFileSync(path.join(SCRIPTS, 'claude-paths.js'), path.join(REAL_DIR, 'claude-paths.js'));
     fs.copyFileSync(REAL_HEARTBEAT, path.join(REAL_DIR, 'fleet-heartbeat.js'));
 
     // A1 and A2 share repo AND branch: the hardest evidence, score 105.
