@@ -54,7 +54,7 @@ in-flight work in your own message to the user and write the outcome to prd.json
 
 | Field | Values |
 |-------|--------|
-| `passes` | `null` (pending), `true` (done), `false` (failed), `"deferred"` |
+| `passes` | `null` (pending), `true` (done), `false` (failed), `"deferred"` (decided against), `"needs-setup"` (blocked on a human — an API key, a vendor, a console) |
 | `realness` | 0-100 (optional, see below). `null` = not rated yet |
 | `type` | fix, feature, refactor, qa, perf |
 | `priority` | 0=critical, 1=high, 2=medium, 3=low |

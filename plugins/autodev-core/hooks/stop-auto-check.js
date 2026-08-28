@@ -172,8 +172,18 @@ try {
     // Counting it as pending (passes !== true) made auto block forever on a
     // sprint whose leftovers were all deferred — the 2h stale flag was the only
     // way out.
-    const pending = Object.entries(stories)
-        .filter(([, s]) => s.passes !== true && s.passes !== 'deferred');
+    //
+    // `needs-setup` repeated that failure. [measured 2026-08-28] auto writes it
+    // for work blocked on an API key or a console nobody has opened, and this
+    // predicate counted it as pending — so a story waiting on the OPERATOR made
+    // the session unable to end its own turn. An agent cannot conjure a
+    // credential; blocking on one is blocking on a human who is not looking.
+    //
+    // isActionable() is the shared predicate, so the four readers that had their
+    // own copy of this filter can no longer disagree about it.
+    const { isActionable, needsSetup } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
+    const pending = Object.entries(stories).filter(([, s]) => isActionable(s));
+    const blockedOnOperator = Object.entries(stories).filter(([, s]) => needsSetup(s));
 
     // A story nobody has edited in months is a decision not to do the work that
     // nobody wrote down. One repo had 14 of 15 pending stories untouched for over

@@ -21,7 +21,7 @@ Fully autonomous development. Works through all tasks without stopping until com
 
 ## Current State
 !`git status --short`
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const done=s.filter(x=>x.passes===true).length;const pend=s.filter(x=>x.passes===null||x.passes===false).length;console.log('Sprint:',name,'| Done:',done,'| Pending:',pend,'| Total:',s.length)}catch(e){console.log('No prd.json')}"`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const done=s.filter(x=>x.passes===true).length;const pend=s.filter(x=>x.passes===null||x.passes===false).length;const defer=s.filter(x=>x.passes==='deferred').length;const setup=s.filter(x=>x.passes==='needs-setup').length;console.log('Sprint:',name,'| Done:',done,'| Pending:',pend,'| Deferred:',defer,'| Blocked on setup:',setup,'| Total:',s.length)}catch(e){console.log('No prd.json')}"`
 
 ## Entry Flow
 
@@ -133,8 +133,11 @@ const storyEntries = Object.entries(stories);
 // must not be picked up here. The Stop hook applies the same rule, and the two
 // disagreeing is what made auto loop on an already-finished sprint.
 const executable = storyEntries.filter(([id, s]) =>
-  s.passes !== true &&
-  s.passes !== 'deferred' &&
+  // FIVE states, not four. `needs-setup` is written by step 6 below for work
+  // blocked on an API key or a console nobody has opened — an agent cannot
+  // conjure a credential, so selecting it re-attempts a blocked story every
+  // single run. [measured 2026-08-28] it was being swept back into the queue.
+  (s.passes === null || s.passes === false) &&
   (s.blockedBy || []).every(dep => stories[dep]?.passes === true)
 );
 ```
@@ -422,7 +425,9 @@ Run `progress` to see full results.
 ## IDLE Detection (Smart Next Action)
 
 If no tasks to work on:
-1. Are all stories `passes: true`?
+1. Are all stories `passes: true`? (`deferred` and `needs-setup` do not block
+   completion — the first is a decision not to do it, the second is waiting on a
+   human, and neither is work an agent can advance)
    - No: find blocked tasks and resolve blockers
    - Yes: continue to step 2
 2. **Auto-transition sprint** (see below)
@@ -445,7 +450,9 @@ When all pending tasks are done, auto handles the sprint lifecycle — but verif
 3. Archive completed stories:
    - Copy current prd.json to .claude/archives/prd-archive-sprint-[N].json
    - Remove stories with passes: true from prd.json
-   - Keep stories with passes: null, false, or "deferred"
+   - Keep stories with passes: null, false, "deferred", or "needs-setup"
+     (needs-setup was missing here, so archiving DELETED work that was waiting
+      on the operator — losing the record of what he still owed)
 
 4. Decide whether to bump — show a one-line honesty summary first:
 

@@ -91,6 +91,57 @@ check('idle marker written', exists(d, 'auto-idle-triggered'));
 ({ decision } = run(d));
 check('auto + all done, second stop → approve (idle is one-shot)', decision?.decision === 'approve');
 check('idle marker cleared', !exists(d, 'auto-idle-triggered'));
+// ---------------------------------------- needs-setup: blocked on a HUMAN
+//
+// [measured 2026-08-28] auto/SKILL.md instructs sessions to write
+// passes: "needs-setup" for work blocked on an API key, a vendor, or a console
+// nobody has opened. This hook counted it as pending, so a story waiting on the
+// OPERATOR made the session unable to end its own turn — the same failure
+// `deferred` was given its own state to prevent, repeated with a new value.
+//
+// Under the old predicate this fixture produced:
+//   "1 tasks remaining. Next: S2. Continue working."
+// which told the session to keep re-attempting a credential it cannot supply.
+{
+    const d = project({ auto: true, prd: { stories: {
+        S1: { title: 'done', passes: true },
+        S2: { title: 'blocked on an API key', passes: 'needs-setup' },
+    } } });
+    const { decision, r } = run(d);
+    const said = (r.stdout || '') + (r.stderr || '');
+    check('needs-setup does NOT count as remaining work',
+        !/tasks remaining/.test(said));
+    check('...and the sprint reads complete instead',
+        /Sprint complete/.test(said));
+    // The other half: it must not silently vanish either. A human is still on the
+    // hook for it, and a report that omits it says the sprint is finished when it
+    // is waiting on him.
+    check('...and the reason names it rather than dropping it',
+        /setup|blocked/i.test(said) || decision !== null);
+}
+{
+    // The known-positive control, through the identical path. Without it, both
+    // assertions above pass against a hook that never blocks at all.
+    const d = project({ auto: true, prd: { stories: {
+        S1: { title: 'done', passes: true },
+        S2: { title: 'genuinely pending', passes: null },
+    } } });
+    const { decision } = run(d);
+    check('CONTROL: a genuinely pending story still blocks',
+        decision && decision.decision === 'block');
+}
+{
+    // And a mix: one actionable, one blocked on a human. The actionable one must
+    // still be found — needs-setup must not suppress real work beside it.
+    const d = project({ auto: true, prd: { stories: {
+        S1: { title: 'real work', passes: false },
+        S2: { title: 'blocked on a key', passes: 'needs-setup' },
+    } } });
+    const { r } = run(d);
+    check('a mix still reports the actionable story',
+        /1 tasks? remaining/.test((r.stdout || '') + (r.stderr || '')));
+}
+
 check('auto flag cleared after idle', !exists(d, 'auto-active'));
 
 // And a third stop, with the flag gone, still approves.
