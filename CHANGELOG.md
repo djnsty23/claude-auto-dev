@@ -1,5 +1,32 @@
 # Changelog
 
+## [8.134.0] - 2026-08-28
+
+### Added: a decision log that does not live on a branch
+
+`[measured 2026-08-28]` two sessions in one repo each appended to that repo's
+`DECISIONS.md` on an **unpushed** branch. One recorded that three advertised Pro
+features were unenforced and began building the Pro gate; the other recorded
+"Features are free. Limits are what you pay for." Neither could see the other —
+`origin/main` was three entries behind both.
+
+The numbering collided visibly and a numbering check catches that, because
+numbers compare across trees without knowing intent. The contradiction did not
+surface at all, for exactly the reason it mattered: seeing it requires knowing
+what each decision meant.
+
+`fleet-decisions.js` is append-only JSONL outside every working tree, readable
+with no fetch. **The load-bearing verb is `--check`, not `--record`** — a log
+everyone writes and nobody reads reproduces the failure with better bookkeeping,
+so the collision check runs before the write and blocks it, showing the prior
+decisions rather than saying one exists.
+
+Subjects normalise hard so `AI Pricing` and `ai-pricing` collide on purpose;
+scoping is per-repo; the same author may revise their own entry; `--list`
+surfaces subjects with more than one author. It does not replace `DECISIONS.md`
+— it is the index that lets the durable write happen without two sessions
+discovering each other afterwards.
+
 ## [8.133.0] - 2026-08-28
 
 Two additions, both from the same afternoon's failures.
