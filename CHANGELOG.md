@@ -1,5 +1,42 @@
 # Changelog
 
+## [8.133.0] - 2026-08-28
+
+Two additions, both from the same afternoon's failures.
+
+### Added: a standing fleet brief every session picks up
+
+`[measured 2026-08-28]` a coordinating session denied panels fleet-wide and
+briefed the seven sessions it could see. Two worktrees created an hour later
+inherited the deny and were never told. Two more finished and went silent,
+because "message me when done" reached them once with nothing to repeat it.
+
+`fleet-brief.js` publishes a brief; `session-start.js` injects it into every
+session that starts afterwards. It **expires** (`--set` refuses without
+`--hours`, capped at 24), it is **signed** (`--author` required, and the injected
+text says it is a coordinator's judgement and NOT the operator's instruction),
+and it is **capped at 4000 chars** because it lands in every session's context on
+every start. Absent, expired, undated, unparseable and whitespace-only all inject
+nothing.
+
+### Added: content drift between installed plugin code and the commit it claims
+
+Every existing drift check compares NUMBERS — installed vs catalog, marketplace
+freshness, the version table. All pass while the bytes differ, and `CLAUDE.md`
+already records the cost: two sessions released 8.98.0 from one clone with
+different trees, and because the cache is keyed on the number, `claude plugin
+update` reported *"already at the latest version"* and installed the wrong build.
+
+`check-plugin-drift.js` hashes each installed file as git would and compares it
+against the blob at the recorded `gitCommitSha`. Three outcomes, never two:
+MATCHES, DRIFTED with the files named, or COULD NOT CHECK with the reason. An
+extra file is not drift; a missing one is. Wired as `npm run check:plugin-drift`.
+
+### Note on delivery
+
+A running session loaded its plugins at start, so neither of these reaches a
+session already in flight — both apply from the next session onward.
+
 ## [8.132.0] - 2026-08-28
 
 Three checks that could not fire, found by running the tools on a machine they
