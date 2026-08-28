@@ -123,24 +123,63 @@ try {
             const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
             const stories = prd.stories || {};
             const entries = Object.entries(stories);
-            const done = entries.filter(([, s]) => s.passes === true);
-            // Shared predicates: `needs-setup` is neither done nor actionable,
-            // and counting it as pending told the operator a sprint was busy when
-            // it was waiting on him.
-            const { isActionable, isDeferred, needsSetup } = require(path.join(PLUGIN_ROOT, 'scripts', 'prd-states.js'));
-            const deferred = entries.filter(([, s]) => isDeferred(s));
-            const blocked = entries.filter(([, s]) => needsSetup(s));
-            const pending = entries.filter(([, s]) => isActionable(s));
+            // ONE counter, shared with every other reader, rather than filters
+            // hand-rolled beside it. The filters that used to live here called
+            // `isActionable` "pending" — and isActionable is true for FAILED as
+            // well as null, so three failed stories rendered as three more
+            // waiting to be picked up. `summarise` keeps the states apart and
+            // carries an `unrecognised` bucket, which is what makes a SIXTH
+            // value visible instead of silently folded into a neighbour, the way
+            // needs-setup was.
+            const { isActionable, summarise } = require(path.join(PLUGIN_ROOT, 'scripts', 'prd-states.js'));
+            const c = summarise(stories);
+            const actionable = entries.filter(([, s]) => isActionable(s));
 
-            const summary = `Sprint ${safe(prd.sprint) || '(unnamed)'}: ${done.length} done, ` +
-                `${pending.length} pending, ${deferred.length} deferred`
-                + (blocked.length ? `, ${blocked.length} blocked on setup` : '') + '.';
+            // COMPLETED WORK LEAVES THIS FILE. `archive-prd` moves finished
+            // stories to .claude/archives/ and records the running total here,
+            // so a count over `stories` alone is a count over the FILE, not over
+            // the project. `[measured 2026-08-28]` a project that had shipped
+            // and archived 159 stories opened every session with "0 done" — a
+            // true statement about the file and the opposite of true about the
+            // work, in the one line every session reads before anything else.
+            const arch = prd.archived;
+            let archivedNote = '';
+            let allTime = null;
+            if (arch && typeof arch === 'object') {
+                const n = Number(arch.totalCompleted);
+                if (Number.isFinite(n) && n >= 0) {
+                    archivedNote = ` (+${n} archived)`;
+                    allTime = c.total + n;
+                } else {
+                    // An archive section whose count will not parse is NOT zero.
+                    // Saying so is the whole difference between "none" and "I
+                    // could not read it".
+                    archivedNote = ' (archive present, count unreadable)';
+                }
+            }
+
+            // done/pending/FAILED/deferred always print, zeros included: a zero
+            // that is stated is evidence, where an omitted bucket is silence.
+            const parts = [
+                `${c.done} done${archivedNote}`,
+                `${c.pending} pending`,
+                `${c.failed} FAILED`,
+                `${c.deferred} deferred`,
+            ];
+            if (c.needsSetup) parts.push(`${c.needsSetup} blocked on setup`);
+            if (c.unrecognised) parts.push(`${c.unrecognised} unrecognised`);
+            const totals = allTime === null ? `${c.total} total` : `${c.total} active, ${allTime} all-time`;
+
+            const summary = `Sprint ${safe(prd.sprint) || '(unnamed)'}: ${parts.join(', ')} (${totals}).`;
             banner += ` | ${summary}`;
 
             const lines = [`This project uses autodev's prd.json task system. ${summary}`];
-            if (pending.length > 0) {
-                const next = pending.slice(0, 3).map(([id, s]) => `${safe(id)} (${safe(s.title) || 'untitled'})`);
-                lines.push(`Next pending stories: ${next.join(', ')}${pending.length > 3 ? `, +${pending.length - 3} more` : ''}.`);
+            if (actionable.length > 0) {
+                // "actionable", not "pending": this list is what an agent may
+                // pick up, which deliberately includes FAILED. Calling it
+                // pending is how the count went wrong in the first place.
+                const next = actionable.slice(0, 3).map(([id, s]) => `${safe(id)} (${safe(s && s.title) || 'untitled'})`);
+                lines.push(`Next actionable stories: ${next.join(', ')}${actionable.length > 3 ? `, +${actionable.length - 3} more` : ''}.`);
             }
             context.push(fence(lines));
         } catch (parseErr) {

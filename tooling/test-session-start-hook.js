@@ -72,6 +72,90 @@ check('counts deferred separately from pending', ctx.includes('1 deferred'));
 check('names the next pending story', ctx.includes('S3-002'));
 check('banner still summarises for the user', (out?.systemMessage || '').includes('Sprint S3'));
 
+// 2b. FAILED is its own bucket, never folded into pending.
+//
+// `[measured 2026-08-28]` a live session opened with "0 done, 8 pending" against
+// a file holding 5 null and 3 false. The hook called `isActionable` "pending",
+// and isActionable is deliberately true for FAILED too — so every failed story
+// was reported as one more waiting to be started. The operator would have read a
+// clean backlog where three things had actually broken.
+fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
+    sprint: 'S4',
+    stories: {
+        'S4-P1': { title: 'pending one', passes: null },
+        'S4-P2': { title: 'pending two', passes: null },
+        'S4-F1': { title: 'failed one', passes: false },
+        'S4-F2': { title: 'failed two', passes: false },
+        'S4-F3': { title: 'failed three', passes: false },
+    },
+}));
+r = run({ cwd: PROJ, session_id: 's2b', hook_event_name: 'SessionStart' });
+const cF = parse(r)?.hookSpecificOutput?.additionalContext || '';
+check('FAILED stories are not counted as pending', /\b2 pending\b/.test(cF));
+check('FAILED gets its own named bucket', /\b3 FAILED\b/.test(cF));
+check('does not report the old folded count', !/\b5 pending\b/.test(cF));
+
+// 2c. Archived work is counted, because completed stories LEAVE this file.
+// Counting `stories` alone is a count over the file, not over the project: a
+// project that had shipped and archived 159 stories opened every session with
+// "0 done" — true of the file, and the opposite of true about the work.
+fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
+    sprint: 'S4',
+    // Shape as `archive-prd` writes it, not invented here.
+    archived: {
+        totalCompleted: 159,
+        lastArchived: '2026-08-28',
+        files: ['.claude/archives/prd-archive-2026-08.json'],
+    },
+    stories: {
+        'S4-P1': { title: 'pending one', passes: null },
+        'S4-F1': { title: 'failed one', passes: false },
+    },
+}));
+r = run({ cwd: PROJ, session_id: 's2c', hook_event_name: 'SessionStart' });
+const cA = parse(r)?.hookSpecificOutput?.additionalContext || '';
+check('surfaces the archived completion count', cA.includes('+159 archived'));
+check('separates active total from all-time', cA.includes('2 active, 161 all-time'));
+check('still reports 0 done for the active file', /\b0 done\b/.test(cA));
+
+// 2d. An archive section whose count will not parse is NOT zero.
+// "none" and "I could not read it" are opposite facts and must not flatten.
+fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
+    sprint: 'S4',
+    archived: { files: ['.claude/archives/prd-archive-2026-08.json'] },
+    stories: { 'S4-P1': { title: 'pending one', passes: null } },
+}));
+r = run({ cwd: PROJ, session_id: 's2d', hook_event_name: 'SessionStart' });
+const cU = parse(r)?.hookSpecificOutput?.additionalContext || '';
+check('unreadable archive count is named, not rendered as zero', cU.includes('count unreadable'));
+check('does not fabricate a +0 archived', !cU.includes('+0 archived'));
+
+// 2e. No archive section at all is a real zero and says nothing extra.
+fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
+    sprint: 'S4',
+    stories: { 'S4-P1': { title: 'pending one', passes: null } },
+}));
+r = run({ cwd: PROJ, session_id: 's2e', hook_event_name: 'SessionStart' });
+const cN = parse(r)?.hookSpecificOutput?.additionalContext || '';
+check('no archive section adds no archive note', !/archived|unreadable/.test(cN));
+check('reports a plain total when nothing is archived', cN.includes('1 total'));
+
+// 2f. A SIXTH state must be visible, not folded into a neighbour.
+// This is exactly how `needs-setup` stayed invisible across five readers.
+fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
+    sprint: 'S4',
+    stories: {
+        'S4-P1': { title: 'pending one', passes: null },
+        'S4-S1': { title: 'waiting on a key', passes: 'needs-setup' },
+        'S4-X1': { title: 'from a future schema', passes: 'quarantined' },
+    },
+}));
+r = run({ cwd: PROJ, session_id: 's2f', hook_event_name: 'SessionStart' });
+const cS = parse(r)?.hookSpecificOutput?.additionalContext || '';
+check('needs-setup is reported separately', cS.includes('1 blocked on setup'));
+check('an unrecognised passes value is counted, not silently dropped', cS.includes('1 unrecognised'));
+check('an unrecognised value is not folded into pending', /\b1 pending\b/.test(cS));
+
 // 3. Malformed prd.json is surfaced, not swallowed.
 fs.writeFileSync(path.join(PROJ, 'prd.json'), '{ not valid json');
 r = run({ cwd: PROJ, session_id: 's3', hook_event_name: 'SessionStart' });
