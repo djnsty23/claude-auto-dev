@@ -334,6 +334,29 @@ was filed as two entities and briefed with its own findings, twice. Reply to the
 sender id of the message you received; never construct an address from a
 transcript filename.
 
+**Before assigning work, check the branch that would do it — not the base you
+audited.** `[measured 2026-08-28]` a Brain audited `origin/main`, found a price
+rendered from a field named `priceUsd` while the live charge was in EUR, and
+assigned the fix. The target session had already made it — renamed the field,
+added a formatter, and caught a structured-data mismatch the audit had missed.
+It refused the work, correctly.
+
+The audit was not wrong. It was stale **relative to the target**: true of the
+base it came from, false on the branch. That is a different failure from two
+sessions colliding, and the decision log does not catch it — the target had
+recorded nothing.
+
+```powershell
+node "$B\check-assignment.js" --repo <path> --branch <name> --files a,b --expect <symbol>
+```
+
+`--expect` is the load-bearing flag: it is your brief's PREMISE. A brief naming a
+symbol the branch no longer has is describing a state that branch moved past.
+Exit 3 means redundant or stale; exit 2 means it could not check, which is never
+"clear to assign". Note a match inside a comment describing a symbol's REMOVAL
+still counts as present, so read the files it prints rather than trusting the
+word.
+
 **Print the population beside every count**, and confirm any load-bearing figure
 against a source with different provenance. An instrument agreeing with itself
 proves nothing.
