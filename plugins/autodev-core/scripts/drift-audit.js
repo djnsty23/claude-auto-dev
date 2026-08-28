@@ -441,7 +441,9 @@ function auditPrd(repo) {
     }
 
     const pendingIds = Object.entries(prd.stories || {})
-        .filter(([, s]) => s.passes !== true && s.passes !== 'deferred')
+        // isActionable(): needs-setup is blocked on a human, not stale work an
+        // agent abandoned, so auditing it for drift blames the wrong party.
+        .filter(([, s]) => require(path.join(__dirname, 'prd-states.js')).isActionable(s))
         .map(([id]) => id);
     if (!pendingIds.length) return;
 

@@ -124,11 +124,17 @@ try {
             const stories = prd.stories || {};
             const entries = Object.entries(stories);
             const done = entries.filter(([, s]) => s.passes === true);
-            const deferred = entries.filter(([, s]) => s.passes === 'deferred');
-            const pending = entries.filter(([, s]) => s.passes !== true && s.passes !== 'deferred');
+            // Shared predicates: `needs-setup` is neither done nor actionable,
+            // and counting it as pending told the operator a sprint was busy when
+            // it was waiting on him.
+            const { isActionable, isDeferred, needsSetup } = require(path.join(PLUGIN_ROOT, 'scripts', 'prd-states.js'));
+            const deferred = entries.filter(([, s]) => isDeferred(s));
+            const blocked = entries.filter(([, s]) => needsSetup(s));
+            const pending = entries.filter(([, s]) => isActionable(s));
 
             const summary = `Sprint ${safe(prd.sprint) || '(unnamed)'}: ${done.length} done, ` +
-                `${pending.length} pending, ${deferred.length} deferred.`;
+                `${pending.length} pending, ${deferred.length} deferred`
+                + (blocked.length ? `, ${blocked.length} blocked on setup` : '') + '.';
             banner += ` | ${summary}`;
 
             const lines = [`This project uses autodev's prd.json task system. ${summary}`];

@@ -43,7 +43,16 @@ try {
                     const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
                     const entries = Object.entries(prd.stories || {});
                     const done = entries.filter(([, v]) => v.passes === true);
-                    const pending = entries.filter(([, v]) => v.passes !== true && v.passes !== 'deferred');
+                    // DELIBERATE DUPLICATE of autodev-core's prd-states.js
+                    // isActionable(). ${CLAUDE_PLUGIN_ROOT} resolves per plugin, so
+                    // this plugin cannot require that file — if core needs a file,
+                    // core ships it, and the same applies here. Marked so the two
+                    // are changed together rather than drifting silently.
+                    //
+                    // `needs-setup` is blocked on a human and is NOT work an agent
+                    // can advance; counting it as pending was one of five readers
+                    // that each guessed differently. [measured 2026-08-28]
+                    const pending = entries.filter(([, v]) => v.passes === null || v.passes === false || v.passes === undefined);
                     summary.completed = done.map(([k, v]) => `${k}: ${v.title}`).join('; ');
                     if (pending.length > 0) {
                         summary.nextSteps = `${pending.length} tasks remaining: ${pending.map(([k]) => k).join(', ')}`;
