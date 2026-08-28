@@ -171,23 +171,43 @@ try {
                 let cat;
                 try { cat = JSON.parse(fs.readFileSync(catPath, 'utf8')); } catch { continue; }
                 const entry = (cat.plugins || []).find((p) => p && p.name === selfName);
-                if (!entry || !entry.version) continue;
+                if (!entry) continue;
+
+                // WHERE THE CATALOG'S VERSION ACTUALLY LIVES.
+                //
+                // This read `entry.version` and bailed when it was missing. No
+                // plugin entry in this marketplace has ever carried that field:
+                // `bump.js` writes the version to `metadata.version` at the top
+                // of marketplace.json and to each plugins/*/plugin.json, never
+                // to the catalog's per-plugin entries.
+                //
+                // So the guard was `if (undefined) continue`, every session,
+                // since the block was written — and because the freshness check
+                // below sat after it in the same loop body, that never ran
+                // either. [measured 2026-08-28] a whole drift block added FOR
+                // the 2026-08-18 failure class had not once fired.
+                //
+                // Entry first anyway: another marketplace may legitimately carry
+                // per-plugin versions, and that is the more specific answer.
+                const catVersion = entry.version || (cat.metadata && cat.metadata.version) || null;
 
                 // 1. Installed vs catalog. Strictly newer only — a catalog
                 //    BEHIND the install (mid-publish, rolled back) is not an
                 //    update and must stay silent.
-                const parse = (v) => String(v).split('.').map(Number);
-                const [a, b] = [parse(entry.version), parse(version)];
-                const newer = a.length === 3 && b.length === 3 && a.every(Number.isFinite) && b.every(Number.isFinite)
-                    && (a[0] - b[0] || a[1] - b[1] || a[2] - b[2]) > 0;
-                if (newer) {
-                    banner += ` | update available: ${entry.version}`;
-                    context.push(
-                        `${selfName} v${version} is running but the local marketplace offers v${entry.version}. `
-                        + `Suggest the user run: /plugin update ${selfName} (then restart to apply). `
-                        + `Verify afterwards that the installed version actually changed — one update `
-                        + `has silently no-oped before.`
-                    );
+                if (catVersion) {
+                    const parse = (v) => String(v).split('.').map(Number);
+                    const [a, b] = [parse(catVersion), parse(version)];
+                    const newer = a.length === 3 && b.length === 3 && a.every(Number.isFinite) && b.every(Number.isFinite)
+                        && (a[0] - b[0] || a[1] - b[1] || a[2] - b[2]) > 0;
+                    if (newer) {
+                        banner += ` | update available: ${catVersion}`;
+                        context.push(
+                            `${selfName} v${version} is running but the local marketplace offers v${catVersion}. `
+                            + `Suggest the user run: /plugin update ${selfName} (then restart to apply). `
+                            + `Verify afterwards that the installed version actually changed — one update `
+                            + `has silently no-oped before.`
+                        );
+                    }
                 }
 
                 // 2. Catalog freshness. FETCH_HEAD's mtime is the last time the
