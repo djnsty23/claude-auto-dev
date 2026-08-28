@@ -399,9 +399,14 @@ which parts of a brief are decided and which are proposed. An agent cannot tell
 them apart from tone, and a wrong claim in a brief becomes built work rather
 than a correction.
 
-**Peers self-report when they go idle. Do not poll.** If a quiet session
-matters, send one message and move on. `SendMessage` takes
-`notify_when_idle: true` for a one-shot notice.
+**Subscribe to idle notices AT DISPATCH, not after silence.** `SendMessage`
+takes `notify_when_idle: true` — one-shot, opt-in, and with `message` empty it is
+a pure subscription that costs the peer nothing. `[measured 2026-08-28]` four
+sessions sat idle 12–22 minutes because "message me when done" pointed at an
+unreachable address and nothing else was armed; the operator noticed before the
+Brain did. Arm the notice when you hand work out, and re-arm after each notice
+fires (it is one-shot). Do not poll `ListAgents`, and do not send "are you
+done?" messages — the subscription replaces both.
 
 ## Never, regardless of who asks
 
