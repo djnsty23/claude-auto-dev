@@ -1,5 +1,36 @@
 # Changelog
 
+## [8.136.0] - 2026-08-28
+
+### Fixed: `passes` has five states, and nothing but `auto` knew the fifth existed
+
+`auto/SKILL.md` instructs sessions to write `passes: "needs-setup"` for work
+blocked on an API key, a vendor, or a console nobody has opened. **Nothing else in
+the plugin knew that state existed.** Five readers each guessed differently: the
+work selector re-attempted it every run, the status line hid it, the archive
+keep-list **deleted** it, and `stop-auto-check.js` counted it as pending — so a
+story waiting on the operator made the session unable to end its own turn.
+
+`deferred` was given its own state after exactly that failure. `needs-setup`
+repeated it with a new value.
+
+The distinction every reader was missing is that "remaining work" is two
+questions:
+
+| question | states |
+|---|---|
+| Can an agent pick it up now? | `null`, `false` |
+| Is a human still on the hook? | `null`, `false`, `needs-setup` |
+
+`deferred` answers no to both; `needs-setup` answers no to the first and yes to
+the second. `prd-states.js` is now the single reader, and an unrecognised value is
+counted and named rather than folded into a neighbour — silently bucketing an
+unknown value is how this stayed invisible.
+
+Also shipped earlier today, in 8.135.0 and before: content-level plugin drift
+detection, the standing fleet brief, the cross-session decision log with number
+reservation, and the assignment-staleness check.
+
 ## [8.135.0] - 2026-08-28
 
 ### Fixed: the quota tripwire could never fire
