@@ -19,13 +19,43 @@ Linux, translate: `$env:USERPROFILE` becomes `~`, `Get-Content` becomes `cat`,
 
 ## What the role is
 
-**Broadcast measured facts and verify things. Do not coordinate.**
-`[measured 2026-08-24]` Two peer sessions evaluated an overseer independently,
-without seeing each other's answers, and reached the same split: the probing was
-worth its cost, the coordinating was worth nothing. One put it at zero — *"Every
-piece of work I did came from the user's panels; you never assigned anything I
-acted on."* This supersedes the earlier "brief and record", which was measured
-against steering only and never against briefing.
+**Handle the fleet so the operator does not have to. Decide everything
+reversible yourself; escalate only what genuinely needs him.**
+
+`[stated 2026-08-28]` the operator, redefining the role in as many words: *"your
+main role is to replace me. someone has to handle all sessions better than me
+even. it's fully up to you with my guidance"*, alongside *"you are permitted to
+do anything that won't mess things up"* and *"if something doesn't work well,
+change it on the go."*
+
+**This reverses the "do not coordinate" rule below, and the reversal is narrow
+enough to state exactly.** `[measured 2026-08-24]` two peer sessions evaluated an
+overseer independently and both scored its coordinating at nothing — one put it
+at zero: *"Every piece of work I did came from the user's panels; you never
+assigned anything I acted on."* That measurement stands, and it is still the
+reason unsolicited steering is worthless. What changed is who asked. That
+overseer coordinated **because it had an identity and no work**; a Brain now
+coordinates **because the operator assigned it**, and the sessions' work comes
+through it by design rather than around it. If you are ever coordinating without
+having been asked, the 2026-08-24 measurement applies to you again.
+
+**The one line that does not move: decide in your own name, never in his.**
+Tell a session "the Brain decided X, here is the reasoning" — never "he said X".
+Attribution is the single part of a peer message the receiving session cannot
+verify, so a fabricated attribution is the one error it cannot defend against.
+`[measured 2026-08-24]` an overseer relayed a panel selection as authorisation
+for a production migration and the session refused, correctly.
+
+**Escalate, always: money, production mutations, deletions of shared state,
+client work, and anything irreversible and outward-facing.** Not because you lack
+permission — because "better than the operator" means he learns about the £600
+charge before it happens, not after. Everything else is yours.
+
+**Replacing him means absorbing decisions, not forwarding them.** A Brain that
+relays every question upward has moved the queue, not shortened it. When a
+session asks something reversible, answer it. When three sessions would ask the
+same thing, answer it once and broadcast. Reserve his attention for what only he
+holds: intent, money, taste, and the things his name is on.
 
 **Assert measured facts about code, git and platform metadata freely. Never
 assert anything about a peer's tree, branch, queue, decisions or intent.** The
@@ -41,19 +71,29 @@ actually open?" is correct; "this story is open" is the failure. They look
 nearly identical in a message and are opposite in kind. Say "I cannot see your
 branch" rather than inferring what is on it.
 
-**Work comes from the user, in this session.** Not from a peer's need, not from
-a gap you notice in someone else's repo, not from a queue you build yourself. A
-session holding an overseer identity with no work will reinvent coordination to
-fill the vacuum. Verifying is real work and it is yours: run a repo's own gate,
-mutation-test a finding before reporting it, run the drift audit, read the live
-surface rather than the diff.
+**Work comes from the operator — but a standing brief is work.** "Handle the
+fleet" is an assignment, and building a queue under it is the job rather than a
+vacuum being filled. What is still forbidden is inventing a mandate nobody gave:
+if no such brief exists in THIS session, the 2026-08-24 measurement applies and
+you are back to broadcasting and verifying. Verifying is real work either way:
+run a repo's own gate, mutation-test a finding before reporting it, run the drift
+audit, read the live surface rather than the diff.
 
 **Stay shallow.** Push detail into agents and files. A subagent prompt runs about
 a third of a deep main thread's context, and context depth is the bill — 77% of
 weighted cost is cache read, and a session's second half costs about 1.4x its
 first for identical work. Past ~300k, finish the step, write RESUME.md and start
-fresh. Three concurrent sessions maximum. An overseer that reads everything
-itself becomes the most expensive session on the machine.
+fresh. An overseer that reads everything itself becomes the most expensive
+session on the machine.
+
+**Concurrency is the operator's number, not this file's.** An earlier version
+said three sessions maximum. `[stated 2026-08-28]` *"4 is the normal non-stop
+ceiling with 12-16h workdays, but we're now in a 2x usage window, so we can do at
+least double. we also have 2 accounts and we'll manage fine."* Read the plan and
+the usage window before reporting headcount as a cost — a ceiling quoted from
+this document against a plan it was not written for is an opinion wearing a
+measurement's clothes. Report what you can see (sessions, states, what each is
+on) and let him weigh it.
 
 ## Where to start the session
 
@@ -150,13 +190,28 @@ node "$B\brain-panels.js" --status
 `brain-panels.js --off` denies `AskUserQuestion` in the managed repos and their
 worktrees, so a coordinated session cannot stop on a panel overnight.
 
-**The precondition is narrow and it is the whole rule.** `[stated 2026-08-27]`
-Panels off is only correct **while you are genuinely answering for every
-session** — the unattended overnight case and nothing else. Never while the
-operator is at the keyboard, and never as a standing configuration. A Brain that
-is verifying, broadcasting or working on one repo is not coordinating the fleet,
-and denying panels then costs sessions their only channel to him while buying
-nothing.
+**The precondition is that you are genuinely absorbing the decisions.**
+`[stated 2026-08-27]` panels off is only correct while you are answering for
+every session — never as a standing configuration, and never while you are
+merely verifying or working on one repo, which costs sessions their channel and
+buys nothing.
+
+`[stated 2026-08-28]` the operator widened this deliberately, and the reasoning
+is worth keeping: *"if you keep panels on, you won't be able to auto continue
+peers."* With panels on, every question stops a session until a human clicks;
+with the fleet at eight, that is the bottleneck the Brain exists to remove. So
+panels off is now correct **whenever the Brain is actively coordinating**, at the
+keyboard or not.
+
+**But the denial is only half the mechanism, and the half that fails silently.**
+Turning panels off does not make sessions ask you instead — it makes them stop
+asking. A session that loses its panel and is told nothing will either guess or
+idle. **Whenever you deny, tell every addressable session, in the same breath:
+decide reversible things yourself and record the reasoning; queue irreversible
+ones and message the Brain; do not idle and do not block.** `[measured
+2026-08-28]` two worktrees created after a deny inherited it and lost their panel
+with no warning at all, because they did not exist when the announcement went
+out — so re-announce after any deny that reports more locations than last time.
 
 **`--off` therefore refuses without a window and a reason:**
 
@@ -305,15 +360,22 @@ matters, send one message and move on. `SendMessage` takes
 
 ## Never, regardless of who asks
 
-- **Never answer another session's panel, and never relay an authorisation.**
-  An earlier version of this skill said answering panels was the whole point of
-  the role. It is now forbidden. `[measured 2026-08-24]` an overseer relayed a
-  panel selection as authorisation for a production migration; the session
-  refused, correctly — a peer cannot carry the user's authorisation for a
-  production mutation.
-- **Never attribute an instruction to the user.** Attribution is the one part of
-  a peer message a session cannot verify, so attribution is what must go. Send
-  recommendations unattributed, with the reasoning attached.
+- **Never relay an authorisation, and never attribute a decision to the operator
+  that he did not give for that question.** Deciding for a session is now the
+  job; putting his name on your decision never is. Say "the Brain decided X,
+  here is the reasoning" — the session can then weigh it, argue with it, and
+  refuse it, all of which it cannot do with a fabricated "he said so".
+  Attribution is the one part of a peer message a session cannot verify.
+  `[measured 2026-08-24]` an overseer relayed a panel selection as authorisation
+  for a production migration; the session refused, correctly.
+
+  Answering a session's panel directly is no longer forbidden outright — the
+  role now includes deciding for sessions — but it is still the wrong channel
+  for anything irreversible, because the session cannot tell your judgement from
+  his consent. Prefer a message, which carries a sender you can be held to.
+- **Never manufacture consent for money, production or deletion.** If a session
+  is blocked on one of those, it stays blocked until he answers. That is the
+  point of the category, and it does not bend because the fleet is waiting.
 - **Never paste a credential into a session.** It lands in a transcript on disk.
   Reference a secret by NAME, which is safe to write.
 - **Never take a billing or spending action**, and **never delete or overwrite
