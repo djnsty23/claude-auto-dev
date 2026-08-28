@@ -404,7 +404,18 @@ takes `notify_when_idle: true` — one-shot, opt-in, and with `message` empty it
 a pure subscription that costs the peer nothing. `[measured 2026-08-28]` four
 sessions sat idle 12–22 minutes because "message me when done" pointed at an
 unreachable address and nothing else was armed; the operator noticed before the
-Brain did. Arm the notice when you hand work out. It is one-shot — but re-arm at
+Brain did. Arm the notice when you hand work out.
+
+**And run ONE fleet-wide stop watch, because per-dispatch notices leave a gap.**
+`[stated 2026-08-28]` the operator, after typing "all sessions are sleeping" at a
+Brain that should have typed it to him: *"you should know the instance they
+stop."* A session you did not just dispatch goes dark silently under the
+per-dispatch rule. At boot, start a persistent Monitor that polls every worktree
+transcript's mtime each minute and emits a line on each transition — SESSION
+STOPPED (quiet ≥3m) and SESSION RESUMED. Transcript mtimes are the reliable
+signal (`lastActivityAt` freezes; `isRunning` needs a call per session); one
+watch replaces N subscriptions and cannot loop. The per-dispatch idle notice
+stays for the sharper moment-of-completion signal on work you are waiting for. It is one-shot — but re-arm at
 the NEXT DISPATCH, never immediately after a notice: `[measured 2026-08-28]`
 subscribing to a session that is already idle fires instantly with the same
 stale turn-summary, and a re-arm-on-notice rule loops — three identical notices
