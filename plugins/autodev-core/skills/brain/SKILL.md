@@ -334,6 +334,28 @@ was filed as two entities and briefed with its own findings, twice. Reply to the
 sender id of the message you received; never construct an address from a
 transcript filename.
 
+**And give BOTH of your own addresses, for the same reason.** `[measured
+2026-08-28]` a Brain handed every session its desktop `local_<uuid>` as the
+return address. Sessions on the peer socket protocol cannot resolve that: two
+reported "Brain unreachable", one after five undelivered attempts. Their reports
+were not lost, but the Brain never saw them and briefed two sessions on work they
+had already finished.
+
+Read your own addresses rather than constructing them. `~/.claude/sessions/<pid>.json`
+holds `messagingSocketPath`, `name`, `sessionId` and `pid` — and the pid is your
+shell's PARENT, not the shell:
+
+```powershell
+$p = (Get-Process -Id $PID).Parent.Id; Get-Content "$env:USERPROFILE\.claude\sessions\$p.json"
+```
+
+macOS or Linux: `ps -o ppid= -p $$`, then read `~/.claude/sessions/<ppid>.json`.
+
+**Pull rather than rely on push.** Reading a peer's recent turns under
+`~/.claude/projects/<slug>/` is reliable, costs the peer nothing, and works when
+its messages to you do not. Do that before briefing anyone — it is also how you
+avoid assigning work already finished.
+
 **Before assigning work, check the branch that would do it — not the base you
 audited.** `[measured 2026-08-28]` a Brain audited `origin/main`, found a price
 rendered from a field named `priceUsd` while the live charge was in EUR, and
