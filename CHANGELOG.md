@@ -1,5 +1,49 @@
 # Changelog
 
+## [8.135.0] - 2026-08-28
+
+### Fixed: the quota tripwire could never fire
+
+It reads a burn-rate source and defaulted to `~/.claude/scripts/quota-burn.js` —
+a path outside every plugin, present on no machine here and in no repo. `--status`
+read `FAILED code=source-missing`, the poll emitted one diagnostic and then
+suppressed it, and **silence is this tripwire's success signal**. Its own
+diagnostic line says so: *"silence from this tripwire is NOT evidence of
+headroom."*
+
+`quota-burn.js` now ships beside it. `--status` went from `FAILED` to
+`reading $843, armed: true`.
+
+It reports a **list-price equivalent, not a bill**, and says so in a `basis`
+field. Cache multipliers verified rather than recalled: read 0.1×, write 1.25× at
+the 5m TTL and **2× at the 1h TTL** — the second matters, because this fleet runs
+the 1-hour TTL. An unknown model is priced at the **highest** published rate,
+never skipped: a tripwire that under-reports stays silent through the wall.
+
+`test-quota-tripwire` asserted the old default, so the suite was demanding the
+bug. The assertion is inverted rather than deleted, and a new case stashes the
+sibling to prove the legacy path still works.
+
+### Added: check whether an assignment is already done
+
+**[measured 2026-08-28]** a coordinator audited `origin/main`, found a price
+rendered from `priceUsd` while the charge was in EUR, and assigned the fix. The
+target had already made it, and had caught a structured-data mismatch the audit
+missed. It refused, correctly.
+
+The audit was not wrong — it was stale **relative to the target**. The decision
+log cannot catch that: the target had recorded nothing, because it had not
+finished.
+
+`check-assignment.js --expect <symbol>` asks whether the brief's **premise** still
+holds on the branch being assigned. Exit 3 = redundant or stale, exit 0 = clear,
+exit 2 = could not check — which is never reported as clear.
+
+Dogfooding it found its own weakness, kept and documented: it reported a symbol as
+"holds" when the only match was a doc comment explaining the field had been
+renamed away from it. A grep cannot tell code from a note about the code, so it
+prints where each symbol matched.
+
 ## [8.134.0] - 2026-08-28
 
 ### Added: a decision log that does not live on a branch
