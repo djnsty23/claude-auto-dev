@@ -72,7 +72,13 @@ const clip = (s) => JSON.stringify(String(s).slice(0, 700));
 // Fixture machine
 // ---------------------------------------------------------------------------
 
-const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'telemetry-report-'));
+// realpathSync because on macOS os.tmpdir() hands back /var/folders/... while
+// the same directory resolves to /private/var/folders/... — they are one
+// directory behind a symlink. The subject reports the path it resolved from its
+// own cwd, so an unresolved fixture makes the expectation differ from the actual
+// by a prefix and nothing else, which reads as a real assertion failure on macOS
+// and passes everywhere else.
+const fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telemetry-report-')));
 
 /** Make a directory of telemetry files. `files` maps a date to its lines. */
 function makeDir(name, files) {

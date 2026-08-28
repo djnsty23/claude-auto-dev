@@ -200,9 +200,176 @@ function writeSession(c, i) {
 
 // ---------------------------------------------------------------------- run
 
+// An unreadable store must REFUSE, never report a zero. [measured 2026-08-28]
+// the default path was `~/.config/Claude/...`, which does not exist on macOS,
+// so the store read as empty and the script printed "POPULATION: 0" followed by
+// "BLOCKED — work exists in exactly one place: 0 (none — every finished own-repo
+// session is committed and pushed)". That last line is the hazard: an
+// affirmative all-clear about a directory the process never opened. Asserting
+// only the exit code would pass a version that still printed the all-clear
+// first, so the absence of those strings is asserted by name.
+function checkUnreadableStoreRefuses() {
+  const res = spawnSync(process.execPath, [SCRIPT], {
+    encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: path.join(ROOT, 'no-such-store-dir') },
+  });
+  check('unreadable store: exits non-zero', res.status !== 0, true);
+  check('unreadable store: exit code is 2', res.status, 2);
+  check('unreadable store: says COULD NOT READ', /COULD NOT READ/.test(res.stderr || ''), true);
+  check('unreadable store: names the path it tried', (res.stderr || '').includes('no-such-store-dir'), true);
+  check('unreadable store: prints NO population count', /POPULATION:/.test(res.stdout || ''), false);
+  check('unreadable store: prints NO safe-to-archive verdict', /SAFE TO ARCHIVE/.test(res.stdout || ''), false);
+  check('unreadable store: prints NO blocked all-clear', /BLOCKED/.test(res.stdout || ''), false);
+}
+
+// The known-positive control for the above. A refusal test alone cannot tell a
+// correct guard from a script that refuses unconditionally, so a store that IS
+// readable must still produce a population.
+function checkReadableStoreStillScans() {
+  const okStore = path.join(ROOT, 'readable-empty-store');
+  fs.mkdirSync(okStore, { recursive: true });
+  const res = spawnSync(process.execPath, [SCRIPT], {
+    encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: okStore, SESSION_SWEEP_OWNER: '' },
+  });
+  check('readable store: exits 0', res.status, 0);
+  check('readable store: prints a population line', /POPULATION:/.test(res.stdout || ''), true);
+}
+
+// Every other case in this suite drives SESSION_SWEEP_STORE, so the DEFAULT path
+// is the one thing they can never see — a mutation reverting the macOS branch
+// survived the whole suite. Run with the override unset and HOME faked, and read
+// the path back out of the refusal, which names it.
+function checkPlatformDefaultPath() {
+  const fakeHome = path.join(ROOT, 'fake-home');
+  fs.mkdirSync(fakeHome, { recursive: true });
+  const env = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome };
+  delete env.SESSION_SWEEP_STORE;
+  delete env.XDG_CONFIG_HOME;
+  const res = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8', env });
+  const said = (res.stderr || '') + (res.stdout || '');
+
+  const expected = process.platform === 'darwin'
+    ? path.join(fakeHome, 'Library', 'Application Support', 'Claude', 'claude-code-sessions')
+    : process.platform === 'win32'
+      ? path.join(env.APPDATA || fakeHome, 'Claude', 'claude-code-sessions')
+      : path.join(fakeHome, '.config', 'Claude', 'claude-code-sessions');
+
+  check(`default store path for ${process.platform}`, said.includes(expected), true);
+  // The macOS regression specifically: ~/.config must NOT be where it looks.
+  if (process.platform === 'darwin') {
+    check('darwin does not fall back to ~/.config', said.includes(path.join(fakeHome, '.config')), false);
+  }
+}
+
+// Plant an isolated store of raw records and read the sweep's own JSON back.
+// Separate from the main fixture on purpose: these two guards are about how
+// records relate to EACH OTHER and to transcripts on disk, neither of which the
+// per-worktree cases model.
+function sweepWith(records, tag, extraEnv) {
+  const store = path.join(ROOT, `store-${tag}`);
+  const dir = path.join(store, 'live-ws', 'sub');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const r of records) {
+    fs.writeFileSync(path.join(dir, `${r.sessionId}.json`), JSON.stringify(r), 'utf8');
+  }
+  const res = spawnSync(process.execPath, [SCRIPT, '--json'], {
+    encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: store, SESSION_SWEEP_OWNER: '', ...extraEnv },
+  });
+  try { return JSON.parse(res.stdout); }
+  catch { failures.push(`sweepWith(${tag}): unparseable JSON\n${(res.stdout || res.stderr || '').slice(0, 400)}`); return []; }
+}
+
+const staleRec = (id, dir, extra) => ({
+  sessionId: `local_${id}`, title: id, cwd: dir, originCwd: dir, worktreePath: dir,
+  isArchived: false, lastActivityAt: Date.now() - 40 * 86400000,
+  createdAt: Date.now() - 60 * 86400000, ...extra,
+});
+
+// archive_session DELETES the worktree, so a worktree named by two live records
+// is one archive away from being pulled out from under the other. [measured
+// 2026-08-28] "Census lcd.js" and "Fix dead regex in ask.js" both named
+// .../worktrees/mito-keys while a third session worked there; both read as 8.7d
+// idle and would have swept.
+function checkSharedWorktreeBlocks() {
+  // Deliberately NOT created on disk. A worktree that no longer exists is
+  // already disposable, so the existence check short-circuits and whatever risk
+  // survives is the one these two guards produced — nothing else can mask it.
+  const shared = path.join(ROOT, 'shared-wt');
+  const solo = path.join(ROOT, 'solo-wt');
+
+  const rows = sweepWith([
+    staleRec('shared-a', shared),
+    staleRec('shared-b', shared),
+    staleRec('solo', solo),
+  ], 'shared');
+
+  const a = rows.find((r) => r.sessionId === 'local_shared-a');
+  const b = rows.find((r) => r.sessionId === 'local_shared-b');
+  const c = rows.find((r) => r.sessionId === 'local_solo');
+
+  check('shared worktree: first record is not safe', a && a.safe, false);
+  check('shared worktree: second record is not safe', b && b.safe, false);
+  // By name, not merely falsy — "dirty" and "shared" are both unsafe and only
+  // one of them is the thing this guard exists to catch.
+  check('shared worktree: labelled shared-worktree', a && a.risk, (v) => /^shared-worktree\(2 sessions\)$/.test(v || ''));
+  check('shared worktree: names the count', b && b.risk, (v) => /2 sessions/.test(v || ''));
+  // The control that makes the three above mean something: a worktree nobody
+  // else names must NOT pick up this label, or the guard is just blocking all.
+  check('sole occupant is not labelled shared', c && c.risk, (v) => !/shared-worktree/.test(v || ''));
+}
+
+// `lastActivityAt` is a liveness ping the app refreshes only while IT holds the
+// session, and it FREEZES rather than failing otherwise. [measured 2026-08-28]
+// two records read as nine days idle while that worktree's transcript had been
+// written three minutes earlier. The idle clock alone therefore cannot stand
+// between a running session and rm -rf of its worktree.
+function checkLiveTranscriptBlocks() {
+  // Not created on disk, for the same reason as the shared-worktree case: an
+  // absent worktree is already disposable, so any risk left is this guard's.
+  const wtLive = path.join(ROOT, 'live-transcript-wt');
+  const wtCold = path.join(ROOT, 'cold-transcript-wt');
+
+  // Transcripts live at <config>/projects/<cwd with / and . turned into ->.
+  const cfg = path.join(ROOT, 'fake-claude-config');
+  const plant = (wt, ageMinutes) => {
+    const d = path.join(cfg, 'projects', wt.replace(/[/.]/g, '-'));
+    fs.mkdirSync(d, { recursive: true });
+    const f = path.join(d, 'transcript.jsonl');
+    fs.writeFileSync(f, '{}\n', 'utf8');
+    const when = new Date(Date.now() - ageMinutes * 60000);
+    fs.utimesSync(f, when, when);
+  };
+  plant(wtLive, 5);        // five minutes ago — someone is in there
+  plant(wtCold, 60 * 24 * 9); // nine days ago — genuinely finished
+
+  const rows = sweepWith(
+    [staleRec('live-tx', wtLive), staleRec('cold-tx', wtCold)],
+    'transcript',
+    { CLAUDE_CONFIG_DIR: cfg },
+  );
+
+  const live = rows.find((r) => r.sessionId === 'local_live-tx');
+  const cold = rows.find((r) => r.sessionId === 'local_cold-tx');
+
+  check('fresh transcript: not safe despite a 40d idle clock', live && live.safe, false);
+  check('fresh transcript: labelled live-transcript', live && live.risk, (v) => /^live-transcript\(\d+m ago\)$/.test(v || ''));
+  // The known-positive control. Without it a guard that blocked every record
+  // would pass both assertions above.
+  check('cold transcript: still sweeps', cold && cold.safe, true);
+  check('cold transcript: carries no risk label', cold && cold.risk, null);
+}
+
 function run() {
   setup();
   buildCases();
+
+  checkUnreadableStoreRefuses();
+  checkReadableStoreStillScans();
+  checkPlatformDefaultPath();
+  checkSharedWorktreeBlocks();
+  checkLiveTranscriptBlocks();
 
   // Two extra records for the ephemeral clock: same 5-day idle, differing only
   // by whether a schedule launched them. Derived from the same age so the pair
