@@ -650,9 +650,86 @@ function plantSession(home, dir, minutesIdle) {
         + 'it must not be half-written');
 }
 
+// ------------------------------------------- 18. the code directory is not fixed
+//
+// THE BUG THIS SUITE COULD NOT SEE, AND WHY. Every fixture above builds its repos
+// under HOME/Downloads/code, which is precisely the path the subject used to
+// hardcode. The suite therefore CREATED the assumption it was meant to test, and
+// the layout could never be wrong here. [measured 2026-08-28] on a Mac whose
+// checkouts live in ~/Code, readdirSync threw, the catch returned [], and --off
+// printed "panels DENIED in 0 location(s)" while writing a marker recording
+// "repos": []. A six-hour window was believed to be constraining five live
+// sessions and was constraining nothing.
+//
+// These scenarios build repos somewhere ELSE on purpose.
+
+{
+    // ~/Code, the macOS layout that broke it.
+    const home = makeHome();
+    const dir = path.join(home, 'Code', 'alpha');
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+
+    const r = run(home, OFF.concat(['--force']));
+    check('18a: ~/Code layout is discovered, not skipped', denies(dir),
+        'stdout: ' + (r.stdout || '').slice(0, 200) + ' stderr: ' + (r.stderr || '').slice(0, 200));
+    check('18b: and it does not report a zero', !/DENIED in 0 location/.test(r.stdout || ''), r.stdout);
+}
+
+{
+    // A candidate with no case twin. ~/Code alone cannot prove the list is
+    // respected: macOS is case-INSENSITIVE, so ~/Code and ~/code are one
+    // directory and deleting either candidate leaves the other matching. The
+    // mutation "drop ~/Code from the list" survived scenario 18a for exactly that
+    // reason - the same /var vs /private/var family of trap this repo already
+    // tracks. ~/Projects has no such twin, so dropping it is visible here.
+    const home = makeHome();
+    const dir = path.join(home, 'Projects', 'gamma');
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+
+    const r = run(home, OFF.concat(['--force']));
+    check('18i: ~/Projects is discovered too', denies(dir),
+        'stdout: ' + (r.stdout || '').slice(0, 200) + ' stderr: ' + (r.stderr || '').slice(0, 200));
+}
+
+{
+    // AUTODEV_CODE_DIR overrides everything, including a present ~/Code.
+    const home = makeHome();
+    const decoy = path.join(home, 'Code', 'decoy');
+    fs.mkdirSync(path.join(decoy, '.git'), { recursive: true });
+    const elsewhere = path.join(home, 'somewhere-else');
+    const real = path.join(elsewhere, 'beta');
+    fs.mkdirSync(path.join(real, '.git'), { recursive: true });
+
+    const r = spawnSync(process.execPath, [SUBJECT].concat(OFF, ['--force']), {
+        env: Object.assign({}, process.env, { USERPROFILE: home, HOME: home, AUTODEV_CODE_DIR: elsewhere }),
+        encoding: 'utf8',
+    });
+    check('18c: AUTODEV_CODE_DIR is honoured', denies(real), (r.stdout || '') + (r.stderr || ''));
+    check('18d: and the default candidate is NOT also swept', !denies(decoy), r.stdout);
+}
+
+{
+    // The refusal. A deny matching nothing must not report success, and must not
+    // leave a marker claiming a constraint that does not exist — that marker is
+    // what made the failure invisible.
+    const home = makeHome();
+    const empty = path.join(home, 'no-repos-here');
+    fs.mkdirSync(empty, { recursive: true });
+
+    const r = spawnSync(process.execPath, [SUBJECT].concat(OFF, ['--force']), {
+        env: Object.assign({}, process.env, { USERPROFILE: home, HOME: home, AUTODEV_CODE_DIR: empty }),
+        encoding: 'utf8',
+    });
+    check('18e: zero locations exits non-zero', r.status !== 0, 'status ' + r.status);
+    check('18f: zero locations says REFUSING', /REFUSING: 0 locations/.test(r.stderr || ''), r.stderr);
+    check('18g: does NOT print a success line', !/panels DENIED/.test(r.stdout || ''), r.stdout);
+    check('18h: writes no marker', !fs.existsSync(path.join(home, '.claude', 'brain-panels-marker.json')),
+        'a marker claiming a constraint that does not exist is how this stayed invisible');
+}
+
 // ------------------------------------------------------------------- report
 
-console.log('population: ' + (passed + failures.length) + ' assertions across 17 scenarios, subject '
+console.log('population: ' + (passed + failures.length) + ' assertions across 18 scenarios, subject '
     + path.relative(process.cwd(), SUBJECT));
 if (failures.length) {
     console.log('FAIL ' + failures.length + ', pass ' + passed);
