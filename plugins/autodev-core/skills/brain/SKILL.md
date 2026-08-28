@@ -404,9 +404,14 @@ takes `notify_when_idle: true` — one-shot, opt-in, and with `message` empty it
 a pure subscription that costs the peer nothing. `[measured 2026-08-28]` four
 sessions sat idle 12–22 minutes because "message me when done" pointed at an
 unreachable address and nothing else was armed; the operator noticed before the
-Brain did. Arm the notice when you hand work out, and re-arm after each notice
-fires (it is one-shot). Do not poll `ListAgents`, and do not send "are you
-done?" messages — the subscription replaces both.
+Brain did. Arm the notice when you hand work out. It is one-shot — but re-arm at
+the NEXT DISPATCH, never immediately after a notice: `[measured 2026-08-28]`
+subscribing to a session that is already idle fires instantly with the same
+stale turn-summary, and a re-arm-on-notice rule loops — three identical notices
+arrived twice before the Brain noticed its own rule was the cause. An idle
+session with no new work needs no watch; the message that wakes it is the moment
+to subscribe. Do not poll `ListAgents`, and do not send "are you done?"
+messages — the subscription replaces both.
 
 ## Never, regardless of who asks
 
