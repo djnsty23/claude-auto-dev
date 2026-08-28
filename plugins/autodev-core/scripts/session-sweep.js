@@ -55,6 +55,11 @@ const opt = (n, d) => {
 };
 
 const STALE_DAYS = parseInt(opt('--stale-days', '14'), 10);
+// A worktree whose transcript was written this recently is treated as in use,
+// whatever the idle clock says. Generous on purpose: against a 14-day staleness
+// threshold, waiting a few hours costs nothing, and the thing on the other side
+// of the trade is deleting a worktree with a session running in it.
+const LIVE_MINUTES = parseInt(opt('--live-minutes', '240'), 10);
 // Scheduled sessions are disposable by construction — the task regenerates them
 // tomorrow — so they get a much shorter clock than hand-started work.
 const EPHEMERAL_DAYS = parseInt(opt('--ephemeral-days', '2'), 10);
@@ -257,7 +262,75 @@ function isThirdParty(s) {
  * "unknown", and unknown is treated as unsafe. An unrecognised state must never
  * fall through to "safe to delete".
  */
-function worktreeRisk(s) {
+/**
+ * Is another session record pointing at this same worktree?
+ *
+ * archive_session removes the worktree, so a worktree named by two records is
+ * one archive away from being pulled out from under whatever still uses it.
+ * This is a CROSS-RECORD property: worktreeRisk() sees one session and cannot
+ * see it, which is why `all` has to be threaded in.
+ *
+ * [measured 2026-08-28] two records, "Census lcd.js" and "Fix dead regex in
+ * ask.js", both named .../worktrees/mito-keys, and a third session was working
+ * there. Both read as 8.7d idle and would have swept.
+ */
+// Only a real worktreePath counts. Falling back to cwd here looked harmless and
+// was not: every record without a worktree carries the REPO ROOT as its cwd, so
+// they all collided and ten unrelated sessions reported shared-worktree(10).
+// Sharing a repo root is normal and is not the hazard — archive_session removes
+// WORKTREES, and a repo root is not one.
+function sessionDir(s) {
+  return s.worktreePath || null;
+}
+
+function sharedWorktree(s, all) {
+  const wt = sessionDir(s);
+  if (!wt) return null;
+  const others = all.filter((o) =>
+    o.sessionId !== s.sessionId && !o.isArchived && sessionDir(o) === wt);
+  if (!others.length) return null;
+  return `shared-worktree(${others.length + 1} sessions)`;
+}
+
+/**
+ * Has anything written a transcript for this worktree recently?
+ *
+ * The independent check on `lastActivityAt`, which is a liveness ping the app
+ * refreshes only while IT holds the session and which FREEZES rather than
+ * failing otherwise. [measured 2026-08-28] two records read as nine days idle
+ * while that worktree's transcript had been written three minutes earlier.
+ * Idle-clock staleness therefore cannot be the only thing standing between a
+ * live session and `rm -rf` of its worktree.
+ *
+ * Transcripts live in ~/.claude/projects/<slug>/, where the slug is the cwd with
+ * every '/' and '.' replaced by '-'.
+ */
+function transcriptFreshMinutes(wt) {
+  if (!wt) return null;
+  const home = process.env.CLAUDE_CONFIG_DIR
+    || path.join(process.env.HOME || process.env.USERPROFILE || '', '.claude');
+  const dir = path.join(home, 'projects', wt.replace(/[/.]/g, '-'));
+  let names;
+  try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')); } catch { return null; }
+  let newest = 0;
+  for (const n of names) {
+    try { newest = Math.max(newest, fs.statSync(path.join(dir, n)).mtimeMs); } catch { /* skip */ }
+  }
+  if (!newest) return null;
+  return (Date.now() - newest) / 60000;
+}
+
+function worktreeRisk(s, all) {
+  // Both of these are about OTHER sessions and hold whether or not the worktree
+  // still exists on disk, so they come before the existence check below.
+  const shared = all ? sharedWorktree(s, all) : null;
+  if (shared) return shared;
+
+  const fresh = transcriptFreshMinutes(sessionDir(s));
+  if (fresh !== null && fresh < LIVE_MINUTES) {
+    return `live-transcript(${Math.round(fresh)}m ago)`;
+  }
+
   const wt = s.worktreePath;
   if (!wt) return null;                  // no worktree, nothing to lose
   if (!fs.existsSync(wt)) return null;   // already cleaned up
@@ -493,7 +566,7 @@ const rows = live.map((s) => {
   const c = classify(s, prStates);
   const finished = c.state === 'MERGED' || c.state === 'STALE';
   const thirdParty = finished ? isThirdParty(s) : false;
-  const risk = finished ? worktreeRisk(s) : null;
+  const risk = finished ? worktreeRisk(s, all) : null;
   // The app has its own opt-out. Honour it rather than inventing a second one.
   const exempt = s.autoArchiveExempt === true;
   return {
