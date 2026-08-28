@@ -1,5 +1,74 @@
 # Changelog
 
+## [8.131.0] - 2026-08-28
+
+Three tools were run on macOS for the first time. Two of them reported success
+over a directory they never opened, and one of those two is a safety tool.
+
+### Fixed: a six-hour panel deny that denied nothing, and said it worked
+
+`brain-panels.js` hardcoded its code directory to `~/Downloads/code`. Anywhere
+else `readdirSync` threw, the catch returned `[]`, and `--off` printed
+`panels DENIED in 0 location(s)` before writing a marker recording `"repos": []`.
+
+`[measured 2026-08-28]` a six-hour coordination window was set on a Mac whose
+checkouts live in `~/Code`. It denied nothing. Five live sessions kept their
+panels while the marker — and `--status`, which reads the marker — reported them
+constrained. This is the enforcement behind "managed sessions must not stop on a
+panel overnight", so a silent no-op means the coordinator believes a constraint
+that is not there.
+
+`resolveCodeDir()` now tries `AUTODEV_CODE_DIR`, `~/Code`, `~/code`,
+`~/Downloads/code`, `~/Projects`, `~/src`, and returns null rather than a path
+that does not exist. `managedRepos()` prefers the repo list already in
+`brain-brief.json`, so the deny tool and the fleet survey cannot disagree.
+`--off` refuses on zero locations and writes no marker.
+
+**Why no suite caught it:** every `test-brain-panels.js` fixture built its repos
+under `HOME/Downloads/code` — the suite created the very path the subject
+hardcoded, so the layout assumption was true by construction.
+
+### Fixed: the session sweep read a path that does not exist, and called it zero
+
+`session-sweep.js` resolved its store to `APPDATA` or `~/.config`. On macOS the
+app keeps sessions under `~/Library/Application Support`, so the store read as
+empty and the script printed `POPULATION: 0`, `SAFE TO ARCHIVE: 0`, and
+`BLOCKED: 0 (none — every finished own-repo session is committed and pushed)`.
+That last line is an affirmative all-clear about a directory the process never
+opened. There were 22 records at the real path.
+
+The store path is now platform-aware, and an unreadable store refuses with exit 2
+before any count is printed.
+
+### Fixed: two session records can name one worktree
+
+`archive_session` removes the worktree it cleans up, so "is this disposable" was
+never a question about one session. `[measured 2026-08-28]` two records both
+named `.../worktrees/mito-keys` while a third session worked there, and both read
+as 8.7 days idle. New guards block a worktree named by more than one live record,
+and one whose transcript was written inside `--live-minutes` (default 240) —
+the independent check on `lastActivityAt`, which freezes rather than failing when
+the app is not holding the session.
+
+### Fixed: "Recent activity" reshuffled between runs
+
+`getRecent()` ordered by `timestamp DESC` alone, so observations captured in the
+same second came back in whatever order SQLite chose. `rowid DESC` is the
+insertion-order tiebreak.
+
+### Added: the markdown memory dashboard
+
+`mem-dashboard`, ported forward from a branch left at VERSION 7.7 with the
+pre-`plugins/` layout — merging it would have reintroduced that tree shape and
+overwritten VERSION. Adds `api.dashboard()`, `renderDashboard()`, the `dashboard`
+CLI subcommand, and the skill. Three empty-state messages stay deliberately
+distinct: DB unreadable, store empty, and sessions-but-no-observations.
+
+### Added: a suite for the observation classifier
+
+It had none in `tooling/`. 48 assertions, plus 41 for the dashboard. `npm test`
+is 58 suites, up from 56.
+
 ## [8.130.0] - 2026-08-27
 
 One fix, found by a peer session correcting a claim this session had already
