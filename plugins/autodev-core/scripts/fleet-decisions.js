@@ -82,6 +82,67 @@ function printEntry(e, indent = '  ', write = console.log) {
     if (e.because) write(`${indent}  because: ${e.because}`);
 }
 
+// -------------------------------------------------------------------- next
+//
+// Reserve the next decision NUMBER for a repo.
+//
+// `[measured 2026-08-28]` four numbering collisions in one day in a single repo.
+// Two branches allocated D18 for different decisions; later, two allocated D22
+// simultaneously — "from a namespace neither could see", because each read the
+// next number off its own unpushed DECISIONS.md while origin/main sat several
+// entries behind both.
+//
+// The contradiction check below cannot help: the numbers are not in conflict,
+// they are identical, and each session's file is internally consistent. The
+// namespace itself is the shared resource, and it was being allocated from
+// private copies.
+//
+// So the allocation moves here, where every session can see it without a fetch.
+// The reservation is appended to the same append-only log, which makes it visible
+// to --list and impossible to lose separately from the decisions themselves.
+
+if (has('--next')) {
+    const repo = val('--repo', null);
+    const author = val('--author', null);
+    const prefix = val('--prefix', 'D');
+    if (!repo || !author) {
+        console.error('REFUSING: --next needs --repo and --author.');
+        console.error('  An unattributed reservation cannot be released or questioned.');
+        process.exit(2);
+    }
+    const { entries } = readAll();
+    // Highest reserved number for this repo and prefix, whether or not the
+    // decision was ever written. A reservation is a claim on the NAME, so a
+    // session that reserved and then abandoned still burns the number — that is
+    // deliberate. Reusing an abandoned number is how two documents end up citing
+    // the same id for different things, which is the failure being prevented.
+    let max = 0;
+    for (const e of entries) {
+        if (e.repo !== repo || e.reservedPrefix !== prefix) continue;
+        const n = parseInt(e.reserved, 10);
+        if (Number.isFinite(n) && n > max) max = n;
+    }
+
+    // The floor from the repo's own file, so the first reservation does not
+    // restart at 1 in a repo that already has 23 entries on disk.
+    const floor = parseInt(val('--floor', '0'), 10) || 0;
+    const next = Math.max(max, floor) + 1;
+
+    const rec = {
+        at: new Date().toISOString(),
+        repo, author,
+        reserved: String(next), reservedPrefix: prefix,
+        subject: 'reservation', decision: `reserved ${prefix}${next}`,
+    };
+    fs.mkdirSync(path.dirname(LOG), { recursive: true });
+    fs.appendFileSync(LOG, JSON.stringify(rec) + '\n', 'utf8');
+    console.log(`${prefix}${next}`);
+    console.error(`reserved ${prefix}${next} for ${repo} by ${author}`);
+    console.error('  Pass --floor <n> with the highest number already in the repo file the');
+    console.error('  first time you use this, or the first reservation will collide with it.');
+    process.exit(0);
+}
+
 // ------------------------------------------------------------------- check
 
 if (has('--check')) {
