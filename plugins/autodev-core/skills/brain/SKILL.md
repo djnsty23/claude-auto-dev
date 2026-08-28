@@ -334,6 +334,28 @@ was filed as two entities and briefed with its own findings, twice. Reply to the
 sender id of the message you received; never construct an address from a
 transcript filename.
 
+**And give BOTH of your own addresses, for the same reason.** `[measured
+2026-08-28]` a Brain handed every session its desktop `local_<uuid>` as the
+return address. Sessions on the peer socket protocol cannot resolve that: two
+reported "Brain unreachable", one after five undelivered attempts. Their reports
+were not lost, but the Brain never saw them and briefed two sessions on work they
+had already finished.
+
+Read your own addresses rather than constructing them. `~/.claude/sessions/<pid>.json`
+holds `messagingSocketPath`, `name`, `sessionId` and `pid` — and the pid is your
+shell's PARENT, not the shell:
+
+```powershell
+$p = (Get-Process -Id $PID).Parent.Id; Get-Content "$env:USERPROFILE\.claude\sessions\$p.json"
+```
+
+macOS or Linux: `ps -o ppid= -p $$`, then read `~/.claude/sessions/<ppid>.json`.
+
+**Pull rather than rely on push.** Reading a peer's recent turns under
+`~/.claude/projects/<slug>/` is reliable, costs the peer nothing, and works when
+its messages to you do not. Do that before briefing anyone — it is also how you
+avoid assigning work already finished.
+
 **Before assigning work, check the branch that would do it — not the base you
 audited.** `[measured 2026-08-28]` a Brain audited `origin/main`, found a price
 rendered from a field named `priceUsd` while the live charge was in EUR, and
@@ -377,9 +399,14 @@ which parts of a brief are decided and which are proposed. An agent cannot tell
 them apart from tone, and a wrong claim in a brief becomes built work rather
 than a correction.
 
-**Peers self-report when they go idle. Do not poll.** If a quiet session
-matters, send one message and move on. `SendMessage` takes
-`notify_when_idle: true` for a one-shot notice.
+**Subscribe to idle notices AT DISPATCH, not after silence.** `SendMessage`
+takes `notify_when_idle: true` — one-shot, opt-in, and with `message` empty it is
+a pure subscription that costs the peer nothing. `[measured 2026-08-28]` four
+sessions sat idle 12–22 minutes because "message me when done" pointed at an
+unreachable address and nothing else was armed; the operator noticed before the
+Brain did. Arm the notice when you hand work out, and re-arm after each notice
+fires (it is one-shot). Do not poll `ListAgents`, and do not send "are you
+done?" messages — the subscription replaces both.
 
 ## Never, regardless of who asks
 
