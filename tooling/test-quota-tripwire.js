@@ -574,11 +574,41 @@ try {
             sampleCost(sp, 0), 4242);
     }
     {
+        // THE DEFAULT SOURCE IS NOW THE SHIPPED SIBLING.
+        //
+        // This used to assert the default was <home>/.claude/scripts/quota-burn.js.
+        // [measured 2026-08-28] that file existed on no machine and in no repo, so
+        // --status read `FAILED code=source-missing` and the tripwire could never
+        // fire — while silence is this tripwire's success signal. The source now
+        // ships beside the subject, and the sibling wins when it exists.
+        //
+        // The assertion is inverted rather than deleted: the old behaviour was a
+        // real bug, and a suite that still demanded it would re-introduce it.
         const sp = seed('src-default');
         const r = run(['--once', '--state', sp]);
-        has('with no --source it looks under the home directory',
+        hasnt('the default no longer points at the non-existent home path',
             r.stdout, path.join(FIXHOME, '.claude', 'scripts', 'quota-burn.js'));
-        has('...and reports the miss rather than assuming zero', r.stdout, 'code=source-missing');
+        hasnt('...and therefore no longer reports source-missing by default',
+            r.stdout, 'code=source-missing');
+    }
+    {
+        // The legacy path is still honoured for anyone who already has one there:
+        // remove the sibling and the old location must be found again. Without
+        // this, "prefer the sibling" could have been implemented as "ignore the
+        // home path entirely", and the fallback would be untested.
+        const sp = seed('src-legacy');
+        const shipped = path.join(path.dirname(SUBJECT), 'quota-burn.js');
+        const stash = shipped + '.suite-stashed';
+        let moved = false;
+        try { fs.renameSync(shipped, stash); moved = true; } catch { /* not present */ }
+        try {
+            const r = run(['--once', '--state', sp]);
+            has('with the sibling absent it falls back to the home path',
+                r.stdout, path.join(FIXHOME, '.claude', 'scripts', 'quota-burn.js'));
+            has('...and reports the miss rather than assuming zero', r.stdout, 'code=source-missing');
+        } finally {
+            if (moved) fs.renameSync(stash, shipped);
+        }
     }
 
     // =======================================================================

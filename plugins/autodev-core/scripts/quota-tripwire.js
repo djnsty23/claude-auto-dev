@@ -93,7 +93,19 @@ const OPTS = {
   diagRepeatMinutes: num('diag-repeat-minutes', 60),
   ceiling: num('ceiling', null),
   statePath: val('state', path.join(HOME, '.claude', 'quota-tripwire-state.json')),
-  sourcePath: val('source', process.env.QUOTA_BURN_JS || path.join(HOME, '.claude', 'scripts', 'quota-burn.js')),
+  // The SHIPPED sibling first. This defaulted to ~/.claude/scripts/quota-burn.js,
+  // a path outside every plugin: [measured 2026-08-28] it existed on no machine
+  // and in no repo, so --status read FAILED code=source-missing and the tripwire
+  // could never fire — while silence is this tripwire's success signal. An alarm
+  // that cannot ring is indistinguishable from one with nothing to report.
+  //
+  // Order: explicit --source, then QUOTA_BURN_JS, then the sibling that ships with
+  // this plugin, then the legacy path for anyone who already has one there.
+  sourcePath: val('source', process.env.QUOTA_BURN_JS || (() => {
+    const shipped = path.join(__dirname, 'quota-burn.js');
+    if (fs.existsSync(shipped)) return shipped;
+    return path.join(HOME, '.claude', 'scripts', 'quota-burn.js');
+  })()),
   verbose: has('verbose'),
 };
 
