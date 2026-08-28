@@ -49,8 +49,11 @@ const VALID = [DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP];
  * to do it. This is the predicate `auto` and the Stop hook want.
  */
 function isActionable(story) {
-    const p = story && story.passes;
-    return p === PENDING || p === FAILED;
+    if (!story) return false;
+    const p = story.passes;
+    // undefined counts as pending: a story authored without the key is work
+    // nobody started, not a story that does not exist to the tooling.
+    return p === PENDING || p === undefined || p === FAILED;
 }
 
 /**
@@ -61,8 +64,9 @@ function isActionable(story) {
  * waiting on him. This is the predicate reports and dashboards want.
  */
 function isOutstanding(story) {
-    const p = story && story.passes;
-    return p === PENDING || p === FAILED || p === NEEDS_SETUP;
+    if (!story) return false;
+    const p = story.passes;
+    return p === PENDING || p === undefined || p === FAILED || p === NEEDS_SETUP;
 }
 
 /** A decision NOT to do the work. Never remaining, never outstanding. */

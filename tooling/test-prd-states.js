@@ -60,6 +60,12 @@ for (const p of [null, false, true, 'deferred']) {
         S.isActionable(st(p)) === S.isOutstanding(st(p)));
 }
 
+// A story with NO passes key is pending work, not invisible. [measured
+// 2026-08-28] upstream's selector dropped undefined, so a keyless story was
+// selected by nothing and counted by nothing — gone rather than late.
+check('actionable: missing passes key', S.isActionable({}));
+check('outstanding: missing passes key', S.isOutstanding({}));
+
 // ------------------------------------------------------------- archiving
 
 check('archivable: done', S.isArchivable(st(true)));

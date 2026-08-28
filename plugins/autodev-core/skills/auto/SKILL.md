@@ -21,7 +21,7 @@ Fully autonomous development. Works through all tasks without stopping until com
 
 ## Current State
 !`git status --short`
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const done=s.filter(x=>x.passes===true).length;const pend=s.filter(x=>x.passes===null||x.passes===false).length;const defer=s.filter(x=>x.passes==='deferred').length;const setup=s.filter(x=>x.passes==='needs-setup').length;console.log('Sprint:',name,'| Done:',done,'| Pending:',pend,'| Deferred:',defer,'| Blocked on setup:',setup,'| Total:',s.length)}catch(e){console.log('No prd.json')}"`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const n=f=>s.filter(f).length;const done=n(x=>x.passes===true);const pending=n(x=>x.passes===null||x.passes===undefined);const failed=n(x=>x.passes===false);const deferred=n(x=>x.passes==='deferred');const setup=n(x=>x.passes==='needs-setup');const other=s.length-done-pending-failed-deferred-setup;console.log('Sprint:',name,'| Done:',done,'| Pending:',pending,'| FAILED:',failed,'| Deferred:',deferred,'| Needs-setup:',setup,'| Total:',s.length,other?'| OTHER: '+other+' (unrecognised passes value)':'')}catch(e){console.log('No prd.json')}"`
 
 ## Entry Flow
 
@@ -137,7 +137,10 @@ const executable = storyEntries.filter(([id, s]) =>
   // blocked on an API key or a console nobody has opened — an agent cannot
   // conjure a credential, so selecting it re-attempts a blocked story every
   // single run. [measured 2026-08-28] it was being swept back into the queue.
-  (s.passes === null || s.passes === false) &&
+  // undefined too: a story authored with no `passes` key is pending, not
+  // invisible. Dropping it here meant it was selected by nothing and (until
+  // the OTHER bucket) counted by nothing — gone, not late.
+  (s.passes === null || s.passes === undefined || s.passes === false) &&
   (s.blockedBy || []).every(dep => stories[dep]?.passes === true)
 );
 ```
