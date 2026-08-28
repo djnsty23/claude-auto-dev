@@ -496,35 +496,77 @@ function turnOff() {
     console.log('  marker outlives this process, and a Brain boot checks for it.');
 }
 
+/*
+ * Restore. Two passes, because the marker is not the whole truth.
+ *
+ * PASS 1 replays what this tool recorded. PASS 2 is a LIVE SCAN for anything
+ * still denying afterwards, and it exists because of a failure measured on
+ * 2026-08-28.
+ *
+ * A deny was set on a managed repo's ROOT at 14:25. Two worktrees of that repo
+ * were created at 18:35 and 18:38 — over an hour LATER — and both came up already
+ * denying, each carrying a panel-deny.json stamped 14:25:22.377Z. `git worktree
+ * add` copies the repo root's `.claude/` directory, so a deny propagates FORWARD
+ * IN TIME into worktrees that did not exist when it was set and therefore cannot
+ * be in the marker.
+ *
+ * --on iterated the marker alone, reported "panels restored", and left both of
+ * them denied. Two fresh sessions silently lost their only channel to the
+ * operator, which is precisely the failure this file's header exists to prevent.
+ * A restore that can only undo what it remembers is not a restore.
+ *
+ * The marker is also no longer a precondition. "No marker" used to be an early
+ * exit, so the 26-hour incident in the header — denies whose marker was gone —
+ * could not be cleared by the obvious command.
+ */
 function turnOn() {
     const record = readJSON(MARKER);
-    if (!record) {
+
+    let restored = 0, removed = 0, failed = 0;
+    for (const entry of (record && record.repos) || []) {
+        // restoreFrom() is the ONE implementation: it puts the prior state back
+        // AND deletes the sibling record. The inline copy that used to live here
+        // forgot the second half, so every panel-deny.json survived a restore and
+        // a cleared location still read as denied to --status.
+        if (restoreFrom(entry.repo, { existed: entry.existed, before: entry.before })) {
+            if (entry.existed) restored++; else removed++;
+        } else failed++;
+    }
+
+    // PASS 2 — anything still denying, marker or no marker.
+    const leftover = scanForDenies();
+    let inherited = 0;
+    for (const loc of leftover) {
+        const rec = readDenyRecord(loc);
+        if (restoreFrom(loc, rec)) inherited++; else failed++;
+    }
+
+    if (record) { try { fs.unlinkSync(MARKER); } catch { /* already gone */ } }
+
+    if (!record && !leftover.length) {
         console.log('nothing to restore: no marker at ' + MARKER);
-        console.log('  That is not proof panels are on — it is proof THIS tool did not');
-        console.log('  turn them off. Check a repo settings file directly if unsure.');
-        process.exit(0);
+        console.log('  A live scan of ' + managedRepos().length + ' location(s) found none');
+        console.log('  denying either, so this is a real all-clear, not an absent marker.');
+        return;
     }
 
-    let restored = 0, removed = 0;
-    for (const entry of record.repos || []) {
-        const sp = settingsPath(entry.repo);
-        if (!entry.existed) {
-            // We created it. Delete rather than leave an empty settings file
-            // behind, which would look deliberate to the next reader.
-            try { fs.unlinkSync(sp); removed++; } catch { /* already gone */ }
-            continue;
-        }
-        try {
-            fs.writeFileSync(sp, JSON.stringify(entry.before, null, 2) + '\n', 'utf8');
-            restored++;
-        } catch (e) {
-            console.error('  COULD NOT RESTORE ' + sp + ': ' + e.message);
-        }
-    }
-
-    fs.unlinkSync(MARKER);
     console.log('panels restored. ' + restored + ' file(s) put back, ' + removed + ' removed as ours.');
-    console.log('  set at ' + record.setAt);
+    if (inherited) {
+        console.log('  ' + inherited + ' further location(s) were denying but NOT in the marker —');
+        console.log('  cleared by live scan. A worktree created after a deny inherits the');
+        console.log('  repo root\'s .claude/, so it can be denied without ever being recorded.');
+    }
+    if (failed) console.log('  !! ' + failed + ' location(s) COULD NOT be restored — see errors above.');
+    if (record) console.log('  set at ' + record.setAt);
+
+    // Confirm by RE-READING, never by trusting the loop above.
+    const still = scanForDenies();
+    if (still.length) {
+        console.log('  !! ' + still.length + ' location(s) STILL deny after the restore:');
+        for (const s of still) console.log('     ' + rel(s));
+    } else {
+        console.log('  verified: 0 of ' + managedRepos().length + ' scanned location(s) still deny.');
+    }
 }
 
 // The scan runs on EVERY status, marker or not. A marker-only report is the

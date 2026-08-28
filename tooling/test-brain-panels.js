@@ -727,9 +727,97 @@ function plantSession(home, dir, minutesIdle) {
         'a marker claiming a constraint that does not exist is how this stayed invisible');
 }
 
+// ------------------------------- 19. a deny --on cannot remember, and must clear
+//
+// `git worktree add` copies the repo root's `.claude/` directory. A worktree
+// created AFTER a deny therefore comes up already denying, carrying a copy of the
+// sibling record, and it cannot possibly be in the marker — the marker was written
+// before it existed.
+//
+// [measured 2026-08-28] a deny set on a managed repo root at 14:25 was inherited
+// by two worktrees created at 18:35 and 18:38. --on iterated the marker alone,
+// printed "panels restored", and left both denied. Two fresh sessions silently
+// lost their only channel to the operator.
+//
+// Every assertion below failed before the two-pass restore existed.
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'orchard');
+    const known = makeWorktree(repo, 'known-at-deny-time');
+
+    const off = run(home, OFF.concat(['--force']));
+    check('19a: fixture precondition — the deny took', denies(repo), off.stdout + off.stderr);
+
+    // The worktree the operator's tooling creates an hour later, inheriting
+    // .claude/ wholesale: the deny AND its sibling record.
+    const late = makeWorktree(repo, 'created-after-the-deny');
+    fs.mkdirSync(path.join(late, '.claude'), { recursive: true });
+    fs.copyFileSync(settingsPath(repo), settingsPath(late));
+    fs.copyFileSync(path.join(repo, '.claude', 'panel-deny.json'),
+        path.join(late, '.claude', 'panel-deny.json'));
+    check('19b: fixture precondition — the late worktree inherited the deny', denies(late));
+
+    const on = run(home, ['--on']);
+    const out = (on.stdout || '') + (on.stderr || '');
+
+    check('19c: the recorded location is restored', !denies(repo), out.slice(0, 300));
+    check('19d: the known worktree is restored', !denies(known), out.slice(0, 300));
+    // THE ASSERTION. Not in the marker, still denied, must still be cleared.
+    check('19e: the LATE worktree is cleared even though the marker never saw it',
+        !denies(late), out.slice(0, 400));
+    check('19f: and --on says so rather than clearing it silently',
+        /NOT in the marker/.test(out), out.slice(0, 400));
+    check('19g: it verifies by re-reading, and reports zero still denying',
+        /verified: 0 of \d+ scanned/.test(out), out.slice(0, 400));
+
+    // The second bug in the same function: the inline restore never deleted the
+    // sibling record, so a cleared location still looked denied to --status.
+    check('19h: sibling record removed from the recorded repo',
+        !fs.existsSync(path.join(repo, '.claude', 'panel-deny.json')));
+    check('19i: sibling record removed from the late worktree',
+        !fs.existsSync(path.join(late, '.claude', 'panel-deny.json')));
+}
+
+{
+    // No marker at all — the 26-hour incident in this file's header. --on used to
+    // exit early on a missing marker, so the obvious command could not clear the
+    // exact situation the header describes.
+    const home = makeHome();
+    const repo = makeRepo(home, 'orphaned');
+    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    fs.writeFileSync(settingsPath(repo),
+        JSON.stringify({ permissions: { deny: ['AskUserQuestion'] } }, null, 2) + '\n', 'utf8');
+    check('19j: fixture precondition — denied with no marker', denies(repo));
+
+    const on = run(home, ['--on']);
+    check('19k: a marker-less deny is still cleared', !denies(repo),
+        ((on.stdout || '') + (on.stderr || '')).slice(0, 300));
+}
+
+{
+    // The known-positive control. Without it, 19e and 19k would both pass against
+    // a version that simply deleted every settings file it could find.
+    const home = makeHome();
+    const repo = makeRepo(home, 'untouched');
+    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    const mine = { permissions: { deny: ['Bash(rm:*)'] }, model: 'opus' };
+    fs.writeFileSync(settingsPath(repo), JSON.stringify(mine, null, 2) + '\n', 'utf8');
+
+    const on = run(home, ['--on']);
+    const out = (on.stdout || '') + (on.stderr || '');
+    check('19l: a settings file we never touched survives --on',
+        fs.existsSync(settingsPath(repo)), out.slice(0, 300));
+    check('19m: and its own rules are left exactly as they were',
+        JSON.stringify(readSettings(repo)) === JSON.stringify(mine),
+        JSON.stringify(readSettings(repo)));
+    check('19n: with nothing denying, --on reports a real all-clear',
+        /real all-clear/.test(out), out.slice(0, 300));
+}
+
 // ------------------------------------------------------------------- report
 
-console.log('population: ' + (passed + failures.length) + ' assertions across 18 scenarios, subject '
+console.log('population: ' + (passed + failures.length) + ' assertions across 19 scenarios, subject '
     + path.relative(process.cwd(), SUBJECT));
 if (failures.length) {
     console.log('FAIL ' + failures.length + ', pass ' + passed);
