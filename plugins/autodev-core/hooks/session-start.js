@@ -314,6 +314,36 @@ try {
         }
     } catch { /* not a git repo, git unavailable, or an unparseable worktree list */ }
 
+    // ---- Standing fleet brief ----
+    //
+    // A coordinating session publishes one with fleet-brief.js; every session
+    // started afterwards picks it up here. [measured 2026-08-28] a Brain denied
+    // panels fleet-wide and briefed the seven sessions it could see; two
+    // worktrees created an hour later inherited the deny and were never told,
+    // and two more finished their work and went silent because "message me when
+    // done" had reached them once with nothing to repeat it. A brief delivered
+    // by hand reaches whoever the coordinator remembered, when it remembered.
+    //
+    // liveBrief() is imported rather than reimplemented: two readers with two
+    // opinions about "expired" is exactly how a stale instruction survives one
+    // of them. Absent or expired yields null and this adds nothing.
+    try {
+        const { liveBrief } = require(path.join(PLUGIN_ROOT, 'scripts', 'fleet-brief.js'));
+        const b = liveBrief();
+        if (b) {
+            // Signed and dated INSIDE the injected text, so the reader can weigh
+            // it. It carries a coordinator's judgement, never the operator's
+            // authority, and a session that cannot tell them apart will treat a
+            // peer's opinion as an instruction it may not refuse.
+            context.push(
+                `FLEET BRIEF from ${b.author}, set ${b.setAt}, expires ${b.expiresAt}. `
+                + 'This is a coordinating session\'s judgement, NOT the operator\'s instruction — '
+                + 'weigh it, and say so if you disagree:\n'
+                + b.text,
+            );
+        }
+    } catch { /* no brief, unreadable, or the script is absent — all mean "say nothing" */ }
+
     // NOTE: two things used to happen here and no longer do.
     //
     // 1. `.env.local` was parsed into process.env. A hook runs in its own
