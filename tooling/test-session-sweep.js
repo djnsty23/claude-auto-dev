@@ -200,9 +200,75 @@ function writeSession(c, i) {
 
 // ---------------------------------------------------------------------- run
 
+// An unreadable store must REFUSE, never report a zero. [measured 2026-08-28]
+// the default path was `~/.config/Claude/...`, which does not exist on macOS,
+// so the store read as empty and the script printed "POPULATION: 0" followed by
+// "BLOCKED — work exists in exactly one place: 0 (none — every finished own-repo
+// session is committed and pushed)". That last line is the hazard: an
+// affirmative all-clear about a directory the process never opened. Asserting
+// only the exit code would pass a version that still printed the all-clear
+// first, so the absence of those strings is asserted by name.
+function checkUnreadableStoreRefuses() {
+  const res = spawnSync(process.execPath, [SCRIPT], {
+    encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: path.join(ROOT, 'no-such-store-dir') },
+  });
+  check('unreadable store: exits non-zero', res.status !== 0, true);
+  check('unreadable store: exit code is 2', res.status, 2);
+  check('unreadable store: says COULD NOT READ', /COULD NOT READ/.test(res.stderr || ''), true);
+  check('unreadable store: names the path it tried', (res.stderr || '').includes('no-such-store-dir'), true);
+  check('unreadable store: prints NO population count', /POPULATION:/.test(res.stdout || ''), false);
+  check('unreadable store: prints NO safe-to-archive verdict', /SAFE TO ARCHIVE/.test(res.stdout || ''), false);
+  check('unreadable store: prints NO blocked all-clear', /BLOCKED/.test(res.stdout || ''), false);
+}
+
+// The known-positive control for the above. A refusal test alone cannot tell a
+// correct guard from a script that refuses unconditionally, so a store that IS
+// readable must still produce a population.
+function checkReadableStoreStillScans() {
+  const okStore = path.join(ROOT, 'readable-empty-store');
+  fs.mkdirSync(okStore, { recursive: true });
+  const res = spawnSync(process.execPath, [SCRIPT], {
+    encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: okStore, SESSION_SWEEP_OWNER: '' },
+  });
+  check('readable store: exits 0', res.status, 0);
+  check('readable store: prints a population line', /POPULATION:/.test(res.stdout || ''), true);
+}
+
+// Every other case in this suite drives SESSION_SWEEP_STORE, so the DEFAULT path
+// is the one thing they can never see — a mutation reverting the macOS branch
+// survived the whole suite. Run with the override unset and HOME faked, and read
+// the path back out of the refusal, which names it.
+function checkPlatformDefaultPath() {
+  const fakeHome = path.join(ROOT, 'fake-home');
+  fs.mkdirSync(fakeHome, { recursive: true });
+  const env = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome };
+  delete env.SESSION_SWEEP_STORE;
+  delete env.XDG_CONFIG_HOME;
+  const res = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8', env });
+  const said = (res.stderr || '') + (res.stdout || '');
+
+  const expected = process.platform === 'darwin'
+    ? path.join(fakeHome, 'Library', 'Application Support', 'Claude', 'claude-code-sessions')
+    : process.platform === 'win32'
+      ? path.join(env.APPDATA || fakeHome, 'Claude', 'claude-code-sessions')
+      : path.join(fakeHome, '.config', 'Claude', 'claude-code-sessions');
+
+  check(`default store path for ${process.platform}`, said.includes(expected), true);
+  // The macOS regression specifically: ~/.config must NOT be where it looks.
+  if (process.platform === 'darwin') {
+    check('darwin does not fall back to ~/.config', said.includes(path.join(fakeHome, '.config')), false);
+  }
+}
+
 function run() {
   setup();
   buildCases();
+
+  checkUnreadableStoreRefuses();
+  checkReadableStoreStillScans();
+  checkPlatformDefaultPath();
 
   // Two extra records for the ephemeral clock: same 5-day idle, differing only
   // by whether a schedule launched them. Derived from the same age so the pair

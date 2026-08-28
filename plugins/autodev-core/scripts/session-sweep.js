@@ -25,8 +25,20 @@ const { execFileSync } = require('child_process');
 // SESSION_SWEEP_STORE exists so the suite can drive a synthetic population
 // through the REAL code path. The safety check is the whole point of this
 // script, and a check nothing has ever seen fail is not a check.
+// The app keeps sessions in the per-user application-data directory, and that is
+// a DIFFERENT path on each platform. `~/.config` is right on Linux only. On macOS
+// it does not exist, so the store read as empty and every downstream count printed
+// a zero — including "BLOCKED: 0 (none — every finished own-repo session is
+// committed and pushed)", an affirmative all-clear about a directory the process
+// never opened. [measured 2026-08-28] 22 records were present at the real path.
+function defaultStoreBase() {
+  if (process.platform === 'win32' && process.env.APPDATA) return process.env.APPDATA;
+  const home = process.env.HOME || '';
+  if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support');
+  return process.env.XDG_CONFIG_HOME || path.join(home, '.config');
+}
 const STORE = process.env.SESSION_SWEEP_STORE || path.join(
-  process.env.APPDATA || path.join(process.env.HOME || '', '.config'),
+  defaultStoreBase(),
   'Claude',
   'claude-code-sessions'
 );
@@ -102,9 +114,17 @@ const DENY = loadDenylist();
 
 // ---------------------------------------------------------------- collection
 
+// A store that cannot be read is NOT a store with no sessions in it, and the
+// difference decides whether "SAFE TO ARCHIVE: 0" means "nothing to do" or
+// "this probe is blind". Returning [] here made every caller print the first
+// while meaning the second. Signal it instead and let main refuse.
+function storeIsReadable() {
+  try { fs.readdirSync(STORE); return true; } catch { return false; }
+}
+
 function collectSessions() {
   const out = [];
-  if (!fs.existsSync(STORE)) return out;
+  if (!storeIsReadable()) return out;
   const walk = (dir, depth, workspace) => {
     if (depth > 4) return;
     let entries;
@@ -416,6 +436,17 @@ carries the conclusions without the cost.
 }
 
 // ---------------------------------------------------------------------- main
+
+// Refuse before any count is printed. Everything downstream reads as a real
+// zero, so an unreadable store must never reach it.
+if (!storeIsReadable()) {
+  console.error(`COULD NOT READ the session store — this is NOT a zero.`);
+  console.error(`  path: ${STORE}`);
+  console.error(`  platform: ${process.platform}`);
+  console.error(`  Nothing was scanned, so no verdict below would have meant anything.`);
+  console.error(`  Set SESSION_SWEEP_STORE to the correct directory if the app keeps it elsewhere.`);
+  process.exit(2);
+}
 
 const all = collectSessions();
 const live = all.filter((s) => !s.isArchived);
