@@ -240,6 +240,107 @@ function renderKnowledgeBrief(result, area) {
     return lines.join('\n');
 }
 
+// --- Memory dashboard (dependency-free markdown) ---
+// A pure-markdown dashboard rendered from the existing store on demand: no
+// server, no browser, no daemon, and no second database. Bounded windows keep it
+// compact. Ported forward 2026-08-28 from claude/slack-session-1z4u71, a branch
+// left at VERSION 7.7 with the pre-plugins/ layout and so unmergeable as-is.
+
+// Fold a file path to a code AREA: the first 1-2 directory segments
+// (src/auth/login.js -> "src/auth", hooks/x.js -> "hooks"). It has no cwd to
+// anchor against, so callers MUST make the path project-relative first — the
+// capture pipeline stores ABSOLUTE source_files, and an unanchored absolute path
+// folds to leading filesystem segments like "Users/andy" instead of a real area.
+// Root-level files have no directory and yield '', which callers skip.
+function deriveArea(filePath) {
+    if (!filePath) return '';
+    const norm = String(filePath).replace(/\\/g, '/');
+    const dir = path.posix.dirname(norm);
+    if (!dir || dir === '.' || dir === '/') return '';
+    const segs = dir.split('/').filter((s) => s && s !== '.' && s !== '..');
+    if (!segs.length) return '';
+    return segs.slice(0, 2).join('/');
+}
+
+// Canonical order for the by-type breakdown, so the bars do not reshuffle
+// between runs on equal counts.
+const DASHBOARD_TYPES = ['decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change'];
+
+// Pure renderer over a dashboard() result — no DB access, so it unit-tests
+// without a database. A null result (DB unavailable) and an empty store are
+// DIFFERENT messages on purpose: "could not read" must not render as "nothing
+// recorded". A project with sessions but no observations says so rather than
+// reporting an actively-used project as empty.
+function renderDashboard(data) {
+    if (!data) {
+        return '# Memory dashboard\n\nNo memory recorded yet.\n';
+    }
+    const project = data.project || '';
+    const stats = data.stats || { totalSessions: 0, totalObservations: 0, totalTokens: 0 };
+    if (!stats.totalObservations) {
+        const sessions = stats.totalSessions || 0;
+        if (sessions > 0) {
+            return `# Memory dashboard: ${project}\n\nNo observations recorded yet for \`${project}\` (${sessions} session${sessions === 1 ? '' : 's'}).\n`;
+        }
+        return `# Memory dashboard: ${project}\n\nNo memory recorded yet for \`${project}\`.\n`;
+    }
+
+    const lines = [`# Memory dashboard: ${project}`, ''];
+
+    lines.push('## Overview', '');
+    lines.push(`- Sessions: ${stats.totalSessions}`);
+    lines.push(`- Observations: ${stats.totalObservations}`);
+    lines.push(`- Tokens: ${stats.totalTokens}`);
+    lines.push('');
+
+    const counts = {};
+    for (const row of data.byType || []) counts[row.type] = row.count;
+    const present = DASHBOARD_TYPES.filter((t) => counts[t] > 0);
+    if (present.length) {
+        const max = Math.max(...present.map((t) => counts[t]));
+        lines.push('## Observations by type', '');
+        lines.push('```');
+        for (const t of present) {
+            const n = counts[t];
+            const barLen = Math.max(1, Math.round((n / max) * 12));
+            lines.push(`${t.padEnd(9)} ${'█'.repeat(barLen)}  ${n}`);
+        }
+        lines.push('```', '');
+    }
+
+    if ((data.topAreas || []).length) {
+        lines.push('## Top areas', '');
+        for (const a of data.topAreas) lines.push(`- \`${a.area}\` — ${a.count}`);
+        lines.push('');
+    }
+
+    if ((data.recentObs || []).length) {
+        lines.push('## Recent activity', '');
+        for (const o of data.recentObs) {
+            const when = (o.date || '').slice(0, 10);
+            const title = (o.title || '').length > 60 ? o.title.slice(0, 57) + '...' : (o.title || '');
+            lines.push(`- [${o.type}] ${title}${when ? ` _(${when})_` : ''}`);
+        }
+        lines.push('');
+    }
+
+    if ((data.recentSessions || []).length) {
+        lines.push('## Recent sessions', '');
+        const snip = (x) => (x && x.length > 80 ? x.slice(0, 77) + '...' : x);
+        for (const s of data.recentSessions) {
+            const when = (s.date || '').slice(0, 10);
+            let line = `- ${when || 'session'}`;
+            if (s.next_steps) line += ` — next: ${snip(s.next_steps)}`;
+            else if (s.learned) line += ` — learned: ${snip(s.learned)}`;
+            else if (s.request) line += ` — ${snip(s.request)}`;
+            lines.push(line);
+        }
+        lines.push('');
+    }
+
+    return lines.join('\n');
+}
+
 // --- Circuit breaker ---
 let _failures = 0;
 const MAX_FAILURES = 3;
@@ -469,6 +570,82 @@ const api = {
         });
     },
 
+    // Structured snapshot for renderDashboard(). Bounded to a recent window like
+    // the other reads. Returns null when the DB is unavailable, and a
+    // zero-observation object when the store is merely empty — the renderer turns
+    // those into two different messages, because they are two different facts.
+    dashboard(projectPath, opts = {}) {
+        // Keep the RAW argument. Stored source_files are absolute paths in their
+        // original case, while normalizeProject lowercases and rewrites — so
+        // path.relative must anchor against the raw arg or the prefix will not
+        // strip on a case-sensitive filesystem and every area comes out wrong.
+        const rawProjectPath = projectPath;
+        projectPath = normalizeProject(projectPath);
+        const obsLimit = opts.obsLimit || 10;
+        const sessLimit = opts.sessLimit || 5;
+        const areaLimit = opts.areaLimit || 8;
+        const scanLimit = opts.scanLimit || 500;
+        return withCircuitBreaker(() => {
+            const db = getDB();
+            if (!db) return null;
+
+            const stats = api.getStats(projectPath) || { totalSessions: 0, totalObservations: 0, byType: [] };
+            const tokenRow = db
+                .prepare('SELECT COALESCE(SUM(token_cost), 0) as tokens FROM observations WHERE project_path = ?')
+                .get(projectPath);
+
+            const areaRows = db.prepare(`
+                SELECT source_files FROM observations
+                WHERE project_path = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            `).all(projectPath, scanLimit);
+            const areaCounts = new Map();
+            for (const r of areaRows) {
+                let files = [];
+                try { files = JSON.parse(r.source_files || '[]'); } catch { files = []; }
+                if (!Array.isArray(files)) continue;
+                const seen = new Set();
+                for (const f of files) {
+                    const rel = path.isAbsolute(f) ? path.relative(rawProjectPath, f) : f;
+                    if (!rel || rel.startsWith('..')) continue; // lives outside the project
+                    const area = deriveArea(rel);
+                    if (!area || seen.has(area)) continue;      // count an area once per observation
+                    seen.add(area);
+                    areaCounts.set(area, (areaCounts.get(area) || 0) + 1);
+                }
+            }
+            const topAreas = [...areaCounts.entries()]
+                .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+                .slice(0, areaLimit)
+                .map(([area, count]) => ({ area, count }));
+
+            const recentObs = api.getRecent(projectPath, obsLimit).map((o) => ({
+                type: o.type, title: o.title, date: o.timestamp,
+            }));
+            const recentSessions = api.getRecentContext(projectPath, sessLimit).map((s) => ({
+                date: s.start_time, request: s.user_request, learned: s.learned, next_steps: s.next_steps,
+            }));
+
+            return {
+                project: projectPath,
+                stats: {
+                    totalSessions: stats.totalSessions,
+                    totalObservations: stats.totalObservations,
+                    totalTokens: (tokenRow && tokenRow.tokens) || 0,
+                },
+                byType: stats.byType || [],
+                topAreas,
+                recentObs,
+                recentSessions,
+            };
+        });
+    },
+
+    // Exposed on the api object so the suite can render without a database.
+    renderDashboard,
+    deriveArea,
+
     // Context for session start injection
     getRecentContext(projectPath, limit = 3) {
         projectPath = normalizeProject(projectPath);
@@ -509,11 +686,15 @@ const api = {
         return withCircuitBreaker(() => {
             const db = getDB();
             if (!db) return [];
+            // rowid DESC is the tiebreak, not decoration. Observations captured in
+            // the same second share a timestamp, and with timestamp alone SQLite may
+            // return those in any order it likes — so "Recent activity" reshuffled
+            // between runs on identical data. rowid is insertion order.
             const stmt = db.prepare(`
                 SELECT id, timestamp, type, title, concept
                 FROM observations
                 WHERE project_path = ?
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, rowid DESC
                 LIMIT ?
             `);
             return stmt.all(projectPath, limit);
@@ -651,6 +832,9 @@ if (require.main === module) {
             console.log(api.renderKnowledgeBrief(result, area));
             break;
         }
+        case 'dashboard':
+            console.log(api.renderDashboard(api.dashboard(projectPath)));
+            break;
         case 'cleanup':
             const removed = api.cleanup(parseInt(args[2]) || 90);
             console.log(`Cleaned up ${removed} old observations`);
@@ -681,6 +865,6 @@ if (require.main === module) {
         }
         default:
             console.log('Usage: node memory-db.js <command> [projectPath] [args]');
-            console.log('Commands: stats, recent, search <query>, semantic <query>, timeline <query>, sessions, decisions, bugs, knowledge <area>, cleanup [days], test');
+            console.log('Commands: stats, recent, search <query>, semantic <query>, timeline <query>, sessions, decisions, bugs, knowledge <area>, dashboard, cleanup [days], test');
     }
 }

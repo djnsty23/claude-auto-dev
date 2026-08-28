@@ -67,7 +67,36 @@ const has = (f) => args.includes(f);
 const val = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
-const CODE = path.join(HOME, 'Downloads', 'code');
+
+// Where the managed checkouts live. This was hardcoded to ~/Downloads/code - one
+// operator's layout. On any other machine readdirSync threw, the catch in
+// managedRepos() returned [], and `--off` printed "panels DENIED in 0
+// location(s)" as a SUCCESS. [measured 2026-08-28] a six-hour coordination
+// window was set on a Mac whose repos live in ~/Code: it denied nothing, every
+// session kept its panels, and the marker recorded a constraint that did not
+// exist. A safety tool that reports a constraint it never applied is worse than
+// one that fails outright.
+//
+// AUTODEV_CODE_DIR is the override and the seam the suite drives.
+function resolveCodeDir() {
+    if (process.env.AUTODEV_CODE_DIR) return process.env.AUTODEV_CODE_DIR;
+    for (const c of [
+        path.join(HOME, 'Code'),
+        path.join(HOME, 'code'),
+        path.join(HOME, 'Downloads', 'code'),
+        path.join(HOME, 'Projects'),
+        path.join(HOME, 'src'),
+    ]) {
+        try { if (fs.statSync(c).isDirectory()) return c; } catch { /* try the next */ }
+    }
+    return null;
+}
+const CODE = resolveCodeDir();
+
+// brain-brief.json already names the repos under management for the fleet
+// survey. Reuse it rather than adding a second source that can disagree with it.
+const BRIEF_CONFIG = path.join(HOME, '.claude', 'brain-brief.json');
+
 const MARKER = path.join(HOME, '.claude', 'brain-panels-marker.json');
 const TOOL = 'AskUserQuestion';
 
@@ -169,19 +198,48 @@ function expand(repos) {
     return out;
 }
 
+// Repos named in brain-brief.json, minus any marked retired. Returns null - NOT
+// an empty array - when the config is absent or unusable, so the caller can tell
+// "configured with nothing" from "no config", which are different facts.
+function configuredRepos() {
+    const j = readJSON(BRIEF_CONFIG);
+    if (!j || !Array.isArray(j.repos)) return null;
+    const retired = new Set(Array.isArray(j.retired) ? j.retired : []);
+    const dirs = j.repos
+        .filter((r) => typeof r === 'string')
+        .filter((r) => !retired.has(path.basename(r)) && !NEVER.has(path.basename(r)))
+        .filter((r) => { try { return fs.statSync(path.join(r, '.git')).isDirectory() || fs.statSync(path.join(r, '.git')).isFile(); } catch { return false; } });
+    return dirs.length ? dirs : null;
+}
+
 function managedRepos() {
     const explicit = val('--repos', null);
     if (explicit) {
         return expand(explicit.split(',')
-            .map((n) => path.join(CODE, n.trim()))
+            .map((n) => {
+                const t = n.trim();
+                // Accept a bare name (joined to the code dir) or a full path, so
+                // the flag still works on a machine with no single code dir.
+                return path.isAbsolute(t) ? t : (CODE ? path.join(CODE, t) : t);
+            })
             .filter((d) => fs.existsSync(d)));
     }
+    const configured = configuredRepos();
+    if (configured) return expand(configured);
+    if (!CODE) return [];
     let entries;
     try { entries = fs.readdirSync(CODE, { withFileTypes: true }); } catch { return []; }
     return expand(entries
         .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !NEVER.has(e.name))
         .map((e) => path.join(CODE, e.name))
         .filter((d) => fs.existsSync(path.join(d, '.git'))));
+}
+
+// Where a path should be printed relative to. CODE can be null now, and
+// path.relative(null, x) throws, which would turn a reporting detail into a
+// crash in the middle of a deny.
+function rel(p) {
+    try { return CODE ? path.relative(CODE, p) : p; } catch { return p; }
 }
 
 // Every location that currently denies the tool, whether or not this tool set
@@ -300,6 +358,21 @@ function turnOff() {
         process.exit(2);
     }
 
+    // A deny that matches nothing is a FAILED deny, not a quiet success. It used
+    // to print "panels DENIED in 0 location(s)" and write a marker, so the
+    // coordinator believed the fleet was constrained while every session kept its
+    // panels. [measured 2026-08-28] exactly that happened on a Mac, because CODE
+    // was hardcoded to another machine's layout.
+    if (!managedRepos().length) {
+        console.error('REFUSING: 0 locations to deny — this is NOT a successful no-op.');
+        console.error('  code dir:  ' + (CODE || 'NONE FOUND — set AUTODEV_CODE_DIR'));
+        console.error('  config:    ' + BRIEF_CONFIG + (fs.existsSync(BRIEF_CONFIG) ? '' : '  (absent)'));
+        console.error('  Nothing would have been denied, so the marker would record a');
+        console.error('  constraint that does not exist. Point AUTODEV_CODE_DIR at your');
+        console.error('  checkouts, list them in brain-brief.json, or pass --repos.');
+        process.exit(2);
+    }
+
     if (fs.existsSync(MARKER)) {
         console.error('REFUSING: a marker already exists at ' + MARKER);
         console.error('  Panels are already off, or a previous run never restored them.');
@@ -350,7 +423,7 @@ function turnOff() {
         }
         if (live.length) {
             console.error('REFUSING: ' + live.length + ' live session(s) are in locations this would deny:');
-            for (const s of live) console.error('  ' + path.relative(CODE, s.cwd) + '  [' + (s.sessionId || 'unknown id') + ']');
+            for (const s of live) console.error('  ' + rel(s.cwd) + '  [' + (s.sessionId || 'unknown id') + ']');
             console.error('');
             console.error('  Denying these takes away the only channel each has to the operator,');
             console.error('  and the sibling record only makes that DISCOVERABLE, not announced.');
@@ -401,7 +474,7 @@ function turnOff() {
     const wt = repos.filter((r) => r.includes(path.join('.claude', 'worktrees')));
     console.log('panels DENIED in ' + repos.length + ' location(s): '
         + (repos.length - wt.length) + ' repo(s), ' + wt.length + ' worktree(s)');
-    for (const r of repos) console.log('  ' + path.relative(CODE, r));
+    for (const r of repos) console.log('  ' + rel(r));
     console.log('');
     console.log('  excluded (the coordinator keeps its panels, worktrees included): ' + [...NEVER].join(', '));
     console.log('  marker: ' + MARKER);
@@ -471,7 +544,7 @@ function reportScan() {
         console.log('');
         console.log('  LIVE - within the window its author set:');
         for (const { loc, rec } of live) {
-            console.log('    ' + path.relative(CODE, loc) + '  until ' + rec.expiresAt
+            console.log('    ' + rel(loc) + '  until ' + rec.expiresAt
                 + '  (' + rec.reason + ')');
         }
     }
@@ -484,7 +557,7 @@ function reportScan() {
         console.log('  !! EXPIRED - past the window its author chose. This is a FAULT,');
         console.log('     not a state: these sessions cannot ask the operator anything.');
         for (const { loc, rec } of expired) {
-            console.log('     ' + path.relative(CODE, loc) + '  expired ' + rec.expiresAt
+            console.log('     ' + rel(loc) + '  expired ' + rec.expiresAt
                 + '  (' + rec.reason + ')');
         }
         console.log('');
@@ -498,7 +571,7 @@ function reportScan() {
         console.log('  This tool did not set these, so it will not clear them:');
         for (const loc of unaccounted) {
             console.log('    [' + classifyUnaccounted(contextFor(loc, unaccounted)) + '] '
-                + path.relative(CODE, loc));
+                + rel(loc));
         }
         console.log('');
         console.log('  Reported, not cleared. "No record" is not the same claim as');
@@ -546,7 +619,7 @@ function status() {
     console.log('panels DENIED since ' + record.setAt);
     console.log('population: ' + (record.repos || []).length + ' repo(s)');
     for (const e of record.repos || []) {
-        console.log('  ' + path.relative(CODE, e.repo) + (e.existed ? '  (had settings, will be restored)' : '  (no settings, will be removed)'));
+        console.log('  ' + rel(e.repo) + (e.existed ? '  (had settings, will be restored)' : '  (no settings, will be removed)'));
     }
     console.log('');
     reportScan();
