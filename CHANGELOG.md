@@ -1,5 +1,64 @@
 # Changelog
 
+## [8.132.0] - 2026-08-28
+
+Three checks that could not fire, found by running the tools on a machine they
+had never been run on. Each one reported healthy the whole time.
+
+### Fixed: every session read "(not addressable)" because of a path
+
+`fleet-status.js` resolved the desktop session store to `APPDATA || ~/.config`,
+correct on Linux only. On macOS `loadSessionIndex()` walked a directory that does
+not exist, the `readdirSync` catch swallowed it, and the empty Map meant **every**
+session rendered `(not addressable)` while the boot summary said `0 addressable`.
+
+`[measured 2026-08-28]` three of those "unaddressable" sessions were messaged
+successfully within the hour. Sessions also showed as `(untitled)`, because titles
+come from the same records.
+
+`auto-brain-survey.js` was the third instance of the same mistake — `ROOT`
+defaulted to `~/Downloads/code`, so the fleet survey covered nothing.
+
+Resolution now has one writer, `claude-paths.js`, exporting `sessionStore()` and
+`codeDir()`. Both validate their override rather than echoing it back, and both
+return null rather than a plausible path that is not there.
+
+### Fixed: a restore that could only undo what it remembered
+
+`--on` printed "panels restored, 12 removed as ours" and left two live locations
+denied.
+
+`git worktree add` copies the repo root's `.claude/`. A worktree created AFTER a
+deny comes up already denying and cannot be in the marker — the marker was written
+before it existed. `[measured 2026-08-28]` a deny set on a repo root at 14:25 was
+inherited by two worktrees created at 18:35 and 18:38, each carrying a
+`panel-deny.json` stamped 14:25:22.377Z. **The deny propagated forward in time.**
+Two fresh sessions silently lost their only channel to the operator.
+
+`turnOn()` now runs a live scan after the marker replay, says when it clears
+something the marker never saw, and re-reads to confirm. A missing marker is no
+longer an early exit, so the 26-hour incident this file's header describes can
+finally be cleared by the obvious command.
+
+It also never deleted the sibling record — `restoreFrom()` does both halves,
+`turnOn()` had reimplemented only the first. Twelve were left behind in one run.
+
+### Fixed: the plugin-drift block has never once fired
+
+It read `entry.version` from marketplace.json's plugin entries. `bump.js` has
+never written that field — the version goes to top-level `metadata.version`. So
+the guard was `if (undefined) continue` on every session since the block was
+added, and because the fetch-age check sits after it in the same loop body, that
+died with it. Added FOR the 2026-08-18 drift incident; silent ever since.
+
+### The pattern under all three
+
+Every one had a passing suite. Each fixture built the world the subject assumed:
+repos under the hardcoded `~/Downloads/code`, a catalog with a per-plugin
+`version` field that `bump.js` cannot produce. **A fixture that constructs the
+assumption cannot falsify it.** New cases in each suite build the shape that
+actually occurs.
+
 ## [8.131.0] - 2026-08-28
 
 Three tools were run on macOS for the first time. Two of them reported success
