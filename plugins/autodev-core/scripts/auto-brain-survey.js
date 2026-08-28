@@ -31,7 +31,16 @@ const has = (f) => args.includes(f);
 const val = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
-const ROOT = path.resolve(val('--root', path.join(HOME, 'Downloads', 'code')));
+// The default was `~/Downloads/code`, one machine's layout. Elsewhere the survey
+// silently covered nothing. Resolve instead, and keep --root as the override.
+// See claude-paths.js for the two other scripts that made the same mistake.
+// Degrades rather than throws — a missing sibling leaves ROOT null, and the
+// refusal below says so, instead of crashing before it can.
+const ROOT_RAW = val('--root', null) || (() => {
+    try { return require(path.join(__dirname, 'claude-paths.js')).codeDir(); }
+    catch { return null; }
+})();
+const ROOT = ROOT_RAW ? path.resolve(ROOT_RAW) : null;
 
 function run(cmd, a, cwd) {
     try { return execFileSync(cmd, a, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim(); }
@@ -113,6 +122,16 @@ function survey(name, dir) {
         } catch { /* absent */ }
     }
     return r;
+}
+
+// No root means nothing was scanned, which is not the same as scanning and
+// finding nothing. Say so and exit non-zero rather than printing a survey of
+// zero repos that reads exactly like a tidy machine.
+if (!ROOT) {
+    console.error('COULD NOT SURVEY: no code directory found — this is NOT "0 repos".');
+    console.error('  tried AUTODEV_CODE_DIR, ~/Code, ~/code, ~/Downloads/code, ~/Projects, ~/src');
+    console.error('  Pass --root <dir>, or set AUTODEV_CODE_DIR.');
+    process.exit(2);
 }
 
 const list = discover(ROOT);

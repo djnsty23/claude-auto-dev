@@ -186,6 +186,12 @@ function buildFixture() {
     // fleet-publish requires fleet-status the same way, so the set travels
     // together or a copy reaches into a different clone.
     fs.copyFileSync(REAL_STATUS, path.join(REAL_DIR, 'fleet-status.js'));
+    // fleet-status.js resolves the desktop session store through claude-paths.js.
+    // A copy without that sibling silently loses the store, so every session comes
+    // back "(not addressable)" and the addressability assertions below fail for a
+    // reason that has nothing to do with the subject. The shipped plugin always
+    // carries the whole scripts directory; the fixture must too.
+    fs.copyFileSync(path.join(SCRIPTS, 'claude-paths.js'), path.join(REAL_DIR, 'claude-paths.js'));
     fs.copyFileSync(REAL_HEARTBEAT, path.join(REAL_DIR, 'fleet-heartbeat.js'));
     fs.copyFileSync(REAL_PUBLISH, path.join(REAL_DIR, 'fleet-publish.js'));
 

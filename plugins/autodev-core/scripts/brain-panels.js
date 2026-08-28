@@ -77,19 +77,29 @@ const HOME = process.env.USERPROFILE || process.env.HOME || '';
 // exist. A safety tool that reports a constraint it never applied is worse than
 // one that fails outright.
 //
-// AUTODEV_CODE_DIR is the override and the seam the suite drives.
+// AUTODEV_CODE_DIR is the override and the seam the suite drives. The resolver
+// lives in claude-paths.js because three scripts made this same mistake
+// independently; one writer means fixing it once.
+//
+// The require DEGRADES rather than throws. A top-level require that can throw
+// turns "a sibling file is missing" into a crash before any of this script's own
+// refusals can run - and this script is specifically built to refuse safely when
+// it cannot see something. Scenario 15 runs a lone copy for exactly that reason.
 function resolveCodeDir() {
-    if (process.env.AUTODEV_CODE_DIR) return process.env.AUTODEV_CODE_DIR;
-    for (const c of [
-        path.join(HOME, 'Code'),
-        path.join(HOME, 'code'),
-        path.join(HOME, 'Downloads', 'code'),
-        path.join(HOME, 'Projects'),
-        path.join(HOME, 'src'),
-    ]) {
-        try { if (fs.statSync(c).isDirectory()) return c; } catch { /* try the next */ }
+    try {
+        return require(path.join(__dirname, 'claude-paths.js')).codeDir();
+    } catch {
+        // Same order as claude-paths.js. Kept deliberately short: this is the
+        // fallback for a broken install, not a second implementation to maintain.
+        if (process.env.AUTODEV_CODE_DIR) {
+            try { return fs.statSync(process.env.AUTODEV_CODE_DIR).isDirectory() ? process.env.AUTODEV_CODE_DIR : null; } catch { return null; }
+        }
+        for (const c of ['Code', 'code', path.join('Downloads', 'code'), 'Projects', 'src']) {
+            const p = path.join(HOME, c);
+            try { if (fs.statSync(p).isDirectory()) return p; } catch { /* next */ }
+        }
+        return null;
     }
-    return null;
 }
 const CODE = resolveCodeDir();
 
