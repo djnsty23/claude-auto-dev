@@ -166,6 +166,79 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
             '--decision', 'x', '--author', 'zz']).status === 3);
 }
 
+// ------------------------------------------------- number reservation (--next)
+//
+// [measured 2026-08-28] FOUR numbering collisions in one repo in one day. Two
+// branches allocated D18 for different decisions; later two allocated D22
+// simultaneously, "from a namespace neither could see" — each read the next
+// number off its own unpushed DECISIONS.md while origin/main sat behind both.
+//
+// The contradiction check cannot help: the numbers are not in conflict, they are
+// identical, and each file is internally consistent. The NAMESPACE is the shared
+// resource, and it was being allocated from private copies.
+
+{
+    const cfg = freshCfg();
+    const a = run(cfg, ['--next', '--repo', 'qr', '--author', 'session-a', '--floor', '23']);
+    check('--next prints just the id on stdout, so it can be captured',
+        a.stdout.trim() === 'D24', JSON.stringify(a.stdout));
+    check('and exits 0', a.status === 0, a.stderr);
+    // THE ASSERTION THIS EXISTS FOR: a different session must never get the same
+    // number, without either of them fetching anything.
+    const b = run(cfg, ['--next', '--repo', 'qr', '--author', 'session-b']);
+    check('a SECOND session gets the next number, not the same one',
+        b.stdout.trim() === 'D25', JSON.stringify(b.stdout));
+    const c = run(cfg, ['--next', '--repo', 'qr', '--author', 'session-c']);
+    check('and a third continues the sequence', c.stdout.trim() === 'D26', JSON.stringify(c.stdout));
+}
+
+{
+    // Scoped per repo, or every project would share one counter.
+    const cfg = freshCfg();
+    run(cfg, ['--next', '--repo', 'qr', '--author', 'a', '--floor', '40']);
+    const other = run(cfg, ['--next', '--repo', 'other', '--author', 'a']);
+    check('a different repo has its own namespace', other.stdout.trim() === 'D1', other.stdout);
+}
+
+{
+    // The floor exists so the first reservation in a repo that already has 23
+    // entries on disk does not restart at 1 and collide with all of them.
+    const cfg = freshCfg();
+    const r = run(cfg, ['--next', '--repo', 'qr', '--author', 'a', '--floor', '99']);
+    check('--floor lifts the first reservation above what is already on disk',
+        r.stdout.trim() === 'D100', r.stdout);
+    // ...and does NOT lower a sequence that has already passed it.
+    const r2 = run(cfg, ['--next', '--repo', 'qr', '--author', 'b', '--floor', '2']);
+    check('a lower --floor cannot rewind the sequence', r2.stdout.trim() === 'D101', r2.stdout);
+}
+
+{
+    const cfg = freshCfg();
+    const r = run(cfg, ['--next', '--repo', 'qr', '--author', 'a', '--prefix', 'ADR']);
+    check('--prefix is honoured', r.stdout.trim() === 'ADR1', r.stdout);
+    // Prefixes are separate namespaces: D and ADR must not share a counter.
+    const d = run(cfg, ['--next', '--repo', 'qr', '--author', 'a']);
+    check('and a different prefix has its own counter', d.stdout.trim() === 'D1', d.stdout);
+}
+
+{
+    const cfg = freshCfg();
+    check('--next without --author is refused',
+        run(cfg, ['--next', '--repo', 'qr']).status === 2);
+    check('--next without --repo is refused',
+        run(cfg, ['--next', '--author', 'a']).status === 2);
+}
+
+{
+    // A reservation is visible to --list, because it lives in the same log. If it
+    // were stored separately it could be lost independently of the decisions,
+    // which is the failure mode the sibling-record incident already demonstrated.
+    const cfg = freshCfg();
+    run(cfg, ['--next', '--repo', 'qr', '--author', 'a', '--floor', '5']);
+    const l = run(cfg, ['--list', '--repo', 'qr']);
+    check('a reservation appears in --list', /reserved D6/.test(l.stdout || ''), l.stdout);
+}
+
 // -------------------------------------------------------------------- report
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* leave it */ }
