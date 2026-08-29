@@ -494,6 +494,34 @@ for a session known to be mid-turn. Arm `notify_when_idle` in the same dispatch,
 and treat an unanswered peer message to an idle session as evidence about the
 channel, never about the session.
 
+**MERGING A PR KILLS THE SESSION THAT WROTE IT.** `[measured 2026-08-29]`
+auto-archive-after-PR-merge is ON for this operator: merging archives the desktop
+session, removes its worktree and deletes its branch. A session vanished within
+seconds of its PR landing, and the Brain noticed only because a stop watch was
+running.
+
+So the follow-up work must be captured BEFORE the merge, not after. The session
+that just built the thing holds context nobody else has, and it is about to stop
+existing. At merge time: take its proposed follow-ups, write them into the repo's
+queue file, and spawn the next chip if it belongs in the current tier. Doing this
+after the merge means reconstructing what a dead session knew.
+
+**Sessions PROPOSE follow-ups; the Brain SPAWNS the chips.** `[stated
+2026-08-29]` the operator, after a session spawned two chips of its own: *"ideally,
+it would do the work in each session or just you spawn chips, but that's your
+call."* The call: spawning is a coordination act and it belongs in one place.
+A session cannot see the headcount, the tier, or what another repo is already
+doing, and four duplicate pairs ran in one afternoon when chips were created
+without a single view of the board. What a session CAN see is what its own work
+implies next — so it writes that to the queue file, which survives its archiving,
+and the Brain decides whether it becomes a chip now or waits.
+
+**Hand each session its NEXT item alongside its current one.** `[measured
+2026-08-29]` ten of fourteen sessions finished, reported, and stopped — four of
+them idle over fifty minutes — because the only thing that could unblock them was
+a reply from a Brain writing replies serially. Finishing meant idling by
+construction. A session holding its own next item does not need the round trip.
+
 **Keep every active repo's queue one tier deep.** Sessions rightly refuse
 cross-repo work they cannot verify, so a drained repo queue idles its sessions
 no matter how much other work exists. Restock from finished work's follow-ups
