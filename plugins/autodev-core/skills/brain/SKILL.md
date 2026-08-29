@@ -494,6 +494,38 @@ for a session known to be mid-turn. Arm `notify_when_idle` in the same dispatch,
 and treat an unanswered peer message to an idle session as evidence about the
 channel, never about the session.
 
+**OPEN AS DRAFT, PUSH FREELY, MARK READY WHEN DONE — and gate on that.**
+`[stated 2026-08-29]` the operator: *"account for our github actions costs, which
+have been increasing lately. we need to batch commits before we push... CIs are
+great, just don't spam them with every session's merge."*
+
+The naive trigger is `pull_request` on `synchronize`, which tests what actually
+merges and is right about that. It is also one full run per push, and a fleet
+pushes to open PRs constantly — one PR took four fixes after review in a single
+afternoon. The naive alternative, `opened` only, tests a tree that no longer
+exists by merge time and produces a green mark that measured something else.
+
+Draft-skip resolves both: `opened, reopened, ready_for_review, synchronize` with
+a job-level `if: github.event.pull_request.draft == false`. A session rebases,
+responds to review and fixes nits at zero cost; marking ready fires the gate once
+on the merging tree. **Batching stops being a discipline someone forgets under
+pressure and becomes structural** — the expensive thing cannot happen until
+somebody deliberately says the work is done.
+
+`ready_for_review` MUST be in the event list. Without it a draft marked ready
+triggers nothing and the PR sits with an EMPTY CHECKS LIST, which reads exactly
+like a clean one — the same failure as a repo with no CI at all, rebuilt
+deliberately.
+
+**And the cost of getting a CI trigger wrong is measured, not theoretical.**
+`[measured 2026-08-29]` one repo's test gate was switched off after burning 3,148
+minutes against a 3,000/month allowance, including a single 360-minute run and
+1,053 minutes of superseded runs nobody cancelled. Its annotation read "recent
+account payments have failed or your spending limit needs to be increased". That
+repo then ran with NO CI on 6,291 tests for three weeks. So `timeout-minutes` and
+`cancel-in-progress` are not hygiene — they are the difference between one bad
+afternoon and a month in the dark.
+
 **MERGING A PR KILLS THE SESSION THAT WROTE IT.** `[measured 2026-08-29]`
 auto-archive-after-PR-merge is ON for this operator: merging archives the desktop
 session, removes its worktree and deletes its branch. A session vanished within
