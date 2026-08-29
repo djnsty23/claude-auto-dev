@@ -98,6 +98,51 @@ that something is NOT reported passes when the fixture never reached the code at
 all.** Two fixtures did this in one file — repos that were never discovered, and
 a state the function returns early on. Both looked like passing tests.
 
+## 5. Exit on what you print
+
+> A gate whose exit code ignores its own findings is not a gate. It is a report
+> with a green light stapled to it.
+
+A design checker computed `strikes = invented + pillar + laws`, printed every
+one, and then exited on **blind leaks alone**. A spec with a dozen strikes
+printed a dozen `✗` lines and returned 0, so every chain that ran it read a
+pass. Separately, three violations the same file *declared* as grammar errors
+were counted into no total at all — the comment above one said absence "is now a
+violation rather than a silent pass", and it was still a silent pass with extra
+prose.
+
+Both survived because every assertion called the checker **in-process and read
+the returned object**. No in-process test can see an exit code. If the CLI is
+how the gate is consumed, a canary has to **spawn it** and assert the status.
+
+The same trap catches the fix: a later instrument printed "answers that once
+existed are gone" and returned 0. Writing the warning is not the gate.
+
+## 6. A gate must not rewrite what it grades
+
+Exit codes are structurally blind to this, because the offender exits 0.
+
+A sweep spawned every script with no arguments to see if it self-tested. One of
+them read bare invocation as "delete both benchmark directories and rebuild them
+empty". It exited 0, the sweep scored it green, and the standing preflight
+destroyed the benchmark on every run — losing four of five recorded answers
+before anyone noticed. This repo has its own version: a killed mutation sweep
+left a mutant in the tree, `git add -A` swept it into a commit, and it was
+**pushed to a public repo** as `if (true)`.
+
+Two things follow. **Declare how a script wants to be driven** rather than
+assuming bare is safe — undeclared can still mean bare, but the premise is
+written down and a script that cannot be run bare can say so. And **snapshot the
+state a gate may read but not modify, then compare after**; `tooling/test-all.js`
+does this as `tree-inert`, and it is the only check in the run that can see a
+suite rewriting the tree.
+
+Two cautions, both measured. The comparison must be *before vs after*, not
+"is it clean" — a tree is legitimately dirty during work. And the check passes
+on emptiness: rebuilding an already-empty directory is idempotent, so it proves
+nothing until there is something to destroy. Verify it by reintroducing the
+defect with real state present.
+
 ## Before shipping a gate
 
 - [ ] It runs the real implementation, not a reconstruction.
@@ -105,3 +150,5 @@ a state the function returns early on. Both looked like passing tests.
 - [ ] Each deliberate breakage was confirmed to fire, and for the right reason.
 - [ ] Every negative assertion was confirmed to reach the code it denies.
 - [ ] No count was reported without reading its members.
+- [ ] The exit code depends on every finding the gate prints.
+- [ ] Running it leaves the tree, and the fixtures, unchanged.
