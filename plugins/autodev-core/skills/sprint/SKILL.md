@@ -57,8 +57,11 @@ Create a new sprint or advance to the next one.
 Before creating a new sprint, check if prd.json needs archiving:
 
 ```bash
-# Count completed sprints
-node -e "try{const p=require('./prd.json');const sprints=p.sprints||[];const done=sprints.filter(s=>s.passes===true||s.stories?.every(st=>st.passes===true||st.passes==='deferred'));console.log('completed:',done.length,'total:',sprints.length,'lines:',JSON.stringify(p).split(',').length)}catch{}"
+# Count completed sprints. Object.values() handles stories as the id-keyed OBJECT
+# core documents as well as an array — .every on an object threw, the catch ate it,
+# and this printed nothing at all.
+# "complete" = no agent-actionable story left (prd-states.js isActionable): needs-setup is blocked on a HUMAN, not on this sprint's engineering, and archive-prd's keep-list retains those stories — so one credential-blocked leftover must not stop the archive suggestion from ever firing.
+node -e "try{const p=require('./prd.json');const sprints=p.sprints||[];const done=sprints.filter(s=>{const st=Object.values(s.stories||{});return s.passes===true||(st.length>0&&st.every(x=>x.passes===true||x.passes==='deferred'||x.passes==='needs-setup'))});console.log('completed:',done.length,'total:',sprints.length,'lines:',JSON.stringify(p).split(',').length)}catch(e){console.log(e.code==='MODULE_NOT_FOUND'?'no prd.json yet - nothing to archive':'archive check failed: '+e.message)}"
 ```
 
 | Condition | Action |

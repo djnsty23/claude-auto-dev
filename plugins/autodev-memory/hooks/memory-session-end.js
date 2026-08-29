@@ -44,16 +44,32 @@ try {
                     const entries = Object.entries(prd.stories || {});
                     const done = entries.filter(([, v]) => v.passes === true);
                     // DELIBERATE DUPLICATE of autodev-core's prd-states.js
-                    // isActionable(). ${CLAUDE_PLUGIN_ROOT} resolves per plugin, so
+                    // isOutstanding(). ${CLAUDE_PLUGIN_ROOT} resolves per plugin, so
                     // this plugin cannot require that file — if core needs a file,
                     // core ships it, and the same applies here. Marked so the two
                     // are changed together rather than drifting silently.
                     //
-                    // `needs-setup` is blocked on a human and is NOT work an agent
-                    // can advance; counting it as pending was one of five readers
-                    // that each guessed differently. [measured 2026-08-28]
-                    const pending = entries.filter(([, v]) => v.passes === null || v.passes === false || v.passes === undefined);
-                    summary.completed = done.map(([k, v]) => `${k}: ${v.title}`).join('; ');
+                    // isOutstanding, not isActionable: this summary is a REPORT a
+                    // later session reads, and prd-states.js says isOutstanding
+                    // "is the predicate reports and dashboards want" — a
+                    // `needs-setup` story is blocked on a human, but the human is
+                    // still on the hook for it, so a report that omits it says the
+                    // project is finished while it is waiting on the operator.
+                    const pending = entries.filter(([, v]) => v.passes === null || v.passes === false || v.passes === undefined || v.passes === 'needs-setup');
+                    let completed = done.map(([k, v]) => `${k}: ${v.title}`).join('; ');
+                    // COMPLETED WORK LEAVES prd.stories. archive-prd moves finished
+                    // stories to .claude/archives/ and records only a running total
+                    // here, so a summary over `stories` alone recorded almost
+                    // nothing for a project that had shipped 159 of them. Count,
+                    // not story list — the archive keeps no per-story detail.
+                    if (prd.archived && typeof prd.archived === 'object') {
+                        const nArch = Number(prd.archived.totalCompleted);
+                        const note = Number.isFinite(nArch) && nArch >= 0
+                            ? `(+${nArch} archived)`
+                            : '(archive present, count unreadable)';
+                        completed = completed ? `${completed} ${note}` : note;
+                    }
+                    if (completed) summary.completed = completed;
                     if (pending.length > 0) {
                         summary.nextSteps = `${pending.length} tasks remaining: ${pending.map(([k]) => k).join(', ')}`;
                     }

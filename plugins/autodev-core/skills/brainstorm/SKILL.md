@@ -13,7 +13,7 @@ argument-hint: "[focus area]"
 Feature ideation + architecture improvements. Not bugs — use `audit` for that.
 
 ## Existing Tasks
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes===false?'FAILED':v.passes==='deferred'?'deferred':v.passes==='needs-setup'?'needs-setup':'pending',v.title))}catch(e){}"`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes===false?'FAILED':v.passes==='deferred'?'deferred':v.passes==='needs-setup'?'needs-setup':'pending',v.title));const a=p.archived;if(a)console.log(Number.isFinite(a.totalCompleted)?'(+'+a.totalCompleted+' archived, not listed above)':'(archive present, count unreadable)')}catch(e){}"`
 
 ## Scope: Brainstorm vs Audit
 
