@@ -35,10 +35,16 @@ let prd;
 try { prd = JSON.parse(fs.readFileSync(prdPath, 'utf8')); }
 catch (e) { console.error(`check-spec-output: ${prdPath} does not parse — ${e.message}`); process.exit(1); }
 
-// Stories may sit at the root or inside the newest sprint, same as every other
-// reader of this file.
-const sprint = Array.isArray(prd.sprints) && prd.sprints.length ? prd.sprints[prd.sprints.length - 1] : null;
-const stories = (sprint && sprint.stories) || prd.stories || {};
+// Stories may sit at the root or inside a sprint. This file had the only
+// correct version of that read; it is now the SHARED one, so there is a single
+// opinion rather than six private ones.
+//
+// One behaviour change, deliberate: this took the newest sprint only, and
+// storiesOf() takes every sprint. On a fresh spec — the thing this gate exists
+// to check — there is one sprint and the two are identical. On a multi-sprint
+// file it now also validates earlier sprints, which is what makes an id
+// duplicated ACROSS sprints visible; that was previously unreachable here.
+const stories = require(path.join(__dirname, 'prd-states.js')).storiesOf(prd);
 const entries = Object.entries(stories);
 
 if (!entries.length) { console.error('check-spec-output: zero stories — a spec that plans nothing is not a spec'); process.exit(1); }

@@ -41,7 +41,26 @@ try {
             if (fs.existsSync(prdPath)) {
                 try {
                     const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
-                    const entries = Object.entries(prd.stories || {});
+                    // DELIBERATE DUPLICATE of autodev-core's prd-states.js
+                    // storiesOf(), for the same reason the state filter below is
+                    // one: ${CLAUDE_PLUGIN_ROOT} resolves per plugin, so this
+                    // plugin cannot require that file. Marked so the two are
+                    // changed together rather than drifting silently.
+                    //
+                    // prd.json has two container shapes. This read the flat one
+                    // alone, so a nested `{ sprints: [{ stories }] }` file wrote
+                    // an EMPTY summary into memory for a full sprint — and unlike
+                    // a crash, a later session reads that as "nothing happened".
+                    // Every sprint, not just the newest: a story pending in an
+                    // earlier sprint is still work the report must carry.
+                    const sprints = Array.isArray(prd.sprints) ? prd.sprints : [];
+                    let stories = null;
+                    for (const sp of sprints) {
+                        if (!sp || !sp.stories || typeof sp.stories !== 'object') continue;
+                        stories = Object.assign(stories || {}, sp.stories);
+                    }
+                    if (!stories) stories = (prd.stories && typeof prd.stories === 'object') ? prd.stories : {};
+                    const entries = Object.entries(stories);
                     const done = entries.filter(([, v]) => v.passes === true);
                     // DELIBERATE DUPLICATE of autodev-core's prd-states.js
                     // isOutstanding(). ${CLAUDE_PLUGIN_ROOT} resolves per plugin, so

@@ -121,7 +121,11 @@ try {
     if (fs.existsSync(prdPath)) {
         try {
             const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
-            const stories = prd.stories || {};
+            // The CONTAINER is shared too, not just the states. Reading
+            // `prd.stories` alone made a nested `{ sprints: [{ stories }] }`
+            // file open the session with "0 done, 0 pending, 0 FAILED,
+            // 0 deferred" over a full sprint. `[measured 2026-08-29]`
+            const stories = require(path.join(PLUGIN_ROOT, 'scripts', 'prd-states.js')).storiesOf(prd);
             const entries = Object.entries(stories);
             // ONE counter, shared with every other reader, rather than filters
             // hand-rolled beside it. The filters that used to live here called
