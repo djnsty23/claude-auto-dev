@@ -12,7 +12,7 @@ user-invocable: true
 Show current progress with minimal token usage.
 
 ## Sprint Data
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';console.log('Project:',p.project||p.projectName||'unknown','| Sprint:',name);console.log('Done:',s.filter(x=>x.passes===true).length,'| Pending:',s.filter(x=>x.passes===null||x.passes===false).length,'| Deferred:',s.filter(x=>x.passes==='deferred').length)}catch(e){console.log('No prd.json found')}"`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const n=f=>s.filter(f).length;const done=n(x=>x.passes===true);const pending=n(x=>x.passes===null||x.passes===undefined);const failed=n(x=>x.passes===false);const deferred=n(x=>x.passes==='deferred');const setup=n(x=>x.passes==='needs-setup');const other=s.length-done-pending-failed-deferred-setup;const arch=p.archived?(Number.isFinite(p.archived.totalCompleted)?' (+'+p.archived.totalCompleted+' archived)':' (archive present, count unreadable)'):'';console.log('Project:',p.project||p.projectName||'unknown','| Sprint:',name);console.log('Done:',done+arch,'| Pending:',pending,'| FAILED:',failed,'| Deferred:',deferred,'| Needs-setup:',setup,'| Total:',s.length,other?'| OTHER: '+other+' (unrecognised passes value)':'')}catch(e){console.log('No prd.json found')}"`
 
 ## Process
 
