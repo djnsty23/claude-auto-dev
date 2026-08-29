@@ -22,7 +22,7 @@ false positives that make an audit worth ignoring. Generate it with
 `/autodev-init`.
 
 ## Existing Tasks
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes==='deferred'?'deferred':'pending',v.title))}catch(e){}"`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes===false?'FAILED':v.passes==='deferred'?'deferred':v.passes==='needs-setup'?'needs-setup':(v.passes===null||v.passes===undefined)?'pending':'UNRECOGNISED:'+v.passes,v.title))}catch(e){}"`
 
 ## Swarm Architecture
 
