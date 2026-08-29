@@ -43,14 +43,6 @@ ledger.json
 settings.backup.json
 .claude/pre-compact-state.json
 
-# Panel-deny state, written per-worktree by the fleet coordinator's deny tool.
-# Runtime state like the entries above, but it was left unignored, and its
-# allow-list entries embed real project paths — so in this PUBLIC repo it made
-# check-no-private-names.js, and therefore validate, fail in every worktree
-# where panels had been denied. The gate was failing on a machine's live
-# configuration rather than on anything anyone had written.
-.claude/panel-deny.json
-
 # Node dependencies
 node_modules/
 
