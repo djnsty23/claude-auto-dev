@@ -163,3 +163,52 @@ Out of the stated scope, but they are the same class and the same evidence cover
 - **U3.** `check-suites-can-fail.js` reports the three F3-failing suites as `RED
   already failing - fix it before trusting this result`. That wording is correct and
   load-bearing: those three suites are currently unverifiable here.
+
+## F4. PR #84 did not break the trunk. It stopped a gate from lying on this platform.
+
+`[measured 2026-08-29T20:40Z]`, added after the Brain independently reported the same
+four failures. Two things came out of checking it.
+
+**No branch holds an unmerged fix for any of the four.** Of the ten, only
+`fix/skill-gate-auto-executed-must-run` touches them, and that is PR **#84, already
+merged** at `3234e26`. The interesting finding is the inverse of the one being looked
+for: #84 is what turned those two suites red here, and it was right to.
+
+Ran `tooling/test-skill-prd-commands.js` at `3234e26^` in a throwaway worktree. Before
+#84, on this platform:
+
+```
+population: 60 SKILL.md scanned, 11 inline command(s) found, 7 of them read prd.json
+NOT RUNNABLE on a valid fixture (illustrative, truncated, or broken) - not checked, not clean:
+  [all 7, including all 5 auto-executed]
+PASS: all 0 runnable prd.json command(s) change output for every one of the 6 states.
+EXIT=0
+```
+
+**A green over an empty set.** All seven commands were excused as unrunnable and the
+gate printed PASS having verified zero. That is the pattern `rule-gate-integrity`
+documents, and it was live on this platform until this morning. #84 removed the excuse
+for `[auto-executed]` on the correct reasoning that a command running at skill load
+and injecting its output cannot be illustrative.
+
+So the trunk did not regress. A gate stopped lying. What is genuinely still wrong is
+that the gate cannot tell "this command is broken" from "this machine has no
+`/bin/sh`", and reports the second as the first.
+
+The cheapest tell that the failure is platform and not content is already inside the
+gate's own output: **the selftest's deliberately-healthy fixture fails**
+(`FAIL healthy auto-executed command passes, expected exit 0, got 1`). A real defect
+in 5 skills cannot make a synthetic known-good command fail. The failure is total, not
+selective, which is what a missing shell looks like.
+
+**U4, revising U2.** Fixing this means a portable spawn, or detecting that no POSIX
+shell is reachable and reporting UNVERIFIABLE-ON-THIS-PLATFORM. A hard red is wrong
+because it is indistinguishable from a real defect. A silent skip would be worse: it
+reinstates precisely the vacuous green #84 just removed. Name the platform in the
+output either way.
+
+**U5. Two sessions on one machine are not two measurements.** This session and the
+Brain measured the same four failures in different worktrees. That corroborates the
+failure set and says nothing about whether the trunk is broken, because both runs share
+the platform that causes it. The discriminating run is a POSIX one, and neither session
+can do it here.
