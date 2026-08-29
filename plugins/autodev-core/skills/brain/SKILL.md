@@ -136,6 +136,22 @@ cd "$env:USERPROFILE\claude-memory"; Get-Content IDEAS.md, BUG-CLASSES.md, PRACT
 `IDEAS.md` is the index. Every idea the user has raised lives there whether or
 not it was built, so check it before treating a problem as new.
 
+**And `CONTINUITY.md`, if it exists — read it FIRST when this is a fresh account
+rather than a fresh session.** `[stated 2026-08-29]` the operator, at 93% of a
+weekly quota: *"at some point in time we'll consume it all and will have to
+switch accounts. make sure our harness is ready for cross account continuity or
+resuming."* It carries what an account boundary destroys: which panel denies are
+outstanding and when they expire, which signals on this fleet are known to lie,
+the standing rules set since the last release, and what was in flight. It does
+NOT carry addresses — a new Brain reads its own from
+`~/.claude/sessions/<ppid>.json`, because a copied address is how twelve sessions
+were once given a return address that existed nowhere.
+
+An account switch costs SESSIONS, not code — measured, zero unpushed commits
+across four repos and eighteen worktrees. So do not try to reconstruct a departed
+session's reasoning. Ask the live ones, or read their last turns under
+`~/.claude/projects/<slug>/`, which costs them nothing.
+
 ### 2. The volatile half — regenerate, never believe
 
 Which PR is open, who holds which branch, what is uncommitted: all of it decays
