@@ -201,6 +201,84 @@ function run(dir, sessionId) {
             check('  nor as completed', !/S1-002/.test(row?.completed || ''));
         }
 
+        // A FAILED story is outstanding work, not completed work. The old suite
+        // never constructed passes:false, so the `=== false` arm of the pending
+        // filter was mutant-survivable.
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({
+                    stories: {
+                        'S1-001': { title: 'a', passes: true },
+                        'S1-002': { title: 'broke', passes: false },
+                    },
+                }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-fail', sid);
+            run(dir, 'sess-fail');
+            const row = readSession(sid);
+            check('a FAILED story counts as remaining', /1 tasks remaining/.test(row?.next_steps || '')
+                && /S1-002/.test(row?.next_steps || ''));
+            check('  and is not listed as completed', !/S1-002/.test(row?.completed || ''));
+        }
+
+        // needs-setup is blocked on a HUMAN but the human is still on the hook:
+        // a session report that omits it says the project is finished while it
+        // waits on the operator (prd-states.js isOutstanding). The old predicate
+        // (isActionable) put it in neither completed nor nextSteps.
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({
+                    stories: {
+                        'S1-001': { title: 'a', passes: true },
+                        'S1-002': { title: 'needs a key', passes: 'needs-setup' },
+                    },
+                }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-setup', sid);
+            run(dir, 'sess-setup');
+            const row = readSession(sid);
+            check('a needs-setup story is outstanding: appears in next_steps',
+                /1 tasks remaining/.test(row?.next_steps || '') && /S1-002/.test(row?.next_steps || ''));
+            check('  and is not listed as completed', !/S1-002/.test(row?.completed || ''));
+        }
+
+        // An archived project: completed work leaves prd.stories, so the summary
+        // must carry archived.totalCompleted or a project that shipped 159
+        // stories records almost nothing.
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({
+                    stories: { 'S9-001': { title: 'latest', passes: true } },
+                    archived: { totalCompleted: 159 },
+                }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-arch', sid);
+            run(dir, 'sess-arch');
+            const row = readSession(sid);
+            check('archived count appears in completed', /\(\+159 archived\)/.test(row?.completed || ''));
+            check('  alongside the active done story', /S9-001/.test(row?.completed || ''));
+        }
+
+        // Archive with nothing active done, and an unreadable count. "None" and
+        // "could not read it" are different statements.
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({
+                    stories: { 'S9-001': { title: 'wip', passes: null } },
+                    archived: { totalCompleted: 'lots' },
+                }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-archbad', sid);
+            run(dir, 'sess-archbad');
+            const row = readSession(sid);
+            check('unreadable archive count is named, not zeroed',
+                /archive present, count unreadable/.test(row?.completed || ''));
+        }
+
         // No prd.json at all — the session still closes, with nothing to say.
         {
             const dir = project();

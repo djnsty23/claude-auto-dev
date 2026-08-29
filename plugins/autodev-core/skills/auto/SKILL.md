@@ -21,7 +21,7 @@ Fully autonomous development. Works through all tasks without stopping until com
 
 ## Current State
 !`git status --short`
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const n=f=>s.filter(f).length;const done=n(x=>x.passes===true);const pending=n(x=>x.passes===null||x.passes===undefined);const failed=n(x=>x.passes===false);const deferred=n(x=>x.passes==='deferred');const setup=n(x=>x.passes==='needs-setup');const other=s.length-done-pending-failed-deferred-setup;console.log('Sprint:',name,'| Done:',done,'| Pending:',pending,'| FAILED:',failed,'| Deferred:',deferred,'| Needs-setup:',setup,'| Total:',s.length,other?'| OTHER: '+other+' (unrecognised passes value)':'')}catch(e){console.log('No prd.json')}"`
+!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const n=f=>s.filter(f).length;const done=n(x=>x.passes===true);const pending=n(x=>x.passes===null||x.passes===undefined);const failed=n(x=>x.passes===false);const deferred=n(x=>x.passes==='deferred');const setup=n(x=>x.passes==='needs-setup');const other=s.length-done-pending-failed-deferred-setup;const arch=p.archived?(Number.isFinite(p.archived.totalCompleted)?' (+'+p.archived.totalCompleted+' archived)':' (archive present, count unreadable)'):'';console.log('Sprint:',name,'| Done:',done+arch,'| Pending:',pending,'| FAILED:',failed,'| Deferred:',deferred,'| Needs-setup:',setup,'| Total:',s.length,other?'| OTHER: '+other+' (unrecognised passes value)':'')}catch(e){console.log('No prd.json')}"`
 
 ## Entry Flow
 
