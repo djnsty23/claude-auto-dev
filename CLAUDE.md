@@ -59,16 +59,39 @@ reference material goes in `references/` beside the skill so it loads on demand.
 the Stop hook and the drift audit. Stories live in a `stories` object keyed by id;
 the load-bearing field is **`passes`**:
 
-| value | meaning |
-|---|---|
-| `null` | pending — counts as remaining work |
-| `true` | done |
-| `false` | failed |
-| `"deferred"` | a decision **not** to do it — explicitly NOT remaining work |
+| value | remaining work? | an agent can act on it? |
+|---|---|---|
+| `null` | yes — pending | yes |
+| `true` | no — done | — |
+| `false` | yes — failed | yes, retry |
+| `"deferred"` | **no** — a decision not to do it | no |
+| `"needs-setup"` | **yes** — blocked on a human | **no** |
 
 `deferred` exists because counting it as pending (`passes !== true`) made `auto`
-block forever on work nobody intended to do. Anything reading this file must
-distinguish the four states, not treat `passes` as a boolean.
+block forever on work nobody intended to do. **`needs-setup` repeated that
+incident from the other side** and is the state most readers get wrong: it is
+work that still counts as remaining, but that no agent can advance, because it
+waits on something only a person can supply — an API key, a dashboard toggle, an
+account. Retrying it burns a turn every run; counting it as done hides a blocked
+story forever. The two questions are independent, which is why the table has two
+columns: *is this still remaining work* and *can an agent move it* are different
+questions, and four of the five values answer them differently.
+
+Anything reading this file must distinguish **all five** states, not treat
+`passes` as a boolean and not stop at four. Use `summarise()` from
+`plugins/autodev-core/scripts/prd-states.js` rather than hand-rolling a filter —
+it keeps the five apart and carries an `unrecognised` bucket so a sixth value
+surfaces instead of being folded into a neighbour. Every hand-rolled filter in
+this repo's history has been wrong, always by collapsing a state into the one
+next to it: `needs-setup` was missing from `archive-prd`'s keep-list, and
+`false` was folded into "pending" by `session-start.js` so the word *failed*
+appeared nowhere.
+
+`[measured 2026-08-29]` this table said **four** states for as long as
+`needs-setup` had existed, and briefs written from it propagated the omission to
+other sessions. A schema documented in prose drifts from the schema in code
+silently; when you add a state, this table and `prd-states.js` change in the
+same commit.
 
 `stop-auto-check.js` blocks the end of a turn while pending stories remain, so a
 wrong answer there hangs the session rather than erroring. Its escape hatches, in

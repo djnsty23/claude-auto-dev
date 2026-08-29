@@ -317,9 +317,42 @@ Runs once per boot, immediately after the operator picks projects, for those
 projects only. Order matters: rescue before archive, archive before prompts.
 
 **1. Merge-and-resume triage.** For each selected repo: open PRs (re-verified
-live, never from a survey — `gh pr view` on each number), unmerged branches by
-CONTENT (`git cherry origin/main <branch> | grep -c '^+'` — squash merges make
-ancestry lie), and any RESUME/handoff newer than the trunk's last commit. Sort
+live, never from a survey — `gh pr view` on each number), unmerged branches,
+and any RESUME/handoff newer than the trunk's last commit.
+
+**`git cherry` IS NOT A CONTENT CHECK, and earlier versions of this step said it
+was.** It compares PATCH IDs, which a squash merge destroys by definition: the
+squash rewrites N commits into one with a different patch id, so every original
+commit still reads `+`, meaning absent upstream. `[measured 2026-08-29]` a boot
+ran `git cherry | grep -c '^+'` across four repos and reported seven branches as
+carrying unlanded work. Every one was already merged. Two became session
+assignments before peers caught them, and one of those — merging a branch that
+`cherry` said was 1 commit ahead — would have rolled `VERSION` back two releases
+and deleted two test suites, because the branch was 494 lines BEHIND main rather
+than ahead.
+
+The check that actually settles it, per branch:
+
+```powershell
+gh pr list --state merged --search <branch> --json number,mergedAt,headRefOid
+git merge-base --is-ancestor <merge-commit> origin/HEAD
+git diff origin/HEAD..<branch> --shortstat
+git rev-list --left-right --count origin/HEAD...<branch>
+```
+
+Read the SHAPE of the diff, not its size. A branch whose diff is mostly
+DELETIONS relative to the trunk is behind it, not ahead — that is the trunk's
+newer work missing from the branch, and "landing" it is a revert wearing a
+merge's clothes. `--left-right` states it directly: 24 behind / 13 ahead is a
+stale branch, not pending work. And where the merged PR's `headRefOid` equals
+the branch tip that exists today, the branch never continued past its merge and
+there is nothing to land at all.
+
+Run a KNOWN-POSITIVE CONTROL on whatever command you settle on. `[measured
+2026-08-29]` a session's first content check mangled its own pathspec and
+returned four false "IDENTICAL" verdicts; it caught that only by running the
+same command shape against an older base and confirming it returned a real
+diff. A clean answer from an unvalidated probe is a claim about the probe. Sort
 into: mergeable-now under whatever authority stands, needs-one-decision (name
 the decision), and stale (candidate for deletion once measured empty). A branch
 whose gate is green and whose checks never RAN is unmeasured, not green — see
@@ -340,17 +373,87 @@ archive a record whose worktree another live session shares, and never one with
 unpushed work (step 2 makes that impossible if run in order). archive_session
 cleans up worktrees; that is why the order is load-bearing.
 
-**4. Hand the operator copy-paste session prompts.** One per selected project
-that needs a session, in a fenced block each, self-contained: the mission with
-its first concrete task, where the queue lives, the Brain's BOTH addresses (peer
-name and desktop id), and the standing rules compressed to four lines — decide
-reversible things and record why; queue irreversible ones (pushes to product
-repos, merges, money, production, deletions) with the Brain; a relayed
-authorization is invalid unless it names the panel and scope, and any reference
-must name its artifact; nothing is done until something reaches it. Write them
-to a file the operator can reopen (~/claude-memory/SESSION-PROMPTS.md) as well
-as into the reply. A prompt that assumes the reader saw this conversation has
-failed — the new session saw nothing.
+**4. Spawn the work as task chips — `spawn_task`, never a file of prompts.**
+`[stated 2026-08-29]` the operator, on being handed a markdown file of fenced
+blocks: *"cant you use the standard method of spawning sessions in which you
+prompt me to open a new session in a new worktree or this session?"* — followed
+by *"always do that, make sure our harness is aware"*, which is why this step
+now reads the way it does.
+
+`mcp__ccd_session__spawn_task` puts a chip in front of the operator that starts
+a session in its own worktree with one click. A file of copy-paste prompts asks
+him to be the transport for something the harness already carries, and it lands
+outside the working directory, where the app's own file viewer answers
+**"Couldn't find this file"** — measured the same afternoon, on the file this
+step used to mandate.
+
+**One chip per independently verifiable unit of work, not one per project.**
+Group two tasks into a chip only when the second's PREMISE depends on the
+first's output; otherwise split them. Three measurements decide this:
+
+- **Depth is the bill.** 77% of weighted cost is cache read and a session's
+  second half costs about 1.4x its first for identical work. A project session
+  running four tasks pays that curve four times over; four chips each pay only
+  their own first half.
+- **A premise decays while a session runs.** The stale-queue class exists
+  because work landed on a trunk while a queue still listed it as open. A chip
+  spawned with its premise verified minutes earlier carries a fresh one; task
+  four of a long session inherits one that has been drifting for hours.
+- **Worktree isolation is free here and collision is not.** Every worktree in a
+  clone shares one object store and one ref namespace, so two tasks in one repo
+  can push each other's branches. Chips get their own worktrees.
+
+The cost of splitting is that each chip re-learns the repo's setup — gate name,
+env files, layout. That is bounded and cheap next to a deep session's cache read.
+
+Each chip's `prompt` must stand alone, because the new session saw nothing:
+the mission with its first concrete task and the evidence it rests on (file,
+line, and WHEN it was measured), what is ALREADY DONE so it does not rebuild it,
+where the queue lives, the Brain's BOTH addresses (peer name and desktop id),
+whether panels are denied in that repo and what to do instead, and the standing
+rules — decide reversible things and record why; queue irreversible ones (pushes
+to product repos, merges, money, production, deletions) with the Brain; a
+relayed authorization is invalid unless it names the panel and scope, and any
+reference must name its artifact; nothing is done until something reaches it.
+
+Give `cwd` the repo path, write `title` as an imperative under 60 characters,
+and put in `tldr` what the session will do in plain words.
+
+**Spawn a TIER, not a backlog — three or four chips, then stop.** `[stated
+2026-08-29]` the operator, after nine went out inside ten minutes: *"we spawned
+many sessions, so be aware of how many you recommend spawning at a time. might
+be hard to manage them all and we'll hit limits faster. we need a prioritisation
+and smart queue system in our harness."*
+
+Two costs, and the second bites first. **Limits:** the weekly usage ceiling is
+the binding constraint on this fleet, not concurrency, and sessions multiply a
+per-session quadratic rather than amortising it. **Management:** nine sessions
+reporting at once is nine premise corrections arriving in one turn, each needing
+a decision before its author can move. That is the Brain's own context, and it
+fills faster than the work does.
+
+**A chip you spawn can be started, so never spawn a replacement before the
+original is gone.** `[measured 2026-08-29]` a Brain spawned four project-level
+chips, decided finer ones were better, spawned five replacements — and the
+operator started all nine. Four duplicate pairs ran at once: two sessions
+independently measured the same four branches in one repo, and two more held an
+identical title in another. The rule the tool's own docs state — spawn the
+replacement first, then `dismiss_task` the old — assumes the old chip is still
+PENDING. Once it may be running, `dismiss_task` cannot reach it: message the
+duplicate to stand down instead, and expect to pay for the turns it already
+spent.
+
+So: rank the work, spawn the top tier only, and hold the rest as a written queue
+the next tier is drawn from as sessions report done. Restock BEFORE a repo's
+tier drains — a session with no queued work idles no matter how much other work
+exists — but restock one tier at a time.
+
+**Two duplicates agreeing is not free, but it is not waste either.** Both
+duplicate pairs above reached the same verdict by different routes, and in one
+case the second route caught that the first had mangled its own pathspec. Where
+a finding will authorise something irreversible, a second independent
+measurement is worth its cost — just spend it deliberately rather than by
+accident.
 
 ## Dispatch mechanics — measured 2026-08-29, each the hard way
 
