@@ -46,7 +46,7 @@ built-in browser tools; chrome-devtools `emulate` for mobile device gates.
 
 ## Cross-cutting verification (all task types)
 
-These six apply to every task regardless of type:
+These seven apply to every task regardless of type:
 
 1. **No unsafe casts** — `as unknown as Type` on external data must be validated with Zod.
 2. **No fire-and-forget fetch** — every `fetch()` checks `res.ok` and has try/catch.
@@ -54,6 +54,40 @@ These six apply to every task regardless of type:
 4. **Design tokens** — no hardcoded colors; semantic tokens only, with the gradient-surface exception.
 5. **Form a11y** — labels on inputs, correct `type`/`inputmode`, don't block paste.
 6. **Error handling** — no empty catch blocks, no missing error states, no unhandled promise rejections.
+7. **Something must REACH it** — name what routes a user or caller to the thing
+   you built, and check that path exists. Not "the page renders" — *what links to
+   it?* Not "the helper is correct" — *do its callers call it?*
+
+### The reachability check, because one day produced four instances
+
+The artifact getting built while its wiring doesn't is the most repeated failure
+class on record here, and every instance passed its own verification:
+
+- a pricing page shipped reachable only through the sitemap — Google could find
+  it, a person browsing the site could not. "The page renders" was true.
+- a copy guard was wired into one writer of a field that had three; the unguarded
+  two kept emitting exactly what the guard strips. "The guard works" was true.
+- a data-loss fix landed in the shared library while the skill that performs the
+  operation kept its hand-rolled version. The library's tests passed.
+- a gate sat unlanded on a branch for eleven days. Its suite was green the whole
+  time, on a base 39 suites behind.
+
+The shared shape: **verification asked "is the artifact correct?" when the
+failing question was "does anything reach it?"** A page nothing links to, a
+helper nothing calls, a guard only one of N writers passes through, a fix on a
+branch nothing merged — each is indistinguishable from *not built* for everyone
+except its author.
+
+So before `passes: true`, answer in one sentence: *by what path does a user,
+caller, or runner arrive at this change?* If the sentence names an entry point —
+a nav link, a call site, a merged ref, a registered hook — check that it exists.
+If the sentence cannot be written, the task is not done; it is half of a task
+whose other half is the wiring.
+
+For enumerable surfaces, enumerate: a guard's writers, a token's consumers, a
+nav's pages. "The N sites are covered" requires stating N and how it was counted
+— by a mechanical rule, not recall. One repo's count went from two writers to
+three the day a rule replaced memory, and the third was on the most public path.
 
 ## Closing a task: the claim must be checkable, and it must be true
 
