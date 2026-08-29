@@ -103,3 +103,12 @@ build/
 # partial tracking under .claude/ is deliberate.
 .claude/design/
 .claude/preview/
+
+# 4. Panel deny state, written per-worktree by brain-panels.js. It lists the
+#    sessions and repo paths a coordinator is silencing, so it names private and
+#    client repos by construction. Found the same way as the three above: it
+#    appeared in a worktree mid-session on 2026-08-29 and turned `npm test` red
+#    for the session working there, because validate runs check-no-private-names
+#    over untracked-but-unignored files and pre-push runs validate. A tool that
+#    writes machine-local state into a PUBLIC repo must not be able to stage it.
+.claude/panel-deny.json
