@@ -63,6 +63,41 @@ const SUBJECT_OVERRIDES = {
     'test-runner-guard.js': ['tooling/test-all.js'],
     'test-superseded.js': ['tooling/check-superseded.js'],
     'test-version-drift.js': ['tooling/check-version-drift.js'],
+
+    // Found by the same reading, 2026-08-29. Both name their subject on one
+    // clear line — `const SUBJECT = path.resolve(__dirname, 'find-record-drift.js')`
+    // and `const GATE = path.resolve(__dirname, 'test-skill-prd-commands.js')` —
+    // and both were waved through as NO-SUBJECT for the documented reason:
+    // deriveSubjects() scans plugins/ and templates/ only, so a suite over
+    // tooling/ is invisible to it however plainly it is written.
+    'test-record-drift.js': ['tooling/find-record-drift.js'],
+    'test-skill-prd-commands-selftest.js': ['tooling/test-skill-prd-commands.js'],
+};
+
+/**
+ * Suites whose subject is NOT JavaScript, and so cannot be stubbed by anything
+ * this script does.
+ *
+ * This is the one honest category between "verified" and "silently skipped", and
+ * it is deliberately hard to enter. An entry must NAME the suite that canaries
+ * it instead, that suite must exist, and it must itself be checked — so an
+ * exemption can only be claimed by pointing at coverage that is real and is
+ * being verified here. A bare "cannot check this one" is not accepted, because
+ * that is an excuse list, and #84 landed the same day on precisely the
+ * principle that a gate must not carry a category meaning "waved through".
+ *
+ * test-skill-prd-commands.js executes the inline `node -e` commands embedded in
+ * SKILL.md files. Its subject is markdown. Stubbing it with JavaScript would
+ * corrupt the file and turn the suite red for the wrong reason, which is a
+ * canary firing on the wrong stimulus — worse than no canary, because it reads
+ * as coverage. What actually proves it can fail is its selftest, which feeds it
+ * a SKILL.md whose command is known-broken and asserts the gate goes red.
+ */
+const NOT_JAVASCRIPT = {
+    'test-skill-prd-commands.js': {
+        subject: 'the inline node -e commands inside plugins/*/skills/*/SKILL.md',
+        canary: 'test-skill-prd-commands-selftest.js',
+    },
 };
 
 function deriveSubjects(suiteFile) {
@@ -96,7 +131,16 @@ function deriveSubjects(suiteFile) {
     //
     //    Safe because it demands a UNIQUE match: a basename resolving to two
     //    files under plugins/ is ambiguous and ignored rather than guessed.
-    for (const m of src.matchAll(/['"`]([\w-]+\.js)['"`]/g)) {
+    //
+    //    The character class allows DOTS, and that is not cosmetic. It was
+    //    `[\w-]+\.js`, which cannot match a basename carrying a second dot, so
+    //    every `*.workflow.js`, `*.config.js` and `*.test.js` in the tree was
+    //    invisible to this rule. `[measured 2026-08-29]` that is exactly how
+    //    test-workflow-isolation.js came back NO-SUBJECT while naming
+    //    `heal-sweep.workflow.js` on one line — reported as a suite with nothing
+    //    to check, which is the silent-skip signature this rule exists to close,
+    //    reappearing inside the rule itself.
+    for (const m of src.matchAll(/['"`]([\w.-]+\.js)['"`]/g)) {
         const hits = allPluginFiles().filter((p) => path.basename(p) === m[1]);
         if (hits.length === 1) found.add(hits[0]);
     }
@@ -220,6 +264,34 @@ rows.push(checkValidator());
 for (const suite of suites) {
     if (suite === 'test-all.js') { rows.push(checkRunner(suite)); continue; }
 
+    // A non-JavaScript subject, and the claim is CHECKED rather than believed.
+    // The named canary must exist and must be a suite this run is checking; if
+    // it is not, the exemption is refused and the row falls through to UNCHECKED
+    // exactly as if it had never been declared. That is what stops this becoming
+    // the excuse list the comment on NOT_JAVASCRIPT warns about — a declaration
+    // pointing at nothing is worth nothing, and says so out loud.
+    const exempt = NOT_JAVASCRIPT[suite];
+    if (exempt) {
+        const canaryExists = fs.existsSync(path.join(__dirname, exempt.canary));
+        const canaryChecked = suites.includes(exempt.canary);
+        if (canaryExists && canaryChecked) {
+            rows.push({
+                suite,
+                status: 'NOT-JS',
+                note: 'subject is ' + exempt.subject + ' — canaried by ' + exempt.canary,
+            });
+        } else {
+            rows.push({
+                suite,
+                status: 'UNCHECKED',
+                note: 'declared NOT_JAVASCRIPT but its canary ' + exempt.canary
+                    + (canaryExists ? ' is not among the suites run' : ' does not exist')
+                    + ' — the exemption is REFUSED, so this suite is NOT verified.',
+            });
+        }
+        continue;
+    }
+
     const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(__dirname, suite));
     if (!subjects.length) {
         // Worded as a deficiency, and counted as a failure, because the previous
@@ -285,12 +357,22 @@ for (const r of rows) {
     // Anything that is not 'ok' means this script did not establish that the
     // suite can fail. There is no third category: a skip is an absence of
     // evidence, and printing it beside the passes is how it gets read as one.
-    const mark = r.status === 'ok' ? '✓' : '✗';
-    if (r.status !== 'ok') bad++;
+    // NOT-JS is the ONE status that is neither a pass nor a deficiency, and the
+    // rule above still holds for it: this script did not establish that the
+    // suite can fail, so it is NOT counted among the verified. It is counted and
+    // named on its own, because the coverage does exist and is proven by a
+    // canary this same run checks — see NOT_JAVASCRIPT, where the exemption is
+    // refused outright unless that canary is present and among the suites run.
+    // Marked '~' rather than '✓' so it can never be skimmed as a pass.
+    const mark = r.status === 'ok' ? '✓' : (r.status === 'NOT-JS' ? '~' : '✗');
+    if (r.status !== 'ok' && r.status !== 'NOT-JS') bad++;
     console.log(`  ${mark} ${r.suite.padEnd(30)} ${r.status.padEnd(9)} ${VERBOSE || r.status !== 'ok' ? r.note : ''}`);
 }
 const unchecked = rows.filter((r) => r.status === 'UNCHECKED' || r.status === 'NO-SUBJECT').length;
-const verified = rows.length - bad;
+const notJs = rows.filter((r) => r.status === 'NOT-JS').length;
+const verified = rows.length - bad - notJs;
 console.log(`\n${rows.length} suite(s) · ${verified} verified able to fail · ${bad} NOT verified` +
-            (unchecked ? ` (${unchecked} with no derivable subject)` : '') + ` · tree restored clean\n`);
+            (unchecked ? ` (${unchecked} with no derivable subject)` : '') +
+            (notJs ? ` · ${notJs} canaried elsewhere, not stubbable here` : '') +
+            ` · tree restored clean\n`);
 process.exit(bad ? 1 : 0);
