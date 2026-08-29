@@ -1,5 +1,30 @@
 # Changelog
 
+## [8.137.0] - 2026-08-29
+
+### Fixed: the opening line said "0 done" to a project that had shipped 159
+
+The SessionStart hook's sprint summary — the first line every session reads —
+counted the FILE, not the project, in two independent ways. FAILED stories were
+folded into "pending" (the hook printed `isActionable` as pending, and
+isActionable is deliberately true for FAILED too), and archived work was
+invisible (`archive-prd` moves completed stories out of `prd.json`, and the hook
+never read `prd.archived.totalCompleted`). A live project holding 5 pending,
+3 failed and 159 archived-and-shipped stories opened every session with
+`0 done, 8 pending`.
+
+The hand-rolled filters are replaced by the shared `summarise()` from
+`prd-states.js` — all five states kept apart, plus an `unrecognised` bucket so a
+sixth value surfaces instead of folding into a neighbour. An archive section
+whose count will not parse now says "count unreadable" rather than rendering as
+zero: "none" and "could not read" are opposite facts.
+
+    before  Sprint S4: 0 done, 8 pending, 0 deferred.
+    after   Sprint S4: 0 done (+159 archived), 5 pending, 3 FAILED,
+            0 deferred (8 active, 167 all-time).
+
+14 new checks; reverting the hook fails 8 of them.
+
 ## [8.136.0] - 2026-08-28
 
 ### Fixed: `passes` has five states, and nothing but `auto` knew the fifth existed
