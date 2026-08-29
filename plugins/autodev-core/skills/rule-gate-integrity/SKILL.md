@@ -77,8 +77,36 @@ Confirm two things about every deliberate breakage:
    without its preceding comma broke the file, so every test threw — which looked
    exactly like the gates correctly firing. An anchor that matches a substring in
    two places does the same.
+3. **It has DIFFERENT PROVENANCE from the check it validates.** A canary derived
+   from the same source as the check shrinks when the check shrinks, so weakening
+   the gate weakens its guard in the same motion and nothing goes red.
 
 The check is cheap: run **one** case by hand and read the actual assertion text.
+
+### Same-source canaries — two instances, one morning
+
+A colour gate iterated a `FAMILIES` array and built its known-positive by
+interpolating each family, while the regex under test was *also* built from
+`FAMILIES`. Narrowing the array back to its original two exited 0 with a clean
+tick: the gate could be silently reduced to nothing while reporting green. Found
+only because the author applied this rule to their own fix rather than to the code
+under test.
+
+Independently, a copy guard's "every declared term is detected" controls looped
+over the guard's own exported vocabulary. The whole suite passed with the
+second-most-common production term deleted from the guard — 4 of 17 terms were
+pinned by independent fixtures; the other 13 were guarded only by a loop that
+shrank with them.
+
+Both were verified as vacuous by deletion, not by reading. **The question to ask
+of any canary: what single edit makes both the check and this canary weaker at
+once?** If one exists, the canary is decorative. Pin it to a hardcoded literal, an
+expected array, or a fixture written by hand — something that cannot move when the
+subject moves.
+
+A mutant you wrote to match the detector's own pattern has the same defect in a
+different place: it verifies the assertion *wiring*, not the detector's coverage.
+The cases it cannot represent are exactly the ones a reviewer will find.
 
 ## 4. Never read a summary line as a verdict
 
