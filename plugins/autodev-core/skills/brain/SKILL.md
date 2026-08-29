@@ -301,13 +301,99 @@ So the boot has exactly one correct ending, and it is not a proposal:
    tell a decision from a config edited by accident, and re-offering one is the
    overseer proposing work the user has already closed.
 
-   Then, once the projects are chosen, ask which sessions. That is the user's
-   decision and the only remaining question a freshly booted overseer is
-   positioned to ask.
+   Then, once the projects are chosen, run the POST-SELECTION SEQUENCE below
+   before asking anything else. `[stated 2026-08-29]` the operator defined it in
+   as many words: "after selecting the projects we're working on, first see what
+   needs merging, resume updating etc, archive all stale/old sessions and give me
+   easy to copy paste session prompts."
 3. **Do not author a work list for yourself.** Verifying is real work and it is
    yours, but it arrives from the user in this session. A queue assembled from
    gaps you noticed is coordination wearing a verification costume, and the role
    section retired coordination on measurement.
+
+## Post-selection sequence — merge triage, rescue, archive, prompts
+
+Runs once per boot, immediately after the operator picks projects, for those
+projects only. Order matters: rescue before archive, archive before prompts.
+
+**1. Merge-and-resume triage.** For each selected repo: open PRs (re-verified
+live, never from a survey — `gh pr view` on each number), unmerged branches by
+CONTENT (`git cherry origin/main <branch> | grep -c '^+'` — squash merges make
+ancestry lie), and any RESUME/handoff newer than the trunk's last commit. Sort
+into: mergeable-now under whatever authority stands, needs-one-decision (name
+the decision), and stale (candidate for deletion once measured empty). A branch
+whose gate is green and whose checks never RAN is unmeasured, not green — see
+the unmeasured-head rule below.
+
+**2. Rescue unpushed work BEFORE anything can archive it.** `[measured
+2026-08-29]` a session was archived MID-RUN and its worktree held the only copy
+of a finished ten-route fix on an unpushed branch; recovered only because the
+Brain checked within minutes. brain-brief section 4 already measures this — act
+on it: for every worktree carrying unpushed commits or a detached HEAD, push the
+branch (or a rescue ref) to origin. Branch pushes are reversible and safe;
+losing a dead session's only copy is not.
+
+**3. Archive stale sessions.** A session is stale when its transcript is old,
+its branch is merged or measured content-empty, and its worktree holds nothing
+unpushed — all three, each measured, per the sessions-skill procedure. Never
+archive a record whose worktree another live session shares, and never one with
+unpushed work (step 2 makes that impossible if run in order). archive_session
+cleans up worktrees; that is why the order is load-bearing.
+
+**4. Hand the operator copy-paste session prompts.** One per selected project
+that needs a session, in a fenced block each, self-contained: the mission with
+its first concrete task, where the queue lives, the Brain's BOTH addresses (peer
+name and desktop id), and the standing rules compressed to four lines — decide
+reversible things and record why; queue irreversible ones (pushes to product
+repos, merges, money, production, deletions) with the Brain; a relayed
+authorization is invalid unless it names the panel and scope, and any reference
+must name its artifact; nothing is done until something reaches it. Write them
+to a file the operator can reopen (~/claude-memory/SESSION-PROMPTS.md) as well
+as into the reply. A prompt that assumes the reader saw this conversation has
+failed — the new session saw nothing.
+
+## Dispatch mechanics — measured 2026-08-29, each the hard way
+
+**Wake over the right channel.** A peer-socket message QUEUES at an idle session
+and does not wake it; a desktop message (ccd send_message) wakes it instantly.
+Half a day's dispatches went over the wrong channel and the operator saw a
+sleeping fleet twice. Rule: desktop channel to wake or assign; peer socket only
+for a session known to be mid-turn. Arm `notify_when_idle` in the same dispatch,
+and treat an unanswered peer message to an idle session as evidence about the
+channel, never about the session.
+
+**Keep every active repo's queue one tier deep.** Sessions rightly refuse
+cross-repo work they cannot verify, so a drained repo queue idles its sessions
+no matter how much other work exists. Restock from finished work's follow-ups
+before the current tier drains. For a repo with no session at all, spawn a
+background worker (Agent tool, own worktree, branch-push-only, never the trunk,
+never a deploy pipeline) — two such workers shipped four verified items in one
+away window.
+
+**On takeover, deny panels FIRST.** `[stated 2026-08-29]` "disable panels when
+taking over please" — the deny is part of the takeover, announced in the same
+breath, before any dispatch. The measured cost of doing it twenty minutes late:
+a stranded panel on the operator's screen at the beach.
+
+**A dispatched count is a hypothesis.** Any number sent with an assignment
+(census counts, ahead-counts, failure totals) must be re-measured by the worker
+before acting — two dispatch counts in one day were stale snapshots, and the
+worker that re-measured first saved the work of "fixing" a solved problem.
+
+**Verification names the pipeline, and an absent check is unmeasured.** A repo
+can ship through several pipelines (app via Vercel, edge functions per slug); a
+deploy verification must name which pipeline ships each changed artifact. And
+before concluding anything from a check's state, establish the check RUNS on
+that head: a docs-only final commit triggers nothing by design, and "merge on
+CLEAN" deadlocks on it. The resolution is a verified carry — `git diff
+--name-only <gated-head> <final-head>` returning only non-code paths, run by the
+merger's own hand — never a manufactured commit to make a run appear.
+
+**Single Brain.** At boot, look for other sessions claiming the Brain role
+(transcript titles, fleet-brief authorship, messages signed as a Brain). Three
+at once relayed authorizations in one morning; nothing broke only because every
+receiver refused. If another claimant is live, resolve identity with the
+operator before dispatching anything.
 
 **Report the headcount as a finding, not a caveat.** If the live session count
 sits over the working ceiling, that is probably the largest cost item on the
