@@ -6,10 +6,10 @@ not answer says so rather than rendering as empty.
 
 | field | value |
 |---|---|
-| directory | `~/Downloads/code/autodev` |
-| branch | `test/brain-panels-vacuity-gaps` |
-| upstream | `origin/test/brain-panels-vacuity-gaps` |
-| HEAD committed | 2026-08-27T22:14:01+03:00 |
+| directory | `~/Code/autodev` |
+| branch | `main` |
+| upstream | `origin/main` |
+| HEAD committed | 2026-08-29T08:02:54+03:00 |
 
 **Re-read before acting on any of this.** A resume file is a snapshot, and
 the two facts most likely to have moved are the two below: someone may have
@@ -21,9 +21,7 @@ None. A real zero: the command ran and returned nothing.
 
 ## Uncommitted changes
 
-- `M .gitignore`
-- ` M RESUME.md`
-- `?? .claude/`
+None. A real zero: the command ran and returned nothing.
 
 ## Open PRs
 
@@ -35,13 +33,10 @@ Another session may hold one of these. Run `git status` in a tree before
 touching it: a dirty tree you did not dirty means someone is in there.
 
 ```
-~/claude-auto-dev                                 86bbe22 [main]
-~/claude-auto-dev/.claude/worktrees/fix-injection 106467f [fix/shell-injection-in-shipped-scripts]
-~/claude-auto-dev/.claude/worktrees/rec-quality   cde1997 [rescue/recommendation-quality]
-~/claude-auto-dev/.claude/worktrees/rel-8123      377366b [release/8.123.0]
-~/claude-auto-dev/.claude/worktrees/rel-8125      ac691b4 (detached HEAD)
-~/claude-auto-dev/.claude/worktrees/sec-rebase    7d5517c [fix/shipped-script-injection-rebased]
-~/Downloads/code/autodev                          5555d34 [test/brain-panels-vacuity-gaps]
+~/Code/autodev                                                1500983 [main]
+~/Code/autodev/.claude/worktrees/autodev-update-3b29cd        7be5d55 (detached HEAD)
+~/Code/autodev/.claude/worktrees/brain-tree-inert             5646d5d [release/8.140.0]
+~/Code/autodev/.claude/worktrees/layout-spec-a-design-d06780  9bf2f20 (detached HEAD)
 ```
 
 ## What a reader should do first
@@ -51,4 +46,4 @@ touching it: a dirty tree you did not dirty means someone is in there.
 3. Read `CHANGELOG.md`, `README.md` - present in this directory, checked rather than assumed.
 4. Read recent commit bodies. Many projects put the reasoning there rather than in a separate design note.
 
-_These steps were derived from what is actually in `~/Downloads/code/autodev`._
+_These steps were derived from what is actually in `~/Code/autodev`._
