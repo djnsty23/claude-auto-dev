@@ -26,7 +26,7 @@ Archive completed stories to keep prd.json fast and small. Keep only last 3 spri
    If the invariant fails, STOP — write nothing, report the ids that fell
    through. This runs BEFORE step 4, not after: a loss detected after the
    write is a loss.
-4. Create archive file: .claude/archives/prd-archive-YYYY-MM.json
+4. Create archive file: prd-archives/prd-archive-YYYY-MM.json (a TRACKED path)
 5. Update main prd.json with summary
 6. Report: "Archived X stories, Y remain active" with both counts and the total
 ```
@@ -49,7 +49,7 @@ own comment block records it); route through it rather than re-deriving buckets.
   "archived": {
     "totalCompleted": 41,
     "lastArchived": "2026-01-22",
-    "files": [".claude/archives/prd-archive-2026-01.json"],
+    "files": ["prd-archives/prd-archive-2026-01.json"],
     "summary": {
       "S01-S10": "Core foundation - registry, funnels, OAuth, caching",
       "S11-S20": "Navigation, QA, dashboard, exports, favorites",
@@ -92,9 +92,16 @@ Keep only the last 3 sprints in prd.json. Archive everything older.
 ## Archive Process
 
 ```
+0. PROVE THE DESTINATION IS DURABLE — BEFORE ANY WRITE
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/check-archive-path.js prd-archives/prd-archive-$(date +%Y-%m).json
+   Exit 1 means git would ignore the path: STOP and write nothing. Do not
+   "fix" it with a .gitignore negation — a `!` rule cannot re-include a file
+   whose parent directory is excluded, so it looks like an exception and grants
+   nothing. Write somewhere outside the ignored tree instead.
+
 1. BACKUP
-   mkdir -p .claude/archives
-   cp prd.json .claude/archives/prd-backup-$(date +%Y%m%d).json
+   mkdir -p prd-archives
+   cp prd.json prd-archives/prd-backup-$(date +%Y%m%d).json
 
 2. EXTRACT ARCHIVABLE
    Filter with isArchivable() from scripts/prd-states.js (and keep type="qa"
@@ -108,7 +115,7 @@ Keep only the last 3 sprints in prd.json. Archive everything older.
    one.)
 
 4. CREATE ARCHIVE
-   Write to: .claude/archives/prd-archive-YYYY-MM.json
+   Write to: prd-archives/prd-archive-YYYY-MM.json  (step 0 proved git keeps it)
    If prd.json already has an "archived" section, this is a RE-archive:
    append to files[] and ADD to totalCompleted — never overwrite it.
 
@@ -124,6 +131,8 @@ Keep only the last 3 sprints in prd.json. Archive everything older.
 7. VALIDATE
    Ensure main prd.json < 1500 lines
    Re-assert the step-3 invariant against the files as written
+   Re-run step 0 against the archive AS WRITTEN, and confirm `git status`
+   actually shows it. Counting stories proves completeness, not durability.
 ```
 
 Note the shape this must survive: real projects store `stories` as an OBJECT
@@ -139,7 +148,7 @@ If you need details on an archived story:
 User: "What was S15 about?"
 Claude:
 1. Check archived.summary for S15 range
-2. Read .claude/archives/prd-archive-2026-01.json if needed
+2. Read prd-archives/prd-archive-2026-01.json if needed
 3. Report story details
 ```
 
@@ -167,14 +176,45 @@ Claude:
 
 ## Proving the run
 
-**Observable:** no story is lost. Stories in the archive plus stories left in
-prd.json equals the count before archiving.
+Two properties, and they fail independently. Assert both.
+
+**Observable 1 — COMPLETENESS: no story is lost.** Stories in the archive plus
+stories left in prd.json equals the count before archiving.
 
 ```bash
 node -e "const a=require('./prd.json');…"   # or just read both files and add up
 ```
 
-Check the total before and after and state both numbers. This is the one failure
-that matters here and the one that is invisible without counting: a story dropped
-during the move looks exactly like a story that was never there. If the two
-totals disagree, restore from `.claude/archives/` and do not proceed.
+Check the total before and after and state both numbers. A story dropped during
+the move looks exactly like a story that was never there.
+
+**Observable 2 — DURABILITY: the archive is a file git will keep.**
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/check-archive-path.js <the archive you wrote>
+git status --short <the archive you wrote>     # it must appear
+```
+
+⚠️ **Counting is not durability, and this is how the archive was lost.**
+`[measured 2026-08-29]` a project archived 159 completed stories, and its count
+check passed *correctly* — both files existed at that moment. The archive had
+been written to `.claude/archives/`, a gitignored path, so `git add -A` skipped
+it in silence and the commit carried only the deletion from prd.json. The archive
+and the backup taken beside it lived on one machine's disk and nowhere else.
+The count check could never have caught it: it measures completeness while the
+failure mode is durability. A check that reports green about a property it does
+not examine is this project's signature failure — see `skills/rule-gate-integrity`.
+
+**If an archive was already lost this way, it is probably recoverable.**
+Archiving REMOVES stories from a tracked `prd.json`, so the commit *before* the
+archive commit holds the complete pre-archive state — every story with its full
+`verified` record:
+
+```bash
+git log --oneline -S'"archived"' -- prd.json    # find the archive commit
+git show <archive-commit>^:prd.json             # the real backup
+```
+
+That recovered the full 164-story file in the incident above. Do **not** send
+anyone to the archive path for recovery: under the conditions that lose the
+archive, that file is exactly what does not exist.
