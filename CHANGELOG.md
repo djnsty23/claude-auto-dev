@@ -1,5 +1,121 @@
 # Changelog
 
+## [8.141.0] - 2026-08-29
+
+### Fixed: the panel deny silenced the sessions it was meant to free
+
+`brain-panels.js` excluded the coordinator by REPO NAME, which covered the whole
+tree. Every worktree cut from that clone was spared too — and a worktree cut from
+the coordinator's clone is where a spawned session lives. Three sessions the Brain
+had itself spawned stopped dead on panels nobody was watching, while every other
+repo's sessions ran. A name identifies a CLONE and never a DIRECTORY, which is why
+no name rule could get this right: the Brain and the sessions it spawns share one
+clone and one name.
+
+The exclusion is now the directory the process is actually in, resolved through
+`realpathSync` because `/var/folders` and `/private/var/folders` are the same
+directory on macOS and an unresolved compare spares nothing.
+
+Its suite asserted the defect. `coordinator WORKTREE is NOT denied` passed for as
+long as the bug existed, with a rationale that read entirely sound — true of a
+Brain running IN a worktree, false of the case that actually occurs. The new
+scenario gives two identically-named worktrees of one clone OPPOSITE verdicts
+because one is the cwd, so no name-based rule can pass both halves.
+
+That deny also wrote `.claude/panel-deny.json` into every silenced worktree —
+untracked, unignored, and naming private repo paths, so the leak gate flagged it,
+validate went red and the pre-push hook refused, for a file the session did not
+create and must not delete. The pressure that creates is toward `--no-verify` on a
+public repo's leak gate. Now gitignored, which also makes it unstageable.
+
+### Fixed: the container was a per-reader guess, the way `passes` was
+
+Six readers each decided independently where stories live in `prd.json`, and five
+read the flat `stories` container only. Against the nested `sprints[].stories`
+shape that `auto/SKILL.md` documents, `stop-auto-check.js` counted ZERO stories,
+announced "Sprint complete", and one turn later APPROVED the stop and deleted
+`.claude/auto-active` — auto mode ending with every story pending, no error, and
+nothing naming the stories. `session-start.js` injected "0 done, 0 pending, 0
+FAILED, 0 deferred" over a full sprint.
+
+277 assertions across eight suites PASSED on the broken code. That is not a
+coverage gap but a gap in what was asked: every test asked whether a reader
+handles the STATES correctly, and none asked whether the readers agree about
+where the stories ARE — a question no single-reader suite can be structured to
+pose. There is now a cross-reader class test, written by a different session from
+the fix so the two have independent provenance.
+
+`storiesOf()` flattens ALL sprints rather than taking the last. Under
+`sprints.slice(-1)` a two-sprint file with pending work in sprint 1 reproduces the
+same silent approval with a narrower trigger.
+
+### Fixed: a gate excused the one kind of command that cannot be illustrative
+
+The skill-command gate's NOT RUNNABLE hatch was kind-blind. A fenced `agent-run`
+command may legitimately be illustrative; an AUTO-EXECUTED one cannot be, because
+it runs at skill load on the user's machine and injects its output into their
+context. It also printed `PASS: all 0 runnable command(s)` and exited 0 when
+everything it found was excused — the population floor applied before exclusions
+instead of after.
+
+### Added: `fleet-stop-watch.js`, and it no longer reports its own author asleep
+
+One fleet-wide watch replaces N per-dispatch subscriptions, emitting one line per
+STOPPED (quiet >= 3m) and RESUMED transition. Keyed on `cliSessionId`, because
+titles are not unique — two live sessions shared one title on the day it was
+written, and title-keying would have merged them into one watched entity so either
+could stop in silence. The trailing `[branch]` that motivated title-stripping is
+appended by `fleet-status.js`'s text renderer and is not in the stored title at
+all.
+
+Parent transcript mtime alone is not enough: measured across eight sessions, seven
+had a parent gap over three minutes with subagents actively writing inside the
+quiet window — the worst 17.5 minutes and 320 subagent writes. A parent-only watch
+would have announced a session STOPPED mid-fan-out. Subagent trees count as
+activity.
+
+Self-exclusion arms itself from the session id rather than depending on the call
+site, because a Brain reporting ITSELF stopped was the documented first-tick
+defect. Its arming-silence test exists because mutation found the gap: `running:
+!quiet` -> `running: true` passed the entire suite, since a `--once` test cannot
+survive to the second scan.
+
+### Fixed: a watcher spoke in a voice that was not its own
+
+`watch-panels.js` inherited `fleet-status`'s stderr, so a warning from a scan that
+SUCCEEDED became the watcher's own output, on every scan for as long as the
+condition lasted. Its 55 assertions never asked whether a quiet scan is quiet when
+the subprocess is noisy. The fix is not the one-liner: dropping stderr outright
+turns a deliberately-pinned assertion red, because on FAILURE the cause must still
+reach the operator.
+
+### Fixed: CLAUDE.md documented four `passes` states and there are five
+
+`needs-setup` was missing, and it is the one readers get wrong because it answers
+the two questions differently from every other value: it IS remaining work, and no
+agent can move it. The table now has two columns for that reason. Briefs written
+from the four-state version had already propagated the omission to other sessions.
+
+### Fixed: the Brain skill called `git cherry` a content check
+
+It compares PATCH IDS, which a squash merge destroys by construction, so every
+commit of a squash-merged branch still reads as absent upstream. A boot ran it
+across four repos and reported seven branches as carrying unlanded work; all seven
+were already merged. Two reached sessions as assignments before peers refused
+them, and one would have rolled `VERSION` back two releases and deleted two test
+suites, because the branch was 494 lines BEHIND the trunk rather than ahead. The
+step now names the checks that settle it, and says to read the SHAPE of the diff.
+
+### Changed: the post-selection sequence spawns chips, not a file of prompts
+
+`spawn_task` puts a clickable chip in front of the operator that opens a session
+in its own worktree; a markdown file of fenced prompts asks him to be the
+transport for something the harness already carries, and lands outside the working
+directory where the app's file viewer cannot open it. Spawn a TIER of three or
+four, then stop — nine went out in ten minutes, all nine were started including
+four meant to be replaced, and four duplicate pairs ran at once. `dismiss_task`
+cannot reach a chip that has already been started.
+
 ## [8.140.0] - 2026-08-29
 
 ### Added: the Brain boot's post-selection sequence
