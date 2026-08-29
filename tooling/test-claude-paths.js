@@ -53,6 +53,12 @@ function env(home, extra) {
     return Object.assign({
         HOME: home, USERPROFILE: home,
         AUTODEV_CODE_DIR: '', CLAUDE_SESSION_STORE: '', XDG_CONFIG_HOME: '',
+        // APPDATA too. sessionStore() consults it on EVERY platform and pushes
+        // it FIRST on win32, so an inherited real APPDATA points at a store that
+        // exists and wins before any fake home is reached. Leaving it set made 4
+        // of 13 cases unpassable on Windows, including 'null when no store exists
+        // anywhere', which returned the developer's actual store.
+        APPDATA: '',
     }, extra || {});
 }
 

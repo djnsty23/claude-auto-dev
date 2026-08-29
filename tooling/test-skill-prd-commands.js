@@ -96,12 +96,36 @@ function skillFiles() {
   return found;
 }
 
+// Resolved once. '/bin/sh' does not exist on Windows, and execFileSync reports
+// a failure to SPAWN with status null - which the consumer below read as
+// "exits non-zero on a VALID prd.json". A missing interpreter and a failing
+// program are opposite facts and must never render the same. [measured
+// 2026-08-29] every auto-executed command on a Windows machine reported
+// `__EXITED__ null`, and five healthy skills were named broken.
+const SHELL = (() => {
+  for (const candidate of ['/bin/sh', 'sh', 'bash']) {
+    try {
+      execFileSync(candidate, ['-c', 'exit 0'], { stdio: 'ignore', timeout: 5000 });
+      return candidate;
+    } catch { /* try the next candidate */ }
+  }
+  return null;
+})();
+
 function runIn(dir, command) {
+  // Worded as a deficiency, not a category: a suite that cannot run its
+  // subject has NOT verified it and must not read as a pass.
+  if (!SHELL) return '__NOSHELL__ no POSIX shell found (/bin/sh, sh, bash)';
   try {
-    return execFileSync('/bin/sh', ['-c', command], {
+    return execFileSync(SHELL, ['-c', command], {
       cwd: dir, encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (e) {
+    // status is null when the child never ran or was killed by a signal. That
+    // is not a non-zero exit and is not evidence about the command at all.
+    if (e.status === null || e.status === undefined) {
+      return `__NOSPAWN__ ${e.code || 'unknown'}\n${e.stdout || ''}${e.stderr || ''}`;
+    }
     // A command that throws is still a result: capture it rather than losing it.
     return `__EXITED__ ${e.status}\n${e.stdout || ''}${e.stderr || ''}`;
   }
@@ -123,6 +147,10 @@ const failures = [];
 
 const notRunnable = [];
 const broken = [];
+// Commands the suite could not RUN. Kept apart from `broken` on purpose: one
+// says the command is defective, the other says this machine could not ask.
+// Folding them together is what named five healthy skills broken.
+const unverified = [];
 
 for (const { plugin, skill, file } of skills) {
   const md = fs.readFileSync(file, 'utf8');
@@ -147,6 +175,12 @@ for (const { plugin, skill, file } of skills) {
     // is injected into their context. One that exits non-zero on a VALID
     // prd.json is broken in every case, and excusing it is this gate reporting
     // green over a defect that fires on every invocation of that skill.
+    // Could-not-run is a THIRD outcome and is never a defect in the command.
+    // Counting it as broken is how this gate named five healthy skills.
+    if (base.startsWith('__NOSHELL__') || base.startsWith('__NOSPAWN__')) {
+      unverified.push({ plugin, skill, kind, rel, base: base.split('\n')[0] });
+      continue;
+    }
     if (base.startsWith('__EXITED__')) {
       if (kind === 'auto-executed') broken.push({ plugin, skill, rel, base });
       else notRunnable.push({ plugin, skill, kind, rel });
@@ -164,6 +198,7 @@ for (const { plugin, skill, file } of skills) {
 
 fs.rmSync(tmp, { recursive: true, force: true });
 
+console.log(`shell: ${SHELL || 'NONE FOUND - every command is unverified'}`);
 console.log(`population: ${skills.length} SKILL.md scanned, ${commandsFound} inline command(s) found, ` +
             `${prdCommands} of them read prd.json`);
 
@@ -176,6 +211,14 @@ if (prdCommands === 0) {
 
 // Three outcomes, never two. A command that would not run is reported as such
 // rather than counted among the clean ones.
+// Printed BEFORE the pass line, and counted as unverified rather than folded
+// into coverage. A gate that cannot run its subject has not cleared it.
+if (unverified.length) {
+  console.error(`UNVERIFIED - ${unverified.length} command(s) could not be RUN on this machine, so they are NOT checked:`);
+  for (const u of unverified) console.error(`  ${u.plugin}/${u.skill} [${u.kind}] ${u.rel}  ${u.base}`);
+  console.error('  This is a gap in coverage on this machine, not a verdict about the commands.');
+}
+
 if (notRunnable.length) {
   console.log(`NOT RUNNABLE on a valid fixture (illustrative, truncated, or broken) - not checked, not clean:`);
   for (const n of notRunnable) console.log(`  ${n.plugin}/${n.skill} [${n.kind}] ${n.rel}`);
@@ -188,7 +231,7 @@ if (notRunnable.length) {
 console.log('scope: executable commands only. Bucketing described in prose for the agent to');
 console.log('       implement is NOT covered by this gate and needs its own suite.');
 
-const checked = prdCommands - notRunnable.length - broken.length;
+const checked = prdCommands - notRunnable.length - broken.length - unverified.length;
 
 // An auto-executed command that will not run is a defect, not an exemption.
 if (broken.length) {
