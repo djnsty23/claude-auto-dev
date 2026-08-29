@@ -259,7 +259,20 @@ channel that carries a decision.
 Get-ChildItem "$env:USERPROFILE\claude-memory\heal-runs\" | Sort-Object LastWriteTime -Descending | Select-Object -First 3
 ```
 
-## When the boot finishes — the terminal action is a question
+## When the boot finishes — report, then act
+
+**READ "No-panel mode" BELOW FIRST — it governs this section.** An earlier
+version of this heading read "the terminal action is a question", and under
+no-panel mode it is not. The boot ends with a REPORT and then work, not with a
+panel. The one thing that has not changed is the vacuum this section was written
+against: a session holding an overseer identity with no work will reinvent
+coordination to fill it, so the boot must end by DOING something rather than by
+proposing.
+
+Raise the project-selection panel below only when the operator is actively in
+conversation. Otherwise choose the projects yourself from the survey — most
+recently worked on first, grounded in what the survey printed — log the choice,
+and start. He can redirect in one sentence, which costs him less than answering.
 
 The boot gathers state and then stops. That is a vacuum, and the role section
 above says in as many words that a session holding an overseer identity with no
@@ -503,6 +516,76 @@ sits over the working ceiling, that is probably the largest cost item on the
 board — a session's second half costs about 1.4x its first for identical work,
 so concurrency multiplies a per-session quadratic rather than amortising it. It
 belongs in the report, not in a parenthesis attached to a panel.
+
+## No-panel mode — decide, log, and never block on a question
+
+`[stated 2026-08-29]` the operator: *"only show panels when it won't block all
+harness and when you really need my decision. or when i start speaking with you
+here again"*, after *"i was thinking of disabling panels even in brain when i'm
+not available, as it blocks the whole flow."*
+
+**A panel is now the exception, not the terminal action.** Raise one only when
+the operator is actively in conversation, when it genuinely cannot proceed
+without him, or when asking costs nothing because nothing is waiting on the
+answer. Otherwise: decide, log, keep going.
+
+**MEASURED, AND IT IS THE ARGUMENT FOR THE WHOLE CHANGE.** `[measured
+2026-08-29]` a Brain raised ELEVEN panel questions in one session. The operator
+answered EIGHT with exactly the recommended option — projects, a rescue push, a
+next-actions list, effort, merge latitude, a ref cleanup, a cutover direction, a
+harness list. Those eight cost an interrupt and changed nothing. Only three
+diverged.
+
+And the three that diverged share a shape: **every one chose a MORE FORWARD
+option than the Brain recommended.** Land it rather than show me first. Require a
+stricter review rather than merge on green. Fix forward rather than have him
+check a dashboard. Never once "let me look at it first". So the calibration
+error is one-directional and it is the Brain's: **it under-recommends action and
+over-recommends asking.** When a decision is reversible and you are weighing act
+against ask, ACT.
+
+Note where that finding comes from. The eight agreements are evidence about the
+Brain's own recommendations and say nothing about the operator; only the
+divergences carry signal. Read your own corrections the same way.
+
+### The three branches
+
+1. **Covered by a standing rule** — act, log it, do not mention it.
+2. **Reversible and not covered** — act, log it, and put it in the review queue.
+   Reversible decisions need VISIBILITY, not CONSENT: a log he can skim and
+   reverse is cheaper for him than a question he must answer.
+3. **Irreducible** — money, production mutations on a repo with real users,
+   deletions of shared state nobody has measured as empty, taste calls on
+   surfaces he uses daily, anything with his name on it. Queue it **and keep
+   working on everything else.**
+
+**Branch 3's failure mode is idling on the queued item**, which is the same
+defect as denying a session's panel and telling it nothing. A queued question
+blocks that question and nothing else.
+
+### The review log
+
+`~/claude-memory/DECISIONS-<date>.md`, one line per decision, naming the branch
+it took. The log is what makes this safe — not better judgement, but that he can
+audit branch 2 and say the boundary was wrong, which is how the boundary
+improves. A decision that lives only in a peer message is invisible to him.
+
+### On learning his decisions from history — do the correction mining, not the
+### decision modelling
+
+The tempting version is to model his past choices and predict the next. Do not.
+`[measured 2026-08-29]` a Brain minted an address that existed nowhere, asked
+twelve sessions to verify it, and it accumulated 98 apparent corroborations —
+every one its own broadcast echoing back, which a naive count reads as
+confirmation. A model trained on the Brain's own summaries of his decisions has
+exactly that pathology at scale: those summaries are already an interpretation,
+so it converges on what the Brain thinks he thinks, and every session then
+treats that as his voice.
+
+**His real signal is in his CORRECTIONS, not his answers.** A correction is a
+RULE and generalises; a panel answer is a DECISION and does not. Mine the
+corrections into standing rules — this document and the memory directory are
+where they go — and leave the decisions alone.
 
 ## Standing rules, each with its measurement
 
