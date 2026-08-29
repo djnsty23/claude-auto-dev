@@ -1,5 +1,65 @@
 # Changelog
 
+## [8.142.0] - 2026-08-30
+
+### Fixed: three POSIX assumptions made the suite unrunnable on Windows
+
+The trunk was 68/72 on Windows with nothing modified, and the four failures had
+three unrelated causes. One was a real product defect rather than a test artifact.
+
+`session-sweep` built its transcript-lookup slug with `/[/.]/`, which replaces the
+forward slash and the dot. A Windows path contains neither, so the path came back
+unchanged and the lookup could never match the `D--proj-repo` form that is on
+disk. **session-sweep was blind to every transcript on a Windows machine.**
+`validate`'s "Slug reversal" check passes and does not cover this: it tests turning
+a slug back INTO a path, which is the other direction, and a passing slug check was
+read as covering slugs.
+
+`test-claude-paths` overrode `HOME` and `USERPROFILE` but not `APPDATA`.
+`sessionStore()` consults `APPDATA` on every platform and pushes it first on win32,
+so the developer's real store won before any fake home was reached. The clearest
+symptom was the case asserting "null when no store exists anywhere" returning an
+actual store path. Measured: 9/13 with the ambient environment, 13/13 with
+`APPDATA` cleared, same tree and same commit.
+
+The prd-commands gate hardcoded `/bin/sh`, which does not exist on Windows.
+`execFileSync` reports a failure to SPAWN with **status null**, and the consumer
+read any throw as "exits non-zero on a VALID prd.json", so five healthy skills were
+named broken because the shell to run them was absent. status null means the child
+never ran or was killed by a signal; it is not evidence about the command. The gate
+now resolves a shell, renders `__NOSPAWN__` separately, and carries an `unverified`
+bucket printed as a coverage gap and subtracted from the checked count rather than
+folded into either the pass or the broken list. It also prints the shell it
+resolved, so a machine with none says so instead of condemning every command.
+
+`test-session-sweep` went from "15/16 passed, 1 FAILED" to 79/79: the ENOENT was
+aborting the suite early, so 63 assertions were never running at all. A crash
+reported as a single failure was concealing most of a suite.
+
+Note the trunk had not regressed. Before the change that made it red, the gate
+printed "PASS: all 0 runnable prd.json command(s)" over an empty set. Red was the
+honest consequence of removing a vacuous green.
+
+### Fixed: the project panel was ordered by a stale read, silently
+
+`brain-brief.js` sorts the REPO SET by `git log -1 --format=%ct --all`. `--all`
+reads remote-tracking refs, so the sort key's freshness is capped by FETCH_HEAD,
+and the tool never fetches.
+
+`fetchAge()` already existed and was already printed, but only in section 4, where
+a stale fetch merely INFLATES a count, and an inflated count invites a check. The
+same staleness silently REORDERS the REPO SET rows, which a reader clicks rather
+than checks. The more dangerous consumer was the one with no caveat.
+
+Measured: a boot whose clones had not fetched for 45 to 69 hours ordered four repos
+wrong. One shown as `1.9d since last commit` had committed 68 minutes earlier;
+another showed `1.9d` against a real 9h. The operator picks projects off that order.
+
+Every row now prints its fetch age, and any row whose clone has not heard from
+origin more recently than the newest commit it can see is marked `!!`. An unknown
+fetch time counts as the dangerous case. Verified by discrimination rather than by a
+green run: on a live 5-repo fleet it marked 1 row and left 4 unmarked.
+
 ## [8.141.0] - 2026-08-29
 
 ### Fixed: the panel deny silenced the sessions it was meant to free
