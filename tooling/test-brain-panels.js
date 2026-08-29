@@ -122,10 +122,11 @@ function denies(dir) {
 // is about what it REFUSES, and deliberately builds its own bare arguments.
 const OFF = ['--off', '--hours', '8', '--reason', 'suite fixture run'];
 
-function run(home, args) {
+function run(home, args, cwd) {
     return spawnSync(process.execPath, [SUBJECT].concat(args), {
         env: Object.assign({}, process.env, { USERPROFILE: home, HOME: home }),
         encoding: 'utf8',
+        cwd: cwd || process.cwd(),
     });
 }
 
@@ -216,10 +217,37 @@ function run(home, args) {
     check('4b planted positive: a MANAGED worktree IS denied', denies(managedWt),
         'without this, 4d passes on a subject blind to every worktree');
 
-    check('4c coordinator repo is NOT denied', !denies(coordinator),
+    check('4c coordinator ROOT CHECKOUT is NOT denied', !denies(coordinator),
         'the panel is how the coordinator reaches the user');
-    check('4d coordinator WORKTREE is NOT denied', !denies(coordWt),
-        'excluding the repo but not its worktrees silences the coordinator anyway');
+
+    // `[measured 2026-08-29]` this assertion used to demand the OPPOSITE, and
+    // that is how three spawned sessions ended up stopped on panels nobody was
+    // watching. A worktree cut from the coordinator's clone is a spawned
+    // session's workspace, not the coordinator's; sparing it by NAME spares the
+    // wrong thing, because a name identifies a clone and never a directory.
+    check('4d a coordinator WORKTREE the Brain is not in IS denied', denies(coordWt),
+        'a spawned session lives here and a panel is a full stop for it');
+}
+
+// ---------------- 4bis. the directory the process is IN is spared, whatever its name
+
+{
+    const home = makeHome();
+    const managed = makeRepo(home, 'someproj');
+    const coordinator = makeRepo(home, 'claude-auto-dev');
+    const brainWt = makeWorktree(coordinator, 'brain-lives-here');
+    const otherWt = makeWorktree(coordinator, 'spawned-session');
+
+    // Run the subject FROM the worktree a Brain would be sitting in. Name rules
+    // cannot distinguish these two directories; only cwd can.
+    run(home, OFF, brainWt);
+
+    check('4e planted positive: an ordinary managed repo IS denied', denies(managed),
+        'without this, 4f and 4g pass on a subject that denied nothing at all');
+    check('4f the worktree the process runs IN is NOT denied', !denies(brainWt),
+        'a coordinator that cannot ask has lost the channel that carries a decision');
+    check('4g a SIBLING coordinator worktree IS denied', denies(otherWt),
+        'same clone, same name, different directory - only one of them is the Brain');
 }
 
 // ------------------------------- 5. the banner promises no hook that is absent

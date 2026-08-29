@@ -15,7 +15,11 @@
  *    coordinator's own panels too, and the panel is how the coordinator asks the
  *    user anything — turning it off would silence the one channel that carries
  *    a decision. Each managed repo gets the rule in its own
- *    `.claude/settings.local.json`; the coordinator's repo is excluded by name.
+ *    `.claude/settings.local.json`; the coordinator's ROOT CHECKOUT is excluded
+ *    by name — but its WORKTREES are denied like any other, because a worktree
+ *    cut from the coordinator's clone hosts a spawned session, not the
+ *    coordinator. `[measured 2026-08-29]` sparing the whole tree left three
+ *    spawned sessions stopped on panels the Brain could not answer.
  *
  * 2. It records the PRIOR state, so restoring never guesses. A revert that
  *    assumes "there was no deny list before" would silently delete a rule
@@ -114,6 +118,21 @@ const TOOL = 'AskUserQuestion';
 // user, and a coordinator that cannot ask is worse than a session that can.
 const NEVER = new Set(['autodev', 'claude-auto-dev']);
 
+// The one location that is ALWAYS spared: the directory this process is running
+// in. Name-based exclusion alone cannot get this right, because the coordinator
+// repo's name says which CLONE a Brain was cut from, never which DIRECTORY the
+// Brain is in — and a spawned session runs in a worktree of that same clone.
+//
+// macOS realpath matters here: /var/folders and /private/var/folders are the
+// same directory, and an unresolved compare silently spares nothing.
+const SELF = (() => {
+    try { return fs.realpathSync(process.cwd()); } catch { return process.cwd(); }
+})();
+
+function isSelf(dir) {
+    try { return fs.realpathSync(dir) === SELF; } catch { return path.resolve(dir) === SELF; }
+}
+
 function readJSON(p) {
     try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
@@ -195,17 +214,29 @@ function worktreesOf(repo) {
         .filter((d) => fs.existsSync(path.join(d, '.git')));
 }
 
-// Each repo contributes itself plus its worktrees. The coordinator is filtered
-// out BEFORE this expansion, so its worktrees are never reached either - the
-// exclusion has to cover the directory a Brain session is really in, not just
-// the clone it was cut from.
+// Each repo contributes itself plus its worktrees. The coordinator's ROOT
+// CHECKOUT is the one location spared - not its whole tree.
+//
+// `[measured 2026-08-29]` an earlier version filtered the coordinator repo out
+// BEFORE this expansion, so its worktrees were spared too. Three sessions the
+// Brain had spawned into those worktrees then stopped dead on panels it could
+// not answer, while every other repo's sessions ran. The operator found them:
+// "the autodev sessions you spawned are blocked by panels... only the main brain
+// session should have panels on."
+//
+// The exclusion must cover the directory the Brain is really in, and NOTHING
+// else. A worktree cut from the coordinator's clone is a spawned session's
+// workspace, not the coordinator's - it is exactly as much in need of the deny
+// as a worktree in any other repo, and sparing it is the same failure as
+// forgetting a repo.
 function expand(repos) {
     const out = [];
     for (const r of repos) {
-        out.push(r);
+        if (!NEVER.has(path.basename(r))) out.push(r);
         for (const w of worktreesOf(r)) out.push(w);
     }
-    return out;
+    // Whatever the name rules said, never deny the directory we are standing in.
+    return out.filter((d) => !isSelf(d));
 }
 
 // Repos named in brain-brief.json, minus any marked retired. Returns null - NOT
@@ -217,7 +248,7 @@ function configuredRepos() {
     const retired = new Set(Array.isArray(j.retired) ? j.retired : []);
     const dirs = j.repos
         .filter((r) => typeof r === 'string')
-        .filter((r) => !retired.has(path.basename(r)) && !NEVER.has(path.basename(r)))
+        .filter((r) => !retired.has(path.basename(r)))
         .filter((r) => { try { return fs.statSync(path.join(r, '.git')).isDirectory() || fs.statSync(path.join(r, '.git')).isFile(); } catch { return false; } });
     return dirs.length ? dirs : null;
 }
@@ -240,7 +271,7 @@ function managedRepos() {
     let entries;
     try { entries = fs.readdirSync(CODE, { withFileTypes: true }); } catch { return []; }
     return expand(entries
-        .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !NEVER.has(e.name))
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
         .map((e) => path.join(CODE, e.name))
         .filter((d) => fs.existsSync(path.join(d, '.git'))));
 }
@@ -486,7 +517,7 @@ function turnOff() {
         + (repos.length - wt.length) + ' repo(s), ' + wt.length + ' worktree(s)');
     for (const r of repos) console.log('  ' + rel(r));
     console.log('');
-    console.log('  excluded (the coordinator keeps its panels, worktrees included): ' + [...NEVER].join(', '));
+    console.log('  excluded (the coordinator ROOT CHECKOUT only; its worktrees ARE denied): ' + [...NEVER].join(', '));
     console.log('  marker: ' + MARKER);
     console.log('');
     console.log('  Restore with --on. Any session can run it, not only this one.');
