@@ -152,6 +152,24 @@ function settingsPath(repo) {
 // So the record travels WITH the state it describes, and it carries enough to
 // restore without the marker: the prior settings verbatim, including "there was
 // no file", so a revert can delete rather than leave an empty shell.
+// A path in free text is the second way private names reach this file.
+//
+// `--reason` is written by whoever runs --off and is stored verbatim in a record
+// that sits inside the repo it describes. One real reason named four repositories.
+// Dropping the prior settings closed the mechanical leak; this closes the typed
+// one, at the only moment anybody is in a position to fix it — before the write.
+//
+// Deliberately NARROW, and deliberately structural. This ships to other people's
+// machines, where the repo's own denylist does not exist and could not be shipped
+// anyway: tooling/ is repo machinery and no plugin script requires it. So the rule
+// keys on the SHAPE of a path rather than on any list of names, which is portable
+// and cannot go stale. A reason does not need a path to say why: the record is a
+// sibling of the settings it explains, so it already knows where it is.
+// Matches the WHOLE path-like token, not just its opening marker, so the refusal
+// can quote the fragment it objected to. "contains a path" sends an operator
+// hunting through their own sentence; naming `~/Code/a-private-thing` does not.
+const PATH_IN_REASON = /(~\/\S*|\/(?:Users|home|Volumes)\/\S*|(?:^|\s)-C(?=\s|$))/;
+
 function denyRecordPath(repo) {
     return path.join(repo, '.claude', 'panel-deny.json');
 }
@@ -171,17 +189,44 @@ function isExpired(rec) {
 }
 
 // Put one location back from its own sibling record, marker or no marker.
+//
+// SUBTRACTIVE, not a rewind. This used to restore `before` verbatim — the whole
+// prior settings file, replayed over whatever is on disk now. That carried two
+// costs, and only one of them was the leak.
+//
+// The leak: `before` is somebody's settings.local.json, and on a coordinator's
+// machine those carry entries like `Bash(git -C <path to another repo>)`. Writing
+// it into a sibling file put paths naming private repos inside a PUBLIC tree, on
+// every deny, sourced from settings this tool did not author.
+//
+// The correctness cost, which is why the fix is a better restore rather than a
+// scrubbed copy of the old one: a verbatim rewind is a lost update. Anything a
+// session added to that file DURING the deny window is silently reverted, and
+// denies are exactly when several sessions are being coordinated at once.
+//
+// So undo what was done rather than replaying what was there: remove our own
+// entry, and drop only the containers we created. The old no-`before` fallback
+// below was already this, and was already the more correct of the two paths — it
+// just was not the default. `before` is still READ when an older record carries
+// it, so a deny set by a previous version stays restorable by this one; it is
+// never written again.
 function restoreFrom(repo, rec) {
     const sp = settingsPath(repo);
     try {
         if (rec && rec.existed === false) fs.unlinkSync(sp);
         else if (rec && rec.before) fs.writeFileSync(sp, JSON.stringify(rec.before, null, 2) + '\n', 'utf8');
         else {
-            // No prior state recorded: strip only our own entry rather than
-            // guessing, so a rule somebody else added survives.
+            // Strip only our own entry, so a rule somebody else added survives.
             const j = readJSON(sp);
             if (j && j.permissions && Array.isArray(j.permissions.deny)) {
                 j.permissions.deny = j.permissions.deny.filter((d) => d !== TOOL);
+                // Structural facts recorded at deny time say which containers did
+                // not exist before us. Leaving an empty `deny: []` or `permissions:
+                // {}` behind is a residue that makes a restored file differ from
+                // the one we found, which is how a "restore" slowly stops being one.
+                const created = (rec && rec.created) || {};
+                if (created.denyArray && j.permissions.deny.length === 0) delete j.permissions.deny;
+                if (created.permissions && Object.keys(j.permissions).length === 0) delete j.permissions;
                 fs.writeFileSync(sp, JSON.stringify(j, null, 2) + '\n', 'utf8');
             }
         }
@@ -392,6 +437,15 @@ function turnOff() {
         console.error('  standing config change, not a coordination window.');
         process.exit(2);
     }
+    const leak = String(reason).match(PATH_IN_REASON);
+    if (leak) {
+        console.error('REFUSING: --reason contains a filesystem path (' + JSON.stringify(leak[0].trim()) + ').');
+        console.error('  The reason is stored verbatim in .claude/panel-deny.json, INSIDE the repo');
+        console.error('  it describes, and a path names whatever else that machine holds. This');
+        console.error('  record is written to public repositories.');
+        console.error('  Say why, not where: "overnight fleet run", not the path of the tree.');
+        process.exit(2);
+    }
     if (!reason || reason.trim().length < 8) {
         console.error('REFUSING: --off needs --reason "<why>" (at least 8 characters).');
         console.error('  The next session to find this has to know whether it is still');
@@ -480,9 +534,18 @@ function turnOff() {
     for (const repo of repos) {
         const sp = settingsPath(repo);
         const before = readJSON(sp);
-        // The prior state is recorded verbatim, including "the file did not
-        // exist", so restoring can delete it rather than leave an empty shell.
-        record.repos.push({ repo, existed: before !== null, before: before });
+
+        // What a restore actually needs, and it is not the prior contents. Two
+        // questions: did this file exist before us (delete it, or edit it), and
+        // which containers did we create (drop them, or leave them alone). Both
+        // are booleans. Storing the settings themselves answered those questions
+        // by carrying every other line in the file along with them, including the
+        // paths of whatever else the operator has permissions for.
+        const created = {
+            permissions: !before || !before.permissions,
+            denyArray: !before || !before.permissions || !Array.isArray(before.permissions.deny),
+        };
+        record.repos.push({ repo, existed: before !== null, created });
 
         const next = before ? JSON.parse(JSON.stringify(before)) : {};
         next.permissions = next.permissions || {};
@@ -500,7 +563,7 @@ function turnOff() {
             expiresAt: expiresAt,
             reason: reason,
             existed: before !== null,
-            before: before,
+            created: created,
             note: 'Set by brain-panels.js. Past expiresAt this is a FAULT, not a state: '
                 + 'any session may clear it with `brain-panels.js --expire`.',
         }, null, 2) + '\n', 'utf8');
@@ -559,7 +622,7 @@ function turnOn() {
         // AND deletes the sibling record. The inline copy that used to live here
         // forgot the second half, so every panel-deny.json survived a restore and
         // a cleared location still read as denied to --status.
-        if (restoreFrom(entry.repo, { existed: entry.existed, before: entry.before })) {
+        if (restoreFrom(entry.repo, { existed: entry.existed, created: entry.created, before: entry.before })) {
             if (entry.existed) restored++; else removed++;
         } else failed++;
     }

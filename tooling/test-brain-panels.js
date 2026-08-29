@@ -843,9 +843,113 @@ function plantSession(home, dir, minutesIdle) {
         /real all-clear/.test(out), out.slice(0, 300));
 }
 
+// ------------------------------- 20. the record carries no settings contents
+//
+// The deny record is a sibling INSIDE the repo it describes, and this repo is
+// public. It used to store `before` — the prior settings.local.json, verbatim —
+// which on a coordinator's machine carries permission entries naming the paths of
+// every other repo that machine works on. The leak did not come from anything
+// this tool wrote; it came from copying settings it did not author.
+//
+// Asserted on the RAW TEXT rather than on the absence of a `before` key. A key
+// check passes the moment the field is renamed or nested, and the property that
+// matters is that the path is not in the file at all, however it got there.
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+    const SECRET = '~/Code/a-private-thing';
+    const prior = { permissions: { deny: ['SomeoneElsesRule'], allow: ['Bash(git -C ' + SECRET + ' status)'] } };
+    writeSettings(repo, prior);
+
+    const r = run(home, OFF);
+    const recPath = path.join(repo, '.claude', 'panel-deny.json');
+    const raw = fs.existsSync(recPath) ? fs.readFileSync(recPath, 'utf8') : '';
+
+    // Planted positive. Without it, "the path is not in the record" is
+    // indistinguishable from "the fixture never had the path", from "--off did
+    // nothing", and from "the record was never written".
+    check('20a planted positive: the settings really do carry the path',
+        (readSettings(repo).permissions.allow || []).join(' ').includes(SECRET),
+        JSON.stringify(readSettings(repo)));
+    check('20b planted positive: --off ran and denied', denies(repo),
+        'exit ' + r.status + ' ' + (r.stderr || '').slice(0, 200));
+    check('20c planted positive: a record was written', raw.length > 0, recPath);
+
+    check('20d the record does not contain the private path', !raw.includes(SECRET),
+        raw.slice(0, 400));
+    check('20e nor any home-relative path at all', !/~\//.test(raw), raw.slice(0, 400));
+    check('20f it still carries what a restore needs',
+        (() => { const j = readJSON(recPath); return !!(j && j.expiresAt && j.setAt && j.reason && j.created); })(),
+        raw.slice(0, 400));
+}
+
+// ------------------------------- 21. a reason naming a path is refused at write
+//
+// Dropping `before` closes the mechanical half. The other half is typed: --reason
+// is free text, stored verbatim in that same in-repo record. One real reason
+// named four repositories. Refusing at write time is the only moment anyone is
+// positioned to fix it — afterwards the file exists and the tree gate is the
+// backstop, not the fix.
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+
+    const bad = run(home, ['--off', '--hours', '8', '--reason', 'silencing ~/Code/a-private-thing overnight']);
+    check('21a a reason containing a path is refused', bad.status !== 0,
+        'exit ' + bad.status + ' ' + (bad.stdout || '').slice(0, 200));
+    check('21b the refused run denied nothing', !denies(repo));
+    check('21c and wrote no record', !fs.existsSync(path.join(repo, '.claude', 'panel-deny.json')));
+    check('21d it says which fragment it objected to',
+        /~\/Code/.test(bad.stderr || ''), (bad.stderr || '').slice(0, 300));
+
+    // The other half of the decision. A rule that refuses every reason would pass
+    // 21a while making --off unusable, which is the same defect one level up.
+    const good = run(home, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+    check('21e a reason that names no path is still accepted', good.status === 0,
+        'exit ' + good.status + ' ' + (good.stderr || '').slice(0, 200));
+    check('21f and it denied', denies(repo));
+}
+
+// ------------------------------- 22. restore is subtractive, so it cannot revert
+//
+// The reason the fix is a better restore rather than a scrubbed copy of the old
+// one. Replaying `before` verbatim is a lost update: it reverts anything written
+// to that file DURING the deny window. A deny window is precisely when several
+// sessions are being coordinated, so that is not a hypothetical.
+//
+// This scenario fails against a verbatim restore, which is what makes it worth
+// having: 22d is the assertion the old implementation could not pass.
+
+{
+    const home = makeHome();
+    const repo = makeRepo(home, 'someproj');
+    writeSettings(repo, { permissions: { deny: ['SomeoneElsesRule'] } });
+
+    run(home, OFF);
+    check('22a planted positive: denied', denies(repo));
+
+    // Another session edits the same file while the deny stands.
+    const during = readSettings(repo);
+    during.permissions.allow = ['Bash(npm test)'];
+    writeSettings(repo, during);
+
+    run(home, ['--on']);
+
+    const after = readSettings(repo);
+    check('22b the deny entry is gone', !denies(repo), JSON.stringify(after));
+    check('22c the rule that was there before survives',
+        !!(after && after.permissions && (after.permissions.deny || []).includes('SomeoneElsesRule')),
+        JSON.stringify(after));
+    check('22d the edit made DURING the window survives',
+        !!(after && after.permissions && (after.permissions.allow || []).includes('Bash(npm test)')),
+        JSON.stringify(after));
+}
+
 // ------------------------------------------------------------------- report
 
-console.log('population: ' + (passed + failures.length) + ' assertions across 19 scenarios, subject '
+console.log('population: ' + (passed + failures.length) + ' assertions across 22 scenarios, subject '
     + path.relative(process.cwd(), SUBJECT));
 if (failures.length) {
     console.log('FAIL ' + failures.length + ', pass ' + passed);
