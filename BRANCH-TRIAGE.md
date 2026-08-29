@@ -177,7 +177,7 @@ for: #84 is what turned those two suites red here, and it was right to.
 Ran `tooling/test-skill-prd-commands.js` at `3234e26^` in a throwaway worktree. Before
 #84, on this platform:
 
-```
+```text
 population: 60 SKILL.md scanned, 11 inline command(s) found, 7 of them read prd.json
 NOT RUNNABLE on a valid fixture (illustrative, truncated, or broken) - not checked, not clean:
   [all 7, including all 5 auto-executed]
@@ -212,3 +212,84 @@ Brain measured the same four failures in different worktrees. That corroborates 
 failure set and says nothing about whether the trunk is broken, because both runs share
 the platform that causes it. The discriminating run is a POSIX one, and neither session
 can do it here.
+
+## P2 executed: draft PR #94
+
+`[2026-08-29T20:40Z]` <https://github.com/djnsty23/claude-auto-dev/pull/94>, opened as a
+**draft** so no CI is spent until someone marks it ready. Verified `draft=true` after
+creation, not assumed.
+
+Branch `test/prd-container-and-keeplist-rebased` at `0389e73`, cut from `origin/main` at
+`e68fb99` with `7a5ba37` cherry-picked. Zero conflicts, pure four-file addition, original
+authorship preserved.
+
+**Deliberately not a rebase of the original.** `claude/prd-container-and-keeplist-tests`
+is another session's ref in a clone several sessions share, and this repo forbids
+force-push and amend for exactly that reason. A fresh branch reaches the same PR without
+rewriting anyone's work. The original is untouched at `7a5ba37` and should be deleted
+only after #94 lands.
+
+| run | result |
+|---|---|
+| `node tooling/test-all.js` on untouched main | 68/72, 4 failed |
+| same with the change applied | 71/75, 4 failed |
+| failure set | identical, no new failures |
+| the three new suites | all PASS |
+
+## P1 prepared, NOT executed: the deletion list
+
+**This needs the operator's authorisation. Nothing here has been run.**
+
+Re-verified at **2026-08-29T20:41Z**, after a fresh `git fetch --prune`, against
+`origin/main` at `e68fb99`. Every row passed both conditions in the same pass: the
+branch tip equals the MERGED PR's `headRefOid`, and the PR's merge commit is an ancestor
+of `origin/main`.
+
+| branch | tip | merge commit | PR |
+|---|---|---|---|
+| `fix/skill-gate-auto-executed-must-run` | f922d510 | 3234e266 | #84 |
+| `fix/prd-container-shape` | e36c3678 | 5232d807 | #85 |
+| `claude/practical-panini-48736b` | 92ff26ee | 2f6b3e99 | #86 |
+| `fix/watch-panels-stderr-leak` | 7e1c1a20 | e456bce5 | #87 |
+| `fix/panel-deny-no-private-paths` | 1e642d5c | 77ba077e | #88 |
+| `fix/archive-prd-durability` | 560c2f43 | 08f3dcd9 | #89 |
+| `fix/mutation-coverage-gaps` | 75b53aeb | 88944a1d | #90 |
+| `feat/queue-freshness` | 560ad61b | a5a8ce84 | #91 |
+| `docs/handoff-layout-spec-session` | 59f6cec6 | e68fb994 | #92 |
+
+**Re-verify before running any of it.** These tips are only as current as the timestamp
+above, and a branch that gained a commit since then is no longer safe to delete. This
+prints SAFE or NOT SAFE per branch and runs in PowerShell as written:
+
+```powershell
+git fetch origin --prune
+foreach ($b in 'fix/skill-gate-auto-executed-must-run','fix/prd-container-shape','claude/practical-panini-48736b','fix/watch-panels-stderr-leak','fix/panel-deny-no-private-paths','fix/archive-prd-durability','fix/mutation-coverage-gaps','feat/queue-freshness','docs/handoff-layout-spec-session') {
+  $tip = git rev-parse "origin/$b"
+  $hro = gh pr list --state all --head $b --limit 5 --json headRefOid,state --jq '.[]|select(.state=="MERGED")|.headRefOid' | Select-Object -First 1
+  $mc  = gh pr list --state all --head $b --limit 5 --json mergeCommit,state --jq '.[]|select(.state=="MERGED")|.mergeCommit.oid' | Select-Object -First 1
+  git merge-base --is-ancestor $mc origin/main
+  if ($? -and $tip -eq $hro) { "SAFE      $b" } else { "NOT SAFE  $b" }
+}
+```
+
+Then, only for rows that printed SAFE:
+
+```powershell
+git push origin --delete fix/skill-gate-auto-executed-must-run
+git push origin --delete fix/prd-container-shape
+git push origin --delete claude/practical-panini-48736b
+git push origin --delete fix/watch-panels-stderr-leak
+git push origin --delete fix/panel-deny-no-private-paths
+git push origin --delete fix/archive-prd-durability
+git push origin --delete fix/mutation-coverage-gaps
+git push origin --delete feat/queue-freshness
+git push origin --delete docs/handoff-layout-spec-session
+```
+
+Recovery if one turns out to be wrong: the tips above are full enough to restore with
+`git push origin <tip>:refs/heads/<branch>`, and every commit also survives inside its
+merge commit on `main`. That is the argument for recording the tips here rather than
+only the names.
+
+**Not on this list, deliberately:** `claude/prd-container-and-keeplist-tests`. It is the
+one branch holding unlanded work. Delete it after #94 merges, not before.
