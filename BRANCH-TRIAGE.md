@@ -293,3 +293,61 @@ only the names.
 
 **Not on this list, deliberately:** `claude/prd-container-and-keeplist-tests`. It is the
 one branch holding unlanded work. Delete it after #94 merges, not before.
+
+## F5. PR #95 verified independently, including that the repaired gate still fires
+
+`[measured 2026-08-29T20:55Z]` <https://github.com/djnsty23/claude-auto-dev/pull/95>,
+`fix/gate-posix-assumptions-on-windows` at `e83a8cd`, which fixes U4. Verified from a
+worktree cut from the PR head, not from the author's description.
+
+| check | result |
+|---|---|
+| `node tooling/test-all.js` | **72/72, exit 0** (from 68/72) |
+| commands the skill gate now checks | **6 runnable**, was **0** |
+| resolved shell printed | `shell: sh` |
+
+**The 0 to 6 is the number that matters**, more than 72/72. A fix that makes a gate
+pass is worth nothing if it passes by checking nothing, which is precisely the vacuous
+green F4 describes. This one moved the checked population from zero to six.
+
+**Mutation-tested, because a green gate is a claim.** Planted a state-blind
+auto-executed command in `skills/status/SKILL.md`: it reads `prd.json` so the gate
+includes it, exits 0 so it counts as runnable, and prints a constant so it cannot vary
+with story state. Blind by construction, so it cannot pass by luck. The gate fired:
+
+```text
+EXIT=1
+FAIL autodev-core/status [auto-executed]
+  output is IDENTICAL whether or not a story exists in: pending (null), FAILED (false),
+  deferred, needs-setup, no passes key, unrecognised value
+1 of 6 runnable prd.json command(s) are blind to at least one state.
+```
+
+Mutation reverted by discarding the throwaway worktree. Confirmed `0` occurrences of the
+planted string anywhere under the repo afterwards, and none of my worktrees remain.
+
+## F6. Correcting F3: a platform artifact was also hiding a real defect
+
+F3 called the four failures "platform artifacts" and stopped. That was correct and one
+question short, and the missing question is the useful part of this whole exercise.
+
+Two things #95 found that this triage did not:
+
+- **`session-sweep.js:312` carried the same `/[/.]/` slug bug in PRODUCTION**, so
+  session-sweep was blind to every transcript on a Windows machine. `validate`'s "Slug
+  reversal" check passes and does not cover it, because that tests turning a slug back
+  into a path, which is the other direction.
+- **`test-session-sweep` reported "15/16 passed, 1 FAILED" while 63 assertions never
+  ran.** The ENOENT aborted the suite early. After the fix it reports **79/79**.
+
+So the suite's own denominator was wrong, and F3 quoted it as though 16 were the
+population. That is the trap this file warns about twice, arriving in my own numbers: a
+count is meaningless until you name the population, and a crashed suite reports the
+assertions it reached rather than the assertions it has.
+
+**The generalisable correction: "this failure is environmental" is a claim about why the
+test failed, never a claim that the code under test is fine.** Both were true here. The
+test failed for platform reasons AND the production code had the same platform bug, and
+calling it environmental reads as "not a real defect", which closed the question. The
+follow-up question, which was one grep away, is whether the code the failing test covers
+shares the assumption that broke the test.
