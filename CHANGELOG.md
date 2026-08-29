@@ -1,5 +1,42 @@
 # Changelog
 
+## [8.139.0] - 2026-08-29
+
+### Fixed: three prd.json readers, one of which deleted stories
+
+A sweep executed every prd.json classifier embedded in SKILL.md files — code
+none of the four coverage questions could reach — and found three wrong, one
+destructive. `status` folded FAILED into pending, counted `needs-setup` and
+keyless stories nowhere, ignored the archive, and failed its own written
+acceptance criteria. `audit` labelled failed and blocked stories "pending" in
+an agent's work selection. `archive-prd`'s two-bucket prose matched neither
+bucket for `deferred`, `needs-setup` and keyless stories — written to neither
+file and silently deleted; `isArchivable()` had been written for exactly that
+incident and was never called by its only caller. The procedure now routes
+through the helper, proves the split invariant BEFORE the write (sum AND
+zero-overlap — the sum alone passes on duplication), and accumulates
+`totalCompleted` on re-archive instead of overwriting it.
+
+### Added: two gates so this class cannot ship silently again
+
+`test-skill-prd-commands` executes the inline `node -e` commands inside every
+SKILL.md and asserts differentially that one added story in each of six states
+changes each command's output — byte-identical output means the story is
+counted by no bucket, which is the class that deleted data. Its state list is
+a hardcoded literal so it cannot shrink with the library. It failed on
+`status` before the fix and passes after, verified in both directions.
+`test-archive-prd` pins the helper across all states, reconstructs the old
+destructive split as a mutation the invariant must catch, and pins the two
+load-bearing SKILL.md sentences so a doc edit reverting them fails the gate.
+
+### Added: rule-verification gains the reachability check; rule-gate-integrity the provenance rule
+
+Nothing is done until something REACHES it: before `passes: true`, name the
+path a user, caller or runner takes to the change and check it exists — four
+same-day instances passed their own verification while wired to nothing. And
+a canary must have different provenance from the check it validates: two
+same-day instances shrank with the thing they guarded.
+
 ## [8.138.0] - 2026-08-29
 
 ### Added: tree-inert — the gate now fails a suite that rewrites what it grades
