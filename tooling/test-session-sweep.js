@@ -334,7 +334,10 @@ function checkLiveTranscriptBlocks() {
   // Transcripts live at <config>/projects/<cwd with / and . turned into ->.
   const cfg = path.join(ROOT, 'fake-claude-config');
   const plant = (wt, ageMinutes) => {
-    const d = path.join(cfg, 'projects', wt.replace(/[/.]/g, '-'));
+    // Same transform as session-sweep's own slug, including the Windows
+    // backslash and drive colon. Without them this mkdir embeds `C:` in the
+    // middle of a path, which is legal on POSIX and an ENOENT on Windows.
+    const d = path.join(cfg, 'projects', wt.replace(/[/.:\\\\]/g, '-'));
     fs.mkdirSync(d, { recursive: true });
     const f = path.join(d, 'transcript.jsonl');
     fs.writeFileSync(f, '{}\n', 'utf8');

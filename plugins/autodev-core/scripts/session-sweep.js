@@ -309,7 +309,15 @@ function transcriptFreshMinutes(wt) {
   if (!wt) return null;
   const home = process.env.CLAUDE_CONFIG_DIR
     || path.join(process.env.HOME || process.env.USERPROFILE || '', '.claude');
-  const dir = path.join(home, 'projects', wt.replace(/[/.]/g, '-'));
+  // The slug replaces the path separator, the dot, AND on Windows the
+  // backslash and the drive colon. [measured 2026-08-29] a Windows path such
+  // as `D:\\proj\\repo` was returned UNCHANGED under the old /[/.]/, because
+  // such a path contains neither a forward slash nor a dot, so the lookup
+  // could never match the real directory `D--proj-repo` that is on disk.
+  // This made session-sweep blind to every transcript on a Windows machine.
+  // validate's 'Slug reversal' check passes and does not cover this: it
+  // tests turning a slug back INTO a path, which is the other direction.
+  const dir = path.join(home, 'projects', wt.replace(/[/.:\\\\]/g, '-'));
   let names;
   try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')); } catch { return null; }
   let newest = 0;
