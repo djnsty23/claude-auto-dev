@@ -128,6 +128,10 @@ fs.writeFileSync(path.join(STUB_SCRIPTS, 'fleet-status.js'), [
     "const mode = process.env.WP_MODE || 'ok';",
     "if (mode === 'fail') { process.stderr.write('fleet-status exploded\\n'); process.exit(7); }",
     "if (mode === 'garbage') { process.stdout.write('{not json'); process.exit(0); }",
+    // A SUCCEEDING scan that also warns. fleet-status.js really does this — it
+    // writes 'no transcript root at ...' to stderr and exits 0 — so this is the
+    // shipped combination, not a contrived one.
+    "if (mode === 'noisy') { process.stderr.write('fleet-status: could not read the session store\\n'); }",
     "process.stdout.write(fs.readFileSync(process.env.WP_PAYLOAD, 'utf8'));",
     '',
 ].join('\n'));
@@ -258,6 +262,37 @@ async function run(o) {
                 r.argv, '["--pending","--days","1","--json"]');
             deq('...and remembers that panel by session and ask time',
                 readState(d1), ['sess-orchard|2026-08-24T10:00:00.000Z']);
+        }
+
+        // -------------------------------------------------------------------
+        // THE CHILD'S STDERR MUST NOT BECOME THE WATCHER'S.
+        //
+        // execFileSync INHERITS stderr unless stdio says otherwise — measured
+        // directly: with the default, a child's stderr lands on the parent's;
+        // with ['ignore','pipe','pipe'] it is captured. So without an explicit
+        // stdio the watcher speaks whenever fleet-status warns, even though the
+        // watcher itself has nothing to report.
+        //
+        // That matters more here than a stray line suggests. This watcher's
+        // whole contract is that a quiet scan is SILENT, so anything reading it
+        // as a signal — a Monitor, a notifier, a human — is being told a session
+        // needs attention by a subprocess's logging. fleet-status warns on a
+        // path it genuinely cannot read, which is a condition that persists, so
+        // it would speak on every scan forever.
+        //
+        // The planted positive shares the run: the beacon's line must still come
+        // through on stdout, so this cannot pass by the watcher having gone deaf.
+        // -------------------------------------------------------------------
+        {
+            const r = await run({
+                fleetDir: freshFleetDir(),
+                mode: 'noisy',
+                payload: { sessions: [BEACON()] },
+            });
+            eq('a warning from fleet-status does not leak onto the watcher stderr',
+                r.stderr, '');
+            eq('...while the scan itself still reports its panel', r.lines[0], BEACON_LINE);
+            eq('...and emits nothing else', r.lines.length, 1);
         }
 
         // -------------------------------------------------------------------

@@ -74,10 +74,26 @@ function scan() {
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
       timeout: 90_000,
+      // CAPTURED, not inherited. execFileSync inherits stderr by default, so a
+      // fleet-status that merely WARNS - it writes 'no transcript root at ...'
+      // and exits 0 - made this watcher speak on a scan where it had nothing to
+      // report. That condition persists, so it spoke on every scan forever, and
+      // this watcher's whole contract is that a quiet scan is silent.
+      //
+      // The cause is not dropped: the failure path below forwards it. Both
+      // properties are pinned by the suite, and they pull in opposite
+      // directions - suppressing on success, surfacing on failure - so neither
+      // can be satisfied by the default.
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     consecutiveErrors = 0;
   } catch (err) {
     consecutiveErrors++;
+    // Now that stderr is captured, forward it — otherwise a permanently broken
+    // fleet-status leaves no visible cause at all, which is strictly worse than
+    // the noise this capture removes. Only on the failure path, so a warning
+    // from a scan that SUCCEEDED still stays quiet.
+    if (err && err.stderr) process.stderr.write(String(err.stderr));
     // An empty result from a failed probe is a claim about the probe, not the
     // world. Only shout once it is persistent, so one transient miss is quiet.
     //
