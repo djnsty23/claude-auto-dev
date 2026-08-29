@@ -119,8 +119,82 @@ function summarise(stories) {
     return counts;
 }
 
+/**
+ * THE STORY CONTAINER, which is a second per-reader guess exactly like `passes`.
+ *
+ * prd.json has TWO shapes. Flat, `{ stories: {...} }`, and nested per sprint,
+ * `{ sprints: [ { id, stories: {...} } ] }` — the nested one is documented
+ * verbatim in auto/SKILL.md and sprint/SKILL.md already reads `p.sprints || []`,
+ * so autodev's own tooling can produce a file its own hooks could not read.
+ *
+ * `[measured 2026-08-29]` five readers reached for `prd.stories` alone. The
+ * costly one is the Stop hook: against a nested file it counted ZERO stories,
+ * printed "Sprint complete" over a full sprint, and one turn later APPROVED the
+ * stop and deleted .claude/auto-active. Auto mode terminated with every story
+ * still pending, no error raised and no story named. Same stories in both runs;
+ * only the container differed.
+ *
+ * That is the same defect as `passes`, one level up: a shape every reader
+ * re-decided privately, so a reader could be wrong on its own without
+ * disagreeing with anything. It is settled here once, and the semantics are
+ * taken from check-spec-output.js, which already had it right — deliberately
+ * NOT re-derived, because a sixth opinion is what this function exists to stop.
+ *
+ * EVERY SPRINT, NOT THE NEWEST — and this is a DECISION, taken against the
+ * grain of the two readers that already existed.
+ *
+ * check-spec-output.js and core/SKILL.md both take the last sprint only
+ * (`sprints[sprints.length - 1]`, `p.sprints.at(-1)`). Inheriting that here
+ * would have shipped the original defect inside its own fix: on a two-sprint
+ * file, every story still pending in sprint 1 becomes invisible, so the Stop
+ * hook counts zero outstanding and approves the stop exactly as it did on the
+ * nested shape. Same silent approval, narrower trigger, and much harder to find
+ * the second time.
+ *
+ * Last-sprint-only is defensible for check-spec-output, whose question is "is
+ * the spec I just generated well-formed" — a fresh spec has one sprint. It is
+ * wrong for all four readers fixed here, whose question is "is there work left",
+ * and a story does not stop being work because a later sprint was opened. When
+ * the two readings disagree, the one that can silently drop pending work loses.
+ *
+ * ON A KEY COLLISION the later sprint wins, because a story carried forward is
+ * the same story and its later state is the current one. Ids embed their sprint
+ * (`S{sprint}-{nnn}`), so this should not arise; it is defined rather than left
+ * to `Object.assign` ordering so that if it ever does, the result is a rule
+ * somebody chose instead of an accident.
+ *
+ * ROOT `stories` IS IGNORED once any sprint carries a `stories` object, so a
+ * legacy file that grew a `sprints` array cannot count its backlog twice. The
+ * fall-through to root fires only when no sprint declares stories at all, which
+ * is the purely flat file every project on this machine currently has.
+ *
+ * Accepts anything, including null and a parse result of the wrong type, and
+ * always returns an object, so no caller needs its own `|| {}`. A reader that
+ * receives {} must report it as "no stories found", never as "the sprint is
+ * complete" — those two readings diverge on exactly this value, only one of
+ * them is safe, and picking the wrong one is the whole defect above.
+ */
+function storiesOf(prd) {
+    if (!prd || typeof prd !== 'object') return {};
+
+    const sprints = Array.isArray(prd.sprints) ? prd.sprints : [];
+    const merged = {};
+    let sawNested = false;
+    // Oldest first, so a later sprint's copy of a repeated id overwrites the
+    // earlier one rather than the other way round.
+    for (const sprint of sprints) {
+        const stories = sprint && sprint.stories;
+        if (!stories || typeof stories !== 'object') continue;
+        sawNested = true;
+        for (const [id, story] of Object.entries(stories)) merged[id] = story;
+    }
+    if (sawNested) return merged;
+
+    return (prd.stories && typeof prd.stories === 'object') ? prd.stories : {};
+}
+
 module.exports = {
     DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP, VALID,
     isActionable, isOutstanding, isDeferred, isDone, needsSetup, isArchivable,
-    summarise,
+    summarise, storiesOf,
 };

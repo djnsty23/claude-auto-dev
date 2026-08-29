@@ -157,7 +157,14 @@ try {
 
     let stories;
     try {
-        stories = JSON.parse(fs.readFileSync(prdPath, 'utf8')).stories || {};
+        // BOTH container shapes, via the shared reader. This read `prd.stories`
+        // alone, so a nested `{ sprints: [{ stories }] }` file — the shape
+        // auto/SKILL.md documents and sprint/SKILL.md can produce — counted ZERO
+        // stories here. The hook then printed "Sprint complete" over a full
+        // sprint and approved the stop on the next turn, deleting auto-active
+        // with every story still pending. `[measured 2026-08-29]`
+        const { storiesOf } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
+        stories = storiesOf(JSON.parse(fs.readFileSync(prdPath, 'utf8')));
     } catch (parseErr) {
         // Auto mode has no task list it can act on. Blocking here would loop the
         // session against a file that cannot be read.

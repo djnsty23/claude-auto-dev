@@ -277,7 +277,12 @@ const g = (repo, args) => {
 function storyValues(text, ids) {
     let parsed;
     try { parsed = JSON.parse(text); } catch { return null; }
-    const stories = parsed.stories || {};
+    // Shared container reader. On a nested file this returned {}, so every id
+    // resolved to `undefined` and every story compared equal to every revision
+    // of itself — the staleness cache would have reported a whole sprint as
+    // untouched forever, and stop-auto-check.js consumes that cache to decide
+    // which stories to stop counting.
+    const stories = require(path.join(__dirname, 'prd-states.js')).storiesOf(parsed);
     const out = {};
     for (const id of ids) {
         out[id] = stories[id] === undefined ? undefined : JSON.stringify(stories[id]);
@@ -440,7 +445,9 @@ function auditPrd(repo) {
         return;
     }
 
-    const pendingIds = Object.entries(prd.stories || {})
+    // The SECOND independent container read in this file — storyValues() above
+    // is the other. Fixing one and calling the file done is the easy miss.
+    const pendingIds = Object.entries(require(path.join(__dirname, 'prd-states.js')).storiesOf(prd))
         // isActionable(): needs-setup is blocked on a human, not stale work an
         // agent abandoned, so auditing it for drift blames the wrong party.
         .filter(([, s]) => require(path.join(__dirname, 'prd-states.js')).isActionable(s))
