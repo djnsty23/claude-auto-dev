@@ -1,5 +1,34 @@
 # Changelog
 
+## [8.140.0] - 2026-08-29
+
+### Added: the Brain boot's post-selection sequence
+
+The operator defined the boot's missing half in as many words. After project
+selection the Brain now: triages what needs merging and resuming (PRs
+re-verified live, branches measured by content, RESUMEs newer than the trunk);
+rescues unpushed work from every worktree BEFORE anything archives it — the
+order is load-bearing, an archive cleaned a worktree holding the only copy of
+finished work this same day; archives stale sessions on three measured
+conditions; and hands the operator copy-paste session prompts, self-contained
+because a new session saw nothing of the conversation that produced them.
+
+### Added: six dispatch rules, each with its same-day measurement
+
+Wake over the desktop channel (peer messages queue at idle sessions and do not
+wake them); keep every active repo's queue one tier deep (sessions rightly
+refuse cross-repo work); deny panels FIRST on takeover; a dispatched count is a
+hypothesis the worker re-measures; deploy verification names the pipeline that
+ships each artifact and treats an absent check as unmeasured (resolved only by
+a verified docs-only carry, never a manufactured commit); assert a single
+Brain at boot.
+
+### Fixed (from 8.139.0's post-release train, PR #81)
+
+sprint's inline command no longer prints a blank on the id-keyed prd shape (a
+swallowed TypeError); session memory records carry the archived count and stop
+hiding needs-setup stories; core/auto/brainstorm gain the archived suffix.
+
 ## [8.139.0] - 2026-08-29
 
 ### Fixed: three prd.json readers, one of which deleted stories
