@@ -25,7 +25,15 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const ROOT = path.resolve(__dirname, '..');
+/**
+ * The tree to scan. Overridable ONLY so this gate's own suite can drive it
+ * against a synthetic plugins/ tree containing a deliberately broken command —
+ * a self-check cannot use the real tree, because the defect it asserts on must
+ * not exist there. Unset in every real run, which is the repo root.
+ */
+const ROOT = process.env.SKILL_PRD_ROOT
+  ? path.resolve(process.env.SKILL_PRD_ROOT)
+  : path.resolve(__dirname, '..');
 
 /**
  * Hardcoded on purpose. Reading these from prd-states.js would make this gate
@@ -114,6 +122,7 @@ let prdCommands = 0;
 const failures = [];
 
 const notRunnable = [];
+const broken = [];
 
 for (const { plugin, skill, file } of skills) {
   const md = fs.readFileSync(file, 'utf8');
@@ -126,11 +135,21 @@ for (const { plugin, skill, file } of skills) {
     writeFixture(tmp, null);
     const base = runIn(tmp, command);
 
-    // A command that cannot run on a valid fixture is illustrative, truncated or
-    // broken. It is neither blind nor clean, and calling it either would be a
-    // could-not-check wearing a verdict.
+    // A command that cannot run on a valid fixture is neither blind nor clean,
+    // and calling it either would be a could-not-check wearing a verdict. But
+    // WHICH of those it is depends on the kind, and the two are not alike.
+    //
+    // A fenced agent-run command is frequently illustrative — archive-prd's
+    // carries an ellipsis — so "would not run" is an honest third outcome.
+    //
+    // An auto-executed !`node -e` command cannot be illustrative by
+    // construction: it runs at skill LOAD on the user's machine and its output
+    // is injected into their context. One that exits non-zero on a VALID
+    // prd.json is broken in every case, and excusing it is this gate reporting
+    // green over a defect that fires on every invocation of that skill.
     if (base.startsWith('__EXITED__')) {
-      notRunnable.push({ plugin, skill, kind, rel });
+      if (kind === 'auto-executed') broken.push({ plugin, skill, rel, base });
+      else notRunnable.push({ plugin, skill, kind, rel });
       continue;
     }
 
@@ -169,8 +188,28 @@ if (notRunnable.length) {
 console.log('scope: executable commands only. Bucketing described in prose for the agent to');
 console.log('       implement is NOT covered by this gate and needs its own suite.');
 
-if (!failures.length) {
-  const checked = prdCommands - notRunnable.length;
+const checked = prdCommands - notRunnable.length - broken.length;
+
+// An auto-executed command that will not run is a defect, not an exemption.
+if (broken.length) {
+  for (const b of broken) {
+    console.error(`FAIL ${b.plugin}/${b.skill} [auto-executed] (${b.rel})`);
+    console.error('  exits non-zero on a VALID prd.json. This runs at skill load and injects');
+    console.error('  its output into the user context, so it cannot be illustrative - it is broken.');
+    console.error(`  ${b.base.split('\n').slice(0, 2).join(' ').trim()}`);
+  }
+}
+
+// Population floor, applied AFTER exclusions (rule-gate-integrity §2). The floor
+// above catches an extractor that found nothing; this catches a run where
+// everything found was excused. Both report a verdict over zero evidence.
+if (!failures.length && !broken.length && checked === 0) {
+  console.error(`FAIL: 0 runnable prd.json command(s) were checked (${prdCommands} found, ${notRunnable.length} excused).`);
+  console.error('  Nothing was verified, so this is not a pass.');
+  process.exit(1);
+}
+
+if (!failures.length && !broken.length) {
   console.log(`PASS: all ${checked} runnable prd.json command(s) change output for every one of the ${STATES.length} states.`);
   process.exit(0);
 }
@@ -180,5 +219,10 @@ for (const f of failures) {
   console.error(`  output is IDENTICAL whether or not a story exists in: ${f.blind.join(', ')}`);
   console.error('  nothing in this command depends on those stories - they are counted by no bucket.');
 }
-console.error(`\n${failures.length} of ${prdCommands - notRunnable.length} runnable prd.json command(s) are blind to at least one state.`);
+if (failures.length) {
+  console.error(`\n${failures.length} of ${checked} runnable prd.json command(s) are blind to at least one state.`);
+}
+if (broken.length) {
+  console.error(`${broken.length} auto-executed command(s) will not run on a valid prd.json.`);
+}
 process.exit(1);
