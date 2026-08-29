@@ -1,5 +1,25 @@
 # Changelog
 
+## [8.138.0] - 2026-08-29
+
+### Added: tree-inert — the gate now fails a suite that rewrites what it grades
+
+`check:vacuity` rewrites its subject with mutants, and `validate` fails while a
+`*.vacuity-backup` exists. Both facts were documented and neither was enforced:
+nothing failed the build when a suite finished with the tree modified, so a suite
+that graded a copy of itself, or that left its subject rewritten for the next
+suite to read, passed silently.
+
+`tree-inert` runs as part of `test-all.js` and asserts the working tree is
+unchanged across the run, with `rule-gate-integrity` gaining the reasoning. This
+is the fourth of that rule's failure modes made mechanical rather than advisory.
+
+The change had been sitting unlanded on a branch for eleven days. It was verified
+twice before landing: 27/27 on its original base, then rebased onto 8.137.0 and
+re-run at 66/66. The gap between those two numbers is the argument for the second
+run — 39 suites had been added since the branch was cut, and none of them had ever
+been run with this check active.
+
 ## [8.137.0] - 2026-08-29
 
 ### Fixed: the opening line said "0 done" to a project that had shipped 159
