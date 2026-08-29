@@ -203,8 +203,14 @@ advance(app, {
         '**D · add-on button** PREMISE: repo=demo-app expect=present match="Unlock brand colours" file=src/style-fields.tsx',
         '**Beacon** ' + BEACON,
     ].join('\n'));
-    check('a match that survives only in a comment still reads PRESENT',
-        verdictOf(res, 0) === 'FRESH', res.json);
+    // NOT stale: the string is genuinely there, and a grep cannot promote "this
+    // is a comment" into "the work is done". It is REVIEW rather than FRESH so
+    // the signal is not left buried in the printed lines — see the COMMENT-ONLY
+    // block below for why that distinction was added and what it must not break.
+    check('a match that survives only in a comment is PRESENT, never stale',
+        verdictOf(res, 0) === 'REVIEW', res.json);
+    check('...and does not fail the run, because a comment is not proof',
+        res.status === 0, res.stdout);
     const m = res.json && res.json.results[0].matches;
     check('...and the MATCHING LINE is printed, so a reader can see it is a note',
         Array.isArray(m) && m.length === 1 && /REMOVED/.test(m[0]), m);
@@ -302,6 +308,64 @@ advance(app, {
     check('a premise with a nonsense expect= is uncheckable', verdictOf(res, 2) === 'UNCHECKABLE', res.json);
     check('...each carrying a reason', res.json && res.json.results.slice(0, 3).every((r) => !!r.why), res.json);
     check('...and the beacon still checked in the same run', verdictOf(res, 3) === 'FRESH', res.json);
+}
+
+// ---------------------------------------------------------------------------
+// COMMENT-ONLY matches, and the two errors that are NOT symmetric.
+//
+// Found by running this tool against the real queue it was built for. Of four
+// items already finished, exactly ONE was caught by the verdict alone; the other
+// three survived as a comment naming what they replaced, so their premises read
+// as holding. The lines were printed and a reader could see it — but leaving the
+// signal only in the lines wastes the cheapest evidence available.
+//
+// REVIEW is advisory and deliberately does not change the exit code: the
+// detector is a heuristic, and a false positive drops live work, which is the
+// expensive direction.
+// ---------------------------------------------------------------------------
+
+{
+    const commented = makeRepo('comment-app', {
+        'src/gone.ts': '// The "brand colours" add-on was REMOVED on 2026-08-29.\nexport default null;\n',
+        'src/live.ts': 'const url = "https://example.invalid/x"; // a trailing note\nexport { url };\n',
+        'src/mixed.ts': '// legacyFlag is documented here\nexport const legacyFlag = true;\n',
+    });
+    void commented;
+
+    const res = run([
+        '**CO1 · only in a comment** PREMISE: repo=comment-app expect=present match="brand colours" file=src/gone.ts',
+        '**CO2 · code with a trailing comment** PREMISE: repo=comment-app expect=present match="https://example.invalid" file=src/live.ts',
+        '**CO3 · in a comment AND in code** PREMISE: repo=comment-app expect=present match=legacyFlag file=src/mixed.ts',
+    ].join('\n'));
+
+    check('a match found only inside comments is flagged REVIEW',
+        verdictOf(res, 0) === 'REVIEW', res.json);
+    // The false positive that a naive line-contains-// check produces. The `//`
+    // here is inside a URL and again in a trailing note; the code is live.
+    check('a URL containing // in live code is NOT flagged as a comment',
+        verdictOf(res, 1) === 'FRESH', res.json);
+    check('one real code hit beats any number of comment hits',
+        verdictOf(res, 2) === 'FRESH', res.json);
+    check('REVIEW does not change the exit code — it is advisory, not a verdict',
+        res.status === 0, res.stdout);
+    check('...and it is counted apart from fresh',
+        res.json && res.json.population.review === 1 && res.json.population.fresh === 2, res.json);
+}
+
+{
+    // An unquoted phrase silently becomes its first word, and the tool then
+    // reports a confident verdict about a string nobody wrote. Refused instead.
+    const res = run([
+        '**P1 · unquoted phrase** PREMISE: repo=demo-app expect=present match=Unlock brand colours file=src/style-fields.tsx',
+        '**P2 · quoted phrase** PREMISE: repo=demo-app expect=present match="Unlock brand colours" file=src/style-fields.tsx',
+    ].join('\n'));
+    check('an unquoted multi-word match= is refused, not truncated',
+        verdictOf(res, 0) === 'UNCHECKABLE', res.json);
+    check('...and the reason names what would have been searched',
+        res.json && /Unlock/.test(res.json.results[0].why), res.json && res.json.results[0].why);
+    check('...while the quoted form is evaluated normally',
+        verdictOf(res, 1) === 'REVIEW' || verdictOf(res, 1) === 'FRESH' || verdictOf(res, 1) === 'STALE',
+        res.json);
 }
 
 {

@@ -168,7 +168,28 @@ function parsePremise(spec, lineNo) {
         if (m[3] !== undefined || m[4] !== undefined) value = value.replace(/\\(.)/g, '$1');
         out[key] = value;
     }
-    if (!out.repo) out.error = 'no repo=';
+    // AN UNQUOTED MULTI-WORD match= IS REFUSED, not silently truncated.
+    //
+    // Found by running this tool against the real queue it was built for: the
+    // premise `match=Unlock brand colours` parses as `Unlock`, because an
+    // unquoted value ends at the first space. It then searched for a string
+    // nobody wrote and reported a verdict about it with full confidence. That is
+    // the same failure as the escaped-quote case above and worse than an error,
+    // because the output looks like an answer.
+    //
+    // A trailing word that is itself `key=value` is the next field and is fine;
+    // anything else means the author meant a phrase and did not quote it.
+    const rawMatch = spec.match(/match=(?!["'])(\S+)((?:\s+\S+)*)/);
+    if (rawMatch && rawMatch[2]) {
+        const trailing = rawMatch[2].trim().split(/\s+/).filter(Boolean);
+        if (trailing.some((w) => !/^\w+=/.test(w))) {
+            out.error = 'match= has unquoted spaces, so only ' + JSON.stringify(rawMatch[1])
+                + ' would be searched — quote the whole phrase';
+        }
+    }
+
+    if (out.error) { /* keep the first, most specific complaint */ }
+    else if (!out.repo) out.error = 'no repo=';
     else if (!out.match) out.error = 'no match=';
     else if (out.expect !== 'present' && out.expect !== 'absent') {
         out.error = 'expect= must be present or absent, got ' + JSON.stringify(out.expect || '');
@@ -183,6 +204,31 @@ function parsePremise(spec, lineNo) {
  * that returns "fine" because something could not be established.
  */
 const fetched = new Set();
+
+/**
+ * Does EVERY match sit on a line that is a comment?
+ *
+ * Deliberately conservative, because the cost of the two errors is not
+ * symmetric. Saying "review this" about live code wastes a reader's minute;
+ * saying "still open" about finished work re-assigns a session's whole turn,
+ * which is the incident. So this only fires when EVERY match looks like a
+ * comment — one plain code hit and the answer is no.
+ *
+ * It tests the text BEFORE the match, not the whole line: a `//` that appears
+ * after the match (inside a URL, or a trailing note on a real line of code)
+ * does not make the code above it a comment. `"https://x"` in live code is the
+ * case that breaks a naive line-contains-slash-slash check, and it is tested.
+ */
+function allMatchesAreComments(matches) {
+    if (!matches.length) return false;
+    return matches.every((m) => {
+        // "file:line:text" — split off exactly two leading fields.
+        const parts = m.split(':');
+        const text = parts.length > 2 ? parts.slice(2).join(':') : m;
+        const t = text.trim();
+        return /^(\/\/|\/\*|\*|#|<!--|--|;)/.test(t) || /^\{\s*\/\*/.test(t);
+    });
+}
 
 function evaluate(p) {
     const base = { premise: p, matches: [] };
@@ -240,6 +286,27 @@ function evaluate(p) {
     const present = base.matches.length > 0;
 
     if (p.expect === 'present') {
+        if (present && allMatchesAreComments(base.matches)) {
+            // MEASURED, on the real queue this tool was built for: of four items
+            // already done, ONE was caught by the verdict alone. The other three
+            // survived only as a comment naming what they replaced — "the add-on
+            // button was removed on 2026-08-29" — so the premise read as holding
+            // while the work was finished.
+            //
+            // That is the documented behaviour and it is correct: a grep cannot
+            // tell code from a note about the code, and guessing would turn a
+            // weak signal into a wrong verdict. But leaving the signal only in
+            // the printed lines wastes the cheapest evidence there is, so it
+            // gets its own bucket.
+            //
+            // Advisory, NOT a verdict: the exit code is unchanged, because the
+            // detector is a heuristic and a false positive here would drop live
+            // work. It says "read this one" and nothing stronger.
+            return Object.assign(base, {
+                verdict: 'REVIEW',
+                why: `"${p.match}" appears ONLY inside comments — often what a finished item leaves behind`,
+            });
+        }
         return Object.assign(base, present
             ? { verdict: 'FRESH', why: 'the string the item names is still there' }
             : { verdict: 'STALE', why: `"${p.match}" is GONE from ${ref} — this looks done` });
@@ -264,8 +331,9 @@ for (const item of items) {
 const stale = results.filter((r) => r.verdict === 'STALE');
 const missing = results.filter((r) => r.verdict === 'MISSING-FILE');
 const unchk = results.filter((r) => r.verdict === 'UNCHECKABLE');
+const review = results.filter((r) => r.verdict === 'REVIEW');
 const fresh = results.filter((r) => r.verdict === 'FRESH');
-const checked = stale.length + missing.length + fresh.length;
+const checked = stale.length + missing.length + fresh.length + review.length;
 
 if (AS_JSON) {
     console.log(JSON.stringify({
@@ -277,6 +345,7 @@ if (AS_JSON) {
             checked,
             stale: stale.length,
             missingFile: missing.length,
+            review: review.length,
             fresh: fresh.length,
             uncheckable: unchk.length,
         },
@@ -301,6 +370,7 @@ if (AS_JSON) {
     for (const group of [
         ['STALE — the queue is describing work that appears done', stale],
         ['MISSING-FILE — the path the item names is gone', missing],
+        ['REVIEW — present only inside comments, which is what a finished item leaves behind', review],
         ['UNCHECKABLE — reported, never counted as fresh', unchk],
         ['FRESH — the premise still holds', fresh],
     ]) {
@@ -333,8 +403,13 @@ if (AS_JSON) {
         console.log(`LIKELY STALE: ${stale.length} premise(s) falsified, ${missing.length} missing file(s), `
             + `out of ${checked} checked — and ${unchk.length} that could not be checked at all.`);
         console.log('  Re-read those items on the trunk before assigning any of them.');
+        if (review.length) {
+            console.log(`  ${review.length} more matched ONLY inside comments — read those too; on the real`);
+            console.log('  queue this was built for, that was the shape of 3 of the 4 finished items.');
+        }
     } else {
         console.log(`NO PREMISE FALSIFIED: ${fresh.length} of ${checked} checked still hold`
+            + (review.length ? `, ${review.length} matched only inside COMMENTS and want a human` : '')
             + ` — and ${unchk.length} could NOT be checked, which is not the same as fine.`);
     }
 }
