@@ -65,8 +65,8 @@ minutes, so notifying on sight would fire ~46 times a day with a worst hour of
 
 ## Other machines
 
-The session registry is machine-local, so this board covers ONE host unless
-another machine publishes. Check what has:
+The MESSAGING registry is machine-local: peers talk over a socket on one host,
+so this board covers ONE host unless another machine publishes. Check what has:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/scripts/fleet-publish.js" --read
@@ -80,6 +80,26 @@ will fail rather than leak. `--push` sends it immediately when the counts change
 without it the file waits for ClaudeMemorySync's ~4h push.
 
 Setting up a second machine: `docs/fleet-cross-machine.md`.
+
+**`ListAgents` is no longer strictly one host, and the difference matters before
+you conclude a peer is unreachable.** Since Claude Code 2.1.225 it also lists
+Remote Control sessions on other machines and cloud sessions, each row labelled
+by kind, when Remote Control is connected here. `[measured 2026-08-30]` a send
+to a local peer returned "another Claude session on this machine; it is also
+connected via Remote Control", so the cross-machine rows are visible from an
+ordinary session. What was NOT verified here is an actual cross-machine
+delivery, only that the mechanism and the labelling exist. Treat the git remote
+as the reliable cross-machine channel and `ListAgents` as the thing that tells
+you whether a direct reply is even possible.
+
+**A bypass-permissions session can HOLD incoming peer messages instead of
+delivering them.** `crossSessionInbound` (2.1.224) governs it, and a held
+message looks identical to a peer that never replied, which is the failure mode
+that strands a dispatch. `[measured 2026-08-30]` it is NOT holding on this
+machine: a session running with bypassed permissions received two peer messages
+directly and its own sends reported no approval gate. So this is a lever to know
+about rather than a bug to fix, and the check when a peer goes quiet is whether
+its `SendMessage` result said "queued" rather than "sent" before assuming it died.
 
 **Every remote figure must be shown with its age.** It rides a periodic git push,
 not a live connection, so a synced count read as current is the failure mode.
