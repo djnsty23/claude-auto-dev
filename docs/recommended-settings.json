@@ -89,5 +89,8 @@
       "Bash(del *prd-backup*)"
     ]
   },
-  "thinkingEnabled": true
+  "thinkingEnabled": true,
+  "fallbackModel": [
+    "sonnet"
+  ]
 }
