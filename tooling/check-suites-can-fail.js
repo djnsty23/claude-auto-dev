@@ -375,8 +375,15 @@ const suites = fs.readdirSync(__dirname)
 // neither refuses under the sweep lock nor announces a test lock of its
 // own. It is honoured only when it matches the nonce in the LIVE lock —
 // a stale or fabricated value proves nothing and is ignored.
+// 15 minutes, not 5. A timeout KILLS the child, and a killed suite that
+// mutates files for its own canaries (test-hook-execution-evidence.js
+// prepends to a target suite and restores on exit) never runs its restore —
+// the sweep then correctly reports its own kill as a mid-sweep conflict and
+// goes INDETERMINATE, which is exactly what happened when the heaviest
+// suite blew a 300s budget on a loaded machine. The generous budget is the
+// fix; the conflict detection stays as the backstop for a genuine hang.
 const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, suite)], {
-    cwd: ROOT, encoding: 'utf8', timeout: 300000,
+    cwd: ROOT, encoding: 'utf8', timeout: 900000,
     env: { ...process.env, AUTODEV_SWEEP_CHILD: NONCE },
 });
 
