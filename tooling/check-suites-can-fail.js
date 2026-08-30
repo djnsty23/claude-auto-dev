@@ -367,8 +367,8 @@ const NONCE = crypto.randomBytes(8).toString('hex');
             console.error('\nRefusing to run: a STALE sweep lock is present (holder pid '
                 + holder + ' is not running).');
             console.error('A previous sweep died without cleaning up. After confirming no sweep');
-            console.error('is running in this tree, remove the lock and re-run:');
-            console.error('\n  node -e "require(\'fs\').unlinkSync(' + JSON.stringify(LOCK) + ')"\n');
+            console.error('is running in this tree, delete this file and re-run:');
+            console.error('\n  ' + LOCK + '\n');
             process.exit(2);
         }
     }
