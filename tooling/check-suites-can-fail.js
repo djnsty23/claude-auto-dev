@@ -205,6 +205,39 @@ module.exports = {};
 `;
 const STUB_BUF = Buffer.from(STUB);
 
+// Every mid-sweep collision this run detects, in one place, because a detected
+// conflict must poison the VERDICT, not just print a line (Sol's round-7
+// blocker: a sweep that says "left alone, carrying on" measured later suites
+// against a tree it knows was modified, then exited 0 under a "tree restored
+// clean" banner). Any entry here makes the whole run INDETERMINATE, exit 2.
+const conflicts = [];
+const conflict = (msg) => { conflicts.push(msg); console.error('  [CONFLICT] ' + msg); };
+
+// Restore a file this sweep overwrote, without being able to destroy anyone
+// else's work. Three properties, in order of what they buy:
+//   1. Restore only when the file still holds exactly what THIS sweep wrote
+//      (`expect`) — anything else is a concurrent writer's content.
+//   2. Replace via rename(), which is atomic, so a raced reader never sees a
+//      torn file and the check-to-replace window is one syscall, not a write.
+//   3. Re-read afterwards and treat any surprise as a conflict. True content
+//      CAS against an uncoordinated writer does not exist in portable fs
+//      APIs; what is left after shrinking the window is detection, and a
+//      detected race is reported and poisons the verdict instead of being
+//      silently absorbed in either direction.
+function restoreOwn(full, expect, original, label) {
+    const now = fs.readFileSync(full);
+    if (!now.equals(expect)) {
+        if (!now.equals(original)) conflict(`${label} changed under this sweep — left alone`);
+        return;
+    }
+    const tmp = full + '.restore-' + process.pid;
+    fs.writeFileSync(tmp, original);
+    fs.renameSync(tmp, full);
+    if (!fs.readFileSync(full).equals(original)) {
+        conflict(`${label} was written by something else during restore`);
+    }
+}
+
 const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
 
 // Refuse to run on a dirty tree: this script writes stubs over real files and
@@ -250,19 +283,63 @@ const LOCK = path.join(os.tmpdir(), 'check-suites-'
                 console.error('A mutation sweep needs the repo to itself; wait for it or kill it, then re-run.\n');
                 process.exit(2);
             }
-            try { fs.unlinkSync(LOCK); } catch { /* raced another acquirer */ }
+            // Atomic takeover of a DEAD holder's lock (Sol's round-7 blocker:
+            // a blind unlink here let two contenders each delete the OTHER's
+            // freshly written lock, and both proceeded). rename() is atomic
+            // and exactly one contender's rename of the stale file succeeds;
+            // the loser throws, loops, and now meets the winner's live lock
+            // at the wx attempt above.
+            try {
+                const claim = LOCK + '.claim-' + process.pid;
+                fs.renameSync(LOCK, claim);
+                fs.unlinkSync(claim);
+            } catch { /* another contender claimed the stale lock first */ }
         }
     }
     console.error('\nCould not acquire the sweep lock at ' + LOCK + ' — refusing to run.\n');
     process.exit(2);
 })();
 
+// The sweep lock excludes other SWEEPS. A plain `npm test` run in this tree is
+// just as fatal to the untracked-diff cleanup — test-validate's child creates
+// zz-spawn-fixture.js, which a concurrent sweep would see as its own suite's
+// orphan and delete mid-use (Sol's round-7 blocker). test-all.js announces
+// itself with a per-pid lock in the same tmpdir namespace; a live one here
+// means a test run is in flight, and this sweep refuses rather than measuring
+// a tree someone else is exercising. Dead pids are stale crash leftovers and
+// are cleaned. test-all children spawned BY this sweep are exempt via
+// AUTODEV_SWEEP_CHILD, so checkRunner below still works.
+{
+    const prefix = path.basename(LOCK).replace(/\.lock$/, '');
+    for (const f of fs.readdirSync(os.tmpdir())) {
+        if (!f.startsWith(prefix + '.test-') || !f.endsWith('.lock')) continue;
+        const p = path.join(os.tmpdir(), f);
+        let holder = NaN;
+        try { holder = parseInt(fs.readFileSync(p, 'utf8'), 10); } catch { /* unreadable */ }
+        let alive = false;
+        if (Number.isFinite(holder)) {
+            try { process.kill(holder, 0); alive = true; } catch { alive = false; }
+        }
+        if (alive) {
+            console.error('\nRefusing to run: a test run (pid ' + holder + ') is in flight in this tree.');
+            console.error('Its suites create zz- fixtures this sweep\'s cleanup would misattribute.');
+            console.error('Wait for it to finish, then re-run.\n');
+            process.exit(2);
+        }
+        try { fs.unlinkSync(p); } catch { /* raced */ }
+    }
+}
+
 const suites = fs.readdirSync(__dirname)
     .filter((f) => /^test-.*\.js$/.test(f))
     .sort();
 
+// AUTODEV_SWEEP_CHILD marks every process this sweep spawns (and their
+// children), so a test-all.js run BY the sweep neither refuses under the
+// sweep lock nor announces a test lock of its own.
 const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, suite)], {
     cwd: ROOT, encoding: 'utf8', timeout: 300000,
+    env: { ...process.env, AUTODEV_SWEEP_CHILD: '1' },
 });
 
 const rows = [];
@@ -284,15 +361,16 @@ function checkRunner(suite) {
     if (!victim) return { suite, status: 'NO-SUBJECT', note: 'no child suite to fail' };
 
     const full = path.join(__dirname, victim);
+    const CANARY = '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n';
     const original = fs.readFileSync(full);
     try {
-        fs.writeFileSync(full, '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n');
+        fs.writeFileSync(full, CANARY);
         const r = runSuite(suite);
         return r.status !== 0
             ? { suite, status: 'ok', note: `reports failure when ${victim} fails` }
             : { suite, status: 'VACUOUS', note: `stays GREEN while ${victim} exits 1 — it is not running them` };
     } finally {
-        fs.writeFileSync(full, original);
+        restoreOwn(full, Buffer.from(CANARY), original, victim);
     }
 }
 
@@ -313,14 +391,15 @@ function checkValidator() {
     });
     if (run().status !== 0) return { suite, status: 'RED', note: 'already failing' };
 
+    const CANARY = '0.0.0-canary\n';
     const original = fs.readFileSync(file);
     try {
-        fs.writeFileSync(file, '0.0.0-canary\n');
+        fs.writeFileSync(file, CANARY);
         return run().status !== 0
             ? { suite, status: 'ok', note: 'goes red on a version-sync break' }
             : { suite, status: 'VACUOUS', note: 'stays GREEN with VERSION desynced from every manifest' };
     } finally {
-        fs.writeFileSync(file, original);
+        restoreOwn(file, Buffer.from(CANARY), original, 'VERSION');
     }
 }
 
@@ -432,17 +511,7 @@ for (const suite of suites) {
             fs.writeFileSync(full, STUB);
             if (runSuite(suite).status !== 0) killed.push(rel);
         } finally {
-            // COMPARE-AND-SWAP, not a blind write (Sol's round-6 blocker). If
-            // the file no longer holds OUR stub, something else wrote it while
-            // stubbed — a concurrent session's edit, or an outside restore —
-            // and writing `original` back would erase that work with a stale
-            // copy. Restore only what this sweep put there; anything else is
-            // reported and left for the end-of-run tree check to name.
-            const now = fs.readFileSync(full);
-            if (now.equals(STUB_BUF)) fs.writeFileSync(full, original);
-            else if (!now.equals(original)) {
-                console.error(`  [left alone] ${rel} changed under the stub — concurrent edit, not overwritten`);
-            }
+            restoreOwn(full, STUB_BUF, original, rel);
         }
     }
 
@@ -479,7 +548,10 @@ if (after) {
         console.error('anything else is concurrent work that was deliberately not touched):\n' + still);
         // Own failure = our stub is still on disk and could not be restored.
         // A stubbed path dirty with FOREIGN content is someone else's work in
-        // flight: reported above, left alone, and not a reason to abort.
+        // flight: reported above, left alone — and, like every other mid-sweep
+        // change, it makes the verdict indeterminate rather than being waved
+        // past (Sol's round-7 blocker: this block used to report the conflict
+        // and then exit 0 under a "tree restored clean" banner).
         const ownDirty = still.split('\n').some((l) => {
             const rel = l.slice(3).trim();
             if (!stubbedEver.has(rel)) return false;
@@ -487,6 +559,9 @@ if (after) {
             catch { return true; }
         });
         if (ownDirty) process.exit(2);
+        for (const l of still.split('\n')) {
+            conflict('tree changed mid-sweep and was left alone: ' + l.trim());
+        }
     }
 }
 
@@ -513,5 +588,17 @@ const verified = rows.length - bad - notJs;
 console.log(`\n${rows.length} suite(s) · ${verified} verified able to fail · ${bad} NOT verified` +
             (unchecked ? ` (${unchecked} with no derivable subject)` : '') +
             (notJs ? ` · ${notJs} canaried elsewhere, not stubbable here` : '') +
-            ` · tree restored clean\n`);
+            (conflicts.length ? '' : ' · tree restored clean') + '\n');
+
+// A detected mid-sweep conflict poisons every verdict above: suites that ran
+// after the tree changed were measured against a tree this script knows it
+// did not control. Indeterminate (2) outranks findings (1), because a finding
+// from a contaminated run is not a finding.
+if (conflicts.length) {
+    console.log('INDETERMINATE — ' + conflicts.length + ' mid-sweep conflict(s) detected:');
+    for (const c of conflicts) console.log('  · ' + c);
+    console.log('The verdicts above were measured on a tree that changed under this sweep.');
+    console.log('Re-run when the tree is quiet.\n');
+    process.exit(2);
+}
 process.exit(bad ? 1 : 0);

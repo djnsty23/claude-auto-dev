@@ -60,6 +60,37 @@ if (suites.length === 0) {
   }
 }
 
+// MUTUAL EXCLUSION WITH THE STUB SWEEP (check-suites-can-fail.js). The sweep
+// overwrites subjects in place, so a test run overlapping it measures mutants;
+// and this run's suites create zz- fixtures the sweep's cleanup would delete
+// mid-use. Two locks in tmpdir close both directions: the sweep's own lock
+// (refused here while its holder is alive) and a per-pid announce lock this
+// run writes so a starting sweep can see a test run in flight. Children the
+// sweep spawns are exempt via AUTODEV_SWEEP_CHILD — the sweep running a suite
+// is the intended case, not a collision.
+if (!process.env.AUTODEV_SWEEP_CHILD) {
+  const os = require('os');
+  const crypto = require('crypto');
+  const key = 'check-suites-'
+    + crypto.createHash('sha1').update(fs.realpathSync(repoRoot)).digest('hex').slice(0, 12);
+  const sweepLock = path.join(os.tmpdir(), key + '.lock');
+  try {
+    const holder = parseInt(fs.readFileSync(sweepLock, 'utf8'), 10);
+    if (Number.isFinite(holder)) {
+      process.kill(holder, 0);   // throws if dead
+      console.error('\nRefusing to run: a stub sweep (pid ' + holder + ') holds this tree.');
+      console.error('Any result printed now would describe its mutants, not the committed code.');
+      console.error('Wait for it to finish, then re-run.\n');
+      process.exit(2);
+    }
+  } catch { /* no sweep lock, or its holder is dead — proceed */ }
+  const announce = path.join(os.tmpdir(), key + '.test-' + process.pid + '.lock');
+  try {
+    fs.writeFileSync(announce, String(process.pid));
+    process.on('exit', () => { try { fs.unlinkSync(announce); } catch { /* gone */ } });
+  } catch { /* announcing is best-effort; the sweep also pid-checks stale files */ }
+}
+
 // A SUITE MUST NOT REWRITE THE TREE IT GRADES.
 //
 // This repo already has the scar. find-vacuous-assertions.js overwrites its
