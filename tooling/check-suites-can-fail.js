@@ -203,7 +203,6 @@ const STUB = `#!/usr/bin/env node
 // STUB installed by check-suites-can-fail.js — restored immediately.
 module.exports = {};
 `;
-const STUB_BUF = Buffer.from(STUB);
 
 // Every mid-sweep collision this run detects, in one place, because a detected
 // conflict must poison the VERDICT, not just print a line (Sol's round-7
@@ -213,40 +212,86 @@ const STUB_BUF = Buffer.from(STUB);
 const conflicts = [];
 const conflict = (msg) => { conflicts.push(msg); console.error('  [CONFLICT] ' + msg); };
 
-// Restore a file this sweep overwrote, without being able to destroy anyone
-// else's work. Round 7's version checked content and then renamed, so a write
-// landing between the check and the rename was destroyed AND the post-read
-// reported clean, because the destroyer had already replaced it (Sol's
-// round-8 blocker). This is CAPTURE-AND-SWAP instead: the live path is
-// renamed aside FIRST — atomically, whatever it holds — so a raced write is
-// preserved in the capture file rather than clobbered; the original then
-// goes back via O_EXCL create, which FAILS rather than replaces if a writer
-// recreated the path in between. Nothing on this path can silently destroy
-// content: every unexpected state is captured or refused, reported as a
-// conflict, and poisons the verdict. Exceptions are conflicts too — a
-// restore that throws must not exit as an ordinary failure with a mutant
-// still on disk and no INDETERMINATE marker.
-function restoreOwn(full, expect, original, label) {
+// The mutation engine. Rounds 6-8 tried to make read-copy-write restores
+// safe and each round found the next window, because copying bytes back is
+// the wrong primitive. This engine NEVER rewrites an original:
+//
+//   install: the original is renamed aside — one atomic syscall that also
+//            preserves its mode bits (Sol's round-9 blocker: a recreated
+//            commit-msg lost its 100755) — and the stub is created with
+//            O_EXCL, which refuses rather than replaces a recreated path.
+//            The original's bytes are never read, copied, or rewritten.
+//   remove:  our stub is unlinked only if the live file still IS our stub
+//            (anything else is captured aside under a unique name, never
+//            destroyed — Sol's round-9 blocker: a reused capture name could
+//            overwrite an earlier capture on POSIX); the original returns
+//            via link(), which fails EEXIST rather than replacing a file a
+//            writer recreated in the gap. Same inode, same mode, nothing
+//            copied.
+//
+// Every unexpected state is a conflict, and a crash leaves the original ON
+// DISK beside the stub as `<file>.orig-<pid>-<n>` — recoverable by rename,
+// with nothing to reconstruct. Exceptions are conflicts too: a throw here
+// must never exit as an ordinary failure with a mutant still in place.
+let seq = 0;
+const installedNow = new Map();   // rel -> { full, orig, expect }
+function installOwn(rel, full, content) {
+    const orig = full + '.orig-' + process.pid + '-' + (++seq);
     try {
-        const cap = full + '.swept-' + process.pid;
-        fs.renameSync(full, cap);
-        const got = fs.readFileSync(cap);
-        try {
-            fs.writeFileSync(full, original, { flag: 'wx' });
-        } catch (e) {
-            conflict(`${label} was recreated by another writer during restore — its content is`
-                + ` left in place, this sweep's capture is at ${path.basename(cap)} (${e.code})`);
-            if (got.equals(expect)) { try { fs.unlinkSync(cap); } catch { /* keep it */ } }
-            return;
+        fs.renameSync(full, orig);
+    } catch (e) {
+        conflict(`could not set ${rel} aside to stub it (${e.code || e.message})`);
+        return false;
+    }
+    try {
+        fs.writeFileSync(full, content, { flag: 'wx' });
+    } catch (e) {
+        conflict(`${rel} was recreated while being stubbed (${e.code || e.message})`);
+        try { fs.renameSync(orig, full); } catch (e2) {
+            conflict(`and returning its original threw ${e2.code || e2.message} — original is at ${path.basename(orig)}`);
         }
-        if (got.equals(expect)) fs.unlinkSync(cap);
-        else conflict(`${label} held foreign content at restore — captured to ${path.basename(cap)}, nothing lost`);
-        if (!fs.readFileSync(full).equals(original)) {
-            conflict(`${label} was written by something else immediately after restore`);
+        return false;
+    }
+    installedNow.set(rel, { full, orig, expect: Buffer.from(content) });
+    return true;
+}
+function removeOwn(rel) {
+    const rec = installedNow.get(rel);
+    if (!rec) return;
+    installedNow.delete(rel);
+    try {
+        let live = null;
+        try { live = fs.readFileSync(rec.full); } catch { /* absent */ }
+        if (live && live.equals(rec.expect)) {
+            fs.unlinkSync(rec.full);
+        } else if (live) {
+            const cap = rec.full + '.swept-' + process.pid + '-' + (++seq);
+            fs.renameSync(rec.full, cap);
+            conflict(`${rel} held foreign content at restore — captured to ${path.basename(cap)}, nothing lost`);
+        } else {
+            conflict(`${rel} was deleted by something else while stubbed`);
+        }
+        try {
+            fs.linkSync(rec.orig, rec.full);   // refuses (EEXIST) rather than replaces
+            fs.unlinkSync(rec.orig);
+        } catch (e) {
+            conflict(`${rel} was recreated before its original could return (${e.code || e.message})`
+                + ` — original preserved at ${path.basename(rec.orig)}`);
         }
     } catch (e) {
-        conflict(`restore of ${label} threw ${e.code || e.message} — treat this run as contaminated`);
+        conflict(`restore of ${rel} threw ${e.code || e.message} — original is at ${path.basename(rec.orig)}`);
     }
+}
+
+// A child run only counts — as a red OR a green — if it actually ran to
+// completion. A timeout, signal, or spawn failure is not a verdict about the
+// suite (Sol's round-9 blocker: a killed child satisfied `status !== 0` and
+// was scored as a successful canary), it is a failure OF THIS SWEEP, so it
+// poisons the run instead of feeding either branch.
+function completed(r, what) {
+    if (r.error) { conflict(`${what} did not run (${r.error.code || r.error.message})`); return false; }
+    if (r.signal) { conflict(`${what} was killed by ${r.signal} before completing`); return false; }
+    return true;
 }
 
 const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
@@ -310,31 +355,41 @@ const NONCE = crypto.randomBytes(8).toString('hex');
                 console.error('A mutation sweep needs the repo to itself; wait for it or kill it, then re-run.\n');
                 process.exit(2);
             }
-            // Takeover of a DEAD holder, in two verified steps. rename() is
-            // atomic and claims whatever is at LOCK — which, if we stalled
-            // between reading the stale pid and renaming, may by now be a
-            // rival's FRESH lock (Sol's round-8 blocker: the round-7 claim
-            // verified nothing, so a delayed contender could steal a live
-            // lock). So: claim, then look at what was actually caught. Our
-            // observed stale content → discard it and loop to wx. Anything
-            // else → we stole a live lock; put it back via O_EXCL (never
-            // replacing a newer one) and loop, where the live holder's lock
-            // now refuses us properly.
-            try {
-                const claim = LOCK + '.claim-' + process.pid;
-                fs.renameSync(LOCK, claim);
-                const caught = fs.readFileSync(claim, 'utf8');
-                if (caught === raw) fs.unlinkSync(claim);
-                else {
-                    try { fs.writeFileSync(LOCK, caught, { flag: 'wx' }); } catch { /* a newer lock exists — leave it */ }
-                    try { fs.unlinkSync(claim); } catch { /* best effort */ }
-                }
-            } catch { /* another contender claimed the stale lock first */ }
+            // NO automatic takeover. Rounds 7 and 8 each closed one takeover
+            // race and each review found the next (delete a rival's fresh
+            // lock; steal a live lock; a third contender arriving during the
+            // put-back), because automatic reclamation of a shared exclusion
+            // token is where the races LIVE. The convenience was never worth
+            // it: a stale lock means a sweep CRASHED here, which a human
+            // should see anyway. So a dead holder is reported with the exact
+            // recovery command, and the operator — who can actually verify
+            // nothing is running — deletes the file.
+            console.error('\nRefusing to run: a STALE sweep lock is present (holder pid '
+                + holder + ' is not running).');
+            console.error('A previous sweep died without cleaning up. After confirming no sweep');
+            console.error('is running in this tree, remove the lock and re-run:');
+            console.error('\n  node -e "require(\'fs\').unlinkSync(' + JSON.stringify(LOCK) + ')"\n');
+            process.exit(2);
         }
     }
     console.error('\nCould not acquire the sweep lock at ' + LOCK + ' — refusing to run.\n');
     process.exit(2);
 })();
+
+// Anything that escapes past the conflict handling above must still land as
+// INDETERMINATE with the tree's state named — never as an ordinary crash
+// whose exit status hides that mutants may be in place (Sol's round-9
+// blocker). Originals set aside by the engine survive on disk as
+// `.orig-<pid>-<n>` files, so the report names what recovery needs.
+process.on('uncaughtException', (e) => {
+    console.error('\nUNCAUGHT: ' + (e && e.stack || e));
+    for (const [rel, rec] of installedNow) {
+        console.error('  stub possibly still in place: ' + rel + ' (original at ' + path.basename(rec.orig) + ')');
+    }
+    console.error('\nINDETERMINATE — the sweep died mid-run; the tree may hold mutants.');
+    console.error('Recover with: git status, then rename each .orig-* file back over its subject.\n');
+    process.exit(2);
+});
 
 // The sweep lock excludes other SWEEPS. A plain `npm test` run in this tree is
 // just as fatal to the untracked-diff cleanup — test-validate's child creates
@@ -388,9 +443,6 @@ const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, su
 });
 
 const rows = [];
-// Every subject path this run has overwritten with a stub, so recovery can be
-// scoped to exactly what THIS sweep touched and nothing else.
-const stubbedEver = new Set();
 
 // The runner is checked differently, and it matters more than any single suite.
 //
@@ -407,15 +459,19 @@ function checkRunner(suite) {
 
     const full = path.join(__dirname, victim);
     const CANARY = '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n';
-    const original = fs.readFileSync(full);
+    if (!installOwn('tooling/' + victim, full, CANARY)) {
+        return { suite, status: 'UNCHECKED', note: 'could not install the runner canary — see conflicts' };
+    }
     try {
-        fs.writeFileSync(full, CANARY);
         const r = runSuite(suite);
+        if (!completed(r, suite + ' (runner canary run)')) {
+            return { suite, status: 'UNCHECKED', note: 'canary run did not complete — indeterminate, not a verdict' };
+        }
         return r.status !== 0
             ? { suite, status: 'ok', note: `reports failure when ${victim} fails` }
             : { suite, status: 'VACUOUS', note: `stays GREEN while ${victim} exits 1 — it is not running them` };
     } finally {
-        restoreOwn(full, Buffer.from(CANARY), original, victim);
+        removeOwn('tooling/' + victim);
     }
 }
 
@@ -432,19 +488,27 @@ function checkValidator() {
     if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', note: 'no VERSION file' };
 
     const run = () => spawnSync(process.execPath, [path.join(__dirname, 'validate.js')], {
-        cwd: ROOT, encoding: 'utf8', timeout: 300000,
+        cwd: ROOT, encoding: 'utf8', timeout: 900000,
+        env: { ...process.env, AUTODEV_SWEEP_CHILD: NONCE },
     });
-    if (run().status !== 0) return { suite, status: 'RED', note: 'already failing' };
+    const base = run();
+    if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate' };
+    if (base.status !== 0) return { suite, status: 'RED', note: 'already failing' };
 
     const CANARY = '0.0.0-canary\n';
-    const original = fs.readFileSync(file);
+    if (!installOwn('VERSION', file, CANARY)) {
+        return { suite, status: 'UNCHECKED', note: 'could not install the VERSION canary — see conflicts' };
+    }
     try {
-        fs.writeFileSync(file, CANARY);
-        return run().status !== 0
+        const r = run();
+        if (!completed(r, 'validate (VERSION canary run)')) {
+            return { suite, status: 'UNCHECKED', note: 'canary run did not complete — indeterminate, not a verdict' };
+        }
+        return r.status !== 0
             ? { suite, status: 'ok', note: 'goes red on a version-sync break' }
             : { suite, status: 'VACUOUS', note: 'stays GREEN with VERSION desynced from every manifest' };
     } finally {
-        restoreOwn(file, Buffer.from(CANARY), original, 'VERSION');
+        removeOwn('VERSION');
     }
 }
 
@@ -530,8 +594,14 @@ for (const suite of suites) {
     };
     try {
 
-    // Baseline: it must be green before the mutation means anything.
-    if (runSuite(suite).status !== 0) {
+    // Baseline: it must be green before the mutation means anything — and it
+    // must have actually RUN. A timed-out or signalled baseline is not a red.
+    const base = runSuite(suite);
+    if (!completed(base, suite + ' (baseline)')) {
+        rows.push({ suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate, not a verdict' });
+        continue;
+    }
+    if (base.status !== 0) {
         rows.push({ suite, status: 'RED', note: 'already failing — fix it before trusting this result' });
         continue;
     }
@@ -548,74 +618,52 @@ for (const suite of suites) {
     // The property under test is "this suite can fail", and one killed subject
     // proves it.
     const killed = [];
+    let incomplete = false;
     for (const rel of subjects) {
         const full = path.join(ROOT, rel);
-        stubbedEver.add(rel);
-        const original = fs.readFileSync(full);
+        if (!installOwn(rel, full, STUB)) { incomplete = true; continue; }
         try {
-            fs.writeFileSync(full, STUB);
-            if (runSuite(suite).status !== 0) killed.push(rel);
+            const r = runSuite(suite);
+            if (!completed(r, suite + ' (with ' + rel + ' stubbed)')) incomplete = true;
+            else if (r.status !== 0) killed.push(rel);
         } finally {
-            restoreOwn(full, STUB_BUF, original, rel);
+            removeOwn(rel);
         }
     }
 
+    // VACUOUS is an accusation, and it needs every stub run to have actually
+    // completed — a run that was killed proves nothing about the suite.
     rows.push(killed.length
         ? { suite, status: 'ok', note: `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed` }
-        : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` });
+        : (incomplete
+            ? { suite, status: 'UNCHECKED', note: 'stub run(s) did not complete — indeterminate, not a verdict' }
+            : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` }));
 
     } finally { cleanNewUntracked(); }
 }
 
 // The restore is the dangerous part; prove it worked rather than assuming.
+// Every original this run set aside was returned by the engine's finallys;
+// anything still recorded here means a code path above skipped its
+// removeOwn, so try once more — the .orig file is the original, on disk,
+// and returning it is a rename, never a copy and never a checkout (rounds
+// 4 through 8 each found a way for checkout-based recovery to replace a
+// file some other writer had just recreated; this recovery cannot, because
+// removeOwn places files with link(), which refuses over an existing path).
+for (const rel of [...installedNow.keys()]) {
+    conflict(rel + ' was still stubbed at end of run — a code path skipped its restore');
+    removeOwn(rel);
+}
+
 const after = git('status --porcelain').trim();
 if (after) {
-    // Recovery is scoped to the paths THIS sweep stubbed. The first version ran
-    // `git checkout -- .`, which Sol's round-4 review named for what it is: it
-    // erases tracked edits a concurrent session made while the sweep ran, in a
-    // clone where several sessions commit at once. A dirty path this sweep
-    // never touched is someone else's work in flight, reported and left alone.
-    console.error('\nFILES NOT RESTORED — restoring the paths this sweep stubbed:\n' + after);
-    for (const rel of stubbedEver) {
-        // Same capture-and-swap as the inline restore (the check-then-checkout
-        // it replaces repeated the destroy-a-raced-write race, Sol's round-8
-        // blocker). The live path is renamed aside first, so whatever it held
-        // is preserved; checkout then recreates the file from the index. A
-        // capture that is not this sweep's stub is foreign content — kept on
-        // disk, named, and a conflict.
-        try {
-            const full = path.join(ROOT, rel);
-            if (!git('status --porcelain -- ' + JSON.stringify(rel)).trim()) continue;
-            const cap = full + '.swept-' + process.pid;
-            fs.renameSync(full, cap);
-            git('checkout -- ' + JSON.stringify(rel));
-            const got = fs.readFileSync(cap);
-            if (got.equals(STUB_BUF)) fs.unlinkSync(cap);
-            else conflict(rel + ' held foreign content at recovery — captured to ' + path.basename(cap) + ', nothing lost');
-        } catch (e) {
-            conflict('recovery of ' + rel + ' threw ' + (e.code || e.message));
-        }
-    }
-    const still = git('status --porcelain').trim();
-    if (still) {
-        console.error('STILL DIRTY (only paths still holding this sweep\'s stub are a failure;');
-        console.error('anything else is concurrent work that was deliberately not touched):\n' + still);
-        // Own failure = our stub is still on disk and could not be restored.
-        // A stubbed path dirty with FOREIGN content is someone else's work in
-        // flight: reported above, left alone — and, like every other mid-sweep
-        // change, it makes the verdict indeterminate rather than being waved
-        // past (Sol's round-7 blocker: this block used to report the conflict
-        // and then exit 0 under a "tree restored clean" banner).
-        const ownDirty = still.split('\n').some((l) => {
-            const rel = l.slice(3).trim();
-            if (!stubbedEver.has(rel)) return false;
-            try { return fs.readFileSync(path.join(ROOT, rel)).equals(STUB_BUF); }
-            catch { return true; }
-        });
-        if (ownDirty) process.exit(2);
-        for (const l of still.split('\n')) {
-            conflict('tree changed mid-sweep and was left alone: ' + l.trim());
-        }
+    console.error('\nTREE NOT CLEAN after the sweep:\n' + after);
+    // Nothing here is this sweep's to fix: its own artifacts were returned
+    // above (or reported as conflicts with the original's location named),
+    // so remaining dirt is either a mid-sweep foreign change or a preserved
+    // capture — both already make the run indeterminate.
+    for (const l of after.split('\n')) {
+        conflict('tree not clean after the sweep: ' + l.trim());
     }
 }
 
