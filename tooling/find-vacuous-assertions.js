@@ -313,3 +313,12 @@ if (results.survived.length) {
     }
     console.log();
 }
+
+// F1 (codex audit 2026-08-30): the verdict must live in the process status.
+// This script printed "N SURVIVED" and then reached EOF, so every shell chain,
+// CI step and pre-push caller saw exit 0 at the exact moment the check had
+// found the condition it exists to reject. Sol's acceptance test
+// (test-vacuity-exit.js) pins all three outcomes. A failed restore outranks
+// survivors: exit 2 means the tree itself can no longer be trusted.
+if (!restored) process.exit(2);
+if (results.survived.length) process.exit(1);
