@@ -101,7 +101,8 @@ it was done, and defects found in the adversary's own tests. That last number
 is the honest one — if it is always zero, nobody is mutation-testing the
 tests, and the loop has degraded into review theatre.
 
-Worked example (first production run, an 8-finding harness audit): 5 rounds to
-clean. The builder believed the work was done after round 1; rounds 2–5 raised
-12 further blockers, all confirmed against the real code, including two in the
-adversary's own acceptance tests. Every round after "done" paid for itself.
+Worked example (first production run, an 8-finding harness audit): the builder
+believed the work was done after round 1. Four further review rounds each
+raised real blockers — confirmed against the code, not accepted on authority —
+including two in the adversary's own acceptance tests. Every round after
+"done" paid for itself.
