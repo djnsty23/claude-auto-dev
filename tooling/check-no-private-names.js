@@ -305,15 +305,49 @@ function main(argv) {
     // ENCODING of a value is not a detector for the value. Enumerate the
     // spellings before deciding a pattern covers it, and test each, because a
     // partial detector reports clean with total confidence.
+    // The segment ABOVE the home directory: "Users" on Windows and macOS,
+    // "home" on Linux. Derived rather than listed, so it needs no maintenance
+    // and cannot be wrong about a machine nobody anticipated.
+    const HOME_PARENT = path.basename(path.dirname(os.homedir() || '')) || '';
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const HOME_PATH = LOCAL_USER && LOCAL_USER.length >= 3
         ? [
             new RegExp('[\\\\\\\\/]' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\\\]/g, '\\\\$&') + '[\\\\\\\\/]', 'gi'),
-            // Dash-encoded. Anchored on a leading dash and followed by a dash
-            // or a boundary, for the same reason the slash form is anchored on
-            // a separator: an unanchored username matches inside unrelated
-            // identifiers, and a noisy check gets muted, which is worse than
-            // the gap it closes.
-            new RegExp('-' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=[-\\b])', 'gi'),
+            // Dash-encoded, and anchored on the PARENT SEGMENT rather than on a
+            // bare leading dash.
+            //
+            // The comment above already named the risk: an unanchored username
+            // matches inside unrelated identifiers, and a noisy check gets
+            // muted. A single leading dash is not enough to prevent that when
+            // the username is an ordinary word.
+            //
+            // [measured 2026-08-30] on a GitHub-hosted ubuntu runner the build
+            // account's name IS an ordinary English word, so LOCAL_USER became
+            // that word and the dash pattern reduced to it surrounded by
+            // hyphens. It then matched `tooling/test-runner-guard.js`, whose
+            // filename contains the same word between hyphens for entirely
+            // unrelated reasons. Six findings across three files, not one of
+            // them a leak, on every CI run forever: the gate could not pass on
+            // Actions at all.
+            //
+            // Requiring the parent segment keeps exactly what the dash form was
+            // built to catch, because the encoding rewrites EVERY separator and
+            // therefore always carries the parent: `C--<parent>-<user>-project`
+            // is the shape, with the real values substituted. It drops only
+            // matches that were never a path to begin with.
+            //
+            // The examples above are deliberately written with placeholders.
+            // An earlier draft of this very comment spelled the runner's real
+            // home out in full and tripped the pattern it documents, which is
+            // the same trap in a smaller costume: an example realistic enough
+            // to illustrate a rule is realistic enough to fire it.
+            HOME_PARENT
+                ? new RegExp(esc(HOME_PARENT) + '-' + esc(LOCAL_USER) + '(?=[-\\b])', 'gi')
+                // No parent segment, e.g. a home directory at the filesystem
+                // root. Fall back to the original, broader form rather than
+                // silently dropping the check: over-reporting is recoverable
+                // here and a missing detector is not.
+                : new RegExp('-' + esc(LOCAL_USER) + '(?=[-\\b])', 'gi'),
           ]
         : null;
 
