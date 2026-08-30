@@ -358,16 +358,14 @@ for (const suite of suites) {
         // restore below cannot fix that - `git checkout` only touches tracked
         // files, so the tree check went STILL DIRTY and exited 2. Snapshot the
         // untracked set before each stubbed run and remove only what is NEW.
-        const untrackedBefore = new Set(git('status --porcelain').split('
-')
+        const untrackedBefore = new Set(git('status --porcelain').split('\n')
             .filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).trim()));
         try {
             fs.writeFileSync(full, STUB);
             if (runSuite(suite).status !== 0) killed.push(rel);
         } finally {
             fs.writeFileSync(full, original);
-            for (const line of git('status --porcelain').split('
-')) {
+            for (const line of git('status --porcelain').split('\n')) {
                 if (!line.startsWith('?? ')) continue;
                 const p = line.slice(3).trim();
                 if (untrackedBefore.has(p)) continue;
