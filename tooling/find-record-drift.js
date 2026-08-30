@@ -120,14 +120,28 @@ else (function walk(dir) {
 
 const all = [];
 let fnCount = 0;
+const unreadable = [];
 for (const f of files) {
-    let src; try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    let src;
+    try { src = fs.readFileSync(f, 'utf8'); } catch { unreadable.push(f); continue; }
     fnCount += parse(src).length;
     all.push(...findings(path.relative(ROOT, f), src));
 }
 
 console.log('\n' + files.length + ' file(s) scanned, ' + fnCount + ' named function(s), '
     + all.length + ' subset pair(s) at overlap >= ' + MIN_OVERLAP + '\n');
+
+// F7 (codex audit 2026-08-30): a requested file the scan never read is not a
+// clean result. The path used to be counted as scanned before readFileSync ran,
+// the error was skipped, and the CLI exited 0 having read zero bytes.
+if (unreadable.length) {
+    console.log('  UNREADABLE - requested but never read, so no verdict covers them:');
+    for (const f of unreadable) console.log('    ' + f);
+    console.log('');
+    console.log('  A clean scan cannot include files it never read.');
+    console.log('');
+    process.exit(2);
+}
 
 if (!all.length) {
     console.log('No function in the scanned population builds a strict subset of another.');
