@@ -110,10 +110,10 @@ if (target && mutatedCheck) {
 let failedSuiteCheck = null;
 if (target && targetSuite && original) {
     try {
-        // Expected failure before the amendment: execution ranges from a suite
-        // that exits nonzero still count as proof, while suiteProblems is only
-        // advisory. A failed evidence producer makes the check indeterminate:
-        // discard that run's coverage and exit 2.
+        // Expected failure before the amendment: suiteProblems is advisory, so
+        // after a red run's unusable coverage leaves the hook untested, the
+        // checker exits 1 instead of the infrastructure-failure status 2. A
+        // failed evidence producer makes the whole check indeterminate.
         fs.writeFileSync(targetSuite, [
             'const acceptanceExit = process.exit.bind(process);',
             'process.exitCode = 1;',
