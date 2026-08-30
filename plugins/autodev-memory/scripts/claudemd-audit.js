@@ -20,7 +20,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+// No child_process. This script spawns nothing, which is the point of the walk
+// below: the one command it used to run does not exist on every platform it
+// ships to.
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
@@ -53,16 +55,46 @@ const linkRe = (ref) => new RegExp('\\]\\(\\s*\\.?/?' + ref.replace(/[.*+?^${}()
 // that would ask someone to delete a working instruction.
 const NOT_IN_REPO = /\b(local[- ]only|gitignored|git-ignored|not (checked in|committed|tracked)|untracked|private|on your machine|machine[- ]local)\b/i;
 
+// Directories that are never part of a repo's own source. Skipped at ANY depth,
+// where the shell version only skipped them at the top level: `-not -path
+// "./node_modules/*"` cannot match a nested one, so a vendored copy used to be
+// walked and reported.
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build']);
+
+// Walk the tree in Node rather than shelling out to `find`.
+//
+// The shell version was unrunnable on a hosted windows runner and nobody could
+// see it, because it fails in the one way a try/catch cannot notice.
+// [measured 2026-08-30] `find` on windows resolves to System32\find.exe, a text
+// SEARCH utility that shares only the name: given these arguments it answers
+// "Access denied - ." and "File not found - -NAME", then exits 0. So the catch
+// never fires, the caller receives noise instead of paths, and every reference
+// in every scanned repo reads as "exists nowhere". 48 assertions, all of them
+// silently meaningless.
+//
+// It passed on this operator's windows machine for the same reason it failed on
+// the runner: `where find` there answers Git's usr\bin\find.exe FIRST, and that
+// one is POSIX. The suite was green because of one machine's PATH ordering.
+//
+// Walking in Node removes the dependency rather than repairing it. Same family
+// as the hardcoded /bin/sh fixed earlier today: a POSIX tool assumed present.
 function findByBasename(repo, base) {
-    try {
-        const out = execSync(
-            `find . -name ${JSON.stringify(base)} -not -path "./node_modules/*" -not -path "./.git/*" -not -path "./dist/*" -not -path "./build/*"`,
-            { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
-        ).trim();
-        return out ? out.split('\n').map((p) => p.replace(/^\.\//, '')) : [];
-    } catch {
-        return [];
-    }
+    const out = [];
+    const walk = (dir, rel) => {
+        let entries;
+        // A directory that cannot be read is not a match and not a crash.
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+            if (SKIP_DIRS.has(e.name)) continue;
+            const childRel = rel ? `${rel}/${e.name}` : e.name;
+            if (e.isDirectory()) walk(path.join(dir, e.name), childRel);
+            else if (e.name === base) out.push(childRel);
+        }
+    };
+    walk(repo, '');
+    // Forward slashes regardless of platform: these strings are compared against
+    // references written in markdown, which are always posix-shaped.
+    return out;
 }
 
 const results = [];
