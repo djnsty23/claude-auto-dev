@@ -237,3 +237,43 @@ and `ubuntu-latest` green.
 onto Node 24 and annotate every run about it. Both are pinned to `v7` now. This
 job uses neither action's optional surface, so the intervening majors do not
 apply to it.
+
+## 2026-08-30 — agent frontmatter `effort:` is not reliably applied
+
+`[measured 2026-08-30]` across 792 subagent transcripts and 62,278 assistant
+rows, 61,657 of which carry an `effort` field. Every row is from 2026-08, so no
+window average is hiding a changed present. Grouped by `attributionAgent`, with
+effort read from the top-level `effort` field Claude Code records on each
+assistant row and the model from `message.model`:
+
+| agent | frontmatter | observed |
+|---|---|---|
+| `autodev-core:code-reviewer` | `effort: high` | `opus-5 / xhigh`, 108 of 108 rows |
+| `autodev-core:researcher` | `effort: high` | `opus-5 / high`, 41 of 41 |
+| `autodev-core:security-scanner` | `effort: high` | `opus-5 / high`, 360 of 361 |
+| `autodev-core:plan-reviewer` | `model: fable` | `fable-5` 305, Opus 195, of 500 |
+| `autodev-core:architect` | `effort: xhigh` | no rows; untested |
+
+Three agents pin `effort: high`. Two ran `high` and one ran `xhigh` in every
+single row. Both competing explanations predict agreement: if the pin were
+applied they would all be `high`, and if effort were purely inherited from the
+session they would also agree, because they run inside the same sessions. They
+disagree. So something is being applied per agent, and whatever it is, it is not
+applying `code-reviewer`'s.
+
+What this does NOT establish is that `researcher` and `security-scanner` prove
+the pin works. Running `high` while pinning `high` is equally consistent with
+inheriting a `high` session, so those rows carry no information in either
+direction. Only the counterexample does.
+
+The model pin is separately unreliable: `plan-reviewer` pins `fable` and ran Opus
+in 39% of its rows. That matters because the choice of model there is argued on
+cost grounds, and a cost argument assumes a pin that holds every time rather than
+three times in five.
+
+**Consequence.** Do not treat frontmatter `effort:` or `model:` as a guarantee,
+and do not cost a plan on one. To re-measure, read `effort` and `message.model`
+off the assistant rows in `subagents/**/agent-*.jsonl` grouped by
+`attributionAgent`. Reading the frontmatter back only tells you what was
+requested, which is the distinction that made the earlier subagent-model
+investigation take three attempts.
