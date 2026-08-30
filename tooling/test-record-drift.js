@@ -147,6 +147,19 @@ try {
         check('  and says a zero is only real if the scan saw the file',
             /real zero only if the scan saw your file/.test(r.out));
     }
+
+    // ---- F7: an explicit unreadable input is not a clean empty scan ----
+    // Expected failure before the fix: the path is counted before readFileSync,
+    // the read error is skipped, and the CLI exits 0 after reading zero bytes.
+    {
+        const missing = path.join(tmp, 'does-not-exist.js');
+        check('control: the explicit unreadable fixture is genuinely absent',
+            !fs.existsSync(missing));
+        const r = run(missing);
+        check('an explicit unreadable input exits 2 instead of reporting clean',
+            r.status === 2,
+            'status ' + r.status);
+    }
 } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
 }
