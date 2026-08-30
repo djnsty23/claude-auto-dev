@@ -569,6 +569,10 @@ async function discoverRepos(fleet) {
         const out = await run('git', ['-C', r.root, 'log', '-1', '--format=%ct', '--all'], { cwd: r.root });
         const t = out.ok ? Number(String(out.stdout).trim()) : NaN;
         r.lastCommit = Number.isFinite(t) && t > 0 ? t : null;
+        // --all reads REMOTE-TRACKING refs too, and those are only as fresh as the
+        // last fetch. So lastCommit is not merely a number with a caveat: its
+        // freshness is CAPPED by this one. Carried here so the sort can say so.
+        r.fetchMs = fetchAgeMs(r.root);
     });
     // Newest first. A repo whose date could not be read sorts LAST, never first:
     // an unreadable date is not a fresh one, and the top of this list is what a
@@ -803,14 +807,19 @@ const STALE_EDIT_DAYS = 30;
  * pushed days ago, so the number is only as current as this timestamp - which is
  * why it is printed beside it rather than left implicit.
  */
-function fetchAge(root) {
+function fetchAgeMs(root) {
     for (const p of [path.join(root, '.git', 'FETCH_HEAD'), path.join(root, '.git')]) {
         try {
             const st = fs.statSync(p);
-            if (st.isFile() && p.endsWith('FETCH_HEAD')) return hours(Date.now() - st.mtimeMs) + 'h ago';
+            if (st.isFile() && p.endsWith('FETCH_HEAD')) return Date.now() - st.mtimeMs;
         } catch { /* fall through */ }
     }
-    return 'UNKNOWN (no FETCH_HEAD)';
+    return null;
+}
+
+function fetchAge(root) {
+    const ms = fetchAgeMs(root);
+    return ms === null ? 'UNKNOWN (no FETCH_HEAD)' : hours(ms) + 'h ago';
 }
 
 async function sectionWork(repos) {
@@ -984,11 +993,42 @@ async function main() {
         ' of ' + disco.sessionDirsTried + (disco.sessionDirsFailed ? '  (' + disco.sessionDirsFailed + ' FAILED)' : ''));
     for (const f of disco.sessionDirFailures || []) say('     ? ' + f.dir + '  ->  ' + f.reason);
     say('  sorted: most recently worked on first, by newest commit on any ref');
+    // THE SORT KEY IS CAPPED BY THE FETCH, AND THIS LIST IS A MENU.
+    //
+    // Section 4 already prints fetch age beside its counts, where a stale fetch
+    // only INFLATES a number - and an inflated number invites a check. The same
+    // staleness silently REORDERS these rows, which a reader clicks rather than
+    // checks, so the identical measurement is far more dangerous here and was
+    // printed only there.
+    //
+    // [measured 2026-08-29] a boot whose clones had not fetched for 45-69h
+    // ordered four repos wrong. Project A was shown as 1.9d idle and had
+    // committed 68 minutes earlier; Project B showed 1.9d against a real 9h.
+    // The operator picks projects off this order.
+    let anyStale = false;
     for (const r of disco.repos) {
         const age = r.lastCommit
             ? shortAge((Date.now() / 1000 - r.lastCommit) / 60) + ' since last commit'
             : 'last commit UNREADABLE';
-        say('   - ' + r.name.padEnd(20) + ' ' + age.padEnd(28) + ' [' + r.how + ']   ' + r.root);
+        // Unsafe exactly when the clone has not heard from origin more recently
+        // than the newest commit it can see: anything pushed inside that window
+        // is invisible, so another repo could outrank this one and not show it.
+        // An unknown fetch time is treated as the dangerous case, never as fine.
+        const commitMs = r.lastCommit ? Date.now() - r.lastCommit * 1000 : null;
+        const stale = r.fetchMs === null || commitMs === null || r.fetchMs > commitMs;
+        if (stale) anyStale = true;
+        const fetched = r.fetchMs === null
+            ? 'fetch UNKNOWN'
+            : 'fetched ' + shortAge(r.fetchMs / 60000) + ' ago';
+        say('   - ' + r.name.padEnd(20) + ' ' + age.padEnd(28) +
+            (stale ? '!! ' : '   ') + fetched.padEnd(20) + ' [' + r.how + ']   ' + r.root);
+    }
+    if (anyStale) {
+        say('  !! ROWS MARKED !! ARE SORTED ON A STALE READ. The clone has not');
+        say('     heard from origin since before the newest commit it can see, so');
+        say('     work pushed inside that window is invisible and THIS ORDER MAY');
+        say('     BE WRONG. Run `git fetch` in those clones and re-run before');
+        say('     treating this list as a ranking or offering it as a choice.');
     }
     if ((disco.retired || []).length) {
         say('  RETIRED - excluded on purpose by config. This is a decision, not a gap:');
