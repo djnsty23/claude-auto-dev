@@ -13,10 +13,29 @@ never ships.
 ## Commands
 
 ```bash
-npm test                     # every tooling/test-*.js suite, then validate. The gate.
+npm run gate                 # THE GATE: npm test, then check:suites. What CI runs.
+npm test                     # every tooling/test-*.js suite, then validate. HALF the gate.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
 ```
+
+**`npm test` is HALF the gate, and the missing half fails silently.**
+`[measured 2026-08-30]` CI runs `npm test` and `npm run check:suites` as two
+separate steps. A session ran nine green `npm test` runs and never executed the
+second, so a newly added suite was reported green while `check-suites-can-fail.js`
+had it counted as NOT verified. The suite in question was the one gating pushes.
+
+Nothing about the first command hints at the second, which is why `npm run gate`
+now exists: it chains both and is what CI runs.
+
+**Run it on a CLEAN tree, after committing and before pushing.** `check:suites`
+rewrites sources in place, so it refuses a dirty tree and exits 2. Iterate with
+`npm test`, then commit, then `npm run gate`, then push. A commit you intend to
+describe as gated needs that second command to have run against it.
+
+One trap while checking any of this: `$?` after a pipe is the PIPE's status.
+`npm run check:suites | tail -3` reports 0 while the script exits 2. That cost
+two wrong readings in the session that wrote this paragraph.
 
 `test-all.js` discovers suites by pattern (`/^test-.*\.js$/`) — a new
 `tooling/test-*.js` needs no registration.

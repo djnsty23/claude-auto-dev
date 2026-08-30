@@ -7,6 +7,27 @@ Merge [`recommended-settings.json`](recommended-settings.json) into
 `~/.claude/settings.json` (global) or `.claude/settings.json` (per project). Do
 not paste it over an existing file; merge the `allow` and `deny` arrays into
 what you already have.
+## `git push` asks, even though `git` is allowed
+
+The allow list carries `Bash(git *)`, which covers around forty git operations
+and is worth having. It also covered `git push`, so a push ran with no prompt.
+
+`[measured 2026-08-30]` that gap has a cost attached rather than being
+theoretical. A skill in this repo told a coordinating session to push another
+session's branch, and nothing stopped it: the instruction said push and the
+permission layer approved silently. The skill is fixed, and this is the second
+half, because a wrong instruction should not be the only thing standing between
+an agent and a publish.
+
+`ask` takes precedence over a broader `allow`, which was tested rather than
+assumed. Same command and same permission mode, one rule different: with only
+`Bash(git *)` the push ran unprompted; adding `Bash(git push*)` to `ask`
+produced "Permission needed to run Bash."
+
+Drop the rule if you push constantly and the prompt becomes noise. Keep in mind
+what it is protecting: publishing is the one action in that list that is visible
+to other people and cannot be taken back by editing a file.
+
 ## `fallbackModel`
 
 The file also sets `"fallbackModel": ["sonnet"]`. That is a top-level key rather

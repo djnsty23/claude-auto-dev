@@ -291,3 +291,37 @@ whether the pin worked. Only spawning one and reading its transcript did that.
 `effort` and `message.model` off the assistant rows of its own
 `subagents/agent-<id>.jsonl`. Reading frontmatter back only tells you what was
 requested.
+
+## 2026-08-30 — architect keeps `effort: xhigh`, now that the pin is known to work
+
+The five agents in `plugins/autodev-core/agents/` were given `effort:` at a time
+when the field was believed inert. `[measured 2026-08-30]` it is not: an agent
+spawned with no effort argument ran at the effort its frontmatter names. So every
+one of those pins became a live cost choice retroactively, and `architect` is the
+only one set to `xhigh`.
+
+**Kept, deliberately.** Two facts decide it.
+
+`architect` is rare. Across 792 subagent transcripts and 62,278 assistant rows it
+appears **zero** times, while `general-purpose` accounts for 31,147 rows and
+`workflow-subagent` for 20,038. An effort pin on an agent that does not run is
+close to free, and the pins that actually move spend are the ones on the agents in
+that second group, none of which this repo owns.
+
+And its job is the one where effort pays. It plans features, maps dependencies and
+records architecture decisions, so its output is read by other agents and turned
+into work. A cheap wrong plan is more expensive than an expensive right one,
+because the cost of a bad plan is paid by every session that builds on it rather
+than once at generation.
+
+**What would reverse this.** If `architect` starts appearing in transcripts at a
+volume comparable to `code-reviewer` (108 rows) or `security-scanner` (361), the
+arithmetic changes and the pin should be re-argued rather than inherited. The
+check is the same one that produced these numbers: group assistant rows in
+`subagents/**/agent-*.jsonl` by `attributionAgent`.
+
+**What this entry is NOT.** It is not a claim that `xhigh` produces better plans.
+Nothing here measured output quality, only that the pin is applied and that the
+agent is rare. The case rests on the cost of the pin being near zero, not on a
+demonstrated benefit, and it should not be cited as evidence for effort levels
+anywhere else.
