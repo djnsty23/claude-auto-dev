@@ -12,11 +12,14 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 
-const RUNNER = path.resolve(__dirname, 'find-vacuous-assertions.js');
+const RUNNER = process.env.VACUITY_RUNNER
+    ? path.resolve(process.env.VACUITY_RUNNER)
+    : path.resolve(__dirname, 'find-vacuous-assertions.js');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vacuity-exit-'));
 const subject = path.join(tempRoot, 'subject.js');
 const suite = path.join(tempRoot, 'suite.js');
 const message = path.join(tempRoot, 'commit-message.txt');
+const preload = path.join(tempRoot, 'fail-subject-write.js');
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
@@ -42,6 +45,23 @@ try {
         "if (classify('kept') !== 'stable') process.exit(1);\n" +
         "console.log('1 passed, 0 failed');\n");
     fs.writeFileSync(message, 'test fixture\n');
+    fs.writeFileSync(preload, [
+        "const fs = require('fs');",
+        "const path = require('path');",
+        'const original = fs.writeFileSync;',
+        'const target = path.resolve(process.env.VACUITY_TEST_SUBJECT);',
+        'const failAt = Number(process.env.VACUITY_FAIL_WRITE);',
+        'let subjectWrites = 0;',
+        'fs.writeFileSync = function (file, ...args) {',
+        '    if (path.resolve(String(file)) === target && ++subjectWrites === failAt) {',
+        "        const error = new Error('injected subject write failure');",
+        "        error.code = 'EACCES';",
+        '        throw error;',
+        '    }',
+        '    return original.call(this, file, ...args);',
+        '};',
+        '',
+    ].join('\n'));
 
     git('init');
     git('config', 'user.name', 'Test Fixture');
@@ -75,6 +95,49 @@ try {
     check('control: the mutation backup is removed after a completed run',
         !fs.existsSync(subject + '.vacuity-backup'),
         'the completed mutation run left its backup behind');
+
+    const runWriteFailure = (failAt) => spawnSync(process.execPath,
+        ['--require', preload, RUNNER, subject, suite], {
+            cwd: tempRoot,
+            env: {
+                ...process.env,
+                VACUITY_TEST_SUBJECT: subject,
+                VACUITY_FAIL_WRITE: String(failAt),
+            },
+            encoding: 'utf8',
+            windowsHide: true,
+            timeout: 30000,
+        });
+    const clearRetainedBackup = () => {
+        const backup = subject + '.vacuity-backup';
+        if (!fs.existsSync(backup)) return;
+        fs.writeFileSync(subject, fs.readFileSync(backup));
+        fs.unlinkSync(backup);
+    };
+
+    // Expected failure before the amendment: a mid-loop subject write throws
+    // through Node's default handler, so the runner exits 1 instead of the
+    // documented restoration-failure status 2.
+    const midLoopFailure = runWriteFailure(3);
+    check('a mid-loop subject write failure exits 2',
+        midLoopFailure.status === 2 && midLoopFailure.signal === null && !midLoopFailure.error,
+        `status=${midLoopFailure.status} signal=${midLoopFailure.signal} error=${midLoopFailure.error?.message || 'none'}`);
+    check('a mid-loop write failure retains the recovery backup',
+        fs.existsSync(subject + '.vacuity-backup'),
+        'the recovery backup was removed after an interrupted mutant window');
+    clearRetainedBackup();
+
+    // Expected failure before the amendment: the final restore throws outside
+    // the verdict path, again collapsing restoration failure into exit 1.
+    const finalRestoreFailure = runWriteFailure(7);
+    check('a final subject restore failure exits 2',
+        finalRestoreFailure.status === 2 && finalRestoreFailure.signal === null
+            && !finalRestoreFailure.error,
+        `status=${finalRestoreFailure.status} signal=${finalRestoreFailure.signal} error=${finalRestoreFailure.error?.message || 'none'}`);
+    check('a final restore failure retains the recovery backup',
+        fs.existsSync(subject + '.vacuity-backup'),
+        'the recovery backup was removed after restoration failed');
+    clearRetainedBackup();
 } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

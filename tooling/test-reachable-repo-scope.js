@@ -10,7 +10,9 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const CHECK = path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'check-rules-reachable.js');
+const CHECK = process.env.REACHABLE_CHECK
+    ? path.resolve(process.env.REACHABLE_CHECK)
+    : path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'check-rules-reachable.js');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'reachable-scope-'));
 const targetRepo = path.join(tempRoot, 'target-repo');
 const otherRepo = path.join(tempRoot, 'other-repo');
@@ -28,6 +30,17 @@ const runTarget = () => spawnSync(process.execPath, [CHECK, targetRepo], {
     encoding: 'utf8',
     windowsHide: true,
 });
+const runTargetJson = () => {
+    const result = spawnSync(process.execPath, [CHECK, '--json', targetRepo], {
+        cwd: ROOT,
+        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+        encoding: 'utf8',
+        windowsHide: true,
+    });
+    let json = null;
+    try { json = JSON.parse(result.stdout); } catch { /* asserted below */ }
+    return { result, json };
+};
 
 const writeRows = (rows) => fs.writeFileSync(logFile,
     rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
@@ -71,6 +84,21 @@ try {
     check('other-repository startup evidence leaves the target at NO EVIDENCE',
         otherRepoOnly.status === 0 && otherRepoOnly.signal === null && !otherRepoOnly.error,
         detail(otherRepoOnly));
+
+    writeRows([{
+        reason: 'session_start',
+        at: '2026-01-01T00:00:00Z',
+        cwd: otherRepo,
+        file: targetRule,
+    }]);
+    const contradictory = runTargetJson();
+    // Expected failure before the amendment: the target file path wins through
+    // an OR even though the recorded cwd says the row came from another repo.
+    check('cwd is authoritative when cwd and loaded-file scope contradict',
+        contradictory.result.status === 0 && contradictory.result.signal === null
+            && !contradictory.result.error && contradictory.json?.rows === 0
+            && contradictory.json?.sawStart === false,
+        `${detail(contradictory.result)} rows=${contradictory.json?.rows} sawStart=${contradictory.json?.sawStart}`);
 } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

@@ -9,7 +9,9 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const CHECK = path.join(ROOT, 'tooling', 'find-untested-hooks.js');
+const CHECK = process.env.HOOK_CHECK
+    ? path.resolve(process.env.HOOK_CHECK)
+    : path.join(ROOT, 'tooling', 'find-untested-hooks.js');
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
@@ -103,6 +105,47 @@ if (target && mutatedCheck) {
         mutatedCheck.result.status === 1 && mutatedCheck.result.signal === null
             && !mutatedCheck.result.error,
         detail(mutatedCheck.result));
+}
+
+let failedSuiteCheck = null;
+if (target && targetSuite && original) {
+    try {
+        // Expected failure before the amendment: execution ranges from a suite
+        // that exits nonzero still count as proof, while suiteProblems is only
+        // advisory. A failed evidence producer makes the check indeterminate:
+        // discard that run's coverage and exit 2.
+        fs.writeFileSync(targetSuite, [
+            'const acceptanceExit = process.exit.bind(process);',
+            'process.exitCode = 1;',
+            'process.exit = (code) => acceptanceExit(code === 0 ? 1 : code);',
+            original,
+        ].join('\n'));
+        const forcedRed = runSuite(targetSuite);
+        check('control: the dedicated suite is red after the injected failure',
+            forcedRed.status === 1 && forcedRed.signal === null && !forcedRed.error,
+            detail(forcedRed));
+        failedSuiteCheck = runChecker();
+    } finally {
+        fs.writeFileSync(targetSuite, original);
+    }
+
+    const restored = runSuite(targetSuite);
+    check('control: the dedicated suite is restored after the red-suite mutation',
+        restored.status === 0 && restored.signal === null && !restored.error,
+        detail(restored));
+}
+
+if (target && failedSuiteCheck) {
+    const failedRow = (failedSuiteCheck.json?.wiredRows || [])
+        .find((row) => row.name === target.name);
+    check('coverage from a failed candidate suite is discarded',
+        !failedRow?.covering?.includes(target.covering[0])
+            && (failedSuiteCheck.json?.untested || []).some((row) => row.name === target.name),
+        `covering=${JSON.stringify(failedRow?.covering)} untested=${JSON.stringify((failedSuiteCheck.json?.untested || []).map((row) => row.name))}`);
+    check('a failed candidate suite makes check:hooks exit 2',
+        failedSuiteCheck.result.status === 2 && failedSuiteCheck.result.signal === null
+            && !failedSuiteCheck.result.error,
+        detail(failedSuiteCheck.result));
 }
 
 let pass = 0;
