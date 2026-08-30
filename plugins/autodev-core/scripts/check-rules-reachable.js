@@ -110,6 +110,13 @@ function readLog(file) {
     return rows;
 }
 
+// Case-folding is a property of the FILESYSTEM, not of this script (Sol's
+// round-4 and round-5 findings): unconditional lowercasing conflated
+// /srv/RepoA with /srv/repoa, and A.md with a.md, on Linux - where those are
+// different things. Windows records one file in mixed case across log rows, so
+// it folds; Linux must not. Used by BOTH the repo scoping and the seen-set.
+const fold = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
+
 function analyse(disk, rows, repo) {
     // F3: evidence belongs to the repository that produced it. The recorded
     // cwd is AUTHORITATIVE when present: a session whose cwd is repo B says
@@ -119,11 +126,6 @@ function analyse(disk, rows, repo) {
     // fallback only for legacy rows written before cwd was recorded. With no
     // repo given (the selftest's synthetic fixtures) behaviour is unchanged.
     if (repo) {
-        // Case-insensitive only where the FILESYSTEM is (Sol's round-4 finding):
-        // unconditional lowercasing conflated /srv/RepoA with /srv/repoa on
-        // Linux, where those are two different repositories. Windows records
-        // paths in mixed case for one repo, so it folds; Linux must not.
-        const fold = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
         const base = fold(path.resolve(repo));
         const within = (p) => {
             if (!p) return false;
@@ -138,14 +140,14 @@ function analyse(disk, rows, repo) {
     // exactly the question an unconditional rule is judged on.
     const sawStart = (rows || []).some((r) => r && r.reason === 'session_start');
     const seen = new Set((rows || []).map((r) => r && r.file
-        ? path.resolve(r.file).toLowerCase() : null).filter(Boolean));
+        ? fold(path.resolve(r.file)) : null).filter(Boolean));
 
     const unreachable = [];
     const unexercised = [];
     let reached = 0;
 
     for (const d of disk) {
-        if (seen.has(d.file.toLowerCase())) { reached += 1; continue; }
+        if (seen.has(fold(d.file))) { reached += 1; continue; }
         if (d.scoped) unexercised.push(d);
         else unreachable.push(d);
     }
@@ -245,7 +247,14 @@ function selftest() {
     // 6. Case-insensitive path matching, because Windows records both forms.
     r = analyse([F('/R/.claude/RULES/a.md', false)],
         [{ reason: 'session_start', at: '2026-08-26T00:00:00Z', file: '/r/.claude/rules/A.MD' }]);
-    check('paths match case-insensitively', r.reached === 1);
+    // Folding follows the platform (round 5): Windows conflates cases because
+    // its filesystem does; Linux keeps A.md and a.md distinct because its
+    // filesystem does. The selftest asserts each platform's own truth, so it
+    // is green on both CI runners while pinning opposite behaviours.
+    check(process.platform === 'win32'
+        ? 'paths match case-insensitively on win32'
+        : 'case-distinct paths stay distinct on POSIX',
+        process.platform === 'win32' ? r.reached === 1 : r.reached === 0);
 
     // 7. MUTATION: fold unexercised into unreachable and prove the count moves.
     r = analyse([F('/r/a.md', true), F('/r/b.md', false)],

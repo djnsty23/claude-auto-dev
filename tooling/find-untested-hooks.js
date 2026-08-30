@@ -125,7 +125,11 @@ if (!wired.length) {
 // Each candidate suite runs once with V8 coverage on. The env flag stops a
 // pathological candidate that spawned this checker from re-entering the
 // execution phase; no current candidate does, and the flag keeps it that way.
-const hookByLower = new Map(wired.map((h) => [h.file.toLowerCase(), h]));
+// Folding follows the platform (Sol's round-5 blocker): unconditional
+// lowercasing let case-distinct hooks share coverage on Linux, where Hook.js
+// and hook.js are different files. Windows folds because its filesystem does.
+const fold = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
+const hookByPath = new Map(wired.map((h) => [fold(h.file), h]));
 const executedBy = new Map();   // hook name -> Set of suite names whose RUN loaded it
 const failedSuites = [];
 
@@ -163,8 +167,8 @@ if (!referencedOnly) {
                 for (const script of cov.result || []) {
                     if (!script.url || !script.url.startsWith('file://')) continue;
                     let p;
-                    try { p = path.resolve(fileURLToPath(script.url)).toLowerCase(); } catch { continue; }
-                    const hook = hookByLower.get(p);
+                    try { p = fold(path.resolve(fileURLToPath(script.url))); } catch { continue; }
+                    const hook = hookByPath.get(p);
                     if (!hook) continue;
                     // Keyed by FULL FILE PATH, not basename (Sol's round-4
                     // warning): two plugins wiring the same hook filename would

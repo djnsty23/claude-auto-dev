@@ -342,22 +342,22 @@ for (const suite of suites) {
     // what is NEW; the finally fires on every continue below.
     const untrackedBefore = new Set(git('status --porcelain').split('\n')
         .filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).trim()));
-    // Sol's round-4 blocker on the first version of this cleanup: an arbitrary
-    // status delta can include work a CONCURRENT session created while a suite
-    // ran - this clone runs several sessions at once, and deleting whatever is
-    // new is deleting whoever else was working. So the delete is scoped to the
-    // zones suites plant fixtures in, and every removal is printed. A new file
-    // outside these zones is left alone and reported; the end-of-run tree check
-    // decides what it means.
-    const FIXTURE_ZONES = ['plugins/', 'tooling/', 'templates/'];
+    // OWNERSHIP IS EXPLICIT, never inferred (Sol's round-4 and round-5
+    // blockers, in sequence). Round 4 deleted any new untracked path; round 5
+    // showed zone-scoping still deletes a CONCURRENT session's new files,
+    // because plugins/ and tooling/ are exactly where sessions work. So the
+    // contract is a naming convention: a suite's disposable fixture has a
+    // `zz-` basename prefix (test-validate's zz-spawn-fixture.js already
+    // does), and ONLY new untracked zz-files are removed. Anything else new
+    // is reported and left - if it is a real orphan, the end-of-run tree
+    // check names it and a human decides.
     const cleanNewUntracked = () => {
         for (const line of git('status --porcelain').split('\n')) {
             if (!line.startsWith('?? ')) continue;
             const p = line.slice(3).trim();
             if (untrackedBefore.has(p)) continue;
-            const norm = p.replace(/\\/g, '/');
-            if (!FIXTURE_ZONES.some((z) => norm.startsWith(z))) {
-                console.error(`  [left alone] new untracked ${p} is outside the fixture zones — not this sweep's to delete`);
+            if (!path.basename(p).startsWith('zz-')) {
+                console.error(`  [left alone] new untracked ${p} — not a zz- disposable fixture, so not this sweep's to delete`);
                 continue;
             }
             console.error(`  [removed] orphaned fixture ${p} (appeared during ${suite}, absent from the pre-run snapshot)`);
