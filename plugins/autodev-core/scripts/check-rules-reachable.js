@@ -38,9 +38,19 @@
  * Usage:
  *   node check-rules-reachable.js [repoPath]   default: cwd
  *   node check-rules-reachable.js --json
- *   node check-rules-reachable.js --selftest
+ *   node check-rules-reachable.js --selftest   (npm run test:reachable)
  *
- * Exit 1 only on UNREACHABLE. Never on UNEXERCISED, never on NO EVIDENCE.
+ * Exit 1 only on UNREACHABLE - in BOTH renderers. Never on UNEXERCISED, never
+ * on NO EVIDENCE. The codex audit (2026-08-30, F2) found the two public live
+ * entrypoints hard-coding success: `npm run check:reachable` always diverted
+ * into the selftest and never read a repository, and --json printed a computed
+ * `unreachable` array and then exited 0 unconditionally. Both now carry the
+ * same verdict the text renderer computes.
+ *
+ * F3, same audit: evidence is scoped to the repository that produced it. The
+ * hook records `cwd`; a session_start in repo A used to make repo B's unseen
+ * unconditional rule read as proven unreachable. Rows are filtered to the
+ * target repo before sawStart/seen/session counts are computed.
  */
 'use strict';
 const fs = require('fs');
@@ -100,7 +110,20 @@ function readLog(file) {
     return rows;
 }
 
-function analyse(disk, rows) {
+function analyse(disk, rows, repo) {
+    // F3: evidence belongs to the repository that produced it. A row is in
+    // scope when its recorded cwd sits inside the target repo, or - for legacy
+    // rows written before cwd was recorded - when the loaded file does. With
+    // no repo given (the selftest's synthetic fixtures) behaviour is unchanged.
+    if (repo) {
+        const base = path.resolve(repo).toLowerCase();
+        const within = (p) => {
+            if (!p) return false;
+            const r = path.resolve(String(p)).toLowerCase();
+            return r === base || r.startsWith(base + path.sep);
+        };
+        rows = (rows || []).filter((r) => r && (within(r.cwd) || within(r.file)));
+    }
     // NO EVIDENCE is decided by whether the log ever saw a session_start, not by
     // whether it has any lines. A log full of path_glob_match rows proves the
     // hook works and proves nothing about what loads at startup, which is
@@ -239,10 +262,14 @@ function main() {
     const rows = readLog(lf);
     const r = rows === null
         ? { rows: null, unreachable: [], unexercised: [] }
-        : analyse(onDisk(repo), rows);
+        : analyse(onDisk(repo), rows, repo);
     if (has('--json')) {
         console.log(JSON.stringify({ repo, log: lf, ...r }, null, 2));
-        process.exit(0);
+        // F2: the JSON verdict mirrors the text renderer. Exit 1 only when a
+        // startup was observed AND an unconditional rule was never seen; a
+        // payload that lists unreachable rules while exiting 0 is a verdict
+        // the caller's shell never receives.
+        process.exit(r.rows !== null && r.sawStart && r.unreachable.length ? 1 : 0);
     }
     process.exit(report(repo, r, lf));
 }
