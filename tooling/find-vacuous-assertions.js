@@ -199,6 +199,19 @@ recoverStaleBackup(subject);
 
 const original = fs.readFileSync(subject, 'utf8');
 fs.writeFileSync(backupPath(subject), original);
+
+// From this line until the final restore, the subject on disk may be a mutant.
+// Sol's adversarial review proved a crash in this window - a locked file, a
+// thrown restore, anything - exited 1 through the default handler with the
+// exit-2 contract unreachable. Any uncaught failure while the backup exists is
+// a restoration failure by definition: the tree cannot be trusted, exit 2, and
+// the backup stays as the recovery sentinel.
+process.on('uncaughtException', (e) => {
+    console.error('FATAL during the sweep: ' + (e && e.message ? e.message : e));
+    console.error('The subject may be a mutant on disk. The .vacuity-backup is retained;');
+    console.error('the next run recovers from it, and validate refuses the tree until then.');
+    process.exit(2);
+});
 const lines = original.split('\n');
 
 // This script OVERWRITES the subject with mutants. The normal path restores
@@ -285,10 +298,19 @@ for (let i = 0; i < lines.length; i++) {
     }
 }
 
-fs.writeFileSync(subject, original);
-const restored = fs.readFileSync(subject, 'utf8') === original;
+// Sol's adversarial review of the first F1 fix found the hole here: if this
+// write THROWS (a lock, a permission), the crash exited 1 with a stack trace
+// and the exit-2 verdict below was unreachable - a verdict written but not
+// computed on the one path it existed for. Restoration failure must not be
+// able to crash past its own verdict, so the throw is caught, `restored`
+// stays false, and the backup is deliberately left as the recovery sentinel.
+let restored = false;
+try {
+    fs.writeFileSync(subject, original);
+    restored = fs.readFileSync(subject, 'utf8') === original;
+} catch { /* restored stays false; the backup stays on disk */ }
 // Only now is the backup redundant. Removing it earlier would reopen the window.
-if (restored) fs.unlinkSync(backupPath(subject));
+if (restored) { try { fs.unlinkSync(backupPath(subject)); } catch { /* validate flags a stale backup */ } }
 
 console.log(`\nsubject: ${subject}`);
 console.log(`suite:   ${suite}`);
