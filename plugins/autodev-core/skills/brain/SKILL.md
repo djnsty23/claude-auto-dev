@@ -143,9 +143,11 @@ switch accounts. make sure our harness is ready for cross account continuity or
 resuming."* It carries what an account boundary destroys: which panel denies are
 outstanding and when they expire, which signals on this fleet are known to lie,
 the standing rules set since the last release, and what was in flight. It does
-NOT carry addresses — a new Brain reads its own from
-`~/.claude/sessions/<ppid>.json`, because a copied address is how twelve sessions
-were once given a return address that existed nowhere.
+NOT carry addresses. A new Brain reads its NAME from `ListAgents`, which reports
+the name peers actually resolve, and its socket path from
+`~/.claude/sessions/<ppid>.json`. A copied address is how twelve sessions were once
+given a return address that existed nowhere, and a CACHED one is how six were given
+a stale one on 2026-08-30.
 
 An account switch costs SESSIONS, not code — measured, zero unpushed commits
 across four repos and eighteen worktrees. So do not try to reconstruct a departed
@@ -714,7 +716,22 @@ reported "Brain unreachable", one after five undelivered attempts. Their reports
 were not lost, but the Brain never saw them and briefed two sessions on work they
 had already finished.
 
-Read your own addresses rather than constructing them. `~/.claude/sessions/<pid>.json`
+**`ListAgents` is the authority for your own NAME, and the session record is
+not.** `[measured 2026-08-30]` a Brain read `name` once at boot from its session
+record and signed six messages `autodev-82`, while `ListAgents` in a peer session
+listed that same Brain as `autodev-50`. Every reply bounced for hours. The Brain
+found out only when one peer gave up on it and escalated to the operator instead.
+The record had gone stale and nothing announced it, which is the failure mode a
+cached identifier always has.
+
+Since Claude Code 2.1.239 `ListAgents` opens with your own entry: "This session is
+<name> [ref], the name other sessions use to message it." Read it there, re-read it
+before you sign anything, and treat any name you cached at boot as unverified. A
+plausible identifier is not a valid one, and that rule applies to your OWN address
+as much as to a peer story id.
+
+The session record remains the right place to read the SOCKET PATH.
+`~/.claude/sessions/<pid>.json`
 holds `messagingSocketPath`, `name`, `sessionId` and `pid` — and the pid is your
 shell's PARENT, not the shell:
 
