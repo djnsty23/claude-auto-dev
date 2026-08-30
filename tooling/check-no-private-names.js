@@ -273,10 +273,16 @@ function main(argv) {
     // The first version matched structurally, on the reasoning that it would
     // then work on any clone. That was wrong, and its first real run said so:
     // 31 findings of which the first three were `/Users/CHANGEME/`, a comment
-    // about `'/home/my-project'` normalisation, and `C:\Users\runneradmin\`,
-    // a public CI account. Structural matching cannot tell a personal account
-    // from a placeholder or a shared one, and a detector at that precision gets
-    // muted, after which it misses the real thing. Precision is the whole value.
+    // about `'/home/my-project'` normalisation, and the hosted CI account's own
+    // home directory. Structural matching cannot tell a personal account from a
+    // placeholder or a shared one, and a detector at that precision gets muted,
+    // after which it misses the real thing. Precision is the whole value.
+    //
+    // That third example is written in prose rather than spelled out, and the
+    // reason is this file's own subject. Spelled out, it is a literal that
+    // matches the slash pattern below whenever this runs AS that account, so
+    // the comment arguing for precise matching was itself a finding on every
+    // windows CI run. Third instance of that shape in one day.
     //
     // Keying on os.homedir() narrows it to the only case that is definitely a
     // leak from THIS clone, which is also the only case a pre-publish gate on
@@ -305,15 +311,75 @@ function main(argv) {
     // ENCODING of a value is not a detector for the value. Enumerate the
     // spellings before deciding a pattern covers it, and test each, because a
     // partial detector reports clean with total confidence.
-    const HOME_PATH = LOCAL_USER && LOCAL_USER.length >= 3
+    // The segment ABOVE the home directory: "Users" on Windows and macOS,
+    // "home" on Linux. Derived rather than listed, so it needs no maintenance
+    // and cannot be wrong about a machine nobody anticipated.
+    const HOME_PARENT = path.basename(path.dirname(os.homedir() || '')) || '';
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // THIS HALF CAN ONLY EVER SEE ONE PERSON'S HOME, and on a hosted runner
+    // that person does not exist.
+    //
+    // Every pattern below is keyed on os.homedir(), so the half detects paths
+    // belonging to THIS host's account and no other. On a build runner that
+    // account is an artifact of the platform, which makes the check
+    // structurally incapable of catching what it exists for: a developer's home
+    // path committed to the repo.
+    //
+    // [measured 2026-08-30] with the home directory set as a hosted runner has
+    // it, a developer's home path planted in a tracked file is NOT CAUGHT in
+    // either spelling, slash or dash-encoded. Run as that developer, both are
+    // caught. The half is not merely less useful there, it is blind.
+    //
+    // Narrowing the pattern (above) stops it reporting nonsense there. It does
+    // NOT make it protective, and a quiet check that protects nothing reads
+    // exactly like a passing one. So say so, out loud, and keep the count out
+    // of the clean line rather than reporting "0 absolute home paths" for a
+    // scan that never ran.
+    //
+    // The NAMES half is unaffected and runs everywhere. That is the half a
+    // public repo actually depends on, and it is keyed on a denylist rather
+    // than on whoever happens to own this machine.
+    const CI_HOST = process.env.GITHUB_ACTIONS ? 'GITHUB_ACTIONS'
+        : (process.env.CI ? 'CI' : '');
+    const HOME_PATH = !CI_HOST && LOCAL_USER && LOCAL_USER.length >= 3
         ? [
             new RegExp('[\\\\\\\\/]' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\\\]/g, '\\\\$&') + '[\\\\\\\\/]', 'gi'),
-            // Dash-encoded. Anchored on a leading dash and followed by a dash
-            // or a boundary, for the same reason the slash form is anchored on
-            // a separator: an unanchored username matches inside unrelated
-            // identifiers, and a noisy check gets muted, which is worse than
-            // the gap it closes.
-            new RegExp('-' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=[-\\b])', 'gi'),
+            // Dash-encoded, and anchored on the PARENT SEGMENT rather than on a
+            // bare leading dash.
+            //
+            // The comment above already named the risk: an unanchored username
+            // matches inside unrelated identifiers, and a noisy check gets
+            // muted. A single leading dash is not enough to prevent that when
+            // the username is an ordinary word.
+            //
+            // [measured 2026-08-30] on a GitHub-hosted ubuntu runner the build
+            // account's name IS an ordinary English word, so LOCAL_USER became
+            // that word and the dash pattern reduced to it surrounded by
+            // hyphens. It then matched `tooling/test-runner-guard.js`, whose
+            // filename contains the same word between hyphens for entirely
+            // unrelated reasons. Six findings across three files, not one of
+            // them a leak, on every CI run forever: the gate could not pass on
+            // Actions at all.
+            //
+            // Requiring the parent segment keeps exactly what the dash form was
+            // built to catch, because the encoding rewrites EVERY separator and
+            // therefore always carries the parent: `C--<parent>-<user>-project`
+            // is the shape, with the real values substituted. It drops only
+            // matches that were never a path to begin with.
+            //
+            // The examples above are deliberately written with placeholders.
+            // An earlier draft of this very comment spelled the runner's real
+            // home out in full and tripped the pattern it documents, which is
+            // the same trap in a smaller costume: an example realistic enough
+            // to illustrate a rule is realistic enough to fire it.
+            HOME_PARENT
+                ? new RegExp(esc(HOME_PARENT) + '-' + esc(LOCAL_USER) + '(?=[-\\b])', 'gi')
+                // No parent segment, e.g. a home directory at the filesystem
+                // root. Fall back to the original, broader form rather than
+                // silently dropping the check: over-reporting is recoverable
+                // here and a missing detector is not.
+                : new RegExp('-' + esc(LOCAL_USER) + '(?=[-\\b])', 'gi'),
           ]
         : null;
 
@@ -355,9 +421,18 @@ function main(argv) {
     if (!hits.length) {
         // Print the population, not just the verdict: a check that reports only
         // "clean" is indistinguishable from one that read nothing.
+        //
+        // And where the home-path half did not run, say NOT RUN rather than
+        // "0 absolute home paths". Zero-found and never-looked are the same
+        // string to a reader and opposite in meaning, which is the whole
+        // failure this line was written to avoid.
+        const homeNote = CI_HOST
+            ? `home paths NOT CHECKED (${CI_HOST} host: keyed on the build account, `
+              + `which cannot represent an operator home - this is a coverage gap, not a pass)`
+            : `0 absolute home paths (keyed on this machine's home dir)`;
         console.log(`[no-private-names] ${scanned} of ${tracked.length} files read, `
             + `${memo.size} distinct candidate tokens, ${DIGESTS.length} names, `
-            + `0 absolute home paths (keyed on this machine's home dir) — clean`);
+            + `${homeNote} — names clean`);
         return 0;
     }
 

@@ -311,13 +311,62 @@ function transcript(id, cwd, branch, opts) {
  * this machine has none. git has to survive that removal for the scenario to
  * mean anything, which is why it is asserted as a control before it is used.
  */
+const PATH_EXTS = IS_WIN ? ['.exe', '.cmd', '.bat', '.com'] : [''];
+
+/** Absolute path of `cmd` within `dirs`, or null. */
+function whichIn(cmd, dirs) {
+    for (const d of dirs) {
+        for (const e of PATH_EXTS) {
+            const p = path.join(d, cmd + e);
+            try { if (fs.statSync(p).isFile()) return p; } catch { /* not here */ }
+        }
+    }
+    return null;
+}
+
+/**
+ * A directory containing ONLY git, reached through a shim that calls the real
+ * binary by absolute path.
+ *
+ * Needed because ubuntu-latest ships git and gh in the SAME directory
+ * (/usr/bin), so removing every gh-bearing directory removes git with it and
+ * the gh-absent scenario cannot run at all. Windows keeps them apart, which is
+ * why this suite passed there and failed on Linux for as long as CI was dark.
+ *
+ * Returns null when no shim can be built, and the control below then fails
+ * loudly rather than testing a broken PATH. That refusal is the property worth
+ * keeping: it is what surfaced this in the first place.
+ */
+let GIT_SHIM_DIR = null;
+function gitShimDir(realGit) {
+    if (!realGit) return null;
+    // A .cmd shim is not spawnable by Node without shell:true since the 2024
+    // command-injection hardening, and copying git.exe out of its libexec tree
+    // breaks it. Windows has never needed this: it keeps git and gh in separate
+    // directories, so the filter leaves git reachable. If that ever stops being
+    // true the control fails and says so, which is the correct outcome.
+    if (IS_WIN) return null;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brainbrief-git-'));
+    const shim = path.join(dir, 'git');
+    fs.writeFileSync(shim, `#!/bin/sh\nexec ${JSON.stringify(realGit)} "$@"\n`);
+    fs.chmodSync(shim, 0o755);
+    GIT_SHIM_DIR = dir;
+    return dir;
+}
+
+/**
+ * PATH entries with no `gh` in them. Built by REMOVING every directory that
+ * holds a gh executable, so gh is absent by construction rather than by hoping
+ * this machine has none. git has to survive that removal for the scenario to
+ * mean anything, which is why it is asserted as a control before it is used --
+ * and where the removal takes git too, it is restored alone through a shim.
+ */
 function pathWithoutGh() {
-    const exts = IS_WIN ? ['.exe', '.cmd', '.bat', '.com'] : [''];
-    return (process.env.PATH || '').split(path.delimiter).filter(Boolean).filter((d) => {
-        return !exts.some((e) => {
-            try { return fs.statSync(path.join(d, 'gh' + e)).isFile(); } catch { return false; }
-        });
-    }).join(path.delimiter);
+    const all = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+    const kept = all.filter((d) => !whichIn('gh', [d]));
+    if (whichIn('git', kept)) return kept.join(path.delimiter);
+    const shim = gitShimDir(whichIn('git', all));
+    return shim ? [shim, ...kept].join(path.delimiter) : kept.join(path.delimiter);
 }
 
 function runBrief(opts) {
@@ -718,6 +767,15 @@ try {
         fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
     } catch (e) {
         console.log('NOTE  fixture cleanup left files behind at ' + ROOT + ': ' + e.message);
+    }
+    // The git shim lives outside ROOT, in the system temp dir, so it needs its
+    // own removal. It is created only where git and gh share a directory.
+    if (GIT_SHIM_DIR) {
+        try {
+            fs.rmSync(GIT_SHIM_DIR, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
+        } catch (e) {
+            console.log('NOTE  git shim left behind at ' + GIT_SHIM_DIR + ': ' + e.message);
+        }
     }
 }
 
