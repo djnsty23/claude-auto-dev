@@ -238,42 +238,56 @@ onto Node 24 and annotate every run about it. Both are pinned to `v7` now. This
 job uses neither action's optional surface, so the intervening majors do not
 apply to it.
 
-## 2026-08-30 — agent frontmatter `effort:` is not reliably applied
+## 2026-08-30 — agent frontmatter `model:` and `effort:` both take effect
 
-`[measured 2026-08-30]` across 792 subagent transcripts and 62,278 assistant
-rows, 61,657 of which carry an `effort` field. Every row is from 2026-08, so no
-window average is hiding a changed present. Grouped by `attributionAgent`, with
-effort read from the top-level `effort` field Claude Code records on each
-assistant row and the model from `message.model`:
+`[measured 2026-08-30]` and stated as a correction, because the first version of
+this entry concluded the opposite and was committed before the controls were run.
 
-| agent | frontmatter | observed |
+**What the retracted version claimed.** That `effort:` is not reliably applied,
+on the evidence that `autodev-core:code-reviewer` pins `effort: high` and ran
+`xhigh` in 108 of 108 assistant rows, while two other agents pinning `high` ran
+`high`. That divergence is real and the reading of it was wrong.
+
+**What was missing: a live control.** Two agents were then spawned with NO model
+and NO effort argument, and their own transcripts read back:
+
+| spawned | frontmatter | ran |
 |---|---|---|
-| `autodev-core:code-reviewer` | `effort: high` | `opus-5 / xhigh`, 108 of 108 rows |
-| `autodev-core:researcher` | `effort: high` | `opus-5 / high`, 41 of 41 |
-| `autodev-core:security-scanner` | `effort: high` | `opus-5 / high`, 360 of 361 |
-| `autodev-core:plan-reviewer` | `model: fable` | `fable-5` 305, Opus 195, of 500 |
-| `autodev-core:architect` | `effort: xhigh` | no rows; untested |
+| `test-runner` | `model: haiku` | `claude-haiku-4-5`, 4 of 4 rows |
+| `autodev-core:code-reviewer` | `model: opus`, `effort: high` | `claude-opus-5`, `effort=high`, 3 of 3 |
 
-Three agents pin `effort: high`. Two ran `high` and one ran `xhigh` in every
-single row. Both competing explanations predict agreement: if the pin were
-applied they would all be `high`, and if effort were purely inherited from the
-session they would also agree, because they run inside the same sessions. They
-disagree. So something is being applied per agent, and whatever it is, it is not
-applying `code-reviewer`'s.
+Both pins held exactly. So `effort:` in agent frontmatter is no longer merely
+documented; a transcript now shows it applied on an agent spawned without an
+effort argument.
 
-What this does NOT establish is that `researcher` and `security-scanner` prove
-the pin works. Running `high` while pinning `high` is equally consistent with
-inheriting a `high` session, so those rows carry no information in either
-direction. Only the counterexample does.
+**Why the historical rows disagreed, at DAY granularity:**
 
-The model pin is separately unreliable: `plan-reviewer` pins `fable` and ran Opus
-in 39% of its rows. That matters because the choice of model there is argued on
-cost grounds, and a cost argument assumes a pin that holds every time rather than
-three times in five.
+| agent | day | observed |
+|---|---|---|
+| `test-runner` | 2026-08-16 / 18 / 19 | `opus-5 / xhigh`, 128 + 77 + 333 |
+| `test-runner` | 2026-08-21 onward | `haiku`, 62 |
+| `autodev-core:code-reviewer` | 2026-08-17 | `opus-5 / xhigh`, 108 |
+| both | 2026-08-30 probe | pins honoured |
 
-**Consequence.** Do not treat frontmatter `effort:` or `model:` as a guarantee,
-and do not cost a plan on one. To re-measure, read `effort` and `message.model`
-off the assistant rows in `subagents/**/agent-*.jsonl` grouped by
-`attributionAgent`. Reading the frontmatter back only tells you what was
-requested, which is the distinction that made the earlier subagent-model
-investigation take three attempts.
+Every contradicting row predates 2026-08-22, which is the day the
+subagent-model environment override was disabled on this machine. That override
+forced every subagent to opus regardless of its definition, which is exactly what
+these rows show. Nothing about pinning was broken; the rows are an artifact of a
+configuration that no longer exists.
+
+**Two method notes, because this went wrong in a specific and repeatable way.**
+
+A month-granularity split was run precisely to avoid reporting a window average
+as current state, and it was still too coarse: every row fell inside 2026-08, so
+the split looked clean while hiding a change on the 22nd. Match the granularity
+to the suspected change, not to the convenient bucket.
+
+And an override refutation is not a pin confirmation. Counting Agent spawns
+showed `test-runner` had 20 spawns and zero explicit `model` arguments, which
+correctly killed the per-spawn-override explanation and said nothing about
+whether the pin worked. Only spawning one and reading its transcript did that.
+
+**Reproduction.** Spawn the agent with no model or effort argument, then read
+`effort` and `message.model` off the assistant rows of its own
+`subagents/agent-<id>.jsonl`. Reading frontmatter back only tells you what was
+requested.
