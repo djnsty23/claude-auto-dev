@@ -391,9 +391,34 @@ the unmeasured-head rule below.
 2026-08-29]` a session was archived MID-RUN and its worktree held the only copy
 of a finished ten-route fix on an unpushed branch; recovered only because the
 Brain checked within minutes. brain-brief section 4 already measures this — act
-on it: for every worktree carrying unpushed commits or a detached HEAD, push the
-branch (or a rescue ref) to origin. Branch pushes are reversible and safe;
-losing a dead session's only copy is not.
+on it: for every worktree carrying unpushed commits or a detached HEAD, **bundle
+the commits; do not push them.**
+
+```bash
+git bundle create "$RESCUE_DIR/<session>-<sha>.bundle" HEAD --not origin/main
+```
+
+`[measured 2026-08-30]` that produced a 2,932-byte file carrying an unpushed
+commit, confirmed restorable by `git bundle verify`, and it needs no remote, no
+network and nobody's authorisation. It survives the worktree being deleted and
+the session being archived, which is the entire failure this step exists for.
+
+**A push is NOT part of the rescue.** `rule-local-first/SKILL.md` holds that an
+ad-hoc push needs the operator to say so in that turn, and this skill does not
+outrank it. Note why this is easy to get wrong: the queue-it-with-the-Brain rule
+further down scopes queued pushes to *product repos*, so a tooling repo reads as
+unguarded when it is not.
+
+`[measured 2026-08-30]` a Brain pushed a peer session's branch on the older
+wording of this step, against a real reboot risk, and the owning session had to
+escalate it as a rules breach. The work was real, the reboot risk was real, and
+the publish was still not the Brain's to decide; the owner found out afterwards.
+
+So the order is: bundle it, which needs no permission; tell the owning session in
+the same turn; then put the push to the operator as a question. Losing a dead
+session's only copy is not acceptable, and neither is publishing a peer's branch
+on your own authority. The bundle removes the pressure that made that trade look
+necessary.
 
 **3. Archive stale sessions.** A session is stale when its transcript is old,
 its branch is merged or measured content-empty, and its worktree holds nothing

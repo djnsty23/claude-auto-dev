@@ -36,7 +36,8 @@
     "check:recommendations": "node plugins/autodev-core/scripts/check-recommendation-quality.js --selftest",
     "check:verdicts": "node plugins/autodev-core/scripts/check-scheduled-verdicts.js --selftest",
     "check:plugin-drift": "node plugins/autodev-core/scripts/check-plugin-drift.js --quiet",
-    "check:reachable": "node plugins/autodev-core/scripts/check-rules-reachable.js --selftest"
+    "check:reachable": "node plugins/autodev-core/scripts/check-rules-reachable.js --selftest",
+    "check:push-auth": "node tooling/check-push-authorisation.js --selftest"
   },
   "author": "djnsty23",
   "license": "MIT",
