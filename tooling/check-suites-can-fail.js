@@ -330,6 +330,25 @@ for (const suite of suites) {
         continue;
     }
 
+    // Any run of the suite from here on - baseline OR stubbed - can be killed
+    // on timeout, and no in-process finally survives a kill. Measured twice on
+    // 2026-08-30: a killed test-validate BASELINE run (not a stubbed one)
+    // orphaned zz-spawn-fixture.js in the real hooks/ dir, and the end-of-run
+    // restore cannot remove untracked files, so the whole sweep exited 2 with
+    // no verdict. Snapshot the untracked set once per suite and remove only
+    // what is NEW; the finally fires on every continue below.
+    const untrackedBefore = new Set(git('status --porcelain').split('\n')
+        .filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).trim()));
+    const cleanNewUntracked = () => {
+        for (const line of git('status --porcelain').split('\n')) {
+            if (!line.startsWith('?? ')) continue;
+            const p = line.slice(3).trim();
+            if (untrackedBefore.has(p)) continue;
+            try { fs.rmSync(path.join(ROOT, p), { recursive: true, force: true }); } catch { /* the tree check below still backstops */ }
+        }
+    };
+    try {
+
     // Baseline: it must be green before the mutation means anything.
     if (runSuite(suite).status !== 0) {
         rows.push({ suite, status: 'RED', note: 'already failing — fix it before trusting this result' });
@@ -351,32 +370,19 @@ for (const suite of suites) {
     for (const rel of subjects) {
         const full = path.join(ROOT, rel);
         const original = fs.readFileSync(full);
-        // A stubbed suite can die (or be killed on timeout) before its own
-        // finally blocks run, orphaning fixtures it planted in the tree.
-        // Measured 2026-08-30: a killed test-validate left an untracked
-        // zz-spawn-fixture.js in the real hooks/ dir, and the end-of-run
-        // restore below cannot fix that - `git checkout` only touches tracked
-        // files, so the tree check went STILL DIRTY and exited 2. Snapshot the
-        // untracked set before each stubbed run and remove only what is NEW.
-        const untrackedBefore = new Set(git('status --porcelain').split('\n')
-            .filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).trim()));
         try {
             fs.writeFileSync(full, STUB);
             if (runSuite(suite).status !== 0) killed.push(rel);
         } finally {
             fs.writeFileSync(full, original);
-            for (const line of git('status --porcelain').split('\n')) {
-                if (!line.startsWith('?? ')) continue;
-                const p = line.slice(3).trim();
-                if (untrackedBefore.has(p)) continue;
-                try { fs.rmSync(path.join(ROOT, p), { force: true }); } catch { /* the tree check below still catches it */ }
-            }
         }
     }
 
     rows.push(killed.length
         ? { suite, status: 'ok', note: `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed` }
         : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` });
+
+    } finally { cleanNewUntracked(); }
 }
 
 // The restore is the dangerous part; prove it worked rather than assuming.
