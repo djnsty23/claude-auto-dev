@@ -596,7 +596,7 @@ try {
 // Both sides go through realpathSync.NATIVE, and the `.native` is the whole
 // point. Windows hands out 8.3 short names — a GitHub runner's %TEMP% is
 // `C:\Users\RUNNER~1\AppData\Local\Temp` — while git answers with the long
-// form, `C:\Users\runneradmin\...`. Plain realpathSync leaves a short name
+// form, `C:\Users\<ci-account>\...`. Plain realpathSync leaves a short name
 // alone (measured: `C:/PROGRA~1` in, `C:\PROGRA~1` out); only `.native`
 // expands it to `C:\Program Files`. Comparing raw strings therefore compared
 // two spellings of one directory and never matched, which is why the first
