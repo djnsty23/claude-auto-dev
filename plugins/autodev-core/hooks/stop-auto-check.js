@@ -5,6 +5,22 @@
 // reach `approve`. The escape hatches, in order: an explicit auto-exit signal,
 // a stale flag (>2h), an unparseable prd.json, a missing prd.json, and the
 // one-shot idle marker. tooling/test-stop-auto-check.js covers all of them.
+//
+// TWO WAYS A TURN CAN END THAT THIS FILE DOES NOT CONTROL, both enforced by the
+// harness rather than by any path below:
+//
+//   1. Eight consecutive blocks. Claude Code 2.1.143 ends the turn with a
+//      warning after eight, overridable with CLAUDE_CODE_STOP_HOOK_BLOCK_CAP.
+//      So the auto loop has an undocumented ceiling of eight blocked turns, and
+//      the warning it ends on reads like the sprint finished rather than like a
+//      cap being hit. Do not raise that cap from a shipped settings.json: it is
+//      the backstop against a runaway Stop hook, and this is a public plugin.
+//
+//   2. An API error (rate limit, auth failure, overload). The turn then ends
+//      through StopFailure and this hook never runs at all, so none of the
+//      escape hatches above are consulted and the auto-active flag survives.
+//      stop-failure-note.js records that case; the 2h stale-flag path below is
+//      what eventually clears it.
 
 const fs = require('fs');
 const path = require('path');

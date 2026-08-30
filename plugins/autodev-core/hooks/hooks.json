@@ -110,6 +110,18 @@
         ]
       }
     ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-failure-note.js"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PreCompact": [
       {
         "hooks": [
