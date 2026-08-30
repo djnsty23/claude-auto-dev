@@ -111,10 +111,13 @@ function readLog(file) {
 }
 
 function analyse(disk, rows, repo) {
-    // F3: evidence belongs to the repository that produced it. A row is in
-    // scope when its recorded cwd sits inside the target repo, or - for legacy
-    // rows written before cwd was recorded - when the loaded file does. With
-    // no repo given (the selftest's synthetic fixtures) behaviour is unchanged.
+    // F3: evidence belongs to the repository that produced it. The recorded
+    // cwd is AUTHORITATIVE when present: a session whose cwd is repo B says
+    // nothing about repo A even if it loaded a file inside A - Sol's round-1
+    // review proved the earlier OR admitted exactly that contradictory foreign
+    // evidence (cwd=B, file-in-A counted as A's sawStart). The file path is a
+    // fallback only for legacy rows written before cwd was recorded. With no
+    // repo given (the selftest's synthetic fixtures) behaviour is unchanged.
     if (repo) {
         const base = path.resolve(repo).toLowerCase();
         const within = (p) => {
@@ -122,7 +125,7 @@ function analyse(disk, rows, repo) {
             const r = path.resolve(String(p)).toLowerCase();
             return r === base || r.startsWith(base + path.sep);
         };
-        rows = (rows || []).filter((r) => r && (within(r.cwd) || within(r.file)));
+        rows = (rows || []).filter((r) => r && (r.cwd ? within(r.cwd) : within(r.file)));
     }
     // NO EVIDENCE is decided by whether the log ever saw a session_start, not by
     // whether it has any lines. A log full of path_glob_match rows proves the
