@@ -72,6 +72,11 @@ const SUBJECT_OVERRIDES = {
     // tooling/ is invisible to it however plainly it is written.
     'test-record-drift.js': ['tooling/find-record-drift.js'],
     'test-skill-prd-commands-selftest.js': ['tooling/test-skill-prd-commands.js'],
+    // Added with the suite itself, because this file said so: a suite over
+    // anything in tooling/ lands here or it is not verified at all. It refused
+    // the suite on its first run and named the remedy, which is the behaviour
+    // the comment above was written to produce.
+    'test-no-private-names.js': ['tooling/check-no-private-names.js'],
 };
 
 /**
