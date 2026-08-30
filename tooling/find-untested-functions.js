@@ -204,7 +204,11 @@ if (asJson) {
         executed: all.length - dead.length,
         untested: dead,
     }, null, 2));
-    process.exit(dead.length ? 1 : 0);
+    // F6 (codex audit 2026-08-30): the JSON verdict follows the same policy as
+    // the text renderer. A red suite means the measurement is untrustworthy and
+    // exits 2 - previously only dead functions fed this exit, so a run that
+    // loaded ZERO plugin files reported an empty census as success.
+    process.exit(run.status !== 0 ? 2 : (dead.length ? 1 : 0));
 }
 
 if (run.status !== 0) {
