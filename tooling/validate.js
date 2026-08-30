@@ -639,11 +639,16 @@ function checkNoStaleMutationBackups() {
 function checkUntestedHooks() {
   const script = path.join(ROOT, 'tooling', 'find-untested-hooks.js');
   if (!fs.existsSync(script)) return log('WARN', 'find-untested-hooks.js is missing');
-  const r = cp.spawnSync(process.execPath, [script, '--json'], { encoding: 'utf8' });
+  // --referenced-only on purpose: the full execution phase runs every candidate
+  // suite (~40s), and validate runs inside suites that run inside sweeps - the
+  // full phase here blew runSuite timeouts and orphaned suite fixtures. This is
+  // the fast STATIC precheck ("referenced", never "driven"); execution evidence
+  // is gated by tooling/test-hook-execution-evidence.js in npm test.
+  const r = cp.spawnSync(process.execPath, [script, '--json', '--referenced-only'], { encoding: 'utf8' });
   let out;
   try { out = JSON.parse(r.stdout); } catch { return log('WARN', 'find-untested-hooks.js produced no parseable output'); }
-  if (!out.untested.length) return log('PASS', `Hook coverage: all ${out.wired} wired hooks are driven by a suite`);
-  log('FAIL', `${out.untested.length} of ${out.wired} wired hooks have no suite — run node tooling/find-untested-hooks.js`);
+  if (!out.untested.length) return log('PASS', `Hook references: all ${out.wired} wired hooks are referenced by a suite (static precheck; execution gated by test-hook-execution-evidence.js)`);
+  log('FAIL', `${out.untested.length} of ${out.wired} wired hooks are referenced by no suite — run node tooling/find-untested-hooks.js`);
 }
 
 // A hook that spawns a console child without windowsHide can pop a visible

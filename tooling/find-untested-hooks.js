@@ -42,6 +42,19 @@ const ROOT = path.resolve(__dirname, '..');
 const TOOLING = path.join(ROOT, 'tooling');
 const asJson = process.argv.includes('--json');
 
+// STATIC PRECHECK MODE. validate calls this with --referenced-only because the
+// execution phase runs every candidate suite (~40s), and validate itself runs
+// inside suites that run inside sweeps - the full phase there blew runSuite
+// timeouts, killed test-validate mid-fixture, and orphaned files in hooks/.
+// In this mode the verdict is only "every wired hook is REFERENCED by a suite";
+// execution evidence is gated by tooling/test-hook-execution-evidence.js, which
+// npm test runs as a permanent suite. The audit blessed exactly this split:
+// source inspection may remain as a fast precheck called "referenced", never
+// "driven", and never as the execution gate. A child re-entry gets the same
+// treatment for the same reason.
+const referencedOnly = process.argv.includes('--referenced-only')
+    || !!process.env.AUTODEV_HOOKCHECK_CHILD;
+
 // --- every hook wired in every plugin's hooks.json ---
 const wired = [];
 for (const plugin of fs.readdirSync(path.join(ROOT, 'plugins'))) {
@@ -114,9 +127,9 @@ if (!wired.length) {
 // execution phase; no current candidate does, and the flag keeps it that way.
 const hookByLower = new Map(wired.map((h) => [h.file.toLowerCase(), h]));
 const executedBy = new Map();   // hook name -> Set of suite names whose RUN loaded it
-const suiteProblems = [];
+const failedSuites = [];
 
-if (!process.env.AUTODEV_HOOKCHECK_CHILD) {
+if (!referencedOnly) {
     for (const [suiteName] of referenced) {
         const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hookcov-'));
         let r;
@@ -129,9 +142,18 @@ if (!process.env.AUTODEV_HOOKCHECK_CHILD) {
                 env: { ...process.env, NODE_V8_COVERAGE: covDir, AUTODEV_HOOKCHECK_CHILD: '1' },
             });
             if (r.error || r.status !== 0) {
-                suiteProblems.push(suiteName + ' exited '
+                // Sol's round-3 contract, and it corrected this block's first
+                // wording ("its coverage still counts, its verdict does not").
+                // A failed evidence producer makes its evidence untrustworthy:
+                // the run's coverage is DISCARDED, and the overall result is
+                // INDETERMINATE (exit 2) - distinct from exit 1, which asserts
+                // a proven gap. Its canary proves the discard is real: the
+                // forced-red suite still emits coverage, so a checker that
+                // "discarded" nothing would show the hook covered.
+                failedSuites.push(suiteName + ' exited '
                     + (r.error ? String(r.error.code || r.error.message) : r.status)
-                    + ' — its coverage still counts, its verdict does not');
+                    + ' - coverage from this run is DISCARDED, result is indeterminate');
+                continue;
             }
             let dumps = [];
             try { dumps = fs.readdirSync(covDir).filter((f) => f.endsWith('.json')); } catch { /* none */ }
@@ -164,25 +186,47 @@ const rows = wired.map((h) => ({
         .filter(([, hooks]) => hooks.has(h.name)).map(([s]) => s).sort(),
 }));
 
-const untested = rows.filter((r) => r.covering.length === 0);
+// In referenced-only mode the verdict basis is the static reference, and the
+// output must say so - "referenced" is a weaker claim than "executed", and
+// conflating them is the original F5 defect.
+const untested = rows.filter((r) =>
+    (referencedOnly ? r.referencedBy : r.covering).length === 0);
+const indeterminate = !referencedOnly && failedSuites.length > 0;
 
 if (asJson) {
     console.log(JSON.stringify({
+        mode: referencedOnly ? 'referenced-only' : 'execution',
         wired: rows.length,
-        suitesExecuted: process.env.AUTODEV_HOOKCHECK_CHILD ? 0 : referenced.size,
-        suiteProblems,
+        suitesExecuted: referencedOnly ? 0 : referenced.size,
+        failedSuites,
         wiredRows: rows,
         untested,
     }, null, 2));
-    process.exit(untested.length ? 1 : 0);
+    process.exit(indeterminate ? 2 : (untested.length ? 1 : 0));
 }
 
-console.log(`\n${rows.length} wired hook(s) · ${referenced.size} candidate suite(s) executed under coverage · `
-    + `${rows.length - untested.length} EXECUTED by a suite · ${untested.length} with no execution evidence\n`);
-for (const w of suiteProblems) console.log('  [warn] ' + w);
+if (referencedOnly) {
+    console.log(`\n${rows.length} wired hook(s) · STATIC PRECHECK ONLY · `
+        + `${rows.length - untested.length} referenced by a suite · ${untested.length} referenced by nothing`);
+    console.log('(execution evidence is NOT established in this mode - '
+        + 'test-hook-execution-evidence.js gates that)\n');
+} else {
+    console.log(`\n${rows.length} wired hook(s) · ${referenced.size} candidate suite(s) executed under coverage · `
+        + `${rows.length - untested.length} EXECUTED by a suite · ${untested.length} with no execution evidence\n`);
+}
+for (const w of failedSuites) console.log('  [FAIL] ' + w);
+
+if (indeterminate) {
+    console.log('\nOne or more evidence producers FAILED. Their coverage is discarded and');
+    console.log('this result is INDETERMINATE - fix the failing suite(s) and re-run.');
+    console.log('An indeterminate check must never read as a pass or as a proven gap.\n');
+    process.exit(2);
+}
 
 if (!untested.length) {
-    console.log('Every wired hook was actually loaded by at least one suite run.\n');
+    console.log(referencedOnly
+        ? 'Every wired hook is referenced by at least one suite.\n'
+        : 'Every wired hook was actually loaded by at least one suite run.\n');
     process.exit(0);
 }
 
