@@ -310,7 +310,33 @@ function main(argv) {
     // and cannot be wrong about a machine nobody anticipated.
     const HOME_PARENT = path.basename(path.dirname(os.homedir() || '')) || '';
     const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const HOME_PATH = LOCAL_USER && LOCAL_USER.length >= 3
+
+    // THIS HALF CAN ONLY EVER SEE ONE PERSON'S HOME, and on a hosted runner
+    // that person does not exist.
+    //
+    // Every pattern below is keyed on os.homedir(), so the half detects paths
+    // belonging to THIS host's account and no other. On a build runner that
+    // account is an artifact of the platform, which makes the check
+    // structurally incapable of catching what it exists for: a developer's home
+    // path committed to the repo.
+    //
+    // [measured 2026-08-30] with the home directory set as a hosted runner has
+    // it, a developer's home path planted in a tracked file is NOT CAUGHT in
+    // either spelling, slash or dash-encoded. Run as that developer, both are
+    // caught. The half is not merely less useful there, it is blind.
+    //
+    // Narrowing the pattern (above) stops it reporting nonsense there. It does
+    // NOT make it protective, and a quiet check that protects nothing reads
+    // exactly like a passing one. So say so, out loud, and keep the count out
+    // of the clean line rather than reporting "0 absolute home paths" for a
+    // scan that never ran.
+    //
+    // The NAMES half is unaffected and runs everywhere. That is the half a
+    // public repo actually depends on, and it is keyed on a denylist rather
+    // than on whoever happens to own this machine.
+    const CI_HOST = process.env.GITHUB_ACTIONS ? 'GITHUB_ACTIONS'
+        : (process.env.CI ? 'CI' : '');
+    const HOME_PATH = !CI_HOST && LOCAL_USER && LOCAL_USER.length >= 3
         ? [
             new RegExp('[\\\\\\\\/]' + LOCAL_USER.replace(/[.*+?^${}()|[\]\\\\]/g, '\\\\$&') + '[\\\\\\\\/]', 'gi'),
             // Dash-encoded, and anchored on the PARENT SEGMENT rather than on a
@@ -389,9 +415,18 @@ function main(argv) {
     if (!hits.length) {
         // Print the population, not just the verdict: a check that reports only
         // "clean" is indistinguishable from one that read nothing.
+        //
+        // And where the home-path half did not run, say NOT RUN rather than
+        // "0 absolute home paths". Zero-found and never-looked are the same
+        // string to a reader and opposite in meaning, which is the whole
+        // failure this line was written to avoid.
+        const homeNote = CI_HOST
+            ? `home paths NOT CHECKED (${CI_HOST} host: keyed on the build account, `
+              + `which cannot represent an operator home - this is a coverage gap, not a pass)`
+            : `0 absolute home paths (keyed on this machine's home dir)`;
         console.log(`[no-private-names] ${scanned} of ${tracked.length} files read, `
             + `${memo.size} distinct candidate tokens, ${DIGESTS.length} names, `
-            + `0 absolute home paths (keyed on this machine's home dir) — clean`);
+            + `${homeNote} — names clean`);
         return 0;
     }
 

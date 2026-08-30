@@ -37,10 +37,18 @@ const check = (label, ok, detail) => cases.push([label, ok, detail]);
  * `home` overrides os.homedir() for the child, which is how a build account's
  * name can be simulated without a build account.
  */
-function sweepWith(content, home) {
+function sweepWith(content, home, extraEnv) {
     fs.writeFileSync(PROBE, `# probe\n${content}\n`);
     try {
+        // Explicitly NOT a CI host by default. The checker skips its home-path
+        // half on one, so inheriting these would make every home-path case
+        // below pass without running -- and this suite's own home is a CI
+        // runner whenever CI runs it. A test that silently stops testing on the
+        // machine it most needs to run on is the failure this file is about.
         const env = { ...process.env };
+        delete env.GITHUB_ACTIONS;
+        delete env.CI;
+        Object.assign(env, extraEnv || {});
         if (home) { env.HOME = home; env.USERPROFILE = home; }
         const r = spawnSync(process.execPath, [CHECKER], { encoding: 'utf8', env, cwd: ROOT });
         const out = `${r.stdout || ''}${r.stderr || ''}`;
@@ -115,6 +123,38 @@ try {
         const r = sweepWith(`a path like x-${s.parent}-${s.user}-guard for details`, FAKE_HOME);
         check('  but the same name behind its parent segment still IS',
             r.status !== 0 && r.namesProbe);
+    }
+
+    // ------------------------------------------------ the CI coverage gap
+    //
+    // On a build host every home-path pattern is keyed on the build account, so
+    // the half cannot see any developer's home path and is not protecting
+    // anything. Narrowing the pattern stops it reporting nonsense there; it does
+    // not make it useful. The check must therefore SAY it did not run, because a
+    // quiet check that protects nothing reads exactly like a passing one.
+    {
+        const s = shapes(os.homedir());
+        const onCi = sweepWith(`see ${path.join(s.home, 'code')} for details`,
+            null, { GITHUB_ACTIONS: 'true' });
+        check('on a CI host the home-path half does not run',
+            onCi.status === 0,
+            'it ran and found something, so the skip is not in effect');
+        check('  and it is reported as a coverage gap, not as a pass',
+            /NOT CHECKED/.test(onCi.out) && /not a pass/.test(onCi.out));
+        check('  and the clean line no longer claims zero home paths',
+            !/0 absolute home paths/.test(onCi.out));
+
+        // The half that actually protects a public repo must be unaffected.
+        // If this ever goes quiet on CI the gate is worthless exactly where it
+        // is the last line of defence. Asserted through the population line,
+        // because planting a real denylisted name would put a literal secret in
+        // this file, which is the thing the gate exists to prevent.
+        check('  and the NAMES half still runs there',
+            /distinct candidate tokens/.test(onCi.out) && /names clean/.test(onCi.out));
+
+        const offCi = sweepWith(`see ${path.join(s.home, 'code')} for details`, null);
+        check('  while off CI the same path is still caught',
+            offCi.status !== 0 && offCi.namesProbe);
     }
 } finally {
     fs.rmSync(PROBE, { force: true });
