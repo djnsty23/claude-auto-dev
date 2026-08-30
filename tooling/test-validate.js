@@ -13,7 +13,17 @@ const VALIDATE = path.join(ROOT, 'tooling', 'validate.js');
 const cases = [];
 const check = (label, ok) => cases.push([label, ok]);
 
-const runValidate = () => spawnSync(process.execPath, [VALIDATE], { encoding: 'utf8', cwd: ROOT });
+const runValidate = (extraEnv) => {
+    // The home-path half of check-no-private-names SKIPS on a CI host, because
+    // there it is keyed on the build account and cannot see any developer's home
+    // path. A case that plants one and expects a finding therefore has to run
+    // with those markers cleared, or it asserts nothing on the only machine that
+    // matters. Passing an env at all is what that case needs; everything else
+    // keeps the inherited one.
+    const env = extraEnv ? { ...process.env, ...extraEnv } : process.env;
+    if (extraEnv && extraEnv.__noCi) { delete env.GITHUB_ACTIONS; delete env.CI; delete env.__noCi; }
+    return spawnSync(process.execPath, [VALIDATE], { encoding: 'utf8', cwd: ROOT, env });
+};
 
 // Baseline: the repo must be green, or nothing below distinguishes anything.
 const base = runValidate();
@@ -180,10 +190,14 @@ check('removing the backup clears the failure', after.status === 0);
         fs.writeFileSync(fixture,
             '# scratch fixture for test-validate\n'
             + `see ${path.join(os.homedir(), 'code')} ${SENTINEL}\n`);
-        planted = runValidate();
+        planted = runValidate({ __noCi: true });
     } finally {
         fs.rmSync(fixture, { force: true });
     }
+    // Baseline under the SAME env as the planted run. The suite-wide `base` at
+    // the top runs with the inherited environment, so on CI it takes the skip
+    // path and is not a comparable control for this case.
+    const cleanNoCi = runValidate({ __noCi: true });
 
     // Find the line by the FIXTURE, not by the wording. An earlier version of
     // this test looked for the string "private project name" and broke the
@@ -205,7 +219,9 @@ check('removing the backup clears the failure', after.status === 0);
     // Control: the assertion above can only mean something if the sentinel was
     // really in the file the checker read. Prove the run saw it at all.
     check('  control: the fixture is what flipped it, not a pre-existing failure',
-        base.status === 0 && planted.status === 1);
+        cleanNoCi.status === 0 && planted.status === 1,
+        'without the fixture the tree already fails under the same env, so this '
+        + 'case proves nothing about the fixture');
 }
 
 let pass = 0, fail = 0;
