@@ -33,6 +33,22 @@ const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] 
 const PORT = Number(val('--port', 7717));
 const DAYS = Number(val('--days', 2));
 
+// F8 (codex audit 2026-08-30): --help used to fall through to the server -
+// probing the script started it, and it stayed alive until killed. A script
+// you cannot ask "what are you" without launching is a side effect wearing a
+// CLI's clothes. Help exits before any fleet state is read.
+if (argv.includes('--help') || argv.includes('-h')) {
+    console.log('fleet-board - the dispatch list, served locally and read live off disk.');
+    console.log('');
+    console.log('Usage:');
+    console.log('  node fleet-board.js               # serve on 7717');
+    console.log('  node fleet-board.js --port 8080');
+    console.log('  node fleet-board.js --days 3');
+    console.log('');
+    console.log('Binds loopback only. Read-only. No dependencies.');
+    process.exit(0);
+}
+
 const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -257,6 +273,10 @@ const deny = (res, code, why) => {
     res.end(`${why}\n`);
 };
 
+// F8, second half: server construction, listen() and the first scan ran at
+// module top level, so merely require()ing this file started the service.
+// Everything with a side effect now lives behind require.main.
+function serve() {
 const server = http.createServer((req, res) => {
     if (req.method !== 'GET') return deny(res, 405, 'fleet board is read-only: GET only');
     if (!ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase())) {
@@ -296,5 +316,8 @@ server.listen(PORT, '127.0.0.1', () => {
         + `${first.population.blocked} blocked, ${first.population.addressable} addressable `
         + `(${Date.now() - t0}ms)`);
 });
+}
+
+if (require.main === module) serve();
 
 module.exports = { esc };
