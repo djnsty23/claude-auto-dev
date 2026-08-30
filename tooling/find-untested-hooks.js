@@ -38,7 +38,9 @@ for (const plugin of fs.readdirSync(path.join(ROOT, 'plugins'))) {
     for (const [event, matchers] of Object.entries(json.hooks || {})) {
         for (const m of matchers || []) {
             for (const h of m.hooks || []) {
-                const cmd = h.command || '';
+                // Exec form keeps the script path in `args`, shell form keeps it
+                // in `command`. Join both so the .js matcher below sees either.
+                const cmd = [h.command || '', ...(h.args || [])].join(' ');
                 const hit = cmd.match(/([\w-]+\.js)/);
                 if (!hit) continue;
                 const file = path.join(ROOT, 'plugins', plugin, 'hooks', hit[1]);

@@ -51,6 +51,13 @@ const SUBJECT_OVERRIDES = {
     'test-githooks.js': ['tooling/githooks/commit-msg'],
     'test-validate.js': ['tooling/validate.js'],
 
+    // Third time, 2026-08-30, and it arrived exactly as the comment above
+    // predicts: a new suite testing tooling/ derived nothing and was counted
+    // NOT verified. It was not caught locally because `npm test` does not run
+    // this script; CI runs it as a separate step. So the suite that gates
+    // pushes was itself the unchecked one.
+    'test-push-authorisation.js': ['tooling/check-push-authorisation.js'],
+
     // Same failure, found again 2026-08-21 — and found by reading this comment
     // rather than the output, because NO-SUBJECT's note ("references no plugin
     // source — nothing to stub") reads like a category of suite that has nothing

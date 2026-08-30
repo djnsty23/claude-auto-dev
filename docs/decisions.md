@@ -237,3 +237,57 @@ and `ubuntu-latest` green.
 onto Node 24 and annotate every run about it. Both are pinned to `v7` now. This
 job uses neither action's optional surface, so the intervening majors do not
 apply to it.
+
+## 2026-08-30 — agent frontmatter `model:` and `effort:` both take effect
+
+`[measured 2026-08-30]` and stated as a correction, because the first version of
+this entry concluded the opposite and was committed before the controls were run.
+
+**What the retracted version claimed.** That `effort:` is not reliably applied,
+on the evidence that `autodev-core:code-reviewer` pins `effort: high` and ran
+`xhigh` in 108 of 108 assistant rows, while two other agents pinning `high` ran
+`high`. That divergence is real and the reading of it was wrong.
+
+**What was missing: a live control.** Two agents were then spawned with NO model
+and NO effort argument, and their own transcripts read back:
+
+| spawned | frontmatter | ran |
+|---|---|---|
+| `test-runner` | `model: haiku` | `claude-haiku-4-5`, 4 of 4 rows |
+| `autodev-core:code-reviewer` | `model: opus`, `effort: high` | `claude-opus-5`, `effort=high`, 3 of 3 |
+
+Both pins held exactly. So `effort:` in agent frontmatter is no longer merely
+documented; a transcript now shows it applied on an agent spawned without an
+effort argument.
+
+**Why the historical rows disagreed, at DAY granularity:**
+
+| agent | day | observed |
+|---|---|---|
+| `test-runner` | 2026-08-16 / 18 / 19 | `opus-5 / xhigh`, 128 + 77 + 333 |
+| `test-runner` | 2026-08-21 onward | `haiku`, 62 |
+| `autodev-core:code-reviewer` | 2026-08-17 | `opus-5 / xhigh`, 108 |
+| both | 2026-08-30 probe | pins honoured |
+
+Every contradicting row predates 2026-08-22, which is the day the
+subagent-model environment override was disabled on this machine. That override
+forced every subagent to opus regardless of its definition, which is exactly what
+these rows show. Nothing about pinning was broken; the rows are an artifact of a
+configuration that no longer exists.
+
+**Two method notes, because this went wrong in a specific and repeatable way.**
+
+A month-granularity split was run precisely to avoid reporting a window average
+as current state, and it was still too coarse: every row fell inside 2026-08, so
+the split looked clean while hiding a change on the 22nd. Match the granularity
+to the suspected change, not to the convenient bucket.
+
+And an override refutation is not a pin confirmation. Counting Agent spawns
+showed `test-runner` had 20 spawns and zero explicit `model` arguments, which
+correctly killed the per-spawn-override explanation and said nothing about
+whether the pin worked. Only spawning one and reading its transcript did that.
+
+**Reproduction.** Spawn the agent with no model or effort argument, then read
+`effort` and `message.model` off the assistant rows of its own
+`subagents/agent-<id>.jsonl`. Reading frontmatter back only tells you what was
+requested.

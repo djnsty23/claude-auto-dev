@@ -62,11 +62,19 @@ git commit -m "feat: add playlist drag-drop reorder"
 - Body explains WHY, not WHAT
 - Include story ID when available: `feat(S13-001): add playlist UI`
 
-## Commit + Push
+## Commit, then ask before pushing
 
 ```bash
 git add <files>
 git commit -m "feat: description"
+```
+
+**Stop at the commit.** `rule-local-first/SKILL.md` holds that an ad-hoc
+`git push`, PR or merge needs the operator to say so in that turn, and that "it is
+ready to push" is a status line rather than a licence. Report the commit and ask.
+Once the answer is yes, in that turn:
+
+```bash
 git push origin HEAD
 ```
 
@@ -116,7 +124,7 @@ fi
 git add <files>
 git commit -m "feat: add playlist UI with drag-drop"
 
-# 3. Push
+# 3. Push -- ONLY once the operator has said so in this turn
 git push -u origin HEAD
 ```
 

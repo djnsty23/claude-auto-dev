@@ -143,9 +143,11 @@ switch accounts. make sure our harness is ready for cross account continuity or
 resuming."* It carries what an account boundary destroys: which panel denies are
 outstanding and when they expire, which signals on this fleet are known to lie,
 the standing rules set since the last release, and what was in flight. It does
-NOT carry addresses — a new Brain reads its own from
-`~/.claude/sessions/<ppid>.json`, because a copied address is how twelve sessions
-were once given a return address that existed nowhere.
+NOT carry addresses. A new Brain reads its NAME from `ListAgents`, which reports
+the name peers actually resolve, and its socket path from
+`~/.claude/sessions/<ppid>.json`. A copied address is how twelve sessions were once
+given a return address that existed nowhere, and a CACHED one is how six were given
+a stale one on 2026-08-30.
 
 An account switch costs SESSIONS, not code — measured, zero unpushed commits
 across four repos and eighteen worktrees. So do not try to reconstruct a departed
@@ -391,9 +393,34 @@ the unmeasured-head rule below.
 2026-08-29]` a session was archived MID-RUN and its worktree held the only copy
 of a finished ten-route fix on an unpushed branch; recovered only because the
 Brain checked within minutes. brain-brief section 4 already measures this — act
-on it: for every worktree carrying unpushed commits or a detached HEAD, push the
-branch (or a rescue ref) to origin. Branch pushes are reversible and safe;
-losing a dead session's only copy is not.
+on it: for every worktree carrying unpushed commits or a detached HEAD, **bundle
+the commits; do not push them.**
+
+```bash
+git bundle create "$RESCUE_DIR/<session>-<sha>.bundle" HEAD --not origin/main
+```
+
+`[measured 2026-08-30]` that produced a 2,932-byte file carrying an unpushed
+commit, confirmed restorable by `git bundle verify`, and it needs no remote, no
+network and nobody's authorisation. It survives the worktree being deleted and
+the session being archived, which is the entire failure this step exists for.
+
+**A push is NOT part of the rescue.** `rule-local-first/SKILL.md` holds that an
+ad-hoc push needs the operator to say so in that turn, and this skill does not
+outrank it. Note why this is easy to get wrong: the queue-it-with-the-Brain rule
+further down scopes queued pushes to *product repos*, so a tooling repo reads as
+unguarded when it is not.
+
+`[measured 2026-08-30]` a Brain pushed a peer session's branch on the older
+wording of this step, against a real reboot risk, and the owning session had to
+escalate it as a rules breach. The work was real, the reboot risk was real, and
+the publish was still not the Brain's to decide; the owner found out afterwards.
+
+So the order is: bundle it, which needs no permission; tell the owning session in
+the same turn; then put the push to the operator as a question. Losing a dead
+session's only copy is not acceptable, and neither is publishing a peer's branch
+on your own authority. The bundle removes the pressure that made that trade look
+necessary.
 
 **3. Archive stale sessions.** A session is stale when its transcript is old,
 its branch is merged or measured content-empty, and its worktree holds nothing
@@ -689,7 +716,22 @@ reported "Brain unreachable", one after five undelivered attempts. Their reports
 were not lost, but the Brain never saw them and briefed two sessions on work they
 had already finished.
 
-Read your own addresses rather than constructing them. `~/.claude/sessions/<pid>.json`
+**`ListAgents` is the authority for your own NAME, and the session record is
+not.** `[measured 2026-08-30]` a Brain read `name` once at boot from its session
+record and signed six messages `autodev-82`, while `ListAgents` in a peer session
+listed that same Brain as `autodev-50`. Every reply bounced for hours. The Brain
+found out only when one peer gave up on it and escalated to the operator instead.
+The record had gone stale and nothing announced it, which is the failure mode a
+cached identifier always has.
+
+Since Claude Code 2.1.239 `ListAgents` opens with your own entry: "This session is
+<name> [ref], the name other sessions use to message it." Read it there, re-read it
+before you sign anything, and treat any name you cached at boot as unverified. A
+plausible identifier is not a valid one, and that rule applies to your OWN address
+as much as to a peer story id.
+
+The session record remains the right place to read the SOCKET PATH.
+`~/.claude/sessions/<pid>.json`
 holds `messagingSocketPath`, `name`, `sessionId` and `pid` — and the pid is your
 shell's PARENT, not the shell:
 

@@ -7,6 +7,19 @@ Merge [`recommended-settings.json`](recommended-settings.json) into
 `~/.claude/settings.json` (global) or `.claude/settings.json` (per project). Do
 not paste it over an existing file; merge the `allow` and `deny` arrays into
 what you already have.
+## `fallbackModel`
+
+The file also sets `"fallbackModel": ["sonnet"]`. That is a top-level key rather
+than part of those two arrays, so merge it separately. Claude Code tries the
+listed models in order, up to three, when the primary is overloaded or
+unavailable.
+
+It is here because the failure it prevents is specific to unattended work. An
+`auto` sprint that meets an overloaded primary model does not degrade, it stops,
+and on a Stop-hook-driven loop that reads as the sprint having finished. One
+fallback turns a halt into slower progress. Drop the key if you would rather a
+sprint stop than continue on a different model, which is a reasonable preference
+when the work is cost-sensitive rather than time-sensitive.
 
 ## What changed from the pre-8.0 template
 
