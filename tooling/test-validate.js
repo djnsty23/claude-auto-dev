@@ -185,13 +185,20 @@ check('removing the backup clears the failure', after.status === 0);
         fs.rmSync(fixture, { force: true });
     }
 
+    // Find the line by the FIXTURE, not by the wording. An earlier version of
+    // this test looked for the string "private project name" and broke the
+    // moment that label was corrected: this checker reports home paths too, and
+    // calling a home-path finding a private name sent readers after the wrong
+    // thing. Anchoring on the fixture keeps the test about the behaviour.
     const line = (planted.stdout || '').split('\n')
-        .find((l) => l.includes('private project name')) || '';
+        .find((l) => l.includes('zz-location-fixture.md')) || '';
 
     check('an untracked file carrying a home path makes validate FAIL', planted.status === 1);
     check('  and the finding is reported as a FAIL', /^\[FAIL\]/.test(line.trim()));
     check('  and it names the file and the line number',
         line.includes('zz-location-fixture.md:2'));
+    check('  and it reports the kind the checker assigned, not the check\'s own name',
+        /home path/.test(line) && !/private project name/.test(line));
     // The load-bearing one. Locations are safe in a public log; the line is not.
     check('  and the offending line itself is never echoed',
         !(planted.stdout || '').includes(SENTINEL));
