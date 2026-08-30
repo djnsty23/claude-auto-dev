@@ -58,6 +58,16 @@ const SUBJECT_OVERRIDES = {
     // pushes was itself the unchecked one.
     'test-push-authorisation.js': ['tooling/check-push-authorisation.js'],
 
+    // Fourth time, 2026-08-30, four at once: the codex-audit acceptance suites
+    // all test tooling/ checkers, so all derived nothing. The pattern is now
+    // structural - every acceptance test for a TOOLING gate lands here - and
+    // the honest fix remains this list plus the UNCHECKED failure below, not a
+    // smarter deriver that guesses.
+    'test-vacuity-exit.js': ['tooling/find-vacuous-assertions.js'],
+    'test-function-json-exit.js': ['tooling/find-untested-functions.js'],
+    'test-runtime-authority.js': ['tooling/check-runtime.js'],
+    'test-hook-execution-evidence.js': ['tooling/find-untested-hooks.js'],
+
     // Same failure, found again 2026-08-21 — and found by reading this comment
     // rather than the output, because NO-SUBJECT's note ("references no plugin
     // source — nothing to stub") reads like a category of suite that has nothing
