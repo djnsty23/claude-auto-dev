@@ -352,7 +352,12 @@ function checkHookWiring() {
       for (const group of groups) {
         for (const hook of group.hooks || []) {
           count++;
-          const cmd = hook.command || '';
+          // Exec form (Claude Code 2.1.139+) puts the executable in `command`
+          // and the rest in `args`; ${CLAUDE_PLUGIN_ROOT} is substituted in both.
+          // [measured 2026-08-30, CC 2.1.239] `args` without `command` is rejected
+          // by `claude plugin validate`, so `command` is always present. Joining
+          // the two is inert for shell-form hooks, which carry no args.
+          const cmd = [hook.command || '', ...(hook.args || [])].join(' ');
           if (!cmd.includes('${CLAUDE_PLUGIN_ROOT}')) {
             log('FAIL', `plugins/${p}: ${event} hook does not use \${CLAUDE_PLUGIN_ROOT}: ${cmd}`);
             ok = false;
