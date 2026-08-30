@@ -5,8 +5,10 @@
 // and before every assertion.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { pathToFileURL } = require('url');
 
 const ROOT = path.resolve(__dirname, '..');
 const CHECK = process.env.HOOK_CHECK
@@ -29,12 +31,28 @@ const runChecker = () => {
     return { result, json };
 };
 
-const runSuite = (file) => spawnSync(process.execPath, [file], {
+const runSuite = (file, extraEnv = {}) => spawnSync(process.execPath, [file], {
     cwd: ROOT,
     encoding: 'utf8',
+    env: { ...process.env, ...extraEnv },
     windowsHide: true,
     timeout: 60000,
 });
+
+const insertAfterShebang = (source, insertion) => {
+    if (!source.startsWith('#!')) return `${insertion}\n${source}`;
+    const lineEnd = source.indexOf('\n');
+    if (lineEnd === -1) return `${source}\n${insertion}\n`;
+    return `${source.slice(0, lineEnd + 1)}${insertion}\n${source.slice(lineEnd + 1)}`;
+};
+
+const rawCoverageContains = (coverageDir, file) => {
+    const fileUrl = pathToFileURL(path.resolve(file)).href;
+    return fs.readdirSync(coverageDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+        .some((entry) => fs.readFileSync(path.join(coverageDir, entry.name), 'utf8')
+            .includes(fileUrl));
+};
 
 const baseline = runChecker();
 check('control: the committed hook checker has a parseable green baseline',
@@ -109,24 +127,30 @@ if (target && mutatedCheck) {
 
 let failedSuiteCheck = null;
 if (target && targetSuite && original) {
+    const coverageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-red-coverage-'));
+    const targetHook = path.join(ROOT, 'plugins', target.plugin, 'hooks', target.name);
     try {
         // Expected failure before the amendment: suiteProblems is advisory, so
         // after a red run's unusable coverage leaves the hook untested, the
         // checker exits 1 instead of the infrastructure-failure status 2. A
         // failed evidence producer makes the whole check indeterminate.
-        fs.writeFileSync(targetSuite, [
+        const exitWrapper = [
             'const acceptanceExit = process.exit.bind(process);',
             'process.exitCode = 1;',
             'process.exit = (code) => acceptanceExit(code === 0 ? 1 : code);',
-            original,
-        ].join('\n'));
-        const forcedRed = runSuite(targetSuite);
+        ].join('\n');
+        fs.writeFileSync(targetSuite, insertAfterShebang(original, exitWrapper));
+        const forcedRed = runSuite(targetSuite, { NODE_V8_COVERAGE: coverageDir });
         check('control: the dedicated suite is red after the injected failure',
             forcedRed.status === 1 && forcedRed.signal === null && !forcedRed.error,
             detail(forcedRed));
+        check('control: the forced-red suite emits raw V8 coverage for its hook',
+            rawCoverageContains(coverageDir, targetHook),
+            `coverage dumps=${fs.readdirSync(coverageDir).length}`);
         failedSuiteCheck = runChecker();
     } finally {
         fs.writeFileSync(targetSuite, original);
+        fs.rmSync(coverageDir, { recursive: true, force: true });
     }
 
     const restored = runSuite(targetSuite);
