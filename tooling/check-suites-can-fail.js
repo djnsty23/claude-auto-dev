@@ -203,6 +203,7 @@ const STUB = `#!/usr/bin/env node
 // STUB installed by check-suites-can-fail.js — restored immediately.
 module.exports = {};
 `;
+const STUB_BUF = Buffer.from(STUB);
 
 const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
 
@@ -216,6 +217,45 @@ if (dirty) {
     console.error(dirty.split('\n').slice(0, 10).join('\n'));
     process.exit(2);
 }
+
+// ONE SWEEP PER TREE, ENFORCED (Sol's round-6 blocker). The zz- cleanup below
+// diffs the untracked set per suite, so two concurrent sweeps in one tree
+// would each see the other's fresh fixture as their own orphan and delete it
+// mid-use — until now "a mutation sweep needs the repo to itself" was prose,
+// not a mechanism. The lock lives in tmpdir, keyed on the resolved ROOT, so
+// distinct worktrees still sweep independently and the end-of-run clean-tree
+// assertion never sees the lock file itself. A dead holder is detected by pid
+// liveness and replaced: this repo had an orphaned sweep outlive its session
+// the same day this was written, and a lock that survives its owner would
+// otherwise block every future run.
+const os = require('os');
+const crypto = require('crypto');
+const LOCK = path.join(os.tmpdir(), 'check-suites-'
+    + crypto.createHash('sha1').update(fs.realpathSync(ROOT)).digest('hex').slice(0, 12) + '.lock');
+(function acquireLock() {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            fs.writeFileSync(LOCK, String(process.pid), { flag: 'wx' });
+            process.on('exit', () => { try { fs.unlinkSync(LOCK); } catch { /* already gone */ } });
+            return;
+        } catch {
+            let holder = NaN;
+            try { holder = parseInt(fs.readFileSync(LOCK, 'utf8'), 10); } catch { /* unreadable */ }
+            let alive = false;
+            if (Number.isFinite(holder)) {
+                try { process.kill(holder, 0); alive = true; } catch { alive = false; }
+            }
+            if (alive) {
+                console.error('\nRefusing to run: another sweep (pid ' + holder + ') holds this tree.');
+                console.error('A mutation sweep needs the repo to itself; wait for it or kill it, then re-run.\n');
+                process.exit(2);
+            }
+            try { fs.unlinkSync(LOCK); } catch { /* raced another acquirer */ }
+        }
+    }
+    console.error('\nCould not acquire the sweep lock at ' + LOCK + ' — refusing to run.\n');
+    process.exit(2);
+})();
 
 const suites = fs.readdirSync(__dirname)
     .filter((f) => /^test-.*\.js$/.test(f))
@@ -392,7 +432,17 @@ for (const suite of suites) {
             fs.writeFileSync(full, STUB);
             if (runSuite(suite).status !== 0) killed.push(rel);
         } finally {
-            fs.writeFileSync(full, original);
+            // COMPARE-AND-SWAP, not a blind write (Sol's round-6 blocker). If
+            // the file no longer holds OUR stub, something else wrote it while
+            // stubbed — a concurrent session's edit, or an outside restore —
+            // and writing `original` back would erase that work with a stale
+            // copy. Restore only what this sweep put there; anything else is
+            // reported and left for the end-of-run tree check to name.
+            const now = fs.readFileSync(full);
+            if (now.equals(STUB_BUF)) fs.writeFileSync(full, original);
+            else if (!now.equals(original)) {
+                console.error(`  [left alone] ${rel} changed under the stub — concurrent edit, not overwritten`);
+            }
         }
     }
 
@@ -413,16 +463,29 @@ if (after) {
     // never touched is someone else's work in flight, reported and left alone.
     console.error('\nFILES NOT RESTORED — restoring the paths this sweep stubbed:\n' + after);
     for (const rel of stubbedEver) {
-        try { git('checkout -- ' + JSON.stringify(rel)); } catch { /* reported below */ }
+        // Same compare-and-swap as the inline restore: checkout erases the
+        // working copy, so it is only safe over content this sweep wrote. A
+        // stubbed path holding anything other than OUR stub is a concurrent
+        // edit that arrived after stubbing — report it, never erase it.
+        try {
+            if (fs.readFileSync(path.join(ROOT, rel)).equals(STUB_BUF)) {
+                git('checkout -- ' + JSON.stringify(rel));
+            }
+        } catch { /* reported below */ }
     }
     const still = git('status --porcelain').trim();
     if (still) {
-        console.error('STILL DIRTY (only paths this sweep stubbed are a failure; anything');
-        console.error('else is concurrent work that was deliberately not touched):\n' + still);
-        const ownDirty = still.split('\n').some((l) => stubbedEver.has(l.slice(3).trim()));
-        // Exiting 0 here would skip the verdict below - only a failure to
-        // restore OUR OWN stubs aborts; foreign dirt falls through to the
-        // normal verdict with the report above as the record.
+        console.error('STILL DIRTY (only paths still holding this sweep\'s stub are a failure;');
+        console.error('anything else is concurrent work that was deliberately not touched):\n' + still);
+        // Own failure = our stub is still on disk and could not be restored.
+        // A stubbed path dirty with FOREIGN content is someone else's work in
+        // flight: reported above, left alone, and not a reason to abort.
+        const ownDirty = still.split('\n').some((l) => {
+            const rel = l.slice(3).trim();
+            if (!stubbedEver.has(rel)) return false;
+            try { return fs.readFileSync(path.join(ROOT, rel)).equals(STUB_BUF); }
+            catch { return true; }
+        });
         if (ownDirty) process.exit(2);
     }
 }

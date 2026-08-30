@@ -117,6 +117,25 @@ function readLog(file) {
 // it folds; Linux must not. Used by BOTH the repo scoping and the seen-set.
 const fold = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
 
+// Identity, not spelling (Sol's round-6 blocker). path.resolve alone treats
+// macOS /var and /private/var - one directory reached through a symlink, two
+// spellings - as different trees, so every recorded row filters out and the
+// verdict degrades to a false "NO EVIDENCE". realpathSync collapses the
+// spellings to one; the fallback covers recorded paths that no longer exist,
+// where resolve is the best identity still available. Memoized because logs
+// carry thousands of rows and realpath is a filesystem call per miss.
+const canonCache = new Map();
+const canon = (p) => {
+    const key = String(p);
+    let v = canonCache.get(key);
+    if (v === undefined) {
+        const r = path.resolve(key);
+        try { v = fold(fs.realpathSync(r)); } catch { v = fold(r); }
+        canonCache.set(key, v);
+    }
+    return v;
+};
+
 function analyse(disk, rows, repo) {
     // F3: evidence belongs to the repository that produced it. The recorded
     // cwd is AUTHORITATIVE when present: a session whose cwd is repo B says
@@ -126,10 +145,10 @@ function analyse(disk, rows, repo) {
     // fallback only for legacy rows written before cwd was recorded. With no
     // repo given (the selftest's synthetic fixtures) behaviour is unchanged.
     if (repo) {
-        const base = fold(path.resolve(repo));
+        const base = canon(repo);
         const within = (p) => {
             if (!p) return false;
-            const r = fold(path.resolve(String(p)));
+            const r = canon(p);
             return r === base || r.startsWith(base + path.sep);
         };
         rows = (rows || []).filter((r) => r && (r.cwd ? within(r.cwd) : within(r.file)));
@@ -140,14 +159,14 @@ function analyse(disk, rows, repo) {
     // exactly the question an unconditional rule is judged on.
     const sawStart = (rows || []).some((r) => r && r.reason === 'session_start');
     const seen = new Set((rows || []).map((r) => r && r.file
-        ? fold(path.resolve(r.file)) : null).filter(Boolean));
+        ? canon(r.file) : null).filter(Boolean));
 
     const unreachable = [];
     const unexercised = [];
     let reached = 0;
 
     for (const d of disk) {
-        if (seen.has(fold(d.file))) { reached += 1; continue; }
+        if (seen.has(canon(d.file))) { reached += 1; continue; }
         if (d.scoped) unexercised.push(d);
         else unreachable.push(d);
     }
