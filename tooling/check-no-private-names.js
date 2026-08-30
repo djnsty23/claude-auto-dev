@@ -273,10 +273,16 @@ function main(argv) {
     // The first version matched structurally, on the reasoning that it would
     // then work on any clone. That was wrong, and its first real run said so:
     // 31 findings of which the first three were `/Users/CHANGEME/`, a comment
-    // about `'/home/my-project'` normalisation, and `C:\Users\runneradmin\`,
-    // a public CI account. Structural matching cannot tell a personal account
-    // from a placeholder or a shared one, and a detector at that precision gets
-    // muted, after which it misses the real thing. Precision is the whole value.
+    // about `'/home/my-project'` normalisation, and the hosted CI account's own
+    // home directory. Structural matching cannot tell a personal account from a
+    // placeholder or a shared one, and a detector at that precision gets muted,
+    // after which it misses the real thing. Precision is the whole value.
+    //
+    // That third example is written in prose rather than spelled out, and the
+    // reason is this file's own subject. Spelled out, it is a literal that
+    // matches the slash pattern below whenever this runs AS that account, so
+    // the comment arguing for precise matching was itself a finding on every
+    // windows CI run. Third instance of that shape in one day.
     //
     // Keying on os.homedir() narrows it to the only case that is definitely a
     // leak from THIS clone, which is also the only case a pre-publish gate on
