@@ -157,6 +157,57 @@ check('removing the backup clears the failure', after.status === 0);
         /^\[PASS\].*Hook spawns:/.test(spawnLine(hidden.stdout).trim()));
 }
 
+// A failing name/path check must name the FILE and LINE, and must never echo the
+// offending line. Before 2026-08-30 it printed neither: the message was "run the
+// checker yourself", which is fine locally and useless in CI, where nobody can
+// re-run it. A CI-only finding was undiagnosable from the log for exactly this.
+//
+// The fixture carries a home path DERIVED from os.homedir() rather than any
+// literal secret, so it cannot collide with a real name, cannot go stale as the
+// denylist changes, and leaves nothing in the repo for someone else's scanner to
+// alert on later. It is untracked on purpose: check-no-private-names scans
+// untracked-but-not-ignored files, which is the window a new file passes through.
+{
+    const os = require('os');
+    // A sentinel on the SAME line as the finding. Without it the leak assertion
+    // is vacuous, because that checker redacts the username from its own output
+    // and "the home path is absent" would then be true whether or not the line
+    // was echoed. The sentinel is not a secret and is not on any denylist.
+    const SENTINEL = 'ZZ_LINE_CONTENT_SENTINEL';
+    const fixture = path.join(ROOT, 'zz-location-fixture.md');
+    let planted;
+    try {
+        fs.writeFileSync(fixture,
+            '# scratch fixture for test-validate\n'
+            + `see ${path.join(os.homedir(), 'code')} ${SENTINEL}\n`);
+        planted = runValidate();
+    } finally {
+        fs.rmSync(fixture, { force: true });
+    }
+
+    // Find the line by the FIXTURE, not by the wording. An earlier version of
+    // this test looked for the string "private project name" and broke the
+    // moment that label was corrected: this checker reports home paths too, and
+    // calling a home-path finding a private name sent readers after the wrong
+    // thing. Anchoring on the fixture keeps the test about the behaviour.
+    const line = (planted.stdout || '').split('\n')
+        .find((l) => l.includes('zz-location-fixture.md')) || '';
+
+    check('an untracked file carrying a home path makes validate FAIL', planted.status === 1);
+    check('  and the finding is reported as a FAIL', /^\[FAIL\]/.test(line.trim()));
+    check('  and it names the file and the line number',
+        line.includes('zz-location-fixture.md:2'));
+    check('  and it reports the kind the checker assigned, not the check\'s own name',
+        /home path/.test(line) && !/private project name/.test(line));
+    // The load-bearing one. Locations are safe in a public log; the line is not.
+    check('  and the offending line itself is never echoed',
+        !(planted.stdout || '').includes(SENTINEL));
+    // Control: the assertion above can only mean something if the sentinel was
+    // really in the file the checker read. Prove the run saw it at all.
+    check('  control: the fixture is what flipped it, not a pre-existing failure',
+        base.status === 0 && planted.status === 1);
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
