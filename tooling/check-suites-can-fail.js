@@ -214,27 +214,38 @@ const conflicts = [];
 const conflict = (msg) => { conflicts.push(msg); console.error('  [CONFLICT] ' + msg); };
 
 // Restore a file this sweep overwrote, without being able to destroy anyone
-// else's work. Three properties, in order of what they buy:
-//   1. Restore only when the file still holds exactly what THIS sweep wrote
-//      (`expect`) — anything else is a concurrent writer's content.
-//   2. Replace via rename(), which is atomic, so a raced reader never sees a
-//      torn file and the check-to-replace window is one syscall, not a write.
-//   3. Re-read afterwards and treat any surprise as a conflict. True content
-//      CAS against an uncoordinated writer does not exist in portable fs
-//      APIs; what is left after shrinking the window is detection, and a
-//      detected race is reported and poisons the verdict instead of being
-//      silently absorbed in either direction.
+// else's work. Round 7's version checked content and then renamed, so a write
+// landing between the check and the rename was destroyed AND the post-read
+// reported clean, because the destroyer had already replaced it (Sol's
+// round-8 blocker). This is CAPTURE-AND-SWAP instead: the live path is
+// renamed aside FIRST — atomically, whatever it holds — so a raced write is
+// preserved in the capture file rather than clobbered; the original then
+// goes back via O_EXCL create, which FAILS rather than replaces if a writer
+// recreated the path in between. Nothing on this path can silently destroy
+// content: every unexpected state is captured or refused, reported as a
+// conflict, and poisons the verdict. Exceptions are conflicts too — a
+// restore that throws must not exit as an ordinary failure with a mutant
+// still on disk and no INDETERMINATE marker.
 function restoreOwn(full, expect, original, label) {
-    const now = fs.readFileSync(full);
-    if (!now.equals(expect)) {
-        if (!now.equals(original)) conflict(`${label} changed under this sweep — left alone`);
-        return;
-    }
-    const tmp = full + '.restore-' + process.pid;
-    fs.writeFileSync(tmp, original);
-    fs.renameSync(tmp, full);
-    if (!fs.readFileSync(full).equals(original)) {
-        conflict(`${label} was written by something else during restore`);
+    try {
+        const cap = full + '.swept-' + process.pid;
+        fs.renameSync(full, cap);
+        const got = fs.readFileSync(cap);
+        try {
+            fs.writeFileSync(full, original, { flag: 'wx' });
+        } catch (e) {
+            conflict(`${label} was recreated by another writer during restore — its content is`
+                + ` left in place, this sweep's capture is at ${path.basename(cap)} (${e.code})`);
+            if (got.equals(expect)) { try { fs.unlinkSync(cap); } catch { /* keep it */ } }
+            return;
+        }
+        if (got.equals(expect)) fs.unlinkSync(cap);
+        else conflict(`${label} held foreign content at restore — captured to ${path.basename(cap)}, nothing lost`);
+        if (!fs.readFileSync(full).equals(original)) {
+            conflict(`${label} was written by something else immediately after restore`);
+        }
+    } catch (e) {
+        conflict(`restore of ${label} threw ${e.code || e.message} — treat this run as contaminated`);
     }
 }
 
@@ -265,15 +276,31 @@ const os = require('os');
 const crypto = require('crypto');
 const LOCK = path.join(os.tmpdir(), 'check-suites-'
     + crypto.createHash('sha1').update(fs.realpathSync(ROOT)).digest('hex').slice(0, 12) + '.lock');
+// The lock's second line is a per-run NONCE. It is what children prove
+// themselves with: AUTODEV_SWEEP_CHILD must carry this exact value, read
+// back from the LIVE lock, to be honoured (Sol's round-8 blocker: a bare
+// boolean env var was an unauthenticated bypass of both exclusion guards —
+// any process that happened to inherit or set it walked straight through).
+const NONCE = crypto.randomBytes(8).toString('hex');
+
 (function acquireLock() {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
         try {
-            fs.writeFileSync(LOCK, String(process.pid), { flag: 'wx' });
-            process.on('exit', () => { try { fs.unlinkSync(LOCK); } catch { /* already gone */ } });
+            fs.writeFileSync(LOCK, process.pid + '\n' + NONCE, { flag: 'wx' });
+            process.on('exit', () => {
+                // Unlink only a lock that is still OURS. If a takeover stole
+                // it (a bug, but a survivable one), deleting the thief's lock
+                // here would let a third sweep in (Sol's round-8 blocker).
+                try {
+                    const cur = fs.readFileSync(LOCK, 'utf8');
+                    if (parseInt(cur, 10) === process.pid) fs.unlinkSync(LOCK);
+                } catch { /* already gone */ }
+            });
             return;
         } catch {
-            let holder = NaN;
-            try { holder = parseInt(fs.readFileSync(LOCK, 'utf8'), 10); } catch { /* unreadable */ }
+            let raw = null;
+            try { raw = fs.readFileSync(LOCK, 'utf8'); } catch { continue; /* vanished — retry wx */ }
+            const holder = parseInt(raw, 10);
             let alive = false;
             if (Number.isFinite(holder)) {
                 try { process.kill(holder, 0); alive = true; } catch { alive = false; }
@@ -283,16 +310,25 @@ const LOCK = path.join(os.tmpdir(), 'check-suites-'
                 console.error('A mutation sweep needs the repo to itself; wait for it or kill it, then re-run.\n');
                 process.exit(2);
             }
-            // Atomic takeover of a DEAD holder's lock (Sol's round-7 blocker:
-            // a blind unlink here let two contenders each delete the OTHER's
-            // freshly written lock, and both proceeded). rename() is atomic
-            // and exactly one contender's rename of the stale file succeeds;
-            // the loser throws, loops, and now meets the winner's live lock
-            // at the wx attempt above.
+            // Takeover of a DEAD holder, in two verified steps. rename() is
+            // atomic and claims whatever is at LOCK — which, if we stalled
+            // between reading the stale pid and renaming, may by now be a
+            // rival's FRESH lock (Sol's round-8 blocker: the round-7 claim
+            // verified nothing, so a delayed contender could steal a live
+            // lock). So: claim, then look at what was actually caught. Our
+            // observed stale content → discard it and loop to wx. Anything
+            // else → we stole a live lock; put it back via O_EXCL (never
+            // replacing a newer one) and loop, where the live holder's lock
+            // now refuses us properly.
             try {
                 const claim = LOCK + '.claim-' + process.pid;
                 fs.renameSync(LOCK, claim);
-                fs.unlinkSync(claim);
+                const caught = fs.readFileSync(claim, 'utf8');
+                if (caught === raw) fs.unlinkSync(claim);
+                else {
+                    try { fs.writeFileSync(LOCK, caught, { flag: 'wx' }); } catch { /* a newer lock exists — leave it */ }
+                    try { fs.unlinkSync(claim); } catch { /* best effort */ }
+                }
             } catch { /* another contender claimed the stale lock first */ }
         }
     }
@@ -334,12 +370,14 @@ const suites = fs.readdirSync(__dirname)
     .filter((f) => /^test-.*\.js$/.test(f))
     .sort();
 
-// AUTODEV_SWEEP_CHILD marks every process this sweep spawns (and their
-// children), so a test-all.js run BY the sweep neither refuses under the
-// sweep lock nor announces a test lock of its own.
+// AUTODEV_SWEEP_CHILD carries this run's lock nonce to every process the
+// sweep spawns (and their children), so a test-all.js run BY the sweep
+// neither refuses under the sweep lock nor announces a test lock of its
+// own. It is honoured only when it matches the nonce in the LIVE lock —
+// a stale or fabricated value proves nothing and is ignored.
 const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, suite)], {
     cwd: ROOT, encoding: 'utf8', timeout: 300000,
-    env: { ...process.env, AUTODEV_SWEEP_CHILD: '1' },
+    env: { ...process.env, AUTODEV_SWEEP_CHILD: NONCE },
 });
 
 const rows = [];
@@ -532,15 +570,24 @@ if (after) {
     // never touched is someone else's work in flight, reported and left alone.
     console.error('\nFILES NOT RESTORED — restoring the paths this sweep stubbed:\n' + after);
     for (const rel of stubbedEver) {
-        // Same compare-and-swap as the inline restore: checkout erases the
-        // working copy, so it is only safe over content this sweep wrote. A
-        // stubbed path holding anything other than OUR stub is a concurrent
-        // edit that arrived after stubbing — report it, never erase it.
+        // Same capture-and-swap as the inline restore (the check-then-checkout
+        // it replaces repeated the destroy-a-raced-write race, Sol's round-8
+        // blocker). The live path is renamed aside first, so whatever it held
+        // is preserved; checkout then recreates the file from the index. A
+        // capture that is not this sweep's stub is foreign content — kept on
+        // disk, named, and a conflict.
         try {
-            if (fs.readFileSync(path.join(ROOT, rel)).equals(STUB_BUF)) {
-                git('checkout -- ' + JSON.stringify(rel));
-            }
-        } catch { /* reported below */ }
+            const full = path.join(ROOT, rel);
+            if (!git('status --porcelain -- ' + JSON.stringify(rel)).trim()) continue;
+            const cap = full + '.swept-' + process.pid;
+            fs.renameSync(full, cap);
+            git('checkout -- ' + JSON.stringify(rel));
+            const got = fs.readFileSync(cap);
+            if (got.equals(STUB_BUF)) fs.unlinkSync(cap);
+            else conflict(rel + ' held foreign content at recovery — captured to ' + path.basename(cap) + ', nothing lost');
+        } catch (e) {
+            conflict('recovery of ' + rel + ' threw ' + (e.code || e.message));
+        }
     }
     const still = git('status --porcelain').trim();
     if (still) {

@@ -68,27 +68,58 @@ if (suites.length === 0) {
 // run writes so a starting sweep can see a test run in flight. Children the
 // sweep spawns are exempt via AUTODEV_SWEEP_CHILD — the sweep running a suite
 // is the intended case, not a collision.
-if (!process.env.AUTODEV_SWEEP_CHILD) {
+{
   const os = require('os');
   const crypto = require('crypto');
   const key = 'check-suites-'
     + crypto.createHash('sha1').update(fs.realpathSync(repoRoot)).digest('hex').slice(0, 12);
   const sweepLock = path.join(os.tmpdir(), key + '.lock');
-  try {
-    const holder = parseInt(fs.readFileSync(sweepLock, 'utf8'), 10);
-    if (Number.isFinite(holder)) {
-      process.kill(holder, 0);   // throws if dead
-      console.error('\nRefusing to run: a stub sweep (pid ' + holder + ') holds this tree.');
-      console.error('Any result printed now would describe its mutants, not the committed code.');
-      console.error('Wait for it to finish, then re-run.\n');
+
+  // The sweep-child exemption is AUTHENTICATED, not a boolean: the env value
+  // must equal the nonce inside the LIVE sweep lock, whose holder must be
+  // alive. A stale or fabricated AUTODEV_SWEEP_CHILD proves nothing and the
+  // full guard applies (Sol's round-8 blocker: a bare flag was a bypass any
+  // inherited environment could trip).
+  let sweepChild = false;
+  if (process.env.AUTODEV_SWEEP_CHILD) {
+    try {
+      const lines = fs.readFileSync(sweepLock, 'utf8').split('\n');
+      process.kill(parseInt(lines[0], 10), 0);   // throws if dead
+      sweepChild = lines[1] === process.env.AUTODEV_SWEEP_CHILD;
+    } catch { sweepChild = false; }
+  }
+
+  if (!sweepChild) {
+    // ANNOUNCE FIRST, check second. Round 8's ordering blocker: with
+    // check-then-announce, a sweep could acquire its lock and scan for test
+    // locks in the gap between this run's check and its announcement, and
+    // both would proceed. Announcing first means any sweep that acquires
+    // later must see this run in its scan. If both start in the same
+    // instant, each sees the other and both refuse — a safe outcome.
+    // Announce failure fails CLOSED: an unannounced test run is invisible
+    // to sweeps, which is exactly the collision this exists to prevent.
+    const announce = path.join(os.tmpdir(), key + '.test-' + process.pid + '.lock');
+    try {
+      fs.writeFileSync(announce, String(process.pid));
+      process.on('exit', () => { try { fs.unlinkSync(announce); } catch { /* gone */ } });
+    } catch (e) {
+      console.error('\nRefusing to run: could not announce this test run ('
+        + (e.code || e.message) + ' writing ' + announce + ').');
+      console.error('An unannounced run is invisible to a concurrent stub sweep.\n');
       process.exit(2);
     }
-  } catch { /* no sweep lock, or its holder is dead — proceed */ }
-  const announce = path.join(os.tmpdir(), key + '.test-' + process.pid + '.lock');
-  try {
-    fs.writeFileSync(announce, String(process.pid));
-    process.on('exit', () => { try { fs.unlinkSync(announce); } catch { /* gone */ } });
-  } catch { /* announcing is best-effort; the sweep also pid-checks stale files */ }
+    try {
+      const holder = parseInt(fs.readFileSync(sweepLock, 'utf8'), 10);
+      if (Number.isFinite(holder)) {
+        process.kill(holder, 0);   // throws if dead
+        try { fs.unlinkSync(announce); } catch { /* withdrawn best-effort */ }
+        console.error('\nRefusing to run: a stub sweep (pid ' + holder + ') holds this tree.');
+        console.error('Any result printed now would describe its mutants, not the committed code.');
+        console.error('Wait for it to finish, then re-run.\n');
+        process.exit(2);
+      }
+    } catch { /* no sweep lock, or its holder is dead — proceed */ }
+  }
 }
 
 // A SUITE MUST NOT REWRITE THE TREE IT GRADES.
