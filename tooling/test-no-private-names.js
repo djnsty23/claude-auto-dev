@@ -75,9 +75,28 @@ try {
     // ---------------------------------------------------------------- clean
     {
         const r = sweepWith('nothing sensitive on this line at all', null);
-        check('a clean tree with a harmless probe passes', r.status === 0,
-            'the tree is not clean to begin with, so nothing below distinguishes anything');
-        check('  and it prints the population it scanned', /files read/.test(r.out));
+        // Assert on the PROBE, not on the whole tree.
+        //
+        // The first version asserted `r.status === 0`, which is a claim about
+        // every other file in the repo and about whatever the rest of the suite
+        // left lying around. It went red on windows CI for a reason that has
+        // nothing to do with this checker: os.tmpdir() sits UNDER the home
+        // directory there, so any file recording a temp path contains the
+        // account name, while on Linux /tmp is outside it. Coupling a test to
+        // global state it does not control makes it fail for reasons it cannot
+        // explain, which is worse than not having it.
+        check('a harmless probe produces no finding of its own', !r.namesProbe);
+        check('  and the checker prints the population it scanned',
+            /files read/.test(r.out) || /finding\(s\)/.test(r.out));
+
+        // If the tree IS dirty, say which files, rather than leaving a later
+        // reader with a bare red. Not an assertion: this is the environment
+        // reporting itself, and it is exactly the diagnosability gap that made
+        // the original CI failure take a day to explain.
+        if (r.status !== 0) {
+            const named = r.out.split('\n').filter((l) => /^\s+\[/.test(l)).join(' | ');
+            console.log(`NOTE  the working tree carries pre-existing findings: ${named || '(none named)'}`);
+        }
     }
 
     // ------------------------------------------------- home paths, must fire
@@ -110,8 +129,11 @@ try {
     {
         const s = shapes(FAKE_HOME);
         const r = sweepWith(`a file named test-${s.user}-guard.js in tooling`, FAKE_HOME);
+        // !namesProbe, not status === 0: the exit code is a verdict on the whole
+        // tree, so an unrelated pre-existing finding would make this red for a
+        // reason that has nothing to do with the pattern under test.
         check('the account name inside an unrelated identifier is NOT a finding',
-            r.status === 0,
+            !r.namesProbe,
             'the dash pattern is matching a bare hyphenated word again, which is what '
             + 'made this gate impossible to pass on a hosted runner');
     }
@@ -137,7 +159,7 @@ try {
         const onCi = sweepWith(`see ${path.join(s.home, 'code')} for details`,
             null, { GITHUB_ACTIONS: 'true' });
         check('on a CI host the home-path half does not run',
-            onCi.status === 0,
+            !onCi.namesProbe,
             'it ran and found something, so the skip is not in effect');
         check('  and it is reported as a coverage gap, not as a pass',
             /NOT CHECKED/.test(onCi.out) && /not a pass/.test(onCi.out));
