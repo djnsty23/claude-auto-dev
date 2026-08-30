@@ -639,6 +639,15 @@ function checkNoStaleMutationBackups() {
 function checkUntestedHooks() {
   const script = path.join(ROOT, 'tooling', 'find-untested-hooks.js');
   if (!fs.existsSync(script)) return log('WARN', 'find-untested-hooks.js is missing');
+  // POPULATION FLOOR (Sol's round-4 finding): the static precheck below is only
+  // honest while the execution gate exists. Delete or rename the permanent
+  // execution suite and the full gate would stay green with static checking
+  // only - the exact silent degradation the precheck wording promises against.
+  const executionGate = path.join(ROOT, 'tooling', 'test-hook-execution-evidence.js');
+  if (!fs.existsSync(executionGate)) {
+    return log('FAIL', 'tooling/test-hook-execution-evidence.js is MISSING — the hook '
+      + 'execution gate is gone, and the static precheck below must not stand in for it');
+  }
   // --referenced-only on purpose: the full execution phase runs every candidate
   // suite (~40s), and validate runs inside suites that run inside sweeps - the
   // full phase here blew runSuite timeouts and orphaned suite fixtures. This is

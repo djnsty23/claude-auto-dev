@@ -119,10 +119,15 @@ function analyse(disk, rows, repo) {
     // fallback only for legacy rows written before cwd was recorded. With no
     // repo given (the selftest's synthetic fixtures) behaviour is unchanged.
     if (repo) {
-        const base = path.resolve(repo).toLowerCase();
+        // Case-insensitive only where the FILESYSTEM is (Sol's round-4 finding):
+        // unconditional lowercasing conflated /srv/RepoA with /srv/repoa on
+        // Linux, where those are two different repositories. Windows records
+        // paths in mixed case for one repo, so it folds; Linux must not.
+        const fold = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
+        const base = fold(path.resolve(repo));
         const within = (p) => {
             if (!p) return false;
-            const r = path.resolve(String(p)).toLowerCase();
+            const r = fold(path.resolve(String(p)));
             return r === base || r.startsWith(base + path.sep);
         };
         rows = (rows || []).filter((r) => r && (r.cwd ? within(r.cwd) : within(r.file)));

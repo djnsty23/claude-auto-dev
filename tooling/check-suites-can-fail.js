@@ -226,6 +226,9 @@ const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, su
 });
 
 const rows = [];
+// Every subject path this run has overwritten with a stub, so recovery can be
+// scoped to exactly what THIS sweep touched and nothing else.
+const stubbedEver = new Set();
 
 // The runner is checked differently, and it matters more than any single suite.
 //
@@ -339,11 +342,25 @@ for (const suite of suites) {
     // what is NEW; the finally fires on every continue below.
     const untrackedBefore = new Set(git('status --porcelain').split('\n')
         .filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).trim()));
+    // Sol's round-4 blocker on the first version of this cleanup: an arbitrary
+    // status delta can include work a CONCURRENT session created while a suite
+    // ran - this clone runs several sessions at once, and deleting whatever is
+    // new is deleting whoever else was working. So the delete is scoped to the
+    // zones suites plant fixtures in, and every removal is printed. A new file
+    // outside these zones is left alone and reported; the end-of-run tree check
+    // decides what it means.
+    const FIXTURE_ZONES = ['plugins/', 'tooling/', 'templates/'];
     const cleanNewUntracked = () => {
         for (const line of git('status --porcelain').split('\n')) {
             if (!line.startsWith('?? ')) continue;
             const p = line.slice(3).trim();
             if (untrackedBefore.has(p)) continue;
+            const norm = p.replace(/\\/g, '/');
+            if (!FIXTURE_ZONES.some((z) => norm.startsWith(z))) {
+                console.error(`  [left alone] new untracked ${p} is outside the fixture zones — not this sweep's to delete`);
+                continue;
+            }
+            console.error(`  [removed] orphaned fixture ${p} (appeared during ${suite}, absent from the pre-run snapshot)`);
             try { fs.rmSync(path.join(ROOT, p), { recursive: true, force: true }); } catch { /* the tree check below still backstops */ }
         }
     };
@@ -369,6 +386,7 @@ for (const suite of suites) {
     const killed = [];
     for (const rel of subjects) {
         const full = path.join(ROOT, rel);
+        stubbedEver.add(rel);
         const original = fs.readFileSync(full);
         try {
             fs.writeFileSync(full, STUB);
@@ -388,10 +406,25 @@ for (const suite of suites) {
 // The restore is the dangerous part; prove it worked rather than assuming.
 const after = git('status --porcelain').trim();
 if (after) {
-    console.error('\nFILES NOT RESTORED — restoring from git:\n' + after);
-    git('checkout -- .');
+    // Recovery is scoped to the paths THIS sweep stubbed. The first version ran
+    // `git checkout -- .`, which Sol's round-4 review named for what it is: it
+    // erases tracked edits a concurrent session made while the sweep ran, in a
+    // clone where several sessions commit at once. A dirty path this sweep
+    // never touched is someone else's work in flight, reported and left alone.
+    console.error('\nFILES NOT RESTORED — restoring the paths this sweep stubbed:\n' + after);
+    for (const rel of stubbedEver) {
+        try { git('checkout -- ' + JSON.stringify(rel)); } catch { /* reported below */ }
+    }
     const still = git('status --porcelain').trim();
-    if (still) { console.error('STILL DIRTY:\n' + still); process.exit(2); }
+    if (still) {
+        console.error('STILL DIRTY (only paths this sweep stubbed are a failure; anything');
+        console.error('else is concurrent work that was deliberately not touched):\n' + still);
+        const ownDirty = still.split('\n').some((l) => stubbedEver.has(l.slice(3).trim()));
+        // Exiting 0 here would skip the verdict below - only a failure to
+        // restore OUR OWN stubs aborts; foreign dirt falls through to the
+        // normal verdict with the report above as the record.
+        if (ownDirty) process.exit(2);
+    }
 }
 
 console.log('\nCan each suite fail?\n');

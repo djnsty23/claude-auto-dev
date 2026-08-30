@@ -166,8 +166,12 @@ if (!referencedOnly) {
                     try { p = path.resolve(fileURLToPath(script.url)).toLowerCase(); } catch { continue; }
                     const hook = hookByLower.get(p);
                     if (!hook) continue;
-                    if (!executedBy.has(hook.name)) executedBy.set(hook.name, new Set());
-                    executedBy.get(hook.name).add(suiteName);
+                    // Keyed by FULL FILE PATH, not basename (Sol's round-4
+                    // warning): two plugins wiring the same hook filename would
+                    // otherwise cross-populate - one file's coverage marking
+                    // both rows executed.
+                    if (!executedBy.has(hook.file)) executedBy.set(hook.file, new Set());
+                    executedBy.get(hook.file).add(suiteName);
                 }
             }
         } finally {
@@ -181,7 +185,7 @@ const rows = wired.map((h) => ({
     // `covering` is EXECUTION evidence. `referencedBy` is the static candidate
     // list, reported so a reader can see the two disagree — a referenced-but-
     // never-executed hook is precisely the audit's vacuous-suite case.
-    covering: [...(executedBy.get(h.name) || [])].sort(),
+    covering: [...(executedBy.get(h.file) || [])].sort(),
     referencedBy: [...referenced.entries()]
         .filter(([, hooks]) => hooks.has(h.name)).map(([s]) => s).sort(),
 }));
