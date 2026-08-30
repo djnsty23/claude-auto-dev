@@ -114,8 +114,12 @@ if (target && targetSuite && original) {
         // that exits nonzero still count as proof, while suiteProblems is only
         // advisory. A failed evidence producer makes the check indeterminate:
         // discard that run's coverage and exit 2.
-        fs.writeFileSync(targetSuite,
-            "process.on('exit', () => { process.exitCode = 1; });\n" + original);
+        fs.writeFileSync(targetSuite, [
+            'const acceptanceExit = process.exit.bind(process);',
+            'process.exitCode = 1;',
+            'process.exit = (code) => acceptanceExit(code === 0 ? 1 : code);',
+            original,
+        ].join('\n'));
         const forcedRed = runSuite(targetSuite);
         check('control: the dedicated suite is red after the injected failure',
             forcedRed.status === 1 && forcedRed.signal === null && !forcedRed.error,
