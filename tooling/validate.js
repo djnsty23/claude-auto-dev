@@ -503,20 +503,64 @@ function checkNoLegacyArtifacts() {
 // directory is neither a name nor a secret, so nothing was looking at it.
 // A generator added 2026-08-25 wrote one into a committed RESUME.md and it
 // survived the whole suite.
+// Both checks below used to report only "run the checker yourself". That is
+// fine on a laptop and useless in CI, where nobody can re-run it and the log is
+// the whole record. 2026-08-30: check-no-private-names FAILED on ubuntu and
+// windows while passing locally on the same commit, and the run log carried
+// exactly one line about it, naming no file. The checkers already know the file
+// and the line; validate was throwing both away.
+//
+// The matched TEXT is still never printed, and that suppression is the point
+// rather than an oversight. These two checks exist to keep private names and
+// home paths out of a PUBLIC repo, and a public CI log is one more place they
+// must not appear. A location is not a secret; the line it points at is.
+const LOC_CAP = 12;
+
+function locationsFrom(output, re) {
+  const seen = new Set();
+  // Strip CR before matching. The child's output is CRLF on Windows, so a `$`
+  // anchor would otherwise never match and every location would be dropped -
+  // silently, and only on one platform.
+  for (const m of String(output || '').replace(/\r/g, '').matchAll(re)) seen.add(`${m[1]}:${m[2]}`);
+  return [...seen];
+}
+
+function reportLocations(what, locs, script) {
+  if (!locs.length) {
+    // Parsing nothing out of a FAILING checker is not a clean result, and
+    // staying quiet here would rebuild the exact defect this code removes.
+    // Say the parse failed, loudly, rather than printing a bare verdict.
+    return log('FAIL', `${what}, and validate could not parse any location from the `
+      + `checker output. Run node ${script}`);
+  }
+  const more = locs.length > LOC_CAP ? ` (+${locs.length - LOC_CAP} more)` : '';
+  log('FAIL', `${what} in ${locs.length} place(s): ${locs.slice(0, LOC_CAP).join(', ')}${more}. `
+    + `Run node ${script} to see the offending lines, which are deliberately not printed here`);
+}
+
 function checkNoHomePaths() {
   const script = path.join(ROOT, 'tooling', 'check-no-home-paths.js');
   if (!fs.existsSync(script)) return log('WARN', 'check-no-home-paths.js is missing');
   const r = cp.spawnSync(process.execPath, [script], { encoding: 'utf8' });
-  if (r.status === 0) log('PASS', (r.stdout || '').trim().replace(/^\[no-home-paths\]\s*/, 'No home paths: '));
-  else log('FAIL', 'a home path appears in a tracked file — run node tooling/check-no-home-paths.js');
+  if (r.status === 0) return log('PASS', (r.stdout || '').trim().replace(/^\[no-home-paths\]\s*/, 'No home paths: '));
+  // That checker prints "  <rel>:<line>  <text>" on stdout. Anchoring on the two
+  // spaces that separate location from text is what keeps the text uncaptured.
+  reportLocations('a home path appears in a tracked file',
+    locationsFrom(`${r.stdout || ''}\n${r.stderr || ''}`, /^ {2}(\S[^\n]*?):(\d+) {2}/gm),
+    'tooling/check-no-home-paths.js');
 }
 
 function checkNoPrivateNames() {
   const script = path.join(ROOT, 'tooling', 'check-no-private-names.js');
   if (!fs.existsSync(script)) return log('WARN', 'check-no-private-names.js is missing');
   const r = cp.spawnSync(process.execPath, [script], { encoding: 'utf8' });
-  if (r.status === 0) log('PASS', (r.stdout || '').trim().replace(/^\[no-private-names\]\s*/, 'No private project names: '));
-  else log('FAIL', 'a private project name appears in a tracked file — run node tooling/check-no-private-names.js');
+  if (r.status === 0) return log('PASS', (r.stdout || '').trim().replace(/^\[no-private-names\]\s*/, 'No private project names: '));
+  // That checker prints "  [<kind>] <rel>:<line>" on stderr with the offending
+  // line indented on the NEXT line, so an end-of-line anchor separates them.
+  // One regex covers both its kinds, private name and absolute home path.
+  reportLocations('a private project name appears in a tracked file',
+    locationsFrom(`${r.stdout || ''}\n${r.stderr || ''}`, /^ {2}\[[^\]\n]+\] (\S[^\n]*?):(\d+)$/gm),
+    'tooling/check-no-private-names.js');
 }
 
 // A mutation run that did not finish may have left a mutant in a source file.
