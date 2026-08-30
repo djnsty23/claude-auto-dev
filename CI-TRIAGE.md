@@ -183,3 +183,91 @@ What the evidence supports, if you are deciding:
    reads like a pass and measured nothing. It is the same shape as the vacuous green in
    `BRANCH-TRIAGE.md` F4, one layer up: absent verification presenting as satisfied
    verification.
+
+## Re-enabled, and the first run in five days answered the open question
+
+`[measured 2026-08-30T04:54Z to 05:05Z]` Operator authorised re-enabling. Done and
+verified: workflow 333126439 went `disabled_manually` to **`active`**, checked after the
+call rather than assumed.
+
+Two things had already been done by someone else while this was being written, both
+re-verified rather than taken on trust: **PR #94 merged** at 04:39:54Z as `13a46ad`, now
+main's tip, with all three suites present on main; and **all nine STALE branches deleted**.
+The deletion list in `BRANCH-TRIAGE.md` re-verified as "ALREADY GONE" for all nine, which
+is why re-checking immediately before acting matters. Nothing was deleted by this session.
+
+#94 merged about fifteen minutes **before** CI was re-enabled, so it got no checks. To
+answer the ubuntu question, main was merged into this branch (clean, forward-only, no
+force-push) and pushed. Local gate on that tree: **75/75, exit 0**, the first fully green
+run of this session.
+
+### Both platforms now genuinely run, and both fail
+
+Run 33293659104, the first since 2026-08-25. **`steps=9` on both jobs**, against `steps=0`
+for every billing-refused run. These are real results.
+
+| job | result | failing suites |
+|---|---|---|
+| `test (ubuntu-latest)` | **72/75** | `test-brain-brief`, `test-validate`, `validate` |
+| `test (windows-latest)` | **72/75** | `test-claudemd-audit`, `test-validate`, + 1 |
+
+**The failure sets differ by platform**, which is the thing five days of billing refusals
+were hiding.
+
+### The Linux finding, which reading the code could not have produced
+
+`test-brain-brief`, ubuntu only, with a clean cross-platform control:
+
+```text
+ubuntu   FAIL  control: git survives the gh-free PATH
+               (git is unreachable once every gh-bearing directory is dropped,
+                so the gh-absent scenario below cannot run on this machine)
+windows  PASS  control: git survives the gh-free PATH
+```
+
+On `ubuntu-latest`, `git` and `gh` both live in `/usr/bin`. The suite builds a PATH with
+every gh-bearing directory removed, which on Linux removes `git` as well. On Windows they
+sit in different directories, so the same technique works.
+
+**The suite behaved correctly.** It carries an explicit control that detects its own
+impossibility and fails, instead of running the scenario against a broken PATH and
+reporting a vacuous pass. That is the gate-integrity discipline in this repo working as
+designed, and the red is the test being honest rather than the code being wrong.
+
+**It is also the honest verdict on the audit above.** The static Linux audit found zero
+issues and this is a real one. The source is platform-neutral: "drop every directory
+containing gh". The assumption is about **filesystem layout**, which is not visible in the
+repo at all. A reading audit cannot find an assumption that lives in the environment rather
+than in the code, and this took one real run to surface.
+
+### The one I could not reproduce, stated as unresolved
+
+`validate` fails in CI on `[FAIL] a private project name appears in a tracked file` and is
+**clean here**, on the same commit:
+
+| where | result |
+|---|---|
+| CI, ubuntu | FAIL |
+| this worktree, same commit `de3f37b` | `294 of 294 files read, 9 names, clean`, exit 0 |
+| the gate's own `scanText` over all 294 tracked and untracked-not-ignored files | **0 hits** |
+
+The scanner is not broken: a known-positive control confirmed a denylisted name digests to
+an entry in the list and that `scanText` fires on a line containing it. The name was
+supplied through an env var and never printed, because this is a public repo.
+
+The likeliest remaining explanation is a file created **during** the run: the checker scans
+untracked-but-not-ignored files, and `validate` runs at the end of `test-all.js` after 75
+suites have written fixtures. That is a hypothesis, not a measurement, and it is labelled
+as one.
+
+### The defect that made it undiagnosable, which is the actionable part
+
+`tooling/validate.js:519` logs a generic message on failure and **discards the checker's
+stdout and stderr**. The checker knows the file and line; validate throws that away, so a
+CI-only failure cannot be diagnosed from the log at all. Confirmed: grepping the entire
+ubuntu log for the checker's output returns exactly one line, the generic FAIL.
+
+Suppressing the matched **text** is correct, since a public CI log must never echo a
+private name. Suppressing the **file path and line number** is not, and they are what a
+reader needs. The minimal fix is to print paths and line numbers on failure while keeping
+the matched text suppressed.
