@@ -212,6 +212,47 @@ What actually converges the loop is narrowing what each round may reopen:
   decides whether another round buys anything. That judgement is cheap
   outside the loop and re-bills a full context inside it.
 
+### Make the decay observable: a round log
+
+"Watch for the round that stops being about findings" is a judgement, and a
+judgement made inside a long loop is made by the party least able to make it.
+Record it instead. One committed line per round, appended before the next round
+starts:
+
+```
+round | raised | fixed | refuted | distinct subjects | new scope
+```
+
+**The quantity that decays is DISTINCT SUBJECTS, not findings.** This matters
+because the naive metric points the wrong way: in the 24-round run above,
+rounds 20 to 24 raised five real findings, so findings-per-round looked healthy
+while the loop circled a single exit-classification decision. Counting subjects
+separates a loop that is still finding things from a loop that is relitigating
+one thing five times.
+
+The stop rule, computed by the caller from the log:
+
+- **Two consecutive rounds whose findings all land on subjects already in the
+  log** means the loop has converged on argument rather than defects. Freeze
+  the contract and ship what is fixed.
+- **A subject reopened in three separate rounds** is a decision, not a defect.
+  Take it out of the loop and decide it directly; it will not converge by
+  being attacked again.
+- **New scope is a separate loop, always.** A finding that does not map to a
+  frozen acceptance test is the next audit's input. Logging it in the `new
+  scope` column is how it survives without extending this run.
+
+**The caller computes this, never the adversary.** An adversary asked to
+declare itself done does not: measured across two workflows, one told to output
+a dry verdict when the work was sound produced zero dry passes and ran to its
+agent cap. A model asked to find findings finds findings. The log is read from
+outside the loop, where the judgement costs one cheap read instead of re-billing
+a full context inside it.
+
+The log is also the only artifact that survives the run. A loop whose history
+lives in one session's chat cannot be audited, cannot be resumed by anyone else,
+and cannot tell a later reader whether round 20 was rigour or churn.
+
 ## Verify the adversary's tests too
 
 The adversary's tests are gates, and a gate's first run is a measurement.
