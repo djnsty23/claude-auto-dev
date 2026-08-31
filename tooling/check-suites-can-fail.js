@@ -371,16 +371,29 @@ const HEAD_SHA = gitArgv(['rev-parse', 'HEAD'], ROOT).trim();
 // exactly as it is, reported, and retried by a later run — its registration
 // survives because prune only drops records whose directory is gone.
 const crypto = require('crypto');
+
+// Canonical path identity for the registration comparison: realpath when the
+// path still exists, case-folded on win32. Without it a case-variant or
+// symlinked spelling of a registered worktree never matches and the stale
+// tree stays unreclaimed forever (Sol's round-15 blocker).
+const canonPath = (p) => {
+    const r = path.resolve(p);
+    let real;
+    try { real = fs.realpathSync(r); } catch { real = r; }
+    return process.platform === 'win32' ? real.toLowerCase() : real;
+};
 {
-    const registered = new Set(gitArgv(['worktree', 'list', '--porcelain'], ROOT)
-        .split('\n')
+    // -z output: NUL-separated attribute records, so a path containing a
+    // newline — legal on POSIX — cannot shear the parse (same blocker).
+    const registered = new Set(gitArgv(['worktree', 'list', '--porcelain', '-z'], ROOT)
+        .split('\0')
         .filter((l) => l.startsWith('worktree '))
-        .map((l) => path.resolve(l.slice('worktree '.length).trim())));
+        .map((l) => canonPath(l.slice('worktree '.length))));
     for (const d of fs.readdirSync(os.tmpdir())) {
         const m = d.match(/^check-suites-wt-(\d+)-/);
         if (!m) continue;
         const full = path.join(os.tmpdir(), d);
-        if (!registered.has(path.resolve(full))) continue;   // not provably ours — untouched
+        if (!registered.has(canonPath(full))) continue;   // not provably ours — untouched
         let alive = false;
         try { process.kill(parseInt(m[1], 10), 0); alive = true; }
         catch (e) { alive = e.code === 'EPERM'; }

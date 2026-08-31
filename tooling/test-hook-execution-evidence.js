@@ -25,21 +25,82 @@ const ROOT = path.resolve(__dirname, '..');
 const crypto = require('crypto');
 const SB_PREFIX = 'hookcheck-sb-';
 const SB_MARKER = '.acceptance-sandbox';
+const SB_MAGIC = 'autodev-acceptance-sandbox-v1';
+const canonPath = (p) => {
+    const r = path.resolve(p);
+    let real;
+    try { real = fs.realpathSync(r); } catch { real = r; }
+    return process.platform === 'win32' ? real.toLowerCase() : real;
+};
+const CANON_ROOT = canonPath(ROOT);
+
+// Reclamation of dead sandboxes, hardened (Sol's round-15 blocker: a prefix
+// plus a bare marker file was forgeable and the check-to-delete was racy).
+// The candidate is CLAIMED BY RENAME first — atomic, one winner, and after
+// it nothing else can race the inspection — then the marker's CONTENTS must
+// name the dead pid from the directory name, this exact source tree, and
+// the magic string. Anything that fails validation is renamed back exactly
+// as it was.
 for (const d of fs.readdirSync(os.tmpdir())) {
     const m = d.match(new RegExp('^' + SB_PREFIX + '(\\d+)-'));
     if (!m) continue;
     const full = path.join(os.tmpdir(), d);
-    if (!fs.existsSync(path.join(full, SB_MARKER))) continue;   // not provably ours
     let alive = false;
     try { process.kill(parseInt(m[1], 10), 0); alive = true; }
     catch (e) { alive = e.code === 'EPERM'; }
-    if (!alive) { try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* next run */ } }
+    if (alive) continue;
+    const claim = full + '.reclaim-' + crypto.randomBytes(6).toString('hex');
+    try { fs.renameSync(full, claim); } catch { continue; /* another claimer won */ }
+    let ours = false;
+    try {
+        const mk = JSON.parse(fs.readFileSync(path.join(claim, SB_MARKER), 'utf8'));
+        ours = mk.magic === SB_MAGIC && mk.pid === parseInt(m[1], 10) && mk.root === CANON_ROOT;
+    } catch { ours = false; }
+    if (ours) { try { fs.rmSync(claim, { recursive: true, force: true }); } catch { /* next run */ } }
+    else { try { fs.renameSync(claim, full); } catch { /* left under the claim name, contents untouched */ } }
 }
+
+// The snapshot would recurse into itself if tmpdir lives inside the source
+// tree; refuse rather than copy forever.
+if (canonPath(os.tmpdir()) === CANON_ROOT || canonPath(os.tmpdir()).startsWith(CANON_ROOT + path.sep)) {
+    console.error('refusing: TMPDIR is inside the source tree — the snapshot would recurse into itself');
+    process.exit(2);
+}
+const SB_SKIP = new Set(['.git', '.claude', 'node_modules']);
+// Symlinks and junctions are SKIPPED, not copied: a link pointing outside
+// the tree would let sandbox mutations escape the sandbox.
+const sbKeep = (src) => !SB_SKIP.has(path.basename(src)) && !fs.lstatSync(src).isSymbolicLink();
+// Size+mtime manifest of the SOURCE, taken before and after the copy: any
+// difference means the tree changed mid-snapshot and the copy is an
+// incoherent mix, so the run refuses instead of measuring it.
+const sbManifest = () => {
+    const out = new Map();
+    const walk = (rel) => {
+        for (const e of fs.readdirSync(path.join(ROOT, rel || '.'), { withFileTypes: true })) {
+            if (SB_SKIP.has(e.name)) continue;
+            const r = rel ? rel + '/' + e.name : e.name;
+            const fp = path.join(ROOT, r);
+            if (fs.lstatSync(fp).isSymbolicLink()) continue;
+            if (e.isDirectory()) walk(r);
+            else { const st = fs.statSync(fp); out.set(r, st.size + ':' + st.mtimeMs); }
+        }
+    };
+    walk('');
+    return out;
+};
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
-fs.writeFileSync(path.join(SANDBOX, SB_MARKER), String(process.pid));
+fs.writeFileSync(path.join(SANDBOX, SB_MARKER),
+    JSON.stringify({ magic: SB_MAGIC, pid: process.pid, root: CANON_ROOT }));
 {
-    const SKIP = new Set(['.git', '.claude', 'node_modules']);
-    fs.cpSync(ROOT, SANDBOX, { recursive: true, filter: (src) => !SKIP.has(path.basename(src)) });
+    const before = sbManifest();
+    fs.cpSync(ROOT, SANDBOX, { recursive: true, filter: sbKeep });
+    const after = sbManifest();
+    let changed = before.size !== after.size;
+    if (!changed) for (const [k, v] of before) { if (after.get(k) !== v) { changed = true; break; } }
+    if (changed) {
+        console.error('refusing: the source tree changed while it was being snapshotted — re-run when quiet');
+        process.exit(2);
+    }
 }
 process.on('exit', () => {
     try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reclaimed next run */ }
