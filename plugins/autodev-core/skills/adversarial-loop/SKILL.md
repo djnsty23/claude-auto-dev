@@ -212,6 +212,83 @@ What actually converges the loop is narrowing what each round may reopen:
   decides whether another round buys anything. That judgement is cheap
   outside the loop and re-bills a full context inside it.
 
+### Make the decay observable: a round log
+
+"Watch for the round that stops being about findings" is a judgement, and a
+judgement made inside a long loop is made by the party least able to make it.
+Record it instead.
+
+**Use the round log the "Measure every run" section already defines** — the
+same file, the same row per round. Do not start a second one: two logs with
+different schemas means one of them is wrong and nothing reports which. Add one
+column to it:
+
+```
+| round | range | threadId | raised | new defect | regression | unresolved | new scope | tests added | verdict |
+```
+
+That log lives under `.claude/reports/`, which this repo **gitignores on
+purpose** so an audit's raw output cannot be staged. It is durable enough for
+the loop because it is appended every round, not written at the end. Do not
+describe it as committed, and do not move it in order to commit it.
+
+**Findings-per-round is the wrong metric and repeat-subject is not the fix.**
+The naive count points the wrong way: rounds 20 to 24 of the run above raised
+five real findings, so the rate looked healthy while the loop circled one
+exit-classification decision.
+
+An earlier version of this section said to count distinct subjects and stop
+after two consecutive rounds on already-seen ones. **The worked example above
+falsifies that rule** — those five rounds sit on one subject and all five were
+real, so the rule stops at round 21 and loses three acknowledged defects.
+"Subject" also has no stable granularity, so a caller can make the same
+sequence converge or not by calling it one subsystem or five clauses.
+
+**What decays is the DISPOSITION of what arrives.** Give every finding a stable
+id and classify it as exactly one of:
+
+| disposition | meaning |
+|---|---|
+| `new defect` | a fault not previously raised |
+| `regression in fix` | the previous round's fix broke something |
+| `same unresolved decision` | the same question, argued again |
+| `new scope` | does not map to a frozen acceptance test |
+
+Only the last two are churn. A round of `regression in fix` is the loop working
+exactly as intended, however familiar the subject looks.
+
+**This decides when to stop ATTACKING. It does not decide when to merge.** The
+merge invariant is unchanged and stated three times elsewhere in this file: the
+loop ends on the exact verdict token, and neither the token nor a green gate is
+sufficient alone. A decayed yield means stop spending rounds and go get that
+verdict on what is fixed — never land without it.
+
+The stop rule, computed by the caller from the log:
+
+- **Two consecutive rounds producing only `same unresolved decision` and
+  `new scope`** means the loop has converged on argument rather than defects.
+  Freeze the contract, then close the loop the normal way. A single
+  `new defect` or `regression in fix` in either round resets this.
+- **The same id disposed `same unresolved decision` three times** is a decision,
+  not a defect. Take it out of the loop and decide it directly; it will not
+  converge by being attacked again.
+- **A repeated subject is a prompt to look, never evidence on its own.** It
+  tells you to read the dispositions; it does not tell you the loop is done.
+- **New scope is a separate loop, always.** A finding that does not map to a
+  frozen acceptance test is the next audit's input. Logging it in the `new
+  scope` column is how it survives without extending this run.
+
+**The caller computes this, never the adversary.** An adversary asked to
+declare itself done does not: measured across two workflows, one told to output
+a dry verdict when the work was sound produced zero dry passes and ran to its
+agent cap. A model asked to find findings finds findings. The log is read from
+outside the loop, where the judgement costs one cheap read instead of re-billing
+a full context inside it.
+
+The log is also the only artifact that survives the run. A loop whose history
+lives in one session's chat cannot be audited, cannot be resumed by anyone else,
+and cannot tell a later reader whether round 20 was rigour or churn.
+
 ## Verify the adversary's tests too
 
 The adversary's tests are gates, and a gate's first run is a measurement.
@@ -245,6 +322,58 @@ Two sweep rules that bite here:
 - **The repo is the only shared memory.** Findings, test contracts, and round
   logs live in committed files, never in one session's chat. The other vendor
   cannot read your context window.
+
+## A timeout aborts the call, not the process
+
+A timeout ends your handle on the adversary. **It may or may not end the
+adversary**, and you cannot tell which from the error.
+
+Both outcomes are observed. One dispatch kept working for about ten minutes
+after the caller had recorded it as failed, rewriting its deliverable four
+times. A second, on the same machine the same day, died with its transport: its
+session log froze at the moment of injection and never grew. Treat "still
+running" as the case to rule out, not as the rule — the cost is asymmetric,
+because acting on a dead delegate wastes a re-dispatch while acting on a live
+one corrupts a file.
+
+**So the first move after a timeout is a liveness check, not a decision.** Look
+for the process, and check whether the delegate's session log is still growing.
+Log SIZE is not the signal: a log can be large purely from the context injected
+at start, which is what fooled the caller in the second case.
+
+The rest follows once you know which case you are in:
+
+- **Do not re-dispatch on a timeout.** A second dispatch puts two writers on one
+  deliverable. That is not a race you lose loudly — one file vanished mid-rewrite
+  and was later found 415 lines shorter under an append that looked clean.
+- **Find out whether it is still running before concluding anything.** An empty
+  result is a claim about the handover, never about the work.
+- **The tell is `git show --numstat`, not the tool output.** Nothing in a tool
+  result announces that a file got smaller. A deliverable that shrank and a
+  deliverable that was edited look identical until you count lines.
+- **Give the deliverable a recovery path, and pick the one its location
+  allows.** An untracked file has none, so an overwrite is total loss rather
+  than a diff. If the deliverable is repo content, commit it to the working
+  branch as it grows — that is a local commit, and pushing still needs the
+  usual say-so. If it is an audit report, it belongs under `.claude/reports/`,
+  which this repo gitignores deliberately so raw audit output cannot be staged;
+  there the recovery path is appending every round plus the delegate's own
+  session log, not a commit. Do not relocate a report in order to commit it.
+- **Last resort: the adversary's own session log on disk holds the bytes
+  verbatim.** That is what recovery came from when the untracked file was gone.
+  It is a backstop, not a plan — committing is the plan.
+
+**Instruct the adversary to write incrementally.** Append findings to a file as
+it goes rather than composing one answer at the end, and prefer a format that
+survives truncation — one finding per block, never a single JSON object, which
+parses as nothing when cut anywhere. A run that times out then still leaves
+output, and a partial deliverable beats an empty one every time.
+
+**Keep from the dispatch whatever tends to stall it.** In the run this was
+measured on, browser work was the stalling half and was also the half the caller
+could do directly. Removing it and re-dispatching narrowed produced a complete
+plan on the next attempt. Split a brief along "what can hang" rather than along
+what is conceptually tidy.
 
 ## Measure every run
 
