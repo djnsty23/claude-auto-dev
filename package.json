@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "8.142.0",
+  "version": "8.143.0",
   "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
   "private": true,
   "keywords": [
@@ -40,7 +40,11 @@
     "check:reachable": "node plugins/autodev-core/scripts/check-rules-reachable.js",
     "test:reachable": "node plugins/autodev-core/scripts/check-rules-reachable.js --selftest",
     "check:push-auth": "node tooling/check-push-authorisation.js --selftest",
-    "check:review": "node tooling/review-diff.js"
+    "check:review": "node tooling/review-diff.js",
+    "check:claims": "node tooling/check-claim-provenance.js --selftest",
+    "check:orphans": "node tooling/reap-orphan-waiters.js --selftest",
+    "usage:both": "node tooling/usage-both.js",
+    "gate:release": "npm run gate && npm run check:runtime"
   },
   "author": "djnsty23",
   "license": "MIT",
