@@ -2,9 +2,9 @@
 /**
  * Framework Radar
  *
- * Deterministic intake for official Claude Code/Codex changes and relevant
+ * Deterministic intake for official agent-development changes and relevant
  * YouTube videos. It collects and deduplicates evidence; the framework-radar
- * skill owns judgement. Scheduled runs are report-only by construction.
+ * skill owns judgement and controlled experimentation.
  */
 'use strict';
 
@@ -82,12 +82,17 @@ function tag(block, name) {
   return match ? decodeEntities(match[1]).trim() : '';
 }
 
+function isPrereleaseTitle(title) {
+  return /(?:^|[.@/_-])(?:alpha|beta|rc|preview|nightly|canary|dev)(?:[.\d_-]|$)|\d+b\d+(?:\b|$)/i
+    .test(String(title));
+}
+
 function parseAtom(xml, source, cutoffMs) {
   const entries = String(xml).match(/<entry\b[\s\S]*?<\/entry>/gi) || [];
   const out = [];
   for (const block of entries) {
     const title = stripHtml(tag(block, 'title'));
-    if (source.excludePrereleases && /-(?:alpha|beta|rc)(?:[.-]|$)/i.test(title)) continue;
+    if (source.excludePrereleases && isPrereleaseTitle(title)) continue;
     const id = tag(block, 'id') || title;
     const updated = tag(block, 'updated') || tag(block, 'published');
     const when = Date.parse(updated);
@@ -99,6 +104,7 @@ function parseAtom(xml, source, cutoffMs) {
       key: `official:${source.id}:${id}`,
       source_id: source.id,
       kind: 'official',
+      category: source.category || 'uncategorized',
       product: source.product,
       title,
       url,
@@ -131,6 +137,7 @@ function parseMarkdownChangelog(markdown, source) {
       key: `official:${source.id}:${section.version}`,
       source_id: source.id,
       kind: 'official',
+      category: source.category || 'uncategorized',
       product: source.product,
       title: `${source.product} ${section.version}`,
       url: source.webUrl,
@@ -302,11 +309,10 @@ async function officialSources(config, fixtureDir, cutoffMs) {
       const parsed = source.kind === 'atom'
         ? parseAtom(raw, source, cutoffMs)
         : parseMarkdownChangelog(raw, source);
-      if (!parsed.length) throw new Error('parsed zero entries');
       items.push(...parsed);
-      statuses.push({ id: source.id, status: 'ok', count: parsed.length });
+      statuses.push({ id: source.id, category: source.category || 'uncategorized', status: 'ok', count: parsed.length });
     } catch (error) {
-      statuses.push({ id: source.id, status: 'error', count: 0, error: clip(error.message, 240) });
+      statuses.push({ id: source.id, category: source.category || 'uncategorized', status: 'error', count: 0, error: clip(error.message, 240) });
     }
   }
   return { statuses, items };
@@ -570,6 +576,10 @@ async function collect() {
   const ok = statuses.filter((row) => row.status === 'ok').length;
   const partial = statuses.filter((row) => row.status === 'partial').length;
   const failed = statuses.filter((row) => row.status === 'error').length;
+  const officialCategories = {};
+  for (const item of official.items) {
+    officialCategories[item.category] = (officialCategories[item.category] || 0) + 1;
+  }
   const runId = new Date().toISOString().replace(/[:.]/g, '-') + '-' + process.pid;
   const manifest = {
     schema_version: SCHEMA_VERSION,
@@ -587,6 +597,7 @@ async function collect() {
       sources_partial: partial,
       sources_failed: failed,
       official_items_seen: official.items.length,
+      official_categories_seen: officialCategories,
       youtube_videos_seen: youtube.videos.length,
       transcripts_attempted: youtube.transcripts_attempted,
       transcripts_succeeded: youtube.transcripts_succeeded,
@@ -683,6 +694,7 @@ module.exports = {
   expandCaptionPlaylist,
   fetchJson,
   fetchText,
+  isPrereleaseTitle,
   normalizeVideo,
   parseAtom,
   parseJsonLines,

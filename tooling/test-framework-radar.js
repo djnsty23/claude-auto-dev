@@ -11,6 +11,8 @@ const os = require('os');
 const path = require('path');
 
 const SCRIPT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'framework-radar.js');
+const DEFAULT_CONFIG = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'framework-radar-sources.json');
+const SKILL = path.join(__dirname, '..', 'plugins', 'autodev-core', 'skills', 'framework-radar', 'SKILL.md');
 const subject = require(SCRIPT);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'framework-radar-'));
 const fixture = path.join(tmp, 'fixture');
@@ -34,8 +36,9 @@ const now = Date.now();
 const iso = (daysAgo) => new Date(now - daysAgo * 86400000).toISOString();
 const config = {
   official: [
-    { id: 'claude-fixture', kind: 'markdown-changelog', product: 'Claude Code', url: 'fixture:', webUrl: 'https://example.test/claude', maxEntries: 3 },
-    { id: 'codex-fixture', kind: 'atom', product: 'Codex CLI', url: 'fixture:', webUrl: 'https://example.test/codex', maxEntries: 3 },
+    { id: 'claude-fixture', kind: 'markdown-changelog', category: 'coding-agent', product: 'Claude Code', url: 'fixture:', webUrl: 'https://example.test/claude', maxEntries: 3 },
+    { id: 'codex-fixture', kind: 'atom', category: 'coding-agent', product: 'Codex CLI', url: 'fixture:', webUrl: 'https://example.test/codex', maxEntries: 3 },
+    { id: 'quiet-fixture', kind: 'atom', category: 'evaluation', product: 'Quiet Harness', url: 'fixture:', webUrl: 'https://example.test/quiet', maxEntries: 3 },
   ],
   youtube: { queries: ['Claude Code workflow'], perQuery: 3, discoveryDays: 30 },
 };
@@ -48,6 +51,10 @@ write(path.join(fixture, 'claude-fixture.txt'), [
 write(path.join(fixture, 'codex-fixture.txt'), `<?xml version="1.0"?><feed>
   <entry><id>tag:codex:0.9.0</id><title>Codex 0.9.0</title><updated>${iso(2)}</updated>
   <link href="https://example.test/codex/0.9.0"/><content><![CDATA[<p>Added automation review queues.</p>]]></content></entry>
+</feed>`);
+write(path.join(fixture, 'quiet-fixture.txt'), `<?xml version="1.0"?><feed>
+  <entry><id>tag:quiet:1.0.0</id><title>Quiet 1.0.0</title><updated>${iso(60)}</updated>
+  <link href="https://example.test/quiet/1.0.0"/><content>Old stable release.</content></entry>
 </feed>`);
 write(path.join(fixture, 'youtube.json'), JSON.stringify([
   {
@@ -69,14 +76,46 @@ async function unitSeams() {
   const parsedMarkdown = subject.parseMarkdownChangelog(fs.readFileSync(path.join(fixture, 'claude-fixture.txt'), 'utf8'), config.official[0]);
   check('markdown parser finds both version sections', parsedMarkdown.length === 2);
   check('markdown parser hashes the section body', /^[a-f0-9]{64}$/.test(parsedMarkdown[0].content_hash));
+  check('markdown parser preserves the source category', parsedMarkdown[0].category === 'coding-agent');
 
   const parsedAtom = subject.parseAtom(fs.readFileSync(path.join(fixture, 'codex-fixture.txt'), 'utf8'), config.official[1], now - 14 * 86400000);
   check('atom parser finds a fresh release', parsedAtom.length === 1 && /automation review queues/.test(parsedAtom[0].content));
   check('atom parser respects the cutoff', subject.parseAtom(fs.readFileSync(path.join(fixture, 'codex-fixture.txt'), 'utf8'), config.official[1], now + 86400000).length === 0);
   const prereleaseAtom = fs.readFileSync(path.join(fixture, 'codex-fixture.txt'), 'utf8').replace(
-    '<entry>', `<entry><id>tag:codex:0.10.0-alpha.1</id><title>0.10.0-alpha.1</title><updated>${iso(1)}</updated><content>noise</content></entry><entry>`);
+    '<entry>', [
+      `<entry><id>tag:codex:0.10.0-alpha.1</id><title>0.10.0-alpha.1</title><updated>${iso(1)}</updated><content>noise</content></entry>`,
+      `<entry><id>tag:codex:0.11.0-preview.1</id><title>0.11.0-preview.1</title><updated>${iso(1)}</updated><content>noise</content></entry>`,
+      `<entry><id>tag:codex:0.12.0-nightly</id><title>0.12.0-nightly</title><updated>${iso(1)}</updated><content>noise</content></entry>`,
+      `<entry><id>tag:codex:2.0.0b4</id><title>2.0.0b4</title><updated>${iso(1)}</updated><content>noise</content></entry>`,
+      '<entry>',
+    ].join(''));
   const stableOnly = subject.parseAtom(prereleaseAtom, Object.assign({}, config.official[1], { excludePrereleases: true }), now - 14 * 86400000);
   check('atom parser can exclude prerelease churn without hiding stable releases', stableOnly.length === 1 && stableOnly[0].title === 'Codex 0.9.0');
+  check('atom parser preserves the source category', stableOnly[0].category === 'coding-agent');
+
+  const registry = read(DEFAULT_CONFIG);
+  const registryIds = new Set(registry.official.map((source) => source.id));
+  const registryCategories = new Set(registry.official.map((source) => source.category));
+  check('default registry covers Claude, Codex and Gemini coding agents',
+    ['claude-code-changelog', 'codex-releases', 'gemini-cli-releases'].every((id) => registryIds.has(id)));
+  check('default registry spans agents, SDKs, orchestration, protocols and evaluation',
+    ['coding-agent', 'agent-sdk', 'orchestration', 'protocol', 'evaluation'].every((category) => registryCategories.has(category)));
+  check('default video discovery spans the broader agent-development ecosystem',
+    registry.youtube.queries.some((query) => /Gemini CLI/.test(query))
+      && registry.youtube.queries.some((query) => /harness evaluation/.test(query)));
+
+  const skill = fs.readFileSync(SKILL, 'utf8');
+  check('skill prioritizes pending experiments before new hypotheses',
+    /earlier candidate experiment with\s+no recorded result is pending work and takes priority/.test(skill));
+  check('skill requires every selected hypothesis to execute in the same run',
+    /Every selected\s+hypothesis must be executed in this run/.test(skill));
+  check('skill requires isolated A B and simpler-C measurement',
+    /dedicated worktree/.test(skill) && /A: current behavior/.test(skill)
+      && /B: the proposed change/.test(skill) && /C: one simpler alternative/.test(skill));
+  check('scheduled adoption stops at a reviewable PR',
+    /winning experiment\s+branch for review/.test(skill)
+      && /does not create `prd\.json`/.test(skill)
+      && /merge,\s+deploy,\s+tag,\s+release or update installed plugins/.test(skill));
 
   check('transcript classifier distinguishes manual captions', subject.transcriptKind('(MANUALLY CREATED)\n - en (English)\n(GENERATED)\nNone') === 'manual');
   check('transcript classifier distinguishes generated captions', subject.transcriptKind('(MANUALLY CREATED)\nNone\n(GENERATED)\n - en (English)\n(TRANSLATION LANGUAGES)') === 'generated');
@@ -134,7 +173,10 @@ async function e2e() {
   check('fixture collection exits 0', first.status === 0, first.stderr || first.stdout);
   check('fixture collection prints its population', /3 official item\(s\), 2 YouTube video\(s\), 1\/1 transcript/.test(first.stdout || ''), first.stdout);
   const manifest = read(firstOutput);
-  check('manifest reports every configured source', manifest.population.sources_configured === 3 && manifest.population.sources_succeeded === 3);
+  check('manifest reports every configured source', manifest.population.sources_configured === 4 && manifest.population.sources_succeeded === 4);
+  check('a healthy feed with zero recent items remains successful',
+    manifest.sources.some((source) => source.id === 'quiet-fixture' && source.status === 'ok' && source.count === 0));
+  check('manifest cross-foots official categories', manifest.population.official_categories_seen['coding-agent'] === 3);
   check('first run requires review of the full population', manifest.population.items_requiring_review === 5);
   check('raw views and balanced ranking can disagree', manifest.ranking_variants.raw_views[0] === 'OLDVIEWS001' && manifest.ranking_variants.balanced[0] === 'FRESHVID001');
   check('manifest records a transcript path', manifest.items.some((item) => item.id === 'FRESHVID001' && item.transcript.status === 'ok'));

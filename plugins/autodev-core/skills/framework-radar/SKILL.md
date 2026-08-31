@@ -1,8 +1,8 @@
 ---
 name: framework-radar
-description: "Research recent Claude Code and Codex changes plus relevant YouTube workflows, then propose measured experiments against the current repository. Use when asked what is new, what agent practices are worth testing, or to run the framework radar."
-when_to_use: "Invoked when the user says framework radar, asks for recent Claude Code or Codex workflow ideas, supplies an agent-workflow video, or asks what new platform behavior the framework should test."
-allowed-tools: Bash, Read, Grep, Glob, Write, WebSearch, WebFetch
+description: "Research coding agents, agent SDKs, orchestration frameworks, harnesses, protocols, evaluations and relevant videos, then execute every selected hypothesis against the current repository. Use when asked what is new, what agent practices are worth testing, or to run the framework radar."
+when_to_use: "Invoked when the user says framework radar, asks for recent Claude Code, Codex, Gemini or agent-development ideas, supplies an agent-workflow video, or asks what new platform behavior the framework should test."
+allowed-tools: Bash, Read, Grep, Glob, Write, Edit, WebSearch, WebFetch
 model: opus
 user-invocable: true
 argument-hint: "[days | YouTube URL]"
@@ -10,9 +10,9 @@ argument-hint: "[days | YouTube URL]"
 
 # Framework Radar
 
-Collect first, judge second. The collector owns source retrieval, transcript
-storage, population counts and deduplication. This skill owns relevance,
-corroboration and experiment design.
+Collect first, judge second, test third. The collector owns source retrieval,
+transcript storage, population counts and deduplication. This skill owns
+relevance, corroboration, controlled experiments and evidence-backed adoption.
 
 ## 1. Collect
 
@@ -29,7 +29,7 @@ discovery window.
 The collector prints:
 
 - The number of configured, successful and failed sources.
-- The official-item, video and transcript populations.
+- The official-item, category, video and transcript populations.
 - `COULD NOT CHECK` for each unavailable source.
 - The absolute path to its JSON manifest.
 
@@ -68,46 +68,84 @@ recorded manual/generated/unknown caption kind.
 ## 3. Corroborate every claim
 
 An official changelog entry is evidence that a behavior changed. A video is a
-hypothesis about how to use that behavior.
+lead about how to use that behavior, not proof that it helps this framework.
 
 For each plausible video claim:
 
-1. Find the official Claude Code or Codex documentation that supports or
-   contradicts it. If no primary source exists, label it community-only.
+1. Find the official documentation or repository for the coding agent, SDK,
+   framework, harness, protocol or evaluation tool that supports or contradicts
+   it. If no primary source exists, label it community-only.
 2. Read the current repository's `AGENTS.md` or `CLAUDE.md`, README, activating
    config and relevant implementation.
 3. Search for the effect, not only the implementation shape suggested by the
-   video. Classify the claim as `already handled`, `watch`, `test`, or `reject`.
+   source. Classify the claim as `already handled`, `watch`, `test`, or `reject`.
 4. State what observation would change the classification.
 
 Requested model, advertised feature and video narration are not execution
 evidence. Prefer logs, config, runtime behavior and executable tests.
 
-Completion: every `test` recommendation cites one primary external source and
-one current-repository artifact, or explicitly says which side could not be
-verified.
+Completion: every item entering `test` cites one primary external source and one
+current-repository artifact. A lead missing either side stays `watch`; it is not
+a hypothesis yet.
 
-## 4. Design measured experiments
+## 4. Execute every hypothesis
 
-Produce at most three experiments. Each compares three variants:
+First read the newest prior radar reports. An earlier candidate experiment with
+no recorded result is pending work and takes priority over a new idea.
+
+Select at most three testable hypotheses for this run. **Every selected
+hypothesis must be executed in this run.** Do not create a heading called
+"hypothesis" for an idea that cannot be tested now; keep it under `watch` with
+the missing prerequisite.
+
+Before seeing results, record:
+
+- Hypothesis and affected workflow.
+- Exact fixture or representative task population.
+- Correctness, cost and user-facing measures.
+- Adoption threshold, expected failure signal and rollback.
+- What is held constant across variants.
+
+Each hypothesis compares three variants:
 
 - A: current behavior.
 - B: the proposed change.
 - C: one simpler alternative.
 
-For each experiment record:
+If C is genuinely impossible, record why before running A and B. "B versus
+nothing" is otherwise incomplete.
 
-- Hypothesis and affected workflow.
-- Exact fixture or representative task population.
-- Correctness measure, cost measure and user-facing measure.
-- Expected failure signal, rollback and blast radius.
-- Confidence and unresolved evidence.
+### Isolation
 
-If it cannot be measured now, label it `unmeasured proposal`; do not upgrade it
-to a recommendation through prose.
+Never experiment in the shared checkout. Fetch the remote, verify the exact
+default-branch commit, and create a dedicated worktree and `codex/radar-*`
+branch from that commit. Run A before editing. Run B and C on the same fixtures
+and environment. Preserve raw commands, exit statuses, elapsed time and output
+paths in the report.
 
-Completion: every recommended experiment has a baseline, a variant and a
-simpler alternative. Zero recommendations is valid.
+The test must exercise the behavior, not merely inspect the proposed file.
+Prefer replayable prompts, fixture repositories, subprocess execution, mutation
+canaries and existing telemetry. Read every finding before reporting a count.
+
+### Verdict and artifact
+
+For each executed hypothesis record:
+
+- A/B/C measurements against the preregistered threshold.
+- `adopt B`, `adopt C`, `no winner`, or `reject`.
+- Confidence, limitations and the exact evidence location.
+
+When B or C wins, implement only the winning variant in the isolated worktree
+and run its targeted verification plus the repository gate. Commit explicit
+paths. A scheduled run may push the winning experiment branch for review and
+open a PR only when its automation prompt explicitly grants standing
+authorization for that exact `codex/radar-*` branch. In an interactive run,
+obtain fresh push authorization from the user. No radar run may merge, deploy,
+tag, release or update installed plugins. When neither variant wins, leave no
+framework change or PR behind.
+
+Completion: the count of selected hypotheses equals the count with executed
+verdicts. Zero hypotheses is valid when no lead is both relevant and testable.
 
 ## 5. Write the report
 
@@ -116,21 +154,27 @@ Write `.claude/reports/framework-radar-YYYY-MM-DD.md` with these sections:
 1. Population and source health.
 2. New official changes.
 3. Video claims checked.
-4. Candidate experiments, maximum three.
+4. Executed experiments and A/B/C results, maximum three.
 5. Already handled and rejected ideas.
-6. Collection or verification gaps.
+6. Watch list and blocked prerequisites.
+7. Winning branches and PRs, if any.
 
 Cross-foot the report totals against the manifest. A failed source remains in
 the report even when other sources succeeded.
 
 ### Scheduled mode
 
-A scheduled run is report-only. It writes the report and returns its summary to
-the review queue. It does not edit framework behavior, create `prd.json` stories,
-write gates, commit, push or release. Accepted experiments enter those workflows
-in a separate interactive turn.
+A scheduled run completes the full collect, corroborate and experiment loop.
+It may edit only its dedicated worktree. It may push only a winning experiment
+branch for review, and only when its automation prompt explicitly grants that
+authorization; otherwise stop after the local commit and report the blocker.
+It does not create `prd.json`, touch the shared checkout, merge, deploy, tag,
+release or update installed plugins. A stale or overlapping radar run exits
+with a named blocker instead of competing for the same branch.
 
-After the report is complete, mark exactly that manifest reviewed:
+After the report contains a verdict for every selected hypothesis and any
+winning PR has been read back from the remote, mark exactly that manifest
+reviewed:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" --mark-reviewed <manifest-path>
@@ -139,5 +183,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" --mark-reviewed <manifes
 This writes the review heartbeat. Do not mark reviewed before the report exists,
 because an interrupted analysis must return on the next run.
 
-Completion: the report exists, its counts cross-foot, and the mark-reviewed
-command reports the same changed-item population the report considered.
+Completion: the report exists, source and hypothesis counts cross-foot, every
+hypothesis has an executed verdict, every winning PR is remotely readable, and
+the mark-reviewed command reports the same changed-item population the report
+considered.
