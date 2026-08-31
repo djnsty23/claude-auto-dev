@@ -38,14 +38,44 @@
 MSG_FILE="$1"
 ROOT="$(git rev-parse --show-toplevel)"
 CHECKER="$ROOT/tooling/check-no-private-names.js"
+CLAIMS="$ROOT/tooling/check-claim-provenance.js"
 
-# Inert where there is no gate to delegate to — this hook is installed per-clone
+# Inert where there is no gate to delegate to - this hook is installed per-clone
 # via core.hooksPath and must not break another repo.
 [ -f "$CHECKER" ] || exit 0
 
+# --- claim provenance: WARN, never block ------------------------------------
+#
+# Second gate on the same message, added after a day that produced five
+# confident wrong claims, every one caught by a human or a second probe rather
+# than by anything here. An absence or completeness claim ("exactly N", "no X
+# found", "84 of 85") must say where it came from: a [measured]/[reported]/
+# [stated]/[inferred] tag, or a backticked command a reader can re-run.
+#
+# It warns rather than blocks, deliberately. The private-name gate below blocks
+# because its precision on this repo's history is 100% and the damage is
+# unfixable. This one is new, its precision on real history is not established,
+# and a noisy blocker gets bypassed with --no-verify until it is ignored
+# entirely. It earns a block when the numbers justify one.
+#
+# It runs FIRST so its warning is visible whether or not the blocking gate
+# fires below.
+if [ -f "$CLAIMS" ]; then
+    CLAIM_HITS=$(node "$CLAIMS" --check-message "$MSG_FILE" 2>&1)
+    if [ $? -eq 1 ]; then
+        echo ""
+        echo "commit-msg WARNING: unlabelled absence/completeness claim(s)."
+        echo ""
+        echo "$CLAIM_HITS"
+        echo ""
+        echo "Add [measured: <command>], [reported], [stated] or [inferred],"
+        echo "or name the command in backticks. Not blocking; the commit proceeds."
+    fi
+fi
+
 # --check-message ignores '#' lines (git's template comments never reach the
 # message) and prints "  <line-no>: <line>" for every hit. Exit 1 means a hit,
-# exit 2 means the hook was called wrong — neither is a reason to pass.
+# exit 2 means the hook was called wrong - neither is a reason to pass.
 HITS=$(node "$CHECKER" --check-message "$MSG_FILE" 2>&1)
 STATUS=$?
 
@@ -57,7 +87,7 @@ if [ "$STATUS" -eq 1 ]; then
     echo ""
     echo "$HITS"
     echo ""
-    echo "A commit message cannot be fixed after the fact the way a file can —"
+    echo "A commit message cannot be fixed after the fact the way a file can -"
     echo "redaction is not removal. Anonymise now (Project A/B/C, keeping the"
     echo "numbers and the product shape)."
 else
