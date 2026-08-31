@@ -9,9 +9,10 @@ argument-hint: "[audit|round <n>|verdict]"
 
 # Adversarial loop
 
-Two agents from different vendors, asymmetric roles, tests before fixes. The
-building agent never grades its own work, and the adversary never merges its
-own opinion — the merge condition is a green gate plus an exact verdict token.
+Two agents with asymmetric roles and separate contexts, tests before fixes —
+a second vendor is one way to get that separation, not a requirement (see
+the tool-posture section). The building agent never grades its own work, and
+the adversary never merges its own opinion — the merge condition is a green gate plus an exact verdict token.
 
 This exists because diff review after the code is written cannot catch the
 worst class: a suite that passes without asserting anything. A reviewer reading
@@ -50,6 +51,46 @@ The builder ships past contract defects precisely because its own tests encode
 its own assumptions. That is the gap the adversary fills, and it is narrow: the
 adversary cannot run your gates, cannot see your tree, and will keep producing
 ever-narrower findings well past the point of value.
+
+### The adversary needs TOOLS, or you are buying assertions
+
+`[measured 2026-08-31]` The routing table above was first written crediting the
+*vendor* for those eight findings. A controlled test the next day does not
+support that reading, and the correction is the more useful half.
+
+Same prompt, same unreviewed 214-line authorization gate, neither model having
+seen it. The cross-vendor adversary returned 11 findings; an in-house subagent
+on the builder's own model returned 10; about 8 were the same defects. The
+in-house one additionally caught a **live** false pass the other missed, and
+prefixed every finding with "Measured" — it had actually executed the predicate
+and run the target's selftest against an empty root. The cross-vendor reviewer
+reasoned statically and asserted.
+
+The confound was the operator's: the subagent was given Bash and Read; the
+cross-vendor reviewer was given a read-only sandbox. One could verify
+empirically and did. **That is tool posture, not vendor judgment**, and it
+plausibly explains the entire apparent gap.
+
+So the likely source of the original eight findings is this skill's PROTOCOL
+rather than the second vendor: an adversary required to write tests that FAIL
+on the defect produces empirical evidence by construction.
+
+Three rules follow, and they outrank the routing table above:
+
+- **Grant the adversary enough tools to prove a finding** — write access to a
+  scratch area, and the ability to run the thing. An adversary that can only
+  read will hand you plausible reasoning, and plausible reasoning is exactly
+  what a false-verdict defect survives.
+- **Require demonstration, not assertion.** "Measured: <command> printed <x>"
+  in every finding. A finding without a reproduction is a hypothesis, and it
+  costs a builder round to discover which.
+- **A cross-vendor adversary is optional; the posture is not.** Run this loop
+  with an in-house subagent on a separate context first. Reach for a second
+  vendor when you want independence from your own model's blind spots, not
+  because you expect it to see more.
+
+And when comparing two reviewers: **an A/B is void unless their tool grants
+match.** Check that before believing any comparison, including the one above.
 
 ## Reach the adversary over MCP, not a desktop app
 
