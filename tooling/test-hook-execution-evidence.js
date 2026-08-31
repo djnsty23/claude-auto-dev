@@ -82,7 +82,15 @@ const sbManifest = (root) => {
     return out;
 };
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
-{
+// Cleanup registers IMMEDIATELY after creation (Sol's round-17 blocker: it
+// used to register after verification, so any refusal or exception in the
+// snapshot block permanently stranded the sandbox). This run created it
+// with mkdtemp in this process — the one directory it may delete without
+// any ownership question.
+process.on('exit', () => {
+    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reported stale next run */ }
+});
+try {
     // Three-way proof: source-before, destination, source-after must agree,
     // and the destination traversal must contain no links at all. Any
     // disagreement is a mid-copy change or an escape vector, and the run
@@ -105,12 +113,13 @@ const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + 
     }
     for (const v of dest.values()) if (v === 'LINK') refuse('the sandbox contains a link');
     if (dest.size !== files) refuse('the sandbox holds files the source manifest does not');
+} catch (e) {
+    // Snapshot INFRASTRUCTURE failing is indeterminate, not a finding: an
+    // exit 1 here would read as this suite going red, which the sweep could
+    // score as a successful canary (Sol's round-17 blocker).
+    console.error('snapshot infrastructure failed: ' + (e.code || e.message));
+    process.exit(2);
 }
-process.on('exit', () => {
-    // This run created SANDBOX with mkdtemp in this process — the one
-    // directory it may delete without any ownership question.
-    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reported stale next run */ }
-});
 const CHECK = path.join(SANDBOX, 'tooling', 'find-untested-hooks.js');
 if (process.env.HOOK_CHECK) fs.copyFileSync(path.resolve(process.env.HOOK_CHECK), CHECK);
 

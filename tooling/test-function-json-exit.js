@@ -74,7 +74,14 @@ const sbManifest = (root) => {
     return out;
 };
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
-{
+// Cleanup registers IMMEDIATELY after creation (round-17: registering after
+// verification stranded the sandbox on any refusal or exception). Created
+// by mkdtemp in this process — the one directory this run may delete
+// without any ownership question.
+process.on('exit', () => {
+    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reported stale next run */ }
+});
+try {
     // Three-way proof: source-before, destination, source-after must agree,
     // and the destination must contain no links. Any disagreement refuses.
     const before = sbManifest(ROOT);
@@ -95,12 +102,13 @@ const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + 
     }
     for (const v of dest.values()) if (v === 'LINK') refuse('the sandbox contains a link');
     if (dest.size !== files) refuse('the sandbox holds files the source manifest does not');
+} catch (e) {
+    // Snapshot INFRASTRUCTURE failing is indeterminate, not a finding — an
+    // exit 1 here would read as the suite going red, which the sweep could
+    // score as a successful canary (round-17).
+    console.error('snapshot infrastructure failed: ' + (e.code || e.message));
+    process.exit(2);
 }
-process.on('exit', () => {
-    // Created by mkdtemp in this process — the one directory this run may
-    // delete without any ownership question.
-    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reported stale next run */ }
-});
 const RUNNER = path.join(SANDBOX, 'tooling', 'test-all.js');
 const CHECK = path.join(SANDBOX, 'tooling', 'find-untested-functions.js');
 
