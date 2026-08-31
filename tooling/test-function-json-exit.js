@@ -20,8 +20,6 @@ const ROOT = path.resolve(__dirname, '..');
 // included. Ownership is the marker file; dead-owner sandboxes are
 // reclaimed at startup and this one is removed on exit.
 const SB_PREFIX = 'funcexit-sb-';
-const SB_MARKER = '.acceptance-sandbox';
-const SB_MAGIC = 'autodev-acceptance-sandbox-v1';
 const canonPath = (p) => {
     const r = path.resolve(p);
     let real;
@@ -30,27 +28,21 @@ const canonPath = (p) => {
 };
 const CANON_ROOT = canonPath(ROOT);
 
-// Reclamation of dead sandboxes, hardened (Sol's round-15 blocker): claim
-// by rename first — atomic, one winner, race over — then validate the
-// marker CONTENTS (magic, the dead pid from the dir name, this exact source
-// tree). Anything that fails validation is renamed back untouched.
+// NO automatic reclamation of other runs' sandboxes (Sol's round-16
+// recommendation, adopted whole): every ownership proof for a plain dir in
+// a shared tmpdir is forgeable and every claim/rollback dance has one more
+// race, so this run deletes NOTHING it did not create. Stale sandboxes are
+// reported for a human to verify and delete.
 for (const d of fs.readdirSync(os.tmpdir())) {
     const m = d.match(new RegExp('^' + SB_PREFIX + '(\\d+)-'));
     if (!m) continue;
-    const full = path.join(os.tmpdir(), d);
     let alive = false;
     try { process.kill(parseInt(m[1], 10), 0); alive = true; }
     catch (e) { alive = e.code === 'EPERM'; }
-    if (alive) continue;
-    const claim = full + '.reclaim-' + crypto.randomBytes(6).toString('hex');
-    try { fs.renameSync(full, claim); } catch { continue; /* another claimer won */ }
-    let ours = false;
-    try {
-        const mk = JSON.parse(fs.readFileSync(path.join(claim, SB_MARKER), 'utf8'));
-        ours = mk.magic === SB_MAGIC && mk.pid === parseInt(m[1], 10) && mk.root === CANON_ROOT;
-    } catch { ours = false; }
-    if (ours) { try { fs.rmSync(claim, { recursive: true, force: true }); } catch { /* next run */ } }
-    else { try { fs.renameSync(claim, full); } catch { /* left under the claim name, contents untouched */ } }
+    if (!alive) {
+        console.error('note: stale sandbox left by dead pid ' + m[1] + ' at '
+            + path.join(os.tmpdir(), d) + ' — verify and delete it manually');
+    }
 }
 
 if (canonPath(os.tmpdir()) === CANON_ROOT || canonPath(os.tmpdir()).startsWith(CANON_ROOT + path.sep)) {
@@ -61,40 +53,53 @@ const SB_SKIP = new Set(['.git', '.claude', 'node_modules']);
 // Symlinks and junctions are skipped, not copied — a link out of the tree
 // would let sandbox mutations escape the sandbox.
 const sbKeep = (src) => !SB_SKIP.has(path.basename(src)) && !fs.lstatSync(src).isSymbolicLink();
-const sbManifest = () => {
+// CONTENT+MODE manifest (round-16: size+mtime missed same-size edits, mode
+// changes, and link swaps). Links are recorded, not skipped, so a
+// file-to-link swap between the source passes cannot hide.
+const sbManifest = (root) => {
     const out = new Map();
     const walk = (rel) => {
-        for (const e of fs.readdirSync(path.join(ROOT, rel || '.'), { withFileTypes: true })) {
+        for (const e of fs.readdirSync(path.join(root, rel || '.'), { withFileTypes: true })) {
             if (SB_SKIP.has(e.name)) continue;
             const r = rel ? rel + '/' + e.name : e.name;
-            const fp = path.join(ROOT, r);
-            if (fs.lstatSync(fp).isSymbolicLink()) continue;
+            const fp = path.join(root, r);
+            const st = fs.lstatSync(fp);
+            if (st.isSymbolicLink()) { out.set(r, 'LINK'); continue; }
             if (e.isDirectory()) walk(r);
-            else { const st = fs.statSync(fp); out.set(r, st.size + ':' + st.mtimeMs); }
+            else out.set(r, crypto.createHash('sha1').update(fs.readFileSync(fp)).digest('hex')
+                + ':' + (st.mode & 0o777));
         }
     };
     walk('');
     return out;
 };
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
-fs.writeFileSync(path.join(SANDBOX, SB_MARKER),
-    JSON.stringify({ magic: SB_MAGIC, pid: process.pid, root: CANON_ROOT }));
 {
-    // Source manifest before and after the copy: any difference means the
-    // tree changed mid-snapshot and the copy is an incoherent mix — refuse
-    // rather than measure it.
-    const before = sbManifest();
+    // Three-way proof: source-before, destination, source-after must agree,
+    // and the destination must contain no links. Any disagreement refuses.
+    const before = sbManifest(ROOT);
     fs.cpSync(ROOT, SANDBOX, { recursive: true, filter: sbKeep });
-    const after = sbManifest();
-    let changed = before.size !== after.size;
-    if (!changed) for (const [k, v] of before) { if (after.get(k) !== v) { changed = true; break; } }
-    if (changed) {
-        console.error('refusing: the source tree changed while it was being snapshotted — re-run when quiet');
+    const dest = sbManifest(SANDBOX);
+    const after = sbManifest(ROOT);
+    const refuse = (why) => {
+        console.error('refusing: ' + why + ' — re-run when the tree is quiet');
         process.exit(2);
+    };
+    if (before.size !== after.size) refuse('the source tree changed while it was being snapshotted');
+    for (const [k, v] of before) if (after.get(k) !== v) refuse('the source tree changed while it was being snapshotted');
+    let files = 0;
+    for (const [k, v] of before) {
+        if (v === 'LINK') { if (dest.has(k)) refuse('a link was copied into the sandbox'); continue; }
+        files++;
+        if (dest.get(k) !== v) refuse('the sandbox does not match the source it was copied from');
     }
+    for (const v of dest.values()) if (v === 'LINK') refuse('the sandbox contains a link');
+    if (dest.size !== files) refuse('the sandbox holds files the source manifest does not');
 }
 process.on('exit', () => {
-    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reclaimed next run */ }
+    // Created by mkdtemp in this process — the one directory this run may
+    // delete without any ownership question.
+    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reported stale next run */ }
 });
 const RUNNER = path.join(SANDBOX, 'tooling', 'test-all.js');
 const CHECK = path.join(SANDBOX, 'tooling', 'find-untested-functions.js');
