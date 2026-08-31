@@ -124,6 +124,48 @@ Pick the reviewing model deliberately and verify what RAN, not what was asked:
 a per-call model override is honoured, but read it back from the vendor's own
 session log before trusting it.
 
+## One thread for the whole loop, not one per round
+
+`[measured 2026-08-31]` Every fresh call to the reviewer re-pays its entire
+preamble: 22,800 input tokens over MCP, 29,343 over the CLI, before it has read
+a single line of your diff. A 24-round audit run as 24 fresh calls pays that
+24 times and gives the reviewer amnesia between rounds.
+
+The reviewer keeps context only when you reply INTO its thread:
+
+```
+round 1   mcp__codex__codex        { prompt: <audit brief>, cwd, sandbox, model }
+          -> { threadId, content }          <- record this threadId
+round 2+  mcp__codex__codex-reply  { threadId, prompt: <round N brief> }
+```
+
+Verified: a reply into an existing thread recalled the reviewer's own previous
+answer. A fresh `codex` call returns a NEW threadId every time and remembers
+nothing, and the CLI's `exec` is fresh per invocation as well.
+
+**What this changes about how a round reads.** With a live thread you no longer
+restate what the reviewer already knows, so a round brief shrinks to the delta:
+
+- the commit range for THIS round, `<prev-tip>..<new-tip>`
+- what you changed per blocker, one clause each
+- the gate result, with the command that produced it
+- the exact verdict token you want back
+
+Keep the SHA in every message even so. The thread gives the reviewer memory; it
+does not tell you whether your send landed, and a duplicate send is the failure
+that costs a whole round.
+
+**Record the threadId in the round log** (the row shape is defined once, under
+"Measure every run"). It is the only handle that lets a later session resume the
+same review, and it is cheap to lose.
+
+**When to start a NEW thread instead.** A thread carries the reviewer's earlier
+conclusions, which is the point, and also its earlier mistakes. Start fresh
+when the subject changes, when the acceptance contract is re-frozen, or when
+you deliberately want a second opinion uncontaminated by round 1. An
+independent second read is worth more from a new thread than from the one that
+already agreed with you.
+
 ## The loop
 
 1. **Audit round.** The adversary reads the subject and returns numbered
@@ -137,7 +179,8 @@ session log before trusting it.
 3. **Fix.** The builder implements on the fix branch until the acceptance
    tests pass, then runs the repo's complete gate.
 4. **Review round.** The adversary gets the commit range (`git diff
-   <test-tip>..<fix-tip>`), and replies with either new blockers or the exact
+   <test-tip>..<fix-tip>`) as a REPLY into the loop's existing thread, not a
+   fresh call, and answers with either new blockers or the exact
    token `VERDICT: CLEAN`. Nothing else counts as approval — prose verdicts
    get misread, so the token is agreed up front and matched exactly.
 5. **Loop or land.** Blockers go back to step 2 or 3. On the token AND a green
@@ -209,7 +252,7 @@ Append one row per round to `.claude/reports/adversarial-loop-<topic>.md` in
 the repo under audit, and total it when the loop closes:
 
 ```
-| round | raised | confirmed | refuted | tests added | fix commits | verdict |
+| round | range | threadId | raised | confirmed | refuted | tests added | verdict |
 ```
 
 Close with: rounds to clean, defects caught after the builder first believed
