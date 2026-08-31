@@ -236,7 +236,7 @@ const conflict = (msg) => { conflicts.push(msg); console.error('  [CONFLICT] ' +
 let seq = 0;
 const installedNow = new Map();   // rel -> { full, orig, expect }
 function installOwn(rel, full, content) {
-    const orig = full + '.orig-' + process.pid + '-' + (++seq);
+    const orig = full + '.orig-' + crypto.randomBytes(6).toString('hex');
     try {
         fs.renameSync(full, orig);
     } catch (e) {
@@ -273,7 +273,7 @@ function removeOwn(rel) {
         // writer replacing the stub between those two operations lost its
         // file undetected). Classification happens on the claimed inode,
         // which nothing else is writing to.
-        const cap = rec.full + '.swept-' + process.pid + '-' + (++seq);
+        const cap = rec.full + '.swept-' + crypto.randomBytes(6).toString('hex');
         let claimed = false;
         try { fs.renameSync(rec.full, cap); claimed = true; }
         catch { conflict(`${rel} was deleted by something else while stubbed`); }
@@ -365,7 +365,20 @@ const HEAD_SHA = gitArgv(['rev-parse', 'HEAD'], ROOT).trim();
 // blocker: without this they accumulate in tmpdir with live git metadata
 // forever). The directory name carries its owner's pid; a dead owner's tree
 // is removed and the records pruned. EPERM means alive under another user —
-// left alone.
+// left alone. And a NAME MATCH IS NOT OWNERSHIP (Sol's round-13 blocker):
+// `git worktree remove` run against THIS repo rejects a directory belonging
+// to another clone, and the old rmSync fallback would then have deleted
+// someone else's checkout. Ownership is proven from the directory's own
+// .git pointer, which for a worktree names its admin dir — only a pointer
+// into THIS repo's git common dir makes the directory ours to delete.
+const crypto = require('crypto');
+const GIT_COMMON = path.resolve(ROOT, gitArgv(['rev-parse', '--git-common-dir'], ROOT).trim());
+const ownWorktree = (dir) => {
+    try {
+        const m = fs.readFileSync(path.join(dir, '.git'), 'utf8').match(/^gitdir:\s*(.+?)\s*$/m);
+        return !!m && path.resolve(dir, m[1]).startsWith(GIT_COMMON + path.sep);
+    } catch { return false; }
+};
 for (const d of fs.readdirSync(os.tmpdir())) {
     const m = d.match(/^check-suites-wt-(\d+)-/);
     if (!m) continue;
@@ -374,6 +387,13 @@ for (const d of fs.readdirSync(os.tmpdir())) {
     catch (e) { alive = e.code === 'EPERM'; }
     if (alive) continue;
     const full = path.join(os.tmpdir(), d);
+    if (!ownWorktree(full)) {
+        // Not provably ours: a half-created empty dir may be removed by the
+        // non-recursive rmdir (which refuses anything with content); a dir
+        // holding another repo's checkout is left exactly as it is.
+        try { fs.rmdirSync(full); } catch { /* not empty — not ours to touch */ }
+        continue;
+    }
     try { gitArgv(['worktree', 'remove', '--force', full], ROOT); }
     catch { try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* locked; the next run retries */ } }
 }

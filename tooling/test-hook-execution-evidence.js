@@ -11,9 +11,39 @@ const { spawnSync } = require('child_process');
 const { pathToFileURL } = require('url');
 
 const ROOT = path.resolve(__dirname, '..');
-const CHECK = process.env.HOOK_CHECK
+
+// PRIVATE ISOLATION (Sol's round-13 blocker). This suite mutates a tracked
+// suite file to exercise the checker, and no restore discipline makes that
+// safe in a shared tree — forced termination strands mutants, and the
+// hardlink return has an unwindable window. So every mutation happens in a
+// sandbox worktree of HEAD, created here and removed on exit. The checker
+// under test is COPIED IN from this tree (or from HOOK_CHECK), never taken
+// from HEAD: under the stub sweep this suite runs against a stubbed
+// checker, and a sandbox built purely from HEAD would silently test the
+// wrong file and blind check:suites to this suite.
+const crypto = require('crypto');
+const gitq = (args) => {
+    const r = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) throw new Error('git ' + args.join(' ') + ': ' + ((r.stderr || '').trim() || r.status));
+    return r.stdout;
+};
+const SANDBOX = (() => {
+    const sha = gitq(['rev-parse', 'HEAD']).trim();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hookcheck-sb-' + process.pid + '-'));
+    fs.rmdirSync(dir);
+    try { gitq(['worktree', 'add', '--detach', dir, sha]); }
+    catch (e) { console.error('could not create the sandbox worktree: ' + e.message); process.exit(2); }
+    process.on('exit', () => {
+        try { gitq(['worktree', 'remove', '--force', dir]); }
+        catch { try { fs.rmSync(dir, { recursive: true, force: true }); gitq(['worktree', 'prune']); } catch { /* stranded; the dir names its owner pid */ } }
+    });
+    return dir;
+})();
+const CHECK_SRC = process.env.HOOK_CHECK
     ? path.resolve(process.env.HOOK_CHECK)
     : path.join(ROOT, 'tooling', 'find-untested-hooks.js');
+const CHECK = path.join(SANDBOX, 'tooling', 'find-untested-hooks.js');
+fs.copyFileSync(CHECK_SRC, CHECK);
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
@@ -21,7 +51,7 @@ const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.me
 
 const runChecker = () => {
     const result = spawnSync(process.execPath, [CHECK, '--json'], {
-        cwd: ROOT,
+        cwd: SANDBOX,
         encoding: 'utf8',
         windowsHide: true,
         timeout: 180000,
@@ -32,23 +62,22 @@ const runChecker = () => {
 };
 
 const runSuite = (file, extraEnv = {}) => spawnSync(process.execPath, [file], {
-    cwd: ROOT,
+    cwd: SANDBOX,
     encoding: 'utf8',
     env: { ...process.env, ...extraEnv },
     windowsHide: true,
     timeout: 60000,
 });
 
-// This suite runs in the MAIN tree and mutates a tracked file, so it uses
-// the same rename-based discipline as the sweep engine: the original is
-// renamed aside (never rewritten, ownership established at install time),
-// the mutant is created O_EXCL, and the original returns via link(), which
-// refuses over a file a concurrent writer recreated. Anything unexpected is
-// captured or refused, reported, and fails the run via process.exitCode —
-// never silently absorbed.
+// Rename-based mutation inside the sandbox: the original is renamed aside
+// (never rewritten), the mutant is created O_EXCL, and the original returns
+// via link(). Artifact names are random, never PID-derived — PID reuse plus
+// a replacing rename could clobber a preserved artifact from an earlier
+// run. Unexpected states are reported and fail the run via
+// process.exitCode, never silently absorbed.
 let mutSeq = 0;
 const installMutant = (file, content) => {
-    const orig = file + '.orig-' + process.pid + '-' + (++mutSeq);
+    const orig = file + '.orig-' + crypto.randomBytes(6).toString('hex');
     fs.renameSync(file, orig);
     try { fs.writeFileSync(file, content, { flag: 'wx' }); }
     catch (e) {
@@ -60,7 +89,7 @@ const installMutant = (file, content) => {
 };
 const removeMutant = (file, orig, wrote) => {
     try {
-        const cap = file + '.cap-' + process.pid + '-' + (++mutSeq);
+        const cap = file + '.cap-' + crypto.randomBytes(6).toString('hex');
         let claimed = false;
         try { fs.renameSync(file, cap); claimed = true; }
         catch { console.error('NOT CLEANED: ' + file + ' was deleted while mutated'); process.exitCode = 1; }
@@ -119,7 +148,7 @@ let mutatedCheck = null;
 let targetSuite = null;
 let original = null;
 if (target) {
-    targetSuite = path.join(ROOT, 'tooling', target.covering[0]);
+    targetSuite = path.join(SANDBOX, 'tooling', target.covering[0]);
     original = fs.readFileSync(targetSuite, 'utf8');
     const ordinary = runSuite(targetSuite);
     check('control: the dedicated suite is green before the mutation',
@@ -171,7 +200,7 @@ if (target && mutatedCheck) {
 let failedSuiteCheck = null;
 if (target && targetSuite && original) {
     const coverageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-red-coverage-'));
-    const targetHook = path.join(ROOT, 'plugins', target.plugin, 'hooks', target.name);
+    const targetHook = path.join(SANDBOX, 'plugins', target.plugin, 'hooks', target.name);
     try {
         // Expected failure before the amendment: suiteProblems is advisory, so
         // after a red run's unusable coverage leaves the hook untested, the

@@ -5,12 +5,38 @@
 // the JSON exit status.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const RUNNER = path.join(ROOT, 'tooling', 'test-all.js');
-const CHECK = path.join(ROOT, 'tooling', 'find-untested-functions.js');
+
+// PRIVATE ISOLATION (Sol's round-13 blocker): the runner mutation happens in
+// a sandbox worktree of HEAD, not in the shared tree, so a forced kill
+// strands nothing and no concurrent writer exists to race. The checker under
+// test is COPIED IN from this tree — under the stub sweep it is the stubbed
+// copy, and a sandbox built purely from HEAD would test the wrong file.
+const gitq = (args) => {
+    const r = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) throw new Error('git ' + args.join(' ') + ': ' + ((r.stderr || '').trim() || r.status));
+    return r.stdout;
+};
+const SANDBOX = (() => {
+    const sha = gitq(['rev-parse', 'HEAD']).trim();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'funcexit-sb-' + process.pid + '-'));
+    fs.rmdirSync(dir);
+    try { gitq(['worktree', 'add', '--detach', dir, sha]); }
+    catch (e) { console.error('could not create the sandbox worktree: ' + e.message); process.exit(2); }
+    process.on('exit', () => {
+        try { gitq(['worktree', 'remove', '--force', dir]); }
+        catch { try { fs.rmSync(dir, { recursive: true, force: true }); gitq(['worktree', 'prune']); } catch { /* stranded; the dir names its owner pid */ } }
+    });
+    return dir;
+})();
+const RUNNER = path.join(SANDBOX, 'tooling', 'test-all.js');
+const CHECK = path.join(SANDBOX, 'tooling', 'find-untested-functions.js');
+fs.copyFileSync(path.join(ROOT, 'tooling', 'find-untested-functions.js'), CHECK);
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
@@ -28,14 +54,14 @@ let payload = null;
 // refuses over anything a concurrent writer recreated. Unexpected states
 // are reported and fail the run rather than being absorbed.
 const original = fs.readFileSync(RUNNER, 'utf8');   // for the restored-content control below
-const RUNNER_ORIG = RUNNER + '.orig-' + process.pid;
+const RUNNER_ORIG = RUNNER + '.orig-' + crypto.randomBytes(6).toString('hex');
 fs.renameSync(RUNNER, RUNNER_ORIG);
 try {
     // Stop before any suite or plugin source is loaded. This makes an empty
     // coverage population while keeping the failure intentional and parseable.
     fs.writeFileSync(RUNNER, mutant, { flag: 'wx' });
     result = spawnSync(process.execPath, [CHECK, '--json'], {
-        cwd: ROOT,
+        cwd: SANDBOX,
         encoding: 'utf8',
         windowsHide: true,
         timeout: 60000,
@@ -43,7 +69,7 @@ try {
     try { payload = JSON.parse(result.stdout); } catch { /* controls report it */ }
 } finally {
     try {
-        const cap = RUNNER + '.cap-' + process.pid;
+        const cap = RUNNER + '.cap-' + crypto.randomBytes(6).toString('hex');
         let claimed = false;
         try { fs.renameSync(RUNNER, cap); claimed = true; } catch { /* deleted */ }
         if (claimed) {
@@ -60,7 +86,7 @@ try {
 }
 
 const restoredSyntax = spawnSync(process.execPath, ['--check', RUNNER], {
-    cwd: ROOT,
+    cwd: SANDBOX,
     encoding: 'utf8',
     windowsHide: true,
 });
