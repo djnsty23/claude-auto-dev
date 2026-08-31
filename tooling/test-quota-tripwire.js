@@ -158,8 +158,13 @@ function run(args, extra, timeout, expect) {
     // (Sol round-22: the old shape accepted exit 1 and arbitrary signals as
     // the expected timeout).
     const timedOut = !!(r.error && r.error.code === 'ETIMEDOUT');
+    // Under 'kill': a spawn-level failure that is not our timeout is
+    // infrastructure, and so is a child that exited 2 on its own - the child
+    // declared itself indeterminate, which must not demote to an assertion 1
+    // (Sol round-23). Everything else (early exit 0, 1, self-signal) reaches
+    // the call site's assertion, which requires OUR timeout to have fired.
     const bad = expect === 'kill'
-        ? !!(r.error && !timedOut)
+        ? (!!(r.error && !timedOut) || (!timedOut && r.status === 2))
         : (!!r.error || !!r.signal || r.status === null
             || (r.status === 2 && expect !== 'exit2'));
     if (bad) {
@@ -167,7 +172,7 @@ function run(args, extra, timeout, expect) {
             + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
         process.exitCode = 2;
     }
-    return { status: r.status, signal: r.signal, stdout: r.stdout || '', stderr: r.stderr || '' };
+    return { status: r.status, signal: r.signal, timedOut, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
 let stateSeq = 0;
@@ -894,12 +899,13 @@ try {
         const r = run(['--state', sp, '--interval-minutes', '5',
             '--fixture-cost', '1', '--fixture-window', String(WSTART),
             '--fixture-now', String(BASE)], null, 2500, 'kill');   // ended by timeout BY DESIGN
-        // The ONLY passing shape is the timeout kill itself: SIGTERM with a
-        // null status. An early self-exit - clean OR crashing - is the
-        // defect this scenario exists to catch (Sol round-22).
+        // The ONLY passing shape is OUR timeout having fired (Sol round-23:
+        // asserting on the SIGTERM signature alone let a child that killed
+        // ITSELF with SIGTERM pass as the expected timeout). timedOut is
+        // true only when the spawn's own timer delivered the kill.
         check('without --once the process keeps polling until the timeout kills it',
-            r.signal === 'SIGTERM' && r.status === null,
-            `expected the timeout kill; got status ${r.status}, signal ${r.signal}`);
+            r.timedOut === true && r.status === null,
+            `expected our timeout kill; got status ${r.status}, signal ${r.signal}, timedOut ${r.timedOut}`);
     }
 
     // =======================================================================
