@@ -8,7 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { pathToFileURL } = require('url');
+const { fileURLToPath } = require('url');
 
 // Any uncaught throw in this suite is INFRASTRUCTURE: exit 2, never the
 // ambient exit 1 the sweep could score as a canary red (Sol round-20).
@@ -230,11 +230,19 @@ const insertAfterShebang = (source, insertion) => {
 };
 
 const rawCoverageContains = (coverageDir, file) => {
-    const fileUrl = pathToFileURL(path.resolve(file)).href;
+    const expected = canonPath(file);
     return fs.readdirSync(coverageDir, { withFileTypes: true })
         .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-        .some((entry) => fs.readFileSync(path.join(coverageDir, entry.name), 'utf8')
-            .includes(fileUrl));
+        .some((entry) => {
+            let coverage;
+            try { coverage = JSON.parse(fs.readFileSync(path.join(coverageDir, entry.name), 'utf8')); }
+            catch { return false; }
+            return (coverage.result || []).some((script) => {
+                if (!script.url || !script.url.startsWith('file://')) return false;
+                try { return canonPath(fileURLToPath(script.url)) === expected; }
+                catch { return false; }
+            });
+        });
 };
 
 const baseline = runChecker();

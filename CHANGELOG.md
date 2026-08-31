@@ -32,7 +32,9 @@ cases. The complete repository suite passed 86 of 86.
 
 The hook-execution evidence gate now gives hosted Windows runners enough timeout
 headroom to finish a valid coverage producer instead of misclassifying runner
-contention as an indeterminate result.
+contention as an indeterminate result. Its raw-coverage control canonicalizes
+file paths before comparing them, so drive-letter casing cannot create a false
+failure on Windows.
 
 ## [8.142.0] - 2026-08-30
 
