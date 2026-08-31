@@ -139,16 +139,24 @@ function env(extra) {
     return Object.assign(e, extra || {});
 }
 
-function run(args, extra, timeout, expect2) {
+function run(args, extra, timeout, expect) {
     const r = spawnSync(process.execPath, [SUBJECT].concat(args), {
-        encoding: 'utf8', env: env(extra), timeout: timeout || 15000,
+        // 60s, not 15: a cold node start under machine load blew 15s, and a
+        // timed-out child is now classified infrastructure rather than being
+        // absorbed - so the budget must only be exceedable by a real hang.
+        encoding: 'utf8', env: env(extra), timeout: timeout || 60000,
     });
     // A child that errored, was signalled, carries a null status, or exited
     // 2 without this call site expecting it produced no verdict: that is
     // INFRASTRUCTURE (exitCode 2), never a false-green `status !== 0` pass
     // or a plain assertion failure (Sol rounds 20-21).
-    if (r.error || r.signal || r.status === null || (!expect2 && r.status === 2)) {
-        console.error('infrastructure: subject run did not produce a verdict ('
+    // expect: undefined, 'exit2' (a rejection path deliberately provoked), or
+    // 'kill' (a loop-mode child this suite deliberately ends by timeout).
+    const killed = !!r.signal || !!(r.error && r.error.code === 'ETIMEDOUT');
+    if ((killed && expect !== 'kill')
+        || (!killed && (r.error || r.status === null))
+        || (r.status === 2 && expect !== 'exit2')) {
+        console.error('infrastructure: subject run ' + JSON.stringify(args) + ' did not produce a verdict ('
             + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
         process.exitCode = 2;
     }
@@ -671,15 +679,15 @@ try {
     // =======================================================================
     {
         const sp = statePath('cal-bad');
-        const r = run(['--calibrate', '--state', sp], null, null, true);   // expects exit 2
+        const r = run(['--calibrate', '--state', sp], null, null, 'exit2');
         eq('--calibrate with no percentage exits 2', r.status, 2);
         has('...telling you what it wants', r.stderr, 'needs the percentage the app is showing');
         eq('...and prints nothing to stdout', r.stdout, '');
         eq('...and writes no state', fs.existsSync(sp), false);
     }
     {
-        eq('--calibrate 0 is rejected', run(['--calibrate', '0', '--state', statePath('c0')], null, null, true).status, 2);
-        eq('--calibrate 101 is rejected', run(['--calibrate', '101', '--state', statePath('c101')], null, null, true).status, 2);
+        eq('--calibrate 0 is rejected', run(['--calibrate', '0', '--state', statePath('c0')], null, null, 'exit2').status, 2);
+        eq('--calibrate 101 is rejected', run(['--calibrate', '101', '--state', statePath('c101')], null, null, 'exit2').status, 2);
     }
     {
         const sp = statePath('cal');
@@ -869,7 +877,7 @@ try {
         const sp = statePath('loop');
         const r = run(['--state', sp, '--interval-minutes', '5',
             '--fixture-cost', '1', '--fixture-window', String(WSTART),
-            '--fixture-now', String(BASE)], null, 2500);
+            '--fixture-now', String(BASE)], null, 2500, 'kill');   // ended by timeout BY DESIGN
         check('without --once the process keeps polling rather than exiting',
             r.status !== 0, `exited cleanly with status ${r.status}, signal ${r.signal}`);
     }
