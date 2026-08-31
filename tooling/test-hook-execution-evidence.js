@@ -10,6 +10,13 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { pathToFileURL } = require('url');
 
+// Any uncaught throw in this suite is INFRASTRUCTURE: exit 2, never the
+// ambient exit 1 the sweep could score as a canary red (Sol round-20).
+process.on('uncaughtException', (e) => {
+    console.error('infrastructure failure (uncaught): ' + ((e && (e.code || e.message)) || e));
+    process.exit(2);
+});
+
 const ROOT = path.resolve(__dirname, '..');
 
 // PRIVATE ISOLATION, as a COPY of the invoking tree (Sol's rounds 13-14).
@@ -137,25 +144,37 @@ const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
 const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.message || 'none'}`;
 
+// A child that errored, was signalled, or carries a null status produced no
+// verdict; that is infrastructure (exitCode 2), while the assertions still
+// report what they saw (Sol round-20).
+const infra = (r, what) => {
+    if (r.error || r.signal || r.status === null) {
+        console.error('infrastructure: ' + what + ' did not complete ('
+            + (r.error ? (r.error.code || r.error.message) : (r.signal || 'null status')) + ')');
+        process.exitCode = 2;
+    }
+    return r;
+};
+
 const runChecker = () => {
-    const result = spawnSync(process.execPath, [CHECK, '--json'], {
+    const result = infra(spawnSync(process.execPath, [CHECK, '--json'], {
         cwd: SANDBOX,
         encoding: 'utf8',
         windowsHide: true,
         timeout: 180000,
-    });
+    }), 'the checker');
     let json = null;
     try { json = JSON.parse(result.stdout); } catch { /* reported by controls */ }
     return { result, json };
 };
 
-const runSuite = (file, extraEnv = {}) => spawnSync(process.execPath, [file], {
+const runSuite = (file, extraEnv = {}) => infra(spawnSync(process.execPath, [file], {
     cwd: SANDBOX,
     encoding: 'utf8',
     env: { ...process.env, ...extraEnv },
     windowsHide: true,
     timeout: 60000,
-});
+}), path.basename(file));
 
 // Rename-based mutation inside the sandbox: the original is renamed aside
 // (never rewritten), the mutant is created O_EXCL, and the original returns

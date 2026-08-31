@@ -879,7 +879,13 @@ try {
         fs.rmSync(fixture, { recursive: true, force: true });
     } catch (e) {
         sleep(300);
-        try { fs.rmSync(fixture, { recursive: true, force: true }); } catch (e2) { /* temp dir */ }
+        try { fs.rmSync(fixture, { recursive: true, force: true }); }
+        catch (e2) {
+            // A cleanup that fails is loud and indeterminate, never a green
+            // exit with a stranded fixture (Sol round-20).
+            console.error('fixture cleanup FAILED (' + (e2.code || e2.message) + ') — left at ' + fixture);
+            process.exitCode = 2;
+        }
     }
 }
 

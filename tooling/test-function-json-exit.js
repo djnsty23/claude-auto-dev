@@ -10,6 +10,24 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
+// Any uncaught throw in this suite is INFRASTRUCTURE: exit 2, never the
+// ambient exit 1 the sweep could score as a canary red (Sol round-20).
+process.on('uncaughtException', (e) => {
+    console.error('infrastructure failure (uncaught): ' + ((e && (e.code || e.message)) || e));
+    process.exit(2);
+});
+// A child that errored, was signalled, or carries a null status produced no
+// verdict; that is infrastructure (exitCode 2), while the assertions still
+// report what they saw (Sol round-20).
+const infra = (r, what) => {
+    if (r.error || r.signal || r.status === null) {
+        console.error('infrastructure: ' + what + ' did not complete ('
+            + (r.error ? (r.error.code || r.error.message) : (r.signal || 'null status')) + ')');
+        process.exitCode = 2;
+    }
+    return r;
+};
+
 const ROOT = path.resolve(__dirname, '..');
 
 // PRIVATE ISOLATION, as a COPY of the invoking tree (Sol's rounds 13-14):
@@ -140,12 +158,12 @@ try {
     // Stop before any suite or plugin source is loaded. This makes an empty
     // coverage population while keeping the failure intentional and parseable.
     fs.writeFileSync(RUNNER, mutant, { flag: 'wx' });
-    result = spawnSync(process.execPath, [CHECK, '--json'], {
+    result = infra(spawnSync(process.execPath, [CHECK, '--json'], {
         cwd: SANDBOX,
         encoding: 'utf8',
         windowsHide: true,
         timeout: 60000,
-    });
+    }), 'the checker');
     try { payload = JSON.parse(result.stdout); } catch { /* controls report it */ }
 } finally {
     try {
@@ -165,11 +183,11 @@ try {
     }
 }
 
-const restoredSyntax = spawnSync(process.execPath, ['--check', RUNNER], {
+const restoredSyntax = infra(spawnSync(process.execPath, ['--check', RUNNER], {
     cwd: SANDBOX,
     encoding: 'utf8',
     windowsHide: true,
-});
+}), 'the restored-syntax check');
 
 check('control: JSON records the deliberately failed suite',
     payload?.suitePassed === false,
