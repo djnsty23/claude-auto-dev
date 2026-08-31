@@ -628,10 +628,16 @@ console.log('');
 // A zero here has two causes and they are opposite. Either the population was
 // audited and is clean, or nothing was audited at all -- a wrong --config-dir,
 // a moved checkout, a permission failure -- and "no drift" is then a statement
-// about this probe rather than about the repos. Separate them before printing.
-if (!canonical.size) {
-    console.log('  COULD NOT AUDIT: 0 repos discovered under ' + CONFIG + '.');
-    console.log('  The probe is blind, not the population clean. Check the config dir.\n');
+// about this probe rather than about the repos.
+//
+// The guard is on whether the config dir could be READ, not on how many repos
+// it held: a config-only audit legitimately finds zero repos, and keying on the
+// repo count failed 27 assertions in test-drift-audit-config.js by calling
+// those runs blind. Provenance checks assert the input was read; they never
+// assert what the value looks like.
+if (!fs.existsSync(CONFIG)) {
+    console.log('  COULD NOT AUDIT: ' + CONFIG + ' does not exist.');
+    console.log('  The probe is blind, not the population clean.\n');
     process.exit(1);
 }
 if (!findings.length) { console.log('  no drift found in the population above\n'); process.exit(0); }

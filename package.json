@@ -43,7 +43,7 @@
     "check:review": "node tooling/review-diff.js",
     "check:claims": "node tooling/check-claim-provenance.js --selftest",
     "check:orphans": "node tooling/reap-orphan-waiters.js --selftest",
-    "check:population": "node tooling/check-population-reporting.js --selftest && node tooling/check-population-reporting.js",
+    "check:population": "node tooling/check-population-reporting.js --selftest && node tooling/check-population-reporting.js --strict",
     "usage:both": "node tooling/usage-both.js",
     "gate:release": "npm run gate && npm run check:runtime"
   },
