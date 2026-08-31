@@ -218,19 +218,16 @@ What actually converges the loop is narrowing what each round may reopen:
 judgement made inside a long loop is made by the party least able to make it.
 Record it instead.
 
-**Use the round log the "Measure every run" section already defines** — the
-same file, the same row per round. Do not start a second one: two logs with
-different schemas means one of them is wrong and nothing reports which. Add one
-column to it:
+**Use the round log the "Measure every run" section already defines.** The row
+shape is written down exactly once, there, and it carries the disposition
+columns this rule needs. Do not restate it here and do not start a second log:
+two schemas means one of them is wrong and nothing reports which.
 
-```
-| round | range | threadId | raised | new defect | regression | unresolved | new scope | tests added | verdict |
-```
-
-That log lives under `.claude/reports/`, which this repo **gitignores on
-purpose** so an audit's raw output cannot be staged. It is durable enough for
-the loop because it is appended every round, not written at the end. Do not
-describe it as committed, and do not move it in order to commit it.
+That was worth learning the hard way. An earlier attempt to fix a two-schema
+contradiction restated the row "with one column added" — which was actually two
+columns added and two removed, producing a third schema while claiming to
+extend the first. **A schema repeated is a schema that will diverge.** Reference
+it; never copy it.
 
 **Findings-per-round is the wrong metric and repeat-subject is not the fix.**
 The naive count points the wrong way: rounds 20 to 24 of the run above raised
@@ -319,8 +316,10 @@ Two sweep rules that bite here:
   rejected tool inputs.** A payload pinned at exactly the cap means the work
   is finished and only the handover failed; recover it instead of paying for
   the run twice.
-- **The repo is the only shared memory.** Findings, test contracts, and round
-  logs live in committed files, never in one session's chat. The other vendor
+- **The repo is the only shared memory.** Findings and test contracts live in
+  committed files, never in one session's chat. The round log is the exception
+  and lives in the gitignored reports directory; it is durable by being
+  appended every round rather than by being committed. The other vendor
   cannot read your context window.
 
 ## A timeout aborts the call, not the process
@@ -343,11 +342,18 @@ at start, which is what fooled the caller in the second case.
 
 The rest follows once you know which case you are in:
 
-- **Do not re-dispatch on a timeout.** A second dispatch puts two writers on one
-  deliverable. That is not a race you lose loudly — one file vanished mid-rewrite
-  and was later found 415 lines shorter under an append that looked clean.
-- **Find out whether it is still running before concluding anything.** An empty
-  result is a claim about the handover, never about the work.
+- **Never re-dispatch before the liveness check answers.** The two branches are
+  different work, and the section above exists to tell them apart:
+  - **Still running → do not re-dispatch, wait.** A second dispatch puts two
+    writers on one deliverable, and that is not a race you lose loudly: one
+    file vanished mid-rewrite and was later found 415 lines shorter under an
+    append that looked clean.
+  - **Dead → re-dispatch, and narrow it first.** Nothing is writing, so the
+    only cost of waiting is the whole run. Re-send with whatever stalled it
+    removed rather than repeating the brief that died.
+- **An empty result is a claim about the handover, never about the work.** That
+  holds on both branches, which is why the liveness check comes before any
+  conclusion about what the delegate produced.
 - **The tell is `git show --numstat`, not the tool output.** Nothing in a tool
   result announces that a file got smaller. A deliverable that shrank and a
   deliverable that was edited look identical until you count lines.
@@ -416,11 +422,22 @@ what is conceptually tidy.
 ## Measure every run
 
 Append one row per round to `.claude/reports/adversarial-loop-<topic>.md` in
-the repo under audit, and total it when the loop closes:
+the repo under audit, and total it when the loop closes. **This is the only
+place the row is defined.** Anything else that needs it references this line
+rather than restating it, because a schema written twice diverges.
 
 ```
-| round | range | threadId | raised | confirmed | refuted | tests added | verdict |
+| round | range | threadId | raised | new defect | regression | unresolved | new scope | tests added | verdict |
 ```
+
+The four middle columns are the dispositions from the bounding section, and
+they replace a single `confirmed`/`refuted` pair: knowing a finding was real
+does not tell you whether the loop is still finding things.
+
+**That path is gitignored in this repo, deliberately, so raw audit output
+cannot be staged.** The log is durable because it is appended every round, not
+because it is committed. Do not describe it as committed and do not relocate it
+in order to commit it.
 
 Close with: rounds to clean, defects caught after the builder first believed
 it was done, and defects found in the adversary's own tests. That last number

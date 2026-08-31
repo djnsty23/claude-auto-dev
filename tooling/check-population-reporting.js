@@ -25,14 +25,24 @@
 // repo is unmeasured until its first run, and a check that fires on half the
 // tree gets muted in a day and then misses the real one. --strict exits 1.
 //
-// KNOWN SCOPE LIMIT, stated because a silent one is worse than a loud gap:
-// NO-CONTROL reads only the subject file. A script whose known-positive lives
-// in a separate suite is reported here even though it is covered, and the
-// review that found this was right to call it a false positive by that
-// reading. It is deliberate rather than unfixed: the question this asks is
-// whether a LIVE RUN proves it can see before it reports nothing, and a suite
-// that runs in CI does not travel with the live run. Read a NO-CONTROL row as
-// "this script cannot vouch for itself at runtime", not as "untested".
+// TWO KNOWN SCOPE LIMITS, stated because a silent limit is worse than a loud
+// gap. Both are printed beside every result so a reader cannot mistake the
+// check for something stronger than it is.
+//
+//   FILE, NOT SUITE. NO-CONTROL reads only the subject file, so a script whose
+//   known-positive lives in a separate suite is reported though covered. This
+//   is deliberate: the question is whether a LIVE RUN proves it can see before
+//   reporting nothing, and a suite that runs in CI does not travel with the
+//   live run. Read a row as "cannot vouch for itself at runtime", not as
+//   "untested".
+//
+//   FILE, NOT PATH. A control anywhere in the file clears the whole file, so a
+//   guard covering one branch silences the check for every other branch. A
+//   review demonstrated this on a real script: its guard covers "transcripts
+//   present but zero subagent files" and not the malformed-usage path that
+//   prints the same empty verdict, and the file no longer reports. Answering
+//   this properly needs per-path analysis this check does not do, so a clean
+//   result here means "a control exists", never "every absence is guarded".
 //
 //   node tooling/check-population-reporting.js
 //   node tooling/check-population-reporting.js --strict
@@ -112,6 +122,14 @@ const CONTROL = [
 // is not a verdict, and counting it as one is how a linter invents findings.
 const EMITS = /\bconsole\.(?:log|error|warn)\b|\bprocess\.std(?:out|err)\.write\b/;
 
+// A guard does not have to print. `throw new Error("REFUSING TO REPORT: ...")`
+// is a control by any reading, and it reaches neither the emitted text nor the
+// code-with-strings-stripped, so keying only on console calls scored a real
+// guard as absent. Used for CONTROL detection only: a thrown message is a
+// guard, but it is not a verdict a reader sees, so it must not satisfy ABSENCE
+// or POPULATION.
+const GUARDS = new RegExp(EMITS.source + '|\\bthrow\\b|\\bprocess\\.exit\\b');
+
 // Blank out everything that is not code -- string bodies, template bodies,
 // comments and regex literals -- preserving length and newlines so the result
 // lines up with the original line for line.
@@ -134,11 +152,23 @@ function maskNonCode(source, commentsOnly = false) {
     // A `/` opens a regex only where a value may begin. This is the standard
     // heuristic; it cannot be exact without parsing, and it errs toward
     // treating a `/` as division, which is the safe direction here.
+    // Punctuation is not the whole story: `return /\)/` begins a regex, and
+    // reading it as division leaves a stray `)` unmasked, which balances the
+    // emitting call early and drops the verdict SILENTLY. That is the failure
+    // mode a review reproduced with exactly that expression, so the keyword
+    // list is not hypothetical.
+    const VALUE_KEYWORDS = /\b(?:return|typeof|instanceof|in|of|new|delete|void|case|do|else|yield|await|throw)$/;
     const regexMayStart = (k) => {
         for (let p = k - 1; p >= 0; p--) {
             const c = source[p];
             if (c === ' ' || c === '\t') continue;
             if (c === '\n' || c === '\r') return true;
+            if (/[A-Za-z0-9_$]/.test(c)) {
+                // Walk back over the identifier and decide on the whole word.
+                let q = p;
+                while (q >= 0 && /[A-Za-z0-9_$]/.test(source[q])) q--;
+                return VALUE_KEYWORDS.test(source.slice(q + 1, p + 1));
+            }
             return '(,=:[!&|?{};+-*%~^<>'.includes(c);
         }
         return true;
@@ -199,7 +229,7 @@ function maskNonCode(source, commentsOnly = false) {
 // than quietly dropped.
 const CALL_LINE_GUARD = 200;
 
-function emittedText(source) {
+function emittedText(source, matcher = EMITS) {
     const lines = source.split(/\r?\n/);
     const masked = maskNonCode(source).split(/\r?\n/);
     const out = [];
@@ -207,7 +237,7 @@ function emittedText(source) {
     for (let i = 0; i < lines.length; i++) {
         // Detect the call on MASKED text, so `console.log` mentioned inside a
         // string or a comment is not mistaken for a call.
-        if (!EMITS.test(masked[i])) continue;
+        if (!matcher.test(masked[i])) continue;
         let depth = 0;
         let opened = false;
         let closedAt = -1;
@@ -254,19 +284,37 @@ function inspect(file) {
     const source = fs.readFileSync(file, 'utf8');
     const { text: printed, unbalanced } = emittedText(source);
 
-    const claimsAbsence = anyMatch(ABSENCE, printed);
-    if (!claimsAbsence) return { file, claimsAbsence: false, findings: [] };
+    // UNREAD-CALL is reported BEFORE the absence test, never after it. The
+    // first version pushed it last, so a call whose verdict fell past the
+    // guard produced no absence match, returned early, and vanished from both
+    // the reporter population and the findings -- the exact silence the guard
+    // exists to break. An unread call means the answer is unknown, and unknown
+    // must never render as clean.
+    const unread = unbalanced.length ? [`UNREAD-CALL@${unbalanced.join(',')}`] : [];
 
-    const findings = [];
+    const claimsAbsence = anyMatch(ABSENCE, printed);
+    if (!claimsAbsence) {
+        return { file, claimsAbsence: unread.length > 0, findings: unread };
+    }
+
+    const findings = [...unread];
     // The population may be printed anywhere the reader sees it, not only on
     // the same line as the verdict.
     if (!anyMatch(POPULATION, normalizeConcat(printed))) findings.push('NO-POPULATION');
-    // A control may live anywhere in the file, including a --selftest branch,
-    // but it must be CODE. Comments are stripped first; a promise in a comment
-    // is not a guard that runs.
-    if (!anyMatch(CONTROL, maskNonCode(source, true))) findings.push('NO-CONTROL');
-    // Say so rather than silently reading a truncated call.
-    if (unbalanced.length) findings.push(`UNREAD-CALL@${unbalanced.join(',')}`);
+    // A control must be reachable, not merely present as text. Two places
+    // qualify and nothing else does:
+    //
+    //   - the EMITTED strings, because a guard that prints "PROBE BLIND" is a
+    //     code path that runs;
+    //   - the CODE with strings and comments both stripped, because a
+    //     `selftest()` function or a `control` identifier is executable.
+    //
+    // Stripping comments alone was not enough: an inert declaration such as
+    // `const dormantDescription = 'known-positive control'` cleared the finding
+    // while proving nothing, and a review reproduced exactly that.
+    const codeOnly = maskNonCode(source);
+    const guardText = emittedText(source, GUARDS).text;
+    if (!anyMatch(CONTROL, guardText) && !anyMatch(CONTROL, codeOnly)) findings.push('NO-CONTROL');
 
     return { file, claimsAbsence: true, findings };
 }
@@ -293,11 +341,18 @@ function scan({ strict }) {
         console.log(`  ${r.findings.join(' ')}  ${rel}`);
     }
 
-    // This gate reports its own population, for the reason it exists.
+    // This gate reports its own population, for the reason it exists, and its
+    // limits beside it, so a clean line cannot be read as a stronger claim
+    // than the check can make.
     console.log(
         `[population] ${files.length} script(s) read across ${SCAN_DIRS.length} directory(ies), ` +
             `${reporters.length} report an absence or all-clear, ` +
             `${flagged.length} of those are missing a population line or a control`
+    );
+    console.log(
+        '[scope] control detection is per-FILE: a guard on one branch clears the ' +
+            'whole file, and a control living in a separate suite is not seen. ' +
+            'A clean result means a control exists, not that every absence is guarded.'
     );
 
     if (!flagged.length) {
@@ -426,6 +481,38 @@ function selftest() {
             name: 'console.log named inside a string is not a call',
             source: 'const help = "run console.log(\\"none found\\") to print";\n',
             expect: [],
+        },
+        {
+            // NEW-3, from round 2. An inert declaration is not a guard: it
+            // cannot run, print, or prove the probe can see. Keeping every
+            // string in the file made this clear the finding.
+            name: 'an inert string holding the vocabulary is not a control',
+            source:
+                "const dormantDescription = 'known-positive control';\n" +
+                "console.log('1 of 1 checks, no issues found');\n",
+            expect: ['NO-CONTROL'],
+        },
+        {
+            // NEW-2, from round 2, and this is the review's own expression.
+            // `return /\)/` begins a REGEX; read as division it leaves a stray
+            // `)` that balances the call early and drops the verdict silently.
+            name: 'a regex after return does not truncate the emitting call',
+            source:
+                'console.log(\n' +
+                '  (() => { return /\\)/; })(),\n' +
+                "  '1 of 1 checks, no issues found'\n" +
+                ');\n',
+            expect: ['NO-CONTROL'],
+        },
+        {
+            // NEW-1, from round 2. The verdict falls PAST the runaway guard,
+            // so the call cannot be read. That must report, never vanish.
+            name: 'a call whose verdict falls past the guard reports UNREAD-CALL',
+            source:
+                'console.log(\n' + '  "a",\n'.repeat(210) +
+                '  "no issues found"\n' +
+                ');\n',
+            expect: ['UNREAD-CALL@1'],
         },
         {
             // The old 12-line cap silently truncated any longer call.
