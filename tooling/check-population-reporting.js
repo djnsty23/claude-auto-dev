@@ -143,7 +143,10 @@ const EMITS = /\bconsole\.(?:log|error|warn)\b|\bprocess\.std(?:out|err)\.write\
 // guard as absent. Used for CONTROL detection only: a thrown message is a
 // guard, but it is not a verdict a reader sees, so it must not satisfy ABSENCE
 // or POPULATION.
-const GUARDS = new RegExp(EMITS.source + '|\\bthrow\\b|\\bprocess\\.exit\\b');
+// `(?<!\.)` because `stream.throw()` and `iterator.throw()` are method calls,
+// not throwing statements, and matching them let unrelated text count as a
+// guard. A `throw` that follows a dot is never the statement.
+const GUARDS = new RegExp(EMITS.source + '|(?<!\\.)\\bthrow\\b|\\bprocess\\.exit\\b');
 
 // Blank out everything that is not code -- string bodies, template bodies,
 // comments and regex literals -- preserving length and newlines so the result
@@ -232,17 +235,23 @@ function maskNonCode(source, commentsOnly = false) {
     return out.join('');
 }
 
-// The unit a printed fact lives in is the CALL, not the line. test-all.js
-// opens `console.log(` on one line and puts "${n}/${total} suites passed" on
-// the next, and a line-scoped reader reports it as having no population --
-// which is what the first live run did. Read from the emitting line until the
-// parentheses balance IN CODE.
+// The unit a printed fact lives in is the CALL, not the line: test-all.js opens
+// `console.log(` on one line and puts "${n}/${total} suites passed" on the next.
 //
-// The cap is a runaway guard, not a semantic limit. At 12 it silently truncated
-// any legitimate call longer than 12 lines, which is a second false-negative
-// class; a call that does not balance within the guard is now reported rather
-// than quietly dropped.
-const CALL_LINE_GUARD = 200;
+// PAREN BALANCING WAS THE WRONG WAY TO FIND THAT BOUNDARY, and three review
+// rounds proved it. A `)` inside a string, a `(` inside a comment, `return /\)/`
+// read as division, a keyword-named property -- each one drove the depth wrong
+// and SUPPRESSED a verdict silently. Every round patched the lexer and the next
+// round found another case, which is a design failing rather than a run of bad
+// luck: depth counting makes one mis-lexed character destroy the whole call.
+//
+// A continuation test has no such blast radius. A line continues the previous
+// one when the previous one ends on an operator, and a mis-lexed character can
+// then only misjudge ONE boundary instead of unbalancing everything after it.
+// No depth, no keyword heuristic, no regex-versus-division dependence for
+// correctness.
+const CONTINUES = /[(,+?:&|=[{]\s*$/;
+const CALL_LINE_GUARD = 40;
 
 function emittedText(source, matcher = EMITS) {
     const lines = source.split(/\r?\n/);
@@ -253,18 +262,17 @@ function emittedText(source, matcher = EMITS) {
         // Detect the call on MASKED text, so `console.log` mentioned inside a
         // string or a comment is not mistaken for a call.
         if (!matcher.test(masked[i])) continue;
-        let depth = 0;
-        let opened = false;
-        let closedAt = -1;
-        for (let j = i; j < Math.min(lines.length, i + CALL_LINE_GUARD); j++) {
+        out.push(lines[i]);
+        let j = i;
+        // Follow the statement while each line ends on an operator. The guard
+        // is a runaway stop; hitting it means the boundary was not found, and
+        // that is reported rather than silently truncated, because an unread
+        // call means the answer is unknown and unknown must not read as clean.
+        while (CONTINUES.test(masked[j]) && j + 1 < lines.length) {
+            j++;
             out.push(lines[j]);
-            for (const ch of masked[j]) {
-                if (ch === '(') { depth++; opened = true; }
-                else if (ch === ')') depth--;
-            }
-            if (opened && depth <= 0) { closedAt = j; break; }
+            if (j - i >= CALL_LINE_GUARD) { unbalanced.push(i + 1); break; }
         }
-        if (opened && closedAt === -1) unbalanced.push(i + 1);
     }
     return { text: out.join('\n'), unbalanced };
 }
@@ -309,7 +317,10 @@ function inspect(file) {
 
     const claimsAbsence = anyMatch(ABSENCE, printed);
     if (!claimsAbsence) {
-        return { file, claimsAbsence: unread.length > 0, findings: unread };
+        // Reported, but NOT counted as an absence reporter: it was never shown
+        // to make an absence claim. Folding it into that population made the
+        // summary line state a category the run had not established.
+        return { file, claimsAbsence: false, findings: unread };
     }
 
     const findings = [...unread];
@@ -349,7 +360,13 @@ function scan({ strict }) {
     const files = collect();
     const results = files.map(inspect);
     const reporters = results.filter((r) => r.claimsAbsence);
-    const flagged = reporters.filter((r) => r.findings.length);
+    // Flagged is drawn from ALL results, not from reporters. Deriving it from
+    // reporters would silently drop a file whose only finding is UNREAD-CALL,
+    // since such a file was never established to claim an absence -- which is
+    // the same silent drop the early-return fix exists to prevent, arriving one
+    // line later.
+    const flagged = results.filter((r) => r.findings.length);
+    const unreadOnly = flagged.filter((r) => !r.claimsAbsence).length;
 
     for (const r of flagged) {
         const rel = path.relative(ROOT, r.file).replace(/\\/g, '/');
@@ -362,7 +379,8 @@ function scan({ strict }) {
     console.log(
         `[population] ${files.length} script(s) read across ${SCAN_DIRS.length} directory(ies), ` +
             `${reporters.length} report an absence or all-clear, ` +
-            `${flagged.length} of those are missing a population line or a control`
+            `${flagged.length - unreadOnly} of those are missing a population line or a control` +
+            (unreadOnly ? `, plus ${unreadOnly} whose emitting call could not be read at all` : '')
     );
     console.log(
         '[scope] control detection is per-FILE: a guard on one branch clears the ' +

@@ -404,8 +404,12 @@ Two guards that made the result trustworthy rather than plausible:
   12, and the grep was wrong. Reconcile against something with a different
   provenance before declaring anything lost.
 
-The cheap version of all of this: if the deliverable matters, put it somewhere a
-worktree removal cannot reach.
+**This is not licence to move the report.** An audit report belongs under
+`.claude/reports/`, gitignored, for the reason stated above: raw audit output
+must not be stageable. The cheap protection is not relocating it — it is
+remembering that removing a worktree destroys everything ignored inside it, so
+copy the report out before running `git worktree remove`, and treat the
+delegate's session log as the recovery path when you forget.
 
 **Instruct the adversary to write incrementally.** Append findings to a file as
 it goes rather than composing one answer at the end, and prefer a format that
