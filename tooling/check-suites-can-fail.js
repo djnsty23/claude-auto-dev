@@ -58,6 +58,16 @@ const SUBJECT_OVERRIDES = {
     // pushes was itself the unchecked one.
     'test-push-authorisation.js': ['tooling/check-push-authorisation.js'],
 
+    // Fourth time, 2026-08-30, four at once: the codex-audit acceptance suites
+    // all test tooling/ checkers, so all derived nothing. The pattern is now
+    // structural - every acceptance test for a TOOLING gate lands here - and
+    // the honest fix remains this list plus the UNCHECKED failure below, not a
+    // smarter deriver that guesses.
+    'test-vacuity-exit.js': ['tooling/find-vacuous-assertions.js'],
+    'test-function-json-exit.js': ['tooling/find-untested-functions.js'],
+    'test-runtime-authority.js': ['tooling/check-runtime.js'],
+    'test-hook-execution-evidence.js': ['tooling/find-untested-hooks.js'],
+
     // Same failure, found again 2026-08-21 — and found by reading this comment
     // rather than the output, because NO-SUBJECT's note ("references no plugin
     // source — nothing to stub") reads like a category of suite that has nothing
@@ -157,7 +167,7 @@ function deriveSubjects(suiteFile) {
         if (hits.length === 1) found.add(hits[0]);
     }
 
-    return [...found].filter((p) => fs.existsSync(path.join(ROOT, p)));
+    return [...found].filter((p) => fs.existsSync(path.join(SWEEP_ROOT, p)));
 }
 
 let _pluginFiles = null;
@@ -165,7 +175,7 @@ function allPluginFiles() {
     if (_pluginFiles) return _pluginFiles;
     const out = [];
     const walk = (dir) => {
-        for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+        for (const e of fs.readdirSync(path.join(SWEEP_ROOT, dir), { withFileTypes: true })) {
             if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
             const rel = dir + '/' + e.name;
             if (e.isDirectory()) walk(rel);
@@ -173,7 +183,7 @@ function allPluginFiles() {
         }
     };
     for (const top of ['plugins']) {
-        if (fs.existsSync(path.join(ROOT, top))) walk(top);
+        if (fs.existsSync(path.join(SWEEP_ROOT, top))) walk(top);
     }
     return (_pluginFiles = out);
 }
@@ -194,7 +204,119 @@ const STUB = `#!/usr/bin/env node
 module.exports = {};
 `;
 
+// Every mid-sweep collision this run detects, in one place, because a detected
+// conflict must poison the VERDICT, not just print a line (Sol's round-7
+// blocker: a sweep that says "left alone, carrying on" measured later suites
+// against a tree it knows was modified, then exited 0 under a "tree restored
+// clean" banner). Any entry here makes the whole run INDETERMINATE, exit 2.
+const conflicts = [];
+const conflict = (msg) => { conflicts.push(msg); console.error('  [CONFLICT] ' + msg); };
+
+// The mutation engine. Rounds 6-8 tried to make read-copy-write restores
+// safe and each round found the next window, because copying bytes back is
+// the wrong primitive. This engine NEVER rewrites an original:
+//
+//   install: the original is renamed aside — one atomic syscall that also
+//            preserves its mode bits (Sol's round-9 blocker: a recreated
+//            commit-msg lost its 100755) — and the stub is created with
+//            O_EXCL, which refuses rather than replaces a recreated path.
+//            The original's bytes are never read, copied, or rewritten.
+//   remove:  our stub is unlinked only if the live file still IS our stub
+//            (anything else is captured aside under a unique name, never
+//            destroyed — Sol's round-9 blocker: a reused capture name could
+//            overwrite an earlier capture on POSIX); the original returns
+//            via link(), which fails EEXIST rather than replacing a file a
+//            writer recreated in the gap. Same inode, same mode, nothing
+//            copied.
+//
+// Every unexpected state is a conflict, and a crash leaves the original ON
+// DISK beside the stub as `<file>.orig-<pid>-<n>` — recoverable by rename,
+// with nothing to reconstruct. Exceptions are conflicts too: a throw here
+// must never exit as an ordinary failure with a mutant still in place.
+let seq = 0;
+const installedNow = new Map();   // rel -> { full, orig, expect }
+function installOwn(rel, full, content) {
+    const orig = full + '.orig-' + crypto.randomBytes(6).toString('hex');
+    try {
+        fs.renameSync(full, orig);
+    } catch (e) {
+        conflict(`could not set ${rel} aside to stub it (${e.code || e.message})`);
+        return false;
+    }
+    try {
+        fs.writeFileSync(full, content, { flag: 'wx' });
+    } catch (e) {
+        conflict(`${rel} was recreated while being stubbed (${e.code || e.message})`);
+        // Rollback must not replace the recreating writer's file either
+        // (round-10: renameSync here overwrote it). link() refuses EEXIST;
+        // if the recreated file is still there, it survives and the original
+        // stays preserved on disk under its .orig name.
+        try {
+            fs.linkSync(orig, full);
+            fs.unlinkSync(orig);
+        } catch (e2) {
+            conflict(`the original could not return over the recreated ${rel} (${e2.code || e2.message})`
+                + ` — original preserved at ${path.basename(orig)}`);
+        }
+        return false;
+    }
+    installedNow.set(rel, { full, orig, expect: Buffer.from(content) });
+    return true;
+}
+function removeOwn(rel) {
+    const rec = installedNow.get(rel);
+    if (!rec) return;
+    installedNow.delete(rel);
+    try {
+        // Claim whatever is live by rename FIRST — one atomic syscall, so
+        // there is no read-then-unlink-by-pathname window (round-10: a
+        // writer replacing the stub between those two operations lost its
+        // file undetected). Classification happens on the claimed inode,
+        // which nothing else is writing to.
+        const cap = rec.full + '.swept-' + crypto.randomBytes(6).toString('hex');
+        let claimed = false;
+        try { fs.renameSync(rec.full, cap); claimed = true; }
+        catch { conflict(`${rel} was deleted by something else while stubbed`); }
+        if (claimed) {
+            const got = fs.readFileSync(cap);
+            if (got.equals(rec.expect)) fs.unlinkSync(cap);
+            else conflict(`${rel} held foreign content at restore — captured to ${path.basename(cap)}, nothing lost`);
+        }
+        try {
+            fs.linkSync(rec.orig, rec.full);   // refuses (EEXIST) rather than replaces
+            fs.unlinkSync(rec.orig);
+        } catch (e) {
+            conflict(`${rel} was recreated before its original could return (${e.code || e.message})`
+                + ` — original preserved at ${path.basename(rec.orig)}`);
+        }
+    } catch (e) {
+        conflict(`restore of ${rel} threw ${e.code || e.message} — original is at ${path.basename(rec.orig)}`);
+    }
+}
+
+// A child run only counts — as a red OR a green — if it actually ran to
+// completion. A timeout, signal, or spawn failure is not a verdict about the
+// suite (Sol's round-9 blocker: a killed child satisfied `status !== 0` and
+// was scored as a successful canary), it is a failure OF THIS SWEEP, so it
+// poisons the run instead of feeding either branch.
+function completed(r, what) {
+    if (r.error) { conflict(`${what} did not run (${r.error.code || r.error.message})`); return false; }
+    if (r.signal) { conflict(`${what} was killed by ${r.signal} before completing`); return false; }
+    if (r.status === 2) {
+        // Exit 2 is this repo's refusal/indeterminate convention (dirty-tree
+        // guards, lock refusals, restoration failures). A child that REFUSED
+        // is not a child that FAILED, and scoring it as a red canary would
+        // verify nothing (Sol's round-10 blocker).
+        conflict(`${what} exited 2 — a refusal or indeterminate result, not a verdict`);
+        return false;
+    }
+    return true;
+}
+
+// git() runs in the SOURCE tree (the dirty check, worktree management);
+// gitW() runs in the private sweep worktree (every scan below).
 const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
+const gitW = (args) => execSync('git ' + args, { cwd: SWEEP_ROOT, encoding: 'utf8' });
 
 // Refuse to run on a dirty tree: this script writes stubs over real files and
 // restores them with `git checkout --`, which would destroy uncommitted work.
@@ -207,12 +329,134 @@ if (dirty) {
     process.exit(2);
 }
 
-const suites = fs.readdirSync(__dirname)
+// THE PRIVATE MUTATION WORKTREE (Sol's round-11 conclusion, adopted whole).
+// Rounds 6 through 10 built locks, nonces, announce files and capture-and-
+// swap restores to make in-place mutation safe against uncoordinated
+// writers, and every round's review found the next window, because the races
+// are INHERENT to mutating a tree someone else can touch. So this sweep no
+// longer touches the shared tree at all: it checks out HEAD into a private
+// detached worktree under tmpdir, mutates THERE, and removes it afterwards.
+// No editor, no test run, no rival sweep can reach that tree, which retires
+// the whole exclusion protocol — the lock, the nonce, the per-pid announce
+// files, and the EPERM liveness logic — rather than hardening it again. The
+// engine below (rename-aside originals, O_EXCL/link placement, conflicts)
+// is kept: it is cheap, and inside a private tree every conflict it reports
+// is a real bug in this script rather than a bystander.
+const os = require('os');
+
+// argv-based git for everything that carries a PATH — JSON.stringify is JSON
+// quoting, not shell escaping, and a tmpdir containing shell metacharacters
+// would have broken or injected through the string form (Sol's round-12
+// blocker). Throws on non-zero exit with stderr attached.
+const gitArgv = (args, cwd) => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) {
+        throw new Error('git ' + args.join(' ') + ' failed: ' + ((r.stderr || '').trim() || r.status));
+    }
+    return r.stdout;
+};
+
+// The worktree is built from ONE captured SHA, not the symbolic HEAD — in a
+// shared clone HEAD can move between resolution and checkout, and every
+// verdict below must be about a tree we can name exactly.
+const HEAD_SHA = gitArgv(['rev-parse', 'HEAD'], ROOT).trim();
+
+// Reclaim worktrees stranded by a crashed or killed sweep. OWNERSHIP IS
+// WHAT GIT SAYS, nothing else (Sol's round-14 blocker: a .git-pointer check
+// is spoofable and check/use racy, and any recursive delete after git
+// refuses a path is the destroy-someone's-checkout branch wearing a new
+// name). The only directories this run may touch are ones REGISTERED as
+// worktrees of THIS repository in `git worktree list --porcelain`, the only
+// deletion is `git worktree remove --force`, and a path git refuses is left
+// exactly as it is, reported, and retried by a later run — its registration
+// survives because prune only drops records whose directory is gone.
+const crypto = require('crypto');
+
+// Canonical path identity for the registration comparison: realpath when the
+// path still exists, case-folded on win32. Without it a case-variant or
+// symlinked spelling of a registered worktree never matches and the stale
+// tree stays unreclaimed forever (Sol's round-15 blocker).
+const canonPath = (p) => {
+    const r = path.resolve(p);
+    let real;
+    try { real = fs.realpathSync(r); } catch { real = r; }
+    return process.platform === 'win32' ? real.toLowerCase() : real;
+};
+{
+    // -z output: NUL-separated attribute records, so a path containing a
+    // newline — legal on POSIX — cannot shear the parse (same blocker).
+    const registered = new Set(gitArgv(['worktree', 'list', '--porcelain', '-z'], ROOT)
+        .split('\0')
+        .filter((l) => l.startsWith('worktree '))
+        .map((l) => canonPath(l.slice('worktree '.length))));
+    for (const d of fs.readdirSync(os.tmpdir())) {
+        const m = d.match(/^check-suites-wt-(\d+)-/);
+        if (!m) continue;
+        const full = path.join(os.tmpdir(), d);
+        if (!registered.has(canonPath(full))) continue;   // not provably ours — untouched
+        let alive = false;
+        try { process.kill(parseInt(m[1], 10), 0); alive = true; }
+        catch (e) { alive = e.code === 'EPERM'; }
+        if (alive) continue;
+        try { gitArgv(['worktree', 'remove', '--force', full], ROOT); }
+        catch (e) {
+            console.error('  [left] stale sweep worktree ' + full
+                + ' — git refused to remove it (' + e.message + '); not deleted');
+        }
+    }
+    try { gitArgv(['worktree', 'prune'], ROOT); } catch { /* best effort */ }
+}
+
+const SWEEP_ROOT = (() => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-suites-wt-' + process.pid + '-'));
+    fs.rmdirSync(dir);   // hand git a unique, nonexistent path
+    try {
+        gitArgv(['worktree', 'add', '--detach', dir, HEAD_SHA], ROOT);
+    } catch (e) {
+        console.error('\nCould not create the private mutation worktree: ' + e.message);
+        process.exit(2);
+    }
+    return dir;
+})();
+const SWEEP_TOOLING = path.join(SWEEP_ROOT, 'tooling');
+process.on('exit', () => {
+    // git is the ONLY remover here too. If it refuses, the worktree stays
+    // REGISTERED, which is precisely what lets the next run's reclamation
+    // find and retry it — an rmSync fallback would both risk a wrong delete
+    // and orphan the directory from the only ownership record it has.
+    try { gitArgv(['worktree', 'remove', '--force', SWEEP_ROOT], ROOT); }
+    catch { /* left registered; the next run's reclamation retries it */ }
+});
+
+// Anything that escapes past the conflict handling above must still land as
+// INDETERMINATE — never as an ordinary crash whose exit status hides what
+// happened (Sol's round-9 blocker). The mutated tree is the private
+// worktree, so a crash strands nothing in the user's tree; the handler
+// still names what was mid-flight for the record.
+process.on('uncaughtException', (e) => {
+    console.error('\nUNCAUGHT: ' + (e && e.stack || e));
+    for (const [rel] of installedNow) {
+        console.error('  stub was in place in the private worktree: ' + rel);
+    }
+    console.error('\nINDETERMINATE — the sweep died mid-run. The user tree was never touched;');
+    console.error('the private worktree is removed on exit.\n');
+    process.exit(2);
+});
+
+const suites = fs.readdirSync(SWEEP_TOOLING)
     .filter((f) => /^test-.*\.js$/.test(f))
     .sort();
 
-const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, suite)], {
-    cwd: ROOT, encoding: 'utf8', timeout: 300000,
+// 15 minutes, not 5. A timeout KILLS the child, and a killed suite that
+// mutates files for its own canaries (test-hook-execution-evidence.js
+// prepends to a target suite and restores on exit) never runs its restore —
+// the sweep then correctly reports its own kill as a conflict and goes
+// INDETERMINATE, which is exactly what happened when the heaviest suite
+// blew a 300s budget on a loaded machine. The generous budget is the fix;
+// the conflict detection stays as the backstop for a genuine hang. Suites
+// run FROM and IN the private worktree — nothing they touch is shared.
+const runSuite = (suite) => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
+    cwd: SWEEP_ROOT, encoding: 'utf8', timeout: 900000,
 });
 
 const rows = [];
@@ -227,19 +471,24 @@ const rows = [];
 //
 // So: make one child suite fail, and assert the runner notices.
 function checkRunner(suite) {
-    const victim = suites.find((s) => s !== suite && deriveSubjects(path.join(__dirname, s)).length);
+    const victim = suites.find((s) => s !== suite && deriveSubjects(path.join(SWEEP_TOOLING, s)).length);
     if (!victim) return { suite, status: 'NO-SUBJECT', note: 'no child suite to fail' };
 
-    const full = path.join(__dirname, victim);
-    const original = fs.readFileSync(full);
+    const full = path.join(SWEEP_TOOLING, victim);
+    const CANARY = '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n';
+    if (!installOwn('tooling/' + victim, full, CANARY)) {
+        return { suite, status: 'UNCHECKED', note: 'could not install the runner canary — see conflicts' };
+    }
     try {
-        fs.writeFileSync(full, '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n');
         const r = runSuite(suite);
+        if (!completed(r, suite + ' (runner canary run)')) {
+            return { suite, status: 'UNCHECKED', note: 'canary run did not complete — indeterminate, not a verdict' };
+        }
         return r.status !== 0
             ? { suite, status: 'ok', note: `reports failure when ${victim} fails` }
             : { suite, status: 'VACUOUS', note: `stays GREEN while ${victim} exits 1 — it is not running them` };
     } finally {
-        fs.writeFileSync(full, original);
+        removeOwn('tooling/' + victim);
     }
 }
 
@@ -252,22 +501,30 @@ function checkRunner(suite) {
 // version sync, which every plugin manifest depends on, and assert it goes red.
 function checkValidator() {
     const suite = 'validate.js';
-    const file = path.join(ROOT, 'VERSION');
+    const file = path.join(SWEEP_ROOT, 'VERSION');
     if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', note: 'no VERSION file' };
 
-    const run = () => spawnSync(process.execPath, [path.join(__dirname, 'validate.js')], {
-        cwd: ROOT, encoding: 'utf8', timeout: 300000,
+    const run = () => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
+        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: 900000,
     });
-    if (run().status !== 0) return { suite, status: 'RED', note: 'already failing' };
+    const base = run();
+    if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate' };
+    if (base.status !== 0) return { suite, status: 'RED', note: 'already failing' };
 
-    const original = fs.readFileSync(file);
+    const CANARY = '0.0.0-canary\n';
+    if (!installOwn('VERSION', file, CANARY)) {
+        return { suite, status: 'UNCHECKED', note: 'could not install the VERSION canary — see conflicts' };
+    }
     try {
-        fs.writeFileSync(file, '0.0.0-canary\n');
-        return run().status !== 0
+        const r = run();
+        if (!completed(r, 'validate (VERSION canary run)')) {
+            return { suite, status: 'UNCHECKED', note: 'canary run did not complete — indeterminate, not a verdict' };
+        }
+        return r.status !== 0
             ? { suite, status: 'ok', note: 'goes red on a version-sync break' }
             : { suite, status: 'VACUOUS', note: 'stays GREEN with VERSION desynced from every manifest' };
     } finally {
-        fs.writeFileSync(file, original);
+        removeOwn('VERSION');
     }
 }
 
@@ -284,7 +541,7 @@ for (const suite of suites) {
     // pointing at nothing is worth nothing, and says so out loud.
     const exempt = NOT_JAVASCRIPT[suite];
     if (exempt) {
-        const canaryExists = fs.existsSync(path.join(__dirname, exempt.canary));
+        const canaryExists = fs.existsSync(path.join(SWEEP_TOOLING, exempt.canary));
         const canaryChecked = suites.includes(exempt.canary);
         if (canaryExists && canaryChecked) {
             rows.push({
@@ -304,7 +561,7 @@ for (const suite of suites) {
         continue;
     }
 
-    const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(__dirname, suite));
+    const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(SWEEP_TOOLING, suite));
     if (!subjects.length) {
         // Worded as a deficiency, and counted as a failure, because the previous
         // wording — "references no plugin source — nothing to stub" — read as a
@@ -320,8 +577,47 @@ for (const suite of suites) {
         continue;
     }
 
-    // Baseline: it must be green before the mutation means anything.
-    if (runSuite(suite).status !== 0) {
+    // Any run of the suite from here on - baseline OR stubbed - can be killed
+    // on timeout, and no in-process finally survives a kill. Measured twice on
+    // 2026-08-30: a killed test-validate BASELINE run (not a stubbed one)
+    // orphaned zz-spawn-fixture.js in the real hooks/ dir, and the end-of-run
+    // restore cannot remove untracked files, so the whole sweep exited 2 with
+    // no verdict. Snapshot the untracked set once per suite and remove only
+    // what is NEW; the finally fires on every continue below.
+    const untrackedBefore = new Set(gitW('status --porcelain').split('\n')
+        .filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).trim()));
+    // OWNERSHIP IS EXPLICIT, never inferred (Sol's round-4 and round-5
+    // blockers, in sequence). Round 4 deleted any new untracked path; round 5
+    // showed zone-scoping still deletes a CONCURRENT session's new files,
+    // because plugins/ and tooling/ are exactly where sessions work. So the
+    // contract is a naming convention: a suite's disposable fixture has a
+    // `zz-` basename prefix (test-validate's zz-spawn-fixture.js already
+    // does), and ONLY new untracked zz-files are removed. Anything else new
+    // is reported and left - if it is a real orphan, the end-of-run tree
+    // check names it and a human decides.
+    const cleanNewUntracked = () => {
+        for (const line of gitW('status --porcelain').split('\n')) {
+            if (!line.startsWith('?? ')) continue;
+            const p = line.slice(3).trim();
+            if (untrackedBefore.has(p)) continue;
+            if (!path.basename(p).startsWith('zz-')) {
+                console.error(`  [left alone] new untracked ${p} — not a zz- disposable fixture, so not this sweep's to delete`);
+                continue;
+            }
+            console.error(`  [removed] orphaned fixture ${p} (appeared during ${suite}, absent from the pre-run snapshot)`);
+            try { fs.rmSync(path.join(SWEEP_ROOT, p), { recursive: true, force: true }); } catch { /* the tree check below still backstops */ }
+        }
+    };
+    try {
+
+    // Baseline: it must be green before the mutation means anything — and it
+    // must have actually RUN. A timed-out or signalled baseline is not a red.
+    const base = runSuite(suite);
+    if (!completed(base, suite + ' (baseline)')) {
+        rows.push({ suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate, not a verdict' });
+        continue;
+    }
+    if (base.status !== 0) {
         rows.push({ suite, status: 'RED', note: 'already failing — fix it before trusting this result' });
         continue;
     }
@@ -338,29 +634,53 @@ for (const suite of suites) {
     // The property under test is "this suite can fail", and one killed subject
     // proves it.
     const killed = [];
+    let incomplete = false;
     for (const rel of subjects) {
-        const full = path.join(ROOT, rel);
-        const original = fs.readFileSync(full);
+        const full = path.join(SWEEP_ROOT, rel);
+        if (!installOwn(rel, full, STUB)) { incomplete = true; continue; }
         try {
-            fs.writeFileSync(full, STUB);
-            if (runSuite(suite).status !== 0) killed.push(rel);
+            const r = runSuite(suite);
+            if (!completed(r, suite + ' (with ' + rel + ' stubbed)')) incomplete = true;
+            else if (r.status !== 0) killed.push(rel);
         } finally {
-            fs.writeFileSync(full, original);
+            removeOwn(rel);
         }
     }
 
+    // VACUOUS is an accusation, and it needs every stub run to have actually
+    // completed — a run that was killed proves nothing about the suite.
     rows.push(killed.length
         ? { suite, status: 'ok', note: `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed` }
-        : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` });
+        : (incomplete
+            ? { suite, status: 'UNCHECKED', note: 'stub run(s) did not complete — indeterminate, not a verdict' }
+            : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` }));
+
+    } finally { cleanNewUntracked(); }
 }
 
 // The restore is the dangerous part; prove it worked rather than assuming.
-const after = git('status --porcelain').trim();
+// Every original this run set aside was returned by the engine's finallys;
+// anything still recorded here means a code path above skipped its
+// removeOwn, so try once more — the .orig file is the original, on disk,
+// and returning it is a rename, never a copy and never a checkout (rounds
+// 4 through 8 each found a way for checkout-based recovery to replace a
+// file some other writer had just recreated; this recovery cannot, because
+// removeOwn places files with link(), which refuses over an existing path).
+for (const rel of [...installedNow.keys()]) {
+    conflict(rel + ' was still stubbed at end of run — a code path skipped its restore');
+    removeOwn(rel);
+}
+
+const after = gitW('status --porcelain').trim();
 if (after) {
-    console.error('\nFILES NOT RESTORED — restoring from git:\n' + after);
-    git('checkout -- .');
-    const still = git('status --porcelain').trim();
-    if (still) { console.error('STILL DIRTY:\n' + still); process.exit(2); }
+    console.error('\nTREE NOT CLEAN after the sweep:\n' + after);
+    // Nothing here is this sweep's to fix: its own artifacts were returned
+    // above (or reported as conflicts with the original's location named),
+    // so remaining dirt is either a mid-sweep foreign change or a preserved
+    // capture — both already make the run indeterminate.
+    for (const l of after.split('\n')) {
+        conflict('tree not clean after the sweep: ' + l.trim());
+    }
 }
 
 console.log('\nCan each suite fail?\n');
@@ -386,5 +706,17 @@ const verified = rows.length - bad - notJs;
 console.log(`\n${rows.length} suite(s) · ${verified} verified able to fail · ${bad} NOT verified` +
             (unchecked ? ` (${unchecked} with no derivable subject)` : '') +
             (notJs ? ` · ${notJs} canaried elsewhere, not stubbable here` : '') +
-            ` · tree restored clean\n`);
+            (conflicts.length ? '' : ' · tree restored clean') + '\n');
+
+// A detected mid-sweep conflict poisons every verdict above: suites that ran
+// after the tree changed were measured against a tree this script knows it
+// did not control. Indeterminate (2) outranks findings (1), because a finding
+// from a contaminated run is not a finding.
+if (conflicts.length) {
+    console.log('INDETERMINATE — ' + conflicts.length + ' mid-sweep conflict(s) detected:');
+    for (const c of conflicts) console.log('  · ' + c);
+    console.log('The verdicts above were measured on a tree that changed under this sweep.');
+    console.log('Re-run when the tree is quiet.\n');
+    process.exit(2);
+}
 process.exit(bad ? 1 : 0);

@@ -38,9 +38,19 @@
  * Usage:
  *   node check-rules-reachable.js [repoPath]   default: cwd
  *   node check-rules-reachable.js --json
- *   node check-rules-reachable.js --selftest
+ *   node check-rules-reachable.js --selftest   (npm run test:reachable)
  *
- * Exit 1 only on UNREACHABLE. Never on UNEXERCISED, never on NO EVIDENCE.
+ * Exit 1 only on UNREACHABLE - in BOTH renderers. Never on UNEXERCISED, never
+ * on NO EVIDENCE. The codex audit (2026-08-30, F2) found the two public live
+ * entrypoints hard-coding success: `npm run check:reachable` always diverted
+ * into the selftest and never read a repository, and --json printed a computed
+ * `unreachable` array and then exited 0 unconditionally. Both now carry the
+ * same verdict the text renderer computes.
+ *
+ * F3, same audit: evidence is scoped to the repository that produced it. The
+ * hook records `cwd`; a session_start in repo A used to make repo B's unseen
+ * unconditional rule read as proven unreachable. Rows are filtered to the
+ * target repo before sawStart/seen/session counts are computed.
  */
 'use strict';
 const fs = require('fs');
@@ -100,21 +110,63 @@ function readLog(file) {
     return rows;
 }
 
-function analyse(disk, rows) {
+// Case-folding is a property of the FILESYSTEM, not of this script (Sol's
+// round-4 and round-5 findings): unconditional lowercasing conflated
+// /srv/RepoA with /srv/repoa, and A.md with a.md, on Linux - where those are
+// different things. Windows records one file in mixed case across log rows, so
+// it folds; Linux must not. Used by BOTH the repo scoping and the seen-set.
+const fold = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
+
+// Identity, not spelling (Sol's round-6 blocker). path.resolve alone treats
+// macOS /var and /private/var - one directory reached through a symlink, two
+// spellings - as different trees, so every recorded row filters out and the
+// verdict degrades to a false "NO EVIDENCE". realpathSync collapses the
+// spellings to one; the fallback covers recorded paths that no longer exist,
+// where resolve is the best identity still available. Memoized because logs
+// carry thousands of rows and realpath is a filesystem call per miss.
+const canonCache = new Map();
+const canon = (p) => {
+    const key = String(p);
+    let v = canonCache.get(key);
+    if (v === undefined) {
+        const r = path.resolve(key);
+        try { v = fold(fs.realpathSync(r)); } catch { v = fold(r); }
+        canonCache.set(key, v);
+    }
+    return v;
+};
+
+function analyse(disk, rows, repo) {
+    // F3: evidence belongs to the repository that produced it. The recorded
+    // cwd is AUTHORITATIVE when present: a session whose cwd is repo B says
+    // nothing about repo A even if it loaded a file inside A - Sol's round-1
+    // review proved the earlier OR admitted exactly that contradictory foreign
+    // evidence (cwd=B, file-in-A counted as A's sawStart). The file path is a
+    // fallback only for legacy rows written before cwd was recorded. With no
+    // repo given (the selftest's synthetic fixtures) behaviour is unchanged.
+    if (repo) {
+        const base = canon(repo);
+        const within = (p) => {
+            if (!p) return false;
+            const r = canon(p);
+            return r === base || r.startsWith(base + path.sep);
+        };
+        rows = (rows || []).filter((r) => r && (r.cwd ? within(r.cwd) : within(r.file)));
+    }
     // NO EVIDENCE is decided by whether the log ever saw a session_start, not by
     // whether it has any lines. A log full of path_glob_match rows proves the
     // hook works and proves nothing about what loads at startup, which is
     // exactly the question an unconditional rule is judged on.
     const sawStart = (rows || []).some((r) => r && r.reason === 'session_start');
     const seen = new Set((rows || []).map((r) => r && r.file
-        ? path.resolve(r.file).toLowerCase() : null).filter(Boolean));
+        ? canon(r.file) : null).filter(Boolean));
 
     const unreachable = [];
     const unexercised = [];
     let reached = 0;
 
     for (const d of disk) {
-        if (seen.has(d.file.toLowerCase())) { reached += 1; continue; }
+        if (seen.has(canon(d.file))) { reached += 1; continue; }
         if (d.scoped) unexercised.push(d);
         else unreachable.push(d);
     }
@@ -214,7 +266,14 @@ function selftest() {
     // 6. Case-insensitive path matching, because Windows records both forms.
     r = analyse([F('/R/.claude/RULES/a.md', false)],
         [{ reason: 'session_start', at: '2026-08-26T00:00:00Z', file: '/r/.claude/rules/A.MD' }]);
-    check('paths match case-insensitively', r.reached === 1);
+    // Folding follows the platform (round 5): Windows conflates cases because
+    // its filesystem does; Linux keeps A.md and a.md distinct because its
+    // filesystem does. The selftest asserts each platform's own truth, so it
+    // is green on both CI runners while pinning opposite behaviours.
+    check(process.platform === 'win32'
+        ? 'paths match case-insensitively on win32'
+        : 'case-distinct paths stay distinct on POSIX',
+        process.platform === 'win32' ? r.reached === 1 : r.reached === 0);
 
     // 7. MUTATION: fold unexercised into unreachable and prove the count moves.
     r = analyse([F('/r/a.md', true), F('/r/b.md', false)],
@@ -239,10 +298,14 @@ function main() {
     const rows = readLog(lf);
     const r = rows === null
         ? { rows: null, unreachable: [], unexercised: [] }
-        : analyse(onDisk(repo), rows);
+        : analyse(onDisk(repo), rows, repo);
     if (has('--json')) {
         console.log(JSON.stringify({ repo, log: lf, ...r }, null, 2));
-        process.exit(0);
+        // F2: the JSON verdict mirrors the text renderer. Exit 1 only when a
+        // startup was observed AND an unconditional rule was never seen; a
+        // payload that lists unreachable rules while exiting 0 is a verdict
+        // the caller's shell never receives.
+        process.exit(r.rows !== null && r.sawStart && r.unreachable.length ? 1 : 0);
     }
     process.exit(report(repo, r, lf));
 }

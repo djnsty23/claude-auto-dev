@@ -639,11 +639,25 @@ function checkNoStaleMutationBackups() {
 function checkUntestedHooks() {
   const script = path.join(ROOT, 'tooling', 'find-untested-hooks.js');
   if (!fs.existsSync(script)) return log('WARN', 'find-untested-hooks.js is missing');
-  const r = cp.spawnSync(process.execPath, [script, '--json'], { encoding: 'utf8' });
+  // POPULATION FLOOR (Sol's round-4 finding): the static precheck below is only
+  // honest while the execution gate exists. Delete or rename the permanent
+  // execution suite and the full gate would stay green with static checking
+  // only - the exact silent degradation the precheck wording promises against.
+  const executionGate = path.join(ROOT, 'tooling', 'test-hook-execution-evidence.js');
+  if (!fs.existsSync(executionGate)) {
+    return log('FAIL', 'tooling/test-hook-execution-evidence.js is MISSING — the hook '
+      + 'execution gate is gone, and the static precheck below must not stand in for it');
+  }
+  // --referenced-only on purpose: the full execution phase runs every candidate
+  // suite (~40s), and validate runs inside suites that run inside sweeps - the
+  // full phase here blew runSuite timeouts and orphaned suite fixtures. This is
+  // the fast STATIC precheck ("referenced", never "driven"); execution evidence
+  // is gated by tooling/test-hook-execution-evidence.js in npm test.
+  const r = cp.spawnSync(process.execPath, [script, '--json', '--referenced-only'], { encoding: 'utf8' });
   let out;
   try { out = JSON.parse(r.stdout); } catch { return log('WARN', 'find-untested-hooks.js produced no parseable output'); }
-  if (!out.untested.length) return log('PASS', `Hook coverage: all ${out.wired} wired hooks are driven by a suite`);
-  log('FAIL', `${out.untested.length} of ${out.wired} wired hooks have no suite — run node tooling/find-untested-hooks.js`);
+  if (!out.untested.length) return log('PASS', `Hook references: all ${out.wired} wired hooks are referenced by a suite (static precheck; execution gated by test-hook-execution-evidence.js)`);
+  log('FAIL', `${out.untested.length} of ${out.wired} wired hooks are referenced by no suite — run node tooling/find-untested-hooks.js`);
 }
 
 // A hook that spawns a console child without windowsHide can pop a visible

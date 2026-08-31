@@ -56,6 +56,13 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+
+// Any uncaught throw in this suite is INFRASTRUCTURE: exit 2, never the
+// ambient exit 1 the sweep could score as evidence (Sol rounds 20-21).
+process.on('uncaughtException', (e) => {
+    console.error('infrastructure failure (uncaught): ' + ((e && (e.code || e.message)) || e));
+    process.exit(2);
+});
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -132,11 +139,44 @@ function env(extra) {
     return Object.assign(e, extra || {});
 }
 
-function run(args, extra, timeout) {
+function run(args, extra, timeout, expect) {
     const r = spawnSync(process.execPath, [SUBJECT].concat(args), {
-        encoding: 'utf8', env: env(extra), timeout: timeout || 15000,
+        // 60s, not 15: a cold node start under machine load blew 15s, and a
+        // timed-out child is now classified infrastructure rather than being
+        // absorbed - so the budget must only be exceedable by a real hang.
+        encoding: 'utf8', env: env(extra), timeout: timeout || 60000,
     });
-    return { status: r.status, signal: r.signal, stdout: r.stdout || '', stderr: r.stderr || '' };
+    // A child that errored, was signalled, carries a null status, or exited
+    // 2 without this call site expecting it produced no verdict: that is
+    // INFRASTRUCTURE (exitCode 2), never a false-green `status !== 0` pass
+    // or a plain assertion failure (Sol rounds 20-21).
+    // expect: undefined, 'exit2' (a rejection path deliberately provoked), or
+    // 'kill' (a loop-mode child this suite deliberately ends by timeout).
+    // Under 'kill' only a spawn-level failure is infrastructure - whether the
+    // child survived to the timeout or exited early is precisely what the
+    // call site's assertion adjudicates, so it must reach that assertion
+    // (Sol round-22: the old shape accepted exit 1 and arbitrary signals as
+    // the expected timeout).
+    const timedOut = !!(r.error && r.error.code === 'ETIMEDOUT');
+    // Under 'kill' exactly ONE outcome is a verdict: our timeout fired and
+    // the child died to the SIGTERM it sent, leaving a null status. An early
+    // numeric 0/1 self-exit is the behavioural red the scenario exists to
+    // catch, so it reaches the assertion. EVERY other incomplete shape is
+    // infrastructure (Sol round-24): a non-timeout signal, ETIMEDOUT with a
+    // non-SIGTERM signal such as SIGKILL, ETIMEDOUT carrying a status, a
+    // self-exit 2, or any other spawn error.
+    const killVerdict = timedOut && r.signal === 'SIGTERM' && r.status === null;
+    const earlyNumericExit = !r.error && !r.signal && (r.status === 0 || r.status === 1);
+    const bad = expect === 'kill'
+        ? !(killVerdict || earlyNumericExit)
+        : (!!r.error || !!r.signal || r.status === null
+            || (r.status === 2 && expect !== 'exit2'));
+    if (bad) {
+        console.error('infrastructure: subject run ' + JSON.stringify(args) + ' did not produce a verdict ('
+            + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
+        process.exitCode = 2;
+    }
+    return { status: r.status, signal: r.signal, timedOut, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
 let stateSeq = 0;
@@ -598,16 +638,36 @@ try {
         // home path entirely", and the fallback would be untested.
         const sp = seed('src-legacy');
         const shipped = path.join(path.dirname(SUBJECT), 'quota-burn.js');
-        const stash = shipped + '.suite-stashed';
+        // Unique per run: a fixed stash name could silently replace a
+        // preserved original left by an earlier failed run on POSIX.
+        const stash = shipped + '.suite-stashed-' + process.pid + '-' + Date.now();
         let moved = false;
-        try { fs.renameSync(shipped, stash); moved = true; } catch { /* not present */ }
+        try { fs.renameSync(shipped, stash); moved = true; }
+        catch (e) {
+            // ENOENT means the sibling genuinely is not present, which is the
+            // scenario's premise. Anything else is infrastructure and must
+            // not be silently read as absence (Sol round-22).
+            if (e.code !== 'ENOENT') {
+                console.error('infrastructure: could not stash ' + shipped + ' (' + (e.code || e.message) + ')');
+                process.exitCode = 2;
+            }
+        }
         try {
             const r = run(['--once', '--state', sp]);
             has('with the sibling absent it falls back to the home path',
                 r.stdout, path.join(FIXHOME, '.claude', 'scripts', 'quota-burn.js'));
             has('...and reports the miss rather than assuming zero', r.stdout, 'code=source-missing');
         } finally {
-            if (moved) fs.renameSync(stash, shipped);
+            // link() refuses EEXIST, so a file recreated at the shipped path
+            // while it was stashed survives instead of being replaced.
+            if (moved) {
+                try { fs.linkSync(stash, shipped); fs.unlinkSync(stash); }
+                catch (e) {
+                    console.error('NOT RESTORED: ' + shipped + ' was recreated while stashed ('
+                        + (e.code || e.message) + '); the original is kept at ' + stash);
+                    process.exitCode = 2;
+                }
+            }
         }
     }
 
@@ -644,15 +704,15 @@ try {
     // =======================================================================
     {
         const sp = statePath('cal-bad');
-        const r = run(['--calibrate', '--state', sp]);
+        const r = run(['--calibrate', '--state', sp], null, null, 'exit2');
         eq('--calibrate with no percentage exits 2', r.status, 2);
         has('...telling you what it wants', r.stderr, 'needs the percentage the app is showing');
         eq('...and prints nothing to stdout', r.stdout, '');
         eq('...and writes no state', fs.existsSync(sp), false);
     }
     {
-        eq('--calibrate 0 is rejected', run(['--calibrate', '0', '--state', statePath('c0')]).status, 2);
-        eq('--calibrate 101 is rejected', run(['--calibrate', '101', '--state', statePath('c101')]).status, 2);
+        eq('--calibrate 0 is rejected', run(['--calibrate', '0', '--state', statePath('c0')], null, null, 'exit2').status, 2);
+        eq('--calibrate 101 is rejected', run(['--calibrate', '101', '--state', statePath('c101')], null, null, 'exit2').status, 2);
     }
     {
         const sp = statePath('cal');
@@ -842,9 +902,15 @@ try {
         const sp = statePath('loop');
         const r = run(['--state', sp, '--interval-minutes', '5',
             '--fixture-cost', '1', '--fixture-window', String(WSTART),
-            '--fixture-now', String(BASE)], null, 2500);
-        check('without --once the process keeps polling rather than exiting',
-            r.status !== 0, `exited cleanly with status ${r.status}, signal ${r.signal}`);
+            '--fixture-now', String(BASE)], null, 2500, 'kill');   // ended by timeout BY DESIGN
+        // The ONLY passing shape is the full triple: OUR timeout fired
+        // (timedOut), the child died to the SIGTERM it delivered, and no
+        // numeric status came back. Round 23 dropped the signal check, which
+        // let ETIMEDOUT + SIGKILL through; asserting the signal alone had let
+        // a self-SIGTERM through. Both halves are required (Sol round-24).
+        check('without --once the process keeps polling until the timeout kills it',
+            r.timedOut === true && r.signal === 'SIGTERM' && r.status === null,
+            `expected our timeout kill; got status ${r.status}, signal ${r.signal}, timedOut ${r.timedOut}`);
     }
 
     // =======================================================================
@@ -868,9 +934,18 @@ try {
         fs.rmSync(fixture, { recursive: true, force: true });
     } catch (e) {
         sleep(300);
-        try { fs.rmSync(fixture, { recursive: true, force: true }); } catch (e2) { /* temp dir */ }
+        try { fs.rmSync(fixture, { recursive: true, force: true }); }
+        catch (e2) {
+            // A cleanup that fails is loud and indeterminate, never a green
+            // exit with a stranded fixture (Sol round-20).
+            console.error('fixture cleanup FAILED (' + (e2.code || e2.message) + ') — left at ' + fixture);
+            process.exitCode = 2;
+        }
     }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : 0);
+// Precedence 2 -> 1 -> 0: an infrastructure problem outranks assertion
+// failures, because a run that could not maintain its own sandbox is
+// indeterminate, not red (Sol round-19).
+process.exit(process.exitCode === 2 ? 2 : (fail > 0 ? 1 : 0));
