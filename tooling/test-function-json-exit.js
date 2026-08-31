@@ -16,17 +16,24 @@ const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
 const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.message || 'none'}`;
 
-const original = fs.readFileSync(RUNNER, 'utf8');
 const mutant =
     "#!/usr/bin/env node\n" +
     "console.error('intentional F6 baseline failure');\n" +
     "process.exit(1);\n";
 let result = null;
 let payload = null;
+// Rename-based mutation, same discipline as the sweep engine: the original
+// is renamed aside (never rewritten, ownership from the first syscall), the
+// mutant is created O_EXCL, and the original returns via link(), which
+// refuses over anything a concurrent writer recreated. Unexpected states
+// are reported and fail the run rather than being absorbed.
+const original = fs.readFileSync(RUNNER, 'utf8');   // for the restored-content control below
+const RUNNER_ORIG = RUNNER + '.orig-' + process.pid;
+fs.renameSync(RUNNER, RUNNER_ORIG);
 try {
     // Stop before any suite or plugin source is loaded. This makes an empty
     // coverage population while keeping the failure intentional and parseable.
-    fs.writeFileSync(RUNNER, mutant);
+    fs.writeFileSync(RUNNER, mutant, { flag: 'wx' });
     result = spawnSync(process.execPath, [CHECK, '--json'], {
         cwd: ROOT,
         encoding: 'utf8',
@@ -35,13 +42,19 @@ try {
     });
     try { payload = JSON.parse(result.stdout); } catch { /* controls report it */ }
 } finally {
-    // Restore only over this suite's own mutant — a concurrent writer's
-    // content is left in place and reported, never overwritten with a stale
-    // copy.
-    const now = fs.readFileSync(RUNNER, 'utf8');
-    if (now === mutant) fs.writeFileSync(RUNNER, original);
-    else if (now !== original) {
-        console.error('NOT RESTORED: ' + RUNNER + ' changed under this suite — restore it from git.');
+    try {
+        const cap = RUNNER + '.cap-' + process.pid;
+        let claimed = false;
+        try { fs.renameSync(RUNNER, cap); claimed = true; } catch { /* deleted */ }
+        if (claimed) {
+            if (fs.readFileSync(cap, 'utf8') === mutant) fs.unlinkSync(cap);
+            else { console.error('NOT CLEANED: foreign content captured at ' + cap); process.exitCode = 1; }
+        }
+        fs.linkSync(RUNNER_ORIG, RUNNER);
+        fs.unlinkSync(RUNNER_ORIG);
+    } catch (e) {
+        console.error('RESTORE INCOMPLETE for ' + RUNNER + ' (' + (e.code || e.message)
+            + '); the original is at ' + RUNNER_ORIG);
         process.exitCode = 1;
     }
 }
@@ -78,4 +91,4 @@ for (const [label, ok, why] of cases) {
     ok ? pass++ : fail++;
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : 0);
+process.exit(fail > 0 ? 1 : (process.exitCode || 0));

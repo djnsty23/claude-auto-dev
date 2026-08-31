@@ -343,14 +343,49 @@ if (dirty) {
 // is kept: it is cheap, and inside a private tree every conflict it reports
 // is a real bug in this script rather than a bystander.
 const os = require('os');
+
+// argv-based git for everything that carries a PATH — JSON.stringify is JSON
+// quoting, not shell escaping, and a tmpdir containing shell metacharacters
+// would have broken or injected through the string form (Sol's round-12
+// blocker). Throws on non-zero exit with stderr attached.
+const gitArgv = (args, cwd) => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) {
+        throw new Error('git ' + args.join(' ') + ' failed: ' + ((r.stderr || '').trim() || r.status));
+    }
+    return r.stdout;
+};
+
+// The worktree is built from ONE captured SHA, not the symbolic HEAD — in a
+// shared clone HEAD can move between resolution and checkout, and every
+// verdict below must be about a tree we can name exactly.
+const HEAD_SHA = gitArgv(['rev-parse', 'HEAD'], ROOT).trim();
+
+// Reclaim worktrees stranded by a crashed or killed sweep (Sol's round-12
+// blocker: without this they accumulate in tmpdir with live git metadata
+// forever). The directory name carries its owner's pid; a dead owner's tree
+// is removed and the records pruned. EPERM means alive under another user —
+// left alone.
+for (const d of fs.readdirSync(os.tmpdir())) {
+    const m = d.match(/^check-suites-wt-(\d+)-/);
+    if (!m) continue;
+    let alive = false;
+    try { process.kill(parseInt(m[1], 10), 0); alive = true; }
+    catch (e) { alive = e.code === 'EPERM'; }
+    if (alive) continue;
+    const full = path.join(os.tmpdir(), d);
+    try { gitArgv(['worktree', 'remove', '--force', full], ROOT); }
+    catch { try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* locked; the next run retries */ } }
+}
+try { gitArgv(['worktree', 'prune'], ROOT); } catch { /* best effort */ }
+
 const SWEEP_ROOT = (() => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-suites-wt-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-suites-wt-' + process.pid + '-'));
     fs.rmdirSync(dir);   // hand git a unique, nonexistent path
     try {
-        execSync('git worktree add --detach ' + JSON.stringify(dir) + ' HEAD',
-            { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' });
+        gitArgv(['worktree', 'add', '--detach', dir, HEAD_SHA], ROOT);
     } catch (e) {
-        console.error('\nCould not create the private mutation worktree: ' + (e.stderr || e.message));
+        console.error('\nCould not create the private mutation worktree: ' + e.message);
         process.exit(2);
     }
     return dir;
@@ -358,13 +393,12 @@ const SWEEP_ROOT = (() => {
 const SWEEP_TOOLING = path.join(SWEEP_ROOT, 'tooling');
 process.on('exit', () => {
     try {
-        execSync('git worktree remove --force ' + JSON.stringify(SWEEP_ROOT),
-            { cwd: ROOT, stdio: 'pipe' });
+        gitArgv(['worktree', 'remove', '--force', SWEEP_ROOT], ROOT);
     } catch {
         try {
             fs.rmSync(SWEEP_ROOT, { recursive: true, force: true });
-            execSync('git worktree prune', { cwd: ROOT, stdio: 'pipe' });
-        } catch { /* a leftover tmpdir worktree is inert; prune removes the record later */ }
+            gitArgv(['worktree', 'prune'], ROOT);
+        } catch { /* the reclamation pass above retires it on the next run */ }
     }
 });
 

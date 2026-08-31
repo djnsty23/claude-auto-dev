@@ -598,7 +598,9 @@ try {
         // home path entirely", and the fallback would be untested.
         const sp = seed('src-legacy');
         const shipped = path.join(path.dirname(SUBJECT), 'quota-burn.js');
-        const stash = shipped + '.suite-stashed';
+        // Unique per run: a fixed stash name could silently replace a
+        // preserved original left by an earlier failed run on POSIX.
+        const stash = shipped + '.suite-stashed-' + process.pid + '-' + Date.now();
         let moved = false;
         try { fs.renameSync(shipped, stash); moved = true; } catch { /* not present */ }
         try {
@@ -882,4 +884,4 @@ try {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : 0);
+process.exit(fail > 0 ? 1 : (process.exitCode || 0));

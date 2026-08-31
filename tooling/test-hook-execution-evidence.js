@@ -39,18 +39,45 @@ const runSuite = (file, extraEnv = {}) => spawnSync(process.execPath, [file], {
     timeout: 60000,
 });
 
-// Restore a file this suite mutated, without overwriting anyone else's work:
-// write `original` back only while the file still holds exactly what THIS
-// suite wrote. Anything else means a concurrent writer got there — leave it,
-// say so loudly, and fail the run rather than absorb it.
-const restoreOwn = (file, wrote, original) => {
-    const now = fs.readFileSync(file, 'utf8');
-    if (now === wrote) { fs.writeFileSync(file, original); return true; }
-    if (now === original) return true;
-    console.error('NOT RESTORED: ' + file + ' changed under this suite — a concurrent');
-    console.error('writer owns its current content. Restore it from git yourself.');
-    process.exitCode = 1;
-    return false;
+// This suite runs in the MAIN tree and mutates a tracked file, so it uses
+// the same rename-based discipline as the sweep engine: the original is
+// renamed aside (never rewritten, ownership established at install time),
+// the mutant is created O_EXCL, and the original returns via link(), which
+// refuses over a file a concurrent writer recreated. Anything unexpected is
+// captured or refused, reported, and fails the run via process.exitCode —
+// never silently absorbed.
+let mutSeq = 0;
+const installMutant = (file, content) => {
+    const orig = file + '.orig-' + process.pid + '-' + (++mutSeq);
+    fs.renameSync(file, orig);
+    try { fs.writeFileSync(file, content, { flag: 'wx' }); }
+    catch (e) {
+        try { fs.linkSync(orig, file); fs.unlinkSync(orig); }
+        catch { console.error('original preserved at ' + orig); }
+        throw e;
+    }
+    return orig;
+};
+const removeMutant = (file, orig, wrote) => {
+    try {
+        const cap = file + '.cap-' + process.pid + '-' + (++mutSeq);
+        let claimed = false;
+        try { fs.renameSync(file, cap); claimed = true; }
+        catch { console.error('NOT CLEANED: ' + file + ' was deleted while mutated'); process.exitCode = 1; }
+        if (claimed) {
+            if (fs.readFileSync(cap, 'utf8') === wrote) fs.unlinkSync(cap);
+            else {
+                console.error('NOT CLEANED: foreign content on ' + file + ' captured at ' + cap);
+                process.exitCode = 1;
+            }
+        }
+        fs.linkSync(orig, file);
+        fs.unlinkSync(orig);
+    } catch (e) {
+        console.error('RESTORE INCOMPLETE for ' + file + ' (' + (e.code || e.message)
+            + '); the original is at ' + orig);
+        process.exitCode = 1;
+    }
 };
 
 const insertAfterShebang = (source, insertion) => {
@@ -112,16 +139,16 @@ if (target) {
             'require(HOOK);',
             '',
         ].join('\n');
-        fs.writeFileSync(targetSuite, vacuousSrc);
+        var vacuousOrig = installMutant(targetSuite, vacuousSrc);
+        var vacuousWrote = vacuousSrc;
 
         const vacuous = runSuite(targetSuite);
         check('control: the vacuous replacement exits 0 without loading its hook',
             vacuous.status === 0 && vacuous.signal === null && !vacuous.error,
             detail(vacuous));
         mutatedCheck = runChecker();
-        var vacuousWrote = vacuousSrc;
     } finally {
-        restoreOwn(targetSuite, vacuousWrote, original);
+        if (vacuousOrig) removeMutant(targetSuite, vacuousOrig, vacuousWrote);
     }
 
     const restored = runSuite(targetSuite);
@@ -156,7 +183,8 @@ if (target && targetSuite && original) {
             'process.exit = (code) => acceptanceExit(code === 0 ? 1 : code);',
         ].join('\n');
         const redSrc = insertAfterShebang(original, exitWrapper);
-        fs.writeFileSync(targetSuite, redSrc);
+        var redOrig = installMutant(targetSuite, redSrc);
+        var redWroteNow = redSrc;
         const forcedRed = runSuite(targetSuite, { NODE_V8_COVERAGE: coverageDir });
         check('control: the dedicated suite is red after the injected failure',
             forcedRed.status === 1 && forcedRed.signal === null && !forcedRed.error,
@@ -165,9 +193,8 @@ if (target && targetSuite && original) {
             rawCoverageContains(coverageDir, targetHook),
             `coverage dumps=${fs.readdirSync(coverageDir).length}`);
         failedSuiteCheck = runChecker();
-        var redWrote = redSrc;
     } finally {
-        restoreOwn(targetSuite, redWrote, original);
+        if (redOrig) removeMutant(targetSuite, redOrig, redWroteNow);
         fs.rmSync(coverageDir, { recursive: true, force: true });
     }
 
@@ -197,4 +224,6 @@ for (const [label, ok, why] of cases) {
     ok ? pass++ : fail++;
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : 0);
+// A red cleanup (process.exitCode set by removeMutant) must survive a green
+// check run — exit(0) here would override it (Sol's round-12 blocker).
+process.exit(fail > 0 ? 1 : (process.exitCode || 0));
