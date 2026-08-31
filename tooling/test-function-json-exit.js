@@ -12,31 +12,36 @@ const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 
-// PRIVATE ISOLATION (Sol's round-13 blocker): the runner mutation happens in
-// a sandbox worktree of HEAD, not in the shared tree, so a forced kill
-// strands nothing and no concurrent writer exists to race. The checker under
-// test is COPIED IN from this tree — under the stub sweep it is the stubbed
-// copy, and a sandbox built purely from HEAD would test the wrong file.
-const gitq = (args) => {
-    const r = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8', windowsHide: true });
-    if (r.status !== 0) throw new Error('git ' + args.join(' ') + ': ' + ((r.stderr || '').trim() || r.status));
-    return r.stdout;
-};
-const SANDBOX = (() => {
-    const sha = gitq(['rev-parse', 'HEAD']).trim();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'funcexit-sb-' + process.pid + '-'));
-    fs.rmdirSync(dir);
-    try { gitq(['worktree', 'add', '--detach', dir, sha]); }
-    catch (e) { console.error('could not create the sandbox worktree: ' + e.message); process.exit(2); }
-    process.on('exit', () => {
-        try { gitq(['worktree', 'remove', '--force', dir]); }
-        catch { try { fs.rmSync(dir, { recursive: true, force: true }); gitq(['worktree', 'prune']); } catch { /* stranded; the dir names its owner pid */ } }
-    });
-    return dir;
-})();
+// PRIVATE ISOLATION, as a COPY of the invoking tree (Sol's rounds 13-14):
+// the runner mutation happens in a plain temp-dir snapshot, so a forced
+// kill strands nothing, no concurrent writer exists to race, and — unlike
+// a worktree of HEAD — the population and the checker under test are
+// exactly the invoking tree's, uncommitted changes and sweep stubs
+// included. Ownership is the marker file; dead-owner sandboxes are
+// reclaimed at startup and this one is removed on exit.
+const SB_PREFIX = 'funcexit-sb-';
+const SB_MARKER = '.acceptance-sandbox';
+for (const d of fs.readdirSync(os.tmpdir())) {
+    const m = d.match(new RegExp('^' + SB_PREFIX + '(\\d+)-'));
+    if (!m) continue;
+    const full = path.join(os.tmpdir(), d);
+    if (!fs.existsSync(path.join(full, SB_MARKER))) continue;   // not provably ours
+    let alive = false;
+    try { process.kill(parseInt(m[1], 10), 0); alive = true; }
+    catch (e) { alive = e.code === 'EPERM'; }
+    if (!alive) { try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* next run */ } }
+}
+const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
+fs.writeFileSync(path.join(SANDBOX, SB_MARKER), String(process.pid));
+{
+    const SKIP = new Set(['.git', '.claude', 'node_modules']);
+    fs.cpSync(ROOT, SANDBOX, { recursive: true, filter: (src) => !SKIP.has(path.basename(src)) });
+}
+process.on('exit', () => {
+    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reclaimed next run */ }
+});
 const RUNNER = path.join(SANDBOX, 'tooling', 'test-all.js');
 const CHECK = path.join(SANDBOX, 'tooling', 'find-untested-functions.js');
-fs.copyFileSync(path.join(ROOT, 'tooling', 'find-untested-functions.js'), CHECK);
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);

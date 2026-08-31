@@ -361,43 +361,38 @@ const gitArgv = (args, cwd) => {
 // verdict below must be about a tree we can name exactly.
 const HEAD_SHA = gitArgv(['rev-parse', 'HEAD'], ROOT).trim();
 
-// Reclaim worktrees stranded by a crashed or killed sweep (Sol's round-12
-// blocker: without this they accumulate in tmpdir with live git metadata
-// forever). The directory name carries its owner's pid; a dead owner's tree
-// is removed and the records pruned. EPERM means alive under another user —
-// left alone. And a NAME MATCH IS NOT OWNERSHIP (Sol's round-13 blocker):
-// `git worktree remove` run against THIS repo rejects a directory belonging
-// to another clone, and the old rmSync fallback would then have deleted
-// someone else's checkout. Ownership is proven from the directory's own
-// .git pointer, which for a worktree names its admin dir — only a pointer
-// into THIS repo's git common dir makes the directory ours to delete.
+// Reclaim worktrees stranded by a crashed or killed sweep. OWNERSHIP IS
+// WHAT GIT SAYS, nothing else (Sol's round-14 blocker: a .git-pointer check
+// is spoofable and check/use racy, and any recursive delete after git
+// refuses a path is the destroy-someone's-checkout branch wearing a new
+// name). The only directories this run may touch are ones REGISTERED as
+// worktrees of THIS repository in `git worktree list --porcelain`, the only
+// deletion is `git worktree remove --force`, and a path git refuses is left
+// exactly as it is, reported, and retried by a later run — its registration
+// survives because prune only drops records whose directory is gone.
 const crypto = require('crypto');
-const GIT_COMMON = path.resolve(ROOT, gitArgv(['rev-parse', '--git-common-dir'], ROOT).trim());
-const ownWorktree = (dir) => {
-    try {
-        const m = fs.readFileSync(path.join(dir, '.git'), 'utf8').match(/^gitdir:\s*(.+?)\s*$/m);
-        return !!m && path.resolve(dir, m[1]).startsWith(GIT_COMMON + path.sep);
-    } catch { return false; }
-};
-for (const d of fs.readdirSync(os.tmpdir())) {
-    const m = d.match(/^check-suites-wt-(\d+)-/);
-    if (!m) continue;
-    let alive = false;
-    try { process.kill(parseInt(m[1], 10), 0); alive = true; }
-    catch (e) { alive = e.code === 'EPERM'; }
-    if (alive) continue;
-    const full = path.join(os.tmpdir(), d);
-    if (!ownWorktree(full)) {
-        // Not provably ours: a half-created empty dir may be removed by the
-        // non-recursive rmdir (which refuses anything with content); a dir
-        // holding another repo's checkout is left exactly as it is.
-        try { fs.rmdirSync(full); } catch { /* not empty — not ours to touch */ }
-        continue;
+{
+    const registered = new Set(gitArgv(['worktree', 'list', '--porcelain'], ROOT)
+        .split('\n')
+        .filter((l) => l.startsWith('worktree '))
+        .map((l) => path.resolve(l.slice('worktree '.length).trim())));
+    for (const d of fs.readdirSync(os.tmpdir())) {
+        const m = d.match(/^check-suites-wt-(\d+)-/);
+        if (!m) continue;
+        const full = path.join(os.tmpdir(), d);
+        if (!registered.has(path.resolve(full))) continue;   // not provably ours — untouched
+        let alive = false;
+        try { process.kill(parseInt(m[1], 10), 0); alive = true; }
+        catch (e) { alive = e.code === 'EPERM'; }
+        if (alive) continue;
+        try { gitArgv(['worktree', 'remove', '--force', full], ROOT); }
+        catch (e) {
+            console.error('  [left] stale sweep worktree ' + full
+                + ' — git refused to remove it (' + e.message + '); not deleted');
+        }
     }
-    try { gitArgv(['worktree', 'remove', '--force', full], ROOT); }
-    catch { try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* locked; the next run retries */ } }
+    try { gitArgv(['worktree', 'prune'], ROOT); } catch { /* best effort */ }
 }
-try { gitArgv(['worktree', 'prune'], ROOT); } catch { /* best effort */ }
 
 const SWEEP_ROOT = (() => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-suites-wt-' + process.pid + '-'));
@@ -412,14 +407,12 @@ const SWEEP_ROOT = (() => {
 })();
 const SWEEP_TOOLING = path.join(SWEEP_ROOT, 'tooling');
 process.on('exit', () => {
-    try {
-        gitArgv(['worktree', 'remove', '--force', SWEEP_ROOT], ROOT);
-    } catch {
-        try {
-            fs.rmSync(SWEEP_ROOT, { recursive: true, force: true });
-            gitArgv(['worktree', 'prune'], ROOT);
-        } catch { /* the reclamation pass above retires it on the next run */ }
-    }
+    // git is the ONLY remover here too. If it refuses, the worktree stays
+    // REGISTERED, which is precisely what lets the next run's reclamation
+    // find and retry it — an rmSync fallback would both risk a wrong delete
+    // and orphan the directory from the only ownership record it has.
+    try { gitArgv(['worktree', 'remove', '--force', SWEEP_ROOT], ROOT); }
+    catch { /* left registered; the next run's reclamation retries it */ }
 });
 
 // Anything that escapes past the conflict handling above must still land as

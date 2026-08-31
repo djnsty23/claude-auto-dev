@@ -12,38 +12,40 @@ const { pathToFileURL } = require('url');
 
 const ROOT = path.resolve(__dirname, '..');
 
-// PRIVATE ISOLATION (Sol's round-13 blocker). This suite mutates a tracked
-// suite file to exercise the checker, and no restore discipline makes that
-// safe in a shared tree — forced termination strands mutants, and the
-// hardlink return has an unwindable window. So every mutation happens in a
-// sandbox worktree of HEAD, created here and removed on exit. The checker
-// under test is COPIED IN from this tree (or from HOOK_CHECK), never taken
-// from HEAD: under the stub sweep this suite runs against a stubbed
-// checker, and a sandbox built purely from HEAD would silently test the
-// wrong file and blind check:suites to this suite.
+// PRIVATE ISOLATION, as a COPY of the invoking tree (Sol's rounds 13-14).
+// This suite mutates a suite file to exercise the checker; doing that in a
+// shared tree was unfixable, and a worktree of HEAD tested the wrong
+// population — an uncommitted wired hook or suite in the invoking tree was
+// invisible to it. A file copy snapshots the tree exactly as it is,
+// checker and population alike (under the stub sweep that means the
+// stubbed checker, which is what keeps check:suites able to see this
+// suite). No git metadata exists to strand: the sandbox is a plain temp
+// dir, owned by the marker file it carries, reclaimed at startup when its
+// owner pid is dead and removed on exit.
 const crypto = require('crypto');
-const gitq = (args) => {
-    const r = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8', windowsHide: true });
-    if (r.status !== 0) throw new Error('git ' + args.join(' ') + ': ' + ((r.stderr || '').trim() || r.status));
-    return r.stdout;
-};
-const SANDBOX = (() => {
-    const sha = gitq(['rev-parse', 'HEAD']).trim();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hookcheck-sb-' + process.pid + '-'));
-    fs.rmdirSync(dir);
-    try { gitq(['worktree', 'add', '--detach', dir, sha]); }
-    catch (e) { console.error('could not create the sandbox worktree: ' + e.message); process.exit(2); }
-    process.on('exit', () => {
-        try { gitq(['worktree', 'remove', '--force', dir]); }
-        catch { try { fs.rmSync(dir, { recursive: true, force: true }); gitq(['worktree', 'prune']); } catch { /* stranded; the dir names its owner pid */ } }
-    });
-    return dir;
-})();
-const CHECK_SRC = process.env.HOOK_CHECK
-    ? path.resolve(process.env.HOOK_CHECK)
-    : path.join(ROOT, 'tooling', 'find-untested-hooks.js');
+const SB_PREFIX = 'hookcheck-sb-';
+const SB_MARKER = '.acceptance-sandbox';
+for (const d of fs.readdirSync(os.tmpdir())) {
+    const m = d.match(new RegExp('^' + SB_PREFIX + '(\\d+)-'));
+    if (!m) continue;
+    const full = path.join(os.tmpdir(), d);
+    if (!fs.existsSync(path.join(full, SB_MARKER))) continue;   // not provably ours
+    let alive = false;
+    try { process.kill(parseInt(m[1], 10), 0); alive = true; }
+    catch (e) { alive = e.code === 'EPERM'; }
+    if (!alive) { try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* next run */ } }
+}
+const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
+fs.writeFileSync(path.join(SANDBOX, SB_MARKER), String(process.pid));
+{
+    const SKIP = new Set(['.git', '.claude', 'node_modules']);
+    fs.cpSync(ROOT, SANDBOX, { recursive: true, filter: (src) => !SKIP.has(path.basename(src)) });
+}
+process.on('exit', () => {
+    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reclaimed next run */ }
+});
 const CHECK = path.join(SANDBOX, 'tooling', 'find-untested-hooks.js');
-fs.copyFileSync(CHECK_SRC, CHECK);
+if (process.env.HOOK_CHECK) fs.copyFileSync(path.resolve(process.env.HOOK_CHECK), CHECK);
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
