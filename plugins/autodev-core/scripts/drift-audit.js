@@ -617,6 +617,19 @@ for (const { repo } of canonical.values()) auditPrd(repo);
 census.push('prd: ' + prdAudited + ' repo(s) with a prd.json, ' + prdSkipped + ' without, from ' +
     canonical.size + ' distinct repo(s)');
 
+// The blind check belongs ABOVE every exit, not only above the human one. It
+// was added below this line, so `--json` on a missing config dir returned
+// `{"findings": []}` and exit 0 -- a machine-readable all-clear from a probe
+// that had read nothing, which is worse than the human path it was fixing
+// because a caller parses it without a person ever seeing it.
+if (!fs.existsSync(CONFIG)) {
+    const blind = { configDir: CONFIG, error: 'config dir does not exist', probeBlind: true, findings: null };
+    if (asJson) { console.log(JSON.stringify(blind, null, 2)); process.exit(1); }
+    console.log('\n  COULD NOT AUDIT: ' + CONFIG + ' does not exist.');
+    console.log('  The probe is blind, not the population clean.\n');
+    process.exit(1);
+}
+
 if (asJson) { console.log(JSON.stringify({ configDir: CONFIG, findings }, null, 2)); process.exit(findings.some((f) => f.severity === 'fail') ? 1 : 0); }
 
 const order = { fail: 0, warn: 1, info: 2 };
@@ -625,21 +638,19 @@ findings.sort((a, b) => order[a.severity] - order[b.severity]);
 console.log(`\nDrift audit — ${CONFIG}\n`);
 for (const line of census) console.log('  ' + line);
 console.log('');
-// A zero here has two causes and they are opposite. Either the population was
-// audited and is clean, or nothing was audited at all -- a wrong --config-dir,
-// a moved checkout, a permission failure -- and "no drift" is then a statement
-// about this probe rather than about the repos.
+// The blind check is above, before the --json exit. Two notes kept here
+// because both were paid for:
 //
 // The guard is on whether the config dir could be READ, not on how many repos
-// it held: a config-only audit legitimately finds zero repos, and keying on the
-// repo count failed 27 assertions in test-drift-audit-config.js by calling
-// those runs blind. Provenance checks assert the input was read; they never
-// assert what the value looks like.
-if (!fs.existsSync(CONFIG)) {
-    console.log('  COULD NOT AUDIT: ' + CONFIG + ' does not exist.');
-    console.log('  The probe is blind, not the population clean.\n');
-    process.exit(1);
-}
+// it held. A config-only audit legitimately finds zero repos, and keying on the
+// repo count failed 27 of 53 assertions in test-drift-audit-config.js by
+// calling those runs blind. A provenance check asserts the input WAS READ; it
+// never asserts what the value looks like.
+//
+// And it sits above every exit rather than above the human one. Placed here it
+// left `--json` returning an empty clean result from a probe that had read
+// nothing, which is worse than the bug it fixed: a caller parses that without
+// a person ever seeing it.
 if (!findings.length) { console.log('  no drift found in the population above\n'); process.exit(0); }
 
 let lastArea = '';
