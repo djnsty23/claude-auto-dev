@@ -1,5 +1,29 @@
 # Changelog
 
+## [8.145.0] - 2026-09-01
+
+### Changed: the radar now executes hypotheses across the agent ecosystem
+
+Framework Radar now treats Claude Code, Codex and Gemini CLI as peers in a
+broader primary-source registry. Coding agents, agent SDKs, orchestration
+frameworks, MCP, evaluation harnesses and adjacent automation tooling are split
+into explicit categories. YouTube discovery covers the same surface but remains
+a lead generator whose claims require primary-source and repository evidence.
+
+The skill no longer stops at an experiment shortlist. It carries forward older
+untested candidates first, selects at most three hypotheses, preregisters their
+population and thresholds, and executes every selected hypothesis against the
+current baseline and a simpler variant. Experiments run in isolated worktrees.
+A winning variant can produce a tested review PR; scheduled runs cannot merge,
+deploy, tag, release or update installed plugins.
+
+Healthy feeds with no releases inside the review window now report a measured
+zero instead of a source failure. Stable-release filtering also recognizes
+preview, nightly, canary and compact beta version names. The live expanded pilot
+checked all 17 configured sources and found 68 recent official items: 26 coding
+agent, 11 agent SDK, 20 orchestration and 11 evaluation items. The hermetic radar
+suite now passes 50 cases.
+
 ## [8.144.0] - 2026-08-31
 
 ### Added: a report-only framework radar

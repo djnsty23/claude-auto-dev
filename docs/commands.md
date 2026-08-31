@@ -18,7 +18,7 @@ These are what you type. Everything else is handled automatically by `auto`.
 | `brainstorm` | Feature ideas + architecture improvements → present findings |
 | `brainstorm quick` | Diff-based scan, only recently changed files (~10s) |
 | `brainstorm apply` | Create stories from last brainstorm |
-| `framework radar` | Research recent Claude Code, Codex and agent-workflow changes; propose measured experiments |
+| `framework radar` | Research coding agents, SDKs, frameworks and harnesses; execute measured experiments |
 | `progress` | Show sprint progress |
 | Natural language | "fix this", "add that", "remove X" — just describe it |
 
@@ -66,7 +66,7 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `memory backup` | Backup/restore auto-memory to private GitHub repo |
 | `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
 | `knowledge <area>` / `what do we know about` / `brief me on` | Distill a domain knowledge brief for a code area from memory |
-| `framework radar [days or video URL]` | Collect official changes and relevant video transcripts, then write a report-only experiment shortlist |
+| `framework radar [days or video URL]` | Collect broad agent-development evidence, test every selected hypothesis, and report A/B/simpler verdicts |
 
 For quick fixes, just describe what to fix — no commands needed.
 

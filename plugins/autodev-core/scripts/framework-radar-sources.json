@@ -3,6 +3,7 @@
     {
       "id": "claude-code-changelog",
       "kind": "markdown-changelog",
+      "category": "coding-agent",
       "product": "Claude Code",
       "url": "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md",
       "webUrl": "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md",
@@ -11,21 +12,170 @@
     {
       "id": "codex-releases",
       "kind": "atom",
+      "category": "coding-agent",
       "product": "Codex CLI",
       "url": "https://github.com/openai/codex/releases.atom",
       "webUrl": "https://github.com/openai/codex/releases",
-      "maxEntries": 20,
+      "maxEntries": 12,
+      "excludePrereleases": true
+    },
+    {
+      "id": "gemini-cli-releases",
+      "kind": "atom",
+      "category": "coding-agent",
+      "product": "Gemini CLI",
+      "url": "https://github.com/google-gemini/gemini-cli/releases.atom",
+      "webUrl": "https://github.com/google-gemini/gemini-cli/releases",
+      "maxEntries": 12,
+      "excludePrereleases": true
+    },
+    {
+      "id": "openhands-releases",
+      "kind": "atom",
+      "category": "coding-agent",
+      "product": "OpenHands",
+      "url": "https://github.com/OpenHands/OpenHands/releases.atom",
+      "webUrl": "https://github.com/OpenHands/OpenHands/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "goose-releases",
+      "kind": "atom",
+      "category": "coding-agent",
+      "product": "Goose",
+      "url": "https://github.com/aaif-goose/goose/releases.atom",
+      "webUrl": "https://github.com/aaif-goose/goose/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "openai-agents-sdk-releases",
+      "kind": "atom",
+      "category": "agent-sdk",
+      "product": "OpenAI Agents SDK",
+      "url": "https://github.com/openai/openai-agents-python/releases.atom",
+      "webUrl": "https://github.com/openai/openai-agents-python/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "google-adk-releases",
+      "kind": "atom",
+      "category": "agent-sdk",
+      "product": "Google Agent Development Kit",
+      "url": "https://github.com/google/adk-python/releases.atom",
+      "webUrl": "https://github.com/google/adk-python/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "langgraph-releases",
+      "kind": "atom",
+      "category": "orchestration",
+      "product": "LangGraph",
+      "url": "https://github.com/langchain-ai/langgraph/releases.atom",
+      "webUrl": "https://github.com/langchain-ai/langgraph/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "pydantic-ai-releases",
+      "kind": "atom",
+      "category": "orchestration",
+      "product": "PydanticAI",
+      "url": "https://github.com/pydantic/pydantic-ai/releases.atom",
+      "webUrl": "https://github.com/pydantic/pydantic-ai/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "autogen-releases",
+      "kind": "atom",
+      "category": "orchestration",
+      "product": "Microsoft AutoGen",
+      "url": "https://github.com/microsoft/autogen/releases.atom",
+      "webUrl": "https://github.com/microsoft/autogen/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "crewai-releases",
+      "kind": "atom",
+      "category": "orchestration",
+      "product": "CrewAI",
+      "url": "https://github.com/crewAIInc/crewAI/releases.atom",
+      "webUrl": "https://github.com/crewAIInc/crewAI/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "mastra-releases",
+      "kind": "atom",
+      "category": "orchestration",
+      "product": "Mastra",
+      "url": "https://github.com/mastra-ai/mastra/releases.atom",
+      "webUrl": "https://github.com/mastra-ai/mastra/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "mcp-spec-releases",
+      "kind": "atom",
+      "category": "protocol",
+      "product": "Model Context Protocol",
+      "url": "https://github.com/modelcontextprotocol/modelcontextprotocol/releases.atom",
+      "webUrl": "https://github.com/modelcontextprotocol/modelcontextprotocol/releases",
+      "maxEntries": 6,
+      "excludePrereleases": true
+    },
+    {
+      "id": "vercel-ai-sdk-releases",
+      "kind": "atom",
+      "category": "agent-sdk",
+      "product": "Vercel AI SDK",
+      "url": "https://github.com/vercel/ai/releases.atom",
+      "webUrl": "https://github.com/vercel/ai/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "promptfoo-releases",
+      "kind": "atom",
+      "category": "evaluation",
+      "product": "Promptfoo",
+      "url": "https://github.com/promptfoo/promptfoo/releases.atom",
+      "webUrl": "https://github.com/promptfoo/promptfoo/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "langfuse-releases",
+      "kind": "atom",
+      "category": "evaluation",
+      "product": "Langfuse",
+      "url": "https://github.com/langfuse/langfuse/releases.atom",
+      "webUrl": "https://github.com/langfuse/langfuse/releases",
+      "maxEntries": 8,
       "excludePrereleases": true
     }
   ],
   "youtube": {
     "queries": [
-      "Claude Code agent workflow",
+      "AI coding agent workflow automation",
       "Claude Code skills hooks agents",
       "OpenAI Codex agent workflow",
-      "Codex automations coding agent"
+      "Gemini CLI agent workflow",
+      "OpenHands Goose coding agent workflow",
+      "OpenAI Agents SDK Google ADK",
+      "LangGraph PydanticAI CrewAI AutoGen Mastra",
+      "MCP agent tools workflow",
+      "AI agent harness evaluation benchmark",
+      "promptfoo Langfuse agent evaluation",
+      "coding agent memory context engineering",
+      "multi-agent orchestration developer tools"
     ],
-    "perQuery": 8,
+    "perQuery": 6,
     "discoveryDays": 30
   }
 }
