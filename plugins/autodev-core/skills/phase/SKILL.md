@@ -52,7 +52,7 @@ of what you happened to build. And research anything that depends on external
 behaviour (API caps, SDK versions, endpoints) rather than reasoning from
 internal consistency, which is not correctness.
 
-Existing: `spec`, `brainstorm`, `wizard`, `setup-project`
+Existing: `spec`, `brainstorm`, `framework-radar`, `wizard`, `setup-project`
 
 ---
 

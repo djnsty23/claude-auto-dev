@@ -142,7 +142,11 @@ if (!referencedOnly) {
                 cwd: ROOT,
                 encoding: 'utf8',
                 windowsHide: true,
-                timeout: 120000,
+                // Hosted Windows runners can take a little over two minutes
+                // when the same commit has push and pull_request jobs running.
+                // A timeout is infrastructure, so leave enough headroom to
+                // distinguish a slow evidence producer from a failed one.
+                timeout: 180000,
                 env: { ...process.env, NODE_V8_COVERAGE: covDir, AUTODEV_HOOKCHECK_CHILD: '1' },
             });
             if (r.error || r.status !== 0) {
