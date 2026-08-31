@@ -152,10 +152,17 @@ function run(args, extra, timeout, expect) {
     // or a plain assertion failure (Sol rounds 20-21).
     // expect: undefined, 'exit2' (a rejection path deliberately provoked), or
     // 'kill' (a loop-mode child this suite deliberately ends by timeout).
-    const killed = !!r.signal || !!(r.error && r.error.code === 'ETIMEDOUT');
-    if ((killed && expect !== 'kill')
-        || (!killed && (r.error || r.status === null))
-        || (r.status === 2 && expect !== 'exit2')) {
+    // Under 'kill' only a spawn-level failure is infrastructure - whether the
+    // child survived to the timeout or exited early is precisely what the
+    // call site's assertion adjudicates, so it must reach that assertion
+    // (Sol round-22: the old shape accepted exit 1 and arbitrary signals as
+    // the expected timeout).
+    const timedOut = !!(r.error && r.error.code === 'ETIMEDOUT');
+    const bad = expect === 'kill'
+        ? !!(r.error && !timedOut)
+        : (!!r.error || !!r.signal || r.status === null
+            || (r.status === 2 && expect !== 'exit2'));
+    if (bad) {
         console.error('infrastructure: subject run ' + JSON.stringify(args) + ' did not produce a verdict ('
             + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
         process.exitCode = 2;
@@ -626,7 +633,16 @@ try {
         // preserved original left by an earlier failed run on POSIX.
         const stash = shipped + '.suite-stashed-' + process.pid + '-' + Date.now();
         let moved = false;
-        try { fs.renameSync(shipped, stash); moved = true; } catch { /* not present */ }
+        try { fs.renameSync(shipped, stash); moved = true; }
+        catch (e) {
+            // ENOENT means the sibling genuinely is not present, which is the
+            // scenario's premise. Anything else is infrastructure and must
+            // not be silently read as absence (Sol round-22).
+            if (e.code !== 'ENOENT') {
+                console.error('infrastructure: could not stash ' + shipped + ' (' + (e.code || e.message) + ')');
+                process.exitCode = 2;
+            }
+        }
         try {
             const r = run(['--once', '--state', sp]);
             has('with the sibling absent it falls back to the home path',
@@ -878,8 +894,12 @@ try {
         const r = run(['--state', sp, '--interval-minutes', '5',
             '--fixture-cost', '1', '--fixture-window', String(WSTART),
             '--fixture-now', String(BASE)], null, 2500, 'kill');   // ended by timeout BY DESIGN
-        check('without --once the process keeps polling rather than exiting',
-            r.status !== 0, `exited cleanly with status ${r.status}, signal ${r.signal}`);
+        // The ONLY passing shape is the timeout kill itself: SIGTERM with a
+        // null status. An early self-exit - clean OR crashing - is the
+        // defect this scenario exists to catch (Sol round-22).
+        check('without --once the process keeps polling until the timeout kills it',
+            r.signal === 'SIGTERM' && r.status === null,
+            `expected the timeout kill; got status ${r.status}, signal ${r.signal}`);
     }
 
     // =======================================================================
