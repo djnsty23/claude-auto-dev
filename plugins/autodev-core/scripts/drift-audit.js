@@ -625,6 +625,15 @@ findings.sort((a, b) => order[a.severity] - order[b.severity]);
 console.log(`\nDrift audit — ${CONFIG}\n`);
 for (const line of census) console.log('  ' + line);
 console.log('');
+// A zero here has two causes and they are opposite. Either the population was
+// audited and is clean, or nothing was audited at all -- a wrong --config-dir,
+// a moved checkout, a permission failure -- and "no drift" is then a statement
+// about this probe rather than about the repos. Separate them before printing.
+if (!canonical.size) {
+    console.log('  COULD NOT AUDIT: 0 repos discovered under ' + CONFIG + '.');
+    console.log('  The probe is blind, not the population clean. Check the config dir.\n');
+    process.exit(1);
+}
 if (!findings.length) { console.log('  no drift found in the population above\n'); process.exit(0); }
 
 let lastArea = '';

@@ -106,15 +106,30 @@ const POPULATION = [
 // and check-assignment both print "COULD NOT ...: this is NOT '0 repos'". Every
 // one of those IS the control, expressed better than the word "control" would
 // have expressed it.
+// DERIVED FROM THE CORPUS, not from memory. The list below was written by
+// grepping every script in tooling/ and plugins/*/scripts/ for the concept and
+// counting what came back, because inventing it from memory got it wrong four
+// separate times in one session -- most recently by requiring "PROBE BLIND"
+// adjacent when two suites write "the probe is blind". Measured counts:
+// could not <verb> 66, this is not 35, is not evidence 11, probe blind 8,
+// cannot fire 8, refusing to <verb> 7, broken probe 5, probe is blind 2.
+//
+// `unverified` (40 hits) is deliberately NOT here. It reads as prose far more
+// often than as a guard, and every widening of this list risks hiding a true
+// positive -- which is exactly what happened to analyze-agent-cost.js. Widen
+// only on a phrasing that cannot mean anything except a guard.
 const CONTROL = [
     /\bknown[- ]positive\b/i,
     /\bcontrol\b/i,
     /\bselftest\b/i,
     /\bmutation\b/i,
-    /\bPROBE BLIND\b/i,
-    /\bREFUSING TO (?:REPORT|RUN|ANSWER)\b/i,
-    /\bCOULD NOT [A-Z]/,
-    /\bthis is NOT\b/,
+    /\bprobe (?:is )?blind\b/i,
+    /\bbroken (?:probe|extractor|finder)\b/i,
+    /\brefusing to \w+/i,
+    /\b(?:could|can)\s?not \w+/i,
+    /\bthis is not\b/i,
+    /\bis not evidence\b/i,
+    /\bnot (?:a |the )?(?:tree )?clean(?: tree)?\b/i,
     /\bso the probe could see\b/i,
 ];
 
