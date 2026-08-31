@@ -154,14 +154,14 @@ try {
         try { fs.renameSync(RUNNER, cap); claimed = true; } catch { /* deleted */ }
         if (claimed) {
             if (fs.readFileSync(cap, 'utf8') === mutant) fs.unlinkSync(cap);
-            else { console.error('NOT CLEANED: foreign content captured at ' + cap); process.exitCode = 1; }
+            else { console.error('NOT CLEANED: foreign content captured at ' + cap); process.exitCode = 2; }
         }
         fs.linkSync(RUNNER_ORIG, RUNNER);
         fs.unlinkSync(RUNNER_ORIG);
     } catch (e) {
         console.error('RESTORE INCOMPLETE for ' + RUNNER + ' (' + (e.code || e.message)
             + '); the original is at ' + RUNNER_ORIG);
-        process.exitCode = 1;
+        process.exitCode = 2;
     }
 }
 
@@ -197,4 +197,7 @@ for (const [label, ok, why] of cases) {
     ok ? pass++ : fail++;
 }
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : (process.exitCode || 0));
+// Precedence 2 -> 1 -> 0: an infrastructure problem outranks assertion
+// failures, because a run that could not maintain its own sandbox is
+// indeterminate, not red (Sol round-19).
+process.exit(process.exitCode === 2 ? 2 : (fail > 0 ? 1 : 0));

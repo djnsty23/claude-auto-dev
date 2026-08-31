@@ -180,12 +180,12 @@ const removeMutant = (file, orig, wrote) => {
         const cap = file + '.cap-' + crypto.randomBytes(6).toString('hex');
         let claimed = false;
         try { fs.renameSync(file, cap); claimed = true; }
-        catch { console.error('NOT CLEANED: ' + file + ' was deleted while mutated'); process.exitCode = 1; }
+        catch { console.error('NOT CLEANED: ' + file + ' was deleted while mutated'); process.exitCode = 2; }
         if (claimed) {
             if (fs.readFileSync(cap, 'utf8') === wrote) fs.unlinkSync(cap);
             else {
                 console.error('NOT CLEANED: foreign content on ' + file + ' captured at ' + cap);
-                process.exitCode = 1;
+                process.exitCode = 2;
             }
         }
         fs.linkSync(orig, file);
@@ -193,7 +193,7 @@ const removeMutant = (file, orig, wrote) => {
     } catch (e) {
         console.error('RESTORE INCOMPLETE for ' + file + ' (' + (e.code || e.message)
             + '); the original is at ' + orig);
-        process.exitCode = 1;
+        process.exitCode = 2;
     }
 };
 
@@ -343,4 +343,7 @@ for (const [label, ok, why] of cases) {
 console.log(`\n${pass} passed, ${fail} failed`);
 // A red cleanup (process.exitCode set by removeMutant) must survive a green
 // check run — exit(0) here would override it (Sol's round-12 blocker).
-process.exit(fail > 0 ? 1 : (process.exitCode || 0));
+// Precedence 2 -> 1 -> 0: an infrastructure problem outranks assertion
+// failures, because a run that could not maintain its own sandbox is
+// indeterminate, not red (Sol round-19).
+process.exit(process.exitCode === 2 ? 2 : (fail > 0 ? 1 : 0));

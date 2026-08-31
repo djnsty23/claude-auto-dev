@@ -616,7 +616,7 @@ try {
                 catch (e) {
                     console.error('NOT RESTORED: ' + shipped + ' was recreated while stashed ('
                         + (e.code || e.message) + '); the original is kept at ' + stash);
-                    process.exitCode = 1;
+                    process.exitCode = 2;
                 }
             }
         }
@@ -884,4 +884,7 @@ try {
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : (process.exitCode || 0));
+// Precedence 2 -> 1 -> 0: an infrastructure problem outranks assertion
+// failures, because a run that could not maintain its own sandbox is
+// indeterminate, not red (Sol round-19).
+process.exit(process.exitCode === 2 ? 2 : (fail > 0 ? 1 : 0));
