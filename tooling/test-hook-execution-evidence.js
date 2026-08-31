@@ -15,6 +15,55 @@ const CHECK = process.env.HOOK_CHECK
     ? path.resolve(process.env.HOOK_CHECK)
     : path.join(ROOT, 'tooling', 'find-untested-hooks.js');
 
+// THIS SUITE REWRITES TRACKED FILES (the vacuous-suite canary below prepends
+// to a real suite and restores it on exit), so a direct run of it overlapping
+// a stub sweep can silently poison the sweep's verdicts and both restore
+// clean — the exact silent-green path the sweep's own exclusion exists to
+// prevent. So it participates in the same protocol test-all.js uses: announce
+// a per-pid test lock before doing anything, refuse under a live sweep, and
+// skip both only when spawned BY the sweep (proven by the nonce in the live
+// lock, not by the env var's mere presence). Any suite that mutates tracked
+// files must carry this block; suites that only read do not.
+{
+    const crypto = require('crypto');
+    const key = 'check-suites-'
+        + crypto.createHash('sha1').update(fs.realpathSync(ROOT)).digest('hex').slice(0, 12);
+    const sweepLock = path.join(os.tmpdir(), key + '.lock');
+    let sweepChild = false;
+    if (process.env.AUTODEV_SWEEP_CHILD) {
+        try {
+            const lines = fs.readFileSync(sweepLock, 'utf8').split('\n');
+            try { process.kill(parseInt(lines[0], 10), 0); } catch (e) { if (e.code !== 'EPERM') throw e; }
+            sweepChild = lines[1] === process.env.AUTODEV_SWEEP_CHILD;
+        } catch { sweepChild = false; }
+    }
+    if (!sweepChild) {
+        const announce = path.join(os.tmpdir(), key + '.test-' + process.pid + '.lock');
+        try {
+            fs.writeFileSync(announce, String(process.pid));
+            process.on('exit', () => { try { fs.unlinkSync(announce); } catch { /* gone */ } });
+        } catch (e) {
+            console.error('refusing: could not announce this run (' + (e.code || e.message) + ')');
+            process.exit(2);
+        }
+        let sweepAlive = false;
+        let holder = NaN;
+        try {
+            holder = parseInt(fs.readFileSync(sweepLock, 'utf8'), 10);
+            if (Number.isFinite(holder)) {
+                try { process.kill(holder, 0); sweepAlive = true; }
+                catch (e) { sweepAlive = e.code === 'EPERM'; }
+            }
+        } catch { /* no sweep lock */ }
+        if (sweepAlive) {
+            try { fs.unlinkSync(announce); } catch { /* best effort */ }
+            console.error('refusing: a stub sweep (pid ' + holder + ') holds this tree, and this');
+            console.error('suite rewrites tracked files. Wait for the sweep, then re-run.');
+            process.exit(2);
+        }
+    }
+}
+
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
 const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.message || 'none'}`;

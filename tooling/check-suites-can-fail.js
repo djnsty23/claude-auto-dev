@@ -247,8 +247,16 @@ function installOwn(rel, full, content) {
         fs.writeFileSync(full, content, { flag: 'wx' });
     } catch (e) {
         conflict(`${rel} was recreated while being stubbed (${e.code || e.message})`);
-        try { fs.renameSync(orig, full); } catch (e2) {
-            conflict(`and returning its original threw ${e2.code || e2.message} — original is at ${path.basename(orig)}`);
+        // Rollback must not replace the recreating writer's file either
+        // (round-10: renameSync here overwrote it). link() refuses EEXIST;
+        // if the recreated file is still there, it survives and the original
+        // stays preserved on disk under its .orig name.
+        try {
+            fs.linkSync(orig, full);
+            fs.unlinkSync(orig);
+        } catch (e2) {
+            conflict(`the original could not return over the recreated ${rel} (${e2.code || e2.message})`
+                + ` — original preserved at ${path.basename(orig)}`);
         }
         return false;
     }
@@ -260,16 +268,19 @@ function removeOwn(rel) {
     if (!rec) return;
     installedNow.delete(rel);
     try {
-        let live = null;
-        try { live = fs.readFileSync(rec.full); } catch { /* absent */ }
-        if (live && live.equals(rec.expect)) {
-            fs.unlinkSync(rec.full);
-        } else if (live) {
-            const cap = rec.full + '.swept-' + process.pid + '-' + (++seq);
-            fs.renameSync(rec.full, cap);
-            conflict(`${rel} held foreign content at restore — captured to ${path.basename(cap)}, nothing lost`);
-        } else {
-            conflict(`${rel} was deleted by something else while stubbed`);
+        // Claim whatever is live by rename FIRST — one atomic syscall, so
+        // there is no read-then-unlink-by-pathname window (round-10: a
+        // writer replacing the stub between those two operations lost its
+        // file undetected). Classification happens on the claimed inode,
+        // which nothing else is writing to.
+        const cap = rec.full + '.swept-' + process.pid + '-' + (++seq);
+        let claimed = false;
+        try { fs.renameSync(rec.full, cap); claimed = true; }
+        catch { conflict(`${rel} was deleted by something else while stubbed`); }
+        if (claimed) {
+            const got = fs.readFileSync(cap);
+            if (got.equals(rec.expect)) fs.unlinkSync(cap);
+            else conflict(`${rel} held foreign content at restore — captured to ${path.basename(cap)}, nothing lost`);
         }
         try {
             fs.linkSync(rec.orig, rec.full);   // refuses (EEXIST) rather than replaces
@@ -291,6 +302,14 @@ function removeOwn(rel) {
 function completed(r, what) {
     if (r.error) { conflict(`${what} did not run (${r.error.code || r.error.message})`); return false; }
     if (r.signal) { conflict(`${what} was killed by ${r.signal} before completing`); return false; }
+    if (r.status === 2) {
+        // Exit 2 is this repo's refusal/indeterminate convention (dirty-tree
+        // guards, lock refusals, restoration failures). A child that REFUSED
+        // is not a child that FAILED, and scoring it as a red canary would
+        // verify nothing (Sol's round-10 blocker).
+        conflict(`${what} exited 2 — a refusal or indeterminate result, not a verdict`);
+        return false;
+    }
     return true;
 }
 
@@ -348,7 +367,11 @@ const NONCE = crypto.randomBytes(8).toString('hex');
             const holder = parseInt(raw, 10);
             let alive = false;
             if (Number.isFinite(holder)) {
-                try { process.kill(holder, 0); alive = true; } catch { alive = false; }
+                // EPERM means the pid EXISTS but belongs to another user —
+                // alive, not stale (Sol's round-10 blocker: treating any
+                // throw as dead let a cross-user sweep be read as absent).
+                try { process.kill(holder, 0); alive = true; }
+                catch (e) { alive = e.code === 'EPERM'; }
             }
             if (alive) {
                 console.error('\nRefusing to run: another sweep (pid ' + holder + ') holds this tree.');
@@ -409,7 +432,9 @@ process.on('uncaughtException', (e) => {
         try { holder = parseInt(fs.readFileSync(p, 'utf8'), 10); } catch { /* unreadable */ }
         let alive = false;
         if (Number.isFinite(holder)) {
-            try { process.kill(holder, 0); alive = true; } catch { alive = false; }
+            // EPERM = exists under another user = alive (round-10).
+            try { process.kill(holder, 0); alive = true; }
+            catch (e) { alive = e.code === 'EPERM'; }
         }
         if (alive) {
             console.error('\nRefusing to run: a test run (pid ' + holder + ') is in flight in this tree.');

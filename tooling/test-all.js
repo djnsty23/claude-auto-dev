@@ -108,17 +108,24 @@ if (suites.length === 0) {
       console.error('An unannounced run is invisible to a concurrent stub sweep.\n');
       process.exit(2);
     }
+    let sweepHolder = NaN;
+    let sweepAlive = false;
     try {
-      const holder = parseInt(fs.readFileSync(sweepLock, 'utf8'), 10);
-      if (Number.isFinite(holder)) {
-        process.kill(holder, 0);   // throws if dead
-        try { fs.unlinkSync(announce); } catch { /* withdrawn best-effort */ }
-        console.error('\nRefusing to run: a stub sweep (pid ' + holder + ') holds this tree.');
-        console.error('Any result printed now would describe its mutants, not the committed code.');
-        console.error('Wait for it to finish, then re-run.\n');
-        process.exit(2);
+      sweepHolder = parseInt(fs.readFileSync(sweepLock, 'utf8'), 10);
+      if (Number.isFinite(sweepHolder)) {
+        // EPERM means the pid exists under another user — ALIVE. Treating
+        // any throw as dead let a cross-user sweep overlap this run.
+        try { process.kill(sweepHolder, 0); sweepAlive = true; }
+        catch (e) { sweepAlive = e.code === 'EPERM'; }
       }
-    } catch { /* no sweep lock, or its holder is dead — proceed */ }
+    } catch { /* no sweep lock — proceed */ }
+    if (sweepAlive) {
+      try { fs.unlinkSync(announce); } catch { /* withdrawn best-effort */ }
+      console.error('\nRefusing to run: a stub sweep (pid ' + sweepHolder + ') holds this tree.');
+      console.error('Any result printed now would describe its mutants, not the committed code.');
+      console.error('Wait for it to finish, then re-run.\n');
+      process.exit(2);
+    }
   }
 }
 
