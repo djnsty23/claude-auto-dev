@@ -246,6 +246,40 @@ Two sweep rules that bite here:
   logs live in committed files, never in one session's chat. The other vendor
   cannot read your context window.
 
+## A timeout aborts the call, not the process
+
+The single most expensive misreading of a delegated run. Your handle on the
+adversary dies; **the adversary does not.** One dispatch kept working for about
+ten minutes after the caller had already recorded it as failed.
+
+Everything below follows from that one fact:
+
+- **Do not re-dispatch on a timeout.** A second dispatch puts two writers on one
+  deliverable. That is not a race you lose loudly — one file vanished mid-rewrite
+  and was later found 415 lines shorter under an append that looked clean.
+- **Find out whether it is still running before concluding anything.** An empty
+  result is a claim about the handover, never about the work.
+- **The tell is `git show --numstat`, not the tool output.** Nothing in a tool
+  result announces that a file got smaller. A deliverable that shrank and a
+  deliverable that was edited look identical until you count lines.
+- **Commit the deliverable after every change.** An untracked file has no
+  recovery path at all, which turns an ordinary overwrite into a total loss.
+- **Last resort: the adversary's own session log on disk holds the bytes
+  verbatim.** That is what recovery came from when the untracked file was gone.
+  It is a backstop, not a plan — committing is the plan.
+
+**Instruct the adversary to write incrementally.** Append findings to a file as
+it goes rather than composing one answer at the end, and prefer a format that
+survives truncation — one finding per block, never a single JSON object, which
+parses as nothing when cut anywhere. A run that times out then still leaves
+output, and a partial deliverable beats an empty one every time.
+
+**Keep from the dispatch whatever tends to stall it.** In the run this was
+measured on, browser work was the stalling half and was also the half the caller
+could do directly. Removing it and re-dispatching narrowed produced a complete
+plan on the next attempt. Split a brief along "what can hang" rather than along
+what is conceptually tidy.
+
 ## Measure every run
 
 Append one row per round to `.claude/reports/adversarial-loop-<topic>.md` in
