@@ -30,6 +30,10 @@ model-switch observations, and native cross-session transport. The hermetic
 suite covers 39 collector, state, ranking, failure, API, transcript, and command
 cases. The complete repository suite passed 86 of 86.
 
+The hook-execution evidence gate now gives hosted Windows runners enough timeout
+headroom to finish a valid coverage producer instead of misclassifying runner
+contention as an indeterminate result.
+
 ## [8.142.0] - 2026-08-30
 
 ### Fixed: three POSIX assumptions made the suite unrunnable on Windows

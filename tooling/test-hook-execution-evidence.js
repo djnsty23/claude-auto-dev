@@ -165,7 +165,9 @@ const runChecker = (expect2 = false) => {
         cwd: SANDBOX,
         encoding: 'utf8',
         windowsHide: true,
-        timeout: 180000,
+        // Must exceed the checker's per-suite timeout. GitHub's hosted Windows
+        // runners can need more than two minutes during duplicate CI runs.
+        timeout: 240000,
     }), 'the checker', expect2);
     let json = null;
     try { json = JSON.parse(result.stdout); } catch { /* reported by controls */ }
