@@ -1,5 +1,35 @@
 # Changelog
 
+## [8.144.0] - 2026-08-31
+
+### Added: a report-only framework radar
+
+`framework radar` now collects recent Claude Code changelog sections, stable
+Codex releases, and relevant YouTube videos before asking Claude to judge any
+claim. It stores raw transcripts outside the public repository, records source
+and population failures explicitly, keeps interrupted evidence pending, and
+marks a manifest reviewed only after a report cross-foots its counts.
+
+The shipped skill makes the workflow available inside Claude Code. It checks
+video claims against primary documentation and the current repository,
+classifies already-handled and rejected ideas, and proposes at most three
+measured A/B/simpler experiments. Scheduled mode is report-only: it cannot edit
+framework behavior, create stories, change gates, commit, push, or release.
+
+The collector works with the YouTube Data API when configured and falls back to
+`yt-dlp` plus `youtube-transcript-api`. No-key discovery uses separate relevance,
+upload-date, and current-month lanes because one YouTube ordering is not a
+reliable recent-content search. Caption HLS playlists are resolved into actual
+caption text before a transcript is counted as successful. Stable Codex intake
+filters alpha, beta, and release-candidate churn.
+
+The first live 14-day pilot checked all 3 configured sources, reviewed 21
+official items and 7 videos, and retrieved 4 of 5 attempted English transcripts.
+It produced three experiment candidates: plain-language output style,
+model-switch observations, and native cross-session transport. The hermetic
+suite covers 39 collector, state, ranking, failure, API, transcript, and command
+cases. The complete repository suite passed 86 of 86.
+
 ## [8.142.0] - 2026-08-30
 
 ### Fixed: three POSIX assumptions made the suite unrunnable on Windows

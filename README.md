@@ -66,6 +66,7 @@ without touching it.
 | — | `scripts/find-orphan-checks.js` finds verification code nothing runs |
 | `brainstorm` | Scan codebase + live site, propose improvements |
 | `brainstorm apply` | Create stories from the last brainstorm |
+| `framework radar` | Research recent Claude Code, Codex and agent-workflow changes, then propose measured experiments |
 | `auto` | Work through all pending stories autonomously |
 | `iterate` | Convergence loop: brainstorm → fix → re-scan until clean |
 | `audit` | 7-agent parallel quality audit |
@@ -117,6 +118,13 @@ auto       → implements all pending stories + visual verification
 ship       → review + security + deploy + post-deploy scan
 iterate    → brainstorm → fix → re-scan loop until clean
 ```
+
+**Framework Radar.** `framework radar` collects recent official Claude Code and
+Codex changes, discovers relevant captioned YouTube videos, keeps raw transcripts
+outside the repository, and checks each claim against the current code before
+proposing an experiment. Scheduled runs are report-only: they write a sourced
+review under `.claude/reports/` and never change code, stories, gates or git state.
+The deterministic collector is also available as `npm run radar` in this repo.
 
 **Visual verification.** Claude opens your app in the built-in Browser pane,
 reads the page, checks the console, and screenshots desktop and mobile after each

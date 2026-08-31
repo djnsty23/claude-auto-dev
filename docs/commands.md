@@ -18,6 +18,7 @@ These are what you type. Everything else is handled automatically by `auto`.
 | `brainstorm` | Feature ideas + architecture improvements → present findings |
 | `brainstorm quick` | Diff-based scan, only recently changed files (~10s) |
 | `brainstorm apply` | Create stories from last brainstorm |
+| `framework radar` | Research recent Claude Code, Codex and agent-workflow changes; propose measured experiments |
 | `progress` | Show sprint progress |
 | Natural language | "fix this", "add that", "remove X" — just describe it |
 
@@ -65,6 +66,7 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `memory backup` | Backup/restore auto-memory to private GitHub repo |
 | `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
 | `knowledge <area>` / `what do we know about` / `brief me on` | Distill a domain knowledge brief for a code area from memory |
+| `framework radar [days or video URL]` | Collect official changes and relevant video transcripts, then write a report-only experiment shortlist |
 
 For quick fixes, just describe what to fix — no commands needed.
 
@@ -75,7 +77,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 45 skills across three plugins: 38 in `autodev-core`, 3 in `autodev-memory`, 4 in `autodev-stack`
+- 62 skills across three plugins: 53 in `autodev-core`, 5 in `autodev-memory`, 4 in `autodev-stack`
 - Claude picks a skill from its `description` and `when_to_use`; run `/plugin` to see what is installed
 - Auto-loaded by file context: `core` (on prd.json), `standards` and the `rule-*` skills (on matching source files)
 
