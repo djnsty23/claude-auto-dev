@@ -33,22 +33,6 @@ const CANON_ROOT = canonPath(ROOT);
 // a shared tmpdir is forgeable and every claim/rollback dance has one more
 // race, so this run deletes NOTHING it did not create. Stale sandboxes are
 // reported for a human to verify and delete.
-for (const d of fs.readdirSync(os.tmpdir())) {
-    const m = d.match(new RegExp('^' + SB_PREFIX + '(\\d+)-'));
-    if (!m) continue;
-    let alive = false;
-    try { process.kill(parseInt(m[1], 10), 0); alive = true; }
-    catch (e) { alive = e.code === 'EPERM'; }
-    if (!alive) {
-        console.error('note: stale sandbox left by dead pid ' + m[1] + ' at '
-            + path.join(os.tmpdir(), d) + ' — verify and delete it manually');
-    }
-}
-
-if (canonPath(os.tmpdir()) === CANON_ROOT || canonPath(os.tmpdir()).startsWith(CANON_ROOT + path.sep)) {
-    console.error('refusing: TMPDIR is inside the source tree — the snapshot would recurse into itself');
-    process.exit(2);
-}
 const SB_SKIP = new Set(['.git', '.claude', 'node_modules']);
 // Symlinks and junctions are skipped, not copied — a link out of the tree
 // would let sandbox mutations escape the sandbox.
@@ -73,15 +57,37 @@ const sbManifest = (root) => {
     walk('');
     return out;
 };
-const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
-// Cleanup registers IMMEDIATELY after creation (round-17: registering after
-// verification stranded the sandbox on any refusal or exception). Created
-// by mkdtemp in this process — the one directory this run may delete
-// without any ownership question.
+// Cleanup registers BEFORE creation, null-guarded (rounds 17-18), and a
+// FAILED cleanup is loud: it logs the stranded path and forces exit 2
+// rather than letting a locked sandbox survive a green exit.
+let SANDBOX = null;
 process.on('exit', () => {
-    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reported stale next run */ }
+    if (!SANDBOX) return;
+    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); }
+    catch (e) {
+        console.error('sandbox cleanup FAILED (' + (e.code || e.message) + ') — left at ' + SANDBOX);
+        process.exitCode = 2;
+    }
 });
 try {
+    // Everything from temp enumeration to the snapshot proof is
+    // INFRASTRUCTURE: exceptions exit 2, never 1 (rounds 17-18).
+    for (const d of fs.readdirSync(os.tmpdir())) {
+        const m = d.match(new RegExp('^' + SB_PREFIX + '(\\d+)-'));
+        if (!m) continue;
+        let alive = false;
+        try { process.kill(parseInt(m[1], 10), 0); alive = true; }
+        catch (e) { alive = e.code === 'EPERM'; }
+        if (!alive) {
+            console.error('note: stale sandbox left by dead pid ' + m[1] + ' at '
+                + path.join(os.tmpdir(), d) + ' — verify and delete it manually');
+        }
+    }
+    if (canonPath(os.tmpdir()) === CANON_ROOT || canonPath(os.tmpdir()).startsWith(CANON_ROOT + path.sep)) {
+        console.error('refusing: TMPDIR is inside the source tree — the snapshot would recurse into itself');
+        process.exit(2);
+    }
+    SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
     // Three-way proof: source-before, destination, source-after must agree,
     // and the destination must contain no links. Any disagreement refuses.
     const before = sbManifest(ROOT);

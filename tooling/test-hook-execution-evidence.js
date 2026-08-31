@@ -38,24 +38,6 @@ const CANON_ROOT = canonPath(ROOT);
 // tmpdir is forgeable, and every claim/rollback dance has one more race, so
 // this run deletes NOTHING it did not create. A stale sandbox is reported
 // with its path and the human who can verify it deletes it.
-for (const d of fs.readdirSync(os.tmpdir())) {
-    const m = d.match(new RegExp('^' + SB_PREFIX + '(\\d+)-'));
-    if (!m) continue;
-    let alive = false;
-    try { process.kill(parseInt(m[1], 10), 0); alive = true; }
-    catch (e) { alive = e.code === 'EPERM'; }
-    if (!alive) {
-        console.error('note: stale sandbox left by dead pid ' + m[1] + ' at '
-            + path.join(os.tmpdir(), d) + ' — verify and delete it manually');
-    }
-}
-
-// The snapshot would recurse into itself if tmpdir lives inside the source
-// tree; refuse rather than copy forever.
-if (canonPath(os.tmpdir()) === CANON_ROOT || canonPath(os.tmpdir()).startsWith(CANON_ROOT + path.sep)) {
-    console.error('refusing: TMPDIR is inside the source tree — the snapshot would recurse into itself');
-    process.exit(2);
-}
 const SB_SKIP = new Set(['.git', '.claude', 'node_modules']);
 // Symlinks and junctions are SKIPPED, not copied: a link pointing outside
 // the tree would let sandbox mutations escape the sandbox.
@@ -81,16 +63,44 @@ const sbManifest = (root) => {
     walk('');
     return out;
 };
-const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
-// Cleanup registers IMMEDIATELY after creation (Sol's round-17 blocker: it
-// used to register after verification, so any refusal or exception in the
-// snapshot block permanently stranded the sandbox). This run created it
-// with mkdtemp in this process — the one directory it may delete without
-// any ownership question.
+// Cleanup registers BEFORE creation, null-guarded (rounds 17-18: register
+// after verification and a refusal strands the sandbox; register after
+// mkdtemp and a creation-adjacent throw still can). And a FAILED cleanup is
+// loud: swallowing an rmSync error let a locked sandbox survive a green
+// exit (Sol's round-18 blocker) — it logs the path and forces exit 2.
+let SANDBOX = null;
 process.on('exit', () => {
-    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* reported stale next run */ }
+    if (!SANDBOX) return;
+    try { fs.rmSync(SANDBOX, { recursive: true, force: true }); }
+    catch (e) {
+        console.error('sandbox cleanup FAILED (' + (e.code || e.message) + ') — left at ' + SANDBOX);
+        process.exitCode = 2;
+    }
 });
 try {
+    // Everything from temp enumeration to the snapshot proof is
+    // INFRASTRUCTURE: any exception in it exits 2, because an exit 1 reads
+    // as this suite going red, which the sweep could score as a canary
+    // (rounds 17-18 moved this boundary out to cover the enumeration and
+    // mkdtemp themselves).
+    for (const d of fs.readdirSync(os.tmpdir())) {
+        const m = d.match(new RegExp('^' + SB_PREFIX + '(\\d+)-'));
+        if (!m) continue;
+        let alive = false;
+        try { process.kill(parseInt(m[1], 10), 0); alive = true; }
+        catch (e) { alive = e.code === 'EPERM'; }
+        if (!alive) {
+            console.error('note: stale sandbox left by dead pid ' + m[1] + ' at '
+                + path.join(os.tmpdir(), d) + ' — verify and delete it manually');
+        }
+    }
+    // The snapshot would recurse into itself if tmpdir lives inside the
+    // source tree; refuse rather than copy forever.
+    if (canonPath(os.tmpdir()) === CANON_ROOT || canonPath(os.tmpdir()).startsWith(CANON_ROOT + path.sep)) {
+        console.error('refusing: TMPDIR is inside the source tree — the snapshot would recurse into itself');
+        process.exit(2);
+    }
+    SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), SB_PREFIX + process.pid + '-'));
     // Three-way proof: source-before, destination, source-after must agree,
     // and the destination traversal must contain no links at all. Any
     // disagreement is a mid-copy change or an escape vector, and the run
