@@ -158,13 +158,17 @@ function run(args, extra, timeout, expect) {
     // (Sol round-22: the old shape accepted exit 1 and arbitrary signals as
     // the expected timeout).
     const timedOut = !!(r.error && r.error.code === 'ETIMEDOUT');
-    // Under 'kill': a spawn-level failure that is not our timeout is
-    // infrastructure, and so is a child that exited 2 on its own - the child
-    // declared itself indeterminate, which must not demote to an assertion 1
-    // (Sol round-23). Everything else (early exit 0, 1, self-signal) reaches
-    // the call site's assertion, which requires OUR timeout to have fired.
+    // Under 'kill' exactly ONE outcome is a verdict: our timeout fired and
+    // the child died to the SIGTERM it sent, leaving a null status. An early
+    // numeric 0/1 self-exit is the behavioural red the scenario exists to
+    // catch, so it reaches the assertion. EVERY other incomplete shape is
+    // infrastructure (Sol round-24): a non-timeout signal, ETIMEDOUT with a
+    // non-SIGTERM signal such as SIGKILL, ETIMEDOUT carrying a status, a
+    // self-exit 2, or any other spawn error.
+    const killVerdict = timedOut && r.signal === 'SIGTERM' && r.status === null;
+    const earlyNumericExit = !r.error && !r.signal && (r.status === 0 || r.status === 1);
     const bad = expect === 'kill'
-        ? (!!(r.error && !timedOut) || (!timedOut && r.status === 2))
+        ? !(killVerdict || earlyNumericExit)
         : (!!r.error || !!r.signal || r.status === null
             || (r.status === 2 && expect !== 'exit2'));
     if (bad) {
@@ -899,12 +903,13 @@ try {
         const r = run(['--state', sp, '--interval-minutes', '5',
             '--fixture-cost', '1', '--fixture-window', String(WSTART),
             '--fixture-now', String(BASE)], null, 2500, 'kill');   // ended by timeout BY DESIGN
-        // The ONLY passing shape is OUR timeout having fired (Sol round-23:
-        // asserting on the SIGTERM signature alone let a child that killed
-        // ITSELF with SIGTERM pass as the expected timeout). timedOut is
-        // true only when the spawn's own timer delivered the kill.
+        // The ONLY passing shape is the full triple: OUR timeout fired
+        // (timedOut), the child died to the SIGTERM it delivered, and no
+        // numeric status came back. Round 23 dropped the signal check, which
+        // let ETIMEDOUT + SIGKILL through; asserting the signal alone had let
+        // a self-SIGTERM through. Both halves are required (Sol round-24).
         check('without --once the process keeps polling until the timeout kills it',
-            r.timedOut === true && r.status === null,
+            r.timedOut === true && r.signal === 'SIGTERM' && r.status === null,
             `expected our timeout kill; got status ${r.status}, signal ${r.signal}, timedOut ${r.timedOut}`);
     }
 
