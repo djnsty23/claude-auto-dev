@@ -29,12 +29,15 @@ reports which. Read `CLAUDE.md`.
 - **Write incrementally.** Append findings to your output file as you go rather
   than composing one answer at the end, and use a format that survives being cut
   in half. A run that ends early then still leaves work behind.
-- **Commit the deliverable as you go if you are able to.** An untracked file has
-  no recovery path, so an overwrite is a total loss rather than a diff.
-- **A caller's timeout does not stop you.** Your handle dies and you keep
-  running. Assume the caller may dispatch again and may not realise you are
-  still writing, so never leave a file in a half-written state you would not
-  want read.
+- **Give your deliverable a recovery path.** An untracked file has none, so an
+  overwrite is total loss rather than a diff. Repo content: commit it to the
+  working branch as it grows, locally, and leave pushing to the caller. An
+  audit report belongs under `.claude/reports/`, which is gitignored here on
+  purpose; there the recovery path is appending every round, not a commit.
+- **A caller's timeout may not stop you.** Its handle dies whether or not you
+  do. Assume the caller may dispatch again without realising you are still
+  writing, so never leave a file in a half-written state you would not want
+  read, and clean up anything you planted.
 - **Every claim carries the command that produced it and what it printed.**
   Print the population beside any count. Before reporting that something is
   absent, run a known-positive control and say what it found.
