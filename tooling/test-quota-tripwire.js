@@ -56,6 +56,13 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+
+// Any uncaught throw in this suite is INFRASTRUCTURE: exit 2, never the
+// ambient exit 1 the sweep could score as evidence (Sol rounds 20-21).
+process.on('uncaughtException', (e) => {
+    console.error('infrastructure failure (uncaught): ' + ((e && (e.code || e.message)) || e));
+    process.exit(2);
+});
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -132,10 +139,19 @@ function env(extra) {
     return Object.assign(e, extra || {});
 }
 
-function run(args, extra, timeout) {
+function run(args, extra, timeout, expect2) {
     const r = spawnSync(process.execPath, [SUBJECT].concat(args), {
         encoding: 'utf8', env: env(extra), timeout: timeout || 15000,
     });
+    // A child that errored, was signalled, carries a null status, or exited
+    // 2 without this call site expecting it produced no verdict: that is
+    // INFRASTRUCTURE (exitCode 2), never a false-green `status !== 0` pass
+    // or a plain assertion failure (Sol rounds 20-21).
+    if (r.error || r.signal || r.status === null || (!expect2 && r.status === 2)) {
+        console.error('infrastructure: subject run did not produce a verdict ('
+            + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
+        process.exitCode = 2;
+    }
     return { status: r.status, signal: r.signal, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
@@ -655,15 +671,15 @@ try {
     // =======================================================================
     {
         const sp = statePath('cal-bad');
-        const r = run(['--calibrate', '--state', sp]);
+        const r = run(['--calibrate', '--state', sp], null, null, true);   // expects exit 2
         eq('--calibrate with no percentage exits 2', r.status, 2);
         has('...telling you what it wants', r.stderr, 'needs the percentage the app is showing');
         eq('...and prints nothing to stdout', r.stdout, '');
         eq('...and writes no state', fs.existsSync(sp), false);
     }
     {
-        eq('--calibrate 0 is rejected', run(['--calibrate', '0', '--state', statePath('c0')]).status, 2);
-        eq('--calibrate 101 is rejected', run(['--calibrate', '101', '--state', statePath('c101')]).status, 2);
+        eq('--calibrate 0 is rejected', run(['--calibrate', '0', '--state', statePath('c0')], null, null, true).status, 2);
+        eq('--calibrate 101 is rejected', run(['--calibrate', '101', '--state', statePath('c101')], null, null, true).status, 2);
     }
     {
         const sp = statePath('cal');

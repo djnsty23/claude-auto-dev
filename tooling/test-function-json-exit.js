@@ -19,10 +19,13 @@ process.on('uncaughtException', (e) => {
 // A child that errored, was signalled, or carries a null status produced no
 // verdict; that is infrastructure (exitCode 2), while the assertions still
 // report what they saw (Sol round-20).
-const infra = (r, what) => {
-    if (r.error || r.signal || r.status === null) {
-        console.error('infrastructure: ' + what + ' did not complete ('
-            + (r.error ? (r.error.code || r.error.message) : (r.signal || 'null status')) + ')');
+const infra = (r, what, expect2 = false) => {
+    // An UNEXPECTED child exit 2 is the child declaring itself indeterminate;
+    // demoting it to an outer assertion 1 would let the sweep read it as a
+    // red verdict (Sol round-21). Call sites expecting a 2 say so.
+    if (r.error || r.signal || r.status === null || (!expect2 && r.status === 2)) {
+        console.error('infrastructure: ' + what + ' did not produce a verdict ('
+            + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
         process.exitCode = 2;
     }
     return r;
@@ -163,7 +166,7 @@ try {
         encoding: 'utf8',
         windowsHide: true,
         timeout: 60000,
-    }), 'the checker');
+    }), 'the checker', true);   // this spawn deliberately provokes exit 2
     try { payload = JSON.parse(result.stdout); } catch { /* controls report it */ }
 } finally {
     try {

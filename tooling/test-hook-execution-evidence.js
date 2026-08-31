@@ -147,22 +147,26 @@ const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.me
 // A child that errored, was signalled, or carries a null status produced no
 // verdict; that is infrastructure (exitCode 2), while the assertions still
 // report what they saw (Sol round-20).
-const infra = (r, what) => {
-    if (r.error || r.signal || r.status === null) {
-        console.error('infrastructure: ' + what + ' did not complete ('
-            + (r.error ? (r.error.code || r.error.message) : (r.signal || 'null status')) + ')');
+const infra = (r, what, expect2 = false) => {
+    // An UNEXPECTED child exit 2 is the child declaring itself indeterminate,
+    // and demoting that to an outer assertion-failure 1 would let the sweep
+    // read it as a red verdict (Sol round-21). Call sites that deliberately
+    // provoke a 2 say so.
+    if (r.error || r.signal || r.status === null || (!expect2 && r.status === 2)) {
+        console.error('infrastructure: ' + what + ' did not produce a verdict ('
+            + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
         process.exitCode = 2;
     }
     return r;
 };
 
-const runChecker = () => {
+const runChecker = (expect2 = false) => {
     const result = infra(spawnSync(process.execPath, [CHECK, '--json'], {
         cwd: SANDBOX,
         encoding: 'utf8',
         windowsHide: true,
         timeout: 180000,
-    }), 'the checker');
+    }), 'the checker', expect2);
     let json = null;
     try { json = JSON.parse(result.stdout); } catch { /* reported by controls */ }
     return { result, json };
@@ -328,7 +332,7 @@ if (target && targetSuite && original) {
         check('control: the forced-red suite emits raw V8 coverage for its hook',
             rawCoverageContains(coverageDir, targetHook),
             `coverage dumps=${fs.readdirSync(coverageDir).length}`);
-        failedSuiteCheck = runChecker();
+        failedSuiteCheck = runChecker(true);   // this call deliberately provokes exit 2
     } finally {
         if (redOrig) removeMutant(targetSuite, redOrig, redWroteNow);
         fs.rmSync(coverageDir, { recursive: true, force: true });
