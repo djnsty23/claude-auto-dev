@@ -607,7 +607,16 @@ try {
                 r.stdout, path.join(FIXHOME, '.claude', 'scripts', 'quota-burn.js'));
             has('...and reports the miss rather than assuming zero', r.stdout, 'code=source-missing');
         } finally {
-            if (moved) fs.renameSync(stash, shipped);
+            // link() refuses EEXIST, so a file recreated at the shipped path
+            // while it was stashed survives instead of being replaced.
+            if (moved) {
+                try { fs.linkSync(stash, shipped); fs.unlinkSync(stash); }
+                catch (e) {
+                    console.error('NOT RESTORED: ' + shipped + ' was recreated while stashed ('
+                        + (e.code || e.message) + '); the original is kept at ' + stash);
+                    process.exitCode = 1;
+                }
+            }
         }
     }
 

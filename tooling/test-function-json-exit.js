@@ -17,15 +17,16 @@ const check = (label, ok, detail) => cases.push([label, ok, detail]);
 const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.message || 'none'}`;
 
 const original = fs.readFileSync(RUNNER, 'utf8');
+const mutant =
+    "#!/usr/bin/env node\n" +
+    "console.error('intentional F6 baseline failure');\n" +
+    "process.exit(1);\n";
 let result = null;
 let payload = null;
 try {
     // Stop before any suite or plugin source is loaded. This makes an empty
     // coverage population while keeping the failure intentional and parseable.
-    fs.writeFileSync(RUNNER,
-        "#!/usr/bin/env node\n" +
-        "console.error('intentional F6 baseline failure');\n" +
-        "process.exit(1);\n");
+    fs.writeFileSync(RUNNER, mutant);
     result = spawnSync(process.execPath, [CHECK, '--json'], {
         cwd: ROOT,
         encoding: 'utf8',
@@ -34,7 +35,15 @@ try {
     });
     try { payload = JSON.parse(result.stdout); } catch { /* controls report it */ }
 } finally {
-    fs.writeFileSync(RUNNER, original);
+    // Restore only over this suite's own mutant — a concurrent writer's
+    // content is left in place and reported, never overwritten with a stale
+    // copy.
+    const now = fs.readFileSync(RUNNER, 'utf8');
+    if (now === mutant) fs.writeFileSync(RUNNER, original);
+    else if (now !== original) {
+        console.error('NOT RESTORED: ' + RUNNER + ' changed under this suite — restore it from git.');
+        process.exitCode = 1;
+    }
 }
 
 const restoredSyntax = spawnSync(process.execPath, ['--check', RUNNER], {

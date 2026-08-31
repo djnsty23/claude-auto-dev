@@ -15,55 +15,6 @@ const CHECK = process.env.HOOK_CHECK
     ? path.resolve(process.env.HOOK_CHECK)
     : path.join(ROOT, 'tooling', 'find-untested-hooks.js');
 
-// THIS SUITE REWRITES TRACKED FILES (the vacuous-suite canary below prepends
-// to a real suite and restores it on exit), so a direct run of it overlapping
-// a stub sweep can silently poison the sweep's verdicts and both restore
-// clean — the exact silent-green path the sweep's own exclusion exists to
-// prevent. So it participates in the same protocol test-all.js uses: announce
-// a per-pid test lock before doing anything, refuse under a live sweep, and
-// skip both only when spawned BY the sweep (proven by the nonce in the live
-// lock, not by the env var's mere presence). Any suite that mutates tracked
-// files must carry this block; suites that only read do not.
-{
-    const crypto = require('crypto');
-    const key = 'check-suites-'
-        + crypto.createHash('sha1').update(fs.realpathSync(ROOT)).digest('hex').slice(0, 12);
-    const sweepLock = path.join(os.tmpdir(), key + '.lock');
-    let sweepChild = false;
-    if (process.env.AUTODEV_SWEEP_CHILD) {
-        try {
-            const lines = fs.readFileSync(sweepLock, 'utf8').split('\n');
-            try { process.kill(parseInt(lines[0], 10), 0); } catch (e) { if (e.code !== 'EPERM') throw e; }
-            sweepChild = lines[1] === process.env.AUTODEV_SWEEP_CHILD;
-        } catch { sweepChild = false; }
-    }
-    if (!sweepChild) {
-        const announce = path.join(os.tmpdir(), key + '.test-' + process.pid + '.lock');
-        try {
-            fs.writeFileSync(announce, String(process.pid));
-            process.on('exit', () => { try { fs.unlinkSync(announce); } catch { /* gone */ } });
-        } catch (e) {
-            console.error('refusing: could not announce this run (' + (e.code || e.message) + ')');
-            process.exit(2);
-        }
-        let sweepAlive = false;
-        let holder = NaN;
-        try {
-            holder = parseInt(fs.readFileSync(sweepLock, 'utf8'), 10);
-            if (Number.isFinite(holder)) {
-                try { process.kill(holder, 0); sweepAlive = true; }
-                catch (e) { sweepAlive = e.code === 'EPERM'; }
-            }
-        } catch { /* no sweep lock */ }
-        if (sweepAlive) {
-            try { fs.unlinkSync(announce); } catch { /* best effort */ }
-            console.error('refusing: a stub sweep (pid ' + holder + ') holds this tree, and this');
-            console.error('suite rewrites tracked files. Wait for the sweep, then re-run.');
-            process.exit(2);
-        }
-    }
-}
-
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
 const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.message || 'none'}`;
@@ -87,6 +38,20 @@ const runSuite = (file, extraEnv = {}) => spawnSync(process.execPath, [file], {
     windowsHide: true,
     timeout: 60000,
 });
+
+// Restore a file this suite mutated, without overwriting anyone else's work:
+// write `original` back only while the file still holds exactly what THIS
+// suite wrote. Anything else means a concurrent writer got there — leave it,
+// say so loudly, and fail the run rather than absorb it.
+const restoreOwn = (file, wrote, original) => {
+    const now = fs.readFileSync(file, 'utf8');
+    if (now === wrote) { fs.writeFileSync(file, original); return true; }
+    if (now === original) return true;
+    console.error('NOT RESTORED: ' + file + ' changed under this suite — a concurrent');
+    console.error('writer owns its current content. Restore it from git yourself.');
+    process.exitCode = 1;
+    return false;
+};
 
 const insertAfterShebang = (source, insertion) => {
     if (!source.startsWith('#!')) return `${insertion}\n${source}`;
@@ -138,7 +103,7 @@ if (target) {
         // Preserve the exact path-resolving literal the old checker recognizes,
         // then exit before the hook load. A correct execution-based checker must
         // reject this even though the mutated suite itself exits successfully.
-        fs.writeFileSync(targetSuite, [
+        const vacuousSrc = [
             '#!/usr/bin/env node',
             "const path = require('path');",
             `const HOOK = path.resolve(__dirname, '..', 'plugins', ${JSON.stringify(target.plugin)}, 'hooks', ${JSON.stringify(target.name)});`,
@@ -146,15 +111,17 @@ if (target) {
             'process.exit(0);',
             'require(HOOK);',
             '',
-        ].join('\n'));
+        ].join('\n');
+        fs.writeFileSync(targetSuite, vacuousSrc);
 
         const vacuous = runSuite(targetSuite);
         check('control: the vacuous replacement exits 0 without loading its hook',
             vacuous.status === 0 && vacuous.signal === null && !vacuous.error,
             detail(vacuous));
         mutatedCheck = runChecker();
+        var vacuousWrote = vacuousSrc;
     } finally {
-        fs.writeFileSync(targetSuite, original);
+        restoreOwn(targetSuite, vacuousWrote, original);
     }
 
     const restored = runSuite(targetSuite);
@@ -188,7 +155,8 @@ if (target && targetSuite && original) {
             'process.exitCode = 1;',
             'process.exit = (code) => acceptanceExit(code === 0 ? 1 : code);',
         ].join('\n');
-        fs.writeFileSync(targetSuite, insertAfterShebang(original, exitWrapper));
+        const redSrc = insertAfterShebang(original, exitWrapper);
+        fs.writeFileSync(targetSuite, redSrc);
         const forcedRed = runSuite(targetSuite, { NODE_V8_COVERAGE: coverageDir });
         check('control: the dedicated suite is red after the injected failure',
             forcedRed.status === 1 && forcedRed.signal === null && !forcedRed.error,
@@ -197,8 +165,9 @@ if (target && targetSuite && original) {
             rawCoverageContains(coverageDir, targetHook),
             `coverage dumps=${fs.readdirSync(coverageDir).length}`);
         failedSuiteCheck = runChecker();
+        var redWrote = redSrc;
     } finally {
-        fs.writeFileSync(targetSuite, original);
+        restoreOwn(targetSuite, redWrote, original);
         fs.rmSync(coverageDir, { recursive: true, force: true });
     }
 

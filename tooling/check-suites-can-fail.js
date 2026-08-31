@@ -167,7 +167,7 @@ function deriveSubjects(suiteFile) {
         if (hits.length === 1) found.add(hits[0]);
     }
 
-    return [...found].filter((p) => fs.existsSync(path.join(ROOT, p)));
+    return [...found].filter((p) => fs.existsSync(path.join(SWEEP_ROOT, p)));
 }
 
 let _pluginFiles = null;
@@ -175,7 +175,7 @@ function allPluginFiles() {
     if (_pluginFiles) return _pluginFiles;
     const out = [];
     const walk = (dir) => {
-        for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+        for (const e of fs.readdirSync(path.join(SWEEP_ROOT, dir), { withFileTypes: true })) {
             if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
             const rel = dir + '/' + e.name;
             if (e.isDirectory()) walk(rel);
@@ -183,7 +183,7 @@ function allPluginFiles() {
         }
     };
     for (const top of ['plugins']) {
-        if (fs.existsSync(path.join(ROOT, top))) walk(top);
+        if (fs.existsSync(path.join(SWEEP_ROOT, top))) walk(top);
     }
     return (_pluginFiles = out);
 }
@@ -313,7 +313,10 @@ function completed(r, what) {
     return true;
 }
 
+// git() runs in the SOURCE tree (the dirty check, worktree management);
+// gitW() runs in the private sweep worktree (every scan below).
 const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
+const gitW = (args) => execSync('git ' + args, { cwd: SWEEP_ROOT, encoding: 'utf8' });
 
 // Refuse to run on a dirty tree: this script writes stubs over real files and
 // restores them with `git checkout --`, which would destroy uncommitted work.
@@ -326,145 +329,74 @@ if (dirty) {
     process.exit(2);
 }
 
-// ONE SWEEP PER TREE, ENFORCED (Sol's round-6 blocker). The zz- cleanup below
-// diffs the untracked set per suite, so two concurrent sweeps in one tree
-// would each see the other's fresh fixture as their own orphan and delete it
-// mid-use — until now "a mutation sweep needs the repo to itself" was prose,
-// not a mechanism. The lock lives in tmpdir, keyed on the resolved ROOT, so
-// distinct worktrees still sweep independently and the end-of-run clean-tree
-// assertion never sees the lock file itself. A dead holder is detected by pid
-// liveness and replaced: this repo had an orphaned sweep outlive its session
-// the same day this was written, and a lock that survives its owner would
-// otherwise block every future run.
+// THE PRIVATE MUTATION WORKTREE (Sol's round-11 conclusion, adopted whole).
+// Rounds 6 through 10 built locks, nonces, announce files and capture-and-
+// swap restores to make in-place mutation safe against uncoordinated
+// writers, and every round's review found the next window, because the races
+// are INHERENT to mutating a tree someone else can touch. So this sweep no
+// longer touches the shared tree at all: it checks out HEAD into a private
+// detached worktree under tmpdir, mutates THERE, and removes it afterwards.
+// No editor, no test run, no rival sweep can reach that tree, which retires
+// the whole exclusion protocol — the lock, the nonce, the per-pid announce
+// files, and the EPERM liveness logic — rather than hardening it again. The
+// engine below (rename-aside originals, O_EXCL/link placement, conflicts)
+// is kept: it is cheap, and inside a private tree every conflict it reports
+// is a real bug in this script rather than a bystander.
 const os = require('os');
-const crypto = require('crypto');
-const LOCK = path.join(os.tmpdir(), 'check-suites-'
-    + crypto.createHash('sha1').update(fs.realpathSync(ROOT)).digest('hex').slice(0, 12) + '.lock');
-// The lock's second line is a per-run NONCE. It is what children prove
-// themselves with: AUTODEV_SWEEP_CHILD must carry this exact value, read
-// back from the LIVE lock, to be honoured (Sol's round-8 blocker: a bare
-// boolean env var was an unauthenticated bypass of both exclusion guards —
-// any process that happened to inherit or set it walked straight through).
-const NONCE = crypto.randomBytes(8).toString('hex');
-
-(function acquireLock() {
-    for (let attempt = 0; attempt < 4; attempt++) {
-        try {
-            fs.writeFileSync(LOCK, process.pid + '\n' + NONCE, { flag: 'wx' });
-            process.on('exit', () => {
-                // Unlink only a lock that is still OURS. If a takeover stole
-                // it (a bug, but a survivable one), deleting the thief's lock
-                // here would let a third sweep in (Sol's round-8 blocker).
-                try {
-                    const cur = fs.readFileSync(LOCK, 'utf8');
-                    if (parseInt(cur, 10) === process.pid) fs.unlinkSync(LOCK);
-                } catch { /* already gone */ }
-            });
-            return;
-        } catch {
-            let raw = null;
-            try { raw = fs.readFileSync(LOCK, 'utf8'); } catch { continue; /* vanished — retry wx */ }
-            const holder = parseInt(raw, 10);
-            let alive = false;
-            if (Number.isFinite(holder)) {
-                // EPERM means the pid EXISTS but belongs to another user —
-                // alive, not stale (Sol's round-10 blocker: treating any
-                // throw as dead let a cross-user sweep be read as absent).
-                try { process.kill(holder, 0); alive = true; }
-                catch (e) { alive = e.code === 'EPERM'; }
-            }
-            if (alive) {
-                console.error('\nRefusing to run: another sweep (pid ' + holder + ') holds this tree.');
-                console.error('A mutation sweep needs the repo to itself; wait for it or kill it, then re-run.\n');
-                process.exit(2);
-            }
-            // NO automatic takeover. Rounds 7 and 8 each closed one takeover
-            // race and each review found the next (delete a rival's fresh
-            // lock; steal a live lock; a third contender arriving during the
-            // put-back), because automatic reclamation of a shared exclusion
-            // token is where the races LIVE. The convenience was never worth
-            // it: a stale lock means a sweep CRASHED here, which a human
-            // should see anyway. So a dead holder is reported with the exact
-            // recovery command, and the operator — who can actually verify
-            // nothing is running — deletes the file.
-            console.error('\nRefusing to run: a STALE sweep lock is present (holder pid '
-                + holder + ' is not running).');
-            console.error('A previous sweep died without cleaning up. After confirming no sweep');
-            console.error('is running in this tree, delete this file and re-run:');
-            console.error('\n  ' + LOCK + '\n');
-            process.exit(2);
-        }
+const SWEEP_ROOT = (() => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-suites-wt-'));
+    fs.rmdirSync(dir);   // hand git a unique, nonexistent path
+    try {
+        execSync('git worktree add --detach ' + JSON.stringify(dir) + ' HEAD',
+            { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' });
+    } catch (e) {
+        console.error('\nCould not create the private mutation worktree: ' + (e.stderr || e.message));
+        process.exit(2);
     }
-    console.error('\nCould not acquire the sweep lock at ' + LOCK + ' — refusing to run.\n');
-    process.exit(2);
+    return dir;
 })();
+const SWEEP_TOOLING = path.join(SWEEP_ROOT, 'tooling');
+process.on('exit', () => {
+    try {
+        execSync('git worktree remove --force ' + JSON.stringify(SWEEP_ROOT),
+            { cwd: ROOT, stdio: 'pipe' });
+    } catch {
+        try {
+            fs.rmSync(SWEEP_ROOT, { recursive: true, force: true });
+            execSync('git worktree prune', { cwd: ROOT, stdio: 'pipe' });
+        } catch { /* a leftover tmpdir worktree is inert; prune removes the record later */ }
+    }
+});
 
 // Anything that escapes past the conflict handling above must still land as
-// INDETERMINATE with the tree's state named — never as an ordinary crash
-// whose exit status hides that mutants may be in place (Sol's round-9
-// blocker). Originals set aside by the engine survive on disk as
-// `.orig-<pid>-<n>` files, so the report names what recovery needs.
+// INDETERMINATE — never as an ordinary crash whose exit status hides what
+// happened (Sol's round-9 blocker). The mutated tree is the private
+// worktree, so a crash strands nothing in the user's tree; the handler
+// still names what was mid-flight for the record.
 process.on('uncaughtException', (e) => {
     console.error('\nUNCAUGHT: ' + (e && e.stack || e));
-    for (const [rel, rec] of installedNow) {
-        console.error('  stub possibly still in place: ' + rel + ' (original at ' + path.basename(rec.orig) + ')');
+    for (const [rel] of installedNow) {
+        console.error('  stub was in place in the private worktree: ' + rel);
     }
-    console.error('\nINDETERMINATE — the sweep died mid-run; the tree may hold mutants.');
-    console.error('Recover with: git status, then rename each .orig-* file back over its subject.\n');
+    console.error('\nINDETERMINATE — the sweep died mid-run. The user tree was never touched;');
+    console.error('the private worktree is removed on exit.\n');
     process.exit(2);
 });
 
-// The sweep lock excludes other SWEEPS. A plain `npm test` run in this tree is
-// just as fatal to the untracked-diff cleanup — test-validate's child creates
-// zz-spawn-fixture.js, which a concurrent sweep would see as its own suite's
-// orphan and delete mid-use (Sol's round-7 blocker). test-all.js announces
-// itself with a per-pid lock in the same tmpdir namespace; a live one here
-// means a test run is in flight, and this sweep refuses rather than measuring
-// a tree someone else is exercising. Dead pids are stale crash leftovers and
-// are cleaned. test-all children spawned BY this sweep are exempt via
-// AUTODEV_SWEEP_CHILD, so checkRunner below still works.
-{
-    const prefix = path.basename(LOCK).replace(/\.lock$/, '');
-    for (const f of fs.readdirSync(os.tmpdir())) {
-        if (!f.startsWith(prefix + '.test-') || !f.endsWith('.lock')) continue;
-        const p = path.join(os.tmpdir(), f);
-        let holder = NaN;
-        try { holder = parseInt(fs.readFileSync(p, 'utf8'), 10); } catch { /* unreadable */ }
-        let alive = false;
-        if (Number.isFinite(holder)) {
-            // EPERM = exists under another user = alive (round-10).
-            try { process.kill(holder, 0); alive = true; }
-            catch (e) { alive = e.code === 'EPERM'; }
-        }
-        if (alive) {
-            console.error('\nRefusing to run: a test run (pid ' + holder + ') is in flight in this tree.');
-            console.error('Its suites create zz- fixtures this sweep\'s cleanup would misattribute.');
-            console.error('Wait for it to finish, then re-run.\n');
-            process.exit(2);
-        }
-        try { fs.unlinkSync(p); } catch { /* raced */ }
-    }
-}
-
-const suites = fs.readdirSync(__dirname)
+const suites = fs.readdirSync(SWEEP_TOOLING)
     .filter((f) => /^test-.*\.js$/.test(f))
     .sort();
 
-// AUTODEV_SWEEP_CHILD carries this run's lock nonce to every process the
-// sweep spawns (and their children), so a test-all.js run BY the sweep
-// neither refuses under the sweep lock nor announces a test lock of its
-// own. It is honoured only when it matches the nonce in the LIVE lock —
-// a stale or fabricated value proves nothing and is ignored.
 // 15 minutes, not 5. A timeout KILLS the child, and a killed suite that
 // mutates files for its own canaries (test-hook-execution-evidence.js
 // prepends to a target suite and restores on exit) never runs its restore —
-// the sweep then correctly reports its own kill as a mid-sweep conflict and
-// goes INDETERMINATE, which is exactly what happened when the heaviest
-// suite blew a 300s budget on a loaded machine. The generous budget is the
-// fix; the conflict detection stays as the backstop for a genuine hang.
-const runSuite = (suite) => spawnSync(process.execPath, [path.join(__dirname, suite)], {
-    cwd: ROOT, encoding: 'utf8', timeout: 900000,
-    env: { ...process.env, AUTODEV_SWEEP_CHILD: NONCE },
+// the sweep then correctly reports its own kill as a conflict and goes
+// INDETERMINATE, which is exactly what happened when the heaviest suite
+// blew a 300s budget on a loaded machine. The generous budget is the fix;
+// the conflict detection stays as the backstop for a genuine hang. Suites
+// run FROM and IN the private worktree — nothing they touch is shared.
+const runSuite = (suite) => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
+    cwd: SWEEP_ROOT, encoding: 'utf8', timeout: 900000,
 });
 
 const rows = [];
@@ -479,10 +411,10 @@ const rows = [];
 //
 // So: make one child suite fail, and assert the runner notices.
 function checkRunner(suite) {
-    const victim = suites.find((s) => s !== suite && deriveSubjects(path.join(__dirname, s)).length);
+    const victim = suites.find((s) => s !== suite && deriveSubjects(path.join(SWEEP_TOOLING, s)).length);
     if (!victim) return { suite, status: 'NO-SUBJECT', note: 'no child suite to fail' };
 
-    const full = path.join(__dirname, victim);
+    const full = path.join(SWEEP_TOOLING, victim);
     const CANARY = '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n';
     if (!installOwn('tooling/' + victim, full, CANARY)) {
         return { suite, status: 'UNCHECKED', note: 'could not install the runner canary — see conflicts' };
@@ -509,12 +441,11 @@ function checkRunner(suite) {
 // version sync, which every plugin manifest depends on, and assert it goes red.
 function checkValidator() {
     const suite = 'validate.js';
-    const file = path.join(ROOT, 'VERSION');
+    const file = path.join(SWEEP_ROOT, 'VERSION');
     if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', note: 'no VERSION file' };
 
-    const run = () => spawnSync(process.execPath, [path.join(__dirname, 'validate.js')], {
-        cwd: ROOT, encoding: 'utf8', timeout: 900000,
-        env: { ...process.env, AUTODEV_SWEEP_CHILD: NONCE },
+    const run = () => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
+        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: 900000,
     });
     const base = run();
     if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate' };
@@ -550,7 +481,7 @@ for (const suite of suites) {
     // pointing at nothing is worth nothing, and says so out loud.
     const exempt = NOT_JAVASCRIPT[suite];
     if (exempt) {
-        const canaryExists = fs.existsSync(path.join(__dirname, exempt.canary));
+        const canaryExists = fs.existsSync(path.join(SWEEP_TOOLING, exempt.canary));
         const canaryChecked = suites.includes(exempt.canary);
         if (canaryExists && canaryChecked) {
             rows.push({
@@ -570,7 +501,7 @@ for (const suite of suites) {
         continue;
     }
 
-    const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(__dirname, suite));
+    const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(SWEEP_TOOLING, suite));
     if (!subjects.length) {
         // Worded as a deficiency, and counted as a failure, because the previous
         // wording — "references no plugin source — nothing to stub" — read as a
@@ -593,7 +524,7 @@ for (const suite of suites) {
     // restore cannot remove untracked files, so the whole sweep exited 2 with
     // no verdict. Snapshot the untracked set once per suite and remove only
     // what is NEW; the finally fires on every continue below.
-    const untrackedBefore = new Set(git('status --porcelain').split('\n')
+    const untrackedBefore = new Set(gitW('status --porcelain').split('\n')
         .filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).trim()));
     // OWNERSHIP IS EXPLICIT, never inferred (Sol's round-4 and round-5
     // blockers, in sequence). Round 4 deleted any new untracked path; round 5
@@ -605,7 +536,7 @@ for (const suite of suites) {
     // is reported and left - if it is a real orphan, the end-of-run tree
     // check names it and a human decides.
     const cleanNewUntracked = () => {
-        for (const line of git('status --porcelain').split('\n')) {
+        for (const line of gitW('status --porcelain').split('\n')) {
             if (!line.startsWith('?? ')) continue;
             const p = line.slice(3).trim();
             if (untrackedBefore.has(p)) continue;
@@ -614,7 +545,7 @@ for (const suite of suites) {
                 continue;
             }
             console.error(`  [removed] orphaned fixture ${p} (appeared during ${suite}, absent from the pre-run snapshot)`);
-            try { fs.rmSync(path.join(ROOT, p), { recursive: true, force: true }); } catch { /* the tree check below still backstops */ }
+            try { fs.rmSync(path.join(SWEEP_ROOT, p), { recursive: true, force: true }); } catch { /* the tree check below still backstops */ }
         }
     };
     try {
@@ -645,7 +576,7 @@ for (const suite of suites) {
     const killed = [];
     let incomplete = false;
     for (const rel of subjects) {
-        const full = path.join(ROOT, rel);
+        const full = path.join(SWEEP_ROOT, rel);
         if (!installOwn(rel, full, STUB)) { incomplete = true; continue; }
         try {
             const r = runSuite(suite);
@@ -680,7 +611,7 @@ for (const rel of [...installedNow.keys()]) {
     removeOwn(rel);
 }
 
-const after = git('status --porcelain').trim();
+const after = gitW('status --porcelain').trim();
 if (after) {
     console.error('\nTREE NOT CLEAN after the sweep:\n' + after);
     // Nothing here is this sweep's to fix: its own artifacts were returned
