@@ -21,13 +21,67 @@ not comments.
 
 ## Roles
 
-- **Adversary** (a different vendor's model, in its own session or harness):
-  audits the subject, writes acceptance tests that FAIL on current code, and
-  reviews each fix round. It never edits the fix branch.
-- **Builder** (this session or a subagent): validates the adversary's tests,
-  implements fixes, runs the complete gate. It never edits the test branch.
+- **Adversary** (a different vendor's model): audits the subject, writes
+  acceptance tests that FAIL on current code, and reviews each fix round. It
+  never edits the fix branch and never runs the gate.
+- **Builder** (this session): confirms each finding against the real code
+  before starting, implements, runs the complete gate, and owns the evidence.
+  It never edits the test branch.
 - Two branches: `<topic>/test-acceptance` (adversary's commits) and
   `<topic>/fix` (builder's commits, which merges the test branch in).
+
+### Route by what each side is actually good at
+
+`[measured 2026-08-31]` over one 24-round audit of a repo's own gates. The
+adversary's eight opening findings were all real, all in gates the builder had
+written, and all in code that an 85-suite gate passed green. Every one was the
+same class: **a check that reports success while proving nothing.**
+
+So the split is not "a second opinion". It is:
+
+| Give the adversary | Keep with the builder |
+|---|---|
+| What an exit code MEANS | Whether the code works and ships |
+| What a gate actually PROVES | Running the gate, producing the evidence |
+| Restore and concurrency semantics under a racing writer | Implementation and style |
+| Which outcomes are indeterminate rather than red | Anything needing the working tree |
+
+The builder ships past contract defects precisely because its own tests encode
+its own assumptions. That is the gap the adversary fills, and it is narrow: the
+adversary cannot run your gates, cannot see your tree, and will keep producing
+ever-narrower findings well past the point of value.
+
+## Reach the adversary over MCP, not a desktop app
+
+`[measured 2026-08-31]` The same audit was driven by computer-use into a
+desktop app, and the transport — not the model — produced most of the waste:
+roughly fifteen click batches lost to focus changes, two stale clipboard
+re-pastes that burned two entire review cycles, and several stalls waiting for
+a human to unlock the machine.
+
+An MCP server removes that failure class outright. Measured against the same
+vendor's CLI on identical prompts:
+
+| | MCP | CLI |
+|---|---|---|
+| Latency | 8,245 ms median | 8,993 ms median — a tie, ~8s is inference |
+| Server startup | 207 ms, paid once | full process per call |
+| Input tokens per call | 22,800 | 29,343 (−22% for MCP) |
+| Multi-turn | returns a thread id; replies continue it | a thread another writer holds refuses resume |
+| Concurrency | two calls in flight returned at +7.3s and +7.9s, not 2x | one process per call |
+| Output | structured JSON | stdout to scrape |
+
+Two operational notes that cost real time to learn:
+
+- **The CLI appends piped stdin to the prompt.** Spawning it with an open stdin
+  pipe blocks forever waiting for EOF. Close stdin explicitly.
+- **Put the commit SHA in every message.** It is what catches a duplicate or
+  stale send immediately, instead of spending a review round on already-reviewed
+  work.
+
+Pick the reviewing model deliberately and verify what RAN, not what was asked:
+a per-call model override is honoured, but read it back from the vendor's own
+session log before trusting it.
 
 ## The loop
 
@@ -93,21 +147,6 @@ Two sweep rules that bite here:
 - Restoration is part of the gate. A sweep that dies mid-run must leave the
   tree recoverable (`git status` clean after its own recovery), and its exit
   code must distinguish clean / findings / could-not-restore.
-
-## Delivery is part of the loop, and it fails silently
-
-When the channel to the adversary is a UI rather than an API, a send can fail
-in a way that looks like success. In that first run two messages were stale
-re-pastes from a clipboard whose delivery had been interrupted, and the
-adversary answered both with "this is the same commit already reviewed" —
-costing two full review cycles and reading, from the builder's side, like a
-stubborn reviewer.
-
-- **After any failed or ambiguous send, look before retrying.** A retry that
-  cannot see the thread will re-send whatever is staged.
-- **Clear the input, then verify it holds the intended text, then submit.**
-- **Put the commit SHA in every message.** It is what let the adversary catch
-  the duplicates immediately rather than reviewing stale work.
 
 ## Cross-vendor handover limits
 
