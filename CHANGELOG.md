@@ -1,30 +1,6 @@
 # Changelog
 
-## [8.147.0] - 2026-09-01
-
-### Fixed: the tool-declaration gate's blind spot is now measured, not assumed
-
-The gate documented a limit and never measured it: a short alias is recognised
-only where the same file also writes the tool out in full. Sweeping that limit
-across the corpus found three real defects inside it. `rule-local-first`
-mandates `preview_start` and `resize_window`; `sessions` says "call
-`archive_session` with its `sessionId`". None of those names appears in full
-in any skill, so no alias map can resolve them.
-
-The class is not closed, it is stated. Closing it needs a registry of MCP tool
-short names this repo does not have, and inventing one would rot silently as
-tools change. The three declarations are added by hand and the two skills are
-pinned in the suite as hardcoded literals, because a canary reading the same
-source as the check would weaken in the same motion. Removing a pinned
-declaration turns the suite red.
-
-The header and the runtime output now say a clean run means no DETECTABLE
-mandate is undeclared, rather than implying none exists. The other documented
-limit was swept too and is currently theoretical: zero skills instruct a tool in
-unbackticked prose. First-run precision is recorded as the gate-integrity
-standard asks: 12 findings, 12 triaged by hand, 12 real.
-
-## [8.146.0] - 2026-09-01
+## [8.148.0] - 2026-09-01
 
 ### Added: a gate for skill bodies that mandate undeclared tools
 
@@ -33,24 +9,38 @@ watching. `auto-brain` step 5 mandated `mcp__ccd_session_mgmt__send_message`
 while declaring neither that nor `spawn_task`, so a coordinator running it had
 no way to start a session for a repo that had none.
 
-`tooling/check-skill-tool-declarations.js` flags a body that mandates a tool
-the frontmatter does not declare. The false-positive rule is the design
-decision and it is written into the gate's header: six harness tool names are
-ordinary English words, so a reference counts only as an `mcp__` token or a
-backticked name from a hardcoded vocabulary, and detection is positive-only.
-Four negative classes override a match, of which the conditional carve-out
-matters most, because a skill that writes its fallback degrades where a bare
-mandate deadlocks.
+`tooling/check-skill-tool-declarations.js` flags a body that mandates a tool the
+frontmatter does not declare. The false-positive rule is the design decision and
+it is written into the gate's header: six harness tool names are ordinary English
+words, so a reference counts only as an `mcp__` token or a backticked name from a
+hardcoded vocabulary, and detection is positive-only. Four negative classes
+override a match, of which the conditional carve-out matters most, because a skill
+that writes its fallback degrades where a bare mandate deadlocks.
 
 Mutation-tested: the suite deletes one tool a skill genuinely declares and
 mandates, then requires the gate to name that skill, tool and line. The planted
 value is derived from the live corpus, so it cannot rot as skills change.
 
-Triaged its 12 findings, all real, and fixed them. Seven skills instructed use
-of the browser tools without declaring them; `auto-brain` needed two
-session-management tools, `brain` needed `spawn_task` and `SendMessage`,
-and `grilling` needed `AskUserQuestion`. The suite now asserts the corpus
-stays at zero, which is what makes this a gate rather than a report.
+Triaged its 12 findings by hand, all real, and fixed them. Seven skills instructed
+use of the browser tools without declaring them; `grilling` needed
+`AskUserQuestion`; `auto-brain` and `brain` needed session tools. The suite
+asserts the corpus stays at zero, which is what makes this a gate rather than a
+report.
+
+### Fixed: the gate now states what it cannot see
+
+Sweeping the gate's own documented limit found three real defects inside it.
+`rule-local-first` mandates `preview_start` and `resize_window`;
+`sessions` says "call `archive_session` with its `sessionId`". None of those
+names appears in full in any skill, so no alias map can resolve them. Closing the
+class needs a registry of MCP tool short names this repo does not have.
+
+The class is stated rather than guessed. The three declarations are added by hand
+and the two skills are pinned in the suite as hardcoded literals, because a canary
+reading the same source as the check would weaken in the same motion. The header
+and the runtime output now say a clean run means no DETECTABLE mandate is
+undeclared. First-run precision is recorded as the gate-integrity standard asks:
+12 findings, 12 triaged, 12 real.
 
 ## [8.145.0] - 2026-09-01
 
