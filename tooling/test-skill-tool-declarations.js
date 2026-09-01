@@ -74,6 +74,26 @@ const seen = out.match(/(\d+) tool references seen, (\d+) read as mandates, (\d+
 check('references are judged, not merely counted',
     seen && Number(seen[2]) > 0 && Number(seen[3]) > 0);
 
+// --- 2b. the blind spot, pinned by hand ------------------------------------
+// A short alias with no full mcp__ name anywhere in the corpus is invisible to
+// the check, by construction and unfixably without a tool-name registry. The
+// three instances found by sweeping that limit on 2026-09-01 are pinned here as
+// literals instead, so removing a declaration the gate cannot re-derive still
+// turns this suite red. Hardcoded on purpose: a canary that reads the same
+// source as the check would weaken in the same motion.
+const BLIND_SPOT = [
+    ['rule-local-first', 'mcp__Claude_Browser__*', 'preview_start / resize_window'],
+    ['sessions', 'mcp__ccd_session_mgmt__archive_session', 'archive_session'],
+];
+for (const [skill, tool, why] of BLIND_SPOT) {
+    const p = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'skills', skill, 'SKILL.md');
+    let decl = '';
+    try { decl = (fs.readFileSync(p, 'utf8').match(/^allowed-tools:\s*(.*)$/m) || [])[1] || ''; }
+    catch { /* reported by the assertion below */ }
+    check(skill + ' still declares ' + tool + ' (mandated as ' + why + ')',
+        decl.split(',').map((s) => s.trim()).includes(tool));
+}
+
 // --- 3. mutation: plant the real defect ------------------------------------
 // Find a skill that mandates a tool it declares. That pair is the contract; the
 // mutation is its removal.

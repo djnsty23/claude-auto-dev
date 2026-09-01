@@ -82,16 +82,30 @@
 // A wildcard reference (`mcp__Claude_Browser__*`) is compared at its namespace,
 // so declaring the namespace satisfies it and declaring one member does not.
 //
+// PRECISION, measured on the first corpus run rather than claimed:
+// 12 findings, 12 triaged by hand, 12 real. No false positives. That run is
+// what earned the wiring; the selftest only proves the check CAN fire.
+//
 // KNOWN LIMITS, printed beside every result so a clean run is not read as more
-// than it is:
+// than it is. The third one is MEASURED, not hypothetical:
 //   * Scope is one sentence for the mandate and the conditional, one CLAUSE for
 //     the negation. A mandate in one sentence and its negation in the next is
 //     not connected, in either direction.
 //   * Bare names only count in backticks, so a skill instructing a tool in
-//     plain prose ("use the Write tool") is not seen.
+//     plain prose ("use the Write tool") is not seen. Swept 2026-09-01: zero
+//     instances in this corpus, so the limit is currently theoretical.
 //   * A short alias is only recognised where the same file also writes the tool
-//     out in full at least once. A skill saying only `spawn_task`, never
-//     `mcp__ccd_session__spawn_task`, is invisible.
+//     out in full at least once. Swept 2026-09-01: THREE REAL DEFECTS SIT IN
+//     THIS BLIND SPOT and no version of this check can see them. rule-local-first
+//     mandates `preview_start` (line 30) and `resize_window` (line 208);
+//     sessions says "call `archive_session` with its `sessionId`" (line 128).
+//     None of those three names appears in full anywhere in the corpus, so a
+//     per-file alias map cannot resolve them and a corpus-wide one cannot
+//     either. Closing this needs a registry of MCP tool short names that this
+//     repo does not have; inventing the list would rot silently as tools
+//     change, which is worse than a stated gap. The three declarations were
+//     added by hand, so the tree is correct while the CHECK still cannot
+//     enforce that class. A future skill can reintroduce it unseen.
 //   * `allowed-tools` is read as a flat comma list; it does not model the
 //     harness's own inheritance or the "All tools except X" agent form.
 //
@@ -509,8 +523,10 @@ function main() {
     }
 
     console.log('\nlimits: mandate and conditional read per sentence, negation per clause;');
-    console.log('bare names counted only in backticks; a short alias needs the full');
-    console.log('mcp__ name somewhere in the same file; allowed-tools read as a flat list.');
+    console.log('bare names counted only in backticks; allowed-tools read as a flat list.');
+    console.log('A short alias needs the full mcp__ name in the same file, and 3 real');
+    console.log('defects sat in that blind spot on 2026-09-01 (see the header). A clean');
+    console.log('run means no DETECTABLE mandate is undeclared, not that none exists.');
 
     if (argv.includes('--advisory')) return 0;
     return findings.length ? 1 : 0;
