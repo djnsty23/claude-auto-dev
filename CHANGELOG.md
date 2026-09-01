@@ -1,5 +1,29 @@
 # Changelog
 
+## [8.147.0] - 2026-09-01
+
+### Fixed: the tool-declaration gate's blind spot is now measured, not assumed
+
+The gate documented a limit and never measured it: a short alias is recognised
+only where the same file also writes the tool out in full. Sweeping that limit
+across the corpus found three real defects inside it. `rule-local-first`
+mandates `preview_start` and `resize_window`; `sessions` says "call
+`archive_session` with its `sessionId`". None of those names appears in full
+in any skill, so no alias map can resolve them.
+
+The class is not closed, it is stated. Closing it needs a registry of MCP tool
+short names this repo does not have, and inventing one would rot silently as
+tools change. The three declarations are added by hand and the two skills are
+pinned in the suite as hardcoded literals, because a canary reading the same
+source as the check would weaken in the same motion. Removing a pinned
+declaration turns the suite red.
+
+The header and the runtime output now say a clean run means no DETECTABLE
+mandate is undeclared, rather than implying none exists. The other documented
+limit was swept too and is currently theoretical: zero skills instruct a tool in
+unbackticked prose. First-run precision is recorded as the gate-integrity
+standard asks: 12 findings, 12 triaged by hand, 12 real.
+
 ## [8.146.0] - 2026-09-01
 
 ### Added: a gate for skill bodies that mandate undeclared tools
