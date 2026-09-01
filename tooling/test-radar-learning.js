@@ -147,6 +147,13 @@ function hypothesisMeasurements() {
     completeStats.find((row) => row.source_id === 'zeta').rejected === 1 &&
       completeStats.find((row) => row.source_id === 'zeta').no_winner === 1);
   check('H2 equal utility and test populations sort deterministically by source id', completeStats[0].source_id === 'alpha');
+  const utilityFirst = subject.rankSources({
+    'higher-utility-fewer-tests': { tested: 4, wins: 4 },
+    'lower-utility-more-tests': { tested: 10, wins: 6 },
+  });
+  check('H2 utility outranks sample count instead of silently sorting by test volume',
+    utilityFirst[0].source_id === 'higher-utility-fewer-tests' &&
+      utilityFirst[0].utility_score > utilityFirst[1].utility_score);
 
   const ledger = subject.createLedger();
   ledger.lifecycle.exp = {
@@ -286,6 +293,15 @@ function endToEnd() {
     /9 of 10 tasks/.test(markdown) && /Transcript and comment text remain outside/.test(markdown));
   check('populated Markdown does not also print empty-state sentinels',
     !/No measured outcomes yet|No executed verdicts|No adopted variants|No new cited source hosts/.test(markdown));
+  check('candidate lifecycle rows render an explicit n/a expiry instead of undefined',
+    /\| Background agents reduce interrupted long-task failures\. \| candidate \| n\/a \|/.test(markdown));
+  const staleMarkdown = subject.renderMarkdown(Object.assign({}, data, {
+    lifecycle: [Object.assign({}, data.lifecycle[0], {
+      effective_status: 'stale', revalidate_by: '2026-08-01T00:00:00.000Z',
+    })],
+  }));
+  check('Markdown summary and lifecycle table both expose stale defaults and their expiry',
+    /1 stale default/.test(staleMarkdown) && /\| stale \| 2026-08-01T00:00:00\.000Z \|/.test(staleMarkdown));
   const emptyData = subject.reportData(manifest, subject.createLedger(), '2026-09-01T10:00:00.000Z');
   const emptyMarkdown = subject.renderMarkdown(emptyData);
   check('empty Markdown names every genuinely empty learned population',
@@ -293,6 +309,8 @@ function endToEnd() {
       /No adopted variants yet/.test(emptyMarkdown));
   check('HTML uses summary-first disclosures and themed scrollbars',
     /class="reveal"/.test(html) && /scrollbar-color/.test(html) && /scrollHeight/.test(html));
+  check('HTML disclosure script reads the exact open state and preserves text selection',
+    /getAttribute\('data-open'\)==='true'/.test(html) && /selection&&selection\.toString\(\)/.test(html));
   check('HTML is self-contained and has no remote scripts or stylesheets',
     !/<script[^>]+src=|<link[^>]+stylesheet/i.test(html));
   check('HTML embeds a local favicon so browser verification has no synthetic 404',
@@ -318,6 +336,15 @@ function endToEnd() {
   check('CLI refreshes findings without inventing or requiring a verdict file',
     noVerdict.status === 0 && /0 new verdict/.test(noVerdict.stdout) &&
       fs.existsSync(path.join(noVerdictOutput, 'framework-radar-findings-latest.html')));
+  const legacyStateDir = path.join(tmp, 'legacy-state');
+  write(path.join(legacyStateDir, 'learning-ledger.json'), { schema_version: 1 });
+  const legacyCliManifest = clone(manifest);
+  legacyCliManifest.run.state_dir = legacyStateDir;
+  const legacyCliManifestFile = path.join(tmp, 'legacy-cli-manifest.json');
+  write(legacyCliManifestFile, legacyCliManifest);
+  const legacyLedgerRun = cli(['--manifest', legacyCliManifestFile, '--output-dir', path.join(tmp, 'legacy-reports')]);
+  check('CLI treats a legacy ledger without experiments as a measured zero',
+    legacyLedgerRun.status === 0 && /0 total experiment/.test(legacyLedgerRun.stdout));
 
   const experimentId = `${manifest.run.id}:background-agents-replay`;
   const invalidDefault = cli(['--state-dir', stateDir, '--transition', experimentId, '--to', 'default', '--evidence', 'fixture']);
