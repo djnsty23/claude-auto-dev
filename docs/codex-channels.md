@@ -79,11 +79,46 @@ Over the CLI, the redirect is not optional in an automated caller:
 codex exec --sandbox workspace-write -m gpt-5.6-sol "..." < /dev/null
 ```
 
-Eight models confirmed executing as of 2026-08-31: `gpt-5.6-sol`,
-`gpt-5.6-codex`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`,
-`gpt-5.4-mini`, `gpt-5.3-codex-spark`. Effort accepts `none`, `minimal`, `low`,
-`medium`, `high`, `xhigh`, `max`; that enum came from one deliberately invalid
-request whose error listed all seven.
+## Models and effort, from the catalog rather than from guesses
+
+`codex debug models` renders the raw model catalog as JSON. Use it. An earlier
+pass concluded no enumeration command existed, invented four plausible model
+names, and reported "valid models are exactly 3" off three 400s. The command was
+there the whole time.
+
+Catalog as of 2026-09-01, 9 slugs, 7 listed and 2 hidden:
+
+| slug | visibility | in API | default effort | supported efforts |
+|---|---|---|---|---|
+| `gpt-5.6-sol` | list | yes | low | low, medium, high, xhigh, max, ultra |
+| `gpt-5.6-terra` | list | yes | medium | low, medium, high, xhigh, max, ultra |
+| `gpt-5.6-luna` | list | yes | medium | low, medium, high, xhigh, max |
+| `gpt-5.5` | list | yes | medium | low, medium, high, xhigh |
+| `gpt-5.4` | list | yes | medium | low, medium, high, xhigh |
+| `gpt-5.4-mini` | list | yes | medium | low, medium, high, xhigh |
+| `gpt-5.3-codex-spark` | list | **no** | high | low, medium, high, xhigh |
+| `gpt-reserve` | hide | yes | medium | low, medium, high, xhigh, max |
+| `codex-auto-review` | hide | yes | medium | low, medium, high, xhigh, max |
+
+Three things that table settles and a flat list of names cannot:
+
+- **Effort is per model, not global.** `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini` and
+  `gpt-5.3-codex-spark` top out at `xhigh` and do not carry `max` at all.
+  Sending `max` to one of them is not the request sending it to Sol is.
+- **`ultra` exists on Sol and Terra and is not in the API's parameter enum.**
+  The catalog describes it as maximum reasoning with automatic task delegation.
+  The API's own `ReasoningEffortParam` rejects an unknown value with
+  `Supported values are: 'none', 'minimal', 'low', 'medium', 'high', 'xhigh',
+  and 'max'`, re-confirmed 2026-09-01. So `ultra` and `max` are different
+  things, and `none` and `minimal` are in the parameter enum while appearing on
+  no model's supported list.
+- **The CLI does not validate effort locally.** `-c model_reasoning_effort=bogus`
+  prints `reasoning effort: bogus` in the session header and ships it, and the
+  rejection arrives from the server as a 400 mid-run. A config value that looks
+  accepted has not been checked by anything yet.
+
+One slug moved inside a day: `gpt-5.6-codex` executed on 2026-08-31 and is absent
+from the catalog on 2026-09-01. Read the catalog rather than this table.
 
 A per-call `model` override is honoured, but confirm it by reading
 `turn_context.model` back out of the rollout log under `~/.codex/sessions/`. A
@@ -138,9 +173,11 @@ paying for a reviewer that reasons where your own model measures.
 
 **Testing names you invented is a probe of your imagination.** Four plausible
 model names, three 400s, one success, reported as "valid models are exactly 3".
-The real list was at least 8. Enumerate from the vendor's own surface: a picker,
-a config file, `--help`, an error that lists the enum. Otherwise say "these N
-work; I did not enumerate".
+The real list was at least 8. The enumeration existed and was one subcommand
+away: `codex debug models`. Enumerate from the vendor's own surface, a picker, a
+config file, a `--help`, an error that lists the enum, before asserting a set is
+complete. Otherwise say "these N work; I did not enumerate", because that is the
+sentence that does not get acted on as a fact.
 
 **The delegate starts cold, and `AGENTS.md` is the whole briefing.** Every CLI
 and MCP invocation is a fresh session inheriting no conversation, no memory and
