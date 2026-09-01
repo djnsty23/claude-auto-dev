@@ -50,3 +50,12 @@ jobs:
       - name: Prove every suite can fail
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:suites
+
+      # A gate as of this commit: the count is 0 and mutation-verified. It
+      # fails on a script that announces an absence without printing a
+      # population or carrying a runtime control. It runs here so a regression
+      # is caught on the PR that introduces it; a detector nobody runs reports
+      # nothing and looks identical to a clean one.
+      - name: Population and control reporting (advisory)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:population

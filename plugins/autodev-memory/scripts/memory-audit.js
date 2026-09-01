@@ -208,7 +208,15 @@ const needsWork = report.filter((r) => r.findings.length);
 console.log(`\nMemory audit — ${report.length} ${includeAll ? '' : 'active '}project(s) under ${CONFIG_DIR}\n`);
 
 if (!report.length) {
-    console.log('  No project memory stores found.\n');
+    // "None found" and "could not look" print identically unless the config
+    // directory is checked first. Only the second is a probe failure, and it
+    // is the one that must not exit 0 and read as an all-clear.
+    if (!fs.existsSync(CONFIG_DIR)) {
+        console.log(`  COULD NOT AUDIT: ${CONFIG_DIR} does not exist.`);
+        console.log('  The probe is blind, not the tree clean.\n');
+        process.exit(1);
+    }
+    console.log(`  No project memory stores found. ${CONFIG_DIR} was read and holds none.\n`);
     process.exit(0);
 }
 

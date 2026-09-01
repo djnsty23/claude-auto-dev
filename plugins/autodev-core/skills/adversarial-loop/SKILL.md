@@ -218,19 +218,16 @@ What actually converges the loop is narrowing what each round may reopen:
 judgement made inside a long loop is made by the party least able to make it.
 Record it instead.
 
-**Use the round log the "Measure every run" section already defines** — the
-same file, the same row per round. Do not start a second one: two logs with
-different schemas means one of them is wrong and nothing reports which. Add one
-column to it:
+**Use the round log the "Measure every run" section already defines.** The row
+shape is written down exactly once, there, and it carries the disposition
+columns this rule needs. Do not restate it here and do not start a second log:
+two schemas means one of them is wrong and nothing reports which.
 
-```
-| round | range | threadId | raised | new defect | regression | unresolved | new scope | tests added | verdict |
-```
-
-That log lives under `.claude/reports/`, which this repo **gitignores on
-purpose** so an audit's raw output cannot be staged. It is durable enough for
-the loop because it is appended every round, not written at the end. Do not
-describe it as committed, and do not move it in order to commit it.
+That was worth learning the hard way. An earlier attempt to fix a two-schema
+contradiction restated the row "with one column added" — which was actually two
+columns added and two removed, producing a third schema while claiming to
+extend the first. **A schema repeated is a schema that will diverge.** Reference
+it; never copy it.
 
 **Findings-per-round is the wrong metric and repeat-subject is not the fix.**
 The naive count points the wrong way: rounds 20 to 24 of the run above raised
@@ -278,6 +275,51 @@ The stop rule, computed by the caller from the log:
   frozen acceptance test is the next audit's input. Logging it in the `new
   scope` column is how it survives without extending this run.
 
+### The stop rule that matters most: a rising `wrongly fixed` count
+
+Every rule above answers "has the loop finished?". This one answers a different
+and more expensive question: **"is the loop making things worse?"** — and it is
+the only stop condition that fires while findings are still real.
+
+`[measured 2026-09-01]` A five-round run on a static analysis check. The
+`wrongly fixed` column, meaning a repair that made something worse than it was:
+
+| round | fixed | not fixed | wrongly fixed |
+|---|---|---|---|
+| 2 | 5 | 0 | 3 |
+| 3 | 8 | 2 | 6 |
+| 4 | 12 | 2 | 6 |
+| 5 | 12 | 3 | 9 |
+
+`fixed` plateaus and `wrongly fixed` climbs. Every round the builder repaired
+real defects and introduced new ones at a similar rate, so no round was
+worthless and no round converged. The adversary was not padding: each finding
+came with a runnable counterexample, and the builder independently reproduced
+the last one before accepting it.
+
+**A rising `wrongly fixed` count means the DESIGN is wrong, not the patches.**
+That run refuted three designs for the same sub-problem — parenthesis
+balancing, then continuation-on-a-trailing-operator, then a fixed radius — and
+each replacement was a considered response to the previous refutation. The
+third was accompanied by the claim that its only failure mode was being too
+small; a nine-line fixture disproved that in one round. When three honest
+attempts at one sub-problem all fail, the sub-problem is the finding.
+
+Two things to do instead of round six:
+
+- **Ask what the checker would have to KNOW to be right**, and whether it can
+  know it. That run needed a JavaScript parser to find where a call ends. No
+  parser was available, so every design was an approximation, and approximating
+  is fine — claiming gate-grade precision from one is not.
+- **Downgrade rather than keep patching.** A check whose false positives are
+  demonstrated must not gate; advisory costs a wrong line of output, gating
+  costs a wrong red build and then gets muted. Landing it advisory keeps the
+  real value and drops the false claim.
+
+**Record the run as unconverged and say so.** A loop that stops without a clean
+verdict is an honest outcome with a written reason. A loop that keeps going
+until someone runs out of patience produces the same code and no reason.
+
 **The caller computes this, never the adversary.** An adversary asked to
 declare itself done does not: measured across two workflows, one told to output
 a dry verdict when the work was sound produced zero dry passes and ran to its
@@ -319,8 +361,10 @@ Two sweep rules that bite here:
   rejected tool inputs.** A payload pinned at exactly the cap means the work
   is finished and only the handover failed; recover it instead of paying for
   the run twice.
-- **The repo is the only shared memory.** Findings, test contracts, and round
-  logs live in committed files, never in one session's chat. The other vendor
+- **The repo is the only shared memory.** Findings and test contracts live in
+  committed files, never in one session's chat. The round log is the exception
+  and lives in the gitignored reports directory; it is durable by being
+  appended every round rather than by being committed. The other vendor
   cannot read your context window.
 
 ## A timeout aborts the call, not the process
@@ -343,11 +387,18 @@ at start, which is what fooled the caller in the second case.
 
 The rest follows once you know which case you are in:
 
-- **Do not re-dispatch on a timeout.** A second dispatch puts two writers on one
-  deliverable. That is not a race you lose loudly — one file vanished mid-rewrite
-  and was later found 415 lines shorter under an append that looked clean.
-- **Find out whether it is still running before concluding anything.** An empty
-  result is a claim about the handover, never about the work.
+- **Never re-dispatch before the liveness check answers.** The two branches are
+  different work, and the section above exists to tell them apart:
+  - **Still running → do not re-dispatch, wait.** A second dispatch puts two
+    writers on one deliverable, and that is not a race you lose loudly: one
+    file vanished mid-rewrite and was later found 415 lines shorter under an
+    append that looked clean.
+  - **Dead → re-dispatch, and narrow it first.** Nothing is writing, so the
+    only cost of waiting is the whole run. Re-send with whatever stalled it
+    removed rather than repeating the brief that died.
+- **An empty result is a claim about the handover, never about the work.** That
+  holds on both branches, which is why the liveness check comes before any
+  conclusion about what the delegate produced.
 - **The tell is `git show --numstat`, not the tool output.** Nothing in a tool
   result announces that a file got smaller. A deliverable that shrank and a
   deliverable that was edited look identical until you count lines.
@@ -362,6 +413,48 @@ The rest follows once you know which case you are in:
 - **Last resort: the adversary's own session log on disk holds the bytes
   verbatim.** That is what recovery came from when the untracked file was gone.
   It is a backstop, not a plan — committing is the plan.
+
+### Recovery is a stitching job, because incremental writing fragments it
+
+`[measured 2026-09-01]` The two halves of this section pull against each other,
+and it is worth knowing before you need it. Writing incrementally is what stops
+a timeout losing everything. It is also why **no single payload in the log holds
+the finished file.**
+
+A 32,327-byte report was destroyed by a `git worktree remove` — the reports
+directory is gitignored, so the deliverable was untracked and the removal took
+it. Recovering it from the delegate's session log:
+
+| | |
+|---|---|
+| Longest single payload | 15,871 chars, 7 of 11 findings |
+| Payloads carrying a finding | 7, written as successive appends |
+| Stitched result | 11 of 11 findings, 27,609 chars |
+
+So a recovery script cannot take the last write or the biggest one. It has to
+**collect every payload, split on headings, and keep the longest copy of each**
+— a later append can extend a section an earlier one truncated, so longest-wins
+rather than last-wins. Byte count will not match the original, because the log
+holds what was written and not the file's final assembly; count the SECTIONS
+recovered against the sections you expect.
+
+Two guards that made the result trustworthy rather than plausible:
+
+- **Run a known-positive before believing a gap.** The first attempt reported
+  the report missing from the log entirely. The control failed too, which meant
+  the probe was pointed at the wrong session — `--last` and newest-mtime both
+  pick the wrong file when several runs overlap. Address the session by id.
+- **Count against the delegate's own closing message.** It said 10 HIGH and 1
+  MEDIUM; recovery produced exactly 11 sections. A grep for headings had said
+  12, and the grep was wrong. Reconcile against something with a different
+  provenance before declaring anything lost.
+
+**This is not licence to move the report.** An audit report belongs under
+`.claude/reports/`, gitignored, for the reason stated above: raw audit output
+must not be stageable. The cheap protection is not relocating it — it is
+remembering that removing a worktree destroys everything ignored inside it, so
+copy the report out before running `git worktree remove`, and treat the
+delegate's session log as the recovery path when you forget.
 
 **Instruct the adversary to write incrementally.** Append findings to a file as
 it goes rather than composing one answer at the end, and prefer a format that
@@ -378,11 +471,22 @@ what is conceptually tidy.
 ## Measure every run
 
 Append one row per round to `.claude/reports/adversarial-loop-<topic>.md` in
-the repo under audit, and total it when the loop closes:
+the repo under audit, and total it when the loop closes. **This is the only
+place the row is defined.** Anything else that needs it references this line
+rather than restating it, because a schema written twice diverges.
 
 ```
-| round | range | threadId | raised | confirmed | refuted | tests added | verdict |
+| round | range | threadId | raised | new defect | regression | unresolved | new scope | tests added | verdict |
 ```
+
+The four middle columns are the dispositions from the bounding section, and
+they replace a single `confirmed`/`refuted` pair: knowing a finding was real
+does not tell you whether the loop is still finding things.
+
+**That path is gitignored in this repo, deliberately, so raw audit output
+cannot be staged.** The log is durable because it is appended every round, not
+because it is committed. Do not describe it as committed and do not relocate it
+in order to commit it.
 
 Close with: rounds to clean, defects caught after the builder first believed
 it was done, and defects found in the adversary's own tests. That last number

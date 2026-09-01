@@ -21,18 +21,53 @@
 //                  known-positive control or selftest. Cure: make it prove it
 //                  can see something before it reports seeing nothing.
 //
-// Warn-only by default, like check-claim-provenance. Its precision on this
-// repo is unmeasured until its first run, and a check that fires on half the
-// tree gets muted in a day and then misses the real one. --strict exits 1.
+// ADVISORY, AND IT SHOULD STAY ADVISORY. It was briefly wired --strict when the
+// count reached 0 of 152. That was withdrawn on evidence, not on nerves: a five
+// round adversarial review refuted three separate designs for finding where an
+// emitting call ends, each with a runnable counterexample, and the last one
+// showed this check can MANUFACTURE a verdict rather than merely miss one.
+// Reproduced independently, and it is nine lines:
 //
-// KNOWN SCOPE LIMIT, stated because a silent one is worse than a loud gap:
-// NO-CONTROL reads only the subject file. A script whose known-positive lives
-// in a separate suite is reported here even though it is covered, and the
-// review that found this was right to call it a false positive by that
-// reading. It is deliberate rather than unfixed: the question this asks is
-// whether a LIVE RUN proves it can see before it reports nothing, and a suite
-// that runs in CI does not travel with the live run. Read a NO-CONTROL row as
-// "this script cannot vouch for itself at runtime", not as "untested".
+//     console.log("ordinary output");
+//     const FIXTURE = "no issues found";
+//
+// The script prints only "ordinary output". The checker reads the next
+// statement, calls the file an absence reporter, and emits two findings.
+//
+// A check with demonstrated false positives must not be able to turn a build
+// red. Advisory, a wrong finding costs one line of output; gating, it costs a
+// wrong red build and then the check gets muted, which is how a detector stops
+// catching the real thing. --strict exists for a caller who wants it; nothing
+// in this repo passes it.
+//
+// KNOWN AND UNFIXED, from that review, listed so nobody reads a clean run as
+// more than it is:
+//   * the radius crosses statement boundaries, as above;
+//   * a verdict further than GUARD_RADIUS lines from its call is not read;
+//   * a throwing control whose message is on a following line is not seen;
+//   * whitespace before the parameter list of a method named `throw` makes it
+//     read as a throwing statement.
+// Fixing these needs a parser this repo does not have. Approximating is fine;
+// claiming gate-grade precision from an approximation is not.
+//
+// TWO KNOWN SCOPE LIMITS, stated because a silent limit is worse than a loud
+// gap. Both are printed beside every result so a reader cannot mistake the
+// check for something stronger than it is.
+//
+//   FILE, NOT SUITE. NO-CONTROL reads only the subject file, so a script whose
+//   known-positive lives in a separate suite is reported though covered. This
+//   is deliberate: the question is whether a LIVE RUN proves it can see before
+//   reporting nothing, and a suite that runs in CI does not travel with the
+//   live run. Read a row as "cannot vouch for itself at runtime", not as
+//   "untested".
+//
+//   FILE, NOT PATH. A control anywhere in the file clears the whole file, so a
+//   guard covering one branch silences the check for every other branch. A
+//   review demonstrated this on a real script: its guard covers "transcripts
+//   present but zero subagent files" and not the malformed-usage path that
+//   prints the same empty verdict, and the file no longer reports. Answering
+//   this properly needs per-path analysis this check does not do, so a clean
+//   result here means "a control exists", never "every absence is guarded".
 //
 //   node tooling/check-population-reporting.js
 //   node tooling/check-population-reporting.js --strict
@@ -96,21 +131,33 @@ const POPULATION = [
 // and check-assignment both print "COULD NOT ...: this is NOT '0 repos'". Every
 // one of those IS the control, expressed better than the word "control" would
 // have expressed it.
+// DERIVED FROM THE CORPUS, not from memory. The list below was written by
+// grepping every script in tooling/ and plugins/*/scripts/ for the concept and
+// counting what came back, because inventing it from memory got it wrong four
+// separate times in one session -- most recently by requiring "PROBE BLIND"
+// adjacent when two suites write "the probe is blind". Measured counts:
+// could not <verb> 66, this is not 35, is not evidence 11, probe blind 8,
+// cannot fire 8, refusing to <verb> 7, broken probe 5, probe is blind 2.
+//
+// `unverified` (40 hits) is deliberately NOT here. It reads as prose far more
+// often than as a guard, and every widening of this list risks hiding a true
+// positive -- which is exactly what happened to analyze-agent-cost.js. Widen
+// only on a phrasing that cannot mean anything except a guard.
 const CONTROL = [
     /\bknown[- ]positive\b/i,
     /\bcontrol\b/i,
     /\bselftest\b/i,
     /\bmutation\b/i,
-    /\bPROBE BLIND\b/i,
-    /\bREFUSING TO (?:REPORT|RUN|ANSWER)\b/i,
-    /\bCOULD NOT [A-Z]/,
-    /\bthis is NOT\b/,
+    /\bprobe (?:is )?blind\b/i,
+    /\bbroken (?:probe|extractor|finder)\b/i,
+    /\brefusing to \w+/i,
+    /\b(?:could|can)\s?not \w+/i,
+    /\bthis is not\b/i,
+    /\bis not evidence\b/i,
+    /\bnot (?:a |the )?(?:tree )?clean(?: tree)?\b/i,
     /\bso the probe could see\b/i,
 ];
 
-// Only lines that actually reach a reader. A regex living in a pattern table
-// is not a verdict, and counting it as one is how a linter invents findings.
-const EMITS = /\bconsole\.(?:log|error|warn)\b|\bprocess\.std(?:out|err)\.write\b/;
 
 // Blank out everything that is not code -- string bodies, template bodies,
 // comments and regex literals -- preserving length and newlines so the result
@@ -134,11 +181,23 @@ function maskNonCode(source, commentsOnly = false) {
     // A `/` opens a regex only where a value may begin. This is the standard
     // heuristic; it cannot be exact without parsing, and it errs toward
     // treating a `/` as division, which is the safe direction here.
+    // Punctuation is not the whole story: `return /\)/` begins a regex, and
+    // reading it as division leaves a stray `)` unmasked, which balances the
+    // emitting call early and drops the verdict SILENTLY. That is the failure
+    // mode a review reproduced with exactly that expression, so the keyword
+    // list is not hypothetical.
+    const VALUE_KEYWORDS = /\b(?:return|typeof|instanceof|in|of|new|delete|void|case|do|else|yield|await|throw)$/;
     const regexMayStart = (k) => {
         for (let p = k - 1; p >= 0; p--) {
             const c = source[p];
             if (c === ' ' || c === '\t') continue;
             if (c === '\n' || c === '\r') return true;
+            if (/[A-Za-z0-9_$]/.test(c)) {
+                // Walk back over the identifier and decide on the whole word.
+                let q = p;
+                while (q >= 0 && /[A-Za-z0-9_$]/.test(source[q])) q--;
+                return VALUE_KEYWORDS.test(source.slice(q + 1, p + 1));
+            }
             return '(,=:[!&|?{};+-*%~^<>'.includes(c);
         }
         return true;
@@ -187,41 +246,59 @@ function maskNonCode(source, commentsOnly = false) {
     return out.join('');
 }
 
-// The unit a printed fact lives in is the CALL, not the line. test-all.js
-// opens `console.log(` on one line and puts "${n}/${total} suites passed" on
-// the next, and a line-scoped reader reports it as having no population --
-// which is what the first live run did. Read from the emitting line until the
-// parentheses balance IN CODE.
-//
-// The cap is a runaway guard, not a semantic limit. At 12 it silently truncated
-// any legitimate call longer than 12 lines, which is a second false-negative
-// class; a call that does not balance within the guard is now reported rather
-// than quietly dropped.
-const CALL_LINE_GUARD = 200;
 
-function emittedText(source) {
-    const lines = source.split(/\r?\n/);
-    const masked = maskNonCode(source).split(/\r?\n/);
+// THERE IS NO BOUNDARY DETECTION LEFT, and that is the point.
+//
+// Four review rounds killed two designs. Parenthesis balancing let one
+// mis-lexed character unbalance everything after it. Continuation-on-a-trailing
+// operator was refuted immediately: JavaScript also continues on a LEADING
+// operator, so a line ending in `true` followed by `? ... : ...` stopped the
+// scan and dropped thirteen lines including the printed verdict. Both were
+// wrong answers to the same question, and the question itself is the mistake:
+// finding a call's textual boundary with regular expressions is underdetermined
+// without a parser, and this repo has no parser and no dependencies.
+//
+// So the check no longer asks where a call ends. It reads every string and
+// template literal in the file and asks what the file's OUTPUT VOCABULARY
+// contains. A lexer error can now mislabel a single literal; it cannot suppress
+// anything else, because nothing downstream depends on where one literal
+// stopped.
+//
+// The cost is real and stated rather than hidden: a literal that is never
+// printed -- a pattern table, a fixture, a dead constant -- reads the same as
+// one that is. That makes the check COARSER, and coarser in the safe direction
+// for a NO-POPULATION finding (an unprinted count cannot mask a missing one)
+// and in the unsafe direction for NO-CONTROL (an unprinted guard word clears
+// the file). The NO-CONTROL scope limits are already printed on every run.
+function literalText(source) {
     const out = [];
-    const unbalanced = [];
-    for (let i = 0; i < lines.length; i++) {
-        // Detect the call on MASKED text, so `console.log` mentioned inside a
-        // string or a comment is not mistaken for a call.
-        if (!EMITS.test(masked[i])) continue;
-        let depth = 0;
-        let opened = false;
-        let closedAt = -1;
-        for (let j = i; j < Math.min(lines.length, i + CALL_LINE_GUARD); j++) {
-            out.push(lines[j]);
-            for (const ch of masked[j]) {
-                if (ch === '(') { depth++; opened = true; }
-                else if (ch === ')') depth--;
+    let i = 0;
+    const n = source.length;
+    while (i < n) {
+        const c = source[i];
+        const next = source[i + 1];
+        if (c === '/' && next === '/') {
+            while (i < n && source[i] !== '\n') i++;
+        } else if (c === '/' && next === '*') {
+            i += 2;
+            while (i < n && !(source[i] === '*' && source[i + 1] === '/')) i++;
+            i += 2;
+        } else if (c === '"' || c === "'" || c === '`') {
+            const start = i + 1;
+            let j = start;
+            while (j < n) {
+                if (source[j] === '\\') { j += 2; continue; }
+                if (source[j] === c) break;
+                if (c !== '`' && source[j] === '\n') break;
+                j++;
             }
-            if (opened && depth <= 0) { closedAt = j; break; }
+            out.push(source.slice(start, j));
+            i = j + 1;
+        } else {
+            i++;
         }
-        if (opened && closedAt === -1) unbalanced.push(i + 1);
     }
-    return { text: out.join('\n'), unbalanced };
+    return out.join('\n');
 }
 
 function anyMatch(patterns, text) {
@@ -250,23 +327,80 @@ function normalizeConcat(text) {
 // unconditional suppression rather than delegated coverage, and it would not
 // have noticed a suite's existing guard being deleted. No exemption now.
 
+// A guard message sits on the same LINE as the call that emits or throws it.
+// That is a line test, not a boundary walk: no continuation, no depth, no
+// runaway guard, and a lexer mistake costs at most this one line.
+//
+// It exists because file-wide literal matching is too coarse for NO-CONTROL
+// specifically. An inert `const dormantDescription = 'known-positive control'`
+// would clear the finding while proving nothing -- a defect a review already
+// reproduced once. ABSENCE and POPULATION stay file-wide, where coarseness is
+// safe; only CONTROL, where coarseness would manufacture a false all-clear,
+// pays for the extra precision.
+const GUARD_LINE = /\bconsole\.(?:log|error|warn)\b|\bprocess\.std(?:out|err)\.write\b|(?<![.\w])throw\s|\bprocess\.exit\b/;
+
+// A FIXED RADIUS, not a boundary. The distinction is the whole point: a
+// boundary can be computed WRONG and then silently swallow or drop a verdict,
+// which is what killed both previous designs. A radius cannot be wrong, only
+// too small -- and too small is a stated, bounded limitation rather than a
+// silent one.
+//
+// Six lines covers the multi-line call shapes in this repo (an opening
+// `console.log(`, arguments, a close). A verdict further than six lines from
+// its emitting call is not read; that is the accepted cost, and it replaces an
+// unbounded failure with a bounded one.
+// 10 is MEASURED, not chosen. Against the 152 scripts here:
+//
+//   radius  6 -> 15 absence reporters, 0 findings
+//   radius 10 -> 18 absence reporters, 0 findings
+//   radius 16 -> 20 absence reporters, 1 finding, and that finding is FALSE:
+//                test-brain-brief.js:61 builds an assertion message,
+//                `'no match for ' + re`, which is a test failing rather than a
+//                verdict about the world, and the file carries 34 guard-
+//                vocabulary hits further off than 16 lines.
+//   radius 24 -> identical to 16, so the curve is flat past that point.
+//
+// 10 therefore reads three more real reporters than 6 and buys no false
+// positive. Re-measure this table before changing the number.
+const GUARD_RADIUS = 10;
+
+function guardLineLiterals(source, radius = 0) {
+    const lines = source.split(/\r?\n/);
+    const masked = maskNonCode(source).split(/\r?\n/);
+    const take = new Set();
+    for (let i = 0; i < lines.length; i++) {
+        if (!GUARD_LINE.test(masked[i])) continue;
+        for (let j = i; j <= Math.min(lines.length - 1, i + radius); j++) take.add(j);
+    }
+    return [...take].sort((a, b) => a - b).map((i) => literalText(lines[i])).join('\n');
+}
+
 function inspect(file) {
     const source = fs.readFileSync(file, 'utf8');
-    const { text: printed, unbalanced } = emittedText(source);
 
-    const claimsAbsence = anyMatch(ABSENCE, printed);
+    // Literals within a fixed radius of an emitting or throwing line. File-wide
+    // matching was tried and measured: absence reporters went from 15 to 35 of
+    // 152 scripts, because a test fixture containing "no issues found" reads
+    // exactly like a script printing it. The radius keeps the multi-line call
+    // shapes without inventing verdicts out of fixture data.
+    const literals = guardLineLiterals(source, GUARD_RADIUS);
+    // Comments blanked, strings kept. A count is often built by concatenation
+    // -- `'found ' + n + ' rows'` -- and the `+` is CODE, so it vanishes from a
+    // literals-only view and the count stops being visible. Comments are still
+    // excluded so prose cannot satisfy a population.
+    const noComments = maskNonCode(source, true);
+    // Code with strings, comments and regexes blanked, so an executable
+    // identifier such as a `selftest()` function still counts as a control.
+    const codeOnly = maskNonCode(source);
+
+    const claimsAbsence = anyMatch(ABSENCE, literals);
     if (!claimsAbsence) return { file, claimsAbsence: false, findings: [] };
 
     const findings = [];
-    // The population may be printed anywhere the reader sees it, not only on
-    // the same line as the verdict.
-    if (!anyMatch(POPULATION, normalizeConcat(printed))) findings.push('NO-POPULATION');
-    // A control may live anywhere in the file, including a --selftest branch,
-    // but it must be CODE. Comments are stripped first; a promise in a comment
-    // is not a guard that runs.
-    if (!anyMatch(CONTROL, maskNonCode(source, true))) findings.push('NO-CONTROL');
-    // Say so rather than silently reading a truncated call.
-    if (unbalanced.length) findings.push(`UNREAD-CALL@${unbalanced.join(',')}`);
+    if (!anyMatch(POPULATION, normalizeConcat(noComments))) findings.push('NO-POPULATION');
+    if (!anyMatch(CONTROL, guardLineLiterals(source)) && !anyMatch(CONTROL, codeOnly)) {
+        findings.push('NO-CONTROL');
+    }
 
     return { file, claimsAbsence: true, findings };
 }
@@ -286,18 +420,25 @@ function scan({ strict }) {
     const files = collect();
     const results = files.map(inspect);
     const reporters = results.filter((r) => r.claimsAbsence);
-    const flagged = reporters.filter((r) => r.findings.length);
+    const flagged = results.filter((r) => r.findings.length);
 
     for (const r of flagged) {
         const rel = path.relative(ROOT, r.file).replace(/\\/g, '/');
         console.log(`  ${r.findings.join(' ')}  ${rel}`);
     }
 
-    // This gate reports its own population, for the reason it exists.
+    // This gate reports its own population, for the reason it exists, and its
+    // limits beside it, so a clean line cannot be read as a stronger claim
+    // than the check can make.
     console.log(
         `[population] ${files.length} script(s) read across ${SCAN_DIRS.length} directory(ies), ` +
             `${reporters.length} report an absence or all-clear, ` +
             `${flagged.length} of those are missing a population line or a control`
+    );
+    console.log(
+        '[scope] control detection is per-FILE: a guard on one branch clears the ' +
+            'whole file, and a control living in a separate suite is not seen. ' +
+            'A clean result means a control exists, not that every absence is guarded.'
     );
 
     if (!flagged.length) {
@@ -423,18 +564,82 @@ function selftest() {
             expect: ['NO-POPULATION', 'NO-CONTROL'],
         },
         {
+            // The `console.log` here is inside a string, so the masked line
+            // does not match and the literal is never in radius of a real call.
             name: 'console.log named inside a string is not a call',
             source: 'const help = "run console.log(\\"none found\\") to print";\n',
             expect: [],
         },
         {
-            // The old 12-line cap silently truncated any longer call.
-            name: 'a call longer than the old 12-line cap is read whole',
+            // NEW-3, from round 2. An inert declaration is not a guard: it
+            // cannot run, print, or prove the probe can see. Keeping every
+            // string in the file made this clear the finding.
+            name: 'an inert string holding the vocabulary is not a control',
             source:
-                'console.log(\n' + '  "a",\n'.repeat(14) +
+                "const dormantDescription = 'known-positive control';\n" +
+                "console.log('1 of 1 checks, no issues found');\n",
+            expect: ['NO-CONTROL'],
+        },
+        {
+            // NEW-2, from round 2, and this is the review's own expression.
+            // `return /\)/` begins a REGEX; read as division it leaves a stray
+            // `)` that balances the call early and drops the verdict silently.
+            name: 'a regex after return does not truncate the emitting call',
+            source:
+                'console.log(\n' +
+                '  (() => { return /\\)/; })(),\n' +
+                "  '1 of 1 checks, no issues found'\n" +
+                ');\n',
+            expect: ['NO-CONTROL'],
+        },
+        {
+            // R4-NEW-1, and it is the review's own shape. The trailing-operator
+            // rule stopped after `true` because JavaScript continues on a
+            // LEADING operator too, dropping the verdict below. With no
+            // boundary at all there is nothing left to stop early.
+            name: 'a leading-operator continuation cannot drop the verdict',
+            source:
+                'console.log(\n' +
+                '  true\n' +
+                "    ? '1 of 1 checks, no issues found'\n" +
+                "    : 'other',\n" +
+                ');\n',
+            expect: ['NO-CONTROL'],
+        },
+        {
+            // R4-NEW-3: a method DEFINITION named throw is not a throwing
+            // statement, so its message must not clear the control finding.
+            name: 'a method named throw does not supply a control',
+            source:
+                'const it = {\n' +
+                "  throw(e) { return 'PROBE BLIND'; }\n" +
+                '};\n' +
+                "console.log('1 of 1 checks, no issues found');\n",
+            expect: ['NO-CONTROL'],
+        },
+        {
+            // Inside the radius: a multi-line call is read whole, which is the
+            // case the very first version got wrong with a 12-line cap.
+            name: 'a multi-line call inside the radius is read whole',
+            source:
+                'console.log(\n' + '  "a",\n'.repeat(7) +
                 '  "no issues found"\n' +
                 ');\n',
             expect: ['NO-POPULATION', 'NO-CONTROL'],
+        },
+        {
+            // OUTSIDE the radius, and asserted rather than left to be found.
+            // This is the bounded cost that replaced an unbounded one: a
+            // verdict further than GUARD_RADIUS lines from its call is not
+            // read. A radius cannot be computed wrong, only be too small, and
+            // too small is a limit you can state. Both previous designs failed
+            // in the other direction, silently and without a bound.
+            name: 'a verdict beyond the radius is missed, and that is the stated limit',
+            source:
+                'console.log(\n' + '  "a",\n'.repeat(20) +
+                '  "no issues found"\n' +
+                ');\n',
+            expect: [],
         },
     ];
 

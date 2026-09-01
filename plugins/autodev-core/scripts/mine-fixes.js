@@ -142,8 +142,13 @@ console.log(`\n  ${fixes.length} fixes : ${feats.length} features  =  ${(fixes.l
 console.log(`  ${rework.length} of them (${Math.round(rework.length / fixes.length * 100)}%) landed on code a feature touched in the previous ${windowDays} days.`);
 console.log('  Those are first-pass failures, not maintenance.\n');
 
-if (!ranked.length) {
-    console.log('  No failure class matched — commit subjects may be too terse to classify.');
+if (!commits.length) {
+    // Nothing was read, so nothing can be concluded. Without this, an empty
+    // window and a project that genuinely never fails print the same line.
+    console.log('  COULD NOT CLASSIFY: 0 engineering commits in the window.');
+    console.log('  The probe is blind, not the history clean. Widen --days or check the repo path.');
+} else if (!ranked.length) {
+    console.log(`  No failure class matched across ${commits.length} commit(s) — subjects may be too terse to classify.`);
 } else {
     const max = ranked[0][1];
     console.log('What this project actually gets wrong:\n');
