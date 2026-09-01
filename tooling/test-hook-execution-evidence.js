@@ -229,20 +229,37 @@ const insertAfterShebang = (source, insertion) => {
     return `${source.slice(0, lineEnd + 1)}${insertion}\n${source.slice(lineEnd + 1)}`;
 };
 
-const rawCoverageContains = (coverageDir, file) => {
+// Returns { found, expected, dumps, urls } rather than a bare boolean.
+//
+// The boolean version reported only `coverage dumps=2` when it failed, which is
+// a count with no population behind it. It cannot distinguish "the hook never
+// executed" from "it executed and the paths compare unequal", and those have
+// opposite fixes. That ambiguity produced a wrong diagnosis: an 8.3 short-name
+// theory, mechanically real and reproduced under a forced RUNNER~1-style TEMP,
+// which did not reproduce this failure at all. A control that cannot say what
+// it compared sends the reader somewhere else entirely.
+const rawCoverageEvidence = (coverageDir, file) => {
     const expected = canonPath(file);
-    return fs.readdirSync(coverageDir, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-        .some((entry) => {
-            let coverage;
-            try { coverage = JSON.parse(fs.readFileSync(path.join(coverageDir, entry.name), 'utf8')); }
-            catch { return false; }
-            return (coverage.result || []).some((script) => {
-                if (!script.url || !script.url.startsWith('file://')) return false;
-                try { return canonPath(fileURLToPath(script.url)) === expected; }
-                catch { return false; }
-            });
-        });
+    const base = path.basename(file).toLowerCase();
+    const dumps = fs.readdirSync(coverageDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.json'));
+    const urls = new Set();
+    let found = false;
+    for (const entry of dumps) {
+        let coverage;
+        try { coverage = JSON.parse(fs.readFileSync(path.join(coverageDir, entry.name), 'utf8')); }
+        catch { continue; }
+        for (const script of coverage.result || []) {
+            if (!script.url || !script.url.startsWith('file://')) continue;
+            let resolved;
+            try { resolved = canonPath(fileURLToPath(script.url)); } catch { continue; }
+            if (resolved === expected) found = true;
+            // Same-basename only: the full list is thousands of node internals,
+            // and the near-miss is the whole diagnostic value.
+            else if (path.basename(resolved) === base) urls.add(resolved);
+        }
+    }
+    return { found, expected, dumps: dumps.length, urls: [...urls] };
 };
 
 const baseline = runChecker();
@@ -339,9 +356,12 @@ if (target && targetSuite && original) {
         check('control: the dedicated suite is red after the injected failure',
             forcedRed.status === 1 && forcedRed.signal === null && !forcedRed.error,
             detail(forcedRed));
+        const cov = rawCoverageEvidence(coverageDir, targetHook);
         check('control: the forced-red suite emits raw V8 coverage for its hook',
-            rawCoverageContains(coverageDir, targetHook),
-            `coverage dumps=${fs.readdirSync(coverageDir).length}`);
+            cov.found,
+            `dumps=${cov.dumps} expected=${cov.expected} `
+            + `same-basename-urls=${cov.urls.length ? JSON.stringify(cov.urls) : 'NONE'} `
+            + '(NONE means the hook never executed; a listed url means it ran and the paths compare unequal)');
         failedSuiteCheck = runChecker(true);   // this call deliberately provokes exit 2
     } finally {
         if (redOrig) removeMutant(targetSuite, redOrig, redWroteNow);

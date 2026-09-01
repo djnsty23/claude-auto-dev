@@ -43,6 +43,7 @@
     "check:review": "node tooling/review-diff.js",
     "check:claims": "node tooling/check-claim-provenance.js --selftest",
     "check:orphans": "node tooling/reap-orphan-waiters.js --selftest",
+    "check:ledger": "node plugins/autodev-core/scripts/deploy-ledger.js --selftest",
     "check:population": "node tooling/check-population-reporting.js --selftest && node tooling/check-population-reporting.js",
     "usage:both": "node tooling/usage-both.js",
     "radar": "node plugins/autodev-core/scripts/framework-radar.js",
