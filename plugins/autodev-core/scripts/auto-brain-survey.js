@@ -65,7 +65,31 @@ function survey(name, dir) {
 
     const r = { name, dir };
     r.branch = g(['branch', '--show-current']) || g(['rev-parse', '--short', 'HEAD']);
-    r.trunk = g(['rev-parse', '--abbrev-ref', 'origin/HEAD']);
+    // WHY THIS IS NOT `rev-parse origin/HEAD` ALONE. That reads
+    // refs/remotes/origin/HEAD, which git writes ONCE AT CLONE TIME and never
+    // updates on fetch. So it is a cache, and it can be months stale.
+    // [measured 2026-09-01] two fatboyslim clones here still resolved it to a
+    // branch that had been retired two days earlier, and this survey printed
+    // that as `trunk`. A session read it, concluded the repo's real trunk was
+    // the retired branch, briefed another session with that, and three merges
+    // were needed to undo it. The header two lines below already warns that a
+    // wrong trunk INVERTS verdicts -- and the value it warned about came from
+    // here.
+    // So ask the REMOTE, which is authoritative and costs nothing extra (this
+    // function has already run `git fetch`). Keep the cached value, compare
+    // them, and surface a disagreement loudly rather than silently preferring
+    // one: a clone whose cache disagrees with its remote is exactly the repo
+    // where every ahead/behind number below is measured against the wrong base.
+    r.trunkCached = g(['rev-parse', '--abbrev-ref', 'origin/HEAD']);
+    const symref = g(['ls-remote', '--symref', 'origin', 'HEAD']);
+    const m = symref && symref.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD/m);
+    r.trunkRemote = m ? 'origin/' + m[1] : null;
+    // Prefer the remote. Fall back to the cache only when the remote could not
+    // answer -- an offline run, or a client repo behind auth -- and say so,
+    // because a fallback that looks like a measurement is how this broke.
+    r.trunk = r.trunkRemote || r.trunkCached;
+    r.trunkFromCache = !r.trunkRemote && !!r.trunkCached;
+    r.trunkStale = !!(r.trunkRemote && r.trunkCached && r.trunkRemote !== r.trunkCached);
 
     const remote = g(['remote', 'get-url', 'origin']);
     r.remote = remote;
@@ -160,6 +184,19 @@ console.log('     pass --root to cover another tree.\n');
 for (const r of results) {
     console.log('### ' + r.name + (r.isClient ? '   [CLIENT — bitbucket remote]' : ''));
     console.log('  branch ' + r.branch + '   trunk ' + (r.trunk || 'COULD NOT CHECK'));
+    if (r.trunkStale) {
+        console.log('  !! THE CACHED origin/HEAD IN THIS CLONE IS STALE: it says ' + r.trunkCached);
+        console.log('     the remote says ' + r.trunkRemote + '. refs/remotes/origin/HEAD is');
+        console.log('     written at clone time and NEVER updated by fetch, so any tool');
+        console.log('     reading it here has been getting the wrong trunk. The numbers');
+        console.log('     below use the REMOTE value and are correct; other tools may not.');
+        console.log('     Fix the clone with:  git -C "' + r.dir + '" remote set-head origin -a');
+    }
+    if (r.trunkFromCache) {
+        console.log('  !! trunk is the CACHED origin/HEAD, NOT confirmed against the remote');
+        console.log('     (git ls-remote could not answer). It may be stale. Treat every');
+        console.log('     ahead/behind number below as unverified rather than as measured.');
+    }
     if (r.trunkIsUnusual) {
         console.log('  !! trunk is NOT main/master. Comparing against origin/main here');
         console.log('     inverts verdicts rather than merely dating them.');
