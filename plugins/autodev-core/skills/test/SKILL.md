@@ -2,7 +2,7 @@
 name: test
 description: Runs unit and browser tests on latest changes. Use after implementing features or fixing bugs.
 when_to_use: "Invoked when the user says \"test\", \"e2e\"."
-allowed-tools: Bash, Read, Grep, Glob
+allowed-tools: Bash, Read, Grep, Glob, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
 argument-hint: "[unit|browser|all]"

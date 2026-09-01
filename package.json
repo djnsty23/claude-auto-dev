@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "8.150.0",
+  "version": "8.148.0",
   "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
   "private": true,
   "keywords": [
@@ -31,6 +31,7 @@
     "check:patterns": "node plugins/autodev-core/scripts/analyze-session-patterns.js",
     "check:queue": "node plugins/autodev-core/scripts/check-queue-drained.js --selftest",
     "check:triggers": "node tooling/check-skill-triggers.js",
+    "check:skill-tools": "node tooling/check-skill-tool-declarations.js --selftest && node tooling/check-skill-tool-declarations.js",
     "check:runtime": "node tooling/check-runtime.js",
     "actions:cost": "node tooling/analyze-actions-cost.js",
     "check:agent-budget": "node tooling/agent-budget.js",

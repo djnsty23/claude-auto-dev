@@ -2,7 +2,7 @@
 name: scan
 description: Live site QA in a real browser. Scans pages for visual, console, accessibility, and performance regressions, and compares against baselines. Use when testing a running site or after deploying.
 when_to_use: "Invoked when the user says \"scan\", \"scan it\", \"test it\", \"qa\", \"visual qa\"."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
 argument-hint: "[url or scope]"
