@@ -40,6 +40,44 @@ function git(cwd, args) {
     return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
 }
 
+/**
+ * A repo cloned from a REAL local bare remote, so `git ls-remote` can answer.
+ *
+ * Every other fixture here points `origin` at a URL that does not resolve,
+ * which is fine for the checks they make and useless for this one: the whole
+ * defect being pinned is a DISAGREEMENT between the cached refs/remotes/origin/HEAD
+ * and what the remote actually says, and you cannot have a disagreement with a
+ * remote that never answers.
+ *
+ * `staleTo` plants the defect the way git itself produces it. git writes
+ * refs/remotes/origin/HEAD once at clone time and never touches it again on
+ * fetch, so a clone taken before the default branch moved keeps pointing at the
+ * old one indefinitely. Repointing the symbolic ref by hand reproduces that
+ * state exactly rather than approximating it.
+ */
+function clonedRepo(name, o) {
+    const bare = path.join(tmp, name + '.git');
+    const seed = path.join(tmp, name + '-seed');
+    fs.mkdirSync(seed, { recursive: true });
+    git(seed, ['init', '-q', '-b', o.defaultBranch]);
+    git(seed, ['config', 'user.email', 't@t']);
+    git(seed, ['config', 'user.name', 'T']);
+    fs.writeFileSync(path.join(seed, 'seed.txt'), 'seed' + String.fromCharCode(10));
+    git(seed, ['add', '.']);
+    git(seed, ['commit', '-qm', 'seed']);
+    for (const b of o.alsoBranches || []) git(seed, ['branch', b]);
+    execFileSync('git', ['clone', '-q', '--bare', seed, bare], { stdio: 'pipe' });
+    // A bare repo's HEAD is what ls-remote --symref reports as the default.
+    git(bare, ['symbolic-ref', 'HEAD', 'refs/heads/' + o.defaultBranch]);
+
+    const dir = path.join(ROOT, name);
+    execFileSync('git', ['clone', '-q', bare, dir], { stdio: 'pipe' });
+    git(dir, ['config', 'user.email', 't@t']);
+    git(dir, ['config', 'user.name', 'T']);
+    if (o.staleTo) git(dir, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/' + o.staleTo]);
+    return dir;
+}
+
 function repo(name, opts) {
     const o = opts || {};
     const dir = path.join(ROOT, name);
@@ -72,6 +110,17 @@ try {
         dirty: true,
     });
 
+    // Two clones from REAL local bare remotes, for the trunk-cache checks.
+    // `staletrunk` is the defect: cloned when the default was `oldtrunk`, and
+    // the default has since moved to `main`. git leaves refs/remotes/origin/HEAD
+    // pointing at the old one forever, so a survey reading it reports a trunk
+    // that was retired, and every ahead/behind number it prints is measured
+    // against the wrong base.
+    clonedRepo('staletrunk', { defaultBranch: 'main', alsoBranches: ['oldtrunk'], staleTo: 'oldtrunk' });
+    // The control. Same construction, cache NOT planted. It must not be flagged,
+    // or the warning above is unreadable noise rather than a finding.
+    clonedRepo('freshtrunk', { defaultBranch: 'main' });
+
     // A plain repo with no remote at all, and no package.json.
     repo('docsonly', { files: ['NOTES.md'] });
 
@@ -81,7 +130,15 @@ try {
     const r = run([]);
     check('it exits 0', r.status === 0, 'status ' + r.status);
     has('it prints the population it scanned', r.out, 'git repo(s) found');
-    check('  and the population is the real count', /population: 3 git repo\(s\) found/.test(r.out),
+    // DERIVED, not hardcoded. This assertion read `population: 3` and went red
+    // the moment two fixtures were added for the trunk-cache checks -- a true
+    // result reported as a failure, which is the shape that trains people to
+    // bump the number without reading it. Count the fixtures on disk instead,
+    // so adding one can never be indistinguishable from the survey miscounting.
+    const expected = fs.readdirSync(ROOT).filter(
+        (d) => fs.existsSync(path.join(ROOT, d, '.git'))).length;
+    check('  and the population is the real count',
+        r.out.indexOf('population: ' + expected + ' git repo(s) found') !== -1,
         (r.out.split('\n').find((l) => l.indexOf('population') !== -1) || '').trim());
 
     // ---- the client distinction, which decides whether a brief may push -----
@@ -145,6 +202,44 @@ try {
         const out = (r3.stdout || '') + (r3.stderr || '');
         has('an empty root still prints a population', out, 'population: 0 git repo(s) found');
         has('  and does not crash', out, 'SUMMARY');
+    }
+
+    {
+        // THE TRUNK CACHE. This is the check the survey shipped without, and the
+        // omission cost three merges on 2026-09-01: two clones still resolved
+        // origin/HEAD to a branch retired two days earlier, the survey printed it
+        // as `trunk`, and a session briefed another session on that reading.
+        const r = run([]);
+        has('a stale cached origin/HEAD is reported as stale',
+            r.out, 'THE CACHED origin/HEAD IN THIS CLONE IS STALE');
+        has('  and names what the cache wrongly says', r.out, 'it says origin/oldtrunk');
+        has('  and what the remote actually says', r.out, 'the remote says origin/main');
+        has('  and gives the command that repairs the clone', r.out, 'remote set-head origin -a');
+
+        // The numbers must already USE the remote value. A warning that tells you
+        // the trunk is wrong while still measuring against it is worse than none:
+        // it reads as handled.
+        const stale = r.out.split('### staletrunk')[1].split('###')[0];
+        has('  the trunk it reports is the REMOTE one, not the cached one',
+            stale, 'trunk origin/main');
+        lacks('  and never reports the stale cached ref as the trunk',
+            stale.split('CACHED origin/HEAD')[0], 'trunk origin/oldtrunk');
+
+        // The control: an identical clone with an accurate cache says nothing.
+        const fresh = r.out.split('### freshtrunk')[1].split('###')[0];
+        lacks('a clone whose cache matches its remote is NOT flagged',
+            fresh, 'IS STALE');
+        lacks('  and is not reported as unverified either', fresh, 'NOT confirmed against the remote');
+
+        // A remote that cannot answer is a THIRD outcome, never folded into the
+        // other two. Every other fixture here points origin at a URL that does not
+        // resolve, so `docsonly`-style repos exercise it: the survey must say the
+        // value is cached and unverified rather than presenting it as measured.
+        const client = r.out.split('### clientproj')[1].split('###')[0];
+        check('a repo whose remote cannot answer says its trunk is unverified',
+            client.indexOf('NOT confirmed against the remote') !== -1 ||
+            client.indexOf('COULD NOT CHECK') !== -1,
+            'clientproj neither flagged unverified nor COULD NOT CHECK');
     }
 } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
