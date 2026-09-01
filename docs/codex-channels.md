@@ -13,7 +13,7 @@ before quoting it; a fact about tooling goes stale without announcing it.
 
 | Channel | Use it for |
 |---|---|
-| **MCP server** (`codex mcp-server`) | Everything agent-to-agent. Structured request and reply, threads that continue, concurrent calls. |
+| **MCP server** (`codex mcp-server`) | Everything agent-to-agent. Structured request and reply, threads that continue, concurrent calls. Deprecated, see below. |
 | **CLI** (`codex exec`) | Repo-rooted runs, long jobs, sandbox and approval flags, `exec review`, session logs you can grep. |
 | **Desktop app** | The human's own threads. Not an automation target. |
 
@@ -40,6 +40,14 @@ entire review cycles, and stalls waiting for the machine to be unlocked. None of
 that failure class exists over MCP.
 
 ## Setup
+
+**The MCP server is deprecated and still the best channel.** Starting it prints
+`warning: codex mcp-server is deprecated and will be removed in a future
+release`, confirmed on 0.151.0. The successor surface, `codex app-server`, is
+marked `[experimental]` in the CLI's own help. So both replacements for the
+other are unsatisfying, the recommendation above stands on measurements rather
+than on support status, and this is a dependency to pin and re-check on upgrade
+rather than one to build on quietly.
 
 Register the MCP server. On Windows the `cmd /c` wrapper is required or the
 server never starts.
@@ -121,8 +129,10 @@ One slug moved inside a day: `gpt-5.6-codex` executed on 2026-08-31 and is absen
 from the catalog on 2026-09-01. Read the catalog rather than this table.
 
 A per-call `model` override is honoured, but confirm it by reading
-`turn_context.model` back out of the rollout log under `~/.codex/sessions/`. A
-requested model is not an executed model, and the request tells you nothing.
+`turn_context.model` back out of the rollout for the thread you dispatched:
+sessions live under `$CODEX_HOME`, which is not always `~/.codex`, and the file
+has to be matched by thread id rather than by being the newest. A requested
+model is not an executed model, and the request tells you nothing.
 
 ## Eight traps, each already paid for
 
@@ -179,9 +189,15 @@ config file, a `--help`, an error that lists the enum, before asserting a set is
 complete. Otherwise say "these N work; I did not enumerate", because that is the
 sentence that does not get acted on as a fact.
 
-**The delegate starts cold, and `AGENTS.md` is the whole briefing.** Every CLI
-and MCP invocation is a fresh session inheriting no conversation, no memory and
-no machine-level rules. A find-replace of `CLAUDE.md` is worse than nothing: the
+**The delegate does not inherit the CALLER's context, which is not the same as
+starting empty.** Every CLI and MCP invocation is a fresh session that carries
+none of your conversation, none of your memory and none of your machine-level
+rules. It does load its own: `codex debug prompt-input` renders 44,220 bytes of
+model-visible input on this machine, carrying `AGENTS.md`, skills and plugin
+instructions. That is the same preamble the token comparison above measures, so
+"receives no machine-level rules" would contradict this document's own numbers.
+The briefing you control for a repo is `AGENTS.md` at its root. A find-replace of
+`CLAUDE.md` is worse than nothing: the
 one tried here inverted repo facts and told the reader to write the one path the
 validator refuses. Make it a pointer plus the few things true only for a cold
 cross-vendor session.
@@ -234,8 +250,11 @@ quietly replaced by a Claude-side attempt, it gets reported as a failure.
 
 **The channel is live.** `codex login status` prints `Logged in using ChatGPT`.
 `codex --version` should be at least 0.151.0, because `exec review` flag
-behaviour is version-sensitive. One trivial MCP call returning within about 10 s
-with a `threadId` proves the server, the auth and the threading together.
+behaviour is version-sensitive. A first MCP call returning a `threadId` proves
+the server and the auth, and proves only that a thread was CREATED. Make a
+second call with `codex-reply` against that id and check the answer depends on
+the first before claiming multi-turn works: continuation can fail on storage,
+locking or tool registration while creation keeps succeeding.
 
 **The sandbox default is what you think.** Read `sandbox_mode` in
 `~/.codex/config.toml`, then dispatch a call with `sandbox: "read-only"` and ask
@@ -243,8 +262,11 @@ it to create a file. It should refuse; a success means the override did not
 take.
 
 **The model that ran is the model you asked for.** Dispatch with an explicit
-`model`, then read `turn_context.model` from the newest `rollout-*.jsonl` under
-`~/.codex/sessions/`.
+`model`, then read `turn_context.model` out of the rollout for THAT thread:
+resolve the sessions directory from `$CODEX_HOME` rather than assuming
+`~/.codex`, and match the file to the dispatch's returned thread id rather than
+taking the newest. Newest-wins reads another run's thread whenever anything else
+is running, and on a machine hosting several agents something else usually is.
 
 If any of these disagrees with what is written above, this document is stale
 rather than the machine, and the figure here should be replaced with what you
