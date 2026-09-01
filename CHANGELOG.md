@@ -1,5 +1,46 @@
 # Changelog
 
+## [8.151.0] - 2026-09-02
+
+### Added: every shipped script must return on --help, gated over the population
+
+`[measured 2026-09-02]` five scripts entered their work loop when asked for
+help: `watch-panels.js`, `fleet-stop-watch.js` and `quota-tripwire.js` never
+returned, and `find-untested-functions.js` and `find-untested-hooks.js`
+started a coverage sweep. F8 of the 2026-08-30 codex audit had fixed this
+class in `fleet-board.js` alone. The cross-vendor review of the harness audit
+plan found the same class blocking the plan's own first hour, three times.
+
+`tooling/check-entrypoints.js` probes every `plugins/*/scripts`,
+`plugins/*/hooks` and `tooling` script with `--help`, stdin closed, under a
+10 s budget, against a scratch copy of the tree under a scratch HOME. The
+copy is the design decision: a script that ignores the flag and does its
+default action can rewrite sources (`check-suites-can-fail.js` does), and a
+probe killed at the budget would leave the working tree mutated. The selftest
+proves the isolation with a script that writes a marker beside itself. Exit
+code on `--help` is reported and not judged; only not returning is a finding.
+
+First run was the measurement: 90 probed, 5 hung. After the fixes, 90
+returned. Side effects in `watch-panels.js` and `quota-tripwire.js` moved
+behind `require.main`. `tooling/test-entrypoints.js` asserts the corpus stays
+at zero and is mutation-verified under `check:suites`.
+
+### Added: the harness audit plan, reviewed by the adversary before execution
+
+`docs/harness-audit-plan.md`: twelve measured stall classes from the last 14
+days of transcripts, an acceptance contract with a probe per criterion, roles
+and file channels for an away window, seven audit lanes each run as one
+adversarial loop, and a revision log carrying the disposition of all 16
+findings from a Codex review (gpt-5.6-sol over MCP, workspace-write, every
+finding measured). Seven of ten criteria named probes that could not produce
+their number; the plan now says which exist and which are builds. The
+operator answered Q2: a standing order recorded verbatim, with date,
+condition and holding session, authorises that session's push.
+
+One measurement from running the review: a 31-minute `codex-reply` lost its
+reply to the 1800 s MCP idle abort while its file survived, because it wrote
+incrementally. The remedy is a per-server `timeout` on the MCP entry.
+
 ## [8.150.0] - 2026-09-01
 
 ### Added: a red suite is not proof that your assertion works
