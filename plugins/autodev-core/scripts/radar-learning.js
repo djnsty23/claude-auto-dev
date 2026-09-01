@@ -94,10 +94,9 @@ function clusterClaims(items, threshold = 0.52) {
     let best = null;
     let bestScore = 0;
     for (const cluster of clusters) {
-      const sameUrl = normalizedUrl && cluster.urls.has(normalizedUrl);
       const sameProduct = item.product && cluster.products.has(item.product);
       const score = similarity(tokens, cluster.tokens);
-      const matches = (sameProduct && score >= threshold) || score >= 0.62 || (sameUrl && score >= 0.8);
+      const matches = (sameProduct && score >= threshold) || score >= 0.62;
       if (matches && score > bestScore) {
         best = cluster;
         bestScore = score;
@@ -342,7 +341,7 @@ function renderMarkdown(data) {
     `Generated: ${data.generated_at}`, '',
     `Run: \`${data.run.id}\``, '',
     '## Summary', '',
-    `- ${data.claims.length} underlying claim cluster(s) from ${data.run.profile === 'marketing-radar' ? data.population.source_items_seen : data.population.source_items_seen} source item(s) and ${data.population.youtube_videos_seen} video(s).`,
+    `- ${data.claims.length} underlying claim cluster(s) from ${data.population.source_items_seen} source item(s) and ${data.population.youtube_videos_seen} video(s).`,
     `- ${data.experiments.length} recorded experiment(s), ${data.lifecycle.filter((entry) => entry.effective_status === 'stale').length} stale default(s).`,
     `- ${data.source_scorecard.length} source(s) with measured outcomes, ${data.source_candidates.length} proposed source candidate(s).`, '',
     '## Claim clusters', '',

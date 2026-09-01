@@ -35,6 +35,14 @@ function cli(args) {
   return spawnSync(process.execPath, [SCRIPT].concat(args), { encoding: 'utf8' });
 }
 
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function throwsMessage(run, pattern) {
+  try { run(); return false; } catch (error) { return pattern.test(error.message); }
+}
+
 const items = [
   {
     key: 'primary:vendor:one', source_id: 'vendor', authority: 'primary', product: 'Codex',
@@ -101,6 +109,26 @@ function hypothesisMeasurements() {
     { key: 'v2', source_id: 'vendor', product: 'Claude Code', title: 'Claude Code 2.1.251', url: 'https://vendor.test/CHANGELOG.md' },
   ]);
   check('H1 keeps distinct releases separate when a changelog reuses one URL', sharedChangelog.length === 2);
+  check('H1 keeps empty claims separate rather than clustering on an empty comparison',
+    subject.clusterClaims([
+      { key: 'empty-1', source_id: 'one', product: 'Fixture', title: '', url: 'https://one.test' },
+      { key: 'empty-2', source_id: 'two', product: 'Fixture', title: '', url: 'https://two.test' },
+    ]).length === 2);
+  const boundaryItems = [
+    { key: 'p1', source_id: 'one', product: 'One', title: 'alpha beta gamma delta', url: 'https://one.test/p1' },
+    { key: 'p2', source_id: 'two', product: 'Two', title: 'alpha beta gamma epsilon', url: 'https://two.test/p2' },
+  ];
+  check('H1 product boundary prevents a moderate lexical overlap from merging unrelated products',
+    subject.clusterClaims(boundaryItems).length === 2);
+  boundaryItems[1].product = 'One';
+  check('H1 the identical moderate overlap clusters when the product boundary agrees',
+    subject.clusterClaims(boundaryItems).length === 1);
+  const fallbackAuthority = subject.clusterClaims([
+    { key: 'kind-only', source_id: 'kind', kind: 'research', title: 'unique claim', url: 'https://kind.test' },
+    { key: 'unknown', source_id: 'unknown', title: 'different statement', url: 'https://unknown.test' },
+  ]);
+  check('H1 authority labels fall back to kind and then unknown without dropping either item',
+    fallbackAuthority[0].authorities[0] === 'research' && fallbackAuthority[1].authorities[0] === 'unknown');
 
   const sourceStats = {
     'sparse-hit': { tested: 1, wins: 1, rejected: 0, no_winner: 0 },
@@ -111,6 +139,14 @@ function hypothesisMeasurements() {
   check('H2 B shrunk utility ranks mature evidence above a one-hit source',
     ranked[0].source_id === 'mature-useful' && ranked[0].utility_score > ranked[1].utility_score);
   check('H2 C raw win rate would incorrectly rank the single hit first', 1 / 1 > 8 / 10);
+  const completeStats = subject.rankSources({
+    zeta: { tested: 2, wins: 0, rejected: 1, no_winner: 1 },
+    alpha: { tested: 2, wins: 0 },
+  });
+  check('H2 scorecard preserves rejected and no-winner outcome populations',
+    completeStats.find((row) => row.source_id === 'zeta').rejected === 1 &&
+      completeStats.find((row) => row.source_id === 'zeta').no_winner === 1);
+  check('H2 equal utility and test populations sort deterministically by source id', completeStats[0].source_id === 'alpha');
 
   const ledger = subject.createLedger();
   ledger.lifecycle.exp = {
@@ -129,6 +165,25 @@ function hypothesisMeasurements() {
   check('H3 B blocks stale to default without a shadow revalidation cycle', illegalBlocked);
   check('H3 C a simple age alert can name staleness but cannot enforce the transition',
     Date.parse(ledger.lifecycle.exp.revalidate_by) < Date.parse('2026-09-01T00:00:00.000Z') && ledger.lifecycle.exp.status === 'default');
+  check('H3 non-default states never become stale because of a leftover expiry field',
+    subject.effectiveLifecycle({ status: 'shadow', revalidate_by: '2026-01-01T00:00:00.000Z' }, Date.parse('2026-09-01T00:00:00.000Z')) === 'shadow');
+  check('H3 a default without an expiry stays visibly default rather than becoming a false stale',
+    subject.effectiveLifecycle({ status: 'default' }, Date.parse('2026-09-01T00:00:00.000Z')) === 'default');
+
+  const transitionLedger = subject.createLedger();
+  transitionLedger.lifecycle.legacy = { experiment_id: 'legacy', claim: 'legacy', status: 'candidate' };
+  const shadowEntry = subject.transitionLifecycle(transitionLedger, 'legacy', 'shadow', 'shadow evidence', { nowIso: '2026-09-01T01:00:00.000Z' });
+  subject.transitionLifecycle(transitionLedger, 'legacy', 'canary', 'canary evidence', { nowIso: '2026-09-01T02:00:00.000Z' });
+  const defaultEntry = subject.transitionLifecycle(transitionLedger, 'legacy', 'default', 'default evidence', {
+    nowIso: '2026-09-01T03:00:00.000Z', revalidateBy: '2026-12-01T00:00:00.000Z',
+  });
+  const recordedExpiry = defaultEntry.revalidate_by;
+  subject.transitionLifecycle(transitionLedger, 'legacy', 'shadow', 'revalidation cycle', { nowIso: '2026-09-02T00:00:00.000Z' });
+  check('H3 transition history initializes for legacy rows and preserves the supplied time',
+    shadowEntry.history[0].at === '2026-09-01T01:00:00.000Z' && shadowEntry.history[0].evidence[0] === 'shadow evidence');
+  check('H3 default transition records a parseable expiry', recordedExpiry === '2026-12-01T00:00:00.000Z' &&
+    transitionLedger.lifecycle.legacy.history.some((row) => row.to === 'default' && row.at === '2026-09-01T03:00:00.000Z'));
+  check('H3 returning a default to shadow deletes the obsolete expiry', !('revalidate_by' in transitionLedger.lifecycle.legacy));
   const legacyManifest = JSON.parse(JSON.stringify(manifest));
   delete legacyManifest.run.profile;
   check('legacy manifests without run.profile remain framework radar artifacts',
@@ -149,6 +204,52 @@ function hypothesisMeasurements() {
       /candidate/.test(text) && /shadow/.test(text) && /canary/.test(text) && /revalidate-by/.test(text)));
   check('package exposes the learning CLI without replacing either collector command',
     /radar-learning\.js/.test(packageJson.scripts['radar:learn']) && packageJson.scripts.radar && packageJson.scripts['marketing:radar']);
+}
+
+function validationAndAccounting() {
+  check('verdict validator rejects null with its stable schema message',
+    throwsMessage(() => subject.validateVerdictFile(null, manifest), /schema_version 1/));
+  check('verdict validator rejects a missing hypotheses array',
+    throwsMessage(() => subject.validateVerdictFile({ schema_version: 1, run_id: manifest.run.id }, manifest), /hypotheses/));
+  const duplicate = clone(verdicts);
+  duplicate.hypotheses.push(clone(duplicate.hypotheses[0]));
+  check('verdict validator rejects duplicate hypothesis ids',
+    throwsMessage(() => subject.validateVerdictFile(duplicate, manifest), /unique/));
+  for (const [field, pattern] of [['claim', /claim/], ['source_keys', /source_keys/], ['variants', /measured A, B and C/], ['evidence', /evidence location/]]) {
+    const invalid = clone(verdicts);
+    delete invalid.hypotheses[0][field];
+    check(`verdict validator rejects a missing ${field}`, throwsMessage(() => subject.validateVerdictFile(invalid, manifest), pattern));
+  }
+  const invalidVariant = clone(verdicts);
+  delete invalidVariant.hypotheses[0].variants.c.measurement;
+  check('verdict validator rejects an unmeasured C variant',
+    throwsMessage(() => subject.validateVerdictFile(invalidVariant, manifest), /measured A, B and C/));
+
+  const outcomes = clone(verdicts);
+  outcomes.hypotheses = [
+    Object.assign(clone(verdicts.hypotheses[0]), { id: 'adopt-c', verdict: 'adopt-c', tested_at: undefined }),
+    Object.assign(clone(verdicts.hypotheses[0]), { id: 'rejected', verdict: 'reject' }),
+    Object.assign(clone(verdicts.hypotheses[0]), { id: 'no-winner', verdict: 'no-winner' }),
+  ];
+  const legacyManifest = clone(manifest);
+  delete legacyManifest.run.profile;
+  const ingested = subject.ingestVerdicts(subject.createLedger(), legacyManifest, outcomes, '2026-09-01T10:00:00.000Z').ledger;
+  const stats = ingested.sources.vendor;
+  const adopted = ingested.lifecycle[`${manifest.run.id}:adopt-c`];
+  check('outcome accounting separates wins, rejects and no-winner results',
+    stats.tested === 3 && stats.wins === 1 && stats.rejected === 1 && stats.no_winner === 1);
+  check('only an adopted outcome enters lifecycle and adopt-C records variant C',
+    Object.keys(ingested.lifecycle).length === 1 && adopted.adopted_variant === 'c');
+  check('legacy ingestion records framework profile and tested-at fallback',
+    ingested.experiments[`${manifest.run.id}:adopt-c`].profile === 'framework-radar' &&
+      ingested.experiments[`${manifest.run.id}:adopt-c`].tested_at === '2026-09-01T10:00:00.000Z');
+  check('YouTube source identity falls back to the channel name when channel id is absent',
+    subject.ingestVerdicts(subject.createLedger(), Object.assign(clone(manifest), {
+      items: [Object.assign(clone(items[2]), { channel_id: null, channel: 'Fallback Channel' })],
+    }), {
+      schema_version: 1, run_id: manifest.run.id,
+      hypotheses: [Object.assign(clone(verdicts.hypotheses[0]), { source_keys: ['youtube:video-one'] })],
+    }, '2026-09-01T10:00:00.000Z').ledger.sources['youtube:fallback channel'].tested === 1);
 }
 
 function endToEnd() {
@@ -173,14 +274,37 @@ function endToEnd() {
   check('artifact records one proposed cited source without adding it to a registry',
     data.source_candidates.length === 1 && data.source_candidates[0].host === 'new-source.test' &&
       data.source_candidates[0].status === 'proposed');
+  const candidateManifest = clone(manifest);
+  candidateManifest.items[0].content += ' https://vendor.test/already-known https://youtube.com/watch?v=IGNORE00001 https://two-new.test/a';
+  candidateManifest.items[1].content += ' https://another-new.test/a';
+  const candidateRows = subject.collectSourceCandidates(candidateManifest);
+  check('source discovery excludes known and YouTube hosts',
+    candidateRows.every((row) => !/vendor\.test|youtube\.com/.test(row.host)));
+  check('source discovery orders equal mention populations deterministically by host',
+    candidateRows.findIndex((row) => row.host === 'another-new.test') < candidateRows.findIndex((row) => row.host === 'two-new.test'));
   check('Markdown shows measurements and explicit evidence boundaries',
     /9 of 10 tasks/.test(markdown) && /Transcript and comment text remain outside/.test(markdown));
+  check('populated Markdown does not also print empty-state sentinels',
+    !/No measured outcomes yet|No executed verdicts|No adopted variants|No new cited source hosts/.test(markdown));
+  const emptyData = subject.reportData(manifest, subject.createLedger(), '2026-09-01T10:00:00.000Z');
+  const emptyMarkdown = subject.renderMarkdown(emptyData);
+  check('empty Markdown names every genuinely empty learned population',
+    /No measured outcomes yet/.test(emptyMarkdown) && /No executed verdicts/.test(emptyMarkdown) &&
+      /No adopted variants yet/.test(emptyMarkdown));
   check('HTML uses summary-first disclosures and themed scrollbars',
     /class="reveal"/.test(html) && /scrollbar-color/.test(html) && /scrollHeight/.test(html));
   check('HTML is self-contained and has no remote scripts or stylesheets',
     !/<script[^>]+src=|<link[^>]+stylesheet/i.test(html));
   check('HTML embeds a local favicon so browser verification has no synthetic 404',
     /rel="icon" href="data:image\/svg\+xml/.test(html));
+  check('HTML keeps a valid doctype and singular/plural independent-source labels',
+    /^<!doctype html>/.test(html) && />3 sources</.test(html) && />1 source</.test(html));
+  const staleHtml = subject.renderHtml(Object.assign({}, data, {
+    lifecycle: [Object.assign({}, data.lifecycle[0], { effective_status: 'stale' })],
+    experiments: [Object.assign({}, data.experiments[0], { verdict: 'reject' })],
+  }));
+  check('HTML counts stale defaults and visually distinguishes rejected experiments',
+    /1 stale defaults/.test(staleHtml) && /card is-warn/.test(staleHtml));
   check('artifact never invents raw transcript or comment content',
     !/CANARY_TRANSCRIPT_FULL_TEXT/.test(JSON.stringify(data) + markdown + html));
 
@@ -189,6 +313,11 @@ function endToEnd() {
   check('verdict ingestion is idempotent by run and hypothesis id',
     rerun.status === 0 && /0 new verdict/.test(rerun.stdout) && Object.keys(ledger.experiments).length === 1 &&
       ledger.sources.vendor.tested === 1);
+  const noVerdictOutput = path.join(tmp, 'no-verdict-reports');
+  const noVerdict = cli(['--manifest', manifestFile, '--output-dir', noVerdictOutput]);
+  check('CLI refreshes findings without inventing or requiring a verdict file',
+    noVerdict.status === 0 && /0 new verdict/.test(noVerdict.stdout) &&
+      fs.existsSync(path.join(noVerdictOutput, 'framework-radar-findings-latest.html')));
 
   const experimentId = `${manifest.run.id}:background-agents-replay`;
   const invalidDefault = cli(['--state-dir', stateDir, '--transition', experimentId, '--to', 'default', '--evidence', 'fixture']);
@@ -204,6 +333,11 @@ function endToEnd() {
   write(invalidVerdicts, Object.assign({}, verdicts, { hypotheses: [Object.assign({}, verdicts.hypotheses[0], { source_keys: ['outside:manifest'] })] }));
   const invalid = cli(['--manifest', manifestFile, '--verdicts', invalidVerdicts, '--output-dir', outputDir]);
   check('CLI rejects verdict evidence outside the collected manifest', invalid.status !== 0 && /outside the manifest/.test(invalid.stderr));
+  const invalidManifest = path.join(tmp, 'invalid-manifest.json');
+  write(invalidManifest, { schema_version: 999, run: {}, items: [] });
+  const invalidManifestRun = cli(['--manifest', invalidManifest, '--output-dir', outputDir]);
+  check('CLI rejects unsupported manifest schemas with a stable message',
+    invalidManifestRun.status !== 0 && /framework-radar schema_version 1/.test(invalidManifestRun.stderr));
 
   const escaped = subject.renderHtml(Object.assign({}, data, {
     claims: [Object.assign({}, data.claims[0], { title: '<script>alert(1)</script>' })],
@@ -212,6 +346,7 @@ function endToEnd() {
 }
 
 hypothesisMeasurements();
+validationAndAccounting();
 endToEnd();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
