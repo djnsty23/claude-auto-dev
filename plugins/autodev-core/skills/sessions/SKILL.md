@@ -2,7 +2,7 @@
 name: sessions
 description: Sweep Claude Code Desktop sessions — classify which are finished, check their worktrees are safe to discard, write resume stubs, and archive the safe ones. Use for "archive finished sessions", "session cleanup", "how many sessions do I have open".
 when_to_use: "Invoked when the user says \"sessions\", \"archive sessions\", or asks to clean up finished sessions."
-allowed-tools: Bash, Read, Write
+allowed-tools: Bash, Read, Write, mcp__ccd_session_mgmt__archive_session
 model: haiku
 user-invocable: true
 ---

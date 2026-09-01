@@ -94,6 +94,10 @@ const SUBJECT_OVERRIDES = {
     // the suite on its first run and named the remedy, which is the behaviour
     // the comment above was written to produce.
     'test-no-private-names.js': ['tooling/check-no-private-names.js'],
+    // Added with the suite, for the reason stated two comments up: a suite over
+    // tooling/ is invisible to deriveSubjects() however plainly it names its
+    // subject, and NO-SUBJECT reads as an exemption rather than a gap.
+    'test-skill-tool-declarations.js': ['tooling/check-skill-tool-declarations.js'],
 
     // This policy regression suite constructs its two skill paths from a common
     // directory, so neither subject appears as a derivable path literal.

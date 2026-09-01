@@ -2,7 +2,7 @@
 name: grilling
 description: "Stress-test a plan or decision BEFORE building it. Use when the user says grill me, poke holes in this, stress-test this, or what am I missing, and before executing any plan whose premise nobody has attacked."
 when_to_use: "Before work starts on anything whose FRAME could be wrong: a new feature, an architecture call, a migration, a rewrite. Not for a decision that is reversible, in scope, and obvious — grilling those is its own failure mode."
-allowed-tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
+allowed-tools: Read, Grep, Glob, Bash, WebFetch, WebSearch, AskUserQuestion
 ---
 
 # Attack the premise before it becomes code
