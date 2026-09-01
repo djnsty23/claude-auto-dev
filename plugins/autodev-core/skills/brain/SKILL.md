@@ -577,17 +577,33 @@ repo then ran with NO CI on 6,291 tests for three weeks. So `timeout-minutes` an
 `cancel-in-progress` are not hygiene — they are the difference between one bad
 afternoon and a month in the dark.
 
-**MERGING A PR KILLS THE SESSION THAT WROTE IT.** `[measured 2026-08-29]`
-auto-archive-after-PR-merge is ON for this operator: merging archives the desktop
-session, removes its worktree and deletes its branch. A session vanished within
-seconds of its PR landing, and the Brain noticed only because a stop watch was
-running.
+**MERGING A PR CAN KILL THE SESSION THAT MERGED IT. READ THE SETTING, NEVER
+ASSUME IT.** Auto-archive-after-PR-merge archives the desktop session, removes
+its worktree and deletes its branch. It is a per-operator toggle, so this
+paragraph cannot tell you whether it is on today. The reliable tell is
+`list_sessions --include_archived` showing `isArchived: true` beside a
+`prState: MERGED`. `[stated 2026-09-01]` one operator turned it off after it
+archived a Brain mid-run, and an earlier version of this paragraph asserted it
+was on for months afterwards.
 
-So the follow-up work must be captured BEFORE the merge, not after. The session
-that just built the thing holds context nobody else has, and it is about to stop
-existing. At merge time: take its proposed follow-ups, write them into the repo's
-queue file, and spawn the next chip if it belongs in the current tier. Doing this
-after the merge means reconstructing what a dead session knew.
+Two measurements, and the second is what makes it hazardous for this role
+specifically:
+
+- `[measured 2026-08-29]` a session vanished within seconds of its own PR
+  landing, noticed only because a stop watch was running.
+- `[measured 2026-09-01]` a **Brain** was archived on a PR belonging to a
+  DIFFERENT repo from the one the session was working in. So the archive keys on
+  any PR the session record is LINKED to, which includes one it merely merged
+  rather than authored. Merging is a Brain's ordinary work, so wherever the
+  setting is on, a Brain kills itself the first time it does its job. The same
+  run also lost the worker session it was coordinating with.
+
+**The durable half survives the setting being off, because a session ends for
+other reasons too: capture follow-up work BEFORE the merge, not after.** The
+session that just built the thing holds context nobody else has. At merge time
+take its proposed follow-ups, write them into the repo's queue file, and spawn
+the next chip if it belongs in the current tier. Doing this afterwards means
+reconstructing what a dead session knew.
 
 **Sessions PROPOSE follow-ups; the Brain SPAWNS the chips.** `[stated
 2026-08-29]` the operator, after a session spawned two chips of its own: *"ideally,

@@ -1,5 +1,31 @@
 # Changelog
 
+## [8.146.0] - 2026-09-01
+
+### Fixed: auto-brain could dispatch to existing sessions and nothing else
+
+`auto-brain` told a coordinator that a repo with no session was "not a session
+to brief" and to leave starting one to the user, while offering no mechanism to
+start one. Its `allowed-tools` listed neither `send_message` nor `spawn_task`,
+so both of its dispatch paths were absent from the frontmatter that gates them.
+A coordinator reading that has two doors, ignore the repo or work it itself, and
+one took the second across four repos in a single session.
+
+Step 2 now routes a session-less repo to a task chip. Step 5 carries both
+mechanisms, chosen by whether a session already holds the repo, with the tier
+cap, the one-chip-per-verifiable-unit rule and the standing-alone prompt
+requirement ported from the `brain` skill. The frontmatter lists the session
+tools the steps actually call.
+
+### Changed: the auto-archive warning states a mechanism instead of a setting
+
+`brain` asserted that auto-archive-after-PR-merge is on. It is a per-operator
+toggle and was turned off on 2026-09-01, so the claim was one edit away from
+being false and had no way to announce it. The paragraph now gives the probe
+that answers it, and records the measurement that matters for this role: the
+archive keys on any PR a session record is linked to, including one it merely
+merged, so a coordinator that merges is archived by its own routine work.
+
 ## [8.145.0] - 2026-09-01
 
 ### Changed: the radar now executes hypotheses across the agent ecosystem
