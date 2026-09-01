@@ -49,6 +49,15 @@ Do not drop a fan-out to Haiku or Sonnet to "save budget" — a cheap agent that
 returns a wrong finding costs more than it saves, because the finding still has
 to be verified. Reduce the agent *count* instead.
 
+**Verify the model that actually ran before a model-specific claim or handoff.**
+`model:` frontmatter, `--model`, a saved preference, and a requested fallback
+chain are intent, not execution evidence. `[measured 2026-09-01]` the
+`PreModelSwitch`/`PostModelSwitch` hooks observed all six explicit interactive
+switches but none of three successful unavailable-primary fallbacks. In an
+interactive session read `/status` after the switch. In an unattended run use
+the command or SDK result's actual model field. If neither readback exists, say
+the model is unverified instead of naming the requested one as fact.
+
 Effort is per-agent (`effort:` in skill frontmatter, `opts.effort` in a
 workflow). Spend `xhigh` on the one agent whose judgement decides the outcome,
 `high` on the rest.
