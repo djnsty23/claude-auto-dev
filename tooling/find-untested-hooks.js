@@ -40,6 +40,13 @@ const { fileURLToPath } = require('url');
 
 const ROOT = path.resolve(__dirname, '..');
 const TOOLING = path.join(ROOT, 'tooling');
+// `[measured 2026-09-02]` --help fell through to the coverage run and past a 10s
+// budget, so a probe for what this does got a sweep; check-entrypoints.js gates it.
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    console.log('usage: node tooling/find-untested-hooks.js [--json] [--referenced-only]\n' +
+        'Lists hooks wired in hooks.json that no suite executes, measured under coverage.');
+    process.exit(0);
+}
 const asJson = process.argv.includes('--json');
 
 // STATIC PRECHECK MODE. validate calls this with --referenced-only because the

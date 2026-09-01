@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "8.150.0",
+  "version": "8.151.0",
   "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
   "private": true,
   "keywords": [
@@ -46,6 +46,7 @@
     "check:orphans": "node tooling/reap-orphan-waiters.js --selftest",
     "check:ledger": "node plugins/autodev-core/scripts/deploy-ledger.js --selftest",
     "check:population": "node tooling/check-population-reporting.js --selftest && node tooling/check-population-reporting.js",
+    "check:entrypoints": "node tooling/check-entrypoints.js --selftest && node tooling/check-entrypoints.js",
     "usage:both": "node tooling/usage-both.js",
     "radar": "node plugins/autodev-core/scripts/framework-radar.js",
     "radar:learn": "node plugins/autodev-core/scripts/radar-learning.js",

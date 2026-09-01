@@ -33,6 +33,26 @@ const INTERVAL_MS = 60_000;
 // Pass --self <sessionId> or set AUTODEV_SELF_SESSION. Absent, nothing is
 // excluded, which is the safe direction: a duplicate ping, never a missed one.
 const argv = process.argv.slice(2);
+
+// --help used to fall through to the poll loop, so a coordinator probing this
+// script to learn what it does never got an answer: `[measured 2026-09-02]`
+// `timeout 8 node watch-panels.js --help` exited 143 with no output. Same class
+// as F8 in fleet-board.js (codex audit 2026-08-30). A script that runs when you
+// look at it cannot be audited, and tooling/check-entrypoints.js now gates it.
+if (argv.includes('--help') || argv.includes('-h')) {
+  console.log([
+    'watch-panels.js - one line per newly-blocked session, for the Monitor tool',
+    '',
+    '  node watch-panels.js                 # scan every 60s until stopped',
+    '  node watch-panels.js --once          # one scan, then exit',
+    '  node watch-panels.js --self <id>     # never report this session\'s own panels',
+    '',
+    'Dedup state: $AUTODEV_FLEET_DIR/watch-panels-seen.json (default ~/.claude/fleet).',
+    'Prints WATCHER-ERROR rather than nothing when a scan fails.',
+  ].join('\n'));
+  process.exit(0);
+}
+
 const selfFlag = argv.indexOf('--self');
 const SELF =
   (selfFlag !== -1 && argv[selfFlag + 1]) || process.env.AUTODEV_SELF_SESSION || null;
@@ -147,5 +167,10 @@ function scan() {
   if (added) saveSeen(seen);
 }
 
-scan();
-setInterval(scan, INTERVAL_MS);
+// Side effects live behind require.main, so importing this module for a test
+// neither scans nor arms a timer.
+if (require.main === module) {
+  scan();
+  if (!argv.includes('--once')) setInterval(scan, INTERVAL_MS);
+}
+module.exports = { scan };

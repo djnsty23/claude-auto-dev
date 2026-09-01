@@ -671,6 +671,26 @@ function selftest() {
 // ------------------------------------------------------------------ main ----
 
 function main() {
+  // `[measured 2026-09-02]` --help entered the poll loop and never returned;
+  // so did a bare invocation probed by an auditor, which is by design but was
+  // undocumented at the prompt. The USAGE block in the header is now printable.
+  if (has('help') || argv.includes('-h')) {
+    console.log([
+      'quota-tripwire.js - fire before the weekly usage wall, from measured burn',
+      '',
+      '  node quota-tripwire.js                          # poll loop, 5 min, threshold 50 min',
+      '  node quota-tripwire.js --once                   # single check, exit',
+      '  node quota-tripwire.js --status                 # human readout, exit',
+      '  node quota-tripwire.js --calibrate <percent>    # record app % against the live cost',
+      '  node quota-tripwire.js --ceiling <cost>         # set the 100% ceiling explicitly',
+      '  node quota-tripwire.js --threshold-minutes 35',
+      '  node quota-tripwire.js --reset                  # clear samples / re-arm',
+      '  node quota-tripwire.js --selftest',
+      '',
+      'Silence means "measured, and not close". A DIAGNOSTIC line means it could not measure.',
+    ].join('\n'));
+    return;
+  }
   if (has('selftest')) return selftest();
   if (has('calibrate')) return cmdCalibrate();
   if (has('status')) return cmdStatus();
@@ -694,4 +714,7 @@ function main() {
   tick();
 }
 
-main();
+// Behind require.main so that importing this module (a test, a census) does
+// not start a five-minute poll loop in the importer's process.
+if (require.main === module) main();
+module.exports = { main };
