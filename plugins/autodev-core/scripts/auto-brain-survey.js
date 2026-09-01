@@ -68,7 +68,7 @@ function survey(name, dir) {
     // WHY THIS IS NOT `rev-parse origin/HEAD` ALONE. That reads
     // refs/remotes/origin/HEAD, which git writes ONCE AT CLONE TIME and never
     // updates on fetch. So it is a cache, and it can be months stale.
-    // [measured 2026-09-01] two fatboyslim clones here still resolved it to a
+    // [measured 2026-09-01] two clones of one project here still resolved it to a
     // branch that had been retired two days earlier, and this survey printed
     // that as `trunk`. A session read it, concluded the repo's real trunk was
     // the retired branch, briefed another session with that, and three merges
