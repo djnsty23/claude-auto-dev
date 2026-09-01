@@ -41,6 +41,29 @@ reports which. Read `CLAUDE.md`.
 - **Every claim carries the command that produced it and what it printed.**
   Print the population beside any count. Before reporting that something is
   absent, run a known-positive control and say what it found.
+- **Starting cold is not starting empty, and the difference is whose context.**
+  `[measured 2026-09-01]` `codex debug prompt-input` renders 44,220 bytes of
+  model-visible input on the operator's machine, carrying `AGENTS.md`, skills
+  and plugin instructions. So you arrive with your own briefing and none of the
+  caller's. Do not report that you received no instructions; report which ones
+  you received, since the caller usually cannot see them.
+- **Your sandbox may be wider than the brief implies.** A call that omits a
+  sandbox setting inherits `~/.codex/config.toml`, where the operator's default
+  may be `danger-full-access`. Read your session header rather than assuming the
+  brief's tone constrains you, and hold to the cleanup obligation above: write
+  only where the brief says, and remove anything you planted.
+
+## Working on the Codex integration itself
+
+`docs/codex-channels.md` holds what has been measured about the three channels
+that reach you, and it is where a new measurement belongs. It is written for the
+caller choosing a channel rather than for you, so most of it will not change how
+you work. Two parts do, and both are above.
+
+Read it before changing `tooling/review-diff.js` or anything else that shells
+out to the CLI: it records constraints that cost real time to find, including
+that `codex exec review` rejects the prompt argument its own usage string
+advertises.
 
 ## Scope
 
