@@ -2,7 +2,7 @@
 name: ship
 description: Pre-deploy checklist with review, security, and test verification. Use when ready to deploy.
 when_to_use: "Invoked when the user says \"ship\"."
-allowed-tools: Bash, Read, Grep, Glob, Task
+allowed-tools: Bash, Read, Grep, Glob, Task, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
 ---

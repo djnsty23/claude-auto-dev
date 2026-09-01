@@ -2,7 +2,7 @@
 name: commit
 description: Standardized git commit, push, and PR creation workflow.
 when_to_use: "Invoked when the user says \"commit\", \"push\", \"commit-push-pr\"."
-allowed-tools: Bash, Read, Glob
+allowed-tools: Bash, Read, Glob, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
 argument-hint: "[type] [message]"
