@@ -2,7 +2,7 @@
 name: brain
 description: Boot the fleet overseer from files with full context — role, registries, live fleet state, open work — in one command. Use when starting a fresh Brain session after a restart, a quota wall, or an account switch.
 when_to_use: "Invoked when the user says \"brain\", \"restart the brain\", \"you are the brain\", \"take over the fleet\", or starts a session intended to oversee other sessions."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Workflow
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Workflow, AskUserQuestion, SendMessage, Monitor, mcp__ccd_session_mgmt__send_message, mcp__ccd_session_mgmt__list_sessions, mcp__ccd_session_mgmt__get_session, mcp__ccd_session_mgmt__archive_session, mcp__ccd_session__spawn_task, mcp__ccd_session__dismiss_task
 model: opus
 user-invocable: true
 argument-hint: "[nothing — it loads itself]"

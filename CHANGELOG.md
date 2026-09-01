@@ -1,5 +1,22 @@
 # Changelog
 
+## [8.147.0] - 2026-09-01
+
+### Fixed: the brain skill mandated a tool it did not declare
+
+`brain`'s post-selection step 4 instructs spawning task chips with
+`mcp__ccd_session__spawn_task`, and its `allowed-tools` listed neither that nor
+`send_message`, `AskUserQuestion` or `Monitor`, all of which its own steps call.
+Same defect as the `auto-brain` gap fixed in 8.146.0, in the skill that
+documents the correct behaviour.
+
+A scan puts the rate at 15 of 63 skills naming a tool their frontmatter omits.
+That figure is UNVERIFIED and certainly carries false positives, because the
+detector matches any tool token in a skill body and cannot yet tell an
+instruction to use a tool from a mention of one. Two hits are confirmed by hand,
+`auto-brain` and `brain`, and both are now fixed. Distinguishing the rest is a
+gate worth building rather than a number worth quoting.
+
 ## [8.146.0] - 2026-09-01
 
 ### Fixed: auto-brain could dispatch to existing sessions and nothing else
