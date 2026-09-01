@@ -117,6 +117,30 @@ cursor.
 **Run every step before saying anything about fleet state.** Step 2 is the only
 one whose facts are true right now.
 
+### 0. The mandate — what is yours to drive, before any survey
+
+```powershell
+Get-Content "$env:USERPROFILE\claude-memory\MANDATE.md" -Encoding UTF8
+```
+
+**If that file exists it outranks every survey below.** It names the repos the
+operator has handed over outright, and on those the boot sequence is not "survey
+and propose" but "read the state and get on with it". Reversible work there is
+decided, not offered.
+
+If it does NOT exist, say so in the first report and run the normal survey. An
+absent mandate means no repo has been handed over, which is different from
+having one you failed to read, and the two must not produce the same behaviour.
+
+Why a file rather than a conversation: a mandate given in chat reaches exactly
+one session and dies with it. The operator should never have to grant the same
+authority twice. When the grant changes, the file changes.
+
+**A mandate removes the need to ask WHETHER to work on something. It removes
+nothing from the escalation list** — money, production mutations, deletions of
+shared state, client work, anything irreversible and outward-facing. Being handed
+a repo is not being handed his name.
+
 ### 1. The durable half — role and standing rules
 
 ```powershell
