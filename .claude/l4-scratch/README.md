@@ -32,3 +32,17 @@ so a CI step reading only the exit code accepts it. Planted here as
 
 **This copy is not a bug report about the real `tooling/check-population-reporting.js`.**
 The real one exits 1 under `--strict` and is verified doing so in `../l4-control/`.
+
+## Why `findings.md` is NOT tracked here
+
+It was, for one commit, and the repo's own gate refused it: the adversary pastes
+real stack traces, so the file carries absolute home paths and this repo is
+public. `check-no-private-names` and `check-no-home-paths` both fired on it.
+
+That is the correct outcome and the split the repo's rule prescribes. Raw audit
+output is a REPORT; reports live under `.claude/reports/`, which is gitignored
+so they cannot be staged, and they are durable by being appended rather than by
+being committed. The copy of record is
+`.claude/reports/l4-bootstrap-findings.md`. What stays tracked here is the
+evidence a later reader needs and that carries no machine-specific path: the
+brief, the two subjects, the fixture and the acceptance test.
