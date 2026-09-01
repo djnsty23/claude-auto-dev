@@ -2,7 +2,7 @@
 name: design
 description: Creates distinctive UI with preserved structure. Avoids generic AI aesthetics. Use when designing or refining user interfaces.
 when_to_use: "Invoked when the user says \"design\", \"ui\"."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
 ---

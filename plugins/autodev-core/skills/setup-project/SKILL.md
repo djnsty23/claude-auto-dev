@@ -2,7 +2,7 @@
 name: setup-project
 description: Scaffolds new projects or onboards existing ones. Detects stack, creates monorepo/single-app, configures strict tooling. Use for greenfield or first-time setup.
 when_to_use: "Invoked when the user says \"setup project\", \"scaffold\", \"new project\", \"init project\"."
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
 ---
