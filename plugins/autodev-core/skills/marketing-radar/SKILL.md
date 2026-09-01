@@ -57,6 +57,12 @@ viewers, customers or business outcomes.
 Completion: the manifest population and printed population cross-foot, and an
 all-source failure is reported as a failure rather than a clean run.
 
+Read the adjacent `marketing-radar-findings-latest.html` dashboard before
+selecting claims. It clusters repeated coverage into underlying claims and keeps
+the independent-source count separate. Its source utility score is a shrunk
+history of executed outcomes, not proof, reach or popularity; keep untested
+sources eligible for exploration.
+
 ## 2. Build the claim ledger
 
 For every source used, record:
@@ -163,6 +169,33 @@ review PR only when its automation prompt explicitly grants that exact standing
 authorization. Interactive runs require fresh push authorization. Never merge,
 deploy, tag, release, update installed plugins or mutate a live marketing system.
 
+### Record outcomes and adoption state
+
+After every selected hypothesis has a verdict, write
+`.claude/reports/marketing-radar-verdicts-YYYY-MM-DD.json` with
+`schema_version: 1`, the exact manifest `run_id`, and one `hypotheses[]` row per
+experiment. Each row needs a stable `id`, falsifiable `claim`, manifest
+`source_keys`, `verdict` (`adopt-b`, `adopt-c`, `no-winner`, or `reject`), string
+measurements under `variants.a/b/c`, `tested_at`, and at least one raw `evidence`
+location.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
+  --manifest <manifest-path> \
+  --verdicts .claude/reports/marketing-radar-verdicts-YYYY-MM-DD.json
+```
+
+Read back the printed HTML, Markdown and JSON artifacts. The ledger is
+idempotent and rejects evidence keys outside the collected population. Adopted
+winners start as `candidate`; use the same command's `--transition` mode to move
+them through evidence-backed `shadow`, `canary`, and dated `default` states.
+Every default needs `--revalidate-by`; expired defaults are `stale` until they
+return to shadow or retire.
+
+Discovered source hosts are proposals only. Add one to the source registry only
+after provenance, feed stability and useful yield have been measured across
+three runs. Discovery must never edit a registry automatically.
+
 ## 5. Report and review
 
 Write `.claude/reports/marketing-radar-YYYY-MM-DD.md` with:
@@ -175,6 +208,7 @@ Write `.claude/reports/marketing-radar-YYYY-MM-DD.md` with:
 6. Already handled, rejected and contradictory claims.
 7. Watch list and missing populations or authority.
 8. Winning branches and review PRs.
+9. Learning ledger changes, adoption lifecycle and proposed source discoveries.
 
 The count of selected hypotheses must equal the count with executed verdicts.
 Zero is valid when no lead is both relevant and safely testable.
@@ -188,5 +222,5 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" \
 ```
 
 Completion: report totals cross-foot, every selected hypothesis has a verdict,
-all proxy limitations remain explicit, and the review heartbeat matches the
-changed-item population.
+all proxy limitations remain explicit, the user-facing HTML/Markdown/JSON
+artifacts exist, and the review heartbeat matches the changed-item population.
