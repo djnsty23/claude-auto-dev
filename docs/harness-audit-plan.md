@@ -61,19 +61,25 @@ not in the contract.
 
 | # | Criterion for an N-hour away window | Probe | Threshold |
 |---|---|---|---|
-| C1 | No session idle with queued work | `fleet-heartbeat.js` age vs the repo's queue file having open items | 0 sessions idle > 20 min while its queue is non-empty |
+| C1 | No session idle with queued work | BUILD `check-idle-with-queue.js`: join each `fleet-heartbeat.js` row (age, cwd) to `<cwd>/QUEUE.md` open items. The heartbeat reader alone prints age, session and cwd and reads no queue (F4) | 0 sessions idle > 20 min while its queue is non-empty |
 | C2 | No panel blocks a session | `fleet-status.js --pending` | 0 blocked > 10 min; reversible questions self-resolve (§2.3) |
 | C3 | The fleet survives Brain death | kill the Brain process mid-window; re-run C1 | C1 still holds 30 min later |
 | C4 | Standing conditional orders execute without re-prompt | a planted order ("when X is green, do Y") with X flipping during the window | Y happens within one wake interval, once, with the order's origin logged |
-| C5 | No work lost | `git ls-remote --heads` + bundle census before and after | every commit made during the window is on a remote or in a bundle |
-| C6 | No duplicate work | `fleet-overlap.js` + `gh pr list --state all` | 0 pairs of branches touching the same files for the same story |
-| C7 | The coordinator writes nothing to a product repo | commit author + cwd census over the window | 0 commits in product repos from the Brain's session |
-| C8 | Every state claim in a report carries provenance | `check-claim-provenance.js` over the window's reports and commit bodies | 0 untagged absence/completeness claims |
-| C9 | Cost stays inside the tripwire | `quota-tripwire.js` | window spend under the configured ceiling; the tripwire fires BEFORE the wall, measured with a planted low ceiling |
-| C10 | Output is mergeable | each landed unit has a green gate run named by command AND an adversary `VERDICT: CLEAN` token in the round log | 100% of merges carry both; 0 merges on either alone |
+| C5 | No work lost | BUILD `commit-ledger.js`: the denominator is every commit ANNOUNCED in a transcript tool result during the window (`[<branch> <sha>] <subject>` lines under `~/.claude/projects`, each row carrying `cwd` and session); the numerator is those SHAs reachable from any remote ref or present in a bundle. Neither `git ls-remote` nor a bundle census can supply the denominator (F7) | every announced commit is on a remote or in a bundle |
+| C6 | No duplicate work | BUILD a fourth signal in `fleet-overlap.js`: shared paths from `git diff --name-only <merge-base>..<tip>` per live branch pair in one repo. Today it scores branch, repo and title tokens only (F5). The story join is out of scope for this audit | 0 live pairs sharing 3 or more changed files |
+| C7 | The coordinator writes nothing to a product repo | the same transcript ledger as C5, filtered to the Brain's session id and a `cwd` outside the harness repo. Git carries author and committer only, never the session (F8) | 0 commits in product repos from the Brain's session |
+| C8 | Absence and completeness claims carry provenance | `check-claim-provenance.js --history N` over the window's commits, and `--check-message <file>` over each status file written in it. Both modes exist; there is no window mode and the checker detects absence and completeness claims only, never qualitative ones (F6) | 0 untagged absence/completeness claims |
+| C9 | Cost stays inside the tripwire | `quota-tripwire.js --status` for the reading, `--once` for a single check. The bare form is the poll loop by design and must not be used as a probe (F1) | window spend under the configured ceiling; the tripwire fires BEFORE the wall, measured with a planted low ceiling |
+| C10 | Output is mergeable | `git log --merges --since <window>` on each trunk; each merge commit body must carry the gate command with its result AND the line `VERDICT: CLEAN` with the adversary thread id. The round log is gitignored by design, so the merge commit is the tracked evidence (F9) | 100% of merges carry both; 0 merges on either alone |
 
 C10 is the half nothing measures today. C1 to C9 are why the fleet stalls; C10
 is why "it doesn't work well enough".
+
+**Probe status, so P1 does not discover it the hard way.** EXISTS and prints
+the number: C2, C3, C8, C9, C10. BUILD before P1 can score them: C1, C5, C6,
+C7 (three small scripts and one new signal). Every probe in P1 runs under a
+15 s timeout wrapper, and a probe that does not return is a finding, never a
+stall (F1 to F3).
 
 ## 2. Roles and channels while the operator is away
 
@@ -141,11 +147,16 @@ partly present, and the audit tests which actually holds:
   with a standing conditional order re-checks it on its own `ScheduleWakeup`
   cadence (`/loop`), never by waiting for a message. Finishing item N starts
   item N+1 with nobody in the loop.
-- **Machine-side:** `install-fleet-notify-task.ps1` registers a Windows task.
-  The stop-without-resume detector runs THERE, keyed per session on the last
-  transition, and toasts the operator's phone via `fleet-notify.js` when a
-  session with a non-empty queue has been silent 20 min. It does not message
-  sessions; it cannot. It makes the absence visible.
+- **Machine-side, and most of it exists.** `install-fleet-notify-task.ps1`
+  already registers `AutodevFleetNotify`, a Windows task every 2 min running
+  `fleet-notify.js`, which toasts once per newly panel-blocked session and
+  writes `.notify-last-run.json` as proof the scan ran. `fleet-stop-watch.js`
+  detects STOPPED and RESUMED transitions but is session-hosted, which is S1.
+  The plan adds ONE thing: the stop-without-resume rule (a STOPPED with no
+  RESUMED after it, for a session whose queue is non-empty, silent 20 min)
+  runs inside the existing task via `fleet-stop-watch.js --once`, keyed per
+  session on the last transition. No new task, no new notifier. It does not
+  message sessions; it cannot. It makes the absence visible.
 
 The Brain's job on return is to read the transitions, not to poll.
 
@@ -161,6 +172,20 @@ round (`new defect`, `regression in fix`, `same unresolved decision`,
 
 Every probe below prints its population and runs a known-positive first. A
 probe that returns empty is a claim about the probe.
+
+### L0: Inert entry points (S11), done first because every other lane probes scripts
+
+- Subject: every `plugins/*/scripts/*.js`, `plugins/*/hooks/*.js` and
+  `tooling/*.js` except suites.
+- `[measured 2026-09-02]` `tooling/check-entrypoints.js` probes each with
+  `--help` under a 10 s budget against a scratch copy of the tree under a
+  scratch HOME, so a script that ignores the flag and mutates cannot touch the
+  source. First run: 90 probed, 5 hung (`watch-panels`, `fleet-stop-watch`,
+  `quota-tripwire`, `find-untested-functions`, `find-untested-hooks`). All
+  five fixed; the suite `tooling/test-entrypoints.js` asserts the corpus stays
+  at zero, and the selftest plants a `setInterval` and a self-writing script
+  to prove the classifier and the isolation.
+- Remaining: mutation-verify the suite under `check:suites`; land as a PR.
 
 ### L1: Liveness and the feeder (S1, S2)
 
@@ -266,7 +291,7 @@ probe that returns empty is a claim about the probe.
 |---|---|---|---|
 | P0 | Freeze §1 as `docs/harness-acceptance-contract.md`; Codex reviews THIS plan; plan v2 | this session, Codex 1 round | tonight, 1 Codex thread |
 | P1 | Baseline census: run every probe in §1 against the last 7 days and print the table with populations. No fixes | fresh Opus Brain | 1 h, 0 Codex rounds |
-| P2 | Lanes L1, L2, L3 in that order (they are the stall root), then L5, L6, L4, L7 | Brain + Codex, one thread per lane | ≤ 4 rounds per lane; freeze on two churn rounds; targeted suite during iteration, full gate at convergence |
+| P2 | L0 is done. Then L1, L2, L3 in that order (the stall root), then L5, L6, L4, L7. Each of C1, C5, C6, C7 is BUILT inside the lane that first needs it, before that lane's audit round | Brain + Codex, one thread per lane | ≤ 4 rounds per lane; freeze on two churn rounds; targeted suite during iteration, full gate at convergence |
 | P3 | Rehearsal: a 4 h window with the operator present but silent, on the two mandated repos only, with §2 fully in force; score §1 | Brain, workers, machine task | 1 window; every failed criterion returns to its lane |
 | P4 | A real away window; same scoring; only then declare unattended | operator names the window | none |
 
@@ -313,3 +338,25 @@ Answered whenever; nothing in P0 to P2 waits on them.
   gate the Brain on reading it?
 - Q4 The rehearsal window (P3): which 4 hours, and are the two mandated repos
   the right subjects?
+
+## 7. Revision log
+
+**v2, 2026-09-02, after the adversary's first nine findings** (thread
+`01a05f07`, `gpt-5.6-sol`, workspace-write, 64 tool calls, every finding
+measured; the call was interrupted by the operator after F9, so the conflict
+check on 2.3, the overlap check on 2.4 and the one-week cut list are pending
+in the same thread).
+
+| Finding | Disposition | What changed |
+|---|---|---|
+| F1 to F3 | ORDER, accepted | L0 added and executed first; P1 wraps every probe in a timeout; C9 names `--status` and `--once` |
+| F4 | WRONG, accepted | C1 marked BUILD with the join it needs |
+| F5 | UNMEASURABLE, accepted | C6 marked BUILD, story join dropped to `new scope` |
+| F6 | UNMEASURABLE, accepted | C8 narrowed to what the checker detects and to its two real modes |
+| F7 | UNMEASURABLE, accepted | C5 gets a denominator: commits announced in transcripts |
+| F8 | UNMEASURABLE, accepted | C7 uses the transcript ledger, which carries session and cwd |
+| F9 | UNMEASURABLE, accepted | C10 reads merge-commit bodies, the tracked evidence |
+
+All nine share one shape: probes were named by the question, not by what the
+script prints. The correction is the one `rules/agent-quality.md` 5e already
+states: an artifact is authoritative only about the layer it encodes.
