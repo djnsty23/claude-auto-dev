@@ -1,5 +1,57 @@
 # Changelog
 
+## [8.150.0] - 2026-09-01
+
+### Added: a red suite is not proof that your assertion works
+
+`rule-gate-integrity` covered a mutation that fires for the wrong reason by
+breaking the subject incidentally, so everything throws. It did not cover the
+neighbouring case, where nothing is broken, the red is entirely legitimate, and
+the suite fails on a DIFFERENT assertion than the one being validated.
+
+`[measured 2026-09-01]` a feature collapsing anonymous rows out of a report had
+its safety property implemented by two filters, one selecting rows to hide and
+one selecting rows to keep. A mutation emptied the first, the suite went red, and
+that read as confirmation. The failure was a count assertion seeing 5 where it
+expected 4; the safety assertion PASSED, because the filter that protects those
+rows was untouched. Both mutations exit 1 and only one tests anything.
+
+The rule is a word longer than the familiar one: assert that THAT assertion went
+red, not that the suite did. Diff the failing assertion NAMES against the ones
+you predicted. The cheap tell that you are about to make this mistake is being
+able to name the function your mutation changed but not the assertion that should
+catch it.
+
+Flagged as structural rather than careless: anything with a separate include-path
+and exclude-path has this shape, and the loudest assertion is rarely the one
+encoding the property.
+
+## [8.149.0] - 2026-09-01
+
+### Changed: the ownership section no longer buries real sessions under anonymous ones
+
+`brain-brief`'s OWNERSHIP section printed every session row at full length.
+`[measured 2026-09-01]` three branches carried 11, 13 and 21 untitled,
+unaddressable rows, and those 45 buried the 8 real sessions well enough that a
+reader took the section for a 53-session fleet.
+
+A run of three or more rows that are BOTH untitled and unaddressable now
+collapses to one counted line naming the idle range. Collapsed, never dropped:
+the count stays visible and stays challengeable, and the branch still declares
+how many sessions share it.
+
+The safety property is that an ADDRESSABLE session is never collapsed whatever
+its title, because that is the row someone may need to message, and a titled one
+is never collapsed either, since the title is the only thing identifying it. The
+only rows this can hide carry neither identity nor address.
+
+Scenario I in `test-brain-brief.js` covers it, with a control asserting the
+session-record seam actually produces an addressable session first, so the other
+assertions cannot pass vacuously. Mutation-tested twice: emptying the shown list
+fails the control and the never-collapsed assertion together. The first mutation
+attempted was rejected as insufficient because it broke the count rather than
+the safety property, which is the distinction the test exists to make.
+
 ## [8.148.0] - 2026-09-01
 
 ### Added: a gate for skill bodies that mandate undeclared tools
@@ -41,6 +93,49 @@ reading the same source as the check would weaken in the same motion. The header
 and the runtime output now say a clean run means no DETECTABLE mandate is
 undeclared. First-run precision is recorded as the gate-integrity standard asks:
 12 findings, 12 triaged, 12 real.
+
+## [8.147.0] - 2026-09-01
+
+### Fixed: the brain skill mandated a tool it did not declare
+
+`brain`'s post-selection step 4 instructs spawning task chips with
+`mcp__ccd_session__spawn_task`, and its `allowed-tools` listed neither that nor
+`send_message`, `AskUserQuestion` or `Monitor`, all of which its own steps call.
+Same defect as the `auto-brain` gap fixed in 8.146.0, in the skill that
+documents the correct behaviour.
+
+A scan puts the rate at 15 of 63 skills naming a tool their frontmatter omits.
+That figure is UNVERIFIED and certainly carries false positives, because the
+detector matches any tool token in a skill body and cannot yet tell an
+instruction to use a tool from a mention of one. Two hits are confirmed by hand,
+`auto-brain` and `brain`, and both are now fixed. Distinguishing the rest is a
+gate worth building rather than a number worth quoting.
+
+## [8.146.0] - 2026-09-01
+
+### Fixed: auto-brain could dispatch to existing sessions and nothing else
+
+`auto-brain` told a coordinator that a repo with no session was "not a session
+to brief" and to leave starting one to the user, while offering no mechanism to
+start one. Its `allowed-tools` listed neither `send_message` nor `spawn_task`,
+so both of its dispatch paths were absent from the frontmatter that gates them.
+A coordinator reading that has two doors, ignore the repo or work it itself, and
+one took the second across four repos in a single session.
+
+Step 2 now routes a session-less repo to a task chip. Step 5 carries both
+mechanisms, chosen by whether a session already holds the repo, with the tier
+cap, the one-chip-per-verifiable-unit rule and the standing-alone prompt
+requirement ported from the `brain` skill. The frontmatter lists the session
+tools the steps actually call.
+
+### Changed: the auto-archive warning states a mechanism instead of a setting
+
+`brain` asserted that auto-archive-after-PR-merge is on. It is a per-operator
+toggle and was turned off on 2026-09-01, so the claim was one edit away from
+being false and had no way to announce it. The paragraph now gives the probe
+that answers it, and records the measurement that matters for this role: the
+archive keys on any PR a session record is linked to, including one it merely
+merged, so a coordinator that merges is archived by its own routine work.
 
 ## [8.145.0] - 2026-09-01
 

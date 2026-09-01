@@ -1,8 +1,8 @@
 ---
 name: auto-brain
-description: Coordinate the fleet across a stretch when the user is away — survey every repo from git, propose per-repo work grounded in that survey, get one approval, dispatch, then let sessions self-report. Use when the user asks to run the team overnight or unattended.
+description: Coordinate the fleet across a stretch when the user is away — survey every repo from git, propose per-repo work grounded in that survey, get one approval, then message the sessions that exist and spawn task chips for the repos that have none. Never work a repo yourself. Use when the user asks to run the team overnight or unattended.
 when_to_use: "Invoked when the user says \"auto brain\", \"coordinate the team while I sleep\", \"run the fleet overnight\", \"give each project work\", or otherwise asks for unattended multi-session coordination."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Workflow, mcp__ccd_session_mgmt__list_sessions, mcp__ccd_session_mgmt__send_message
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Workflow, mcp__ccd_session_mgmt__send_message, mcp__ccd_session_mgmt__list_sessions, mcp__ccd_session_mgmt__get_session, mcp__ccd_session__spawn_task, mcp__ccd_session__dismiss_task
 model: opus
 user-invocable: true
 argument-hint: "[hours per project, default 3]"
@@ -80,9 +80,31 @@ disagree, or when a repo with real queued work appears to have no session, ask
 before filing. Put the guess in the message and invite the correction: naming
 what you assumed costs one sentence, and a mis-filed session says so at once.
 
-A repo with genuinely no session is not a session to brief. Note it, say it has
-queued work if it does, and leave starting one to the user — that is a
-concurrency decision rather than a coordination one.
+**A repo with genuinely no session is not a session to brief. It is a chip to
+spawn.** Put it in the manifest with the work it needs and the survey line that
+grounds it, exactly like a session brief, and mark it as a spawn rather than a
+send. Step 5 carries the mechanism.
+
+**Do not do that repo's work here instead. That is the failure this paragraph
+exists to prevent**, and it is a capability gap rather than a lapse of
+judgement: an earlier version of this step said to note the repo and leave
+starting a session to the user, while offering no way to start one. Told to run
+the fleet, a coordinator reading that has exactly two doors, ignore the repo or
+work it itself, and `[measured 2026-09-01]` one took the second across four
+repos in a single session.
+
+Two costs came out of that run, both from the coordinator also being a writer on
+refs a briefed session was pushing to. It retargeted five PRs onto a dead base,
+caught only after a session had begun rebasing on the wrong one. Then it merged
+a branch into a base a session it had briefed forty seconds earlier was still
+landing PRs into, and its own pre-push guard reported the base had moved while
+the push went ahead regardless, because the check was chained to the push with
+`;` rather than gating it.
+
+**You cannot hold a branch level with a branch that is actively receiving
+merges.** Convergence needs one side to stop, and it should be the side not
+doing the productive work. So the coordinator dispatches and verifies; it does
+not take a share of the implementation.
 
 ### 3. Propose — from the survey, never from imagination
 
@@ -103,7 +125,43 @@ is one interruption rather than one per session.
 
 ### 5. Dispatch
 
-`mcp__ccd_session_mgmt__send_message`, one per session.
+**Two mechanisms, chosen by whether a session already holds the repo.**
+
+**A session exists:** `mcp__ccd_session_mgmt__send_message`, one per session.
+The rest of this step is about that path.
+
+**No session exists:** `mcp__ccd_session__spawn_task`. It puts a chip in front
+of the user that starts a session in its own worktree with one click, which is
+the harness's own mechanism for this and costs the user a click rather than a
+copy-paste. Do not hand over a file of prompts instead: it asks the user to be
+the transport for something already carried, and a file written outside the
+working directory is not openable from the app.
+
+**One chip per independently verifiable unit of work, not one per repo.** Group
+two tasks into one chip only when the second's premise depends on the first's
+output. Three reasons, all measured: context depth is the bill and a session's
+second half costs about 1.4x its first for identical work, so one session
+running four tasks pays that curve four times; a premise decays while a session
+runs, and task four inherits one that has been drifting for hours; and worktree
+isolation is free here while two tasks in one repo can push each other's
+branches.
+
+**Spawn a TIER, three or four chips, then stop.** The binding constraint is the
+weekly usage ceiling, not concurrency, and sessions multiply a per-session
+quadratic rather than amortising it. Hold the rest as a written queue and
+restock a repo before its tier drains, one tier at a time.
+
+**A spawned chip can be started, so never spawn a replacement before the
+original is gone.** `dismiss_task` reaches a chip only while it is PENDING.
+`[measured 2026-08-29]` a coordinator spawned four chips, preferred a finer
+split, spawned five more, and the user started all nine: four duplicate pairs
+ran at once. Once a chip may be running, message the duplicate to stand down
+instead.
+
+Each chip's `prompt` must stand alone, because the new session saw nothing: the
+mission and its first concrete task, the evidence with file, line and WHEN it
+was measured, what is already done, where the queue lives, your return address,
+and the standing rules on what it may decide versus queue.
 
 **Messages queue.** `[measured 2026-08-24]` the tool returns "Message sent" for
 an idle session and "Message queued ... it will be processed after the in-flight

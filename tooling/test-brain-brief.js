@@ -257,6 +257,22 @@ function makeHome(name, opts) {
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, t.id + '.jsonl'), t.lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
     }
+    // Desktop session records, which are what give a transcript a TITLE and an
+    // ADDRESSABLE id. Without one a session reads as untitled and unmessageable,
+    // so this seam is what lets a scenario have both kinds side by side.
+    // The path mirrors claude-paths.sessionStore(): <APPDATA>/Claude/
+    // claude-code-sessions, and runBrief points APPDATA at <home>/AppData.
+    for (const r of opts.sessionRecords || []) {
+        const dir = path.join(home, 'AppData', 'Claude', 'claude-code-sessions');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'local_' + r.cliSessionId + '.json'), JSON.stringify({
+            cliSessionId: r.cliSessionId,
+            sessionId: 'local_' + r.cliSessionId,
+            title: r.title || null,
+            lastActivityAt: Date.now(),
+            isArchived: false,
+        }));
+    }
     return home;
 }
 
@@ -762,6 +778,63 @@ try {
     hasText('H: a derelict tree is still counted as carrying work', h4,
         '1 carrying uncommitted or unpushed work');
     lacksText('H: a derelict tree is never reported as clean', h4, 'all clean and pushed');
+
+    // -----------------------------------------------------------------------
+    // I. OWNERSHIP collapses anonymous rows, and NEVER an addressable one.
+    //
+    // `[measured 2026-09-01]` three branches carried 11, 13 and 21 untitled,
+    // unaddressable rows, and those 45 buried the 8 real sessions well enough
+    // that a Brain read the section as a 53-session fleet.
+    //
+    // The safety property is the half worth testing: collapsing must be unable
+    // to hide a session someone could message. So this scenario puts both kinds
+    // on ONE branch and asserts the addressable one survives verbatim. A test
+    // that only checked the count would pass a version that collapsed
+    // everything.
+    // -----------------------------------------------------------------------
+    const CLI_NAMED = 'aaaaaaaa-0000-0000-0000-00000000000f';
+    const homeI = makeHome('i', {
+        memoryDir: true,
+        config: JSON.stringify({ repos: [DIRTY_REPO] }),
+        sessionRecords: [{ cliSessionId: CLI_NAMED, title: 'Named and reachable' }],
+        transcripts: [
+            transcript(CLI_NAMED, DIRTY_REPO, 'feat/crowd', {}),
+            transcript('cccccccc-0000-0000-0000-000000000001', DIRTY_REPO, 'feat/crowd', {}),
+            transcript('cccccccc-0000-0000-0000-000000000002', DIRTY_REPO, 'feat/crowd', {}),
+            transcript('cccccccc-0000-0000-0000-000000000003', DIRTY_REPO, 'feat/crowd', {}),
+            transcript('cccccccc-0000-0000-0000-000000000004', DIRTY_REPO, 'feat/crowd', {}),
+            // A second branch, under the collapse threshold of 3, proving the
+            // rule is a threshold rather than "hide every anonymous row".
+            transcript('dddddddd-0000-0000-0000-000000000001', DIRTY_REPO, 'feat/sparse', {}),
+            transcript('dddddddd-0000-0000-0000-000000000002', DIRTY_REPO, 'feat/sparse', {}),
+        ],
+    });
+    const workI = workDir('i', []);
+    const I = runBrief({ home: homeI, cwd: workI, path: WITH_GH, args: ['--no-overlap'] });
+    const i2 = section(I.stdout, '2. OWNERSHIP');
+
+    check('I: exits 0', I.status === 0, 'exit ' + I.status + ' stderr ' + I.stderr.slice(0, 200));
+    // Control FIRST: if the record seam is broken every session is anonymous and
+    // every assertion below passes for the wrong reason.
+    hasText('I: control - the session record makes one session addressable', i2,
+        'local_' + CLI_NAMED);
+    hasText('I: the addressable session is printed in full, never collapsed', i2,
+        '- Named and reachable  [');
+    hasText('I: four anonymous rows on one branch collapse to a count', i2,
+        '[4 more, all untitled and NOT addressable');
+    hasText('I: the collapsed line says why those rows were dropped', i2,
+        'collapsed - none can be messaged');
+    // The whole population is still reported, so the count stays challengeable.
+    hasText('I: the branch still declares how many sessions share it', i2,
+        'feat/crowd  <-- 5 SESSIONS ON ONE BRANCH');
+    // Below the threshold nothing is hidden. Asserted as a COUNT over the whole
+    // section rather than by slicing one branch out of it: exactly one collapsed
+    // line must exist across two branches, so a version that also collapsed the
+    // sparse branch fails here.
+    hasText('I: two anonymous rows stay expanded', i2, 'feat/sparse  <-- 2 SESSIONS ON ONE BRANCH');
+    check('I: exactly one branch collapses, so the threshold is a threshold',
+        (i2.match(/more, all untitled and NOT addressable/g) || []).length === 1,
+        'collapsed lines found: ' + (i2.match(/more, all untitled and NOT addressable/g) || []).length);
 } finally {
     try {
         fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
