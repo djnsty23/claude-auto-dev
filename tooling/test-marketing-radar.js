@@ -30,7 +30,7 @@ const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const now = Date.now();
 const iso = (daysAgo) => new Date(now - daysAgo * 86400000).toISOString();
 
-function unit() {
+async function unit() {
   const source = { id: 'official-blog', category: 'seo', product: 'Official Blog', webUrl: 'https://example.test/blog', maxEntries: 4 };
   const rss = `<?xml version="1.0"?><rss><channel>
     <item><guid>fresh</guid><title>Fresh search change</title><link>https://example.test/fresh</link>
@@ -43,7 +43,7 @@ function unit() {
     parsed.length === 1 && parsed[0].title === 'Fresh search change');
   check('RSS parser preserves category, URL and body evidence',
     parsed[0].category === 'seo' && parsed[0].url === 'https://example.test/fresh'
-      && /structured data behavior/.test(parsed[0].content));
+      && parsed[0].authority === 'primary' && /structured data behavior/.test(parsed[0].content));
 
   const dated = subject.parseMarkdownChangelog([
     '## <a name="august2026"></a>August 2026', '', '- New conversion report.', '',
@@ -68,8 +68,68 @@ function unit() {
   check('profile relevance terms rank marketing evidence ahead of unrelated agent evidence',
     ranking.balanced[0] === 'MARKETVID01' && videos[1].relevance_terms === 4);
 
+  const commentFixture = [
+    { id: 'real-1', text: 'This fixed the attribution mismatch, but the setup step was unclear.', author_id: 'real-a' },
+    { id: 'spam-1', text: 'Contact him on Telegram for crypto recovery', author_id: 'spam-a' },
+    { id: 'spam-2', text: 'Subscribe for subscribe and check out my channel', author_id: 'spam-b' },
+    { id: 'dup-1', text: 'Amazing guaranteed system that changed my financial life forever', author_id: 'dup-a' },
+    { id: 'dup-2', text: 'Amazing guaranteed system that changed my financial life forever', author_id: 'dup-b' },
+    { id: 'dup-3', text: 'Amazing guaranteed system that changed my financial life forever', author_id: 'dup-c' },
+    { id: 'short-1', text: 'Great video', author_id: 'short-a' },
+    { id: 'short-2', text: 'Great video', author_id: 'short-b' },
+    { id: 'short-3', text: 'Great video', author_id: 'short-c' },
+    { id: 'real-2', text: 'Our leads go directly to a WhatsApp business account, so awareness works in this market.', author_id: 'real-b' },
+    { id: 'creator-1', text: 'Here is the worksheet mentioned above.', author_id: 'creator', author_is_uploader: true },
+  ].map((row, index) => subject.normalizeComment(row, 'fixture', index));
+  const filtered = subject.filterCommentFeedback(commentFixture);
+  check('comment filter removes only independently pinned high-confidence patterns',
+    filtered.retained.length === 5 && filtered.excluded.length === 6
+      && filtered.reasons['off-platform-promotion'] === 1
+      && filtered.reasons['engagement-manipulation'] === 1
+      && filtered.reasons['multi-author-duplicate'] === 3
+      && filtered.reasons['creator-response'] === 1);
+  check('short ordinary praise is retained rather than guessed to be a bot',
+    filtered.retained.filter((row) => row.text === 'Great video').length === 3);
+  check('ordinary discussion of an off-platform channel is not mislabeled as promotion',
+    filtered.retained.some((row) => row.id === 'real-2'));
+
+  const apiCalls = [];
+  const apiComments = await subject.discoverCommentsWithApi('MARKETVID01', 'test-key', 20, async (url) => {
+    apiCalls.push(url);
+    return { items: [{ id: `thread-${apiCalls.length}`, snippet: { topLevelComment: {
+      id: `comment-${apiCalls.length}`, snippet: { textOriginal: `Comment ${apiCalls.length}`, authorChannelId: { value: `author-${apiCalls.length}` }, likeCount: apiCalls.length },
+    } } }] };
+  });
+  check('YouTube API comment seam samples both relevance and time lanes',
+    apiCalls.length === 2 && apiCalls.some((url) => /order=relevance/.test(url))
+      && apiCalls.some((url) => /order=time/.test(url)) && apiComments.comments.length === 2);
+
+  const pinnedCalls = [];
+  const pinned = await subject.discoverWithApi({ queries: [], perQuery: 2 }, 'test-key', iso(14), 5,
+    ['MARKETVID01'], async (url) => {
+      pinnedCalls.push(url);
+      return { items: [{ id: 'MARKETVID01', snippet: { title: 'Pinned marketing video', publishedAt: iso(1) }, statistics: { viewCount: '10' } }] };
+    });
+  check('pinned-only API discovery skips search and fetches supplied video details',
+    pinnedCalls.length === 1 && /\/youtube\/v3\/videos\?/.test(pinnedCalls[0])
+      && !/\/search\?/.test(pinnedCalls[0]) && pinned.length === 1 && pinned[0].pinned === true);
+
+  const ytCalls = [];
+  const ytComments = subject.discoverCommentsWithYtDlp('MARKETVID01', 20,
+    (_invocation, args) => {
+      ytCalls.push(args);
+      return { status: 0, stdout: JSON.stringify({ comments: [{ id: `yt-${ytCalls.length}`, text: `YT ${ytCalls.length}`, author_id: `author-${ytCalls.length}` }] }), stderr: '' };
+    }, () => ({ command: 'yt-dlp', prefix: [] }));
+  check('yt-dlp comment seam bounds top and recent samples without replies',
+    ytCalls.length === 2 && ytCalls.every((args) => args.includes('--write-comments'))
+      && ytCalls.some((args) => args.some((arg) => /comment_sort=top/.test(arg)))
+      && ytCalls.some((args) => args.some((arg) => /comment_sort=new/.test(arg)))
+      && ytCalls.every((args) => args.some((arg) => /max_comments=10,10,0,0,1/.test(arg)))
+      && ytComments.comments.length === 2);
+
   const registry = read(REGISTRY);
-  const categories = new Set(registry.official.map((row) => row.category));
+  const registered = registry.official.concat(registry.research, registry.community);
+  const categories = new Set(registered.map((row) => row.category));
   check('marketing registry has its own state, output and relevance profile',
     registry.profile.id === 'marketing-radar'
       && registry.profile.stateDirName === 'autodev-marketing-radar'
@@ -78,8 +138,14 @@ function unit() {
     ['paid-social', 'paid-search', 'measurement', 'seo', 'crm-automation', 'email-automation']
       .every((category) => categories.has(category)));
   check('registry includes Meta, Google, TikTok and Microsoft platform evidence',
-    ['meta-business-sdk-releases', 'google-ads-api-releases', 'tiktok-business-api-changelog',
+    ['meta-business-node-releases', 'google-ads-python-releases', 'tiktok-business-api-changelog',
       'microsoft-advertising-release-notes'].every((id) => registry.official.some((row) => row.id === id)));
+  check('registry breadth floors are independent of the registry itself',
+    registry.official.length >= 35 && registry.research.length >= 3 && registry.community.length >= 10
+      && categories.size >= 18 && registry.youtube.queries.length >= 35);
+  check('registry enables bounded top and recent audience feedback',
+    registry.youtube.comments.enabled === true && registry.youtube.comments.maxVideos === 5
+      && registry.youtube.comments.maxPerVideo === 100);
 
   const skill = fs.readFileSync(SKILL, 'utf8');
   check('skill separates source incentive, evidence and verdict',
@@ -109,7 +175,10 @@ function endToEnd() {
     official: [
       { id: 'blog-fixture', kind: 'rss', category: 'paid-social', product: 'Fixture Blog', url: 'fixture:', webUrl: 'https://example.test', maxEntries: 2 },
     ],
-    youtube: { queries: ['marketing fixture'], perQuery: 2, discoveryDays: 30 },
+    youtube: {
+      queries: ['marketing fixture'], perQuery: 2, discoveryDays: 30,
+      comments: { enabled: true, maxVideos: 1, maxPerVideo: 10 },
+    },
   };
   const configFile = path.join(fixture, 'config.json');
   write(configFile, JSON.stringify(config, null, 2));
@@ -123,6 +192,12 @@ function endToEnd() {
   ]));
   write(path.join(fixture, 'transcript-MARKETVID01.json'), JSON.stringify([
     { text: 'A sponsored presenter claims creative iteration improves conversion.', start: 0, duration: 4 },
+  ]));
+  write(path.join(fixture, 'comments-MARKETVID01.json'), JSON.stringify([
+    { id: 'comment-1', text: 'The attribution example matched my implementation.', author_id: 'viewer-1', lane: 'top' },
+    { id: 'comment-2', text: 'Can you show the server-side version?', author_id: 'viewer-2', lane: 'recent' },
+    { id: 'comment-3', text: 'Contact me on Telegram for guaranteed profit.', author_id: 'spam-1', lane: 'recent' },
+    { id: 'comment-4', text: 'The template is linked above.', author_id: 'creator', author_is_uploader: true, lane: 'top' },
   ]));
 
   const result = spawnSync(process.execPath, [SCRIPT,
@@ -138,7 +213,18 @@ function endToEnd() {
   const manifest = read(expectedOutput);
   check('manifest records the profile and cross-footed population',
     manifest.run.profile === 'marketing-fixture' && manifest.population.official_items_seen === 1
-      && manifest.population.youtube_videos_seen === 2 && manifest.population.items_requiring_review === 3);
+      && manifest.population.youtube_videos_seen === 2 && manifest.population.items_requiring_review === 3
+      && manifest.population.comments_fetched === 4 && manifest.population.comments_retained === 2
+      && manifest.population.comments_excluded === 2
+      && manifest.population.sources_by_authority_configured.primary === 1
+      && manifest.population.sources_by_authority_configured['practitioner-audience'] === 1
+      && manifest.population.source_categories_seen['paid-social'] === 1);
+  const commentVideo = manifest.items.find((item) => item.id === 'MARKETVID01');
+  check('manifest points to an anonymized, cross-footed local comment sample',
+    commentVideo.comments.status === 'ok' && fs.existsSync(commentVideo.comments.path)
+      && commentVideo.comments.distinct_retained_authors === 2
+      && commentVideo.comments.exclusion_reasons['off-platform-promotion'] === 1
+      && commentVideo.comments.exclusion_reasons['creator-response'] === 1);
   check('profile terms control balanced video ranking in the real CLI',
     manifest.ranking_variants.balanced[0] === 'MARKETVID01');
   const reviewed = spawnSync(process.execPath, [SCRIPT, '--mark-reviewed', expectedOutput], {
@@ -149,8 +235,13 @@ function endToEnd() {
     reviewed.stderr || reviewed.stdout);
 }
 
-unit();
-endToEnd();
-console.log('');
-console.log(pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+(async () => {
+  await unit();
+  endToEnd();
+  console.log('');
+  console.log(pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+})().catch((error) => {
+  console.error(error.stack || error.message);
+  process.exit(1);
+});

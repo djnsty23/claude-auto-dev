@@ -2,9 +2,10 @@
 /**
  * Framework Radar
  *
- * Deterministic intake for official changes and relevant YouTube videos. It
- * collects and deduplicates evidence; a profile-specific skill owns judgement
- * and controlled experimentation.
+ * Deterministic intake for primary changes, independent/trade evidence and
+ * relevant YouTube videos with audience feedback. It collects, labels and
+ * deduplicates evidence; a profile-specific skill owns judgement and controlled
+ * experimentation.
  */
 'use strict';
 
@@ -85,6 +86,18 @@ function isPrereleaseTitle(title) {
     .test(String(title));
 }
 
+function sourceAuthority(source) {
+  return source.authority || 'primary';
+}
+
+function sourceKeyPrefix(source) {
+  return sourceAuthority(source) === 'primary' ? 'official' : sourceAuthority(source);
+}
+
+function sourceItemKind(source) {
+  return sourceAuthority(source) === 'primary' ? 'official' : 'external';
+}
+
 function parseAtom(xml, source, cutoffMs) {
   const entries = String(xml).match(/<entry\b[\s\S]*?<\/entry>/gi) || [];
   const out = [];
@@ -99,9 +112,10 @@ function parseAtom(xml, source, cutoffMs) {
     const url = linkMatch ? decodeEntities(linkMatch[1]) : source.webUrl;
     const content = clip(stripHtml(tag(block, 'content') || tag(block, 'summary')));
     out.push({
-      key: `official:${source.id}:${id}`,
+      key: `${sourceKeyPrefix(source)}:${source.id}:${id}`,
       source_id: source.id,
-      kind: 'official',
+      kind: sourceItemKind(source),
+      authority: sourceAuthority(source),
       category: source.category || 'uncategorized',
       product: source.product,
       title,
@@ -127,9 +141,10 @@ function parseRss(xml, source, cutoffMs) {
     const url = stripHtml(tag(block, 'link')) || source.webUrl;
     const content = clip(stripHtml(tag(block, 'content:encoded') || tag(block, 'description')));
     out.push({
-      key: `official:${source.id}:${id}`,
+      key: `${sourceKeyPrefix(source)}:${source.id}:${id}`,
       source_id: source.id,
-      kind: 'official',
+      kind: sourceItemKind(source),
+      authority: sourceAuthority(source),
       category: source.category || 'uncategorized',
       product: source.product,
       title,
@@ -171,9 +186,10 @@ function parseMarkdownChangelog(markdown, source, cutoffMs) {
     const content = clip(section.lines.join('\n'));
     const parsedDate = source.headingDates ? Date.parse(`1 ${section.version} UTC`) : NaN;
     return {
-      key: `official:${source.id}:${section.version}`,
+      key: `${sourceKeyPrefix(source)}:${source.id}:${section.version}`,
       source_id: source.id,
-      kind: 'official',
+      kind: sourceItemKind(source),
+      authority: sourceAuthority(source),
       category: source.category || 'uncategorized',
       product: source.product,
       title: `${source.product} ${section.version}`,
@@ -335,10 +351,31 @@ function scoreVideos(videos, nowMs, discoveryDays, relevantTerms = RELEVANT_TERM
   };
 }
 
-async function officialSources(config, fixtureDir, cutoffMs) {
-  const statuses = [];
-  const items = [];
-  for (const source of config.official || []) {
+function configuredSourceList(config) {
+  return [
+    ...(config.official || []).map((source) => Object.assign({ authority: 'primary' }, source)),
+    ...(config.research || []).map((source) => Object.assign({ authority: 'independent-research' }, source)),
+    ...(config.community || []).map((source) => Object.assign({ authority: 'trade-community' }, source)),
+  ];
+}
+
+async function mapLimit(rows, limit, worker) {
+  const results = new Array(rows.length);
+  let cursor = 0;
+  const runWorker = async () => {
+    while (cursor < rows.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(rows[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, rows.length) }, runWorker));
+  return results;
+}
+
+async function configuredSources(config, fixtureDir, cutoffMs) {
+  const sources = configuredSourceList(config);
+  const rows = await mapLimit(sources, 8, async (source) => {
     try {
       const raw = fixtureDir
         ? fs.readFileSync(path.join(fixtureDir, `${source.id}.txt`), 'utf8')
@@ -348,13 +385,36 @@ async function officialSources(config, fixtureDir, cutoffMs) {
         : source.kind === 'rss'
           ? parseRss(raw, source, cutoffMs)
           : parseMarkdownChangelog(raw, source, cutoffMs);
-      items.push(...parsed);
-      statuses.push({ id: source.id, category: source.category || 'uncategorized', status: 'ok', count: parsed.length });
+      return {
+        status: {
+          id: source.id,
+          product: source.product,
+          authority: sourceAuthority(source),
+          category: source.category || 'uncategorized',
+          status: 'ok',
+          count: parsed.length,
+        },
+        items: parsed,
+      };
     } catch (error) {
-      statuses.push({ id: source.id, category: source.category || 'uncategorized', status: 'error', count: 0, error: clip(error.message, 240) });
+      return {
+        status: {
+          id: source.id,
+          product: source.product,
+          authority: sourceAuthority(source),
+          category: source.category || 'uncategorized',
+          status: 'error',
+          count: 0,
+          error: clip(error.message, 240),
+        },
+        items: [],
+      };
     }
-  }
-  return { statuses, items };
+  });
+  return {
+    statuses: rows.map((row) => row.status),
+    items: rows.flatMap((row) => row.items),
+  };
 }
 
 function parseJsonLines(text) {
@@ -523,6 +583,182 @@ async function extractTranscript(video, fixtureDir, stateDir) {
   return { status: 'unavailable', error: 'no English transcript could be retrieved' };
 }
 
+function normalizeComment(raw, lane = 'unknown', index = 0) {
+  const source = raw || {};
+  const top = source.snippet && source.snippet.topLevelComment;
+  const snippet = top && top.snippet ? top.snippet : source.snippet || source;
+  const text = clip(stripHtml(snippet.textDisplay || snippet.textOriginal || source.text || source.html || ''), 3000);
+  const id = (top && top.id) || source.id || hash([lane, index, text].join('\n')).slice(0, 24);
+  const author = (snippet.authorChannelId && snippet.authorChannelId.value) || source.author_id || source.author || `unknown-${id}`;
+  const timestamp = Number(source.timestamp || 0);
+  const published = snippet.publishedAt || source.published_at || source.publishedAt ||
+    (timestamp > 0 ? new Date(timestamp * 1000).toISOString() : null);
+  return {
+    id: String(id),
+    text,
+    author_key: hash(String(author)).slice(0, 16),
+    published_at: published && Number.isFinite(Date.parse(published)) ? new Date(published).toISOString() : null,
+    likes: Number(snippet.likeCount || source.like_count || source.likes || 0) || 0,
+    lane,
+    is_creator: Boolean(source.author_is_uploader || snippet.authorChannelId && source.video_channel_id &&
+      snippet.authorChannelId.value === source.video_channel_id),
+    is_pinned: Boolean(source.is_pinned),
+  };
+}
+
+function commentFingerprint(text) {
+  return String(text || '').toLowerCase()
+    .replace(/https?:\/\/\S+|www\.\S+/g, '<url>')
+    .replace(/[^\p{L}\p{N}<>' ]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function filterCommentFeedback(comments) {
+  const normalized = comments.filter(Boolean);
+  const byText = new Map();
+  const byAuthorText = new Map();
+  for (const comment of normalized) {
+    const fingerprint = commentFingerprint(comment.text);
+    if (!fingerprint) continue;
+    if (!byText.has(fingerprint)) byText.set(fingerprint, new Set());
+    byText.get(fingerprint).add(comment.author_key);
+    const authorKey = `${comment.author_key}:${fingerprint}`;
+    byAuthorText.set(authorKey, (byAuthorText.get(authorKey) || 0) + 1);
+  }
+
+  const retained = [];
+  const excluded = [];
+  const reasons = {};
+  for (const comment of normalized) {
+    const text = comment.text.toLowerCase();
+    const fingerprint = commentFingerprint(comment.text);
+    let reason = null;
+    if (!fingerprint) reason = 'empty';
+    else if (comment.is_creator) reason = 'creator-response';
+    else if (/(?:sub(?:scribe)?\s*(?:4|for)\s*sub|check out my channel|subscribe to my channel|like\s*(?:4|for)\s*like)/i.test(text)) {
+      reason = 'engagement-manipulation';
+    } else if (/(?:t\.me\/|wa\.me\/|(?:contact|text|message|reach|dm)\s+(?:me|him|her|them|us|on)?[^.\n]{0,50}(?:whats\s*app|telegram)|(?:whats\s*app|telegram)[^.\n]{0,40}(?:\+\d{6,}|@[a-z0-9_]{4,})|investment\s+expert|crypto\s+recovery|forex\s+mentor)/i.test(text)) {
+      reason = 'off-platform-promotion';
+    } else if (fingerprint.length >= 30 && (byText.get(fingerprint) || new Set()).size >= 3) {
+      reason = 'multi-author-duplicate';
+    } else if (fingerprint.length >= 15 && (byAuthorText.get(`${comment.author_key}:${fingerprint}`) || 0) >= 2) {
+      reason = 'same-author-duplicate';
+    }
+    if (reason) {
+      reasons[reason] = (reasons[reason] || 0) + 1;
+      excluded.push(Object.assign({ exclusion_reason: reason }, comment));
+    } else {
+      retained.push(comment);
+    }
+  }
+  return { retained, excluded, reasons };
+}
+
+async function discoverCommentsWithApi(videoId, apiKey, maxComments, getJson = fetchJson) {
+  const perLane = Math.min(100, Math.max(1, Math.ceil(maxComments / 2)));
+  const rows = [];
+  for (const lane of [{ name: 'top', order: 'relevance' }, { name: 'recent', order: 'time' }]) {
+    const params = new URLSearchParams({
+      part: 'snippet',
+      videoId,
+      maxResults: String(perLane),
+      order: lane.order,
+      textFormat: 'plainText',
+      key: apiKey,
+    });
+    const data = await getJson(`https://www.googleapis.com/youtube/v3/commentThreads?${params}`,
+      `YouTube comments ${lane.name}`);
+    (data.items || []).forEach((row, index) => rows.push(normalizeComment(row, lane.name, index)));
+  }
+  return { comments: rows, lanes: ['top', 'recent'], provider: 'youtube-data-api' };
+}
+
+function discoverCommentsWithYtDlp(videoId, maxComments, execute = run, resolve = runner) {
+  const invocation = resolve('yt-dlp', 'yt-dlp');
+  if (!invocation) throw new Error('neither yt-dlp nor uvx is available for comments');
+  const perLane = Math.max(1, Math.ceil(maxComments / 2));
+  const rows = [];
+  for (const lane of ['top', 'new']) {
+    const result = execute(invocation, [
+      '--dump-single-json', '--skip-download', '--no-warnings', '--write-comments',
+      '--extractor-args', `youtube:comment_sort=${lane};max_comments=${perLane},${perLane},0,0,1`,
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ], 180000);
+    if (result.status !== 0) throw new Error(`yt-dlp comments ${lane} failed with exit ${result.status}`);
+    let data;
+    try { data = JSON.parse(result.stdout); } catch { throw new Error(`yt-dlp comments ${lane} returned invalid JSON`); }
+    (data.comments || []).forEach((row, index) => rows.push(normalizeComment(row, lane === 'new' ? 'recent' : 'top', index)));
+  }
+  return { comments: rows, lanes: ['top', 'recent'], provider: 'yt-dlp-comments' };
+}
+
+async function extractComments(video, fixtureDir, stateDir, discoveryProvider, maxComments) {
+  try {
+    let result;
+    if (fixtureDir) {
+      const fixture = path.join(fixtureDir, `comments-${video.id}.json`);
+      if (!fs.existsSync(fixture)) throw new Error('fixture comments absent');
+      const rows = readJson(fixture, []);
+      result = {
+        comments: rows.map((row, index) => normalizeComment(row, row.lane || 'fixture', index)),
+        lanes: Array.from(new Set(rows.map((row) => row.lane || 'fixture'))),
+        provider: 'fixture',
+      };
+    } else if (discoveryProvider === 'youtube-data-api' && process.env.YOUTUBE_API_KEY) {
+      result = await discoverCommentsWithApi(video.id, process.env.YOUTUBE_API_KEY, maxComments);
+    } else {
+      result = discoverCommentsWithYtDlp(video.id, maxComments);
+    }
+    const deduped = Array.from(new Map(result.comments.map((comment) => [comment.id, comment])).values())
+      .slice(0, maxComments);
+    const filtered = filterCommentFeedback(deduped);
+    const commentDir = path.join(stateDir, 'comments');
+    const destination = path.join(commentDir, `${video.id}.json`);
+    const payload = {
+      schema_version: 1,
+      video_id: video.id,
+      collected_at: new Date().toISOString(),
+      provider: result.provider,
+      sample_lanes: result.lanes,
+      filter: {
+        version: 1,
+        rule: 'exclude only high-confidence repetitive, engagement-manipulation or off-platform promotional patterns',
+        limitation: 'public metadata cannot prove whether every retained account is human or every excluded account is automated',
+      },
+      population: {
+        fetched: deduped.length,
+        retained: filtered.retained.length,
+        excluded: filtered.excluded.length,
+        distinct_retained_authors: new Set(filtered.retained.map((comment) => comment.author_key)).size,
+      },
+      exclusion_reasons: filtered.reasons,
+      retained: filtered.retained,
+      excluded: filtered.excluded,
+    };
+    writeAtomic(destination, JSON.stringify(payload, null, 2));
+    const stable = JSON.stringify({
+      retained: filtered.retained.map((comment) => [comment.id, comment.text, comment.likes, comment.lane]),
+      excluded: filtered.excluded.map((comment) => [comment.id, comment.exclusion_reason]),
+    });
+    return {
+      status: 'ok',
+      provider: result.provider,
+      sample_lanes: result.lanes,
+      fetched: deduped.length,
+      retained: filtered.retained.length,
+      excluded: filtered.excluded.length,
+      distinct_retained_authors: payload.population.distinct_retained_authors,
+      exclusion_reasons: filtered.reasons,
+      filter_version: 1,
+      content_hash: hash(stable),
+      path: destination,
+    };
+  } catch (error) {
+    return { status: 'unavailable', error: clip(error.message, 240) };
+  }
+}
+
 async function youtubeSource(config, fixtureDir, options, cutoffMs, stateDir) {
   try {
     let videos;
@@ -547,25 +783,54 @@ async function youtubeSource(config, fixtureDir, options, cutoffMs, stateDir) {
     const selected = videos.slice().sort((a, b) => b.radar_score - a.radar_score).slice(0, options.maxTranscripts);
     const transcripts = new Map();
     for (const video of selected) transcripts.set(video.id, await extractTranscript(video, fixtureDir, stateDir));
+    const commentSelected = options.commentsEnabled
+      ? videos.slice().sort((a, b) => b.radar_score - a.radar_score).slice(0, options.maxCommentVideos)
+      : [];
+    const comments = new Map();
+    for (const video of commentSelected) {
+      comments.set(video.id, await extractComments(video, fixtureDir, stateDir, provider, options.maxComments));
+    }
     for (const video of videos) {
       video.transcript = transcripts.get(video.id) || { status: 'not-selected' };
+      video.comments = options.commentsEnabled
+        ? comments.get(video.id) || { status: 'not-selected' }
+        : { status: 'disabled' };
       const stable = [video.title, video.description, video.channel, video.published_at,
-        video.transcript.content_hash || 'no-transcript'].join('\n');
+        video.transcript.content_hash || 'no-transcript',
+        video.comments.content_hash || 'no-comments'].join('\n');
       video.content_hash = hash(stable);
       delete video._captions;
     }
+    const commentResults = Array.from(comments.values());
+    const commentsSucceeded = commentResults.filter((row) => row.status === 'ok').length;
+    const commentsFailed = commentResults.length - commentsSucceeded;
     return {
-      status: { id: 'youtube', status: 'ok', count: videos.length, provider },
+      status: {
+        id: 'youtube',
+        authority: 'practitioner-audience',
+        category: 'video',
+        status: commentsFailed ? 'partial' : 'ok',
+        count: videos.length,
+        provider,
+        error: commentsFailed ? `${commentsFailed} of ${commentResults.length} comment sample(s) unavailable` : undefined,
+      },
       videos,
       ranking,
       transcripts_attempted: selected.length,
       transcripts_succeeded: selected.filter((video) => transcripts.get(video.id).status === 'ok').length,
+      comments_attempted: commentResults.length,
+      comments_succeeded: commentsSucceeded,
+      comments_fetched: commentResults.reduce((sum, row) => sum + (row.fetched || 0), 0),
+      comments_retained: commentResults.reduce((sum, row) => sum + (row.retained || 0), 0),
+      comments_excluded: commentResults.reduce((sum, row) => sum + (row.excluded || 0), 0),
     };
   } catch (error) {
     return {
-      status: { id: 'youtube', status: 'error', count: 0, error: clip(error.message, 240) },
+      status: { id: 'youtube', authority: 'practitioner-audience', category: 'video', status: 'error', count: 0, error: clip(error.message, 240) },
       videos: [], ranking: { raw_views: [], view_velocity: [], relevance: [], balanced: [] },
       transcripts_attempted: 0, transcripts_succeeded: 0,
+      comments_attempted: 0, comments_succeeded: 0, comments_fetched: 0,
+      comments_retained: 0, comments_excluded: 0,
     };
   }
 }
@@ -603,8 +868,10 @@ function loadConfig(file) {
   if (!config || !Array.isArray(config.official) || !config.youtube || !Array.isArray(config.youtube.queries)) {
     throw new Error('config must define official[] and youtube.queries[]');
   }
-  for (const source of config.official) {
-    if (!source.id || !source.kind || !source.product || !source.maxEntries) throw new Error('each official source needs id, kind, product and maxEntries');
+  for (const source of configuredSourceList(config)) {
+    if (!source.id || !source.kind || !source.product || !source.maxEntries) {
+      throw new Error('each configured source needs id, kind, product and maxEntries');
+    }
   }
   return config;
 }
@@ -617,9 +884,16 @@ async function collect() {
     days: positiveInt('--days', 14, 365),
     maxVideos: positiveInt('--max-videos', 20, 50),
     maxTranscripts: positiveInt('--max-transcripts', 5, 10),
+    commentsEnabled: Boolean(config.youtube.comments && config.youtube.comments.enabled),
+    maxCommentVideos: positiveInt('--max-comment-videos',
+      Number(config.youtube.comments && config.youtube.comments.maxVideos) || 5, 10),
+    maxComments: positiveInt('--max-comments',
+      Number(config.youtube.comments && config.youtube.comments.maxPerVideo) || 100, 500),
     pinnedIds: values('--video').map((input) => (/[?&]v=([\w-]{11})/.exec(input) || /^([\w-]{11})$/.exec(input) || [])[1]).filter(Boolean),
+    pinnedOnly: process.argv.includes('--pinned-only'),
     relevantTerms: selectedProfile.relevantTerms,
   };
+  if (options.pinnedOnly && !options.pinnedIds.length) throw new Error('--pinned-only requires at least one --video');
   const fixtureDirRaw = value('--fixture-dir', null);
   const fixtureDir = fixtureDirRaw ? path.resolve(fixtureDirRaw) : null;
   const stateDir = path.resolve(value('--state-dir', defaultStateDir(selectedProfile)));
@@ -628,18 +902,30 @@ async function collect() {
   const stateFile = path.join(stateDir, 'state.json');
   const state = readJson(stateFile, { schema_version: SCHEMA_VERSION, reviewed: {}, pending_runs: {} });
 
-  const official = await officialSources(config, fixtureDir, cutoffMs);
-  const youtube = await youtubeSource(config.youtube, fixtureDir, options, cutoffMs, stateDir);
-  const items = official.items.concat(youtube.videos);
+  const evidence = await configuredSources(config, fixtureDir, cutoffMs);
+  const youtubeConfig = options.pinnedOnly ? Object.assign({}, config.youtube, { queries: [] }) : config.youtube;
+  const youtube = await youtubeSource(youtubeConfig, fixtureDir, options, cutoffMs, stateDir);
+  const items = evidence.items.concat(youtube.videos);
   for (const item of items) item.requires_review = reviewState(state, item);
 
-  const statuses = official.statuses.concat(youtube.status);
+  const statuses = evidence.statuses.concat(youtube.status);
   const ok = statuses.filter((row) => row.status === 'ok').length;
   const partial = statuses.filter((row) => row.status === 'partial').length;
   const failed = statuses.filter((row) => row.status === 'error').length;
-  const officialCategories = {};
-  for (const item of official.items) {
-    officialCategories[item.category] = (officialCategories[item.category] || 0) + 1;
+  const evidenceCategories = {};
+  const evidenceAuthorities = {};
+  const configuredAuthorities = {};
+  for (const item of evidence.items) {
+    evidenceCategories[item.category] = (evidenceCategories[item.category] || 0) + 1;
+    evidenceAuthorities[item.authority] = (evidenceAuthorities[item.authority] || 0) + 1;
+  }
+  for (const status of statuses) {
+    configuredAuthorities[status.authority] = (configuredAuthorities[status.authority] || 0) + 1;
+  }
+  const primaryItems = evidence.items.filter((item) => item.authority === 'primary').length;
+  const primaryCategories = {};
+  for (const item of evidence.items.filter((row) => row.authority === 'primary')) {
+    primaryCategories[item.category] = (primaryCategories[item.category] || 0) + 1;
   }
   const runId = new Date().toISOString().replace(/[:.]/g, '-') + '-' + process.pid;
   const manifest = {
@@ -658,11 +944,20 @@ async function collect() {
       sources_succeeded: ok,
       sources_partial: partial,
       sources_failed: failed,
-      official_items_seen: official.items.length,
-      official_categories_seen: officialCategories,
+      sources_by_authority_configured: configuredAuthorities,
+      source_items_seen: evidence.items.length,
+      source_authorities_seen: evidenceAuthorities,
+      source_categories_seen: evidenceCategories,
+      official_items_seen: primaryItems,
+      official_categories_seen: primaryCategories,
       youtube_videos_seen: youtube.videos.length,
       transcripts_attempted: youtube.transcripts_attempted,
       transcripts_succeeded: youtube.transcripts_succeeded,
+      comment_samples_attempted: youtube.comments_attempted,
+      comment_samples_succeeded: youtube.comments_succeeded,
+      comments_fetched: youtube.comments_fetched,
+      comments_retained: youtube.comments_retained,
+      comments_excluded: youtube.comments_excluded,
       items_requiring_review: items.filter((item) => item.requires_review).length,
     },
     sources: statuses,
@@ -677,8 +972,9 @@ async function collect() {
   writeAtomic(stateFile, JSON.stringify(state, null, 2));
 
   console.log(`${selectedProfile.label}: ${ok} succeeded, ${partial} partial, ${failed} failed of ${statuses.length} source(s)`);
-  console.log(`population: ${official.items.length} official item(s), ${youtube.videos.length} YouTube video(s), ` +
+  console.log(`population: ${evidence.items.length} source item(s) (${primaryItems} primary), ${youtube.videos.length} YouTube video(s), ` +
     `${youtube.transcripts_succeeded}/${youtube.transcripts_attempted} transcript(s), ` +
+    `${youtube.comments_retained}/${youtube.comments_fetched} retained comment(s), ` +
     `${manifest.population.items_requiring_review} item(s) requiring review`);
   for (const status of statuses.filter((row) => row.status !== 'ok')) {
     console.log(`COULD NOT CHECK ${status.id}: ${status.error || status.status}`);
@@ -728,13 +1024,16 @@ function help() {
     `  --days N              overlap window, default 14\n` +
     `  --max-videos N        detailed YouTube candidates, default 20\n` +
     `  --max-transcripts N   transcript attempts, default 5\n` +
+    `  --max-comment-videos N videos whose audience feedback is sampled, default from config\n` +
+    `  --max-comments N      top plus recent comments per selected video, default from config\n` +
     `  --video ID|URL        force one video into the candidate set; repeatable\n` +
+    `  --pinned-only         skip search and collect only supplied --video IDs\n` +
     `  --output PATH         manifest path; defaults under .claude/reports\n` +
     `  --state-dir PATH      durable local state; defaults under ~/.codex\n` +
     `  --config PATH         source registry\n` +
     `  --mark-reviewed PATH  mark a completed manifest only after analysis\n` +
     `  --help                show this text\n\n` +
-    `YouTube discovery uses YOUTUBE_API_KEY when set, otherwise yt-dlp/uvx.`);
+    `YouTube discovery and comments use YOUTUBE_API_KEY when set, otherwise yt-dlp/uvx.`);
 }
 
 async function main() {
@@ -753,11 +1052,15 @@ if (require.main === module) main();
 
 module.exports = {
   discoverWithApi,
+  discoverCommentsWithApi,
+  discoverCommentsWithYtDlp,
   discoverWithYtDlp,
   expandCaptionPlaylist,
   fetchJson,
   fetchText,
   isPrereleaseTitle,
+  filterCommentFeedback,
+  normalizeComment,
   normalizeVideo,
   parseAtom,
   parseRss,

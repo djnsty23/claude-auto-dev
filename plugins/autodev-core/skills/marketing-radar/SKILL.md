@@ -11,8 +11,9 @@ argument-hint: "[days | YouTube URL]"
 # Marketing Radar
 
 Collect first, separate claims from promotion, then test only what the available
-population can actually answer. Platform narration, popularity and proxy scores
-are leads, not proof of business impact.
+population can actually answer. Primary, research-method, trade/community and
+practitioner-audience evidence are separate populations. Platform narration,
+popularity, comments and proxy scores are leads, not proof of business impact.
 
 ## 1. Collect
 
@@ -28,9 +29,30 @@ Append `--video <ID-or-URL>` for every supplied YouTube source. The collector
 stores transcripts outside the repository, reports source failures and writes a
 deduplicated manifest under `.claude/reports/`.
 
+The registry spans first-party changes, research methods, trade/community feeds
+and practitioner video discovery. Never use the number of feeds as a confidence
+score: ten outlets repeating one vendor announcement are one underlying claim.
+Cross-foot both category and authority populations, and require a primary source
+before a platform-behavior claim can enter `test`.
+
 Read only manifest items where `requires_review` is true. Read a transcript only
 from its recorded local path. Record whether captions are manual, generated or
 unknown. Never copy a full transcript into a report or repository.
+
+When `comments.status` is `ok`, read the recorded local comments path. It contains
+top and recent samples with author identifiers pseudonymized. Report fetched,
+retained, excluded and distinct-author populations plus every exclusion reason.
+The filter removes only high-confidence repetitive, engagement-manipulation and
+off-platform promotional patterns. Call these `excluded bot/spam-like comments`,
+not verified bots: public metadata cannot establish that every retained account
+is human or every excluded account is automated.
+
+Summarize audience feedback by theme, with a count and at most one short excerpt
+per theme. Separate sentiment toward the presenter/video from sentiment toward
+the actual tactic, and list recurring questions and contradictions. Show both
+unweighted theme counts and whether top-liked comments would change the reading.
+Comments represent commenters after creator and platform moderation, not all
+viewers, customers or business outcomes.
 
 Completion: the manifest population and printed population cross-foot, and an
 all-source failure is reported as a failure rather than a clean run.
@@ -145,13 +167,14 @@ deploy, tag, release, update installed plugins or mutate a live marketing system
 
 Write `.claude/reports/marketing-radar-YYYY-MM-DD.md` with:
 
-1. Population and source health.
-2. Official platform changes.
-3. Claim ledger with incentives and boundary conditions.
-4. Executed A/B/C experiments, maximum three.
-5. Already handled, rejected and contradictory claims.
-6. Watch list and missing populations or authority.
-7. Winning branches and review PRs.
+1. Population and source health, by authority and category.
+2. Primary platform changes plus independent/trade leads kept separate.
+3. Video audience feedback with comment sampling and exclusions.
+4. Claim ledger with incentives and boundary conditions.
+5. Executed A/B/C experiments, maximum three.
+6. Already handled, rejected and contradictory claims.
+7. Watch list and missing populations or authority.
+8. Winning branches and review PRs.
 
 The count of selected hypotheses must equal the count with executed verdicts.
 Zero is valid when no lead is both relevant and safely testable.

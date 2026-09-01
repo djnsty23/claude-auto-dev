@@ -103,6 +103,16 @@ async function unitSeams() {
   check('default video discovery spans the broader agent-development ecosystem',
     registry.youtube.queries.some((query) => /Gemini CLI/.test(query))
       && registry.youtube.queries.some((query) => /harness evaluation/.test(query)));
+  check('default registry breadth floors are independent of the registry itself',
+    registry.official.length >= 45 && registry.research.length >= 2
+      && registry.community.length >= 2 && registryCategories.size >= 12
+      && registry.youtube.queries.length >= 30);
+  check('default registry covers coding agents, protocols, evals, sandboxes, browser agents and memory',
+    ['aider-releases', 'mcp-typescript-sdk-releases', 'inspect-ai-releases', 'e2b-releases',
+      'browser-use-releases', 'mem0-releases'].every((id) => registryIds.has(id)));
+  check('default video discovery enables bounded audience feedback',
+    registry.youtube.comments.enabled === true && registry.youtube.comments.maxVideos === 5
+      && registry.youtube.comments.maxPerVideo === 100);
 
   const skill = fs.readFileSync(SKILL, 'utf8');
   check('skill prioritizes pending experiments before new hypotheses',
@@ -116,6 +126,8 @@ async function unitSeams() {
     /winning experiment\s+branch for review/.test(skill)
       && /does not create `prd\.json`/.test(skill)
       && /merge,\s+deploy,\s+tag,\s+release or update installed plugins/.test(skill));
+  check('skill treats filtered comments as sampled feedback rather than verified humans',
+    /cannot prove\s+humanity/.test(skill) && /platform and creator moderation/.test(skill));
 
   check('transcript classifier distinguishes manual captions', subject.transcriptKind('(MANUALLY CREATED)\n - en (English)\n(GENERATED)\nNone') === 'manual');
   check('transcript classifier distinguishes generated captions', subject.transcriptKind('(MANUALLY CREATED)\nNone\n(GENERATED)\n - en (English)\n(TRANSLATION LANGUAGES)') === 'generated');
@@ -171,12 +183,19 @@ async function e2e() {
     '--days', '14', '--max-videos', '10', '--max-transcripts', '1'];
   const first = cli(baseArgs.concat(['--output', firstOutput]));
   check('fixture collection exits 0', first.status === 0, first.stderr || first.stdout);
-  check('fixture collection prints its population', /3 official item\(s\), 2 YouTube video\(s\), 1\/1 transcript/.test(first.stdout || ''), first.stdout);
+  check('fixture collection prints its population',
+    /3 source item\(s\) \(3 primary\), 2 YouTube video\(s\), 1\/1 transcript\(s\), 0\/0 retained comment/.test(first.stdout || ''),
+    first.stdout);
   const manifest = read(firstOutput);
   check('manifest reports every configured source', manifest.population.sources_configured === 4 && manifest.population.sources_succeeded === 4);
   check('a healthy feed with zero recent items remains successful',
     manifest.sources.some((source) => source.id === 'quiet-fixture' && source.status === 'ok' && source.count === 0));
   check('manifest cross-foots official categories', manifest.population.official_categories_seen['coding-agent'] === 3);
+  check('manifest separates configured authorities from observed item authorities',
+    manifest.population.sources_by_authority_configured.primary === 3
+      && manifest.population.sources_by_authority_configured['practitioner-audience'] === 1
+      && manifest.population.source_authorities_seen.primary === 3
+      && manifest.population.source_categories_seen['coding-agent'] === 3);
   check('first run requires review of the full population', manifest.population.items_requiring_review === 5);
   check('raw views and balanced ranking can disagree', manifest.ranking_variants.raw_views[0] === 'OLDVIEWS001' && manifest.ranking_variants.balanced[0] === 'FRESHVID001');
   check('manifest records a transcript path', manifest.items.some((item) => item.id === 'FRESHVID001' && item.transcript.status === 'ok'));
