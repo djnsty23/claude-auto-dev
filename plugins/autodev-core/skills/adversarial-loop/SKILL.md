@@ -275,6 +275,51 @@ The stop rule, computed by the caller from the log:
   frozen acceptance test is the next audit's input. Logging it in the `new
   scope` column is how it survives without extending this run.
 
+### The stop rule that matters most: a rising `wrongly fixed` count
+
+Every rule above answers "has the loop finished?". This one answers a different
+and more expensive question: **"is the loop making things worse?"** — and it is
+the only stop condition that fires while findings are still real.
+
+`[measured 2026-09-01]` A five-round run on a static analysis check. The
+`wrongly fixed` column, meaning a repair that made something worse than it was:
+
+| round | fixed | not fixed | wrongly fixed |
+|---|---|---|---|
+| 2 | 5 | 0 | 3 |
+| 3 | 8 | 2 | 6 |
+| 4 | 12 | 2 | 6 |
+| 5 | 12 | 3 | 9 |
+
+`fixed` plateaus and `wrongly fixed` climbs. Every round the builder repaired
+real defects and introduced new ones at a similar rate, so no round was
+worthless and no round converged. The adversary was not padding: each finding
+came with a runnable counterexample, and the builder independently reproduced
+the last one before accepting it.
+
+**A rising `wrongly fixed` count means the DESIGN is wrong, not the patches.**
+That run refuted three designs for the same sub-problem — parenthesis
+balancing, then continuation-on-a-trailing-operator, then a fixed radius — and
+each replacement was a considered response to the previous refutation. The
+third was accompanied by the claim that its only failure mode was being too
+small; a nine-line fixture disproved that in one round. When three honest
+attempts at one sub-problem all fail, the sub-problem is the finding.
+
+Two things to do instead of round six:
+
+- **Ask what the checker would have to KNOW to be right**, and whether it can
+  know it. That run needed a JavaScript parser to find where a call ends. No
+  parser was available, so every design was an approximation, and approximating
+  is fine — claiming gate-grade precision from one is not.
+- **Downgrade rather than keep patching.** A check whose false positives are
+  demonstrated must not gate; advisory costs a wrong line of output, gating
+  costs a wrong red build and then gets muted. Landing it advisory keeps the
+  real value and drops the false claim.
+
+**Record the run as unconverged and say so.** A loop that stops without a clean
+verdict is an honest outcome with a written reason. A loop that keeps going
+until someone runs out of patience produces the same code and no reason.
+
 **The caller computes this, never the adversary.** An adversary asked to
 declare itself done does not: measured across two workflows, one told to output
 a dry verdict when the work was sound produced zero dry passes and ran to its

@@ -56,6 +56,6 @@ jobs:
       # population or carrying a runtime control. It runs here so a regression
       # is caught on the PR that introduces it; a detector nobody runs reports
       # nothing and looks identical to a clean one.
-      - name: Population and control reporting
+      - name: Population and control reporting (advisory)
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:population

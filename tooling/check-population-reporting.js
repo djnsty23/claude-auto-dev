@@ -21,9 +21,34 @@
 //                  known-positive control or selftest. Cure: make it prove it
 //                  can see something before it reports seeing nothing.
 //
-// Warn-only by default, like check-claim-provenance. Its precision on this
-// repo is unmeasured until its first run, and a check that fires on half the
-// tree gets muted in a day and then misses the real one. --strict exits 1.
+// ADVISORY, AND IT SHOULD STAY ADVISORY. It was briefly wired --strict when the
+// count reached 0 of 152. That was withdrawn on evidence, not on nerves: a five
+// round adversarial review refuted three separate designs for finding where an
+// emitting call ends, each with a runnable counterexample, and the last one
+// showed this check can MANUFACTURE a verdict rather than merely miss one.
+// Reproduced independently, and it is nine lines:
+//
+//     console.log("ordinary output");
+//     const FIXTURE = "no issues found";
+//
+// The script prints only "ordinary output". The checker reads the next
+// statement, calls the file an absence reporter, and emits two findings.
+//
+// A check with demonstrated false positives must not be able to turn a build
+// red. Advisory, a wrong finding costs one line of output; gating, it costs a
+// wrong red build and then the check gets muted, which is how a detector stops
+// catching the real thing. --strict exists for a caller who wants it; nothing
+// in this repo passes it.
+//
+// KNOWN AND UNFIXED, from that review, listed so nobody reads a clean run as
+// more than it is:
+//   * the radius crosses statement boundaries, as above;
+//   * a verdict further than GUARD_RADIUS lines from its call is not read;
+//   * a throwing control whose message is on a following line is not seen;
+//   * whitespace before the parameter list of a method named `throw` makes it
+//     read as a throwing statement.
+// Fixing these needs a parser this repo does not have. Approximating is fine;
+// claiming gate-grade precision from an approximation is not.
 //
 // TWO KNOWN SCOPE LIMITS, stated because a silent limit is worse than a loud
 // gap. Both are printed beside every result so a reader cannot mistake the
