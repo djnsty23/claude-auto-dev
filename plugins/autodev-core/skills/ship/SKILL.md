@@ -164,6 +164,45 @@ npx playwright open [DEPLOY_URL]
 3. **Auth broken** → Check OAuth redirect URLs match deploy URL
 4. **Blank page** → Check build output, check base path config
 
+## Step 5b: The deploy ledger — what changed, and was each surface looked at
+
+Everything above tells you HOW to verify. Nothing above records WHAT needed
+verifying, so the surface most likely to be skipped is the one nobody
+remembered was touched. The ledger closes that.
+
+```bash
+node plugins/autodev-core/scripts/deploy-ledger.js --write    # derive from the diff
+node plugins/autodev-core/scripts/deploy-ledger.js --verify   # exit 1 while a box is empty
+```
+
+`--write` reads `<last deploy>..HEAD` and produces `DEPLOY-LEDGER.md` at the
+repo root: one row per affected surface, each needing a desktop pass, 390, 414,
+console clean and network clean. `--verify` refuses while any box is empty. Run
+it before calling a deploy verified, and re-run `--write` afterwards — existing
+ticks survive a regenerate, because a tool that wipes your work is a tool nobody
+re-runs.
+
+The last deploy is read from `--since`, then `.claude/last-deploy`, then the
+most recent tag. **If none resolves it refuses with exit 2 rather than
+diffing against something arbitrary** — "no surfaces changed" and "I could not
+tell what changed" are opposite answers and must not print the same.
+
+Three things it deliberately does not do:
+
+- **It does not decide whether a check passed.** A human or a browser-driving
+  agent ticks the boxes; `--verify` only asks whether they are ticked. A checker
+  that both generates and satisfies its own checklist proves nothing.
+- **It does not guess narrowly.** A change to a token file, a global
+  stylesheet or a layout is reported as WIDE, meaning every surface is
+  potentially affected. Narrowing that would be a false all-clear.
+- **It does not derive metrics.** The ledger has a metrics section that must be
+  filled or explicitly waived, and an empty one fails `--verify`. Nothing here
+  knows which metrics your deploy could move.
+
+Route derivation is convention-based (`app/`, `pages/`, `src/routes/`). A
+project routing some other way gets its changed files listed without a route,
+which is honest rather than wrong — the row still has to be checked.
+
 ## Step 6: Rollback (if needed)
 
 ```bash
