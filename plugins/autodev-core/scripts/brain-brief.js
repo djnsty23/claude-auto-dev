@@ -79,6 +79,12 @@ const DAYS = Number(val('--days', 2)) || 2;
 const GH_TIMEOUT_MS = Number(val('--gh-timeout', 15000)) || 15000;
 const LIVE_MINUTES = 60 * 24;   // matches fleet-overlap's definition of "live"
 
+// Collapse a run of untitled, unaddressable rows in the OWNERSHIP section only
+// once there are at least this many. Below it, printing them costs nothing and
+// hides nothing; at 11, 13 and 21 per branch they bury the rows that matter.
+// Never collapses a titled or addressable session - see the comment at the use.
+const ANON_COLLAPSE_AT = 3;
+
 if (has('--help') || has('-h')) {
     console.log(fs.readFileSync(__filename, 'utf8').split('*/')[0]);
     process.exit(0);
@@ -424,9 +430,31 @@ async function sectionOwnership(fleet, repoIndex) {
         for (const [branch, sessions] of branches) {
             const clash = sessions.length > 1 ? '  <-- ' + sessions.length + ' SESSIONS ON ONE BRANCH' : '';
             say('    ' + branch + clash);
-            for (const s of sessions) {
+
+            // A row that is BOTH untitled and unaddressable tells a reader nothing
+            // and cannot be acted on. `[measured 2026-09-01]` three branches carried
+            // 11, 13 and 21 of them, so 45 such rows buried the 8 real sessions in
+            // this section and a Brain read the section as a 53-session fleet.
+            //
+            // Collapsed to a count, never dropped: the number stays visible and
+            // stays challengeable. An ADDRESSABLE session is never collapsed
+            // whatever its title, because that is precisely the row someone may
+            // need to message, and a titled one is never collapsed either, because
+            // the title is the only thing identifying it. So the only rows this can
+            // hide are rows carrying no identity and no address.
+            const anon = sessions.filter((s) => !s.title && !s.addressableId);
+            const shown = anon.length >= ANON_COLLAPSE_AT
+                ? sessions.filter((s) => s.title || s.addressableId)
+                : sessions;
+            for (const s of shown) {
                 say('      - ' + (s.title || '(untitled)') + '  [' + s.state + ', ' +
                     shortAge(s.idleMinutes) + ' idle]' + (s.addressableId ? '  ' + s.addressableId : '  (not addressable)'));
+            }
+            if (anon.length >= ANON_COLLAPSE_AT) {
+                const idle = anon.map((s) => s.idleMinutes).sort((a, b) => a - b);
+                say('      - [' + anon.length + ' more, all untitled and NOT addressable, idle ' +
+                    shortAge(idle[0]) + ' to ' + shortAge(idle[idle.length - 1]) +
+                    '] collapsed - none can be messaged');
             }
         }
         say('');

@@ -1,5 +1,31 @@
 # Changelog
 
+## [8.149.0] - 2026-09-01
+
+### Changed: the ownership section no longer buries real sessions under anonymous ones
+
+`brain-brief`'s OWNERSHIP section printed every session row at full length.
+`[measured 2026-09-01]` three branches carried 11, 13 and 21 untitled,
+unaddressable rows, and those 45 buried the 8 real sessions well enough that a
+reader took the section for a 53-session fleet.
+
+A run of three or more rows that are BOTH untitled and unaddressable now
+collapses to one counted line naming the idle range. Collapsed, never dropped:
+the count stays visible and stays challengeable, and the branch still declares
+how many sessions share it.
+
+The safety property is that an ADDRESSABLE session is never collapsed whatever
+its title, because that is the row someone may need to message, and a titled one
+is never collapsed either, since the title is the only thing identifying it. The
+only rows this can hide carry neither identity nor address.
+
+Scenario I in `test-brain-brief.js` covers it, with a control asserting the
+session-record seam actually produces an addressable session first, so the other
+assertions cannot pass vacuously. Mutation-tested twice: emptying the shown list
+fails the control and the never-collapsed assertion together. The first mutation
+attempted was rejected as insufficient because it broke the count rather than
+the safety property, which is the distinction the test exists to make.
+
 ## [8.147.0] - 2026-09-01
 
 ### Fixed: the brain skill mandated a tool it did not declare
