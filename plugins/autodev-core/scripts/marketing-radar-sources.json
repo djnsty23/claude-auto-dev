@@ -1,0 +1,123 @@
+{
+  "profile": {
+    "id": "marketing-radar",
+    "label": "marketing radar",
+    "outputPrefix": "marketing-radar-input",
+    "stateDirName": "autodev-marketing-radar",
+    "relevantTerms": [
+      "meta ads", "facebook ads", "instagram ads", "google ads", "tiktok ads",
+      "linkedin ads", "microsoft ads", "paid social", "paid search", "creative",
+      "campaign", "conversion", "attribution", "incrementality", "landing page",
+      "cro", "offer", "funnel", "email", "lifecycle", "seo", "content",
+      "analytics", "ga4", "gtm", "automation", "experiment", "testing", "profit"
+    ]
+  },
+  "official": [
+    {
+      "id": "meta-business-sdk-releases",
+      "kind": "atom",
+      "category": "paid-social",
+      "product": "Meta Business SDK",
+      "url": "https://github.com/facebook/facebook-nodejs-business-sdk/releases.atom",
+      "webUrl": "https://github.com/facebook/facebook-nodejs-business-sdk/releases",
+      "maxEntries": 10,
+      "excludePrereleases": true
+    },
+    {
+      "id": "google-ads-api-releases",
+      "kind": "atom",
+      "category": "paid-search",
+      "product": "Google Ads API Python client",
+      "url": "https://github.com/googleads/google-ads-python/releases.atom",
+      "webUrl": "https://github.com/googleads/google-ads-python/releases",
+      "maxEntries": 10,
+      "excludePrereleases": true
+    },
+    {
+      "id": "tiktok-business-api-changelog",
+      "kind": "markdown-changelog",
+      "category": "paid-social",
+      "product": "TikTok Business API SDK",
+      "url": "https://raw.githubusercontent.com/tiktok/tiktok-business-api-sdk/main/Changelog.md",
+      "webUrl": "https://github.com/tiktok/tiktok-business-api-sdk/blob/main/Changelog.md",
+      "maxEntries": 8
+    },
+    {
+      "id": "microsoft-advertising-release-notes",
+      "kind": "markdown-changelog",
+      "headingPattern": "^(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+20\\d{2}$",
+      "headingDates": true,
+      "category": "paid-search",
+      "product": "Microsoft Advertising API",
+      "url": "https://raw.githubusercontent.com/MicrosoftDocs/Advertising/main/advertising/bingads-13/guides/release-notes.md",
+      "webUrl": "https://learn.microsoft.com/advertising/guides/release-notes?view=bingads-13",
+      "maxEntries": 8
+    },
+    {
+      "id": "google-ads-commerce-blog",
+      "kind": "rss",
+      "category": "marketing-platform",
+      "product": "Google Ads and Commerce",
+      "url": "https://blog.google/products/ads-commerce/rss/",
+      "webUrl": "https://blog.google/products/ads-commerce/",
+      "maxEntries": 12
+    },
+    {
+      "id": "google-search-central-blog",
+      "kind": "rss",
+      "category": "seo",
+      "product": "Google Search Central",
+      "url": "https://developers.google.com/search/blog/feed.xml",
+      "webUrl": "https://developers.google.com/search/blog",
+      "maxEntries": 12
+    },
+    {
+      "id": "google-analytics-data-releases",
+      "kind": "atom",
+      "category": "measurement",
+      "product": "Google Analytics Data API client",
+      "url": "https://github.com/googleapis/nodejs-analytics-data/releases.atom",
+      "webUrl": "https://github.com/googleapis/nodejs-analytics-data/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "hubspot-api-releases",
+      "kind": "atom",
+      "category": "crm-automation",
+      "product": "HubSpot API client",
+      "url": "https://github.com/HubSpot/hubspot-api-python/releases.atom",
+      "webUrl": "https://github.com/HubSpot/hubspot-api-python/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    },
+    {
+      "id": "mailchimp-marketing-api-releases",
+      "kind": "atom",
+      "category": "email-automation",
+      "product": "Mailchimp Marketing API client",
+      "url": "https://github.com/mailchimp/mailchimp-marketing-python/releases.atom",
+      "webUrl": "https://github.com/mailchimp/mailchimp-marketing-python/releases",
+      "maxEntries": 8,
+      "excludePrereleases": true
+    }
+  ],
+  "youtube": {
+    "queries": [
+      "Meta ads creative testing strategy",
+      "Google Ads experiments strategy",
+      "TikTok ads creative testing",
+      "LinkedIn ads B2B testing",
+      "marketing measurement incrementality attribution",
+      "GA4 GTM conversion tracking automation",
+      "landing page CRO experimentation",
+      "email lifecycle marketing automation",
+      "SEO Google search update strategy",
+      "organic content marketing testing",
+      "offer funnel conversion optimization",
+      "AI marketing operations automation"
+    ],
+    "perQuery": 6,
+    "discoveryDays": 30
+  }
+}

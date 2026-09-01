@@ -2,9 +2,9 @@
 /**
  * Framework Radar
  *
- * Deterministic intake for official agent-development changes and relevant
- * YouTube videos. It collects and deduplicates evidence; the framework-radar
- * skill owns judgement and controlled experimentation.
+ * Deterministic intake for official changes and relevant YouTube videos. It
+ * collects and deduplicates evidence; a profile-specific skill owns judgement
+ * and controlled experimentation.
  */
 'use strict';
 
@@ -17,8 +17,6 @@ const { spawnSync } = require('child_process');
 const SCHEMA_VERSION = 1;
 const USER_AGENT = 'autodev-framework-radar/1.0';
 const DEFAULT_CONFIG = path.join(__dirname, 'framework-radar-sources.json');
-const DEFAULT_STATE_DIR = process.env.AUTODEV_RADAR_HOME ||
-  path.join(os.homedir(), '.codex', 'autodev-framework-radar');
 const RELEVANT_TERMS = [
   'claude', 'codex', 'agent', 'agents', 'workflow', 'skill', 'skills', 'hook',
   'hooks', 'automation', 'automations', 'mcp', 'worktree', 'prompt', 'context',
@@ -117,22 +115,61 @@ function parseAtom(xml, source, cutoffMs) {
   return out;
 }
 
-function parseMarkdownChangelog(markdown, source) {
+function parseRss(xml, source, cutoffMs) {
+  const entries = String(xml).match(/<item\b[\s\S]*?<\/item>/gi) || [];
+  const out = [];
+  for (const block of entries) {
+    const title = stripHtml(tag(block, 'title'));
+    const id = tag(block, 'guid') || tag(block, 'link') || title;
+    const published = tag(block, 'pubDate') || tag(block, 'published') || tag(block, 'date');
+    const when = Date.parse(published);
+    if (Number.isFinite(when) && when < cutoffMs) continue;
+    const url = stripHtml(tag(block, 'link')) || source.webUrl;
+    const content = clip(stripHtml(tag(block, 'content:encoded') || tag(block, 'description')));
+    out.push({
+      key: `official:${source.id}:${id}`,
+      source_id: source.id,
+      kind: 'official',
+      category: source.category || 'uncategorized',
+      product: source.product,
+      title,
+      url,
+      published_at: Number.isFinite(when) ? new Date(when).toISOString() : null,
+      content,
+      content_hash: hash([title, content, published].join('\n')),
+    });
+    if (out.length >= source.maxEntries) break;
+  }
+  return out;
+}
+
+function parseMarkdownChangelog(markdown, source, cutoffMs) {
   const lines = String(markdown).split(/\r?\n/);
   const sections = [];
   let current = null;
+  const headingPattern = source.headingPattern
+    ? new RegExp(source.headingPattern, 'i')
+    : /^v?\d+\.\d+\.\d+(?:[-.][\w.-]+)?$/;
   for (const line of lines) {
     const heading = /^##\s+(.+?)\s*$/.exec(line);
-    if (heading && /^v?\d+\.\d+\.\d+(?:[-.][\w.-]+)?$/.test(heading[1].trim())) {
+    const headingText = heading ? stripHtml(heading[1]).trim() : '';
+    if (heading && headingPattern.test(headingText)) {
       if (current) sections.push(current);
-      current = { version: heading[1].trim(), lines: [] };
+      current = { version: headingText, lines: [] };
     } else if (current) {
       current.lines.push(line);
     }
   }
   if (current) sections.push(current);
-  return sections.slice(0, source.maxEntries).map((section) => {
+  const unique = sections.filter((section, index) =>
+    sections.findIndex((candidate) => candidate.version === section.version) === index);
+  return unique.filter((section) => {
+    if (!source.headingDates || !cutoffMs) return true;
+    const when = Date.parse(`1 ${section.version} UTC`);
+    return !Number.isFinite(when) || when >= cutoffMs;
+  }).slice(0, source.maxEntries).map((section) => {
     const content = clip(section.lines.join('\n'));
+    const parsedDate = source.headingDates ? Date.parse(`1 ${section.version} UTC`) : NaN;
     return {
       key: `official:${source.id}:${section.version}`,
       source_id: source.id,
@@ -141,7 +178,7 @@ function parseMarkdownChangelog(markdown, source) {
       product: source.product,
       title: `${source.product} ${section.version}`,
       url: source.webUrl,
-      published_at: null,
+      published_at: Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : null,
       content,
       content_hash: hash([section.version, content].join('\n')),
     };
@@ -271,17 +308,17 @@ function normalizeVideo(raw, searchRank, pinned) {
   };
 }
 
-function relevance(video) {
+function relevance(video, relevantTerms = RELEVANT_TERMS) {
   const haystack = `${video.title} ${video.description}`.toLowerCase();
-  return RELEVANT_TERMS.reduce((count, term) => count + (haystack.includes(term) ? 1 : 0), 0);
+  return relevantTerms.reduce((count, term) => count + (haystack.includes(term) ? 1 : 0), 0);
 }
 
-function scoreVideos(videos, nowMs, discoveryDays) {
+function scoreVideos(videos, nowMs, discoveryDays, relevantTerms = RELEVANT_TERMS) {
   for (const video of videos) {
     const published = Date.parse(video.published_at || '');
     const ageDays = Number.isFinite(published) ? Math.max(1, (nowMs - published) / 86400000) : discoveryDays;
     const velocity = video.views / ageDays;
-    const rel = relevance(video);
+    const rel = relevance(video, relevantTerms);
     const freshness = Math.max(0, 1 - ageDays / discoveryDays);
     video.age_days = Math.round(ageDays * 10) / 10;
     video.view_velocity = Math.round(velocity);
@@ -308,7 +345,9 @@ async function officialSources(config, fixtureDir, cutoffMs) {
         : await fetchText(source.url, source.id);
       const parsed = source.kind === 'atom'
         ? parseAtom(raw, source, cutoffMs)
-        : parseMarkdownChangelog(raw, source);
+        : source.kind === 'rss'
+          ? parseRss(raw, source, cutoffMs)
+          : parseMarkdownChangelog(raw, source, cutoffMs);
       items.push(...parsed);
       statuses.push({ id: source.id, category: source.category || 'uncategorized', status: 'ok', count: parsed.length });
     } catch (error) {
@@ -368,7 +407,8 @@ async function discoverWithApi(config, apiKey, cutoffIso, maxVideos, pinnedIds, 
   }).filter(Boolean);
 }
 
-async function discoverWithYtDlp(config, maxVideos, pinnedIds, execute = run, resolve = runner) {
+async function discoverWithYtDlp(config, maxVideos, pinnedIds, execute = run, resolve = runner,
+  relevantTerms = RELEVANT_TERMS) {
   const invocation = resolve('yt-dlp', 'yt-dlp');
   if (!invocation) throw new Error('neither yt-dlp nor uvx is available');
   const candidates = new Map();
@@ -412,8 +452,8 @@ async function discoverWithYtDlp(config, maxVideos, pinnedIds, execute = run, re
     else candidates.get(id).pinned = true;
   }
   const prelim = Array.from(candidates.values()).sort((a, b) => {
-    const ar = relevance(normalizeVideo(a.row, a.rank, a.pinned) || { title: '', description: '' });
-    const br = relevance(normalizeVideo(b.row, b.rank, b.pinned) || { title: '', description: '' });
+    const ar = relevance(normalizeVideo(a.row, a.rank, a.pinned) || { title: '', description: '' }, relevantTerms);
+    const br = relevance(normalizeVideo(b.row, b.rank, b.pinned) || { title: '', description: '' }, relevantTerms);
     const av = Number(a.row.view_count || 0), bv = Number(b.row.view_count || 0);
     return (b.pinned ? 1000 : 0) + (b.temporalLane ? 50 : 0) + (b.recentLane ? 25 : 0) + br * 10 + Math.log10(bv + 1) -
       ((a.pinned ? 1000 : 0) + (a.temporalLane ? 50 : 0) + (a.recentLane ? 25 : 0) + ar * 10 + Math.log10(av + 1));
@@ -496,13 +536,14 @@ async function youtubeSource(config, fixtureDir, options, cutoffMs, stateDir) {
         new Date(cutoffMs).toISOString(), options.maxVideos, options.pinnedIds);
       provider = 'youtube-data-api';
     } else {
-      videos = await discoverWithYtDlp(config, options.maxVideos, options.pinnedIds);
+      videos = await discoverWithYtDlp(config, options.maxVideos, options.pinnedIds, run, runner,
+        options.relevantTerms);
       provider = 'yt-dlp-search';
     }
     const discoveryDays = Number(config.discoveryDays || options.days);
     videos = videos.filter((video) => video.pinned || !video.published_at || Date.parse(video.published_at) >= cutoffMs);
     if (!videos.length) throw new Error('discovery returned zero videos in the requested window');
-    const ranking = scoreVideos(videos, Date.now(), discoveryDays);
+    const ranking = scoreVideos(videos, Date.now(), discoveryDays, options.relevantTerms);
     const selected = videos.slice().sort((a, b) => b.radar_score - a.radar_score).slice(0, options.maxTranscripts);
     const transcripts = new Map();
     for (const video of selected) transcripts.set(video.id, await extractTranscript(video, fixtureDir, stateDir));
@@ -534,9 +575,27 @@ function reviewState(state, item) {
   return !prior || prior.content_hash !== item.content_hash;
 }
 
-function manifestOutputPath() {
+function profile(config) {
+  const raw = config.profile || {};
+  return {
+    id: raw.id || 'framework-radar',
+    label: raw.label || 'framework radar',
+    outputPrefix: raw.outputPrefix || 'framework-radar-input',
+    stateDirName: raw.stateDirName || 'autodev-framework-radar',
+    relevantTerms: Array.isArray(raw.relevantTerms) && raw.relevantTerms.length
+      ? raw.relevantTerms.map((term) => String(term).toLowerCase())
+      : RELEVANT_TERMS,
+  };
+}
+
+function defaultStateDir(selectedProfile) {
+  return process.env.AUTODEV_RADAR_HOME ||
+    path.join(os.homedir(), '.codex', selectedProfile.stateDirName);
+}
+
+function manifestOutputPath(selectedProfile) {
   const date = new Date().toISOString().slice(0, 10);
-  return path.resolve(process.cwd(), '.claude', 'reports', `framework-radar-input-${date}.json`);
+  return path.resolve(process.cwd(), '.claude', 'reports', `${selectedProfile.outputPrefix}-${date}.json`);
 }
 
 function loadConfig(file) {
@@ -551,18 +610,20 @@ function loadConfig(file) {
 }
 
 async function collect() {
+  const configFile = path.resolve(value('--config', DEFAULT_CONFIG));
+  const config = loadConfig(configFile);
+  const selectedProfile = profile(config);
   const options = {
     days: positiveInt('--days', 14, 365),
     maxVideos: positiveInt('--max-videos', 20, 50),
     maxTranscripts: positiveInt('--max-transcripts', 5, 10),
     pinnedIds: values('--video').map((input) => (/[?&]v=([\w-]{11})/.exec(input) || /^([\w-]{11})$/.exec(input) || [])[1]).filter(Boolean),
+    relevantTerms: selectedProfile.relevantTerms,
   };
-  const configFile = path.resolve(value('--config', DEFAULT_CONFIG));
   const fixtureDirRaw = value('--fixture-dir', null);
   const fixtureDir = fixtureDirRaw ? path.resolve(fixtureDirRaw) : null;
-  const stateDir = path.resolve(value('--state-dir', DEFAULT_STATE_DIR));
-  const output = path.resolve(value('--output', manifestOutputPath()));
-  const config = loadConfig(configFile);
+  const stateDir = path.resolve(value('--state-dir', defaultStateDir(selectedProfile)));
+  const output = path.resolve(value('--output', manifestOutputPath(selectedProfile)));
   const cutoffMs = Date.now() - options.days * 86400000;
   const stateFile = path.join(stateDir, 'state.json');
   const state = readJson(stateFile, { schema_version: SCHEMA_VERSION, reviewed: {}, pending_runs: {} });
@@ -585,6 +646,7 @@ async function collect() {
     schema_version: SCHEMA_VERSION,
     run: {
       id: runId,
+      profile: selectedProfile.id,
       created_at: new Date().toISOString(),
       days: options.days,
       repository: process.cwd(),
@@ -614,7 +676,7 @@ async function collect() {
   state.pending_runs[runId] = { manifest: output, created_at: manifest.run.created_at };
   writeAtomic(stateFile, JSON.stringify(state, null, 2));
 
-  console.log(`framework radar: ${ok} succeeded, ${partial} partial, ${failed} failed of ${statuses.length} source(s)`);
+  console.log(`${selectedProfile.label}: ${ok} succeeded, ${partial} partial, ${failed} failed of ${statuses.length} source(s)`);
   console.log(`population: ${official.items.length} official item(s), ${youtube.videos.length} YouTube video(s), ` +
     `${youtube.transcripts_succeeded}/${youtube.transcripts_attempted} transcript(s), ` +
     `${manifest.population.items_requiring_review} item(s) requiring review`);
@@ -630,7 +692,8 @@ function markReviewed(manifestFile) {
   if (!manifest || manifest.schema_version !== SCHEMA_VERSION || !manifest.run || !Array.isArray(manifest.items)) {
     throw new Error('refusing to mark an invalid or unsupported manifest');
   }
-  const stateDir = path.resolve(value('--state-dir', DEFAULT_STATE_DIR));
+  const fallbackStateDir = manifest.run.state_dir || defaultStateDir({ stateDirName: 'autodev-framework-radar' });
+  const stateDir = path.resolve(value('--state-dir', fallbackStateDir));
   const stateFile = path.join(stateDir, 'state.json');
   const state = readJson(stateFile, { schema_version: SCHEMA_VERSION, reviewed: {}, pending_runs: {} });
   state.reviewed = state.reviewed || {};
@@ -697,6 +760,7 @@ module.exports = {
   isPrereleaseTitle,
   normalizeVideo,
   parseAtom,
+  parseRss,
   parseJsonLines,
   parseMarkdownChangelog,
   run,
