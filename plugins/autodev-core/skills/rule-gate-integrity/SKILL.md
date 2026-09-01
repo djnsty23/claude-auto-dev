@@ -171,9 +171,48 @@ on emptiness: rebuilding an already-empty directory is idempotent, so it proves
 nothing until there is something to destroy. Verify it by reintroducing the
 defect with real state present.
 
+## 7. Measure precision on the real corpus before wiring anything
+
+A gate earns its wiring with a triaged first run, never with a passing
+selftest. The selftest proves the check CAN fire. Only the corpus says
+whether what it catches is worth reading.
+
+**A worked negative, kept because the result is the useful part.** A
+reviewer found a real defect no suite here could see: a document that
+denied a thing in one paragraph and measured it in another, where each
+sentence was individually plausible and only their conjunction was false.
+A detector for that shape was written, and it passed a careful selftest
+8 of 8, including the real defect planted verbatim and the fixed text
+staying quiet.
+
+Then it met the corpus: **204 hits over 123 files, and 12 of the first 12
+triaged by hand were false.** Every one paired unrelated paragraphs -- "no
+releases" in one changelog entry against "releases" in a different entry
+forty paragraphs later. The check matched a shared noun; the question was
+whether two statements are about the same subject, and a string comparison
+cannot answer it.
+
+Three things that generalise past this one check:
+
+- **A selftest measures the author's imagination.** Both the positive and
+  the negatives were cases considered while writing it. The corpus
+  supplies the cases that were not.
+- **Fix your own bugs before condemning the class.** The first sweep
+  flagged `the`, `from`, `its`: the capture took the token after the
+  negation, which is often a determiner. That was 24 hits of author error
+  masquerading as evidence about the problem. Removing them moved 228 to
+  204 and changed no conclusion, but the conclusion was only trustworthy
+  after.
+- **A detector at zero precision is worse than none**, and the reason is
+  the same one that makes a reassuring skip worse than silence: a check
+  people mute stops catching the real thing later. Ship the negative
+  result instead. "This class needs a semantic comparison, here is the
+  measurement that says so" is a finding.
+
 ## Before shipping a gate
 
 - [ ] It runs the real implementation, not a reconstruction.
+- [ ] Its first corpus run was triaged by hand, and the precision written down.
 - [ ] It fails when the population is empty, not just when it differs.
 - [ ] Each deliberate breakage was confirmed to fire, and for the right reason.
 - [ ] Every negative assertion was confirmed to reach the code it denies.
