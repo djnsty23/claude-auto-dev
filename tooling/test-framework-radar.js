@@ -183,6 +183,11 @@ async function e2e() {
     '--days', '14', '--max-videos', '10', '--max-transcripts', '1'];
   const first = cli(baseArgs.concat(['--output', firstOutput]));
   check('fixture collection exits 0', first.status === 0, first.stderr || first.stdout);
+  check('collection refreshes a user-facing findings dashboard beside the manifest',
+    fs.existsSync(path.join(tmp, 'framework-radar-findings-latest.html')) &&
+      fs.existsSync(path.join(tmp, 'framework-radar-findings-latest.md')) &&
+      fs.existsSync(path.join(tmp, 'framework-radar-findings-latest.json')) &&
+      /findings: .*framework-radar-findings-latest\.html/.test(first.stdout || ''));
   check('fixture collection prints its population',
     /3 source item\(s\) \(3 primary\), 2 YouTube video\(s\), 1\/1 transcript\(s\), 0\/0 retained comment/.test(first.stdout || ''),
     first.stdout);

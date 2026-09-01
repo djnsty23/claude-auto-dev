@@ -14,6 +14,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const radarLearning = require('./radar-learning');
 
 const SCHEMA_VERSION = 1;
 const USER_AGENT = 'autodev-framework-radar/1.0';
@@ -970,6 +971,9 @@ async function collect() {
   state.pending_runs = state.pending_runs || {};
   state.pending_runs[runId] = { manifest: output, created_at: manifest.run.created_at };
   writeAtomic(stateFile, JSON.stringify(state, null, 2));
+  const learningLedger = readJson(path.join(stateDir, 'learning-ledger.json'), radarLearning.createLedger());
+  const findings = radarLearning.writeArtifacts(path.dirname(output),
+    radarLearning.reportData(manifest, learningLedger, manifest.run.created_at));
 
   console.log(`${selectedProfile.label}: ${ok} succeeded, ${partial} partial, ${failed} failed of ${statuses.length} source(s)`);
   console.log(`population: ${evidence.items.length} source item(s) (${primaryItems} primary), ${youtube.videos.length} YouTube video(s), ` +
@@ -980,6 +984,7 @@ async function collect() {
     console.log(`COULD NOT CHECK ${status.id}: ${status.error || status.status}`);
   }
   console.log(`manifest: ${output}`);
+  console.log(`findings: ${findings.html}`);
   process.exitCode = ok + partial > 0 ? 0 : 1;
 }
 

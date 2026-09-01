@@ -32,6 +32,8 @@ The collector prints:
 - The primary, research, community, category, video, transcript and retained-comment populations.
 - `COULD NOT CHECK` for each unavailable source.
 - The absolute path to its JSON manifest.
+- The absolute path to a self-contained HTML findings dashboard, with adjacent
+  Markdown and JSON versions under `.claude/reports/`.
 
 It uses `YOUTUBE_API_KEY` when available. Otherwise it tries `yt-dlp`, then
 `uvx --from yt-dlp`. Transcript extraction similarly uses
@@ -101,6 +103,12 @@ Completion: every item entering `test` cites one primary external source and one
 current-repository artifact. A lead missing either side stays `watch`; it is not
 a hypothesis yet.
 
+Before choosing leads, read the dashboard's claim clusters and source outcome
+scorecard. Repeated coverage of one announcement is one underlying claim; keep
+the independent-source population visible. The outcome score is a shrunk history
+of tested utility, not a truth or popularity score, and a source with no outcomes
+must remain eligible for exploration.
+
 ## 4. Execute every hypothesis
 
 First read the newest prior radar reports. An earlier candidate experiment with
@@ -160,6 +168,44 @@ framework change or PR behind.
 Completion: the count of selected hypotheses equals the count with executed
 verdicts. Zero hypotheses is valid when no lead is both relevant and testable.
 
+### Record the executable verdict
+
+Write `.claude/reports/framework-radar-verdicts-YYYY-MM-DD.json` after every
+selected hypothesis has run. It must use `schema_version: 1`, the exact manifest
+`run_id`, and one `hypotheses[]` row per executed hypothesis with:
+
+- stable `id`, falsifiable `claim`, and the manifest `source_keys` that led to it;
+- `verdict`: `adopt-b`, `adopt-c`, `no-winner`, or `reject`;
+- `variants.a`, `variants.b`, and `variants.c`, each with a string `measurement`;
+- at least one raw `evidence` location and the measured `tested_at` time.
+
+Then update the durable learning ledger and regenerate the user artifacts:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
+  --manifest <manifest-path> \
+  --verdicts .claude/reports/framework-radar-verdicts-YYYY-MM-DD.json
+```
+
+The command rejects source keys outside the manifest and is idempotent by run
+and hypothesis id. Read back the printed Markdown, HTML and JSON paths before
+marking the manifest reviewed.
+
+An adopted winner starts as `candidate`; it does not become a default because a
+PR merged. Move it through `shadow`, `canary`, then `default` only with evidence
+for each transition. `default` requires `--revalidate-by`; an expired default is
+reported as `stale` and must return to shadow or retire.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
+  --state-dir <manifest-state-dir> --transition <experiment-id> \
+  --to shadow --evidence <evidence-path-or-summary>
+```
+
+New hosts cited by collected descriptions appear only as source proposals. Add
+one to a registry only after provenance, feed stability and useful yield have
+been measured across three runs. Never let discovery edit a registry directly.
+
 ## 5. Write the report
 
 Write `.claude/reports/framework-radar-YYYY-MM-DD.md` with these sections:
@@ -171,6 +217,7 @@ Write `.claude/reports/framework-radar-YYYY-MM-DD.md` with these sections:
 5. Already handled and rejected ideas.
 6. Watch list and blocked prerequisites.
 7. Winning branches and PRs, if any.
+8. Learning ledger changes, lifecycle status and proposed source discoveries.
 
 Cross-foot the report totals against the manifest. A failed source remains in
 the report even when other sources succeeded.
@@ -198,5 +245,5 @@ because an interrupted analysis must return on the next run.
 
 Completion: the report exists, source and hypothesis counts cross-foot, every
 hypothesis has an executed verdict, every winning PR is remotely readable, and
-the mark-reviewed command reports the same changed-item population the report
-considered.
+the user-facing HTML/Markdown/JSON artifacts exist, and the mark-reviewed command
+reports the same changed-item population the report considered.
