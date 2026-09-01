@@ -444,8 +444,11 @@ function scan({ strict }) {
     if (!flagged.length) {
         process.exit(0);
     }
-    if (strict) console.log(`[population] FAIL: ${flagged.length} script(s) missing a population line or a control`);
-    else console.log('[population] advisory only; pass --strict to fail on these');
+    if (strict) {
+        console.log(`[population] FAIL: ${flagged.length} script(s) missing a population line or a control`);
+        process.exit(1);
+    }
+    console.log('[population] advisory only; pass --strict to fail on these');
     process.exit(0);
 }
 

@@ -97,3 +97,47 @@ Output (exit 0):
 ## Out of scope
 
 - The scanner-radius and control-scope limits already documented in the subject header were not treated as findings.
+
+## T1 - defect in the acceptance test
+
+The original test required `[population] FAIL:`, a banner emitted only by the defective subject. The corrected precondition instead requires the fixture's `NO-POPULATION NO-CONTROL` finding row, which both implementations emit, and then asserts only the contract: strict mode must return a nonzero status when a script is flagged.
+
+Planted-subject command: `node .claude/l4-scratch/test-strict-exit.js`
+
+Output (exit 1):
+
+```text
+node:assert:152
+  throw new AssertionError(obj);
+  ^
+
+AssertionError [ERR_ASSERTION]: strict failure output must produce a failing exit code; stdout:
+  NO-POPULATION NO-CONTROL  tooling/fixture-absence.js
+[population] 2 script(s) read across 1 directory(ies), 2 report an absence or all-clear, 1 of those are missing a population line or a control
+[scope] control detection is per-FILE: a guard on one branch clears the whole file, and a control living in a separate suite is not seen. A clean result means a control exists, not that every absence is guarded.
+[population] FAIL: 1 script(s) missing a population line or a control
+
+    at Object.<anonymous> (C:\Users\nstyp\claude-auto-dev\.claude\worktrees\vigorous-maxwell-7ac5dc\.claude\l4-scratch\test-strict-exit.js:34:12)
+    at Module._compile (node:internal/modules/cjs/loader:1830:14)
+    at Object..js (node:internal/modules/cjs/loader:1961:10)
+    at Module.load (node:internal/modules/cjs/loader:1553:32)
+    at Module._load (node:internal/modules/cjs/loader:1355:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 0,
+  expected: 0,
+  operator: 'notStrictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.15.0
+```
+
+Control-subject command: `node .claude/l4-control/test-strict-exit.js`
+
+Output (exit 0): empty.
+
+The temporary control test copy was deleted after the run.
