@@ -130,13 +130,30 @@ has exactly one legal move today, and it is stop.
    four-part idle message, **and take the next queue item**. Blocked on one
    item is not idle.
 
-"Away" is a declared state, not an inference: the Brain writes
-`~/claude-memory/AWAY.md` with an until-time from the operator's own words
-("i'm going outside", "keep them going, i'll be back in a bit"), and removes
-it on his next direct message. Workers read it before choosing branch 2 vs a
-panel. The panel-deny window (`brain-panels.js`) is subordinate to it: a deny
-that outlives the Brain must not strand a worker (S1), so a worker whose panel
-is denied AND `AWAY.md` is absent raises the panel anyway.
+"Away" is a declared state, not an inference, and it needs a MECHANISM,
+because two things already in the repo contradict the paragraph above as first
+written (F10). `rule-options-protocol/SKILL.md` is always-on and tells every
+worker to end each substantive turn with a panel; `brain-panels.js` denies
+panels by writing `AskUserQuestion` into `permissions.deny`, so a worker
+"raising the panel anyway" cannot happen while that deny stands. The plan
+therefore replaces the deny, it does not layer on it:
+
+- **State file:** `~/claude-memory/AWAY.md` carries an ISO until-time and the
+  operator's words verbatim, written atomically (temp file, rename). Four
+  states, each with a defined reading (F16): **active** (until-time in the
+  future) means self-resolve; **expired**, **absent** and **malformed** all
+  mean "the operator can be asked", and malformed is logged. Expiry needs no
+  writer, so a dead Brain cannot strand anyone.
+- **Enforcement point:** `panel-recommendation.js`, the PreToolUse hook that
+  already parses every outgoing panel and knows its recommended option. Under
+  an active AWAY it blocks the panel with exit 2 and returns the branch-2
+  decision to the session in the block message: take the recommended option,
+  append the branch label to `DECISIONS-<date>.md`, continue. Under any other
+  state it behaves as today. The permissions deny in `brain-panels.js` is
+  retired once this lands; `--extend` and expiry semantics move to the file.
+- **Irreducible questions** (branch 3) are written to the queue as blocked
+  by the session itself before it moves on; the hook cannot judge
+  reversibility, so the session's brief names the branch-3 classes verbatim.
 
 ### 2.4 Liveness without a Brain
 
@@ -147,16 +164,27 @@ partly present, and the audit tests which actually holds:
   with a standing conditional order re-checks it on its own `ScheduleWakeup`
   cadence (`/loop`), never by waiting for a message. Finishing item N starts
   item N+1 with nobody in the loop.
-- **Machine-side, and most of it exists.** `install-fleet-notify-task.ps1`
-  already registers `AutodevFleetNotify`, a Windows task every 2 min running
-  `fleet-notify.js`, which toasts once per newly panel-blocked session and
-  writes `.notify-last-run.json` as proof the scan ran. `fleet-stop-watch.js`
-  detects STOPPED and RESUMED transitions but is session-hosted, which is S1.
-  The plan adds ONE thing: the stop-without-resume rule (a STOPPED with no
-  RESUMED after it, for a session whose queue is non-empty, silent 20 min)
-  runs inside the existing task via `fleet-stop-watch.js --once`, keyed per
-  session on the last transition. No new task, no new notifier. It does not
-  message sessions; it cannot. It makes the absence visible.
+- **Machine-side: the pieces exist and are not joined, and the host is not
+  even registered here.** `[measured 2026-09-02]` by the adversary:
+  `schtasks /Query /TN AutodevFleetNotify` prints "cannot find the path
+  specified", so `install-fleet-notify-task.ps1` has never been run on this
+  machine (F12). When it is, the task runs `fleet-notify.js` every 2 min,
+  which toasts the DESKTOP once per newly panel-blocked session; it has no
+  phone transport, and this plan makes no phone claim (F11).
+  `fleet-stop-watch.js` emits STOPPED and RESUMED but keeps its state in
+  memory on purpose, so `--once` from a task baselines every session and can
+  never see a transition (F12). The build for this lane is therefore one
+  persisted, queue-aware join: `--state <file>` on the stop watch, the
+  stop-without-resume rule (STOPPED, no RESUMED after it, queue non-empty,
+  silent 20 min) evaluated across runs, and the toast reused from the notifier.
+- **Visibility is not liveness (F13).** Nothing outside a session can message
+  a session, wake one, or reclaim its queue item. So after a Brain or worker
+  dies, the machine side can only make the absence visible; the RECOVERY half
+  is one of two things, and choosing is the operator's call (Q5): a worker's
+  own `ScheduleWakeup` cadence, which survives Brain death but not its own;
+  or the supervisor task launching a headless `claude -p` run against the
+  repo's queue file, which is spend while nobody is watching. Until Q5 is
+  answered, C3 is scored as "work is visible and resumable", not "continues".
 
 The Brain's job on return is to read the transitions, not to poll.
 
@@ -235,6 +263,13 @@ probe that returns empty is a claim about the probe.
 - Question: does the loop find a planted false-verdict defect, prove it with a
   test that fails, survive a timeout without a second writer, and stay under
   the 2048-character structured-reply cap?
+- `[measured 2026-09-02]` the idle timeout bit this plan's own review: the
+  resumed `codex-reply` ran 31 minutes, the harness aborted the call at 1800 s
+  of silence ("sent no response or progress for 1800s"), and the reply was
+  lost while the file survived because it was written incrementally. The
+  error names the remedy: a per-server `timeout` in the MCP settings, or
+  `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`. Setting it is a persistent config
+  change and is the first item of the L4 bootstrap, with the operator's yes.
 - Probe: copy one gate to a scratch subject, plant the exact F1 defect from
   PR #105 (verdict printed, exit 0), run one round with `sandbox:
   workspace-write`; separately kill the MCP call mid-run and follow the
@@ -291,9 +326,9 @@ probe that returns empty is a claim about the probe.
 |---|---|---|---|
 | P0 | Freeze §1 as `docs/harness-acceptance-contract.md`; Codex reviews THIS plan; plan v2 | this session, Codex 1 round | tonight, 1 Codex thread |
 | P1 | Baseline census: run every probe in §1 against the last 7 days and print the table with populations. No fixes | fresh Opus Brain | 1 h, 0 Codex rounds |
-| P2 | L0 is done. Then L1, L2, L3 in that order (the stall root), then L5, L6, L4, L7. Each of C1, C5, C6, C7 is BUILT inside the lane that first needs it, before that lane's audit round | Brain + Codex, one thread per lane | ≤ 4 rounds per lane; freeze on two churn rounds; targeted suite during iteration, full gate at convergence |
-| P3 | Rehearsal: a 4 h window with the operator present but silent, on the two mandated repos only, with §2 fully in force; score §1 | Brain, workers, machine task | 1 window; every failed criterion returns to its lane |
-| P4 | A real away window; same scoring; only then declare unattended | operator names the window | none |
+| P2 | L0 is done. Order per F14, validating the instrument before using it: **L4 bootstrap (one round: transport, idle timeout, report preservation) → L5 remainder → L7 (30 min, bare-word dispatch only) → L6 rails → L2 → L3 → L1**. L1 is the integration lane and runs last. C1 is built inside L1; C5 to C8 are deferred to week 2 | Brain + Codex, one thread per lane | ≤ 4 rounds per lane; freeze on two churn rounds; targeted suite during iteration, full gate at convergence |
+| P3 | Rehearsal: a 2 h window, operator present but silent, on ONE synthetic three-item queue in a scratch repo, with a forced Brain death mid-window; score C1 to C4, C9, C10 | Brain, one worker, machine task | 1 window; every failed criterion returns to its lane |
+| P4 | Week 2: C5 to C8 built and scored, the mandated repos brought in, a real away window; only then declare unattended | operator names the window | none |
 
 Bounds that are measured rather than chosen: `[measured]` the first
 production adversarial loop ran 24 rounds against a cap of 5, so the freeze is
@@ -325,19 +360,29 @@ Pro rate-limits mid-week, so L4 runs early in the week.
 - **No product-repo writes from the Brain**, ever, including "just this once
   to unblock". S5 is what that costs.
 - **No parallel lanes, no round cap as the bound, no relayed authorisation.**
+- **No product repo in week 1.** The rehearsal runs on a synthetic queue in a
+  scratch repo; the mandated repos enter in week 2 after C1 to C4 hold there.
 
-## 6. Queued for the operator: non-blocking
+## 6. Queued for the operator
 
-Answered whenever; nothing in P0 to P2 waits on them.
+**Q2 blocks the contract freeze (F15). The rest are answered whenever.**
 
+- Q2 **[blocking C4 and L2]** Does a standing order, recorded verbatim from
+  your own words with the date, count as "push authorised in that turn" for
+  the session that holds it? `brain/SKILL.md:915` says a push needs your yes
+  in the turn, and whether a durable order satisfies that is your authority,
+  not an audit detail. If no, S3 stays by design and C4 is dropped from the
+  contract; if yes, L2 builds the holder and the push-authorisation gate learns
+  the recorded form.
 - Q1 Is 10% of the weekly window the right ceiling for the audit?
-- Q2 Should a standing order recorded verbatim count as "push authorised in
-  that turn" (L2 acceptance depends on it; the alternative is that every
-  conditional merge waits for you, which is S3 forever)?
 - Q3 Auto-archive-after-merge: leave off for Brain sessions permanently, or
   gate the Brain on reading it?
-- Q4 The rehearsal window (P3): which 4 hours, and are the two mandated repos
-  the right subjects?
+- Q4 The rehearsal window (P3): which 2 hours? Week 1 rehearses on a
+  synthetic three-item queue in a scratch repo, not on the mandated repos.
+- Q5 The recovery half of liveness (F13): may the supervisor task launch a
+  headless `claude -p` run to reclaim a queue item when a worker is dead, or
+  is in-session `ScheduleWakeup` the only mechanism you want spending while
+  you are away?
 
 ## 7. Revision log
 
@@ -360,3 +405,22 @@ in the same thread).
 All nine share one shape: probes were named by the question, not by what the
 script prints. The correction is the one `rules/agent-quality.md` 5e already
 states: an artifact is authoritative only about the layer it encodes.
+
+**v3, 2026-09-02, after the resumed thread returned F10 to F16 and closed
+with `REVIEW: COMPLETE`** (16 findings: WRONG 4, MISSING 2, UNMEASURABLE 5,
+ORDER 5, OVERBUILT 0; adversary's severity order F1, F13, F10, F14, F15, F4,
+F12, F16, F9, F7, F8, F5, F6, F2, F3, F11).
+
+| Finding | Disposition | What changed |
+|---|---|---|
+| F10 | WRONG, accepted | 2.3 rewritten around a mechanism: the AWAY state is enforced by the existing panel hook, and the `permissions.deny` mechanism in `brain-panels.js` is retired rather than layered on |
+| F11 | WRONG, accepted | "phone" removed; the toast is desktop-only |
+| F12 | WRONG, accepted | the notifier task is not registered here; the stop watch keeps no state; L1's build is the persisted, queue-aware join |
+| F13 | MISSING, accepted | visibility and recovery split; recovery is Q5, the operator's call, and C3 is scored honestly until then |
+| F14 | ORDER, accepted | P2 runs L4 bootstrap first and L1 last |
+| F15 | ORDER, accepted | Q2 now blocks the contract freeze |
+| F16 | MISSING, accepted | AWAY has four states, atomic writes and expiry that needs no writer |
+| one-week cut | accepted with one change | L7 kept as a 30-minute bare-word dispatch check inside week 1 rather than cut, because L2's briefs depend on it |
+
+One new measurement from running the review itself: the 1800 s MCP idle
+timeout, recorded under L4.
