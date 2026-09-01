@@ -2,9 +2,10 @@
 /**
  * Framework Radar
  *
- * Deterministic intake for official agent-development changes and relevant
- * YouTube videos. It collects and deduplicates evidence; the framework-radar
- * skill owns judgement and controlled experimentation.
+ * Deterministic intake for primary changes, independent/trade evidence and
+ * relevant YouTube videos with audience feedback. It collects, labels and
+ * deduplicates evidence; a profile-specific skill owns judgement and controlled
+ * experimentation.
  */
 'use strict';
 
@@ -17,8 +18,6 @@ const { spawnSync } = require('child_process');
 const SCHEMA_VERSION = 1;
 const USER_AGENT = 'autodev-framework-radar/1.0';
 const DEFAULT_CONFIG = path.join(__dirname, 'framework-radar-sources.json');
-const DEFAULT_STATE_DIR = process.env.AUTODEV_RADAR_HOME ||
-  path.join(os.homedir(), '.codex', 'autodev-framework-radar');
 const RELEVANT_TERMS = [
   'claude', 'codex', 'agent', 'agents', 'workflow', 'skill', 'skills', 'hook',
   'hooks', 'automation', 'automations', 'mcp', 'worktree', 'prompt', 'context',
@@ -87,6 +86,18 @@ function isPrereleaseTitle(title) {
     .test(String(title));
 }
 
+function sourceAuthority(source) {
+  return source.authority || 'primary';
+}
+
+function sourceKeyPrefix(source) {
+  return sourceAuthority(source) === 'primary' ? 'official' : sourceAuthority(source);
+}
+
+function sourceItemKind(source) {
+  return sourceAuthority(source) === 'primary' ? 'official' : 'external';
+}
+
 function parseAtom(xml, source, cutoffMs) {
   const entries = String(xml).match(/<entry\b[\s\S]*?<\/entry>/gi) || [];
   const out = [];
@@ -101,9 +112,10 @@ function parseAtom(xml, source, cutoffMs) {
     const url = linkMatch ? decodeEntities(linkMatch[1]) : source.webUrl;
     const content = clip(stripHtml(tag(block, 'content') || tag(block, 'summary')));
     out.push({
-      key: `official:${source.id}:${id}`,
+      key: `${sourceKeyPrefix(source)}:${source.id}:${id}`,
       source_id: source.id,
-      kind: 'official',
+      kind: sourceItemKind(source),
+      authority: sourceAuthority(source),
       category: source.category || 'uncategorized',
       product: source.product,
       title,
@@ -117,31 +129,72 @@ function parseAtom(xml, source, cutoffMs) {
   return out;
 }
 
-function parseMarkdownChangelog(markdown, source) {
+function parseRss(xml, source, cutoffMs) {
+  const entries = String(xml).match(/<item\b[\s\S]*?<\/item>/gi) || [];
+  const out = [];
+  for (const block of entries) {
+    const title = stripHtml(tag(block, 'title'));
+    const id = tag(block, 'guid') || tag(block, 'link') || title;
+    const published = tag(block, 'pubDate') || tag(block, 'published') || tag(block, 'date');
+    const when = Date.parse(published);
+    if (Number.isFinite(when) && when < cutoffMs) continue;
+    const url = stripHtml(tag(block, 'link')) || source.webUrl;
+    const content = clip(stripHtml(tag(block, 'content:encoded') || tag(block, 'description')));
+    out.push({
+      key: `${sourceKeyPrefix(source)}:${source.id}:${id}`,
+      source_id: source.id,
+      kind: sourceItemKind(source),
+      authority: sourceAuthority(source),
+      category: source.category || 'uncategorized',
+      product: source.product,
+      title,
+      url,
+      published_at: Number.isFinite(when) ? new Date(when).toISOString() : null,
+      content,
+      content_hash: hash([title, content, published].join('\n')),
+    });
+    if (out.length >= source.maxEntries) break;
+  }
+  return out;
+}
+
+function parseMarkdownChangelog(markdown, source, cutoffMs) {
   const lines = String(markdown).split(/\r?\n/);
   const sections = [];
   let current = null;
+  const headingPattern = source.headingPattern
+    ? new RegExp(source.headingPattern, 'i')
+    : /^v?\d+\.\d+\.\d+(?:[-.][\w.-]+)?$/;
   for (const line of lines) {
     const heading = /^##\s+(.+?)\s*$/.exec(line);
-    if (heading && /^v?\d+\.\d+\.\d+(?:[-.][\w.-]+)?$/.test(heading[1].trim())) {
+    const headingText = heading ? stripHtml(heading[1]).trim() : '';
+    if (heading && headingPattern.test(headingText)) {
       if (current) sections.push(current);
-      current = { version: heading[1].trim(), lines: [] };
+      current = { version: headingText, lines: [] };
     } else if (current) {
       current.lines.push(line);
     }
   }
   if (current) sections.push(current);
-  return sections.slice(0, source.maxEntries).map((section) => {
+  const unique = sections.filter((section, index) =>
+    sections.findIndex((candidate) => candidate.version === section.version) === index);
+  return unique.filter((section) => {
+    if (!source.headingDates || !cutoffMs) return true;
+    const when = Date.parse(`1 ${section.version} UTC`);
+    return !Number.isFinite(when) || when >= cutoffMs;
+  }).slice(0, source.maxEntries).map((section) => {
     const content = clip(section.lines.join('\n'));
+    const parsedDate = source.headingDates ? Date.parse(`1 ${section.version} UTC`) : NaN;
     return {
-      key: `official:${source.id}:${section.version}`,
+      key: `${sourceKeyPrefix(source)}:${source.id}:${section.version}`,
       source_id: source.id,
-      kind: 'official',
+      kind: sourceItemKind(source),
+      authority: sourceAuthority(source),
       category: source.category || 'uncategorized',
       product: source.product,
       title: `${source.product} ${section.version}`,
       url: source.webUrl,
-      published_at: null,
+      published_at: Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : null,
       content,
       content_hash: hash([section.version, content].join('\n')),
     };
@@ -271,17 +324,17 @@ function normalizeVideo(raw, searchRank, pinned) {
   };
 }
 
-function relevance(video) {
+function relevance(video, relevantTerms = RELEVANT_TERMS) {
   const haystack = `${video.title} ${video.description}`.toLowerCase();
-  return RELEVANT_TERMS.reduce((count, term) => count + (haystack.includes(term) ? 1 : 0), 0);
+  return relevantTerms.reduce((count, term) => count + (haystack.includes(term) ? 1 : 0), 0);
 }
 
-function scoreVideos(videos, nowMs, discoveryDays) {
+function scoreVideos(videos, nowMs, discoveryDays, relevantTerms = RELEVANT_TERMS) {
   for (const video of videos) {
     const published = Date.parse(video.published_at || '');
     const ageDays = Number.isFinite(published) ? Math.max(1, (nowMs - published) / 86400000) : discoveryDays;
     const velocity = video.views / ageDays;
-    const rel = relevance(video);
+    const rel = relevance(video, relevantTerms);
     const freshness = Math.max(0, 1 - ageDays / discoveryDays);
     video.age_days = Math.round(ageDays * 10) / 10;
     video.view_velocity = Math.round(velocity);
@@ -298,24 +351,70 @@ function scoreVideos(videos, nowMs, discoveryDays) {
   };
 }
 
-async function officialSources(config, fixtureDir, cutoffMs) {
-  const statuses = [];
-  const items = [];
-  for (const source of config.official || []) {
+function configuredSourceList(config) {
+  return [
+    ...(config.official || []).map((source) => Object.assign({ authority: 'primary' }, source)),
+    ...(config.research || []).map((source) => Object.assign({ authority: 'independent-research' }, source)),
+    ...(config.community || []).map((source) => Object.assign({ authority: 'trade-community' }, source)),
+  ];
+}
+
+async function mapLimit(rows, limit, worker) {
+  const results = new Array(rows.length);
+  let cursor = 0;
+  const runWorker = async () => {
+    while (cursor < rows.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(rows[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, rows.length) }, runWorker));
+  return results;
+}
+
+async function configuredSources(config, fixtureDir, cutoffMs) {
+  const sources = configuredSourceList(config);
+  const rows = await mapLimit(sources, 8, async (source) => {
     try {
       const raw = fixtureDir
         ? fs.readFileSync(path.join(fixtureDir, `${source.id}.txt`), 'utf8')
         : await fetchText(source.url, source.id);
       const parsed = source.kind === 'atom'
         ? parseAtom(raw, source, cutoffMs)
-        : parseMarkdownChangelog(raw, source);
-      items.push(...parsed);
-      statuses.push({ id: source.id, category: source.category || 'uncategorized', status: 'ok', count: parsed.length });
+        : source.kind === 'rss'
+          ? parseRss(raw, source, cutoffMs)
+          : parseMarkdownChangelog(raw, source, cutoffMs);
+      return {
+        status: {
+          id: source.id,
+          product: source.product,
+          authority: sourceAuthority(source),
+          category: source.category || 'uncategorized',
+          status: 'ok',
+          count: parsed.length,
+        },
+        items: parsed,
+      };
     } catch (error) {
-      statuses.push({ id: source.id, category: source.category || 'uncategorized', status: 'error', count: 0, error: clip(error.message, 240) });
+      return {
+        status: {
+          id: source.id,
+          product: source.product,
+          authority: sourceAuthority(source),
+          category: source.category || 'uncategorized',
+          status: 'error',
+          count: 0,
+          error: clip(error.message, 240),
+        },
+        items: [],
+      };
     }
-  }
-  return { statuses, items };
+  });
+  return {
+    statuses: rows.map((row) => row.status),
+    items: rows.flatMap((row) => row.items),
+  };
 }
 
 function parseJsonLines(text) {
@@ -368,7 +467,8 @@ async function discoverWithApi(config, apiKey, cutoffIso, maxVideos, pinnedIds, 
   }).filter(Boolean);
 }
 
-async function discoverWithYtDlp(config, maxVideos, pinnedIds, execute = run, resolve = runner) {
+async function discoverWithYtDlp(config, maxVideos, pinnedIds, execute = run, resolve = runner,
+  relevantTerms = RELEVANT_TERMS) {
   const invocation = resolve('yt-dlp', 'yt-dlp');
   if (!invocation) throw new Error('neither yt-dlp nor uvx is available');
   const candidates = new Map();
@@ -412,8 +512,8 @@ async function discoverWithYtDlp(config, maxVideos, pinnedIds, execute = run, re
     else candidates.get(id).pinned = true;
   }
   const prelim = Array.from(candidates.values()).sort((a, b) => {
-    const ar = relevance(normalizeVideo(a.row, a.rank, a.pinned) || { title: '', description: '' });
-    const br = relevance(normalizeVideo(b.row, b.rank, b.pinned) || { title: '', description: '' });
+    const ar = relevance(normalizeVideo(a.row, a.rank, a.pinned) || { title: '', description: '' }, relevantTerms);
+    const br = relevance(normalizeVideo(b.row, b.rank, b.pinned) || { title: '', description: '' }, relevantTerms);
     const av = Number(a.row.view_count || 0), bv = Number(b.row.view_count || 0);
     return (b.pinned ? 1000 : 0) + (b.temporalLane ? 50 : 0) + (b.recentLane ? 25 : 0) + br * 10 + Math.log10(bv + 1) -
       ((a.pinned ? 1000 : 0) + (a.temporalLane ? 50 : 0) + (a.recentLane ? 25 : 0) + ar * 10 + Math.log10(av + 1));
@@ -483,6 +583,182 @@ async function extractTranscript(video, fixtureDir, stateDir) {
   return { status: 'unavailable', error: 'no English transcript could be retrieved' };
 }
 
+function normalizeComment(raw, lane = 'unknown', index = 0) {
+  const source = raw || {};
+  const top = source.snippet && source.snippet.topLevelComment;
+  const snippet = top && top.snippet ? top.snippet : source.snippet || source;
+  const text = clip(stripHtml(snippet.textDisplay || snippet.textOriginal || source.text || source.html || ''), 3000);
+  const id = (top && top.id) || source.id || hash([lane, index, text].join('\n')).slice(0, 24);
+  const author = (snippet.authorChannelId && snippet.authorChannelId.value) || source.author_id || source.author || `unknown-${id}`;
+  const timestamp = Number(source.timestamp || 0);
+  const published = snippet.publishedAt || source.published_at || source.publishedAt ||
+    (timestamp > 0 ? new Date(timestamp * 1000).toISOString() : null);
+  return {
+    id: String(id),
+    text,
+    author_key: hash(String(author)).slice(0, 16),
+    published_at: published && Number.isFinite(Date.parse(published)) ? new Date(published).toISOString() : null,
+    likes: Number(snippet.likeCount || source.like_count || source.likes || 0) || 0,
+    lane,
+    is_creator: Boolean(source.author_is_uploader || snippet.authorChannelId && source.video_channel_id &&
+      snippet.authorChannelId.value === source.video_channel_id),
+    is_pinned: Boolean(source.is_pinned),
+  };
+}
+
+function commentFingerprint(text) {
+  return String(text || '').toLowerCase()
+    .replace(/https?:\/\/\S+|www\.\S+/g, '<url>')
+    .replace(/[^\p{L}\p{N}<>' ]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function filterCommentFeedback(comments) {
+  const normalized = comments.filter(Boolean);
+  const byText = new Map();
+  const byAuthorText = new Map();
+  for (const comment of normalized) {
+    const fingerprint = commentFingerprint(comment.text);
+    if (!fingerprint) continue;
+    if (!byText.has(fingerprint)) byText.set(fingerprint, new Set());
+    byText.get(fingerprint).add(comment.author_key);
+    const authorKey = `${comment.author_key}:${fingerprint}`;
+    byAuthorText.set(authorKey, (byAuthorText.get(authorKey) || 0) + 1);
+  }
+
+  const retained = [];
+  const excluded = [];
+  const reasons = {};
+  for (const comment of normalized) {
+    const text = comment.text.toLowerCase();
+    const fingerprint = commentFingerprint(comment.text);
+    let reason = null;
+    if (!fingerprint) reason = 'empty';
+    else if (comment.is_creator) reason = 'creator-response';
+    else if (/(?:sub(?:scribe)?\s*(?:4|for)\s*sub|check out my channel|subscribe to my channel|like\s*(?:4|for)\s*like)/i.test(text)) {
+      reason = 'engagement-manipulation';
+    } else if (/(?:t\.me\/|wa\.me\/|(?:contact|text|message|reach|dm)\s+(?:me|him|her|them|us|on)?[^.\n]{0,50}(?:whats\s*app|telegram)|(?:whats\s*app|telegram)[^.\n]{0,40}(?:\+\d{6,}|@[a-z0-9_]{4,})|investment\s+expert|crypto\s+recovery|forex\s+mentor)/i.test(text)) {
+      reason = 'off-platform-promotion';
+    } else if (fingerprint.length >= 30 && (byText.get(fingerprint) || new Set()).size >= 3) {
+      reason = 'multi-author-duplicate';
+    } else if (fingerprint.length >= 15 && (byAuthorText.get(`${comment.author_key}:${fingerprint}`) || 0) >= 2) {
+      reason = 'same-author-duplicate';
+    }
+    if (reason) {
+      reasons[reason] = (reasons[reason] || 0) + 1;
+      excluded.push(Object.assign({ exclusion_reason: reason }, comment));
+    } else {
+      retained.push(comment);
+    }
+  }
+  return { retained, excluded, reasons };
+}
+
+async function discoverCommentsWithApi(videoId, apiKey, maxComments, getJson = fetchJson) {
+  const perLane = Math.min(100, Math.max(1, Math.ceil(maxComments / 2)));
+  const rows = [];
+  for (const lane of [{ name: 'top', order: 'relevance' }, { name: 'recent', order: 'time' }]) {
+    const params = new URLSearchParams({
+      part: 'snippet',
+      videoId,
+      maxResults: String(perLane),
+      order: lane.order,
+      textFormat: 'plainText',
+      key: apiKey,
+    });
+    const data = await getJson(`https://www.googleapis.com/youtube/v3/commentThreads?${params}`,
+      `YouTube comments ${lane.name}`);
+    (data.items || []).forEach((row, index) => rows.push(normalizeComment(row, lane.name, index)));
+  }
+  return { comments: rows, lanes: ['top', 'recent'], provider: 'youtube-data-api' };
+}
+
+function discoverCommentsWithYtDlp(videoId, maxComments, execute = run, resolve = runner) {
+  const invocation = resolve('yt-dlp', 'yt-dlp');
+  if (!invocation) throw new Error('neither yt-dlp nor uvx is available for comments');
+  const perLane = Math.max(1, Math.ceil(maxComments / 2));
+  const rows = [];
+  for (const lane of ['top', 'new']) {
+    const result = execute(invocation, [
+      '--dump-single-json', '--skip-download', '--no-warnings', '--write-comments',
+      '--extractor-args', `youtube:comment_sort=${lane};max_comments=${perLane},${perLane},0,0,1`,
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ], 180000);
+    if (result.status !== 0) throw new Error(`yt-dlp comments ${lane} failed with exit ${result.status}`);
+    let data;
+    try { data = JSON.parse(result.stdout); } catch { throw new Error(`yt-dlp comments ${lane} returned invalid JSON`); }
+    (data.comments || []).forEach((row, index) => rows.push(normalizeComment(row, lane === 'new' ? 'recent' : 'top', index)));
+  }
+  return { comments: rows, lanes: ['top', 'recent'], provider: 'yt-dlp-comments' };
+}
+
+async function extractComments(video, fixtureDir, stateDir, discoveryProvider, maxComments) {
+  try {
+    let result;
+    if (fixtureDir) {
+      const fixture = path.join(fixtureDir, `comments-${video.id}.json`);
+      if (!fs.existsSync(fixture)) throw new Error('fixture comments absent');
+      const rows = readJson(fixture, []);
+      result = {
+        comments: rows.map((row, index) => normalizeComment(row, row.lane || 'fixture', index)),
+        lanes: Array.from(new Set(rows.map((row) => row.lane || 'fixture'))),
+        provider: 'fixture',
+      };
+    } else if (discoveryProvider === 'youtube-data-api' && process.env.YOUTUBE_API_KEY) {
+      result = await discoverCommentsWithApi(video.id, process.env.YOUTUBE_API_KEY, maxComments);
+    } else {
+      result = discoverCommentsWithYtDlp(video.id, maxComments);
+    }
+    const deduped = Array.from(new Map(result.comments.map((comment) => [comment.id, comment])).values())
+      .slice(0, maxComments);
+    const filtered = filterCommentFeedback(deduped);
+    const commentDir = path.join(stateDir, 'comments');
+    const destination = path.join(commentDir, `${video.id}.json`);
+    const payload = {
+      schema_version: 1,
+      video_id: video.id,
+      collected_at: new Date().toISOString(),
+      provider: result.provider,
+      sample_lanes: result.lanes,
+      filter: {
+        version: 1,
+        rule: 'exclude only high-confidence repetitive, engagement-manipulation or off-platform promotional patterns',
+        limitation: 'public metadata cannot prove whether every retained account is human or every excluded account is automated',
+      },
+      population: {
+        fetched: deduped.length,
+        retained: filtered.retained.length,
+        excluded: filtered.excluded.length,
+        distinct_retained_authors: new Set(filtered.retained.map((comment) => comment.author_key)).size,
+      },
+      exclusion_reasons: filtered.reasons,
+      retained: filtered.retained,
+      excluded: filtered.excluded,
+    };
+    writeAtomic(destination, JSON.stringify(payload, null, 2));
+    const stable = JSON.stringify({
+      retained: filtered.retained.map((comment) => [comment.id, comment.text, comment.likes, comment.lane]),
+      excluded: filtered.excluded.map((comment) => [comment.id, comment.exclusion_reason]),
+    });
+    return {
+      status: 'ok',
+      provider: result.provider,
+      sample_lanes: result.lanes,
+      fetched: deduped.length,
+      retained: filtered.retained.length,
+      excluded: filtered.excluded.length,
+      distinct_retained_authors: payload.population.distinct_retained_authors,
+      exclusion_reasons: filtered.reasons,
+      filter_version: 1,
+      content_hash: hash(stable),
+      path: destination,
+    };
+  } catch (error) {
+    return { status: 'unavailable', error: clip(error.message, 240) };
+  }
+}
+
 async function youtubeSource(config, fixtureDir, options, cutoffMs, stateDir) {
   try {
     let videos;
@@ -496,35 +772,65 @@ async function youtubeSource(config, fixtureDir, options, cutoffMs, stateDir) {
         new Date(cutoffMs).toISOString(), options.maxVideos, options.pinnedIds);
       provider = 'youtube-data-api';
     } else {
-      videos = await discoverWithYtDlp(config, options.maxVideos, options.pinnedIds);
+      videos = await discoverWithYtDlp(config, options.maxVideos, options.pinnedIds, run, runner,
+        options.relevantTerms);
       provider = 'yt-dlp-search';
     }
     const discoveryDays = Number(config.discoveryDays || options.days);
     videos = videos.filter((video) => video.pinned || !video.published_at || Date.parse(video.published_at) >= cutoffMs);
     if (!videos.length) throw new Error('discovery returned zero videos in the requested window');
-    const ranking = scoreVideos(videos, Date.now(), discoveryDays);
+    const ranking = scoreVideos(videos, Date.now(), discoveryDays, options.relevantTerms);
     const selected = videos.slice().sort((a, b) => b.radar_score - a.radar_score).slice(0, options.maxTranscripts);
     const transcripts = new Map();
     for (const video of selected) transcripts.set(video.id, await extractTranscript(video, fixtureDir, stateDir));
+    const commentSelected = options.commentsEnabled
+      ? videos.slice().sort((a, b) => b.radar_score - a.radar_score).slice(0, options.maxCommentVideos)
+      : [];
+    const comments = new Map();
+    for (const video of commentSelected) {
+      comments.set(video.id, await extractComments(video, fixtureDir, stateDir, provider, options.maxComments));
+    }
     for (const video of videos) {
       video.transcript = transcripts.get(video.id) || { status: 'not-selected' };
+      video.comments = options.commentsEnabled
+        ? comments.get(video.id) || { status: 'not-selected' }
+        : { status: 'disabled' };
       const stable = [video.title, video.description, video.channel, video.published_at,
-        video.transcript.content_hash || 'no-transcript'].join('\n');
+        video.transcript.content_hash || 'no-transcript',
+        video.comments.content_hash || 'no-comments'].join('\n');
       video.content_hash = hash(stable);
       delete video._captions;
     }
+    const commentResults = Array.from(comments.values());
+    const commentsSucceeded = commentResults.filter((row) => row.status === 'ok').length;
+    const commentsFailed = commentResults.length - commentsSucceeded;
     return {
-      status: { id: 'youtube', status: 'ok', count: videos.length, provider },
+      status: {
+        id: 'youtube',
+        authority: 'practitioner-audience',
+        category: 'video',
+        status: commentsFailed ? 'partial' : 'ok',
+        count: videos.length,
+        provider,
+        error: commentsFailed ? `${commentsFailed} of ${commentResults.length} comment sample(s) unavailable` : undefined,
+      },
       videos,
       ranking,
       transcripts_attempted: selected.length,
       transcripts_succeeded: selected.filter((video) => transcripts.get(video.id).status === 'ok').length,
+      comments_attempted: commentResults.length,
+      comments_succeeded: commentsSucceeded,
+      comments_fetched: commentResults.reduce((sum, row) => sum + (row.fetched || 0), 0),
+      comments_retained: commentResults.reduce((sum, row) => sum + (row.retained || 0), 0),
+      comments_excluded: commentResults.reduce((sum, row) => sum + (row.excluded || 0), 0),
     };
   } catch (error) {
     return {
-      status: { id: 'youtube', status: 'error', count: 0, error: clip(error.message, 240) },
+      status: { id: 'youtube', authority: 'practitioner-audience', category: 'video', status: 'error', count: 0, error: clip(error.message, 240) },
       videos: [], ranking: { raw_views: [], view_velocity: [], relevance: [], balanced: [] },
       transcripts_attempted: 0, transcripts_succeeded: 0,
+      comments_attempted: 0, comments_succeeded: 0, comments_fetched: 0,
+      comments_retained: 0, comments_excluded: 0,
     };
   }
 }
@@ -534,9 +840,27 @@ function reviewState(state, item) {
   return !prior || prior.content_hash !== item.content_hash;
 }
 
-function manifestOutputPath() {
+function profile(config) {
+  const raw = config.profile || {};
+  return {
+    id: raw.id || 'framework-radar',
+    label: raw.label || 'framework radar',
+    outputPrefix: raw.outputPrefix || 'framework-radar-input',
+    stateDirName: raw.stateDirName || 'autodev-framework-radar',
+    relevantTerms: Array.isArray(raw.relevantTerms) && raw.relevantTerms.length
+      ? raw.relevantTerms.map((term) => String(term).toLowerCase())
+      : RELEVANT_TERMS,
+  };
+}
+
+function defaultStateDir(selectedProfile) {
+  return process.env.AUTODEV_RADAR_HOME ||
+    path.join(os.homedir(), '.codex', selectedProfile.stateDirName);
+}
+
+function manifestOutputPath(selectedProfile) {
   const date = new Date().toISOString().slice(0, 10);
-  return path.resolve(process.cwd(), '.claude', 'reports', `framework-radar-input-${date}.json`);
+  return path.resolve(process.cwd(), '.claude', 'reports', `${selectedProfile.outputPrefix}-${date}.json`);
 }
 
 function loadConfig(file) {
@@ -544,47 +868,71 @@ function loadConfig(file) {
   if (!config || !Array.isArray(config.official) || !config.youtube || !Array.isArray(config.youtube.queries)) {
     throw new Error('config must define official[] and youtube.queries[]');
   }
-  for (const source of config.official) {
-    if (!source.id || !source.kind || !source.product || !source.maxEntries) throw new Error('each official source needs id, kind, product and maxEntries');
+  for (const source of configuredSourceList(config)) {
+    if (!source.id || !source.kind || !source.product || !source.maxEntries) {
+      throw new Error('each configured source needs id, kind, product and maxEntries');
+    }
   }
   return config;
 }
 
 async function collect() {
+  const configFile = path.resolve(value('--config', DEFAULT_CONFIG));
+  const config = loadConfig(configFile);
+  const selectedProfile = profile(config);
   const options = {
     days: positiveInt('--days', 14, 365),
     maxVideos: positiveInt('--max-videos', 20, 50),
     maxTranscripts: positiveInt('--max-transcripts', 5, 10),
+    commentsEnabled: Boolean(config.youtube.comments && config.youtube.comments.enabled),
+    maxCommentVideos: positiveInt('--max-comment-videos',
+      Number(config.youtube.comments && config.youtube.comments.maxVideos) || 5, 10),
+    maxComments: positiveInt('--max-comments',
+      Number(config.youtube.comments && config.youtube.comments.maxPerVideo) || 100, 500),
     pinnedIds: values('--video').map((input) => (/[?&]v=([\w-]{11})/.exec(input) || /^([\w-]{11})$/.exec(input) || [])[1]).filter(Boolean),
+    pinnedOnly: process.argv.includes('--pinned-only'),
+    relevantTerms: selectedProfile.relevantTerms,
   };
-  const configFile = path.resolve(value('--config', DEFAULT_CONFIG));
+  if (options.pinnedOnly && !options.pinnedIds.length) throw new Error('--pinned-only requires at least one --video');
   const fixtureDirRaw = value('--fixture-dir', null);
   const fixtureDir = fixtureDirRaw ? path.resolve(fixtureDirRaw) : null;
-  const stateDir = path.resolve(value('--state-dir', DEFAULT_STATE_DIR));
-  const output = path.resolve(value('--output', manifestOutputPath()));
-  const config = loadConfig(configFile);
+  const stateDir = path.resolve(value('--state-dir', defaultStateDir(selectedProfile)));
+  const output = path.resolve(value('--output', manifestOutputPath(selectedProfile)));
   const cutoffMs = Date.now() - options.days * 86400000;
   const stateFile = path.join(stateDir, 'state.json');
   const state = readJson(stateFile, { schema_version: SCHEMA_VERSION, reviewed: {}, pending_runs: {} });
 
-  const official = await officialSources(config, fixtureDir, cutoffMs);
-  const youtube = await youtubeSource(config.youtube, fixtureDir, options, cutoffMs, stateDir);
-  const items = official.items.concat(youtube.videos);
+  const evidence = await configuredSources(config, fixtureDir, cutoffMs);
+  const youtubeConfig = options.pinnedOnly ? Object.assign({}, config.youtube, { queries: [] }) : config.youtube;
+  const youtube = await youtubeSource(youtubeConfig, fixtureDir, options, cutoffMs, stateDir);
+  const items = evidence.items.concat(youtube.videos);
   for (const item of items) item.requires_review = reviewState(state, item);
 
-  const statuses = official.statuses.concat(youtube.status);
+  const statuses = evidence.statuses.concat(youtube.status);
   const ok = statuses.filter((row) => row.status === 'ok').length;
   const partial = statuses.filter((row) => row.status === 'partial').length;
   const failed = statuses.filter((row) => row.status === 'error').length;
-  const officialCategories = {};
-  for (const item of official.items) {
-    officialCategories[item.category] = (officialCategories[item.category] || 0) + 1;
+  const evidenceCategories = {};
+  const evidenceAuthorities = {};
+  const configuredAuthorities = {};
+  for (const item of evidence.items) {
+    evidenceCategories[item.category] = (evidenceCategories[item.category] || 0) + 1;
+    evidenceAuthorities[item.authority] = (evidenceAuthorities[item.authority] || 0) + 1;
+  }
+  for (const status of statuses) {
+    configuredAuthorities[status.authority] = (configuredAuthorities[status.authority] || 0) + 1;
+  }
+  const primaryItems = evidence.items.filter((item) => item.authority === 'primary').length;
+  const primaryCategories = {};
+  for (const item of evidence.items.filter((row) => row.authority === 'primary')) {
+    primaryCategories[item.category] = (primaryCategories[item.category] || 0) + 1;
   }
   const runId = new Date().toISOString().replace(/[:.]/g, '-') + '-' + process.pid;
   const manifest = {
     schema_version: SCHEMA_VERSION,
     run: {
       id: runId,
+      profile: selectedProfile.id,
       created_at: new Date().toISOString(),
       days: options.days,
       repository: process.cwd(),
@@ -596,11 +944,20 @@ async function collect() {
       sources_succeeded: ok,
       sources_partial: partial,
       sources_failed: failed,
-      official_items_seen: official.items.length,
-      official_categories_seen: officialCategories,
+      sources_by_authority_configured: configuredAuthorities,
+      source_items_seen: evidence.items.length,
+      source_authorities_seen: evidenceAuthorities,
+      source_categories_seen: evidenceCategories,
+      official_items_seen: primaryItems,
+      official_categories_seen: primaryCategories,
       youtube_videos_seen: youtube.videos.length,
       transcripts_attempted: youtube.transcripts_attempted,
       transcripts_succeeded: youtube.transcripts_succeeded,
+      comment_samples_attempted: youtube.comments_attempted,
+      comment_samples_succeeded: youtube.comments_succeeded,
+      comments_fetched: youtube.comments_fetched,
+      comments_retained: youtube.comments_retained,
+      comments_excluded: youtube.comments_excluded,
       items_requiring_review: items.filter((item) => item.requires_review).length,
     },
     sources: statuses,
@@ -614,9 +971,10 @@ async function collect() {
   state.pending_runs[runId] = { manifest: output, created_at: manifest.run.created_at };
   writeAtomic(stateFile, JSON.stringify(state, null, 2));
 
-  console.log(`framework radar: ${ok} succeeded, ${partial} partial, ${failed} failed of ${statuses.length} source(s)`);
-  console.log(`population: ${official.items.length} official item(s), ${youtube.videos.length} YouTube video(s), ` +
+  console.log(`${selectedProfile.label}: ${ok} succeeded, ${partial} partial, ${failed} failed of ${statuses.length} source(s)`);
+  console.log(`population: ${evidence.items.length} source item(s) (${primaryItems} primary), ${youtube.videos.length} YouTube video(s), ` +
     `${youtube.transcripts_succeeded}/${youtube.transcripts_attempted} transcript(s), ` +
+    `${youtube.comments_retained}/${youtube.comments_fetched} retained comment(s), ` +
     `${manifest.population.items_requiring_review} item(s) requiring review`);
   for (const status of statuses.filter((row) => row.status !== 'ok')) {
     console.log(`COULD NOT CHECK ${status.id}: ${status.error || status.status}`);
@@ -630,7 +988,8 @@ function markReviewed(manifestFile) {
   if (!manifest || manifest.schema_version !== SCHEMA_VERSION || !manifest.run || !Array.isArray(manifest.items)) {
     throw new Error('refusing to mark an invalid or unsupported manifest');
   }
-  const stateDir = path.resolve(value('--state-dir', DEFAULT_STATE_DIR));
+  const fallbackStateDir = manifest.run.state_dir || defaultStateDir({ stateDirName: 'autodev-framework-radar' });
+  const stateDir = path.resolve(value('--state-dir', fallbackStateDir));
   const stateFile = path.join(stateDir, 'state.json');
   const state = readJson(stateFile, { schema_version: SCHEMA_VERSION, reviewed: {}, pending_runs: {} });
   state.reviewed = state.reviewed || {};
@@ -665,13 +1024,16 @@ function help() {
     `  --days N              overlap window, default 14\n` +
     `  --max-videos N        detailed YouTube candidates, default 20\n` +
     `  --max-transcripts N   transcript attempts, default 5\n` +
+    `  --max-comment-videos N videos whose audience feedback is sampled, default from config\n` +
+    `  --max-comments N      top plus recent comments per selected video, default from config\n` +
     `  --video ID|URL        force one video into the candidate set; repeatable\n` +
+    `  --pinned-only         skip search and collect only supplied --video IDs\n` +
     `  --output PATH         manifest path; defaults under .claude/reports\n` +
     `  --state-dir PATH      durable local state; defaults under ~/.codex\n` +
     `  --config PATH         source registry\n` +
     `  --mark-reviewed PATH  mark a completed manifest only after analysis\n` +
     `  --help                show this text\n\n` +
-    `YouTube discovery uses YOUTUBE_API_KEY when set, otherwise yt-dlp/uvx.`);
+    `YouTube discovery and comments use YOUTUBE_API_KEY when set, otherwise yt-dlp/uvx.`);
 }
 
 async function main() {
@@ -690,13 +1052,18 @@ if (require.main === module) main();
 
 module.exports = {
   discoverWithApi,
+  discoverCommentsWithApi,
+  discoverCommentsWithYtDlp,
   discoverWithYtDlp,
   expandCaptionPlaylist,
   fetchJson,
   fetchText,
   isPrereleaseTitle,
+  filterCommentFeedback,
+  normalizeComment,
   normalizeVideo,
   parseAtom,
+  parseRss,
   parseJsonLines,
   parseMarkdownChangelog,
   run,

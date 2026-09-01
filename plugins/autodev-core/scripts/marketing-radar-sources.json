@@ -1,0 +1,90 @@
+{
+  "profile": {
+    "id": "marketing-radar", "label": "marketing radar",
+    "outputPrefix": "marketing-radar-input", "stateDirName": "autodev-marketing-radar",
+    "relevantTerms": [
+      "meta ads", "facebook ads", "instagram ads", "google ads", "tiktok ads", "linkedin ads",
+      "microsoft ads", "amazon ads", "reddit ads", "pinterest ads", "paid social", "paid search",
+      "retail media", "creative", "campaign", "conversion", "attribution", "incrementality",
+      "media mix", "marketing mix", "landing page", "cro", "offer", "pricing", "funnel",
+      "email", "lifecycle", "retention", "churn", "seo", "content", "influencer", "affiliate",
+      "analytics", "ga4", "gtm", "server side", "consent", "automation", "experiment", "testing",
+      "customer data", "crm", "commerce", "profit", "contribution margin"
+    ]
+  },
+  "official": [
+    { "id": "meta-business-node-releases", "kind": "atom", "category": "paid-social", "product": "Meta Business SDK for Node", "url": "https://github.com/facebook/facebook-nodejs-business-sdk/releases.atom", "webUrl": "https://github.com/facebook/facebook-nodejs-business-sdk/releases", "maxEntries": 6, "excludePrereleases": true },
+    { "id": "meta-business-python-releases", "kind": "atom", "category": "paid-social", "product": "Meta Business SDK for Python", "url": "https://github.com/facebook/facebook-python-business-sdk/releases.atom", "webUrl": "https://github.com/facebook/facebook-python-business-sdk/releases", "maxEntries": 6, "excludePrereleases": true },
+    { "id": "google-ads-python-releases", "kind": "atom", "category": "paid-search", "product": "Google Ads API Python client", "url": "https://github.com/googleads/google-ads-python/releases.atom", "webUrl": "https://github.com/googleads/google-ads-python/releases", "maxEntries": 6, "excludePrereleases": true },
+    { "id": "google-ads-java-releases", "kind": "atom", "category": "paid-search", "product": "Google Ads API Java client", "url": "https://github.com/googleads/google-ads-java/releases.atom", "webUrl": "https://github.com/googleads/google-ads-java/releases", "maxEntries": 6, "excludePrereleases": true },
+    { "id": "tiktok-business-api-changelog", "kind": "markdown-changelog", "category": "paid-social", "product": "TikTok Business API SDK", "url": "https://raw.githubusercontent.com/tiktok/tiktok-business-api-sdk/main/Changelog.md", "webUrl": "https://github.com/tiktok/tiktok-business-api-sdk/blob/main/Changelog.md", "maxEntries": 8 },
+    { "id": "microsoft-advertising-release-notes", "kind": "markdown-changelog", "headingPattern": "^(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+20\\d{2}$", "headingDates": true, "category": "paid-search", "product": "Microsoft Advertising API", "url": "https://raw.githubusercontent.com/MicrosoftDocs/Advertising/main/advertising/bingads-13/guides/release-notes.md", "webUrl": "https://learn.microsoft.com/advertising/guides/release-notes?view=bingads-13", "maxEntries": 8 },
+    { "id": "google-ads-commerce-blog", "kind": "rss", "category": "marketing-platform", "product": "Google Ads and Commerce", "url": "https://blog.google/products/ads-commerce/rss/", "webUrl": "https://blog.google/products/ads-commerce/", "maxEntries": 10 },
+    { "id": "google-search-central-blog", "kind": "rss", "category": "seo", "product": "Google Search Central", "url": "https://developers.google.com/search/blog/feed.xml", "webUrl": "https://developers.google.com/search/blog", "maxEntries": 10 },
+    { "id": "shopify-developer-changelog", "kind": "rss", "category": "commerce", "product": "Shopify developer changelog", "url": "https://shopify.dev/changelog/feed.xml", "webUrl": "https://shopify.dev/changelog", "maxEntries": 10 },
+    { "id": "hubspot-developer-changelog", "kind": "rss", "category": "crm-automation", "product": "HubSpot developer changelog", "url": "https://developers.hubspot.com/changelog/rss.xml", "webUrl": "https://developers.hubspot.com/changelog", "maxEntries": 10 },
+    { "id": "google-analytics-data-releases", "kind": "atom", "category": "measurement", "product": "Google Analytics Data API client", "url": "https://github.com/googleapis/nodejs-analytics-data/releases.atom", "webUrl": "https://github.com/googleapis/nodejs-analytics-data/releases", "maxEntries": 6, "excludePrereleases": true },
+    { "id": "google-analytics-admin-releases", "kind": "atom", "category": "measurement", "product": "Google Analytics Admin API client", "url": "https://github.com/googleapis/nodejs-analytics-admin/releases.atom", "webUrl": "https://github.com/googleapis/nodejs-analytics-admin/releases", "maxEntries": 6, "excludePrereleases": true },
+    { "id": "hubspot-api-releases", "kind": "atom", "category": "crm-automation", "product": "HubSpot API client", "url": "https://github.com/HubSpot/hubspot-api-python/releases.atom", "webUrl": "https://github.com/HubSpot/hubspot-api-python/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "salesforce-marketing-cloud-releases", "kind": "atom", "category": "crm-automation", "product": "Salesforce Marketing Cloud SDK", "url": "https://github.com/salesforce-marketingcloud/FuelSDK-Python/releases.atom", "webUrl": "https://github.com/salesforce-marketingcloud/FuelSDK-Python/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "mailchimp-marketing-api-releases", "kind": "atom", "category": "email-automation", "product": "Mailchimp Marketing API client", "url": "https://github.com/mailchimp/mailchimp-marketing-python/releases.atom", "webUrl": "https://github.com/mailchimp/mailchimp-marketing-python/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "sendgrid-node-releases", "kind": "atom", "category": "email-automation", "product": "Twilio SendGrid Node client", "url": "https://github.com/sendgrid/sendgrid-nodejs/releases.atom", "webUrl": "https://github.com/sendgrid/sendgrid-nodejs/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "klaviyo-node-releases", "kind": "atom", "category": "lifecycle", "product": "Klaviyo API Node client", "url": "https://github.com/klaviyo/klaviyo-api-node/releases.atom", "webUrl": "https://github.com/klaviyo/klaviyo-api-node/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "braze-web-sdk-releases", "kind": "atom", "category": "lifecycle", "product": "Braze Web SDK", "url": "https://github.com/braze-inc/braze-web-sdk/releases.atom", "webUrl": "https://github.com/braze-inc/braze-web-sdk/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "customerio-node-releases", "kind": "atom", "category": "lifecycle", "product": "Customer.io Node SDK", "url": "https://github.com/customerio/customerio-node/releases.atom", "webUrl": "https://github.com/customerio/customerio-node/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "resend-node-releases", "kind": "atom", "category": "email-automation", "product": "Resend Node SDK", "url": "https://github.com/resend/resend-node/releases.atom", "webUrl": "https://github.com/resend/resend-node/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "segment-analytics-releases", "kind": "atom", "category": "customer-data", "product": "Segment Analytics Next", "url": "https://github.com/segmentio/analytics-next/releases.atom", "webUrl": "https://github.com/segmentio/analytics-next/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "posthog-js-releases", "kind": "atom", "category": "product-analytics", "product": "PostHog JavaScript SDK", "url": "https://github.com/PostHog/posthog-js/releases.atom", "webUrl": "https://github.com/PostHog/posthog-js/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "rudderstack-js-releases", "kind": "atom", "category": "customer-data", "product": "RudderStack JavaScript SDK", "url": "https://github.com/rudderlabs/rudder-sdk-js/releases.atom", "webUrl": "https://github.com/rudderlabs/rudder-sdk-js/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "snowplow-js-releases", "kind": "atom", "category": "measurement", "product": "Snowplow JavaScript Tracker", "url": "https://github.com/snowplow/snowplow-javascript-tracker/releases.atom", "webUrl": "https://github.com/snowplow/snowplow-javascript-tracker/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "growthbook-releases", "kind": "atom", "category": "experimentation", "product": "GrowthBook", "url": "https://github.com/growthbook/growthbook/releases.atom", "webUrl": "https://github.com/growthbook/growthbook/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "statsig-js-releases", "kind": "atom", "category": "experimentation", "product": "Statsig JavaScript SDKs", "url": "https://github.com/statsig-io/js-client-monorepo/releases.atom", "webUrl": "https://github.com/statsig-io/js-client-monorepo/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "launchdarkly-js-releases", "kind": "atom", "category": "experimentation", "product": "LaunchDarkly JavaScript SDK", "url": "https://github.com/launchdarkly/js-client-sdk/releases.atom", "webUrl": "https://github.com/launchdarkly/js-client-sdk/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "shopify-api-releases", "kind": "atom", "category": "commerce", "product": "Shopify API library", "url": "https://github.com/Shopify/shopify-api-js/releases.atom", "webUrl": "https://github.com/Shopify/shopify-api-js/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "stripe-node-releases", "kind": "atom", "category": "commerce", "product": "Stripe Node SDK", "url": "https://github.com/stripe/stripe-node/releases.atom", "webUrl": "https://github.com/stripe/stripe-node/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "bigcommerce-node-releases", "kind": "atom", "category": "commerce", "product": "BigCommerce Node API", "url": "https://github.com/bigcommerce/bigcommerce-api-node/releases.atom", "webUrl": "https://github.com/bigcommerce/bigcommerce-api-node/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "woocommerce-api-releases", "kind": "atom", "category": "commerce", "product": "WooCommerce REST API client", "url": "https://github.com/woocommerce/woocommerce-rest-api-js-lib/releases.atom", "webUrl": "https://github.com/woocommerce/woocommerce-rest-api-js-lib/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "contentful-js-releases", "kind": "atom", "category": "content-ops", "product": "Contentful JavaScript SDK", "url": "https://github.com/contentful/contentful.js/releases.atom", "webUrl": "https://github.com/contentful/contentful.js/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "sanity-client-releases", "kind": "atom", "category": "content-ops", "product": "Sanity JavaScript client", "url": "https://github.com/sanity-io/client/releases.atom", "webUrl": "https://github.com/sanity-io/client/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "wordpress-gutenberg-releases", "kind": "atom", "category": "content-ops", "product": "WordPress Gutenberg", "url": "https://github.com/WordPress/gutenberg/releases.atom", "webUrl": "https://github.com/WordPress/gutenberg/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "zapier-platform-releases", "kind": "atom", "category": "workflow-automation", "product": "Zapier Platform", "url": "https://github.com/zapier/zapier-platform/releases.atom", "webUrl": "https://github.com/zapier/zapier-platform/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "n8n-releases", "kind": "atom", "category": "workflow-automation", "product": "n8n", "url": "https://github.com/n8n-io/n8n/releases.atom", "webUrl": "https://github.com/n8n-io/n8n/releases", "maxEntries": 5, "excludePrereleases": true }
+  ],
+  "research": [
+    { "id": "robyn-releases", "authority": "research-method", "kind": "atom", "category": "attribution-causal", "product": "Meta Robyn marketing mix modeling", "url": "https://github.com/facebookexperimental/Robyn/releases.atom", "webUrl": "https://github.com/facebookexperimental/Robyn/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "meridian-releases", "authority": "research-method", "kind": "atom", "category": "attribution-causal", "product": "Google Meridian marketing mix modeling", "url": "https://github.com/google/meridian/releases.atom", "webUrl": "https://github.com/google/meridian/releases", "maxEntries": 5, "excludePrereleases": true },
+    { "id": "causalml-releases", "authority": "research-method", "kind": "atom", "category": "attribution-causal", "product": "CausalML", "url": "https://github.com/uber/causalml/releases.atom", "webUrl": "https://github.com/uber/causalml/releases", "maxEntries": 5, "excludePrereleases": true }
+  ],
+  "community": [
+    { "id": "search-engine-land", "kind": "rss", "category": "search-industry", "product": "Search Engine Land", "url": "https://searchengineland.com/feed", "webUrl": "https://searchengineland.com/", "maxEntries": 8 },
+    { "id": "search-engine-journal", "kind": "rss", "category": "search-industry", "product": "Search Engine Journal", "url": "https://www.searchenginejournal.com/feed/", "webUrl": "https://www.searchenginejournal.com/", "maxEntries": 8 },
+    { "id": "adexchanger", "kind": "rss", "category": "adtech-industry", "product": "AdExchanger", "url": "https://www.adexchanger.com/feed/", "webUrl": "https://www.adexchanger.com/", "maxEntries": 8 },
+    { "id": "martech", "kind": "rss", "category": "marketing-ops", "product": "MarTech", "url": "https://martech.org/feed/", "webUrl": "https://martech.org/", "maxEntries": 8 },
+    { "id": "ahrefs-blog", "kind": "rss", "category": "seo-practitioner", "product": "Ahrefs Blog", "url": "https://ahrefs.com/blog/feed/", "webUrl": "https://ahrefs.com/blog/", "maxEntries": 8 },
+    { "id": "semrush-blog", "kind": "rss", "category": "seo-practitioner", "product": "Semrush Blog", "url": "https://www.semrush.com/blog/feed/", "webUrl": "https://www.semrush.com/blog/", "maxEntries": 8 },
+    { "id": "moz-blog", "kind": "rss", "category": "seo-practitioner", "product": "Moz Blog", "url": "https://moz.com/blog/feed", "webUrl": "https://moz.com/blog", "maxEntries": 8 },
+    { "id": "litmus-blog", "kind": "rss", "category": "email-practitioner", "product": "Litmus Blog", "url": "https://www.litmus.com/blog/feed/", "webUrl": "https://www.litmus.com/blog", "maxEntries": 8 },
+    { "id": "ppc-hero", "kind": "rss", "category": "paid-media-practitioner", "product": "PPC Hero", "url": "https://www.ppchero.com/feed/", "webUrl": "https://www.ppchero.com/", "maxEntries": 8 },
+    { "id": "social-media-today", "kind": "rss", "category": "social-industry", "product": "Social Media Today", "url": "https://www.socialmediatoday.com/feeds/news/", "webUrl": "https://www.socialmediatoday.com/", "maxEntries": 8 }
+  ],
+  "youtube": {
+    "queries": [
+      "Meta ads creative testing strategy", "Google Ads experiments strategy", "TikTok ads creative testing",
+      "LinkedIn ads B2B testing", "Microsoft Ads optimization", "Amazon Ads retail media strategy",
+      "Reddit ads performance marketing", "Pinterest ads ecommerce", "paid social incrementality",
+      "paid search incrementality", "marketing mix modeling practical", "attribution geo holdout experiment",
+      "GA4 GTM conversion tracking automation", "server side tagging consent measurement",
+      "customer data platform implementation", "landing page CRO experimentation",
+      "checkout conversion optimization", "pricing experimentation", "offer funnel conversion optimization",
+      "B2B SaaS demand generation", "product led growth experiments", "local service lead generation",
+      "DTC ecommerce growth strategy", "marketplace growth strategy", "email lifecycle marketing automation",
+      "retention churn lifecycle testing", "CRM sales marketing automation", "SEO Google search update strategy",
+      "content marketing experimentation", "organic social content testing", "influencer marketing measurement",
+      "affiliate marketing incrementality", "community led growth", "AI marketing operations automation",
+      "AI marketing agents workflow", "marketing analytics data quality", "creative fatigue testing",
+      "brand lift versus direct response", "contribution margin customer acquisition"
+    ],
+    "perQuery": 5, "discoveryDays": 30,
+    "comments": { "enabled": true, "maxVideos": 5, "maxPerVideo": 100 }
+  }
+}

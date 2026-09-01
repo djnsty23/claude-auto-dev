@@ -29,14 +29,15 @@ discovery window.
 The collector prints:
 
 - The number of configured, successful and failed sources.
-- The official-item, category, video and transcript populations.
+- The primary, research, community, category, video, transcript and retained-comment populations.
 - `COULD NOT CHECK` for each unavailable source.
 - The absolute path to its JSON manifest.
 
 It uses `YOUTUBE_API_KEY` when available. Otherwise it tries `yt-dlp`, then
 `uvx --from yt-dlp`. Transcript extraction similarly uses
-`youtube-transcript-api` directly or through `uvx`. Missing tooling is a named
-source failure, never an empty success.
+`youtube-transcript-api` directly or through `uvx`. Comment sampling uses the
+YouTube Data API or a bounded yt-dlp fallback. Missing tooling is a named source
+failure, never an empty success.
 
 Completion: a manifest exists and its population line matches the JSON counts.
 If every source failed, write a short failure report and stop without marking
@@ -46,6 +47,12 @@ anything reviewed.
 
 Read the manifest. Work from items where `requires_review` is true. For a video,
 read its local `transcript.path` only when `transcript.status` is `ok`.
+
+When `comments.status` is `ok`, read its local path and cross-foot fetched,
+retained, excluded and distinct-author counts. The top and recent lanes answer
+different sampling questions. Report exclusion reasons. The deterministic filter
+removes high-confidence spam/bot-like patterns, but public metadata cannot prove
+humanity, so never claim complete bot removal.
 
 Raw transcripts stay in the collector's local state directory. The report may
 contain a paraphrase, source URL and short excerpt, but never the full transcript.
@@ -62,8 +69,14 @@ Treat the four YouTube rankings as alternative triage lenses:
 Do not call the balanced score objectively better. It is a reading order whose
 variants are printed so the reviewer can see when the choice changes.
 
+Summarize recurring support, objections, questions and contradictions with theme
+counts and short representative excerpts. Separate feedback about the presenter
+from feedback about the proposed workflow. Comments reflect commenters after
+platform and creator moderation, not all viewers or correctness.
+
 Completion: every transcript used in a recommendation has a source URL and a
-recorded manual/generated/unknown caption kind.
+recorded manual/generated/unknown caption kind, and every used comment sample
+states both its retained denominator and filter limitation.
 
 ## 3. Corroborate every claim
 
@@ -151,9 +164,9 @@ verdicts. Zero hypotheses is valid when no lead is both relevant and testable.
 
 Write `.claude/reports/framework-radar-YYYY-MM-DD.md` with these sections:
 
-1. Population and source health.
-2. New official changes.
-3. Video claims checked.
+1. Population and source health by authority and category.
+2. New primary changes plus research/community leads kept separate.
+3. Video claims and audience feedback checked.
 4. Executed experiments and A/B/C results, maximum three.
 5. Already handled and rejected ideas.
 6. Watch list and blocked prerequisites.
