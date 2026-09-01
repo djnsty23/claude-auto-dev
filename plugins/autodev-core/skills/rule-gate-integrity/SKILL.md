@@ -1,7 +1,7 @@
 ---
 name: rule-gate-integrity
-description: "Four ways a gate, test, or generator check passes while proving nothing: grading a copy of itself, passing on emptiness, a canary firing for the wrong reason, and a summary line read as a verdict. Load before writing a gate, a mutation harness, or any check that guards generated output."
-when_to_use: "Before writing a gate, test, detector or harness — and again when one reports green."
+description: "Ways a gate, test, or generator check proves nothing while looking decisive: grading a copy of itself, passing on emptiness, a canary firing for the wrong reason, a summary line read as a verdict, and a mutation whose red comes from a different assertion than the one being validated. Load before writing a gate, a mutation harness, or any check that guards generated output."
+when_to_use: "Before writing a gate, test, detector or harness — again when one reports green, and again when a mutation makes one go red."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 paths:
@@ -107,6 +107,44 @@ subject moves.
 A mutant you wrote to match the detector's own pattern has the same defect in a
 different place: it verifies the assertion *wiring*, not the detector's coverage.
 The cases it cannot represent are exactly the ones a reviewer will find.
+
+### A RED SUITE IS NOT PROOF THAT YOUR ASSERTION WORKS
+
+Point 2 above covers a mutation that breaks the subject incidentally, so
+everything throws. This is the neighbouring case and it is harder to see, because
+nothing is broken and the red is entirely legitimate: **the suite fails on a
+DIFFERENT assertion than the one you were validating, and you read the exit code
+instead of the line.**
+
+`[measured 2026-09-01]` A new feature collapsed anonymous rows out of a report,
+and its safety property was that a row which can be acted on is never collapsed.
+Two filters implement that: one selects the rows to hide, one selects the rows to
+keep. The mutation emptied the FIRST filter, the suite went red, and that looked
+like confirmation. It was not. The failure was the count assertion noticing 5
+where it expected 4. **The safety assertion passed**, because the filter that
+actually protects those rows had not been touched. Mutating the second filter
+instead failed the safety assertion and its control together, which is the real
+check.
+
+Both runs exit 1. Only one of them tests anything.
+
+So the rule is one word longer than the familiar one, and the word carries all of
+it: **assert that THAT assertion went red**, not that the suite did. Concretely,
+run the suite under mutation and diff the set of failing assertion NAMES against
+the set you predicted. If a name you did not predict is in there, you have
+learned something either way: either your mutation is hitting the wrong code, or
+an assertion you did not know about is doing the work you credited to yours.
+
+The trap is structural rather than careless. A property worth protecting usually
+has several assertions around it, and the loudest one is rarely the one that
+encodes the property. Anything with a separate include-path and exclude-path has
+this shape: a filter pair, an allowlist beside a denylist, a fast path beside a
+fallback. Mutating either turns the suite red; only one of them tests the
+invariant you care about.
+
+Cheapest tell that you are about to make this mistake: you can state which
+FUNCTION your mutation changed but not which ASSERTION should catch it. Predict
+the assertion by name before running, then check.
 
 ## 4. Never read a summary line as a verdict
 

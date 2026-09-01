@@ -1,5 +1,31 @@
 # Changelog
 
+## [8.150.0] - 2026-09-01
+
+### Added: a red suite is not proof that your assertion works
+
+`rule-gate-integrity` covered a mutation that fires for the wrong reason by
+breaking the subject incidentally, so everything throws. It did not cover the
+neighbouring case, where nothing is broken, the red is entirely legitimate, and
+the suite fails on a DIFFERENT assertion than the one being validated.
+
+`[measured 2026-09-01]` a feature collapsing anonymous rows out of a report had
+its safety property implemented by two filters, one selecting rows to hide and
+one selecting rows to keep. A mutation emptied the first, the suite went red, and
+that read as confirmation. The failure was a count assertion seeing 5 where it
+expected 4; the safety assertion PASSED, because the filter that protects those
+rows was untouched. Both mutations exit 1 and only one tests anything.
+
+The rule is a word longer than the familiar one: assert that THAT assertion went
+red, not that the suite did. Diff the failing assertion NAMES against the ones
+you predicted. The cheap tell that you are about to make this mistake is being
+able to name the function your mutation changed but not the assertion that should
+catch it.
+
+Flagged as structural rather than careless: anything with a separate include-path
+and exclude-path has this shape, and the loudest assertion is rarely the one
+encoding the property.
+
 ## [8.149.0] - 2026-09-01
 
 ### Changed: the ownership section no longer buries real sessions under anonymous ones
