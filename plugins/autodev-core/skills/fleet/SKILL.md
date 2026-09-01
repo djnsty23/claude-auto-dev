@@ -92,14 +92,21 @@ delivery, only that the mechanism and the labelling exist. Treat the git remote
 as the reliable cross-machine channel and `ListAgents` as the thing that tells
 you whether a direct reply is even possible.
 
-**A bypass-permissions session can HOLD incoming peer messages instead of
-delivering them.** `crossSessionInbound` (2.1.224) governs it, and a held
-message looks identical to a peer that never replied, which is the failure mode
-that strands a dispatch. `[measured 2026-08-30]` it is NOT holding on this
-machine: a session running with bypassed permissions received two peer messages
-directly and its own sends reported no approval gate. So this is a lever to know
-about rather than a bug to fix, and the check when a peer goes quiet is whether
-its `SendMessage` result said "queued" rather than "sent" before assuming it died.
+**`SendMessage` success is acceptance by the transport, not delivery evidence.**
+`crossSessionInbound` (2.1.224) governs whether an incoming peer message is
+delivered or held. `[measured 2026-09-01]` a bypass-permissions sender reported
+`success: true` and "sent" while accept-edits recipients held the message for
+manual review. Matching permission-mode classes delivered it; disabling
+telemetry made no difference. Re-run `ListAgents` immediately before sending,
+use the full `name [ref]` when names collide, and confirm receipt from the target
+transcript, reply, or resulting branch state before claiming delivery. A queued,
+sent, or successful sender result alone is not confirmation.
+
+Stale refs are worse than an offline error: `[measured 2026-09-01]` after one of
+two same-named sessions stopped, a send to its old full ref returned success but
+arrived in the surviving session. If a fresh `ListAgents` read no longer contains
+the exact ref, do not send. Pull the target transcript when local, or use the git
+remote and current branch evidence as the reliable fallback.
 
 **Every remote figure must be shown with its age.** It rides a periodic git push,
 not a live connection, so a synced count read as current is the failure mode.
