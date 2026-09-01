@@ -1,5 +1,33 @@
 # Changelog
 
+## [8.146.0] - 2026-09-01
+
+### Added: a gate for skill bodies that mandate undeclared tools
+
+A skill's prose and its `allowed-tools` could drift apart with nothing
+watching. `auto-brain` step 5 mandated `mcp__ccd_session_mgmt__send_message`
+while declaring neither that nor `spawn_task`, so a coordinator running it had
+no way to start a session for a repo that had none.
+
+`tooling/check-skill-tool-declarations.js` flags a body that mandates a tool
+the frontmatter does not declare. The false-positive rule is the design
+decision and it is written into the gate's header: six harness tool names are
+ordinary English words, so a reference counts only as an `mcp__` token or a
+backticked name from a hardcoded vocabulary, and detection is positive-only.
+Four negative classes override a match, of which the conditional carve-out
+matters most, because a skill that writes its fallback degrades where a bare
+mandate deadlocks.
+
+Mutation-tested: the suite deletes one tool a skill genuinely declares and
+mandates, then requires the gate to name that skill, tool and line. The planted
+value is derived from the live corpus, so it cannot rot as skills change.
+
+Triaged its 12 findings, all real, and fixed them. Seven skills instructed use
+of the browser tools without declaring them; `auto-brain` needed two
+session-management tools, `brain` needed `spawn_task` and `SendMessage`,
+and `grilling` needed `AskUserQuestion`. The suite now asserts the corpus
+stays at zero, which is what makes this a gate rather than a report.
+
 ## [8.145.0] - 2026-09-01
 
 ### Changed: the radar now executes hypotheses across the agent ecosystem
