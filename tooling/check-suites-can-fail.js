@@ -94,6 +94,13 @@ const SUBJECT_OVERRIDES = {
     // the suite on its first run and named the remedy, which is the behaviour
     // the comment above was written to produce.
     'test-no-private-names.js': ['tooling/check-no-private-names.js'],
+
+    // This policy regression suite constructs its two skill paths from a common
+    // directory, so neither subject appears as a derivable path literal.
+    'test-framework-radar-guidance.js': [
+        'plugins/autodev-core/skills/rule-agent-concurrency/SKILL.md',
+        'plugins/autodev-core/skills/fleet/SKILL.md',
+    ],
 };
 
 /**
