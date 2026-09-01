@@ -367,7 +367,7 @@ Pro rate-limits mid-week, so L4 runs early in the week.
 
 **Q2 blocks the contract freeze (F15). The rest are answered whenever.**
 
-- Q2 **[blocking C4 and L2]** Does a standing order, recorded verbatim from
+- Q2 **ANSWERED YES, `[stated 2026-09-02]` by the operator in this session's panel: a recorded order authorises its push, and L2 builds the holder.** The question as put: Does a standing order, recorded verbatim from
   your own words with the date, count as "push authorised in that turn" for
   the session that holds it? `brain/SKILL.md:915` says a push needs your yes
   in the turn, and whether a durable order satisfies that is your authority,
