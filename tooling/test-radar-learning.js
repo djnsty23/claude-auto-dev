@@ -214,6 +214,9 @@ function hypothesisMeasurements() {
 }
 
 function validationAndAccounting() {
+  const required = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(SCRIPT)})`], { encoding: 'utf8' });
+  check('requiring the learning module has no CLI side effect',
+    required.status === 0 && required.stdout === '' && required.stderr === '');
   check('verdict validator rejects null with its stable schema message',
     throwsMessage(() => subject.validateVerdictFile(null, manifest), /schema_version 1/));
   check('verdict validator rejects a missing hypotheses array',
