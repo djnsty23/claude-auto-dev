@@ -1,5 +1,33 @@
 # Changelog
 
+## [8.154.0] - 2026-09-02
+
+### Fixed: session-sweep.js --help ran the whole sweep before returning
+
+test-entrypoints went red on it at 10034ms against a 10000ms budget, 0.3% over,
+on a commit touching two unrelated tooling files. Run alone on a quiet machine it
+exits 0 three times out of three, at 7998ms, 10037ms and 6845ms. It was never
+hanging; it straddled the budget and went red or green on machine load.
+
+The script had no --help branch. The flag fell through and it ran its full scan,
+reading every transcript and shelling out to git per worktree. Now 147ms against
+a control run of 8062ms for the default action, which still prints its table.
+
+Worth keeping and not fixed here: for a script with no --help branch that gate
+measures whether the DEFAULT action finished in 10s, and scores that identically
+to honouring the flag. 89 scripts "returned"; an unknown number merely finished.
+
+### Fixed: check-runtime claimed "Runtime is current" over a deferred check
+
+The --pre-release flag downgrades a behind-install to INFO, but the summary line
+still keyed on the FAIL count, so a run with six deferred checks ended with
+"Runtime is current." while the install was a full version behind. A reassuring
+label on a skip reports absence as a pass. Three states now: failures, named
+deferrals pointing at verify:release, and only a genuinely current install gets
+the reassuring wording. The assertion that makes the other two mean something is
+the control: a fully current fixture must still print the positive phrase.
+
+
 ## [8.153.0] - 2026-09-02
 
 ### Added: spine step 4b, an independent read with an answered-findings condition
