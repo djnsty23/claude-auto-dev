@@ -117,3 +117,37 @@ before starting them.
   is fine. No rotation performed.
 - A dead `FLY_API_TOKEN` repo secret remains in the analytics repo.
 - Q5 stays open: no headless supervisor was built or run.
+
+## L6, partially delivered 2026-09-02
+
+| rail | verdict |
+|---|---|
+| C9 tripwire | **PASS**, two-sided, ceiling the only variable |
+| S5 coordinator-write ban | **ABSENT**; no PreToolUse hook matches Bash |
+| S12 archive setting at boot | **FAILS**; `isArchived` used as a filter only |
+| C5, C7, mirror race | deferred by the plan's own week-1 scope |
+
+**Next session starts here, smallest first.**
+
+1. **S12, one line in `brain-brief.js`.** It already fetches session rows and
+   uses `isArchived` three times as a filter. Print the SETTING: any row with
+   `isArchived: true` beside `prState: MERGED` means merging a PR can end the
+   merging session. Measured ON today, so a Brain that merges can archive itself
+   with no warning at boot.
+2. **S5, the coordinator-write hook. Do this in a FRESH session.** It is a
+   PreToolUse hook on `Bash`, shipping in this marketplace into other people's
+   sessions, where a throw kills their turn and a defect survives until
+   reinstall. Fail OPEN, follow `pre-tool-filter.js`'s private-name block, and
+   mutation-test by removing the role file. It was deliberately not attempted at
+   412k context.
+3. Then L2, L3, and L1 last as the integration lane.
+
+**C9 carries a standing limit, unchanged:** its reading is account-wide, moving
+$55 to $974 during one session, so it scores "is the account near its wall" and
+cannot score "has the audit spent 8% of its window". Use the `usage-both.js` GPT
+column plus this session's transcript for the latter.
+
+**Probe note for whoever tests the tripwire next:** use `--fixture-cost`,
+`--fixture-window` and `--fixture-now` with a scratch `--state`. Hand-seeding
+samples does not work, because a `windowStart` mismatch clears the sample array
+(line 264), and both arms of the experiment then return identical output.
