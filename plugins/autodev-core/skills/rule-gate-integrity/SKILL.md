@@ -1,6 +1,6 @@
 ---
 name: rule-gate-integrity
-description: "Ways a gate, test, or generator check proves nothing while looking decisive: grading a copy of itself, passing on emptiness, a canary firing for the wrong reason, a summary line read as a verdict, and a mutation whose red comes from a different assertion than the one being validated. Load before writing a gate, a mutation harness, or any check that guards generated output."
+description: "Ways a gate or test proves nothing while looking decisive: grading a copy of itself, passing on emptiness, a canary firing for the wrong reason, a summary read as a verdict, a probe pointed at the wrong invocation. Load before writing a gate, a mutation harness, or any check guarding generated output."
 when_to_use: "Before writing a gate, test, detector or harness — again when one reports green, and again when a mutation makes one go red."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash

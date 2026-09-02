@@ -1,6 +1,6 @@
 ---
 name: auto-brain
-description: Coordinate the fleet across a stretch when the user is away — survey every repo from git, propose per-repo work grounded in that survey, get one approval, then message the sessions that exist and spawn task chips for the repos that have none. Never work a repo yourself. Use when the user asks to run the team overnight or unattended.
+description: "Coordinate the fleet while the user is away: survey every repo from git, propose per-repo work grounded in that survey, get one approval, then message the sessions that exist and spawn task chips for repos with none. Never work a repo yourself. Use when asked to run the team overnight or unattended."
 when_to_use: "Invoked when the user says \"auto brain\", \"coordinate the team while I sleep\", \"run the fleet overnight\", \"give each project work\", or otherwise asks for unattended multi-session coordination."
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Workflow, mcp__ccd_session_mgmt__send_message, mcp__ccd_session_mgmt__list_sessions, mcp__ccd_session_mgmt__get_session, mcp__ccd_session__spawn_task, mcp__ccd_session__dismiss_task
 model: opus
