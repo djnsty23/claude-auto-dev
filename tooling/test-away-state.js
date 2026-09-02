@@ -11,13 +11,29 @@
 // fleet. Both readings look reasonable in isolation; only a test that checks the
 // STATE NAME as well as `canAsk` can tell them apart, so every case asserts both.
 //
-// Every case whose ASSERTION depends on time injects `now`, so none of them can
-// go red on their own one day. Two cases deliberately do not — the "does not
-// throw" pair that exercises a bogus `now` and a null `file`, which fall back to
-// the real clock and the real default path on purpose. Their assertion is only
-// "it returned a state and did not throw", so what that state happens to be
-// cannot flip them. Said explicitly because "time is injected" would have been
-// the tidier sentence and the false one.
+// TWO TIME BASES LIVE IN THIS FILE AND A FIXTURE MUST MATCH THE ONE THAT READS IT.
+//
+// `readAwayState({ now })` cases inject the clock, so their fixtures carry
+// ABSOLUTE instants and are deterministic forever. The cases that spawn the real
+// binary cannot inject anything, so they read the WALL CLOCK, and their fixtures
+// are built RELATIVE to `Date.now()`.
+//
+// `[measured 2026-09-02 22:31Z]` this file shipped with one fixture serving both,
+// and the absolute `until: 2026-09-02T22:00:00Z` labelled "the FUTURE" expired at
+// 22:00:00Z. 22 cases passed and 1 failed, the only one asking the clock, and it
+// turned the trunk gate red for the whole fleet about thirty minutes later.
+//
+// The header this replaces made the failure harder to see rather than easier. It
+// said every time-dependent case injects `now`, then enumerated the two
+// exceptions it knew about, so it read as an audit that had been done. The audit
+// was real and it was incomplete: it looked at `readAwayState` callers and never
+// at the `spawnSync` ones, which are the only cases that CANNOT inject. A stated
+// exhaustive list is worse than no list when it is short by a category, because
+// the next reader checks the list instead of the file.
+//
+// So the rule, not the inventory: a fixture is pinned to the time base of its
+// CONSUMER. If a case can inject `now`, use an absolute instant. If it spawns,
+// derive the value from `Date.now()` so it cannot expire.
 
 const fs = require('fs');
 const os = require('os');
@@ -155,7 +171,24 @@ for (const [label, arg] of [
         r.status === 0 && (r.stdout || '').length > 0 && ms < 10000, `exit ${r.status}, ${ms}ms`);
 }
 {
-    const f = path.join(fixture, 'active.md');
+    // WALL-CLOCK FIXTURE, RELATIVE ON PURPOSE. This case spawns the real binary,
+    // which reads the actual clock, so an absolute `until` here is a timer rather
+    // than a fixture.
+    //
+    // `[measured 2026-09-02 22:31Z]` it fired. `active.md` was planted with
+    // `until: 2026-09-02T22:00:00Z` and labelled "the FUTURE", which it was when
+    // written and stopped being at 22:00:00Z. Every `expectState` case survived,
+    // because those inject `now`; only this one broke, because only this one asks
+    // the clock. One fixture, two consumers, one time base pinned.
+    //
+    // 22c-i inverted. That rule says a planted NEGATIVE must be impossible by
+    // construction rather than merely absent from a list. Here a planted POSITIVE
+    // decayed into a negative by construction of time: an "active" window built
+    // from an absolute instant is guaranteed to expire, and only the date is in
+    // question. The cure is the same one, derive the planted value FROM the thing
+    // under test, so `Date.now() + 4h` cannot expire no matter when it runs.
+    const soon = new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+    const f = write('cli-active.md', `# AWAY\n\nuntil: ${soon}\n\nrelative, so it cannot expire\n`);
     const r = spawnSync(process.execPath, [SUBJECT, '--status', '--file', f], { input: '', encoding: 'utf8' });
     const ok = r.status === 0 && r.stdout.includes(f) && /SELF-RESOLVE/.test(r.stdout);
     check('--status names the file it read, and says which licence the state grants', ok,
@@ -175,7 +208,15 @@ for (const [label, arg] of [
     const r = spawnSync(process.execPath, [SUBJECT, '--json'], {
         input: '',
         encoding: 'utf8',
-        env: { ...process.env, AUTODEV_AWAY_FILE: path.join(fixture, 'expired.md') },
+        // Relative for the same reason as the case above. A past instant only
+        // gets more past, so `expired.md` is safe by luck rather than by design,
+        // and copying a construction that is safe by luck is how the active one
+        // got written. Both wall-clock fixtures are now relative.
+        env: {
+            ...process.env,
+            AUTODEV_AWAY_FILE: write('cli-expired.md',
+                `# AWAY\n\nuntil: ${new Date(Date.now() - 3600 * 1000).toISOString()}\n\nclosed an hour ago\n`),
+        },
     });
     let parsed = null;
     try { parsed = JSON.parse(r.stdout); } catch { /* stays null */ }
