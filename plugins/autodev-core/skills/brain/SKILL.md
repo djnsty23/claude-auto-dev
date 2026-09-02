@@ -589,36 +589,62 @@ deliberately. It is not optional through inattention: `ready_for_review` is NOT
 one of GitHub's default `pull_request` activity types, which are `opened`,
 `synchronize` and `reopened`.
 
-**THE PRECONDITION THIS PASSAGE LEFT UNSTATED, AND IT COST TEN BRIEFS: a
-draft-skip is a `pull_request`-EVENT control, so it does nothing about a `push:`
-trigger.** A push to a draft branch fires every `push`-triggered workflow at full
-cost. Where a repo has both triggers, an active-looking guard is INERT rather
-than merely partial.
+**THE PRECONDITION THIS PASSAGE LEFT UNSTATED: a draft-skip is a
+`pull_request`-EVENT control, so it does nothing about a `push:` trigger THAT A
+DRAFT BRANCH MATCHES.** The qualifier is the whole rule, and leaving it off costs
+more than leaving off the precondition did.
+
+**The right question is never "does this workflow trigger on push". It is "does a
+push to a FEATURE branch fire it".** A draft PR lives on a feature branch, so a
+`push:` carrying `branches: [main]` never fires for it and the guard governs the
+event that remains. The same trigger with `branches-ignore: [master]`, or with no
+filter at all, fires on every feature push and the guard beside it is inert.
+`branches:` and `branches-ignore:` invert the answer, and the event name is
+identical in all three cases.
 
 `[measured 2026-09-03]` a Brain read the paragraph above as a description of how
-the fleet was already wired and told ten spawned sessions to push freely. The
-survey it ran afterwards, when a peer refused the claim and read its own workflow
-file:
+the fleet was already wired and told ten spawned sessions to push freely. It then
+over-corrected: it grepped for `push:`, found one in a repo whose guard was
+working perfectly, and told eight sessions to batch their commits. A peer's
+checker had the identical defect and reported the same conclusion back, which
+looked like independent confirmation and was one error counted twice.
 
-| repo | guard | `push:` trigger | is "push freely" true |
+| repo | guard | does a FEATURE push fire it | "push freely" |
 |---|---|---|---|
-| A | active, `ready_for_review` in types | none | **yes** |
-| B | active | unconditional | no, the guard is inert |
-| C | added, then WITHDRAWN after measurement | yes | no, and deliberately so |
-| D | none | `on: [push, pull_request]` | no, and it bills twice per push |
-| E | none | — | no |
+| A | active | no, `pull_request` only | **yes** |
+| B | active | no, `push: branches: [main]` | **yes** |
+| C | added, then WITHDRAWN after measurement | yes, via PR `synchronize` | no, deliberately |
+| D | none | yes, `on: [push, pull_request]` | no, bills twice per push |
+| E | none | yes, `push: branches-ignore: [master]` | no |
 | F | no workflows at all | — | moot |
 
-One repo of six matched the unstated precondition. The direction of the error is
-what made it expensive: the operator had named CI spend as a concern in that same
-session, and the advice told ten sessions to push MORE often in five repos where
-every push bills.
+**So before recommending this pattern anywhere, read the whole `on:` block
+including its branch and path filters, and say which branch you are reasoning
+about.** Reading the guard cannot tell you, and neither can reading the event
+names. Note repo C: a repo that added draft-skip and withdrew it after measuring
+has already run this experiment, so read its reasoning before re-adding it.
 
-**So before recommending this pattern anywhere, read that workflow's `on:` block
-and confirm it is `pull_request`-only.** Reading the guard alone cannot tell you,
-because the guard looks identical either way. And note repo C: a repo that added
-draft-skip and then withdrew it after measuring has already run this experiment,
-so read its reasoning before re-adding it.
+Three facts about the mechanism, each of which defeats a plausible fix:
+
+- **GitHub has no draft filter for event triggers.** The draft test can only live
+  in a job-level `if`. "Move the draft check into `on:`" proposes something that
+  does not exist.
+- **A skipped draft run is not zero runs.** The checks list shows a run whose job
+  is `skipped` at 0s, allocating no runner and billing nothing. So the assertion
+  is "no run CONSUMES MINUTES", never "no runs appear" - verifying a draft-skip by
+  counting runs returns a false negative.
+- **`ready_for_review` is not a default `pull_request` activity type.** The
+  defaults are `opened`, `synchronize`, `reopened`. Omit it and marking ready
+  fires nothing.
+
+**And a warning about reading a repo's own comments, which is what caused the
+over-correction.** The workflow in repo B carries a comment saying "pushing to a
+draft branch still fires `push`; it governs the 40, not the 360". That is the
+RATIONALE for a fix they already applied - they measured 400 runs, found 360 were
+pushes with zero on main, and solved it with the branch filter rather than the
+draft-skip. Read as a description of current behaviour it says the opposite of
+the truth. A comment explaining why a fix was chosen is evidence about the past,
+not about the file it sits in today.
 
 The lesson generalises past CI. **This document is written in the imperative and
 supplies exact YAML, which is the register of a description even when the intent
