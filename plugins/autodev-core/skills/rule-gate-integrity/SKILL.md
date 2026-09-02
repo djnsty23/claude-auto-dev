@@ -292,9 +292,61 @@ RESULT: perform the merge in a throwaway worktree and parse the output. For a
 JSON file that is `JSON.parse` throwing on the markers, which also proves the
 records you cared about survived rather than only that a conflict existed.
 
+## 9. Sample the input before you build the reader
+
+Section 7 asks whether a gate's hits are worth reading. This one is upstream of
+it: does the shape you plan to key on occur in the real input **at all**? A gate
+built against a shape that is not there does not fire wrongly. It never fires,
+reports a confident zero for every subject forever, and reads exactly like an
+all-clear.
+
+A spec said to join session heartbeats to the OPEN ITEMS in each project's
+`QUEUE.md`, keyed on markdown checkboxes. Measured across every real `QUEUE.md`
+on the machine before a line of the join was written:
+
+```
+4 files, 1,488 lines total
+unchecked "- [ ]"   0
+checked   "- [x]"   0
+"PREMISE:" lines    0
+control: a planted checkbox and a planted PREMISE: line   1 and 1
+```
+
+They are prose. Nobody had written a checkbox into one, ever. The specified join
+would have shipped a gate that reports zero open items for every session, and
+the number would have been *correct* in the sense that the query returned it.
+
+The control is the half that makes this reportable rather than a shrug. Without
+planting a checkbox and confirming the same grep finds it, "zero" is a claim
+about the probe. With it, zero is a fact about the corpus, and the finding stops
+being "my grep found nothing" and becomes "the data does not have this shape".
+
+**So the spec was wrong, and that is the deliverable.** The instrument was keyed
+on staleness instead, and its header says which question it answers rather than
+carrying the original name over a different measurement. Reporting "this cannot
+be built as specified, here is the measurement" is a result. Building it anyway
+produces an instrument that is inert and looks healthy, which is worse than
+having none.
+
+Two habits fall out, both cheap:
+
+- **Before writing a reader, run its extraction over the real corpus and print
+  what it found, with a known-positive control beside it.** One command, before
+  any design is committed to.
+- **When the extraction returns nothing, do not soften the key until something
+  matches.** That converts a finding about the data into a gate with invented
+  semantics. Ask instead what the input actually contains and whether a
+  different question is the useful one.
+
+This is the same discipline as pre-selling a product before building it: the
+cheapest possible test of whether the thing you are about to spend days on has
+a subject. The failure it prevents is not a wrong answer, it is weeks of work
+sitting behind an assumption nobody sampled.
+
 ## Before shipping a gate
 
 - [ ] It runs the real implementation, not a reconstruction.
+- [ ] The shape it keys on was confirmed to EXIST in the real input, with a control.
 - [ ] Its first corpus run was triaged by hand, and the precision written down.
 - [ ] It fails when the population is empty, not just when it differs.
 - [ ] Each deliberate breakage was confirmed to fire, and for the right reason.
