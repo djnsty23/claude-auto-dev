@@ -103,11 +103,31 @@ reads `MANDATE.md`, the latest `DECISIONS-*.md`, and this file.
 | Thing | Where | Why there |
 |---|---|---|
 | This plan and its revisions | `docs/harness-audit-plan.md`, committed | repo is the only channel a cold Codex run and a fresh Brain share |
-| Adversary round log | `.claude/reports/harness-audit-rounds.md`, appended every round, one schema (the one `adversarial-loop` "Measure every run" defines) | gitignored on purpose; durable by append, and the delegate's own session log is the backstop |
+| Adversary round log | `.claude/reports/harness-audit-rounds.md`, appended every round, one schema (the one `adversarial-loop` "Measure every run" defines). **Copy it to `~/claude-memory/reports/harness-audit-rounds-<date>.md` before the session ends** | gitignored on purpose, and therefore NOT durable. See the correction under the table |
 | Decisions taken without a panel | `~/claude-memory/DECISIONS-<date>.md`, branch-labelled | the operator audits branch 2 and moves the boundary |
 | Per-repo work queue | `<repo>/PUBLISH-QUEUE.md` for publish items; `<repo>/QUEUE.md` for work items, one tier deep | survives session death; a worker reads it itself |
 | Standing orders | `~/claude-memory/STANDING-ORDERS.md`, one line per order: the operator's words verbatim, the date, the condition, the action, who holds it | S3: durable authorisation needs a durable holder |
 | Status for the operator | `~/claude-memory/STATUS-<date>.md`, rewritten at each milestone and sent with `SendUserFile` | a phone cannot open a repo path; a markdown link outside cwd is dead (`outside-cwd-paths-need-sendfile`) |
+
+**CORRECTION `[measured 2026-09-02]`: the round log is not durable by append, and
+this plan already said so one page earlier.** During L2, `.claude/reports/` and
+everything in it was deleted from the worktree during an `npm run gate` run.
+Cause not established, so none is asserted. The log was recovered in full only
+because a mirror copy at `~/claude-memory/reports/` was three minutes old.
+
+S7 in the record above already carries this exact failure: *"a 32 KB report
+destroyed by `git worktree remove` because reports are gitignored"*. The plan
+recorded gitignored reports being destroyed, then described this one as durable.
+
+Two things follow, and neither is "commit the log": C10 depends on it staying
+gitignored, and `.claude/reports/` also holds telemetry that should not be
+committed.
+
+- **The mirror copy is the durability mechanism.** Make it an explicit step at
+  session end, not a coincidence of the sync task's timing.
+- **The stated backstop does not work either.** "The delegate's own session log
+  is the backstop" assumes a later session can read it; a delegate's transcript
+  is not addressable from another session, and nothing joins it to this file.
 
 Mirror writes go through **write-then-commit in one command**, never write,
 then `git add` later (S12). A lock file is not available; atomicity is.
