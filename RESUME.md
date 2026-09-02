@@ -60,18 +60,51 @@ touching it: a dirty tree you did not dirty means someone is in there.
 
 _These steps were derived from what is actually in `~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc`._
 
-## Unpushed commits, measured by hand where the script cannot answer
-
-The script reports COULD NOT READ, correctly: this branch tracks no upstream, so
-"ahead of origin" has no answer. Measured against the trunk instead:
+## Unpushed commits: FOUR, not eighteen. Name the reference or the count lies.
 
 ```
-git rev-list --count origin/main..HEAD   ->  17
+git rev-list --count origin/main..HEAD                             ->  18
+git log --oneline origin/claude/intelligent-brattain-6a09ad..HEAD  ->   4
+git ls-remote --heads origin claude/intelligent-brattain-6a09ad    ->  4c1a991
 ```
 
-Seventeen local commits, none pushed. A push needs the operator's word in the
-turn, or a recorded standing order in the Q2 form. `~/claude-memory/STANDING-ORDERS.md`
-holds **zero** orders, so nothing currently authorises one.
+Both numbers are true and they answer different questions. **The branch IS on
+origin**, pushed at 14:03:37 by the previous session, at `4c1a991`. So 14 of
+these commits are already published and only **4 are genuinely unpushed**: the
+three L2 commits and this RESUME.
+
+The first draft of this section said "seventeen local commits, none pushed",
+measured against `origin/main` alone. That is the wrong reference for a branch
+carrying its own remote ref, and it would have told a reader nothing was
+published when most of it was.
+
+**Nothing was pushed by this session.** A push needs the operator's word in the
+turn, or a recorded standing order in the Q2 form, and
+`~/claude-memory/STANDING-ORDERS.md` holds **zero** orders.
+
+## The gate DETACHED this worktree's HEAD, and git status showed clean
+
+`[measured 2026-09-02]` After the third `npm run gate`, a commit landed as
+`[detached HEAD df79674]` rather than on the branch. The reflog names it:
+
+```
+df79674 HEAD@{0}: commit: docs(resume): ...
+302b147 HEAD@{1}: checkout: moving from claude/intelligent-brattain-6a09ad to HEAD
+302b147 HEAD@{2}: reset: moving to HEAD
+```
+
+`HEAD@{2}` is `check-suites-can-fail.js` restoring its mutated sources;
+`HEAD@{1}` is that restore leaving HEAD detached instead of on the branch.
+
+Recovered with `git checkout -B`, which was safe **only** because
+`git merge-base --is-ancestor claude/intelligent-brattain-6a09ad HEAD` exited 0
+first. Run that check before forcing any branch ref; without it, `-B` can
+discard commits.
+
+Nothing but the reflog reported this. `git status --porcelain` was empty
+throughout, because a detached HEAD is not a dirty tree. **A gate that moves
+refs in the tree it is auditing is worth its own finding**, and it is the same
+run that removed `.claude/reports/`.
 
 ## L2 delivered, 2026-09-02
 
