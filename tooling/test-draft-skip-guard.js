@@ -109,13 +109,36 @@ const GUARD = '    if: github.event.pull_request.draft == false\n';
         p && p.rows[0].pushReachesDrafts === 'unknown' && p.rows[0].inert === false,
         'reach=' + (p && p.rows[0].pushReachesDrafts));
 }
-// branches-ignore inverts the test and this checker does not attempt it.
+// branches-ignore INVERTS branches, and the inversion is the point: both read as
+// restrictive at a glance and mean opposite things. `branches: [main]` keeps a
+// push OFF feature branches; `branches-ignore: [master]` keeps it ON all of them,
+// which is where drafts live. A peer's fleet survey got a row wrong on exactly
+// this, and it is a live shape in one repo here.
 {
-    const body = 'name: CI\non:\n  push:\n    branches-ignore: [docs/*]\n  pull_request:\njobs:\n  test:\n' + GUARD;
-    const r = run([root('ignore', body), '--json']);
+    const body = 'name: CI\non:\n  push:\n    branches-ignore:\n      - master\n  pull_request:\njobs:\n  test:\n' + GUARD;
+    const r = run([root('ignore-trunk', body)]);
+    check('branches-ignore listing only trunk leaves feature pushes firing, so INERT',
+        r.status === 1, 'exit ' + r.status);
+    check('  and the inline form agrees with the block form',
+        run([root('ignore-trunk-inline',
+            'name: CI\non:\n  push:\n    branches-ignore: [main]\n  pull_request:\njobs:\n  test:\n' + GUARD)]).status === 1);
+}
+// A non-trunk name could be anything, including a branch nobody drafts on.
+{
+    const body = 'name: CI\non:\n  push:\n    branches-ignore: [docs-only]\n  pull_request:\njobs:\n  test:\n' + GUARD;
+    const r = run([root('ignore-other', body), '--json']);
     let p = null;
     try { p = JSON.parse(r.out); } catch { /* stays null */ }
-    check('branches-ignore is UNKNOWN, not silently treated as unfiltered',
+    check('branches-ignore naming a NON-trunk branch stays UNKNOWN',
+        p && p.rows[0].pushReachesDrafts === 'unknown' && p.rows[0].inert === false,
+        'reach=' + (p && p.rows[0].pushReachesDrafts));
+}
+{
+    const body = 'name: CI\non:\n  push:\n    branches-ignore: [docs/*]\n  pull_request:\njobs:\n  test:\n' + GUARD;
+    const r = run([root('ignore-glob', body), '--json']);
+    let p = null;
+    try { p = JSON.parse(r.out); } catch { /* stays null */ }
+    check('a GLOB in branches-ignore stays UNKNOWN, not guessed',
         p && p.rows[0].pushReachesDrafts === 'unknown', 'reach=' + (p && p.rows[0].pushReachesDrafts));
 }
 {

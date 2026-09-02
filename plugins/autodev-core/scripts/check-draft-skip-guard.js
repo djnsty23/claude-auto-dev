@@ -74,10 +74,18 @@ const GUARD = /github\.event\.pull_request\.draft/;
  * DRAFTS LIVE ON. Unfiltered, it matches everything and defeats the guard. With
  * `branches:` naming only trunk, it does not.
  *
- * Conservative where it cannot tell. `branches-ignore` and glob patterns are
- * reported as UNKNOWN rather than guessed in either direction, because a wrong
- * confident answer here sends somebody to change working CI. Unknown is a result
- * a reader can act on; a guess is not.
+ * `branches-ignore` INVERTS `branches` and is graded rather than deferred, which
+ * is the whole reason it is worth handling. Both read as restrictive at a glance
+ * and mean opposite things: `branches: [main]` keeps a push OFF feature branches,
+ * `branches-ignore: [master]` keeps it ON all of them. That inversion is what
+ * made a peer's fleet survey wrong about one repo, and deferring it would have
+ * left the single repo shaped to need the answer without one.
+ *
+ * Conservative where it genuinely cannot tell. A glob in either list, an empty
+ * list, or a non-trunk name in `branches-ignore` returns UNKNOWN rather than a
+ * guess in either direction, because a wrong confident answer here sends
+ * somebody to change working CI. Unknown is a result a reader can act on; a
+ * guess is not.
  *
  * Deliberately NOT a YAML parse, so a shipped script gains no dependency. The
  * forms below are the whole surface the selftest plants. A third form belongs in
@@ -122,31 +130,53 @@ function pushReachesDraftBranches(src) {
     }
     if (!body.length) return 'yes';                     // `push:` with no filters
 
-    if (body.some((l) => /^[ \t]*branches-ignore:/.test(l))) return 'unknown';
-
-    const brAt = body.findIndex((l) => /^[ \t]*branches:/.test(l));
-    if (brAt < 0) return 'yes';                         // paths filters only
-
-    const inlineBranches = /^[ \t]*branches:[ \t]*\[([^\]]*)\]/.exec(body[brAt]);
-    let listed;
-    if (inlineBranches) {
-        listed = inlineBranches[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
-    } else {
-        listed = [];
-        const brIndent = indent(body[brAt]);
-        for (let j = brAt + 1; j < body.length; j++) {
-            if (indent(body[j]) <= brIndent) break;
-            const item = /^[ \t]*-[ \t]*['"]?([^'"]+?)['"]?[ \t]*$/.exec(body[j]);
-            if (item) listed.push(item[1].trim());
+    /** The branch names under `key:`, inline or block form, or null if absent. */
+    const listUnder = (key) => {
+        const at = body.findIndex((l) => new RegExp(`^[ \\t]*${key}:`).test(l));
+        if (at < 0) return null;
+        const inlineForm = new RegExp(`^[ \\t]*${key}:[ \\t]*\\[([^\\]]*)\\]`).exec(body[at]);
+        if (inlineForm) {
+            return inlineForm[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
         }
+        const out = [];
+        const keyIndent = indent(body[at]);
+        for (let j = at + 1; j < body.length; j++) {
+            if (indent(body[j]) <= keyIndent) break;
+            const item = /^[ \t]*-[ \t]*['"]?([^'"]+?)['"]?[ \t]*$/.exec(body[j]);
+            if (item) out.push(item[1].trim());
+        }
+        return out;
+    };
+
+    const isTrunk = (b) => b === 'main' || b === 'master';
+    const hasGlob = (names) => names.some((b) => /[*?[\]!+]/.test(b));
+
+    // `branches-ignore` INVERTS `branches`, and that inversion is the whole
+    // reason it is worth grading rather than deferring. Both read as restrictive
+    // at a glance and they mean opposite things: `branches: [main]` keeps a push
+    // OFF feature branches, `branches-ignore: [master]` keeps it ON all of them.
+    // A peer's fleet survey got a row wrong on exactly that, and returning
+    // UNKNOWN here would have left the one repo shaped to need the answer without
+    // one the moment somebody added a guard to it.
+    const ignored = listUnder('branches-ignore');
+    if (ignored) {
+        if (!ignored.length || hasGlob(ignored)) return 'unknown';
+        // Ignoring only trunk means every FEATURE branch still fires, and a
+        // draft PR lives on a feature branch. So the push reaches drafts.
+        if (ignored.every(isTrunk)) return 'yes';
+        // Any other explicit name is a branch somebody might draft on, and
+        // whether they do is not knowable from the workflow.
+        return 'unknown';
     }
 
+    const listed = listUnder('branches');
+    if (listed === null) return 'yes';                  // paths filters only
     if (!listed.length) return 'unknown';
     // A glob could match a feature branch; refuse to guess.
-    if (listed.some((b) => /[*?\[\]]/.test(b))) return 'unknown';
+    if (hasGlob(listed)) return 'unknown';
     // Only trunk-ish names listed means drafts, which live on feature branches,
     // are not reached. Any other explicit name is a branch a draft could use.
-    return listed.every((b) => b === 'main' || b === 'master') ? 'no' : 'unknown';
+    return listed.every(isTrunk) ? 'no' : 'unknown';
 }
 
 function scan(root) {
@@ -216,6 +246,12 @@ if (has('--selftest')) {
         'name: CI\non:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  test:\n' + GUARD_LINE);
     fs.writeFileSync(path.join(wf, 'glob.yml'),
         'name: CI\non:\n  push:\n    branches: [release/*]\n  pull_request:\njobs:\n  test:\n' + GUARD_LINE);
+    // branches-ignore inverts branches. Ignoring only trunk means every FEATURE
+    // branch still fires, so a guard beside it IS inert.
+    fs.writeFileSync(path.join(wf, 'ignore-trunk.yml'),
+        'name: CI\non:\n  push:\n    branches-ignore:\n      - master\n  pull_request:\njobs:\n  test:\n' + GUARD_LINE);
+    fs.writeFileSync(path.join(wf, 'ignore-other.yml'),
+        'name: CI\non:\n  push:\n    branches-ignore: [docs-only]\n  pull_request:\njobs:\n  test:\n' + GUARD_LINE);
 
     const rows = scan(root);
     const by = (n) => rows.find((r) => r.file.endsWith(n));
@@ -228,11 +264,17 @@ if (has('--selftest')) {
         by('filtered.yml').unclear === false && by('filtered-inline.yml').unclear === false);
     t('a GLOB branch filter is UNKNOWN, never guessed either way',
         by('glob.yml').inert === false && by('glob.yml').unclear === true);
+    t('branches-ignore listing only trunk means feature pushes fire, so INERT',
+        by('ignore-trunk.yml').inert === true);
+    t('  and it is not reported as unclear, since master is unambiguous',
+        by('ignore-trunk.yml').unclear === false);
+    t('branches-ignore naming a NON-trunk branch is UNKNOWN, not guessed',
+        by('ignore-other.yml').inert === false && by('ignore-other.yml').unclear === true);
     t('a pull_request-only workflow with a guard is NOT reported', by('working.yml').inert === false);
     t('  and it is still recognised as carrying a guard', by('working.yml').guard === true);
     t('a workflow with no guard is NOT reported', by('no-guard.yml').inert === false);
     t('  and its push is still seen as reaching every branch', by('no-guard.yml').pushReachesDrafts === 'yes');
-    t('the population counts every workflow, not only the findings', rows.length === 7);
+    t('the population counts every workflow, not only the findings', rows.length === 9);
 
     // No workflow directory at all must be distinguishable from a clean scan.
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-empty-'));
