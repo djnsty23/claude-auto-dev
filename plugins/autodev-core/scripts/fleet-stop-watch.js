@@ -314,6 +314,23 @@ function scan() {
 }
 
 function main() {
+    // `[measured 2026-09-02]` --help fell through to the watch and never
+    // returned (exit 143 under an 8s timeout). The usage block in the header
+    // was the only documentation and nothing printed it.
+    if (has('--help') || has('-h')) {
+        console.log([
+            'fleet-stop-watch.js - one line per transition: SESSION STOPPED / SESSION RESUMED',
+            '',
+            '  node fleet-stop-watch.js                      # poll forever, 60s',
+            '  node fleet-stop-watch.js --once               # one scan, then exit',
+            '  node fleet-stop-watch.js --quiet-minutes 5    # how long is "stopped" (default 3)',
+            '  node fleet-stop-watch.js --interval 30        # seconds between scans (default 60)',
+            '  node fleet-stop-watch.js --self <cliSessionId> # never report this session',
+            '',
+            'Reads transcript mtimes under ~/.claude/projects. Always exits 0; a report, not a gate.',
+        ].join('\n'));
+        return;
+    }
     if (!fs.existsSync(ROOT)) {
         // Not silence. A watch pointed at a directory that is not there reports
         // a permanently quiet fleet, which is the confident-zero failure

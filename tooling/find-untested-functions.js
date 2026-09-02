@@ -85,6 +85,13 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+// `[measured 2026-09-02]` --help fell through to the full ~20s coverage run, so a
+// probe for what this does got a sweep instead; check-entrypoints.js gates it.
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    console.log('usage: node tooling/find-untested-functions.js [--json]\n' +
+        'Runs every suite under coverage and lists plugin functions never entered. ~20s.');
+    process.exit(0);
+}
 const asJson = process.argv.includes('--json');
 
 // basename -> plugin-relative path, for attributing copies back to their source.
