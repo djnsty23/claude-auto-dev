@@ -58,6 +58,17 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/panel-recommendation.js"]
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/coordinator-write-guard.js"],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [

@@ -8,6 +8,14 @@
 // the block below, which asserts Bash is not filtered AT ALL. Those cases exist
 // so that re-adding a denylist shows up as a failing test naming the decision,
 // rather than as a mystery block six months later.
+//
+// SINCE 2026-09-02 A DIFFERENT HOOK DOES MATCH Bash: coordinator-write-guard.js,
+// tested by tooling/test-coordinator-write-guard.js. It is not a denylist —
+// it is inert unless a Brain role file exists, and it refuses exactly two
+// subcommands writing outside that file's declared home repos. The cases below
+// still hold for THIS hook and still mean what they say; noted here so a reader
+// who finds a blocked Bash call does not conclude the 2026-08-17 decision was
+// quietly reversed.
 
 const { spawnSync } = require('child_process');
 const path = require('path');

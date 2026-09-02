@@ -895,6 +895,29 @@ messages — the subscription replaces both.
   Reference a secret by NAME, which is safe to write.
 - **Never take a billing or spending action**, and **never delete or overwrite
   production rows.** Propose it with the reader-grep evidence attached.
+- **Never commit or push in a product repo.** `[measured 2026-09-01]` this is the
+  one on the list that has actually been broken: told to run the fleet with no
+  way to start a worker, a coordinator worked four repos itself and retargeted
+  five PRs onto the wrong base. Brief a session that owns the repo, or hand the
+  change over. Surveying is not writing — read-only git in someone else's repo
+  is the job.
+
+  **Arm the rail at boot, because the version of this that was prose only did
+  not hold.** Write `~/.claude/brain-role.json` naming this session and the
+  repos that are yours to write in, and `coordinator-write-guard.js` refuses
+  `git commit` and `git push` anywhere else:
+
+  ```powershell
+  $id = (Get-Content "$env:USERPROFILE\.claude\sessions\$PID.json" -Raw | ConvertFrom-Json).sessionId
+  @{ session_id = $id; home_repos = @("$env:USERPROFILE\claude-auto-dev"); claimed_at = (Get-Date -Format o) } |
+    ConvertTo-Json | Set-Content "$env:USERPROFILE\.claude\brain-role.json" -Encoding UTF8
+  ```
+
+  Two things to know before relying on it. It fails **open** on every error,
+  because it ships installed and a hook that throws kills a stranger's turn — so
+  a quiet run is not proof it is armed. And **standing down is deleting that
+  file**, which is deliberate: a rail you can only escape by naming the escape
+  is one the next session can audit.
 
 ## Shared clones and worktrees
 
