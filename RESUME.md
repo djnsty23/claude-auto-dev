@@ -6,10 +6,10 @@ not answer says so rather than rendering as empty.
 
 | field | value |
 |---|---|
-| directory | `~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc` |
-| branch | _not a git repo_ |
-| upstream | _none tracked_ |
-| HEAD committed | 2026-09-02T15:45:05+03:00 |
+| directory | `~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2` |
+| branch | `claude/intelligent-brattain-6a09ad` |
+| upstream | `origin/claude/intelligent-brattain-6a09ad` |
+| HEAD committed | 2026-09-02T22:01:15+03:00 |
 
 **Re-read before acting on any of this.** A resume file is a snapshot, and
 the two facts most likely to have moved are the two below: someone may have
@@ -17,17 +17,16 @@ pushed, and someone may have merged.
 
 ## Unpushed commits
 
-**COULD NOT READ.** No upstream is tracked for this branch, or git could not be reached, so "ahead of origin" has no answer here.
-
-This is not "none". Nothing was measured, so treat it as unknown.
+- `8b79aa2 fix(session-exit): --help wrote RESUME.md, and the usage named flags that do not exist`
+- `0d0d6cb fix(selftests): derive three population counts, one of which was already wrong`
 
 ## Uncommitted changes
 
-None. A real zero: the command ran and returned nothing.
+- `M RESUME.md`
 
 ## Open PRs
 
-- [#125](https://github.com/djnsty23/claude-auto-dev/pull/125) `claude/agents-md-channel-pointer` - docs(agents): two channel facts a delegate can act on, and a pointer for the rest
+- [#127](https://github.com/djnsty23/claude-auto-dev/pull/127) `fix/test-validate-orphan-fixture` - fix(suites): two baselines that failed for reasons outside themselves, and v8.155.0
 
 ## Worktrees
 
@@ -35,20 +34,12 @@ Another session may hold one of these. Run `git status` in a tree before
 touching it: a dirty tree you did not dirty means someone is in there.
 
 ```
-~/claude-auto-dev                                                      27f1c69 [main]
-~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78          e4942c1 [claude/stoic-mayer-faab1d]
-~/claude-auto-dev/.claude/worktrees/code-changelog-d72bca              0222e8e (detached HEAD)
-~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2           187ce9c [claude/agents-md-channel-pointer]
-~/claude-auto-dev/.claude/worktrees/incremental-write                  556850f (detached HEAD)
-~/claude-auto-dev/.claude/worktrees/sad-kirch-355c74                   2d3808b (detached HEAD)
-~/claude-auto-dev/.claude/worktrees/survey-trunk-cache                 70fbfce [fix/survey-trunk-cache]
-~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc            302b147 (detached HEAD)
-~/Downloads/code/autodev                                               3f8101f [test/brain-panels-vacuity-gaps]
-~/Downloads/code/autodev/.claude/worktrees/framework-radar             a398c93 [codex/framework-radar]
-~/Downloads/code/autodev/.claude/worktrees/framework-radar-experiments 4ba28eb [codex/framework-radar-experiments]
-~/Downloads/code/autodev/.claude/worktrees/marketing-radar             1d39981 [codex/marketing-radar]
-~/Downloads/code/autodev/.claude/worktrees/radar-2026-09-01-first-live f40ee1a [codex/radar-2026-09-01-first-live]
-~/Downloads/code/autodev/.claude/worktrees/radar-learning-layer        a63e08d [codex/radar-learning-layer]
+~/claude-auto-dev                                               e1a53d6 [main]
+~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78   e4942c1 (detached HEAD)
+~/claude-auto-dev/.claude/worktrees/codex-radar-20260902-184238 e1a53d6 [codex/radar-20260902-184238]
+~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2    8b79aa2 [claude/intelligent-brattain-6a09ad]
+~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc     b6f25ad [fix/test-validate-orphan-fixture]
+~/Downloads/code/autodev                                        3f8101f [test/brain-panels-vacuity-gaps]
 ```
 
 ## What a reader should do first
@@ -58,133 +49,4 @@ touching it: a dirty tree you did not dirty means someone is in there.
 3. Read `CHANGELOG.md`, `README.md` - present in this directory, checked rather than assumed.
 4. Read recent commit bodies. Many projects put the reasoning there rather than in a separate design note.
 
-_These steps were derived from what is actually in `~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc`._
-
-## Unpushed commits: FOUR, not eighteen. Name the reference or the count lies.
-
-```
-git rev-list --count origin/main..HEAD                             ->  18
-git log --oneline origin/claude/intelligent-brattain-6a09ad..HEAD  ->   4
-git ls-remote --heads origin claude/intelligent-brattain-6a09ad    ->  4c1a991
-```
-
-Both numbers are true and they answer different questions. **The branch IS on
-origin**, pushed at 14:03:37 by the previous session, at `4c1a991`. So 14 of
-these commits are already published and only **4 are genuinely unpushed**: the
-three L2 commits and this RESUME.
-
-The first draft of this section said "seventeen local commits, none pushed",
-measured against `origin/main` alone. That is the wrong reference for a branch
-carrying its own remote ref, and it would have told a reader nothing was
-published when most of it was.
-
-**Nothing was pushed by this session.** A push needs the operator's word in the
-turn, or a recorded standing order in the Q2 form, and
-`~/claude-memory/STANDING-ORDERS.md` holds **zero** orders.
-
-## This worktree's HEAD was detached mid-gate. NOT by the gate. Cause unknown.
-
-**RETRACTION.** An earlier version of this section, and commit `0551a46`'s
-message, said `check-suites-can-fail.js` detached HEAD while restoring its
-mutants. That was an inference from reflog adjacency, asserted as fact, and it
-is **refuted**.
-
-`[measured 2026-09-02]` A controlled re-run in a scratch worktree, with a
-planted marker file under the gitignored `.claude/reports/`:
-
-| | before | after a full 92-suite sweep |
-|---|---|---|
-| branch | `probe/gate-sideeffects-5811` | `probe/gate-sideeffects-5811` |
-| marker in `.claude/reports/` | PRESENT | PRESENT |
-| reflog entries | 2 | 2 |
-
-The sweep did real work (92 suites, 91 verified able to fail), so this is a null
-result and not a no-op. Static reading agrees: the script makes exactly ONE
-source-tree git call, `status --porcelain`, which is read-only. Every other git
-call is worktree management passing `ROOT` explicitly, and suites run with
-`cwd: SWEEP_ROOT`.
-
-**What actually happened is still unknown, and no cause is asserted.** Both
-reflog entries landed in the same second, 16:08:40:
-
-```
-302b147 HEAD@{1}: checkout: moving from claude/intelligent-brattain-6a09ad to HEAD
-302b147 HEAD@{2}: reset: moving to HEAD
-```
-
-Searched and came up empty: no `git reset`, `git checkout HEAD` or `git clean`
-anywhere in `tooling/` or `plugins/`, and none in `~/.claude/scripts` or
-`~/.claude/hooks`. What IS in `settings.json` is three base64
-`-EncodedCommand` hooks (which is why a plain grep found nothing), all invoking
-`~/.orca/agent-hooks/claude-hook.cmd`. That file only POSTs to a local daemon,
-passing `ORCA_WORKTREE_ID`. So a worktree-aware external orchestrator is in
-play whose code is not readable from here. That is a lead, not a finding.
-
-Recovered with `git checkout -B`, safe **only** because
-`git merge-base --is-ancestor claude/intelligent-brattain-6a09ad HEAD` exited 0
-first. Run that before forcing any branch ref; without it, `-B` discards commits.
-
-**The durable fix is the one that survives not knowing the culprit.**
-`check-suites-can-fail.js` now captures the source tree's branch and HEAD at
-start and re-checks both at the end, reporting a move as a conflict (exit 2).
-`git status` is structurally unable to see this: a detached HEAD is not a dirty
-tree, and neither is a branch switch. Its summary also said "tree restored
-clean" while measuring the **sweep** worktree via `gitW`, a temp directory
-deleted moments later; it now reads "sweep worktree clean, source tree refs
-unmoved".
-
-## L2 delivered, 2026-09-02
-
-| artefact | state |
-|---|---|
-| `~/claude-memory/STANDING-ORDERS.md` | the holder. Zero orders, which is correct |
-| `tooling/check-standing-orders.js` | validator, 19 selftest checks |
-| `tooling/test-standing-orders.js` | 17 passed |
-| `tooling/standing-order-wake.js` | the wake, and C4's once-only transition |
-| `tooling/test-standing-order-wake.js` | 25 passed, three wakes over one flip |
-| `check:standing-orders` | npm alias. Not in the gate chain: `npm test` runs the suite |
-
-Commits `0232835`, `ffffe6e`, `302b147`. Mirror `9982315`.
-
-    npm run gate  ->  94/94 suites, 93 verified able to fail, 0 NOT verified,
-                      tree restored clean, GATE_EXIT=0
-
-C4 measured: wake 1 does not fire, wake 2 fires once and writes
-`executed <ts>`, wake 3 does not re-fire with the condition still true.
-
-**The acceptance test was wrong a fourth time, in the same way.** L2's
-acceptance named `check-push-authorisation.js` as the gate that must refuse an
-order with no verbatim words. Run it and it prints
-`63 shipped SKILL.md scanned` - a different question over a different corpus.
-Keep running each lane's probe before starting the lane.
-
-## Two things the next session should not rediscover
-
-1. **A backgrounded `npm run gate` reports its exit as 0 regardless**, if the
-   command ends with anything after `;`. Run one here was RED and the task
-   notification said exit code 0. Capture `GATE_EXIT=$?` and read that.
-2. **`.claude/reports/` was deleted from this worktree during a gate run**,
-   cause unknown and not asserted. The round log survived only because the
-   mirror had copied it three minutes earlier. It is gitignored, so `git status`
-   showed nothing. The plan calls the log "durable by appending"; that is false,
-   and the durability actually came from `~/claude-memory/reports/`.
-
-## Next lane: S5, then L3, then L1
-
-**S5, the coordinator-write hook.** A PreToolUse hook refusing `git commit` and
-`git push` when the session holds the Brain role file and cwd is outside the
-harness repo. Absence re-confirmed here with a control:
-
-```
-git ls-tree -r --name-only HEAD | grep hooks.json                  ->  2 tracked
-git grep -c "AskUserQuestion" HEAD -- plugins/*/hooks/hooks.json   ->  1  (control)
-git grep -c "Bash"            HEAD -- plugins/*/hooks/hooks.json   ->  0
-```
-
-PreToolUse carries `Read|Write|Edit` and `AskUserQuestion` only, so the ban has
-no mechanism at all. Build it in a FRESH session: it ships in this marketplace
-and runs in other people's sessions, where a throw kills their turn and a defect
-survives until reinstall. Fail OPEN, follow the private-name block in
-`pre-tool-filter.js`, and mutation-test by removing the role file.
-
-Then L3, then L1 as the integration lane.
+_These steps were derived from what is actually in `~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2`._
