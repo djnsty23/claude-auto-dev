@@ -105,7 +105,11 @@ function wake(holder, opts = {}) {
 
 function report(r) {
   if (r.missing) {
-    console.log(`[wake] NO HOLDER at ${r.holder}: 0 orders, nothing evaluated`);
+    // Say what could not be done, not merely that nothing happened. "0 orders"
+    // on its own reads as a considered all-clear, and a wake that never found
+    // the holder has not checked anything at all.
+    console.log(`[wake] NO HOLDER: could not read ${r.holder}`);
+    console.log('[wake] 0 orders evaluated. This is not "nothing was ready", it is an unread holder.');
     return 0;
   }
   console.log(
