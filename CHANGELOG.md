@@ -1,5 +1,69 @@
 # Changelog
 
+## [8.155.0] - 2026-09-02
+
+### Fixed: two suites whose baseline failed for reasons outside themselves
+
+check-suites-can-fail reported `RED  already failing` twice in one afternoon, on
+two different suites, each of which passed standalone on the same tree minutes
+later. Both were real defects and neither was in the suite it named.
+
+The first fix moved the failure one suite over rather than clearing it, which is
+how the second was found. The shared symptom is "a baseline fails for an ambient
+reason", and that is a family rather than a bug.
+
+### Fixed: a killed run's fixture failed validate for every later run
+
+test-validate.js plants zz-location-fixture.md at the repo root, asserts against
+it, and removes it in a `finally`. A `finally` does not run when the process is
+killed, so a timeout or a Ctrl-C leaves the file behind. validate scans
+untracked-but-not-ignored files, so it then failed for every LATER run, and
+check-suites-can-fail reported the suite as already failing when nothing was
+wrong with it.
+
+Reproduced with a control: on a clean tree validate exits 0 and the suite exits
+0; with the fixture present both exit 1, naming the expected home-path finding.
+The check was working correctly and reporting a mess left by a killed gate run.
+
+Fixture names now carry the owning pid, and a sweep before the baseline reclaims
+fixtures whose owner is gone. Liveness is the load-bearing half: it separates a
+dead run's litter from a LIVE peer's fixture, and deleting the latter is the
+concurrent-session-deletion failure check-suites-can-fail already documents at
+its own cleanNewUntracked. A blanket "remove every zz- file" sweep would have
+reintroduced it.
+
+### Fixed: a port found and released is not a port you hold
+
+test-fleet-board.js called freePort(), which binds 0, reads the number the OS
+assigned, then CLOSES the socket. The child then binds a port the suite no longer
+holds, and anything on the machine can take it in that window. At roughly 116
+node processes it did: the suite passed standalone at 62/62 while
+check-suites-can-fail reported it RED on the same tree.
+
+Retry is scoped to EADDRINUSE and takes a fresh port each attempt. A board that
+dies for any other reason still fails the suite, because a broader catch would
+swallow the startup defects that file exists to find. Fixed in the harness rather
+than in fleet-board.js, which ships and runs in other people's sessions.
+
+Both fixes are one rule: a planted value must be collision-proof BY CONSTRUCTION,
+not merely unlikely to collide. A fixed filename with finally-only cleanup, and a
+port you found and then let go, are both "usually fine" designs that fail under
+exactly the conditions a busy fleet produces.
+
+Four assertions were added and all four were mutation-tested, each killed by the
+RIGHT assertion rather than a neighbour. The dead pid one uses is derived rather
+than guessed: a child is spawned and waited on, so it is dead by construction
+when used. One of the four guards the guard, because a retry keyed on a message
+it can no longer match is structurally incapable of firing and would fail
+silently while looking correct.
+
+Worth keeping and not fixed here: the gate that verified this ran green with
+NEITHER guard firing, since the conditions they handle did not arise. A green run
+where a guard never fires is compatible with the guard being inert, so the
+mutation results are the evidence and that pass is not. check-suites went from
+90 verified able to fail with 1 NOT verified, to 91 with 0.
+
+
 ## [8.154.0] - 2026-09-02
 
 ### Fixed: session-sweep.js --help ran the whole sweep before returning
