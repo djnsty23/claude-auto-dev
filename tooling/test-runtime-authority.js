@@ -148,6 +148,16 @@ try {
         preBehind.stdout.includes("[INFO]") && preBehind.stdout.includes("active pin is"),
         'stdout had no INFO pin line');
 
+    check('  and the summary does NOT claim the runtime is current',
+        !preBehind.stdout.includes('Runtime is current'),
+        'a reassuring label on a deferred check reports absence as a pass');
+    check('  and it names the deferral instead',
+        preBehind.stdout.includes('DEFERRED'),
+        'stdout had no DEFERRED summary');
+    check('control: a fully current install DOES say the runtime is current',
+        clean.stdout.includes('Runtime is current'),
+        'the positive wording is unreachable, so the assertion above proves nothing');
+
     // The flag must not blanket-pass. An install AHEAD of the source still
     // means the code you edited is not the code that runs, and no push fixes it.
     const aheadPins = { ...versions, 'autodev-core': nextVersion(versions['autodev-core']) };

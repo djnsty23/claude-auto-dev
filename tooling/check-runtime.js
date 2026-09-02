@@ -57,9 +57,11 @@ const cmpV = (a, b) => {
 };
 
 let fail = 0;
+let deferred = 0;
 const log = (tag, msg) => {
     console.log('[' + tag + '] ' + msg);
     if (tag === 'FAIL') fail++;
+    if (tag === 'INFO') deferred++;
 };
 
 function version(root, plugin) {
@@ -239,6 +241,16 @@ if (corePin && corePin.installPath && installedVersion(corePin.installPath) !== 
     }
 }
 
-console.log('\n' + (fail === 0 ? 'Runtime is current.'
-    : fail + ' problem(s) — the code you edited is not the code that runs.'));
+// Never print "current" over a DEFERRED check. A reassuring label on a skip
+// converts an absent check into a reported pass, which is worse than having no
+// opinion: it closes the question rather than opening one. Introduced and
+// caught in the same session, 2026-09-02, by reading the run rather than the
+// exit code.
+console.log('\n' + (fail > 0
+    ? fail + ' problem(s), the code you edited is not the code that runs.'
+    : deferred > 0
+        ? deferred + ' check(s) DEFERRED: the install is behind the source, which is'
+            + ' expected before a push. Nothing else is wrong. Run verify:release'
+            + ' after publishing and updating the plugins.'
+        : 'Runtime is current.'));
 process.exit(fail > 0 ? 1 : 0);
