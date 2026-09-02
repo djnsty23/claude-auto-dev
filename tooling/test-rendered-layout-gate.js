@@ -187,6 +187,39 @@ for (const w of [360, 390, 414, 768]) {
     check(`clip @${w}: the unusable samples are counted rather than silently dropped`,
         r.counts.exempt.inconclusiveSamples > 0, r.counts.exempt);
 }
+// ------------------------------- an ancestor that CLIPS also stops the scroll
+//
+// FOUND ON A REAL PAGE, not on a fixture. MDN's overflow article carries a 534px
+// demo iframe inside a `div.code-example` with overflow-x hidden and a right
+// edge of 374, on a page whose scrollWidth equals its clientWidth. The first
+// version of the exemption covered only auto/scroll, so `hidden` fell through
+// and the report printed "extends past the layout viewport with nothing to
+// absorb it" while something plainly had absorbed it - a finding contradicting
+// its own note.
+//
+// The shape is reproduced locally rather than by committing 200KB of a third
+// party's geometry that goes stale on their next redesign: a 500px block inside
+// the clipping panel, wider than the viewport at every phone width.
+
+for (const w of [360, 390, 414]) {
+    const s = load(`defect-clip-${w}`);
+    const cw = s.viewport.clientWidth;
+    const wide = s.elements.find((e) => /wide-in-clip/.test(e.sel));
+    check(`clip @${w}: the control element exists and is wider than the viewport`,
+        !!wide && wide.box.r > cw + 1, wide && { right: wide.box.r, cw });
+    check(`clip @${w}: it is absorbed by a CLIPPING ancestor, not a scrolling one`,
+        wide && wide.clipAncestor && CHECKS.CLIPS.has(wide.clipAncestor.overflowX),
+        wide && wide.clipAncestor);
+    check(`clip @${w}: and the page does not scroll sideways because of it`,
+        s.viewport.scrollWidth === s.viewport.clientWidth,
+        { sw: s.viewport.scrollWidth, cw: s.viewport.clientWidth });
+    const r = CHECKS.analyse(s);
+    check(`clip @${w}: so it is NOT reported as an overflow culprit`,
+        r.counts.overflowCulprit === 0, r.findings.map((f) => `${f.code} ${f.sel}`));
+    check(`clip @${w}: it is counted as clip-absorbed, apart from the rail case`,
+        r.counts.exempt.clipAbsorbed === 1 && r.counts.exempt.scrollerAbsorbed === 0, r.counts.exempt);
+}
+
 {
     // A genuine responsive difference, not noise: at 1280 the first paragraph
     // fits on one line inside the 72px panel and is not cut off.

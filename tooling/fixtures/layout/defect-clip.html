@@ -21,6 +21,15 @@
      overflow auto instead of hidden. The reader can reach every word, so this
      must stay silent or the check is flagging scrollers rather than clipping. */
   .panel-ok{height:72px;overflow:auto;background:#eef7ee;border-radius:8px;padding:12px;margin:16px 0}
+
+  /* THE REGRESSION CONTROL, reduced from a real third-party page. A 500px
+     block inside the clipping panel: wider than the panel AND wider than the
+     viewport at every mobile width, yet the document does not scroll, because
+     the panel clips it. It must NOT be reported as an overflow culprit - that
+     code's own note says "with nothing to absorb it", and something plainly
+     did. Found on MDN's overflow page, where a 534px demo iframe sits in an
+     overflow-x:hidden code example. */
+  .wide-in-clip{width:500px;height:24px;background:#ddd}
 </style></head>
 <body>
 <main class="wrap">
@@ -30,6 +39,7 @@
     <p>This panel is 72 pixels tall and holds four paragraphs. Everything after the first two lines is cut off with no way for anyone to reach it.</p>
     <p>This sentence is inside the clipping panel and is not reachable by any means. It is not scrolled out of view, it is painted nowhere.</p>
     <p>Neither is this one.</p>
+    <div class="wide-in-clip"></div>
   </section>
 
   <section class="panel-ok">

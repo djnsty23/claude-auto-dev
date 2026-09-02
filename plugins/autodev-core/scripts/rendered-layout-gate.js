@@ -110,14 +110,29 @@ sideways. Against the committed fixtures that test misses the planted defect at
 360, 390 and 414 and catches it only at 768. The layout viewport is the
 denominator.
 
-WHAT THE EXEMPTIONS ARE WORTH, on the committed clean control:
+WHAT THE EXEMPTIONS ARE WORTH, measured on the committed fixtures:
 
   carousel cards under overflow-x:auto      5 findings suppressed, all correct
   transparent click-catcher over body text  1 sample source suppressed
   descendants of an already-flagged element 16 rows collapsed to 1 on the
                                             overflow fixture
+  a clipping ancestor, which stops the      1, and this one was found on a real
+  page scrolling just as a rail does        third-party page rather than on a
+                                            fixture
 
-Without them the clean page reports 6 defects and has none.`);
+Without them the clean page reports 6 defects and has none.
+
+FALSE-POSITIVE RATE ON A REAL PAGE, which is the number that decides whether
+this is safe to run: 0 findings over 605 element boxes and 26 text runs on MDN's
+CSS overflow article at 390. That run is also what found the last exemption: a
+534px demo iframe inside an overflow-x:hidden code example, on a page whose
+scrollWidth equals its clientWidth, was being reported with the note "extends
+past the layout viewport with nothing to absorb it" while something plainly had
+absorbed it.
+
+ONE PAGE IS A CONTROL, NOT A RATE. It proves the gate can run a real page
+without crying wolf; it does not establish precision across a corpus. Collect
+real runs before anyone promotes this past advisory.`);
 }
 
 function readSnapshots() {

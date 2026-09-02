@@ -57,6 +57,19 @@
  * that table, so the day someone "simplifies" this to innerWidth the suite says
  * exactly which widths went blind.
  *
+ * -------------------------------------------------- WHAT ABSORBS AN OVERFLOW
+ *
+ * Two ancestors stop a page scrolling sideways and they are not the same thing.
+ * `overflow-x: auto|scroll` keeps the content REACHABLE - that is a rail, and
+ * flagging one is how a gate cries wolf on every carousel ever built.
+ * `overflow: hidden|clip` stops the scroll by CUTTING THE CONTENT OFF, which is
+ * often the defect rather than the fix.
+ *
+ * Both are exempt from OVERFLOW-CULPRIT, because that code is about the page
+ * scrolling and neither one scrolls it. They are counted apart, and where a clip
+ * hides WORDS, CLIPPED-TEXT reports it - which is the code that can say
+ * something useful about it.
+ *
  * ------------------------------------------------------------ THRESHOLDS
  *
  * Every number below is a knob and none is derived from anything. They are a
@@ -181,6 +194,7 @@ function analyse(snapshot, options) {
     const findings = [];
     const exempt = {
         scrollerAbsorbed: 0,
+        clipAbsorbed: 0,
         ancestorAlreadyOverflows: 0,
         rootElement: 0,
         transparentOccluder: 0,
@@ -238,6 +252,27 @@ function analyse(snapshot, options) {
             // clean control has five cards in exactly this position: five false
             // positives without this branch, zero with it.
             exempt.scrollerAbsorbed++;
+            continue;
+        }
+        if (ca && CLIPS.has(ca.overflowX)) {
+            // A clipping ancestor absorbs the overflow too - by cutting the
+            // content off rather than by letting the reader scroll to it - so
+            // the DOCUMENT does not scroll and this is not the defect this code
+            // names. Where the clipping hides words, CLIPPED-TEXT reports it,
+            // which is the right code for it.
+            //
+            // `[measured 2026-09-03]` found on a real third-party page, not on
+            // a fixture: an MDN demo iframe 534px wide inside a
+            // `div.code-example` with overflow-x hidden and a right edge of
+            // 374, on a page whose scrollWidth equals its clientWidth. Without
+            // this branch the finding printed "extends past the layout viewport
+            // with nothing to absorb it" while something plainly had absorbed
+            // it - a report contradicting its own note.
+            //
+            // Counted separately from the rail case, because these two are only
+            // alike in stopping the scroll: a rail keeps the content reachable
+            // and a clip does not.
+            exempt.clipAbsorbed++;
             continue;
         }
 

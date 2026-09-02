@@ -174,6 +174,7 @@ function harvest(opt) {
     var SKIP = { SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, TITLE: 1, HEAD: 1, BR: 1 };
     var all = Array.prototype.slice.call(doc.querySelectorAll('*'));
     var considered = 0;
+    var dropped = 0;
     var elements = [];
     var index = new Map();
 
@@ -183,7 +184,11 @@ function harvest(opt) {
         considered++;
         var rect = el.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) continue;
-        if (elements.length >= MAX_EL) continue;
+        // Count what the cap actually dropped. Comparing `considered` against
+        // the cap counts zero-area elements too, and `[measured 2026-09-03]` a
+        // real page with 5,250 considered and 605 recorded reported truncation
+        // that never happened.
+        if (elements.length >= MAX_EL) { dropped++; continue; }
         var cs2 = getComputedStyle(el);
 
         // Nearest ancestor that does not let x-overflow through, and HOW it
@@ -380,7 +385,8 @@ function harvest(opt) {
             domElements: all.length,
             considered: considered,
             recorded: elements.length,
-            truncatedElements: considered > MAX_EL,
+            droppedForCap: dropped,
+            truncatedElements: dropped > 0,
             textElementsTotal: textTotal,
             textRecords: textRecords.length,
             truncatedText: textRecords.length >= MAX_TEXT,
