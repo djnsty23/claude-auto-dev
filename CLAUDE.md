@@ -33,6 +33,22 @@ rewrites sources in place, so it refuses a dirty tree and exits 2. Iterate with
 `npm test`, then commit, then `npm run gate`, then push. A commit you intend to
 describe as gated needs that second command to have run against it.
 
+**And do not touch the tree WHILE it runs.** Clean at the start is not enough:
+`test-all.js` snapshots `git status` before the suites and compares after, so a
+file edited mid-run fails `tree-inert` with "THE TEST RUN MODIFIED THE WORKING
+TREE. A suite rewrote what it grades." `[measured 2026-09-02]` that fired on a
+run where no suite had done anything: two tracked files were edited 13 s and 42 s
+into it, established by mtime rather than by reflog adjacency. Every other suite
+exited 0, which is the point of the check and also why the red is easy to
+misread as being about the diff.
+
+Gate runs take tens of minutes here, so the temptation to keep editing is real.
+Draft in the scratchpad instead and apply once the run ends. Ignored paths are
+invisible to `tree-inert`, so a report under `.claude/reports/` can be written
+mid-run. Check before relying on that: `.gitignore` lists individual `.claude/`
+paths rather than the directory, so `git check-ignore -v <path>` is the answer
+and "it is under `.claude/`" is not.
+
 One trap while checking any of this: `$?` after a pipe is the PIPE's status.
 `npm run check:suites | tail -3` reports 0 while the script exits 2. That cost
 two wrong readings in the session that wrote this paragraph.

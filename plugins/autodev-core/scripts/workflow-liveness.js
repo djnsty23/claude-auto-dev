@@ -57,6 +57,22 @@
 
 'use strict';
 
+if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    // Print this file's own header block. A probe asking what this script is
+    // must never cause it to DO what this script does: several entry points
+    // here reach the network, and one made 21 registry calls from a --help
+    // probe before this branch existed.
+    const lines = require('fs').readFileSync(__filename, 'utf8').split('\n');
+    const head = [];
+    for (const line of lines.slice(1)) {
+        if (line.trim() === "'use strict';") continue;
+        if (/^\s*(\/\/|\/\*|\*|$)/.test(line)) head.push(line);
+        else break;
+    }
+    console.log(head.join('\n').trim());
+    process.exit(0);
+}
+
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 

@@ -245,6 +245,40 @@ try {
         has('  and says the steps were derived', r2.out, 'derived from what is actually in');
     }
 
+    // ---- --help MUST NOT WRITE ----------------------------------------------
+    //
+    // `[measured 2026-09-02]` it did. The flag was unrecognised and fell through
+    // to the main path, so asking what this script does REGENERATED RESUME.md in
+    // the working tree. --help is the one argument a reader uses to decide
+    // whether to run something, and check-entrypoints.js probes every
+    // plugins/*/scripts/*.js with exactly it — contained there only because that
+    // probe copies the repo first, which is its isolation rather than this
+    // script's good behaviour.
+    //
+    // Asserted on the FILESYSTEM, not on the output. A usage string proves the
+    // branch printed; only an unchanged file proves it did not also write.
+    {
+        const repo = newRepo('helpnowrite');
+        const target = path.join(repo, 'RESUME.md');
+        fs.writeFileSync(target, 'SENTINEL — --help must not overwrite this\n');
+        const before = fs.readFileSync(target, 'utf8');
+
+        const r = run(repo, ['--help']);
+        check('--help exits 0', r.status === 0, 'exit ' + r.status);
+        check('--help leaves RESUME.md byte-identical',
+            fs.readFileSync(target, 'utf8') === before,
+            'the file was rewritten by a flag that only asks what the script does');
+        has('--help names the only non-writing mode', r.out, '--print');
+        has('--help says it writes by default', r.out, 'WRITES A FILE');
+
+        // The planted positive. Without it the assertions above pass against a
+        // script that never writes at all, which would be a different defect
+        // wearing the same green.
+        const r2 = run(repo, []);
+        check('planted positive: a bare run DOES write, so the check above is about --help',
+            fs.readFileSync(target, 'utf8') !== before, 'exit ' + r2.status);
+    }
+
     // ---- the peer block must refuse to speak for peers ----------------------
     {
         const repo = newRepo('peers');

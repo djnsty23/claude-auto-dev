@@ -35,6 +35,28 @@ const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
 const val = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 
+// --help MUST NOT WRITE. `[measured 2026-09-02]` it did: running this with
+// --help to find out what it does regenerated RESUME.md in the working tree.
+// The flag was simply unrecognised and fell through to the main path.
+//
+// That is worse than an ordinary missing feature, because --help is the one
+// argument a reader uses to learn what a script does BEFORE deciding to run it,
+// and check-entrypoints.js probes every plugins/*/scripts/*.js with exactly
+// this flag. That probe was not harmed — it copies the repo to a scratch dir
+// first, and its header says that isolation exists for actions like this one —
+// but the isolation is what contained it, not this script's own behaviour, and
+// a human at a prompt has no such copy.
+if (has('--help') || has('-h')) {
+    console.log('usage: session-exit.js [--print] [--out <path>] [--force] [--peers]\n'
+        + 'Writes RESUME.md for the next session, from state read at generation time.\n'
+        + '  --print   write to stdout instead of a file  (the only non-writing mode)\n'
+        + '  --out P   write somewhere other than ./RESUME.md\n'
+        + '  --force   skip the refuse-to-clobber check\n'
+        + '  --peers   also print what peer sessions must do themselves\n'
+        + 'WRITES A FILE unless --print is given.');
+    process.exit(0);
+}
+
 const CWD = process.cwd();
 
 // RESUME.md gets COMMITTED, and a committed file must not carry a home path.

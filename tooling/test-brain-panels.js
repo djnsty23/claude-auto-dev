@@ -120,7 +120,13 @@ function denies(dir) {
 
 // The valid --off invocation. Scenarios 1-8 are about what --off DOES; scenario 9
 // is about what it REFUSES, and deliberately builds its own bare arguments.
-const OFF = ['--off', '--hours', '8', '--reason', 'suite fixture run'];
+// `--legacy` since 2026-09-02: `--off` is retired and refuses without it. It is
+// kept here rather than removed because writing a deny is the ONLY way to create
+// the state the --on, --expire and --status scenarios restore from. Deleting the
+// write path would delete the coverage of the restore path with it, which is
+// the half that still has to work — a deny written by an earlier version of this
+// tool must remain findable and clearable.
+const OFF = ['--off', '--legacy', '--hours', '8', '--reason', 'suite fixture run'];
 
 function run(home, args, cwd) {
     return spawnSync(process.execPath, [SUBJECT].concat(args), {
@@ -383,7 +389,15 @@ function run(home, args, cwd) {
 
     // Deliberately bare. Do NOT replace with OFF: this scenario is the one that
     // asserts the refusal, so the whole point is the missing arguments.
-    const bare = run(home, ['--off']);
+    //
+    // `--legacy` is present for 2026-09-02's retirement, and it is load-bearing
+    // rather than incidental. Without it every assertion in this scenario would
+    // be satisfied by the RETIREMENT refusal instead of the window-and-reason
+    // one, so the window check could be deleted entirely and scenario 9 would
+    // stay green. That is the same "passes while measuring something else"
+    // failure the fixture-home comment below was written for, arriving through
+    // a different door.
+    const bare = run(home, ['--off', '--legacy']);
     check('9a bare --off is refused', bare.status !== 0,
         'a deny with no stated window is the one that outlives its coordination');
     check('9b nothing was denied by the refused run', !denies(repo),
@@ -395,13 +409,13 @@ function run(home, args, cwd) {
     // assertion passes while measuring something else. Caught on the baseline
     // run, where 9c passed against a subject with no reason-check at all.
     const h2 = makeHome(); const r2 = makeRepo(h2, 'someproj');
-    const noReason = run(h2, ['--off', '--hours', '8']);
+    const noReason = run(h2, ['--off', '--legacy', '--hours', '8']);
     check('9c --hours without --reason is refused', noReason.status !== 0,
         'exit ' + noReason.status);
     check('9d the refused no-reason run denied nothing', !denies(r2));
 
     const h3 = makeHome(); const r3 = makeRepo(h3, 'someproj');
-    const noHours = run(h3, ['--off', '--reason', 'overnight fleet run']);
+    const noHours = run(h3, ['--off', '--legacy', '--reason', 'overnight fleet run']);
     check('9e --reason without --hours is refused', noHours.status !== 0,
         'a reason without a window still outlives its coordination');
     check('9f the refused no-hours run denied nothing', !denies(r3));
@@ -409,9 +423,44 @@ function run(home, args, cwd) {
     // Planted positive. Without it every assertion above passes on a subject that
     // refuses unconditionally, which is a worse tool than the one being fixed.
     const h4 = makeHome(); const r4 = makeRepo(h4, 'someproj');
-    const ok = run(h4, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+    const ok = run(h4, ['--off', '--legacy', '--hours', '8', '--reason', 'overnight fleet run']);
     check('9g planted positive: --off with both arguments succeeds', ok.status === 0 && denies(r4),
         'exit ' + ok.status + ' stdout=' + JSON.stringify(ok.stdout));
+}
+
+// ---------- 9bis. --off is RETIRED, and the retirement is not unconditional
+//
+// This scenario exists because 9g is a planted positive guarding against "a
+// subject that refuses unconditionally", and the retirement below is exactly
+// the change that could turn this tool into one. So both halves are asserted:
+// the documented invocation refuses, AND the escape hatch still writes.
+//
+// The retirement is real rather than cosmetic — a Brain following the usage text
+// can no longer deny panels — and it is a speed bump rather than a wall, because
+// removing the write path would remove the only way to CREATE the state that
+// every restore scenario in this file depends on.
+{
+    const h = makeHome();
+    const repo = makeRepo(h, 'someproj');
+
+    // Fully specified, and still refused: nothing is missing except --legacy.
+    const retired = run(h, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+    check('9h a COMPLETE --off is refused now that it is retired', retired.status === 2,
+        'exit ' + retired.status);
+    check('9i the refusal points at the replacement, not just at itself',
+        /AWAY\.md/.test(retired.stderr || '') && /away-state/.test(retired.stderr || ''),
+        JSON.stringify((retired.stderr || '').slice(0, 120)));
+    check('9j it says the restore half is NOT retired, so nobody deletes a live deny',
+        /--on, --expire and --status are NOT retired/.test(retired.stderr || ''));
+    check('9k the refused run denied nothing', !denies(repo),
+        'a refusal that still writes is worse than no refusal');
+
+    // The control that keeps 9h honest: same argv plus --legacy, and it works.
+    // Without this, 9h passes against a --off that refuses for any reason at all.
+    const h2 = makeHome(); const r2 = makeRepo(h2, 'someproj');
+    const legacy = run(h2, ['--off', '--legacy', '--hours', '8', '--reason', 'overnight fleet run']);
+    check('9l planted positive: --legacy still writes, so 9h is about the retirement',
+        legacy.status === 0 && denies(r2), 'exit ' + legacy.status);
 }
 
 // ---------- 10. the deny is self-describing, beside the settings it applies to
@@ -421,7 +470,7 @@ function run(home, args, cwd) {
     const repo = makeRepo(home, 'someproj');
     const wt = makeWorktree(repo, 'a-worktree');
 
-    run(home, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+    run(home, ['--off', '--legacy', '--hours', '8', '--reason', 'overnight fleet run']);
 
     // THE WHOLE POINT. On 2026-08-27 five denies were found whose central marker
     // was gone, so nothing could say when they were set, by whom, or whether they
@@ -441,7 +490,7 @@ function run(home, args, cwd) {
 {
     const home = makeHome();
     const repo = makeRepo(home, 'someproj');
-    run(home, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+    run(home, ['--off', '--legacy', '--hours', '8', '--reason', 'overnight fleet run']);
 
     // Age it past its window by rewriting the record, then delete the central
     // marker to reproduce exactly what was found on disk that morning.
@@ -473,7 +522,7 @@ function run(home, args, cwd) {
     const home = makeHome();
     const stale = makeRepo(home, 'staleproj');
     const live = makeRepo(home, 'liveproj');
-    run(home, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+    run(home, ['--off', '--legacy', '--hours', '8', '--reason', 'overnight fleet run']);
 
     // Age ONLY staleproj. liveproj is the discriminating control: a sweep that
     // clears everything would satisfy 12a and is exactly the blind prune this
@@ -896,7 +945,7 @@ function plantSession(home, dir, minutesIdle) {
     const home = makeHome();
     const repo = makeRepo(home, 'someproj');
 
-    const bad = run(home, ['--off', '--hours', '8', '--reason', 'silencing ~/Code/a-private-thing overnight']);
+    const bad = run(home, ['--off', '--legacy', '--hours', '8', '--reason', 'silencing ~/Code/a-private-thing overnight']);
     check('21a a reason containing a path is refused', bad.status !== 0,
         'exit ' + bad.status + ' ' + (bad.stdout || '').slice(0, 200));
     check('21b the refused run denied nothing', !denies(repo));
@@ -906,7 +955,7 @@ function plantSession(home, dir, minutesIdle) {
 
     // The other half of the decision. A rule that refuses every reason would pass
     // 21a while making --off unusable, which is the same defect one level up.
-    const good = run(home, ['--off', '--hours', '8', '--reason', 'overnight fleet run']);
+    const good = run(home, ['--off', '--legacy', '--hours', '8', '--reason', 'overnight fleet run']);
     check('21e a reason that names no path is still accepted', good.status === 0,
         'exit ' + good.status + ' ' + (good.stderr || '').slice(0, 200));
     check('21f and it denied', denies(repo));
@@ -949,7 +998,21 @@ function plantSession(home, dir, minutesIdle) {
 
 // ------------------------------------------------------------------- report
 
-console.log('population: ' + (passed + failures.length) + ' assertions across 22 scenarios, subject '
+// DERIVED, not hand-maintained. It read a hardcoded `22` until 2026-09-02, and
+// it was already wrong by one before anything was added to this file: scenario
+// `4bis` existed and was never counted. A population line exists so a reader can
+// tell a real run from a no-op, and one that cannot move when the population
+// moves is the same silent-rot failure it was written to prevent — measured here
+// as 24 against a claim of 22.
+//
+// Counting the section headers in this file rather than the checks, because a
+// scenario is the unit a reader is being told about. `[0-9]+[a-z]*` on purpose:
+// `4bis` and `9bis` are real scenarios and a digits-only pattern drops them,
+// which is how the count went stale in the first place.
+const SCENARIOS = (fs.readFileSync(__filename, 'utf8')
+    .match(/^\/\/ -+ [0-9]+[a-z]*\./gm) || []).length;
+
+console.log('population: ' + (passed + failures.length) + ' assertions across ' + SCENARIOS + ' scenarios, subject '
     + path.relative(process.cwd(), SUBJECT));
 if (failures.length) {
     console.log('FAIL ' + failures.length + ', pass ' + passed);

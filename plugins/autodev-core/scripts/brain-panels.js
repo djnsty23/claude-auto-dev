@@ -417,6 +417,49 @@ function classifyUnaccounted(ctx) {
 }
 
 function turnOff() {
+    // RETIRED, 2026-09-02. The documented way to stop panels is now a declared
+    // AWAY window, and this path survives only so the RESTORE half stays
+    // testable and so a deny written by an earlier version can still be created,
+    // found and cleared.
+    //
+    // Why it is retired rather than tuned. Denying `AskUserQuestion` removes the
+    // CHANNEL; it does not answer on it. `rule-options-protocol` is always-on
+    // and tells every worker to end a substantive turn with a panel, so under a
+    // deny a worker with a question had exactly one legal move, and it was stop.
+    // `[measured 2026-09-02 01:06]` one session sat 50 minutes on a question
+    // whose answer was already visible in fleet state.
+    //
+    // The replacement returns a DECISION instead of removing the channel:
+    // `~/claude-memory/AWAY.md`, read by `scripts/away-state.js`, enforced in
+    // `hooks/panel-recommendation.js`. Its window expires without a writer, so a
+    // dead Brain cannot strand the fleet — which a deny could, and is why this
+    // file grew `--expire` and an unaccounted-deny report at all.
+    //
+    // `--legacy` is a deliberate speed bump, not a secret. Everything below this
+    // line is unchanged and still works; what changed is that following the
+    // documentation can no longer get you here.
+    if (!has('--legacy')) {
+        console.error('REFUSING: --off is retired.');
+        console.error('');
+        console.error('  It denied AskUserQuestion through permissions.deny, which removes the');
+        console.error('  channel rather than answering on it. A worker with a question then has');
+        console.error('  one legal move, and it is stop.');
+        console.error('');
+        console.error('  Declare an away window instead. A panel is HELD and the session is');
+        console.error('  handed the decision, and the window expires with no writer:');
+        console.error('');
+        console.error('    ~/claude-memory/AWAY.md');
+        console.error('      until: <ISO instant WITH a timezone, e.g. 2026-09-02T22:00:00Z>');
+        console.error('      <your words, verbatim>');
+        console.error('');
+        console.error('  Check it:   node plugins/autodev-core/scripts/away-state.js --status');
+        console.error('  Enforced:   plugins/autodev-core/hooks/panel-recommendation.js');
+        console.error('');
+        console.error('  --on, --expire and --status are NOT retired: they still find and clear');
+        console.error('  a deny written by an earlier version. Pass --legacy to write one anyway.');
+        process.exit(2);
+    }
+
     // A WINDOW AND A REASON ARE REQUIRED.
     //
     // `[stated 2026-08-27]` panels off is only correct while the coordinator is
@@ -781,9 +824,14 @@ else {
     status();
     console.log('');
     console.log('Usage:');
-    console.log('  --off --hours N --reason "why"   deny panels for a bounded window');
     console.log('  --on                             restore everything this tool set');
     console.log('  --expire                         clear ONLY denies past their window');
     console.log('  --status                         what is set, live vs expired vs unaccounted');
     console.log('  --repos a,b                      an explicit list rather than the default');
+    console.log('');
+    console.log('  --off                            RETIRED. Declare ~/claude-memory/AWAY.md');
+    console.log('                                   instead — a panel is held and the session');
+    console.log('                                   is handed the decision, and the window');
+    console.log('                                   expires without a writer.');
+    console.log('                                   Check: away-state.js --status');
 }
