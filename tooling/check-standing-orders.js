@@ -440,13 +440,20 @@ function selftest() {
   return bad ? 1 : 0;
 }
 
-if (process.argv.includes('--help')) {
-  console.log('Usage: check-standing-orders.js [holder.md] [--selftest]');
-  console.log('Validates that each standing order carries the four parts Q2 requires, plus Status.');
-  console.log(`Default holder: ${HOLDER}`);
-  process.exit(0);
-}
+// Exported so standing-order-wake.js reads orders through THIS parser rather
+// than a second copy of it. A wake that parsed the holder its own way could
+// fire an order the gate refuses, which is the one combination that must not
+// exist.
+module.exports = { parse, suspects, sections, fields, validate, statusWord, REQUIRED };
 
-process.exit(
-  process.argv.includes('--selftest') ? selftest() : run(HOLDER, new Date().toISOString().slice(0, 10))
-);
+if (require.main === module) {
+  if (process.argv.includes('--help')) {
+    console.log('Usage: check-standing-orders.js [holder.md] [--selftest]');
+    console.log('Validates that each standing order carries the four parts Q2 requires, plus Status.');
+    console.log(`Default holder: ${HOLDER}`);
+    process.exit(0);
+  }
+  process.exit(
+    process.argv.includes('--selftest') ? selftest() : run(HOLDER, new Date().toISOString().slice(0, 10))
+  );
+}

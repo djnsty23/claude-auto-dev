@@ -58,6 +58,15 @@ const SUBJECT_OVERRIDES = {
     // pushes was itself the unchecked one.
     'test-push-authorisation.js': ['tooling/check-push-authorisation.js'],
 
+    // Fifth time, 2026-09-02, and the prediction below held exactly. L2 needed a
+    // standing-order validator in tooling/, so its suite derived nothing and was
+    // reported UNCHECKED. Worth recording that this cost nothing: the UNCHECKED
+    // failure did its job, went red on the first full gate run, and named the
+    // fix. Under the old "nothing to stub" wording it would have been reported
+    // as a pass over a suite nobody had verified.
+    'test-standing-orders.js': ['tooling/check-standing-orders.js'],
+    'test-standing-order-wake.js': ['tooling/standing-order-wake.js'],
+
     // Fourth time, 2026-08-30, four at once: the codex-audit acceptance suites
     // all test tooling/ checkers, so all derived nothing. The pattern is now
     // structural - every acceptance test for a TOOLING gate lands here - and
