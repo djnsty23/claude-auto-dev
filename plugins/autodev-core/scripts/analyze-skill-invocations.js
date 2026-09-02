@@ -278,7 +278,13 @@ function report(r) {
 
 function selftest() {
     let fail = 0;
+    // `ran` exists so the count below is DERIVED. It read a literal `15` until
+    // 2026-09-02, which is a population that cannot move when the population
+    // does — the same defect found in test-brain-panels.js, where a hardcoded
+    // "22 scenarios" described a file carrying 24.
+    let ran = 0;
     const t = (label, cond, detail) => {
+        ran++;
         if (cond) console.log('ok   ' + label);
         else { fail++; console.log('FAIL ' + label + (detail ? ' - ' + detail : '')); }
     };
@@ -347,7 +353,7 @@ function selftest() {
     t('an unreadable inventory exits 2, not 0', err === 2, 'got ' + err);
 
     console.log('');
-    console.log('15 cases, ' + fail + ' failed');
+    console.log(ran + ' cases, ' + fail + ' failed');
     return fail ? 1 : 0;
 }
 
