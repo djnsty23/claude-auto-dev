@@ -25,6 +25,52 @@ const runValidate = (extraEnv) => {
     return spawnSync(process.execPath, [VALIDATE], { encoding: 'utf8', cwd: ROOT, env });
 };
 
+// Reclaim this suite's OWN orphaned fixtures before the baseline reads the tree.
+//
+// Every fixture below is planted, asserted against, and removed in a `finally`.
+// A `finally` does not run when the process is killed, so a timeout or a Ctrl-C
+// leaves the file on disk — and `validate` then FAILS on it for every LATER run,
+// because it scans untracked-but-not-ignored files. check-suites-can-fail reports
+// that as `RED  already failing`, which reads as a defect in this suite when
+// nothing is wrong with it at all. Measured 2026-09-02: a killed gate run left
+// zz-location-fixture.md behind and the next gate reported this suite RED while
+// `npm test`, `node tooling/test-validate.js` and `npm run validate` were all
+// green on the same tree.
+//
+// The pid in the name is what makes the cleanup safe rather than merely tidy. It
+// lets this sweep tell a DEAD run's litter from a LIVE peer's fixture, and
+// deleting the latter is precisely the failure check-suites-can-fail documents
+// at its own cleanNewUntracked: zone-scoped cleanup that removes a concurrent
+// session's files. It also makes collision impossible by construction rather
+// than unlikely, which is the standing rule for any planted value.
+const FIXTURE_OWNED = /^zz-(?:location|spawn)-fixture\.(\d+)\.(?:md|js)$/;
+const pidAlive = (pid) => {
+    // signal 0 tests for existence without delivering anything. EPERM means the
+    // process exists and is not ours, which still counts as alive.
+    try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+};
+const sweepOrphanFixtures = (dir) => {
+    let names;
+    try { names = fs.readdirSync(dir); } catch { return 0; }
+    let removed = 0;
+    for (const name of names) {
+        const m = FIXTURE_OWNED.exec(name);
+        if (!m) continue;
+        const pid = Number(m[1]);
+        if (pid === process.pid || pidAlive(pid)) continue;
+        try { fs.rmSync(path.join(dir, name), { force: true }); removed++; } catch { /* the baseline below still reports it */ }
+    }
+    return removed;
+};
+const HOOKS_DIR = path.join(ROOT, 'plugins', 'autodev-core', 'hooks');
+const reclaimed = sweepOrphanFixtures(ROOT) + sweepOrphanFixtures(HOOKS_DIR);
+if (reclaimed) console.error(`  [reclaimed] ${reclaimed} orphaned fixture(s) from a run that died before its cleanup`);
+
+// Fixture paths carry the owning pid, so two concurrent runs of this suite in one
+// tree cannot overwrite or delete each other's files.
+const LOCATION_FIXTURE = `zz-location-fixture.${process.pid}.md`;
+const SPAWN_FIXTURE = `zz-spawn-fixture.${process.pid}.js`;
+
 // Baseline: the repo must be green, or nothing below distinguishes anything.
 const base = runValidate();
 check('validate is green on a clean tree', base.status === 0);
@@ -131,8 +177,8 @@ check('removing the backup clears the failure', after.status === 0);
 // exit-1 assertion would then pass for the wrong reason — a mutation caught by a
 // different gate proves nothing about the gate under test.
 {
-    const hooksDir = path.join(ROOT, 'plugins', 'autodev-core', 'hooks');
-    const fixture = path.join(hooksDir, 'zz-spawn-fixture.js');
+    const hooksDir = HOOKS_DIR;
+    const fixture = path.join(hooksDir, SPAWN_FIXTURE);
     const spawnLine = (out) => (out || '').split('\n').find((l) => /Hook spawns|hook spawn site/.test(l)) || '';
 
     // Baseline: the real hooks are all hidden, and the PASS line prints the
@@ -162,7 +208,7 @@ check('removing the backup clears the failure', after.status === 0);
     const exposedLine = spawnLine(exposed.stdout);
     check('an unhidden hook spawn is reported as a FAIL', /^\[FAIL\]/.test(exposedLine.trim()));
     check('  and names the offending file and line',
-        (exposed.stdout || '').split('\n').some((l) => /zz-spawn-fixture\.js:2\s+execSync/.test(l)));
+        (exposed.stdout || '').split('\n').some((l) => l.includes(`${SPAWN_FIXTURE}:2`) && /execSync/.test(l)));
     check('adding windowsHide clears that finding',
         /^\[PASS\].*Hook spawns:/.test(spawnLine(hidden.stdout).trim()));
 }
@@ -184,7 +230,7 @@ check('removing the backup clears the failure', after.status === 0);
     // and "the home path is absent" would then be true whether or not the line
     // was echoed. The sentinel is not a secret and is not on any denylist.
     const SENTINEL = 'ZZ_LINE_CONTENT_SENTINEL';
-    const fixture = path.join(ROOT, 'zz-location-fixture.md');
+    const fixture = path.join(ROOT, LOCATION_FIXTURE);
     let planted;
     try {
         fs.writeFileSync(fixture,
@@ -205,12 +251,12 @@ check('removing the backup clears the failure', after.status === 0);
     // calling a home-path finding a private name sent readers after the wrong
     // thing. Anchoring on the fixture keeps the test about the behaviour.
     const line = (planted.stdout || '').split('\n')
-        .find((l) => l.includes('zz-location-fixture.md')) || '';
+        .find((l) => l.includes(LOCATION_FIXTURE)) || '';
 
     check('an untracked file carrying a home path makes validate FAIL', planted.status === 1);
     check('  and the finding is reported as a FAIL', /^\[FAIL\]/.test(line.trim()));
     check('  and it names the file and the line number',
-        line.includes('zz-location-fixture.md:2'));
+        line.includes(`${LOCATION_FIXTURE}:2`));
     check('  and it reports the kind the checker assigned, not the check\'s own name',
         /home path/.test(line) && !/private project name/.test(line));
     // The load-bearing one. Locations are safe in a public log; the line is not.
@@ -222,6 +268,44 @@ check('removing the backup clears the failure', after.status === 0);
         cleanNoCi.status === 0 && planted.status === 1,
         'without the fixture the tree already fails under the same env, so this '
         + 'case proves nothing about the fixture');
+}
+
+// The orphan sweep at the top of this file. It exists because a killed run's
+// leftover fixture failed `validate` for every later run, and check-suites-can-fail
+// reported THIS suite as "already failing" when nothing was wrong with it.
+//
+// The dead pid is DERIVED, never guessed: a child is spawned and waited on, so it
+// is dead by construction at the moment it is used. A hardcoded "unlikely" pid is
+// the planted-negative failure this repo already documents — it is only probably
+// absent, and it silently stops testing anything the day the number is reused.
+{
+    const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+    const deadPid = dead.pid;
+    const livePid = process.ppid; // our own parent: alive as long as we are
+
+    const orphan = path.join(ROOT, `zz-location-fixture.${deadPid}.md`);
+    const peers = path.join(ROOT, `zz-location-fixture.${livePid}.md`);
+    try {
+        fs.writeFileSync(orphan, '# litter from a run that was killed\n');
+        fs.writeFileSync(peers, '# a LIVE peer run is using this\n');
+
+        const removed = sweepOrphanFixtures(ROOT);
+
+        check('the sweep reclaims a dead run\'s orphaned fixture', !fs.existsSync(orphan));
+        // The safety half, and the more important one. Deleting a concurrent
+        // session's files is the exact failure check-suites-can-fail documents
+        // at its own cleanNewUntracked, so this must never widen into a
+        // "remove every zz- file" sweep.
+        check('  and LEAVES a live peer\'s fixture alone', fs.existsSync(peers));
+        check('  and reports how many it reclaimed', removed === 1);
+        // Control: without it, both assertions above would also pass on a sweep
+        // that did nothing at all, because the orphan would simply never exist.
+        check('  control: the orphan really was there to be reclaimed',
+            deadPid > 0 && livePid > 0 && deadPid !== livePid);
+    } finally {
+        fs.rmSync(orphan, { force: true });
+        fs.rmSync(peers, { force: true });
+    }
 }
 
 let pass = 0, fail = 0;

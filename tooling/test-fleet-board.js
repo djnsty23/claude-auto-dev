@@ -275,12 +275,46 @@ function freePort() {
     });
 }
 
+// freePort() binds 0, reads the number the OS assigned, then CLOSES. The child
+// therefore binds a port this process no longer holds, and anything on the
+// machine can take it in that window. On a loaded box it does: the child dies
+// with EADDRINUSE and every assertion below fails for a reason that has nothing
+// to do with the board.
+//
+// Measured 2026-09-02: this suite passed standalone (62/62) while
+// check-suites-can-fail reported it `RED  already failing` in the same tree,
+// with ~116 node processes running. Same signature as a leftover fixture, and a
+// completely different cause - so the shared symptom is "a baseline fails for an
+// ambient reason", not one bug.
+//
+// Only EADDRINUSE is retried. A board that dies for any other reason must still
+// fail the suite: a broader catch would hide precisely the startup defects this
+// file exists to catch, which is the "narrowing a filter hides what it was
+// compensating for" trap in reverse.
+const ADDR_IN_USE = /EADDRINUSE/;
+const START_ATTEMPTS = 5;
+
 /**
  * Start the board and wait for a POSITIVE signal that it is up - the second of
  * the two lines it prints, which lands only after the boot scan has returned.
  * Waiting on a quiet period instead would conclude before the scan began.
+ *
+ * Retries only a port collision, and only with a FRESH port each time.
  */
 async function startBoard(dir, args, env) {
+    let last;
+    for (let attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
+        last = await startBoardOnce(dir, args, env);
+        const lost = last.died() && ADDR_IN_USE.test(last.stderr());
+        if (!lost) return last;
+        if (attempt < START_ATTEMPTS) {
+            console.error(`  [retry ${attempt}/${START_ATTEMPTS - 1}] port ${last.port} was taken between freePort() and bind; retrying on a fresh one`);
+        }
+    }
+    return last;
+}
+
+async function startBoardOnce(dir, args, env) {
     const port = await freePort();
     const child = spawn(process.execPath,
         [path.join(dir, 'fleet-board.js'), '--port', String(port), ...(args || [])], {
@@ -523,6 +557,37 @@ function get(port, p) {
             check('the process is still alive after two failed scans', !b.died(),
                 'server exited; stderr=' + JSON.stringify(b.stderr()));
             await b.stop();
+        }
+
+        // The retry above is worthless if ADDR_IN_USE never matches what the
+        // child actually prints, and that is a silent failure: the suite would
+        // simply go on failing intermittently while the guard sat there looking
+        // correct. So hold a port OURSELVES and make the board collide with it,
+        // rather than trusting that node's message still says EADDRINUSE.
+        {
+            const held = net.createServer();
+            const takenPort = await new Promise((res, rej) => {
+                held.on('error', rej);
+                held.listen(0, '127.0.0.1', () => res(held.address().port));
+            });
+            try {
+                const child = spawn(process.execPath,
+                    [path.join(REAL_DIR, 'fleet-board.js'), '--port', String(takenPort)],
+                    { env: { ...process.env, USERPROFILE: HOME, HOME, APPDATA: APPDIR,
+                        AUTODEV_FLEET_DIR: BEATS, AUTODEV_FLEET_PUBLISH_DIR: PUBLISHED, BOARD_THROW: '' } });
+                children.push(child);
+                let err = '';
+                child.stderr.on('data', (d) => { err += d; });
+                await new Promise((r) => child.on('close', r));
+                check('a board whose port is already held dies rather than serving',
+                    err.length > 0, 'the child exited silently, so nothing proves it collided');
+                // The load-bearing one. If node ever reworded this, the retry
+                // would stop firing and nothing else would say so.
+                check('  and ADDR_IN_USE matches the message it really prints',
+                    ADDR_IN_USE.test(err), `stderr was: ${err.slice(0, 200)}`);
+            } finally {
+                await new Promise((r) => held.close(r));
+            }
         }
 
     } finally {
