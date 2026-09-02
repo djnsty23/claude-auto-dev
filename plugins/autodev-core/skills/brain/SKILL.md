@@ -938,6 +938,52 @@ session with no new work needs no watch; the message that wakes it is the moment
 to subscribe. Do not poll `ListAgents`, and do not send "are you done?"
 messages — the subscription replaces both.
 
+## Idle work is harness self-evaluation, and it is measured rather than felt
+
+`[stated 2026-09-03]` the operator: *"evaluate our harness when you have time on
+all levels, multiple times if needed. that should be default brain idle work in
+my mind."*
+
+So a Brain with a drained queue does NOT stop and does not invent coordination.
+It audits the harness. That is the one kind of work that is always available,
+never blocks on a peer, and compounds.
+
+**Start from a COUNT of your own rule violations, not from a reading of the
+rules.** `[measured 2026-09-03]` in one overnight session: 340 tool calls, 218 of
+them Bash, and **10 reads of `$?` after a pipe** - a trap written in that
+operator's own rules, which the same session quoted at two peers while
+committing it. The rule was present, correct, and did not fire.
+
+That is the shape of nearly every harness defect worth finding: not a missing
+rule, an unfired one. So the audit questions, in order of yield:
+
+1. **Which written rule did I break this session, and how many times?** Grep your
+   own transcript for the mechanical ones: `$?` after a pipe, `git add -A`,
+   `--no-verify`, a probe reporting a zero with no known-positive control, a
+   claim about a peer's branch. A count is a finding; an impression is not.
+2. **Which gate is invoked by nothing?** A detector that exists and is never run
+   reports the same as a clean one. `find-orphan-checks.js` answers this.
+3. **Which agent is invoked by nothing?** Same failure one layer up. A specialist
+   that is never called is indistinguishable from one that finds nothing.
+4. **What is loaded into every request that does not earn it?** Always-on
+   instruction bytes and skill descriptions are paid on every call forever.
+5. **Which claim in a rules file is now false?** Anything with a version, a step
+   count, or a repo state rots silently. Re-measure and date it.
+
+**Fix the DETECTOR, not the instance.** A rule broken ten times in one session is
+not a discipline problem, it is a missing gate. The durable output of an audit
+round is a check that fails, with a mutation test proving it can.
+
+**Prefer a fresh session for the fix.** An audit run by the session that made the
+mistakes inherits the context that produced them, and a long thread is where
+wrong causal diagnoses cluster. Spawn the fix; keep the audit shallow.
+
+**Research is part of this and needs a different tool.** Upstream tooling changes
+faster than any rules file tracks. A read-only research agent, given the web, can
+answer "what shipped in this toolchain that we should adopt" without spending the
+coordinator's context. Ask it for CHANGES SINCE a dated claim in our own files,
+so the output is a diff against what we believe rather than a survey.
+
 ## Never, regardless of who asks
 
 - **Never relay an authorisation, and never attribute a decision to the operator
