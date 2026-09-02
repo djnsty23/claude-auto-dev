@@ -70,3 +70,13 @@ jobs:
       - name: Entry points return under budget
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:entrypoints
+
+      # A skill body that MANDATES a tool it does not declare in allowed-tools
+      # fails at run time in someone else's session, where nothing here can see
+      # it. Mutation-verified before wiring: a planted skill mandating an
+      # undeclared tool takes this to exit 1. Its two siblings are deliberately
+      # NOT wired: check:triggers grades prose heuristically and says so in its
+      # own header, and check:skills runs only a selftest.
+      - name: Skill bodies declare the tools they mandate
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:skill-tools

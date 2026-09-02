@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "node tooling/test-all.js",
-    "gate": "npm test && npm run check:suites && npm run check:population && npm run check:entrypoints",
+    "gate": "npm test && npm run check:suites && npm run check:population && npm run check:entrypoints && npm run check:skill-tools",
     "validate": "node tooling/validate.js",
     "bump": "node tooling/bump.js",
     "check:suites": "node tooling/check-suites-can-fail.js",
