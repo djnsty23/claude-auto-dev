@@ -59,3 +59,14 @@ jobs:
       - name: Population and control reporting (advisory)
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:population
+
+      # Probes every script entry point with --help under a 10s budget, in a
+      # scratch copy of the tree so a script that ignores the flag and mutates
+      # cannot touch the source. It grades HANGS only: a non-zero exit is
+      # reported, never failed on, because plenty of scripts answer --help with
+      # exit 1 or 2. Wired here on 2026-09-02 after an audit round found the
+      # script defined, its suite running, and the gate itself invoked by
+      # nothing, which is a detector that reports the same as a clean one.
+      - name: Entry points return under budget
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:entrypoints
