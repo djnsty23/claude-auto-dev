@@ -585,7 +585,46 @@ somebody deliberately says the work is done.
 `ready_for_review` MUST be in the event list. Without it a draft marked ready
 triggers nothing and the PR sits with an EMPTY CHECKS LIST, which reads exactly
 like a clean one — the same failure as a repo with no CI at all, rebuilt
-deliberately.
+deliberately. It is not optional through inattention: `ready_for_review` is NOT
+one of GitHub's default `pull_request` activity types, which are `opened`,
+`synchronize` and `reopened`.
+
+**THE PRECONDITION THIS PASSAGE LEFT UNSTATED, AND IT COST TEN BRIEFS: a
+draft-skip is a `pull_request`-EVENT control, so it does nothing about a `push:`
+trigger.** A push to a draft branch fires every `push`-triggered workflow at full
+cost. Where a repo has both triggers, an active-looking guard is INERT rather
+than merely partial.
+
+`[measured 2026-09-03]` a Brain read the paragraph above as a description of how
+the fleet was already wired and told ten spawned sessions to push freely. The
+survey it ran afterwards, when a peer refused the claim and read its own workflow
+file:
+
+| repo | guard | `push:` trigger | is "push freely" true |
+|---|---|---|---|
+| A | active, `ready_for_review` in types | none | **yes** |
+| B | active | unconditional | no, the guard is inert |
+| C | added, then WITHDRAWN after measurement | yes | no, and deliberately so |
+| D | none | `on: [push, pull_request]` | no, and it bills twice per push |
+| E | none | — | no |
+| F | no workflows at all | — | moot |
+
+One repo of six matched the unstated precondition. The direction of the error is
+what made it expensive: the operator had named CI spend as a concern in that same
+session, and the advice told ten sessions to push MORE often in five repos where
+every push bills.
+
+**So before recommending this pattern anywhere, read that workflow's `on:` block
+and confirm it is `pull_request`-only.** Reading the guard alone cannot tell you,
+because the guard looks identical either way. And note repo C: a repo that added
+draft-skip and then withdrew it after measuring has already run this experiment,
+so read its reasoning before re-adding it.
+
+The lesson generalises past CI. **This document is written in the imperative and
+supplies exact YAML, which is the register of a description even when the intent
+is a prescription.** A reader cannot tell them apart from tone. Anything here
+that prescribes a pattern the fleet may not have adopted yet should say so, and
+say what to check.
 
 **And the cost of getting a CI trigger wrong is measured, not theoretical.**
 `[measured 2026-08-29]` one repo's test gate was switched off after burning 3,148
