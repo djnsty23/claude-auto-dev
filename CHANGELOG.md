@@ -1,5 +1,65 @@
 # Changelog
 
+## [8.152.0] - 2026-09-02
+
+### Added: a spine, so 52 skills have an order
+
+A skill library has two failure modes and only one gets discussed. The
+discussed one is a missing skill. The other is many skills and no ordering,
+where the model picks by description similarity and the pick is a lottery.
+`check-skill-triggers.js` measures the standing cost of the set at ~19.6 KB
+resident every session; nothing measured what fires first.
+
+`rule-workflow-spine` names four steps and the terminal condition that ends
+each: isolate, build, prove, ship. It is UNCONDITIONAL (no `paths:` key),
+which `check-rules-reachable.js` documents as the only frontmatter shape
+loading at session start. `core` was the obvious home and is wrong: it is
+path-gated on `**/prd.json`, so it arrives after step 1 has been skipped.
+
+`isolate` makes the worktree a step rather than advice spread across 11
+skills. `prove` captures the before state while the defect still reproduces,
+which is the only moment it is free, into `.claude/evidence/<slug>/` rather
+than `.claude/screenshots/`, which is gitignored and cleaned each run.
+
+### Fixed: four defects the spine's own dry-run found
+
+Running it once against a real change broke four things in prose written two
+hours earlier that read as correct on every re-read, and none was visible
+without executing the step. Branching from `origin/main` is wrong when the
+work sits on unpushed commits. A branch name is not evidence about its
+content: the scope check fired on `fix/always-on-without-a-trigger`, which
+had already landed and whose tip was a telemetry path fix. The
+`node_modules` step was unconditional in a repo with zero dependencies. And
+`.claude/evidence/` is tracked, so evidence left uncommitted dirties the tree
+and any gate refusing a dirty tree then refuses to run at all.
+
+### Added: rule-gate-integrity section 8, a probe bound to its command form
+
+`git merge-tree` has two spellings, each discriminated by exactly one probe,
+and that probe reports clean on the other. The 3-arg form exits 0 with
+conflicts present and indents its markers inside a diff hunk, so a
+line-anchored grep counts zero. `--write-tree` prints no markers at all and
+signals by exit status. `changed in both` fires on a merge that is clean.
+Two sessions found this from opposite ends and the joint result appeared only
+because both published the marker count, the exit code and a known-negative
+control together.
+
+### Fixed: .claude/archives was blocking the gate entirely
+
+`npm run gate` exited 2 without `check:suites` running a single suite, on one
+untracked file nobody owned: a three-day-old worktree quick-resume patch.
+Verification had been blocked for every session in this clone since 2026-08-30,
+and it looks complete right up to the refusal. A `.patch` in a PUBLIC repo is
+also a full diff of whatever branch produced it.
+
+### Fixed: four skill descriptions over the 320-char budget
+
+overlong 4 to 0; standing cost 19,815 to 19,618 bytes. Cut from the summary
+half only, since the condition clause is what fires a skill. The controls that
+would catch a bad trim both held: "names no condition" stayed 0 of 66 and
+"no when_to_use field" stayed 0 of 66.
+
+
 ## [8.151.0] - 2026-09-02
 
 ### Added: every shipped script must return on --help, gated over the population
