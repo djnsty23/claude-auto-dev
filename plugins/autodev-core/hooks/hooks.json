@@ -6,14 +6,18 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js"
+            ],
             "timeout": 15,
             "statusMessage": "Loading sprint context..."
           },
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/agent-browser-cleanup.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/agent-browser-cleanup.js"
+            ],
             "timeout": 10
           }
         ]
@@ -25,13 +29,17 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-image-scan.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-image-scan.js"
+            ],
             "timeout": 3
           },
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/inbox-notify.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/inbox-notify.js"
+            ],
             "timeout": 3
           }
         ]
@@ -44,7 +52,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-filter.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-filter.js"
+            ],
             "timeout": 5
           }
         ]
@@ -55,7 +65,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/panel-recommendation.js"]
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/panel-recommendation.js"
+            ]
           }
         ]
       },
@@ -65,7 +77,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/coordinator-write-guard.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/coordinator-write-guard.js"
+            ],
             "timeout": 5
           }
         ]
@@ -78,7 +92,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-typecheck.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-typecheck.js"
+            ],
             "timeout": 60
           }
         ]
@@ -89,7 +105,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.js"
+            ],
             "timeout": 3
           }
         ]
@@ -102,7 +120,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.js"
+            ],
             "timeout": 3
           }
         ]
@@ -114,9 +134,20 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-auto-check.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/stop-auto-check.js"
+            ],
             "timeout": 5,
             "statusMessage": "Checking auto mode..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/stop-brain-report.js"
+            ],
+            "timeout": 5,
+            "statusMessage": "Checking for unreported work..."
           }
         ]
       }
@@ -127,7 +158,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-failure-note.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/stop-failure-note.js"
+            ],
             "timeout": 5
           }
         ]
@@ -139,7 +172,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.js"
+            ],
             "timeout": 5,
             "statusMessage": "Saving sprint state..."
           }
@@ -152,7 +187,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/post-compact.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/post-compact.js"
+            ],
             "timeout": 5,
             "statusMessage": "Restoring sprint state..."
           }
@@ -165,7 +202,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/instructions-loaded.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/instructions-loaded.js"
+            ],
             "timeout": 5
           }
         ]
