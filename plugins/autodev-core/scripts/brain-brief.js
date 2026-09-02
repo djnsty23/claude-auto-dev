@@ -333,6 +333,29 @@ function sectionFleet(fleet) {
     say('              ' + p.blocked + ' blocked on an unanswered panel, ' +
         p.addressable + ' addressable, ' + p.withPanels + ' have ever raised a panel');
 
+    // Auto-archive-after-PR-merge ends the session that merged, removes its
+    // worktree and deletes its branch - including a Brain that merely merged
+    // someone else's PR, which is ordinary Brain work. brain/SKILL.md says READ
+    // THE SETTING, NEVER ASSUME IT, and nothing in this boot path did.
+    //
+    // It still does not, and this line says so rather than faking it. The
+    // obvious test - a row that is archived beside a MERGED pr - CANNOT FIRE
+    // here: `[measured 2026-09-02]` isArchived is false for all 152 sessions
+    // scanFleet returns, and 0 of 12 local session records carry the key at
+    // all, because archiving removes a session from the local store rather than
+    // flagging it. A check that cannot fire would print a reassuring line
+    // forever, which is worse than printing nothing.
+    //
+    // Same measurement explains why the three `!s.isArchived` filters in this
+    // file exclude nothing today. They are correct and inert.
+    const archivedSeen = all.filter((s) => s.isArchived).length;
+    say('  auto-archive-after-merge: NOT DETERMINABLE from local records - ' + archivedSeen +
+        ' of ' + all.length + ' scanned sessions carry the archived flag, because archiving ' +
+        'removes a session from the local store rather than flagging it.');
+    say('     Read it with list_sessions(include_archived: true) and look for isArchived beside');
+    say('     a MERGED prState. If it is on, merging a PR ends the session that merged, so');
+    say('     capture follow-up work BEFORE you merge. Do not read this line as "off".');
+
     const byState = new Map();
     for (const s of live) byState.set(s.state, (byState.get(s.state) || 0) + 1);
     const states = [...byState.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => k + ' ' + v);
