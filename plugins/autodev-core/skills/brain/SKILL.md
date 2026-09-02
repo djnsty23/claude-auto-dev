@@ -499,6 +499,25 @@ reference must name its artifact; nothing is done until something reaches it.
 Give `cwd` the repo path, write `title` as an imperative under 60 characters,
 and put in `tldr` what the session will do in plain words.
 
+**To make a session RUN a skill, the message must be the bare word and nothing
+else.** `[measured 2026-08-25]` The triggers are already exactly one word:
+`audit` is registered as *invoked when the user says "audit"*, and `test`,
+`brainstorm` and `deploy` are the same shape. What never happens is anyone
+sending the word alone. Across the local transcripts `audit` appears 3,199
+times, `test` 20,564 and `design` 6,824, every one inside a sentence, where it
+reads as prose rather than as an invocation, and the skill does not fire.
+
+So a paragraph-shaped dispatch that says "please audit the auth module" invokes
+nothing, however clear it is to a human. Send `audit`, on its own, as the whole
+message. A one-word message carries no object, so the skill has to derive its
+subject from context, and that is a requirement on the skill body rather than a
+reason to pad the message.
+
+Note this cuts against the standalone-prompt rule directly above it, and both
+are right for different channels: a spawn_task `prompt` starts a session that
+saw nothing and must carry everything, while a bare word sent to a session that
+already has context is what makes a skill load at all.
+
 **Spawn a TIER, not a backlog — three or four chips, then stop.** `[stated
 2026-08-29]` the operator, after nine went out inside ten minutes: *"we spawned
 many sessions, so be aware of how many you recommend spawning at a time. might
