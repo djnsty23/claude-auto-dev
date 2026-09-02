@@ -151,3 +151,27 @@ column plus this session's transcript for the latter.
 `--fixture-window` and `--fixture-now` with a scratch `--state`. Hand-seeding
 samples does not work, because a `windowStart` mismatch clears the sample array
 (line 264), and both arms of the experiment then return identical output.
+
+## L2 surveyed, not built, 2026-09-02
+
+`STANDING-ORDERS.md` does not exist. The three queue scripts do. And L2's
+acceptance names `check-push-authorisation.js` as the gate that must refuse an
+order with no verbatim operator words, which it cannot do: it reads only
+`plugins/*/skills/*/SKILL.md`. C4 needs a NEW validator over the holder file,
+checking the four parts Q2 specified (verbatim words, date, condition, holding
+session).
+
+**Start L2 in a fresh session.** It is a new file plus a new gate plus a suite,
+and this session reached 457,833 tokens.
+
+**Before starting any remaining lane, re-read its acceptance test against what
+its probe actually prints.** Three of three executed lanes found their own
+acceptance wrong in the same way, so treat it as the default rather than the
+exception.
+
+**Bonus finding, with its population:** 38 npm aliases are defined and **21 are
+invoked from nowhere**, measured across package.json, every workflow and 164
+scripts. Not 21 defects: some are deliberately manual (`bump`, `radar`,
+`usage:both`), two are advisory by design. But `find-orphan-checks.js` calls
+every one of them reachable, because a package.json mention counts as a
+reference, so this class can grow forever without the detector noticing.
