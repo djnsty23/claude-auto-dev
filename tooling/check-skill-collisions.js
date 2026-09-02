@@ -65,8 +65,11 @@ const MIN_TOKEN_LEN = 5;
 // its entry: an entry naming a skill that no longer exists is reported as
 // STALE, so the map cannot rot into a blanket exemption.
 //
-// Triaged 2026-09-03, first run, 3 of 3 candidates cleared and 0 requiring a
-// description change. That is a finding about the metric as much as the corpus:
+// [measured 2026-09-03: node tooling/check-skill-collisions.js --list]
+//   66 skills with a description, 2145 pairs compared, 105 words appearing in
+//   exactly 2 descriptions, 3 pairs reported. All 3 read and cleared, 0 needing
+//   a description change. Re-run that command rather than trusting these
+//   numbers; the corpus grows and every one of them moves with it. That is a finding about the metric as much as the corpus:
 // rare shared words locate pairs built from one TEMPLATE, which correlates with
 // competing for a situation without being the same property.
 const TRIAGED = new Map([
