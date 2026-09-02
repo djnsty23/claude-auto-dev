@@ -38,6 +38,24 @@ const MANIFEST = path.join(HOME, '.claude', 'plugins', 'installed_plugins.json')
 
 const PLUGINS = ['autodev-core', 'autodev-memory', 'autodev-stack'];
 
+// --pre-release: the source is SUPPOSED to be ahead of the install before a
+// push, so gate:release chaining this check could never pass. That is worse
+// than no check: a gate that always fails at the one moment you must run it
+// teaches people to skip it. With the flag, an install merely BEHIND the source
+// is INFO. Every other mismatch, including an install AHEAD of the source or a
+// sha that disagrees, still FAILs, because those mean the code you edited is
+// not the code that runs and no push fixes them.
+const PRE = process.argv.includes('--pre-release');
+
+const cmpV = (a, b) => {
+    const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+        const x = pa[i] || 0, y = pb[i] || 0;
+        if (x !== y) return x < y ? -1 : 1;
+    }
+    return 0;
+};
+
 let fail = 0;
 const log = (tag, msg) => {
     console.log('[' + tag + '] ' + msg);
@@ -122,8 +140,11 @@ for (const p of PLUGINS) {
 
     if (!cloneV) log('WARN', p + ': no marketplace clone copy — installed from elsewhere?');
     else if (srcV && cloneV !== srcV) {
-        log('FAIL', p + ': clone is at ' + cloneV + ', source at ' + srcV
-            + ' — run: claude plugin marketplace update autodev');
+        const behind = PRE && cmpV(cloneV, srcV) < 0;
+        log(behind ? 'INFO' : 'FAIL', p + ': clone is at ' + cloneV + ', source at ' + srcV
+            + (behind
+                ? ', expected before publishing; the clone advances on push plus marketplace update'
+                : ' — run: claude plugin marketplace update autodev'));
     }
 
     if (!pin) {
@@ -131,6 +152,12 @@ for (const p of PLUGINS) {
             log('FAIL', p + ': declared by this repo but absent from the manifest — the plugin'
                 + ' is not installed, which the old cache-scan reported as clean');
         }
+        continue;
+    }
+    if (srcV && pin.version !== srcV && PRE && cmpV(pin.version, srcV) < 0) {
+        log('INFO', p + ': active pin is ' + pin.version + ', source is ' + srcV
+            + ', expected before publishing; run check:runtime with no flag after'
+            + ' the push and the plugin update');
         continue;
     }
     if (srcV && pin.version !== srcV) {

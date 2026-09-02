@@ -93,8 +93,14 @@ function buildHome(name, installedPlugins, extraCoreVersion) {
     return home;
 }
 
-function run(home) {
-    return spawnSync(process.execPath, [CHECK], {
+const nextVersion = (version) => {
+    const parts = version.split('.').map(Number);
+    parts[1] += 1; parts[2] = 0;
+    return parts.join('.');
+};
+
+function run(home, args = []) {
+    return spawnSync(process.execPath, [CHECK, ...args], {
         cwd: ROOT,
         env: { ...process.env, USERPROFILE: home, HOME: home },
         encoding: 'utf8',
@@ -125,6 +131,31 @@ try {
     check('an inert newest cache cannot hide an older active core pin',
         stale.status === 1 && stale.signal === null && !stale.error && !stale.stderr.trim(),
         detail(stale));
+
+    // --pre-release: an install BEHIND the source is the normal state before a
+    // push, so gate:release could never pass while it counted as a failure.
+    // The control is the SAME fixture without the flag, which must still fail,
+    // otherwise a passing run would prove the fixture harmless rather than the
+    // flag effective.
+    const preBehind = run(staleHome, ['--pre-release']);
+    check('--pre-release passes an install merely BEHIND the source',
+        preBehind.status === 0 && preBehind.signal === null && !preBehind.error,
+        detail(preBehind));
+    check('control: the same fixture WITHOUT the flag still fails',
+        stale.status === 1,
+        detail(stale));
+    check('  and the behind line is reported as INFO, not dropped',
+        preBehind.stdout.includes("[INFO]") && preBehind.stdout.includes("active pin is"),
+        'stdout had no INFO pin line');
+
+    // The flag must not blanket-pass. An install AHEAD of the source still
+    // means the code you edited is not the code that runs, and no push fixes it.
+    const aheadPins = { ...versions, 'autodev-core': nextVersion(versions['autodev-core']) };
+    const aheadHome = buildHome('ahead-pin', aheadPins);
+    const preAhead = run(aheadHome, ['--pre-release']);
+    check('--pre-release still FAILS an install AHEAD of the source',
+        preAhead.status === 1 && preAhead.signal === null && !preAhead.error,
+        detail(preAhead));
 
     const coreOnlyHome = buildHome('core-only', {
         'autodev-core': versions['autodev-core'],
