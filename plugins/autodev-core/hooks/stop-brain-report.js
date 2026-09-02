@@ -80,7 +80,7 @@ function readJson(p) {
 /** HEAD sha for `cwd`, or null when this is not a git repo or git is unavailable. */
 function headSha(cwd) {
     try {
-        const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8', timeout: 3000 });
+        const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8', timeout: 3000, windowsHide: true });
         if (r.status !== 0) return null;
         const s = (r.stdout || '').trim();
         return /^[0-9a-f]{7,40}$/.test(s) ? s : null;
@@ -93,7 +93,7 @@ function headSha(cwd) {
 function aheadOfUpstream(cwd) {
     try {
         const r = spawnSync('git', ['rev-list', '--count', '@{upstream}..HEAD'],
-            { cwd, encoding: 'utf8', timeout: 3000 });
+            { cwd, encoding: 'utf8', timeout: 3000, windowsHide: true });
         if (r.status !== 0) return null;          // no upstream is normal, not an error
         const n = Number((r.stdout || '').trim());
         return Number.isFinite(n) ? n : null;
@@ -105,7 +105,7 @@ function aheadOfUpstream(cwd) {
 function branchName(cwd) {
     try {
         const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'],
-            { cwd, encoding: 'utf8', timeout: 3000 });
+            { cwd, encoding: 'utf8', timeout: 3000, windowsHide: true });
         return r.status === 0 ? (r.stdout || '').trim() : null;
     } catch {
         return null;

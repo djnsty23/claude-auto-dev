@@ -81,23 +81,20 @@ Nothing here is blocked on anything I can do alone.
 
 ## Fleet, as of 02:07
 
-- Open PRs: fatboyslim 6, qr 1, spotivibly 1, afk-farm 1, claude-auto-dev 0.
-- Panels DENIED across 30 locations until **05:26:23Z (08:26 local)**. Restore
-  with `brain-panels.js --on`, or `--expire` if it is past that and still set.
-- 83 stranded commits bundled to `~/claude-memory/rescue/` (fatboyslim 5,
-  growceanu 48 + 28 subset, Shopify 2 in `Downloads/code/_rescue`, client work
-  deliberately not in the mirror). growceanu's branch reached origin separately.
+Per-repo counts, panel-deny locations and the rescue-bundle inventory are NOT
+here: this repo is public, and naming other repositories fails its own test —
+would this sentence still be true and useful on a machine that is not this one?
+They live in `~/claude-memory/RESUME-fleet-2026-09-03.md`, which is on the
+backup allowlist and survives a reinstall.
+
+What belongs here, because it is about THIS repo:
+
+- Panels are denied fleet-wide until **05:26:23Z**. Restore with
+  `brain-panels.js --on`, or `--expire` if it is past that and still set.
 - Standing instruction from the operator, 2026-09-03: **check on peers every turn
   while autobrain is on, even when interrupted.**
-
-## Only the operator can do these
-
-1. **afk-farm PR #4** — that repo's brief says the owner merges, never a session.
-2. **`subagentPromptCacheTtl`** — unset, so subagents get 5 minutes while gates
-   run 20 to 40. Billing-adjacent, so left alone.
-3. **`betsetgo` branch `chore/ci-branch-filter`** — an empty pointer at
-   origin/master from a change that proved unnecessary. `git branch -D` is
-   blocked by a hook, correctly.
+- `subagentPromptCacheTtl` is unset, so subagents get a 5-minute prompt cache
+  while a full gate here runs 20 to 40 minutes. Billing-adjacent, left alone.
 
 ## Read this before re-deriving anything
 
