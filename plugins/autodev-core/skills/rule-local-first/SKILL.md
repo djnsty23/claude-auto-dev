@@ -1,6 +1,6 @@
 ---
 name: rule-local-first
-description: "Verification happens on this machine, in a browser you drive, before anything is pushed. Covers the local gate, the batched publish cadence, why GitHub Actions is not the gate, and how to manage browser cookie state so a restored session cannot fake a pass. Load before verifying a change, before pushing, and before any visual check."
+description: "Verification happens on this machine, in a browser you drive, before anything is pushed. Covers the local gate, the batched publish cadence, why GitHub Actions is not the gate, and why a restored browser session fakes a pass. Load before verifying, before pushing, and before any visual check."
 when_to_use: "Before verifying, pushing, or calling any work done."
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash, mcp__Claude_Browser__*

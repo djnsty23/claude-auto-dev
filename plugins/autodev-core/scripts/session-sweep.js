@@ -65,6 +65,31 @@ const DENYLIST_FILE = path.join(process.env.USERPROFILE || process.env.HOME || '
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);
+
+// --help returns BEFORE any sweep. Without this the flag fell through and the
+// script ran its whole scan, which reads every transcript and shells out to git
+// per worktree: 6.8s, 10.0s and 6.8s measured over three quiet runs 2026-09-02.
+// check-entrypoints.js allows 10s, so this script sat astride the budget and
+// went red or green on machine load.
+//
+// The deeper point, worth keeping: that gate's verdict was never about --help
+// for a script like this. It measured whether the DEFAULT action finished in
+// time, and scored that identically to handling the flag.
+if (flag('--help') || flag('-h')) {
+  console.log([
+    'session-sweep.js: classify Claude Code sessions for archiving. READ-ONLY.',
+    '',
+    'Usage: node session-sweep.js [options]',
+    '',
+    '  --stale-days N     idle days before a session is stale (default 14)',
+    '  --live-minutes N   recent transcript window treated as in use (default 240)',
+    '  --help, -h         this text',
+    '',
+    'Never archives anything. Archiving is a separate MCP call made after',
+    'reading this output, so a bug here cannot destroy a worktree.',
+  ].join('\n'));
+  process.exit(0);
+}
 const opt = (n, d) => {
   const i = args.indexOf(n);
   return i >= 0 && args[i + 1] ? args[i + 1] : d;

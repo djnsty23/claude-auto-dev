@@ -112,3 +112,13 @@ build/
 #    over untracked-but-unignored files and pre-push runs validate. A tool that
 #    writes machine-local state into a PUBLIC repo must not be able to stage it.
 .claude/panel-deny.json
+
+# 5. Archives, including worktree quick-resume patches. file-organization gives
+#    `.claude/archives/` 30-day retention for prd archives and backups, so a
+#    file sitting there is doing its job -- but the directory was never ignored,
+#    and a `.patch` written there is a full diff of whatever branch produced it,
+#    in a PUBLIC repo. Found 2026-09-02 as a three-day-old stray that made
+#    `npm run gate` exit 2 before check:suites ran a single suite: that script
+#    rewrites sources in place, so it refuses any dirty tree, and one untracked
+#    file nobody owned blocked verification for every session in this clone.
+.claude/archives/

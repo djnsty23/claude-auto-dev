@@ -1,6 +1,6 @@
 ---
 name: rule-diagnosis
-description: "Diagnosis is the load-bearing step, not the fix. A wrong fix costs one cycle; a wrong diagnosis costs every cycle until someone questions the premise. Reproduce before explaining, suspect the frame before inventing a mechanism, and attribute a failure before repairing it. Load before proposing any cause, fix, or explanation."
+description: "A wrong fix costs one cycle; a wrong diagnosis costs every cycle until someone questions the premise. Reproduce before explaining, suspect the frame before inventing a mechanism, and attribute a failure before repairing it. Load before proposing any cause, fix, or explanation."
 when_to_use: "Before stating why something is happening — any cause, fix, or explanation, including one that looks obvious."
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash

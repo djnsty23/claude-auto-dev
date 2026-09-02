@@ -1,0 +1,15 @@
+# BEFORE — overlong skill descriptions (>320 chars)
+# probe: npm run check:triggers, at 493ef34
+
+standing context cost: 19815 bytes of description + when_to_use, resident every session
+  roughly 4954 tokens, paid whether or not a single skill loads
+
+names no condition (loads on vibes, or never): 0 of 66
+
+overlong (>320 chars, crowds every other description): 4
+  auto-brain                   334 chars
+  rule-diagnosis               326 chars
+  rule-gate-integrity          375 chars
+  rule-local-first             334 chars
+
+no when_to_use field: 0 of 66

@@ -1,5 +1,116 @@
 # Changelog
 
+## [8.154.0] - 2026-09-02
+
+### Fixed: session-sweep.js --help ran the whole sweep before returning
+
+test-entrypoints went red on it at 10034ms against a 10000ms budget, 0.3% over,
+on a commit touching two unrelated tooling files. Run alone on a quiet machine it
+exits 0 three times out of three, at 7998ms, 10037ms and 6845ms. It was never
+hanging; it straddled the budget and went red or green on machine load.
+
+The script had no --help branch. The flag fell through and it ran its full scan,
+reading every transcript and shelling out to git per worktree. Now 147ms against
+a control run of 8062ms for the default action, which still prints its table.
+
+Worth keeping and not fixed here: for a script with no --help branch that gate
+measures whether the DEFAULT action finished in 10s, and scores that identically
+to honouring the flag. 89 scripts "returned"; an unknown number merely finished.
+
+### Fixed: check-runtime claimed "Runtime is current" over a deferred check
+
+The --pre-release flag downgrades a behind-install to INFO, but the summary line
+still keyed on the FAIL count, so a run with six deferred checks ended with
+"Runtime is current." while the install was a full version behind. A reassuring
+label on a skip reports absence as a pass. Three states now: failures, named
+deferrals pointing at verify:release, and only a genuinely current install gets
+the reassuring wording. The assertion that makes the other two mean something is
+the control: a fully current fixture must still print the positive phrase.
+
+
+## [8.153.0] - 2026-09-02
+
+### Added: spine step 4b, an independent read with an answered-findings condition
+
+The spine's step 4 covered the gate, which is for the machine, and the evidence,
+which is for the reviewer. Neither is a second opinion on whether the change is
+right, and `adversarial-loop` is heavy enough that it fires only on high-stakes
+work, so most changes got no independent read at all.
+
+4b points at `review` for ordinary work and `adversarial-loop` when a wrong fix
+is expensive. The difference between them is order, not thoroughness: the
+adversary writes FAILING tests before any fix, because a reviewer reading a
+finished diff cannot see the worst class of defect, a suite that passes without
+asserting anything.
+
+It ends when every finding has been answered, fixed or refuted with the reason
+written down. Explicitly never on a score. A number a loop optimises toward
+stops measuring the thing it was named after, which is the same failure
+`rule-gate-integrity` documents for gates that cannot fail. The step carries the
+same skip-and-name clause as the other four, so small reversible changes covered
+by a mutation-tested gate do not acquire a ritual.
+
+
+## [8.152.0] - 2026-09-02
+
+### Added: a spine, so 52 skills have an order
+
+A skill library has two failure modes and only one gets discussed. The
+discussed one is a missing skill. The other is many skills and no ordering,
+where the model picks by description similarity and the pick is a lottery.
+`check-skill-triggers.js` measures the standing cost of the set at ~19.6 KB
+resident every session; nothing measured what fires first.
+
+`rule-workflow-spine` names four steps and the terminal condition that ends
+each: isolate, build, prove, ship. It is UNCONDITIONAL (no `paths:` key),
+which `check-rules-reachable.js` documents as the only frontmatter shape
+loading at session start. `core` was the obvious home and is wrong: it is
+path-gated on `**/prd.json`, so it arrives after step 1 has been skipped.
+
+`isolate` makes the worktree a step rather than advice spread across 11
+skills. `prove` captures the before state while the defect still reproduces,
+which is the only moment it is free, into `.claude/evidence/<slug>/` rather
+than `.claude/screenshots/`, which is gitignored and cleaned each run.
+
+### Fixed: four defects the spine's own dry-run found
+
+Running it once against a real change broke four things in prose written two
+hours earlier that read as correct on every re-read, and none was visible
+without executing the step. Branching from `origin/main` is wrong when the
+work sits on unpushed commits. A branch name is not evidence about its
+content: the scope check fired on `fix/always-on-without-a-trigger`, which
+had already landed and whose tip was a telemetry path fix. The
+`node_modules` step was unconditional in a repo with zero dependencies. And
+`.claude/evidence/` is tracked, so evidence left uncommitted dirties the tree
+and any gate refusing a dirty tree then refuses to run at all.
+
+### Added: rule-gate-integrity section 8, a probe bound to its command form
+
+`git merge-tree` has two spellings, each discriminated by exactly one probe,
+and that probe reports clean on the other. The 3-arg form exits 0 with
+conflicts present and indents its markers inside a diff hunk, so a
+line-anchored grep counts zero. `--write-tree` prints no markers at all and
+signals by exit status. `changed in both` fires on a merge that is clean.
+Two sessions found this from opposite ends and the joint result appeared only
+because both published the marker count, the exit code and a known-negative
+control together.
+
+### Fixed: .claude/archives was blocking the gate entirely
+
+`npm run gate` exited 2 without `check:suites` running a single suite, on one
+untracked file nobody owned: a three-day-old worktree quick-resume patch.
+Verification had been blocked for every session in this clone since 2026-08-30,
+and it looks complete right up to the refusal. A `.patch` in a PUBLIC repo is
+also a full diff of whatever branch produced it.
+
+### Fixed: four skill descriptions over the 320-char budget
+
+overlong 4 to 0; standing cost 19,815 to 19,618 bytes. Cut from the summary
+half only, since the condition clause is what fires a skill. The controls that
+would catch a bad trim both held: "names no condition" stayed 0 of 66 and
+"no when_to_use field" stayed 0 of 66.
+
+
 ## [8.151.0] - 2026-09-02
 
 ### Added: every shipped script must return on --help, gated over the population

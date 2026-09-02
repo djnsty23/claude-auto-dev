@@ -1,6 +1,6 @@
 {
   "name": "claude-auto-dev",
-  "version": "8.151.0",
+  "version": "8.154.0",
   "description": "Autonomous development workflow for Claude Code, distributed as a plugin marketplace",
   "private": true,
   "keywords": [
@@ -52,7 +52,8 @@
     "radar": "node plugins/autodev-core/scripts/framework-radar.js",
     "radar:learn": "node plugins/autodev-core/scripts/radar-learning.js",
     "marketing:radar": "node plugins/autodev-core/scripts/framework-radar.js --config plugins/autodev-core/scripts/marketing-radar-sources.json",
-    "gate:release": "npm run gate && npm run check:runtime"
+    "gate:release": "npm run gate && node tooling/check-runtime.js --pre-release",
+    "verify:release": "node tooling/check-runtime.js"
   },
   "author": "djnsty23",
   "license": "MIT",

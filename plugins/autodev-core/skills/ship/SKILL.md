@@ -40,6 +40,19 @@ git status --short         # Warn if uncommitted changes
 | Uncommitted changes | Warn user, ask if they want to commit (use git directly, do not invoke the commit skill) |
 | All pass | Continue to Step 2 |
 
+## Step 1b: Evidence for the human reviewer
+
+The gates above are for the machine. Before opening a PR, check the `prove`
+skill's before/after pair exists for anything with a visible surface or a number
+that moved, and put it in the PR body.
+
+A relative path does not reliably render there. After the branch is pushed, use
+the raw URL:
+`https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.claude/evidence/<slug>/after.png`
+
+Skip it and say so when the change is purely additive. A step skipped and named
+is a decision; a step skipped silently is indistinguishable from one forgotten.
+
 ## Step 2: Security Scan
 
 Run before every deploy (uses `security` skill):
