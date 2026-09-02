@@ -41,6 +41,7 @@
     "check:reachable": "node plugins/autodev-core/scripts/check-rules-reachable.js",
     "test:reachable": "node plugins/autodev-core/scripts/check-rules-reachable.js --selftest",
     "check:push-auth": "node tooling/check-push-authorisation.js --selftest",
+    "check:standing-orders": "node tooling/check-standing-orders.js --selftest",
     "check:review": "node tooling/review-diff.js",
     "check:claims": "node tooling/check-claim-provenance.js --selftest",
     "check:orphans": "node tooling/reap-orphan-waiters.js --selftest",
