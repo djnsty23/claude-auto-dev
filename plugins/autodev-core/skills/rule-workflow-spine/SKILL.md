@@ -61,6 +61,31 @@ reads it, not only in the session that produced it.
 
 A gate run before the last edit graded a tree that no longer exists.
 
+### 4b. An independent read, when the change is worth one
+
+The gate is for the machine and the evidence is for the reviewer. Neither is a
+second opinion on whether the change is right.
+
+Load `review` for ordinary work. Load `adversarial-loop` instead when a wrong
+fix is expensive: gates, harnesses, security paths, anything that grades other
+code. The difference is not thoroughness, it is order. `adversarial-loop` has
+the adversary write FAILING tests before any fix, because a reviewer reading a
+finished diff cannot see the worst class of defect, a suite that passes without
+asserting anything.
+
+**Ends when** every finding has been answered: fixed, or refuted with the reason
+written down. Not when a count is low and not when a score is high.
+
+**Never terminate on a score.** A number that a loop optimises toward stops
+measuring the thing it was named after, and a reviewer's confidence rating is a
+claim about a diff rather than about the code's behaviour. "Loop until it says
+5 of 5" trains the loop to satisfy the grader, which is the same failure
+`rule-gate-integrity` documents for gates that cannot fail.
+
+Skip it, and say you did, when the change is small, reversible, and covered by a
+gate you have mutation-tested. Most changes are. The step exists so that the
+ones that are not get a read, rather than every change getting a ritual.
+
 ## What the spine is not
 
 **It is not a ceremony for a one-line change.** A typo fix in a repo with one

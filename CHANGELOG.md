@@ -1,5 +1,28 @@
 # Changelog
 
+## [8.153.0] - 2026-09-02
+
+### Added: spine step 4b, an independent read with an answered-findings condition
+
+The spine's step 4 covered the gate, which is for the machine, and the evidence,
+which is for the reviewer. Neither is a second opinion on whether the change is
+right, and `adversarial-loop` is heavy enough that it fires only on high-stakes
+work, so most changes got no independent read at all.
+
+4b points at `review` for ordinary work and `adversarial-loop` when a wrong fix
+is expensive. The difference between them is order, not thoroughness: the
+adversary writes FAILING tests before any fix, because a reviewer reading a
+finished diff cannot see the worst class of defect, a suite that passes without
+asserting anything.
+
+It ends when every finding has been answered, fixed or refuted with the reason
+written down. Explicitly never on a score. A number a loop optimises toward
+stops measuring the thing it was named after, which is the same failure
+`rule-gate-integrity` documents for gates that cannot fail. The step carries the
+same skip-and-name clause as the other four, so small reversible changes covered
+by a mutation-tested gate do not acquire a ritual.
+
+
 ## [8.152.0] - 2026-09-02
 
 ### Added: a spine, so 52 skills have an order
