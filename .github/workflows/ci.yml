@@ -1,6 +1,35 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  # ⚠️ branches: [main] IS A COST CONTROL. DO NOT REMOVE IT TO "GET CI ON MY BRANCH".
+  #
+  # This trigger carried no branch filter, so every push to every branch ran the
+  # whole matrix. [measured 2026-09-03, `gh api repos/:owner/:repo/actions/runs`
+  # over 24h] 26 push runs / ~324 wall-clock minutes against 8 pull_request runs
+  # / ~95 minutes. Pushes were 77% of the spend, and this repo runs many parallel
+  # agent worktrees, so the branch tail grows with the fleet rather than the work.
+  #
+  # Wall-clock UNDERSTATES it: a matrix bills the SUM of its jobs, and
+  # windows-latest carries a 2x minute multiplier, so the real billable figure is
+  # materially higher than 324.
+  #
+  # What this does NOT trade away: `main` still gets a verdict on every push, and
+  # a feature branch still gets one from its PR — on the merge ref, which is the
+  # tree that actually merges and the only tree the verdict is about. With many
+  # concurrent sessions `main` moves constantly, so a branch green in isolation
+  # can be red on its new base, and only the PR run can see that.
+  #
+  # The cost of NOT doing this is measured, on a sibling repo: its gate billed
+  # 3,283 minutes in a month against a 3,000 ACCOUNT-WIDE allowance and was
+  # disabled by hand, leaving that repo with no CI for three weeks. The fix there
+  # was this same one line, not dropping PRs.
+  #
+  # A branch with NO open PR gets no CI. That is the accepted trade: open a draft
+  # PR and you have it back, at zero cost until you mark it ready.
+  push:
+    branches:
+      - main
+  pull_request:
 
 permissions:
   contents: read

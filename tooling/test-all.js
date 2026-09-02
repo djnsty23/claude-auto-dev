@@ -78,9 +78,23 @@ if (suites.length === 0) {
 //
 // The failure it catches cannot be caught by exit codes: the scripts that do
 // this exit 0. Only looking at the state afterwards can see it.
+// HEAD is captured alongside the status, and that half is not cosmetic.
+// [measured 2026-09-03] a status-only snapshot reports GREEN when someone
+// COMMITS during a run: the tree is clean before and clean after, so the two
+// strings match while the run graded one version of a file at the start and a
+// different one at the end. An UNCOMMITTED edit fails loudly today; the
+// committed case was silent, and committing mid-run is the more natural of the
+// two actions. The subject is still "did this run grade ONE tree", and HEAD is
+// part of identifying which tree that was, not a demand that it be committed.
 const gitState = () => {
   const r = spawnSync('git', ['status', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' });
-  return r.status === 0 ? (r.stdout || '') : null;   // null = not a git repo; skip the check
+  if (r.status !== 0) return null;                   // null = not a git repo; skip the check
+  const h = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' });
+  // A repo with no commits yet has no HEAD. Fall back to a marker rather than
+  // returning null: null disables the whole check, which would make this gate
+  // structurally incapable of firing on a fresh repo.
+  const head = h.status === 0 ? (h.stdout || '').trim() : '(no commits)';
+  return 'HEAD ' + head + '\n' + (r.stdout || '');
 };
 const treeBefore = gitState();
 
@@ -125,14 +139,27 @@ run('validate', [...CHILD_FLAGS, path.join(scriptsDir, 'validate.js')]);
 if (treeBefore !== null) {
   const treeAfter = gitState();
   if (treeAfter !== null && treeAfter !== treeBefore) {
-    const was = new Set(treeBefore.split('\n').filter(Boolean));
-    const now = treeAfter.split('\n').filter(Boolean);
+    // Split the two causes: they need different diagnoses, and one message
+    // covering both would misattribute either as the other.
+    const headBefore = treeBefore.split('\n')[0];
+    const headAfter = treeAfter.split('\n')[0];
+    const was = new Set(treeBefore.split('\n').slice(1).filter(Boolean));
+    const now = treeAfter.split('\n').slice(1).filter(Boolean);
     const added = now.filter((l) => !was.has(l));
     const gone = [...was].filter((l) => !now.includes(l));
     console.error('\n=== tree-inert ===');
-    console.error('THE TEST RUN MODIFIED THE WORKING TREE. A suite rewrote what it grades.');
-    for (const l of added.slice(0, 15)) console.error('  now:  ' + l);
-    for (const l of gone.slice(0, 15)) console.error('  was:  ' + l);
+    if (headAfter !== headBefore) {
+      console.error('HEAD MOVED DURING THE RUN. This gate graded a mixture of two trees.');
+      console.error('  was:  ' + headBefore);
+      console.error('  now:  ' + headAfter);
+      console.error('Nothing was left dirty: a commit landed mid-run, so a status-only');
+      console.error('check reports GREEN. Re-run on a settled tree before believing it.');
+    }
+    if (added.length || gone.length) {
+      console.error('THE TEST RUN MODIFIED THE WORKING TREE. A suite rewrote what it grades.');
+      for (const l of added.slice(0, 15)) console.error('  now:  ' + l);
+      for (const l of gone.slice(0, 15)) console.error('  was:  ' + l);
+    }
     console.error('Every suite above exited 0. That is the point — no exit code can see this.');
     results.push(['tree-inert', false]);
   } else {
