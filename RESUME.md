@@ -1,107 +1,85 @@
-# RESUME
+# Resume here — coordinator session, night of 2026-09-02/03
 
-Written by `session-exit.js` from state READ at generation time, never from
-a recollection. Every number came from a command; anything a command could
-not answer says so rather than rendering as empty.
+`[measured 2026-09-03 03:20]` Every line below was re-read at that time. Where a
+number appears, the command that produced it is named, because this file went
+stale three times in one night and each staleness was invisible from inside it.
 
-| field | value |
-|---|---|
-| directory | `~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78` |
-| branch | `claude/autodev-core-brain-7cb881` |
-| upstream | _none tracked_ |
-| HEAD committed | 2026-09-03T02:03:33+03:00 |
-
-**Re-read before acting on any of this.** A resume file is a snapshot, and
-the two facts most likely to have moved are the two below: someone may have
-pushed, and someone may have merged.
-
-## Unpushed commits
-
-**COULD NOT READ.** No upstream is tracked for this branch, or git could not be reached, so "ahead of origin" has no answer here.
-
-This is not "none". Nothing was measured, so treat it as unknown.
-
-## Uncommitted changes
-
-None. A real zero: the command ran and returned nothing.
-
-## Open PRs
-
-None. A real zero: the command ran and returned nothing.
-
-## Worktrees
-
-Another session may hold one of these. Run `git status` in a tree before
-touching it: a dirty tree you did not dirty means someone is in there.
-
-```
-~/claude-auto-dev                                               0d8302c [main]
-~/AppData/Local/Temp/check-suites-wt-41904-xUVmFf               ab00a35 (detached HEAD)
-~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78   71462ea [claude/autodev-core-brain-7cb881]
-~/claude-auto-dev/.claude/worktrees/codex-radar-20260902-184238 e1a53d6 [codex/radar-20260902-184238]
-~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2    ab00a35 [fix/away-state-time-bomb]
-~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc     0285b8f [claude/affectionate-kalam-8a7ed8]
-~/Downloads/code/autodev                                        3f8101f [test/brain-panels-vacuity-gaps]
-```
-
-## What a reader should do first
-
-1. `git fetch`, then re-check the sections above. They decay fastest.
-2. Run `npm run gate` before believing anything is green. That name was read from `package.json` here, not assumed.
-3. Read `CHANGELOG.md`, `README.md` - present in this directory, checked rather than assumed.
-4. Read recent commit bodies. Many projects put the reasoning there rather than in a separate design note.
-
-_These steps were derived from what is actually in `~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78`._
-
-## Measured by hand, because session-exit could not (2026-09-03 02:07)
-
-It reported `unpushed UNKNOWN`, correctly: this branch has NO UPSTREAM
-(`claude/autodev-core-brain-7cb881`), so there is nothing for it to diff against.
-That is a COULD-NOT-READ, not a zero. The real answer, against `origin/main`:
-
-    git rev-list --left-right --count origin/main...HEAD   ->   0  5
-
-**FIVE COMMITS, UNPUSHED, ALL GATED CLEAN:**
-
-    71462ea  feat(hooks): tell the coordinator when work has landed
-    7f54c04  docs(design-system): Magic UI is the motion layer
-    4ad27bd  fix(gate): tree-inert watches HEAD, CI branch filter
-    f33042d  docs(brain): draft-skip precondition, corrected
-    02b70d1  docs(brain): draft-skip precondition, first version
-
-`npm run gate` on these: 132 suites, 2301 PASS, **exactly one failing suite** and
-it is not mine — `test-away-state`, a pre-existing time bomb on the trunk
-(`tooling/test-away-state.js:58` hardcodes `until: 2026-09-02T22:00:00Z` as "the
-FUTURE"; it expired at 22:00Z). The S5 session holds the fix as `ab00a35` on
-`fix/away-state-time-bomb`, has the operator's panel authorisation to push on
-green, and had not pushed as of 02:07.
-
-**So the sequence is: their fix lands on main, I rebase, push these five.**
-Nothing here is blocked on anything I can do alone.
-
-## Fleet, as of 02:07
-
-Per-repo counts, panel-deny locations and the rescue-bundle inventory are NOT
-here: this repo is public, and naming other repositories fails its own test —
+Product repos are lettered. This repo is public; naming them fails its own test —
 would this sentence still be true and useful on a machine that is not this one?
-They live in `~/claude-memory/RESUME-fleet-2026-09-03.md`, which is on the
-backup allowlist and survives a reinstall.
+The mapping and the per-repo detail live in the memory mirror, which is on the
+backup allowlist.
 
-What belongs here, because it is about THIS repo:
+## The one thing to read first
 
-- Panels are denied fleet-wide until **05:26:23Z**. Restore with
-  `brain-panels.js --on`, or `--expire` if it is past that and still set.
-- Standing instruction from the operator, 2026-09-03: **check on peers every turn
-  while autobrain is on, even when interrupted.**
-- `subagentPromptCacheTtl` is unset, so subagents get a 5-minute prompt cache
-  while a full gate here runs 20 to 40 minutes. Billing-adjacent, left alone.
+**Nothing is broken and nothing is waiting on me.** Six PRs sit open across four
+repos, every one of them deliberately, and the reasons differ.
 
-## Read this before re-deriving anything
+## This branch
 
-`~/claude-memory/FINDINGS-claude-code-docs-2026-09-03.md` (commit `a07e9c7`) has
-everything nine pasted docs pages were worth to this setup, measured. The two
-that pay: a 3,998-line always-on instruction load against a 200-line target, and
-66 skill descriptions costing ~2,397 tokens on every request with none hidden.
+`claude/autodev-core-brain-7cb881`, pushed, **PR #130 (draft)**.
 
-`~/claude-memory/DECISIONS-2026-09-03.md` has every reversible call made
-overnight, with its reasoning, for auditing or reversing.
+    git rev-list --left-right --count origin/main...HEAD   ->   0  8
+
+Eight commits: tree-inert watching HEAD, the coordinator report hook and its
+suite, this repo's CI branch filter, both draft-skip corrections, a motion-layer
+addition to the design-system rule, the harness-audit idle-work section, and a
+windowsHide fix.
+
+`npm run gate`: 132 suites, 2301 PASS, **one failing suite** — `test-away-state`,
+**pre-existing on the trunk and not from this branch**. `npm run validate`:
+19 PASS, 0 FAIL.
+
+## Open PRs, and why each is open
+
+| PR | state | why it is not merged |
+|---|---|---|
+| this repo **#131** | green, ready | The trunk fix. Its session was offered a straight-to-main merge on a panel and the operator chose the PR round-trip instead, with the tradeoff named: no review surface on a fix to a test that had just proved it could lie about being green. A later broad merge grant does not reverse a specific choice about this change. **His.** |
+| this repo **#130** | draft | Mine. No hurry. |
+| this repo **#132** | draft | The rendered-layout gate. 13 mutants, 13 killed by their own named assertion; 0 findings over 605 element boxes on a real third-party page. Its session is still running the gate. |
+| Project A **#654** | gate was IN_PROGRESS | Wires an offer engine that was advertised and never applied. Careful work: resolved server-side rather than from the request body, and explicitly fail-safe. **Live payment path** — deploys on merge. |
+| Project B **#33** | gate SUCCESS | During a payment-provider secret roll only the first signature was tried, so the webhook returned 400 to every legitimate event, with a rejection byte-identical to a forged one. Its existing test PINNED the defect. **Live payment path** — deploys on merge. Ready to land in seconds. |
+| Project C ×7 | mixed | One real gate FAILURE, one check still running, one CONFLICTING, four drafts. None ready. |
+
+**The two payment-path PRs are held on one reasoning, stated so the standard is
+visible rather than implied:** the merge grant covers deciding whether work is
+USEFUL, and both are. It does not cover deploying money code at 03:00 when the
+operator's own condition was "we'll have to check on live after deploy and really
+test everything out" — a condition unmeetable for hours.
+
+## Merged tonight
+
+- **Project B #32.** Nine buyer-facing surfaces still advertised the old free-tier
+  rate after it changed; one localised page promised "no limit on how many you
+  keep" directly under a hard cap. Measured in a browser, ships a shape test.
+- **Project D #4**, after the operator overrode a hold with "no users, can't break
+  anything".
+
+## The debt that is easiest to forget
+
+**`~/.claude/brain-role.json` does not exist**, so `stop-brain-report.js` — added
+this session to fix the coordination failure that defined it — has never fired and
+cannot. Arming it also arms `coordinator-write-guard`'s four-verb block, so it is
+the operator's call. Its `home_repos` MUST include the memory mirror or the backup
+obligation silently breaks. Full shape in the decisions log.
+
+## Where the durable output went
+
+Not in this repo, deliberately:
+
+- `DECISIONS-2026-09-03.md` in the mirror — every reversible call with reasoning
+- `FINDINGS-claude-code-docs-2026-09-03.md` — what nine pasted docs pages were
+  worth here, measured
+- `RESUME-fleet-2026-09-03.md` — per-repo fleet state and the letter mapping
+- `~/.claude/rules/verification-traps.md` — two new sections; its own checker
+  reports 28 sections, 28 indexed, 0 gaps
+- `~/.claude/rules/local-first.md` — a gate step count DELETED after being wrong a
+  fourth time, executing that paragraph's own standing instruction
+
+## Standing, until told otherwise
+
+- **Check peers every turn while autobrain is on, interruptions included.**
+  Operator, 2026-09-03.
+- **Idle work is harness self-evaluation** — five questions, all counts rather
+  than readings. First round complete; findings in the decisions log.
+- Panels denied fleet-wide until **05:26:23Z**. `brain-panels.js --on` restores;
+  `--expire` clears it if it is past that and still set.
