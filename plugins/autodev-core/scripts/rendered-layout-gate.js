@@ -122,17 +122,38 @@ WHAT THE EXEMPTIONS ARE WORTH, measured on the committed fixtures:
 
 Without them the clean page reports 6 defects and has none.
 
-FALSE-POSITIVE RATE ON A REAL PAGE, which is the number that decides whether
-this is safe to run: 0 findings over 605 element boxes and 26 text runs on MDN's
-CSS overflow article at 390. That run is also what found the last exemption: a
-534px demo iframe inside an overflow-x:hidden code example, on a page whose
-scrollWidth equals its clientWidth, was being reported with the note "extends
-past the layout viewport with nothing to absorb it" while something plainly had
-absorbed it.
+WHAT FOUR REAL PAGES SAID, at 390, none of them written here:
 
-ONE PAGE IS A CONTROL, NOT A RATE. It proves the gate can run a real page
-without crying wolf; it does not establish precision across a corpus. Collect
-real runs before anyone promotes this past advisory.`);
+  MDN, CSS overflow     605 els   26 text   0 findings
+  Wikipedia, mobile     255 els   69 text   1 finding   (43 control labels exempt)
+  nodejs.org, fs docs  4000 els   46 text  34 findings  (1 doc-scroll + 33 culprits
+                                                         across 4 selectors)
+  a bot interstitial      3 els    0 text   0 findings, both text codes n/a
+
+The nodejs one is a REAL defect and it is the strongest evidence for the
+denominator argument above, because nobody here authored the page: at 390 it
+reports innerWidth 716, scrollWidth 716, clientWidth 390. The obvious test says
+false; the page scrolls 326px sideways.
+
+EVERY EXEMPTION IN THIS GATE WAS FOUND BY A PAGE NOBODY HERE WROTE. A fixture is
+written by the same hand as the check, so it can only contain shapes that
+already occurred to that hand:
+
+  a clipping ancestor absorbs the scroll   MDN, a 534px demo iframe inside an
+                                           overflow-x:hidden code example, on a
+                                           page that does not scroll. Reported
+                                           with the note "nothing to absorb it"
+                                           while something plainly had.
+  text in a control is an accessible name  Wikipedia, 23 of 25 findings were
+                                           "Search" / "Watch" / "Edit" labels
+                                           clipped away inside 44x44 buttons.
+  a pinned bar covers what you scroll      the clean control itself, once it grew
+  beneath it                               tall enough to scroll: its own fixed
+                                           header covers the h1 at scrollY 64.
+
+FOUR PAGES IS NOT A RATE. It proves the gate can run real HTML without crying
+wolf, and says nothing about precision across a corpus. Collect real runs before
+anyone promotes this past advisory.`);
 }
 
 function readSnapshots() {
@@ -236,6 +257,10 @@ function report(results, opts) {
             continue;
         }
         const c = r.counts;
+        // A text-based count is null when no text was sampled at all. It prints
+        // n/a rather than 0, because a zero from a check with nothing to look
+        // at is a claim about the probe, not about the page.
+        const n = (v) => (v === null || v === undefined ? 'n/a' : String(v));
         out.push(
             String(r.width).padEnd(6) + ' ' +
             'MEASURED'.padEnd(11) + ' ' +
@@ -244,8 +269,8 @@ function report(results, opts) {
             String(c.total).padStart(8) + '  ' +
             String(c.docScroll).padStart(3) + '  ' +
             String(c.overflowCulprit).padStart(7) + '  ' +
-            String(c.clippedText).padStart(4) + '  ' +
-            String(c.occluded).padStart(8)
+            n(c.clippedText).padStart(4) + '  ' +
+            n(c.occluded).padStart(8)
         );
     }
     out.push('');
@@ -270,14 +295,35 @@ function report(results, opts) {
             if (r.status !== 'MEASURED' || !r.findings.length) continue;
             out.push('');
             out.push(`--- ${r.width}px`);
+            // Collapsed by selector shape. `[measured 2026-09-03]` nodejs.org's
+            // fs docs at 390 produce 33 OVERFLOW-CULPRIT rows across FOUR
+            // distinct selectors - one row per list item, all saying the same
+            // thing, and the DOC-SCROLL line that matters scrolls off the top.
+            // The count and the worst case carry everything the 33 rows did.
+            const groups = new Map();
             for (const f of r.findings) {
-                out.push(`  ${f.code}  ${f.sel}`);
-                out.push(`      ${f.note}`);
+                const key = f.code + ' ' + f.sel;
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(f);
+            }
+            for (const [, fs_] of groups) {
+                const f = fs_[0];
+                const times = fs_.length > 1 ? `   x${fs_.length}` : '';
+                out.push(`  ${f.code}  ${f.sel}${times}`);
+                if (fs_.length > 1 && f.detail.overshootPx !== undefined) {
+                    const worst = Math.max(...fs_.map((x) => x.detail.overshootPx));
+                    out.push(`      ${fs_.length} elements match this selector; worst extends ${Math.round(worst)}px past the layout viewport`);
+                } else {
+                    out.push(`      ${f.note}`);
+                }
                 out.push(`      threshold: ${f.threshold}`);
                 if (f.code === CHECKS.CODES.DOC_SCROLL && f.detail.naiveTestWouldMiss) {
                     out.push('      note: scrollWidth > innerWidth is FALSE here. The visual viewport ' +
                         `zoomed to ${f.detail.innerWidth} to fit; only the layout viewport (${f.detail.clientWidth}) sees this.`);
                 }
+            }
+            if (groups.size < r.findings.length) {
+                out.push(`  (${r.findings.length} findings collapsed to ${groups.size} distinct selectors)`);
             }
         }
         const ex = results.filter((r) => r.counts).reduce((a, r) => {

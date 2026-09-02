@@ -134,7 +134,9 @@ for (const w of [360, 390, 414, 768]) {
     check(`overflow @${w}: the document is reported as scrolling sideways`, r.counts.docScroll === 1, r.counts);
     check(`overflow @${w}: exactly one culprit, not the whole subtree`, r.counts.overflowCulprit === 1, r.counts);
     const culprit = r.findings.find((f) => f.code === CHECKS.CODES.OVERFLOW_CULPRIT);
-    check(`overflow @${w}: the culprit is the table, not a cell`, /table\.rates$/.test(culprit.sel), culprit.sel);
+    check(`overflow @${w}: a culprit finding exists to inspect`, !!culprit, r.findings.map((f) => f.code));
+    check(`overflow @${w}: the culprit is the table, not a cell`,
+        !!culprit && /table\.rates$/.test(culprit.sel), culprit && culprit.sel);
     check(`overflow @${w}: its descendants were collapsed away`, r.counts.exempt.ancestorAlreadyOverflows > 5,
         r.counts.exempt.ancestorAlreadyOverflows);
     check(`overflow @${w}: it fires no other check`, r.counts.clippedText === 0 && r.counts.occluded === 0, r.counts);
@@ -150,9 +152,12 @@ for (const w of WIDTHS) {
     const r = at('defect-occlusion', w);
     check(`occlusion @${w}: exactly one covered text run`, r.counts.occluded === 1, r.counts);
     const f = r.findings.find((x) => x.code === CHECKS.CODES.TEXT_OCCLUDED);
-    check(`occlusion @${w}: the heading is the covered run`, /h1$/.test(f.sel), f.sel);
-    check(`occlusion @${w}: the bar is named as the occluder`, /promo/.test(f.detail.occluder), f.detail.occluder);
-    check(`occlusion @${w}: the occluder is opaque`, f.detail.occluderAlpha >= 0.5, f.detail.occluderAlpha);
+    check(`occlusion @${w}: an occlusion finding exists to inspect`, !!f, r.findings.map((x) => x.code));
+    check(`occlusion @${w}: the heading is the covered run`, !!f && /h1$/.test(f.sel), f && f.sel);
+    check(`occlusion @${w}: the bar is named as the occluder`,
+        !!f && /promo/.test(f.detail.occluder), f && f.detail.occluder);
+    check(`occlusion @${w}: the occluder is opaque`,
+        !!f && f.detail.occluderAlpha >= 0.5, f && f.detail.occluderAlpha);
     check(`occlusion @${w}: the paragraphs clear of the bar are NOT reported`,
         r.counts.occluded === 1 && r.population.textRecords > 1, r.population);
     check(`occlusion @${w}: it fires no other check`,
@@ -225,6 +230,112 @@ for (const w of [360, 390, 414]) {
     // fits on one line inside the 72px panel and is not cut off.
     const r = at('defect-clip', 1280);
     check('clip @1280: two runs, because the first paragraph now fits', r.counts.clippedText === 2, r.counts);
+}
+
+// ------------------- a viewport-pinned bar covers what you scroll beneath it
+//
+// FOUND BY THE CLEAN CONTROL, once it grew tall enough to scroll. Its own fixed
+// header covers the h1 at scrollY 64 and 127, and nothing is wrong with that
+// page - that is what a fixed header does. Text under one AT REST is the defect,
+// because it means the layout reserved no clearance, and that is exactly where
+// defect-occlusion.html's finding sits.
+//
+// Without this the check fires on every site with a sticky header, at every
+// scroll step, and the real finding drowns in the noise.
+
+{
+    const s = load('clean-360');
+    check('the clean control is tall enough to scroll, so the case is exercised',
+        s.population.scrollPositions.length > 1, s.population.scrollPositions);
+    const bar = s.elements.find((e) => /header\.bar/.test(e.sel));
+    check('its header is viewport-pinned', bar && CHECKS.PINNED.has(bar.position), bar && bar.position);
+    // The known positive: the bar really is over the heading once scrolled, and
+    // really is opaque. Without this the exemption could be passing because
+    // nothing was ever covered.
+    const scrolled = s.text.filter((t) => (t.scrollY || 0) > 0
+        && (t.samples || []).some((x) => x.occluder && /header\.bar/.test(x.occluder.sel) && x.occluder.bgAlpha >= 0.5));
+    check('and it really does cover text once scrolled', scrolled.length > 0, scrolled.length);
+    check('so the clean control still reports nothing', CHECKS.analyse(s).counts.occluded === 0);
+}
+{
+    // The other side: the planted defect sits at rest, and must still fire.
+    const r = at('defect-occlusion', 390);
+    check('the planted occlusion is at scrollY 0, where clearance should have been',
+        r.findings.every((f) => (f.scrollY || 0) === 0), r.findings.map((f) => f.scrollY));
+    check('and it is still reported', r.counts.occluded === 1, r.counts);
+}
+
+// ------------------------------- text inside a control is a name, not body copy
+//
+// FOUND ON A REAL PAGE. Wikipedia at 390 produced 25 CLIPPED-TEXT findings and
+// 23 were "Search" / "Watch" / "Edit" labels inside 44x44 icon buttons - present
+// for a screen reader, hidden on purpose, and structurally identical to a
+// paragraph cut off by a panel.
+//
+// Neither of the obvious discriminators works. Container SIZE cannot: 44x44 is a
+// real tap target, not the 1px visually-hidden idiom. Clipped FRACTION cannot
+// either: a hidden label and a paragraph entirely inside a clipping panel are
+// both 100%, and two of the three planted runs in defect-clip.html are exactly
+// 100%. What the text IS decides it.
+
+// The clean control now carries the shape itself: two 44x44 icon buttons whose
+// labels are clipped away. Without the exemption the clean page reports them,
+// which is what makes the exemption testable rather than merely present. Before
+// this fixture existed a mutant removing the exemption SURVIVED the suite - the
+// branch was untested by construction, which is the shape of a gate that cannot
+// fail.
+for (const w of WIDTHS) {
+    const s = load(`clean-${w}`);
+    const labels = s.text.filter((t) => t.controlAncestor);
+    check(`clean @${w}: the icon-button labels are present and inside a control`,
+        labels.length >= 2, labels.length);
+    check(`clean @${w}: each is clipped away by its own 44x44 button`,
+        labels.filter((t) => {
+            const ca = s.elements[t.i].clipAncestor;
+            return ca && CHECKS.CLIPS.has(ca.overflowX)
+                && t.glyphRects.some((g) => g.r > ca.box.r + 1 || g.b > ca.box.b + 1);
+        }).length >= 2,
+        labels.map((t) => t.text));
+    const r = CHECKS.analyse(s);
+    check(`clean @${w}: and they are exempted, not reported`,
+        r.counts.exempt.controlLabel >= 2 && r.counts.clippedText === 0, r.counts);
+}
+
+{
+    const s = load('defect-clip-390');
+    check('the planted runs are body copy, with no control ancestor',
+        s.text.every((t) => !t.controlAncestor),
+        s.text.filter((t) => t.controlAncestor).map((t) => t.sel));
+    // So the exemption is INERT on the fixtures. That matters: an exemption that
+    // fires here could be masking a planted defect, and this says it is not.
+    const r = CHECKS.analyse(s);
+    check('so the control-label exemption is inert on the planted defects',
+        r.counts.exempt.controlLabel === 0 && r.counts.clippedText === 3, r.counts);
+}
+
+// ---------------------------------------- a check with no input reports no input
+//
+// FOUND ON A REAL PAGE TOO. A bot-challenge interstitial harvested 3 elements
+// and 0 text runs, and reported a confident zero for both text-based codes - a
+// zero from a check that had nothing to look at, which is a claim about the
+// probe rather than about the page.
+
+{
+    const empty = load('clean-390');
+    empty.text = [];
+    const r = CHECKS.analyse(empty);
+    check('with no text sampled, the run is still MEASURED', r.status === 'MEASURED', r.reason);
+    check('but the text-based counts are null, not zero',
+        r.counts.clippedText === null && r.counts.occluded === null, r.counts);
+    check('and the element-based counts still answer',
+        typeof r.counts.docScroll === 'number' && typeof r.counts.overflowCulprit === 'number', r.counts);
+    check('coverage is stated rather than implied', r.counts.textCovered === false, r.counts);
+    // The control: with text present they are numbers, so null means "not
+    // covered" rather than "always null".
+    const full = CHECKS.analyse(load('clean-390'));
+    check('control: with text present the same counts are numbers',
+        full.counts.clippedText === 0 && full.counts.occluded === 0 && full.counts.textCovered === true,
+        full.counts);
 }
 
 // ------------------------------------------------- the false-positive control
@@ -399,6 +510,11 @@ function run(args) {
 
     const printed = run(['--print-probe', '--width', '414']);
     check('--print-probe emits a pasteable expression', printed.status === 0 && /414/.test(printed.stdout));
+
+    // 33 rows naming one cause buries the DOC-SCROLL line that matters. Measured
+    // on nodejs.org's fs docs: 33 OVERFLOW-CULPRIT findings across 4 selectors.
+    const grouped = run([path.join(SNAPS, 'defect-overflow-390.json')]);
+    check('a single finding is NOT annotated with a count', !/\sx1$/m.test(grouped.stdout));
 
     const json = run(['--dir', SNAPS, '--json']);
     let parsed = null;

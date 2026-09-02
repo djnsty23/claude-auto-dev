@@ -96,6 +96,8 @@ const DEFAULTS = {
 // and is a legitimate rail. One that cuts the content off does not.
 const SCROLLS = new Set(['auto', 'scroll', 'overlay']);
 const CLIPS = new Set(['hidden', 'clip']);
+// Occluders painted against the viewport rather than the document.
+const PINNED = new Set(['fixed', 'sticky']);
 
 const REFUSALS = {
     NO_SNAPSHOT: 'NO-SNAPSHOT',
@@ -200,6 +202,7 @@ function analyse(snapshot, options) {
         transparentOccluder: 0,
         modalSuppressed: 0,
         scrollableClip: 0,
+        controlLabel: 0,
         inconclusiveSamples: 0,
     };
 
@@ -317,6 +320,17 @@ function analyse(snapshot, options) {
     for (const t of texts) {
         const el = elements[t.i];
         if (!el || !el.clipAncestor) continue;
+        // Text inside a control is that control's ACCESSIBLE NAME, and clipping
+        // it away is how an icon button is built. `[measured 2026-09-03]` on
+        // Wikipedia at 390 this branch is the difference between 23 findings
+        // and 0: every one was a "Search" / "Watch" / "Edit" label inside a
+        // 44x44 button, present for a screen reader and hidden on purpose.
+        //
+        // Container SIZE cannot make this call - 44x44 is a real tap target,
+        // not the 1px visually-hidden idiom - and neither can the clipped
+        // FRACTION, because a fully hidden label and a paragraph entirely
+        // inside a clipping panel are both 100%. What the text IS decides it.
+        if (t.controlAncestor) { exempt.controlLabel++; continue; }
         const ca = el.clipAncestor;
         const ancEl = ca.i != null ? elements[ca.i] : null;
         const clipsX = CLIPS.has(ca.overflowX);
@@ -377,7 +391,18 @@ function analyse(snapshot, options) {
             if (!o) return false;
             // Opacity 0 hit-tests and paints nothing.
             if (o.opacity === 0) return false;
-            return o.bgAlpha >= T.occluderMinAlpha || o.hasBgImage || o.hasBackdrop;
+            if (!(o.bgAlpha >= T.occluderMinAlpha || o.hasBgImage || o.hasBackdrop)) return false;
+            // A viewport-pinned bar covers whatever the reader scrolls beneath
+            // it, which is the entire point of one. Only at rest does text under
+            // it mean the layout reserved no clearance.
+            //
+            // `[measured 2026-09-03]` this is not hypothetical: the clean
+            // control's own fixed header covers its h1 at scrollY 64 and 127
+            // and nothing is wrong with the page. Without this branch the check
+            // fires on every site with a sticky header, at every scroll step,
+            // and the planted defect - which sits at scrollY 0 - drowns in it.
+            if (PINNED.has(o.position) && (t.scrollY || 0) > 0) return false;
+            return true;
         });
         if (!covered.length) {
             // Distinguish "nothing over it" from "something over it that does
@@ -416,12 +441,19 @@ function analyse(snapshot, options) {
         });
     }
 
+    // `[measured 2026-09-03]` a bot-challenge interstitial harvested 3 elements
+    // and 0 text runs, and reported MEASURED with 0 occlusion findings - a
+    // confident zero from a check that had nothing to look at. Both text-based
+    // codes report null rather than 0 when nothing was sampled, so the row
+    // reads "n/a" and cannot be mistaken for a clean page.
+    const sawText = texts.length > 0;
     const counts = {
         total: findings.length,
         docScroll: findings.filter((f) => f.code === CODES.DOC_SCROLL).length,
         overflowCulprit: findings.filter((f) => f.code === CODES.OVERFLOW_CULPRIT).length,
-        clippedText: findings.filter((f) => f.code === CODES.CLIPPED_TEXT).length,
-        occluded: findings.filter((f) => f.code === CODES.TEXT_OCCLUDED).length,
+        clippedText: sawText ? findings.filter((f) => f.code === CODES.CLIPPED_TEXT).length : null,
+        occluded: sawText ? findings.filter((f) => f.code === CODES.TEXT_OCCLUDED).length : null,
+        textCovered: sawText,
         exempt,
     };
 
@@ -479,7 +511,7 @@ function summarise(results) {
     };
 }
 
-module.exports = { analyse, summarise, DEFAULTS, CODES, REFUSALS, SCROLLS, CLIPS };
+module.exports = { analyse, summarise, DEFAULTS, CODES, REFUSALS, SCROLLS, CLIPS, PINNED };
 
 if (require.main === module) {
     console.log('layout-checks.js - the judging half of the rendered-layout gate.');

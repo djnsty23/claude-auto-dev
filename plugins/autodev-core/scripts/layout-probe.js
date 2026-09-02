@@ -91,6 +91,27 @@ function harvest(opt) {
 
     function r4(n) { return Math.round(n * 100) / 100; }
 
+    // The nearest ancestor (or self) that is an interactive control. Text
+    // inside one is that control's ACCESSIBLE NAME, and clipping it away is
+    // the ordinary way to build an icon button - so the analyzer has to be
+    // able to tell it apart from body copy. Recorded as a fact; the judgement
+    // is layout-checks.js's.
+    function controlAncestor(el) {
+        var cur = el;
+        while (cur && cur.nodeType === 1) {
+            var tag = cur.tagName;
+            var role = cur.getAttribute ? cur.getAttribute('role') : null;
+            if (tag === 'BUTTON' || tag === 'A' || tag === 'LABEL' || tag === 'SUMMARY'
+                || tag === 'OPTION' || tag === 'LEGEND'
+                || role === 'button' || role === 'link' || role === 'menuitem'
+                || role === 'tab' || role === 'option') {
+                return { sel: selPath(cur), tag: tag.toLowerCase(), role: role || null };
+            }
+            cur = cur.parentElement;
+        }
+        return null;
+    }
+
     function boxOf(r) {
         return {
             l: r4(r.left), t: r4(r.top), r: r4(r.right),
@@ -120,6 +141,11 @@ function harvest(opt) {
             hasBgImage: cs.backgroundImage !== 'none',
             hasBackdrop: bf !== 'none',
             opacity: r4(parseFloat(cs.opacity)),
+            // Whether the occluder is pinned to the viewport. Content passing
+            // UNDER a fixed bar as the reader scrolls is what a fixed bar is
+            // for; content under one at rest means no clearance was reserved.
+            // The analyzer needs the two apart.
+            position: cs.position,
         };
     }
 
@@ -346,6 +372,7 @@ function harvest(opt) {
                             hasBgImage: pf.hasBgImage,
                             hasBackdrop: pf.hasBackdrop,
                             opacity: pf.opacity,
+                            position: pf.position,
                             modal: modalKind(cand, vw, vh),
                         };
                         if (occ.modal && !modalSeen) modalSeen = occ.modal;
@@ -368,6 +395,7 @@ function harvest(opt) {
                 i: index.get(te),
                 sel: selPath(te),
                 scrollY: scrollY,
+                controlAncestor: controlAncestor(te),
                 text: own.trim().slice(0, 80),
                 glyphRects: visible.slice(0, 6).map(boxOf),
                 glyphRectCount: glyphRects.length,
