@@ -53,18 +53,36 @@
 // claim is machine-wide rather than session-scoped. Removing the file disarms
 // the guard entirely, which is what the mutation test does.
 //
-// SCOPE, DELIBERATELY NARROW. `commit` and `push` only. Not merge, not rebase,
-// not `gh pr merge`. The plan's probe names those two, and widening a blocking
-// hook past its brief is how the last denylist grew into the thing that had to
-// be deleted. The ledger still sees the rest.
+// SCOPE: FOUR VERBS, and the list is a decision rather than a default.
+// `commit`, `push`, `merge`, `rebase`.
+//
+// It shipped as two — commit and push, which is what the plan's probe names —
+// and merge and rebase were added on 2026-09-02 because S5's measured damage
+// was not only the five retargeted PRs. It was also *a branch merged into a
+// base a briefed session was landing PRs into forty seconds later*. A guard
+// that stops the commit and allows the merge is guarding the half of the
+// incident that was cheaper to undo.
+//
+// `pull` is EXCLUDED, and that is the line worth holding. It merges, so a
+// mechanical reading of "block what writes" catches it — but a coordinator
+// updating a local clone in order to READ it is the job, and blocking that
+// pushes the role back toward guessing at state it could have measured. Same
+// reasoning excludes `fetch`. Both are asserted as allowed in the suite, so
+// removing the exemption is a visible decision rather than a drift.
+//
+// `gh pr merge` is out of scope too: this parses `git`, and a GitHub-side merge
+// is the transcript ledger's to catch. Every one of these exclusions has a
+// passing test case, because the failure mode of a blocking hook is silent
+// growth — that is how the 2026-08-17 denylist became something that had to be
+// deleted rather than trimmed.
 //
 // WHAT IT CANNOT SEE, collected here so a quiet run is not over-read. cwd is
-// not where a write lands, so `-C`, `--work-tree` and `cd` are followed across
-// command segments — but `--git-dir=` alone is not, `cd -` and `pushd`/`popd`
-// are not, and a path built from a variable is not. Every one of those leaves
-// the guard at its last known-good directory rather than at a guess, which is
-// the fail-open direction. Silence from this hook is NOT evidence that a write
-// was checked; only a block is a positive signal.
+// not where a write lands, so `-C`, `--work-tree` and `--git-dir` are followed,
+// and `cd` is tracked across command segments — but `cd -` and `pushd`/`popd`
+// are not, and a path built from a variable is not. Each of those leaves the
+// guard at its last known-good directory rather than at a guess, which is the
+// fail-open direction. Silence from this hook is NOT evidence that a write was
+// checked; only a block is a positive signal.
 
 'use strict';
 
@@ -74,13 +92,14 @@ const path = require('path');
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log('usage: coordinator-write-guard.js  (PreToolUse hook on Bash; reads hook JSON on stdin)\n'
-        + 'Refuses `git commit` / `git push` when a Brain role file names this session and the\n'
-        + 'effective git directory is outside the home repos that role file declares.\n'
+        + 'Refuses git commit / push / merge / rebase when a Brain role file names this session\n'
+        + 'and the work tree or --git-dir is outside the home repos that role file declares.\n'
+        + 'pull and fetch are excluded: a coordinator updating a clone to READ it is the job.\n'
         + 'Role file: $AUTODEV_BRAIN_ROLE_FILE, else ~/.claude/brain-role.json. Absent = inert.');
     process.exit(0);
 }
 
-const BLOCKED_SUBCOMMANDS = new Set(['commit', 'push']);
+const BLOCKED_SUBCOMMANDS = new Set(['commit', 'push', 'merge', 'rebase']);
 
 /** The role file this run consults. Env first so the suite can point it at a fixture. */
 function roleFilePath() {
@@ -175,9 +194,16 @@ function commandSegments(stripped) {
  * of the incident this hook exists for. git applies repeated -C relative to
  * each other, so they compose. `--work-tree=` moves the tree the same way.
  *
- * KNOWN LIMIT, stated rather than papered over: `--git-dir=` is not followed.
- * A bare `--git-dir` with a matching `--work-tree` is covered by the latter;
- * `--git-dir` alone pointed elsewhere is not, and the ledger is what catches it.
+ * `--git-dir` is followed too, and returned SEPARATELY rather than folded into
+ * `dir`. A git write touches two things — the working tree and the object store
+ * — and they are not always the same repo. `git --git-dir=<foreign>/.git commit`
+ * from inside the home repo writes foreign objects with a home work tree, and
+ * the reverse writes home objects from a foreign tree. Either being outside the
+ * declared homes makes it a foreign write, so the caller checks both and names
+ * whichever one it caught.
+ *
+ * No stripping of a trailing `.git` is needed: if `<repo>` is inside a home,
+ * `<repo>/.git` is inside it too, and if it is outside, so is its object store.
  */
 function parseGitSegment(segment, cwd) {
     const toks = segment.split(/\s+/).filter(Boolean);
@@ -191,14 +217,17 @@ function parseGitSegment(segment, cwd) {
     i++;
 
     let dir = cwd;
+    let gitDir = null;
     for (; i < toks.length; i++) {
         const t = toks[i];
         if (t === '-C') { const v = toks[++i]; if (v) dir = path.resolve(dir, unwrap(v)); continue; }
         if (t.startsWith('--work-tree=')) { dir = path.resolve(dir, unwrap(t.slice(12))); continue; }
         if (t === '--work-tree') { const v = toks[++i]; if (v) dir = path.resolve(dir, unwrap(v)); continue; }
-        if (t === '-c' || t === '--exec-path' || t === '--namespace' || t === '--git-dir') { i++; continue; }
-        if (t.startsWith('-')) continue;      // any other global flag, incl. --git-dir=…
-        return { sub: t.toLowerCase(), dir };  // first non-flag word is the subcommand
+        if (t.startsWith('--git-dir=')) { gitDir = path.resolve(dir, unwrap(t.slice(10))); continue; }
+        if (t === '--git-dir') { const v = toks[++i]; if (v) gitDir = path.resolve(dir, unwrap(v)); continue; }
+        if (t === '-c' || t === '--exec-path' || t === '--namespace') { i++; continue; }
+        if (t.startsWith('-')) continue;               // any other global flag
+        return { sub: t.toLowerCase(), dir, gitDir };  // first non-flag word is the subcommand
     }
     return null;
 }
@@ -301,8 +330,15 @@ try {
         if (moved) { here = moved; continue; }
         const g = parseGitSegment(seg, here);
         if (!g || !BLOCKED_SUBCOMMANDS.has(g.sub)) continue;
-        if (homes.some((h) => isInside(h, g.dir))) continue;
-        hits.push(g);
+        // A git write touches the working tree AND the object store, and
+        // --git-dir can point them at different repos. Either one landing
+        // outside the declared homes makes this a foreign write; report the
+        // one that was caught rather than a generic directory.
+        const foreign = [g.dir, g.gitDir]
+            .filter(Boolean)
+            .filter((d) => !homes.some((h) => isInside(h, d)));
+        if (!foreign.length) continue;
+        hits.push({ ...g, at: foreign[0] });
     }
     if (!hits.length) process.exit(0);
 
@@ -312,7 +348,7 @@ try {
     if (claimed && !mine) {
         process.stderr.write(`coordinator-write-guard: ${rolePath} claims session ${claimed}, but this `
             + `hook payload carries no session_id, so the holder could not be confirmed. `
-            + `Allowing \`git ${hits[0].sub}\` in ${hits[0].dir} UNCHECKED.\n`);
+            + `Allowing \`git ${hits[0].sub}\` in ${hits[0].at} UNCHECKED.\n`);
         process.exit(0);
     }
 
@@ -321,7 +357,7 @@ try {
     const h = hits[0];
     process.stderr.write(
         `Blocked: this session holds the coordinator role (${rolePath}), and \`git ${h.sub}\` here `
-        + `would write to ${h.dir}, which is outside its home repo`
+        + `would write to ${h.at}, which is outside its home repo`
         + `${homes.length > 1 ? 's' : ''} (${homes.join(', ')}).\n`
         + `The coordinator does not write to product repos. Brief a session that owns that repo, or `
         + `hand the change over — an unattended coordinator retargeting five PRs is what this rail is for.\n`

@@ -172,13 +172,31 @@ for (const cmd of ['git status --porcelain', 'git log --oneline -5', 'git fetch 
     expectSilentAllow(`read-only \`${cmd.split(' ').slice(0, 2).join(' ')}\` in a foreign repo is allowed`,
         run({ payload: bash(cmd) }));
 }
-// Deliberately out of scope, and asserted so a later widening is a visible
-// decision rather than a drift. The transcript ledger C7 scores against still
-// sees these; this hook's brief names commit and push.
-expectSilentAllow('`git merge` is out of scope by decision, not by oversight',
-    run({ payload: bash('git merge --no-ff feature') }));
-expectSilentAllow('`gh pr merge` is out of scope by decision, not by oversight',
+// `merge` and `rebase` joined the list on 2026-09-02. S5's measured damage was
+// not only the five retargeted PRs — it was also a branch merged into a base a
+// briefed session was landing PRs into forty seconds later. A guard that stops
+// the commit and allows the merge guards the cheaper half.
+expectBlock('`git merge` in a foreign repo blocks',
+    run({ payload: bash('git merge --no-ff feature') }), /git merge/);
+expectBlock('`git rebase` in a foreign repo blocks',
+    run({ payload: bash('git rebase origin/main') }), /git rebase/);
+expectBlock('`git rebase --continue` is still a rebase',
+    run({ payload: bash('git rebase --continue') }), /git rebase/);
+expectSilentAllow('merging INSIDE the home repo is ordinary work',
+    run({ payload: bash('git merge --no-ff feature', { cwd: HOME_REPO }) }));
+
+// The exclusions, each asserted so removing one is a visible decision rather
+// than a drift. `pull` merges, so a mechanical "block what writes" catches it —
+// and a coordinator updating a local clone in order to READ it is the job.
+// Blocking that pushes the role back toward guessing at state it could measure.
+expectSilentAllow('`git pull` is excluded: updating a clone to read it is the job',
+    run({ payload: bash('git pull --ff-only origin main') }));
+expectSilentAllow('`git pull` with an explicit merge is still excluded',
+    run({ payload: bash('git pull --no-rebase origin main') }));
+expectSilentAllow('`gh pr merge` is out of scope: this parses git, not gh',
     run({ payload: bash('gh pr merge 12 --squash') }));
+expectSilentAllow('`git cherry-pick` was not added and is not blocked',
+    run({ payload: bash('git cherry-pick abc1234') }));
 
 // ---------------------------------------------------------------------------
 // D. THE ESCAPES. cwd alone is not where the write lands, and both of these are
@@ -192,6 +210,22 @@ expectBlock('`cd <foreign> && git commit` from inside the home repo still blocks
     run({ payload: bash(`cd ${OTHER_REPO} && git commit -m "x"`, { cwd: HOME_REPO }) }));
 expectBlock('`--work-tree=<foreign>` still blocks',
     run({ payload: bash(`git --work-tree=${OTHER_REPO} commit -m "x"`, { cwd: HOME_REPO }) }));
+
+// --git-dir points the OBJECT STORE somewhere the work tree is not. A write
+// touches both, so either being foreign is a foreign write. Closed 2026-09-02;
+// it had been a documented limit.
+expectBlock('`--git-dir=<foreign>` blocks even with a home work tree',
+    run({ payload: bash(`git --git-dir=${path.join(OTHER_REPO, '.git')} commit -m "x"`, { cwd: HOME_REPO }) }));
+expectBlock('a space-separated `--git-dir <foreign>` blocks too',
+    run({ payload: bash(`git --git-dir ${path.join(OTHER_REPO, '.git')} push`, { cwd: HOME_REPO }) }));
+expectBlock('a HOME --git-dir does not launder a FOREIGN work tree',
+    run({ payload: bash(`git --git-dir=${path.join(HOME_REPO, '.git')} commit -m "x"`) }));
+expectSilentAllow('`--git-dir=<home>` from inside the home repo is ordinary work',
+    run({ payload: bash(`git --git-dir=${path.join(HOME_REPO, '.git')} commit -m "x"`, { cwd: HOME_REPO }) }));
+// The value must be CONSUMED, not read as the subcommand. Getting this wrong
+// makes every --git-dir command allow, which looks exactly like a clean pass.
+expectSilentAllow('a --git-dir value is not mistaken for the subcommand',
+    run({ payload: bash(`git --git-dir ${path.join(HOME_REPO, '.git')} status`, { cwd: HOME_REPO }) }));
 expectBlock('a push buried in a `;` chain still blocks',
     run({ payload: bash('npm test ; git push origin HEAD') }));
 expectBlock('a push inside a command substitution still blocks',

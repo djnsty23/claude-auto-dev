@@ -905,7 +905,9 @@ messages — the subscription replaces both.
   **Arm the rail at boot, because the version of this that was prose only did
   not hold.** Write `~/.claude/brain-role.json` naming this session and the
   repos that are yours to write in, and `coordinator-write-guard.js` refuses
-  `git commit` and `git push` anywhere else:
+  `git commit`, `push`, `merge` and `rebase` anywhere else. `pull` and `fetch`
+  stay allowed on purpose: updating a clone in order to READ it is the job, and
+  a guard that blocks surveying pushes this role back toward guessing:
 
   ```powershell
   $id = (Get-Content "$env:USERPROFILE\.claude\sessions\$PID.json" -Raw | ConvertFrom-Json).sessionId
