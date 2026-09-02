@@ -82,29 +82,56 @@ published when most of it was.
 turn, or a recorded standing order in the Q2 form, and
 `~/claude-memory/STANDING-ORDERS.md` holds **zero** orders.
 
-## The gate DETACHED this worktree's HEAD, and git status showed clean
+## This worktree's HEAD was detached mid-gate. NOT by the gate. Cause unknown.
 
-`[measured 2026-09-02]` After the third `npm run gate`, a commit landed as
-`[detached HEAD df79674]` rather than on the branch. The reflog names it:
+**RETRACTION.** An earlier version of this section, and commit `0551a46`'s
+message, said `check-suites-can-fail.js` detached HEAD while restoring its
+mutants. That was an inference from reflog adjacency, asserted as fact, and it
+is **refuted**.
+
+`[measured 2026-09-02]` A controlled re-run in a scratch worktree, with a
+planted marker file under the gitignored `.claude/reports/`:
+
+| | before | after a full 92-suite sweep |
+|---|---|---|
+| branch | `probe/gate-sideeffects-5811` | `probe/gate-sideeffects-5811` |
+| marker in `.claude/reports/` | PRESENT | PRESENT |
+| reflog entries | 2 | 2 |
+
+The sweep did real work (92 suites, 91 verified able to fail), so this is a null
+result and not a no-op. Static reading agrees: the script makes exactly ONE
+source-tree git call, `status --porcelain`, which is read-only. Every other git
+call is worktree management passing `ROOT` explicitly, and suites run with
+`cwd: SWEEP_ROOT`.
+
+**What actually happened is still unknown, and no cause is asserted.** Both
+reflog entries landed in the same second, 16:08:40:
 
 ```
-df79674 HEAD@{0}: commit: docs(resume): ...
 302b147 HEAD@{1}: checkout: moving from claude/intelligent-brattain-6a09ad to HEAD
 302b147 HEAD@{2}: reset: moving to HEAD
 ```
 
-`HEAD@{2}` is `check-suites-can-fail.js` restoring its mutated sources;
-`HEAD@{1}` is that restore leaving HEAD detached instead of on the branch.
+Searched and came up empty: no `git reset`, `git checkout HEAD` or `git clean`
+anywhere in `tooling/` or `plugins/`, and none in `~/.claude/scripts` or
+`~/.claude/hooks`. What IS in `settings.json` is three base64
+`-EncodedCommand` hooks (which is why a plain grep found nothing), all invoking
+`~/.orca/agent-hooks/claude-hook.cmd`. That file only POSTs to a local daemon,
+passing `ORCA_WORKTREE_ID`. So a worktree-aware external orchestrator is in
+play whose code is not readable from here. That is a lead, not a finding.
 
-Recovered with `git checkout -B`, which was safe **only** because
+Recovered with `git checkout -B`, safe **only** because
 `git merge-base --is-ancestor claude/intelligent-brattain-6a09ad HEAD` exited 0
-first. Run that check before forcing any branch ref; without it, `-B` can
-discard commits.
+first. Run that before forcing any branch ref; without it, `-B` discards commits.
 
-Nothing but the reflog reported this. `git status --porcelain` was empty
-throughout, because a detached HEAD is not a dirty tree. **A gate that moves
-refs in the tree it is auditing is worth its own finding**, and it is the same
-run that removed `.claude/reports/`.
+**The durable fix is the one that survives not knowing the culprit.**
+`check-suites-can-fail.js` now captures the source tree's branch and HEAD at
+start and re-checks both at the end, reporting a move as a conflict (exit 2).
+`git status` is structurally unable to see this: a detached HEAD is not a dirty
+tree, and neither is a branch switch. Its summary also said "tree restored
+clean" while measuring the **sweep** worktree via `gitW`, a temp directory
+deleted moments later; it now reads "sweep worktree clean, source tree refs
+unmoved".
 
 ## L2 delivered, 2026-09-02
 
