@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>planted: text under a sticky bar</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font:16px/1.6 system-ui,sans-serif}
+  .wrap{padding:16px;max-width:70ch}
+  /* THE PLANTED DEFECT. An opaque sticky bar pinned to the top with no
+     clearance reserved on the content beneath it, so the first lines of the
+     article sit underneath it. Opaque, so it genuinely hides the text — the
+     clean page's transparent catcher is the negative control for this. */
+  .promo{position:fixed;top:0;left:0;right:0;height:96px;background:#0b3d91;color:#fff;padding:12px 16px;z-index:20}
+  .article{margin-top:0}
+</style></head>
+<body>
+<div class="promo">Spring sale, ends Friday. This bar reserves no space.</div>
+<main class="wrap">
+  <article class="article">
+    <h1>The headline this bar covers</h1>
+    <p>The opening paragraph is underneath the promotional bar and cannot be read at any width. Nothing on the page reserves the 96 pixels the bar occupies, so the article simply starts at the top of the document and the bar is painted over it.</p>
+    <p>This second paragraph is clear of the bar and must not be reported, or the check is measuring the page rather than the defect.</p>
+    <p>So is this one.</p>
+  </article>
+</main>
+</body></html>
