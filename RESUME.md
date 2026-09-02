@@ -9,7 +9,7 @@ not answer says so rather than rendering as empty.
 | directory | `~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc` |
 | branch | `claude/intelligent-brattain-6a09ad` |
 | upstream | _none tracked_ |
-| HEAD committed | 2026-09-02T02:33:11+03:00 |
+| HEAD committed | 2026-09-02T12:26:46+03:00 |
 
 **Re-read before acting on any of this.** A resume file is a snapshot, and
 the two facts most likely to have moved are the two below: someone may have
@@ -35,14 +35,15 @@ Another session may hold one of these. Run `git status` in a tree before
 touching it: a dirty tree you did not dirty means someone is in there.
 
 ```
-~/claude-auto-dev                                                      f44f321 [main]
+~/claude-auto-dev                                                      6e331ec [main]
+~/AppData/Local/Temp/check-suites-wt-54308-5tB9Nn                      6e331ec (detached HEAD)
 ~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78          6a31e23 (detached HEAD)
 ~/claude-auto-dev/.claude/worktrees/code-changelog-d72bca              0222e8e (detached HEAD)
 ~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2           187ce9c [claude/agents-md-channel-pointer]
 ~/claude-auto-dev/.claude/worktrees/incremental-write                  556850f (detached HEAD)
 ~/claude-auto-dev/.claude/worktrees/sad-kirch-355c74                   2d3808b (detached HEAD)
 ~/claude-auto-dev/.claude/worktrees/survey-trunk-cache                 70fbfce [fix/survey-trunk-cache]
-~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc            2be34ef [claude/intelligent-brattain-6a09ad]
+~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc            c0891f1 [claude/intelligent-brattain-6a09ad]
 ~/Downloads/code/autodev                                               3f8101f [test/brain-panels-vacuity-gaps]
 ~/Downloads/code/autodev/.claude/worktrees/framework-radar             a398c93 [codex/framework-radar]
 ~/Downloads/code/autodev/.claude/worktrees/framework-radar-experiments 4ba28eb [codex/framework-radar-experiments]
@@ -60,39 +61,59 @@ touching it: a dirty tree you did not dirty means someone is in there.
 
 _These steps were derived from what is actually in `~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc`._
 
-## Unpushed commits, measured by hand after the script said COULD NOT READ
+## Unpushed commits, measured by hand where the script cannot answer
 
-The script is right and its blank is honest: this branch tracks no upstream, so
-`ahead of origin` genuinely has no answer. Measured against the trunk instead:
+The script reports COULD NOT READ, correctly: this branch tracks no upstream, so
+"ahead of origin" has no answer. Measured against the trunk instead:
 
 ```
-git rev-list --count origin/main..HEAD   ->  5
+git rev-list --count origin/main..HEAD   ->  10
 git status -sb                           ->  ## claude/intelligent-brattain-6a09ad   (no upstream)
 ```
 
-Five local commits, none pushed, and a push needs the operator's word in the
-turn. In order: the kill-test seed, the evidence tree, the fix, the merge of
-origin/main, and the untracking of the raw adversary output.
+Ten local commits, none pushed. A push needs the operator's word in the turn.
 
-## Where the round's artifacts are
+## What landed this session
 
-- Round log: `.claude/reports/harness-audit-rounds.md` in this worktree, ~400
-  lines, gitignored by design and durable by being appended.
-- Raw adversary findings: `.claude/reports/l4-bootstrap-findings.md`, same
-  directory. Carries absolute home paths, which is why it is not tracked.
-- Summary that survives this session: `DECISIONS-2026-09-02.md` in the config
-  mirror, committed there locally.
-- The adversary's plan review moved out of the archived planning worktree into
-  the mirror's `reports/` directory; the path in the original brief is dead.
+| lane | result | commits |
+|---|---|---|
+| L4 bootstrap | one round, VERDICT: CLEAN, 1 defect found in the adversary's own test | earlier |
+| Fly.io removal | workflow disabled, dead token deleted, two docs updated | mirror repo |
+| L5 | check:entrypoints wired; 5 scripts stopped doing work on --help; provenance stays advisory | 565f6d1, 2a1a1fc |
+| L7 | bare-word dispatch form added; check:skill-tools wired | 016637b, c0891f1 |
 
-## Next lane, L5 remainder, in order
+Gate green on a clean tree after every code change: 92/92 suites, 91 verified
+able to fail, 0 NOT verified, tree restored clean, exit 0.
 
-1. Wire `check:entrypoints` into `gate` and into CI. It is defined on main and
-   nothing runs it; control grep for `check:population` finds it wired in both.
-2. The `--help` sweep over the whole script population, printing the population
-   and the non-returners.
-3. Claim-provenance precision on the last 100 commit bodies; promote to blocking
-   only under 5% false positives on that sample.
+## Next lane: L6, then L2, L3, L1
 
-Stopping here rather than starting L5: last-turn context measured 328,686
-tokens, over the ~300k threshold at which a lane hands off to a fresh session.
+L1 is the integration lane and runs last. Two rails L6 should pick up, both
+found while executing other lanes rather than by planning:
+
+1. **The gate cannot run inside one tool call.** It exceeds a 10-minute budget,
+   and the process SURVIVES the killed call, so anything automating it must
+   background and poll rather than wait. A caller that re-runs on timeout puts
+   two mutation sweeps on one job.
+2. **C9's stop line cannot be read off `quota-tripwire.js --status`.** That
+   figure is account-wide across every live session, not this audit's spend. The
+   audit's attributable cost is the GPT column of `usage-both.js` plus this
+   session's own transcript.
+
+## Two findings that belong to the PLAN, not the code
+
+L5 and L7 each ended by finding their own acceptance test wrong, the same way:
+naming a probe by the question they want answered rather than by what the probe
+reports. L5 wanted a gate keyed on exit codes, which cannot detect an ignored
+flag. L7 wanted a heuristic prose-grader to gate, which its own header declines
+to do. Two of two executed lanes, so treat it as a property of the plan and
+re-read the remaining lanes' acceptance tests against what their probes print
+before starting them.
+
+## Open, needing the operator
+
+- `SUPABASE_WINDROSE_PASSWORD` was rendered into this session's transcript by a
+  `doppler secrets delete` that prints the whole store. Confined to the local
+  transcript, 0 files elsewhere; the operator read the blast radius and said it
+  is fine. No rotation performed.
+- A dead `FLY_API_TOKEN` repo secret remains in the analytics repo.
+- Q5 stays open: no headless supervisor was built or run.
