@@ -26,6 +26,20 @@ about to create is the cheapest possible warning that someone is on the same
 problem. Read that branch before renaming around it, and if the work is
 duplicated keep the better implementation rather than yours.
 
+**But a branch name is not evidence about its content.** Test whether its commit
+is an ancestor of the default branch, and run a control so a uniform answer
+cannot pass as a finding:
+
+```bash
+git merge-base --is-ancestor origin/<branch> origin/main   # exit 0 = already landed
+git merge-base --is-ancestor HEAD origin/main              # control, expect 1
+```
+
+`[measured 2026-09-02]` a branch named `fix/always-on-without-a-trigger` was the
+only match for a search about skill triggers. It had already landed, and its tip
+commit was a telemetry path fix. The name matched the search and nothing else
+did.
+
 ## Create the tree
 
 ```bash
@@ -35,6 +49,17 @@ git worktree add .claude/worktrees/<slug> -b <slug> origin/main
 
 Branch from the **remote** default branch, not from local `main`, which may be
 behind or may carry another session's uncommitted work.
+
+**Unless your work sits on unpushed local commits.** Then branch from `HEAD` and
+say so, because `origin/main` does not contain them and the tree would silently
+start without what you are building on. One command decides it:
+
+```bash
+git log --oneline origin/main..HEAD
+```
+
+Nothing printed means `origin/main` is safe. Anything printed is the list of
+commits you would have lost.
 
 `.claude/worktrees/` is the convention because it is gitignored, so the trees
 never appear as untracked files in the parent clone.
@@ -47,13 +72,15 @@ missing and both fail in ways that look like a bug in your change:
 - **Gitignored env files.** Copy `.env.local` and siblings from the main clone.
   Without them a dev server starts with zero env injected, the app never mounts,
   and every browser check fails against a blank page.
-- **`node_modules`.** A worktree cut from an older base, or reusing the parent's
-  install, surfaces import errors for dependencies added since. Run the install.
+- **`node_modules`, but only if the repo has dependencies.** A worktree cut from
+  an older base, or reusing the parent's install, surfaces import errors for
+  dependencies added since. Count them before installing: a repo with zero deps
+  needs no install, and running one anyway is a minute spent per worktree.
 
 Check both before concluding anything about the code:
 
 ```bash
-ls -a .claude/worktrees/<slug> | grep -c '^\.env' || echo "0 env files — copy them"
+ls -a .claude/worktrees/<slug> | grep -c '^\.env' || echo "0 env files, copy them"
 ```
 
 ## Never touch a tree you did not create

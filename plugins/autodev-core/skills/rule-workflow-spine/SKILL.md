@@ -1,6 +1,6 @@
 ---
 name: rule-workflow-spine
-description: "The order the other skills run in. Four steps — isolate, build, prove, ship — each with the terminal condition that ends it. Load before starting any feature, fix or task, and whenever you are about to pick a skill and cannot tell which one comes first."
+description: "The order the other skills run in. Four steps: isolate, build, prove, ship. Each carries the condition that ends it. Load before starting any feature, fix or task, and whenever you are about to pick a skill and cannot tell which one comes first."
 when_to_use: "At the start of any unit of work, before the first edit. Also when a session has many candidate skills and no ordering to choose between them."
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash
@@ -16,7 +16,7 @@ file is the order. It adds no capability; it decides what fires when.
 Four steps. Each ends on a condition you can check, not on a feeling that the
 step is finished.
 
-## 1. Isolate — before the first edit
+## 1. Isolate: before the first edit
 
 Load `isolate`. Work happens in a git worktree branched from the remote default
 branch, never in a tree another session is using.
@@ -29,16 +29,16 @@ running parallel agents has no exemption: two agents in one tree produce a
 collision whose symptom is a lost edit, and a lost edit is not reported by
 anything.
 
-## 2. Build — the work itself
+## 2. Build: the work itself
 
 No skill owns this step. The repo's own conventions do, plus whichever rule
 skills the paths you touch pull in.
 
 **Ends when** the change compiles and the thing you set out to change behaves
-differently. Not when it is correct — that is step 3's job, and merging the two
+differently. Not when it is correct. That is step 3's job, and merging the two
 is how a build declares itself proven.
 
-## 3. Prove — evidence, not assertion
+## 3. Prove: evidence, not assertion
 
 Load `prove`. The before state is captured **while the defect still reproduces**,
 which is the only moment it is free, and the after state once the change works.
@@ -50,7 +50,7 @@ The trap this prevents: a fix verified only after the fact cannot distinguish
 "I fixed it" from "it was never broken the way I described". `rule-diagnosis`
 carries the cost of that confusion; this step is what makes it observable.
 
-## 4. Ship — gate, then hand over
+## 4. Ship: gate, then hand over
 
 Load `commit`, then `ship` if the change deploys. Run the repo's whole gate on a
 clean tree, after committing.

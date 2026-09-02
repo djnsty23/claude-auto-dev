@@ -37,6 +37,19 @@ git add src/components/new-feature.tsx src/lib/utils.ts
 git commit -m "feat: add playlist drag-drop reorder"
 ```
 
+## Evidence goes IN the commit
+
+If the change fixes a defect or moves a visible surface, the `prove` skill's
+before/after pair belongs in this commit, not beside it. Two reasons, and the
+second is the one that bites:
+
+- A reviewer reading the commit later has no other route to it.
+- `.claude/evidence/` is tracked, so evidence left uncommitted dirties the tree
+  and any gate refusing a dirty tree then refuses to run at all.
+
+Name the paths in the body and state the delta in one line. A difference you
+cannot state in a sentence is one you have not checked.
+
 ## Conventional Commits (Required)
 
 ```
