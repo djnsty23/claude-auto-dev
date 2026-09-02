@@ -7,9 +7,9 @@ not answer says so rather than rendering as empty.
 | field | value |
 |---|---|
 | directory | `~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc` |
-| branch | `claude/intelligent-brattain-6a09ad` |
+| branch | _not a git repo_ |
 | upstream | _none tracked_ |
-| HEAD committed | 2026-09-02T12:26:46+03:00 |
+| HEAD committed | 2026-09-02T15:45:05+03:00 |
 
 **Re-read before acting on any of this.** A resume file is a snapshot, and
 the two facts most likely to have moved are the two below: someone may have
@@ -35,15 +35,14 @@ Another session may hold one of these. Run `git status` in a tree before
 touching it: a dirty tree you did not dirty means someone is in there.
 
 ```
-~/claude-auto-dev                                                      6e331ec [main]
-~/AppData/Local/Temp/check-suites-wt-54308-5tB9Nn                      6e331ec (detached HEAD)
-~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78          6a31e23 (detached HEAD)
+~/claude-auto-dev                                                      27f1c69 [main]
+~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78          e4942c1 [claude/stoic-mayer-faab1d]
 ~/claude-auto-dev/.claude/worktrees/code-changelog-d72bca              0222e8e (detached HEAD)
 ~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2           187ce9c [claude/agents-md-channel-pointer]
 ~/claude-auto-dev/.claude/worktrees/incremental-write                  556850f (detached HEAD)
 ~/claude-auto-dev/.claude/worktrees/sad-kirch-355c74                   2d3808b (detached HEAD)
 ~/claude-auto-dev/.claude/worktrees/survey-trunk-cache                 70fbfce [fix/survey-trunk-cache]
-~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc            c0891f1 [claude/intelligent-brattain-6a09ad]
+~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc            302b147 (detached HEAD)
 ~/Downloads/code/autodev                                               3f8101f [test/brain-panels-vacuity-gaps]
 ~/Downloads/code/autodev/.claude/worktrees/framework-radar             a398c93 [codex/framework-radar]
 ~/Downloads/code/autodev/.claude/worktrees/framework-radar-experiments 4ba28eb [codex/framework-radar-experiments]
@@ -67,111 +66,65 @@ The script reports COULD NOT READ, correctly: this branch tracks no upstream, so
 "ahead of origin" has no answer. Measured against the trunk instead:
 
 ```
-git rev-list --count origin/main..HEAD   ->  10
-git status -sb                           ->  ## claude/intelligent-brattain-6a09ad   (no upstream)
+git rev-list --count origin/main..HEAD   ->  17
 ```
 
-Ten local commits, none pushed. A push needs the operator's word in the turn.
+Seventeen local commits, none pushed. A push needs the operator's word in the
+turn, or a recorded standing order in the Q2 form. `~/claude-memory/STANDING-ORDERS.md`
+holds **zero** orders, so nothing currently authorises one.
 
-## What landed this session
+## L2 delivered, 2026-09-02
 
-| lane | result | commits |
-|---|---|---|
-| L4 bootstrap | one round, VERDICT: CLEAN, 1 defect found in the adversary's own test | earlier |
-| Fly.io removal | workflow disabled, dead token deleted, two docs updated | mirror repo |
-| L5 | check:entrypoints wired; 5 scripts stopped doing work on --help; provenance stays advisory | 565f6d1, 2a1a1fc |
-| L7 | bare-word dispatch form added; check:skill-tools wired | 016637b, c0891f1 |
-
-Gate green on a clean tree after every code change: 92/92 suites, 91 verified
-able to fail, 0 NOT verified, tree restored clean, exit 0.
-
-## Next lane: L6, then L2, L3, L1
-
-L1 is the integration lane and runs last. Two rails L6 should pick up, both
-found while executing other lanes rather than by planning:
-
-1. **The gate cannot run inside one tool call.** It exceeds a 10-minute budget,
-   and the process SURVIVES the killed call, so anything automating it must
-   background and poll rather than wait. A caller that re-runs on timeout puts
-   two mutation sweeps on one job.
-2. **C9's stop line cannot be read off `quota-tripwire.js --status`.** That
-   figure is account-wide across every live session, not this audit's spend. The
-   audit's attributable cost is the GPT column of `usage-both.js` plus this
-   session's own transcript.
-
-## Two findings that belong to the PLAN, not the code
-
-L5 and L7 each ended by finding their own acceptance test wrong, the same way:
-naming a probe by the question they want answered rather than by what the probe
-reports. L5 wanted a gate keyed on exit codes, which cannot detect an ignored
-flag. L7 wanted a heuristic prose-grader to gate, which its own header declines
-to do. Two of two executed lanes, so treat it as a property of the plan and
-re-read the remaining lanes' acceptance tests against what their probes print
-before starting them.
-
-## Open, needing the operator
-
-- `SUPABASE_WINDROSE_PASSWORD` was rendered into this session's transcript by a
-  `doppler secrets delete` that prints the whole store. Confined to the local
-  transcript, 0 files elsewhere; the operator read the blast radius and said it
-  is fine. No rotation performed.
-- A dead `FLY_API_TOKEN` repo secret remains in the analytics repo.
-- Q5 stays open: no headless supervisor was built or run.
-
-## L6, partially delivered 2026-09-02
-
-| rail | verdict |
+| artefact | state |
 |---|---|
-| C9 tripwire | **PASS**, two-sided, ceiling the only variable |
-| S5 coordinator-write ban | **ABSENT**; no PreToolUse hook matches Bash |
-| S12 archive setting at boot | **FAILS**; `isArchived` used as a filter only |
-| C5, C7, mirror race | deferred by the plan's own week-1 scope |
+| `~/claude-memory/STANDING-ORDERS.md` | the holder. Zero orders, which is correct |
+| `tooling/check-standing-orders.js` | validator, 19 selftest checks |
+| `tooling/test-standing-orders.js` | 17 passed |
+| `tooling/standing-order-wake.js` | the wake, and C4's once-only transition |
+| `tooling/test-standing-order-wake.js` | 25 passed, three wakes over one flip |
+| `check:standing-orders` | npm alias. Not in the gate chain: `npm test` runs the suite |
 
-**Next session starts here, smallest first.**
+Commits `0232835`, `ffffe6e`, `302b147`. Mirror `9982315`.
 
-1. **S12, one line in `brain-brief.js`.** It already fetches session rows and
-   uses `isArchived` three times as a filter. Print the SETTING: any row with
-   `isArchived: true` beside `prState: MERGED` means merging a PR can end the
-   merging session. Measured ON today, so a Brain that merges can archive itself
-   with no warning at boot.
-2. **S5, the coordinator-write hook. Do this in a FRESH session.** It is a
-   PreToolUse hook on `Bash`, shipping in this marketplace into other people's
-   sessions, where a throw kills their turn and a defect survives until
-   reinstall. Fail OPEN, follow `pre-tool-filter.js`'s private-name block, and
-   mutation-test by removing the role file. It was deliberately not attempted at
-   412k context.
-3. Then L2, L3, and L1 last as the integration lane.
+    npm run gate  ->  94/94 suites, 93 verified able to fail, 0 NOT verified,
+                      tree restored clean, GATE_EXIT=0
 
-**C9 carries a standing limit, unchanged:** its reading is account-wide, moving
-$55 to $974 during one session, so it scores "is the account near its wall" and
-cannot score "has the audit spent 8% of its window". Use the `usage-both.js` GPT
-column plus this session's transcript for the latter.
+C4 measured: wake 1 does not fire, wake 2 fires once and writes
+`executed <ts>`, wake 3 does not re-fire with the condition still true.
 
-**Probe note for whoever tests the tripwire next:** use `--fixture-cost`,
-`--fixture-window` and `--fixture-now` with a scratch `--state`. Hand-seeding
-samples does not work, because a `windowStart` mismatch clears the sample array
-(line 264), and both arms of the experiment then return identical output.
+**The acceptance test was wrong a fourth time, in the same way.** L2's
+acceptance named `check-push-authorisation.js` as the gate that must refuse an
+order with no verbatim words. Run it and it prints
+`63 shipped SKILL.md scanned` - a different question over a different corpus.
+Keep running each lane's probe before starting the lane.
 
-## L2 surveyed, not built, 2026-09-02
+## Two things the next session should not rediscover
 
-`STANDING-ORDERS.md` does not exist. The three queue scripts do. And L2's
-acceptance names `check-push-authorisation.js` as the gate that must refuse an
-order with no verbatim operator words, which it cannot do: it reads only
-`plugins/*/skills/*/SKILL.md`. C4 needs a NEW validator over the holder file,
-checking the four parts Q2 specified (verbatim words, date, condition, holding
-session).
+1. **A backgrounded `npm run gate` reports its exit as 0 regardless**, if the
+   command ends with anything after `;`. Run one here was RED and the task
+   notification said exit code 0. Capture `GATE_EXIT=$?` and read that.
+2. **`.claude/reports/` was deleted from this worktree during a gate run**,
+   cause unknown and not asserted. The round log survived only because the
+   mirror had copied it three minutes earlier. It is gitignored, so `git status`
+   showed nothing. The plan calls the log "durable by appending"; that is false,
+   and the durability actually came from `~/claude-memory/reports/`.
 
-**Start L2 in a fresh session.** It is a new file plus a new gate plus a suite,
-and this session reached 457,833 tokens.
+## Next lane: S5, then L3, then L1
 
-**Before starting any remaining lane, re-read its acceptance test against what
-its probe actually prints.** Three of three executed lanes found their own
-acceptance wrong in the same way, so treat it as the default rather than the
-exception.
+**S5, the coordinator-write hook.** A PreToolUse hook refusing `git commit` and
+`git push` when the session holds the Brain role file and cwd is outside the
+harness repo. Absence re-confirmed here with a control:
 
-**Bonus finding, with its population:** 38 npm aliases are defined and **21 are
-invoked from nowhere**, measured across package.json, every workflow and 164
-scripts. Not 21 defects: some are deliberately manual (`bump`, `radar`,
-`usage:both`), two are advisory by design. But `find-orphan-checks.js` calls
-every one of them reachable, because a package.json mention counts as a
-reference, so this class can grow forever without the detector noticing.
+```
+git ls-tree -r --name-only HEAD | grep hooks.json                  ->  2 tracked
+git grep -c "AskUserQuestion" HEAD -- plugins/*/hooks/hooks.json   ->  1  (control)
+git grep -c "Bash"            HEAD -- plugins/*/hooks/hooks.json   ->  0
+```
+
+PreToolUse carries `Read|Write|Edit` and `AskUserQuestion` only, so the ban has
+no mechanism at all. Build it in a FRESH session: it ships in this marketplace
+and runs in other people's sessions, where a throw kills their turn and a defect
+survives until reinstall. Fail OPEN, follow the private-name block in
+`pre-tool-filter.js`, and mutation-test by removing the role file.
+
+Then L3, then L1 as the integration lane.
