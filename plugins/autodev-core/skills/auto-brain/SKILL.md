@@ -311,6 +311,13 @@ unattended window goes wrong.
 - **Write `RESUME.md` at the end** with `session-exit.js`, and report the four:
   what you finished with commits named, what you verified naming the command and
   what it printed, what is blocked and on whom, and whether you are idle.
+- **If the brief means a session to RUN a skill, send the bare word alone.**
+  `[measured 2026-08-25]` The triggers are already one word, and a word inside a
+  sentence never fires one: `audit` appears 3,199 times across the local
+  transcripts and not once on its own. A prose brief saying "audit the auth
+  module" invokes nothing. Send `audit` as the entire message, and let the skill
+  take its subject from the session's context.
+
 - **Say plainly if the brief is wrong for that repo.** A brief written from
   outside will sometimes prescribe something that does not apply. Contradicting
   it is the correct response, not insubordination.

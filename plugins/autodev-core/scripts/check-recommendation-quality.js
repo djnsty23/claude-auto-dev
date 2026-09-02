@@ -221,7 +221,11 @@ function selftest() {
     ]);
 
     const fails = [];
-    const check = (name, cond) => { if (!cond) fails.push(name); };
+    // `ran` exists so the count below is DERIVED. It read a literal `10` until
+    // 2026-09-02: a population that cannot move when the population does, which
+    // is the rot a population line exists to prevent.
+    let ran = 0;
+    const check = (name, cond) => { ran++; if (!cond) fails.push(name); };
 
     // 1. REJECTED fires when the recommendation is left out.
     let r = analyse(collectPanels(mk('a', [{
@@ -307,7 +311,7 @@ function selftest() {
         console.error('SELFTEST FAILED: ' + fails.join('; '));
         process.exit(1);
     }
-    console.log('selftest ok: 10 cases, each paired with the negative it must not fire on');
+    console.log(`selftest ok: ${ran} cases, each paired with the negative it must not fire on`);
     process.exit(0);
 }
 

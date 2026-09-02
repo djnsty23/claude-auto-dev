@@ -1,0 +1,6 @@
+
+# Raw adversary output is a REPORT, not evidence to track.
+# It carries absolute paths from the machine that produced it, and this repo
+# is public. `.claude/reports/` is gitignored for exactly this reason; the copy
+# of record lives there. See .claude/l4-scratch/README.md.
+findings.md

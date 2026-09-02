@@ -464,6 +464,31 @@ try {
         'population: 2 transcripts in 1 project dirs (last 2d), 2 live (<24h), 0 cold');
     hasText('A: counts the blocked session in the population line', a1, '1 blocked on an unanswered panel');
     hasText('A: counts sessions that have ever raised a panel', a1, '1 have ever raised a panel');
+
+    // Auto-archive-after-merge. The section reports a BLIND SPOT rather than a
+    // reading, and these assertions pin that shape, because the tempting
+    // implementation is a check that can never fire.
+    //
+    // Measured 2026-09-02: isArchived is false for all 152 sessions scanFleet
+    // returns and 0 of 12 local records carry the key, since archiving removes a
+    // session from the store rather than flagging it. So a line testing
+    // "archived beside a MERGED pr" would print the same reassuring text forever.
+    // The pair asserted here is therefore not true/false but MEASURED/CLAIMED:
+    // the line must carry its denominator, and must never render as "off".
+    hasText('A: reports the archive setting as not determinable, with its denominator', a1,
+        'auto-archive-after-merge: NOT DETERMINABLE from local records - 0 of 2 scanned sessions');
+    hasText('A: names the probe that CAN answer it', a1, 'list_sessions(include_archived: true)');
+    hasText('A: says what it costs if the setting is on', a1,
+        'merging a PR ends the session that merged');
+    // No regex and no escape sequence here, on purpose. The first version of
+    // this assertion carried literal backspace bytes where it meant word
+    // boundaries, because the escapes were eaten in transit, so it matched
+    // nothing and could never fire. Mutation testing caught it: a planted line
+    // reading "off" left it silent while its neighbour went red. A plain
+    // substring has nothing to lose in transit.
+    check('A: never lets the blind spot read as "off"',
+        !a1.toLowerCase().includes('after-merge: off'),
+        'the archive line must never render as "off"; section 1 was: ' + JSON.stringify(a1.slice(0, 400)));
     check('A: breaks live sessions down by state', a1.includes('blocked 1') && a1.includes('working 1'),
         'live-by-state line was: ' + JSON.stringify((a1.match(/ live by state: .*/) || [''])[0]));
     hasText('A: reports the blocked count against the scanned denominator', a1,

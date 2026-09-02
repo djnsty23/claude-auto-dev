@@ -58,6 +58,15 @@ const SUBJECT_OVERRIDES = {
     // pushes was itself the unchecked one.
     'test-push-authorisation.js': ['tooling/check-push-authorisation.js'],
 
+    // Fifth time, 2026-09-02, and the prediction below held exactly. L2 needed a
+    // standing-order validator in tooling/, so its suite derived nothing and was
+    // reported UNCHECKED. Worth recording that this cost nothing: the UNCHECKED
+    // failure did its job, went red on the first full gate run, and named the
+    // fix. Under the old "nothing to stub" wording it would have been reported
+    // as a pass over a suite nobody had verified.
+    'test-standing-orders.js': ['tooling/check-standing-orders.js'],
+    'test-standing-order-wake.js': ['tooling/standing-order-wake.js'],
+
     // Fourth time, 2026-08-30, four at once: the codex-audit acceptance suites
     // all test tooling/ checkers, so all derived nothing. The pattern is now
     // structural - every acceptance test for a TOOLING gate lands here - and
@@ -372,6 +381,27 @@ const gitArgv = (args, cwd) => {
 // verdict below must be about a tree we can name exactly.
 const HEAD_SHA = gitArgv(['rev-parse', 'HEAD'], ROOT).trim();
 
+// The SOURCE tree's ref position, captured so the end of the run can prove it
+// did not move.
+//
+// `[measured 2026-09-02]` This sweep was blamed for detaching a worktree's HEAD
+// mid-gate, on nothing but reflog adjacency. A controlled re-run refuted it: a
+// full 92-suite sweep in a scratch worktree left the branch attached, the
+// reflog unchanged at 2 entries, and a planted file under the gitignored
+// `.claude/reports/` still present. The sweep is not the cause.
+//
+// What IS true, and is the reason this capture exists: nothing here could have
+// told you either way. `git status` cannot see a moved ref. A detached HEAD is
+// not a dirty tree, and neither is a branch switch, so an external mutation of
+// the source tree during a 15-minute sweep is completely silent. Whoever did
+// move it, the run should say so rather than print a summary that reads as an
+// all-clear.
+//
+// `rev-parse --abbrev-ref` rather than `symbolic-ref`: it returns the literal
+// string "HEAD" when detached and exits 0, where `symbolic-ref` exits 1 and
+// gitArgv would throw during capture.
+const SOURCE_BRANCH_BEFORE = gitArgv(['rev-parse', '--abbrev-ref', 'HEAD'], ROOT).trim();
+
 // Reclaim worktrees stranded by a crashed or killed sweep. OWNERSHIP IS
 // WHAT GIT SAYS, nothing else (Sol's round-14 blocker: a .git-pointer check
 // is spoofable and check/use racy, and any recursive delete after git
@@ -682,9 +712,34 @@ for (const rel of [...installedNow.keys()]) {
     removeOwn(rel);
 }
 
+// THE SOURCE TREE'S REFS, which `git status` is structurally unable to report.
+// A moved branch or a detached HEAD leaves a perfectly clean status, so without
+// this the run ends with a summary that reads as an all-clear over a tree whose
+// HEAD is somewhere else entirely.
+try {
+    const branchAfter = gitArgv(['rev-parse', '--abbrev-ref', 'HEAD'], ROOT).trim();
+    const shaAfter = gitArgv(['rev-parse', 'HEAD'], ROOT).trim();
+    if (branchAfter !== SOURCE_BRANCH_BEFORE) {
+        conflict(
+            `the SOURCE tree's HEAD moved during this run: was on ${SOURCE_BRANCH_BEFORE}, now on ` +
+            `${branchAfter}${branchAfter === 'HEAD' ? ' (DETACHED)' : ''}. This sweep never writes to ` +
+            `the source tree, so something else did. Recover with ` +
+            `\`git merge-base --is-ancestor <branch> HEAD\` and, only if that passes, \`git checkout -B <branch>\``
+        );
+    } else if (shaAfter !== HEAD_SHA) {
+        conflict(
+            `the SOURCE tree's HEAD advanced during this run: ${HEAD_SHA.slice(0, 8)} -> ` +
+            `${shaAfter.slice(0, 8)} on ${branchAfter}. The verdicts above describe ` +
+            `${HEAD_SHA.slice(0, 8)}, not the tree you are standing in.`
+        );
+    }
+} catch (e) {
+    conflict('could not re-read the source tree HEAD after the sweep: ' + e.message);
+}
+
 const after = gitW('status --porcelain').trim();
 if (after) {
-    console.error('\nTREE NOT CLEAN after the sweep:\n' + after);
+    console.error('\nSWEEP WORKTREE NOT CLEAN after the sweep:\n' + after);
     // Nothing here is this sweep's to fix: its own artifacts were returned
     // above (or reported as conflicts with the original's location named),
     // so remaining dirt is either a mid-sweep foreign change or a preserved
@@ -717,7 +772,13 @@ const verified = rows.length - bad - notJs;
 console.log(`\n${rows.length} suite(s) · ${verified} verified able to fail · ${bad} NOT verified` +
             (unchecked ? ` (${unchecked} with no derivable subject)` : '') +
             (notJs ? ` · ${notJs} canaried elsewhere, not stubbable here` : '') +
-            (conflicts.length ? '' : ' · tree restored clean') + '\n');
+            // "tree restored clean" was measured with gitW, in the PRIVATE sweep
+            // worktree that is deleted moments later. It reads as reassurance
+            // about the tree you are standing in and was never about it. Say
+            // which tree, and say that the source tree's refs were checked too,
+            // since that is the part a reader actually wants and the part
+            // `git status` cannot answer.
+            (conflicts.length ? '' : ' · sweep worktree clean, source tree refs unmoved') + '\n');
 
 // A detected mid-sweep conflict poisons every verdict above: suites that ran
 // after the tree changed were measured against a tree this script knows it

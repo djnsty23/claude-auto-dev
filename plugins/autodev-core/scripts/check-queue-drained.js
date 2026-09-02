@@ -200,7 +200,12 @@ function selftest() {
     const COMMA = 'Merge #17, then clear #16';   // a real label shape, comma included
     const OTHER = 'Nightly browser-gate workflow';
     const failures = [];
+    // `ran` exists so the count below is DERIVED. It read a literal `12` until
+    // 2026-09-02: a population that cannot move when the population does, which
+    // is the rot a population line exists to prevent.
+    let ran = 0;
     const check = (name, cond, detail) => {
+        ran++;
         console.log(`  ${cond ? 'ok  ' : 'FAIL'}  ${name}${cond ? '' : ' - ' + detail}`);
         if (!cond) failures.push(name);
     };
@@ -279,7 +284,7 @@ function selftest() {
 
     console.log(failures.length
         ? `selftest: FAIL (${failures.length})`
-        : 'selftest: PASS - 12 assertions, positive and negative both exercised');
+        : `selftest: PASS - ${ran} assertions, positive and negative both exercised`);
     return failures.length ? 1 : 0;
 }
 
