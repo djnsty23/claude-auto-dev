@@ -86,7 +86,20 @@ try {
     // is why "it passes on my machine" is not evidence here.
     // This repo already documents the same class on macOS, where /var and
     // /private/var are one directory. Resolve before comparing, always.
-    const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+    // `.native` FIRST, and it is the only one that works. [measured 2026-09-03]
+    // against a real 8.3 name (`AVERYL~1` beside `averylongdirectoryname`):
+    //   path.resolve        short === long   FALSE
+    //   fs.realpathSync     short === long   FALSE   <- the fix that did not work
+    //   realpathSync.native short === long   TRUE
+    // realpathSync resolves symlinks and normalises separators; it does NOT
+    // expand a short name. Only the native call does, because it goes through
+    // GetFinalPathNameByHandle. The first attempt at this used the non-native
+    // form, passed locally, and failed the runner identically to the original
+    // bug — a fix aimed at the right class with the wrong API.
+    const real = (p) => {
+        try { return fs.realpathSync.native(p); } catch { /* fall through */ }
+        try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+    };
     const rowFor = (res, dir) => res.rows.find((r) => real(r.worktree) === real(dir));
     const kinds = (row) => (row ? row.findings.map((f) => f.kind) : ['<row missing>']);
 
