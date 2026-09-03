@@ -40,6 +40,44 @@ only match for a search about skill triggers. It had already landed, and its tip
 commit was a telemetry path fix. The name matched the search and nothing else
 did.
 
+### Neither command above can see unpushed work
+
+Both read the REMOTE. Where commits stay local until someone says push, which is
+the default in this estate, the normal state of work in progress is invisible to
+both. So the scope check as written is blind to precisely the case it exists for.
+
+Add the local probe, and run it against the repo's MAIN CLONE rather than your
+own tree, because that is where another session's finished-but-unpushed work
+sits:
+
+```bash
+git -C <main-clone> rev-list --left-right --count origin/main...HEAD
+git -C <main-clone> log --oneline origin/main..HEAD
+git -C <main-clone> status --porcelain
+```
+
+The first prints `behind<TAB>ahead`. A non-zero right-hand number means finished
+work exists that no worktree cut from `origin/main` can see, including yours.
+The third says whether someone is still typing in it.
+
+`[measured 2026-09-03]` two sessions wrote the same layout gate for one repo
+within an hour. The remote showed nothing, because the first session's gate AND
+its fix for the underlying defect were committed locally and never pushed: six
+commits ahead, zero behind. From any worktree the defect still looked open, and
+the second session's evidence that "it does not exist" was correct about
+`origin/main` and wrong about the repo.
+
+Nothing surfaced it. The two sessions found out because one sent the other an
+unsolicited message about a patch, and the reconciliation took four exchanges
+because the first quoted line numbers without naming a ref. A tracked file has
+as many current values as there are checkouts.
+
+**Two habits follow, and the second is the one that generalises.** Name the ref
+in any claim about a file, so "line 1867" becomes "line 1867 of local main at
+87f1ce7f". And re-fetch before you ACT, not before you send: that same
+measurement was two commits stale by the time it was read, because the clone was
+being actively worked while the message sat in a queue.
+
 ## Create the tree
 
 ```bash
