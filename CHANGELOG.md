@@ -1,5 +1,73 @@
 # Changelog
 
+## [8.156.0] - 2026-09-03
+
+### Added: check-skill-collisions, two skills competing for one situation
+
+check-skill-triggers scores every description alone. Every predicate in it reads
+one row, and there is no pairwise comparison anywhere in the file, so a corpus
+where two skills describe the same moment passes completely while the model
+picks between them by similarity. That is the dispatch lottery
+rule-workflow-spine addresses, and section 10 of rule-gate-integrity: a floor is
+a property of one item, and "these two do not collide" is a property of a pair.
+
+The discriminator is not a similarity threshold, because 66 descriptions give
+2,145 pairs and any cutoff needs retuning as the corpus grows. A word appearing
+in exactly TWO descriptions is by construction evidence about those two and
+nothing else, so it self-calibrates.
+
+`[measured 2026-09-03: node tooling/check-skill-collisions.js --list]` 66
+skills, 2,145 pairs, 105 corpus-rare words, 3 pairs. All 3 read and cleared, 0
+needing a change, each recorded with its reason. That triage is also a finding
+about the metric and is kept rather than tuned away: rare shared words locate
+pairs built from one TEMPLATE, which correlates with competing for a situation
+without being it.
+
+Both mutations target the TRIAGE MAP rather than the analyser, because the map
+is the part that rots. Un-triaging a cleared pair reports it as NEW and exits 1;
+an entry naming a skill that no longer has a description reports STALE and exits
+1 on its own, so the map cannot outlive what it exempts.
+
+### Fixed: the isolate scope check could not see unpushed work
+
+Both commands that skill prescribed read the REMOTE. Where commits stay local
+until someone says push, the normal state of work in progress is invisible to
+`git ls-remote` and `gh pr list` alike, so the check was blind to precisely the
+case it exists for. The blind spot is created by policy, not oversight.
+
+`[measured 2026-09-03]` two sessions wrote the same layout gate for one repo
+within an hour. The remote showed nothing because the first session's gate and
+its fix for the underlying defect were committed locally and never pushed. From
+any worktree the defect still looked open. Separately, a second duplication in
+this repo was invisible for the opposite reason: the other session's PR was
+created twenty minutes AFTER the duplicate was committed, so the registry had
+nothing to show either.
+
+Adds `git -C <main-clone> rev-list --left-right --count origin/main...HEAD`,
+run against the repo's main clone rather than the caller's own tree. Also takes
+the ref-naming half: a claim about a file names the ref it was read at, because
+a tracked file has as many current values as there are checkouts.
+
+### Added: rule-gate-integrity section 10, per-item versus per-set
+
+A suite built only from per-element floors and page-level absences cannot fail
+on a property ranging over a set, however complete its route coverage. Sorts
+assertions by how many items you must look at to decide them, and carries the
+sub-trap learned by getting it wrong: measure the thing that is DRAWN, not the
+grid cell, because a list item wrapping a button stretches while the button does
+not.
+
+### Fixed: test-skill-collisions was NOT verified
+
+check-suites-can-fail derives a subject from plugin sources, and the new checker
+lives in tooling/, so nothing derived and the suite was counted unverified.
+Sixth instance of a pattern the file already calls structural. Worth recording
+because every other signal said the suite was fine: npm test 98/98, validate 19
+PASS 0 FAIL, the suite itself 11/11 including two mutations. Only check:suites
+knew, and only because someone had replaced "nothing to stub" with "UNCHECKED
+subject not derived".
+
+
 ## [8.155.0] - 2026-09-02
 
 ### Fixed: two suites whose baseline failed for reasons outside themselves
