@@ -40,89 +40,53 @@ const VERBOSE = process.argv.includes('--verbose');
 // its subject as a path literal — `hooks/stop-auto-check.js`,
 // `'..','plugins','autodev-memory','hooks','memory-capture.js'`, or a require of
 // a relative path. Collect all three shapes and resolve them against the repo.
+//
+// DERIVATION READS tooling/ TOO, since 2026-09-03. Before that it scanned
+// plugins/ and templates/ only, so a suite testing tooling/ derived nothing
+// however plainly it named its subject, was reported as having no subject, and
+// was hand-registered below. That happened six times, and the comment sitting
+// here predicted each occurrence before it arrived. Predictions that keep coming
+// true are an argument for fixing derivation, not for maintaining the list they
+// keep extending.
+//
+// Two rules carry it, and neither GUESSES — which matters, because the comment
+// this replaces argued that the honest fix was a list rather than "a smarter
+// deriver that guesses", and it was right about guessing:
+//
+//   · tooling/ joins plugins/ and templates/ wherever a path is written out in
+//     full: as a literal, as path.join/resolve segments, or as a require.
+//   · a suite's OWN directory resolves its own-directory references. A suite
+//     lives in tooling/, so `path.resolve(__dirname, 'check-foo.js')` and
+//     `require('./check-foo.js')` ARE tooling/check-foo.js. That is a fact about
+//     where the file sits, not a similarity heuristic.
+//
+// Rule 4's unique-basename search deliberately did NOT widen. It is the one rule
+// that guesses, and the measurement is under it.
+//
+// `[measured 2026-09-03]` the widening took the derive-nothing count from 18 to
+// 3 and retired 16 of the 18 entries below, each because derivation returns that
+// entry's exact path. The 3 that still derive nothing are the ones derivation
+// cannot reach by construction: test-all.js (checked as the runner, never by its
+// own subjects), test-skill-prd-commands.js (subject is markdown — see
+// NOT_JAVASCRIPT), and test-framework-radar-guidance.js (below).
 const SUBJECT_OVERRIDES = {
-    // Only for a suite whose subject genuinely cannot be read off its source.
-    //
-    // Derivation looks for plugin sources, because that is what every suite
-    // tested until now. These two test TOOLING instead — a shell hook and the
-    // validator — so they derived nothing and were reported NO-SUBJECT, which
-    // means this script was silently not checking them at all. That is the
-    // "silent skip" failure this whole file exists to prevent, reappearing in it.
+    // What remains is the honest residue: a suite whose subject is NOT
+    // JavaScript, which no amount of path derivation can reach. This list no
+    // longer grows with every new suite over tooling/ — those derive their own
+    // subject now — so an addition here should be rare and should say why.
+
+    // The subject is a shell hook, and derivation only ever yields `.js`.
+    // Pinned deliberately rather than left to derivation, which for this suite
+    // DOES find something: it requires tooling/check-no-private-names.js, the
+    // helper the hook shells out to. Stubbing that helper turns the suite red
+    // and would earn an 'ok' row without the hook under test being touched once
+    // — a verdict about the wrong file, which is exactly what the paragraph at
+    // the top says a map of guesses produces.
     'test-githooks.js': ['tooling/githooks/commit-msg'],
-    'test-validate.js': ['tooling/validate.js'],
-
-    // Third time, 2026-08-30, and it arrived exactly as the comment above
-    // predicts: a new suite testing tooling/ derived nothing and was counted
-    // NOT verified. It was not caught locally because `npm test` does not run
-    // this script; CI runs it as a separate step. So the suite that gates
-    // pushes was itself the unchecked one.
-    'test-push-authorisation.js': ['tooling/check-push-authorisation.js'],
-
-    // Fifth time, 2026-09-02, and the prediction below held exactly. L2 needed a
-    // standing-order validator in tooling/, so its suite derived nothing and was
-    // reported UNCHECKED. Worth recording that this cost nothing: the UNCHECKED
-    // failure did its job, went red on the first full gate run, and named the
-    // fix. Under the old "nothing to stub" wording it would have been reported
-    // as a pass over a suite nobody had verified.
-    'test-standing-orders.js': ['tooling/check-standing-orders.js'],
-    'test-standing-order-wake.js': ['tooling/standing-order-wake.js'],
-
-    // Sixth time, 2026-09-03, and the entry above predicted it exactly: a new
-    // pairwise skill-description checker landed in tooling/, so its suite
-    // derived nothing and was reported UNCHECKED.
-    //
-    // Same non-cost as the fifth, and worth recording again because it is the
-    // argument for keeping the UNCHECKED failure loud. npm test read 98/98 and
-    // validate read 19 PASS 0 FAIL, so every signal short of this one said the
-    // suite was fine. The full gate went red on its first run against the new
-    // suite and named the fix in the failure text. Under the old "nothing to
-    // stub" wording it would have been counted as a pass over a suite nobody
-    // had verified.
-    'test-skill-collisions.js': ['tooling/check-skill-collisions.js'],
-
-    // Fourth time, 2026-08-30, four at once: the codex-audit acceptance suites
-    // all test tooling/ checkers, so all derived nothing. The pattern is now
-    // structural - every acceptance test for a TOOLING gate lands here - and
-    // the honest fix remains this list plus the UNCHECKED failure below, not a
-    // smarter deriver that guesses.
-    'test-vacuity-exit.js': ['tooling/find-vacuous-assertions.js'],
-    'test-function-json-exit.js': ['tooling/find-untested-functions.js'],
-    'test-runtime-authority.js': ['tooling/check-runtime.js'],
-    'test-hook-execution-evidence.js': ['tooling/find-untested-hooks.js'],
-
-    // Same failure, found again 2026-08-21 — and found by reading this comment
-    // rather than the output, because NO-SUBJECT's note ("references no plugin
-    // source — nothing to stub") reads like a category of suite that has nothing
-    // to check. It is not. It is the silent-skip signature, and three more
-    // tooling suites were sitting behind it, unverified, while the summary line
-    // said "0 cannot fail".
-    //
-    // If you add a suite over anything in tooling/, it lands here or it is not
-    // checked at all. deriveSubjects() only scans plugins/ and templates/.
-    'test-runner-guard.js': ['tooling/test-all.js'],
-    'test-superseded.js': ['tooling/check-superseded.js'],
-    'test-version-drift.js': ['tooling/check-version-drift.js'],
-
-    // Found by the same reading, 2026-08-29. Both name their subject on one
-    // clear line — `const SUBJECT = path.resolve(__dirname, 'find-record-drift.js')`
-    // and `const GATE = path.resolve(__dirname, 'test-skill-prd-commands.js')` —
-    // and both were waved through as NO-SUBJECT for the documented reason:
-    // deriveSubjects() scans plugins/ and templates/ only, so a suite over
-    // tooling/ is invisible to it however plainly it is written.
-    'test-record-drift.js': ['tooling/find-record-drift.js'],
-    'test-skill-prd-commands-selftest.js': ['tooling/test-skill-prd-commands.js'],
-    // Added with the suite itself, because this file said so: a suite over
-    // anything in tooling/ lands here or it is not verified at all. It refused
-    // the suite on its first run and named the remedy, which is the behaviour
-    // the comment above was written to produce.
-    'test-no-private-names.js': ['tooling/check-no-private-names.js'],
-    // Added with the suite, for the reason stated two comments up: a suite over
-    // tooling/ is invisible to deriveSubjects() however plainly it names its
-    // subject, and NO-SUBJECT reads as an exemption rather than a gap.
-    'test-skill-tool-declarations.js': ['tooling/check-skill-tool-declarations.js'],
 
     // This policy regression suite constructs its two skill paths from a common
-    // directory, so neither subject appears as a derivable path literal.
+    // directory, so neither subject appears as a derivable path literal — and
+    // SKILL.md is not `.js` either, so no widening reaches it.
     'test-framework-radar-guidance.js': [
         'plugins/autodev-core/skills/rule-agent-concurrency/SKILL.md',
         'plugins/autodev-core/skills/fleet/SKILL.md',
@@ -159,22 +123,49 @@ function deriveSubjects(suiteFile) {
     const src = fs.readFileSync(suiteFile, 'utf8');
     const found = new Set();
 
+    // The suite's OWN directory, relative to the repo, as a posix path. Rules 2b
+    // and 3b resolve against it, so they state a fact about where this file sits
+    // rather than matching on resemblance. Read from the path rather than
+    // hardcoded, so a suite that ever moves resolves correctly.
+    const suiteDir = path.relative(SWEEP_ROOT, path.dirname(suiteFile)).split(path.sep).join('/');
+
     // 1. A slash-separated path literal inside the repo: 'plugins/…/foo.js'
-    for (const m of src.matchAll(/['"`]((?:\.\.\/)*(?:plugins|templates)\/[\w./-]+\.js)['"`]/g)) {
+    //    The alternation is written out rather than assembled from a variable: a
+    //    RegExp built through a template literal loses `\w` and `\.` to escape
+    //    collapsing, and the result is a silent false-empty rather than an error.
+    //    That cost a wrong reading while measuring this very change.
+    for (const m of src.matchAll(/['"`]((?:\.\.\/)*(?:plugins|templates|tooling)\/[\w./-]+\.js)['"`]/g)) {
         found.add(m[1].replace(/^(\.\.\/)+/, ''));
     }
     // 2. path.join / path.resolve segment lists: 'plugins', 'autodev-core', 'hooks', 'x.js'
     for (const m of src.matchAll(/path\.(?:join|resolve)\(([^)]*)\)/g)) {
-        const parts = [...m[1].matchAll(/['"`]([\w.-]+)['"`]/g)].map((x) => x[1]);
-        const i = parts.indexOf('plugins');
-        if (i >= 0 && parts[parts.length - 1].endsWith('.js')) {
-            found.add(parts.slice(i).join('/'));
+        const call = m[1];
+        const parts = [...call.matchAll(/['"`]([\w.-]+)['"`]/g)].map((x) => x[1]);
+        if (!parts.length || !parts[parts.length - 1].endsWith('.js')) continue;
+        for (const top of ['plugins', 'tooling']) {
+            const i = parts.indexOf(top);
+            if (i >= 0) found.add(parts.slice(i).join('/'));
+        }
+        // 2b. __dirname-anchored with no '..' climb. The suite lives in
+        //     suiteDir, so path.resolve(__dirname, 'check-foo.js') IS
+        //     suiteDir/check-foo.js. A '..' among the segments means the call
+        //     leaves that directory and this reading does not hold, so it is
+        //     skipped and rules 1-3 handle it.
+        if (/\b__dirname\b/.test(call) && !/['"`]\.\.['"`]/.test(call)) {
+            found.add(suiteDir + '/' + parts.join('/'));
         }
     }
     // 3. A bare require of a repo-relative module, with or without .js
     for (const m of src.matchAll(/require\(['"`]((?:\.\.\/)+[\w./-]+)['"`]\)/g)) {
         const p = m[1].replace(/^(\.\.\/)+/, '');
-        if (/^(plugins|templates)\//.test(p)) found.add(p.endsWith('.js') ? p : p + '.js');
+        if (/^(plugins|templates|tooling)\//.test(p)) found.add(p.endsWith('.js') ? p : p + '.js');
+    }
+    // 3b. A './' require resolves against the suite's own directory, the same
+    //     fact as 2b. test-standing-order-wake.js names its subject exactly this
+    //     way — `require('./standing-order-wake.js')` — and derived nothing.
+    for (const m of src.matchAll(/require\(['"`]\.\/([\w./-]+)['"`]\)/g)) {
+        const p = m[1];
+        found.add(suiteDir + '/' + (p.endsWith('.js') ? p : p + '.js'));
     }
 
     // 4. A bare BASENAME, for suites that build the path in two steps:
@@ -195,6 +186,12 @@ function deriveSubjects(suiteFile) {
     //    `heal-sweep.workflow.js` on one line — reported as a suite with nothing
     //    to check, which is the silent-skip signature this rule exists to close,
     //    reappearing inside the rule itself.
+    //    NOT widened to tooling/ when rules 1-3 were, on 2026-09-03. This is the
+    //    one rule that guesses — it infers a subject from a name that resembles
+    //    a file — and `[measured 2026-09-03]` widening its pool covered exactly
+    //    ONE extra suite, test-all.js, which is checked as the runner and never
+    //    consults its own subjects, while adding three more fuzzy matches
+    //    elsewhere. Zero gain for more guessing, so it stays scoped to plugins/.
     for (const m of src.matchAll(/['"`]([\w.-]+\.js)['"`]/g)) {
         const hits = allPluginFiles().filter((p) => path.basename(p) === m[1]);
         if (hits.length === 1) found.add(hits[0]);
@@ -626,7 +623,10 @@ for (const suite of suites) {
         rows.push({
             suite,
             status: 'UNCHECKED',
-            note: 'subject not derived — this suite is NOT verified. Add it to SUBJECT_OVERRIDES.',
+            note: 'subject not derived — this suite is NOT verified. Name its subject where '
+                + 'derivation can read it (a full path literal, a __dirname-anchored '
+                + 'path.join/resolve, or a relative require), or add it to SUBJECT_OVERRIDES '
+                + 'if the subject is not JavaScript.',
         });
         continue;
     }
@@ -704,7 +704,13 @@ for (const suite of suites) {
     // VACUOUS is an accusation, and it needs every stub run to have actually
     // completed — a run that was killed proves nothing about the suite.
     rows.push(killed.length
-        ? { suite, status: 'ok', note: `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed` }
+        // NAME them. Derivation returns several subjects for some suites, and a
+        // bare count cannot separate "red because its subject broke" from "red
+        // because a helper it imports broke" — the second is a weaker claim
+        // wearing the same row. A count cannot carry which one; an identity
+        // list can, and this file's own history is of counts that agreed with
+        // themselves.
+        ? { suite, status: 'ok', note: `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed: ${killed.join(', ')}` }
         : (incomplete
             ? { suite, status: 'UNCHECKED', note: 'stub run(s) did not complete — indeterminate, not a verdict' }
             : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` }));
