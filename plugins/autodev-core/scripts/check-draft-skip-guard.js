@@ -15,6 +15,26 @@
 // twice, because the first cancel did not take. Nothing about the clean scan was
 // wrong; it answered a narrower question than the one the reader had.
 //
+// WHAT THIS CANNOT REACH, said out loud so a clean exit is not read as more
+// than it is. Both findings are about WORKFLOW FILES. The belief they exist to
+// stop, that a draft is free, comes just as often from PROSE: a briefing, a
+// README, a skill that says "open it as a draft and push freely". This check
+// cannot see that source and never will.
+//
+// `[measured 2026-09-03]` this repo is currently the prose-shaped case, and it
+// scans clean here for a correct reason: its own ci.yml is
+// `on: [push, pull_request]` with an OS matrix and no draft condition anywhere,
+// so nothing guards and nothing is inconsistent with anything. Meanwhile a
+// brief told three sessions that drafts skip CI here. Two of them measured it
+// afterwards through `gh api actions/runs`: one drafted pull request fired two
+// full runs, another fired four, every one behind the matrix.
+//
+// So exit 0 means the WORKFLOWS are consistent. It does not mean anyone's
+// belief about drafts is true, and the two are easy to confuse precisely
+// because this check is the thing that looked. A checker that does not say what
+// it fails to govern becomes an instance of the defect it was written for,
+// which is the argument below arriving one layer out.
+//
 // THE DEFECT THIS EXISTS FOR. A workflow can carry
 // `if: github.event.pull_request.draft == false` and still run on every push,
 // because that expression reads a field which exists only on a `pull_request`
@@ -64,7 +84,66 @@ if (has('--help') || has('-h')) {
     process.exit(0);
 }
 
-/** The guard expression, in the spellings GitHub actually accepts. */
+/**
+ * Strip YAML comments, so nothing below reads a mechanism that is switched off.
+ *
+ * THE DEFECT THIS EXISTS FOR, and it was found in this file rather than
+ * imagined. `[measured 2026-09-03]` a workflow carried
+ *
+ *     # A draft-skip guard (`if: github.event.pull_request.draft == false` plus
+ *     # a branches filter) was considered and rejected here.
+ *
+ * which is a note recording that a guard was DECLINED. Matching against raw
+ * source reported that repo as guarded, so a repo that had deliberately chosen
+ * not to guard was scored as one that had. A tighter guard regex cannot help:
+ * the text it matches is the real expression, verbatim, and only its position
+ * inside a comment makes it inert.
+ *
+ * Applied to every predicate rather than only the guard, but be exact about what
+ * that buys, because the first version of this comment was not. The measured
+ * defect was in the GUARD alone. `triggerEvents` already skips whole-line
+ * comments on its own, and a trailing `# pull_request:` cannot be read as a key
+ * either, so mutation-testing this function to a no-op kills the two guard cases
+ * and NOT the commented-trigger one. Stripping is defence in depth on the input
+ * side, not the thing that currently defends it. Said plainly so the next reader
+ * does not delete the other skip believing this covers it.
+ *
+ * Quote-aware, so a `#` inside a string stays. NOT a YAML parse, consistent with
+ * the rest of this file: block scalars are not excepted, so a `#` inside a
+ * `run: |` body is stripped too. Safe here only because every construct read
+ * below is a KEY — `on:`, `push:`, `branches:`, `if:` — and none can appear
+ * inside a block scalar. That is the reason it is safe, not an argument that it
+ * is harmless in general, and a predicate reading script bodies could not reuse
+ * this.
+ */
+function stripYamlComments(src) {
+    return src.split('\n').map((line) => {
+        let inSingle = false;
+        let inDouble = false;
+        for (let i = 0; i < line.length; i++) {
+            const c = line[i];
+            if (c === "'" && !inDouble) inSingle = !inSingle;
+            else if (c === '"' && !inSingle) inDouble = !inDouble;
+            else if (c === '#' && !inSingle && !inDouble) return line.slice(0, i);
+        }
+        return line;
+    }).join('\n');
+}
+
+/**
+ * The guard expression, in the spellings GitHub actually accepts.
+ *
+ * Deliberately the FULL property path and not the word `draft`. A workflow can
+ * mention drafts in prose: `[measured 2026-09-03]` one carries "Nightly was the
+ * first draft and cost ~120 more" inside a cost comment, so `grep -c draft`
+ * returns 1 on a file with no guard at all. Anyone scanning by hand hits that
+ * before this regex does, and a check reporting it would be the false-positive
+ * shape that gets a detector muted and then missed when it is finally right.
+ *
+ * Specificity is not sufficient on its own, which is the neighbouring lesson:
+ * it does nothing about the real expression sitting inside a comment. That is
+ * what stripYamlComments above is for, and the two defend different halves.
+ */
 const GUARD = /github\.event\.pull_request\.draft/;
 
 /**
@@ -295,8 +374,12 @@ function scan(root) {
 
     const rows = [];
     for (const name of names) {
-        let src;
-        try { src = fs.readFileSync(path.join(dir, name), 'utf8'); } catch { continue; }
+        let raw;
+        try { raw = fs.readFileSync(path.join(dir, name), 'utf8'); } catch { continue; }
+        // Every predicate reads the COMMENT-STRIPPED source. A guard or a
+        // trigger that is commented out governs nothing, and reading it as live
+        // scores a repo for a mechanism it switched off.
+        const src = stripYamlComments(raw);
         const guard = GUARD.test(src);
         const reach = pushReachesDraftBranches(src);   // 'yes' | 'no' | 'unknown'
         rows.push({
@@ -429,6 +512,45 @@ if (has('--selftest')) {
     t('  and its push is still seen as reaching every branch', by('no-guard.yml').pushReachesDrafts === 'yes');
     t('the population counts every workflow, not only the findings', rows.length === 9);
 
+    // --- comments are not mechanisms ----------------------------------------
+    // A permanent fixture rather than a case we happened to catch. Found by a
+    // peer against a real repo AFTER this file had been mutation-tested on both
+    // new paths and run against a live known positive, which is the point: a
+    // mutant proves a path is load-bearing and a known positive proves the check
+    // can fire, and NEITHER enumerates the shapes the probe cannot see.
+    // Its own root, deliberately. Adding these to the shared one above would
+    // sit AFTER that root's `rows.length === 9` population assertion, which
+    // would still pass only because `rows` was captured before these files
+    // existed. Correct today and broken by the first person to move a line.
+    const cmt = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-cmt-'));
+    const cwf = path.join(cmt, '.github', 'workflows');
+    fs.mkdirSync(cwf, { recursive: true });
+    fs.writeFileSync(path.join(cwf, 'commented-guard.yml'),
+        'name: Gate\non:\n  pull_request:\njobs:\n  x:\n'
+        + '    # A draft-skip guard (`if: github.event.pull_request.draft == false` plus\n'
+        + '    # a branches filter) was considered and rejected here.\n'
+        + '    runs-on: ubuntu-latest\n');
+    fs.writeFileSync(path.join(cwf, 'guard-trailing-comment.yml'),
+        'name: Gate\non:\n  pull_request:\njobs:\n  x:\n'
+        + '    if: github.event.pull_request.draft == false  # keep drafts cheap\n');
+    fs.writeFileSync(path.join(cwf, 'commented-trigger.yml'),
+        'name: Gate\non:\n  push:\n'
+        + '  # pull_request:\njobs:\n  x:\n    runs-on: ubuntu-latest\n');
+
+    const commented = scan(cmt);
+    const cby = (n) => commented.find((r) => r.file.endsWith(n));
+    t('a guard that exists ONLY inside a comment is NOT a guard',
+        cby('commented-guard.yml').guard === false);
+    t('  a repo declining a guard in prose is not scored as having one',
+        cby('commented-guard.yml').draftReachable === true
+        && cby('commented-guard.yml').guard === false);
+    t('a real guard with a TRAILING comment is still a guard',
+        cby('guard-trailing-comment.yml').guard === true);
+    t('a commented-out trigger does not make a workflow draft-reachable',
+        cby('commented-trigger.yml').draftReachable === false);
+    t('a `#` inside a quoted string is not treated as a comment',
+        stripYamlComments('    run: echo "a # b"').includes('a # b'));
+
     // --- draft-reachability, the population filter for partial coverage -----
     // Asserted directly rather than only through the finding, because if this
     // predicate is wrong every coverage verdict is wrong in the same direction
@@ -503,11 +625,12 @@ if (has('--selftest')) {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-empty-'));
     t('a root with no .github/workflows returns null, never an empty pass', scan(empty) === null);
 
-    for (const d of [root, empty, mixed, none, all]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [root, empty, mixed, none, all, cmt]) fs.rmSync(d, { recursive: true, force: true });
 
     console.log(`\n${pass} passed, ${fail} failed  (${pass + fail} cases: all four guard/trigger `
         + 'combinations, the no-population case, draft-reachability in every trigger form, '
-        + 'and partial coverage with BOTH consistent states as negatives)');
+        + 'partial coverage with BOTH consistent states as negatives, and a guard that '
+        + 'exists only inside a comment)');
     process.exit(fail ? 1 : 0);
 }
 
