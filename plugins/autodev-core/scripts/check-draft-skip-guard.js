@@ -1,7 +1,19 @@
 #!/usr/bin/env node
 'use strict';
 
-// check-draft-skip-guard.js — a draft-skip guard that a `push:` trigger makes inert.
+// check-draft-skip-guard.js — two ways a draft-skip policy can be a fiction.
+//
+// Both findings share one harm: a reader concludes drafts are cheap and pushes
+// freely, and the CI runs anyway. They differ in what produced the belief. An
+// INERT guard is a control that cannot fire. PARTIAL coverage is a control that
+// fires on one workflow while another, unguarded, runs in full.
+//
+// `[measured 2026-09-03]` the second was added after the first missed a live
+// case. A repo scanned CLEAN here — 9 workflows, 1 guarded, 0 inert — while a
+// session opened a draft, watched the guarded workflow skip, inferred drafts
+// were free, and had to cancel an unguarded windows-runner workflow by hand,
+// twice, because the first cancel did not take. Nothing about the clean scan was
+// wrong; it answered a narrower question than the one the reader had.
 //
 // THE DEFECT THIS EXISTS FOR. A workflow can carry
 // `if: github.event.pull_request.draft == false` and still run on every push,
@@ -40,10 +52,15 @@ const has = (f) => argv.includes(f);
 
 if (has('--help') || has('-h')) {
     console.log('usage: check-draft-skip-guard.js [root] [--json] [--selftest]\n'
-        + 'Finds a draft-skip guard (github.event.pull_request.draft) in a workflow that\n'
-        + 'ALSO triggers on push, which makes the guard inert: the field is null on a push\n'
-        + 'event, so the job runs anyway and the draft saves nothing.\n'
-        + 'Exit 0 clean, 1 inert guard found, 2 no workflows to scan.');
+        + 'Two ways a draft-skip policy can be a fiction:\n'
+        + '  INERT    a guard (github.event.pull_request.draft) in a workflow that ALSO\n'
+        + '           triggers on push to the branches drafts live on. The field is null\n'
+        + '           on a push event, so the job runs anyway and the draft saves nothing.\n'
+        + '  PARTIAL  some draft-reachable workflows carry the guard and others do not, so\n'
+        + '           a draft shows one skipping while another runs in full. The visible\n'
+        + '           skip is evidence for a policy that does not hold.\n'
+        + 'A repo where NO workflow guards is neither: that is a coherent choice.\n'
+        + 'Exit 0 clean, 1 a finding of either kind, 2 no workflows to scan.');
     process.exit(0);
 }
 
@@ -179,6 +196,94 @@ function pushReachesDraftBranches(src) {
     return listed.every(isTrunk) ? 'no' : 'unknown';
 }
 
+/**
+ * Can a DRAFT pull request trigger this workflow at all?
+ *
+ * This is the population filter for the partial-coverage check below, and the
+ * choice of filter is the load-bearing decision in it. A draft-skip guard can
+ * only ever govern a `pull_request` event, because that is the only event whose
+ * payload carries a `draft` field. A workflow with no such trigger is not part
+ * of the repo's draft policy, correctly carries no guard, and must never be
+ * reported as a gap.
+ *
+ * `[measured 2026-09-03]` on the repo that produced this defect: 9 workflows,
+ * of which 7 trigger only on `workflow_dispatch`, `schedule`, or a bare `push`.
+ * Filtering on reachability alone cuts the population from 9 to 2 without
+ * guessing anything, which is why this check does NOT filter on "expensive".
+ * Cost cannot be read off a workflow file without a model of runner minutes,
+ * and the harm here does not depend on cost: it is a MISLEADING SIGNAL, and a
+ * reader who watches one workflow skip and infers drafts are free is wrong by
+ * the same amount whether the workflow that ran was cheap or not. Cost decides
+ * how much the mistake costs, not whether it is one, so it annotates the row
+ * rather than gating it.
+ *
+ * Same line-scanning discipline as pushReachesDraftBranches, and for the same
+ * reason: `\s` spans newlines, so a multiline regex over indentation-scoped
+ * YAML matches the wrong block. Comment lines are skipped explicitly here,
+ * which that function does not do — a `#` at column zero inside an `on:` block
+ * would end its scan early. Legal YAML, not observed in the wild, and left
+ * alone rather than fixed in a commit about something else.
+ */
+function triggerEvents(src) {
+    const out = new Set();
+
+    // `on: [push, pull_request]`
+    const inline = /^on:[ \t]*\[([^\]]*)\]/m.exec(src);
+    if (inline) {
+        for (const n of inline[1].split(',')) {
+            const t = n.trim().replace(/^['"]|['"]$/g, '');
+            if (t) out.add(t);
+        }
+        return out;
+    }
+
+    // `on: workflow_dispatch` — a single event as a scalar.
+    const scalar = /^on:[ \t]+([A-Za-z_]+)[ \t]*$/m.exec(src);
+    if (scalar) { out.add(scalar[1]); return out; }
+
+    // Mapping form. Only DIRECT children of `on:` are events; `branches:` and
+    // `paths:` sit deeper and must not be collected as event names.
+    const lines = src.split('\n');
+    const indent = (l) => l.length - l.replace(/^[ \t]*/, '').length;
+    const start = lines.findIndex((l) => /^on:[ \t]*$/.test(l));
+    if (start < 0) return out;
+
+    let childIndent = -1;
+    for (let j = start + 1; j < lines.length; j++) {
+        const line = lines[j];
+        if (!line.trim()) continue;
+        if (line.trim().startsWith('#')) continue;
+        if (indent(line) === 0) break;                 // next top-level key
+        const key = /^[ \t]+([A-Za-z_]+):/.exec(line);
+        if (!key) continue;
+        if (childIndent < 0) childIndent = indent(line);
+        if (indent(line) === childIndent) out.add(key[1]);
+    }
+    return out;
+}
+
+/** Reachable by a draft PR: the events whose payload has a `draft` field. */
+function draftReachable(src) {
+    const ev = triggerEvents(src);
+    return ev.has('pull_request') || ev.has('pull_request_target');
+}
+
+/**
+ * Signals that a workflow is expensive, reported as evidence rather than as a
+ * verdict. Each is a fact readable off the file. None is a minute count, and
+ * this deliberately does not add up to one: billing depends on runner class,
+ * matrix size, job count and duration, and a confident wrong number here would
+ * be worse than no number. A reader who sees `windows-latest` knows it bills at
+ * 2x without this script asserting a total.
+ */
+function costSignals(src) {
+    const out = [];
+    if (/^\s*runs-on:\s*.*\bmacos[-a-z0-9]*\b/mi.test(src)) out.push('macos runner (10x minutes)');
+    if (/^\s*runs-on:\s*.*\bwindows[-a-z0-9]*\b/mi.test(src)) out.push('windows runner (2x minutes)');
+    if (/^\s*strategy:/m.test(src) && /^\s*matrix:/m.test(src)) out.push('matrix (multiplies jobs)');
+    return out;
+}
+
 function scan(root) {
     const dir = path.join(root, '.github', 'workflows');
     let names;
@@ -204,9 +309,57 @@ function scan(root) {
             // working CI, which is worse than saying it could not tell.
             inert: guard && reach === 'yes',
             unclear: guard && reach === 'unknown',
+            // For the partial-coverage check. Kept separate from `inert`: a
+            // workflow can be draft-reachable and perfectly correct, and most
+            // are.
+            draftReachable: draftReachable(src),
+            cost: costSignals(src),
         });
     }
     return rows;
+}
+
+/**
+ * PARTIAL COVERAGE: some draft-reachable workflows guard, others do not.
+ *
+ * THE DEFECT. A repo where workflow A carries the guard and workflow B does not
+ * shows a draft pull request with one workflow skipping and another running in
+ * full. The skip is visible and reads as the policy holding, so a reader infers
+ * drafts are cheap and pushes freely. They are not: B ran every time.
+ *
+ * This is the header's own argument, one level up. An absent guard prompts the
+ * question. An inert guard reads as a control somebody thought about. A PARTIAL
+ * guard is worse than either, because the workflow that does skip is visible
+ * evidence for a policy that does not exist, and the evidence is genuine — that
+ * workflow really did skip.
+ *
+ * `[measured 2026-09-03]` the shape is not hypothetical. One repo carries the
+ * guard on its preflight workflow and documents it at length, while its browser
+ * gates workflow triggers on both push and pull_request with no draft condition
+ * at either level and runs partly on a windows runner. A session opened a draft,
+ * watched preflight skip, concluded drafts were free, and cancelled a
+ * browser-gates run by hand — twice, because the first cancel did not take.
+ * Before this check, that repo scanned CLEAN: 9 workflows, 1 guarded, 0 inert.
+ *
+ * NOT A FINDING when NO draft-reachable workflow carries a guard. That is a
+ * coherent choice — the repo has no draft policy and nothing pretends it does,
+ * so there is no misleading signal to report. The same reasoning as the
+ * "NOT an endorsement" line below: this check grades CONSISTENCY, never whether
+ * a guard ought to exist.
+ *
+ * KNOWN LIMIT. Guard detection is file-wide, so a workflow guarding some jobs
+ * and not others reads as guarded. That is a third shape and it is not caught
+ * here; it is named so the next reader knows the boundary rather than inferring
+ * coverage this does not have.
+ */
+function partialCoverage(rows) {
+    const reachable = rows.filter((r) => r.draftReachable);
+    const guarded = reachable.filter((r) => r.guard);
+    const unguarded = reachable.filter((r) => !r.guard);
+    // Both arms must be non-empty. All-guarded is consistent; none-guarded is a
+    // legitimate choice, not a gap.
+    if (!guarded.length || !unguarded.length) return null;
+    return { reachable, guarded, unguarded };
 }
 
 // --- selftest -------------------------------------------------------------
@@ -276,15 +429,85 @@ if (has('--selftest')) {
     t('  and its push is still seen as reaching every branch', by('no-guard.yml').pushReachesDrafts === 'yes');
     t('the population counts every workflow, not only the findings', rows.length === 9);
 
+    // --- draft-reachability, the population filter for partial coverage -----
+    // Asserted directly rather than only through the finding, because if this
+    // predicate is wrong every coverage verdict is wrong in the same direction
+    // and the finding would still look reasonable.
+    t('`on: [push, pull_request]` is draft-reachable',
+        draftReachable('on: [push, pull_request]\n') === true);
+    t('`on: [push]` alone is NOT draft-reachable',
+        draftReachable('on: [push]\n') === false);
+    t('the mapping form `on:` / `  pull_request:` is draft-reachable',
+        draftReachable('on:\n  pull_request:\n    paths:\n      - x\n') === true);
+    t('a schedule/dispatch-only workflow is NOT draft-reachable',
+        draftReachable('on:\n  schedule:\n    - cron: "0 3 * * *"\n  workflow_dispatch:\n') === false);
+    t('`on: workflow_dispatch` as a scalar is NOT draft-reachable',
+        draftReachable('on: workflow_dispatch\npermissions:\n') === false);
+    t('pull_request_target counts, since its payload carries draft too',
+        draftReachable('on:\n  pull_request_target:\n') === true);
+    t('a nested `paths:` key is never mistaken for an event',
+        !triggerEvents('on:\n  push:\n    paths:\n      - x\n').has('paths'));
+    t('a comment at column zero inside on: does not truncate the scan',
+        draftReachable('on:\n  push:\n# a comment\n  pull_request:\n') === true);
+
+    // --- partial coverage ---------------------------------------------------
+    // A repo where one draft-reachable workflow guards and another does not.
+    const mixed = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-mixed-'));
+    const mwf = path.join(mixed, '.github', 'workflows');
+    fs.mkdirSync(mwf, { recursive: true });
+    fs.writeFileSync(path.join(mwf, 'guarded.yml'),
+        'name: Preflight\non:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  test:\n' + GUARD_LINE);
+    fs.writeFileSync(path.join(mwf, 'unguarded.yml'),
+        'name: Browser\non:\n  push:\n    paths:\n      - docs/**\n  pull_request:\n    paths:\n      - docs/**\njobs:\n'
+        + '  gate:\n    runs-on: windows-latest\n');
+    // Must NOT be counted in the coverage population: a draft PR cannot fire it.
+    fs.writeFileSync(path.join(mwf, 'cron-only.yml'),
+        'name: Nightly\non:\n  schedule:\n    - cron: "0 3 * * *"\n  workflow_dispatch:\njobs:\n  x:\n    runs-on: ubuntu-latest\n');
+
+    const mixedRows = scan(mixed);
+    const mixedPartial = partialCoverage(mixedRows);
+    t('a repo guarding one draft-reachable workflow and not another is PARTIAL',
+        mixedPartial !== null);
+    t('  the unguarded one is named', mixedPartial.unguarded.length === 1
+        && mixedPartial.unguarded[0].file.endsWith('unguarded.yml'));
+    t('  the guarded one is named and NOT reported as the gap', mixedPartial.guarded.length === 1
+        && mixedPartial.guarded[0].file.endsWith('guarded.yml'));
+    t('  a cron/dispatch-only workflow is excluded from the population',
+        mixedPartial.reachable.length === 2
+        && !mixedPartial.reachable.some((r) => r.file.endsWith('cron-only.yml')));
+    t('  the windows runner is reported as a cost signal, not as a minute count',
+        mixedPartial.unguarded[0].cost.some((c) => /windows/.test(c)));
+    t('  and the guarded workflow is not reported INERT, since its push is trunk-only',
+        mixedRows.find((r) => r.file.endsWith('guarded.yml')).inert === false);
+
+    // THE NEGATIVE THE CHECK MUST NOT FIRE ON. No guard anywhere is a coherent
+    // choice, not a gap. Without this case the check would report every repo
+    // that has never adopted the pattern, which is most of them.
+    const none = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-none-'));
+    const nwf = path.join(none, '.github', 'workflows');
+    fs.mkdirSync(nwf, { recursive: true });
+    fs.writeFileSync(path.join(nwf, 'a.yml'), 'name: A\non: [push, pull_request]\njobs:\n  x:\n    runs-on: ubuntu-latest\n');
+    fs.writeFileSync(path.join(nwf, 'b.yml'), 'name: B\non: [push, pull_request]\njobs:\n  y:\n    runs-on: ubuntu-latest\n');
+    t('a repo where NOTHING carries a guard is not a finding', partialCoverage(scan(none)) === null);
+
+    // And the other consistent state.
+    const all = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-all-'));
+    const awf = path.join(all, '.github', 'workflows');
+    fs.mkdirSync(awf, { recursive: true });
+    fs.writeFileSync(path.join(awf, 'a.yml'), 'name: A\non:\n  pull_request:\njobs:\n  x:\n' + GUARD_LINE);
+    fs.writeFileSync(path.join(awf, 'b.yml'), 'name: B\non:\n  pull_request:\njobs:\n  y:\n' + GUARD_LINE);
+    t('a repo where EVERY draft-reachable workflow guards is not a finding',
+        partialCoverage(scan(all)) === null);
+
     // No workflow directory at all must be distinguishable from a clean scan.
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-empty-'));
     t('a root with no .github/workflows returns null, never an empty pass', scan(empty) === null);
 
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(empty, { recursive: true, force: true });
+    for (const d of [root, empty, mixed, none, all]) fs.rmSync(d, { recursive: true, force: true });
 
     console.log(`\n${pass} passed, ${fail} failed  (${pass + fail} cases: all four guard/trigger `
-        + 'combinations, plus the no-population case)');
+        + 'combinations, the no-population case, draft-reachability in every trigger form, '
+        + 'and partial coverage with BOTH consistent states as negatives)');
     process.exit(fail ? 1 : 0);
 }
 
@@ -299,26 +522,28 @@ if (rows === null) {
 }
 
 const inert = rows.filter((r) => r.inert);
+const partial = partialCoverage(rows);
 
 if (has('--json')) {
-    console.log(JSON.stringify({ root, scanned: rows.length, inert: inert.length, rows }, null, 2));
-    process.exit(inert.length ? 1 : 0);
+    console.log(JSON.stringify({
+        root,
+        scanned: rows.length,
+        inert: inert.length,
+        partial: partial ? { guarded: partial.guarded.map((r) => r.file), unguarded: partial.unguarded.map((r) => r.file) } : null,
+        rows,
+    }, null, 2));
+    process.exit(inert.length || partial ? 1 : 0);
 }
 
 // Population before the verdict: a bare "none found" cannot be told apart from a
-// scan that read no files.
+// scan that read no files. Both denominators are printed, because the two checks
+// grade different populations — every workflow for inertness, only the
+// draft-reachable ones for coverage.
 const guarded = rows.filter((r) => r.guard).length;
+const reachable = rows.filter((r) => r.draftReachable);
 console.log(`${rows.length} workflow(s) in ${root}, ${guarded} carrying a draft-skip guard`);
-
-if (!inert.length) {
-    console.log('0 inert guards.');
-    if (!guarded) {
-        console.log('NOT an endorsement: no workflow here uses a draft-skip guard at all, so');
-        console.log('there is nothing for a push trigger to defeat. This says nothing about');
-        console.log('whether one SHOULD be added.');
-    }
-    process.exit(0);
-}
+console.log(`${reachable.length} reachable by a draft pull request `
+    + `(${reachable.filter((r) => r.guard).length} guarded, ${reachable.filter((r) => !r.guard).length} not)`);
 
 for (const r of inert) {
     console.log(`\n  INERT  ${r.file}`);
@@ -327,5 +552,42 @@ for (const r of inert) {
     console.log('         drafts save nothing. Remove the push trigger, or drop the guard');
     console.log('         and stop describing this workflow as draft-aware.');
 }
-console.log(`\n${inert.length} of ${rows.length} workflow(s) carry a guard a push trigger makes inert.`);
+
+if (partial) {
+    console.log('\n  PARTIAL  this repo guards some draft-reachable workflows and not others.');
+    console.log('           A draft pull request shows the guarded one skipping, which reads');
+    console.log('           as the policy holding, while every workflow below runs in full.');
+    console.log('           The skip is real, which is what makes it misleading.');
+    console.log('\n           guarded:');
+    for (const r of partial.guarded) console.log(`             ${r.file}`);
+    console.log('           NOT guarded:');
+    for (const r of partial.unguarded) {
+        const c = r.cost.length ? `   [${r.cost.join('; ')}]` : '';
+        console.log(`             ${r.file}${c}`);
+    }
+    console.log('\n           Guard them too, or drop the guard from the one that has it and');
+    console.log('           stop describing this repo as draft-aware. Either is coherent;');
+    console.log('           the present state is what is not.');
+    const withCost = partial.unguarded.filter((r) => r.cost.length);
+    if (withCost.length) {
+        console.log(`\n           ${withCost.length} of the unguarded `
+            + `${withCost.length === 1 ? 'carries' : 'carry'} a cost signal, shown above.`);
+        console.log('           Those are facts read off the file, not a minute estimate.');
+    }
+}
+
+if (!inert.length && !partial) {
+    console.log('\n0 inert guards, and draft-skip coverage is consistent.');
+    if (!guarded) {
+        console.log('NOT an endorsement: no workflow here uses a draft-skip guard at all, so');
+        console.log('there is nothing for a push trigger to defeat and nothing to be');
+        console.log('inconsistent with. This says nothing about whether one SHOULD be added.');
+    }
+    process.exit(0);
+}
+
+const findings = [];
+if (inert.length) findings.push(`${inert.length} of ${rows.length} workflow(s) carry a guard a push trigger makes inert`);
+if (partial) findings.push(`${partial.unguarded.length} of ${partial.reachable.length} draft-reachable workflow(s) unguarded beside ${partial.guarded.length} guarded`);
+console.log(`\n${findings.join('; ')}.`);
 process.exit(1);
