@@ -1,5 +1,41 @@
 # Changelog
 
+## [8.157.0] - 2026-09-04
+
+### Added: stop-brain-report, the deterministic trigger a brief cannot be
+
+Every spawned session's brief said to message the coordinator on finishing or
+blocking rather than idling. `[measured 2026-09-03, one overnight fleet run]`
+4 of ~13 did. The silent ones were the ones that had FINISHED: one opened a
+pull request, another merged three, and the coordinator learned about both by
+reading git. The operator was pressing tab-enter per session to make them
+report.
+
+A brief is a request, and a request has no trigger. This is a Stop hook, so it
+fires at the moment a turn ends, which is exactly where a session would
+otherwise go quiet.
+
+Commits are the signal rather than idleness, because idle and finished are
+indistinguishable from outside — that indistinguishability is the whole reason
+the coordinator was polling. A commit is evidence something was DELIVERED, it
+is local, and it costs one `git rev-parse` with no network inside a 5s budget.
+
+It is throttled for a measured reason. Each notice wakes the coordinator and
+re-reads its whole context; a main-thread turn on that run averaged 324,223
+cache-read tokens, and a naive stop watch cost 72 wakes in one night. At most
+one notice per cooldown window, default 20 minutes, and only when commits
+actually landed. A hook firing on every commit would be worse than the polling
+it replaces.
+
+INERT BY DEFAULT. No `~/.claude/brain-role.json` means no coordinator is
+running and there is nobody to report to, so it emits zero bytes on both
+streams. It shares that file with coordinator-write-guard deliberately — one
+claim mechanism, not two — and the two scope it in opposite directions: the
+report hook exempts the coordinator and nudges every other session, the write
+guard constrains only the coordinator. It never blocks a turn; every path
+exits 0, because it ships installed and a defect here would strand a stranger's
+session until they reinstalled.
+
 ## [8.156.0] - 2026-09-03
 
 ### Added: check-skill-collisions, two skills competing for one situation
