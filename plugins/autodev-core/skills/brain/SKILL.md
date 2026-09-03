@@ -650,8 +650,27 @@ same amount whether the thing that ran was cheap or not. Cost decides what the
 mistake costs, not whether it is one.
 
 So the paragraph below describes a design to INSTALL, not a property to assume. If
-the guard is not there, say so when you brief a session, or the advice costs money
-while sounding like thrift.
+the guard is not there, say so when you brief a session, or the advice costs
+something while sounding like thrift.
+
+⚠️ **AND WHAT IT COSTS DEPENDS ON VISIBILITY, WHICH THE TABLE ABOVE SPANS.**
+`[measured 2026-09-03]` GitHub bills Actions minutes on PRIVATE repositories and
+gives PUBLIC ones unlimited free minutes. Of the three rows above, two are private
+and one — this repo — is public. So on this repo an unguarded workflow costs
+wall-clock, runner contention and noise, and **no money at all**, while on a
+private one it costs the monthly allowance.
+
+That distinction is not cosmetic and it has already misled a change on this repo:
+an open pull request restricting `push` to the trunk here argues its case in
+"spend", "billable figure" and a "2x minute multiplier", and cites a sibling's
+3,283-minutes-against-3,000 incident. The sibling is private and that incident is
+real; this repo is public and those minutes are free. The change may still be
+worth making for contention and feedback speed. The reason given for it is wrong.
+
+**So check `gh repo view --json visibility` before quoting a cost at anyone.**
+The same defect is a budget problem in one repo and a tidiness problem in another,
+and briefing a session with the wrong one of those spends its attention in the
+wrong place.
 
 `[stated 2026-08-29]` the operator: *"account for our github actions costs, which
 have been increasing lately. we need to batch commits before we push... CIs are
