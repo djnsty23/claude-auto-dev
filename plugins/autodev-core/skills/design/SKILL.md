@@ -114,6 +114,12 @@ Test at 375px width before considering any UI complete.
 - Layered transparencies, dramatic shadows
 - Decorative borders, custom cursors, grain overlays
 
+**A background you SOURCE or GENERATE fails differently from one you draw in
+CSS.** Photographic and generated heroes carry their own legibility, crop,
+weight and reduced-motion problems, and the hierarchy decision behind them is
+that the hero shows no product UI at all. Load
+`${CLAUDE_SKILL_DIR}/references/background-craft.md` before building one.
+
 ## AI Slop Detection Checklist
 
 Before finalizing any design, check for these patterns. If 3+ are present, start over with a bolder direction:
@@ -217,6 +223,7 @@ Load specific references for engineering quality:
 | Reference | When to Load |
 |-----------|--------------|
 | `${CLAUDE_SKILL_DIR}/references/web-interface-guidelines.md` | Forms, focus states, animation, a11y, dark mode, touch, i18n |
+| `${CLAUDE_SKILL_DIR}/references/background-craft.md` | A hero or section led by a photographic or generated background: sourcing, reframing, video loops, legibility over an image |
 
 ## Component Composition
 
