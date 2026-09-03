@@ -33,10 +33,10 @@ windowsHide fix.
 
 | PR | state | why it is not merged |
 |---|---|---|
-| this repo **#131** | green, ready | The trunk fix. Its session was offered a straight-to-main merge on a panel and the operator chose the PR round-trip instead, with the tradeoff named: no review surface on a fix to a test that had just proved it could lie about being green. A later broad merge grant does not reverse a specific choice about this change. **His.** |
+| this repo **#131** | green, ready | The trunk fix, and it now blocks #132 as well as three others. Its session was offered a straight-to-main merge on a panel and the operator chose the PR round-trip instead, with the tradeoff named: no review surface on a fix to a test that had just proved it could lie about being green. A later broad merge grant does not reverse a specific choice about this change. **His.** |
 | this repo **#130** | draft | Mine. No hurry. |
-| this repo **#132** | draft | The rendered-layout gate. 13 mutants, 13 killed by their own named assertion; 0 findings over 605 element boxes on a real third-party page. Its session is still running the gate. |
-| Project A **#654** | gate was IN_PROGRESS | Wires an offer engine that was advertised and never applied. Careful work: resolved server-side rather than from the request body, and explicitly fail-safe. **Live payment path** — deploys on merge. |
+| this repo **#132** | draft, PR run RED | The rendered-layout gate. Its single failure is `test-away-state`, the trunk bug **#131** fixes, not its own work: third sighting tonight. Its push run is green only because the branch is 34 behind and carries 92 of the trunk's 96 suites, so it never ran the failing file. **Do not rebase it before #131 merges** - that would import the bug and turn the green run red too. Its session measured this itself and is holding it deliberately. |
+| Project A **#654** | gate SUCCESS, CLEAN | Wires an offer engine that was advertised and never applied. Careful work: resolved server-side rather than from the request body, and explicitly fail-safe. **Live payment path** — deploys on merge. |
 | Project B **#33** | gate SUCCESS | During a payment-provider secret roll only the first signature was tried, so the webhook returned 400 to every legitimate event, with a rejection byte-identical to a forged one. Its existing test PINNED the defect. **Live payment path** — deploys on merge. Ready to land in seconds. |
 | Project C ×7 | mixed | One real gate FAILURE, one check still running, one CONFLICTING, four drafts. None ready. |
 
@@ -53,6 +53,42 @@ test everything out" — a condition unmeetable for hours.
   keep" directly under a hard cap. Measured in a browser, ships a shape test.
 - **Project D #4**, after the operator overrode a hold with "no users, can't break
   anything".
+
+## Rescued work, and where it is NOT
+
+`[measured 2026-09-03 04:0x]` **16 bundles** in `~/claude-memory/rescue/`, every
+one `bundle verify` okay, each verified from the repo it came from because
+verifying from the wrong one produces both false reds and a false green.
+
+Two were added after the earlier sweep:
+
+- `autodev-main-0fbe6dd-20260903.bundle` (19,329 B) - six commits on the shared
+  clone's local `main`, now including a REVERT of the duplicate trunk fix, so
+  that session compared against #131 and backed its own out. Committing to
+  `main` in a shared clone still violates this repo's own CLAUDE.md.
+- `autodev-draftskip-c83bcf3-20260903.bundle` (18,077 B) - three commits on
+  `fix/draft-skip-precondition`, a branch that exists on no remote and has no PR.
+
+**`rescue/` is gitignored** (`.gitignore:9`), so new bundles never reach the
+remote. That matters because two of the sixteen hold CLIENT work, which the
+backup protocol forbids from reaching personal GitHub, and the ignore rule is
+what enforces it. Nobody should "fix" that rule without reading the directory.
+
+**But the rule is not retroactive, and I nearly reported the opposite.** Two
+bundles predate it, are tracked, and ARE on GitHub:
+
+    git ls-files rescue      ->  2, not 0
+    analytics-client-ip-73f0544.bundle
+    vigorous-maxwell-7ac5dc-c885ddd.bundle
+
+Both are from repos the operator owns, so neither is a client leak, and I
+checked that rather than assuming it. The near-miss is the reusable part: I
+printed the count with the words "0 is correct" beside it, and the command
+returned 2. A label asserting the expected answer sits next to the real one and
+reads as agreement. Never write the expected value into the same line as the
+measurement.
+
+So these are insurance against a deleted worktree, not against a dead disk.
 
 ## The debt that is easiest to forget
 
