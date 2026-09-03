@@ -597,17 +597,50 @@ for f in .github/workflows/*.yml; do
 done
 ```
 
-Two things that command does deliberately, because the version without them was
-written first and read CLEAN on two of the three repos it was tested against.
-**Comments are stripped before anything is matched**, because one repo records in
-prose that a draft-skip guard was considered and rejected, quoting the guard
-expression verbatim, and a naive grep reads that as the guard being present. And
-**the trigger test accepts the inline `on: [push, pull_request]` form**, which a
-`^\s*pull_request:` anchor cannot see, so a repo using it is skipped rather than
-judged. Both failures point the same way: clean.
+⚠️ **A `push: branches: [main]` FILTER IS NOT A SUBSTITUTE FOR THE GUARD, AND A
+COORDINATOR PROPOSED TREATING IT AS ONE.** They govern different event
+populations and are complementary. A branch filter removes push runs on feature
+branches. It does nothing at all to the `pull_request` event, which fires on a
+draft exactly as on a ready pull request, and there is no trigger-level way to
+skip a draft — the job-level condition is the only mechanism there is.
+
+`[measured 2026-09-03]` on this repo's own numbers, from the change that added
+such a filter: 26 push runs and about 324 minutes against 8 pull-request runs and
+about 95 minutes over 24 hours. The filter removes the 324 and leaves the 95,
+which is exactly the draft cost a guard would remove. And empirically, a drafted
+pull request here fired both a `push` and a `pull_request` run.
+
+So a branch-filtered workflow that still carries a `pull_request:` trigger runs on
+every draft, and reporting it is correct. Adding a "branch-filtered" state would
+suppress a real finding to avoid a false positive that does not exist.
 
 Read BOTH output lines. A repo printing only `UNGUARDED` never adopted the pattern,
-which is a legitimate choice. The defect is a repo printing both.
+which is a legitimate choice it may have measured and accepted. The defect this
+section is about is a repo printing both, because that is what makes a reader watch
+one workflow skip and infer a policy.
+
+Two things the command does deliberately, each because the version without it
+was written first and got a repo wrong:
+
+- **Comments are stripped before anything is matched.** One repo records in prose
+  that a draft-skip guard was "added here and WITHDRAWN after measurement", quoting
+  the expression verbatim with a decision-record reference. A naive grep reads that
+  as the guard being present.
+- **The trigger test accepts the inline `on: [push, pull_request]` form**, which a
+  line-anchored `pull_request:` cannot see, so a repo using it is skipped rather
+  than judged — including this one.
+- **The branch filter is detected at all.** Without it, the repo that chose that
+  mechanism deliberately, and wrote down why, is reported as the defect.
+
+All three failures point the same way except the last, which points the other way
+and is worse for it: a false positive gets the whole check muted, and this fleet
+has already muted one detector that ran at one-in-six precision.
+
+A fourth shape, from the same file, and the reason not to collapse any of these:
+that repo forbids `paths-ignore` outright, because a workflow skipped by path
+filtering does not report a conclusion — it leaves its checks PENDING, and a pull
+request that REQUIRES that check can then never merge. "Did not run" has at least
+four causes and they do not mean the same thing.
 
 On the measured repo that returns exactly the one unguarded workflow. The
 unfiltered version returns SIX and five are correct cron-only jobs, which is how a
