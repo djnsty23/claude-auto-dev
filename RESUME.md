@@ -56,9 +56,20 @@ test everything out" — a condition unmeetable for hours.
 
 ## Rescued work, and where it is NOT
 
-`[measured 2026-09-03 04:0x]` **16 bundles** in `~/claude-memory/rescue/`, every
-one `bundle verify` okay, each verified from the repo it came from because
-verifying from the wrong one produces both false reds and a false green.
+**No count here, for the same reason the gate step count was deleted.** I wrote
+"16" while the true figure was 15, by counting FILES in `~/claude-memory/rescue/`
+when one of them is a `.md`. Count them when you need the number, with the filter
+that makes it the right question:
+
+    ls -1 ~/claude-memory/rescue/*.bundle | wc -l
+
+Every bundle is `bundle verify` okay, each verified from the repo it came from,
+because verifying from the wrong one produces both false reds and a false green.
+
+**A bundle goes stale the moment its session commits again**, which happened
+within the hour: the ab-artifact-check tip moved from `4dba7168` to `1dd003db`
+after I bundled it, so the rescue covered one of two commits. Re-bundled. Any
+sweep that bundles and walks away is protecting a tip that no longer exists.
 
 Two were added after the earlier sweep:
 
