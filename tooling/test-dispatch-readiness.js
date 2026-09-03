@@ -111,13 +111,17 @@ try {
         !kinds(rowFor(r1, rightBase)).includes('INHABITED'));
 
     // ---- 4. WRONG REPO -------------------------------------------------------
-    const other = makeRepo(TMP, 'beta');
-    const r4 = subject.inspect(work, { trunk: 'origin/deploy', expectOrigin: other.bare });
+    // A bogus expected origin rather than a second real repository. The check
+    // compares normalised URLs, so a string that cannot match exercises exactly
+    // the same branch — and building a second origin cost seven process spawns
+    // to prove something a string proves. [measured 2026-09-03] this suite ran
+    // 19s against a comparable suite's 3s and timed out the mutation sweep's
+    // runner canary; process spawns on Windows were the whole of it.
+    const r4 = subject.inspect(work, { trunk: 'origin/deploy', expectOrigin: '/nowhere/that-repo' });
     ok('every worktree is WRONG REPO when the expected origin differs',
         r4.rows.every((r) => r.findings.some((f) => f.kind === 'WRONG REPO')));
-    const r5 = subject.inspect(work, { trunk: 'origin/deploy' });
     ok('  control: with no expectation, none is WRONG REPO',
-        !r5.rows.some((r) => r.findings.some((f) => f.kind === 'WRONG REPO')));
+        !r3.rows.some((r) => r.findings.some((f) => f.kind === 'WRONG REPO')));
 
     // ---- 5. no population -> vouches for nothing -----------------------------
     const notRepo = path.join(TMP, 'not-a-repo');
@@ -132,6 +136,12 @@ try {
         r7.rows.every((r) => r.findings.some((f) => f.kind === 'TRUNK UNREADABLE')));
 
     // ---- 7. the CLI exits the way its header documents ------------------------
+    // A clean checkout for the exit-0 case: ONE clone of the bare origin we
+    // already have, rather than a second origin plus clone plus commit plus push.
+    const cleanRepo = path.join(TMP, 'clean');
+    execFileSync('git', ['clone', '-q', path.join(TMP, 'alpha.git'), cleanRepo],
+        { stdio: 'ignore', windowsHide: true });
+
     const run = (args) => {
         try {
             const out = execFileSync(process.execPath, [SUBJECT, ...args],
@@ -139,15 +149,22 @@ try {
             return { code: 0, out };
         } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
     };
+    // Three subprocess runs, not five: each one re-does a full inspect, so the
+    // CLI layer is exercised for its EXIT CODES and its printed population, and
+    // every finding is asserted against inspect() above where it costs nothing.
     const cli = run([work, '--trunk', 'origin/deploy']);
     ok('CLI exits 1 when a worktree is not ready', cli.code === 1, 'code=' + cli.code);
     ok('  and prints the population on a FAILING run', /population: \d+ worktree/.test(cli.out));
     const cliNone = run([notRepo]);
     ok('CLI exits 2 on no population', cliNone.code === 2, 'code=' + cliNone.code);
-    const cliClean = run([other.work, '--trunk', 'origin/main']);
+    // Clean exit and the no-trunk notice come from the SAME run: the bare
+    // fixture has no unpushed commit at this point only because this block
+    // runs before the INHABITED mutation would have been asserted against it,
+    // so the ordering is load-bearing rather than incidental.
+    const cliClean = run([cleanRepo]);
     ok('CLI exits 0 on a clean repo', cliClean.code === 0, 'code=' + cliClean.code + ' ' + cliClean.out.slice(0, 120));
     ok('  and prints the population on a CLEAN run too', /population: \d+ worktree/.test(cliClean.out));
-    ok('  and says so when no trunk was given', /NO TRUNK GIVEN/.test(run([other.work]).out));
+    ok('  and says so when no trunk was given', /NO TRUNK GIVEN/.test(cliClean.out));
 } catch (err) {
     fail++;
     console.log('FAIL  suite threw: ' + (err && err.message));
