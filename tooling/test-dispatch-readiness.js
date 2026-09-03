@@ -234,6 +234,49 @@ try {
     ok('CLI exits 0 on a clean repo', cliClean.code === 0, 'code=' + cliClean.code + ' ' + cliClean.out.slice(0, 120));
     ok('  and prints the population on a CLEAN run too', /population: \d+ worktree/.test(cliClean.out));
     ok('  and says so when no trunk was given', /NO TRUNK GIVEN/.test(cliClean.out));
+    ok('  and says so when no origin expectation was given',
+        /NO ORIGIN EXPECTATION GIVEN/.test(cliClean.out));
+
+    // ---- 8. the CLI contract an adversarial review found broken --------------
+    // Every assertion here corresponds to a finding: each of these invocations
+    // previously returned a confident wrong answer rather than an error, which
+    // is the failure mode that gets a gate trusted and then ignored.
+
+    // A serialisation flag must never change a verdict. `--json` exited 0
+    // unconditionally, so the machine-readable mode — the one a script branches
+    // on — reported success for a repo that was NOT ready, and for a directory
+    // that was not a repository at all.
+    const cliJson = run([work, '--trunk', 'origin/deploy', '--json']);
+    ok('--json carries the SAME exit code as the human form',
+        cliJson.code === cli.code, 'json=' + cliJson.code + ' human=' + cli.code);
+    ok('  and its body is parseable JSON', (() => {
+        try { return typeof JSON.parse(cliJson.out) === 'object'; } catch { return false; }
+    })());
+    const jsonNoRepo = run([notRepo, '--json']);
+    ok('--json on a non-repository still exits 2, never 0',
+        jsonNoRepo.code === 2, 'code=' + jsonNoRepo.code);
+
+    // `--trunk=ref` is how half of everyone spells it, and it used to fall
+    // through to null: the base check silently did not run and the population
+    // line said NO TRUNK GIVEN while the caller believed they had given one.
+    const cliEq = run([work, '--trunk=origin/deploy']);
+    ok('--trunk=ref is honoured, not silently read as absent',
+        /trunk origin\/deploy/.test(cliEq.out) && !/NO TRUNK GIVEN/.test(cliEq.out));
+
+    // A flag's VALUE is not a positional. `--expect-origin <url> <repo>` used to
+    // select the URL as the repo and then fail as "not a git repository".
+    const cliFlagFirst = run(['--expect-origin', 'https://example.invalid/x', work,
+        '--trunk', 'origin/deploy']);
+    ok('a flag value before the repo does not become the repo',
+        cliFlagFirst.code !== 2, 'code=' + cliFlagFirst.code);
+    ok('  and WRONG REPO can actually FIRE from the CLI with an expectation',
+        /WRONG REPO/.test(cliFlagFirst.out));
+
+    // Two positionals is a typo. Ignoring the second means checking a directory
+    // the caller never named and reporting on that instead.
+    const cliTwo = run([work, notRepo]);
+    ok('two positionals are refused rather than one being picked',
+        cliTwo.code === 2 && /exactly one/.test(cliTwo.out), 'code=' + cliTwo.code);
 } catch (err) {
     fail++;
     console.log('FAIL  suite threw: ' + (err && err.message));

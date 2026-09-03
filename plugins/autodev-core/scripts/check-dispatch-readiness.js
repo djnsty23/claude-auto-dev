@@ -35,7 +35,7 @@
 // calling it lost work.
 //
 // Usage:
-//   check-dispatch-readiness.js <repo> [--trunk <ref>] [--json] [--selftest]
+//   check-dispatch-readiness.js <repo> [--trunk <ref>] [--expect-origin <url>] [--json]
 //
 // Exit: 0 nothing to report · 1 at least one worktree not ready ·
 //       2 no population (not a git repo, or no worktrees, so this run
@@ -46,7 +46,17 @@ const path = require('path');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
-const valOf = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
+// Accepts BOTH `--flag value` and `--flag=value`. The second form used to fall
+// through to null, so `--trunk=origin/main` silently skipped the base check and
+// reported a clean bill. A flag spelled a normal way must not disable a check.
+const valOf = (f) => {
+    const eq = argv.find((a) => a.startsWith(f + '='));
+    if (eq) return eq.slice(f.length + 1) || null;
+    const i = argv.indexOf(f);
+    if (i < 0) return null;
+    const v = argv[i + 1];
+    return v === undefined || v.startsWith('--') ? null : v;
+};
 
 function git(repo, args) {
     try {
@@ -69,10 +79,34 @@ function worktrees(repo) {
 
 /** The remote this worktree actually points at, normalised so that a trailing
  *  `.git` and an scp-style host do not read as a different repo. */
+/**
+ * One normaliser, used on BOTH sides. An expectation normalised differently
+ * from the observed value makes two spellings of one repository compare
+ * unequal, which is the same defect class as comparing two spellings of one
+ * directory: `git@github.com:o/r.git` and `https://github.com/o/r` are the
+ * same repo and must not be a finding.
+ */
+function normaliseOrigin(url) {
+    if (!url) return null;
+    return String(url)
+        .trim()
+        .replace(/^git\+/, '')
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')   // any scheme: https, ssh, git
+        .replace(/^[^@/]+@/, '')                     // user@, however it arrived
+        .replace(/^([^/:]+):/, '$1/')                // scp colon -> path separator
+        .replace(/\.git$/, '')
+        .replace(/\/+$/, '')
+        .toLowerCase();
+}
+
 function originUrl(wt) {
     const u = git(wt, ['remote', 'get-url', 'origin']);
     if (!u) return null;
-    return u.replace(/\.git$/, '').replace(/^git@([^:]+):/, 'https://$1/').toLowerCase();
+    // Through the SAME normaliser as the expectation. This previously had its
+    // own, which rewrote the scp form to `https://host/path` while the
+    // expectation side rewrote it to `host/path`, so an operator passing the
+    // exact URL git reports got WRONG REPO.
+    return normaliseOrigin(u);
 }
 
 function isAncestor(wt, a, b) {
@@ -93,9 +127,14 @@ function inspect(repo, opts = {}) {
     if (list === null) return { ok: false, reason: 'not a git repository', rows: [] };
     if (!list.length) return { ok: false, reason: 'no worktrees', rows: [] };
 
+    // NULL, not "the repo's own origin". Linked worktrees share one config, so
+    // comparing each worktree's origin against the repo's compares a string with
+    // itself and WRONG REPO could never fire — a check that runs, passes, and
+    // examines nothing. With no expectation there is nothing to check, and the
+    // population line says so rather than counting silence as a clean bill.
     const wantOrigin = opts.expectOrigin
-        ? opts.expectOrigin.replace(/\.git$/, '').toLowerCase()
-        : originUrl(repo);
+        ? normaliseOrigin(opts.expectOrigin)
+        : null;
 
     const rows = list.map((wt) => {
         const head = git(wt, ['rev-parse', '--short', 'HEAD']);
@@ -136,8 +175,9 @@ function inspect(repo, opts = {}) {
         if (n) {
             findings.push({
                 kind: 'INHABITED',
-                detail: `${n} commit(s) on no origin ref — a finding only if this is BEFORE the session started; `
-                    + 'afterwards it is that session\'s own work. Ancestry, not content: a squash leaves the same diffs upstream under new shas',
+                detail: `${n} commit(s) on no LOCAL origin ref — a finding only if this is BEFORE the session started; `
+                    + 'afterwards it is that session\'s own work. Ancestry, not content: a squash leaves the same diffs upstream under new shas. '
+                    + 'Computed against remote-tracking refs, which this script never fetches: a branch deleted upstream whose local tracking ref survives still reads as pushed',
             });
         }
 
@@ -145,6 +185,17 @@ function inspect(repo, opts = {}) {
     });
 
     return { ok: true, rows };
+}
+
+/**
+ * The single exit contract. `--json` used to exit 0 unconditionally, so the
+ * machine-readable mode — the one a script would branch on — reported success
+ * for a repo that was not ready, and for one that was not a repo at all.
+ * A serialisation flag must never change a verdict.
+ */
+function exitCodeFor(res) {
+    if (!res || !res.ok) return 2;
+    return res.rows.some((r) => r.findings.length) ? 1 : 0;
 }
 
 function report(repo, opts) {
@@ -162,8 +213,14 @@ function report(repo, opts) {
     }
     // The population is printed on every run, clean or not: a bare verdict is
     // indistinguishable from a checker that found nothing to look at.
+    // Both disclosures, not one. WRONG REPO cannot fire without an expectation
+    // (linked worktrees share a config, so the default comparison was a string
+    // against itself), and a reader given only the trunk notice would take the
+    // silence on origin for a pass.
     const pop = `population: ${res.rows.length} worktree(s) of ${repo}`
-        + (opts.trunk ? `, trunk ${opts.trunk}` : ', NO TRUNK GIVEN so no base check ran');
+        + (opts.trunk ? `, trunk ${opts.trunk}` : ', NO TRUNK GIVEN so no base check ran')
+        + (opts.expectOrigin ? `, expecting origin ${opts.expectOrigin}`
+            : ', NO ORIGIN EXPECTATION GIVEN so no repo check ran');
     if (!bad.length) {
         process.stdout.write(`dispatch-readiness: 0 of ${res.rows.length} worktree(s) need attention\n${pop}\n`);
         return 0;
@@ -173,18 +230,53 @@ function report(repo, opts) {
     return 1;
 }
 
-module.exports = { inspect, worktrees, originUrl };
+module.exports = { inspect, worktrees, originUrl, normaliseOrigin, exitCodeFor };
+
+const USAGE = 'usage: check-dispatch-readiness.js <repo> '
+    + '[--trunk <ref>] [--expect-origin <url>] [--json]\n'
+    + '  --trunk          the ref work should be based on. Without it, no base check runs.\n'
+    + '  --expect-origin  the repository these worktrees should belong to. Without it, no\n'
+    + '                   repo check runs: linked worktrees share one config, so there is\n'
+    + '                   nothing to compare a worktree origin against.\n'
+    + 'exit: 0 clean - 1 at least one worktree not ready - 2 no population\n';
+
+/**
+ * Positionals, skipping the VALUE of every value-taking flag rather than of
+ * `--trunk` alone. `--expect-origin <url> <repo>` used to select the URL as the
+ * repo, which then failed as "not a git repository" - a wrong answer produced
+ * by a correct-looking invocation.
+ */
+function positionalsOf(args) {
+    const VALUE_FLAGS = new Set(['--trunk', '--expect-origin']);
+    const out = [];
+    for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (VALUE_FLAGS.has(a)) { i++; continue; }       // consume its value
+        if (a.startsWith('--')) continue;
+        out.push(a);
+    }
+    return out;
+}
 
 if (require.main === module) {
-    if (has('--help') || (!argv.length && !has('--selftest'))) {
-        process.stdout.write('usage: check-dispatch-readiness.js <repo> [--trunk <ref>] [--json]\n');
+    if (has('--help') || !argv.length) {
+        process.stdout.write(USAGE);
         process.exit(argv.length ? 0 : 2);
     }
-    const repo = argv.find((a) => !a.startsWith('--') && argv[argv.indexOf(a) - 1] !== '--trunk');
+    const positionals = positionalsOf(argv);
+    // A second positional is a typo, not a repo. Silently ignoring it means
+    // checking a directory the caller did not name and reporting on that.
+    if (positionals.length !== 1) {
+        process.stderr.write('dispatch-readiness: expected exactly one <repo>, got '
+            + positionals.length + (positionals.length ? ' (' + positionals.join(', ') + ')' : '')
+            + '\n' + USAGE + 'This run vouches for nothing.\n');
+        process.exit(2);
+    }
     const opts = { trunk: valOf('--trunk'), expectOrigin: valOf('--expect-origin') };
     if (has('--json')) {
-        process.stdout.write(JSON.stringify(inspect(repo, opts), null, 2) + '\n');
-        process.exit(0);
+        const res = inspect(positionals[0], opts);
+        process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+        process.exit(exitCodeFor(res));                  // the SAME verdict as the human form
     }
-    process.exit(report(repo, opts));
+    process.exit(report(positionals[0], opts));
 }
