@@ -28,6 +28,32 @@
 // The one lookup that settles it is named in the output rather than guessed at,
 // the same way the sibling check names visibility instead of calling `gh`.
 //
+// THE OTHER PATH-FILTER TRAP, WHICH THIS DOES NOT CATCH. A path filter has two
+// distinct failure surfaces and they are opposites, so a check covering one has
+// to say it is not covering the other, or a reader takes the exit code for more
+// than it is.
+//
+//   MERGING, this file: a skipped workflow reports no conclusion, a required
+//   check sits PENDING, and the pull request cannot land. Loud, and terminal.
+//
+//   COVERAGE, not this file: `paths-ignore` skips only when EVERY changed path
+//   matches, so a commit touching ignored files AND code still runs. That reads
+//   as safe, and it is what makes the inverse dangerous: put a directory in the
+//   list that also holds shipped code, and every commit touching ONLY that
+//   directory is never gated. Silent, and it produces no signal at all.
+//
+// `[measured 2026-09-03, reported by a peer from two different repositories]`
+// both are real. One repo's gate forbids `paths-ignore` outright and gives the
+// PENDING reason. Another USES it, and its own comment records the coverage
+// failure: a docs directory was in the list and IS the shipped application, so
+// 41 of 200 commits changed shipped code and received no verdict until somebody
+// looked.
+//
+// Detecting the coverage trap needs to know which paths hold code, which is a
+// fact about the repository rather than about the workflow, so it is not a
+// widening of this check. Named here so the next reader knows the boundary
+// rather than inferring coverage this does not have.
+//
 // `[measured 2026-09-03]` over one repository's 9 workflows: 2 carry a path
 // filter on a `pull_request` trigger and are reported, 1 carries `paths:` on
 // `push` only and is not, and 6 have no filter. So the discriminator is not
