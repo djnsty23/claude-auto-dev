@@ -343,6 +343,75 @@ cheapest possible test of whether the thing you are about to spend days on has
 a subject. The failure it prevents is not a wrong answer, it is weeks of work
 sitting behind an assumption nobody sampled.
 
+## 10. A floor is a property of one item. "Complete" is a property of a set.
+
+> Every assertion passed. The page was in the route list. It had two dedicated
+> tests. The defect was between two siblings, which is neither an item nor a page.
+
+`[measured 2026-09-03]` A pricing page shipped a grid declaring 5 items in
+`coinPacks.ts` against 4 columns in a Tailwind class in `Pricing.tsx`, so the
+last row held one stranded cell at every breakpoint. Its layout suite at the
+time asserted only a per-element floor (every control at least 44px) and a
+page-level absence (no horizontal scroll). Both passed, correctly. `/pricing`
+was in the route list and carried two dedicated tests, so coverage was never
+the gap.
+
+**That suite has since grown a relational check, and its header carries the
+sub-trap that catches the second attempt: measure the thing that is DRAWN, not
+the grid cell.** A list item wrapping a button stretches to the row height while
+the button inside it does not, so comparing a grid's direct children reports
+equal heights and sees nothing. Descend to the lone element child, and compare
+only elements that are actually painted, or a grid of bare text spans with
+differing line counts fires on every page.
+
+I re-derived that gate without reading the file first and got exactly that
+distinction wrong, comparing `children` rects directly. The existing version
+also guards against its own blindness, refusing to report a pass when it scanned
+zero grids. Read the suite before writing the check, not after.
+
+**Sort your assertions by how many items you must look at to decide them.**
+
+| shape | decidable from | examples |
+|---|---|---|
+| floor, ceiling, format | ONE item | `>= 44px`, has a condition clause, declares `allowed-tools` |
+| absence | the whole page, but as one fact | no horizontal scroll, no console error |
+| **relational** | **two or more items, compared** | equal, aligned, unique, distinct, the last row is full, no two of these collide |
+
+A suite built entirely from the first two rows cannot fail on anything in the
+third, no matter how complete its coverage. That is not a gap in the corpus, it
+is a gap in the assertion's shape, and adding routes never closes it.
+
+**The same defect is in this repo.** `check-skill-triggers.js` scores every
+description alone: `!r.hasCondition`, `r.len > 320`, `!r.hasWhenToUse`. Every
+predicate reads one row and there is no pairwise comparison in the file. So
+nothing detects two skills whose descriptions match the SAME situation, which is
+the dispatch collision `rule-workflow-spine` exists to address. The one checker
+that touches descriptions cannot see the failure the descriptions cause.
+
+Two reasons this shape survives review, both of which apply above:
+
+- **The fact spans files.** Item count in one module, column count in a class
+  string in another; a skill's description here, its neighbour's over there.
+  Section 9 covers a reader built on too little input. This is a reader whose
+  unit of observation is smaller than its subject, so it reports absence
+  confidently, which is the trap `verification-traps.md` names for a
+  line-oriented probe over wrapped prose.
+- **The coupling is not typed.** `sm:grid-cols-4` is a string, not a number the
+  compiler can compare against `COIN_PACKS.length`. Adding the fifth pack was a
+  data-only diff with no type error and no failing test. Where you can, make the
+  relation a shared constant so a typecheck decides it and no gate is needed.
+
+**Writing one:** name the property, then name the set it ranges over, then print
+that set's size beside the verdict. A relational check that reports only a count
+is worse than a per-item one, because the reader cannot tell WHICH pair failed.
+Print the pair.
+
+And expect the first run to find things outside the case that prompted it. A
+ragged last row is correct for a blog list and wrong for a pack selector. Triage
+by hand rather than tuning until quiet, and where an instance is legitimate mark
+it at the source with an attribute rather than in an allowlist keyed on a
+selector that will drift.
+
 ## Before shipping a gate
 
 - [ ] It runs the real implementation, not a reconstruction.
@@ -355,3 +424,4 @@ sitting behind an assumption nobody sampled.
 - [ ] The exit code depends on every finding the gate prints.
 - [ ] Running it leaves the tree, and the fixtures, unchanged.
 - [ ] Its probe was measured against the exact invocation the gate runs.
+- [ ] Every relational property it claims is decided by comparing items, not by passing each one.
