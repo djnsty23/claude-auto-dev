@@ -117,6 +117,13 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-auto-check.js"],
             "timeout": 5,
             "statusMessage": "Checking auto mode..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-brain-report.js"],
+            "timeout": 5,
+            "statusMessage": "Checking for unreported work..."
           }
         ]
       }
