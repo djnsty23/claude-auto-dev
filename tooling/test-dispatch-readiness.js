@@ -1,0 +1,160 @@
+#!/usr/bin/env node
+'use strict';
+
+// Acceptance tests for check-dispatch-readiness.js.
+//
+// Every fixture is a REAL git repository built in a temp directory, because the
+// three findings are all statements about git ancestry and a stubbed git would
+// only prove the stub agrees with itself. Fixtures are synthetic throughout: no
+// repo of the operator's is named, and this file ships in a public tree.
+//
+// The negatives matter as much as the positives here. A checker that flags every
+// worktree is useless in a fleet that runs eleven of them, and the failure this
+// script exists to prevent is silent, so an over-firing version gets muted and
+// then misses the real one.
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
+
+const ROOT = path.resolve(__dirname, '..');
+const SUBJECT = path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'check-dispatch-readiness.js');
+
+let pass = 0;
+let fail = 0;
+function ok(label, cond, extra) {
+    if (cond) { pass++; console.log('PASS  ' + label); }
+    else { fail++; console.log('FAIL  ' + label + (extra ? '  — ' + extra : '')); }
+}
+
+function git(cwd, args) {
+    return execFileSync('git', ['-C', cwd, ...args], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+    }).trim();
+}
+
+function write(p, s) { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s, 'utf8'); }
+
+/** An origin plus a clone, so `--remotes=origin` and ancestry are real. */
+function makeRepo(base, name) {
+    const bare = path.join(base, name + '.git');
+    fs.mkdirSync(bare, { recursive: true });
+    execFileSync('git', ['init', '--bare', '-b', 'main', bare], { stdio: 'ignore', windowsHide: true });
+
+    const work = path.join(base, name);
+    execFileSync('git', ['clone', bare, work], { stdio: 'ignore', windowsHide: true });
+    git(work, ['config', 'user.email', 't@example.invalid']);
+    git(work, ['config', 'user.name', 'T']);
+    write(path.join(work, 'a.txt'), 'one\n');
+    git(work, ['add', '.']);
+    git(work, ['commit', '-m', 'one']);
+    git(work, ['push', '-u', 'origin', 'main']);
+    return { bare, work };
+}
+
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-ready-'));
+let subject;
+try {
+    subject = require(SUBJECT);
+
+    // ---- fixture: a repo whose TRUNK is a branch other than the default -------
+    // This is the shape that produced the real incident: origin/HEAD says one
+    // thing, development lands somewhere else.
+    const { work } = makeRepo(TMP, 'alpha');
+    git(work, ['checkout', '-q', '-b', 'deploy']);
+    write(path.join(work, 'b.txt'), 'trunk work\n');
+    git(work, ['add', '.']);
+    git(work, ['commit', '-m', 'trunk moves ahead']);
+    git(work, ['push', '-q', '-u', 'origin', 'deploy']);
+    git(work, ['checkout', '-q', 'main']);
+
+    const rightBase = path.join(TMP, 'wt-right');
+    git(work, ['worktree', 'add', '-q', rightBase, 'origin/deploy']);
+    const wrongBase = path.join(TMP, 'wt-wrong');
+    git(work, ['worktree', 'add', '-q', wrongBase, 'origin/main']);
+
+    // ---- 1. the base check, both directions ---------------------------------
+    const r1 = subject.inspect(work, { trunk: 'origin/deploy' });
+    ok('inspect reads a repo and returns rows', r1.ok && r1.rows.length >= 3,
+        'rows=' + (r1.rows ? r1.rows.length : 'none'));
+
+    const rowFor = (res, dir) => res.rows.find((r) => path.resolve(r.worktree) === path.resolve(dir));
+    const kinds = (row) => (row ? row.findings.map((f) => f.kind) : ['<row missing>']);
+
+    ok('a worktree forked BEFORE the trunk is WRONG BASE',
+        kinds(rowFor(r1, wrongBase)).includes('WRONG BASE'), kinds(rowFor(r1, wrongBase)).join(','));
+    ok('  and it says how many commits are missing',
+        (rowFor(r1, wrongBase) || { findings: [] }).findings
+            .some((f) => f.kind === 'WRONG BASE' && /\d+ commit/.test(f.detail)));
+    ok('a worktree ON the trunk is NOT flagged',
+        !kinds(rowFor(r1, rightBase)).includes('WRONG BASE'), kinds(rowFor(r1, rightBase)).join(','));
+
+    // ---- 2. no trunk given: the base check must not run at all ---------------
+    const r2 = subject.inspect(work, {});
+    ok('with no trunk, no worktree is flagged WRONG BASE',
+        !r2.rows.some((r) => r.findings.some((f) => f.kind === 'WRONG BASE')));
+
+    // ---- 3. INHABITED: commits on no origin ref ------------------------------
+    git(rightBase, ['config', 'user.email', 't@example.invalid']);
+    git(rightBase, ['config', 'user.name', 'T']);
+    write(path.join(rightBase, 'c.txt'), 'someone elses work\n');
+    git(rightBase, ['add', '.']);
+    git(rightBase, ['commit', '-m', 'unpushed']);
+    const r3 = subject.inspect(work, { trunk: 'origin/deploy' });
+    ok('a worktree carrying an unpushed commit is INHABITED',
+        kinds(rowFor(r3, rightBase)).includes('INHABITED'), kinds(rowFor(r3, rightBase)).join(','));
+    ok('  and INHABITED names ancestry rather than claiming lost work',
+        (rowFor(r3, rightBase) || { findings: [] }).findings
+            .some((f) => f.kind === 'INHABITED' && /ancestry/i.test(f.detail)));
+    ok('  control: the same worktree was NOT inhabited a moment earlier',
+        !kinds(rowFor(r1, rightBase)).includes('INHABITED'));
+
+    // ---- 4. WRONG REPO -------------------------------------------------------
+    const other = makeRepo(TMP, 'beta');
+    const r4 = subject.inspect(work, { trunk: 'origin/deploy', expectOrigin: other.bare });
+    ok('every worktree is WRONG REPO when the expected origin differs',
+        r4.rows.every((r) => r.findings.some((f) => f.kind === 'WRONG REPO')));
+    const r5 = subject.inspect(work, { trunk: 'origin/deploy' });
+    ok('  control: with no expectation, none is WRONG REPO',
+        !r5.rows.some((r) => r.findings.some((f) => f.kind === 'WRONG REPO')));
+
+    // ---- 5. no population -> vouches for nothing -----------------------------
+    const notRepo = path.join(TMP, 'not-a-repo');
+    fs.mkdirSync(notRepo, { recursive: true });
+    const r6 = subject.inspect(notRepo, {});
+    ok('a non-repository reports no population rather than a clean bill',
+        r6.ok === false && /not a git repository/.test(r6.reason), JSON.stringify(r6.reason));
+
+    // ---- 6. an unresolvable trunk is reported, not silently skipped ----------
+    const r7 = subject.inspect(work, { trunk: 'origin/does-not-exist' });
+    ok('an unresolvable trunk is TRUNK UNREADABLE, never a pass',
+        r7.rows.every((r) => r.findings.some((f) => f.kind === 'TRUNK UNREADABLE')));
+
+    // ---- 7. the CLI exits the way its header documents ------------------------
+    const run = (args) => {
+        try {
+            const out = execFileSync(process.execPath, [SUBJECT, ...args],
+                { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+            return { code: 0, out };
+        } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+    };
+    const cli = run([work, '--trunk', 'origin/deploy']);
+    ok('CLI exits 1 when a worktree is not ready', cli.code === 1, 'code=' + cli.code);
+    ok('  and prints the population on a FAILING run', /population: \d+ worktree/.test(cli.out));
+    const cliNone = run([notRepo]);
+    ok('CLI exits 2 on no population', cliNone.code === 2, 'code=' + cliNone.code);
+    const cliClean = run([other.work, '--trunk', 'origin/main']);
+    ok('CLI exits 0 on a clean repo', cliClean.code === 0, 'code=' + cliClean.code + ' ' + cliClean.out.slice(0, 120));
+    ok('  and prints the population on a CLEAN run too', /population: \d+ worktree/.test(cliClean.out));
+    ok('  and says so when no trunk was given', /NO TRUNK GIVEN/.test(run([other.work]).out));
+} catch (err) {
+    fail++;
+    console.log('FAIL  suite threw: ' + (err && err.message));
+} finally {
+    try { fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 3 }); } catch { /* windows file locks */ }
+}
+
+console.log('');
+console.log(pass + ' passed, ' + fail + ' failed');
+process.exit(fail ? 1 : 0);
