@@ -48,6 +48,8 @@
     "check:ledger": "node plugins/autodev-core/scripts/deploy-ledger.js --selftest",
     "check:population": "node tooling/check-population-reporting.js --selftest && node tooling/check-population-reporting.js",
     "check:entrypoints": "node tooling/check-entrypoints.js --selftest && node tooling/check-entrypoints.js",
+    "check:layout": "node plugins/autodev-core/scripts/rendered-layout-gate.js --selftest",
+    "check:targets": "node tooling/check-assertion-targets.js --selftest && node tooling/check-assertion-targets.js",
     "usage:both": "node tooling/usage-both.js",
     "radar": "node plugins/autodev-core/scripts/framework-radar.js",
     "radar:learn": "node plugins/autodev-core/scripts/radar-learning.js",

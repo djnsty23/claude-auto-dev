@@ -58,6 +58,14 @@ const SUBJECT_OVERRIDES = {
     // pushes was itself the unchecked one.
     'test-push-authorisation.js': ['tooling/check-push-authorisation.js'],
 
+    // Fourth occurrence, 2026-09-03, and it arrived exactly as predicted above:
+    // a new suite testing tooling/ derived nothing and was counted NOT verified.
+    // The comment two blocks up has now been right four times, which is a
+    // stronger argument for deriving tooling/ subjects than for keeping this
+    // list - noted rather than fixed, because widening derivation is a change
+    // to what every other row means and does not belong in this commit.
+    'test-assertion-targets.js': ['tooling/check-assertion-targets.js'],
+
     // Fifth time, 2026-09-02, and the prediction below held exactly. L2 needed a
     // standing-order validator in tooling/, so its suite derived nothing and was
     // reported UNCHECKED. Worth recording that this cost nothing: the UNCHECKED
