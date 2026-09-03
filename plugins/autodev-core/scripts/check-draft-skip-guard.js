@@ -430,8 +430,37 @@ function scan(root) {
  * "NOT an endorsement" line below: this check grades CONSISTENCY, never whether
  * a guard ought to exist.
  *
+ * A BRANCH FILTER IS NOT A SUBSTITUTE FOR A GUARD, and this was proposed as a
+ * third recognised state before being measured. The argument was that a repo
+ * restricting `push` to trunk has solved the same cost problem by other means,
+ * so flagging it is a false positive on a repo that got there first.
+ *
+ * It is not, and the repo making that argument disproves it in its own file.
+ * Its preflight workflow carries BOTH mechanisms, with this comment beside the
+ * branch filter:
+ *
+ *     A draft-skip on pull_request alone could not have fixed this. Draft-skip
+ *     is a pull_request-event control and pushing to a draft branch still fires
+ *     `push`; it governs the 40, not the 360.
+ *
+ * The two govern DIFFERENT event populations and are complementary. A branch
+ * filter stops `push` runs on feature branches. It does nothing to the
+ * `pull_request` event, which fires on a draft exactly as it does on a ready
+ * one, so a branch-filtered workflow carrying a `pull_request:` trigger and no
+ * guard still runs on every draft. Reporting it is correct.
+ *
+ * `[measured 2026-09-03]` both shapes, and the reachability filter already
+ * separates them without a third state:
+ *
+ *   pull_request + branch-filtered push, no guard   REPORTED (it runs on drafts)
+ *   push-only, branch-filtered, no pull_request     not reachable, excluded
+ *
+ * So the legitimate case is already silent, and adding the proposed state would
+ * suppress the illegitimate one. That would be a false NEGATIVE traded for a
+ * false positive that does not exist.
+ *
  * KNOWN LIMIT. Guard detection is file-wide, so a workflow guarding some jobs
- * and not others reads as guarded. That is a third shape and it is not caught
+ * and not others reads as guarded. That is a further shape and it is not caught
  * here; it is named so the next reader knows the boundary rather than inferring
  * coverage this does not have.
  */
@@ -602,6 +631,38 @@ if (has('--selftest')) {
     t('  and the guarded workflow is not reported INERT, since its push is trunk-only',
         mixedRows.find((r) => r.file.endsWith('guarded.yml')).inert === false);
 
+    // A BRANCH FILTER IS NOT A GUARD. Both shapes asserted, because the
+    // distinction was proposed for removal and the two look alike in prose.
+    const bf = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-bf-'));
+    const bwf = path.join(bf, '.github', 'workflows');
+    fs.mkdirSync(bwf, { recursive: true });
+    fs.writeFileSync(path.join(bwf, 'guarded.yml'),
+        'name: G\non:\n  pull_request:\njobs:\n  t:\n' + GUARD_LINE);
+    // Branch-filtered push AND a pull_request trigger. The filter stops push
+    // runs on feature branches and does nothing to the pull_request event, so
+    // this still runs on every draft. Reporting it is correct.
+    fs.writeFileSync(path.join(bwf, 'branch-filtered.yml'),
+        'name: B\non:\n  pull_request:\n  push:\n    branches: [main]\n  workflow_dispatch:\n'
+        + 'jobs:\n  t:\n    runs-on: ubuntu-latest\n');
+    const bfPartial = partialCoverage(scan(bf));
+    t('a branch-filtered workflow that still triggers on pull_request IS a gap',
+        bfPartial !== null && bfPartial.unguarded.length === 1
+        && bfPartial.unguarded[0].file.endsWith('branch-filtered.yml'));
+
+    // The same filter WITHOUT a pull_request trigger is the legitimate case: a
+    // draft cannot reach it, so reachability excludes it and no third state is
+    // needed to keep it quiet.
+    const bf2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-bf2-'));
+    const bwf2 = path.join(bf2, '.github', 'workflows');
+    fs.mkdirSync(bwf2, { recursive: true });
+    fs.writeFileSync(path.join(bwf2, 'guarded.yml'),
+        'name: G\non:\n  pull_request:\njobs:\n  t:\n' + GUARD_LINE);
+    fs.writeFileSync(path.join(bwf2, 'push-only.yml'),
+        'name: B\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n'
+        + 'jobs:\n  t:\n    runs-on: ubuntu-latest\n');
+    t('  the same filter with NO pull_request trigger is not reachable, so not a gap',
+        partialCoverage(scan(bf2)) === null);
+
     // THE NEGATIVE THE CHECK MUST NOT FIRE ON. No guard anywhere is a coherent
     // choice, not a gap. Without this case the check would report every repo
     // that has never adopted the pattern, which is most of them.
@@ -625,12 +686,13 @@ if (has('--selftest')) {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-empty-'));
     t('a root with no .github/workflows returns null, never an empty pass', scan(empty) === null);
 
-    for (const d of [root, empty, mixed, none, all, cmt]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [root, empty, mixed, none, all, cmt, bf, bf2]) fs.rmSync(d, { recursive: true, force: true });
 
     console.log(`\n${pass} passed, ${fail} failed  (${pass + fail} cases: all four guard/trigger `
         + 'combinations, the no-population case, draft-reachability in every trigger form, '
-        + 'partial coverage with BOTH consistent states as negatives, and a guard that '
-        + 'exists only inside a comment)');
+        + 'partial coverage with BOTH consistent states as negatives, a guard that exists '
+        + 'only inside a comment, and a branch filter both with and without a '
+        + 'pull_request trigger)');
     process.exit(fail ? 1 : 0);
 }
 
