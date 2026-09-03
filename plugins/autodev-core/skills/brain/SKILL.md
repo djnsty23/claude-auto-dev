@@ -565,6 +565,61 @@ and treat an unanswered peer message to an idle session as evidence about the
 channel, never about the session.
 
 **OPEN AS DRAFT, PUSH FREELY, MARK READY WHEN DONE — and gate on that.**
+
+⚠️ **"PUSH FREELY" IS CONDITIONAL AND THE CONDITION IS USUALLY UNMET. CHECK THE
+REPO BEFORE RELYING ON IT.** `[measured 2026-09-03]` A Brain gave this advice to
+three sessions in one afternoon. It was false in both repositories it was given
+about, and the Brain's own draft pull request fired FOUR full runs while drafted,
+two pushes each triggering a `push` and a `pull_request` event.
+
+| repo | workflow | guard |
+|---|---|---|
+| Project A | its preflight gate | present, documented at length |
+| Project A | a second, browser-driven workflow | **absent**, and it is the expensive one of the pair |
+| this repo | `ci.yml` | **absent**, `on: [push, pull_request]` with an OS matrix |
+
+The partial case is the dangerous one. A session opened a draft, watched preflight
+skip, correctly inferred that the draft policy was working, and had the OTHER
+workflow run in full — needing two cancel requests, because the first did not take.
+Seeing one workflow skip is what makes a reader believe a policy that does not exist.
+
+Before telling anyone to push freely, run this in that repo. It filters on
+REACHABILITY, because a draft-skip guard can only govern a `pull_request` event —
+that is the only payload carrying a draft field — so a workflow without that
+trigger is not part of the policy and correctly has no guard:
+
+```bash
+for f in .github/workflows/*.yml; do
+  body=$(sed 's/#.*//' "$f")                                    # comments FIRST
+  echo "$body" | grep -qE '^[[:space:]]*pull_request:|^on:.*pull_request' || continue
+  echo "$body" | grep -qE 'pull_request\.draft *== *false' \
+    && echo "  guarded: $f" || echo "  UNGUARDED on PR: $f"
+done
+```
+
+Two things that command does deliberately, because the version without them was
+written first and read CLEAN on two of the three repos it was tested against.
+**Comments are stripped before anything is matched**, because one repo records in
+prose that a draft-skip guard was considered and rejected, quoting the guard
+expression verbatim, and a naive grep reads that as the guard being present. And
+**the trigger test accepts the inline `on: [push, pull_request]` form**, which a
+`^\s*pull_request:` anchor cannot see, so a repo using it is skipped rather than
+judged. Both failures point the same way: clean.
+
+Read BOTH output lines. A repo printing only `UNGUARDED` never adopted the pattern,
+which is a legitimate choice. The defect is a repo printing both.
+
+On the measured repo that returns exactly the one unguarded workflow. The
+unfiltered version returns SIX and five are correct cron-only jobs, which is how a
+detector gets muted. Do not filter on how EXPENSIVE a workflow looks: cost cannot be read
+off a file without guessing, and a reader misled by a partial guard is wrong by the
+same amount whether the thing that ran was cheap or not. Cost decides what the
+mistake costs, not whether it is one.
+
+So the paragraph below describes a design to INSTALL, not a property to assume. If
+the guard is not there, say so when you brief a session, or the advice costs money
+while sounding like thrift.
+
 `[stated 2026-08-29]` the operator: *"account for our github actions costs, which
 have been increasing lately. we need to batch commits before we push... CIs are
 great, just don't spam them with every session's merge."*
