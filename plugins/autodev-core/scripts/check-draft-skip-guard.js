@@ -348,12 +348,34 @@ function draftReachable(src) {
 }
 
 /**
- * Signals that a workflow is expensive, reported as evidence rather than as a
- * verdict. Each is a fact readable off the file. None is a minute count, and
- * this deliberately does not add up to one: billing depends on runner class,
- * matrix size, job count and duration, and a confident wrong number here would
- * be worse than no number. A reader who sees `windows-latest` knows it bills at
- * 2x without this script asserting a total.
+ * Signals that a workflow is HEAVY, reported as evidence rather than a verdict.
+ * Each is a fact readable off the file. None is a minute count, and this
+ * deliberately does not add up to one: the total depends on runner class, matrix
+ * size, job count and duration, and a confident wrong number would be worse than
+ * no number.
+ *
+ * CALLED LOAD RATHER THAN COST, and the rename is the correction. GitHub bills
+ * Actions minutes on PRIVATE repositories and runs standard hosted runners free
+ * on PUBLIC ones. `[measured 2026-09-03]` this repo is public and its siblings
+ * are private, so the identical multiplier is money on one and not on the other.
+ * The first version of this called every one a "cost signal", which reads as a
+ * budget warning on a repo that has no budget.
+ *
+ * The multipliers are real either way. A 2x windows runner takes 2x the minutes
+ * whoever is counting them, so it is 2x the wall-clock before a check reports
+ * and 2x the contention with everything else queued. Those are what a public
+ * repo actually pays.
+ *
+ * NOT resolved by looking the repository up. `gh repo view --json visibility`
+ * would answer it exactly, and this script ships inside a plugin and runs on
+ * machines that may have no `gh`, no authentication, or a target directory that
+ * is not a GitHub repository at all. A framing improvement is not worth a hard
+ * dependency that can fail in three ways. Wording that is true on both is.
+ *
+ * The remaining inaccuracy, stated rather than smoothed over: LARGER runners
+ * bill even on a public repository. Every runner this matches is a standard
+ * hosted one, so the sentence holds for what it reports, and would not hold if
+ * this ever learned to match `runs-on: [self-hosted, ...]` or a runner group.
  */
 function costSignals(src) {
     const out = [];
@@ -626,7 +648,7 @@ if (has('--selftest')) {
     t('  a cron/dispatch-only workflow is excluded from the population',
         mixedPartial.reachable.length === 2
         && !mixedPartial.reachable.some((r) => r.file.endsWith('cron-only.yml')));
-    t('  the windows runner is reported as a cost signal, not as a minute count',
+    t('  the windows runner is reported as a load signal, not as a minute count',
         mixedPartial.unguarded[0].cost.some((c) => /windows/.test(c)));
     t('  and the guarded workflow is not reported INERT, since its push is trunk-only',
         mixedRows.find((r) => r.file.endsWith('guarded.yml')).inert === false);
@@ -756,8 +778,12 @@ if (partial) {
     const withCost = partial.unguarded.filter((r) => r.cost.length);
     if (withCost.length) {
         console.log(`\n           ${withCost.length} of the unguarded `
-            + `${withCost.length === 1 ? 'carries' : 'carry'} a cost signal, shown above.`);
-        console.log('           Those are facts read off the file, not a minute estimate.');
+            + `${withCost.length === 1 ? 'carries' : 'carry'} a load signal, shown above.`);
+        console.log('           Those are facts read off the file, not a minute estimate, and');
+        console.log('           NOT necessarily money: GitHub bills Actions minutes on PRIVATE');
+        console.log('           repositories, while a public one runs standard hosted runners');
+        console.log('           for free. The multipliers are real either way for wall-clock');
+        console.log('           and for contention with everything else queued.');
     }
 }
 
