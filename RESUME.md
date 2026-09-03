@@ -90,6 +90,38 @@ measurement.
 
 So these are insurance against a deleted worktree, not against a dead disk.
 
+## The Stop hook is verified LIVE, not just by its suite
+
+`[measured 2026-09-03]` The 16-case suite drives fixtures. This drove the shipped
+`stop-brain-report.js` as a subprocess against two real worktrees, using the env
+overrides so nothing in `~/.claude` was touched and the write guard stayed disarmed:
+
+| behaviour | result |
+|---|---|
+| role file ABSENT (the ship-safe default) | silent, 0 bytes stdout AND stderr |
+| role file present, first sighting | silent, baseline sha recorded |
+| HEAD moved since last look | FIRES, correct branch and sha in the notice |
+| immediately again, inside the window | silent, throttled |
+| the coordinator being told to report to itself | silent |
+
+Every path exit 0. So the mechanism works and the only thing standing between it
+and doing its job is the role file the operator has not created.
+
+One number in the notice needs reading carefully, and it is right rather than
+wrong. It says "4 ahead of upstream" where a sweep for genuinely unpublished work
+says 3. Both are correct: `@{upstream}..HEAD` counts against ONE ref, and the
+sweep counts against every origin ref. The extra commit is published on another
+branch. The notice names its reference, which is what keeps it honest.
+
+## The away-state fix has no rival, checked rather than assumed
+
+`[measured 2026-09-03]` Worry retired. Exactly one origin branch carries a change
+to `tooling/test-away-state.js` that is not on main, and it is **#131's own
+branch**. There is no competing PR. The session I flagged for a possible duplicate
+had in fact MERGED #131's branch into its work, which is the correct move and the
+opposite of duplicating it. So the morning decision is one merge, not a choice
+between two.
+
 ## The debt that is easiest to forget
 
 **`~/.claude/brain-role.json` does not exist**, so `stop-brain-report.js` — added
