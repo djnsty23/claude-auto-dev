@@ -288,6 +288,7 @@ Load specific references for engineering quality:
 |-----------|--------------|
 | `${CLAUDE_SKILL_DIR}/references/web-interface-guidelines.md` | Forms, focus states, animation, a11y, dark mode, touch, i18n |
 | `${CLAUDE_SKILL_DIR}/references/background-craft.md` | A hero or section led by a photographic or generated background: sourcing, reframing, video loops, legibility over an image |
+| `${CLAUDE_SKILL_DIR}/references/claude-design-handoff.md` | Porting a Claude Design handoff bundle into a component tree |
 
 ## Component Composition
 
