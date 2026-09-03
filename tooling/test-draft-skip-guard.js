@@ -186,11 +186,96 @@ const GUARD = '    if: github.event.pull_request.draft == false\n';
         'scanned=' + (parsed && parsed.scanned));
 }
 
+// --- partial coverage, through the process boundary ------------------------
+// The subject's own selftest asserts partialCoverage() in-process. These drive
+// the CLI instead, because the exit code and the printed population are the
+// contract a caller actually consumes, and an in-process assertion cannot see
+// either. A finding that computes correctly and exits 0 is still a broken gate.
+
+/** A root carrying several named workflows. */
+function multiRoot(name, files) {
+    const r = path.join(tmp, name);
+    const wf = path.join(r, '.github', 'workflows');
+    fs.mkdirSync(wf, { recursive: true });
+    for (const [file, body] of Object.entries(files)) fs.writeFileSync(path.join(wf, file), body);
+    return r;
+}
+
+{
+    const mixed = multiRoot('mixed', {
+        'guarded.yml': 'name: P\non:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  t:\n' + GUARD,
+        'unguarded.yml': 'name: B\non:\n  push:\n    paths:\n      - docs/**\n  pull_request:\njobs:\n'
+            + '  g:\n    runs-on: windows-latest\n',
+        'cron.yml': 'name: N\non:\n  schedule:\n    - cron: "0 3 * * *"\njobs:\n  x:\n    runs-on: ubuntu-latest\n',
+    });
+    const r = run([mixed]);
+    check('PARTIAL coverage is reported and exits 1',
+        r.status === 1 && /PARTIAL/.test(r.out), `exit ${r.status}`);
+    check('  the unguarded workflow is named in the output',
+        /unguarded\.yml/.test(r.out));
+    check('  the guarded one is shown as guarded, not as the gap',
+        /guarded:[\s\S]*guarded\.yml/.test(r.out));
+    check('  the cron-only workflow is excluded from the reachable population',
+        /2 reachable by a draft pull request/.test(r.out));
+    check('  the population names BOTH denominators, not just the finding',
+        /3 workflow\(s\)/.test(r.out) && /2 reachable/.test(r.out));
+    check('  the windows cost signal is printed as a signal, with no minute total',
+        /windows runner/.test(r.out) && !/\d+\s*(billable|minutes\/month)/.test(r.out));
+
+    const j = run([mixed, '--json']);
+    let parsed = null;
+    try { parsed = JSON.parse(j.out); } catch { /* stays null */ }
+    check('--json carries the partial finding and exits 1',
+        j.status === 1 && parsed && parsed.partial
+        && parsed.partial.unguarded.length === 1 && parsed.partial.guarded.length === 1,
+        `exit ${j.status}`);
+}
+
+// THE TWO CONSISTENT STATES, which must NOT be reported. Without both, this
+// check would fire on every repo that never adopted the pattern, which is most
+// of them, and a gate that cries wolf gets muted.
+{
+    const none = multiRoot('none-guarded', {
+        'a.yml': 'name: A\non: [push, pull_request]\njobs:\n  x:\n    runs-on: ubuntu-latest\n',
+        'b.yml': 'name: B\non: [push, pull_request]\njobs:\n  y:\n    runs-on: ubuntu-latest\n',
+    });
+    const r = run([none]);
+    check('a repo where NOTHING guards exits 0 and is not reported',
+        r.status === 0 && !/PARTIAL/.test(r.out), `exit ${r.status}`);
+    check('  and it says plainly that this is not an endorsement',
+        /NOT an endorsement/.test(r.out));
+
+    const all = multiRoot('all-guarded', {
+        'a.yml': 'name: A\non:\n  pull_request:\njobs:\n  x:\n' + GUARD,
+        'b.yml': 'name: B\non:\n  pull_request:\njobs:\n  y:\n' + GUARD,
+    });
+    const r2 = run([all]);
+    check('a repo where EVERY draft-reachable workflow guards exits 0',
+        r2.status === 0 && !/PARTIAL/.test(r2.out), `exit ${r2.status}`);
+}
+
+// A workflow a draft cannot reach is never the gap, even beside a guarded one.
+// This is the case that would turn every repo with a nightly cron into a
+// finding, so it is asserted through the CLI rather than trusted.
+{
+    const cronBeside = multiRoot('cron-beside', {
+        'guarded.yml': 'name: P\non:\n  pull_request:\njobs:\n  t:\n' + GUARD,
+        'nightly.yml': 'name: N\non:\n  schedule:\n    - cron: "0 3 * * *"\n  workflow_dispatch:\njobs:\n'
+            + '  x:\n    runs-on: macos-latest\n',
+    });
+    const r = run([cronBeside]);
+    check('a cron/dispatch-only workflow beside a guarded one is NOT a partial finding',
+        r.status === 0 && !/PARTIAL/.test(r.out), `exit ${r.status}`);
+    check('  and the reachable population is 1, not 2',
+        /1 reachable by a draft pull request/.test(r.out));
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SUBJECT)}; every case plants its `
     + 'own workflow fixture, because this repo carries no draft-skip guard and a live run here '
-    + 'would report zero forever. One positive that must fire, three near-misses that must not.');
+    + 'would report zero forever. Both findings are covered, each with its own negatives: for '
+    + 'INERT, three near-misses; for PARTIAL, both consistent states and an unreachable workflow.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 process.exit(fail ? 1 : 0);
