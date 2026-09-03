@@ -219,8 +219,16 @@ function multiRoot(name, files) {
         /2 reachable by a draft pull request/.test(r.out));
     check('  the population names BOTH denominators, not just the finding',
         /3 workflow\(s\)/.test(r.out) && /2 reachable/.test(r.out));
-    check('  the windows cost signal is printed as a signal, with no minute total',
+    check('  the windows load signal is printed as a signal, with no minute total',
         /windows runner/.test(r.out) && !/\d+\s*(billable|minutes\/month)/.test(r.out));
+    // The multipliers are money on a PRIVATE repo and free on a public one, so
+    // the output must not read as a budget warning to a reader who has no
+    // budget. Asserted rather than left to the wording, because the wording is
+    // the whole fix and a later edit could quietly drop it.
+    check('  and it says plainly that minutes are billed on private repos, not all',
+        /PRIVATE/.test(r.out) && /free/.test(r.out));
+    check('  while still saying the multipliers are real for wall-clock',
+        /wall-clock/.test(r.out));
 
     const j = run([mixed, '--json']);
     let parsed = null;
