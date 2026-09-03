@@ -155,23 +155,7 @@ for (const [label, arg] of [
         r.status === 0 && (r.stdout || '').length > 0 && ms < 10000, `exit ${r.status}, ${ms}ms`);
 }
 {
-    // The cases above inject NOW, so they are deterministic. This one spawns
-    // the real CLI, which reads the real clock, so an ABSOLUTE until-time in
-    // the fixture rots the instant it passes. It did: the shared active.md is
-    // fixed at 2026-09-02T22:00:00Z, so from 2026-09-03 this assertion read
-    // EXPIRED and could never match the active licence it checks for. One
-    // assertion in a 23-case suite depended on the wall clock, and it was the
-    // only one not given an injected now.
-    //
-    // Derive the planted value FROM the thing under test instead, per 22c-i:
-    // a value that is only accidentally in the future decays into a false
-    // alarm, and this one did.
-    const f = write(
-        'active-cli.md',
-        '# AWAY\n\nuntil: ' +
-            new Date(Date.now() + 4 * 3600 * 1000).toISOString() +
-            '\n\nback around ten, self-resolve reversible things\n',
-    );
+    const f = path.join(fixture, 'active.md');
     const r = spawnSync(process.execPath, [SUBJECT, '--status', '--file', f], { input: '', encoding: 'utf8' });
     const ok = r.status === 0 && r.stdout.includes(f) && /SELF-RESOLVE/.test(r.stdout);
     check('--status names the file it read, and says which licence the state grants', ok,
