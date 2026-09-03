@@ -590,10 +590,24 @@ trigger is not part of the policy and correctly has no guard:
 
 ```bash
 for f in .github/workflows/*.yml; do
-  grep -qE '^\s*pull_request:' "$f" || continue
-  grep -qE 'pull_request\.draft *== *false' "$f" || echo "UNGUARDED on PR: $f"
+  body=$(sed 's/#.*//' "$f")                                    # comments FIRST
+  echo "$body" | grep -qE '^[[:space:]]*pull_request:|^on:.*pull_request' || continue
+  echo "$body" | grep -qE 'pull_request\.draft *== *false' \
+    && echo "  guarded: $f" || echo "  UNGUARDED on PR: $f"
 done
 ```
+
+Two things that command does deliberately, because the version without them was
+written first and read CLEAN on two of the three repos it was tested against.
+**Comments are stripped before anything is matched**, because one repo records in
+prose that a draft-skip guard was considered and rejected, quoting the guard
+expression verbatim, and a naive grep reads that as the guard being present. And
+**the trigger test accepts the inline `on: [push, pull_request]` form**, which a
+`^\s*pull_request:` anchor cannot see, so a repo using it is skipped rather than
+judged. Both failures point the same way: clean.
+
+Read BOTH output lines. A repo printing only `UNGUARDED` never adopted the pattern,
+which is a legitimate choice. The defect is a repo printing both.
 
 On the measured repo that returns exactly the one unguarded workflow. The
 unfiltered version returns SIX and five are correct cron-only jobs, which is how a
