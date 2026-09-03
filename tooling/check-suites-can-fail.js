@@ -67,6 +67,19 @@ const SUBJECT_OVERRIDES = {
     'test-standing-orders.js': ['tooling/check-standing-orders.js'],
     'test-standing-order-wake.js': ['tooling/standing-order-wake.js'],
 
+    // Sixth time, 2026-09-03, and the entry above predicted it exactly: a new
+    // pairwise skill-description checker landed in tooling/, so its suite
+    // derived nothing and was reported UNCHECKED.
+    //
+    // Same non-cost as the fifth, and worth recording again because it is the
+    // argument for keeping the UNCHECKED failure loud. npm test read 98/98 and
+    // validate read 19 PASS 0 FAIL, so every signal short of this one said the
+    // suite was fine. The full gate went red on its first run against the new
+    // suite and named the fix in the failure text. Under the old "nothing to
+    // stub" wording it would have been counted as a pass over a suite nobody
+    // had verified.
+    'test-skill-collisions.js': ['tooling/check-skill-collisions.js'],
+
     // Fourth time, 2026-08-30, four at once: the codex-audit acceptance suites
     // all test tooling/ checkers, so all derived nothing. The pattern is now
     // structural - every acceptance test for a TOOLING gate lands here - and
