@@ -76,8 +76,6 @@ try {
 
     // ---- 1. the base check, both directions ---------------------------------
     const r1 = subject.inspect(work, { trunk: 'origin/deploy' });
-    ok('inspect reads a repo and returns rows', r1.ok && r1.rows.length >= 3,
-        'rows=' + (r1.rows ? r1.rows.length : 'none'));
 
     // ⚠️ realpath BOTH SIDES, never path.resolve. Two spellings of one directory
     // compare unequal, and which spelling you get depends on who produced it.
@@ -91,6 +89,17 @@ try {
     const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
     const rowFor = (res, dir) => res.rows.find((r) => real(r.worktree) === real(dir));
     const kinds = (row) => (row ? row.findings.map((f) => f.kind) : ['<row missing>']);
+
+    // Named for what it proves: that the rows came from THIS repository. The
+    // earlier version asserted `ok && rows.length >= 3`, and an adversarial
+    // mutation that bypassed every git read and returned three fabricated rows
+    // left it green. A count is not provenance, so this identifies the three
+    // worktrees the fixture actually built.
+    ok('inspect ENUMERATES the worktrees this fixture built, not merely three rows',
+        r1.ok && r1.rows.length >= 3
+            && [work, rightBase, wrongBase].every((d) => rowFor(r1, d) !== undefined),
+        'rows=' + (r1.rows ? r1.rows.length : 'none')
+            + ' matched=' + [work, rightBase, wrongBase].filter((d) => rowFor(r1, d)).length + '/3');
 
     ok('a worktree forked BEFORE the trunk is WRONG BASE',
         kinds(rowFor(r1, wrongBase)).includes('WRONG BASE'), kinds(rowFor(r1, wrongBase)).join(','));
@@ -131,9 +140,16 @@ try {
     }
 
     // ---- 2. no trunk given: the base check must not run at all ---------------
+    // BOTH base findings, not just WRONG BASE. The earlier version named only
+    // one, so a mutation that forced the base check to run and reported every
+    // row TRUNK UNREADABLE left it green — the check ran, which is exactly what
+    // the heading says must not happen, and the assertion could not see it.
+    // Assert the contract the heading states, not one symptom of breaking it.
+    const BASE_KINDS = new Set(['WRONG BASE', 'TRUNK UNREADABLE']);
     const r2 = subject.inspect(work, {});
-    ok('with no trunk, no worktree is flagged WRONG BASE',
-        !r2.rows.some((r) => r.findings.some((f) => f.kind === 'WRONG BASE')));
+    ok('with no trunk, the base check does not run at all',
+        !r2.rows.some((r) => r.findings.some((f) => BASE_KINDS.has(f.kind))),
+        'saw=' + JSON.stringify([...new Set(r2.rows.flatMap((r) => r.findings.map((f) => f.kind)))]));
 
     // ---- 3. INHABITED: commits on no origin ref ------------------------------
     git(rightBase, ['config', 'user.email', 't@example.invalid']);
