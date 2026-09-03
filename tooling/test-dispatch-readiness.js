@@ -79,7 +79,17 @@ try {
     ok('inspect reads a repo and returns rows', r1.ok && r1.rows.length >= 3,
         'rows=' + (r1.rows ? r1.rows.length : 'none'));
 
-    const rowFor = (res, dir) => res.rows.find((r) => path.resolve(r.worktree) === path.resolve(dir));
+    // ⚠️ realpath BOTH SIDES, never path.resolve. Two spellings of one directory
+    // compare unequal, and which spelling you get depends on who produced it.
+    // [measured 2026-09-03] this suite passed on a local Windows box and failed
+    // 4 of 18 on the Windows CI runner, whose temp directory is an 8.3 SHORT
+    // NAME (`RUNNER~1`) while git reports the long form. There is no short name
+    // locally, so the defect is invisible on the machine that wrote it — which
+    // is why "it passes on my machine" is not evidence here.
+    // This repo already documents the same class on macOS, where /var and
+    // /private/var are one directory. Resolve before comparing, always.
+    const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+    const rowFor = (res, dir) => res.rows.find((r) => real(r.worktree) === real(dir));
     const kinds = (row) => (row ? row.findings.map((f) => f.kind) : ['<row missing>']);
 
     ok('a worktree forked BEFORE the trunk is WRONG BASE',
@@ -89,6 +99,36 @@ try {
             .some((f) => f.kind === 'WRONG BASE' && /\d+ commit/.test(f.detail)));
     ok('a worktree ON the trunk is NOT flagged',
         !kinds(rowFor(r1, rightBase)).includes('WRONG BASE'), kinds(rowFor(r1, rightBase)).join(','));
+
+    // ---- 1b. a DIFFERENT SPELLING of the same directory must still match ----
+    // The CI failure was an 8.3 short name (`RUNNER~1`), which cannot be made on
+    // a machine that has none. A symlink is the same property reachable
+    // everywhere: two paths naming one directory, which `path.resolve` cannot
+    // collapse because it never touches the filesystem.
+    //
+    // MUTATION-TESTED, and the first version FAILED that test. It compared
+    // `path.join(dir, '.') + sep` against `dir` — two spellings `path.resolve`
+    // also normalises — so it passed with the defect reinstalled and could
+    // never have caught anything. An assertion that cannot fail is worse than
+    // no assertion, because it reads as coverage.
+    let differs = false;
+    const alias = path.join(TMP, 'alias-wrong');
+    try {
+        // 'junction' is the Windows form that needs no elevation.
+        fs.symlinkSync(wrongBase, alias, 'junction');
+        // Self-check: the two spellings must actually DIFFER, or this proves
+        // nothing. Deriving the precondition from the fixture rather than
+        // assuming the platform provides it.
+        differs = fs.realpathSync(alias) !== path.resolve(alias);
+    } catch { /* no privilege to link: report unverified, never pass */ }
+    if (differs) {
+        ok('a differently-spelled path finds the same worktree row',
+            rowFor(r1, alias) === rowFor(r1, wrongBase) && rowFor(r1, alias) !== undefined,
+            'alias=' + (rowFor(r1, alias) ? 'found' : 'MISSING'));
+    } else {
+        console.log('UNVERIFIED  path-spelling assertion did not run — no distinct second '
+            + 'spelling available here. This is absent coverage, not a pass.');
+    }
 
     // ---- 2. no trunk given: the base check must not run at all ---------------
     const r2 = subject.inspect(work, {});
