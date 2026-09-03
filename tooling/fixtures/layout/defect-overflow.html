@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>planted: horizontal overflow</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font:16px/1.6 system-ui,sans-serif}
+  .wrap{padding:16px}
+  /* THE PLANTED DEFECT. A fixed 900px table inside a fluid page. It fits at
+     1280 and forces the document sideways at every mobile width, which is
+     exactly the "present at 360, absent at 1280" shape the gate must report
+     per width rather than collapsing to one verdict. */
+  .rates{width:900px;border-collapse:collapse}
+  .rates td,.rates th{border:1px solid #ccc;padding:8px;white-space:nowrap}
+</style></head>
+<body>
+<main class="wrap">
+  <h1>Rates</h1>
+  <p>The table below is 900px wide and the page is not.</p>
+  <table class="rates">
+    <tr><th>Plan</th><th>Region</th><th>Monthly</th><th>Annual</th><th>Seats</th><th>Support</th></tr>
+    <tr><td>Starter</td><td>Europe</td><td>10</td><td>100</td><td>3</td><td>Email</td></tr>
+    <tr><td>Team</td><td>Europe</td><td>30</td><td>300</td><td>10</td><td>Email and chat</td></tr>
+  </table>
+</main>
+</body></html>

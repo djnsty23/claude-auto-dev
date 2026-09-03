@@ -63,12 +63,20 @@ const VERBOSE = process.argv.includes('--verbose');
 // Rule 4's unique-basename search deliberately did NOT widen. It is the one rule
 // that guesses, and the measurement is under it.
 //
-// `[measured 2026-09-03]` the widening took the derive-nothing count from 18 to
-// 3 and retired 16 of the 18 entries below, each because derivation returns that
-// entry's exact path. The 3 that still derive nothing are the ones derivation
-// cannot reach by construction: test-all.js (checked as the runner, never by its
-// own subjects), test-skill-prd-commands.js (subject is markdown — see
-// NOT_JAVASCRIPT), and test-framework-radar-guidance.js (below).
+// `[measured 2026-09-03, over 100 suites, after merging origin/main]` the
+// widening took the derive-nothing count from 19 to 3 and retired 16 of the 18
+// entries below, each because derivation returns that entry's exact path. The 3
+// that still derive nothing are the ones derivation cannot reach by
+// construction: test-all.js (checked as the runner, never by its own subjects),
+// test-skill-prd-commands.js (subject is markdown — see NOT_JAVASCRIPT), and
+// test-framework-radar-guidance.js (below).
+//
+// The baseline reads 19 rather than the 18 this comment carried before the
+// merge, and the correction is the point rather than a tidy-up: origin/main
+// added two more tooling suites while this branch sat open, so the population
+// moved under a number written into prose. Both figures were measured and only
+// one was current. Re-measure over the tree in front of you rather than quoting
+// this line, which is stale the moment another tooling suite lands.
 const SUBJECT_OVERRIDES = {
     // What remains is the honest residue: a suite whose subject is NOT
     // JavaScript, which no amount of path derivation can reach. This list no

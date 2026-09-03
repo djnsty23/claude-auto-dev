@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>clean control</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font:16px/1.6 system-ui,sans-serif;color:#1a1a1a;background:#fff}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px 16px}
+  h1{font-size:1.6rem;margin:0 0 12px}
+  p{margin:0 0 16px;max-width:68ch}
+
+  /* A legitimate horizontal scroller. Its children are WIDER than the
+     container on purpose. A naive overflow check flags every one of them;
+     this page is the control that says it must not. */
+  .rail{overflow-x:auto;overflow-y:hidden;display:flex;gap:12px;padding:12px 0}
+  .rail .card{flex:0 0 260px;height:120px;background:#eef1f5;border-radius:12px;padding:12px}
+
+  /* A transparent click-catcher over body text. It is invisible, so it is not
+     visual occlusion — but it IS what elementFromPoint returns. The control
+     for the paint test. */
+  .catcher{position:absolute;inset:0;background:transparent;z-index:5}
+  .catch-host{position:relative}
+
+  /* A decorative badge hanging off a card corner. Deliberate overhang,
+     overflow visible, entirely inside the viewport. */
+  .badge-host{position:relative;margin:24px 0;padding:16px;background:#f6f6f6;border-radius:12px}
+  .badge{position:absolute;top:-8px;right:-8px;background:#333;color:#fff;border-radius:999px;padding:2px 10px;font-size:12px}
+
+  /* An icon button whose label is clipped away by a 44x44 box. The word is
+     there for a screen reader and painted nowhere, which is how icon buttons
+     have always been built - and it is structurally identical to a paragraph
+     cut off by a panel, so nothing about the geometry can tell them apart.
+     Reduced from Wikipedia's mobile skin, where 23 of 25 findings on the first
+     real run were exactly this. */
+  .icon-btn{width:44px;height:44px;overflow:hidden;border:1px solid #ccc;border-radius:8px;background:#fff;padding:0;display:inline-flex;align-items:center;justify-content:center}
+  .icon-btn .btn-label{white-space:nowrap;font-size:14px}
+
+  /* Fixed header. Does not contribute to document scroll width and sits
+     above nothing that carries text. */
+  .bar{position:fixed;top:0;left:0;right:0;height:44px;background:#111;color:#fff;display:flex;align-items:center;padding:0 16px;z-index:10}
+  .below-bar{margin-top:60px}
+</style></head>
+<body>
+<header class="bar">clean control</header>
+<main class="wrap below-bar">
+  <h1>A page with nothing wrong with it</h1>
+  <p>Four things on this page look like defects to a checker that measures rectangles and stops there. None of them is one. This page must produce zero findings at every width, or the gate is not safe to run against real work.</p>
+
+  <div class="rail">
+    <div class="card">one</div><div class="card">two</div><div class="card">three</div>
+    <div class="card">four</div><div class="card">five</div><div class="card">six</div>
+  </div>
+
+  <div class="catch-host">
+    <p>This paragraph sits underneath a fully transparent absolutely-positioned layer. Hit testing returns the layer, not this text. Nothing is visually covered, so nothing should be reported.</p>
+    <div class="catcher"></div>
+  </div>
+
+  <div class="badge-host">
+    <span class="badge">new</span>
+    A card with a badge deliberately overhanging its corner.
+  </div>
+
+  <p>
+    <button class="icon-btn" type="button"><span class="btn-label">Search this site</span></button>
+    <button class="icon-btn" type="button"><span class="btn-label">Add to watchlist</span></button>
+    Two icon buttons whose labels are clipped away on purpose.
+  </p>
+
+  <p>Body copy runs to a readable measure and wraps at every width without forcing the document sideways.</p>
+</main>
+</body></html>

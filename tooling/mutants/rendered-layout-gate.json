@@ -1,0 +1,174 @@
+{
+  "suite": "tooling/test-rendered-layout-gate.js",
+  "description": "Each mutant plants ONE defect the rendered-layout gate exists to catch, and names the assertion that must object to it. Every one of these was written after the check it targets, so the manifest doubles as a record of what the gate is actually asserting rather than what it appears to.",
+  "mutants": [
+    {
+      "id": "M1",
+      "name": "DOC-SCROLL compares against innerWidth, the naive test",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "const overshoot = vp.scrollWidth - vp.clientWidth;",
+      "to": "const overshoot = vp.scrollWidth - vp.innerWidth;",
+      "expect": "the document is reported as scrolling sideways"
+    },
+    {
+      "id": "M2",
+      "name": "the scroller exemption is removed, so carousels report",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (ca && SCROLLS.has(ca.overflowX)) {",
+      "to": "if (false) {",
+      "expect": "clean @\\d+: ZERO findings"
+    },
+    {
+      "id": "M3",
+      "name": "the descendant dedup is removed, 17 rows for one defect",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (suppressed) { exempt.ancestorAlreadyOverflows++; continue; }",
+      "to": "if (false) { exempt.ancestorAlreadyOverflows++; continue; }",
+      "expect": "exactly one culprit"
+    },
+    {
+      "id": "M4",
+      "name": "hidden is treated like auto, clipping absorbed as if scrollable",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "const CLIPS = new Set(['hidden', 'clip']);",
+      "to": "const CLIPS = new Set([]);",
+      "expect": "three cut-off runs reported"
+    },
+    {
+      "id": "M5",
+      "name": "the opacity test is removed, a transparent catcher counts as cover",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (!(o.bgAlpha >= T.occluderMinAlpha || o.hasBgImage || o.hasBackdrop)) return false;",
+      "to": "return true;",
+      "expect": "clean @\\d+: ZERO findings"
+    },
+    {
+      "id": "M6",
+      "name": "inconclusive samples counted as measured",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "const usable = (t.samples || []).filter((s) => s.selfHit !== false);",
+      "to": "const usable = (t.samples || []);",
+      "expect": "clipped text is NOT also reported as occluded"
+    },
+    {
+      "id": "M7",
+      "name": "the width-mismatch refusal is removed",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (vp.requestedWidth != null && vp.clientWidth !== vp.requestedWidth) {",
+      "to": "if (false) {",
+      "expect": "refuses when the resize did not take"
+    },
+    {
+      "id": "M8",
+      "name": "the empty-harvest refusal is removed, an empty probe reads as a clean page",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (!elements.length) {",
+      "to": "if (false && !elements.length) {",
+      "expect": "refuses an empty harvest"
+    },
+    {
+      "id": "M9",
+      "name": "the no-viewport-meta refusal is removed",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (vp.requestedWidth != null && vp.requestedWidth < 768 && !vp.hasViewportMeta) {",
+      "to": "if (false) {",
+      "expect": "refuses a mobile width on a page with no viewport meta"
+    },
+    {
+      "id": "M12",
+      "name": "a clipping ancestor no longer absorbs, the MDN false positive",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (ca && CLIPS.has(ca.overflowX)) {",
+      "to": "if (false) {",
+      "expect": "so it is NOT reported as an overflow culprit"
+    },
+    {
+      "id": "M13",
+      "name": "clip-absorbed is folded into the rail count",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "exempt.clipAbsorbed++;",
+      "to": "exempt.scrollerAbsorbed++;",
+      "expect": "counted as clip-absorbed, apart from the rail case"
+    },
+    {
+      "id": "M14",
+      "name": "control labels are no longer exempt, the Wikipedia false positives",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (t.controlAncestor) { exempt.controlLabel++; continue; }",
+      "to": "if (false) { exempt.controlLabel++; continue; }",
+      "expect": "they are exempted, not reported|control-label exemption is inert"
+    },
+    {
+      "id": "M15",
+      "name": "a text count with no input reports 0 rather than null",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "const sawText = texts.length > 0;",
+      "to": "const sawText = true;",
+      "expect": "the text-based counts are null, not zero"
+    },
+    {
+      "id": "M17",
+      "name": "a pinned bar counts at every scroll position, sticky-header noise",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (PINNED.has(o.position) && (t.scrollY || 0) > 0) return false;",
+      "to": "",
+      "expect": "clean @\\d+: ZERO findings|clean control still reports nothing"
+    },
+    {
+      "id": "M18",
+      "name": "a pinned bar is exempt at EVERY scroll position, rest included",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if (PINNED.has(o.position) && (t.scrollY || 0) > 0) return false;",
+      "to": "if (PINNED.has(o.position)) return false;",
+      "expect": "an occlusion finding exists to inspect|and it is still reported"
+    },
+    {
+      "id": "M10",
+      "name": "the probe stops reading the layout viewport",
+      "file": "plugins/autodev-core/scripts/layout-probe.js",
+      "from": "clientWidth: de.clientWidth,",
+      "to": "clientWidth: window.innerWidth,",
+      "expect": "re-capture the fixtures|the harvester in the tree right now"
+    },
+    {
+      "id": "M11",
+      "name": "the probe measures element boxes instead of glyph boxes",
+      "file": "plugins/autodev-core/scripts/layout-probe.js",
+      "from": "range.selectNodeContents(tn);",
+      "to": "range.selectNode(tn);",
+      "expect": "re-capture the fixtures|the harvester in the tree right now"
+    },
+    {
+      "id": "M16",
+      "name": "the probe stops recording the control ancestor",
+      "file": "plugins/autodev-core/scripts/layout-probe.js",
+      "from": "controlAncestor: controlAncestor(te),",
+      "to": "controlAncestor: null,",
+      "expect": "re-capture the fixtures|the harvester in the tree right now"
+    },
+    {
+      "id": "M19",
+      "name": "the probe stops recording the occluder position",
+      "file": "plugins/autodev-core/scripts/layout-probe.js",
+      "from": "position: cs.position,",
+      "to": "position: undefined,",
+      "expect": "re-capture the fixtures|the harvester in the tree right now"
+    },
+    {
+      "id": "M20",
+      "name": "the coverage tally marks every text element, 100% forever",
+      "file": "plugins/autodev-core/scripts/layout-probe.js",
+      "from": "            sampledElementIds[index.get(te)] = 1;",
+      "to": "",
+      "expect": "re-capture the fixtures|the harvester in the tree right now|not marking nothing"
+    },
+    {
+      "id": "M21",
+      "name": "the report drops the coverage denominator from the per-width table",
+      "file": "plugins/autodev-core/scripts/rendered-layout-gate.js",
+      "from": "`${r.textSampled}/${r.textTotal == null ? '?' : r.textTotal}`.padStart(9)",
+      "to": "String(r.textSampled).padStart(9)",
+      "expect": "prints the coverage denominator|table row carries the denominator"
+    }
+  ]
+}
