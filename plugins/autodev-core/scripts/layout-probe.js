@@ -271,6 +271,7 @@ function harvest(opt) {
 
     var textTotal = 0;
     var textRecords = [];
+    var sampledElementIds = {};
     var scrollPositions = [];
     var modalSeen = null;
     var sampledKeys = {};
@@ -298,6 +299,12 @@ function harvest(opt) {
                 if (n.nodeType === 3) own += n.nodeValue;
             }
             if (!own.trim()) continue;
+            // Counted once per ELEMENT, on the first pass only. textRecords
+            // below accumulates one row per element PER SCROLL POSITION, so the
+            // two are different units and must not be read as a ratio - a page
+            // with 67 text elements reported 69 records, which is above 100%
+            // and interpretable as nothing. `sampledElements` is the tally that
+            // shares this unit and is the honest denominator's numerator.
             if (s === 0) textTotal++;
 
             var glyphRects = [];
@@ -326,6 +333,7 @@ function harvest(opt) {
             if (sampledKeys[key]) continue;
             if (textRecords.length >= MAX_TEXT) continue;
             sampledKeys[key] = 1;
+            sampledElementIds[index.get(te)] = 1;
 
             var samples = [];
             for (var g2 = 0; g2 < visible.length && samples.length < 12; g2++) {
@@ -415,7 +423,10 @@ function harvest(opt) {
             recorded: elements.length,
             droppedForCap: dropped,
             truncatedElements: dropped > 0,
+            // Same unit, so this pair IS a coverage fraction.
             textElementsTotal: textTotal,
+            textElementsSampled: Object.keys(sampledElementIds).length,
+            // A different unit: one row per element per scroll position.
             textRecords: textRecords.length,
             truncatedText: textRecords.length >= MAX_TEXT,
             scrollPositions: scrollPositions,

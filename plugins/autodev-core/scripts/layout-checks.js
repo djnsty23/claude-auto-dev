@@ -488,7 +488,7 @@ function summarise(results) {
         status: r.status,
         reason: r.reason,
         elements: r.population ? r.population.recorded : null,
-        textSampled: r.population ? r.population.textRecords : null,
+        textSampled: r.population ? r.population.textElementsSampled : null,
         textTotal: r.population ? r.population.textElementsTotal : null,
         findings: r.findings.length,
         counts: r.counts,
@@ -499,7 +499,9 @@ function summarise(results) {
         refused: refused.length,
         totalFindings: measured.reduce((n, r) => n + r.findings.length, 0),
         elementsScanned: measured.reduce((n, r) => n + (r.population ? r.population.recorded : 0), 0),
-        textSampled: measured.reduce((n, r) => n + (r.population ? r.population.textRecords : 0), 0),
+        // Element-unit on both sides, so this pair is a real fraction.
+        textSampled: measured.reduce((n, r) => n + (r.population ? (r.population.textElementsSampled || 0) : 0), 0),
+        textTotal: measured.reduce((n, r) => n + (r.population ? (r.population.textElementsTotal || 0) : 0), 0),
         byWidth,
         // A code seen at some widths and not others is the responsive finding.
         widthsByCode: Object.values(CODES).reduce((acc, code) => {

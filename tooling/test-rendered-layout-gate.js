@@ -45,6 +45,9 @@ function check(name, cond, detail) {
 }
 
 const WIDTHS = [360, 390, 414, 768, 1280];
+function run(args) {
+    return spawnSync(process.execPath, [GATE].concat(args), { encoding: 'utf8', stdio: 'pipe' });
+}
 const PAGES = ['clean', 'defect-overflow', 'defect-occlusion', 'defect-clip'];
 const load = (n) => JSON.parse(fs.readFileSync(path.join(SNAPS, n + '.json'), 'utf8'));
 const at = (page, w) => CHECKS.analyse(load(`${page}-${w}`));
@@ -408,6 +411,46 @@ for (const w of WIDTHS) {
     }
 }
 
+// --------------------------- a census and a sample are not the same zero
+//
+// The overflow checks read every recorded element box. The text checks read only
+// what was on screen at the sampled scroll positions - measured at 8% of text on
+// MDN and 2% on nodejs.org. Printing "26" without "of 313" invites those two
+// zeros to be read as the same kind of number, which is the failure this whole
+// gate is built around, appearing in the gate's own output.
+
+for (const p of PAGES) {
+    for (const w of WIDTHS) {
+        const pop = load(`${p}-${w}`).population;
+        check(`${p}@${w}: the text tallies share a unit, so their ratio is interpretable`,
+            pop.textElementsSampled <= pop.textElementsTotal,
+            { sampled: pop.textElementsSampled, total: pop.textElementsTotal });
+    }
+}
+{
+    // The tally must be a measurement, not a tautology. If every text-bearing
+    // element were marked sampled the fraction would read 100% forever and say
+    // nothing - which is what the first version of it did.
+    const pop = load('clean-360').population;
+    check('coverage is below 100% somewhere, so the tally is not marking everything',
+        pop.textElementsSampled < pop.textElementsTotal,
+        { sampled: pop.textElementsSampled, total: pop.textElementsTotal });
+    check('and above zero, so it is not marking nothing either', pop.textElementsSampled > 0);
+}
+{
+    const r = run([path.join(SNAPS, 'clean-360.json')]);
+    check('the report prints the coverage denominator, not just the count',
+        /text checks read \d+ of \d+ text elements/.test(r.stdout), r.stdout.slice(0, 400));
+    // The denominator is printed in TWO places and both must carry it. Asserting
+    // only the summary let a mutation strip it from the per-width table and
+    // survive - the table is the row a reader actually scans.
+    check('the per-width table row carries the denominator too',
+        /MEASURED\s+\d+\s+\d+\/\d+\s/.test(r.stdout),
+        r.stdout.split(String.fromCharCode(10)).slice(4, 8));
+    check('and names the overflow side a census', /a census/.test(r.stdout));
+    check('and names the text side a SAMPLE', /a SAMPLE/.test(r.stdout));
+}
+
 // -------------------------------------------------------------- thresholds
 //
 // Every threshold travels with the finding it produced, so a reader who
@@ -481,9 +524,6 @@ for (const w of WIDTHS) {
 //
 // Advisory means advisory: findings do not turn a build red unless asked.
 
-function run(args) {
-    return spawnSync(process.execPath, [GATE].concat(args), { encoding: 'utf8', stdio: 'pipe' });
-}
 {
     const withFindings = run([path.join(SNAPS, 'defect-overflow-390.json')]);
     check('the CLI exits 0 on findings - it is advisory', withFindings.status === 0, withFindings.status);

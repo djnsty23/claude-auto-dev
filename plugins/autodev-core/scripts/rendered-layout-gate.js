@@ -56,7 +56,14 @@ const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 
-const DEFAULT_WIDTHS = [360, 390, 414, 768, 1280];
+// 390 and 414 are the real phone widths; 375, 768 and 1024 are required
+// alongside them so a responsive claim carries a narrow, a mid AND a wide
+// reading rather than one class of width. 360 and 1280 are kept as the outer
+// edges. The committed fixtures deliberately use five of these, not all seven:
+// their job is proving the analyzer behaves per width, and one of them already
+// carries a genuine responsive difference. Covering every device is the job of
+// a run against a real page, not of a unit fixture.
+const DEFAULT_WIDTHS = [360, 375, 390, 414, 768, 1024, 1280];
 
 function usage() {
     console.log(`rendered-layout-gate.js - rendered-page layout defects, per width.
@@ -250,7 +257,7 @@ function report(results, opts) {
 
     // The population line. A bare verdict is indistinguishable from a finder
     // that returned nothing, so every row says what it looked at.
-    out.push('width  status      elements  text  findings  doc  culprit  clip  occluded');
+    out.push('width  status      elements   text seen  findings  doc  culprit  clip  occluded');
     for (const r of s.byWidth) {
         if (r.status !== 'MEASURED') {
             out.push(`${String(r.width).padEnd(6)} ${r.status.padEnd(11)} ${r.reason}`);
@@ -265,7 +272,13 @@ function report(results, opts) {
             String(r.width).padEnd(6) + ' ' +
             'MEASURED'.padEnd(11) + ' ' +
             String(r.elements).padStart(8) + '  ' +
-            String(r.textSampled).padStart(4) + '  ' +
+            // The denominator, always. The overflow checks read every recorded
+            // element, so their zero is a census. The text checks read only what
+            // was on screen at the sampled scroll positions, so their zero is a
+            // SAMPLE - measured at 8% of text on one real page and 2% on
+            // another. Printing "26" without "of 313" invites those two zeros to
+            // be read as the same kind of number.
+            `${r.textSampled}/${r.textTotal == null ? '?' : r.textTotal}`.padStart(9) + '  ' +
             String(c.total).padStart(8) + '  ' +
             String(c.docScroll).padStart(3) + '  ' +
             String(c.overflowCulprit).padStart(7) + '  ' +
@@ -274,9 +287,15 @@ function report(results, opts) {
         );
     }
     out.push('');
+    const tTot = s.textTotal || 0;
+    const pct = tTot ? Math.round((s.textSampled / tTot) * 100) : null;
     out.push(`${s.measured} of ${s.widths} widths measured, ${s.refused} refused. ` +
-        `${s.elementsScanned} element boxes and ${s.textSampled} text runs scanned. ` +
         `${s.totalFindings} findings.`);
+    out.push(`  overflow checks read ${s.elementsScanned} of ${s.elementsScanned} recorded element boxes - a census.`);
+    out.push(`  text checks read ${s.textSampled} of ${tTot} text elements` +
+        (pct === null ? '' : ` (${pct}%)`) +
+        ' - a SAMPLE, limited to text on screen at the sampled scroll positions.' +
+        (pct !== null && pct < 50 ? ' A zero here is thin coverage, not a clean bill.' : ''));
 
     // A code fired at some widths and not others IS the responsive finding, so
     // it gets its own line rather than being inferred from the table.
