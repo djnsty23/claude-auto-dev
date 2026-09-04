@@ -1,5 +1,49 @@
 # Changelog
 
+## [8.159.0] - 2026-09-04
+
+Five commits landed on main after 8.158.0 was cut, four of them Brain skill and
+role fixes (#150, #151, #153, #154). The loader is cache-keyed on the version
+number, so none of them reached a Brain: `claude plugin update` compares version
+STRINGS, reports "already at the latest version", and leaves the old tree in
+place. This release exists to move the key.
+
+`[measured 2026-09-04]` the two trees at the same number, read side by side:
+
+| | installed cache 8.158.0 | repo at 8.158.0 |
+|---|---|---|
+| post-selection sequence | `merge triage, rescue, archive, prompts` | `triage, spawn, rescue, merge, archive` |
+| `brain-panels.js --off` | still documented | recorded as retired |
+
+That first row is not cosmetic. A Brain booting `/brain` from the cache is told
+to merge BEFORE rescuing unpushed work, and merging is what triggers archiving
+when auto-archive is on, which removes the worktree the rescue step exists to
+protect. A Brain hit exactly that sequence this evening.
+
+### Fixed: the auto-archive tell only ever confirms ON, never OFF
+
+The skill told a Brain to settle "is auto-archive-after-PR-merge on?" by looking
+for `isArchived: true` beside a `prState: MERGED`. That is sound evidence FOR
+the setting, says nothing when absent, and the paragraph read as a two-sided
+test.
+
+`[measured 2026-09-04]` a Brain ran it over 40 records and got BOTH patterns at
+once: 14 archived-beside-MERGED, and 2 live sessions also holding MERGED PRs. It
+treated the 2 as decisive, reported the setting off, and merged two PRs without
+capturing follow-ups first. The operator corrected it with a screenshot of the
+Settings pane. Nothing was lost, and only because neither PR's head branch was
+the branch its owning session's worktree sat on.
+
+A live session holding a MERGED PR is consistent with the setting being ON by
+three mechanisms the record cannot distinguish: a stale `prState` (measured the
+same day at 90s behind `gh`), a session that moved branch after its merge, or one
+reopened from the Archived list.
+
+The section now says the probe is one-directional, that no session-side
+observation can confirm OFF, and that the default is to assume ON. The setting
+has now been recorded wrongly in both directions, which argues for a safe default
+rather than for a better probe.
+
 ## [8.158.0] - 2026-09-04
 
 Two of the three items here are live defects in hooks that ship installed, which
