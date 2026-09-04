@@ -194,25 +194,63 @@ const where = [
    The failure is quiet by construction — a wrong address produces a lookup
    miss in the RECIPIENT's session, so the sender never learns the message went
    nowhere. */
+/* THE RECORD IS CHECKED BEFORE IT IS HANDED OUT AS AN ADDRESS, AND THERE IS NO
+   cwd FALLBACK. `[measured 2026-09-04]` this file named a session archived the
+   previous afternoon for a whole day. Every Stop hook read it and routed idle
+   reports to a dead Brain, and the old third address line ("or find it by cwd
+   under <home_repos[0]>") sent them to whichever session later occupied that
+   worktree: three inside one hour, two of them client sessions. A worktree
+   outlives the session in it, so a directory names a place, not a correspondent.
+   The fallback was the bug, not the mitigation.
+   The check reads ~/.claude/sessions/<pid>.json and the desktop store, no MCP
+   call, and it cannot throw. If the sibling script is missing (a broken
+   install) the record is handed out unchecked, WITHOUT the cwd line, and the
+   text says it was unchecked: absent coverage must not read as coverage. */
+let verdict = null;
+try {
+    const { checkBrainRole } = require(path.join(__dirname, '..', 'scripts', 'check-brain-role.js'));
+    verdict = checkBrainRole({ roleFile: roleFilePath(), role });
+} catch {
+    verdict = null;
+}
+
 const addr = [
     role.peer_name ? 'peer name `' + role.peer_name + '`' : null,
     role.desktop_session_id ? 'desktop session id `' + role.desktop_session_id + '`' : null,
-    role.home_repos && role.home_repos.length ? 'or find it by cwd under `' + role.home_repos[0] + '`' : null,
-].filter(Boolean).join(', ') || 'the coordinator session';
+].filter(Boolean).join(', ');
+
+const REPORT_SHAPE =
+    'Say what landed, what you verified naming the command and what it printed, '
+    + 'what is blocked and on whom, and what you propose next. From outside, a '
+    + 'finished session and a dead one look identical, so silence is the one '
+    + 'signal it cannot read.\n'
+    + 'If you have already reported this work, ignore this and carry on.';
+
+let context;
+if (verdict && verdict.state === 'fault') {
+    context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + '), '
+        + 'BUT THE ROLE FILE DOES NOT NAME A LIVE COORDINATOR: '
+        + verdict.faults.map((f) => f.code + ' (' + f.detail + ')').join('; ') + '.\n'
+        + 'Nobody can be reached at that record, and do not resolve a coordinator by cwd: a '
+        + 'worktree outlives the session in it. Report to the operator instead, and say the '
+        + 'role file at ' + roleFilePath() + ' is stale (check: scripts/check-brain-role.js --status).\n'
+        + REPORT_SHAPE;
+} else {
+    const checked = verdict ? '' : ' (the record could not be checked for liveness; if the address does not resolve, the role file is stale)';
+    context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + ').\n'
+        + (addr
+            ? 'Message it before you go quiet: ' + addr + checked + '.\n'
+            : 'The role file at ' + roleFilePath() + ' carries no address (no peer_name, no desktop_session_id), '
+              + 'so there is nobody to message; report to the operator and say so.\n')
+        + REPORT_SHAPE;
+}
 
 // additionalContext is the field that reaches the model. Plain stdout on exit 0
 // goes to the debug log and would be invisible here.
 console.log(JSON.stringify({
     hookSpecificOutput: {
         hookEventName: 'Stop',
-        additionalContext:
-            'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + ').\n'
-            + 'Message it before you go quiet: ' + addr + '.\n'
-            + 'Say what landed, what you verified naming the command and what it printed, '
-            + 'what is blocked and on whom, and what you propose next. From outside, a '
-            + 'finished session and a dead one look identical, so silence is the one '
-            + 'signal it cannot read.\n'
-            + 'If you have already reported this work, ignore this and carry on.',
+        additionalContext: context,
     },
 }));
 process.exit(0);

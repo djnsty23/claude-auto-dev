@@ -152,20 +152,48 @@ function spoke(r) {
 }
 
 // --- the case it exists for ------------------------------------------------
+/* A LIVE coordinator, so the address path is the one under test. The role file
+   names this test process as the coordinator: its pid answers, its CLI session
+   uuid and peer name sit in a fixture sessions dir, and its desktop record sits
+   two directories down a fixture store, which is the shape the real store has.
+   Without a live record the hook now speaks the STALE-ROLE text instead, which
+   is the scenario after this one. */
+const LIVE = (() => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sbr-live-'));
+    const sessions = path.join(root, 'sessions');
+    const store = path.join(root, 'store', 'acct', 'bucket');
+    fs.mkdirSync(sessions, { recursive: true });
+    fs.mkdirSync(store, { recursive: true });
+    fs.writeFileSync(path.join(sessions, process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'brain-1', name: 'brain-peer' }));
+    fs.writeFileSync(path.join(sessions, '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'brain-dead', name: 'brain-dead-peer' }));
+    fs.writeFileSync(path.join(store, 'local_brain-desk.json'), JSON.stringify({ sessionId: 'local_brain-desk', cliSessionId: 'brain-1', isArchived: false }));
+    fs.writeFileSync(path.join(store, 'local_brain-desk-old.json'), JSON.stringify({ sessionId: 'local_brain-desk-old', cliSessionId: 'brain-dead', isArchived: true, title: 'Old brain' }));
+    return { env: { AUTODEV_SESSIONS_DIR: sessions, CLAUDE_SESSION_STORE: path.join(root, 'store') } };
+})();
+
 {
     const repo = makeRepo();
-    const role = writeRole({ session_id: 'brain-1', peer_name: 'brain-peer' });
+    const role = writeRole({ session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk', home_repos: ['C:/somewhere/coordinator'] });
     const state = stateFilePath();
 
-    run({ input: { session_id: 's3', cwd: repo }, roleFile: role, stateFile: state });   // baseline
+    run({ input: { session_id: 's3', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });   // baseline
     commitIn(repo, 'v2 delivered\n');
 
-    const fired = run({ input: { session_id: 's3', cwd: repo }, roleFile: role, stateFile: state });
+    const fired = run({ input: { session_id: 's3', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
     const j = spoke(fired);
     check('a commit since the last report FIRES', !!j,
         j ? 'additionalContext present' : `out=${JSON.stringify(fired.out.slice(0, 80))}`);
     check('  it names the coordinator addresses from the role file',
-        !!j && /brain-peer/.test(j.hookSpecificOutput.additionalContext));
+        !!j && /brain-peer/.test(j.hookSpecificOutput.additionalContext) && /local_brain-desk/.test(j.hookSpecificOutput.additionalContext));
+    /* The cwd fallback is GONE. `[measured 2026-09-04]` "or find it by cwd under
+       <home_repos[0]>" routed three sessions' idle reports to whichever session
+       had since been spawned into a dead Brain's worktree. A directory is a
+       place, not a correspondent. */
+    check('  it does NOT offer to find the coordinator by cwd',
+        !!j && !/by cwd/.test(j.hookSpecificOutput.additionalContext) && !/somewhere\/coordinator/.test(j.hookSpecificOutput.additionalContext),
+        j ? j.hookSpecificOutput.additionalContext.split('\n')[1] : '');
+    check('  a live record is not called stale',
+        !!j && !/DOES NOT NAME A LIVE COORDINATOR/.test(j.hookSpecificOutput.additionalContext) && !/could not be checked/.test(j.hookSpecificOutput.additionalContext));
     /* This assertion used to REQUIRE `brain-1` — the session_id — to appear in
        the address, so the suite enshrined the defect rather than catching it.
        `session_id` is the Claude Code session UUID this hook compares against
@@ -184,6 +212,41 @@ function spoke(r) {
         !!j && j.hookSpecificOutput.additionalContext !== undefined
         && !('decision' in j) && !('block' in j) && fired.status === 0,
         'exit=' + fired.status);
+}
+
+// --- a stale role file ---------------------------------------------------------
+// `[measured 2026-09-04]` brain-role.json named a session archived the day
+// before, for a whole day. The hook must SAY so and hand out no address, rather
+// than route the report to a dead session or, worse, to a directory.
+{
+    const repo = makeRepo();
+    const role = writeRole({ session_id: 'brain-dead', peer_name: 'brain-dead-peer', desktop_session_id: 'local_brain-desk-old', home_repos: ['C:/somewhere/coordinator'] });
+    const state = stateFilePath();
+
+    run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    commitIn(repo, 'v2 delivered\n');
+    const fired = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    const j = spoke(fired);
+    const ctx = j ? j.hookSpecificOutput.additionalContext : '';
+    check('stale role: the hook still speaks (a commit landed)', !!j, fired.out.slice(0, 120));
+    check('  and says the record names no live coordinator', /DOES NOT NAME A LIVE COORDINATOR/.test(ctx), ctx.split('\n')[0]);
+    check('  naming the dead session id and the archived record', /dead-session \(session_id brain-dead/.test(ctx) && /archived-desktop/.test(ctx), ctx);
+    check('  it hands out NO address to message', !/Message it before you go quiet/.test(ctx));
+    check('  and never by cwd', !/somewhere\/coordinator/.test(ctx) && /do not resolve a coordinator by cwd/.test(ctx));
+    check('  it does NOT block the turn', fired.status === 0 && !('decision' in j));
+
+    // Control: the same role file with a LIVE session_id is not called stale,
+    // which is what proves the verdict came from the registries and not from
+    // the text being unconditional.
+    const liveRole = writeRole({ session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk' });
+    const repo2 = makeRepo();
+    const state2 = stateFilePath();
+    run({ input: { session_id: 's5', cwd: repo2 }, roleFile: liveRole, stateFile: state2, env: LIVE.env });
+    commitIn(repo2, 'v2 delivered\n');
+    const ok = spoke(run({ input: { session_id: 's5', cwd: repo2 }, roleFile: liveRole, stateFile: state2, env: LIVE.env }));
+    check('  control: a live record in the same fixture is handed out as an address',
+        !!ok && /Message it before you go quiet: peer name `brain-peer`, desktop session id `local_brain-desk`/.test(ok.hookSpecificOutput.additionalContext),
+        ok ? ok.hookSpecificOutput.additionalContext.split('\n')[1] : 'silent');
 }
 
 // --- the throttle ----------------------------------------------------------
@@ -228,9 +291,10 @@ function spoke(r) {
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
-    + '13 cases over 6 inert paths, the firing path, a 3-step throttle with a '
-    + 'cooldown-0 control, and a corrupt ledger. Every quiet case asserts zero '
-    + 'bytes on BOTH streams.');
+    + (pass + fail) + ' cases over 6 inert paths, the firing path against a LIVE role '
+    + 'record (own pid, nested fixture store), a STALE role record with a live control, '
+    + 'a 3-step throttle with a cooldown-0 control, and a corrupt ledger. Every quiet '
+    + 'case asserts zero bytes on BOTH streams; the address line never offers cwd.');
 if (fail) {
     console.log('failed: ' + failures.join('; '));
     process.exit(1);
