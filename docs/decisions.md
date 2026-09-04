@@ -325,3 +325,49 @@ Nothing here measured output quality, only that the pin is applied and that the
 agent is rare. The case rests on the cost of the pin being near zero, not on a
 demonstrated benefit, and it should not be cited as evidence for effort levels
 anywhere else.
+
+## 2026-09-04 — one hooks module, in plain .mjs, that keeps its secrets in memory and its denies at home
+
+Claude Code 2.1.259 carries "function hooks" (hooks modules) behind a rollout
+flag; `docs/function-hooks/README.md` has the contract. Five choices in
+`plugins/autodev-core/hooks/fn/` are not derivable from the code:
+
+**One module carries four concerns** (redaction, Bash rules, the commit trailer,
+the status line) because the loader takes one module per plugin and refuses a
+second. The entry file holds every `on(...)` and every `$` call; the helpers are
+pure, because the host's static scan refuses `$` passed, bound or read, so a
+helper cannot take it as an argument.
+
+**`.mjs`, not `.ts`.** The loader compiles either. Plain ES modules let
+`tooling/test-hooks-module.js` load the real files with `import()` under Node
+alone, and let V8 coverage prove the load to `find-untested-hooks.js`. A `.ts`
+module would have needed a toolchain in the gate for no gain.
+
+**The vault is worker memory, never `$.store`.** `$.store` persists to a JSON
+file under `~/.claude/plugins/store/`, a worse home for a credential than the
+transcript the module exists to protect. A hot reload empties the vault; the
+model then meets a placeholder it cannot resolve, and the failure names itself.
+
+**Denies are scoped to this repository** through `$.session.repo()`, and there
+are three: the commands CLAUDE.md forbids by name. The 2026-08-17 measurement
+that a text denylist over Bash blocked 807 legitimate calls and nothing
+dangerous stands; a fourth deny needs its own numbers. Rewrites are not scoped,
+because a rewrite cannot block work. One measured cost: a rewrite changes the
+permission prefix, so `MSYS_NO_PATHCONV=1 git show` can prompt under an
+allowlist that `git show` passed.
+
+**The vendor's `claude-code.d.ts` is extracted, not vendored.** It is marked
+early access and ships inside every binary; `tooling/extract-plugin-types.js`
+recovers it into gitignored `.claude/types/` per install, and the README states
+the contract in this repo's own words.
+
+**The branch stayed local.** The closing panel was held by the away branch and
+resolved to "push and open the PR". Not taken: this machine's own decision log
+for the day classes a push as the operator's, `rules/local-first.md` says a push
+needs his yes in the turn, and a branch push fires `ci.yml`. HEAD `6d10188`,
+gate green. The push is queued on his word.
+
+**What would reverse the design choices.** A `$.store` that the host scoped to
+memory would make the vault a store. A loader that lifts the one-module rule
+would split the four concerns. A measured count of denies refusing legitimate
+work in this repo would remove the denies before it added a fourth.
