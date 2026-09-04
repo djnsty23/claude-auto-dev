@@ -17,7 +17,7 @@ It does four things a shell hook structurally cannot:
 | Hook | What it does | Why |
 |---|---|---|
 | `prompt.submit` | A pasted credential becomes `[REDACTED:kind#n]` before the prompt enters the transcript. The value is held in worker memory only. | Four transcript leaks in one month came from values that were already in the session before anything could scan for them. |
-| `tool.call {tool: Bash}` | Puts a placeholder's real value back into the command that runs; applies the rules in `bash-rules.mjs`; scrubs known values and credential-shaped text out of stdout and stderr before the model or the transcript sees them. | A `doppler secrets delete` printing the whole store, a masking `sed` that missed a spacing variant, a `select=*` on a credential table: all output-side. |
+| `tool.call {tool: Bash}` | Puts a placeholder's real value back into the command that runs; applies the rules in `bash-rules.mjs` (three denies in this repository, one Windows-only deny, one flag-appending rewrite); scrubs known values and credential-shaped text out of stdout and stderr before the model or the transcript sees them. | A `doppler secrets delete` printing the whole store, a masking `sed` that missed a spacing variant, a `select=*` on a credential table: all output-side. |
 | `attribution.text {kind: commit}` | Returns empty text, so the model is never told to write a co-author trailer. | The standing rule here is no trailer; a per-session instruction keeps re-adding one. |
 | `session.start`, `turn.complete` | Pins one status line under the prompt: what the module did this session, and the sprint's five `passes` states from `prd.json`. | Costs no context tokens, and its absence is the tell that the module is not running. |
 
@@ -73,14 +73,16 @@ lists the module as a wired hook, so it needs a suite that loads it;
 
 ## Two interactions worth knowing before changing the rules
 
-- **A rewrite changes the permission prefix.** `[measured 2026-09-04]` with
-  `--allowedTools "Bash(git show:*)"`, the `msys-pathconv` rule turned
-  `git show HEAD:.gitignore` into `MSYS_NO_PATHCONV=1 git show ...`, and the
-  permission layer, which runs inside `next(e)`, asked for approval it would
-  not have asked for. In bypass mode nothing changes; under an allowlist a
-  rewritten command can prompt. The rule stays because the unrewritten read
-  fails as "not a valid object name" and a `|| echo` fallback then reports a
-  present file as missing, which is worse than a prompt.
+- **A rewrite must not change a command's first token.** `[measured
+  2026-09-04]` with `--allowedTools "Bash(git show:*)"`, an earlier version of
+  the `msys-pathconv` rule turned `git show HEAD:.gitignore` into
+  `MSYS_NO_PATHCONV=1 git show ...`, and the permission layer, which runs
+  inside `next(e)` and matches the allowlist on the first token, asked for
+  approval it would not have asked for: a prompt for a command the model
+  never wrote, which reads as the plugin breaking permissions. The rule is
+  now a deny whose reason carries the exact prefixed command, so the model
+  re-issues it as its own. Appending a flag, as the doppler rule does, leaves
+  the first token alone and is safe; the suite asserts that for every rewrite.
 - **The restored command runs with the real value.** A permission dialog for
   it shows that value on screen. The transcript records the model's tool use,
   which carries the placeholder.

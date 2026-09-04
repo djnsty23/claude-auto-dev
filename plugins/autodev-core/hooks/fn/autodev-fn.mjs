@@ -18,10 +18,11 @@
 //                           worker memory, never $.store, so a Bash command
 //                           that names the placeholder still runs with it.
 //   2. tool.call {Bash}     the command is decided (bash-rules.mjs: three
-//                           denies scoped to this repo, two rewrites anywhere)
-//                           and its stdout/stderr are scrubbed of known values
-//                           and credential-shaped text before the model or
-//                           the transcript sees them.
+//                           denies scoped to this repo, one Windows-only deny,
+//                           one flag-appending rewrite anywhere) and its
+//                           stdout/stderr are scrubbed of known values and
+//                           credential-shaped text before the model or the
+//                           transcript sees them.
 //   3. attribution.text     the commit trailer is empty text. The standing
 //                           rule here is no co-author trailer, and a
 //                           mid-session instruction keeps re-adding one.

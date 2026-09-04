@@ -352,9 +352,15 @@ model then meets a placeholder it cannot resolve, and the failure names itself.
 are three: the commands CLAUDE.md forbids by name. The 2026-08-17 measurement
 that a text denylist over Bash blocked 807 legitimate calls and nothing
 dangerous stands; a fourth deny needs its own numbers. Rewrites are not scoped,
-because a rewrite cannot block work. One measured cost: a rewrite changes the
-permission prefix, so `MSYS_NO_PATHCONV=1 git show` can prompt under an
-allowlist that `git show` passed.
+because a rewrite cannot block work. **Corrected the same evening:** the MSYS
+rule began as a rewrite that prefixed `MSYS_NO_PATHCONV=1`, and that changed
+the command's first token, which is what the permission layer matches an
+allowlist on, so `git show` under `Bash(git *)` started prompting. A prompt
+for a command the model never wrote reads as the plugin breaking permissions.
+It is now a Windows-only deny whose reason carries the exact command to run;
+its measurement is the two-of-two mangled dot-leading reads in the
+verification-traps table. The rule that fell out: a rewrite may append a
+flag and may never change the first token, and the suite asserts it.
 
 **The vendor's `claude-code.d.ts` is extracted, not vendored.** It is marked
 early access and ships inside every binary; `tooling/extract-plugin-types.js`

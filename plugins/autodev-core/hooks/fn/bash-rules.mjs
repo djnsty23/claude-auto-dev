@@ -6,12 +6,18 @@
 //   rewrite   changes a flag the command should have carried and tells the
 //             model it did so. A rewrite cannot block work; the worst case is
 //             a flag the command did not need.
-//   deny      refuses the call with the rule's reason. Denies are scoped to
-//             THIS repository (`scope: 'repo'`) and to the three commands its
-//             CLAUDE.md forbids by name, because a text denylist over Bash was
-//             measured on 2026-08-17 to have blocked 807 legitimate calls and
-//             zero dangerous ones. Three exact shapes are not a denylist; a
-//             fourth needs its own measurement before it lands here.
+//   deny      refuses the call with the rule's reason. Three denies are scoped
+//             to THIS repository (`scope: 'repo'`): the commands its CLAUDE.md
+//             forbids by name. A text denylist over Bash was measured on
+//             2026-08-17 to have blocked 807 legitimate calls and zero
+//             dangerous ones, so these are exact shapes, not a list, and a new
+//             one needs its own measurement. The fourth, `msys-pathconv`, is
+//             Windows-only and unscoped; its measurement is in its comment.
+//
+// A rewrite must not change a command's FIRST TOKEN: the permission layer
+// matches an allowlist on it, inside next(e), so a prefix that the model never
+// wrote turns an allowed command into a prompt. Appending a flag is safe;
+// prefixing an env var is not, which is why msys-pathconv is a deny.
 //
 // The command is split into pipeline segments so a rule reads the command
 // that RUNS, not text that mentions it: `grep "git commit -m" file` starts
@@ -77,15 +83,28 @@ export const RULES = [
         note: 'added `--silent` to a doppler write: without it the CLI prints the whole remaining secret store, values included, on every outcome.',
     },
     {
+        // A DENY, not a rewrite, and the only deny that is not repo-scoped.
+        // It began as a rewrite that prefixed `MSYS_NO_PATHCONV=1`, and
+        // [measured 2026-09-04] that turned an allowlisted `git show` into a
+        // command needing approval: the permission layer runs inside next(e)
+        // and matches on the command's first token, which the prefix had
+        // changed. A prompt for a command the model never wrote reads as the
+        // plugin breaking permissions. Refusing with the exact command to run
+        // keeps the decision deterministic and makes the prefixed command the
+        // model's own, so any prompt it draws is for what the model chose.
+        // The unrefused read fails 2 of 2 times on a dot-leading path
+        // (rules/verification-traps.md, the `rev:path` table) with "not a
+        // valid object name", and a `|| echo` fallback then reports a present
+        // file as missing, which is the outcome this rule exists to prevent.
         id: 'msys-pathconv',
-        kind: 'rewrite',
+        kind: 'deny',
         scope: 'all',
         test: (segment, ctx) => ctx.windows
             && GIT_REV_READ_RE.test(segment)
             && DOT_LEADING_REV_PATH_RE.test(segment)
             && !/(?:^|\s)MSYS_NO_PATHCONV=1\s/.test(segment),
-        apply: (segment) => segment.replace(/^(\s*)/, '$1MSYS_NO_PATHCONV=1 '),
-        note: 'prefixed `MSYS_NO_PATHCONV=1`: Git Bash rewrites a `rev:.path` argument as a Windows path list, and the read fails as "not a valid object name".',
+        reason: (segment) => 'Git Bash on Windows rewrites a `rev:.path` argument as a Windows path list, so this read fails as "not a valid object name" and a `|| echo` fallback then reports a present file as missing. Run it with the conversion off, as your own command: `MSYS_NO_PATHCONV=1 '
+            + segment.trim() + '` (or through PowerShell, which has no MSYS layer).',
     },
 ];
 
@@ -132,7 +151,10 @@ export function decideBash({ command, cwd, repo }) {
         for (const rule of RULES) {
             if (rule.scope === 'repo' && !ctx.inRepo) continue;
             if (!rule.test(segment, ctx)) continue;
-            if (rule.kind === 'deny') return { deny: rule.reason, rule: rule.id };
+            if (rule.kind === 'deny') {
+                const reason = typeof rule.reason === 'function' ? rule.reason(segment, ctx) : rule.reason;
+                return { deny: reason, rule: rule.id };
+            }
             segment = rule.apply(segment, ctx);
             notes.push(rule.note);
             rules.push(rule.id);

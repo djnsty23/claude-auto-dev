@@ -247,18 +247,33 @@ const OTHER_REPO = { root: '/srv/project-b', remote: 'git@github.com:someone/pro
     const dop3 = rules.decideBash({ command: 'doppler secrets --project p --config prd --only-names', cwd: posix, repo: OTHER_REPO });
     check('doppler read is untouched', dop3.rules.length === 0);
 
+    // msys-pathconv is a DENY whose reason carries the command to run, never a
+    // rewrite: a prefix the model did not write changes the permission prefix.
     const rev = rules.decideBash({ command: 'git cat-file -p origin/main:.github/workflows/ci.yml', cwd: win, repo: OTHER_REPO });
-    check('dot-leading rev:path on Windows gains MSYS_NO_PATHCONV=1', rev.command === 'MSYS_NO_PATHCONV=1 git cat-file -p origin/main:.github/workflows/ci.yml' && rev.rules.includes('msys-pathconv'), rev.command);
+    check('dot-leading rev:path on Windows is denied with the prefixed command in the reason',
+        rev.deny && rev.rule === 'msys-pathconv' && rev.deny.includes('`MSYS_NO_PATHCONV=1 git cat-file -p origin/main:.github/workflows/ci.yml`'), JSON.stringify(rev).slice(0, 200));
     const rev2 = rules.decideBash({ command: 'git show origin/main:.gitignore | head -3', cwd: win, repo: OTHER_REPO });
-    check('git show rev:.file on Windows gains the prefix in its own segment', rev2.command === 'MSYS_NO_PATHCONV=1 git show origin/main:.gitignore | head -3', rev2.command);
-    const rev3 = rules.decideBash({ command: 'git show origin/main:scripts/preflight.js', cwd: win, repo: OTHER_REPO });
-    check('rev:path without a leading dot is untouched', rev3.rules.length === 0);
-    const rev4 = rules.decideBash({ command: 'git show origin/main:./prd.json', cwd: win, repo: OTHER_REPO });
-    check('rev:./path is untouched', rev4.rules.length === 0);
-    const rev5 = rules.decideBash({ command: 'git cat-file -p origin/main:.gitignore', cwd: posix, repo: OTHER_REPO });
-    check('the same read on a posix cwd is untouched', rev5.rules.length === 0);
-    const rev6 = rules.decideBash({ command: 'MSYS_NO_PATHCONV=1 git show origin/main:.gitignore', cwd: win, repo: OTHER_REPO });
-    check('an already-prefixed read is untouched', rev6.rules.length === 0);
+    check('git show rev:.file on Windows is denied naming its own segment, not the pipe tail',
+        rev2.deny && rev2.deny.includes('`MSYS_NO_PATHCONV=1 git show origin/main:.gitignore`') && !rev2.deny.includes('head -3'), JSON.stringify(rev2).slice(0, 200));
+    const untouchedRev = [
+        ['rev:path without a leading dot', 'git show origin/main:scripts/preflight.js', win],
+        ['rev:./path', 'git show origin/main:./prd.json', win],
+        ['the same read on a posix cwd', 'git cat-file -p origin/main:.gitignore', posix],
+        ['an already-prefixed read', 'MSYS_NO_PATHCONV=1 git show origin/main:.gitignore', win],
+    ];
+    for (const [name, cmd, cwd] of untouchedRev) {
+        const d = rules.decideBash({ command: cmd, cwd, repo: OTHER_REPO });
+        check(`${name} is untouched`, !d.deny && d.command === cmd && d.rules.length === 0, JSON.stringify(d).slice(0, 160));
+    }
+    // No rewrite may change a command's first token (the permission prefix).
+    const rewriteRules = rules.RULES.filter((r) => r.kind === 'rewrite');
+    console.log(`  population: ${rules.RULES.length} rules, ${rewriteRules.length} rewrite(s), ${rules.RULES.length - rewriteRules.length} deny(s)`);
+    for (const r of rewriteRules) {
+        const sample = r.id === 'doppler-silent' ? 'doppler secrets set K=v --project p --config prd' : null;
+        if (!sample) { check(`rewrite ${r.id} has a first-token sample in this suite`, false, 'add one'); continue; }
+        const out = r.apply(sample, { windows: true, inRepo: true });
+        check(`rewrite ${r.id} keeps the first token`, out.trim().split(/\s+/)[0] === sample.trim().split(/\s+/)[0], out);
+    }
 
     check('isAutodevRepo matches the remote path', rules.isAutodevRepo({ root: '/x/y', remote: 'git@github.com:o/claude-auto-dev.git' }));
     check('isAutodevRepo matches the tree name without a remote', rules.isAutodevRepo({ root: '/x/claude-auto-dev', remote: null }));
@@ -278,10 +293,16 @@ const OTHER_REPO = { root: '/srv/project-b', remote: 'git@github.com:someone/pro
         check('the deny is logged by rule id only', log.some((l) => /denied a Bash call \(git-commit-m\)/.test(l)), log.join(' | '));
 
         const { $: $win } = fakeDollar({ cwd: win, repo: OTHER_REPO });
+        let winNext = false;
+        const w = await tc($win, { tool: 'Bash', tool_use_id: 't6', command: 'git show HEAD:.gitignore' }, async () => { winNext = true; return { ref: 3, result: {} }; });
+        check('hook denies a dot-leading rev:path read on Windows without calling next, naming the command to run',
+            !winNext && typeof w.deny === 'string' && w.deny.includes('MSYS_NO_PATHCONV=1 git show HEAD:.gitignore'), JSON.stringify(w).slice(0, 220));
+
+        const { $: $any } = fakeDollar({ cwd: posix, repo: OTHER_REPO });
         let ranWith = null;
-        const r = await tc($win, { tool: 'Bash', tool_use_id: 't6', command: 'git show HEAD:.gitignore' }, async (e2) => { ranWith = e2.command; return { ref: 3, result: { stdout: 'node_modules\n', stderr: '', interrupted: false, isImage: false }, text: 'node_modules' }; });
-        check('hook hands next the rewritten command', ranWith === 'MSYS_NO_PATHCONV=1 git show HEAD:.gitignore', ranWith);
-        check('a rewrite keeps core\'s ref and adds one context note', r.ref === 3 && Array.isArray(r.context) && r.context.length === 1 && /MSYS_NO_PATHCONV/.test(r.context[0]), JSON.stringify(r));
+        const r = await tc($any, { tool: 'Bash', tool_use_id: 't7', command: 'doppler secrets delete OLD --project p --config prd --yes' }, async (e2) => { ranWith = e2.command; return { ref: 3, result: { stdout: '', stderr: '', interrupted: false, isImage: false }, text: '' }; });
+        check('hook hands next the rewritten command', ranWith === 'doppler secrets delete --silent OLD --project p --config prd --yes', ranWith);
+        check('a rewrite keeps core\'s ref and adds one context note', r.ref === 3 && Array.isArray(r.context) && r.context.length === 1 && /--silent/.test(r.context[0]), JSON.stringify(r));
     }
 
     // --- 5. attribution --------------------------------------------------------
