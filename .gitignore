@@ -122,3 +122,7 @@ build/
 #    rewrites sources in place, so it refuses any dirty tree, and one untracked
 #    file nobody owned blocked verification for every session in this clone.
 .claude/archives/
+
+# Function-hooks API declarations, written per install by tooling/extract-plugin-types.js
+# (or /plugin-types in a session). Vendor text, marked early access; never committed.
+.claude/types/
