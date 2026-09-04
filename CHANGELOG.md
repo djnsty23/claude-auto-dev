@@ -1,5 +1,75 @@
 # Changelog
 
+## [8.158.0] - 2026-09-04
+
+Two of the three items here are live defects in hooks that ship installed, which
+is why this release exists at all. The plugin loader is cache-keyed on the
+version number, so a merged hook fix reaches nobody until the number moves.
+
+### Fixed: quoting a path defeated the coordinator write guard entirely (#146)
+
+`stripNonCommandText` deleted every character between quotes. That reads as
+prudent, because `echo "git push"` must not parse as a push, and it silently
+removed the rail it was part of. Quoting a path is the normal way to write one.
+
+`[measured 2026-09-04]` on the shipped 8.157.0 hook, `git -C "<foreign>" merge`
+exited 0. The path vanished, `-C` consumed `merge` as its value, no subcommand
+was ever found, and a no-finding return is an allow. The mirror image blocked a
+legitimate write: `cd "<home>" && git commit` collapsed to a bare `cd`, which is
+the home directory, so the refusal named a place the caller never mentioned. Two
+opposite failures from one deletion, and nothing errored in either direction.
+
+Quotes hide separators, not arguments, so that is what is emulated now. The
+character survives and anything that could split a command becomes a space.
+`echo "git push"` still reads as a single `echo` segment, because segmentation
+looks at a segment's first word.
+
+The population that hid this was selected by the property under test. Every
+existing quoting case was a mention, an `echo` or a `grep`, so the mention rule
+could not fail and nothing exercised a quoted path. Five assertions were added
+covering both directions. Restoring the deletion turns three of them red, two as
+false negatives and one as a false positive.
+
+### Fixed: the Stop hook published a session id as an address (#147)
+
+`stop-brain-report` emitted `role.session_id` labelled "desktop session id". It
+is neither. `session_id` is the Claude Code session UUID the hook compares
+against its own payload to exempt the coordinator from its own nudge, and the
+desktop registry keys on a different space. A peer hit `Session not found`
+against it twice, and reached the coordinator by matching a worktree path
+instead.
+
+One field cannot serve both purposes: exemption needs the value the hook payload
+carries, addressing needs the value the messaging tool accepts. The address is
+now built only from fields that are addresses, plus the home repo path as the
+route that actually worked. A role file without a `desktop_session_id` says so
+rather than substituting a lookalike.
+
+The failure was quiet by construction. A wrong address produces a lookup miss in
+the recipient's session, so the sender never learns the message went nowhere.
+
+The suite required the defect. Its assertion checked that the address contained
+the fixture's `session_id`, so it passed only while the bug was present, and a
+correct fix would have turned it red. An assertion written from the
+implementation inherits the implementation's bugs.
+
+### Added: the Claude Design canvas surface and how to read a handoff bundle (#148)
+
+Two references under the `design` skill. The first covers the canvas product,
+its four input channels and why they are not interchangeable, and its documented
+limitations. The second is measured against one real exported bundle: what is in
+the zip, which parts are assets and which are output, and three traps when
+porting one.
+
+The load-bearing point in both is the same. A handoff bundle is authoritative
+about surface, meaning palette, type, layout and the shape of a row. It is
+silent about mechanism, meaning navigation, state and what a control does. Where
+a bundle conflicts with logic already built and vetted, the logic wins and the
+conflict gets written down rather than silently resolved.
+
+Both documents date their claims and say to re-read the source rather than trust
+the paragraph, because plan tiers, release status and export formats all move.
+
 ## [8.157.0] - 2026-09-04
 
 ### Added: stop-brain-report, the deterministic trigger a brief cannot be

@@ -207,6 +207,70 @@ After seeing variants, tell the model:
 
 This is where Opus shines - it actually understands your preferences and iterates meaningfully.
 
+## Claude Design: the canvas surface
+
+Everything above assumes you are writing the code. Claude Design is the other
+surface: a canvas product where the design exists before any repo does, and which
+hands off to Claude Code when it is ready. Reach for it for wireframes, decks and
+marketing collateral. Stay in code for anything already living in a component tree.
+
+`[measured 2026-09-03]` from Anthropic's own docs, linked at the end of this
+section. Plan tiers and release status move, so re-read the source before quoting
+either rather than trusting this paragraph.
+
+- **Beta on Pro, Max, Team and Enterprise**, and **default OFF for Enterprise**, so
+  an Enterprise seat is not evidence of access. Web at `claude.ai/design`, or the
+  Claude Desktop sidebar. Powered by Claude Opus 4.7.
+- **Chat on the left, canvas on the right.**
+
+### Four input channels, and they are not interchangeable
+
+| Channel | What the docs say it is for | In practice |
+|---|---|---|
+| Chat | "structural changes, new sections, or anything that requires explanation" | section order, layout, colour direction, tone |
+| Inline comment | click the element, "request a targeted change" | one button, one card, one headline |
+| Direct edit | drag, resize and align elements on the canvas | nudging position, quick visual shifts |
+| Custom sliders | built by Claude for that design | sweeping one dimension without re-prompting |
+
+**Macro before micro.** This ordering is reasoning rather than documented: an inline
+comment is anchored to a rendered element, so any chat prompt that reflows the page
+destroys the node every earlier comment was attached to. Settle structure and visual
+direction in chat first, then spend comments on detail. The other order means
+redoing the detail work after every structural change.
+
+### Checkpoint before exploring
+
+Ask Claude to save the current version before requesting a different approach, so
+earlier iterations stay referenceable. Then ask for alternatives of ONE section
+rather than the whole page, and compare them side by side. This is the same move as
+shipping an options artifact: two or three genuine variants, real content rather
+than lorem, one marked recommendation, and a decision made by looking rather than
+by guessing.
+
+### Handoff and export
+
+`.zip`, PDF, PPTX, Canva, standalone HTML, and a handoff bundle to Claude Code
+(local agent or web). Partner targets: Adobe, Base44, Gamma, Lovable, Miro, Replit,
+Vercel and Wix. Sharing is organisation-scoped, with view, comment and edit levels.
+
+**A handoff bundle is a proposal about surface, not a spec for mechanism.** It is
+authoritative about palette, type, layout and the shape of a row. It is silent on
+navigation, state and what a control does. A session that reads a mockup as a flow
+mandate ships a different product wearing the right silhouette. Where the bundle
+conflicts with logic already built and vetted, the logic wins and the conflict gets
+written down rather than silently resolved.
+
+### Known limitations, from the docs
+
+Comments do not always persist, large codebases lag, chat errors can require a new
+tab, multi-person editing is unreliable, it is web and desktop only, and imported
+design-system quality tracks the quality of the source you pointed it at. When a
+comment fails to register, put the same instruction into chat rather than fighting
+the canvas.
+
+Sources: [Anthropic Labs announcement](https://www.anthropic.com/news/claude-design-anthropic-labs) and
+[Get started with Claude Design](https://support.claude.com/en/articles/14604416-get-started-with-claude-design).
+
 ## Match Complexity to Vision
 
 - **Maximalist designs** → elaborate code, extensive animations, effects
@@ -224,6 +288,7 @@ Load specific references for engineering quality:
 |-----------|--------------|
 | `${CLAUDE_SKILL_DIR}/references/web-interface-guidelines.md` | Forms, focus states, animation, a11y, dark mode, touch, i18n |
 | `${CLAUDE_SKILL_DIR}/references/background-craft.md` | A hero or section led by a photographic or generated background: sourcing, reframing, video loops, legibility over an image |
+| `${CLAUDE_SKILL_DIR}/references/claude-design-handoff.md` | Porting a Claude Design handoff bundle into a component tree |
 
 ## Component Composition
 
