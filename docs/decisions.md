@@ -377,3 +377,14 @@ gate green. The push is queued on his word.
 memory would make the vault a store. A loader that lifts the one-module rule
 would split the four concerns. A measured count of denies refusing legitimate
 work in this repo would remove the denies before it added a fourth.
+
+**Pushed the same night, and here is what the authorisation was read from.**
+The operator typed, in his own turn to another session and read from that
+session's transcript as a `[user]` row rather than through a relay: *"work
+over night on what you can. don't stop for me, no questions."* Beside it: this
+file's own CLAUDE.md line ("commit and push autodev freely; ask before
+touching a product repo"), the mandate recording autodev's merges as delegated
+because it has no users, and the away declaration delegating reversible
+decisions. A branch push here deploys nothing and is one `git push --delete`
+from undone. The Brain took the decision in its own name and said so; the
+version bump to 8.160.0 is not part of it and waits for a green PR.
