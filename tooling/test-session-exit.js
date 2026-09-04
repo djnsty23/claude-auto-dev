@@ -218,6 +218,70 @@ try {
         check('  --force still overrides', f.status === 0, 'status ' + f.status);
     }
 
+    // ---- a LARGE file that QUOTES the marker --------------------------------
+    //
+    // `[measured 2026-09-05]` The marker test used to run BEFORE `tracked` and
+    // `huge` were computed, so quoting the marker was an unconditional write
+    // permit. Measured on the real file, one variable, the ordering:
+    //
+    //     shipped script   exit 0   25,804 b -> 2,141 b   23,663 bytes destroyed
+    //     reordered        exit 3   25,804 b -> 25,804 b  intact
+    //
+    // The document that triggered it carried the string once, inside a paragraph
+    // whose whole purpose was to say the file is NOT generated. The files most
+    // likely to quote a marker are exactly the long hand-written handoffs this
+    // guard exists to protect.
+    //
+    // Same class as a mutation-test token tripping a secret scanner, polarity
+    // reversed: that caused a false alarm, this caused a silent deletion.
+    //
+    // MARKER is read OUT OF THE SUBJECT rather than spelled here, so the two
+    // cannot drift. A test hard-coding the string would keep passing against a
+    // subject whose marker had changed, which is the same one-fact-in-two-files
+    // defect this case is about.
+    {
+        const src = fs.readFileSync(SUBJECT, 'utf8');
+        const m = src.match(/^const MARKER = '([^']+)';/m);
+        check('the suite can read MARKER out of the subject', !!m,
+            'no `const MARKER = ...` line; this case would be vacuous without it');
+
+        if (m) {
+            const marker = m[1];
+            const repo = newRepo('quoted-marker');
+            const doc = path.join(repo, 'RESUME.md');
+            // Big enough to clear SUSPICIOUS_BYTES and to dwarf what the script
+            // writes for a fixture repo, which is what `huge` tests.
+            const original = 'This file is NOT generated. It is hand-written.\n'
+                + 'The string ' + marker + ' appears above only to explain the\n'
+                + 'convention and warn the next reader about it.\n'
+                + 'x'.repeat(60000) + '\n';
+            fs.writeFileSync(doc, original);
+            git(repo, ['add', 'RESUME.md']);
+            git(repo, ['commit', '-qm', 'a handoff that documents the marker']);
+
+            const r = run(repo, []);
+            check('a LARGE file QUOTING the marker is refused, not adopted',
+                r.status === 3, 'status ' + r.status);
+            check('  and is byte-identical afterwards',
+                fs.readFileSync(doc, 'utf8') === original);
+            has('  and the refusal names the quoting, not foreign authorship',
+                r.err, 'QUOTES');
+            lacks('  and does NOT claim we did not write it, which would be unprovable',
+                r.err, 'it was not written by this script');
+
+            // The half a naive fix would break: our own output carries the marker
+            // and is SMALL, so a rerun must still need no --force.
+            const small = newRepo('small-marker');
+            const sdoc = path.join(small, 'RESUME.md');
+            const first = run(small, []);
+            check('  a fresh write still succeeds', first.status === 0, 'status ' + first.status);
+            check('  ...and carries the marker',
+                fs.readFileSync(sdoc, 'utf8').indexOf(marker) !== -1);
+            check('  ...and a rerun over our own small output needs no --force',
+                run(small, []).status === 0);
+        }
+    }
+
     // ---- the closing advice must be DERIVED, not prescribed -----------------
     //
     // Reported by a peer working a GTM/analytics engagement with no package.json
