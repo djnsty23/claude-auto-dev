@@ -82,6 +82,17 @@ for (const plugin of fs.readdirSync(path.join(ROOT, 'plugins'))) {
             }
         }
     }
+    // A hooks module (function hooks, early access) is wired by `modules`, not
+    // by an event, and runs on every session where the host has the feature
+    // on. It is production code exactly as a shell hook is, so it takes a row
+    // here and needs a suite that LOADS it: an `import()` from a suite shows up
+    // in V8 coverage under the module's file URL, which is what the evidence
+    // phase below matches on.
+    for (const m of Array.isArray(json.modules) ? json.modules : []) {
+        if (typeof m !== 'string') continue;
+        const file = path.join(ROOT, 'plugins', plugin, 'hooks', m);
+        if (fs.existsSync(file)) wired.push({ plugin, event: 'modules', name: path.basename(m), file });
+    }
 }
 
 // --- strip comments, so a stale header cannot select a suite for execution ---
