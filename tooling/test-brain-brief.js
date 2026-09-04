@@ -860,6 +860,164 @@ try {
     check('I: exactly one branch collapses, so the threshold is a threshold',
         (i2.match(/more, all untitled and NOT addressable/g) || []).length === 1,
         'collapsed lines found: ' + (i2.match(/more, all untitled and NOT addressable/g) || []).length);
+
+    // -----------------------------------------------------------------------
+    // J. the mandate gate: the repo set is bound to the operator's scope
+    //
+    // `[measured 2026-09-04]` the survey config had silently diverged from the
+    // mandate: a named focus repo was absent from it, so every survey ever run
+    // on that machine was silent about a repo carrying 15 branches and 29
+    // stories, and that silence read exactly like the repo being clean. A
+    // survey cannot report a repo it was never given, so the gate refuses to
+    // print one that omits a mandated project. This is the ONE non-zero exit
+    // in a script that otherwise always exits 0, and every refusal here sits
+    // beside a control that passes, so a mutant that refuses everything or
+    // nothing fails the pair rather than half of it.
+    //
+    // The mandate fixture follows the documented contract: a `##` heading
+    // containing ACTIVE PROJECTS, then one indented line of names. Each
+    // scenario uses a different separator so all three are exercised.
+    // -----------------------------------------------------------------------
+    const mandateBody = (scopeLine) => '# Mandate\n\n## THE ACTIVE PROJECTS, AND EVERY OTHER REPO IS DEAD\n\n'
+        + 'So the scope is exactly:\n\n    ' + scopeLine + '\n\n## Something else\n\nprose\n';
+
+    // J1: a mandated project the config omits -> REFUSED, named, no survey.
+    const homeJ1 = makeHome('j1', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: mandateBody('fixture-repo-clean · ghost-project (a gloss)') }],
+        config: JSON.stringify({ repos: [CLEAN_REPO] }),
+    });
+    const J1 = runBrief({ home: homeJ1, cwd: workDir('j1', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J1: a mandated project the config omits exits 2', J1.status === 2,
+        'exit ' + J1.status + ' stderr ' + J1.stderr.slice(0, 200));
+    hasText('J1: the refusal says it is a refusal', J1.stdout, 'REFUSED - the repo set is not bound to the mandate');
+    hasText('J1: names the missing project, and only it', J1.stdout, 'MISSING FROM CONFIG: ghost-project\n');
+    hasText('J1: prints the scope it parsed, parentheses stripped', J1.stdout,
+        '2 project(s) named: fixture-repo-clean, ghost-project');
+    lacksText('J1: no survey section was printed under a refusal', J1.stdout, '1. FLEET');
+    lacksText('J1: no repo set was printed under a refusal', J1.stdout, 'REPO SET - what sections');
+
+    // J2: the control. Same shape, the config covers every name -> exit 0 and
+    // the binding is printed as a counted fact beside the repo set.
+    const homeJ2 = makeHome('j2', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: mandateBody('fixture-repo-clean (the clean one)') }],
+        config: JSON.stringify({ repos: [CLEAN_REPO] }),
+    });
+    const J2 = runBrief({ home: homeJ2, cwd: workDir('j2', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J2: control - a covered mandate exits 0', J2.status === 0,
+        'exit ' + J2.status + ' ' + J2.stdout.slice(0, 300));
+    lacksText('J2: control - a covered mandate is not refused', J2.stdout, 'REFUSED');
+    hasText('J2: control - the survey was printed', J2.stdout, '1. FLEET');
+    const j2set = section(J2.stdout, 'REPO SET');
+    matches('J2: the binding is a counted fact beside the repo set', j2set,
+        /mandate: 1 project\(s\) named in .*MANDATE\.md, 1 covered by config/);
+    lacksText('J2: nothing is flagged as outside the mandate', j2set, 'NOT IN MANDATE');
+    lacksText('J2: a present mandate is not a COULD NOT CHECK', j2set, 'COULD NOT CHECK - mandate coverage');
+
+    // J3: a config repo the mandate does not name is surveyed and FLAGGED,
+    // never refused. The gate is about what the survey cannot see.
+    const homeJ3 = makeHome('j3', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: mandateBody('fixture-repo-clean | not-a-repo-here (also gone)') }],
+        config: JSON.stringify({ repos: [CLEAN_REPO, DIRTY_REPO] }),
+    });
+    // "not-a-repo-here" is mandated and absent, so J3 must refuse for THAT and
+    // must not be read as an extras test. Split: J3a refuses on the absence,
+    // J3b is the extras case with a fully covered mandate.
+    const J3a = runBrief({ home: homeJ3, cwd: workDir('j3a', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J3a: the `|` separator parses, so the absent name is found', J3a.status === 2, 'exit ' + J3a.status);
+    hasText('J3a: and it is the absent name that is reported', J3a.stdout, 'MISSING FROM CONFIG: not-a-repo-here\n');
+
+    const homeJ3b = makeHome('j3b', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: mandateBody('fixture-repo-clean, ') }],
+        config: JSON.stringify({ repos: [CLEAN_REPO, DIRTY_REPO] }),
+    });
+    const J3b = runBrief({ home: homeJ3b, cwd: workDir('j3b', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J3b: an extra config repo does not refuse', J3b.status === 0, 'exit ' + J3b.status + ' ' + J3b.stdout.slice(0, 300));
+    const j3set = section(J3b.stdout, 'REPO SET');
+    hasText('J3b: the extra is flagged by name', j3set,
+        'NOT IN MANDATE - in the config, not named as active: fixture-repo-dirty');
+    hasText('J3b: and the reader is told not to offer it on the mandate\'s authority', j3set,
+        'do not offer it as work on the mandate\'s authority');
+    hasText('J3b: the trailing comma did not become an empty name', j3set, 'mandate: 1 project(s) named');
+
+    // J4: no mandate at all. Absence is the ordinary case on a machine with no
+    // grant, so it does not refuse - but it is a blind spot and must be named
+    // as one where the repo set is printed, never folded into a pass.
+    const homeJ4 = makeHome('j4', { memoryDir: true, config: JSON.stringify({ repos: [CLEAN_REPO] }) });
+    const J4 = runBrief({ home: homeJ4, cwd: workDir('j4', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J4: an absent mandate exits 0', J4.status === 0, 'exit ' + J4.status);
+    const j4set = section(J4.stdout, 'REPO SET');
+    matches('J4: an absent mandate is a COULD NOT CHECK with the path', j4set,
+        /COULD NOT CHECK - mandate coverage: no file at .*MANDATE\.md/);
+    hasText('J4: and says what that leaves unbound', j4set, 'The repo set above is bound to nothing');
+    lacksText('J4: an absent mandate never prints a coverage count', j4set, 'covered by config');
+
+    // J5: a mandate that EXISTS and cannot be read is not "no mandate". It
+    // refuses, and says which half of the contract was not met.
+    const homeJ5 = makeHome('j5', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: '# Mandate\n\n## The repos\n\nprose with no scope line\n' }],
+        config: JSON.stringify({ repos: [CLEAN_REPO] }),
+    });
+    const J5 = runBrief({ home: homeJ5, cwd: workDir('j5', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J5: an unparseable mandate exits 2', J5.status === 2, 'exit ' + J5.status);
+    hasText('J5: names the state', J5.stdout, 'state:   UNPARSEABLE - no "## ... ACTIVE PROJECTS ..." heading');
+    hasText('J5: distinguishes it from absence in words', J5.stdout,
+        'is not the same\n   fact as "no mandate"');
+
+    // J5b: the heading exists and the scope line does not - the other half.
+    const homeJ5b = makeHome('j5b', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: '## ACTIVE PROJECTS\n\nno indented line follows\n' }],
+        config: JSON.stringify({ repos: [CLEAN_REPO] }),
+    });
+    const J5b = runBrief({ home: homeJ5b, cwd: workDir('j5b', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J5b: a heading with no scope line exits 2', J5b.status === 2, 'exit ' + J5b.status);
+    hasText('J5b: names the missing half', J5b.stdout, 'no indented scope line under the ACTIVE PROJECTS heading');
+
+    // J6: mandated AND retired is a contradiction between two files the operator
+    // maintains. Refuse and name it; do not pick a side.
+    const homeJ6 = makeHome('j6', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: mandateBody('fixture-repo-clean') }],
+        config: JSON.stringify({ repos: [DIRTY_REPO], retired: [CLEAN_REPO] }),
+    });
+    const J6 = runBrief({ home: homeJ6, cwd: workDir('j6', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J6: mandated-but-retired exits 2', J6.status === 2, 'exit ' + J6.status);
+    hasText('J6: names the contradiction', J6.stdout,
+        'RETIRED IN CONFIG BUT NAMED ACTIVE BY THE MANDATE: fixture-repo-clean');
+    lacksText('J6: a retired repo is not also reported as missing', J6.stdout, 'MISSING FROM CONFIG');
+
+    // J7: listed, but the path is gone. The survey is exactly as silent about
+    // that repo as about one never listed, so it refuses - with the reason.
+    const homeJ7 = makeHome('j7', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: mandateBody('fixture-repo-clean · vanished-repo') }],
+        config: JSON.stringify({ repos: [CLEAN_REPO, path.join(ROOT, 'vanished-repo')] }),
+    });
+    const J7 = runBrief({ home: homeJ7, cwd: workDir('j7', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J7: a listed-but-gone path is a refusal', J7.status === 2, 'exit ' + J7.status);
+    hasText('J7: and the reason is that the path is gone', J7.stdout,
+        'MISSING FROM CONFIG: vanished-repo (listed, but its path is gone)');
+
+    // J8: --mandate points elsewhere, and the report names the file it read.
+    const altMandate = path.join(ROOT, 'elsewhere-MANDATE.md');
+    fs.writeFileSync(altMandate, mandateBody('fixture-repo-clean'));
+    const homeJ8 = makeHome('j8', {
+        memoryDir: true,
+        memoryFiles: [{ name: 'MANDATE.md', body: mandateBody('ghost-project') }],
+        config: JSON.stringify({ repos: [CLEAN_REPO] }),
+    });
+    const J8 = runBrief({ home: homeJ8, cwd: workDir('j8', []), path: WITH_GH, args: ['--no-overlap', '--mandate', altMandate] });
+    check('J8: --mandate overrides the default path', J8.status === 0, 'exit ' + J8.status + ' ' + J8.stdout.slice(0, 300));
+    hasText('J8: and the report names the file it actually read', section(J8.stdout, 'REPO SET'),
+        'named in ' + altMandate);
+    // Control for J8: the default path in that same home WOULD have refused.
+    const J8c = runBrief({ home: homeJ8, cwd: workDir('j8c', []), path: WITH_GH, args: ['--no-overlap'] });
+    check('J8: control - the same home refuses on its default mandate', J8c.status === 2, 'exit ' + J8c.status);
 } finally {
     try {
         fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });

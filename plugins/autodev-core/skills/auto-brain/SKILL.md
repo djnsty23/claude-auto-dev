@@ -282,12 +282,26 @@ verify.
 - **The coordinator never answers on the user's behalf.** Batch and forward.
   Answering another session's panel is forbidden elsewhere in this role and that
   does not change because the panel arrived as a message instead.
-- **Instruction, not enforcement.** You can ask a session not to panel. You
-  cannot disable the tool remotely, and you must not edit permission settings to
-  do it — that is a machine-wide change affecting sessions nobody is
-  coordinating. If the user wants enforcement rather than convention they will
-  say so; until then a session that panels anyway has not disobeyed anything
-  load-bearing.
+- **Instruction, never a deny.** You can ask a session not to panel. You must
+  not edit permission settings to do it, and `brain-panels.js --off` is retired
+  (2026-09-02) for the same reason: denying `AskUserQuestion` removes the
+  CHANNEL rather than answering on it, so a worker with a question has one
+  legal move and it is stop. `[measured 2026-09-04]` ten denies across two of
+  the operator's own repos, one bulk write, no record beside any of them. The
+  tool has written a record beside every deny it sets since 2026-08-27, so
+  those were written by hand, and because "no record" is not "stale" it took
+  the operator's own yes to clear them from his own repos.
+
+  **The enforcement that exists is a declared AWAY window, and it returns a
+  decision rather than removing the channel.** `~/claude-memory/AWAY.md` with
+  an `until:` line that carries a timezone; `away-state.js --status` reads it;
+  `hooks/panel-recommendation.js` holds a panel raised inside the window and
+  hands the session the recommended option to take and log. The window expires
+  without a writer, so a dead coordinator cannot strand the fleet. Declare it
+  only while you are answering for every session, never as a standing
+  configuration, and run `brain-panels.js --status` at boot to find a deny an
+  earlier version or a hand left behind. The `brain` skill's boot step 3
+  carries the procedure.
 
 And keep the exception: **money, production deploys, client state and anything
 irreversible still stop.** Those are not ambiguity, they are authorisation, and
@@ -299,7 +313,14 @@ These are not boilerplate. Each one is the answer to a specific way an
 unattended window goes wrong.
 
 - **Commits stay local. No push, no PR, no merge, no deploy.** A push needs the
-  user's yes in that turn, and overnight there is no turn to give it in.
+  user's yes in that turn, and overnight there is no turn to give it in. The
+  merge half is a different rule from the push half, and the brief should say
+  so or the session reads one rule for itself and another for the Brain with
+  no reason given, and distrusts the brief: merging is the coordinator's act,
+  because sequencing merges across a fleet is coordination and no single
+  session can see enough to do it. `brain` states that once, under "Merging is
+  the coordinator's". A session that finds its PR mergeable reports it and
+  leaves the merge to whoever holds the sequence.
 - **No production mutation, no billing action, no credential rotation.** Propose
   it with the evidence attached and stop.
 - **Run the repo's own gate before claiming anything is green**, and name it —
@@ -324,10 +345,28 @@ unattended window goes wrong.
 
 ## Client repos
 
-A bitbucket remote means client work. Analysis, diagnosis and local commits are
-fine. Never push to a personal remote, never open a PR, and never archive those
-sessions. If a brief for a client repo cannot be done without pushing, it is not
-a brief for tonight.
+**A client repo or a client session gets nothing from the coordinator.** No
+brief, no dispatch, no question, no work assigned to it, and no survey line
+acted on. It may appear in the survey, which reads every repo under the code
+root and cannot know; it is reported and then left alone.
+
+`[stated 2026-09-01]` the operator, mid-turn while a manifest was being
+dispatched: only his own projects, never client work, under this skill. That
+supersedes the rule this section used to carry, which forbade only pushing to a
+personal remote and archiving those sessions, and so left analysis, questions
+and local commits reading as permitted. They are not. An earlier version of
+this paragraph said "analysis, diagnosis and local commits are fine", and it
+was still here three days after the operator had said otherwise, at a scale
+that matters: `[measured 2026-09-04]` 7 of 14 live sessions on the machine
+this was written on were client sessions. A coordinator filing sessions by repo
+under the old paragraph briefs half the fleet on work it must not touch.
+
+The reliable tell is a bitbucket remote, which the survey flags as `CLIENT`, but
+absence of that flag is not a clearance: at least one client repo on that
+machine has no bitbucket remote. The machine's mandate file names the known
+client surfaces; this file does not, because it is public. When in doubt it is
+client work, and the cost of being wrong that way is one repo left unassigned
+for a night.
 
 ## Before you finish
 

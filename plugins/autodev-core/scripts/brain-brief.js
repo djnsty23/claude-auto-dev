@@ -36,6 +36,7 @@
  *   node brain-brief.js --handoff <path>    # point at a specific handoff doc
  *   node brain-brief.js --no-overlap        # skip the overlap child process
  *   node brain-brief.js --gh-timeout 30000  # widen the gh bound on a slow link
+ *   node brain-brief.js --mandate <path>    # the mandate to bind the repo set to
  *
  * Repos are never named in this file. claude-auto-dev is PUBLIC and some of the
  * repos on this machine are client work, so the set is discovered at runtime
@@ -46,6 +47,20 @@
  *
  * When that config is absent the script says so, with the path - an incomplete
  * repo set that announces itself beats a complete-looking one that is not.
+ *
+ * THE ONE EXIT THAT IS NOT 0: the mandate gate. "Always exits 0" above holds
+ * for every SECTION, because one broken probe must not hide the others. It does
+ * not hold for the repo set itself. The config is hand-maintained, and
+ * [measured 2026-09-04] it had diverged from the operator's mandate without
+ * anything saying so: a named focus repo was absent from it, so every survey
+ * ever run on that machine was silent about a repo carrying 15 branches and 29
+ * stories, and that silence read exactly like the repo being clean. A survey
+ * cannot report a repo it was never given, so the check has to run BEFORE the
+ * survey and refuse to print one that omits a mandated project. When
+ * ~/claude-memory/MANDATE.md (or --mandate <path>) names a project the config
+ * does not cover, this prints the names and exits 2 with no survey. An absent
+ * mandate is reported and does not refuse: a machine with no mandate has bound
+ * its repo set to nothing, and the report says so where the set is printed.
  */
 'use strict';
 
@@ -77,6 +92,12 @@ const many = (f) => argv.reduce((a, v, i) => (v === f && argv[i + 1] ? a.concat(
 
 const DAYS = Number(val('--days', 2)) || 2;
 const GH_TIMEOUT_MS = Number(val('--gh-timeout', 15000)) || 15000;
+
+// The operator's mandate: which projects are handed over. Machine-local, like
+// the config, and read from the same memory directory the brain skill boots
+// from. --mandate exists so a test can point at a fixture and so a machine that
+// keeps it elsewhere is not silently reported as having none.
+const MANDATE_PATH = val('--mandate', path.join(MEMORY_DIR, 'MANDATE.md'));
 const LIVE_MINUTES = 60 * 24;   // matches fleet-overlap's definition of "live"
 
 // Collapse a run of untitled, unaddressable rows in the OWNERSHIP section only
@@ -527,14 +548,134 @@ function readRepoConfig() {
         for (const p of list) (isDir(p) ? good : bad).push(p);
         return {
             repos: good,
+            listed: list,
             retired,
             note: 'config ' + CONFIG_PATH + ': ' + list.length + ' listed, ' + good.length + ' present' +
                 (bad.length ? ', MISSING: ' + bad.join(', ') : '') +
                 (retired.length ? ', ' + retired.length + ' retired (named below, not a gap)' : ''),
         };
     } catch (e) {
-        return { repos: [], retired: [], note: 'COULD NOT READ config ' + CONFIG_PATH + ': ' + e.message };
+        return { repos: [], listed: [], retired: [], note: 'COULD NOT READ config ' + CONFIG_PATH + ': ' + e.message };
     }
+}
+
+// ---------------------------------------------------------------------------
+// the mandate gate - the repo set is bound to the operator's scope, or it is
+// bound to nothing and says so
+// ---------------------------------------------------------------------------
+
+/**
+ * The mandate's project list, read from its ACTIVE PROJECTS section.
+ *
+ * The contract, stated because prose drifts and a parser that fails quietly on
+ * drift is the defect this gate exists to catch:
+ *
+ *   - a `##` heading whose text contains "ACTIVE PROJECTS", case-insensitive;
+ *   - inside that section, the first INDENTED line (four spaces or a tab, the
+ *     markdown code form) is the scope line;
+ *   - names on it are separated by `·`, `|` or `,`; anything in parentheses is
+ *     an alias or a gloss and is ignored; matching is case-insensitive.
+ *
+ * Four states, and only `ok` carries names. `absent` is the ordinary case on a
+ * machine with no mandate. The other two mean a mandate EXISTS and this could
+ * not read its scope, which must not be reported the same way as "no mandate":
+ * an unrecognised state is the dangerous one, and here the danger is a repo set
+ * silently unbound from a scope somebody wrote down.
+ */
+function readMandateScope(file) {
+    if (!isFile(file)) return { state: 'absent', file, names: [] };
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf8'); }
+    catch (e) { return { state: 'unreadable', file, names: [], reason: e.message }; }
+    const lines = raw.split(/\r?\n/);
+    const start = lines.findIndex((l) => /^##\s/.test(l) && /ACTIVE PROJECTS/i.test(l));
+    if (start < 0) {
+        return { state: 'unparseable', file, names: [], reason: 'no "## ... ACTIVE PROJECTS ..." heading' };
+    }
+    let end = lines.findIndex((l, i) => i > start && /^##\s/.test(l));
+    if (end < 0) end = lines.length;
+    const scopeLine = lines.slice(start + 1, end).find((l) => /^(?: {4,}|\t)\S/.test(l));
+    if (!scopeLine) {
+        return { state: 'unparseable', file, names: [], reason: 'no indented scope line under the ACTIVE PROJECTS heading' };
+    }
+    const names = scopeLine.split(/[·|,]/)
+        .map((s) => s.replace(/\([^)]*\)/g, '').trim().toLowerCase())
+        .filter(Boolean);
+    if (!names.length) {
+        return { state: 'unparseable', file, names: [], reason: 'the scope line holds no names: ' + JSON.stringify(scopeLine.trim()) };
+    }
+    return { state: 'ok', file, names, line: scopeLine.trim() };
+}
+
+/**
+ * Compare the mandate's names with the config's repos, by directory basename.
+ *
+ * A mandated project is COVERED only by a config entry whose path is present:
+ * a listed path that is gone leaves the survey exactly as silent as no entry
+ * at all. A mandated name in `retired` is a contradiction between two files the
+ * operator maintains, and a person has to pick one. A config entry the mandate
+ * does not name is surveyed anyway and flagged, never refused: the gate is
+ * about what the survey cannot see, and it can see that one.
+ */
+function checkMandate(cfg) {
+    const scope = readMandateScope(MANDATE_PATH);
+    const result = { scope, missing: [], retiredButMandated: [], extra: [], covered: [] };
+    if (scope.state !== 'ok') return result;
+    const present = new Set((cfg.repos || []).map((p) => baseName(p).toLowerCase()));
+    const listed = new Set((cfg.listed || []).map((p) => baseName(p).toLowerCase()));
+    const retired = new Set((cfg.retired || []).map((p) => baseName(p).toLowerCase()));
+    for (const n of scope.names) {
+        if (retired.has(n)) result.retiredButMandated.push(n);
+        else if (present.has(n)) result.covered.push(n);
+        else result.missing.push(n + (listed.has(n) ? ' (listed, but its path is gone)' : ''));
+    }
+    result.extra = [...listed].filter((n) => !scope.names.includes(n) && !retired.has(n));
+    return result;
+}
+
+/**
+ * The refusal. Printed INSTEAD of a survey, never after one: a report that
+ * prints five sections and then a warning is a report whose warning is the
+ * last thing read, and the sections above it are about a repo set already
+ * known to be wrong.
+ */
+function mandateRefusal(m) {
+    const s = m.scope;
+    const lines = [];
+    lines.push('!! REFUSED - the repo set is not bound to the mandate, so no survey was printed.');
+    lines.push('   mandate: ' + s.file);
+    if (s.state === 'ok') {
+        lines.push('   scope:   ' + s.names.length + ' project(s) named: ' + s.names.join(', '));
+        lines.push('   config:  ' + CONFIG_PATH);
+        if (m.missing.length) {
+            lines.push('   MISSING FROM CONFIG: ' + m.missing.join(', '));
+        }
+        if (m.retiredButMandated.length) {
+            lines.push('   RETIRED IN CONFIG BUT NAMED ACTIVE BY THE MANDATE: ' + m.retiredButMandated.join(', '));
+        }
+        lines.push('');
+        lines.push('   A survey is silent about a repo it was never given, and that silence is');
+        lines.push('   indistinguishable from the repo being clean. [measured 2026-09-04] one');
+        lines.push('   mandated repo was absent from this config for every survey ever run on');
+        lines.push('   its machine, and accumulated 15 branches and 29 stories unseen.');
+        lines.push('');
+        lines.push('   Fix one side: add each missing repo\'s path to "repos" in the config (and');
+        lines.push('   take it out of "retired"), or remove the name from the mandate\'s scope');
+        lines.push('   line. Then re-run. Names are matched on directory basename.');
+    } else {
+        lines.push('   state:   ' + s.state.toUpperCase() + ' - ' + (s.reason || 'unknown'));
+        lines.push('');
+        lines.push('   The mandate exists and its scope could not be read, which is not the same');
+        lines.push('   fact as "no mandate" and must not produce the same survey. The contract:');
+        lines.push('   a "## ... ACTIVE PROJECTS ..." heading, and under it one indented line');
+        lines.push('   of names separated by "·", "|" or ",", parentheses ignored.');
+    }
+    return lines.join('\n') + '\n';
+}
+
+function mandateRefuses(m) {
+    const st = m.scope.state;
+    return st === 'unparseable' || st === 'unreadable' || m.missing.length > 0 || m.retiredButMandated.length > 0;
 }
 
 /**
@@ -565,8 +706,8 @@ async function resolveRoots(dirs) {
     return { index, roots, tried: uniq.length, failed: failures.length, failures };
 }
 
-async function discoverRepos(fleet) {
-    const cfg = readRepoConfig();
+async function discoverRepos(fleet, cfgIn) {
+    const cfg = cfgIn || readRepoConfig();
 
     // A retired repo is excluded ON PURPOSE, and it is named in the output for
     // that reason. Dropping it silently would leave a future session unable to
@@ -1020,6 +1161,16 @@ async function sectionWork(repos) {
 async function main() {
     const started = Date.now();
 
+    // The mandate gate runs FIRST, before a byte of survey is gathered. Refusing
+    // after the sections are built would mean printing them, and a survey that
+    // is known to omit a mandated repo must not reach a reader at all.
+    const cfg = readRepoConfig();
+    const mandate = checkMandate(cfg);
+    if (mandateRefuses(mandate)) {
+        process.stdout.write(mandateRefusal(mandate));
+        process.exit(2);
+    }
+
     freshnessHeader();
 
     // scanFleet is synchronous and reads every recent transcript. Run it first so
@@ -1030,7 +1181,7 @@ async function main() {
         catch (e) { return { error: 'scanFleet() threw: ' + (e && e.message ? e.message : String(e)) }; }
     })();
 
-    const disco = await discoverRepos(fleet);
+    const disco = await discoverRepos(fleet, cfg);
 
     sectionFleet(fleet);
     await sectionOwnership(fleet, disco.index);
@@ -1040,6 +1191,22 @@ async function main() {
     say(THIN);
     say('  population: ' + disco.repos.length + ' repo(s) discovered');
     say('  ' + disco.note);
+    // The binding, stated beside the set it binds. A covered mandate is a
+    // counted fact; an absent one is a blind spot named as one, because a repo
+    // set bound to nothing has no way to report a repo it was never given.
+    if (mandate.scope.state === 'ok') {
+        say('  mandate: ' + mandate.scope.names.length + ' project(s) named in ' + mandate.scope.file
+            + ', ' + mandate.covered.length + ' covered by config');
+        if (mandate.extra.length) {
+            say('  !! NOT IN MANDATE - in the config, not named as active: ' + mandate.extra.join(', '));
+            say('     Surveyed below all the same. It is not in the operator\'s named scope, so');
+            say('     do not offer it as work on the mandate\'s authority; ask.');
+        }
+    } else {
+        say('  !! COULD NOT CHECK - mandate coverage: no file at ' + mandate.scope.file);
+        say('     The repo set above is bound to nothing. A repo missing from the config');
+        say('     is invisible to this survey and nothing here will say so.');
+    }
     say('  session cwds resolved to a git root: ' + (disco.sessionDirsTried - disco.sessionDirsFailed) +
         ' of ' + disco.sessionDirsTried + (disco.sessionDirsFailed ? '  (' + disco.sessionDirsFailed + ' FAILED)' : ''));
     for (const f of disco.sessionDirFailures || []) say('     ? ' + f.dir + '  ->  ' + f.reason);

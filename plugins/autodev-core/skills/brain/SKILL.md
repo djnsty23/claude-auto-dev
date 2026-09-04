@@ -207,6 +207,16 @@ step to it.
 **Read each script's population line rather than its exit code.** A zero needs a
 known-positive control before you report it.
 
+**The one exit code that carries meaning is `brain-brief.js` exiting 2**: the
+repo set omits a project the mandate names, and no survey was printed. Add
+that repo's path to `~/.claude/brain-brief.json` and re-run. Do not survey
+around it. `[measured 2026-09-04]` that config had silently omitted two of the
+five mandated repos, one of them for every survey ever run on the machine,
+while the repo accumulated 15 branches and 29 stories. A survey is silent
+about a repo it was never given, and that silence reads exactly like the repo
+being clean, which is why the check is a refusal rather than a warning line
+under five sections that are already wrong.
+
 Then the git registries, which are what a peer should read as they start:
 
 ```powershell
@@ -223,77 +233,89 @@ Other scripts sit beside those three and were not run at boot. One warning:
 `fleet-notify.js` fires real Windows toasts at the user. Use `--dry` to see what
 would fire, `--test` for exactly one sample.
 
-### 3. Is a previous session's panel block still set?
+### 3. Is a leftover panel deny still set? Find and clear it; never write one
 
 ```powershell
 node "$B\brain-panels.js" --status
 ```
 
-`brain-panels.js --off` denies `AskUserQuestion` in the managed repos and their
-worktrees, so a coordinated session cannot stop on a panel overnight.
+**Panels are held with a declared AWAY window, never with a deny.**
+`brain-panels.js --off` was retired on 2026-09-02, and until 2026-09-04 this
+step still documented it as the mechanism, with the `--hours` and `--reason`
+invocation to type. It denied `AskUserQuestion` through `permissions.deny`,
+which removes the channel rather than answering on it: `rule-options-protocol`
+is always-on and tells every worker to end a substantive turn with a panel, so
+under a deny a worker with a question had one legal move, and it was stop.
+`[measured 2026-09-02 01:06]` one session sat 50 minutes on a question whose
+answer was already visible in fleet state.
 
-**The precondition is that you are genuinely absorbing the decisions.**
-`[stated 2026-08-27]` panels off is only correct while you are answering for
-every session — never as a standing configuration, and never while you are
-merely verifying or working on one repo, which costs sessions their channel and
-buys nothing.
-
-`[stated 2026-08-28]` the operator widened this deliberately, and the reasoning
-is worth keeping: *"if you keep panels on, you won't be able to auto continue
-peers."* With panels on, every question stops a session until a human clicks;
-with the fleet at eight, that is the bottleneck the Brain exists to remove. So
-panels off is now correct **whenever the Brain is actively coordinating**, at the
-keyboard or not.
-
-**But the denial is only half the mechanism, and the half that fails silently.**
-Turning panels off does not make sessions ask you instead — it makes them stop
-asking. A session that loses its panel and is told nothing will either guess or
-idle. **Whenever you deny, tell every addressable session, in the same breath:
-decide reversible things yourself and record the reasoning; queue irreversible
-ones and message the Brain; do not idle and do not block.** `[measured
-2026-08-28]` two worktrees created after a deny inherited it and lost their panel
-with no warning at all, because they did not exist when the announcement went
-out — so re-announce after any deny that reports more locations than last time.
-
-**`--off` therefore refuses without a window and a reason:**
+The replacement returns a DECISION instead of removing the channel:
 
 ```powershell
-node "$B\brain-panels.js" --off --hours 8 --reason "overnight fleet run"
+@"
+until: 2026-09-05T07:00:00Z
+Overnight fleet run. Take the recommended option on anything reversible and log it.
+"@ | Set-Content "$env:USERPROFILE\claude-memory\AWAY.md" -Encoding UTF8
+node "$B\away-state.js" --status
 ```
 
-`--hours` is capped at 24, because anything longer is a config change rather
-than a coordination window. Each denied location gets a sibling
-`panel-deny.json` beside its settings file recording when it was set, when it
-expires, why, and the prior settings verbatim — so losing the central marker can
-no longer orphan a deny.
+`until:` must carry a timezone, or the file reads as MALFORMED and the operator
+can be asked, which is the safe direction. `hooks/panel-recommendation.js`
+reads that state on every panel: inside the window the panel is held and the
+session is handed the recommended option to take and log, with the three
+branches spelled out. The window expires without a writer, so a Brain that
+dies mid-run cannot strand the fleet, which a deny could and did.
 
-**`--status` reports three outcomes, never two: live, EXPIRED and unaccounted.**
-An expired deny is a **fault**, not a state. Any session may clear those, and
-only those:
+**It holds every session's panels, the coordinator's included.** There is no
+exemption in the hook and none is wanted: the window is a statement that the
+operator is not there, so there is nobody for the Brain to ask either. The
+Brain's own branch-3 items queue like anyone else's. Declare the window only
+when that is true.
 
-```powershell
-node "$B\brain-panels.js" --expire
-```
+**The precondition has not moved.** `[stated 2026-08-27]` holding panels is
+only correct while you are genuinely answering for every session: never as a
+standing configuration, and never while merely verifying or working on one
+repo, which costs sessions their channel and buys nothing. `[stated
+2026-08-28]` the operator widened WHEN: *"if you keep panels on, you won't be
+able to auto continue peers."* With panels live, every question stops a
+session until a human clicks, and with the fleet at eight that is the
+bottleneck the Brain exists to remove. So a window is correct whenever the
+Brain is actively coordinating, at the keyboard or not. Both statements are
+about the window; neither licenses a deny.
 
-**Why this got tightened.** `[measured 2026-08-27]` five denies were found
-across two repos, written in one bulk pass 26 hours earlier, with the marker
-gone. `--status` read as an all-clear, `--on` could not reach them, and a
-client-work session spent a day unable to ask the operator a question. The tool
-could not see worktrees at all, which is where every live session runs.
+**And the announcement is still half the mechanism, and the half that fails
+silently.** A held panel does not make a session ask you instead. Whenever you
+declare a window, tell every addressable session in the same breath: decide
+reversible things yourself and record the reasoning; queue irreversible ones
+and message the Brain; do not idle and do not block. `[measured 2026-08-28]`
+two worktrees created after a deny inherited it and lost their panel with no
+warning at all, because they did not exist when the announcement went out.
 
-There is deliberately NO SessionEnd hook doing this automatically — the hook
-fires for every session, so a MANAGED session ending would revert the block that
-is supposed to be constraining it. Self-healing at boot, plus the expiry, is the
-correct place.
+**What `--status` is for now is archaeology.** A deny can still exist: one
+written by a plugin version before the retirement, one copied forward into a
+worktree by `git worktree add` (it copies the repo root's `.claude/`), or one
+written by hand. `--status` scans every managed location, marker or not, and
+reports three outcomes, never two: live, EXPIRED and unaccounted. At boot:
 
-At boot: if `--status` shows anything EXPIRED, run `--expire`. If it shows a
-live deny and you are not continuing that same coordination, restore with
-`--on`. If it shows something unaccounted, report it and let the operator
-decide — "no record" is not the same claim as "stale".
+- anything EXPIRED: `node "$B\brain-panels.js" --expire`. Any session may run
+  it, and it touches only the expired.
+- a live deny you are not continuing: `--on` restores everything the tool set
+  and clears anything else it can see denying.
+- anything UNACCOUNTED: report it and let the operator decide. "No record" is
+  not the same claim as "stale". `[measured 2026-09-04]` ten of these across
+  two of the operator's own repos, one bulk write at 13:17, no record beside
+  any of them. `--status` correctly refused to clear what it did not set, and
+  it took the operator's own yes to unblock two of his repos. That is the cost
+  of a deny written outside the tool. The one path that still writes a deny
+  (`--off --legacy`, kept so the restore path stays testable) writes the
+  record BEFORE the deny, so a crash between the two leaves a record with no
+  deny and never the reverse.
 
-Note it never denies panels in the coordinator's own repo. A panel is how the
-coordinator reaches the user; a coordinator that cannot ask has lost the one
-channel that carries a decision.
+There is deliberately NO SessionEnd hook restoring denies automatically: the
+hook fires for every session, so a managed session ending would revert the
+block constraining it. Self-healing at boot, plus the expiry, is the correct
+place. And the tool never denies the coordinator's own root checkout: a panel
+is how the coordinator reaches the user when he IS there.
 
 ### 4. The newest heal run, if there is one
 
@@ -301,77 +323,142 @@ channel that carries a decision.
 Get-ChildItem "$env:USERPROFILE\claude-memory\heal-runs\" | Sort-Object LastWriteTime -Descending | Select-Object -First 3
 ```
 
+### 5. Claim the role, then announce the handover
+
+`[stated 2026-09-04]` the operator, relayed to this file by the Brain session
+that heard it: *"we should also send a new brain message to all sessions when
+changing brains, as they don't have any way of knowing."* Second-hand here.
+The measurements below are first-hand, one from each end of the failure.
+
+**A Brain change is invisible to the fleet, and the file that should announce
+it asserts the previous Brain instead.** `~/.claude/brain-role.json` is read by
+`stop-brain-report.js`, which tells every session's Stop hook where to send its
+idle report, and by `coordinator-write-guard.js`, which arms the product-repo
+rail for the session it names. `[measured 2026-09-04]` that file named a
+session archived the previous afternoon. So for a day every Stop hook directed
+its report to a dead Brain, and because a peer name resolves through a
+worktree, the reports landed on whichever session later occupied that
+worktree: three of them inside one hour reached a worker doing unrelated
+tooling work there, two of the three client sessions that must hear nothing
+from a coordinator. The Brain that found the file also found the guard armed
+against the dead session, so its own merges and a branch rename in a product
+clone had run with no rail at all; nothing went wrong, and that was luck. A
+missing broadcast leaves a session with an old address it might doubt. A
+config file naming a dead session gives every session a confident wrong answer
+with a hook enforcing it, which is strictly worse, and it is why the fix is a
+claim before a broadcast rather than a broadcast alone.
+
+So, after step 4 and before anything is dispatched, in this order:
+
+1. **Read your own name from `ListAgents`** (its first line is your own entry
+   since Claude Code 2.1.239) and your desktop id from the session store.
+   Never from `brain-role.json`, which is the thing that went stale, and never
+   from a cached value: a Brain that read its name once signed six messages
+   with a name peers could not resolve, and every reply bounced for hours.
+2. **Claim the role by rewriting `brain-role.json`** with `session_id`,
+   `peer_name` AND `desktop_session_id`, keeping the previous holder under
+   `previous` rather than overwriting it. The snippet is under "Never commit
+   or push in a product repo" in the never-list. Until this is written the
+   Stop hook falls back to "find it by cwd", which names a place rather than
+   a correspondent, and the guard protects nobody.
+3. **Send BOTH addresses to every live session.** A session on the peer
+   protocol cannot resolve a `local_<uuid>` and a desktop-only session cannot
+   use the peer name, so one address reaches half the fleet. Say plainly that
+   it is an address change and not a brief, so a mid-task session does not
+   stop. A client session gets the address and nothing else, and is told it
+   will hear nothing further from this coordinator. A chip spawned this boot
+   already carries both addresses in its prompt; skip it, because a broadcast
+   to a session you briefed ten minutes ago is noise.
+
+`[measured 2026-09-04]` by the Brain that did this first: nine sessions, two
+full-form, six client short-form, five chips skipped, and all five idle
+sessions woke on it. The `peer_name` field had already been corrected once
+that day, from a wrong suffix, before it was found naming a dead session: two
+wrong values by two mechanisms inside one day. A hand-maintained field read by
+a hook wants a check, not another correction, and that check does not exist
+yet.
+
 ## When the boot finishes — report, then act
 
-**READ "No-panel mode" BELOW FIRST — it governs this section.** An earlier
-version of this heading read "the terminal action is a question", and under
-no-panel mode it is not. The boot ends with a REPORT and then work, not with a
-panel. The one thing that has not changed is the vacuum this section was written
-against: a session holding an overseer identity with no work will reinvent
-coordination to fill it, so the boot must end by DOING something rather than by
-proposing.
+The boot ends with a REPORT and then work, not with a panel. An earlier version
+of this heading read "the terminal action is a question", and under no-panel
+mode it is not. A later version said so in its first paragraph and then
+specified a two-stage panel, projects then sessions, as the thing to do, and
+`[measured 2026-09-04]` a Brain read both paragraphs and raised the panel. So
+this section now describes one ending, and the only panel in it is conditional
+and asks one question.
 
-Raise the project-selection panel below only when the operator is actively in
-conversation. Otherwise choose the projects yourself from the survey — most
-recently worked on first, grounded in what the survey printed — log the choice,
-and start. He can redirect in one sentence, which costs him less than answering.
-
-The boot gathers state and then stops. That is a vacuum, and the role section
-above says in as many words that a session holding an overseer identity with no
-work will reinvent coordination to fill it.
-
-`[measured 2026-08-24]` A session read that sentence during its own boot and
-then, one turn later, authored itself a four-item work list and offered it as a
-panel. The user's correction: the first panel should be about which sessions to
-start. Loading the rule was not enough to fire it, because nothing in the boot
-said what to do once the boot was done.
-
-So the boot has exactly one correct ending, and it is not a proposal:
+The vacuum this section was written against is real: a session holding an
+overseer identity with no work will reinvent coordination to fill it.
+`[measured 2026-08-24]` a session read that sentence during its own boot and,
+one turn later, authored itself a four-item work list and offered it as a
+panel. Loading the rule was not enough to fire it, because nothing in the boot
+said what to do once the boot was done. This does:
 
 1. **Report the state you measured.** Fleet, ownership, open PRs, uncommitted
    work. Each with the population it scanned, and each COULD-NOT-CHECK named
    rather than folded in with the real zeros.
-2. **Ask which PROJECTS first, then which sessions.** `[stated 2026-08-25]`
-   project selection is one of the boot's choices. It is the upstream question:
-   sessions follow from a project, and a panel asking "which sessions should
-   start" while the project is unsettled asks about the wrong layer.
 
-   **That first question is `multiSelect: true`, and its options are ordered
-   most recently worked on first.** `[stated 2026-08-25]` Both halves matter.
-   Projects are not alternatives, so forcing one choice manufactures a backlog
-   out of work that could have been dispatched together. And recency is the
-   ordering the user actually thinks in, where a leverage ranking is the
-   overseer's opinion smuggled into the sort. `brain-brief.js` prints the repo
-   set in exactly that order, with the age since the newest commit on any ref
-   beside each name, so take the order from its output rather than composing one.
+2. **Select the projects yourself, and log the selection.** The mandate (step
+   0) names what is handed over; that IS the selection and it is not a
+   question. Beyond the mandate, take the survey's order: `brain-brief.js`
+   prints the repo set most recently worked on first, with the age since the
+   newest commit on any ref beside each name, and since 2026-09-04 it refuses
+   to print a set that omits a mandated project, so the list is bound to the
+   mandate rather than to whoever last edited the config. A retired repo is
+   never offered: the survey prints those under RETIRED, excluded on purpose,
+   named so a later session can tell a decision from a config edited by
+   accident, and re-offering one is proposing work the user has already
+   closed. Write the selection into the review log; he can redirect in one
+   sentence, which costs him less than answering a panel.
 
-   Ground every option in something the survey printed: a repo with open PRs and
-   nobody on it, a repo far behind its trunk, a repo with a governed publish
-   queue gone stale, a repo whose gate has not been run. A list of repo names is
-   not a panel. A list of repos with the fact that makes each one urgent is.
+   **If the operator is actively in conversation, one panel is allowed here,
+   and its question is "which repos get a chip tier this round".** Not "which
+   projects should I work on": the answer to that is always "none, spawn
+   chips", so a panel whose options read as repos to drive is the
+   worked-four-repos-itself failure in miniature, and it is how a Brain came to
+   run a gate inside a product worktree before spawning anything. `[stated
+   2026-09-04]` the operator's correction of that panel, relayed here by the
+   Brain that raised it: *"when choosing projects, we should spawn chips, not
+   fix all projects here. separate peers and you communicate with each other."*
+   `multiSelect: true`, options in the survey's recency order, each grounded in
+   a fact the survey printed: open PRs with nobody on them, far behind its
+   trunk, a governed publish queue gone stale, a gate never run. A list of repo
+   names is not a panel. `[stated 2026-08-25]` projects come before sessions
+   because sessions follow from a project; the "which sessions" question no
+   longer exists as a panel at all, because its answer is one chip per unit of
+   work and the sequence below produces those.
 
-   **A retired repo is never offered.** `brain-brief.js` reads a `retired` array
-   from `~/.claude/brain-brief.json` and prints those names under RETIRED,
-   excluded on purpose. They are named rather than dropped so a later session can
-   tell a decision from a config edited by accident, and re-offering one is the
-   overseer proposing work the user has already closed.
+3. **Run the post-selection sequence below**, for the selected projects only,
+   before asking anything else. `[stated 2026-08-29]` the operator defined it:
+   *"after selecting the projects we're working on, first see what needs
+   merging, resume updating etc, archive all stale/old sessions and give me
+   easy to copy paste session prompts."* The prompts became chips the same day.
+   The order was corrected on 2026-09-04 so that spawning is second rather
+   than last; the sequence's own header says why.
 
-   Then, once the projects are chosen, run the POST-SELECTION SEQUENCE below
-   before asking anything else. `[stated 2026-08-29]` the operator defined it in
-   as many words: "after selecting the projects we're working on, first see what
-   needs merging, resume updating etc, archive all stale/old sessions and give me
-   easy to copy paste session prompts."
-3. **Do not author a work list for yourself.** Verifying is real work and it is
-   yours, but it arrives from the user in this session. A queue assembled from
-   gaps you noticed is coordination wearing a verification costume, and the role
-   section retired coordination on measurement.
+4. **Do not author a work list for yourself.** Verifying is real work and it
+   is yours, but it arrives from the user in this session. A queue assembled
+   from gaps you noticed is coordination wearing a verification costume, and
+   the role section retired coordination on measurement.
 
-## Post-selection sequence — merge triage, rescue, archive, prompts
+## Post-selection sequence: triage, spawn, rescue, merge, archive
 
-Runs once per boot, immediately after the operator picks projects, for those
-projects only. Order matters: rescue before archive, archive before prompts.
+Runs once per boot, immediately after the projects are selected, for those
+projects only. **Order matters, and until 2026-09-04 the order was wrong.** It
+read triage, rescue, archive, then spawn, with "triage" including running each
+PR's gate and merging it. Spawning last meant it was reached last, after the
+coordinator had spent itself on chip work: `[measured 2026-09-04]` a Brain ran
+`npm ci` and a full gate inside one product repo's worktree, merged a PR in a
+second, and diffed seven files of a draft in a third, all before spawning a
+single chip, while the never-list below said in as many words not to work a
+product repo. So: triage is READ-ONLY and only sorts; spawning is second, so
+the chips exist before the coordinator does anything else; rescue precedes
+anything that can remove a worktree; the merge is the one write the coordinator
+keeps, for the reason under "Merging is the coordinator's"; archive is last
+because it destroys.
 
-**1. Merge-and-resume triage.** For each selected repo: open PRs (re-verified
+**1. Triage, read-only.** For each selected repo: open PRs (re-verified
 live, never from a survey — `gh pr view` on each number), unmerged branches,
 and any RESUME/handoff newer than the trunk's last commit.
 
@@ -408,52 +495,17 @@ Run a KNOWN-POSITIVE CONTROL on whatever command you settle on. `[measured
 returned four false "IDENTICAL" verdicts; it caught that only by running the
 same command shape against an older base and confirming it returned a real
 diff. A clean answer from an unvalidated probe is a claim about the probe. Sort
-into: mergeable-now under whatever authority stands, needs-one-decision (name
-the decision), and stale (candidate for deletion once measured empty). A branch
-whose gate is green and whose checks never RAN is unmeasured, not green — see
-the unmeasured-head rule below.
+into three, and the sorting is the whole of this step: MERGEABLE-NOW (its
+checks RAN and passed on the current base, `gh pr view --json
+mergeable,statusCheckRollup` shows no conflict, and nothing needs reading that
+the PR page did not show), CHIP (it needs a gate run, a dependency install, a
+rebase, a conflict resolved, a diff read, a review, or a decision; name which),
+and STALE (candidate for deletion once measured empty). A branch whose gate is
+green and whose checks never RAN is unmeasured, not green (see the
+unmeasured-head rule below), and it is a CHIP. Running the gate yourself to
+move a PR from CHIP to MERGEABLE-NOW is the failure this order exists to stop.
 
-**2. Rescue unpushed work BEFORE anything can archive it.** `[measured
-2026-08-29]` a session was archived MID-RUN and its worktree held the only copy
-of a finished ten-route fix on an unpushed branch; recovered only because the
-Brain checked within minutes. brain-brief section 4 already measures this — act
-on it: for every worktree carrying unpushed commits or a detached HEAD, **bundle
-the commits; do not push them.**
-
-```bash
-git bundle create "$RESCUE_DIR/<session>-<sha>.bundle" HEAD --not origin/main
-```
-
-`[measured 2026-08-30]` that produced a 2,932-byte file carrying an unpushed
-commit, confirmed restorable by `git bundle verify`, and it needs no remote, no
-network and nobody's authorisation. It survives the worktree being deleted and
-the session being archived, which is the entire failure this step exists for.
-
-**A push is NOT part of the rescue.** `rule-local-first/SKILL.md` holds that an
-ad-hoc push needs the operator to say so in that turn, and this skill does not
-outrank it. Note why this is easy to get wrong: the queue-it-with-the-Brain rule
-further down scopes queued pushes to *product repos*, so a tooling repo reads as
-unguarded when it is not.
-
-`[measured 2026-08-30]` a Brain pushed a peer session's branch on the older
-wording of this step, against a real reboot risk, and the owning session had to
-escalate it as a rules breach. The work was real, the reboot risk was real, and
-the publish was still not the Brain's to decide; the owner found out afterwards.
-
-So the order is: bundle it, which needs no permission; tell the owning session in
-the same turn; then put the push to the operator as a question. Losing a dead
-session's only copy is not acceptable, and neither is publishing a peer's branch
-on your own authority. The bundle removes the pressure that made that trade look
-necessary.
-
-**3. Archive stale sessions.** A session is stale when its transcript is old,
-its branch is merged or measured content-empty, and its worktree holds nothing
-unpushed — all three, each measured, per the sessions-skill procedure. Never
-archive a record whose worktree another live session shares, and never one with
-unpushed work (step 2 makes that impossible if run in order). archive_session
-cleans up worktrees; that is why the order is load-bearing.
-
-**4. Spawn the work as task chips — `spawn_task`, never a file of prompts.**
+**2. Spawn the chips triage produced: `spawn_task`, never a file of prompts.**
 `[stated 2026-08-29]` the operator, on being handed a markdown file of fenced
 blocks: *"cant you use the standard method of spawning sessions in which you
 prompt me to open a new session in a new worktree or this session?"* — followed
@@ -553,6 +605,60 @@ case the second route caught that the first had mangled its own pathspec. Where
 a finding will authorise something irreversible, a second independent
 measurement is worth its cost — just spend it deliberately rather than by
 accident.
+
+**3. Rescue unpushed work BEFORE anything can remove a worktree.** `[measured
+2026-08-29]` a session was archived MID-RUN and its worktree held the only copy
+of a finished ten-route fix on an unpushed branch; recovered only because the
+Brain checked within minutes. brain-brief section 4 already measures this — act
+on it: for every worktree carrying unpushed commits or a detached HEAD, **bundle
+the commits; do not push them.**
+
+```bash
+git bundle create "$RESCUE_DIR/<session>-<sha>.bundle" HEAD --not origin/main
+```
+
+`[measured 2026-08-30]` that produced a 2,932-byte file carrying an unpushed
+commit, confirmed restorable by `git bundle verify`, and it needs no remote, no
+network and nobody's authorisation. It survives the worktree being deleted and
+the session being archived, which is the entire failure this step exists for.
+
+**A push is NOT part of the rescue.** `rule-local-first/SKILL.md` holds that an
+ad-hoc push needs the operator to say so in that turn, and this skill does not
+outrank it. Note why this is easy to get wrong: the queue-it-with-the-Brain rule
+further down scopes queued pushes to *product repos*, so a tooling repo reads as
+unguarded when it is not.
+
+`[measured 2026-08-30]` a Brain pushed a peer session's branch on the older
+wording of this step, against a real reboot risk, and the owning session had to
+escalate it as a rules breach. The work was real, the reboot risk was real, and
+the publish was still not the Brain's to decide; the owner found out afterwards.
+
+So the order is: bundle it, which needs no permission; tell the owning session in
+the same turn; then put the push to the operator as a question. Losing a dead
+session's only copy is not acceptable, and neither is publishing a peer's branch
+on your own authority. The bundle removes the pressure that made that trade look
+necessary.
+
+**4. Merge what triage classified MERGEABLE-NOW.** The one write the
+coordinator keeps in a product repo, and the reason is under "Merging is the
+coordinator's" in the never-list: sequencing merges across repos is
+coordination. `gh pr merge` on the remote, one PR at a time, in an order you
+chose knowing which bases are receiving merges from whom; never a local `git
+merge` in a product tree, which `coordinator-write-guard.js` refuses. Read the
+auto-archive setting first (Dispatch mechanics below): where it is on, a merge
+can archive the session linked to the PR and remove its worktree, which is why
+rescue runs before this step. Capture the merged session's proposed follow-ups
+into the repo's queue BEFORE the merge. Anything triage put in CHIP stays
+there: if it needs a gate run, an install, a rebase or a conflict resolved to
+become mergeable, that is the chip's work and the merge waits for the chip's
+report.
+
+**5. Archive stale sessions.** A session is stale when its transcript is old,
+its branch is merged or measured content-empty, and its worktree holds nothing
+unpushed — all three, each measured, per the sessions-skill procedure. Never
+archive a record whose worktree another live session shares, and never one with
+unpushed work (step 3 makes that impossible if run in order). archive_session
+cleans up worktrees; that is why the order is load-bearing.
 
 ## Dispatch mechanics — measured 2026-08-29, each the hard way
 
@@ -1017,16 +1123,65 @@ messages — the subscription replaces both.
   a guard that blocks surveying pushes this role back toward guessing:
 
   ```powershell
+  $f = "$env:USERPROFILE\.claude\brain-role.json"
+  $prev = if (Test-Path $f) { Get-Content $f -Raw | ConvertFrom-Json } else { $null }
   $id = (Get-Content "$env:USERPROFILE\.claude\sessions\$PID.json" -Raw | ConvertFrom-Json).sessionId
-  @{ session_id = $id; home_repos = @("$env:USERPROFILE\claude-auto-dev"); claimed_at = (Get-Date -Format o) } |
-    ConvertTo-Json | Set-Content "$env:USERPROFILE\.claude\brain-role.json" -Encoding UTF8
+  $peer = '<your own entry from ListAgents, read THIS boot>'
+  $desktop = (Get-ChildItem "$env:APPDATA\Claude\claude-code-sessions" -Filter 'local_*.json' |
+    ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } |
+    Where-Object { $_.cliSessionId -eq $id }).sessionId
+  if (-not $desktop) { throw "no desktop record joins cliSessionId $id; read it from list_sessions, never invent one" }
+  @{ session_id = $id; peer_name = $peer; desktop_session_id = $desktop;
+     home_repos = @("$env:USERPROFILE\claude-auto-dev"); claimed_at = (Get-Date -Format o); previous = $prev } |
+    ConvertTo-Json -Depth 4 | Set-Content $f -Encoding UTF8
   ```
+
+  **All three address fields, or the file lies.** `[measured 2026-09-04]` the
+  version of this snippet that wrote `session_id` and `home_repos` only left
+  `stop-brain-report.js`, which reads `peer_name` and `desktop_session_id` and
+  otherwise says "find it by cwd", pointing every session's idle report at a
+  directory, and left this guard armed against a session archived the day
+  before. `session_id` is the Claude Code session uuid the hook uses to exempt
+  you from your own nudge; it is not an address, and the desktop registry
+  keys on a separate `local_<uuid>` space joined to it only by the
+  `cliSessionId` inside each record, which is why the lookup above reads the
+  record rather than composing a lookalike. Boot step 5 is where this runs,
+  and the `previous` field is how the next Brain can see who held it.
 
   Two things to know before relying on it. It fails **open** on every error,
   because it ships installed and a hook that throws kills a stranger's turn — so
   a quiet run is not proof it is armed. And **standing down is deleting that
   file**, which is deliberate: a rail you can only escape by naming the escape
   is one the next session can audit.
+
+- **Merging is the coordinator's, and it is the only write the coordinator
+  keeps in a product repo.** Stated once, here, because every brief carries "no
+  push, no PR, no merge, no deploy" and the bullet above says never commit or
+  push in a product repo, so a reader saw one rule for the sessions and another
+  for the Brain with no reason given. A session that cannot see the reason
+  distrusts the brief, and the audit that found this (2026-09-04) listed it as
+  a contradiction. It is not one; it is a rule that was never written down.
+
+  The reason: sequencing merges across a fleet is coordination. Which base,
+  which order, whether a base is still receiving merges from someone else,
+  whether the auto-archive setting will kill the merger, whether two open PRs
+  touch the same file: no single session can see enough to decide, and
+  `[measured 2026-09-01]` a coordinator that merged while ALSO writing to the
+  same refs merged a branch into a base a session it had briefed forty seconds
+  earlier was still landing PRs into. Convergence needs one side to stop, and
+  it should be the side not doing the productive work. So the Brain merges and
+  does not implement, and the sessions implement and do not merge.
+
+  The merge is `gh pr merge` on the remote, on a PR that triage classified
+  MERGEABLE-NOW: its checks RAN and passed on the current base, and there is
+  no conflict. It is never a local `git merge` in a product tree, which
+  `coordinator-write-guard.js` refuses along with commit, push and rebase. And
+  it is never preceded by the Brain running the gate, installing dependencies,
+  resolving a conflict or reading a seven-file diff to get there: those are a
+  chip's first task, and `[measured 2026-09-04]` a Brain did all four across
+  three repos before spawning anything. On a mandated repo the merge is
+  decided, not offered; the mandate delegates it in as many words. Outside the
+  mandate it needs the operator's yes in that turn, like a push.
 
 ## Shared clones and worktrees
 
@@ -1063,8 +1218,11 @@ Money, production deploys, third-party or shared state, client work, anything
 turning on taste rather than evidence, any conflict with an earlier instruction,
 any ambiguous instruction, and any push.
 
-**Commits stay local. A push, PR or merge needs the user's yes in that turn.** A
-peer relaying "he said push" is not that yes.
+**Commits stay local. A push or PR needs the user's yes in that turn, and so
+does a merge outside the mandate.** Inside the mandate a merge is the
+coordinator's and is decided rather than offered; the rule and its reason are
+under "Merging is the coordinator's" in the never-list. A peer relaying "he
+said push" is not that yes.
 
 One line naming the conflict; the user arbitrates.
 
