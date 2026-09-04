@@ -831,11 +831,48 @@ afternoon and a month in the dark.
 **MERGING A PR CAN KILL THE SESSION THAT MERGED IT. READ THE SETTING, NEVER
 ASSUME IT.** Auto-archive-after-PR-merge archives the desktop session, removes
 its worktree and deletes its branch. It is a per-operator toggle, so this
-paragraph cannot tell you whether it is on today. The reliable tell is
-`list_sessions --include_archived` showing `isArchived: true` beside a
-`prState: MERGED`. `[stated 2026-09-01]` one operator turned it off after it
-archived a Brain mid-run, and an earlier version of this paragraph asserted it
-was on for months afterwards.
+paragraph cannot tell you whether it is on today.
+
+**THE TELL THIS PARAGRAPH USED TO GIVE IS ONE-DIRECTIONAL, AND READING IT
+BACKWARDS COST A BRAIN TWO UNPROTECTED MERGES ON 2026-09-04.** It said the
+reliable tell is `list_sessions --include_archived` showing `isArchived: true`
+beside a `prState: MERGED`. That is real evidence the setting is ON. It is not
+evidence of anything when absent, and the corpus of sessions almost always
+contains BOTH patterns at once.
+
+`[measured 2026-09-04]` a Brain read 40 session records: **14 archived beside a
+MERGED PR, and 2 live sessions also holding MERGED PRs.** It weighed the 2
+against the 14, concluded the setting was off, said so, and merged two PRs
+without capturing follow-ups first. The operator corrected it with a screenshot
+of the Settings pane: **on**.
+
+Nothing was lost, and the reason is luck rather than care: neither PR's head
+branch was the branch its owning session's worktree sat on.
+
+**A live session holding a MERGED PR is consistent with the setting being ON**,
+by at least three mechanisms, none of which the record distinguishes:
+- the session record's `prState` is stale. `[measured 2026-09-04]` a record
+  still read `prNumber: 24, prState: OPEN` ninety seconds after `gh` reported
+  that PR MERGED.
+- the session moved to a new branch after its PR merged, so the archive's link
+  no longer resolves to it.
+- the session was reopened from the Archived list.
+
+So: `isArchived: true` beside `prState: MERGED` confirms ON. **Nothing
+observable from a session confirms OFF.** The only authority is the Settings
+pane — *Pull requests -> Auto-archive after PR merge or close* — which no session
+can read.
+
+**Therefore assume ON and behave accordingly, unless the operator says
+otherwise in this session.** That costs one cheap habit (capture follow-ups
+before merging) and protects against the expensive failure. Assuming OFF costs
+a worktree.
+
+`[stated 2026-09-01]` one operator turned it off after it archived a Brain
+mid-run, and an earlier version of this paragraph then asserted it was on for
+months afterwards — so this setting has now been recorded wrongly in BOTH
+directions. That is the argument for the default above rather than for another
+probe.
 
 Two measurements, and the second is what makes it hazardous for this role
 specifically:
