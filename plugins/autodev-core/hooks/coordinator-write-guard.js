@@ -146,8 +146,25 @@ function stripNonCommandText(command) {
     for (let i = 0; i < s.length; i++) {
         const c = s[i];
         if (quote) {
-            if (c === '\\' && quote === '"' && /["\\$`]/.test(s[i + 1] || '')) { i++; continue; }
-            if (c === quote) quote = null;
+            if (c === '\\' && quote === '"' && /["\\$`]/.test(s[i + 1] || '')) { out += s[i + 1]; i++; continue; }
+            if (c === quote) { quote = null; continue; }
+            /* ⚠️ KEEP THE CONTENT. This dropped every character between quotes until
+               2026-09-04, which read as prudent — `echo "git push"` must not parse as a
+               push — and silently defeated the whole guard, because QUOTING A PATH IS
+               THE NORMAL WAY TO WRITE ONE.
+               [measured 2026-09-04] `git -C "<foreign-repo>" merge` was ALLOWED: the
+               path vanished, `-C` swallowed `merge` as its value, no subcommand was ever
+               found, and a no-finding return is an allow. The same collapse turned
+               `cd "<home-repo>" && git commit` into a bare `cd`, which is the home
+               DIRECTORY, so a legitimate write was BLOCKED and the message named a
+               place the caller never mentioned. Two opposite failures, nothing errored.
+               Paths here are placeholders on purpose: a realistic one trips the tracked
+               -file path gate, which is a finding this comment would otherwise become.
+               What quotes actually do is hide SEPARATORS, not arguments, so that is what
+               is emulated here: the character survives and anything that could split a
+               command becomes a space. `echo "git push"` still reads as one `echo`
+               segment, because segmentation looks at a segment's FIRST word. */
+            out += /[;&|\n()`]/.test(c) ? ' ' : c;
             continue;
         }
         if (c === '\\') {

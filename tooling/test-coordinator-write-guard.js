@@ -185,6 +185,34 @@ expectBlock('`git rebase --continue` is still a rebase',
 expectSilentAllow('merging INSIDE the home repo is ordinary work',
     run({ payload: bash('git merge --no-ff feature', { cwd: HOME_REPO }) }));
 
+// ---------------------------------------------------------------------------
+// C2. A QUOTED PATH IS AN ARGUMENT, NOT A MENTION.
+//
+// Group C above proves quoted TEXT is not executed, and every case there is an
+// `echo` or a `grep`. Nothing tested a quoted PATH, so the strip that makes
+// group C pass was free to delete arguments too, and it did.
+//
+// [measured 2026-09-04] on the shipped 8.157.0 hook: `git -C "<foreign>" merge`
+// exited 0. The quoted path was deleted, `-C` consumed `merge` as its value,
+// no subcommand was found, and no-finding is an allow. Quoting a path defeated
+// the entire rail. The mirror image blocked a legitimate write: `cd "<home>"`
+// collapsed to a bare `cd`, which is $HOME.
+//
+// Both directions are asserted here, because a fix for either one alone reads
+// as correct. The population that hid this was chosen by the property under
+// test: every quoting case was a mention, so the mention rule could not fail.
+// ---------------------------------------------------------------------------
+expectBlock('a DOUBLE-QUOTED -C path into a foreign repo still blocks',
+    run({ payload: bash(`git -C "${OTHER_REPO}" merge origin/main`, { cwd: HOME_REPO }) }), /git merge/);
+expectBlock('a SINGLE-QUOTED -C path into a foreign repo still blocks',
+    run({ payload: bash(`git -C '${OTHER_REPO}' commit -m x`, { cwd: HOME_REPO }) }), /git commit/);
+expectBlock('a quoted cd into a foreign repo still blocks',
+    run({ payload: bash(`cd "${OTHER_REPO}" && git push origin main`, { cwd: HOME_REPO }) }), /git push/);
+expectSilentAllow('a quoted cd into the HOME repo is allowed, not read as bare cd',
+    run({ payload: bash(`cd "${HOME_REPO}" && git commit -m x`) }));
+expectSilentAllow('a quoted -C into the HOME repo is allowed',
+    run({ payload: bash(`git -C "${HOME_REPO}" merge --no-ff feature`) }));
+
 // The exclusions, each asserted so removing one is a visible decision rather
 // than a drift. `pull` merges, so a mechanical "block what writes" catches it —
 // and a coordinator updating a local clone in order to READ it is the job.
