@@ -595,11 +595,21 @@ function turnOff() {
         next.permissions.deny = Array.isArray(next.permissions.deny) ? next.permissions.deny.slice() : [];
         if (next.permissions.deny.indexOf(TOOL) === -1) next.permissions.deny.push(TOOL);
 
+        // THE RECORD IS WRITTEN BEFORE THE DENY, AND THE ORDER IS THE POINT.
+        //
+        // Two files, one intent, and a process can die between them. Written
+        // deny-then-record, a crash leaves a deny with nothing beside it, which
+        // --status can only call UNACCOUNTED and no session may clear: the
+        // exact state the sibling record exists to make impossible. Written
+        // record-then-deny, a crash leaves a record with no deny, which nothing
+        // reads (--status classifies locations that DENY) and which the next
+        // successful run overwrites. One order fails safe and the other does
+        // not. `[measured 2026-09-04]` ten denies across two repos, one bulk
+        // write, no record beside any of them, stuck until the operator
+        // personally authorised clearing them. Not this tool's current version
+        // (it has written a record since 2026-08-27), but whatever wrote them
+        // made the same mistake this order rules out here.
         fs.mkdirSync(path.dirname(sp), { recursive: true });
-        fs.writeFileSync(sp, JSON.stringify(next, null, 2) + '\n', 'utf8');
-
-        // The sibling carries everything a restore needs, so losing the central
-        // marker can no longer orphan this deny.
         fs.writeFileSync(denyRecordPath(repo), JSON.stringify({
             tool: TOOL,
             setAt: record.setAt,
@@ -610,6 +620,8 @@ function turnOff() {
             note: 'Set by brain-panels.js. Past expiresAt this is a FAULT, not a state: '
                 + 'any session may clear it with `brain-panels.js --expire`.',
         }, null, 2) + '\n', 'utf8');
+
+        fs.writeFileSync(sp, JSON.stringify(next, null, 2) + '\n', 'utf8');
     }
 
     fs.mkdirSync(path.dirname(MARKER), { recursive: true });
