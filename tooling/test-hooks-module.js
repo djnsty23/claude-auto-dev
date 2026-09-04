@@ -16,13 +16,18 @@ const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
+// A throw here is a VERDICT, exit 1, not infrastructure. This suite has no
+// sandbox or fixture tree of its own: every code path calls a subject, so a
+// subject that throws (or a stubbed one, under check:suites, whose exports
+// are gone) is the suite failing to pass, which is exactly what the sweep
+// needs to see. Exit 2 would read as "indeterminate" and hide the verdict.
 process.on('uncaughtException', (e) => {
-    console.error('infrastructure failure (uncaught): ' + ((e && (e.stack || e.message)) || e));
-    process.exit(2);
+    console.error('FAIL (uncaught): ' + ((e && (e.stack || e.message)) || e));
+    process.exit(1);
 });
 process.on('unhandledRejection', (e) => {
-    console.error('infrastructure failure (rejection): ' + ((e && (e.stack || e.message)) || e));
-    process.exit(2);
+    console.error('FAIL (rejection): ' + ((e && (e.stack || e.message)) || e));
+    process.exit(1);
 });
 
 const ROOT = path.resolve(__dirname, '..');

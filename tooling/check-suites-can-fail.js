@@ -99,6 +99,21 @@ const SUBJECT_OVERRIDES = {
         'plugins/autodev-core/skills/rule-agent-concurrency/SKILL.md',
         'plugins/autodev-core/skills/fleet/SKILL.md',
     ],
+
+    // The subject is a hooks module (Claude Code function hooks): ES modules
+    // with an .mjs extension, which derivation cannot yield. Left to
+    // derivation this suite DOES find something — prd-states.js, the CommonJS
+    // original its parity check reads — and stubbing that alone would earn an
+    // 'ok' row without the module under test being touched once. The CJS stub
+    // installed into an .mjs file throws at import, which the suite reports as
+    // a verdict (exit 1), so each of the four files is checked in turn.
+    'test-hooks-module.js': [
+        'plugins/autodev-core/hooks/fn/autodev-fn.mjs',
+        'plugins/autodev-core/hooks/fn/redact.mjs',
+        'plugins/autodev-core/hooks/fn/bash-rules.mjs',
+        'plugins/autodev-core/hooks/fn/sprint-status.mjs',
+        'plugins/autodev-core/scripts/prd-states.js',
+    ],
 };
 
 /**
