@@ -361,7 +361,21 @@ So, after step 4 and before anything is dispatched, in this order:
    or push in a product repo" in the never-list. Until this is written the
    Stop hook falls back to "find it by cwd", which names a place rather than
    a correspondent, and the guard protects nobody.
-3. **Send BOTH addresses to every live session.** A session on the peer
+3. **Verify the claim before you act on it.** `node "$B\check-brain-role.js"
+   --status`. Exit 0 means a live session holds the record; **exit 2 means it
+   does not, and then you do NOT broadcast** -- an address that resolves to
+   nobody is worse than none, because a session cannot tell a dead coordinator
+   from a busy one. Fix the record and re-run rather than announcing it.
+
+   This step exists because writing the file is not the same as writing it
+   correctly. `[measured 2026-09-04]` the Brain that added step 2 then filled
+   `session_id` with its DESKTOP uuid, arrived at by stripping `local_` off it.
+   The two registries use different uuids and nothing converts between them, so
+   the guard stayed armed for nobody and the Stop hook's self-exemption missed
+   -- the second inert-rail of that day, by a different mechanism from the
+   first. A peer found it; the check now finds it in one call.
+
+4. **Send BOTH addresses to every live session.** A session on the peer
    protocol cannot resolve a `local_<uuid>` and a desktop-only session cannot
    use the peer name, so one address reaches half the fleet. Say plainly that
    it is an address change and not a brief, so a mid-task session does not
@@ -375,8 +389,13 @@ full-form, six client short-form, five chips skipped, and all five idle
 sessions woke on it. The `peer_name` field had already been corrected once
 that day, from a wrong suffix, before it was found naming a dead session: two
 wrong values by two mechanisms inside one day. A hand-maintained field read by
-a hook wants a check, not another correction, and that check does not exist
-yet.
+a hook wants a check, not another correction. **That check now exists** --
+`check-brain-role.js`, added the same day -- which is why step 3 above is a
+command rather than a warning. It reads the sessions directory for a live file
+whose `name` and `sessionId` match and whose pid answers, joins the desktop
+store on `cliSessionId`, and reports absent / ok / fault, naming the dead id on
+a fault. It never resolves a coordinator by cwd: that fallback is the bug
+rather than the mitigation, because a worktree outlives the session in it.
 
 ## When the boot finishes — report, then act
 
