@@ -996,6 +996,48 @@ function plantSession(home, dir, minutesIdle) {
         JSON.stringify(after));
 }
 
+// ------------------------------- 23. the record is written before the deny
+//
+// Two files, one intent, and a process can die between them. Written
+// deny-then-record, a crash leaves a deny with nothing beside it: UNACCOUNTED,
+// which no session may clear. Written record-then-deny, a crash leaves a record
+// with no deny, which nothing reads. `[measured 2026-09-04]` ten denies across
+// two repos from one bulk write, no record beside any, stuck until the operator
+// personally authorised clearing them. This scenario forces the crash: the
+// settings path is a DIRECTORY, so the deny write throws, and the assertion is
+// about what was on disk when it did. Reverting the order fails 23b.
+
+{
+    const home = makeHome();
+    // Alphabetical enumeration puts 'aaa-broken' first, so the crash happens
+    // before the healthy repo is reached and the run can write nothing there.
+    const broken = makeRepo(home, 'aaa-broken');
+    const healthy = makeRepo(home, 'zzz-healthy');
+    fs.mkdirSync(settingsPath(broken), { recursive: true });
+
+    const r = run(home, OFF);
+    check('23a the run crashed on the unwritable location', r.status !== 0, 'exit ' + r.status);
+    check('23b the record was on disk before the deny was attempted',
+        fs.existsSync(path.join(broken, '.claude', 'panel-deny.json')));
+    check('23c the crashed location does not deny', !denies(broken));
+    check('23d nothing past the crash was written', !denies(healthy)
+        && !fs.existsSync(path.join(healthy, '.claude', 'panel-deny.json')));
+
+    // A record with no deny must be invisible to the scan: --status classifies
+    // locations that DENY, so a stranded record is not a phantom finding.
+    const st = run(home, ['--status']);
+    check('23e --status reports the crashed location as neither denied nor unaccounted',
+        /currently deny AskUserQuestion across 2 scanned, 0 live, 0 EXPIRED, 0 unaccounted/.test(st.stdout || ''),
+        (st.stdout || '').slice(0, 300));
+
+    // Control: with nothing broken, the same run leaves record AND deny.
+    const home2 = makeHome();
+    const ok = makeRepo(home2, 'someproj');
+    const r2 = run(home2, OFF);
+    check('23f control - a healthy run writes both', r2.status === 0 && denies(ok)
+        && fs.existsSync(path.join(ok, '.claude', 'panel-deny.json')), 'exit ' + r2.status);
+}
+
 // ------------------------------------------------------------------- report
 
 // DERIVED, not hand-maintained. It read a hardcoded `22` until 2026-09-02, and
