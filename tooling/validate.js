@@ -372,8 +372,68 @@ function checkHookWiring() {
       }
     }
 
+    // A hooks module (Claude Code function hooks, early access): `modules`
+    // names ONE path per plugin, relative to hooks.json, exporting
+    // register(on, options). The host reads what it hooks and calls from the
+    // source before loading it, and `claude plugin validate` prints that scan;
+    // nothing in this repo can reproduce the scan, so the CLI is asked when it
+    // is on PATH and the gap is named when it is not. A module that exists
+    // but was never scanned is reported as exactly that, never as a pass.
+    if (cfg.modules !== undefined && !Array.isArray(cfg.modules)) {
+      log('FAIL', `plugins/${p}/hooks/hooks.json: "modules" must be an array holding one relative path`);
+      ok = false;
+    }
+    const modules = Array.isArray(cfg.modules) ? cfg.modules : [];
+    if (modules.length > 1) {
+      log('FAIL', `plugins/${p}/hooks/hooks.json: "modules" names ${modules.length} hooks modules; the loader takes one per plugin and refuses both`);
+      ok = false;
+    }
+    for (const m of modules) {
+      count++;
+      const file = typeof m === 'string' ? path.join(PLUGINS_DIR, p, 'hooks', m) : null;
+      if (!file || !fs.existsSync(file)) {
+        log('FAIL', `plugins/${p}: hooks module points at a missing file: ${m}`);
+        ok = false;
+        continue;
+      }
+      const scan = scanHooksModule(path.join(PLUGINS_DIR, p));
+      if (scan.status === 'passed') log('PASS', `plugins/${p}: hooks module ${m} scanned by the host: ${scan.detail}`);
+      else if (scan.status === 'failed') { log('FAIL', `plugins/${p}: hooks module ${m} failed the host's scan: ${scan.detail}`); ok = false; }
+      else log('WARN', `plugins/${p}: hooks module ${m} exists but was NOT scanned (${scan.reason}); its hooks and $ calls are unverified here`);
+    }
+
     if (ok) log('PASS', `plugins/${p}: ${count} hooks wired to existing files`);
   }
+}
+
+// Ask the installed Claude Code to scan a plugin's hooks module. Three
+// outcomes, and the third is deliberately not a pass: `passed` with the scan's
+// own hooks/calls lines, `failed` with the host's error lines, `skipped` with
+// the reason (no CLI, a timeout, or neither verdict printed). A scan that
+// passed but listed no hooks is a FAIL too — it means the `modules` entry was
+// not read, and an unread module is the silent kind of broken.
+function scanHooksModule(pluginDir) {
+  // One quoted command string through the shell: `claude` on PATH is a shim
+  // (a .cmd on Windows), which spawnSync cannot run without a shell, and an
+  // args array under shell:true is concatenated unescaped (DEP0190).
+  const quoted = '"' + String(pluginDir).replace(/"/g, '\\"') + '"';
+  const r = cp.spawnSync(`claude plugin validate ${quoted}`, {
+    encoding: 'utf8',
+    timeout: 90000,
+    windowsHide: true,
+    shell: true,
+    env: { ...process.env, CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1' },
+  });
+  if (r.error) return { status: 'skipped', reason: r.error.code === 'ENOENT' ? 'claude is not on PATH' : String(r.error.message) };
+  const out = (r.stdout || '') + (r.stderr || '');
+  if (/Validation failed/.test(out)) {
+    const detail = out.split('\n').filter((l) => /❯|error/i.test(l) && !/^Validating/.test(l)).map((l) => l.trim()).join(' | ');
+    return { status: 'failed', detail: detail || out.trim().slice(-400) };
+  }
+  if (!/Validation passed/.test(out)) return { status: 'skipped', reason: 'claude plugin validate printed neither verdict (exit ' + r.status + ')' };
+  const scan = out.split('\n').filter((l) => /\bhooks:|\bcalls:/.test(l)).map((l) => l.replace(/^\s*❯\s*/, '').trim());
+  if (!scan.some((l) => /\bhooks:/.test(l))) return { status: 'failed', detail: 'validation passed but the scan listed no hooks: the modules entry was not read' };
+  return { status: 'passed', detail: scan.join('; ') };
 }
 
 function checkScriptReferences() {

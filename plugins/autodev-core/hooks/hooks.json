@@ -178,5 +178,6 @@
         ]
       }
     ]
-  }
+  },
+  "modules": ["./fn/autodev-fn.mjs"]
 }
