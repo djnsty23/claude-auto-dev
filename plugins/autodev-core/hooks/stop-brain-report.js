@@ -178,9 +178,26 @@ const where = [
     ahead === null ? null : ahead + ' ahead of upstream',
 ].filter(Boolean).join(', ');
 
+/* ⚠️ `session_id` IS NOT AN ADDRESS, AND PRINTING IT AS ONE SENT PEERS TO A DEAD
+   ONE. This read `'desktop session id `' + role.session_id + '`'` until
+   2026-09-04. It is neither: `session_id` is the Claude Code SESSION UUID this
+   hook compares against `input.session_id` to exempt the coordinator from its
+   own nudge, and the desktop registry keys on a different space entirely
+   (`local_<uuid>`). A peer reported `Session not found` against it TWICE, and
+   reached the coordinator in the end by matching a worktree path through
+   list_sessions.
+   One field cannot serve both: exemption needs the value the hook payload
+   carries, addressing needs the value the messaging tool accepts. So the
+   address is built only from fields that ARE addresses, and `session_id` is
+   never one of them. `desktop_session_id` is optional and separate; a role file
+   that omits it says so rather than substituting a lookalike.
+   The failure is quiet by construction — a wrong address produces a lookup
+   miss in the RECIPIENT's session, so the sender never learns the message went
+   nowhere. */
 const addr = [
     role.peer_name ? 'peer name `' + role.peer_name + '`' : null,
-    role.session_id ? 'desktop session id `' + role.session_id + '`' : null,
+    role.desktop_session_id ? 'desktop session id `' + role.desktop_session_id + '`' : null,
+    role.home_repos && role.home_repos.length ? 'or find it by cwd under `' + role.home_repos[0] + '`' : null,
 ].filter(Boolean).join(', ') || 'the coordinator session';
 
 // additionalContext is the field that reaches the model. Plain stdout on exit 0
