@@ -47,12 +47,12 @@ const PREFIX_TRAP = HOME_REPO + '-extra';
 function writeRole(obj) { fs.writeFileSync(ROLE, JSON.stringify(obj)); }
 
 /** Drive the hook as a subprocess. `roleFile` may point at a path that is absent. */
-function run({ roleFile = ROLE, payload, raw = null, args = [] }) {
+function run({ roleFile = ROLE, payload, raw = null, args = [], env = {} }) {
     const input = raw !== null ? raw : JSON.stringify(payload);
     const r = spawnSync(process.execPath, [HOOK, ...args], {
         input,
         encoding: 'utf8',
-        env: { ...process.env, AUTODEV_BRAIN_ROLE_FILE: roleFile },
+        env: { ...process.env, AUTODEV_BRAIN_ROLE_FILE: roleFile, ...env },
         timeout: 20000,
     });
     return {
@@ -337,6 +337,59 @@ writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
 }
 
 // ---------------------------------------------------------------------------
+// E2. A CLAIM NAMING A DEAD SESSION. `[measured 2026-09-04]` the role file named
+//     a session archived the day before, then a fresh claim wrote the desktop
+//     uuid into session_id. Both times `claimed !== mine` held for the live
+//     Brain, this guard exited quietly on every git write, and the Brain worked
+//     for hours believing its rail was armed. The line must fire at the moment
+//     it matters and nowhere else: a blocked verb, from inside the home repo,
+//     while the record names no live session. Liveness is real: this process's
+//     own pid is the live session and 999999 the dead one.
+// ---------------------------------------------------------------------------
+{
+    const sessions = fs.mkdtempSync(path.join(os.tmpdir(), 'cwg-sessions-'));
+    fs.writeFileSync(path.join(sessions, process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'SESSION-A', name: 'peer-a' }));
+    fs.writeFileSync(path.join(sessions, '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'SESSION-DEAD', name: 'peer-dead' }));
+    const env = { AUTODEV_SESSIONS_DIR: sessions };
+    const fromHome = (cmd) => bash(cmd, { session_id: 'SESSION-B', cwd: HOME_REPO });
+
+    // Control first: somebody else's LIVE claim stays byte-silent, same
+    // command, same cwd, same fixture. Without it every warning below could be
+    // an unconditional line.
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+    expectSilentAllow('control: another session\'s LIVE claim is silent from inside the home repo',
+        run({ payload: fromHome('git commit -m "x"'), env }));
+
+    writeRole({ session_id: 'SESSION-DEAD', home_repos: [HOME_REPO] });
+    {
+        const res = run({ payload: fromHome('git commit -m "x"'), env });
+        const ok = res.exit === 0 && res.stdout.length === 0
+            && /names session SESSION-DEAD as the coordinator/.test(res.stderr)
+            && /no live session has that id/.test(res.stderr)
+            && /armed for NOBODY/.test(res.stderr)
+            && /Allowing `git commit`/.test(res.stderr)
+            && /check-brain-role\.js --status/.test(res.stderr);
+        check('a claim naming a DEAD session allows, and SAYS the rail is armed for nobody', ok,
+            `exit ${res.exit}, stderr ${JSON.stringify(res.stderr.slice(0, 160))}`);
+    }
+    expectSilentAllow('the dead claim is silent for a worker in a product repo (nothing to believe there)',
+        run({ payload: bash('git commit -m "x"', { session_id: 'SESSION-B' }), env }));
+    expectSilentAllow('the dead claim is silent when the command was never going to block',
+        run({ payload: fromHome('git status && git log -1'), env }));
+    expectSilentAllow('the dead claim is silent when the sessions dir cannot be read (fails open)',
+        run({ payload: fromHome('git commit -m "x"'), env: { AUTODEV_SESSIONS_DIR: path.join(sessions, 'no-such-dir') } }));
+    // The desktop store is deliberately not consulted on this path: a record
+    // whose sessions-dir half is live must not be called dead by an unreachable
+    // store, or every git write pays a 600-record walk to learn nothing.
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO], desktop_session_id: 'local_nothing-here' });
+    expectSilentAllow('a live claim with an unknown desktop id is still silent here',
+        run({ payload: fromHome('git commit -m "x"'), env }));
+
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+    fs.rmSync(sessions, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
 // F. FAIL OPEN, AND SAY SO WHEN IT MATTERS. This ships installed: a throw would
 //    kill a stranger's turn and survive until they reinstall.
 // ---------------------------------------------------------------------------
@@ -416,7 +469,7 @@ console.log(`\n${pass} passed, ${fail} failed`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
     + `driven as a subprocess ${pass + fail} times over `
     + `${['inert-without-role', 'the ban', 'mention-is-not-execution', 'cwd escapes',
-        'role ownership', 'fail-open', 'mutation'].length} case groups; `
+        'role ownership', 'dead claim', 'fail-open', 'mutation'].length} case groups; `
     + `every allow asserted zero bytes on BOTH stdout and stderr.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 process.exit(fail > 0 ? 1 : 0);

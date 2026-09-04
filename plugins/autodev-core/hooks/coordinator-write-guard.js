@@ -333,12 +333,54 @@ try {
     const claimed = typeof role.session_id === 'string' && role.session_id.length
         ? role.session_id : null;
     const mine = data.session_id || null;
-    // A role file with no session_id is a machine-wide claim and applies here.
-    // One that names a DIFFERENT session is somebody else's role: exit quiet.
-    if (claimed && mine && claimed !== mine) process.exit(0);
 
     const cwd = path.resolve(data.cwd || process.cwd());
     const segments = commandSegments(stripNonCommandText(command));
+
+    // A role file with no session_id is a machine-wide claim and applies here.
+    // One that names a DIFFERENT session is somebody else's role: exit quiet,
+    // with ONE exception, and the exception is the whole reason this file is
+    // read by a second checker.
+    //
+    // `[measured 2026-09-04]` the role file named a session archived the day
+    // before, and later that day a fresh claim wrote the desktop uuid into
+    // session_id. Both times `claimed !== mine` held for the live Brain, so this
+    // branch exited quietly on every one of its git writes, and it worked for
+    // hours believing its rail was armed. A rail that silently protects nobody
+    // is worse than no rail, because it is believed.
+    //
+    // So when the claim names no LIVE session, say so, but only at the moment
+    // it matters, the way the unconfirmable-holder warning below does: a
+    // blocked verb, from a session standing inside the coordinator's own home
+    // repo (the Brain itself, or a chip cut from its clone). A worker committing
+    // in a product repo gains nothing from the line and would see it on every
+    // commit. Liveness comes from scripts/check-brain-role.js reading
+    // ~/.claude/sessions/<pid>.json; the desktop store is skipped here because
+    // this runs on every git write and the sessions dir alone decides "live".
+    // Everything about it fails OPEN: no sibling script, no warning.
+    if (claimed && mine && claimed !== mine) {
+        const writing = segments.some((seg) => {
+            const g = parseGitSegment(seg, cwd);
+            return !!(g && BLOCKED_SUBCOMMANDS.has(g.sub));
+        });
+        if (writing && homes.some((h) => isInside(h, cwd))) {
+            let verdict = null;
+            try {
+                const { checkBrainRole } = require(path.join(__dirname, '..', 'scripts', 'check-brain-role.js'));
+                verdict = checkBrainRole({ roleFile: rolePath, role, store: null });
+            } catch { verdict = null; }
+            const dead = verdict && verdict.state === 'fault'
+                ? verdict.faults.find((f) => f.code === 'dead-session') : null;
+            if (dead) {
+                const sub = segments.map((seg) => parseGitSegment(seg, cwd)).find((g) => g && BLOCKED_SUBCOMMANDS.has(g.sub)).sub;
+                process.stderr.write(`coordinator-write-guard: ${rolePath} names session ${claimed} as the coordinator, `
+                    + `but no live session has that id (${dead.detail}). The rail is armed for NOBODY. `
+                    + `Allowing \`git ${sub}\` in ${cwd} UNCHECKED; whoever holds the Brain role must rewrite the `
+                    + `record from ~/.claude/sessions/<pid>.json (check: scripts/check-brain-role.js --status).\n`);
+            }
+        }
+        process.exit(0);
+    }
 
     const hits = [];
     let here = cwd;                       // moves with each `cd` segment
