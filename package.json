@@ -15,10 +15,11 @@
   ],
   "scripts": {
     "test": "node tooling/test-all.js",
-    "gate": "npm test && npm run check:suites && npm run check:population && npm run check:entrypoints && npm run check:skill-tools",
+    "gate": "npm test && npm run check:suites && npm run check:probe-shapes && npm run check:population && npm run check:entrypoints && npm run check:skill-tools",
     "validate": "node tooling/validate.js",
     "bump": "node tooling/bump.js",
     "check:suites": "node tooling/check-suites-can-fail.js",
+    "check:probe-shapes": "node tooling/check-probe-shapes.js --selftest",
     "check:vacuity": "node tooling/find-vacuous-assertions.js",
     "check:hooks": "node tooling/find-untested-hooks.js",
     "check:liveness": "node plugins/autodev-core/scripts/workflow-liveness.js --selftest",
