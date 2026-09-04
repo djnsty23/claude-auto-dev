@@ -262,8 +262,15 @@ function makeHome(name, opts) {
     // so this seam is what lets a scenario have both kinds side by side.
     // The path mirrors claude-paths.sessionStore(): <APPDATA>/Claude/
     // claude-code-sessions, and runBrief points APPDATA at <home>/AppData.
+    //
+    // NESTED, because the real store is. `[measured 2026-09-04]` the live store
+    // holds 676 records at <store>/<account>/<bucket>/local_<uuid>.json and none
+    // at the top level; a flat probe reported it empty with a known-positive
+    // present. This fixture used to write flat, so the ownership join was
+    // exercised only against a shape production does not have, and a reader
+    // that stopped recursing would have passed here and found nothing there.
     for (const r of opts.sessionRecords || []) {
-        const dir = path.join(home, 'AppData', 'Claude', 'claude-code-sessions');
+        const dir = path.join(home, 'AppData', 'Claude', 'claude-code-sessions', 'account-fixture', 'bucket-fixture');
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, 'local_' + r.cliSessionId + '.json'), JSON.stringify({
             cliSessionId: r.cliSessionId,
