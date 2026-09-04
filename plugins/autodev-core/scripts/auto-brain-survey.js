@@ -58,6 +58,27 @@ const ROOT_RAW = val('--root', null) || (() => {
 })();
 const ROOT = ROOT_RAW ? path.resolve(ROOT_RAW) : null;
 
+// Repos the operator has NAMED as client work, regardless of where their origin
+// points. Read from the machine-local config so no client name is ever
+// committed to this public repo. Missing file, missing key and a malformed file
+// all degrade to an empty list, which is the pre-existing bitbucket-only
+// behaviour — so `clientListFound` is tracked separately and printed, because
+// "no repo is named" and "the list could not be read" are opposite facts that
+// both flatten to zero matches.
+let clientNames = [];
+let clientListFound = false;
+try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(HOME, '.claude', 'brain-brief.json'), 'utf8'));
+    if (Array.isArray(cfg.clients)) {
+        clientNames = cfg.clients.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim().toLowerCase());
+        clientListFound = true;
+    }
+} catch { /* no config, or unreadable: clientNames stays empty */ }
+
+// Match a repo by directory name or full path, both lowercased. A path match is
+// allowed so a list entry can disambiguate two repos sharing a basename.
+const repoKey = (p, name) => ((p || '') + ' ' + (name || '')).toLowerCase();
+
 function run(cmd, a, cwd) {
     try { return execFileSync(cmd, a, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim(); }
     catch { return null; }
@@ -112,7 +133,24 @@ function survey(name, dir) {
     // A bitbucket remote means client work. It is not a lesser repo, it is a
     // repo whose rules differ: never push it to a personal remote, and never
     // assume gh can answer anything about it.
-    r.isClient = !!remote && remote.indexOf('bitbucket') !== -1;
+    //
+    // ⚠️ A HOST IS A HINT, NOT THE ANSWER. Client work can sit on a personal
+    // GitHub remote, and when it does this heuristic clears it. [measured
+    // 2026-09-04] one repo on this machine is named as client work by the
+    // operator's own mandate and has an `https://github.com/<personal>/...`
+    // origin, so it scored as the operator's own in every survey ever run here
+    // while carrying two live sessions. The mandate is the authority and the
+    // remote is a guess, so a hand-maintained list has to be able to OVERRIDE
+    // the guess in the direction of caution.
+    //
+    // The list lives in the machine-local config rather than here on purpose:
+    // this repo is public and a client's name is exactly what must not be
+    // committed to it. An absent config therefore degrades to the old
+    // behaviour, which is the unsafe direction, so `clientWhy` records which
+    // signal fired and the summary prints when no list was found at all.
+    const named = clientNames.some((n) => n && repoKey(r.dir, r.name).indexOf(n) !== -1);
+    r.isClient = named || (!!remote && remote.indexOf('bitbucket') !== -1);
+    r.clientWhy = named ? 'named in the client list' : (r.isClient ? 'bitbucket remote' : null);
     r.isGitHub = !!remote && remote.indexOf('github') !== -1;
 
     const dirty = g(['status', '--porcelain=v1']);
@@ -198,7 +236,7 @@ console.log('     session which project it is actually in before briefing it, an
 console.log('     pass --root to cover another tree.\n');
 
 for (const r of results) {
-    console.log('### ' + r.name + (r.isClient ? '   [CLIENT — bitbucket remote]' : ''));
+    console.log('### ' + r.name + (r.isClient ? '   [CLIENT — ' + (r.clientWhy || 'unknown signal') + ']' : ''));
     console.log('  branch ' + r.branch + '   trunk ' + (r.trunk || 'COULD NOT CHECK'));
     if (r.trunkStale) {
         console.log('  !! THE CACHED origin/HEAD IN THIS CLONE IS STALE: it says ' + r.trunkCached);
@@ -247,6 +285,13 @@ const noGate = results.filter((r) => r.gates && r.gates.length === 0 && !r.notNo
 
 console.log('SUMMARY');
 console.log('  client repos (never push to a personal remote): ' + (clients.join(', ') || 'none'));
+// Print the POPULATION the client check ran against, not just its result. An
+// empty client list and an unreadable config produce the same zero matches, and
+// only one of those is safe to act on: without this line a survey that failed to
+// read the list looks exactly like a machine that has no client work on it.
+console.log('  client list: ' + (clientListFound
+    ? clientNames.length + ' name(s) from ~/.claude/brain-brief.json, plus any bitbucket remote'
+    : 'NOT FOUND in ~/.claude/brain-brief.json — falling back to the bitbucket remote alone, which CANNOT see client work on a personal GitHub remote'));
 console.log('  more than 50 behind trunk: ' + (stale.join(', ') || 'none'));
 console.log('  node projects naming no gate script: ' + (noGate.join(', ') || 'none'));
 console.log('  repos where gh could not answer: '
