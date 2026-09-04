@@ -165,8 +165,19 @@ function spoke(r) {
     check('a commit since the last report FIRES', !!j,
         j ? 'additionalContext present' : `out=${JSON.stringify(fired.out.slice(0, 80))}`);
     check('  it names the coordinator addresses from the role file',
-        !!j && /brain-peer/.test(j.hookSpecificOutput.additionalContext)
-        && /brain-1/.test(j.hookSpecificOutput.additionalContext));
+        !!j && /brain-peer/.test(j.hookSpecificOutput.additionalContext));
+    /* This assertion used to REQUIRE `brain-1` — the session_id — to appear in
+       the address, so the suite enshrined the defect rather than catching it.
+       `session_id` is the Claude Code session UUID this hook compares against
+       the payload to exempt the coordinator from its own nudge. It is not an
+       address in any registry: a peer reported `Session not found` against it
+       TWICE and reached the coordinator by matching a worktree path instead.
+       A wrong address fails in the RECIPIENT's session, so the sender never
+       learns the message went nowhere, which is why two reports were needed
+       before anyone looked. */
+    check('  it does NOT emit session_id as an address',
+        !!j && !/brain-1/.test(j.hookSpecificOutput.additionalContext),
+        j ? JSON.stringify(j.hookSpecificOutput.additionalContext.split('\n')[1] || '') : '');
     check('  it carries the Stop event name',
         !!j && j.hookSpecificOutput.hookEventName === 'Stop');
     check('  it does NOT block the turn',
