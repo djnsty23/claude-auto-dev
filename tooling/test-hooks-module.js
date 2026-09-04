@@ -48,7 +48,7 @@ function fakeOn() {
     return on;
 }
 
-function fakeDollar({ cwd = '/home/u/proj', repo = null, files = {}, failFs = false } = {}) {
+function fakeDollar({ cwd = '/srv/proj', repo = null, files = {}, failFs = false } = {}) {
     const log = [];
     const status = [];
     const $ = Object.freeze({
@@ -71,8 +71,8 @@ function fakeDollar({ cwd = '/home/u/proj', repo = null, files = {}, failFs = fa
     return { $, log, status };
 }
 
-const AUTODEV_REPO = { root: 'C:\\Users\\u\\claude-auto-dev', remote: 'https://github.com/someone/claude-auto-dev.git', internal: false, name: null };
-const OTHER_REPO = { root: '/home/u/project-b', remote: 'git@github.com:someone/project-b.git', internal: false, name: null };
+const AUTODEV_REPO = { root: 'D:\\work\\claude-auto-dev', remote: 'https://github.com/someone/claude-auto-dev.git', internal: false, name: null };
+const OTHER_REPO = { root: '/srv/project-b', remote: 'git@github.com:someone/project-b.git', internal: false, name: null };
 
 (async () => {
     const fn = await import(pathToFileURL(ENTRY).href);
@@ -193,8 +193,8 @@ const OTHER_REPO = { root: '/home/u/project-b', remote: 'git@github.com:someone/
 
     // --- 4. bash rules --------------------------------------------------------
     console.log('\n== decideBash');
-    const win = 'C:\\Users\\u\\claude-auto-dev';
-    const posix = '/home/u/claude-auto-dev';
+    const win = 'D:\\work\\claude-auto-dev';
+    const posix = '/srv/claude-auto-dev';
     const denyCases = [
         ['git commit -m "x"', 'git-commit-m'],
         ['git commit -am "x"', 'git-commit-m'],
