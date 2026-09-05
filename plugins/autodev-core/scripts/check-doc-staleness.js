@@ -108,6 +108,82 @@ const SECTION_RE = /^\s*(?:#{1,6}\s+(.+?)\s*$|>?\s*\*\*(.+?)\*\*)/;
 /** A date the writer stamped, so the claim's age is knowable. */
 const DATE_RE = /\b(20\d\d)-(\d\d)-(\d\d)\b/;
 
+/**
+ * A SECTION THAT SAYS THE WORK SHIPPED describes history, and everything under
+ * it ages into a false positive every day it survives.
+ *
+ * `[measured 2026-09-05]` the instance: one product's RESUME.md was flagged at
+ * 54 days on the phrase `not done`, under a dated heading whose lead read
+ * `**v626 - Train workout-flow (5 fixes, FLEET agent, LIVE+verified):**`. The
+ * section is a shipped-work record; nothing in it is a live claim.
+ *
+ * Keyed on the SHIPPED MARKER rather than on the heading's date, deliberately.
+ * Suppressing every dated heading would also silence `## 2026-09-05 - what is
+ * still open`, which is a dated heading over genuinely open work. The marker is
+ * the narrower signal and it is the one the instance actually carried.
+ */
+const SHIPPED_SECTION =
+    /\b(live\b|verified|shipped|deployed|landed|merged|closed|done\b|complete)/i;
+
+/**
+ * A QUOTED SPAN CAN OPEN ON ONE LINE AND CLOSE ON THE NEXT, so quote state has
+ * to be carried ACROSS lines. `[measured 2026-09-05]` the same instance:
+ *
+ *     line N     ... not the plain modal; "<pencil> mark
+ *     line N+1   not done" undo CTA on a DONE session ...
+ *
+ * `not done` is the tail of a UI LABEL, not a claim about state. The second
+ * line opens with a CLOSING quote and contains no opener, so a line-local check
+ * mis-pairs it and matches anyway - which is the wrapped-prose trap inverted,
+ * reporting PRESENCE with total confidence rather than absence.
+ */
+const QUOTE_CHARS = /["“”]/g;
+
+/**
+ * RULE 1, NARROW ON PURPOSE. Some headings assert openness STRUCTURALLY: every
+ * row under `## Open PRs` claims its PR is open, with no stale-claim vocabulary
+ * anywhere, so a lexical scan is blind to exactly the machine-generated blocks
+ * a reader trusts most.
+ *
+ * `[measured 2026-09-05]` this repo's own trunk RESUME.md listed a PR as open
+ * that had merged six minutes after that snapshot's HEAD time, two commits as
+ * unpushed that were both ancestors of main, and 3 of 6 worktrees that no
+ * longer existed.
+ *
+ * THE BROAD FORM WAS CENSUSED AND REJECTED. Across five repos - 557 prose
+ * files, 81 headings that "sound open", 1,682 rows under them - matching any
+ * such heading yielded 53 candidates, 37 with a resolved handle, and about
+ * FOUR genuine after triage: roughly 8% precision. A detector at 8% gets muted,
+ * which this fleet has already had to do once. Restricted to the three
+ * machine-WRITTEN status headings below it yielded 6 candidates and 4 genuine,
+ * about 67%, and all four sat in generated blocks rather than in prose.
+ *
+ * So this is an allowlist, not a heuristic, and it should stay one. Adding
+ * "blocked" or "what is next" here is the change that re-introduces the 8%.
+ */
+const GENERATED_STATUS = /^\s*(open\s+prs?|unpushed(\s+commits)?|uncommitted(\s+changes)?)\s*$/i;
+
+/**
+ * Under those headings the row must carry an UNAMBIGUOUS handle. A bare `#N` in
+ * prose is `UI-CONTRACT #1`, `fix #7`, `trap #1 above` - and PR #1 and #7 exist
+ * in nearly every repo, so a bare number resolves as merged essentially always.
+ * `[measured 2026-09-05]` that single mistake produced most of the broad form's
+ * false positives. A plausible identifier is not a valid one.
+ */
+const STRICT_HANDLE =
+    /\/pull\/\d{1,4}\b|\bPR\s+#\d{1,4}\b|\b[0-9a-f]{7,40}\b|\b[A-Z]\d+-[A-Z]{2,5}-\d+\b/;
+
+/**
+ * A row that reports its OWN resolution is an accurate record, not a stale
+ * claim. `[measured 2026-09-05]` 18 of 37 handle-resolved rows were this:
+ * a queue row naming a PR and saying it is **MERGED**, a struck-through item
+ * marked DONE. Counting them measured whether the HANDLE had resolved rather
+ * than whether the LINE claimed openness - a different question wearing the
+ * same output.
+ */
+const SELF_RESOLVED =
+    /~~|\b(done|merged|closed|fixed|shipped|landed|resolved|complete|is pushed|are pushed)\b/i;
+
 function git(args, cwd) {
     try {
         return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -140,8 +216,10 @@ function checkDocStaleness(cwd, opts) {
 
     let scanned = 0, missing = 0, lines = 0, dated = 0;
     let conditional = 0, decided = 0, resolved = 0;
+    let quoted = 0, shipped = 0, structural = 0, structuralSeen = 0;
     let headings = 0;
     const findings = [];
+    const structuralFindings = [];
     const now = Date.now();
 
     for (const doc of BOOT_DOCS) {
@@ -152,15 +230,53 @@ function checkDocStaleness(cwd, opts) {
         scanned++;
         const rows = body.split('\n');
         let section = '';
+        let heading = '';
+        // Quote state is carried ACROSS lines: a label can open on one row and
+        // close on the next, and the closing row contains no opener at all.
+        let openQuote = false;
         for (let i = 0; i < rows.length; i++) {
             const line = rows[i];
+            const quotesBefore = openQuote;
+            const qn = (line.match(QUOTE_CHARS) || []).length;
+            if (qn % 2 === 1) openQuote = !openQuote;
             const sm = line.match(SECTION_RE);
-            if (sm) section = sm[1] || sm[2] || '';
+            if (sm) {
+                section = sm[1] || sm[2] || '';
+                // Only a real `#` heading opens a structural block; a bold lead
+                // is a paragraph marker and does not govern the rows after it.
+                if (/^\s{0,3}#{1,6}\s/.test(line)) heading = section;
+                openQuote = false;   // a heading cannot sit inside a quoted span
+            }
+
+            // ---- RULE 1 (narrow): the HEADING is the assertion ---------------
+            // No vocabulary needed and no date required, because these rows are
+            // machine-written and carry a handle by construction. This runs
+            // BEFORE the lexical path so a generated row is classified once.
+            if (GENERATED_STATUS.test(heading) && line.trim() && !sm) {
+                structuralSeen++;
+                if (STRICT_HANDLE.test(line) && !SELF_RESOLVED.test(line)) {
+                    structural++;
+                    structuralFindings.push({ doc, line: i + 1, section: heading,
+                        text: line.trim().slice(0, 150) });
+                }
+                continue;
+            }
+
             if (line.length < 20) continue;
             lines++;
             if (!OPEN_STATE.some((re) => re.test(line))) continue;
+            // A match inside a span that was ALREADY open when this line began
+            // is quoted text - a UI label, an error string - not a claim.
+            if (quotesBefore) { quoted++; continue; }
             if (CONDITIONAL.test(line)) { conditional++; continue; }
             if (DECIDED.test(line) || DECIDED_SECTION.test(section)) { decided++; continue; }
+            // AFTER `decided`, deliberately. `SHIPPED_SECTION` matches "closed",
+            // and a section headed "Closed as NOT defects" is a DECISION, not
+            // shipped work. Placed first, this rule silently stole that case
+            // from the decided bucket and the suite caught it as a count moving
+            // from 2 to 1 - which is the whole reason suppressions are counted
+            // per rule rather than summed.
+            if (SHIPPED_SECTION.test(section)) { shipped++; continue; }
             if (RESOLVED.test(line)) { resolved++; continue; }
             // Look for a date on the line or within the three above it, which is
             // where a `[measured YYYY-MM-DD]` tag usually sits.
@@ -182,9 +298,12 @@ function checkDocStaleness(cwd, opts) {
         population: { bootDocsLookedFor: BOOT_DOCS.length, present: scanned, absent: missing,
             linesConsidered: lines, suppressedAsConditional: conditional,
             suppressedAsDecided: decided, suppressedAsResolved: resolved,
+            suppressedAsQuotedSpan: quoted, suppressedAsShippedSection: shipped,
+            generatedStatusRowsSeen: structuralSeen, structuralFindings: structural,
             assertedInAHeading: headings,
             openStateAndDated: dated, olderThanAgeDays: findings.length },
-        findings: findings.slice(0, max), note,
+        findings: findings.slice(0, max),
+        structural: structuralFindings.slice(0, max), note,
     };
 }
 
@@ -200,6 +319,13 @@ function render(r) {
         + ' decided, ' + (p.suppressedAsResolved || 0) + ' resolved), '
         + (p.openStateAndDated || 0) + ' open-state and dated, '
         + (p.olderThanAgeDays || 0) + ' older than the threshold');
+    // The structural path is reported on its own line: it shares no counter with
+    // the lexical one, and folding them would hide which rule found what.
+    out.push('    structural: ' + (p.generatedStatusRowsSeen || 0)
+        + ' rows under a generated status heading, ' + (p.structuralFindings || 0)
+        + ' carrying a handle and not self-resolved'
+        + '; suppressed ' + (p.suppressedAsQuotedSpan || 0) + ' inside a quoted span, '
+        + (p.suppressedAsShippedSection || 0) + ' under a shipped section');
     for (const n of r.note) out.push('    NOTE: ' + n);
     if (!r.findings.length) { out.push('    nothing to re-check'); return out.join('\n'); }
     out.push('    RE-CHECK BEFORE TRUSTING (oldest first):');

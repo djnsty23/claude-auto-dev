@@ -81,6 +81,44 @@ const FIXTURE = [
     '## A note written after the fact',
     '`[measured 2026-01-02]` The row above used to say MERGEABLE and blocked on a revert.',
     '',
+
+    // ---- RULE 1 (narrow): the HEADING is the assertion ---------------------
+    // No open-state vocabulary and no date on any of these rows. A lexical scan
+    // cannot see them; the generated-status heading IS the claim.
+    '## Open PRs',
+    '',
+    '- [#127](https://github.com/o/r/pull/127) `fix/x` - a PR row with a real handle',
+    '- a row with no handle at all, which must NOT be reported',
+    // A BARE `#N` is not a PR reference. `UI-CONTRACT #1`, `fix #7`, `trap #1`
+    // all look like one, and PR #1 and #7 exist in nearly every repo, so a bare
+    // number resolves as merged essentially always. Without this row the
+    // strict-handle rule is structurally incapable of failing: a mutation that
+    // accepted bare `#N` survived the whole suite until this line existed.
+    '- see UI-CONTRACT #1 for the row shape, which is not a PR reference',
+    '- [#49](https://github.com/o/r/pull/49) is **MERGED**, recorded so nobody redoes it',
+    '',
+    '## Unpushed commits',
+    '',
+    '- `8b79aa2 fix(thing): a seven-character sha, which must still count`',
+    '',
+    // NOT a generated-status heading. The same row shape under a heading that
+    // merely SOUNDS open is the broad rule the census rejected at ~8%.
+    '## What is next',
+    '',
+    '- [#900](https://github.com/o/r/pull/900) a row under a heading that only sounds open',
+    '',
+
+    // ---- a QUOTED SPAN opening on one line and closing on the next ---------
+    '## A record quoting a control name',
+    '`[measured 2026-01-02]` the flow offers the plain modal and a \"mark',
+    'not done\" undo control, which is a button name rather than a claim.',
+    '',
+
+    // ---- a SHIPPED section, whose rows age into false positives forever ----
+    '## v626 workout flow',
+    '**Five fixes, LIVE+verified:**',
+    '`[measured 2026-01-02]` the resume path is still broken on the older client.',
+    '',
 ].join('\n');
 
 function git(args, cwd) {
@@ -163,6 +201,53 @@ if (tmp) {
         r.population.suppressedAsDecided === 2, String(r.population.suppressedAsDecided));
     check('resolved suppressions are counted separately from decided',
         r.population.suppressedAsResolved === 1, String(r.population.suppressedAsResolved));
+
+    // ---- RULE 1 (narrow): the heading is the assertion ---------------------
+    //
+    // These rows carry NO stale-claim vocabulary and NO date, so every
+    // assertion here is invisible to the lexical path by construction. That is
+    // the point of the rule and the reason it needed its own census.
+    const st = r.structural || [];
+    const stText = st.map((f) => f.text).join(' | ');
+    check('a PR row under `## Open PRs` is reported with no stale wording on it',
+        stText.indexOf('/pull/127') !== -1, stText);
+    check('a seven-character sha under `## Unpushed commits` still counts',
+        stText.indexOf('8b79aa2') !== -1,
+        'tightening the sha pattern to 8+ hex silently dropped real findings once');
+    check('a row with NO handle is not reported', stText.indexOf('no handle at all') === -1);
+    check('a BARE #N is not accepted as a handle',
+        stText.indexOf('UI-CONTRACT') === -1,
+        'PR #1 exists in nearly every repo, so a bare number resolves as merged almost always');
+    check('a row that reports its OWN resolution is not reported',
+        stText.indexOf('/pull/49') === -1,
+        'it says MERGED, so it is an accurate record rather than a stale claim');
+    check('a heading that merely SOUNDS open does NOT trigger the rule',
+        stText.indexOf('/pull/900') === -1,
+        'the broad form measured ~8% precision and is an allowlist for that reason');
+    check('the generated-status population is printed, not just the findings',
+        r.population.generatedStatusRowsSeen >= 4,
+        String(r.population.generatedStatusRowsSeen));
+
+    // Structural findings must NOT join the aged list. They carry no date, so
+    // an --age threshold cannot apply to them, and merging the two would make
+    // `--age 99999` quietly stop meaning "report nothing".
+    check('structural findings are kept OUT of the aged findings list',
+        !r.findings.some((f) => f.text.indexOf('/pull/127') !== -1));
+
+    // ---- a quoted span that opens on one line and closes on the next -------
+    check('vocabulary inside a quoted control name is suppressed',
+        !r.findings.some((f) => f.text.indexOf('undo control') !== -1),
+        'the closing line has no opening quote, so a line-local check matches it');
+    check('  and the quoted-span suppression is counted, not silent',
+        r.population.suppressedAsQuotedSpan === 1,
+        String(r.population.suppressedAsQuotedSpan));
+
+    // ---- a section that says the work shipped ------------------------------
+    check('a claim under a LIVE+verified section is suppressed',
+        !r.findings.some((f) => f.text.indexOf('resume path') !== -1));
+    check('  and the shipped-section suppression is counted separately',
+        r.population.suppressedAsShippedSection === 1,
+        String(r.population.suppressedAsShippedSection));
 
     // The precision pass must not buy its numbers by deleting real output.
     check('the known positive still survives every suppressor',
