@@ -1,5 +1,101 @@
 # Changelog
 
+## [8.162.0] - 2026-09-05
+
+Four fixes, and three of them are the same defect wearing different clothes: a
+signal that is internally consistent, points at a real thing, and answers a
+question next to the one its reader is asking.
+
+### Fixed
+
+- **The coordinator write rail had a hole exactly the width of the character
+  people type.** `path.resolve` has no notion of `~`, so a product-repo path
+  written that way resolved to `<home-repo>/~/…` and the containment check
+  reported it as INSIDE the home repo. `git -C ~/path/to/product commit` was
+  permitted where the absolute and relative spellings of the identical command
+  both blocked. Found because the guard refused the coordinator's own memory
+  mirror, which is the one write it should not have refused. Same family as the
+  2026-09-02 backslash defect the file already documents, and worse in one
+  respect: that one failed in both directions and announced itself the same day,
+  while this one only ever failed OPEN, and a rail that only fails open is
+  indistinguishable from a rail that works. `${HOME}` turned out to be a second
+  bug: `commandSegments` splits on `{` and `}` for shell brace groups, so that
+  spelling was shredded into three fragments and parsed to nothing. Mutation
+  tested per half, 8 cases and 2 cases respectively. (#167)
+- **A session that had published everything was told it had not.** The Stop
+  hook counted `@{upstream}..HEAD`, which measures distance from a BRANCH's own
+  tracked ref, and any session whose work reaches a trunk by merge leaves that
+  ref behind permanently. In a worktree fleet that is most sessions. It now
+  resolves `origin/HEAD`, rather than assuming `origin/main` because one repo
+  here has a `main` two months behind its real trunk, and prints both facts when
+  they disagree: a branch-local count on published work says a merge left the
+  ref behind, which is worth seeing, and printing it ALONE was the defect. The
+  cost was never the one wrong line. A nudge that fires on published work trains
+  the reader to ignore the nudge, and then it misses the session that genuinely
+  has not reported.
+- **`RESUME.md` could not be dated, so a week-old snapshot read like a fresh
+  one.** Its only timestamp described a commit rather than the file, and its
+  three state sections were each wrong on a trunk snapshot three days old: a
+  merged PR under `Open PRs`, two ancestors of main under `Unpushed commits`,
+  and three worktrees that no longer existed. A `| generated |` row now leads
+  the table, because it dates every row beneath it. (#166)
+- **The gate's dirty-tree refusal described a mechanism retired five days
+  earlier.** `check:suites` stopped mutating the shared tree on 2026-08-31; both
+  `CLAUDE.md` and the script's own message went on telling readers to stash to
+  protect work the sweep cannot touch. The refusal was always right and its
+  reason was not, which is the harder kind of stale claim, because a sentence
+  that still gives working advice is never revisited. The true reason is better
+  and was unwritten: the sweep grades HEAD, so running it dirty reports on
+  committed code while naming files you are still editing.
+
+### Added
+
+- **The doc-staleness checker reads structure, not only vocabulary.** A row
+  under `## Open PRs` carrying a PR number asserts openness with no stale-claim
+  word anywhere, so a lexical sweep is blind to exactly the machine-generated
+  status blocks readers trust most. The rule is an ALLOWLIST of three generated
+  headings rather than a heuristic, and the census is why: any-open-sounding
+  heading scored 53 candidates for about 4 genuine findings, roughly 8%, which
+  is the threshold at which this fleet has already had to mute a detector, while
+  the narrow form scored 6 for 4. All four genuine findings were in generated
+  blocks and none was prose. Two suppressions land with it: quote state carried
+  ACROSS lines, since a quoted label whose opening quote is on the previous line
+  defeats any line-local check, and a shipped-marker section suppression, since
+  an append-only changelog ages every historical section into a false positive
+  forever. (#168)
+
+### Known defect in this release
+
+- **The shipped-section suppression above OVER-SUPPRESSES, and it ships that
+  way.** Its pattern includes the bare word `live`, which matches a running
+  VERSION marker rather than a record of shipped work. On one project's trunk a
+  bold lead of the form `**Live \`vNNN · swNNN\`**` is read as a shipped section,
+  so the claim on the very next line, that a mobile release is still blocked on a
+  human, is suppressed. That claim had been independently proved half stale
+  earlier the same day, so the rule silently removed a verified finding.
+
+  Measured across five trunks, same command, before and after the rule: two of
+  them lose findings, 4 to 2 and 2 to 1. The quoted-span half of the change works
+  correctly; the over-suppression is entirely the `live` token.
+
+  It is recorded here rather than fixed here because the operator asked for the
+  release now, and the fix was still under mutation test in another session when
+  it was cut. The effect is a QUIETER report rather than a wrong one, and the
+  tool reports rather than gates, so nothing downstream acts on it. Removed
+  noise is visible and removed truth is not, which is why this note exists
+  instead of a silent wait for the next version.
+
+  Fix expected in 8.163.0: drop `live`, keep `verified|shipped|deployed|landed|
+  merged|complete`, pinned by a discriminating pair where both sections contain
+  the letters of "live" and only one is a shipped record.
+
+### Notes
+
+The version is the plugin-cache key, so none of the above ran on any machine
+until this release. Two of the four were reported by peer sessions rather than
+found by their author, and the third was found because a probe returned an empty
+result that was reported as unreproduced rather than quietly re-run.
+
 ## [8.161.0] - 2026-09-05
 
 ### Added
