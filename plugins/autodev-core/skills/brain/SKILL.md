@@ -233,6 +233,44 @@ Other scripts sit beside those three and were not run at boot. One warning:
 `fleet-notify.js` fires real Windows toasts at the user. Use `--dry` to see what
 would fire, `--test` for exactly one sample.
 
+### 2b. The DOCUMENTS decay too, so re-check what they assert
+
+Step 2 regenerates git and session state because it decays within hours. The
+prose a Brain reads at boot decays the same way and nothing regenerates it.
+
+```powershell
+(Get-Content "$env:USERPROFILE\.claude\brain-brief.json" -Raw | ConvertFrom-Json).repos | ForEach-Object { node "$B\check-doc-staleness.js" --repo $_ --age 7 }
+```
+
+It reads the `repos` array, which is the mandate's own list, so client repos are
+excluded by construction rather than by remembering to exclude them.
+
+**The instance.** `[measured 2026-09-05]` One product's `RESUME.md` said of a
+payment webhook fix: *"No real delivery has arrived since, so the fix is
+unproven."* That was true when written at 11:18:46Z and false by 22:24:35Z the
+same day. It stood for fifteen days. A Brain read it at boot, ranked "the
+revenue path is unverified" as the highest-priority item across five projects,
+and spent a session proving something already proven.
+
+**A stale OPEN claim is far worse than a stale "fixed in PR #N".** The stale
+"fixed" surfaces the moment anybody looks, because the work is still needed and
+its absence shows. A stale "still unproven" makes a reader SKIP work already
+done, and skipping emits no output, no failure and no diff. The cost is
+invisible by construction and compounds for as long as the sentence stands.
+
+**What the output is, and what it is not.** It is a short list of claims to
+re-check before believing, ranked by the age of the date their writer stamped.
+It does NOT decide staleness, because deciding needs a probe per claim and
+guessing one produces a gate that is confidently wrong. It always exits 0.
+
+**Re-check by asking the right surface, then fix the sentence in the same
+turn.** A claim about a deploy is answered by the running system, not by git.
+Leaving a re-checked claim unedited guarantees the next Brain pays for it again.
+
+**Read the population line, not the finding count.** A repo with zero findings
+and 3 boot documents present is a different statement from one with zero
+findings and 0 documents present, and only the population separates them.
+
 ### 3. Is a leftover panel deny still set? Find and clear it; never write one
 
 ```powershell
@@ -326,7 +364,7 @@ Get-ChildItem "$env:USERPROFILE\claude-memory\heal-runs\" | Sort-Object LastWrit
 ### 4b. Read what the last Brain already learned, BEFORE you interview anyone
 
 ```powershell
-Get-ChildItem "$env:USERPROFILEclaude-memoryDECISIONS-*.md" | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Encoding UTF8 }
+Get-ChildItem "$env:USERPROFILE\claude-memory\DECISIONS-*.md" | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Encoding UTF8 }
 ```
 
 **A handover transfers ADDRESSES and loses ANSWERS, and nothing about the loss

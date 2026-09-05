@@ -61,6 +61,25 @@ and it flags three things that change how a repo may be worked:
 - **a large `RESUME.md`** — probably hand-written. One is 458KB. A generator
   that overwrites it destroys work no snapshot reconstructs.
 
+**The survey reports that those documents EXIST and how old the FILE is. It says
+nothing about whether their claims still hold**, and an unattended window is
+exactly when a wrong claim turns into a night of misdirected work, because
+nobody is awake to say "that was fixed weeks ago". So run the claim check beside
+the survey:
+
+```powershell
+(Get-Content "$env:USERPROFILE\.claude\brain-brief.json" -Raw | ConvertFrom-Json).repos | ForEach-Object { node "$B\check-doc-staleness.js" --repo $_ --age 7 }
+```
+
+`[measured 2026-09-05]` one `RESUME.md` claimed a payment fix was unproven; it
+had been proven eleven hours after that sentence was written and the sentence
+stood for fifteen days. A Brain ranked it top across five projects.
+
+**Nothing it prints may go into a brief without being re-checked first.** A
+dispatch built on an open-state claim is the propagation failure this role costs
+most: a wrong steer told to the operator costs a correction, and the same steer
+written into a session's brief becomes built work.
+
 ### 2. Join sessions to repos — on cwd AND branch
 
 `mcp__ccd_session_mgmt__list_sessions`. Match by working directory and branch,
