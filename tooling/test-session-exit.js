@@ -78,6 +78,28 @@ try {
             r.out.indexOf('None. A real zero') !== -1);
         has('the branch is still reported', r.out, '`main`');
         has('no upstream is named as such', r.out, '_none tracked_');
+
+        // ---- the snapshot must date ITSELF ---------------------------------
+        //
+        // Same family as the assertion above: two states that render alike.
+        // A snapshot taken a minute ago and one taken last week are opposite
+        // facts to a reader deciding whether to trust the rows below, and
+        // without a stamp both present as current.
+        //
+        // The expected value is DERIVED from the subject's own output rather
+        // than compared against a date written here. A fixture that names a
+        // date is a second clock, and it goes red on its own the day the
+        // clocks disagree - so this parses whatever the subject emitted and
+        // asks only that it be a real instant near now.
+        const stamp = (r.out.match(/^\| generated \| (\S+) \|$/m) || [])[1];
+        check('the table carries a generated stamp', !!stamp, r.out.slice(0, 200));
+        const skew = stamp ? Math.abs(Date.now() - Date.parse(stamp)) : NaN;
+        check('  and it is a real instant, within an hour of now',
+            Number.isFinite(skew) && skew < 3600e3, 'parsed: ' + stamp);
+        // It dates every row under it, so it must come FIRST. A stamp buried
+        // below the rows it qualifies is read after they have been believed.
+        check('  and it is the first row of the table',
+            r.out.indexOf('| generated |') < r.out.indexOf('| directory |'));
     }
 
     // ---- a repo WITH an upstream and nothing ahead: a real zero -------------
