@@ -29,9 +29,26 @@ Nothing about the first command hints at the second, which is why `npm run gate`
 now exists: it chains both and is what CI runs.
 
 **Run it on a CLEAN tree, after committing and before pushing.** `check:suites`
-rewrites sources in place, so it refuses a dirty tree and exits 2. Iterate with
-`npm test`, then commit, then `npm run gate`, then push. A commit you intend to
-describe as gated needs that second command to have run against it.
+grades HEAD, in a private worktree under tmpdir, so it refuses a dirty tree and
+exits 2: run it dirty and every verdict is about committed code while the output
+names files you are still editing. Iterate with `npm test`, then commit, then
+`npm run gate`, then push. A commit you intend to describe as gated needs that
+second command to have run against it.
+
+⚠️ **This paragraph said "rewrites sources in place" until 2026-09-05, and it
+had been false since 7d70fab on 2026-08-31**, when the sweep stopped touching
+the shared tree. The refusal was right the whole time and its stated reason was
+not, which is the harder kind of stale claim: a sentence that is still USEFUL
+goes uncorrected because the advice it gives works. It survived here, in the
+file every session reads, and in the script's own refusal message, where it told
+people to stash to protect work that was never at risk.
+
+Worth generalising, because this file is full of the same shape. An INVARIANT
+cannot rot: "a 42703 means the column is missing" is a property of the world. An
+IMPLEMENTATION DESCRIPTION rots the instant someone refactors, and both read as
+mechanism. The discriminator is whether the sentence names something a refactor
+can change: a tool, a file, a data structure, a code path. When it does, it is a
+dated claim whether or not it carries a date.
 
 **And do not touch the tree WHILE it runs.** Clean at the start is not enough:
 `test-all.js` snapshots `git status` before the suites and compares after, so a

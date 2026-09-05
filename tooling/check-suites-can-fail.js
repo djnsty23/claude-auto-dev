@@ -371,13 +371,28 @@ function completed(r, what) {
 const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
 const gitW = (args) => execSync('git ' + args, { cwd: SWEEP_ROOT, encoding: 'utf8' });
 
-// Refuse to run on a dirty tree: this script writes stubs over real files and
-// restores them with `git checkout --`, which would destroy uncommitted work.
+// Refuse to run on a dirty tree, and the REASON changed when the private
+// worktree landed. It used to be "this script overwrites your files", which was
+// true while the sweep mutated the shared tree in place and has been false since
+// 7d70fab (2026-08-31): mutation happens in a detached worktree under tmpdir and
+// your files are never touched.
+//
+// The refusal stays, because the remaining reason is just as good and nobody had
+// written it down: the sweep checks out HEAD, so it grades COMMITTED code. Run it
+// dirty and every verdict is about a tree you do not have, while the output names
+// files you are in the middle of editing. A green there says nothing about the
+// change in front of you.
+//
+// `[reported 2026-09-05]` a peer session found both this message and CLAUDE.md
+// still describing the retired mechanism, five days after it was retired. The
+// wording below is what a reader acts on, so it is part of the tool rather than
+// a comment: it told people to stash to protect work that was never at risk.
 const dirty = git('status --porcelain').trim();
 if (dirty) {
     console.error('\nRefusing to run: the working tree has uncommitted changes.\n');
-    console.error('This script overwrites source files with stubs and restores them from git,');
-    console.error('which would discard your edits. Commit or stash first.\n');
+    console.error('This sweep mutates a private worktree, not yours, so your edits are safe.');
+    console.error('It grades HEAD, so running it dirty would report on committed code while');
+    console.error('naming files you are still changing. Commit first, then run it.\n');
     console.error(dirty.split('\n').slice(0, 10).join('\n'));
     process.exit(2);
 }
