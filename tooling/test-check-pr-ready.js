@@ -115,5 +115,43 @@ check('an EMPTY rollup is refused, since it looks identical to a clean one',
 check('every-check-skipped is refused even with no failures',
     /good === 0 && skipped > 0/.test(SRC));
 
+// ---- PENDING is pending, not unknown -----------------------------------------
+//
+// Legacy commit statuses (Vercel and most bots) carry `state: PENDING` while
+// running. `[measured 2026-09-05]` on a live PR that read as UNRECOGNISED: the
+// safe direction, but the wrong kind, since pending is a state the script
+// knows and waits on rather than one it has never heard of.
+const RUNNING = setFrom('STILL_RUNNING');
+check('the suite can read STILL_RUNNING out of the subject', !!RUNNING);
+if (RUNNING && GOOD && BAD && NOT_EV) {
+    check('PENDING is classified as still running', RUNNING.has('PENDING'));
+    check('EXPECTED (a required check not yet reported) is still running', RUNNING.has('EXPECTED'));
+    for (const s of RUNNING) {
+        check('running state ' + s + ' is in no terminal vocabulary', !GOOD.has(s) && !BAD.has(s) && !NOT_EV.has(s));
+    }
+    check('a running state is counted as PENDING in the loop, before the skip test',
+        SRC.indexOf('STILL_RUNNING.has(concl)') !== -1
+        && SRC.indexOf('STILL_RUNNING.has(concl)') < SRC.indexOf('NOT_EVIDENCE.has(concl)'));
+}
+
+// ---- an empty rollup is explained, not merely refused ----------------------
+//
+// Two causes, opposite meanings. Every PR-firing workflow path-filtered the
+// change out: fine, nothing could ever go red. A gate was due and never
+// started: the outage shape. The subject asks the workflow files at the trunk
+// which one it is, and only the first is allowed through as READY.
+check('the subject asks the path-filter helper about an empty rollup',
+    /explainEmptyRollup\(cwd,/.test(SRC), 'without this an empty rollup can never be explained');
+check('a benign empty rollup is worded as the filter WORKING',
+    /the rollup is EMPTY and that is the path filter working/.test(SRC));
+check('a due-but-missing run is worded as DUE, and names the workflow',
+    /a run was DUE and none exists/.test(SRC));
+check('only the benign wording is excluded from the blocking reasons',
+    /!r\.startsWith\('the rollup is EMPTY and that is the path filter working'\)/.test(SRC)
+    && !/!r\.startsWith\('the rollup is EMPTY but a run was DUE/.test(SRC),
+    'the DUE case must stay blocking or an outage reads as a clean docs PR');
+check('the changed-file list is requested from gh, or the helper has nothing to judge',
+    /headRefName,files'/.test(SRC));
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

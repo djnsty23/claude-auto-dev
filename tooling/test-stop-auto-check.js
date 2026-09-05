@@ -460,6 +460,53 @@ function runWithCfg(dir, cfg) {
         out?.decision === 'block' && !/untouched >30d/.test(stderr));
 }
 
+// ------------------------------------------- the next-story nudge, outside auto
+//
+// `[measured 2026-09-05]` a dozen fleet sessions drained over three hours with
+// actionable stories sitting in prd.json a directory away. Not in auto mode, so
+// every stop was approved and nothing said what was next. The nudge rides on
+// the approve as a systemMessage: it carries no decision, so it can never
+// block, and it is attached ONLY when a story is actionable, so a repo with
+// nothing to pull gets exactly the approve it always got.
+{
+    let d = project({ prd: SPRINT_PENDING });
+    let { decision } = run(d);
+    check('nudge: no auto + pending story → still approve', decision?.decision === 'approve');
+    check('nudge: names the next actionable story', (decision?.systemMessage || '').includes('S1-002'));
+    check('nudge: says the word that pulls it', /`auto`/.test(decision?.systemMessage || ''));
+    check('nudge: counts how many are actionable', /1 actionable story\b/.test(decision?.systemMessage || ''));
+
+    d = project({ prd: SPRINT_DONE });
+    ({ decision } = run(d));
+    check('nudge: all done → approve with NO systemMessage', decision?.decision === 'approve' && decision.systemMessage === undefined);
+
+    d = project({ prd: { stories: { 'S1-001': { title: 'a', passes: true }, 'S1-002': { title: 'b', passes: 'deferred' } } } });
+    ({ decision } = run(d));
+    check('nudge: deferred is a decision not to do it, so NO nudge', decision?.systemMessage === undefined);
+
+    d = project({ prd: { stories: { 'S1-001': { title: 'a', passes: 'needs-setup' } } } });
+    ({ decision } = run(d));
+    check('nudge: needs-setup cannot be pulled by an agent, so NO nudge', decision?.systemMessage === undefined);
+
+    d = project({ prd: { stories: { 'S1-001': { title: 'a', passes: true }, 'S1-002': { title: 'b', passes: false } } } });
+    ({ decision } = run(d));
+    check('nudge: a FAILED story is actionable (retry), so it IS nudged', (decision?.systemMessage || '').includes('S1-002'));
+
+    d = project({});
+    ({ decision } = run(d));
+    check('nudge: no prd.json → approve, silent', decision?.decision === 'approve' && decision.systemMessage === undefined);
+
+    d = project({ prd: '{ not json' });
+    ({ decision } = run(d));
+    check('nudge: unparseable prd → approve, silent (fails open)', decision?.decision === 'approve' && decision.systemMessage === undefined);
+
+    // The nudge must never be the thing that keeps a session alive: auto mode
+    // is the only path that blocks, and it did so before this existed.
+    d = project({ auto: true, prd: SPRINT_PENDING });
+    ({ decision } = run(d));
+    check('nudge: in auto mode the existing BLOCK path still wins', decision?.decision === 'block');
+}
+
 // ---------------------------------------------------------------- report
 
 let pass = 0, fail = 0;

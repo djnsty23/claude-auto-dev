@@ -46,6 +46,12 @@ const { execFileSync } = require('child_process');
 const TERMINAL_GOOD = new Set(['SUCCESS', 'NEUTRAL']);
 const TERMINAL_BAD = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STALE', 'STARTUP_FAILURE']);
 const NOT_EVIDENCE = new Set(['SKIPPED']);
+// Legacy commit statuses (Vercel, most bots) carry `state`, not `status`, and
+// report PENDING while running. `[measured 2026-09-05]` that read as
+// UNRECOGNISED on a real PR: the fail-safe direction, but wrong in kind, since
+// pending is a state this script knows and waits on. EXPECTED is GitHub's
+// "required check not yet reported".
+const STILL_RUNNING = new Set(['PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED']);
 
 function gh(args, cwd) {
     try {
@@ -66,7 +72,7 @@ function present(v) {
  */
 function checkPrReady(prNumber, cwd) {
     const raw = gh(['pr', 'view', String(prNumber), '--json',
-        'number,state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,baseRefName,headRefName'], cwd);
+        'number,state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,baseRefName,headRefName,files'], cwd);
     if (raw === null) {
         return { verdict: 'CANNOT_TELL', reasons: ['gh could not answer for PR ' + prNumber + ' in ' + (cwd || process.cwd())], population: {}, checks: [] };
     }
@@ -95,6 +101,7 @@ function checkPrReady(prNumber, cwd) {
         const label = name || '(unnamed)';
         if (status !== null && status !== 'COMPLETED') { pending++; checks.push([label, status + '/pending']); continue; }
         if (concl === null) { pending++; checks.push([label, 'no conclusion yet']); continue; }
+        if (STILL_RUNNING.has(concl)) { pending++; checks.push([label, concl + '/pending']); continue; }
         if (NOT_EVIDENCE.has(concl)) { skipped++; checks.push([label, 'SKIPPED']); continue; }
         if (TERMINAL_GOOD.has(concl)) { good++; checks.push([label, concl]); continue; }
         if (TERMINAL_BAD.has(concl)) { bad++; checks.push([label, concl]); continue; }
@@ -122,9 +129,35 @@ function checkPrReady(prNumber, cwd) {
         reasons.push('mergeStateStatus is UNSTABLE with no failing or pending check; usually the rollup artifact');
     }
     if (good === 0 && skipped > 0) reasons.push('every check that ran was SKIPPED, so nothing was actually verified');
-    if (rollup.length === 0) reasons.push('the rollup is EMPTY, which looks identical to a clean one and is not');
+    // An empty rollup looks identical to a clean one and is not. But it has two
+    // causes with opposite meanings: every PR-firing workflow path-filtered the
+    // change out (fine, nothing could ever go red), or a gate was due and never
+    // started (the outage shape). Ask the workflow files at the trunk which.
+    let pathFilter = null;
+    if (rollup.length === 0) {
+        const files = Array.isArray(pr.files) ? pr.files.map((f) => f.path).filter(Boolean) : [];
+        if (files.length && cwd) {
+            try {
+                const { explainEmptyRollup } = require(require('path').join(__dirname, 'pr-path-filters.js'));
+                pathFilter = explainEmptyRollup(cwd, 'origin/' + (pr.baseRefName || 'main'), files, pr.baseRefName);
+            } catch (e) { pathFilter = null; }
+        }
+        if (pathFilter && !pathFilter.anyDue && pathFilter.population > 0) {
+            reasons.push('the rollup is EMPTY and that is the path filter working: ' + files.length + ' changed file(s) excluded by all '
+                + pathFilter.population + ' workflow(s) at the trunk, so nothing could have run or gone red');
+        } else if (pathFilter && pathFilter.anyDue) {
+            const due = pathFilter.workflows.filter((w) => w.wouldRun).map((w) => w.name + ' (' + w.why + ')').join(', ');
+            reasons.push('the rollup is EMPTY but a run was DUE and none exists: ' + due);
+        } else {
+            reasons.push('the rollup is EMPTY, which looks identical to a clean one and is not'
+                + (files.length ? '' : '; could not read the changed files to tell whether a gate was due'));
+        }
+    }
 
-    const blocking = reasons.filter((r) => !r.startsWith('mergeStateStatus is UNSTABLE with no'));
+    // Two reasons are notes, not blocks: the UNSTABLE-with-nothing-pending
+    // artifact, and an empty rollup the path filters fully account for.
+    const blocking = reasons.filter((r) => !r.startsWith('mergeStateStatus is UNSTABLE with no')
+        && !r.startsWith('the rollup is EMPTY and that is the path filter working'));
     return { verdict: blocking.length === 0 ? 'READY' : 'NOT_READY', reasons, population, checks, pr };
 }
 
