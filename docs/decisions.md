@@ -508,3 +508,50 @@ because it has no users, and the away declaration delegating reversible
 decisions. A branch push here deploys nothing and is one `git push --delete`
 from undone. The Brain took the decision in its own name and said so; the
 version bump to 8.160.0 is not part of it and waits for a green PR.
+
+## 2026-09-05 — a snapshot that cannot date itself
+
+**The trunk's own `RESUME.md` was three days stale and nothing in it said so.**
+`[measured 2026-09-05]` at `origin/main`, all three state sections were wrong:
+`## Open PRs` listed [#127](https://github.com/djnsty23/claude-auto-dev/pull/127),
+merged `2026-09-02T19:07:18Z` — six minutes after the snapshot's own HEAD time,
+so it was accurate for about six minutes. `## Unpushed commits` listed `8b79aa2`
+and `0d0d6cb`, both ancestors of `origin/main`. `## Worktrees` listed six, of
+which three no longer exist, against eight that do.
+
+**The fix is a `| generated |` row, first in the table, and that is all it is.**
+A reader could not date the snapshot: the only timestamp was `HEAD committed`,
+which is a fact about a commit, not about when the file was written. So a
+snapshot taken a minute ago and one taken last week rendered identically. That
+is the suite's own founding thesis — null must not render as empty, because
+"no unpushed commits" and "git was never asked" are opposite facts — arriving
+one level up, where *recent* and *ancient* were the pair that looked alike.
+
+Three assertions, each mutation-tested and each caught by the assertion under
+test rather than a neighbour: removing the row (2 red), moving it below
+`directory` (1 red), and emitting a plausible non-instant `'recently'` (1 red).
+The third is the one that earns its place — `has('| generated |')` would have
+passed it. The expected value is parsed from the subject's own output and
+checked for being a real instant near now, never compared against a date
+written into the fixture, because a fixture that names a date is a second clock
+and goes red on its own when the two disagree.
+
+**Not done, and deliberately left for the operator.** `RESUME.md` is a
+per-session artifact committed to a shared trunk: it names one worktree's
+directory and branch, so it is wrong for the other seven readers by
+construction, and regenerating it only moves which tree it is right about.
+The history already shows this being hand-patched — `chore(resume): regenerate
+— it described a different worktree` — and 23 commits touched the file in 30
+days. A stamp makes the decay legible; it does not make a per-session file into
+a shared one. Whether the trunk should carry it at all is a convention change,
+not a bug fix, so it is recorded here rather than decided while he is away.
+
+**Where this came from.** A sweep for stale "still open / unproven / blocked"
+claims across five repos, written up in `~/claude-memory/STALE-CLAIMS-2026-09-05.md`.
+Worth noting against that report's own method: its detector found only 12
+checkable lines in this repo and **none of them were this file**. The sweep
+matched on vocabulary — "still open", "unproven", "blocked on" — and a table row
+reading `| #127 | fix/... |` under a `## Open PRs` heading asserts openness
+structurally, with no such word anywhere. A state document can be stale without
+using any stale-claim language, and a lexical detector is blind to exactly the
+most machine-generated, most trusted kind.

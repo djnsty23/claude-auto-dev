@@ -140,6 +140,15 @@ const lines = [
     '',
     '| field | value |',
     '|---|---|',
+    // FIRST row, because it dates every other row. Without it a reader cannot
+    // tell a snapshot taken a minute ago from one taken last week, and the two
+    // render identically - the same defect this suite exists to prevent one
+    // level up, where a null section and an empty section look alike.
+    // `[measured 2026-09-05]` the copy of RESUME.md on this repo's own trunk
+    // listed PR #127 as open (merged 6 minutes after that snapshot was taken),
+    // two commits as unpushed (both merged), and 3 of 6 worktrees that no
+    // longer exist - and nothing in the file let a reader date any of it.
+    '| generated | ' + new Date().toISOString() + ' |',
     '| directory | `' + tilde(CWD) + '` |',
     '| branch | ' + (branch ? '`' + branch + '`' : '_not a git repo_') + ' |',
     '| upstream | ' + (upstream ? '`' + upstream + '`' : '_none tracked_') + ' |',
