@@ -121,9 +121,27 @@ const DATE_RE = /\b(20\d\d)-(\d\d)-(\d\d)\b/;
  * Suppressing every dated heading would also silence `## 2026-09-05 - what is
  * still open`, which is a dated heading over genuinely open work. The marker is
  * the narrower signal and it is the one the instance actually carried.
+ *
+ * `live` IS DELIBERATELY ABSENT, and its removal is the whole of this rule's
+ * first correction. `[measured 2026-09-05]`, running the merged rule across the
+ * fleet, it suppressed a genuine finding:
+ *
+ *     ## WHERE THINGS STAND - 2026-07-31
+ *     **Live `v1098 · sw674`** · iOS TestFlight **build 1015** · ...
+ *     (release still blocked on Andy: Play Console + Firebase - see below).
+ *
+ * The only token matching was `Live`, from a DEPLOYMENT VERSION MARKER in a
+ * status header. That header is the opposite of a shipped-work record: it is
+ * the section a reader consults for what is still open. The claim under it had
+ * been verified half stale by hand hours earlier, and the rule removed it.
+ *
+ * A suppression that removes a TRUE finding is worse than the noise it was
+ * tuning away, because the noise is visible and the loss is not. So the marker
+ * must describe the WORK's status (`LIVE+verified`, which still matches on
+ * `verified`) and never a running version.
  */
 const SHIPPED_SECTION =
-    /\b(live\b|verified|shipped|deployed|landed|merged|closed|done\b|complete)/i;
+    /\b(verified|shipped|deployed|landed|merged|closed|done\b|complete)/i;
 
 /**
  * A QUOTED SPAN CAN OPEN ON ONE LINE AND CLOSE ON THE NEXT, so quote state has

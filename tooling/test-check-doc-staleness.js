@@ -119,6 +119,18 @@ const FIXTURE = [
     '**Five fixes, LIVE+verified:**',
     '`[measured 2026-01-02]` the resume path is still broken on the older client.',
     '',
+
+    // ---- the DISCRIMINATING PAIR for the shipped-section rule --------------
+    //
+    // A status header naming a RUNNING VERSION is the opposite of a shipped
+    // record: it is the section a reader consults for what is still open. The
+    // first version of this rule matched `live` and suppressed the claim below,
+    // which had been verified half stale by hand. A suppression that removes a
+    // TRUE finding is worse than the noise it tuned away.
+    '## WHERE THINGS STAND',
+    '**Live `v1098 - sw674`** - TestFlight **build 1015** - debug APK green in CI',
+    '`[measured 2026-01-02]` the store release is still blocked on a console account.',
+    '',
 ].join('\n');
 
 function git(args, cwd) {
@@ -249,17 +261,31 @@ if (tmp) {
         r.population.suppressedAsShippedSection === 1,
         String(r.population.suppressedAsShippedSection));
 
+    // The discriminating pair. Both sections carry the letters l-i-v-e; only
+    // one of them is a record of shipped work. If a future widening of
+    // SHIPPED_SECTION re-admits `live`, the second assertion goes red and the
+    // first stays green, which names the direction of the mistake.
+    check('a LIVE+verified lead DOES suppress',
+        !r.findings.some((f) => f.text.indexOf('resume path') !== -1));
+    check('a `Live vNNN` status header does NOT suppress',
+        r.findings.some((f) => f.text.indexOf('store release') !== -1),
+        'matching `live` here removed a hand-verified finding: a lost true positive is invisible');
+
     // The precision pass must not buy its numbers by deleting real output.
     check('the known positive still survives every suppressor',
         r.findings.some((f) => f.text.indexOf('the fix is unproven') !== -1),
         'a filter that suppresses the motivating instance is worse than no filter');
 
     // ---- what is left, and in what order ----------------------------------
-    check('exactly the two datable, non-rule claims are reported', r.findings.length === 2,
+    // THREE since the shipped-section discriminating pair was added: its
+    // `Live vNNN` half is reportable BY DESIGN, because a status header naming a
+    // running version is not a record of shipped work.
+    check('exactly the three datable, non-rule claims are reported', r.findings.length === 3,
         r.findings.map((f) => f.doc + ':' + f.line).join(' '));
     check('findings are ordered oldest first',
-        r.findings.length === 2 && r.findings[0].age > r.findings[1].age);
-    check('the oldest is the 2025 one', r.findings.length === 2 && r.findings[0].age > 300);
+        r.findings.length === 3 && r.findings[0].age > r.findings[1].age
+        && r.findings[1].age >= r.findings[2].age);
+    check('the oldest is the 2025 one', r.findings.length === 3 && r.findings[0].age > 300);
 
     // ---- the population line ----------------------------------------------
     //
@@ -271,7 +297,7 @@ if (tmp) {
         r.population.present === 1 && r.population.absent === BOOT_DOCS.length - 1,
         r.population.present + '/' + r.population.absent);
     check('the population counts open-state AND dated separately from findings',
-        r.population.openStateAndDated === 2);
+        r.population.openStateAndDated === 3, String(r.population.openStateAndDated));
     const text = render(r);
     check('render prints the population, not just a verdict', /population:/.test(text));
     check('render prints the trunk it read', /trunk=origin\/main/.test(text));
@@ -280,7 +306,7 @@ if (tmp) {
     const strict = checkDocStaleness(tmp, { age: 99999, max: 12 });
     check('a threshold beyond every claim reports nothing', strict.findings.length === 0);
     check('but still reports the same population, so a zero is readable',
-        strict.population.openStateAndDated === 2,
+        strict.population.openStateAndDated === 3,
         'a zero with no denominator looks identical to a broken probe');
 
     // ---- a repo with no trunk says so rather than reporting clean ---------
