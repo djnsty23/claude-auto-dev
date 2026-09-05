@@ -288,12 +288,83 @@ const LIVE = (() => {
         silentOk(r), `exit=${r.status} err=${r.err.length}B`);
 }
 
+// --- published work must not read as unreported ----------------------------
+// `[reported 2026-09-05]` a session that had pushed everything to the trunk was
+// told it was carrying three commits the coordinator had not been told about.
+// The count was real and answered "how far is HEAD from THIS BRANCH's tracked
+// ref", which a merge to the trunk leaves behind permanently. In a worktree
+// fleet that is most sessions, and a nudge that fires on published work trains
+// the reader to ignore the nudge.
+{
+    /** A clone whose branch upstream was left behind by a merge to the trunk. */
+    function mergedToTrunk({ landOnTrunk }) {
+        const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sbr-origin-'));
+        execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'pipe' });
+        const dir = makeRepo();
+        const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'pipe' });
+        git('branch', '-M', 'main');
+        git('remote', 'add', 'origin', origin);
+        git('push', '-q', '-u', 'origin', 'main');
+        git('checkout', '-q', '-b', 'feat');
+        git('push', '-q', '-u', 'origin', 'feat');      // upstream pinned at v1
+        commitIn(dir, 'v2 delivered\n');
+        // The whole point: the work reaches the trunk WITHOUT the branch ref
+        // being updated, which is what a squash or a merge from the forge does.
+        if (landOnTrunk) git('push', '-q', 'origin', 'HEAD:main');
+        git('remote', 'set-head', 'origin', 'main');
+        git('fetch', '-q', 'origin');
+        return dir;
+    }
+
+    const role = writeRole({ session_id: 'brain-1', peer_name: 'brain-peer' });
+
+    // The subject. HEAD is 1 ahead of origin/feat AND already on origin/main.
+    const onTrunk = mergedToTrunk({ landOnTrunk: true });
+    const s1 = stateFilePath();
+    run({ input: { session_id: 'p1', cwd: onTrunk }, roleFile: role, stateFile: s1, env: LIVE.env });
+    commitIn(onTrunk, 'v3 local\n');
+    execFileSync('git', ['push', '-q', 'origin', 'HEAD:main'], { cwd: onTrunk, stdio: 'pipe' });
+    execFileSync('git', ['fetch', '-q', 'origin'], { cwd: onTrunk, stdio: 'pipe' });
+    const pub = spoke(run({ input: { session_id: 'p1', cwd: onTrunk }, roleFile: role, stateFile: s1, env: LIVE.env }));
+    const pubCtx = pub ? pub.hookSpecificOutput.additionalContext : '';
+    check('published: the hook still speaks (a commit landed)', !!pub, String(pubCtx).slice(0, 90));
+    check('  and says the work is already on the trunk',
+        /already on the trunk|on the trunk/.test(pubCtx), pubCtx.split('\n')[0]);
+    check('  and does NOT report it as bare commits ahead of upstream',
+        !/\d+ ahead of upstream/.test(pubCtx), pubCtx.split('\n')[0]);
+
+    // The control that makes the two above mean something: identical fixture,
+    // identical commit, the ONLY difference is that the work never reached the
+    // trunk. Without this a hook that always printed the trunk clause passes.
+    const offTrunk = mergedToTrunk({ landOnTrunk: false });
+    const s2 = stateFilePath();
+    run({ input: { session_id: 'p2', cwd: offTrunk }, roleFile: role, stateFile: s2, env: LIVE.env });
+    commitIn(offTrunk, 'v3 local\n');
+    const unpub = spoke(run({ input: { session_id: 'p2', cwd: offTrunk }, roleFile: role, stateFile: s2, env: LIVE.env }));
+    const unpubCtx = unpub ? unpub.hookSpecificOutput.additionalContext : '';
+    check('  control: work NOT on the trunk still reports commits ahead of upstream',
+        /\d+ ahead of upstream/.test(unpubCtx), unpubCtx.split('\n')[0]);
+    check('  control: and does not claim the trunk carries it',
+        !/on the trunk/.test(unpubCtx), unpubCtx.split('\n')[0]);
+
+    // A repo with no origin at all must be unchanged: the trunk is UNKNOWN, and
+    // unknown must not be reported as either published or unpublished.
+    const bare = makeRepo();
+    const s3 = stateFilePath();
+    run({ input: { session_id: 'p3', cwd: bare }, roleFile: role, stateFile: s3, env: LIVE.env });
+    commitIn(bare, 'v2 local\n');
+    const noOrigin = spoke(run({ input: { session_id: 'p3', cwd: bare }, roleFile: role, stateFile: s3, env: LIVE.env }));
+    const noCtx = noOrigin ? noOrigin.hookSpecificOutput.additionalContext : '';
+    check('  no origin: the hook speaks and claims nothing about a trunk',
+        !!noOrigin && !/on the trunk/.test(noCtx), noCtx.split('\n')[0]);
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
     + (pass + fail) + ' cases over 6 inert paths, the firing path against a LIVE role '
     + 'record (own pid, nested fixture store), a STALE role record with a live control, '
-    + 'a 3-step throttle with a cooldown-0 control, and a corrupt ledger. Every quiet '
+    + 'a 3-step throttle with a cooldown-0 control, a corrupt ledger, and the merged-to-trunk shape with an off-trunk control and a no-origin case. Every quiet '
     + 'case asserts zero bytes on BOTH streams; the address line never offers cwd.');
 if (fail) {
     console.log('failed: ' + failures.join('; '));
