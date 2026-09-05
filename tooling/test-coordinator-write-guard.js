@@ -441,6 +441,98 @@ expectSilentAllow('a Bash call with no command is passed through untouched',
 }
 
 // ---------------------------------------------------------------------------
+// F2. A HOME-NAMING PREFIX IS NOT A DIRECTORY CALLED THAT.
+//
+//     `[measured 2026-09-05]` against the live hook, with controls: the
+//     absolute and relative spellings of `git commit` into a product repo both
+//     blocked, and BOTH `~` spellings of the same command were ALLOWED.
+//     `path.resolve` has no notion of `~`, so `~/product` resolved against a
+//     cwd inside the home repo lands at `<home-repo>/~/product`, and the
+//     containment check then reports it as inside. The coordinator rail had a
+//     hole exactly the width of the character people actually type.
+//
+//     Same family as the backslash defect in section D, and worse in one
+//     respect: that one failed in both directions, so it announced itself the
+//     first time a legitimate home-repo write was blocked. This one only ever
+//     fails OPEN, and a rail that only fails open is indistinguishable from a
+//     rail that is working.
+//
+//     `os.homedir()` reads USERPROFILE on win32 and HOME elsewhere, so the
+//     child's environment is what makes `~` point into the fixture. Both are
+//     set: asserting only the platform's own variable would pass here and
+//     leave the suite blind on the other platform.
+// ---------------------------------------------------------------------------
+{
+    // `~` resolves to the fixture root, so `~/product` IS OTHER_REPO and
+    // `~/harness` IS HOME_REPO. Nothing has to exist on disk.
+    const asHome = { HOME: fixture, USERPROFILE: fixture };
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+
+    // The regression. cwd is INSIDE the home repo, which is what makes the
+    // unexpanded form resolve to somewhere the guard considers safe.
+    const inHome = { cwd: HOME_REPO };
+
+    expectBlock('`cd ~/product && git commit` blocks',
+        run({ payload: bash('cd ~/product && git commit -m "x"', inHome), env: asHome }),
+        /git commit/);
+    expectBlock('`git -C ~/product commit` blocks',
+        run({ payload: bash('git -C ~/product commit -m "x"', inHome), env: asHome }),
+        /git commit/);
+    expectBlock('`git --work-tree=~/product push` blocks',
+        run({ payload: bash('git --work-tree=~/product push origin HEAD', inHome), env: asHome }),
+        /git push/);
+    expectBlock('`$HOME/product` blocks',
+        run({ payload: bash('cd $HOME/product && git merge topic', inHome), env: asHome }),
+        /git merge/);
+    // The braced form is the one that got away, and not through the expansion
+    // at all: `commandSegments` splits on `{` and `}` for shell brace groups,
+    // so `${HOME}/product` became three segments and the command parsed to
+    // nothing. Four spellings blocked and this one allowed, which is why the
+    // suite carries every spelling rather than one representative.
+    expectBlock('`${HOME}/product` blocks (the braces must not shred the segment)',
+        run({ payload: bash('git -C ${HOME}/product rebase main', inHome), env: asHome }),
+        /git rebase/);
+    expectBlock('`cd ${HOME}/product` blocks',
+        run({ payload: bash('cd ${HOME}/product && git commit -m "x"', inHome), env: asHome }),
+        /git commit/);
+
+    // …and the brace GROUP the splitter was built for still ends a command,
+    // because `;` closes it. Without this, a fix for the line above could
+    // quietly stop segmenting `{ … }` and nothing would say so.
+    expectBlock('a brace group is still segmented: `{ git commit; }` blocks',
+        run({ payload: bash('{ git -C ~/product commit -m "x"; }', inHome), env: asHome }),
+        /git commit/);
+    expectBlock('`%USERPROFILE%\\product` blocks',
+        run({ payload: bash('git -C %USERPROFILE%\\product commit -m "x"', inHome), env: asHome }),
+        /git commit/);
+
+    // THE OTHER DIRECTION, and it is why this is an expansion rather than a
+    // ban on the character. A coordinator's own home repo reached through `~`
+    // must still be allowed — this is the exact shape of the memory-mirror
+    // commit that surfaced the bug, and a fix that blocked it would trade a
+    // silent hole for a loud one.
+    expectSilentAllow('`cd ~/harness && git commit` is still allowed',
+        run({ payload: bash('cd ~/harness && git commit -m "x"', inHome), env: asHome }));
+    expectSilentAllow('a bare `~` that IS the home repo is allowed',
+        run({
+            payload: bash('git commit -m "x"', { cwd: OTHER_REPO }),
+            env: asHome,
+            roleFile: (writeRole({ session_id: 'SESSION-A', home_repos: [fixture] }), ROLE),
+        }));
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+
+    // OVER-EXPANSION, which is how a fix like this creates the bug it removed.
+    // `~foo` is another user's home and is not ours to rewrite; `$HOMEBREW` is
+    // simply a different variable. Both must keep resolving against cwd, so
+    // from inside the home repo they stay inside it and the hook stays silent.
+    // Without the lookahead anchors these become paths nobody typed.
+    expectSilentAllow('`~foo` is another user\'s home, not ours to expand',
+        run({ payload: bash('cd ~foo/product && git commit -m "x"', inHome), env: asHome }));
+    expectSilentAllow('`$HOMEBREW` is not `$HOME`',
+        run({ payload: bash('cd $HOMEBREW/product && git commit -m "x"', inHome), env: asHome }));
+}
+
+// ---------------------------------------------------------------------------
 // G. THE MUTATION TEST. One input, two arms, and the ONLY difference is whether
 //    the role file exists on disk. A gate nobody has watched fire is a
 //    hypothesis; this is the watching.
@@ -469,7 +561,7 @@ console.log(`\n${pass} passed, ${fail} failed`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
     + `driven as a subprocess ${pass + fail} times over `
     + `${['inert-without-role', 'the ban', 'mention-is-not-execution', 'cwd escapes',
-        'role ownership', 'dead claim', 'fail-open', 'mutation'].length} case groups; `
+        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'mutation'].length} case groups; `
     + `every allow asserted zero bytes on BOTH stdout and stderr.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 process.exit(fail > 0 ? 1 : 0);
