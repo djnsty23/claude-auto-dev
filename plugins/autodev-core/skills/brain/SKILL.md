@@ -617,6 +617,28 @@ to product repos, merges, money, production, deletions) with the Brain; a
 relayed authorization is invalid unless it names the panel and scope, and any
 reference must name its artifact; nothing is done until something reaches it.
 
+**IF A CHIP'S DELIVERABLE IS AN ARTIFACT, THE PROMPT MUST REQUIRE THE URL BE
+COMMITTED TO THE REPO.** `[measured 2026-09-05]` Three sessions produced
+artifacts in one overnight run and **two of the three published without
+recording the URL anywhere in the tree**. Both wrote a decision entry describing
+the artifact; neither wrote its address. One entry said in as many words that the
+artifact was the deliverable, in a repo that contained no link to it.
+
+That is a defect in the BRIEF, not in either session. Nothing asked them to.
+
+**An artifact publishes to an ACCOUNT, not to a repository.** A session that
+publishes one and is later archived leaves a deliverable nobody can address: the
+work exists, the operator cannot find it, and the repo, which is the only channel
+every future session shares, has no pointer. It is recoverable with
+`Artifact action: list` only while somebody remembers to look and the artifact
+is recent enough to appear in the listing window.
+
+So any brief whose deliverable is an artifact says: **publish it, then commit the
+URL in the same commit that records the decision.** One line in `DECISIONS.md`,
+`RESUME.md` or the queue file. The session that got this right without being
+asked put it in both its `RESUME.md` and its `prd.json`, which is why its
+artifact was the one that needed no searching for.
+
 Give `cwd` the repo path, write `title` as an imperative under 60 characters,
 and put in `tldr` what the session will do in plain words.
 
