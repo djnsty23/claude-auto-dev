@@ -163,6 +163,28 @@ mission and its first concrete task, the evidence with file, line and WHEN it
 was measured, what is already done, where the queue lives, your return address,
 and the standing rules on what it may decide versus queue.
 
+**IF A CHIP'S DELIVERABLE IS AN ARTIFACT, THE PROMPT MUST REQUIRE THE URL BE
+COMMITTED TO THE REPO.** `[measured 2026-09-05]` Three sessions produced
+artifacts in one overnight run and **two of the three published without
+recording the URL anywhere in the tree**. Both wrote a decision entry describing
+the artifact; neither wrote its address. One entry said in as many words that the
+artifact was the deliverable, in a repo that contained no link to it.
+
+That is a defect in the BRIEF, not in either session. Nothing asked them to.
+
+**An artifact publishes to an ACCOUNT, not to a repository.** A session that
+publishes one and is later archived leaves a deliverable nobody can address: the
+work exists, the operator cannot find it, and the repo, which is the only channel
+every future session shares, has no pointer. It is recoverable with
+`Artifact action: list` only while somebody remembers to look and the artifact
+is recent enough to appear in the listing window.
+
+So any brief whose deliverable is an artifact says: **publish it, then commit the
+URL in the same commit that records the decision.** One line in `DECISIONS.md`,
+`RESUME.md` or the queue file. The session that got this right without being
+asked put it in both its `RESUME.md` and its `prd.json`, which is why its
+artifact was the one that needed no searching for.
+
 **Messages queue.** `[measured 2026-08-24]` the tool returns "Message sent" for
 an idle session and "Message queued ... it will be processed after the in-flight
 turn finishes" for a busy one. It never interrupts a turn, so there is no reason
