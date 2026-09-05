@@ -323,6 +323,56 @@ is how the coordinator reaches the user when he IS there.
 Get-ChildItem "$env:USERPROFILE\claude-memory\heal-runs\" | Sort-Object LastWriteTime -Descending | Select-Object -First 3
 ```
 
+### 4b. Read what the last Brain already learned, BEFORE you interview anyone
+
+```powershell
+Get-ChildItem "$env:USERPROFILEclaude-memoryDECISIONS-*.md" | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Encoding UTF8 }
+```
+
+**A handover transfers ADDRESSES and loses ANSWERS, and nothing about the loss
+is visible from either end.** `[measured 2026-09-05]` Three Brain identities
+existed inside two days. The new one asked a session whether its site was the
+operator's or a client's; a previous Brain had asked that same session the same
+question the day before, been told, and replied that it had recorded it. The
+session had to answer twice and said so:
+
+> "That makes at least three Brain identities inside two days. The addresses
+> transferred. The answer did not, so I have been asked the same question twice
+> and the next Brain will ask a third time."
+
+Re-asking a settled question looks exactly like diligence from the asking end
+and exactly like cooperation from the answering end, so neither side flags it.
+The only trace is the session's patience running out.
+
+**The answers are already written down. The gap is that a new Brain interviews
+before it reads.** `DECISIONS-<date>.md` is where the no-panel-mode branches
+above already tell a Brain to record every call it makes, so by the time you
+boot, yesterday's Brain has usually written the thing you are about to ask.
+Read the last two or three, plus `~/.claude/brain-brief.json`, then ask only
+what those cannot answer.
+
+Two things this is NOT, both proposed and both rejected on a peer's reasoning
+from inside the hooks that would have carried them:
+
+- **Not a map inside `brain-role.json`.** That file is a CLAIM of role: small,
+  rewritten whole at every claim, and read by two hooks that fail open on a
+  parse error. A growing map inside it either dies at the very hop it exists to
+  survive, or, the day a claim writes it badly, silently disarms
+  `stop-brain-report.js` and `coordinator-write-guard.js` at once. Keep a
+  claim file a claim.
+- **Never keyed by cwd.** That is the routing defect one layer over: a worktree
+  outlives the session in it, so an answer keyed by directory is served to
+  whoever next occupies it. The same session that received two strangers'
+  idle reports would then inherit their ownership answers.
+
+If a machine-readable map is ever wanted, key it by `repo + branch` with the
+session id as provenance rather than as the key, timestamp every entry, and
+carry a `verify` command beside each answer (`git cherry -v origin/main HEAD`,
+`gh pr view <N> --json state`) so the next Brain re-runs the check instead of
+re-asking. An answer with no re-check command is a memory that rots exactly the
+way the role file did. Build this reading step first regardless: it needs no
+schema and closes most of the gap on its own.
+
 ### 5. Claim the role, then announce the handover
 
 `[stated 2026-09-04]` the operator, relayed to this file by the Brain session

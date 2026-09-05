@@ -256,7 +256,6 @@ const SUSPICIOUS_BYTES = 20000;
 function refuseToClobber(out, aboutToWrite) {
     let existing;
     try { existing = fs.readFileSync(out, 'utf8'); } catch { return null; }   // absent: fine
-    if (existing.indexOf(MARKER) !== -1) return null;                          // ours: fine
 
     let tracked = true;
     try {
@@ -277,14 +276,35 @@ function refuseToClobber(out, aboutToWrite) {
     const huge = existing.length >= SUSPICIOUS_BYTES
         && existing.length > (aboutToWrite || 0) * 4;
 
+    // THE MARKER IS A STRING A DOCUMENT CAN QUOTE, so it may only ever DOWNGRADE
+    // a refusal, never grant permission. `[measured 2026-09-05]` this test used to
+    // run FIRST and return null on a hit, so a 25,790-byte hand-written RESUME.md
+    // that quoted the marker inside a paragraph explaining the file is NOT
+    // generated was classified as ours, and one bare invocation would have replaced
+    // it with a 2.4 kB snapshot without a prompt. The A/B was one string: marker
+    // present, overwrite; marker removed, exit 3.
+    //
+    // Ordering is the whole fix, and SIZE is why it works: our own output is about
+    // the size of what we are about to write, never four times it. So a huge file
+    // is not ours whatever it contains, and the marker is consulted only among
+    // files that are already plausibly ours. This is the third route into the same
+    // destruction and the first that defeats both guards rather than falling
+    // between them.
+    const quoted = existing.indexOf(MARKER) !== -1;
+    if (quoted && !huge) return null;     // ours, and not big enough to be a handoff
+
     if (!tracked && !huge) return null;   // small, foreign, untracked: replaceable
 
-    const why = tracked && huge ? 'It is tracked by git AND is ' + existing.length + ' bytes'
+    const why = quoted
+        ? 'It is ' + existing.length + ' bytes and QUOTES this script\'s marker'
+        : tracked && huge ? 'It is tracked by git AND is ' + existing.length + ' bytes'
         : tracked ? 'It is tracked by git'
         : 'It is ' + existing.length + ' bytes — far larger than the ' + aboutToWrite
             + ' this would write';
     return 'REFUSING to overwrite ' + out + '\n'
-        + '  ' + why + ', and it was not written by this script.\n'
+        + '  ' + why + (quoted
+            ? ', which a hand-written document explaining the convention will do.\n'
+            : ', and it was not written by this script.\n')
         + '  A hand-written project handoff at RESUME.md is a convention in some\n'
         + '  repos — one is 458 KB and is named in its CLAUDE.md as the cold-start\n'
         + '  entry point. Replacing one loses work no snapshot reconstructs, and\n'
