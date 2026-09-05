@@ -3,6 +3,126 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
+
+The question was whether a 249k-star harness is better than this one, and if
+so whether to port its logic here or fork it and put auto-brain on top. The
+answer is no to all three, and every reason below is a number from this
+machine rather than a reading of its README.
+
+**What it is**, at commit `e04ea0b`: 3,520 tracked files, 2,520 of them
+markdown. 286 skills, 94 command shims, 68 agents, adapters for 12 harnesses,
+a Rust TUI alpha, a Python LLM layer, an installer with its own doctor and
+repair. MIT. 370 authors all time and 276 commits in the last 31 days, with
+one maintainer and one collaborator carrying most of the triage.
+
+**Hook cost per tool call.** Both repos' real `hooks.json` command strings
+were run against the same five payloads, N=8, medians, HOME sandboxed so
+neither wrote into the live `~/.claude`. ECC through `bash -c`, which its
+inline `node -e` bootstrap needs; ours through the shell-free `command` +
+`args` form it ships in, and through `bash -c` as a control.
+
+| event | ECC blocking | ECC cpu | autodev blocking | autodev cpu |
+|---|---|---|---|---|
+| PreToolUse/Read | 166 ms | 2,173 ms | 43 ms | 43 ms |
+| PreToolUse/Bash | 183 ms | 2,297 ms | 42 ms | 42 ms |
+| PreToolUse/Edit | 173 ms | 2,621 ms | 45 ms | 45 ms |
+| PostToolUse/Edit | 91 ms | 2,141 ms | 48 ms | 138 ms |
+| Stop | 263 ms | 1,101 ms | 47 ms | 90 ms |
+
+Blocking is the slowest synchronous hook, since the harness runs a matcher
+group in parallel. CPU is the sum, including async hooks. ECC's async observe
+hook spawns bash and three python processes on every tool call including
+Read and Grep, which is where the two seconds go. The control run of ours
+through `bash -c` read 60-84 ms blocking, so the runner is not the gap.
+
+**Skill listing.** 286 skills carry 73,076 description characters, about
+19.5k tokens, plus 94 commands. Ours carry 12,285 across 67, about 3.2k.
+ECC's own open issue #2694 reports that the listing truncates and skills
+from other plugins become invisible to routing. Installed beside this plugin
+it would hide ours. That closes the "use both" option without a fork.
+
+**Windows.** Open issue #2687: the inline `node -e` bootstrap in every hook
+matches Defender's VirTool:JS/Anomelesz.A heuristic on the session
+transcript, and it quarantined a live one from 6.88 MB to 0.08 MB. The
+continuous-learning observer is skipped on Windows outright, is disabled by
+default on every platform, and carries an open P0 (#2673) where a 1,519-row
+batch was archived unanalysed. Orchestration is tmux worktrees, a SQLite
+store and GitHub-issue epics; there is no tmux here and nothing resembling
+prd.json's five states, stop-auto-check, desktop session messaging or the
+auto-brain survey.
+
+**Gate integrity.** Its suite is 4,049 tests in 472 s here, 14 failing and
+all 14 Windows-only (11 symlink EPERM, 3 tar). One test file per hook script
+with three exceptions. No mutation or can-fail gate exists, so there is no
+equivalent of `check:suites` or `check:vacuity`. A fork would carry 3,520
+files this operator never uses and either lose those gates or port roughly
+64k lines of scripts, hooks and tooling onto them.
+
+**Rules and skills** are generic where ours are incident-derived: KISS, DRY,
+YAGNI, 80% coverage, immutability marked CRITICAL, and a camelCase rule its
+own issue #2830 notes contradicts the Python and Rust packs. The skill
+catalogue is a breadth play (Laravel, Kotlin, homelab, DeFi, a music-video
+taste layer); nothing in it targets this stack better than what is here.
+
+**AgentShield**, its config scanner, run against this repo: grade A with two
+findings, both wrong on this machine. CLAUDE.md "world-writable 0o666" is
+what every file reports through node on NTFS, and "no PreToolUse hooks" comes
+from reading settings files only, so it cannot see plugin hooks at all.
+
+**What survives the pass.** One idea maps to a measured gap in this repo's
+own record: rule 14c says 77% of cost is cache reads and a session should
+restart past about 300k, and nothing in our hooks enforces it. ECC's
+`ecc-context-monitor.js` nudges from transcript size; transcript rows here
+carry `usage.cache_read_input_tokens`, so a hook can read the true figure.
+`config-protection`, which blocks edits to linter configs, is 176 lines and
+cheap, but no incident in the record motivates it, so it waits for one.
+
+**Built the same day: `hooks/context-depth-nudge.js`.** A Stop hook that
+reads the latest assistant row's usage from the tail of `transcript_path`
+(input + cache_read + cache_creation, the figure that call was billed for),
+and once per 100k step past 300k emits `additionalContext` telling the model
+to finish the step and write RESUME.md, plus a `systemMessage` telling the
+operator to start fresh. No `decision` key, so it cannot hold a turn or fight
+stop-auto-check; silence is zero bytes on both streams. Suite:
+`tooling/test-context-depth-nudge.js`, 30 cases, including a usage row behind
+a 700KB attachment row, a truncated final line, and a corrupt ledger. The
+first run of that suite failed two of its own cases on arithmetic (402,578 is
+one whole step past the line, bucket 1, not 0); the hook was right and the
+expectation was wrong, which is what a first run is for.
+
+**Away-window decision, branch 2.** The closing panel for this evaluation was
+held by the operator's standing AWAY order (`~/claude-memory/AWAY.md`, until
+2026-09-06T20:00Z, "no panels, decide it yourself and log why"). The order's
+branch 2 covers work that is reversible and not otherwise decided: this hook
+is one file, one suite and one `hooks.json` line, reverted by removing them.
+It was the recommended option and it was the one measured gap the evaluation
+found, so it was built rather than queued. Not taken from the same panel: an
+artifact page (arms a live-watch chip the operator would have to close, low
+value while away) and, at the time, the push.
+
+**Corrected the same afternoon: the push, the PR and the merge are covered by
+a standing rule, branch 1.** `~/claude-memory/MANDATE.md`, "PUSHES AND MERGES
+ARE THE FLEET'S, IN HIS OWN REPOS", carries the operator's words of
+2026-09-05 verbatim: "not even merges need me, but everything that costs
+minutes should be either batched or optimized." Read directly from disk, not
+taken from the peer relay that pointed at it. Beside it, this repo's CLAUDE.md
+line "commit and push autodev freely", and the same day's D9a precedent that
+an autodev push reaches a git remote and nothing else. So: one push of the
+whole branch, one PR whose title is the squash subject, every ci.yml check
+read by name to a terminal state (unknown is not finished), squash-merge, then
+both new files verified on `origin/main` by path. The gate ran green at
+`75c0429` (exit 0, 2,208 s, 110 of 110 suites, 109 verified able to fail);
+this correction is docs-only and ran validate and the private-names gate. Not
+cut here: a release, because a version number is a plugin-cache key and a
+sibling branch was landing at the same time, so one release covering both is
+one run instead of two.
+
+**What would reverse this.** A measured per-call cost within 2x of ours, a
+skill listing that fits the budget beside another plugin, the Defender issue
+closed with a non-inline bootstrap, and a hook can-fail gate. Any one of
+those is a new evaluation; none of them is a reason to re-read the README.
+
 ## 2026-08-19 — the mutation gap is 5 of 112, and one was a vacuous assertion
 
 Both suites re-swept against the same subject, because the figures in

@@ -135,6 +135,13 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-brain-report.js"],
             "timeout": 5,
             "statusMessage": "Checking for unreported work..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/context-depth-nudge.js"],
+            "timeout": 5,
+            "statusMessage": "Checking context depth..."
           }
         ]
       }
