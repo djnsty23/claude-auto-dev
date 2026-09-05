@@ -26,8 +26,10 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-doc-staleness.js');
-const { checkDocStaleness, OPEN_STATE, CONDITIONAL, BOOT_DOCS, render } = require(SUBJECT);
+const { checkDocStaleness, OPEN_STATE, CONDITIONAL, DECIDED, DECIDED_SECTION,
+    RESOLVED, SECTION_RE, BOOT_DOCS, render } = require(SUBJECT);
 const SRC = fs.readFileSync(SUBJECT, 'utf8');
+const SRC_SUBJECT = SRC;
 
 let pass = 0, fail = 0;
 function check(label, ok, detail) {
@@ -64,6 +66,20 @@ const FIXTURE = [
     '',
     '',
     'This one remains open and nothing near it carries a date, so it cannot be aged.',
+    '',
+    // A DECIDED section. The claim under it carries no marker of its own,
+    // which is why section tracking exists rather than a wider line regex.
+    '## Closed as NOT defects, recorded so they are not re-opened',
+    '`[measured 2026-01-02]` The critic scores are still broken on the staging tier.',
+    '',
+    // A SHORT decided heading, deliberately under the line-length filter.
+    // Only registers if section tracking runs BEFORE that filter.
+    '## Deferred',
+    '`[measured 2026-01-02]` The export job is still broken and nobody has looked.',
+    '',
+    // A past-tense claim about a state that has already moved.
+    '## A note written after the fact',
+    '`[measured 2026-01-02]` The row above used to say MERGEABLE and blocked on a revert.',
     '',
 ].join('\n');
 
@@ -126,6 +142,33 @@ if (tmp) {
         !r.findings.some((f) => f.text.indexOf('nothing near it carries a date') !== -1),
         'an age is the whole output; a claim that cannot be aged cannot be ranked');
 
+    // ---- precision: a decision is not an open claim -----------------------
+    //
+    // Measured on the first fleet run: 9 findings, 5 of them not open state.
+    // Three were decisions and none carried a marker on the claim line.
+    check('a claim inside a DECIDED section is not reported',
+        !r.findings.some((f) => f.text.indexOf('critic scores') !== -1),
+        'the section said closed-as-not-defects; the claim line said nothing');
+    check('the claim line really does carry no marker of its own',
+        !DECIDED.test('The critic scores are still broken on the staging tier.'),
+        'if it did, this case would pass without section tracking and prove nothing');
+    check('a SHORT decided heading is still seen, despite the length filter',
+        !r.findings.some((f) => f.text.indexOf('export job') !== -1),
+        'section tracking must run BEFORE the line-length filter or this is missed');
+    check('the short heading really is below the filter', '## Deferred'.length < 20);
+    check('a past-tense claim is not reported',
+        !r.findings.some((f) => f.text.indexOf('used to say') !== -1));
+
+    check('decided suppressions are counted, not silent',
+        r.population.suppressedAsDecided === 2, String(r.population.suppressedAsDecided));
+    check('resolved suppressions are counted separately from decided',
+        r.population.suppressedAsResolved === 1, String(r.population.suppressedAsResolved));
+
+    // The precision pass must not buy its numbers by deleting real output.
+    check('the known positive still survives every suppressor',
+        r.findings.some((f) => f.text.indexOf('the fix is unproven') !== -1),
+        'a filter that suppresses the motivating instance is worse than no filter');
+
     // ---- what is left, and in what order ----------------------------------
     check('exactly the two datable, non-rule claims are reported', r.findings.length === 2,
         r.findings.map((f) => f.doc + ':' + f.line).join(' '));
@@ -181,6 +224,13 @@ if (tmp) {
 check('the subject reads the TRACKED tree at the trunk, never the working copy',
     /git\(\['show', trunk \+ ':' \+ doc\]/.test(SRC),
     'a working copy has as many current values as there are checkouts');
+check('section tracking runs BEFORE the line-length filter',
+    SRC_SUBJECT.indexOf('if (sm) section =') < SRC_SUBJECT.indexOf('if (line.length < 20) continue;'),
+    'a heading shorter than the filter is invisible otherwise, and nothing in the output says so');
+check('the decided test reads the SECTION, not just the line',
+    /DECIDED_SECTION\.test\(section\)/.test(SRC_SUBJECT));
+check('section resets per document, so one file cannot inherit another\'s',
+    /const rows = body\.split[\s\S]{0,80}let section = ''/.test(SRC_SUBJECT));
 check('the suppressor is APPLIED in the scan loop, not merely defined',
     /CONDITIONAL\.test\(line\)/.test(SRC),
     'a regex defined and never applied is a gate wired to nothing');

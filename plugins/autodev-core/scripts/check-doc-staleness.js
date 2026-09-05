@@ -79,6 +79,32 @@ const OPEN_STATE = [
  */
 const CONDITIONAL = /\b(until|unless|as long as|whenever|any time|before you)\b/i;
 
+/**
+ * A DECISION NOT TO ACT IS NOT AN OPEN CLAIM. `[measured 2026-09-05]` the
+ * first fleet run returned 9 hits and 5 were not open state. Three were
+ * decisions, and none carried a marker on the claim line: the marker was the
+ * SECTION. "Closed as NOT defects - recorded so they are not re-opened" and
+ * "Deliberately NOT done, with reasons" both introduce a list whose every
+ * line then reads as an open claim. So this tracks the enclosing heading or
+ * bold lead as well as the line.
+ *
+ * This is prd.json's `deferred` state arriving in prose: counting a decision
+ * as remaining work is the same defect that made `auto` block forever.
+ */
+const DECIDED = /\b(deliberately|by design|on purpose|do-not-implement|won'?t fix|wontfix|yagni|not a defect|decided not to)\b/i;
+const DECIDED_SECTION = /\b(closed as|deliberately|not defects|won'?t fix|do-not-implement|decided|deferred|rejected)\b/i;
+
+/**
+ * A claim in the PAST TENSE describes a state that has already moved, and the
+ * prose around it usually says so outright. The instance: "The row above used
+ * to say MERGEABLE and blocked on reverting a depth-of-field effect; both
+ * halves were stale."
+ */
+const RESOLVED = /\b(used to (say|be|read)|was blocked|were stale|is no longer|are no longer|has since|have since|turned out|no longer blocked)\b/i;
+
+/** A markdown heading or a bold lead-in, either of which opens a section. */
+const SECTION_RE = /^\s*(?:#{1,6}\s+(.+?)\s*$|>?\s*\*\*(.+?)\*\*)/;
+
 /** A date the writer stamped, so the claim's age is knowable. */
 const DATE_RE = /\b(20\d\d)-(\d\d)-(\d\d)\b/;
 
@@ -112,7 +138,9 @@ function checkDocStaleness(cwd, opts) {
             note: ['could not resolve a trunk; nothing scanned, which is NOT the same as nothing found'] };
     }
 
-    let scanned = 0, missing = 0, lines = 0, dated = 0, conditional = 0;
+    let scanned = 0, missing = 0, lines = 0, dated = 0;
+    let conditional = 0, decided = 0, resolved = 0;
+    let headings = 0;
     const findings = [];
     const now = Date.now();
 
@@ -123,12 +151,17 @@ function checkDocStaleness(cwd, opts) {
         if (body === null) { missing++; continue; }
         scanned++;
         const rows = body.split('\n');
+        let section = '';
         for (let i = 0; i < rows.length; i++) {
             const line = rows[i];
+            const sm = line.match(SECTION_RE);
+            if (sm) section = sm[1] || sm[2] || '';
             if (line.length < 20) continue;
             lines++;
             if (!OPEN_STATE.some((re) => re.test(line))) continue;
             if (CONDITIONAL.test(line)) { conditional++; continue; }
+            if (DECIDED.test(line) || DECIDED_SECTION.test(section)) { decided++; continue; }
+            if (RESOLVED.test(line)) { resolved++; continue; }
             // Look for a date on the line or within the three above it, which is
             // where a `[measured YYYY-MM-DD]` tag usually sits.
             let m = null;
@@ -138,7 +171,8 @@ function checkDocStaleness(cwd, opts) {
             const when = Date.UTC(+m[1], +m[2] - 1, +m[3]);
             const age = Math.floor((now - when) / 86400000);
             if (age < ageDays) continue;
-            findings.push({ doc, line: i + 1, age, text: line.trim().slice(0, 150) });
+            if (sm) headings++;
+            findings.push({ doc, line: i + 1, age, isHeading: !!sm, text: line.trim().slice(0, 150) });
         }
     }
 
@@ -147,6 +181,8 @@ function checkDocStaleness(cwd, opts) {
         repo: path.basename(cwd), trunk,
         population: { bootDocsLookedFor: BOOT_DOCS.length, present: scanned, absent: missing,
             linesConsidered: lines, suppressedAsConditional: conditional,
+            suppressedAsDecided: decided, suppressedAsResolved: resolved,
+            assertedInAHeading: headings,
             openStateAndDated: dated, olderThanAgeDays: findings.length },
         findings: findings.slice(0, max), note,
     };
@@ -158,13 +194,18 @@ function render(r) {
     const p = r.population;
     out.push('    population: ' + (p.present || 0) + ' of ' + (p.bootDocsLookedFor || 0)
         + ' boot docs present (' + (p.absent || 0) + ' absent), ' + (p.linesConsidered || 0)
-        + ' lines considered, ' + (p.openStateAndDated || 0) + ' open-state (' + (p.suppressedAsConditional || 0) + ' suppressed as rules) and dated, '
+        + ' lines considered, '
+        + ((p.suppressedAsConditional || 0) + (p.suppressedAsDecided || 0) + (p.suppressedAsResolved || 0))
+        + ' suppressed (' + (p.suppressedAsConditional || 0) + ' rules, ' + (p.suppressedAsDecided || 0)
+        + ' decided, ' + (p.suppressedAsResolved || 0) + ' resolved), '
+        + (p.openStateAndDated || 0) + ' open-state and dated, '
         + (p.olderThanAgeDays || 0) + ' older than the threshold');
     for (const n of r.note) out.push('    NOTE: ' + n);
     if (!r.findings.length) { out.push('    nothing to re-check'); return out.join('\n'); }
     out.push('    RE-CHECK BEFORE TRUSTING (oldest first):');
     for (const f of r.findings) {
-        out.push('      [' + String(f.age).padStart(4) + 'd] ' + f.doc + ':' + f.line);
+        out.push('      [' + String(f.age).padStart(4) + 'd] ' + f.doc + ':' + f.line
+            + (f.isHeading ? '   <- ASSERTED IN A HEADING, longer half-life: readers trust structure' : ''));
         out.push('             ' + f.text);
     }
     return out.join('\n');
@@ -203,6 +244,44 @@ function selftest() {
     t('the motivating sentence is NOT suppressed', !CONDITIONAL.test(REAL),
         'suppressing the one instance it exists to catch would make it vacuous');
 
+    // The real false positives from the first fleet run, verbatim.
+    const decidedLine = '### One thing deliberately NOT fixed';
+    const decidedSect = '**Closed as NOT defects - recorded so they are not re-opened:**';
+    const inSection = 'AUTO_CRITIC recalibration (blocked on scores not persisting since 07-30);';
+    const resolvedLine = 'The row above used to say MERGEABLE and blocked on reverting a depth effect;';
+    const stillOpen = '> **Still open:** 953 dead census keys (prune PER NAMESPACE, never bulk).';
+    const ownerBlocked = '(release still blocked on Andy: Play Console + Firebase - see the note below).';
+
+    t('a deliberate NOT-fixed line is suppressed',
+        OPEN_STATE.some((re) => re.test(decidedLine)) && DECIDED.test(decidedLine),
+        'it must match open-state and then be suppressed, or the suppressor is untested');
+    t('a decided SECTION heading is recognised as one', DECIDED_SECTION.test(decidedSect));
+    t('a claim inside that section carries no marker of its own',
+        !DECIDED.test(inSection),
+        'this is why section tracking exists rather than a wider line regex');
+    t('the section heading parses as a section', SECTION_RE.test(decidedSect));
+    t('a past-tense claim is suppressed as resolved', RESOLVED.test(resolvedLine));
+
+    // The two REAL open claims must survive every suppressor, or the pass
+    // bought precision by deleting the output.
+    t('a genuinely open claim survives all three suppressors',
+        OPEN_STATE.some((re) => re.test(stillOpen))
+        && !CONDITIONAL.test(stillOpen) && !DECIDED.test(stillOpen) && !RESOLVED.test(stillOpen));
+    t('an owner-blocked claim survives too',
+        OPEN_STATE.some((re) => re.test(ownerBlocked))
+        && !CONDITIONAL.test(ownerBlocked) && !DECIDED.test(ownerBlocked) && !RESOLVED.test(ownerBlocked));
+    t('the motivating sentence survives all three',
+        !CONDITIONAL.test(REAL) && !DECIDED.test(REAL) && !RESOLVED.test(REAL),
+        'suppressing the one instance it exists to catch would make it vacuous');
+
+    // A heading or bold lead asserting state, which is the high-precision subset.
+    t('a bold lead asserting state parses as a section',
+        SECTION_RE.test('> **Still open:** 953 dead census keys (prune PER NAMESPACE).'),
+        'the live instance is a bold lead inside a blockquote, not a markdown heading');
+    t('a markdown heading asserting state parses too', SECTION_RE.test('## Still broken on staging'));
+    t('an ordinary sentence does NOT parse as a section',
+        !SECTION_RE.test('The nightly export is still broken on the staging tier.'));
+
     t('a date is required, so an undated claim is not reported', DATE_RE.test('[measured 2026-08-21]'));
     t('a non-date number is not read as a date', !DATE_RE.test('port 8080 and 5173'));
 
@@ -210,7 +289,8 @@ function selftest() {
     return fail === 0;
 }
 
-module.exports = { checkDocStaleness, OPEN_STATE, CONDITIONAL, BOOT_DOCS, render };
+module.exports = { checkDocStaleness, OPEN_STATE, CONDITIONAL, DECIDED, DECIDED_SECTION,
+    RESOLVED, SECTION_RE, BOOT_DOCS, render };
 
 if (require.main === module) {
     const argv = process.argv.slice(2);

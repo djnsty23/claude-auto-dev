@@ -267,6 +267,36 @@ guessing one produces a gate that is confidently wrong. It always exits 0.
 turn.** A claim about a deploy is answered by the running system, not by git.
 Leaving a re-checked claim unedited guarantees the next Brain pays for it again.
 
+**RE-CHECK THE ONES THAT NAME AN OBSERVABLE FIRST, AND DO NOT READ THE REST
+AS HEALTHY.** `[reported 2026-09-05]` by the session that worked the instance
+this tool was built from, and it is the half no pattern can supply:
+
+> "Every wrong line here was grammatically confident and internally consistent;
+> nothing in RESUME.md looked wrong. What made it findable was that the claim
+> named a checkable observable, 'no real delivery has arrived since', against a
+> table any session can query in one call."
+
+So the sweep RANKS; it cannot GRADE. Sort its output by whether the claim names
+the artifact that would refute it:
+
+- **Names one** (a table, an endpoint, a run, a build number, a file): re-run
+  the refutation. That is one call and it settles the claim outright.
+- **Names none** ("the flow feels wrong", "this is probably still broken"):
+  **ungradeable, which is not the same as true and not the same as false.** Say
+  so in the report rather than letting it pass as verified. A claim with no
+  observable rots silently and no sweep will ever catch it, so the fix is to
+  edit it into one that names something, not to re-read it harder.
+
+Reporting absence as health is the specific failure to avoid: "nothing to
+re-check" means the tool found no DATED open-state claim, never that the
+document is true.
+
+**A claim asserting state in a HEADING or a bold lead outranks the same words in
+a sentence.** Same source, and the reason is about readers rather than about
+decay: structure is trusted and the qualifying text underneath it is skimmed.
+The tool marks these, and the live instance is a bold lead reading
+"Still open: 953 dead census keys", 28 days old at the time of writing.
+
 **Read the population line, not the finding count.** A repo with zero findings
 and 3 boot documents present is a different statement from one with zero
 findings and 0 documents present, and only the population separates them.
