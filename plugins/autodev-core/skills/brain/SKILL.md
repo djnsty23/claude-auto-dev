@@ -1381,6 +1381,68 @@ check the transcript for `__unparsedToolInput`. A rejected payload at exactly
 produced zero dry passes across two workflows and ran to the agent cap. One
 bounded round, then a human reads the delta.
 
+## THE OPERATOR CAN ANSWER TWO PANELS DIFFERENTLY, AND NOTHING RECONCILES THEM
+
+`[measured 2026-09-05]` He answered a panel in the coordinator's session at
+06:20Z selecting **"push both branches, open PRs, mark ready"**. He answered a
+panel in one of those branches' own sessions at 06:45Z selecting **"keep it
+local, nothing leaves this disk"**. Both answers are real, both were acted on,
+and they are opposites.
+
+    07:26Z  the coordinator pushed the branch      executing the 06:20Z answer
+    07:30Z  the session deleted the remote ref     executing the 06:45Z answer
+            which closed the pull request the push had created
+
+**Neither party did anything wrong.** The session honoured the instruction given
+directly to it, which is exactly what a session should do with a coordinator's
+relay standing against it, and it measured before deleting shared state: same
+SHA present in its worktree and three verified bundles, re-push restores it
+byte-identically with one command, no PR opened so no billable minutes spent.
+That is a better-reasoned delete than most merges.
+
+**The failure is structural and it is the coordinator's to prevent.** A Brain
+cannot see a panel answered in another session. It dispatches on the last
+instruction IT received and has no way to know a later, contradicting one exists
+somewhere else. The gap is not visible from either end until the two acts collide.
+
+**So: before acting on a repo where a session is working, read that repo's
+`DECISIONS-<date>.md`.** The away-window rules already tell every session to log
+its decisions in the repo it is working in, which makes that file the one shared
+surface where a divergent instruction surfaces. In this instance the session
+logged its reasoning at 07:30Z and the coordinator read it forty minutes later,
+only because it went looking after the act had already collided.
+
+```bash
+git -C <repo> log --oneline -5 -- 'DECISIONS-*.md'
+git -C <repo> show origin/main:DECISIONS-$(date +%Y-%m-%d).md 2>/dev/null | head -60
+```
+
+**And when the two instructions genuinely conflict, do not resolve it.** Report
+both, quote both, and let him arbitrate. The escalation rule already says this;
+what is new is that the conflict can be invisible, so the reading above is what
+makes the rule usable rather than aspirational.
+
+## AN ACTOR FIELD DOES NOT DISTINGUISH THE OPERATOR FROM A SESSION
+
+`[measured 2026-09-05]` `gh pr view --json closedAt` plus the timeline reported a
+pull request "closed by djnsty23". The coordinator read that as the operator
+closing it and told him so. **A session closed it**, because sessions act as his
+GitHub account and the actor field records the account rather than the hand.
+
+The same holds for every commit, push, merge, tag, comment and branch deletion a
+session performs. `git log --format=%an` and every forge actor field are silent
+on which of the two acted.
+
+**What DOES distinguish them:** a session that follows the logging rules leaves a
+decision entry saying what it did and why. Here the session's own commit read
+`docs: D1 - deleted a remote branch that appeared without this session pushing
+it`. That sentence is evidence an actor field can never carry.
+
+So before attributing any repository act to the operator, look for a decision
+entry claiming it. If none exists, say the act happened rather than naming who
+did it, because naming the wrong actor turns a coordination question into an
+accusation and sends the investigation in the wrong direction.
+
 ## Escalate rather than resolve
 
 Money, production deploys, third-party or shared state, client work, anything
