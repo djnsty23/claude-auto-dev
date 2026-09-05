@@ -2,7 +2,7 @@
 
 ## [8.162.0] - 2026-09-05
 
-Four fixes, and three of them are the same defect wearing different clothes: a
+Five changes, and three of them are the same defect wearing different clothes: a
 signal that is internally consistent, points at a real thing, and answers a
 question next to the one its reader is asking.
 
@@ -64,35 +64,38 @@ question next to the one its reader is asking.
   an append-only changelog ages every historical section into a false positive
   forever. (#168)
 
-### Known defect in this release
+### Also in this release, from the same rule
 
-- **The shipped-section suppression above OVER-SUPPRESSES, and it ships that
-  way.** Its pattern includes the bare word `live`, which matches a running
-  VERSION marker rather than a record of shipped work. On one project's trunk a
-  bold lead of the form `**Live \`vNNN · swNNN\`**` is read as a shipped section,
-  so the claim on the very next line, that a mobile release is still blocked on a
-  human, is suppressed. That claim had been independently proved half stale
-  earlier the same day, so the rule silently removed a verified finding.
+- **A running VERSION is not a shipped record, and a NEGATED marker is not a
+  marker.** The shipped-section suppression above shipped in #168 matching the
+  bare word `live`, which catches a status header whose bold lead reads `Live vNNN`
+  and suppresses any open claim beneath it. Measured across five trunks by
+  restoring the token as the only variable, isolating it from the two
+  suppressions that work correctly: it hid ONE true finding on ONE trunk, and
+  that finding had been independently proved half stale the same day.
 
-  Measured across five trunks, same command, before and after the rule: two of
-  them lose findings, 4 to 2 and 2 to 1. The quoted-span half of the change works
-  correctly; the over-suppression is entirely the `live` token.
+  The census run for it found a second and sharper case. `done` was the sole
+  matcher exactly twice and BOTH were negations, `## NOT done` and
+  `## Deliberately NOT done`, which are the opposite of shipped. So `done` also
+  leaves the pattern and a general negated-marker veto now protects every
+  remaining token at once.
 
-  It is recorded here rather than fixed here because the operator asked for the
-  release now, and the fix was still under mutation test in another session when
-  it was cut. The effect is a QUIETER report rather than a wrong one, and the
-  tool reports rather than gates, so nothing downstream acts on it. Removed
-  noise is visible and removed truth is not, which is why this note exists
-  instead of a silent wait for the next version.
+  `closed` STAYS, and the reasoning is recorded rather than resolved: it is the
+  sole matcher six times, five are real closures, and the sixth is a
+  parenthetical in a version note. Removing it trades five correct suppressions
+  for one, and noise is what gets a detector muted.
 
-  Fix expected in 8.163.0: drop `live`, keep `verified|shipped|deployed|landed|
-  merged|complete`, pinned by a discriminating pair where both sections contain
-  the letters of "live" and only one is a shipped record.
+  Three of four mutants killed. The fourth is a labelled SURVIVOR rather than a
+  tuned-away one: re-admitting `done` changes nothing, because the veto already
+  covers both its cases. The veto itself was untestable at first, since with
+  `done` gone the rule never matches `## NOT done` and the veto is never
+  consulted; it needed a case the rule still matches before the assertion could
+  fail for its own reason. (#171)
 
 ### Notes
 
 The version is the plugin-cache key, so none of the above ran on any machine
-until this release. Two of the four were reported by peer sessions rather than
+until this release. Three of the five were reported by peer sessions rather than
 found by their author, and the third was found because a probe returned an empty
 result that was reported as unreproduced rather than quietly re-run.
 
