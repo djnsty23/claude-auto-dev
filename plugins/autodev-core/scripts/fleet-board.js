@@ -1,250 +1,323 @@
 #!/usr/bin/env node
-'use strict';
 /**
- * fleet-board.js - one page that says what needs the operator, what is moving,
- * and what is stranded, across the mandate's repos, with the population beside
- * every number.
+ * fleet-board.js - the dispatch list, served locally and read live off disk.
  *
- * It is a SNAPSHOT and says so. A board this page could not keep live (the forge
- * and local git are not reachable from a browser) would be a lie the moment it
- * loaded, so the masthead carries the time every figure was measured and the
- * page names the probe that produced it. Re-run to republish.
+ * READ-ONLY BY MEASUREMENT, not by caution. A/B tested 2026-08-21 with one
+ * instrument and two targets:
  *
- *   node fleet-board.js --out board.html            gather live, render
- *   node fleet-board.js --json > snapshot.json      gather live, dump the data
- *   node fleet-board.js --data snapshot.json --out board.html   render a dump
+ *   busy session (mid-turn, sitting on a panel)  -> send_message says "queued",
+ *      and over 482s, 49 polls and 166KB of transcript growth it never arrived.
+ *   idle session (70m, assistant spoke last)     -> send_message says "sent",
+ *      delivered and acked in 20s.
  *
- * Reads the same instruments the fleet already merges on, so the board and the
- * merge decision cannot disagree: check-pr-ready for each open PR, prd-states
- * at the TRUNK REF (never a working copy, which has as many current values as
- * there are checkouts), check-doc-staleness, and transcript mtimes for session
- * activity. Client repos are excluded by construction: the mandate's `repos`
- * array in ~/.claude/brain-brief.json is the population.
+ * A panel does not end a turn - answering one feeds a tool_result back into the
+ * same turn - so a session in an options-protocol loop may never reach the
+ * boundary where queued mail is delivered. The sessions you most want to answer
+ * are exactly the ones that cannot receive an answer. So this board tells you
+ * WHICH session to go to; it does not pretend to answer for you.
  *
- * `--data` exists so the renderer can be tested on a fixed dataset without gh,
- * git or a live fleet. The gather half is exercised by the fleet itself.
+ * Usage:
+ *   node fleet-board.js               # serve on 7717
+ *   node fleet-board.js --port 8080
+ *   node fleet-board.js --days 3
+ *
+ * No dependencies, no build step, binds loopback only.
  */
-
-const fs = require('fs');
-const os = require('os');
+'use strict';
+const http = require('http');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { scanFleet } = require(path.join(__dirname, 'fleet-status.js'));
 
-const SCRIPTS = __dirname;
-const { summarise, storiesOf } = require(path.join(SCRIPTS, 'prd-states.js'));
+const argv = process.argv.slice(2);
+const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
+const PORT = Number(val('--port', 7717));
+const DAYS = Number(val('--days', 2));
 
-function sh(cmd, args, cwd) {
-    try {
-        return execFileSync(cmd, args, {
-            cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1e8,
-            env: Object.assign({}, process.env, { MSYS_NO_PATHCONV: '1' }),
+// F8 (codex audit 2026-08-30): --help used to fall through to the server -
+// probing the script started it, and it stayed alive until killed. A script
+// you cannot ask "what are you" without launching is a side effect wearing a
+// CLI's clothes. Help exits before any fleet state is read.
+if (argv.includes('--help') || argv.includes('-h')) {
+    console.log('fleet-board - the dispatch list, served locally and read live off disk.');
+    console.log('');
+    console.log('Usage:');
+    console.log('  node fleet-board.js               # serve on 7717');
+    console.log('  node fleet-board.js --port 8080');
+    console.log('  node fleet-board.js --days 3');
+    console.log('');
+    console.log('Binds loopback only. Read-only. No dependencies.');
+    process.exit(0);
+}
+
+const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+const PAGE = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fleet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{--ground:#EDF0F3;--surface:#fff;--surface-2:#F5F7F9;--ink:#10151B;--ink-2:#3D4854;--ink-3:#6B7885;
+--rule:#DCE2E8;--rule-2:#C6D0D9;--accent:#0F6E7E;--accent-soft:#DCEEF1;
+--blocked:#B23A0E;--blocked-bg:#FBE9E0;--blocked-edge:#E8A886;--stalled:#8A6D1F;--stalled-bg:#FBF3DC;
+--working:#0F6E7E;--idle:#7A8794;--done:#2F6B4F}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--ground:#0C1116;--surface:#131A21;--surface-2:#1A232C;
+--ink:#E6EDF3;--ink-2:#A9B7C4;--ink-3:#7A8894;--rule:#253039;--rule-2:#31404C;--accent:#4FC3D4;--accent-soft:#12333A;
+--blocked:#FF8A4C;--blocked-bg:#361D11;--blocked-edge:#7A4526;--stalled:#D9B24C;--stalled-bg:#2E2712;
+--working:#4FC3D4;--idle:#6E7C89;--done:#6FBF95}}
+:root[data-theme="dark"]{--ground:#0C1116;--surface:#131A21;--surface-2:#1A232C;
+--ink:#E6EDF3;--ink-2:#A9B7C4;--ink-3:#7A8894;--rule:#253039;--rule-2:#31404C;--accent:#4FC3D4;--accent-soft:#12333A;
+--blocked:#FF8A4C;--blocked-bg:#361D11;--blocked-edge:#7A4526;--stalled:#D9B24C;--stalled-bg:#2E2712;
+--working:#4FC3D4;--idle:#6E7C89;--done:#6FBF95}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.5}
+.wrap{max-width:1000px;margin:0 auto;padding:26px 20px 70px}
+h1{font-size:21px;font-weight:600;letter-spacing:-.02em;margin:0 0 3px}
+.sub{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.counts{display:flex;gap:0;border:1px solid var(--rule);border-radius:7px;overflow:hidden;background:var(--surface)}
+.ct{padding:7px 14px;border-right:1px solid var(--rule);text-align:center}
+.ct:last-child{border-right:0}
+.ct b{display:block;font-family:"IBM Plex Mono",monospace;font-size:17px;font-weight:500;font-variant-numeric:tabular-nums}
+.ct span{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+.ct.hot b{color:var(--blocked)}
+.ct.ctog{cursor:pointer;user-select:none}
+.ct.ctog:hover{background:var(--surface-2)}
+.ct.ctog:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rows{background:var(--surface);border:1px solid var(--rule);border-radius:9px;overflow:hidden}
+.row{display:grid;grid-template-columns:3px 88px minmax(0,1fr) auto;gap:0 13px;align-items:center;border-bottom:1px solid var(--rule)}
+.row:last-child{border-bottom:0}
+.stripe{align-self:stretch}
+.row.blocked{background:var(--blocked-bg)}.row.blocked .stripe{background:var(--blocked)}
+.row.stalled{background:var(--stalled-bg)}.row.stalled .stripe{background:var(--stalled)}
+.st{padding:10px 0 10px 13px}.bd{padding:10px 0;min-width:0}.mt{padding:10px 15px 10px 0;text-align:right;white-space:nowrap}
+.pill{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;letter-spacing:.05em;
+text-transform:uppercase;padding:2px 7px;border-radius:3px;border:1px solid var(--rule-2);color:var(--ink-3);background:var(--surface-2)}
+.pill.blocked{color:var(--blocked);border-color:var(--blocked-edge);background:var(--surface)}
+.pill.stalled{color:var(--stalled);border-color:var(--stalled);background:var(--surface)}
+.pill.working{color:var(--working);border-color:var(--accent);background:var(--accent-soft)}
+.pill.done{color:var(--done)}
+.ttl{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.age{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.row.blocked .age{color:var(--blocked);font-weight:500}
+.panel{grid-column:2/-1;padding:0 15px 14px 0}
+.q{font-size:14px;font-weight:500;margin:0 0 8px}
+.opt{display:flex;gap:8px;align-items:flex-start;background:var(--surface);border:1px solid var(--rule);border-radius:5px;padding:6px 10px;margin-bottom:5px}
+.opt .k{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);border:1px solid var(--rule-2);border-radius:3px;padding:0 5px;flex:none;margin-top:2px}
+.opt .l{font-size:13px}
+.opt .d{font-size:12.5px;color:var(--ink-3);line-height:1.45;margin-top:2px}
+.go{font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;font-weight:500;color:var(--accent);background:var(--surface);
+border:1px solid var(--accent);border-radius:5px;padding:4px 9px;cursor:pointer;margin-top:8px}
+.go:hover{background:var(--accent-soft)}
+.go:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.na{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3)}
+.machines{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.mach{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:5px 10px}
+.mach b{color:var(--ink)}
+.mach.hot{border-color:var(--blocked-edge)}
+.mach.hot b{color:var(--blocked)}
+.mach.stale{opacity:.6}
+.mach i{font-style:normal;opacity:.75}
+.empty{padding:34px 18px;text-align:center;color:var(--ink-3)}
+.empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:5px;font-weight:500}
+footer{margin-top:16px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3)}
+</style></head><body><div class="wrap">
+<header>
+  <div><h1>Fleet</h1><div class="sub" id="scanline">loading&hellip;</div></div>
+  <div class="counts" id="counts"></div>
+</header>
+<div id="machines" class="machines"></div>
+<div class="rows" id="rows"><div class="empty">loading&hellip;</div></div>
+<footer id="foot"></footer>
+</div>
+<script>
+var REFRESH_MS = 15000;
+// Cold is hidden, not dropped. Measured: 72 of 124 sessions were quiet for a day
+// or more against 4 blocked, so showing everything buries the rows that matter.
+// The count stays visible and clickable, because a filter you cannot see is
+// indistinguishable from data that never arrived.
+var showCold = false;
+var lastData = null;
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function proj(cwd){ if(!cwd) return '?'; var p=cwd.split(/[\\\\/]/);
+  var i=p.indexOf('.claude'); return i>0?p[i-1]:p[p.length-1]; }
+// Three states, and the absent one must read as absent rather than as bad news:
+// a session with no heartbeat is simply one the Stop hook has not run in yet.
+function hb(s){
+  if(s.endedCleanly===true)  return ' \\u00b7 turn ended';
+  if(s.endedCleanly===false) return ' \\u00b7 <b style="color:var(--stalled)">turn never ended</b>';
+  return '';
+}
+function render(d){
+  lastData = d;
+  var pop=d.population;
+  var n=function(st){return d.sessions.filter(function(s){return s.state===st}).length};
+  var coldCount=n('cold');
+  document.getElementById('scanline').textContent =
+    pop.transcripts+' transcripts \\u00b7 '+pop.dirs+' project dirs \\u00b7 '+pop.addressable+' addressable \\u00b7 '+
+    new Date(d.scannedAt).toLocaleTimeString();
+  document.getElementById('counts').innerHTML =
+    '<div class="ct'+(pop.blocked?' hot':'')+'"><b>'+pop.blocked+'</b><span>blocked</span></div>'+
+    '<div class="ct"><b>'+n('stalled')+'</b><span>stalled</span></div>'+
+    '<div class="ct"><b>'+n('working')+'</b><span>working</span></div>'+
+    '<div class="ct ctog" role="button" tabindex="0" title="'+(showCold?'hide':'show')+' sessions quiet 24h+">'+
+      '<b>'+coldCount+'</b><span>cold '+(showCold?'\\u2212':'+')+'</span></div>'+
+    '<div class="ct"><b>'+d.sessions.length+'</b><span>sessions</span></div>';
+
+  if(!d.sessions.length){
+    document.getElementById('rows').innerHTML='<div class="empty"><b>No sessions in window</b>Nothing has written a transcript recently.</div>';
+    return;
+  }
+  var visible = showCold ? d.sessions : d.sessions.filter(function(s){return s.state!=='cold'});
+  if(!visible.length){
+    document.getElementById('rows').innerHTML='<div class="empty"><b>Nothing active</b>'+
+      coldCount+' session'+(coldCount===1?'':'s')+' quiet for 24h+. Click "cold" above to show them.</div>';
+    return;
+  }
+  var html = visible.map(function(s){
+    var cls = s.state==='blocked' ? 'blocked' : (s.state==='stalled' ? 'stalled' : '');
+    var out = '<div class="row '+cls+'"><div class="stripe"></div>'+
+      '<div class="st"><span class="pill '+esc(s.state)+'">'+esc(s.state)+'</span></div>'+
+      '<div class="bd"><div class="ttl">'+esc(s.title || proj(s.cwd))+'</div>'+
+      '<div class="meta">'+esc(proj(s.cwd))+(s.gitBranch?' \\u00b7 '+esc(s.gitBranch):'')+
+      (s.prNumber?' \\u00b7 PR #'+esc(s.prNumber):'')+hb(s)+'</div></div>'+
+      '<div class="mt"><span class="age">'+s.idleMinutes+'m</span></div>';
+    if(s.pending){
+      out += '<div class="panel">';
+      s.pending.questions.forEach(function(q){
+        out += '<p class="q">'+esc(q.question)+'</p>';
+        q.options.forEach(function(o,i){
+          out += '<div class="opt"><span class="k">'+(i+1)+'</span><div><div class="l">'+esc(o.label)+'</div>'+
+                 (o.description?'<div class="d">'+esc(o.description)+'</div>':'')+'</div></div>';
         });
-    } catch (e) { return null; }
-}
-function shJson(cmd, args, cwd) {
-    // check-pr-ready exits 2 or 3 with its JSON still on stdout; keep it.
-    try { return JSON.parse(execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1e8 })); }
-    catch (e) { try { return JSON.parse(String(e.stdout || '')); } catch (e2) { return null; } }
-}
-
-function trunkOf(cwd) {
-    const h = sh('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], cwd);
-    if (h) return h.trim();
-    for (const c of ['origin/main', 'origin/master']) if (sh('git', ['rev-parse', '--verify', c], cwd)) return c;
-    return null;
-}
-
-/** Transcripts written in the last 24 h whose project dir is inside `repo`. */
-function transcriptsFor(repo) {
-    const root = path.join(os.homedir(), '.claude', 'projects');
-    const slug = repo.replace(/[:\\/]/g, '-').replace(/^-/, '');
-    const out = [];
-    let dirs = [];
-    try { dirs = fs.readdirSync(root); } catch (e) { return { recent: [], scanned: 0 }; }
-    let scanned = 0;
-    for (const d of dirs) {
-        if (!d.startsWith(slug)) continue;
-        let files = [];
-        try { files = fs.readdirSync(path.join(root, d)).filter((f) => f.endsWith('.jsonl')); } catch (e) { continue; }
-        for (const f of files) {
-            scanned++;
-            let st; try { st = fs.statSync(path.join(root, d, f)); } catch (e) { continue; }
-            const ageMin = Math.round((Date.now() - st.mtimeMs) / 60000);
-            if (ageMin > 24 * 60) continue;
-            out.push({ worktree: d.slice(slug.length).replace(/^-+\.claude-worktrees-/, '').replace(/^-+/, '') || '(root)', ageMin });
-        }
+      });
+      // Deliberately not an answer control: a blocked session cannot receive a
+      // message, so this copies the id you need to find it in the app instead.
+      out += s.addressableId
+        ? '<button class="go" data-id="'+esc(s.addressableId)+'">Copy session id</button>'
+        : '<div class="na">no desktop record \\u2014 cannot be addressed</div>';
+      out += '</div>';
     }
-    out.sort((a, b) => a.ageMin - b.ageMin);
-    return { recent: out, scanned };
+    return out + '</div>';
+  }).join('');
+  document.getElementById('rows').innerHTML = html;
+  // Other machines. Always stamp the AGE — a stale count read as current is the
+  // whole failure mode of a synced status file, and this one rides a 4-hourly
+  // sync rather than a live connection.
+  var mHtml = '';
+  if (d.machines && d.machines.length) {
+    mHtml = d.machines.map(function(m){
+      var age = Math.round((Date.now() - Date.parse(m.publishedAt))/60000);
+      var stale = age > 360;
+      return '<span class="mach'+(m.blocked?' hot':'')+(stale?' stale':'')+'">'+
+        esc(m.host)+': <b>'+m.blocked+'</b> blocked / '+m.sessions+
+        ' <i>as of '+(age<60?age+'m':Math.round(age/60)+'h')+' ago</i></span>';
+    }).join('');
+  }
+  document.getElementById('machines').innerHTML = mHtml;
+  document.getElementById('foot').textContent =
+    'read-only \\u00b7 a blocked session cannot receive a message, so go to it rather than answering from here';
 }
+function toggleCold(){ showCold = !showCold; if(lastData) render(lastData); }
+document.addEventListener('keydown', function(e){
+  if((e.key==='Enter'||e.key===' ') && e.target.closest && e.target.closest('.ctog')){
+    e.preventDefault(); toggleCold();
+  }
+});
+document.addEventListener('click', function(e){
+  if(e.target.closest && e.target.closest('.ctog')){ toggleCold(); return; }
+  var b = e.target.closest && e.target.closest('.go');
+  if(!b) return;
+  navigator.clipboard.writeText(b.dataset.id).then(function(){
+    var t=b.textContent; b.textContent='Copied'; setTimeout(function(){b.textContent=t;},1200);
+  }, function(){ b.textContent = b.dataset.id; });
+});
+function tick(){
+  fetch('/api/fleet').then(function(r){return r.json();}).then(render).catch(function(e){
+    document.getElementById('scanline').textContent='scan failed: '+e.message;
+  });
+}
+tick(); setInterval(tick, REFRESH_MS);
+</script></body></html>`;
 
-function repoFacts(repoPath) {
-    const cwd = repoPath;
-    sh('git', ['fetch', '-q', 'origin'], cwd);
-    const trunk = trunkOf(cwd);
-    const tip = trunk ? (sh('git', ['log', '-1', '--format=%h %s', trunk], cwd) || '').trim() : '';
-    const tipAge = trunk ? (sh('git', ['log', '-1', '--format=%cr', trunk], cwd) || '').trim() : '';
+// --------------------------------------------------------------- access guard
+//
+// Binding 127.0.0.1 keeps other HOSTS out. It does nothing about the browser
+// already running on this machine, and that is the real exposure: /api/fleet
+// carries sessionIds, absolute cwd paths (which spell out the OS username and
+// client project directory names), branch names, titles, and the verbatim text
+// of every open options panel. Any page the developer visits can point a
+// hostname it controls at 127.0.0.1 — DNS rebinding — and then read all of it
+// with a plain fetch.
+//
+// Three checks, on headers a hostile page cannot set:
+//   Host   — the browser sends the name it dialled. A rebinding page's name is
+//            neither 127.0.0.1 nor localhost, so it fails here.
+//   Origin — browsers attach it to cross-origin requests and omit it on the
+//            same-origin GET this board's own page makes, so its mere presence
+//            means the request came from somewhere else.
+//   Method — this surface is read-only.
+//
+// The board's own page is unaffected: it is served from, and fetches from, the
+// exact origin the user typed.
+const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 
-    const prs = [];
-    const list = shJson('gh', ['pr', 'list', '--state', 'open', '--limit', '20', '--json', 'number,title,isDraft,headRefName'], cwd) || [];
-    for (const p of list) {
-        const r = shJson('node', [path.join(SCRIPTS, 'check-pr-ready.js'), String(p.number), '--repo', cwd, '--json']) || {};
-        prs.push({ number: p.number, title: p.title, draft: !!p.isDraft, head: p.headRefName,
-            verdict: r.verdict || 'CANNOT_TELL', population: r.population || {}, reasons: (r.reasons || []).slice(0, 3) });
+const deny = (res, code, why) => {
+    res.writeHead(code, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(`${why}\n`);
+};
+
+// F8, second half: server construction, listen() and the first scan ran at
+// module top level, so merely require()ing this file started the service.
+// Everything with a side effect now lives behind require.main.
+function serve() {
+const server = http.createServer((req, res) => {
+    if (req.method !== 'GET') return deny(res, 405, 'fleet board is read-only: GET only');
+    if (!ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase())) {
+        return deny(res, 403, 'fleet board only answers to 127.0.0.1 or localhost');
     }
+    if (req.headers.origin) return deny(res, 403, 'fleet board refuses cross-origin requests');
 
-    let prd = null;
-    if (trunk) {
-        const raw = sh('git', ['show', trunk + ':prd.json'], cwd);
-        if (raw) {
+    if (req.url.startsWith('/api/fleet')) {
+        let body;
+        try {
+            const fleet = scanFleet(DAYS);
+            // Other machines publish COUNTS ONLY — see fleet-publish.js for why
+            // nothing identifying can cross a git remote. Absent is normal: the
+            // other host may simply not be publishing.
             try {
-                const st = storiesOf(JSON.parse(raw)); const s = summarise(st);
-                const next = Object.entries(st).filter(([, v]) => v && (v.passes === null || v.passes === false)).slice(0, 3)
-                    .map(([id, v]) => ({ id, title: String(v.title || '').slice(0, 64) }));
-                prd = { done: s.done, pending: s.pending, failed: s.failed, deferred: s.deferred, needsSetup: s.needsSetup, total: s.total, next };
-            } catch (e) { prd = null; }
+                const { readAll, DIR } = require(path.join(__dirname, 'fleet-publish.js'));
+                fleet.machines = readAll().filter((m) => m.host !== require('os').hostname());
+                fleet.machinesDir = DIR;
+            } catch { fleet.machines = []; }
+            body = JSON.stringify(fleet);
+        } catch (e) {
+            res.writeHead(500, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify({ error: e.message }));
         }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        return res.end(body);
     }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(PAGE);
+});
 
-    const stale = shJson('node', [path.join(SCRIPTS, 'check-doc-staleness.js'), '--repo', cwd, '--age', '7', '--max', '3', '--json']) || null;
-    const branchesAhead = trunk ? (sh('git', ['for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin'], cwd) || '')
-        .split('\n').filter((b) => b && !/\/(main|master|HEAD)$/.test(b) && b !== trunk)
-        .filter((b) => Number((sh('git', ['rev-list', '--count', trunk + '..' + b], cwd) || '0').trim()) > 0).length : null;
-
-    const { recent, scanned } = transcriptsFor(repoPath);
-    return { name: path.basename(repoPath), trunk, tip, tipAge, prs, prd,
-        stale: stale && stale.population ? stale.population : null, branchesAhead, transcripts: recent, transcriptsScanned: scanned };
+server.listen(PORT, '127.0.0.1', () => {
+    const t0 = Date.now();
+    const first = scanFleet(DAYS);
+    console.log(`fleet board on http://127.0.0.1:${PORT}`);
+    console.log(`  first scan: ${first.population.transcripts} transcripts, `
+        + `${first.population.blocked} blocked, ${first.population.addressable} addressable `
+        + `(${Date.now() - t0}ms)`);
+});
 }
 
-function gather() {
-    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'brain-brief.json'), 'utf8'));
-    let away = null;
-    try { away = (fs.readFileSync(path.join(os.homedir(), 'claude-memory', 'AWAY.md'), 'utf8').match(/until:\s*(\S+)/) || [])[1] || null; } catch (e) { away = null; }
-    return { measuredAt: new Date().toISOString(), repos: (cfg.repos || []).map(repoFacts), clientReposExcluded: (cfg.clients || []).length, away };
-}
+if (require.main === module) serve();
 
-// ---------------------------------------------------------------- render
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const ago = (m) => m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' d';
-
-function verdictChip(v) {
-    const cls = v === 'READY' ? 'good' : v === 'CANNOT_TELL' ? 'warn' : 'crit';
-    const word = v === 'READY' ? 'ready' : v === 'CANNOT_TELL' ? 'cannot tell' : 'not ready';
-    return '<span class="chip ' + cls + '">' + word + '</span>';
-}
-
-function prdBar(p) {
-    if (!p) return '<p class="muted mono">no prd.json at the trunk</p>';
-    const segs = [['done', p.done, 'good'], ['pending', p.pending, 'accent'], ['failed', p.failed, 'crit'], ['deferred', p.deferred, 'muted'], ['needs setup', p.needsSetup, 'warn']].filter(([, n]) => n > 0);
-    const bar = segs.map(([k, n, c]) => '<i class="seg ' + c + '" style="flex:' + n + '" title="' + k + ' ' + n + '"></i>').join('');
-    const legend = segs.map(([k, n]) => '<span><b class="mono">' + n + '</b> ' + k + '</span>').join('');
-    const next = (p.next || []).length ? '<ol class="next">' + p.next.map((s) => '<li><span class="mono">' + esc(s.id) + '</span> ' + esc(s.title) + '</li>').join('') + '</ol>' : '';
-    return '<div class="bar" role="img" aria-label="' + p.total + ' stories: ' + segs.map(([k, n]) => n + ' ' + k).join(', ') + '">' + bar + '</div>'
-        + '<div class="legend">' + legend + '<span class="muted">of <b class="mono">' + p.total + '</b></span></div>' + next;
-}
-
-function repoPanel(r) {
-    const ready = r.prs.filter((p) => p.verdict === 'READY').length;
-    const prs = r.prs.length
-        ? '<ul class="prs">' + r.prs.map((p) => '<li>' + verdictChip(p.verdict) + '<span class="mono">#' + esc(p.number) + '</span> <span class="t">' + esc(p.title) + '</span>'
-            + (p.draft ? '<span class="chip muted">draft</span>' : '') + '<span class="why mono">' + esc(String((p.reasons || [])[0] || '').slice(0, 90)) + '</span></li>').join('') + '</ul>'
-        : '<p class="muted">no open pull requests</p>';
-    const st = r.stale;
-    const stale = st ? '<span class="mono">' + (st.olderThanAgeDays || 0) + '</span> of <span class="mono">' + (st.openStateAndDated || 0) + '</span> dated open-state claims older than 7 d, in <span class="mono">' + (st.present || 0) + '</span> boot docs' : 'not scanned';
-    const tr = (r.transcripts || []).length
-        ? r.transcripts.slice(0, 5).map((s) => '<li><span class="mono">' + esc(s.worktree) + '</span><span class="muted mono">' + ago(s.ageMin) + ' ago</span></li>').join('')
-        : '<li class="muted">none written in 24 h</li>';
-    return '<section class="repo">\n'
-        + '  <header><h2>' + esc(r.name) + '</h2><span class="mono muted">' + esc(r.trunk || 'no trunk') + '</span></header>\n'
-        + '  <p class="tip mono">' + esc(r.tip) + ' <span class="muted">' + esc(r.tipAge) + '</span></p>\n'
-        + '  <h3>Pull requests <span class="count mono">' + r.prs.length + '</span>' + (ready ? '<span class="chip good">' + ready + ' mergeable</span>' : '') + '</h3>\n'
-        + '  ' + prs + '\n'
-        + '  <h3>Stories</h3>\n  ' + prdBar(r.prd) + '\n'
-        + '  <h3>Documents</h3>\n  <p class="small">' + stale + '</p>\n'
-        + '  <h3>Transcripts, 24 h <span class="count mono">' + (r.transcripts || []).length + '</span></h3>\n  <ul class="sess">' + tr + '</ul>\n'
-        + '  <p class="foot mono muted">' + (r.branchesAhead == null ? '' : r.branchesAhead + ' branches ahead of the trunk · ') + (r.transcriptsScanned || 0) + ' transcripts scanned</p>\n'
-        + '</section>';
-}
-
-const CSS = [
-    ':root{--paper:#eef0ee;--card:#f8f9f8;--sunk:#e2e6e4;--ink:#161a19;--ink2:#4f5856;--muted:#66706e;--rule:#cfd5d2;--accent:#3b6d8c;--accent-soft:#dbe6ee;--good:#2f7a52;--warn:#a06d12;--crit:#a83a2b;--shadow:0 1px 2px rgba(22,26,25,.06),0 12px 28px -20px rgba(22,26,25,.35)}',
-    '@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#121615;--card:#1a1f1e;--sunk:#222827;--ink:#e7ebe9;--ink2:#b3bbb8;--muted:#8c9592;--rule:#2b3331;--accent:#8db6d0;--accent-soft:#1d2b34;--good:#5fc08c;--warn:#d9a84e;--crit:#ef8b7a;--shadow:0 1px 2px rgba(0,0,0,.5),0 12px 28px -20px rgba(0,0,0,.8)}}',
-    ':root[data-theme="dark"]{--paper:#121615;--card:#1a1f1e;--sunk:#222827;--ink:#e7ebe9;--ink2:#b3bbb8;--muted:#8c9592;--rule:#2b3331;--accent:#8db6d0;--accent-soft:#1d2b34;--good:#5fc08c;--warn:#d9a84e;--crit:#ef8b7a;--shadow:0 1px 2px rgba(0,0,0,.5),0 12px 28px -20px rgba(0,0,0,.8)}',
-    '*{box-sizing:border-box}',
-    'body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 "Libre Franklin",ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}',
-    '.wrap{max-width:1180px;margin:0 auto;padding:0 24px 56px}',
-    'h1,h2,h3{font-family:"Schibsted Grotesk",ui-sans-serif,system-ui,sans-serif;margin:0;letter-spacing:-.015em;text-wrap:balance}',
-    '.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;font-size:.9em}',
-    '.muted{color:var(--muted)}',
-    '.mast{padding:40px 0 22px;border-bottom:1px solid var(--rule);display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 32px}',
-    '.mast h1{font-size:clamp(1.8rem,4vw,2.6rem);line-height:1.05;font-weight:700}',
-    '.mast .stamp{font-family:"IBM Plex Mono",monospace;font-size:.8rem;color:var(--muted);letter-spacing:.04em}',
-    '.mast .stamp b{color:var(--ink);font-weight:500}',
-    '.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:22px 0 30px}',
-    '.tile{background:var(--card);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}',
-    '.tile .v{font-family:"Schibsted Grotesk",sans-serif;font-size:2rem;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}',
-    '.tile .k{font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:6px}',
-    '.tile.you{border-color:var(--accent);background:var(--accent-soft)}',
-    '.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));align-items:start}',
-    '.repo{background:var(--card);border:1px solid var(--rule);border-radius:6px;padding:18px 18px 12px;box-shadow:var(--shadow)}',
-    '.repo header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--rule);padding-bottom:8px}',
-    '.repo h2{font-size:1.25rem;font-weight:700}',
-    '.repo h3{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px;display:flex;align-items:center;gap:8px;font-weight:600}',
-    '.repo .count{color:var(--ink);font-size:.8rem}',
-    '.tip{margin:10px 0 0;font-size:.82rem;overflow-wrap:anywhere}',
-    '.prs,.sess,.next{list-style:none;margin:0;padding:0;display:grid;gap:6px}',
-    '.prs li{display:grid;grid-template-columns:auto auto 1fr;gap:4px 8px;align-items:baseline;padding:6px 0;border-top:1px solid var(--rule)}',
-    '.prs li:first-child{border-top:0}',
-    '.prs .t{font-size:.9rem;overflow-wrap:anywhere}',
-    '.prs .why{grid-column:1/-1;font-size:.72rem;color:var(--muted)}',
-    '.chip{display:inline-flex;align-items:center;font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}',
-    '.chip.good{color:var(--good)}.chip.warn{color:var(--warn)}.chip.crit{color:var(--crit)}.chip.muted{color:var(--muted)}',
-    '.bar{display:flex;height:10px;border-radius:2px;overflow:hidden;background:var(--sunk);gap:1px}',
-    '.seg{display:block}.seg.good{background:var(--good)}.seg.accent{background:var(--accent)}.seg.crit{background:var(--crit)}.seg.muted{background:var(--muted)}.seg.warn{background:var(--warn)}',
-    '.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.78rem;margin-top:6px}',
-    '.next{margin-top:8px}.next li{display:flex;gap:8px;font-size:.82rem;align-items:baseline}',
-    '.sess li{display:flex;justify-content:space-between;gap:8px;font-size:.8rem}',
-    '.small{font-size:.82rem;margin:0}',
-    '.foot{font-size:.7rem;margin:14px 0 0;border-top:1px solid var(--rule);padding-top:8px}',
-    '.note{margin:32px 0 0;padding:14px 16px;border-left:2px solid var(--accent);font-size:.85rem;color:var(--ink2);max-width:66ch}',
-    '@media (prefers-reduced-motion:reduce){*{transition:none!important}}',
-].join('\n');
-
-function render(d) {
-    const total = { prs: 0, ready: 0, pending: 0, transcripts: 0 };
-    for (const r of d.repos) {
-        total.prs += r.prs.length; total.ready += r.prs.filter((p) => p.verdict === 'READY').length;
-        total.pending += (r.prd && r.prd.pending) || 0; total.transcripts += (r.transcripts || []).length;
-    }
-    const when = String(d.measuredAt || '').replace('T', ' ').slice(0, 16) + ' UTC';
-    return '<title>Fleet Board</title>\n'
-        + '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
-        + '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Libre+Franklin:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">\n'
-        + '<style>\n' + CSS + '\n</style>\n'
-        + '<div class="wrap">\n<header class="mast">\n  <h1>Fleet Board</h1>\n'
-        + '  <div class="stamp">measured <b>' + esc(when) + '</b> · ' + d.repos.length + ' repos in the mandate · ' + (d.clientReposExcluded || 0) + ' client repos excluded'
-        + (d.away ? ' · away window until <b>' + esc(d.away) + '</b>' : '') + '</div>\n</header>\n'
-        + '<div class="tiles">\n'
-        + '  <div class="tile you"><div class="v">' + total.ready + '</div><div class="k">mergeable now</div></div>\n'
-        + '  <div class="tile"><div class="v">' + total.prs + '</div><div class="k">open pull requests</div></div>\n'
-        + '  <div class="tile"><div class="v">' + total.pending + '</div><div class="k">stories pending</div></div>\n'
-        + '  <div class="tile"><div class="v">' + total.transcripts + '</div><div class="k">transcripts written, 24 h</div></div>\n'
-        + '</div>\n<div class="grid">\n' + d.repos.map(repoPanel).join('\n') + '\n</div>\n'
-        + '<p class="note">Every figure here is a snapshot from the same instruments the fleet merges on: each pull request through <span class="mono">check-pr-ready</span>, stories from <span class="mono">prd.json</span> at the trunk ref rather than any working copy, document claims from <span class="mono">check-doc-staleness</span>, sessions from transcript writes. A count with no population beside it is a guess, so each panel ends with what was scanned. Re-run the generator to republish.</p>\n'
-        + '</div>';
-}
-
-module.exports = { gather, render, repoPanel, prdBar, esc };
-
-if (require.main === module) {
-    const argv = process.argv.slice(2);
-    const arg = (n) => { const i = argv.indexOf(n); return i === -1 ? null : argv[i + 1]; };
-    const dataFile = arg('--data');
-    const out = arg('--out');
-    let d;
-    if (dataFile) d = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-    else d = gather();
-    if (argv.includes('--json')) console.log(JSON.stringify(d, null, 2));
-    if (out) { fs.writeFileSync(out, render(d), 'utf8'); console.error('wrote ' + out + ' (' + fs.statSync(out).size + ' bytes) measured ' + d.measuredAt); }
-    if (!out && !argv.includes('--json')) console.log('fleet-board.js --out <file.html> | --json | --data <snapshot.json> --out <file.html>');
-}
+module.exports = { esc };
