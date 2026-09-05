@@ -188,15 +188,78 @@ function stripNonCommandText(command) {
 const unwrap = (tok) => tok.split(ESCAPED_SPACE).join(' ');
 
 /**
+ * Prefixes that NAME the home directory without being a directory called that.
+ *
+ * `path.resolve` has no notion of any of them, so `~/Downloads/code/product`
+ * resolved against a cwd inside the home repo lands at
+ * `<home-repo>/~/Downloads/code/product` -- which `isInside` then reports as
+ * INSIDE the home repo. The guard allowed it. `[measured 2026-09-05]` against
+ * this hook, with controls: the absolute and relative spellings of the same
+ * command both blocked, and `cd ~/Downloads/code/product && git commit` and
+ * `git -C ~/Downloads/code/product commit` were both permitted.
+ *
+ * This is the 2026-09-02 backslash defect arriving through a different
+ * character, and the comment above `stripArgumentText` describes its shape
+ * exactly: a path collapses to something shorter, and the shorter thing
+ * resolves under the home repo. There it failed in both directions; here it
+ * fails only OPEN, which is worse, because a fail-closed guard announces
+ * itself the first time it is wrong and this one does not.
+ *
+ * Anchored at the start, because none of these mean home anywhere else. The
+ * bare form (`~`, `$HOME`) must be the WHOLE token or be followed by a
+ * separator, or `~foo` (another user's home, which is not ours to expand) and
+ * `$HOMEBREW` would be rewritten into paths nobody typed.
+ */
+const HOME_PREFIXES = [
+    /^~(?=$|[/\\])/,
+    /^\$HOME(?=$|[/\\])/,
+    /^%USERPROFILE%/i,
+    /^\$env:USERPROFILE/i,
+];
+
+/** Replace a leading home-naming prefix with the real home directory. */
+function expandHome(raw) {
+    for (const re of HOME_PREFIXES) {
+        if (re.test(raw)) return os.homedir() + raw.replace(re, '');
+    }
+    return raw;
+}
+
+/**
+ * Unwrap, expand a home prefix, then resolve. Every path this guard derives
+ * from a command string goes through here, so a new prefix is handled at one
+ * site rather than at the six that previously called `path.resolve` directly.
+ */
+const resolveArg = (base, raw) => path.resolve(base, expandHome(unwrap(raw)));
+
+/**
  * Split into command-position segments.
  *
  * A shell starts a new command after `;`, `&&`, `||`, `|`, a newline, and at the
  * open of a subshell or command substitution. Splitting on those and only
  * looking at each segment's FIRST word is what keeps `git grep git-commit` and
  * `echo && git commit` telling apart from each other.
+ *
+ * `{` and `}` are in that set for shell brace GROUPS (`{ git commit; }`), and
+ * they also appear in `${VAR}`, where splitting on them is destructive.
+ * `[measured 2026-09-05]` `git -C ${HOME}/product rebase main` split into
+ * `git -C $`, `HOME` and `/product rebase main`; the first segment has no
+ * subcommand after `-C` eats the `$`, so the whole command parsed to nothing
+ * and the guard allowed a write it blocks in all four other spellings.
+ *
+ * Normalising `${NAME}` to `$NAME` first is the smaller fix than teaching the
+ * splitter about nesting: the two are the same expansion, and the braced form
+ * then reaches `expandHome` by the path the bare form already takes. Only the
+ * plain form is rewritten. `${VAR:-default}`, `${#VAR}` and `${VAR/a/b}` are
+ * different operators, they are not paths this guard could resolve anyway, and
+ * a regex that tried to cover them would be inventing shell semantics.
+ *
+ * Brace groups keep working regardless, because `;` already ends the command
+ * inside one.
  */
 function commandSegments(stripped) {
-    return stripped
+    return String(stripped)
+        .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, '$$$1')
         .split(/(?:\$\(|[;\n&|()`{}])+/)
         .map((seg) => seg.trim())
         .filter(Boolean);
@@ -237,11 +300,11 @@ function parseGitSegment(segment, cwd) {
     let gitDir = null;
     for (; i < toks.length; i++) {
         const t = toks[i];
-        if (t === '-C') { const v = toks[++i]; if (v) dir = path.resolve(dir, unwrap(v)); continue; }
-        if (t.startsWith('--work-tree=')) { dir = path.resolve(dir, unwrap(t.slice(12))); continue; }
-        if (t === '--work-tree') { const v = toks[++i]; if (v) dir = path.resolve(dir, unwrap(v)); continue; }
-        if (t.startsWith('--git-dir=')) { gitDir = path.resolve(dir, unwrap(t.slice(10))); continue; }
-        if (t === '--git-dir') { const v = toks[++i]; if (v) gitDir = path.resolve(dir, unwrap(v)); continue; }
+        if (t === '-C') { const v = toks[++i]; if (v) dir = resolveArg(dir, v); continue; }
+        if (t.startsWith('--work-tree=')) { dir = resolveArg(dir, t.slice(12)); continue; }
+        if (t === '--work-tree') { const v = toks[++i]; if (v) dir = resolveArg(dir, v); continue; }
+        if (t.startsWith('--git-dir=')) { gitDir = resolveArg(dir, t.slice(10)); continue; }
+        if (t === '--git-dir') { const v = toks[++i]; if (v) gitDir = resolveArg(dir, v); continue; }
         if (t === '-c' || t === '--exec-path' || t === '--namespace') { i++; continue; }
         if (t.startsWith('-')) continue;               // any other global flag
         return { sub: t.toLowerCase(), dir, gitDir };  // first non-flag word is the subcommand
@@ -270,7 +333,7 @@ function cdTarget(segment, cwd) {
     if (toks[i] !== 'cd') return null;
     const args = toks.slice(i + 1).filter((t) => !t.startsWith('-'));
     if (!args.length) return toks.includes('-') ? null : os.homedir();
-    return path.resolve(cwd, unwrap(args[0]));
+    return resolveArg(cwd, args[0]);
 }
 
 /** True when `child` is `root` or lives under it. Case-insensitive on win32. */
