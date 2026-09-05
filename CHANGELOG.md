@@ -1,5 +1,104 @@
 # Changelog
 
+## [8.162.0] - 2026-09-05
+
+Five changes, and three of them are the same defect wearing different clothes: a
+signal that is internally consistent, points at a real thing, and answers a
+question next to the one its reader is asking.
+
+### Fixed
+
+- **The coordinator write rail had a hole exactly the width of the character
+  people type.** `path.resolve` has no notion of `~`, so a product-repo path
+  written that way resolved to `<home-repo>/~/…` and the containment check
+  reported it as INSIDE the home repo. `git -C ~/path/to/product commit` was
+  permitted where the absolute and relative spellings of the identical command
+  both blocked. Found because the guard refused the coordinator's own memory
+  mirror, which is the one write it should not have refused. Same family as the
+  2026-09-02 backslash defect the file already documents, and worse in one
+  respect: that one failed in both directions and announced itself the same day,
+  while this one only ever failed OPEN, and a rail that only fails open is
+  indistinguishable from a rail that works. `${HOME}` turned out to be a second
+  bug: `commandSegments` splits on `{` and `}` for shell brace groups, so that
+  spelling was shredded into three fragments and parsed to nothing. Mutation
+  tested per half, 8 cases and 2 cases respectively. (#167)
+- **A session that had published everything was told it had not.** The Stop
+  hook counted `@{upstream}..HEAD`, which measures distance from a BRANCH's own
+  tracked ref, and any session whose work reaches a trunk by merge leaves that
+  ref behind permanently. In a worktree fleet that is most sessions. It now
+  resolves `origin/HEAD`, rather than assuming `origin/main` because one repo
+  here has a `main` two months behind its real trunk, and prints both facts when
+  they disagree: a branch-local count on published work says a merge left the
+  ref behind, which is worth seeing, and printing it ALONE was the defect. The
+  cost was never the one wrong line. A nudge that fires on published work trains
+  the reader to ignore the nudge, and then it misses the session that genuinely
+  has not reported.
+- **`RESUME.md` could not be dated, so a week-old snapshot read like a fresh
+  one.** Its only timestamp described a commit rather than the file, and its
+  three state sections were each wrong on a trunk snapshot three days old: a
+  merged PR under `Open PRs`, two ancestors of main under `Unpushed commits`,
+  and three worktrees that no longer existed. A `| generated |` row now leads
+  the table, because it dates every row beneath it. (#166)
+- **The gate's dirty-tree refusal described a mechanism retired five days
+  earlier.** `check:suites` stopped mutating the shared tree on 2026-08-31; both
+  `CLAUDE.md` and the script's own message went on telling readers to stash to
+  protect work the sweep cannot touch. The refusal was always right and its
+  reason was not, which is the harder kind of stale claim, because a sentence
+  that still gives working advice is never revisited. The true reason is better
+  and was unwritten: the sweep grades HEAD, so running it dirty reports on
+  committed code while naming files you are still editing.
+
+### Added
+
+- **The doc-staleness checker reads structure, not only vocabulary.** A row
+  under `## Open PRs` carrying a PR number asserts openness with no stale-claim
+  word anywhere, so a lexical sweep is blind to exactly the machine-generated
+  status blocks readers trust most. The rule is an ALLOWLIST of three generated
+  headings rather than a heuristic, and the census is why: any-open-sounding
+  heading scored 53 candidates for about 4 genuine findings, roughly 8%, which
+  is the threshold at which this fleet has already had to mute a detector, while
+  the narrow form scored 6 for 4. All four genuine findings were in generated
+  blocks and none was prose. Two suppressions land with it: quote state carried
+  ACROSS lines, since a quoted label whose opening quote is on the previous line
+  defeats any line-local check, and a shipped-marker section suppression, since
+  an append-only changelog ages every historical section into a false positive
+  forever. (#168)
+
+### Also in this release, from the same rule
+
+- **A running VERSION is not a shipped record, and a NEGATED marker is not a
+  marker.** The shipped-section suppression above shipped in #168 matching the
+  bare word `live`, which catches a status header whose bold lead reads `Live vNNN`
+  and suppresses any open claim beneath it. Measured across five trunks by
+  restoring the token as the only variable, isolating it from the two
+  suppressions that work correctly: it hid ONE true finding on ONE trunk, and
+  that finding had been independently proved half stale the same day.
+
+  The census run for it found a second and sharper case. `done` was the sole
+  matcher exactly twice and BOTH were negations, `## NOT done` and
+  `## Deliberately NOT done`, which are the opposite of shipped. So `done` also
+  leaves the pattern and a general negated-marker veto now protects every
+  remaining token at once.
+
+  `closed` STAYS, and the reasoning is recorded rather than resolved: it is the
+  sole matcher six times, five are real closures, and the sixth is a
+  parenthetical in a version note. Removing it trades five correct suppressions
+  for one, and noise is what gets a detector muted.
+
+  Three of four mutants killed. The fourth is a labelled SURVIVOR rather than a
+  tuned-away one: re-admitting `done` changes nothing, because the veto already
+  covers both its cases. The veto itself was untestable at first, since with
+  `done` gone the rule never matches `## NOT done` and the veto is never
+  consulted; it needed a case the rule still matches before the assertion could
+  fail for its own reason. (#171)
+
+### Notes
+
+The version is the plugin-cache key, so none of the above ran on any machine
+until this release. Three of the five were reported by peer sessions rather than
+found by their author, and the third was found because a probe returned an empty
+result that was reported as unreproduced rather than quietly re-run.
+
 ## [8.161.0] - 2026-09-05
 
 ### Added
