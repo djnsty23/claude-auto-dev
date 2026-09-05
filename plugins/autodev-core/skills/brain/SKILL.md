@@ -233,6 +233,74 @@ Other scripts sit beside those three and were not run at boot. One warning:
 `fleet-notify.js` fires real Windows toasts at the user. Use `--dry` to see what
 would fire, `--test` for exactly one sample.
 
+### 2b. The DOCUMENTS decay too, so re-check what they assert
+
+Step 2 regenerates git and session state because it decays within hours. The
+prose a Brain reads at boot decays the same way and nothing regenerates it.
+
+```powershell
+(Get-Content "$env:USERPROFILE\.claude\brain-brief.json" -Raw | ConvertFrom-Json).repos | ForEach-Object { node "$B\check-doc-staleness.js" --repo $_ --age 7 }
+```
+
+It reads the `repos` array, which is the mandate's own list, so client repos are
+excluded by construction rather than by remembering to exclude them.
+
+**The instance.** `[measured 2026-09-05]` One product's `RESUME.md` said of a
+payment webhook fix: *"No real delivery has arrived since, so the fix is
+unproven."* That was true when written at 11:18:46Z and false by 22:24:35Z the
+same day. It stood for fifteen days. A Brain read it at boot, ranked "the
+revenue path is unverified" as the highest-priority item across five projects,
+and spent a session proving something already proven.
+
+**A stale OPEN claim is far worse than a stale "fixed in PR #N".** The stale
+"fixed" surfaces the moment anybody looks, because the work is still needed and
+its absence shows. A stale "still unproven" makes a reader SKIP work already
+done, and skipping emits no output, no failure and no diff. The cost is
+invisible by construction and compounds for as long as the sentence stands.
+
+**What the output is, and what it is not.** It is a short list of claims to
+re-check before believing, ranked by the age of the date their writer stamped.
+It does NOT decide staleness, because deciding needs a probe per claim and
+guessing one produces a gate that is confidently wrong. It always exits 0.
+
+**Re-check by asking the right surface, then fix the sentence in the same
+turn.** A claim about a deploy is answered by the running system, not by git.
+Leaving a re-checked claim unedited guarantees the next Brain pays for it again.
+
+**RE-CHECK THE ONES THAT NAME AN OBSERVABLE FIRST, AND DO NOT READ THE REST
+AS HEALTHY.** `[reported 2026-09-05]` by the session that worked the instance
+this tool was built from, and it is the half no pattern can supply:
+
+> "Every wrong line here was grammatically confident and internally consistent;
+> nothing in RESUME.md looked wrong. What made it findable was that the claim
+> named a checkable observable, 'no real delivery has arrived since', against a
+> table any session can query in one call."
+
+So the sweep RANKS; it cannot GRADE. Sort its output by whether the claim names
+the artifact that would refute it:
+
+- **Names one** (a table, an endpoint, a run, a build number, a file): re-run
+  the refutation. That is one call and it settles the claim outright.
+- **Names none** ("the flow feels wrong", "this is probably still broken"):
+  **ungradeable, which is not the same as true and not the same as false.** Say
+  so in the report rather than letting it pass as verified. A claim with no
+  observable rots silently and no sweep will ever catch it, so the fix is to
+  edit it into one that names something, not to re-read it harder.
+
+Reporting absence as health is the specific failure to avoid: "nothing to
+re-check" means the tool found no DATED open-state claim, never that the
+document is true.
+
+**A claim asserting state in a HEADING or a bold lead outranks the same words in
+a sentence.** Same source, and the reason is about readers rather than about
+decay: structure is trusted and the qualifying text underneath it is skimmed.
+The tool marks these, and the live instance is a bold lead reading
+"Still open: 953 dead census keys", 28 days old at the time of writing.
+
+**Read the population line, not the finding count.** A repo with zero findings
+and 3 boot documents present is a different statement from one with zero
+findings and 0 documents present, and only the population separates them.
+
 ### 3. Is a leftover panel deny still set? Find and clear it; never write one
 
 ```powershell
@@ -326,7 +394,7 @@ Get-ChildItem "$env:USERPROFILE\claude-memory\heal-runs\" | Sort-Object LastWrit
 ### 4b. Read what the last Brain already learned, BEFORE you interview anyone
 
 ```powershell
-Get-ChildItem "$env:USERPROFILEclaude-memoryDECISIONS-*.md" | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Encoding UTF8 }
+Get-ChildItem "$env:USERPROFILE\claude-memory\DECISIONS-*.md" | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Encoding UTF8 }
 ```
 
 **A handover transfers ADDRESSES and loses ANSWERS, and nothing about the loss
@@ -1380,6 +1448,68 @@ check the transcript for `__unparsedToolInput`. A rejected payload at exactly
 **Do not loop until dry.** `[measured]` an adversary told to output DRY if sound
 produced zero dry passes across two workflows and ran to the agent cap. One
 bounded round, then a human reads the delta.
+
+## THE OPERATOR CAN ANSWER TWO PANELS DIFFERENTLY, AND NOTHING RECONCILES THEM
+
+`[measured 2026-09-05]` He answered a panel in the coordinator's session at
+06:20Z selecting **"push both branches, open PRs, mark ready"**. He answered a
+panel in one of those branches' own sessions at 06:45Z selecting **"keep it
+local, nothing leaves this disk"**. Both answers are real, both were acted on,
+and they are opposites.
+
+    07:26Z  the coordinator pushed the branch      executing the 06:20Z answer
+    07:30Z  the session deleted the remote ref     executing the 06:45Z answer
+            which closed the pull request the push had created
+
+**Neither party did anything wrong.** The session honoured the instruction given
+directly to it, which is exactly what a session should do with a coordinator's
+relay standing against it, and it measured before deleting shared state: same
+SHA present in its worktree and three verified bundles, re-push restores it
+byte-identically with one command, no PR opened so no billable minutes spent.
+That is a better-reasoned delete than most merges.
+
+**The failure is structural and it is the coordinator's to prevent.** A Brain
+cannot see a panel answered in another session. It dispatches on the last
+instruction IT received and has no way to know a later, contradicting one exists
+somewhere else. The gap is not visible from either end until the two acts collide.
+
+**So: before acting on a repo where a session is working, read that repo's
+`DECISIONS-<date>.md`.** The away-window rules already tell every session to log
+its decisions in the repo it is working in, which makes that file the one shared
+surface where a divergent instruction surfaces. In this instance the session
+logged its reasoning at 07:30Z and the coordinator read it forty minutes later,
+only because it went looking after the act had already collided.
+
+```bash
+git -C <repo> log --oneline -5 -- 'DECISIONS-*.md'
+git -C <repo> show origin/main:DECISIONS-$(date +%Y-%m-%d).md 2>/dev/null | head -60
+```
+
+**And when the two instructions genuinely conflict, do not resolve it.** Report
+both, quote both, and let him arbitrate. The escalation rule already says this;
+what is new is that the conflict can be invisible, so the reading above is what
+makes the rule usable rather than aspirational.
+
+## AN ACTOR FIELD DOES NOT DISTINGUISH THE OPERATOR FROM A SESSION
+
+`[measured 2026-09-05]` `gh pr view --json closedAt` plus the timeline reported a
+pull request "closed by djnsty23". The coordinator read that as the operator
+closing it and told him so. **A session closed it**, because sessions act as his
+GitHub account and the actor field records the account rather than the hand.
+
+The same holds for every commit, push, merge, tag, comment and branch deletion a
+session performs. `git log --format=%an` and every forge actor field are silent
+on which of the two acted.
+
+**What DOES distinguish them:** a session that follows the logging rules leaves a
+decision entry saying what it did and why. Here the session's own commit read
+`docs: D1 - deleted a remote branch that appeared without this session pushing
+it`. That sentence is evidence an actor field can never carry.
+
+So before attributing any repository act to the operator, look for a decision
+entry claiming it. If none exists, say the act happened rather than naming who
+did it, because naming the wrong actor turns a coordination question into an
+accusation and sends the investigation in the wrong direction.
 
 ## Escalate rather than resolve
 

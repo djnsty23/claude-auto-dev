@@ -225,6 +225,31 @@ const SUPERSEDED = [
         fixtureFile: 'plugins/autodev-core/skills/rule-windows/SKILL.md',
     },
     {
+        id: 'collapsed-env-var-path',
+        // Fires when a known env var is followed straight by a letter, digit or
+        // dot. A correct path has a separator, quote, space or line end there.
+        re: /\$env:(?:USERPROFILE|APPDATA|LOCALAPPDATA|CLAUDE_PLUGIN_ROOT|TMPDIR|TEMP)(?=[A-Za-z0-9.])/,
+        why: 'the path separators were eaten in transit, so PowerShell reads the whole run-together string as ONE variable name, which is empty; the command then globs nothing and returns silently, and an empty result reads exactly like a real negative (measured 2026-09-05, brain SKILL.md step 4b shipped this way)',
+        replacement: 'the same path with its separators restored',
+        fence: ['powershell', 'ps1', 'pwsh'],
+        // The fixture arrays are scanned AS DOCUMENT LINES, so a fenced rule
+        // needs its own fence opener here or it can never fire and the CLI
+        // refuses to report at all. That refusal is correct and it caught this.
+        positive: [
+            '```powershell',
+            'Get-ChildItem "$env:USERPROFILEclaude-memoryDECISIONS-*.md"',
+            'node "$env:USERPROFILE.claudescriptsprobe.js"',
+            '```',
+        ],
+        negative: [
+            '```powershell',
+            'Get-ChildItem "$env:USERPROFILE\\claude-memory\\DECISIONS-*.md"',
+            '$B = "$env:USERPROFILE\\.claude\\plugins\\marketplaces"',
+            'echo $env:CLAUDE_PLUGIN_ROOT',
+            '```',
+        ],
+    },
+    {
         id: 'supabase-db-query-linked',
         re: /supabase\s+db\s+query\s+--linked/,
         why: 'it triggers a Windows Firewall prompt and times out; the REST endpoint is the automatable path',
