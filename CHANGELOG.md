@@ -1,5 +1,35 @@
 # Changelog
 
+## [8.160.0] - 2026-09-05
+
+### Fixed
+
+- **`session-exit.js` no longer lets a QUOTED marker grant permission to
+  overwrite.** `refuseToClobber` tested `MARKER` before `tracked` or `huge` was
+  computed, so any document quoting the marker was classified as this script's
+  own output. The documents most likely to quote it are the long hand-written
+  handoffs the guard exists to protect. Measured on a real file, one variable:
+  the shipped version exited 0 and took it from 25,804 bytes to 2,141, destroying
+  23,663; the reordered version exits 3 and leaves it intact. Size is computed
+  first now, because size is the signal a document cannot quote, and the marker
+  can only downgrade a refusal rather than grant permission. Small generated
+  files are still overwritten on every rerun, and there is a test for that.
+  Mutation-tested: against the unfixed subject the suite reports 58 passed and 3
+  failed, and the three are exactly the new assertions. (#157)
+
+### Added
+
+- **A hooks module for autodev-core**, behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`:
+  prompt and Bash-output secret redaction, Bash rules, an empty commit trailer, a
+  pinned sprint status line, plus a d.ts extractor and a README. `validate` and
+  `find-untested-hooks` were taught to see a `modules` entry. (#156)
+- **`brain` boot step 4b: read the last Brain's decisions before interviewing any
+  session.** A handover transfers addresses and loses answers, and nothing about
+  the loss is visible from either end. Three Brain identities existed inside two
+  days and a session was asked the same ownership question twice. The answers were
+  already in `DECISIONS-<date>.md`; the gap was ordering, so the fix is a boot step
+  rather than a new record. (#157)
+
 ## [8.159.0] - 2026-09-04
 
 Five commits landed on main after 8.158.0 was cut, four of them Brain skill and
