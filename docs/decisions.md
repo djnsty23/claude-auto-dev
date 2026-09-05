@@ -78,6 +78,30 @@ carry `usage.cache_read_input_tokens`, so a hook can read the true figure.
 `config-protection`, which blocks edits to linter configs, is 176 lines and
 cheap, but no incident in the record motivates it, so it waits for one.
 
+**Built the same day: `hooks/context-depth-nudge.js`.** A Stop hook that
+reads the latest assistant row's usage from the tail of `transcript_path`
+(input + cache_read + cache_creation, the figure that call was billed for),
+and once per 100k step past 300k emits `additionalContext` telling the model
+to finish the step and write RESUME.md, plus a `systemMessage` telling the
+operator to start fresh. No `decision` key, so it cannot hold a turn or fight
+stop-auto-check; silence is zero bytes on both streams. Suite:
+`tooling/test-context-depth-nudge.js`, 30 cases, including a usage row behind
+a 700KB attachment row, a truncated final line, and a corrupt ledger. The
+first run of that suite failed two of its own cases on arithmetic (402,578 is
+one whole step past the line, bucket 1, not 0); the hook was right and the
+expectation was wrong, which is what a first run is for.
+
+**Away-window decision, branch 2.** The closing panel for this evaluation was
+held by the operator's standing AWAY order (`~/claude-memory/AWAY.md`, until
+2026-09-06T20:00Z, "no panels, decide it yourself and log why"). The order's
+branch 2 covers work that is reversible and not otherwise decided: this hook
+is one file, one suite and one `hooks.json` line, reverted by removing them.
+It was the recommended option and it was the one measured gap the evaluation
+found, so it was built rather than queued. Not taken from the same panel: an
+artifact page (arms a live-watch chip the operator would have to close, low
+value while away) and the push (a push is his call under `rules/local-first.md`,
+and the branch is one `git push` from published when he says so).
+
 **What would reverse this.** A measured per-call cost within 2x of ours, a
 skill listing that fits the budget beside another plugin, the Defender issue
 closed with a non-inline bootstrap, and a hook can-fail gate. Any one of
