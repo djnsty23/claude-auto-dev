@@ -1097,6 +1097,47 @@ before writing it, before sending it. `[measured]` a correct reading of an
 unpushed commit was reported after it had been pushed. The probe was right and
 the report was late. Timestamp anything you cannot re-check.
 
+**AND RE-READING IS PER-SURFACE, NOT PER-MESSAGE.** `[measured 2026-09-05]` A
+session reported that a release candidate was holding at a manual deploy gate and
+that approving it would ship a build predating the fixes it had just landed. It
+had re-fetched before sending, exactly as the rule above requires. It re-fetched
+GIT. The stale claim was about the PIPELINE, which git cannot see, and it rode
+into the message alongside genuinely fresh git facts. The build had in fact been
+live for eight hours, which one call to the service's own version endpoint would
+have shown, and neither that session nor the coordinator relaying it made that
+call.
+
+The reporting session's own words, and they are the rule:
+
+> Re-reading is per-surface, not per-message: a fresh git read does not refresh a
+> deploy-gate claim riding alongside it.
+
+**The rule above is silent on WHICH surface, and that silence is the defect.** A
+message carrying claims about two systems gets one of them refreshed, and the
+other inherits the freshness of the first in the reader's eye. The report looks
+verified because part of it was.
+
+So: **name the surface each load-bearing claim came from, and refresh each
+surface separately.** They answer different questions and none substitutes:
+
+| surface | probe | answers |
+|---|---|---|
+| local git | `git fetch`, `rev-list`, `cherry` | what commits exist and where |
+| the forge | `gh pr view`, `gh api` | what is open, merged, gated |
+| the running system | its own version or health endpoint | what is actually DEPLOYED |
+
+A git read refreshes git. Only the running system can say what is live. Three
+claims in one message need three probes, and a claim inherits freshness only
+from its own.
+
+**The coordinator's version of this failure is worse than the session's**, and it
+happened in the same exchange: the relay was about a CLIENT repo, where the
+coordinator correctly takes no action, and "not mine to act on" slid into "not
+mine to verify" before the warning reached the operator. Reporting something is
+asserting it, and a warning is the worst class to get wrong because it prompts
+action rather than merely informing.
+
+
 **A current-state measurement supports no historical claim.** `[measured]` two
 credentials were read as identical and reported as "already one credential, two
 homes" — they had been made identical twenty minutes earlier by another session.
