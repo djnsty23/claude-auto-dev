@@ -102,6 +102,51 @@ function aheadOfUpstream(cwd) {
     }
 }
 
+/**
+ * Is HEAD already reachable from the trunk? null when it cannot be determined.
+ *
+ * `aheadOfUpstream` above answers "how far is HEAD from THIS BRANCH's tracked
+ * ref", which is a different question from "is this work published", and the
+ * hook was printing the first while the reader acted on the second.
+ *
+ * `[reported 2026-09-05]` by a session that had pushed everything to the trunk
+ * and was then told it was carrying three commits the coordinator had not been
+ * told about. Its own measurement: `@{u}...HEAD` was `0 3` while
+ * `origin/main...HEAD` was `0 0` and `merge-base --is-ancestor HEAD origin/main`
+ * succeeded. Every number was real and the sentence built from them was false.
+ *
+ * It is not a rare shape. Any session whose work reaches a trunk by MERGE rather
+ * than by pushing its own branch ref leaves that branch's upstream behind
+ * permanently, and in a worktree fleet that is most of them. The cost is not the
+ * one wrong line: a nudge that fires on published work trains the reader to
+ * ignore the nudge, and then it misses the session that really has not reported.
+ *
+ * `origin/HEAD` is resolved rather than assuming `origin/main`, because one repo
+ * in this fleet has a `main` two months behind its real trunk.
+ */
+function publishedOnTrunk(cwd) {
+    const run = (args) => spawnSync('git', args,
+        { cwd, encoding: 'utf8', timeout: 3000, windowsHide: true });
+    try {
+        let trunk = null;
+        const sym = run(['symbolic-ref', '-q', 'refs/remotes/origin/HEAD']);
+        if (sym.status === 0) trunk = (sym.stdout || '').trim().replace(/^refs\/remotes\//, '');
+        if (!trunk) {
+            // No origin/HEAD is normal in a fresh clone. Fall back only to a ref
+            // that exists, so a missing trunk reads as UNKNOWN rather than as
+            // "not published", which is the direction that invents a nudge.
+            const probe = run(['rev-parse', '--verify', '--quiet', 'origin/main']);
+            if (probe.status === 0) trunk = 'origin/main'; else return null;
+        }
+        const anc = run(['merge-base', '--is-ancestor', 'HEAD', trunk]);
+        if (anc.status === 0) return true;
+        if (anc.status === 1) return false;
+        return null;                              // any other status is unknowable
+    } catch {
+        return null;
+    }
+}
+
 function branchName(cwd) {
     try {
         const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'],
@@ -170,12 +215,26 @@ if (lastNotice && now - lastNotice < cooldownMs) {
 
 const branch = branchName(cwd);
 const ahead = aheadOfUpstream(cwd);
+const published = publishedOnTrunk(cwd);
 writeState(state, sessionId, { sha, at: now, reportedAt: now });
+
+/* BOTH FACTS WHEN THEY DISAGREE, rather than replacing one with the other.
+   A branch-local count of 3 on work that is already on the trunk is not noise
+   to be suppressed: it says the branch ref was left behind by a merge, which is
+   worth seeing. What was wrong was printing it ALONE, where it reads as "three
+   commits nobody has been told about". Where the two agree, the trunk clause is
+   omitted, because "0 ahead" and "on the trunk" say the same thing twice. */
+const aheadClause = ahead === null ? null
+    : published === true
+        ? (ahead > 0
+            ? ahead + ' ahead of its branch upstream, but already on the trunk'
+            : 'on the trunk')
+        : ahead + ' ahead of upstream';
 
 const where = [
     branch ? 'branch ' + branch : null,
     'HEAD ' + sha.slice(0, 8),
-    ahead === null ? null : ahead + ' ahead of upstream',
+    aheadClause,
 ].filter(Boolean).join(', ');
 
 /* ⚠️ `session_id` IS NOT AN ADDRESS, AND PRINTING IT AS ONE SENT PEERS TO A DEAD
