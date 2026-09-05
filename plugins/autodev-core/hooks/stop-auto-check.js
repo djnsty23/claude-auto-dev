@@ -59,6 +59,24 @@ const CACHE_MAX_AGE_DAYS = 14;
 // Which of these story ids the nightly drift-audit measured as long-untouched.
 // Every failure path here returns an empty list, so a missing, stale, or
 // corrupt cache can only make auto do MORE work, never less.
+// One line naming the next story an agent could act on, or null. Read from the
+// WORKING COPY on purpose: this is the repo the session is sitting in, and the
+// question is "does the thing beside you have work", not "what does the trunk
+// say". Every failure path returns null, and null adds nothing to the approve.
+function nextStoryNudge(prdPath) {
+    try {
+        if (!fs.existsSync(prdPath)) return null;
+        const { storiesOf, isActionable } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
+        const stories = storiesOf(JSON.parse(fs.readFileSync(prdPath, 'utf8')));
+        const open = Object.entries(stories).filter(([, s]) => isActionable(s));
+        if (!open.length) return null;
+        const [id, s] = open[0];
+        const title = String(s.title || '').slice(0, 70);
+        return `[Auto-Dev] ${open.length} actionable stor${open.length === 1 ? 'y' : 'ies'} in prd.json, next: ${id}`
+            + (title ? ` (${title})` : '') + '. Run `auto` to pull it rather than stopping.';
+    } catch { return null; }
+}
+
 function staleStories(ids, cwd) {
     const none = { skipped: [], cacheAge: null };
     try {
@@ -163,7 +181,23 @@ try {
         approve();
     }
 
-    if (!fs.existsSync(autoFlag)) approve();  // not in auto mode
+    // Not in auto mode. Approve, but if this repo's prd.json holds a story an
+    // agent could act on, SAY SO on the way out, riding on the approve as a
+    // systemMessage so it carries no decision and cannot block anything.
+    //
+    // `[measured 2026-09-05]` a dozen fleet sessions drained over three hours,
+    // stops staggered, each one finishing the single task in its chip and
+    // stopping with actionable stories sitting in prd.json a directory away.
+    // Nothing told them. The pull model above only engages once `auto` has been
+    // run, and a spawned session never runs it unless something says the word.
+    // This is that something: one line, only when there is a story, never a
+    // block. A session that reads it runs `auto` and pulls; one that does not
+    // has lost nothing it had before.
+    if (!fs.existsSync(autoFlag)) {
+        const nudge = nextStoryNudge(prdPath);
+        if (nudge) carryNote = carryNote ? carryNote + '\n' + nudge : nudge;
+        approve();
+    }
 
     if (!fs.existsSync(prdPath)) {
         try { fs.unlinkSync(autoFlag); } catch {}
