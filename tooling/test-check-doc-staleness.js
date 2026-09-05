@@ -149,6 +149,23 @@ const FIXTURE = [
     '## NOT shipped to the store yet, and here is what remains',
     '`[measured 2026-01-02]` the upload step is still blocked on a signing cert.',
     '',
+
+    // ---- an author's explicit carve-out inside a shipped section -----------
+    //
+    // The section heading is a real closure record and SHOULD suppress its own
+    // rows. But a line marked PRE-EXISTING / NOT fixed is the author saying
+    // THIS one survived the shipped work, and that outranks the section. The
+    // parenthetical below is the shape that caused it: something else closed.
+    '## v916 retired the cart hash and redirects to Food (dead end closed)',
+    // The sibling row must itself be an OPEN-STATE claim that this section
+    // legitimately suppresses. The first version read 'the redirect is
+    // verified and the old route is gone', which matches no OPEN_STATE
+    // pattern at all - so it could never be a finding, and the assertion
+    // guarding it was structurally incapable of failing. A mutant widening
+    // the carve-out survived against it with zero reds.
+    '`[measured 2026-01-02]` the old bookmark route is still broken, which this change accepts.',
+    '`[measured 2026-01-02]` PRE-EXISTING, not introduced here, NOT fixed: editing the hash still blocked on a guard.',
+    '',
 ].join('\n');
 
 function git(args, cwd) {
@@ -275,8 +292,13 @@ if (tmp) {
     // ---- a section that says the work shipped ------------------------------
     check('a claim under a LIVE+verified section is suppressed',
         !r.findings.some((f) => f.text.indexOf('resume path') !== -1));
+    // TWO since the carve-out fixture landed: the LIVE+verified row, and the
+    // sibling row inside the closure section. That second one moving this
+    // count from 1 to 2 is the evidence it is genuinely suppressible - its
+    // first draft matched no OPEN_STATE pattern, so it was suppressed by
+    // nothing and the assertion guarding it could not fail.
     check('  and the shipped-section suppression is counted separately',
-        r.population.suppressedAsShippedSection === 1,
+        r.population.suppressedAsShippedSection === 2,
         String(r.population.suppressedAsShippedSection));
 
     // The discriminating pair. Both sections carry the letters l-i-v-e; only
@@ -295,24 +317,40 @@ if (tmp) {
         r.findings.some((f) => f.text.indexOf('upload step') !== -1),
         'this is the one that actually exercises the veto: `shipped` matches, `NOT shipped` must not');
 
+    // ---- the carve-out pair, and BOTH halves are the assertion -------------
+    check('a line marked PRE-EXISTING / NOT fixed survives a shipped section',
+        r.findings.some((f) => f.text.indexOf('editing the hash') !== -1),
+        'the author carved it out explicitly; a section-level marker must not bury that');
+    check('  and the SAME section still suppresses its ordinary rows',
+        !r.findings.some((f) => f.text.indexOf('old bookmark route') !== -1),
+        'without this half the rule could pass by disabling the shipped-section check entirely');
+    check('    (and that row IS an open-state claim, so the check above can fail)',
+        OPEN_STATE.some((re) => re.test('the old bookmark route is still broken, which this change accepts.')),
+        'a suppressed-row assertion over a line that never matches OPEN_STATE is vacuous');
+
     // The precision pass must not buy its numbers by deleting real output.
     check('the known positive still survives every suppressor',
         r.findings.some((f) => f.text.indexOf('the fix is unproven') !== -1),
         'a filter that suppresses the motivating instance is worse than no filter');
 
     // ---- what is left, and in what order ----------------------------------
-    // FIVE. Two came from the shipped-section discriminating pair, whose
+    // SEVEN. The newest is the carve-out line: a section that legitimately
+    // suppresses its own rows still yields the one the author marked
+    // PRE-EXISTING / NOT fixed. Its sibling row in the same section stays
+    // suppressed, which is the half that stops the rule passing by simply
+    // disabling the shipped-section check.
+    // Before that, FIVE. Two came from the shipped-section discriminating pair, whose
     // `Live vNNN` half is reportable BY DESIGN because a status header naming a
     // running version is not a record of shipped work. Two more came from the
     // negation case, and BOTH are correct: the claim under it, and the heading
     // `## NOT done ...` itself, which is an open-state assertion in a heading
     // and is flagged as the longer-half-life kind on purpose.
-    check('exactly the six datable, non-rule claims are reported', r.findings.length === 6,
+    check('exactly the seven datable, non-rule claims are reported', r.findings.length === 7,
         r.findings.map((f) => f.doc + ':' + f.line).join(' '));
     check('findings are ordered oldest first',
-        r.findings.length === 6
+        r.findings.length === 7
         && r.findings.every((f, i) => i === 0 || r.findings[i - 1].age >= f.age));
-    check('the oldest is the 2025 one', r.findings.length === 6 && r.findings[0].age > 300);
+    check('the oldest is the 2025 one', r.findings.length === 7 && r.findings[0].age > 300);
 
     // ---- the population line ----------------------------------------------
     //
@@ -324,7 +362,7 @@ if (tmp) {
         r.population.present === 1 && r.population.absent === BOOT_DOCS.length - 1,
         r.population.present + '/' + r.population.absent);
     check('the population counts open-state AND dated separately from findings',
-        r.population.openStateAndDated === 6, String(r.population.openStateAndDated));
+        r.population.openStateAndDated === 7, String(r.population.openStateAndDated));
     const text = render(r);
     check('render prints the population, not just a verdict', /population:/.test(text));
     check('render prints the trunk it read', /trunk=origin\/main/.test(text));
@@ -333,7 +371,7 @@ if (tmp) {
     const strict = checkDocStaleness(tmp, { age: 99999, max: 12 });
     check('a threshold beyond every claim reports nothing', strict.findings.length === 0);
     check('but still reports the same population, so a zero is readable',
-        strict.population.openStateAndDated === 6,
+        strict.population.openStateAndDated === 7,
         'a zero with no denominator looks identical to a broken probe');
 
     // ---- a repo with no trunk says so rather than reporting clean ---------

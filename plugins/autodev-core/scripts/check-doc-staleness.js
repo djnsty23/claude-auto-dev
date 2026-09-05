@@ -186,6 +186,40 @@ const NEGATED_MARKER =
     /\b(not|never|n't)\s+(yet\s+)?(verified|shipped|deployed|landed|merged|closed|done|complete)/i;
 
 /**
+ * AN AUTHOR'S EXPLICIT CARVE-OUT OUTRANKS A SECTION-LEVEL SHIPPED MARKER.
+ *
+ * `[measured 2026-09-06]` This resolves the known cost recorded above for
+ * `closed`. The instance: a version-note heading ending `(dead end closed)`
+ * suppressed a line reading
+ * `PRE-EXISTING, not introduced here, NOT fixed: ...`. The section carries no
+ * negation, so NEGATED_MARKER cannot see it; the parenthetical describes a
+ * DIFFERENT thing that closed, and the line is the author saying this one
+ * survived the shipped work.
+ *
+ * Deliberately narrow: each phrase is a writer marking an exception, not merely
+ * another way of stating open state. OPEN_STATE has already matched by the time
+ * this is consulted, so a wide pattern here would simply disable the
+ * shipped-section rule.
+ *
+ * CENSUSED BEFORE IT WAS WRITTEN, on the five trunks this tool runs against:
+ * SHIPPED_SECTION suppresses **6** lines in total, and **exactly one** carries
+ * a carve-out - the instance above. So this un-suppresses one line and leaves
+ * the other five suppressions untouched.
+ *
+ * That census also corrects a number in the comment above. `closed` suppresses
+ * **5**, not the 6 recorded there: the earlier count did not replicate the
+ * scan's ordering, in which DECIDED runs first, so `Closed as NOT defects` was
+ * counted against `closed` when the running code attributes it to `decided`.
+ * Measuring "would this pattern match" is not measuring "does this rule
+ * suppress", and only the second one is the rule's behaviour.
+ *
+ * Placed AFTER the decided check, not before it. A decision not to act governs
+ * its section whatever a line says; this only overrides SHIPPED.
+ */
+const LINE_CARVEOUT =
+    /\b(pre-existing|preexisting|not introduced here|NOT fixed|still not fixed|unrelated to this|survives this|out of scope here)\b/i;
+
+/**
  * A QUOTED SPAN CAN OPEN ON ONE LINE AND CLOSE ON THE NEXT, so quote state has
  * to be carried ACROSS lines. `[measured 2026-09-05]` the same instance:
  *
@@ -336,7 +370,8 @@ function checkDocStaleness(cwd, opts) {
             // from the decided bucket and the suite caught it as a count moving
             // from 2 to 1 - which is the whole reason suppressions are counted
             // per rule rather than summed.
-            if (SHIPPED_SECTION.test(section) && !NEGATED_MARKER.test(section)) { shipped++; continue; }
+            if (SHIPPED_SECTION.test(section) && !NEGATED_MARKER.test(section)
+                && !LINE_CARVEOUT.test(line)) { shipped++; continue; }
             if (RESOLVED.test(line)) { resolved++; continue; }
             // Look for a date on the line or within the three above it, which is
             // where a `[measured YYYY-MM-DD]` tag usually sits.
