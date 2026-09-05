@@ -1,5 +1,75 @@
 # Changelog
 
+## [8.161.0] - 2026-09-05
+
+### Added
+
+- **The documents a Brain reads at boot are re-checked for stale OPEN-STATE
+  claims.** `check-doc-staleness.js` reads the boot documents at the trunk ref,
+  finds claims asserting something is unproven, blocked or still broken,
+  requires a stamped date so the claim can be aged, and reports a short ranked
+  list with the population beside it. Wired into `brain` step 2b and
+  `auto-brain` step 1. The instance: a RESUME line saying a payment fix was
+  unproven, true for eleven hours and standing for fifteen days, that a Brain
+  ranked top across five projects. Its own first fleet run was triaged, not
+  tuned quiet: 9 hits, 5 not open state, and two mechanical classes
+  (decisions and past-tense claims, the former needing section tracking) took
+  it to 80% precision with the known positive asserted to survive. (#161)
+- **`check-pr-ready.js`** answers "is this PR safe to merge" without the four
+  rollup traps that produced three wrong verdicts in one day: an empty-string
+  conclusion read as terminal, the same read as a failure, a SKIPPED check on
+  a draft read as a pass, and the null artifact row on every PR read as
+  unknown. Unrecognised is not-ready. (#161)
+- **The coordinator loop is write-and-wait, and the peer channel is
+  budgeted.** Measured on one twelve-hour coordinator session: 101 wake-ups
+  from a 60-second stop/resume watcher yielding perhaps three actions, 59 peer
+  messages of 135k characters with ten to one session, a dozen sessions
+  drained across three hours with actionable stories a directory away. The
+  `auto-brain` loop now has sessions pull from `prd.json` via `auto`, the
+  Stop-hook report as the only wake signal, client sessions filtered before
+  the list is read, and briefs from refs. `hooks/peer-message-budget.js`
+  refuses the fourth message to one session inside an hour, per recipient,
+  failing open, with `OVERRIDE-BUDGET` as the deliberate escape. (#162)
+- **An empty rollup is explained, not merely refused.** `pr-path-filters.js`
+  reads every workflow at the trunk ref and says per workflow whether a run was
+  due; `check-pr-ready` passes "every file path-filtered out" as READY and
+  keeps "a run was due and none exists" NOT_READY naming the workflow.
+  `STILL_RUNNING` classifies the legacy `PENDING` status as pending. (#163)
+- **The Stop hook names the next actionable story** on a stop outside auto
+  mode, as a `systemMessage` riding on the approve: how many, which next, and
+  the word `auto`. Never blocks, silent when there is nothing to pull. (#163)
+- **`fleet-snapshot.js`** renders a timestamped board of every mandate repo
+  from the same instruments the fleet merges on. `--data` renders a dump
+  without git or gh, which is how its suite drives it. (#163)
+- **`hooks/context-depth-nudge.js`** enforces rule 14c: past 300k tokens it
+  speaks once per 100k step, via `additionalContext` and `systemMessage`, no
+  decision key. The one idea from the `affaan-m/ecc` evaluation that mapped to
+  a measured gap; ECC itself was measured at 87 to 263 ms blocking per tool
+  call against 42 to 48 ms here and not adopted, with the evidence in
+  `docs/evidence-ecc-hook-latency.md`. (#164)
+
+### Fixed
+
+- **`fleet-board.js` was overwritten by a same-named generator** on the #163
+  branch and restored byte-for-byte before merge; the generator is
+  `fleet-snapshot.js`. The Write tool said "updated" and the author read past
+  it; the original's entrypoints suite caught it. (#163)
+- **Brain step 4b shipped a PowerShell path with its separators eaten**, so the
+  glob matched nothing and the step meant to stop a new Brain re-asking the
+  previous Brain's questions returned a silence that read as "no decisions".
+  A `check-superseded` rule now fires on a known env var followed straight by
+  a letter, digit or dot. (#161)
+
+### Changed
+
+- **On the operator's own repos, sessions push, open PRs and merge on their own
+  judgement; the constraint is Actions minutes.** `[stated 2026-09-05]`
+  "not even merges need me, but everything that costs minutes should be either
+  batched or optimized." Both skills carry it verbatim and dated. Two sessions
+  that refused a push relayed by the coordinator earlier that day were right
+  against the rule as it then stood, and that is recorded rather than erased.
+  (#162)
+
 ## [8.160.0] - 2026-09-05
 
 ### Fixed
