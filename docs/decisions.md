@@ -99,8 +99,24 @@ is one file, one suite and one `hooks.json` line, reverted by removing them.
 It was the recommended option and it was the one measured gap the evaluation
 found, so it was built rather than queued. Not taken from the same panel: an
 artifact page (arms a live-watch chip the operator would have to close, low
-value while away) and the push (a push is his call under `rules/local-first.md`,
-and the branch is one `git push` from published when he says so).
+value while away) and, at the time, the push.
+
+**Corrected the same afternoon: the push, the PR and the merge are covered by
+a standing rule, branch 1.** `~/claude-memory/MANDATE.md`, "PUSHES AND MERGES
+ARE THE FLEET'S, IN HIS OWN REPOS", carries the operator's words of
+2026-09-05 verbatim: "not even merges need me, but everything that costs
+minutes should be either batched or optimized." Read directly from disk, not
+taken from the peer relay that pointed at it. Beside it, this repo's CLAUDE.md
+line "commit and push autodev freely", and the same day's D9a precedent that
+an autodev push reaches a git remote and nothing else. So: one push of the
+whole branch, one PR whose title is the squash subject, every ci.yml check
+read by name to a terminal state (unknown is not finished), squash-merge, then
+both new files verified on `origin/main` by path. The gate ran green at
+`75c0429` (exit 0, 2,208 s, 110 of 110 suites, 109 verified able to fail);
+this correction is docs-only and ran validate and the private-names gate. Not
+cut here: a release, because a version number is a plugin-cache key and a
+sibling branch was landing at the same time, so one release covering both is
+one run instead of two.
 
 **What would reverse this.** A measured per-call cost within 2x of ours, a
 skill listing that fits the budget beside another plugin, the Defender issue
