@@ -3,6 +3,86 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
+
+The question was whether a 249k-star harness is better than this one, and if
+so whether to port its logic here or fork it and put auto-brain on top. The
+answer is no to all three, and every reason below is a number from this
+machine rather than a reading of its README.
+
+**What it is**, at commit `e04ea0b`: 3,520 tracked files, 2,520 of them
+markdown. 286 skills, 94 command shims, 68 agents, adapters for 12 harnesses,
+a Rust TUI alpha, a Python LLM layer, an installer with its own doctor and
+repair. MIT. 370 authors all time and 276 commits in the last 31 days, with
+one maintainer and one collaborator carrying most of the triage.
+
+**Hook cost per tool call.** Both repos' real `hooks.json` command strings
+were run against the same five payloads, N=8, medians, HOME sandboxed so
+neither wrote into the live `~/.claude`. ECC through `bash -c`, which its
+inline `node -e` bootstrap needs; ours through the shell-free `command` +
+`args` form it ships in, and through `bash -c` as a control.
+
+| event | ECC blocking | ECC cpu | autodev blocking | autodev cpu |
+|---|---|---|---|---|
+| PreToolUse/Read | 166 ms | 2,173 ms | 43 ms | 43 ms |
+| PreToolUse/Bash | 183 ms | 2,297 ms | 42 ms | 42 ms |
+| PreToolUse/Edit | 173 ms | 2,621 ms | 45 ms | 45 ms |
+| PostToolUse/Edit | 91 ms | 2,141 ms | 48 ms | 138 ms |
+| Stop | 263 ms | 1,101 ms | 47 ms | 90 ms |
+
+Blocking is the slowest synchronous hook, since the harness runs a matcher
+group in parallel. CPU is the sum, including async hooks. ECC's async observe
+hook spawns bash and three python processes on every tool call including
+Read and Grep, which is where the two seconds go. The control run of ours
+through `bash -c` read 60-84 ms blocking, so the runner is not the gap.
+
+**Skill listing.** 286 skills carry 73,076 description characters, about
+19.5k tokens, plus 94 commands. Ours carry 12,285 across 67, about 3.2k.
+ECC's own open issue #2694 reports that the listing truncates and skills
+from other plugins become invisible to routing. Installed beside this plugin
+it would hide ours. That closes the "use both" option without a fork.
+
+**Windows.** Open issue #2687: the inline `node -e` bootstrap in every hook
+matches Defender's VirTool:JS/Anomelesz.A heuristic on the session
+transcript, and it quarantined a live one from 6.88 MB to 0.08 MB. The
+continuous-learning observer is skipped on Windows outright, is disabled by
+default on every platform, and carries an open P0 (#2673) where a 1,519-row
+batch was archived unanalysed. Orchestration is tmux worktrees, a SQLite
+store and GitHub-issue epics; there is no tmux here and nothing resembling
+prd.json's five states, stop-auto-check, desktop session messaging or the
+auto-brain survey.
+
+**Gate integrity.** Its suite is 4,049 tests in 472 s here, 14 failing and
+all 14 Windows-only (11 symlink EPERM, 3 tar). One test file per hook script
+with three exceptions. No mutation or can-fail gate exists, so there is no
+equivalent of `check:suites` or `check:vacuity`. A fork would carry 3,520
+files this operator never uses and either lose those gates or port roughly
+64k lines of scripts, hooks and tooling onto them.
+
+**Rules and skills** are generic where ours are incident-derived: KISS, DRY,
+YAGNI, 80% coverage, immutability marked CRITICAL, and a camelCase rule its
+own issue #2830 notes contradicts the Python and Rust packs. The skill
+catalogue is a breadth play (Laravel, Kotlin, homelab, DeFi, a music-video
+taste layer); nothing in it targets this stack better than what is here.
+
+**AgentShield**, its config scanner, run against this repo: grade A with two
+findings, both wrong on this machine. CLAUDE.md "world-writable 0o666" is
+what every file reports through node on NTFS, and "no PreToolUse hooks" comes
+from reading settings files only, so it cannot see plugin hooks at all.
+
+**What survives the pass.** One idea maps to a measured gap in this repo's
+own record: rule 14c says 77% of cost is cache reads and a session should
+restart past about 300k, and nothing in our hooks enforces it. ECC's
+`ecc-context-monitor.js` nudges from transcript size; transcript rows here
+carry `usage.cache_read_input_tokens`, so a hook can read the true figure.
+`config-protection`, which blocks edits to linter configs, is 176 lines and
+cheap, but no incident in the record motivates it, so it waits for one.
+
+**What would reverse this.** A measured per-call cost within 2x of ours, a
+skill listing that fits the budget beside another plugin, the Defender issue
+closed with a non-inline bootstrap, and a hook can-fail gate. Any one of
+those is a new evaluation; none of them is a reason to re-read the README.
+
 ## 2026-08-19 — the mutation gap is 5 of 112, and one was a vacuous assertion
 
 Both suites re-swept against the same subject, because the figures in
