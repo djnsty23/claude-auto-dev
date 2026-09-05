@@ -139,9 +139,51 @@ const DATE_RE = /\b(20\d\d)-(\d\d)-(\d\d)\b/;
  * tuning away, because the noise is visible and the loss is not. So the marker
  * must describe the WORK's status (`LIVE+verified`, which still matches on
  * `verified`) and never a running version.
+ *
+ * `done` IS ABSENT FOR A SHARPER REASON: it matched its own negation. A census
+ * of every token in this pattern across five repos' boot documents asked which
+ * token was the SOLE reason a section suppressed, since that is where `live`
+ * went wrong. `done` was the sole matcher twice and BOTH were negations:
+ *
+ *     ## NOT done - these are redesigns, not fixes, and need direction:
+ *     ## Deliberately NOT done, with reasons:
+ *
+ * A section headed "NOT done" is the opposite of a shipped record, and the rule
+ * suppressed everything under it. With the negation guard below, `done` would
+ * suppress nothing at all in that corpus, so it earns no place.
+ *
+ * `closed` STAYS, with its one imperfect case recorded rather than hidden. It
+ * was the sole matcher six times: five are real closures, and one is a version
+ * note reading `(dead end closed)` whose parenthetical suppressed a line saying
+ * "PRE-EXISTING ... NOT fixed". Removing it would un-suppress five legitimate
+ * closures to fix one, which makes the tool noisier - and noise is what gets a
+ * detector muted. Stated as a known cost, not resolved.
  */
 const SHIPPED_SECTION =
-    /\b(verified|shipped|deployed|landed|merged|closed|done\b|complete)/i;
+    /\b(verified|shipped|deployed|landed|merged|closed|complete)/i;
+
+/**
+ * A NEGATED MARKER IS NOT A MARKER. "NOT done", "not shipped", "never merged"
+ * are open claims wearing a shipped word, and a section heading is exactly
+ * where that phrasing lives. Vetoes the suppression rather than narrowing the
+ * pattern, so it protects every token at once instead of one at a time.
+ *
+ * THIS OVERLAPS WITH REMOVING `done`, DELIBERATELY, AND THE MUTATION SAYS SO.
+ * Re-admitting `done` to the pattern above SURVIVES the suite, because this
+ * veto already catches both of its census cases. That mutant is recorded as a
+ * survivor rather than tuned away: it is not a defect, it is two changes whose
+ * effects coincide on the corpus we have. Each earns its place on its own
+ * terms - the veto is general and tested, and `done` suppressed nothing
+ * legitimate in five repos, so a token that can only misfire is not worth
+ * carrying whatever the veto does.
+ *
+ * The veto needed a section whose marker IS in the pattern before it could be
+ * tested at all. With `done` gone, `## NOT done ...` never matches
+ * SHIPPED_SECTION, so the veto is never consulted and two mutants survived
+ * against it. `## NOT shipped to the store yet` is the case that exercises it.
+ */
+const NEGATED_MARKER =
+    /\b(not|never|n't)\s+(yet\s+)?(verified|shipped|deployed|landed|merged|closed|done|complete)/i;
 
 /**
  * A QUOTED SPAN CAN OPEN ON ONE LINE AND CLOSE ON THE NEXT, so quote state has
@@ -294,7 +336,7 @@ function checkDocStaleness(cwd, opts) {
             // from the decided bucket and the suite caught it as a count moving
             // from 2 to 1 - which is the whole reason suppressions are counted
             // per rule rather than summed.
-            if (SHIPPED_SECTION.test(section)) { shipped++; continue; }
+            if (SHIPPED_SECTION.test(section) && !NEGATED_MARKER.test(section)) { shipped++; continue; }
             if (RESOLVED.test(line)) { resolved++; continue; }
             // Look for a date on the line or within the three above it, which is
             // where a `[measured YYYY-MM-DD]` tag usually sits.
