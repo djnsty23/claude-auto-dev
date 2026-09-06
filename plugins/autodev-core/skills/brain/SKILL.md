@@ -435,11 +435,25 @@ from inside the hooks that would have carried them:
 
 If a machine-readable map is ever wanted, key it by `repo + branch` with the
 session id as provenance rather than as the key, timestamp every entry, and
-carry a `verify` command beside each answer (`git cherry -v origin/main HEAD`,
-`gh pr view <N> --json state`) so the next Brain re-runs the check instead of
-re-asking. An answer with no re-check command is a memory that rots exactly the
-way the role file did. Build this reading step first regardless: it needs no
-schema and closes most of the gap on its own.
+carry a `verify` command beside each answer so the next Brain re-runs the check
+instead of re-asking. An answer with no re-check command is a memory that rots
+exactly the way the role file did. Build this reading step first regardless: it
+needs no schema and closes most of the gap on its own.
+
+Use the same commands the triage step below settles on, never `git cherry`:
+
+```powershell
+gh pr view <N> --json state,mergedAt,headRefOid
+git rev-parse origin/<branch>          # equal to headRefOid -> nothing to land
+```
+
+`[measured 2026-09-06]` this paragraph suggested `git cherry -v origin/main HEAD`
+until a coordinator briefed a session to land twelve commits that were already
+merged. It followed this line, which is 160 lines ABOVE the step explaining why
+`cherry` cannot answer that question. **The corpus was not missing the
+instruction; the wrong one was simply closer to where the reader started.** A
+warning only governs the readers who reach it, so a stale example upstream of it
+is not a smaller defect than a missing rule - it is a louder one.
 
 ### 5. Claim the role, then announce the handover
 
@@ -1190,7 +1204,7 @@ surface separately.** They answer different questions and none substitutes:
 
 | surface | probe | answers |
 |---|---|---|
-| local git | `git fetch`, `rev-list`, `cherry` | what commits exist and where |
+| local git | `git fetch`, `rev-list`, `rev-parse` | what commits exist and where |
 | the forge | `gh pr view`, `gh api` | what is open, merged, gated |
 | the running system | its own version or health endpoint | what is actually DEPLOYED |
 
