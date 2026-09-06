@@ -1,5 +1,43 @@
 # Changelog
 
+## [8.164.0] - 2026-09-06
+
+One fix, cut as its own release because the version number is a plugin-cache
+key and 8.163.0 had already been installed on a tree that contained this change
+but was labelled as though it did not. Two trees must never share one number.
+
+### Fixed
+
+- **The coordinator write guard expanded a home prefix in the command it judged
+  and not in its own config, so the role file could not be written portably at
+  all.** #167 taught it that `~/product` names a real directory rather than one
+  called `~`, and applied it to paths parsed out of the command being judged.
+  `role.home_repos` went to `isInside` raw, and `isInside` calls
+  `path.resolve(root)`, which resolves `~/claude-auto-dev` against the process
+  cwd. That matched no real directory, so `homes.some(isInside)` went false for
+  the coordinator's OWN repo, every directory counted as foreign, and the guard
+  blocked the writes it exists to permit. It prints the same message then as
+  when a write really is elsewhere: two causes, one verdict. Nobody had hit it
+  because the portable spelling was never written, because writing it broke
+  everything. Measured against both installed guards with one payload: a commit
+  in the coordinator's own home repo is ALLOWED under 8.163.0 with either
+  spelling, and BLOCKED under 8.160.0 with the portable one. An absolute path
+  carries a username and a drive letter, so this is what lets the record survive
+  a device or account change. 8 new assertions across three spellings, each
+  asserting both that the own repo is permitted and that a foreign repo still
+  blocks, plus a proof of eligibility: an unexpandable `~foo/harness` matches
+  nothing, so the same cwd that passes above blocks there. Mutation removing
+  `.map(expandHome)` kills exactly the four permitting assertions and leaves
+  every blocking one green. (#176)
+
+**Migration order, which is not optional.** The installed plugin must carry this
+before any role file is rewritten to the portable form. An older guard blocks
+every git write the coordinator makes, with a message that reads exactly like a
+genuine foreign-write refusal. The full device-change runbook lives in
+`NEW-DEVICE-BOOTSTRAP-2026-07-10.md` in the private memory repo, alongside a
+`check-hook-paths.js` that verifies every hook command still resolves after a
+restore.
+
 ## [8.163.0] - 2026-09-06
 
 Three changes, and each is a correct mechanism that is silently absent in
