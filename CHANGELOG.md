@@ -1,5 +1,55 @@
 # Changelog
 
+## [8.163.0] - 2026-09-06
+
+Three changes, and each is a correct mechanism that is silently absent in
+exactly the case it was written for. None of them was broken in any way a
+reader could see: the rule is present, spelled correctly, and governs
+everything except the one situation that produced it.
+
+### Fixed
+
+- **The brain-role advice fired on the fault COUNT rather than on what still
+  resolved, and the collision check switched itself off exactly where
+  collisions come from.** A record whose `peer_name` had gone stale on a rename,
+  with `session_id` and `desktop_session_id` both live, printed "Nobody can be
+  reached at this record ... delete it". Messaging by desktop id had worked all
+  evening and kept working, so a session obeying that abandons a live channel
+  and escalates to a sleeping operator. The second defect is worse and was found
+  by checking a reviewer's objection instead of accepting it: the collision
+  check reads `if (a && b && a.file !== b.file)` where `a` is the `session_id`
+  lookup, and a dead `session_id` IS the handover case, a coordinator archived
+  and its name freed for reuse. The one check that catches a stranger cannot
+  fire where strangers come from. Named as a shape: a correctness check gated on
+  the completeness of its inputs is switched off exactly when the inputs are
+  incomplete, and incomplete inputs are usually the dangerous case. Addresses
+  now carry `resolves`, `attributable` and `reachable` separately, and
+  attribution has two witnesses rather than one, so a handover with a live
+  desktop record is decidable rather than silent. Four mutants, each killed by
+  the assertion naming it with the all-dead control staying green. (#174)
+- **A shipped-section suppression overrode the author's own carve-out.** A
+  version-note heading ending "(dead end closed)" suppressed a line reading
+  "PRE-EXISTING, not introduced here, NOT fixed": the parenthetical describes a
+  different thing that closed, and the line is the author saying this one
+  survived. Censused before any code on the five trunks it runs against, and the
+  census corrected a number in the file's own comment, because measuring whether
+  a pattern MATCHES is not measuring whether a rule SUPPRESSES and only the
+  second is behaviour. One line un-suppressed, the other five untouched. (#172)
+
+### Changed
+
+- **The brain skill's stale `git cherry` example, which sat 160 lines above its
+  own correction.** The warning was never missing: the triage step already said
+  cherry compares patch ids, that a squash destroys them, and named the
+  discriminator. It governed nobody who stopped at the earlier example, which
+  answered the question and so gave no reason to read on. That is what sent a
+  coordinator to brief a session to land twelve already-merged commits. On that
+  branch three probes give three answers and only one is right: cherry says 12
+  unmerged, ancestry says not merged, and the PR's `headRefOid` at merge equals
+  the branch tip today, so there is nothing to land. `git diff --shortstat` said
+  107 insertions against 946 deletions, meaning landing it would have been a
+  revert wearing a merge's clothes. (#173)
+
 ## [8.162.0] - 2026-09-05
 
 Five changes, and three of them are the same defect wearing different clothes: a
