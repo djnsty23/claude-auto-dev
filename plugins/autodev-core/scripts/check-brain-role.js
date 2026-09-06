@@ -163,6 +163,11 @@ function checkBrainRole(opts) {
     // role file returns before the registries are read.
     let sessions = null;
     let found = { store: store || null, readable: false, records: 0, archived: 0, record: null };
+    // Same reason, and the selftest caught it: `addresses` is computed near the
+    // end, and the unparseable-role path returns before that. A `const` there
+    // put finish() in its temporal dead zone, so the early return crashed while
+    // every live path passed. Declared here, null-checked by the renderer.
+    let addresses = null;
 
     let role = o.role || null;
     if (!role) {
@@ -218,11 +223,92 @@ function checkBrainRole(opts) {
         }
     }
 
+    /* THREE PROPERTIES, AND THE ADVICE NEEDS ALL THREE. They are named here
+       rather than described in a comment, because three adjectives in prose get
+       collapsed back into "works" by whoever edits next.
+
+         resolves      the lookup returned a record
+         attributable  that record belongs to THIS role record, via an anchor
+         reachable     the session behind it is actually live
+
+       For `peer_name` resolves and reachable coincide, because `byName` is built
+       from live sessions only. For `desktop_session_id` they do NOT: a record
+       can be present and unarchived while its `cliSessionId` names a session
+       that is gone, and messaging it then reaches nobody.
+
+       ANCHORS IN ORDER, because attribution has two possible witnesses and
+       stopping at the first gives up early. A handover with a live desktop
+       record is decidable — either `peer_name` names the session that record
+       points at, or it names somebody else — and "do not message this" is an
+       answer an operator can act on where silence is not. */
+    const liveSelf = byId.get(role.session_id);
+    const peerSession = byName.get(role.peer_name);
+
+    /* ANCHOR 2 IS THE TWO ADDRESSES CORROBORATING EACH OTHER, not the desktop
+       record alone. Working the fixtures out is what showed the difference, and
+       it is worth stating because the first version of this looked right.
+
+       When `session_id` is dead, every address that points AT that session is
+       also unreachable, so a desktop record faithfully naming the dead id yields
+       attributable-but-not-reachable and nothing is usable. Correct, and it
+       makes anchor 2 useless in the case it was invented for.
+
+       The case where it earns its keep is a PARTLY UPDATED record: somebody
+       rewrote `peer_name` and `desktop_session_id` to the new session and left
+       `session_id` behind. Then two independent witnesses name the same live
+       session, and the stale field is the third. Two agreeing beats one
+       disagreeing, so that session anchors and both addresses are usable.
+
+       If they do NOT agree, there is no anchor and nothing is offered. */
+    const anchor = liveSelf
+        ? { id: role.session_id, via: 'session_id', live: true }
+        : (peerSession && found.record && !found.record.isArchived
+            && found.record.cliSessionId && peerSession.sessionId === found.record.cliSessionId
+            ? { id: peerSession.sessionId, via: 'peer_name and the desktop record agreeing', live: true }
+            : null);
+    addresses = {
+        anchor,
+        peer: {
+            value: role.peer_name || null,
+            resolves: !!peerSession,
+            attributable: !!(peerSession && anchor && peerSession.sessionId === anchor.id),
+            reachable: !!peerSession,
+        },
+        desktop: {
+            value: role.desktop_session_id || null,
+            resolves: !!(found.record && !found.record.isArchived),
+            attributable: !!(found.record && anchor && found.record.cliSessionId === anchor.id),
+            reachable: !!(found.record && !found.record.isArchived
+                && found.record.cliSessionId && byId.has(found.record.cliSessionId)),
+        },
+    };
+    addresses.peer.usable = addresses.peer.resolves && addresses.peer.attributable && addresses.peer.reachable;
+    addresses.desktop.usable = addresses.desktop.resolves && addresses.desktop.attributable && addresses.desktop.reachable;
+
+    /* THE `a && b` GAP. The mismatch check above is written
+       `if (a && b && a.file !== b.file)`, which cannot fire when `a` is
+       missing — and a dead `session_id` IS the handover case: a coordinator
+       archived, its record inherited, its NAME FREED FOR REUSE. So the one
+       check that catches a stranger is switched off exactly where strangers
+       come from, and the output reads `peer_name -> live session, pid <a
+       stranger's>` with nothing to say it is not ours.
+
+       A correctness check gated on the completeness of its inputs is switched
+       off exactly when the inputs are incomplete, and incomplete inputs are
+       usually the dangerous case. This restores it for that case only, so the
+       two never double-report. */
+    if (peerSession && !liveSelf && !addresses.peer.attributable) {
+        fault('unattributable-peer', 'peer_name ' + role.peer_name + ' resolves to a LIVE session (pid '
+            + peerSession.pid + ') but session_id is dead, so nothing attributes that name to this record'
+            + (anchor ? '; ' + anchor.via + ' anchors to ' + anchor.id + ', which that session does not carry' : '; no anchor survives')
+            + '. A name freed by an archived session can be taken by another, so this may be a stranger. Message nobody at it.');
+    }
+
     return finish(faults.length ? 'fault' : 'ok');
 
     function finish(state) {
         return {
-            state, roleFile, role, faults, lines,
+            state, roleFile, role, faults, lines, addresses,
             population: {
                 sessionsDir, sessionFiles: sessions ? sessions.files : 0,
                 livePids: sessions ? sessions.live.length : 0, deadPids: sessions ? sessions.dead : 0,
@@ -247,12 +333,57 @@ function render(r) {
         + (p.storeReadable ? p.storeRecords + ' record(s), ' + p.storeArchived + ' archived, at ' + p.store : 'NOT FOUND' + (p.store ? ' at ' + p.store : '')));
     for (const l of r.lines) out.push('  ' + l);
     for (const f of r.faults) out.push('!! FAULT ' + f.code + ': ' + f.detail);
-    if (r.state === 'fault') {
+    /* THE ADVICE FOLLOWS THE SURVIVING ADDRESSES, NOT THE FAULT COUNT.
+
+       `[measured 2026-09-06]` This block used to fire on any fault at all and
+       say "Nobody can be reached at this record". A coordinator's `peer_name`
+       had gone stale on a RENAME while its session_id and desktop id both still
+       resolved, and a peer's Stop hook was told to stop reporting and escalate
+       to a sleeping operator. Messaging by desktop id had worked all evening and
+       kept working. That session ignored the advice on the evidence, which is
+       the only reason nothing broke.
+
+       A red gets acted on where a green gets challenged, so a red that
+       OVERSTATES what it found costs a working channel. The faults were exact;
+       only the conclusion was one size too large. */
+    const a = r.addresses;
+    if (r.state === 'fault' && a) {
+        const usable = [
+            a.peer.usable ? 'peer name `' + a.peer.value + '`' : null,
+            a.desktop.usable ? 'desktop session id `' + a.desktop.value + '`' : null,
+        ].filter(Boolean);
+        /* `desktop-mismatch` is NOT a collision when the two addresses agree
+           with each other: that is a partly updated record whose stale field is
+           `session_id`, and both addresses reach the session they name. It IS a
+           collision when they disagree, because then one of them reaches
+           somebody else. The usable check already encodes which, so read that
+           rather than the fault code alone. */
+        const anyUsable = a.peer.usable || a.desktop.usable;
+        const collision = !anyUsable && r.faults.some((f) => f.code === 'mismatch'
+            || f.code === 'desktop-mismatch' || f.code === 'unattributable-peer');
+
         out.push('');
-        out.push('   Nobody can be reached at this record, and nothing here resolves a coordinator');
-        out.push('   by cwd: a worktree outlives the session in it. Rewrite the record from');
-        out.push('   ~/.claude/sessions/<pid>.json (`sessionId`, `name`) and the desktop store,');
-        out.push('   or delete it so the hooks fall silent rather than routing to a dead session.');
+        if (collision) {
+            /* A COLLISION IS NOT A STALE FIELD, and the operator action differs:
+               a stale field wants rewriting, a collision wants nobody messaged
+               until a human looks. Folding it into "some addresses survive"
+               would route a report to whoever now holds a reused name. */
+            out.push('   AN ADDRESS HERE RESOLVES TO SOMEBODY ELSE. Message nobody at this record');
+            out.push('   until a person has looked: a name freed by an archived session can be');
+            out.push('   taken by another, so a resolving address is not an address that reaches');
+            out.push('   who you mean. Rewrite the record before using any of it.');
+        } else if (usable.length) {
+            out.push('   THIS RECORD IS PARTLY STALE AND STILL REACHABLE. Use ' + usable.join(' or ') + '.');
+            out.push('   Rewrite the stale field rather than abandoning the channel: read `peer_name`');
+            out.push('   from ListAgents, which is the authority for a session\'s own name, and');
+            out.push('   `session_id` from ~/.claude/sessions/<pid>.json. Read the value from the');
+            out.push('   authority rather than copying it out of a message, including this one.');
+        } else {
+            out.push('   Nobody can be reached at this record, and nothing here resolves a coordinator');
+            out.push('   by cwd: a worktree outlives the session in it. Rewrite the record from');
+            out.push('   ~/.claude/sessions/<pid>.json (`sessionId`, `name`) and the desktop store,');
+            out.push('   or delete it so the hooks fall silent rather than routing to a dead session.');
+        }
     }
     return out.join('\n') + '\n';
 }
@@ -304,10 +435,77 @@ function selftest() {
     expect('a store that cannot be found is NOT CHECKED, not a pass and not a fault',
         checkBrainRole({ roleFile: roleAt('nostore', { session_id: 'selftest-live-cli', peer_name: 'selftest-live-peer', desktop_session_id: 'local_selftest-live-desktop' }), sessionsDir, store: null }), 'ok', []);
 
+    /* THE ADVICE, WHICH IS A DIFFERENT ASSERTION FROM THE FAULTS.
+       `[measured 2026-09-06]` the faults were exact and the advice said "Nobody
+       can be reached" on any of them, so a peer was told to abandon a channel
+       that worked. Every case below asserts the rendered TEXT, because that is
+       what a reader acts on, and `expect` above cannot see it.
+
+       A BUCKET IS NOT A CASE: "some fields resolve" has two members and only
+       the second was ever exercised in the wild, so both are here. */
+    const advice = (label, r, must, mustNot) => {
+        const text = render(r);
+        const ok = must.every((s) => text.includes(s)) && mustNot.every((s) => !text.includes(s));
+        cases.push({ label, ok, detail: text.split('\n').filter((l) => /^ {3}\S/.test(l)).join(' | ').slice(0, 120) || '(no advice)' });
+    };
+
+    // A second LIVE session, so a "stranger" cannot coincide with the record by
+    // construction. The parent process is alive for as long as this test runs;
+    // if it is not, say so rather than passing a case that never ran.
+    const stranger = process.ppid;
+    cases.push({ label: 'fixture: a second live pid exists for the stranger cases', ok: isPidAlive(stranger), detail: 'ppid ' + stranger });
+    w(path.join(sessionsDir, stranger + '.json'), { pid: stranger, sessionId: 'selftest-stranger-cli', name: 'selftest-stranger-peer' });
+    w(path.join(store, 'account-fixture', 'bucket-fixture', 'local_selftest-stranger-desktop.json'),
+        { sessionId: 'local_selftest-stranger-desktop', cliSessionId: 'selftest-stranger-cli', isArchived: false });
+
+    advice('advice: peer live, desktop archived -> offers the peer name',
+        run('partial-peer', { session_id: 'selftest-live-cli', peer_name: 'selftest-live-peer', desktop_session_id: 'local_selftest-archived-desktop' }),
+        ['PARTLY STALE AND STILL REACHABLE', 'peer name'], ['Nobody can be reached']);
+
+    advice('advice: desktop live, peer dead -> offers the desktop id (the case that bit us)',
+        run('partial-desktop', { session_id: 'selftest-live-cli', peer_name: 'selftest-no-such-peer', desktop_session_id: 'local_selftest-live-desktop' }),
+        ['PARTLY STALE AND STILL REACHABLE', 'desktop session id'], ['Nobody can be reached']);
+
+    advice('advice: nothing resolves -> the original wording, which is true only here',
+        run('all-dead', { session_id: 'selftest-dead-cli', peer_name: 'selftest-dead-peer', desktop_session_id: 'local_selftest-archived-desktop' }),
+        ['Nobody can be reached'], ['PARTLY STALE']);
+
+    /* THE `a && b` GAP: session_id dead, peer_name resolving to a LIVE session
+       that is somebody else. The mismatch check cannot fire because its first
+       lookup is missing, which is exactly the handover case. */
+    advice('advice: a stale name resolving to a STRANGER offers no address',
+        run('stranger', { session_id: 'selftest-dead-cli', peer_name: 'selftest-stranger-peer', desktop_session_id: 'local_selftest-archived-desktop' }),
+        ['RESOLVES TO SOMEBODY ELSE', 'Message nobody'], ['PARTLY STALE AND STILL REACHABLE']);
+    expect('  and it is named as a fault rather than reported as a live address',
+        run('stranger2', { session_id: 'selftest-dead-cli', peer_name: 'selftest-stranger-peer', desktop_session_id: 'local_selftest-archived-desktop' }),
+        'fault', ['dead-session', 'archived-desktop', 'unattributable-peer']);
+
+    /* ANCHOR 2: a partly updated record. `session_id` left behind, while
+       `peer_name` and the desktop record independently name the same live
+       session. Two witnesses agreeing beats the stale third, so both addresses
+       are usable. Without this case the anchor chain is tested only on its
+       refusals, and a chain tested only on failure passes if step 2 never runs. */
+    advice('advice: two addresses corroborating each other outrank a stale session_id',
+        run('partly-updated', { session_id: 'selftest-dead-cli', peer_name: 'selftest-stranger-peer', desktop_session_id: 'local_selftest-stranger-desktop' }),
+        ['PARTLY STALE AND STILL REACHABLE', 'peer name', 'desktop session id'], ['Nobody can be reached', 'RESOLVES TO SOMEBODY ELSE']);
+
+    /* Census the fixture BEFORE cleanup removes it. Reading it after the
+       rmSync returned a confident 0 of everything, which is worse than the
+       stale literal it replaced: a literal is wrong, a zero looks measured. */
+    const fx = readLiveSessions(sessionsDir);
+    const fxStore = findStoreRecord(store, null);
     try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* temp */ }
     const failed = cases.filter((c) => !c.ok);
     for (const c of cases) console.log((c.ok ? '  ok   ' : '  FAIL ') + c.label + (c.ok ? '' : '  (' + c.detail + ')'));
-    console.log('selftest: ' + (cases.length - failed.length) + ' of ' + cases.length + ' cases, fixture of 2 session files (1 live pid, 1 dead) and 2 store records (1 archived)');
+    /* DERIVED, NOT WRITTEN DOWN. This line read "2 session files ... 2 store
+       records" as a literal, and adding a third of each for the stranger cases
+       made it false without failing anything — a population line that cannot
+       track its own fixture is the defect this whole file exists to catch,
+       sitting in the file. Read it off the fixture so it cannot go stale. */
+    console.log('selftest: ' + (cases.length - failed.length) + ' of ' + cases.length
+        + ' cases, fixture of ' + fx.files + ' session file(s) ('
+        + fx.live.length + ' live pid, ' + fx.dead + ' dead) and '
+        + fxStore.records + ' store record(s) (' + fxStore.archived + ' archived)');
     return failed.length === 0;
 }
 
