@@ -533,6 +533,62 @@ expectSilentAllow('a Bash call with no command is passed through untouched',
 }
 
 // ---------------------------------------------------------------------------
+// F3. THE SAME EXPANSION ON THE CONFIG SIDE, WHICH F2 NEVER REACHED.
+//
+//     F2 fixed the paths parsed out of the COMMAND, the half an attacker or a
+//     careless caller controls. `role.home_repos` went to `isInside` raw, so
+//     the TRUSTED half could not be written portably at all.
+//
+//     It fails CLOSED rather than open, which is why it outlived F2: declaring
+//     `~/harness` made `path.resolve` produce `<cwd>/~/harness`, that matched no
+//     real directory, `homes.some(isInside)` went false for the coordinator's
+//     own repo, and every directory counted as foreign. The guard then blocked
+//     the writes it exists to permit, and said only that the write was outside
+//     the home repo -- which is what it also says when the write really is
+//     elsewhere. Two causes, one message.
+//
+//     Why it matters for more than tidiness: an absolute path carries a
+//     username and a drive letter. A role file written on one machine is wrong
+//     on the next, and a restored backup carries the wrongness with it. The
+//     expansion is what lets the record be device- and account-agnostic.
+// ---------------------------------------------------------------------------
+{
+    const asHome = { HOME: fixture, USERPROFILE: fixture };
+
+    // `~/harness` IS HOME_REPO, by the same fixture arithmetic F2 uses.
+    for (const spelling of ['~/harness', '$HOME/harness', '%USERPROFILE%/harness']) {
+        writeRole({ session_id: 'SESSION-A', home_repos: [spelling] });
+        expectSilentAllow(`home_repos declared as \`${spelling}\` still permits its own repo`,
+            run({ payload: bash('git commit -m "x"', { cwd: HOME_REPO }), env: asHome }));
+        expectBlock(`home_repos declared as \`${spelling}\` still blocks a foreign repo`,
+            run({ payload: bash('git commit -m "x"', { cwd: OTHER_REPO }), env: asHome }),
+            /git commit/);
+    }
+
+    // PROOF OF ELIGIBILITY. Without this the pair above is satisfied by any
+    // change that makes the guard permissive, and an assertion that something
+    // is allowed cannot tell "the expansion worked" from "nothing is guarded".
+    // `~foo` is another user's home and must stay literal, so it names no real
+    // directory, nothing matches, and the guard blocks its own repo. That the
+    // SAME cwd blocks here and passes above is what pins the behaviour to the
+    // expansion rather than to the fixture.
+    writeRole({ session_id: 'SESSION-A', home_repos: ['~foo/harness'] });
+    expectBlock('an unexpandable `~foo/harness` home_repo matches nothing, so its own repo is foreign',
+        run({ payload: bash('git commit -m "x"', { cwd: HOME_REPO }), env: asHome }),
+        /git commit/);
+
+    // And a mixed list: one portable entry beside one absolute entry, which is
+    // what a role file mid-migration actually looks like.
+    writeRole({ session_id: 'SESSION-A', home_repos: ['~/harness', OTHER_REPO] });
+    expectSilentAllow('a mixed portable/absolute list expands only the portable entry',
+        run({ payload: bash('git commit -m "x"', { cwd: HOME_REPO }), env: asHome }));
+    expectSilentAllow('  and the absolute entry in that same list still matches',
+        run({ payload: bash('git commit -m "x"', { cwd: OTHER_REPO }), env: asHome }));
+
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+}
+
+// ---------------------------------------------------------------------------
 // G. THE MUTATION TEST. One input, two arms, and the ONLY difference is whether
 //    the role file exists on disk. A gate nobody has watched fire is a
 //    hypothesis; this is the watching.

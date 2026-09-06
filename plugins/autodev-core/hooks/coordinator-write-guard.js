@@ -383,10 +383,30 @@ try {
         process.exit(0);
     }
 
+    /* `expandHome` on the CONFIG side, not only the command side.
+       #167 taught this guard that `~/product` and `$HOME/product` name a real
+       directory rather than one called `~`, and applied it to paths parsed out
+       of the command being judged. The role file's own `home_repos` never got
+       the same treatment, so the trusted half could not be written portably.
+
+       The consequence was not a missing feature, it was a fail-CLOSED trap.
+       `isInside` calls `path.resolve(root)`, and `path.resolve('~/x')` resolves
+       against the process cwd, so a role file declaring `~/claude-auto-dev`
+       matched no real directory: `homes.some(isInside)` went false for the
+       coordinator's own repo, every directory then counted as foreign, and the
+       guard blocked the writes it exists to permit. Nothing said why, because a
+       home_repo that matches nothing and a home_repo that is genuinely elsewhere
+       produce the same verdict.
+
+       This matters beyond tidiness: an absolute path carries a username and a
+       drive letter, so a role file written on one machine is wrong on the next
+       one in a way that survives a restore. Expanding here is what lets the
+       record be device- and account-agnostic. */
     const homes = []
         .concat(Array.isArray(role.home_repos) ? role.home_repos : [])
         .concat(typeof role.home_repo === 'string' ? [role.home_repo] : [])
-        .filter((h) => typeof h === 'string' && h.length);
+        .filter((h) => typeof h === 'string' && h.length)
+        .map(expandHome);
     if (!homes.length) {
         process.stderr.write(`coordinator-write-guard: ${rolePath} declares no home_repo/home_repos, `
             + `so every directory would count as foreign; not guarding rather than blocking everything.\n`);
