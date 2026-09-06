@@ -62,7 +62,19 @@ try {
     check('--help exits 0 and names the four states', help.status === 0 && /absent/.test(help.out) && /fault/.test(help.out), 'exit ' + help.status);
     const self = run(['--selftest']);
     check('--selftest passes on this machine', self.status === 0, self.out.slice(-400));
-    check('  and prints its population', /selftest: \d+ of \d+ cases, fixture of 2 session files/.test(self.out));
+    /* Assert the ARITHMETIC, not the literal. This line read `fixture of 2
+       session files` until a third fixture landed, and a hardcoded count in a
+       population assertion decays into a false alarm the moment the fixture it
+       describes legitimately grows. The invariant does not: live + dead must
+       equal the files counted, archived cannot exceed the records, and nothing
+       may be zero. That last clause is the one that matters, because the
+       version of this line being replaced would have passed against a census
+       taken after cleanup, which reported a confident 0 of everything. */
+    const census = /selftest: (\d+) of (\d+) cases, fixture of (\d+) session file\(s\) \((\d+) live pid, (\d+) dead\) and (\d+) store record\(s\) \((\d+) archived\)/.exec(self.out);
+    const c = census ? census.slice(1).map(Number) : null;
+    check('  and prints a population whose arithmetic holds',
+        !!c && c[0] === c[1] && c[0] > 0 && c[2] > 0 && c[3] > 0 && c[3] + c[4] === c[2] && c[5] > 0 && c[6] <= c[5],
+        census ? census[0] : 'no population line: ' + self.out.slice(-200));
 
     // Known-positive.
     const okRole = role({ session_id: 'cli-live', peer_name: 'peer-live', desktop_session_id: 'local_desk-live' });
