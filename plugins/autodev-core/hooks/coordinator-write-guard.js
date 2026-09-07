@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// PreToolUse hook on Bash — the coordinator-write ban, as a mechanism.
-// Exit 2 = block, exit 0 = allow.
+// PreToolUse hook on Bash — the coordinator-write ban, as a mechanism, and
+// since 2026-09-08 the `--no-verify` ask (second header, further down).
+// Exit 2 = block, exit 0 = allow; exit 0 with a JSON decision on stdout = ask.
 //
 // WHY THIS EXISTS. `[measured 2026-09-01]` A coordinator session told to run the
 // fleet with no way to start a worker had two doors: ignore the repo, or work it
@@ -22,10 +23,12 @@
 // This is not that, and the difference is the population rather than the
 // cleverness of the regex:
 //
-//   * It is INERT unless a role file exists. In every session without one — the
-//     overwhelming majority, including every user who installs this plugin and
-//     never coordinates anything — it reads one path that is not there and
-//     exits 0 with zero bytes on both streams.
+//   * The BAN is INERT unless a role file exists. In every session without one
+//     — the overwhelming majority, including every user who installs this
+//     plugin and never coordinates anything — it reads one path that is not
+//     there and exits 0 with zero bytes on both streams. (The --no-verify ASK
+//     added 2026-09-08 is always on, and is a question, never a block; its own
+//     header below carries its population and its cost.)
 //   * It does not judge danger. It enforces a structural fact the model cannot
 //     see from inside a single tool call: which repo it is standing in, versus
 //     which repo it is the coordinator OF. That is the same frame as the two
@@ -95,7 +98,9 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         + 'Refuses git commit / push / merge / rebase when a Brain role file names this session\n'
         + 'and the work tree or --git-dir is outside the home repos that role file declares.\n'
         + 'pull and fetch are excluded: a coordinator updating a clone to READ it is the job.\n'
-        + 'Role file: $AUTODEV_BRAIN_ROLE_FILE, else ~/.claude/brain-role.json. Absent = inert.');
+        + 'Role file: $AUTODEV_BRAIN_ROLE_FILE, else ~/.claude/brain-role.json. Absent = inert.\n'
+        + 'Also ASKS (permissionDecision: ask on stdout) before git commit/push/merge/rebase/cherry-pick/am\n'
+        + 'with --no-verify, commit/am -n, or -c core.hooksPath=; the justification belongs in the commit or PR body.');
     process.exit(0);
 }
 
@@ -134,12 +139,14 @@ function roleFilePath() {
  */
 const ESCAPED_SPACE = '\u0000';
 
+/** <<EOF / <<-EOF / <<'EOF' / <<"EOF" … up to a line that is the delimiter. */
+const HEREDOC_RE = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n[\s\S]*?(?:^[ \t]*\2[ \t]*$|$)/gm;
+
 function stripNonCommandText(command) {
     let s = String(command);
 
     // <<EOF / <<-EOF / <<'EOF' / <<"EOF" … up to a line that is the delimiter.
-    s = s.replace(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n[\s\S]*?(?:^[ \t]*\2[ \t]*$|$)/gm,
-        (m) => m.split('\n')[0]);
+    s = s.replace(HEREDOC_RE, (m) => m.split('\n')[0]);
 
     let out = '';
     let quote = null;
@@ -343,6 +350,259 @@ function isInside(root, child) {
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
+// ===========================================================================
+// THE SECOND GUARD IN THIS FILE: `--no-verify` ASKS. Added 2026-09-08.
+//
+// WHY IT LIVES HERE. `[measured 2026-09-08]` on this machine under load 38,
+// interleaved medians of 7 on a no-op `ls -la` payload: a bare
+// `process.exit(0)` subprocess 52.8 ms, pre-tool-filter.js on a Bash payload
+// 58.5 ms, this hook with no role file 52.4 ms. Any new PreToolUse subprocess
+// on Bash pays that floor on EVERY Bash call. A branch in the hook that already
+// runs on Bash pays the tokeniser below, which is microseconds. Putting it in
+// pre-tool-filter.js would also widen that hook's matcher to Bash and reverse
+// the 2026-08-17 decision its suite asserts by name; this file is the one that
+// already argued, at the top, why a narrow Bash guard is not that denylist.
+//
+// WHY ASK, NOT DENY. `[measured 2026-09-07]` a push with --no-verify over a
+// gate that was red at origin/main for a host-shaped reason (the `claude` on
+// PATH was 2.1.233) was the CORRECT call, and its reasoning was written into
+// the tree. Across two repos, `git log --all -i --grep=no-verify` finds 4 and
+// 0 commits; the 4 are 2 messages each seen twice (branch commit and squash
+// merge): one is that recorded bypass, one is prose about the pressure toward
+// bypassing. So the constraint is "deliberate and recorded", not "impossible".
+// This hook can ask; it cannot see the answer. The RECORD therefore lives in
+// the commit or PR body, and the reason says so. A checker over commit bodies
+// was measured against a population of one already-compliant instance and
+// not built. A headless session cannot answer an ask and is denied, which is
+// the right default for an autonomous run skipping a gate.
+//
+// WHAT IT MATCHES. A word in command position that is `git`, whose subcommand
+// is one of six, carrying `--no-verify` as an UNQUOTED flag word; or `-n` in a
+// short-option cluster for the two subcommands where `-n` means --no-verify
+// (`[measured 2026-09-08]` git 2.50.1: commit and am; on push it is --dry-run,
+// on merge and rebase --no-stat, on cherry-pick --no-commit); or a
+// `-c core.hooksPath=…` global override in front of any of the six.
+// cherry-pick is on the list from ECC's; on 2.50.1 it does not accept the
+// flag at all, so an ask there is about a command git would reject, which
+// costs one question and no false silence.
+//
+// WHAT IT DOES NOT MATCH, each with a case in the suite: the string inside a
+// quoted commit message, a heredoc body, a grep pattern, a comment, a piped
+// `echo`, a pathspec after `--`, and `-n` on any other subcommand. QUOTES DO
+// NOT HIDE A FLAG: the shell strips them before git sees the word, so
+// `git push "--no-verify"` is a bypass and asks. What keeps a quoted message
+// quiet is that `-m` takes a value, which is why each subcommand carries a
+// table of its value-taking options. The first draft of this matcher keyed on
+// whether the `-` was quoted, and would have stayed silent on the quoted
+// spelling; the case is pinned in the suite. This tokeniser is separate from
+// stripNonCommandText above on purpose: that one deletes the quote characters
+// and keeps the content, which turns `-m "explain --no-verify"` into three
+// words. Ported from ECC's block-no-verify.js (affaan-m/ecc, MIT): the commit
+// value-option table and the short-cluster rule; not its byte-offset search.
+// `sh -c "…"` is followed one level, because a model that has been asked once
+// knows the cheapest wrapper.
+// ===========================================================================
+
+/** Subcommand -> the git hooks its --no-verify skips (git-scm.com/docs, 2.50). */
+const BYPASS_SUBCOMMANDS = {
+    commit: ['pre-commit', 'commit-msg'],
+    push: ['pre-push'],
+    merge: ['pre-merge-commit', 'commit-msg'],
+    rebase: ['pre-rebase'],
+    'cherry-pick': ['pre-commit', 'commit-msg'],
+    am: ['applypatch-msg', 'pre-applypatch'],
+};
+/** Where `-n` in a short cluster IS --no-verify. Measured, not assumed. */
+const SHORT_N_IS_NO_VERIFY = new Set(['commit', 'am']);
+/**
+ * Options whose NEXT word is their value, so that word is never read as a
+ * flag. This is what keeps `git commit -m "explain --no-verify"` quiet: the
+ * shell hands git the message unquoted, so quoting is not what protects it.
+ */
+const VALUE_OPTIONS = {
+    commit: new Set(['-m', '--message', '-F', '--file', '-C', '--reuse-message', '-c', '--reedit-message',
+        '--author', '--date', '-t', '--template', '--fixup', '--squash', '--pathspec-from-file', '--trailer']),
+    push: new Set(['-o', '--push-option', '--receive-pack', '--exec', '--repo']),
+    merge: new Set(['-m', '--message', '-F', '--file', '-s', '--strategy', '-X', '--strategy-option', '--into-name']),
+    rebase: new Set(['-s', '--strategy', '-X', '--strategy-option', '-x', '--exec', '--onto']),
+    'cherry-pick': new Set(['-m', '--mainline', '-X', '--strategy-option', '--strategy']),
+    am: new Set(['--directory', '--exclude', '--include', '--patch-format', '--whitespace']),
+};
+/** Short letters that swallow the REST of a cluster as their value (`-mn` is message "n"). */
+const CLUSTER_VALUE_LETTERS = { commit: new Set(['m', 'F', 'C', 'c', 't']), am: new Set(['C', 'p', 'S']) };
+/** …and, when last in the cluster, take the NEXT word (`-am msg`). `-S` does not: its key id is joined or absent. */
+const CLUSTER_NEXT_WORD_LETTERS = { commit: new Set(['m', 'F', 'C', 'c', 't']), am: new Set(['C', 'p']) };
+const GIT_GLOBAL_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--exec-path', '--namespace', '--super-prefix']);
+const WRAPPER_SHELLS = new Set(['sh', 'bash', 'zsh', 'dash']);
+
+/**
+ * Shell words grouped into command segments, with quotes and escapes
+ * resolved the way the shell resolves them before git ever sees a word.
+ * Quotes GROUP; they do not hide: `git push "--no-verify"` hands git the
+ * flag, so it is one. stripNonCommandText above cannot serve here because it
+ * turns `-m "explain --no-verify"` into three words.
+ */
+function shellWords(command) {
+    const s = String(command).replace(HEREDOC_RE, (m) => m.split('\n')[0]);
+    const segments = [];
+    let seg = [];
+    let word = null;
+    let quote = null;
+    let braced = false;                       // inside ${…}, where } is not a group close
+    const endWord = () => { if (word !== null) { seg.push(word); word = null; } };
+    const endSeg = () => { endWord(); if (seg.length) segments.push(seg); seg = []; };
+    const put = (ch) => { word = (word === null ? '' : word) + ch; };
+    for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (quote) {
+            if (c === quote) { quote = null; continue; }
+            if (quote === '"' && c === '\\' && /["\\$`]/.test(s[i + 1] || '')) { put(s[++i]); continue; }
+            put(c);
+            continue;
+        }
+        if (c === '"' || c === "'") { quote = c; if (word === null) word = ''; continue; }
+        if (c === '\\') {
+            const n = s[i + 1];
+            if (n === '\n') { i++; continue; }               // line continuation
+            if (n !== undefined) { put(n); i++; }            // literal next char
+            continue;
+        }
+        if (c === '#' && word === null) { while (i < s.length && s[i] !== '\n') i++; endSeg(); continue; }
+        if (c === '$' && s[i + 1] === '{') { braced = true; put(c); put('{'); i++; continue; }
+        if (c === '}' && braced) { braced = false; put(c); continue; }
+        if (c === '&' && (s[i + 1] === '>' || /[<>]/.test(s[i - 1] || ''))) { put(c); continue; }   // 2>&1, &>
+        if (/[;\n|&(){}`]/.test(c)) { endSeg(); continue; }
+        if (c === ' ' || c === '\t' || c === '\r') { endWord(); continue; }
+        put(c);
+    }
+    endSeg();
+    return segments;
+}
+
+/**
+ * Drop redirections and their targets: `<<< "--no-verify"` feeds stdin, and
+ * `> out.txt` names a file; neither word reaches git's argv. A joined form
+ * (`>out.txt`, `2>&1`) is one word and goes alone.
+ */
+const REDIRECT_OP = /^[0-9]*(?:<<<|<>|<|>>|>|&>>|&>|<&|>&)$/;
+const REDIRECT_JOINED = /^(?:[0-9]*(?:<<<|<>|<|>>|>|<&|>&)|&>>?).+/;
+function withoutRedirections(words) {
+    const out = [];
+    for (let i = 0; i < words.length; i++) {
+        if (REDIRECT_OP.test(words[i])) { i++; continue; }
+        if (REDIRECT_JOINED.test(words[i])) continue;
+        out.push(words[i]);
+    }
+    return out;
+}
+
+/**
+ * The bypass one segment performs, or null. `here` is the directory the
+ * command runs in, tracked so the reason can name the hook FILE being skipped.
+ */
+function bypassInSegment(rawWords, here, depth) {
+    const words = withoutRedirections(rawWords);
+    let i = 0;
+    while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) i++;
+    if (i >= words.length) return null;
+    const exe = path.basename(words[i]).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
+    if (WRAPPER_SHELLS.has(exe) && depth < 1) {
+        const c = words.indexOf('-c', i + 1);
+        return c !== -1 && words[c + 1] !== undefined ? findHookBypass(words[c + 1], here, depth + 1) : null;
+    }
+    if (exe !== 'git') return null;
+
+    let dir = here;
+    let hooksPath = false;
+    let sub = null;
+    for (i++; i < words.length; i++) {
+        const t = words[i];
+        if (!t.startsWith('-')) { sub = t.toLowerCase(); break; }
+        if (GIT_GLOBAL_VALUE_OPTIONS.has(t)) {
+            const v = words[i + 1];
+            if (v !== undefined && t === '-c' && /^core\.hookspath=/i.test(v)) hooksPath = true;
+            if (v !== undefined && t === '-C') dir = resolveArg(dir, v);
+            i++;
+            continue;
+        }
+        if (/^-ccore\.hookspath=/i.test(t)) hooksPath = true;
+    }
+    if (!sub || !BYPASS_SUBCOMMANDS[sub]) return null;
+    if (hooksPath) return { sub, via: '-c core.hooksPath=…', dir };
+
+    const values = VALUE_OPTIONS[sub];
+    const swallow = CLUSTER_VALUE_LETTERS[sub] || new Set();
+    const takesNext = CLUSTER_NEXT_WORD_LETTERS[sub] || new Set();
+    for (i++; i < words.length; i++) {
+        const t = words[i];
+        if (t === '--') break;                              // pathspecs from here on
+        if (t === '--no-verify') return { sub, via: '--no-verify', dir };
+        if (values.has(t)) { i++; continue; }
+        if (!/^-[^-]/.test(t)) continue;                    // positional, or a long option carrying its own value
+        for (let k = 1; k < t.length; k++) {
+            const ch = t[k];
+            if (ch === 'n' && SHORT_N_IS_NO_VERIFY.has(sub)) return { sub, via: '-n', dir };
+            if (swallow.has(ch)) { if (k === t.length - 1 && takesNext.has(ch)) i++; break; }
+        }
+    }
+    return null;
+}
+
+/** First hook bypass in a command, following `cd` between segments. */
+function findHookBypass(command, cwd, depth = 0) {
+    let here = cwd;
+    for (const words of shellWords(command)) {
+        let k = 0;
+        while (k < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[k])) k++;
+        if (words[k] === 'cd') {
+            const args = words.slice(k + 1).filter((t) => !t.startsWith('-'));
+            if (args.length) here = resolveArg(here, args[0]);
+            else if (!words.includes('-')) here = os.homedir();
+            continue;
+        }
+        const hit = bypassInSegment(words, here, depth);
+        if (hit) return hit;
+    }
+    return null;
+}
+
+/**
+ * The ask text. Names the git hook(s) the flag skips, and, when the repo the
+ * command runs in has that hook installed, the FILE and the scripts it runs,
+ * read from the hook itself so the reason is true in any repo rather than
+ * only this one. `git rev-parse --git-path hooks` honours core.hooksPath
+ * (`[measured 2026-09-08]` git 2.50.1: `.git/hooks` unset, `tooling/githooks`
+ * set, `../tooling/githooks` from a subdirectory). Only spawned on the ask
+ * path, never on the quiet one.
+ */
+function bypassReason(hit) {
+    const hooks = BYPASS_SUBCOMMANDS[hit.sub];
+    let here = '';
+    try {
+        const r = require('child_process').spawnSync('git', ['-C', hit.dir, 'rev-parse', '--git-path', 'hooks'],
+            { encoding: 'utf8', timeout: 3000, windowsHide: true });
+        if (r.status === 0 && r.stdout.trim()) {
+            const hooksDir = path.resolve(hit.dir, r.stdout.trim());
+            const found = [];
+            for (const h of hooks) {
+                const file = path.join(hooksDir, h);
+                if (!fs.existsSync(file)) continue;
+                const live = fs.readFileSync(file, 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+                const runs = [...new Set((live.match(/(?:[\w.-]+[/\\])+[\w.-]+\.(?:m?js|cjs|sh|py)\b/g) || [])
+                    .map((p) => p.split(/[/\\]/).slice(-2).join('/')))];
+                const rel = path.relative(hit.dir, file);
+                found.push(`${rel && !rel.startsWith('..') ? rel : file}${runs.length ? ` (runs ${runs.join(', ')})` : ''}`);
+            }
+            if (found.length) here = ` Here that is ${found.join(' and ')}.`;
+        }
+    } catch { /* no git, or not a repo: the git hook names above still stand */ }
+    return `\`git ${hit.sub} ${hit.via}\` skips the ${hooks.join(' and ')} hook${hooks.length > 1 ? 's' : ''}.${here} `
+        + 'A bypass can be the right call (a gate red at the base commit for a reason that is not this change\'s), '
+        + 'but it has to be deliberate and RECORDED, and this hook cannot see the answer to this question. '
+        + 'Allow it only with a one-line justification in the commit or PR body that names the gate skipped and why, '
+        + 'so the bypass stays distinguishable from a push that simply skipped the gate.';
+}
+
 try {
     let data;
     try {
@@ -360,6 +620,24 @@ try {
     const command = (data.tool_input && data.tool_input.command) || '';
     if (!command) process.exit(0);
 
+    const cwd = path.resolve(data.cwd || process.cwd());
+
+    // The ask is decided up front and DELIVERED at every allow below, so a
+    // block (exit 2) still wins when both apply, and a session with no role
+    // file, the common one, still gets asked. Quiet paths stay quiet: with no
+    // bypass in the command, allow() writes nothing.
+    const bypass = findHookBypass(command, cwd);
+    const allow = () => {
+        if (bypass) {
+            process.stdout.write(JSON.stringify({ hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'ask',
+                permissionDecisionReason: bypassReason(bypass),
+            } }) + '\n');
+        }
+        process.exit(0);
+    };
+
     // Cheapest discriminator first: no role file, no opinion, zero bytes. This
     // is the branch that runs in every session that is not coordinating, so it
     // must cost one failed stat and nothing else.
@@ -368,7 +646,7 @@ try {
     try {
         roleRaw = fs.readFileSync(rolePath, 'utf8');
     } catch {
-        process.exit(0);
+        allow();
     }
 
     let role;
@@ -380,7 +658,7 @@ try {
         // session holding it believes otherwise.
         process.stderr.write(`coordinator-write-guard: ${rolePath} is present but did not parse `
             + `(${err.message}); this session's git writes are NOT guarded.\n`);
-        process.exit(0);
+        allow();
     }
 
     /* `expandHome` on the CONFIG side, not only the command side.
@@ -410,14 +688,13 @@ try {
     if (!homes.length) {
         process.stderr.write(`coordinator-write-guard: ${rolePath} declares no home_repo/home_repos, `
             + `so every directory would count as foreign; not guarding rather than blocking everything.\n`);
-        process.exit(0);
+        allow();
     }
 
     const claimed = typeof role.session_id === 'string' && role.session_id.length
         ? role.session_id : null;
     const mine = data.session_id || null;
 
-    const cwd = path.resolve(data.cwd || process.cwd());
     const segments = commandSegments(stripNonCommandText(command));
 
     // A role file with no session_id is a machine-wide claim and applies here.
@@ -462,7 +739,7 @@ try {
                     + `record from ~/.claude/sessions/<pid>.json (check: scripts/check-brain-role.js --status).\n`);
             }
         }
-        process.exit(0);
+        allow();
     }
 
     const hits = [];
@@ -482,7 +759,7 @@ try {
         if (!foreign.length) continue;
         hits.push({ ...g, at: foreign[0] });
     }
-    if (!hits.length) process.exit(0);
+    if (!hits.length) allow();
 
     // Would have blocked, but cannot confirm the holder is this session. Say so
     // HERE rather than on every call: a warning that fires constantly gets
@@ -491,7 +768,7 @@ try {
         process.stderr.write(`coordinator-write-guard: ${rolePath} claims session ${claimed}, but this `
             + `hook payload carries no session_id, so the holder could not be confirmed. `
             + `Allowing \`git ${hits[0].sub}\` in ${hits[0].at} UNCHECKED.\n`);
-        process.exit(0);
+        allow();
     }
 
     // Population beside the verdict: a reader can tell a block that examined
