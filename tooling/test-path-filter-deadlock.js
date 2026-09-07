@@ -14,7 +14,7 @@
 // finding that computes correctly while exiting the wrong way is a broken gate
 // in whichever direction it is wrong.
 
-const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -23,7 +23,9 @@ const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'script
 
 let pass = 0;
 let fail = 0;
+let infra = 0;
 const failures = [];
+const indeterminate = [];
 function check(label, ok, detail) {
     if (ok) pass++; else { fail++; failures.push(label); }
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
@@ -39,8 +41,32 @@ function root(name, files) {
     return r;
 }
 
-function run(args) {
-    const r = spawnSync(process.execPath, [SUBJECT].concat(args), { encoding: 'utf8', timeout: 20000 });
+// A child that produced no verdict is INFRASTRUCTURE, and until 2026-09-07 this
+// suite had no notion of one. A 20s budget blown under concurrent load came back
+// with status null, and `s.status === 1` then printed
+// `--strict turns the same finding into exit 1  (exit null)` -- a killed child
+// reported as the checker exiting the wrong way, which is a claim about the code
+// that the run had no evidence for. It cuts the other way too: `--help does not
+// scan anything` asserts an ABSENCE, and empty stdout from a killed child
+// satisfies it, so the same timeout produced a false GREEN in the same run.
+//
+// The assertions still print what they saw, as they do in
+// test-hook-execution-evidence. What changed is that the tally and the exit code
+// now say the run was indeterminate, so neither the red nor the green above can
+// be read as a verdict about check-path-filter-deadlock.js.
+// `expect` names an outcome this call site deliberately provokes, so it reaches
+// the assertion instead of being absorbed. Only 'exit2' is used here: the
+// no-workflows case drives the subject down its own indeterminate path on
+// purpose, and that 2 is the answer being asserted, not a failure to answer.
+function run(args, expect) {
+    const r = runBudgeted(process.execPath, [SUBJECT].concat(args), { encoding: 'utf8', timeout: 20000 });
+    if (classify(r, expect) === 'infrastructure') {
+        infra++;
+        const what = 'the subject run ' + JSON.stringify(args);
+        indeterminate.push(what + ' (' + reason(r) + ')');
+        console.error('infrastructure: ' + what + ' produced no verdict (' + reason(r)
+            + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms)');
+    }
     return { status: r.status, out: r.stdout || '', err: r.stderr || '' };
 }
 
@@ -127,7 +153,7 @@ function run(args) {
 {
     const bare = path.join(tmp, 'bare');
     fs.mkdirSync(bare, { recursive: true });
-    const r = run([bare]);
+    const r = run([bare], 'exit2');
     check('a root with no .github/workflows exits 2, never 0', r.status === 2, `exit ${r.status}`);
     check('  and says the run vouches for nothing', /vouches for NOTHING/.test(r.err));
 }
@@ -146,10 +172,11 @@ function run(args) {
 
 fs.rmSync(tmp, { recursive: true, force: true });
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SUBJECT)}; every case plants its `
     + 'own workflow fixture, because this repo carries no path filter and a live run here would '
     + 'report zero forever. One positive, four negatives including a filter on push that cannot '
     + 'affect a pull request, and both exit modes asserted.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
-process.exit(fail ? 1 : 0);
+if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+process.exit(exitCode(fail, infra));

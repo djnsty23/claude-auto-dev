@@ -7,7 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally } = require('./spawn-budget.js');
 const { fileURLToPath } = require('url');
 
 // Any uncaught throw in this suite is INFRASTRUCTURE: exit 2, never the
@@ -147,39 +147,56 @@ const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.me
 // A child that errored, was signalled, or carries a null status produced no
 // verdict; that is infrastructure (exitCode 2), while the assertions still
 // report what they saw (Sol round-20).
+//
+// `[measured 2026-09-07]` that second half is why a timed-out run of this suite
+// reads as a code defect. Under concurrent load the 240s checker budget blew,
+// and the run printed `10 passed, 2 failed` with both failures reading
+// `status=null signal=SIGTERM ETIMEDOUT` — the SAME timeout counted once here as
+// infrastructure and again as two red assertions, with only the tally in front
+// of the reader and only passed/failed in it. The assertions still report what
+// they saw, deliberately; what is new is that the tally NAMES the indeterminate
+// count, so the line a reader ends on agrees with the exit code.
+const indeterminate = [];
 const infra = (r, what, expect2 = false) => {
     // An UNEXPECTED child exit 2 is the child declaring itself indeterminate,
     // and demoting that to an outer assertion-failure 1 would let the sweep
     // read it as a red verdict (Sol round-21). Call sites that deliberately
     // provoke a 2 say so.
-    if (r.error || r.signal || r.status === null || (!expect2 && r.status === 2)) {
-        console.error('infrastructure: ' + what + ' did not produce a verdict ('
-            + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
+    if (classify(r, expect2 ? 'exit2' : undefined) === 'infrastructure') {
+        const why = reason(r) + (r.attempts > 1 ? `; ${r.attempts} attempts, budget ${r.budgetMs}ms` : '');
+        console.error('infrastructure: ' + what + ' did not produce a verdict (' + why + ')');
+        indeterminate.push(what + ' (' + why + ')');
         process.exitCode = 2;
     }
     return r;
 };
 
 const runChecker = (expect2 = false) => {
-    const result = infra(spawnSync(process.execPath, [CHECK, '--json'], {
+    const result = infra(runBudgeted(process.execPath, [CHECK, '--json'], {
         cwd: SANDBOX,
         encoding: 'utf8',
         windowsHide: true,
         // Must exceed the checker's per-suite timeout. GitHub's hosted Windows
         // runners can need more than two minutes during duplicate CI runs.
+        // On a timeout runBudgeted retries once at a contention-scaled budget;
+        // the cap keeps the pair ordered (the checker's own per-suite budget
+        // caps at 600s) and bounds how long `npm test` waits before being told
+        // the run was indeterminate.
         timeout: 240000,
+        maxTimeout: 900000,
     }), 'the checker', expect2);
     let json = null;
     try { json = JSON.parse(result.stdout); } catch { /* reported by controls */ }
     return { result, json };
 };
 
-const runSuite = (file, extraEnv = {}) => infra(spawnSync(process.execPath, [file], {
+const runSuite = (file, extraEnv = {}) => infra(runBudgeted(process.execPath, [file], {
     cwd: SANDBOX,
     encoding: 'utf8',
     env: { ...process.env, ...extraEnv },
     windowsHide: true,
     timeout: 60000,
+    maxTimeout: 300000,
 }), path.basename(file));
 
 // Rename-based mutation inside the sandbox: the original is renamed aside
@@ -393,7 +410,14 @@ for (const [label, ok, why] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label + (ok || !why ? '' : '  -> ' + why));
     ok ? pass++ : fail++;
 }
-console.log(`\n${pass} passed, ${fail} failed`);
+// Anything else that set exitCode 2 — a mutant that would not restore, a
+// sandbox that would not delete — is indeterminate too, and must not reach the
+// reader as a bare green tally either.
+if (process.exitCode === 2 && indeterminate.length === 0) {
+    indeterminate.push('the sandbox or a mutant could not be restored; see the lines above');
+}
+console.log(`\n${tally(pass, fail, indeterminate.length)}`);
+if (indeterminate.length) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
 // A red cleanup (process.exitCode set by removeMutant) must survive a green
 // check run — exit(0) here would override it (Sol's round-12 blocker).
 // Precedence 2 -> 1 -> 0: an infrastructure problem outranks assertion

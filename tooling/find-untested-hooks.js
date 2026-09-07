@@ -35,7 +35,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const cp = require('child_process');
+const { runBudgeted } = require('./spawn-budget.js');
 const { fileURLToPath } = require('url');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -156,7 +156,7 @@ if (!referencedOnly) {
         const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hookcov-'));
         let r;
         try {
-            r = cp.spawnSync(process.execPath, [path.join(TOOLING, suiteName)], {
+            r = runBudgeted(process.execPath, [path.join(TOOLING, suiteName)], {
                 cwd: ROOT,
                 encoding: 'utf8',
                 windowsHide: true,
@@ -164,7 +164,12 @@ if (!referencedOnly) {
                 // when the same commit has push and pull_request jobs running.
                 // A timeout is infrastructure, so leave enough headroom to
                 // distinguish a slow evidence producer from a failed one.
+                // Under concurrent load this fixed budget is what turned a
+                // healthy run indeterminate, so a blown one is retried once at
+                // a contention-scaled budget; the cap keeps it below the 900s
+                // ceiling the acceptance suite gives this whole checker.
                 timeout: 180000,
+                maxTimeout: 600000,
                 env: { ...process.env, NODE_V8_COVERAGE: covDir, AUTODEV_HOOKCHECK_CHILD: '1' },
             });
             if (r.error || r.status !== 0) {
