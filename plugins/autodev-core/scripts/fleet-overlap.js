@@ -2,18 +2,53 @@
 /**
  * overlap.js — find sessions working the same ground.
  *
- * Three signals, deliberately separate because they mean different things:
+ * Four signals, deliberately separate because they mean different things:
  *   BRANCH  two sessions on the same git branch — the hardest evidence, they
  *           will physically collide.
+ *   FILES   the two worktrees have actually edited the same path. Evidence, not
+ *           a prior: it is the only signal that names WHAT the collision is.
  *   REPO    same repo, different branches — may be fine, may be duplicated work.
  *   TOPIC   shared distinctive title tokens — the softest, catches the two
- *           Unreal sessions that share no repo at all.
+ *           sessions that share no repo at all.
+ *
+ * WHY FILES EXIST, measured 2026-09-07/08 over 32 live sessions in 64
+ * worktrees, 36 of them in one repo.
+ *
+ * The first three signals score INTENT — what a session is called and where it
+ * sits. Scoring intent missed six real collisions in one night, every one of
+ * them found later at PR-or-report time, hours after the duplicated work was
+ * already done:
+ *
+ *   two sessions rewriting the same seo snapshot script
+ *   two rewriting the same rendered-layout gate
+ *   two rewriting the same validate script
+ *   two fixing the same flaky test
+ *   two editing the same CI workflow comment
+ *   two doing the same three-suite fix end to end — a full duplicate
+ *
+ * Not one of those pairs shares enough title vocabulary to score, and each sat
+ * on its own branch. Under the old weights they scored 5, for the shared repo,
+ * against a threshold of 20. Six invisible collisions.
+ *
+ * The file signal fires after the first edit and before the PR, which is the
+ * only window where the answer is still cheap. All six pairs above score on it;
+ * they are the suite's fixture, not an illustration.
+ *
+ * A shared PATH is evidence. A shared REPO is a prior, and a weak one now: with
+ * 36 worktrees in a single repo, "same repo" is close to meaningless, which is
+ * why one shared file (40) clears the threshold alone while a shared repo (5)
+ * still cannot.
+ *
+ * The title signal is KEPT, not replaced. It catches a class the file signal
+ * physically cannot see: two sessions about to work the same thing that have
+ * not edited anything yet. Deleting it would trade one blind spot for another.
  *
  * Stopwords matter here: without them every pair "overlaps" on words like
  * session, fix, and the repo name, which is a detector that fires on everything
  * and therefore says nothing.
  */
 const { execFileSync } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 // fleet-status.js is a SIBLING in this plugin, so resolve it as one.
@@ -98,6 +133,148 @@ function tokens(r) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// SIGNAL 4: the files each live worktree has actually touched.
+// ---------------------------------------------------------------------------
+
+/**
+ * Paths that collide BY CONSTRUCTION — shared coordination ledgers, not work.
+ *
+ * This list is MEASURED, not guessed. Over the 39 live sessions of 2026-09-08,
+ * every path was counted by how many same-repo pairs shared it (309 such pairs).
+ * The distribution has a clean cliff:
+ *
+ *     28 pairs  docs/decisions.md          <- ledger
+ *     12 pairs  RESUME.md                  <- ledger
+ *     10 pairs  DECISIONS.md               <- ledger
+ *      6 pairs  PUBLISH-QUEUE.md           <- ledger
+ *      6 pairs  CLAUDE.md                  <- REAL, kept
+ *      4 pairs  DECISIONS-<date>.md        <- ledger
+ *   <= 3 pairs  everything else            <- REAL, kept
+ *
+ * Above the cliff sit files whose whole purpose is that every session appends
+ * to them; two sessions writing different sections of a journal are not
+ * colliding. Below it, at three pairs and fewer, sit the genuine collisions
+ * this detector exists for — the shared test file, the shared CI workflow, the
+ * shared gate script. The cut is between four and three, and it is a cut
+ * between KINDS, which is why the rules are patterns rather than the literal
+ * filenames measured: DECISIONS-<date>.md is created fresh most days, so a
+ * literal list would rot within a week of being written.
+ *
+ * CLAUDE.md is deliberately NOT excluded even though it is sixth by volume. It
+ * is prose people edit and conflict over rather than a journal they append to,
+ * and it costs 4 single-file pairs out of 309. Volume alone does not make a
+ * ledger; being append-only does.
+ *
+ * Every exclusion this run actually suppressed is PRINTED below. A silent
+ * exclusion is how a detector goes quietly blind, and this list is exactly the
+ * kind of thing that rots: the day a new shared journal appears, it will show
+ * up in the report as a path inflating scores, rather than as nothing at all.
+ */
+const LEDGER_RULES = [
+  ['RESUME.md', /(^|\/)RESUME\.md$/i],
+  ['DECISIONS.md and DECISIONS-*.md', /(^|\/)DECISIONS(-[^/]*)?\.md$/i],
+  ['PUBLISH-QUEUE.md', /(^|\/)PUBLISH-QUEUE\.md$/i],
+  ['prd.json', /(^|\/)prd\.json$/i],
+  ['lockfiles', /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb|Cargo\.lock|poetry\.lock|Gemfile\.lock|composer\.lock|uv\.lock)$/i],
+  ['.claude/reports/*', /(^|\/)\.claude\/reports\//i],
+];
+const isLedger = (f) => LEDGER_RULES.some(([, re]) => re.test(f));
+
+/**
+ * Read one worktree with git, without ever taking a lock in it.
+ *
+ * --no-optional-locks matters and is not decoration: `git diff` refreshes the
+ * index stat cache and takes index.lock to do it. Running that across 39 live
+ * worktrees means 39 chances to collide with the session actually working in
+ * one. The flag exists for exactly this caller — a reader that must not
+ * perturb the tree it is reading.
+ *
+ * Returns a status, never a bare empty set:
+ *   ok        every question answered
+ *   partial   some answered. Files found are still USED — a partial read can
+ *             only add detections, never remove them — but it is reported
+ *             separately so nobody reads it as a clean zero.
+ *   failed    nothing readable. NOT a zero. With 64 worktrees some are always
+ *             mid-rebase, detached, or pruned out from under the session record.
+ */
+function readWorktree(cwd) {
+  const rec = { status: 'ok', reason: null, repoKey: null, trunk: null, files: new Set() };
+  const git = (args) => {
+    try {
+      return execFileSync('git', ['--no-optional-locks', '-C', cwd, ...args], {
+        encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch (e) {
+      return null;
+    }
+  };
+  const fail = (why) => { rec.status = 'failed'; rec.reason = why; return rec; };
+  const degrade = (why) => { rec.status = 'partial'; rec.reason = rec.reason ? rec.reason + '; ' + why : why; };
+
+  if (!cwd) return fail('no cwd recorded for this session');
+  if (!fs.existsSync(cwd)) return fail('worktree path no longer exists');
+  const top = git(['rev-parse', '--show-toplevel']);
+  if (!top) return fail('not a readable git worktree');
+
+  // Repo identity is the ORIGIN URL, not the directory name. Two worktrees of
+  // one clone must agree, and — more importantly — scripts/build.mjs in two
+  // DIFFERENT repos is not a shared file. Falling back to the shared git dir
+  // keeps a remote-less repo comparable with its own worktrees only.
+  const origin = git(['remote', 'get-url', 'origin']);
+  rec.repoKey = origin
+    ? origin.replace(/\.git$/, '').replace(/^.*[:/]([^:/]+\/[^:/]+)$/, '$1').toLowerCase()
+    : (git(['rev-parse', '--path-format=absolute', '--git-common-dir']) || top);
+
+  // Committed work: everything since this branch left the trunk. The trunk ref
+  // is NAMED in the report because the answer is only as fresh as that ref —
+  // work that landed after the last fetch reads as this session's own. Worktrees
+  // of one clone share refs, so that staleness is uniform across them, not
+  // per-session, but a reader still deserves to see which commit it was.
+  let base = null;
+  for (const ref of ['origin/main', 'origin/master', 'origin/HEAD', 'main', 'master']) {
+    base = git(['merge-base', 'HEAD', ref]);
+    if (base) { rec.trunk = ref + ' @ ' + base.slice(0, 7); break; }
+  }
+  if (base) {
+    const committed = git(['diff', '--name-only', base, 'HEAD']);
+    if (committed === null) degrade('committed diff failed');
+    else committed.split('\n').filter(Boolean).forEach((f) => rec.files.add(f));
+  } else {
+    degrade('no merge base against any known trunk');
+  }
+
+  // Uncommitted. `diff HEAD` rather than a bare `diff` so STAGED work counts:
+  // a session that has staged its edit but not committed is exactly as much of
+  // a collision as one that has not, and a bare diff cannot see it.
+  const dirty = git(['diff', '--name-only', 'HEAD']);
+  if (dirty === null) degrade('working-tree diff failed');
+  else dirty.split('\n').filter(Boolean).forEach((f) => rec.files.add(f));
+
+  const untracked = git(['ls-files', '--others', '--exclude-standard']);
+  if (untracked === null) degrade('untracked listing failed');
+  else untracked.split('\n').filter(Boolean).forEach((f) => rec.files.add(f));
+
+  return rec;
+}
+
+const touched = new Map();
+const suppressed = new Map();
+for (const r of live) {
+  const rec = readWorktree(r.cwd);
+  for (const f of [...rec.files]) {
+    if (!isLedger(f)) continue;
+    rec.files.delete(f);
+    suppressed.set(f, (suppressed.get(f) || 0) + 1);
+  }
+  touched.set(r, rec);
+}
+
+const readOk = [...touched.values()].filter((t) => t.status === 'ok').length;
+const readPartial = [...touched.values()].filter((t) => t.status === 'partial').length;
+const readFailed = [...touched.values()].filter((t) => t.status === 'failed').length;
+
 const pairs = [];
 for (let i = 0; i < live.length; i++) {
   for (let j = i + 1; j < live.length; j++) {
@@ -110,6 +287,32 @@ for (let i = 0; i < live.length; i++) {
       reasons.push(`SAME BRANCH ${a.gitBranch}`);
       score += 100;
     }
+    // FILES, scored above everything but a shared branch. A shared path is
+    // evidence of the collision; the reasons NAME the paths, because which file
+    // it is is the actionable half — a reader who knows only "these two overlap"
+    // still has to go and find out what to do about it.
+    //
+    // Only within one repo: the same relative path in two different repos is two
+    // different files, and pairing them would fire on every project that has a
+    // README.
+    //
+    // 40 for the first shared path, +20 for each after, capped at 100 so the
+    // file signal can equal but never outrank a proven same-branch collision.
+    // One shared file scores 40 against a threshold of 20, so it fires ALONE —
+    // deliberately, because with 36 worktrees in a single repo the shared-repo
+    // prior underneath it has stopped carrying information.
+    const fa = touched.get(a);
+    const fb = touched.get(b);
+    if (fa && fb && fa.repoKey && fa.repoKey === fb.repoKey && fa.files.size && fb.files.size) {
+      const sharedFiles = [...fa.files].filter((f) => fb.files.has(f)).sort();
+      if (sharedFiles.length) {
+        const shown = sharedFiles.slice(0, 6).join(', ');
+        const more = sharedFiles.length > 6 ? ` (+${sharedFiles.length - 6} more)` : '';
+        reasons.push(`SAME FILES (${sharedFiles.length}): ${shown}${more}`);
+        score += Math.min(100, 40 + 20 * (sharedFiles.length - 1));
+      }
+    }
+
     const ra = repoOf(a);
     const rb = repoOf(b);
     if (ra === rb && ra !== '(none)') {
@@ -130,6 +333,31 @@ for (let i = 0; i < live.length; i++) {
 pairs.sort((x, y) => y.score - x.score);
 
 console.log(`population: ${all.length} scanned, ${live.length} live (unarchived, active <24h)`);
+// The worktree ledger is a SEPARATE count from the session one, because a
+// worktree that could not be read is not a worktree with no overlaps. Reporting
+// them together is how "nothing found" comes to mean two different things.
+console.log(
+  `worktrees: ${readOk} read, ${readPartial} partially read, ${readFailed} COULD NOT CHECK`,
+);
+for (const [r, t] of touched) {
+  if (t.status === 'ok') continue;
+  const label = t.status === 'failed' ? 'COULD NOT CHECK' : 'partial';
+  console.log(`  ${label}: ${r.title || r.sessionId} - ${t.reason}`);
+}
+if (readFailed) {
+  console.log(
+    `  ${readFailed} worktree(s) contributed NO file evidence. That is not a finding of "no overlap".`,
+  );
+}
+// Printed every run, whether or not anything was suppressed: a reader has to be
+// able to tell "nothing was excluded" from "the exclusion list was skipped".
+console.log(`file-signal exclusions (paths that collide by construction): ${LEDGER_RULES.map(([n]) => n).join(', ')}`);
+if (suppressed.size) {
+  const rows = [...suppressed].sort((x, y) => y[1] - x[1]);
+  console.log(`  suppressed this run: ${rows.map(([f, n]) => `${f} (${n} worktree(s))`).join(', ')}`);
+} else {
+  console.log('  suppressed this run: none');
+}
 console.log(`${pairs.length} overlapping pair(s) at score >= 20\n`);
 for (const p of pairs) {
   console.log(`[${String(p.score).padStart(3)}] ${p.a.title}`);
