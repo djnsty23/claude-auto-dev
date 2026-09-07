@@ -199,7 +199,11 @@ const isLedger = (f) => LEDGER_RULES.some(([, re]) => re.test(f));
  *             mid-rebase, detached, or pruned out from under the session record.
  */
 function readWorktree(cwd) {
-  const rec = { status: 'ok', reason: null, repoKey: null, trunk: null, files: new Set() };
+  const rec = {
+    status: 'ok', reason: null, repoKey: null, trunk: null,
+    commits: new Map(),   // sha -> files that commit touched
+    dirty: new Set(),     // uncommitted + untracked: always this session's own
+  };
   const git = (args) => {
     try {
       return execFileSync('git', ['--no-optional-locks', '-C', cwd, ...args], {
@@ -227,49 +231,105 @@ function readWorktree(cwd) {
     ? origin.replace(/\.git$/, '').replace(/^.*[:/]([^:/]+\/[^:/]+)$/, '$1').toLowerCase()
     : (git(['rev-parse', '--path-format=absolute', '--git-common-dir']) || top);
 
-  // Committed work: everything since this branch left the trunk. The trunk ref
-  // is NAMED in the report because the answer is only as fresh as that ref —
-  // work that landed after the last fetch reads as this session's own. Worktrees
-  // of one clone share refs, so that staleness is uniform across them, not
-  // per-session, but a reader still deserves to see which commit it was.
+  // Committed work, kept PER COMMIT rather than as a flat file list.
+  //
+  // The flat list was wrong, and wrong in the most expensive direction: it made
+  // a REVIEWER look like a colliding author. Measured 2026-09-08 — a session
+  // assigned to review a PR had that PR's branch checked out, so both worktrees
+  // sat at the same tip with the same 19 files and no local edits. The pair
+  // scored top of the report. It was one session READING another's work, which
+  // is the behaviour the fleet wants, and a detector whose loudest rows are all
+  // correct behaviour is one that gets ignored. That is not hypothetical here:
+  // nine review assignments went out the same night, each of which would have
+  // produced one of these.
+  //
+  // So a file counts as this session's OWN work only if a commit that is NOT in
+  // the other session's history touched it. Shared commits are shared history,
+  // not convergence. Keeping the sha->files map makes that a set difference at
+  // pair time and costs the same one git call the flat diff cost.
+  //
+  // Chosen over the two cheaper discriminators because both are wrong at an
+  // edge that matters:
+  //   equal tips     suppresses a REAL collision where two sessions sit at one
+  //                  tip and both have the same file dirty. Uncommitted work is
+  //                  exactly what this signal exists to catch early.
+  //   detached HEAD  reads detachment as "reviewing". A session can and does
+  //                  author on a detached HEAD, and this would go blind to it.
+  // Commit attribution subsumes the useful half of both and assumes neither. It
+  // also handles the ANCESTOR case the tip check misses: a reviewer sitting on
+  // an older commit of the same branch has no commit of their own either.
   let base = null;
   for (const ref of ['origin/main', 'origin/master', 'origin/HEAD', 'main', 'master']) {
     base = git(['merge-base', 'HEAD', ref]);
     if (base) { rec.trunk = ref + ' @ ' + base.slice(0, 7); break; }
   }
   if (base) {
-    const committed = git(['diff', '--name-only', base, 'HEAD']);
-    if (committed === null) degrade('committed diff failed');
-    else committed.split('\n').filter(Boolean).forEach((f) => rec.files.add(f));
+    // %x00 prefixes each commit block with a NUL, so a sha line can never be
+    // confused with a path. A bare %H would need the reader to guess whether a
+    // 40-hex line is a commit or a file named like one.
+    const log = git(['log', '--name-only', '--pretty=format:%x00%H', base + '..HEAD']);
+    if (log === null) degrade('commit log failed');
+    else {
+      for (const chunk of log.split('\u0000')) {
+        const lines = chunk.split('\n').filter(Boolean);
+        if (!lines.length) continue;
+        rec.commits.set(lines[0], lines.slice(1));
+      }
+    }
   } else {
     degrade('no merge base against any known trunk');
   }
 
-  // Uncommitted. `diff HEAD` rather than a bare `diff` so STAGED work counts:
-  // a session that has staged its edit but not committed is exactly as much of
-  // a collision as one that has not, and a bare diff cannot see it.
+  // Uncommitted work is ALWAYS this session's own: nobody else's history can
+  // account for an edit that is not in any commit. `diff HEAD` rather than a
+  // bare `diff` so STAGED work counts — a session that has staged its edit is
+  // exactly as much of a collision as one that has not.
   const dirty = git(['diff', '--name-only', 'HEAD']);
   if (dirty === null) degrade('working-tree diff failed');
-  else dirty.split('\n').filter(Boolean).forEach((f) => rec.files.add(f));
+  else dirty.split('\n').filter(Boolean).forEach((f) => rec.dirty.add(f));
 
   const untracked = git(['ls-files', '--others', '--exclude-standard']);
   if (untracked === null) degrade('untracked listing failed');
-  else untracked.split('\n').filter(Boolean).forEach((f) => rec.files.add(f));
+  else untracked.split('\n').filter(Boolean).forEach((f) => rec.dirty.add(f));
 
   return rec;
+}
+
+/**
+ * The files `mine` can be held responsible for, given what `theirs` also holds.
+ *
+ * Uncommitted work always counts. Committed work counts only when the commit
+ * that touched it is absent from the other session's history — otherwise the
+ * two are looking at one piece of work, not doing it twice.
+ */
+function ownFiles(mine, theirs) {
+  const out = new Set(mine.dirty);
+  for (const [sha, files] of mine.commits) {
+    if (theirs.commits.has(sha)) continue;
+    for (const f of files) out.add(f);
+  }
+  return out;
 }
 
 const touched = new Map();
 const suppressed = new Map();
 for (const r of live) {
   const rec = readWorktree(r.cwd);
-  for (const f of [...rec.files]) {
-    if (!isLedger(f)) continue;
-    rec.files.delete(f);
-    suppressed.set(f, (suppressed.get(f) || 0) + 1);
-  }
+  const seen = new Set();
+  const drop = (f) => {
+    if (!isLedger(f)) return false;
+    if (!seen.has(f)) { seen.add(f); suppressed.set(f, (suppressed.get(f) || 0) + 1); }
+    return true;
+  };
+  for (const f of [...rec.dirty]) if (drop(f)) rec.dirty.delete(f);
+  for (const [sha, files] of rec.commits) rec.commits.set(sha, files.filter((f) => !drop(f)));
   touched.set(r, rec);
 }
+// Pairs dropped because one worktree simply HOLDS the other's commits — a review
+// checkout, or a branch taken from another. Counted so the suppression is
+// visible: this class is common by design and going silently blind to how often
+// it fires is how the threshold underneath it stops being understood.
+let sharedHistoryPairs = 0;
 
 const readOk = [...touched.values()].filter((t) => t.status === 'ok').length;
 const readPartial = [...touched.values()].filter((t) => t.status === 'partial').length;
@@ -303,8 +363,17 @@ for (let i = 0; i < live.length; i++) {
     // prior underneath it has stopped carrying information.
     const fa = touched.get(a);
     const fb = touched.get(b);
-    if (fa && fb && fa.repoKey && fa.repoKey === fb.repoKey && fa.files.size && fb.files.size) {
-      const sharedFiles = [...fa.files].filter((f) => fb.files.has(f)).sort();
+    if (fa && fb && fa.repoKey && fa.repoKey === fb.repoKey) {
+      const mine = ownFiles(fa, fb);
+      const yours = ownFiles(fb, fa);
+      const sharedFiles = [...mine].filter((f) => yours.has(f)).sort();
+      // Did they share paths that ONLY common history accounts for? That is the
+      // reviewer case, and it is reported as a count rather than as a pair.
+      if (!sharedFiles.length) {
+        const everyA = new Set([...fa.dirty, ...[].concat(...[...fa.commits.values()])]);
+        const everyB = new Set([...fb.dirty, ...[].concat(...[...fb.commits.values()])]);
+        if ([...everyA].some((f) => everyB.has(f))) sharedHistoryPairs++;
+      }
       if (sharedFiles.length) {
         const shown = sharedFiles.slice(0, 6).join(', ');
         const more = sharedFiles.length > 6 ? ` (+${sharedFiles.length - 6} more)` : '';
@@ -351,6 +420,10 @@ if (readFailed) {
 }
 // Printed every run, whether or not anything was suppressed: a reader has to be
 // able to tell "nothing was excluded" from "the exclusion list was skipped".
+console.log(
+  `shared-history pairs not reported: ${sharedHistoryPairs} `
+  + '(one worktree holds the other\'s commits — a review checkout, not two authors)',
+);
 console.log(`file-signal exclusions (paths that collide by construction): ${LEDGER_RULES.map(([n]) => n).join(', ')}`);
 if (suppressed.size) {
   const rows = [...suppressed].sort((x, y) => y[1] - x[1]);

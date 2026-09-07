@@ -317,6 +317,24 @@ const clip = (out) => JSON.stringify(out.slice(0, 700));
  * three, so a session that appears only as COULD-NOT-CHECK would read as a
  * false positive that never happened.
  */
+/**
+ * The reported pair naming both `x` and `y`, as its three rendered lines, or
+ * null if the detector declined to report it. Scans only lines that open a pair
+ * (`[ nn] title`), so a session named in a diagnostic block is not mistaken for
+ * a reported collision.
+ */
+const pairIn = (out, x, y) => {
+    const lines = out.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        if (!/^\[\s*\d+\]/.test(lines[i])) continue;
+        const two = lines[i] + '\n' + lines[i + 1];
+        if (two.includes(x) && two.includes(y)) {
+            return lines[i] + '\n' + lines[i + 1] + '\n' + lines[i + 2];
+        }
+    }
+    return null;
+};
+
 const pairsOnly = (out) => {
     const a = out.indexOf('overlapping pair(s) at score >= 20');
     if (a < 0) return out;
@@ -790,15 +808,7 @@ try {
             clip(r.stdout));
 
         // --- The six, each asserted on the PATH it must name, not just a score.
-        const pairText = (x, y) => {
-            const lines = r.stdout.split('\n');
-            for (let i = 0; i < lines.length; i++) {
-                if (!/^\[\s*\d+\]/.test(lines[i])) continue;
-                const two = lines[i] + '\n' + lines[i + 1];
-                if (two.includes(x) && two.includes(y)) return lines[i] + '\n' + lines[i + 1] + '\n' + lines[i + 2];
-            }
-            return null;
-        };
+        const pairText = (x, y) => pairIn(r.stdout, x, y);
         const fires = (label, x, y, path_, score) => {
             const t = pairText(x, y);
             check(label, !!t && t.includes(path_) && t.includes('[' + String(score).padStart(3) + ']'),
@@ -1090,6 +1100,127 @@ try {
             pairCount(r.stdout), 1);
         check('...so neither cross-repo pair was reported',
             !pairsOnly(r.stdout).includes('Peridot'), clip(r.stdout));
+    }
+
+    // -----------------------------------------------------------------------
+    // A REVIEWER IS NOT A COLLIDER. This is the false positive that reached the
+    // top of the live report on 2026-09-08, and it is a systematic class rather
+    // than one bad row.
+    //
+    // A session assigned to review a PR checks that PR's branch out. Both
+    // worktrees then sit at the same tip with the SAME file list and no local
+    // edits, which under a flat committed-file diff is indistinguishable from
+    // two authors converging - except that it scores higher, because the file
+    // sets match exactly. Nine review assignments went out the same night. A
+    // detector whose loudest rows are all correct behaviour is one that gets
+    // ignored, and this fleet has already muted a detector once.
+    //
+    // The rule: a file is this session's OWN only if a commit absent from the
+    // other's history touched it. All four shapes below are exercised, because
+    // the cheap discriminators each get one of them wrong.
+    // -----------------------------------------------------------------------
+    {
+        const bare = makeOrigin('review', ['src/feature.js', 'src/other.js']);
+
+        // 1. The author, with a real commit of their own.
+        const author = makeClone(bare, 'rv-author');
+        committed(author, ['src/feature.js']);
+        const tip = git(author, ['rev-parse', 'HEAD']);
+        git(author, ['push', '-q', 'origin', 'HEAD:refs/heads/feature']);
+
+        // 2. The reviewer: the SAME commit, checked out detached. No work of
+        //    their own anywhere.
+        const reviewer = makeClone(bare, 'rv-reviewer');
+        git(reviewer, ['fetch', '-q', 'origin', 'feature']);
+        git(reviewer, ['checkout', '-q', '--detach', tip]);
+
+        // 3. An ANCESTOR reviewer: sitting on an earlier commit of that branch.
+        //    Same shape, and the equal-tips test cannot see it.
+        const older = makeClone(bare, 'rv-older');
+        git(older, ['fetch', '-q', 'origin', 'feature']);
+        git(older, ['checkout', '-q', '--detach', tip + '~1']);
+
+        // 4. A second author with an INDEPENDENT commit to the same path. Must
+        //    still fire - this is the case the whole signal exists for, and it
+        //    rides along so the zeros above mean "declined", not "saw nothing".
+        const rival = makeClone(bare, 'rv-rival');
+        committed(rival, ['src/feature.js']);
+
+        const r = runStub([
+            S({ title: 'Opalstone', wt: author, branch: 'w/rv1' }),
+            S({ title: 'Peridotleaf', wt: reviewer, branch: 'w/rv2' }),
+            S({ title: 'Quicksilver', wt: older, branch: 'w/rv3' }),
+            S({ title: 'Rosewater', wt: rival, branch: 'w/rv4' }),
+        ]);
+        check('a reviewer holding the author\'s own commit is not a collision',
+            !pairIn(r.stdout, 'Opalstone', 'Peridotleaf'),
+            JSON.stringify(pairIn(r.stdout, 'Opalstone', 'Peridotleaf')));
+        check('...nor is a reviewer sitting on an ANCESTOR of it',
+            !pairIn(r.stdout, 'Opalstone', 'Quicksilver'),
+            JSON.stringify(pairIn(r.stdout, 'Opalstone', 'Quicksilver')));
+        check('...and the suppression is COUNTED, not silent',
+            /shared-history pairs not reported: [1-9]/.test(r.stdout), clip(r.stdout));
+        check('CONTROL: an independent commit to the same path still fires',
+            !!pairIn(r.stdout, 'Opalstone', 'Rosewater')
+            && pairIn(r.stdout, 'Opalstone', 'Rosewater').includes('src/feature.js'),
+            clip(r.stdout));
+        check('...and all four worktrees were read, so these zeros are decisions',
+            r.stdout.includes('worktrees: 4 read, 0 partially read, 0 COULD NOT CHECK'),
+            clip(r.stdout));
+    }
+
+    // -----------------------------------------------------------------------
+    // The edge that rules out the cheaper fix. Two sessions at the SAME TIP,
+    // both with the same file dirty, ARE colliding: uncommitted work is exactly
+    // what this signal exists to catch, and no commit history can account for
+    // it. Suppressing on equal tips - the obvious one-line version of the fix
+    // above - would go blind here.
+    // -----------------------------------------------------------------------
+    {
+        const bare = makeOrigin('sametip', ['src/contested.js']);
+        const a = makeClone(bare, 'st-a'); dirty(a, ['src/contested.js']);
+        const b = makeClone(bare, 'st-b'); dirty(b, ['src/contested.js']);
+        const r = runStub([
+            S({ title: 'Sandalwood', wt: a, branch: 'w/st1' }),
+            S({ title: 'Tourmaline', wt: b, branch: 'w/st2' }),
+        ]);
+        eq('two worktrees at one tip, both with the file dirty, DO collide',
+            pairCount(r.stdout), 1);
+        check('...named as the contested path',
+            r.stdout.includes('SAME FILES (1): src/contested.js'), clip(r.stdout));
+        check('...and nothing was written off as shared history',
+            r.stdout.includes('shared-history pairs not reported: 0'), clip(r.stdout));
+    }
+
+    // -----------------------------------------------------------------------
+    // The partial case, which is the one that carries the real diagnostic gain.
+    // Two sessions sharing SOME history and diverging on one file must report
+    // that ONE file, not everything both branches touch. Measured on the live
+    // fleet: a pair scoring 7 shared paths was really two shared commits plus a
+    // single genuine conflict, and naming the seven buried the one.
+    // -----------------------------------------------------------------------
+    {
+        const bare = makeOrigin('partial', ['a.js', 'b.js', 'contested.js']);
+        const one = makeClone(bare, 'pt-one');
+        committed(one, ['a.js', 'b.js']);           // common work...
+        git(one, ['push', '-q', 'origin', 'HEAD:refs/heads/shared']);
+        const shared = git(one, ['rev-parse', 'HEAD']);
+        committed(one, ['contested.js']);           // ...then its own
+
+        const two = makeClone(bare, 'pt-two');
+        git(two, ['fetch', '-q', 'origin', 'shared']);
+        git(two, ['checkout', '-q', '--detach', shared]);
+        committed(two, ['contested.js']);           // its own, independently
+
+        const r = runStub([
+            S({ title: 'Umbercliff', wt: one, branch: 'w/pt1' }),
+            S({ title: 'Vermillion', wt: two, branch: 'w/pt2' }),
+        ]);
+        eq('the pair is still reported', pairCount(r.stdout), 1);
+        check('ONLY the independently-touched file is named, not the shared history',
+            r.stdout.includes('SAME FILES (1): contested.js'), clip(r.stdout));
+        check('...so a.js and b.js, touched by the commit BOTH hold, are absent',
+            !r.stdout.includes('a.js, b.js'), clip(r.stdout));
     }
 
 } finally {

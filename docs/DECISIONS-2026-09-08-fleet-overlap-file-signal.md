@@ -244,3 +244,79 @@ but it is the right direction, and it arrived without anyone looking.
 
 A second pair **grew from 4 shared paths to 17 within the hour** between two runs.
 That is the window this signal exists to see into, and it is not hypothetical.
+
+
+## Correction: a reviewer is not a collider
+
+**Reported by the coordinator against the first live run, verified here, and
+fixed.** The top-scoring row of that run — 17 shared paths — was a **false
+positive**, and a systematic one.
+
+Measured directly: both worktrees sat at tip `1b3f489`, one on a branch and one
+**detached**, and **both were clean**. One session had been assigned to review
+the other's PR and had checked its branch out. That is not two sessions
+converging on a file; it is one reading the other's work.
+
+It also explains the detail I had reported as evidence *for* the signal — "grew
+from 4 shared paths to 17 within the hour". That was not two authors diverging.
+That was the moment the reviewer ran `git checkout`. A real collision grows
+gradually and partially; a checkout arrives at once and matches exactly. **I had
+the observation right and the interpretation backwards.**
+
+This matters more than one row: nine review assignments went out the same night,
+so the fleet was about to generate many of these, every one scoring at the top.
+A detector whose loudest rows are all correct behaviour is one that gets muted —
+which is the failure this design was explicitly trying to avoid.
+
+### The fix, and why not the cheaper one
+
+A file counts as a session's **own** work only if a commit **absent from the
+other's history** touched it. Committed work is kept per-commit (`git log
+--name-only --pretty=format:%x00%H`) rather than as a flat diff, which costs the
+same single git call, and the pair-time test is a set difference.
+
+Two cheaper discriminators were considered and rejected, each wrong at an edge:
+
+- **suppress when tips are equal** — loses a *real* collision where two sessions
+  sit at one tip and both have the same file dirty. Uncommitted work is exactly
+  what this signal exists to catch early, and no history can account for it.
+- **treat a detached HEAD as reviewing** — a session can and does author on a
+  detached HEAD. This would go blind to it.
+
+Commit attribution subsumes the useful half of both and assumes neither. It also
+catches the **ancestor** case the tip test misses: a reviewer sitting on an
+earlier commit of the branch has no commit of their own either.
+
+Suppressed pairs are **counted and printed** (`shared-history pairs not
+reported: N`), on the same principle as the ledger paths.
+
+### What it changed, measured
+
+| | before fix | after fix |
+|---|---|---|
+| pairs sharing 3+ files (C6) | 5 | **2** |
+| file-firing pairs | 28 | **26** |
+| precision | 3.8% | **3.5%** |
+| shared-history pairs suppressed | — | 2 |
+
+**The gain is diagnostic, not just arithmetic.** The pair the coordinator had
+stood down by hand scored 185 across 7 shared paths before; it now scores 125
+and names **one** file, `tooling/test-quota-tripwire.js`. That is correct and
+sharper: those two branches share commits `518dea7` and `f53ef82`, which account
+for six of the seven paths, and the single file where each wrote its **own**
+commit is the only real point of conflict. Naming seven buried the one that
+mattered.
+
+Every previously-verified collision still fires, and the C6 figure of 5 I
+published earlier in this file and reported to the coordinator was wrong; it is
+**2**. Corrected in `harness-audit-plan.md` in the same commit.
+
+**Suite: 139 assertions, 0 failed. Mutation: 14 mutants, 14 killed** — including
+three new ones for this fix: shared commits counted as own work (the reviewer
+false positive returns), uncommitted work no longer treated as always-own (the
+same-tip dirty collision is lost), and the suppression count silenced.
+
+Four new scenarios cover it, all on real git repositories: a reviewer at the
+same tip, a reviewer on an **ancestor** commit, two worktrees at one tip **both
+dirty on the same file** (must fire), and a partial case where two branches
+share history and diverge on exactly one path (only that path may be named).
