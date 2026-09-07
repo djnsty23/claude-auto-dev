@@ -11,18 +11,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS dropped 2026-08-17. It was the single largest GROSS line in the
-        # whole account — 376 macOS minutes in 17 days, $23.34 gross — because
-        # this matrix runs on every push and pull_request, and 28 pushes landed
-        # in one day. Public repos bill $0, so it cost nothing; it was noise in
-        # the usage report and it tripled CI wall-clock per push.
+        # macOS was dropped 2026-08-17 on the standing condition "re-add
+        # macos-latest the day a macOS-only failure appears". RE-ADDED
+        # 2026-09-07: that day came, and the reason it was dropped was wrong.
         #
-        # It also tested nothing the other two do not. This plugin is pure Node
-        # with no native deps and no darwin-specific code paths; the platform
-        # risk it actually carries is Windows (cmd.exe routing, the PowerShell
-        # curl alias, CRLF, reserved device names), which is why windows-latest
-        # stays. Re-add macos-latest the day a macOS-only failure appears.
-        os: [ubuntu-latest, windows-latest]
+        # The dropped-comment's load-bearing claim was "no darwin-specific code
+        # paths". That was false, and it was false in the way source review
+        # cannot catch: the darwin-specific path is not in this repo's code, it
+        # is in the RUNTIME UNDERNEATH IT. Node's stdout is asynchronous for
+        # PIPES on macOS and synchronous for pipes on Linux and Windows. So a
+        # script that writes more than the 64KiB pipe buffer and then calls
+        # process.exit() delivers TRUNCATED output with exit status 0 on macOS
+        # and correct output everywhere else. Being pure Node with no native
+        # deps does not buy immunity from this; being pure Node is what exposes
+        # you to it.
+        #
+        # That is not hypothetical here. rendered-layout-gate.js --json emitted
+        # 84752 bytes to a file and 65536 to a pipe, status 0 both ways, and
+        # test-rendered-layout-gate.js was red on every Mac while CI on the same
+        # commit was green. It reached trunk (25d91dd) and blocked every macOS
+        # session in the fleet, because the only platform that could see it was
+        # the one platform not in this matrix. A green check measuring a
+        # platform the failure cannot occur on is worse than no check: it is a
+        # check that actively certifies the broken commit.
+        #
+        # Cost, stated honestly: this repo is PUBLIC, so runner minutes bill
+        # $0 — do not re-litigate this on price. Matrix legs run in parallel, so
+        # the cost is runner minutes and queueing, not wall-clock per push. The
+        # macOS leg also runs only the two ungated steps below; every heavier
+        # check stays pinned to ubuntu-latest, so this adds the cheap half.
+        #
+        # Before dropping it again, name the mechanism that makes macOS
+        # unable to differ — "it is pure Node" is the claim that already failed.
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       # v4 targets Node 20, which the runners now force onto Node 24 and warn
       # about on every run. v7 is the current major for both and runs natively.

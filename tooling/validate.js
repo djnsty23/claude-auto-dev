@@ -409,9 +409,15 @@ function checkHookWiring() {
 // Ask the installed Claude Code to scan a plugin's hooks module. Three
 // outcomes, and the third is deliberately not a pass: `passed` with the scan's
 // own hooks/calls lines, `failed` with the host's error lines, `skipped` with
-// the reason (no CLI, a timeout, or neither verdict printed). A scan that
-// passed but listed no hooks is a FAIL too — it means the `modules` entry was
-// not read, and an unread module is the silent kind of broken.
+// the reason (no CLI, a timeout, neither verdict printed, or a CLI that does not
+// scan components at all).
+//
+// A scan that RAN and listed no hooks is a FAIL — it means the `modules` entry
+// was not read, and an unread module is the silent kind of broken. A CLI that
+// never scans components is a SKIP, because its silence is not evidence about
+// this repo. Those two look identical if you only ask "was there a hooks: line",
+// which is how this check spent time reporting FAIL on hosts whose CLI simply
+// had nothing to say. An unreadable result is not a failed result.
 function scanHooksModule(pluginDir) {
   // One quoted command string through the shell: `claude` on PATH is a shim
   // (a .cmd on Windows), which spawnSync cannot run without a shell, and an
@@ -432,7 +438,14 @@ function scanHooksModule(pluginDir) {
   }
   if (!/Validation passed/.test(out)) return { status: 'skipped', reason: 'claude plugin validate printed neither verdict (exit ' + r.status + ')' };
   const scan = out.split('\n').filter((l) => /\bhooks:|\bcalls:/.test(l)).map((l) => l.replace(/^\s*❯\s*/, '').trim());
-  if (!scan.some((l) => /\bhooks:/.test(l))) return { status: 'failed', detail: 'validation passed but the scan listed no hooks: the modules entry was not read' };
+  // [measured 2026-09-07] claude 2.1.233 prints "Validating plugin manifest" and
+  // "✔ Validation passed" and nothing else — no component scan for ANY plugin.
+  // No component line at all means this host could not measure the modules entry,
+  // not that the entry is missing. CI never installs `claude`, so this check is
+  // already `skipped` there; the fix is to skip on the unmeasurable host too
+  // rather than invent a repo defect out of a CLI's silence.
+  if (!scan.length) return { status: 'skipped', reason: `this claude printed no component scan at all (exit ${r.status}), so the modules entry could not be measured here` };
+  if (!scan.some((l) => /\bhooks:/.test(l))) return { status: 'failed', detail: 'the component scan ran but listed no hooks: the modules entry was not read' };
   return { status: 'passed', detail: scan.join('; ') };
 }
 

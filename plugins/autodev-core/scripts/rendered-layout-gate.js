@@ -163,11 +163,17 @@ wolf, and says nothing about precision across a corpus. Collect real runs before
 anyone promotes this past advisory.`);
 }
 
+// Thrown instead of calling process.exit() from deep in the call stack; see the
+// note on the runner at the foot of this file for why no path here may exit.
+class Bail extends Error {
+    constructor(code) { super('bail'); this.code = code; }
+}
+
 function readSnapshots() {
     const dir = val('--dir', null);
     const files = [];
     if (dir) {
-        if (!fs.existsSync(dir)) { console.error(`No such directory: ${dir}`); process.exit(2); }
+        if (!fs.existsSync(dir)) { console.error(`No such directory: ${dir}`); throw new Bail(2); }
         for (const f of fs.readdirSync(dir).sort()) {
             if (f.endsWith('.json')) files.push(path.join(dir, f));
         }
@@ -419,6 +425,23 @@ function main() {
     return 0;
 }
 
-if (require.main === module) process.exit(main());
+// NEVER process.exit() here. Node's stdout is asynchronous for PIPES on macOS
+// and synchronous for pipes on Linux and Windows (documented platform behaviour,
+// not an implementation detail of this script). process.exit() terminates while
+// a queued write is still pending, so a consumer piping --json received only the
+// 64KiB the pipe buffer had already taken - 65536 of 84752 bytes, cut mid-object,
+// with exit status 0. Truncated output under a success code is the worst of both:
+// JSON.parse throws in the consumer while the gate reports it passed.
+// Setting exitCode lets the process end naturally once stdout has drained, which
+// preserves every code below (0 advisory, 1 --strict, 2 no input).
+// [measured 2026-09-07] via file 84752 bytes; via pipe 65536; both status 0.
+if (require.main === module) {
+    try {
+        process.exitCode = main();
+    } catch (e) {
+        if (!(e instanceof Bail)) throw e;
+        process.exitCode = e.code;
+    }
+}
 
 module.exports = { report, selftest };
