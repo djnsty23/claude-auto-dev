@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// hooks_profile=minimal (plugin userConfig, reaching hooks as CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE)
+// skips this hook: it advises, it never guards. tooling/test-hooks-profile.js holds the list.
+if (/^minimal$/i.test(process.env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE || process.env.CLAUDE_PLUGIN_OPTION_hooks_profile || '')) process.exit(0);
+
 // UserPromptSubmit hook — tell Claude when something new landed in the inbox.
 //
 // Fires on every prompt, so the budget is a readdir plus one stat per file.
