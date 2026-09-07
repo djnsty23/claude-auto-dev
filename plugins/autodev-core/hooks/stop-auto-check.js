@@ -280,10 +280,22 @@ try {
 
     fs.writeFileSync(idleMarker, new Date().toISOString());
     const deferred = Object.values(stories).filter((s) => s.passes === 'deferred').length;
-    process.stderr.write(`[Auto-Dev] Sprint complete${deferred ? ` (${deferred} deferred)` : ''}. Running IDLE detection...\n`);
+    // Blocked on the OPERATOR, named. This list was computed above and then
+    // never printed, so a sprint whose leftovers were all needs-setup read as
+    // "Sprint complete" with nothing saying who it was waiting on. It is not
+    // remaining work for the agent (the turn still ends) but it is remaining
+    // work for a person, and this is the one line where they meet.
+    const blockedIds = blockedOnOperator.map(([id]) => id);
+    const blockedNote = blockedIds.length
+        ? ` Blocked on you: ${blockedIds.length} (${blockedIds.join(', ')}).`
+        : '';
+    process.stderr.write(`[Auto-Dev] Sprint complete${deferred ? ` (${deferred} deferred)` : ''}.${blockedNote} Running IDLE detection...\n`);
     block(
         '[Auto-Dev] Sprint complete - running smart next action' +
         (deferred ? `. ${deferred} story(ies) deferred; do not treat them as outstanding work.` : '') +
+        (blockedIds.length
+            ? `. ${blockedIds.length} story(ies) blocked on the operator (${blockedIds.join(', ')}) — needs-setup, not actionable by an agent; tell the user what each one is waiting for (blockedReason) rather than retrying it.`
+            : '') +
         // Surfaced to Claude, not just to stderr: these stories are still
         // `passes: null` and auto walked past them. Reconciling or deferring
         // them for real is the next action, and it needs a human.

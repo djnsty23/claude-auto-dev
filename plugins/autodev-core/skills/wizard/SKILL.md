@@ -41,6 +41,21 @@ are worth one retry. A decision is not.
 
 **Stop the retry loop first.** Not after one more attempt.
 
+**If the blocked step belongs to a prd.json story, mark the story before you
+write anything else**, with the handback as the reason:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/prd-mark-needs-setup.js" <id> "<what is needed, the exact URL or path, what done looks like>"
+```
+
+A handback that exists only in the chat is gone when the session ends, and the
+story is what `status`, `auto` and the Stop hook read. `[measured 2026-09-07]`
+across three product repos this state had been written once in four months
+while six stories waiting on a person sat as pending for up to 122 days; the
+one session that did write it by hand put the handback in a log file. `auto`'s
+**Handback** section has the full three-step rule; when the operator says it
+is done, `--clear` on the same command hands the story back to the agent.
+
 Then write the handback. It goes in the message to the user, not in a file they
 have to find. Every step must be executable by someone who has not read the
 transcript and does not know what you were doing:

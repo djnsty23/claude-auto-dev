@@ -1,52 +1,40 @@
-# RESUME
+# RESUME — needs-setup as a first-class state, 2026-09-08
 
-Written by `session-exit.js` from state READ at generation time, never from
-a recollection. Every number came from a command; anything a command could
-not answer says so rather than rendering as empty.
+Branch `claude/keen-haslett-b76054`, worktree `keen-haslett-b76054`, base `origin/main`
+b8eae1f. Context depth passed 300k, so this session stopped after the step below; a fresh
+session continues from here.
 
-| field | value |
+## Done, and how each was verified
+
+| what | verified by |
 |---|---|
-| directory | `~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2` |
-| branch | `claude/intelligent-brattain-6a09ad` |
-| upstream | `origin/claude/intelligent-brattain-6a09ad` |
-| HEAD committed | 2026-09-02T22:01:15+03:00 |
+| `prd-states.js`: `blockers()`, `isReady()`, `summarise().ready` | `node tooling/test-prd-states.js` → 54/54 |
+| `scripts/prd-mark-needs-setup.js` (mark / `--clear` / `--list`, refusals, idempotent) | `node tooling/test-prd-mark-needs-setup.js` → 58/58 (new suite) |
+| `check-spec-output.js --spec SPEC.md`: External services section, `type: setup`, `blockedReason` URL, `blockedBy` resolves; fixture `tooling/fixtures/spec/oncall/` | `node tooling/test-check-spec-output.js` → 53/53 (was 21) |
+| `hooks/stop-auto-check.js` names blocked-on-operator ids; needs-setup-only backlog reaches approve | `node tooling/test-stop-auto-check.js` → 70/70 |
+| `status` and `auto` inline commands print "Blocked on you: N (ids)" | `node tooling/test-skill-prd-commands.js` → 6/6 states |
+| skills: auto (Handback section), spec (External services + setup stories + `--spec`), wizard (mark first), core (schema rows), status | `node tooling/check-skill-tool-declarations.js` clean |
+| docs: `docs/evidence-needs-setup-2026-09-08.md`, `docs/decisions.md` entry | `check-no-private-names.js` clean (Project A/B/C/D anonymised); `check-claim-provenance.js --check-message` on each → 0 unlabelled |
+| `node tooling/validate.js` | 18 PASS, 1 FAIL — the FAIL (`hooks module ./fn/autodev-fn.mjs ... modules entry was not read`) reproduces on a scratch worktree of HEAD; open PRs #182/#184 address it. Not this change. |
 
-**Re-read before acting on any of this.** A resume file is a snapshot, and
-the two facts most likely to have moved are the two below: someone may have
-pushed, and someone may have merged.
+Evidence: 36 stories pending >30d across three trunks; 6 live blocked-on-a-human, all in one
+client repo (proposal in the evidence doc, no commit there); qr and autodev have no prd.json
+on any ref, so nothing to backfill. Two brief premises came from checkouts 353/387 commits
+behind their trunks and are corrected in the doc.
 
-## Unpushed commits
+## Next, in order
 
-- `8b79aa2 fix(session-exit): --help wrote RESUME.md, and the usage named flags that do not exist`
-- `0d0d6cb fix(selftests): derive three population counts, one of which was already wrong`
+1. `npm test` was started on the dirty tree (log in the session scratchpad); if this file
+   is in the tree, it finished and the commit below was made after it.
+2. Commit: `git -c user.email=djnsty23@users.noreply.github.com commit -F <msg>` with
+   explicit paths (see the branch). Then `npm run gate` on the CLEAN tree — tens of minutes,
+   three suites are load-sensitive, re-run a red serially before attributing it. CI runs the
+   same gate on the PR.
+3. Push, open the PR against `main` (no VERSION bump). If the PR is already open, step 2's
+   local gate is the only thing left to confirm.
+4. Not done, by the brief's design: applying the six Project C marks (client repo, read-only).
 
-## Uncommitted changes
+## Seen in passing
 
-- `M RESUME.md`
-
-## Open PRs
-
-- [#127](https://github.com/djnsty23/claude-auto-dev/pull/127) `fix/test-validate-orphan-fixture` - fix(suites): two baselines that failed for reasons outside themselves, and v8.155.0
-
-## Worktrees
-
-Another session may hold one of these. Run `git status` in a tree before
-touching it: a dirty tree you did not dirty means someone is in there.
-
-```
-~/claude-auto-dev                                               e1a53d6 [main]
-~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78   e4942c1 (detached HEAD)
-~/claude-auto-dev/.claude/worktrees/codex-radar-20260902-184238 e1a53d6 [codex/radar-20260902-184238]
-~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2    8b79aa2 [claude/intelligent-brattain-6a09ad]
-~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc     b6f25ad [fix/test-validate-orphan-fixture]
-~/Downloads/code/autodev                                        3f8101f [test/brain-panels-vacuity-gaps]
-```
-
-## What a reader should do first
-
-1. `git fetch`, then re-check the sections above. They decay fastest.
-2. Run `npm run gate` before believing anything is green. That name was read from `package.json` here, not assumed.
-3. Read `CHANGELOG.md`, `README.md` - present in this directory, checked rather than assumed.
-4. Read recent commit bodies. Many projects put the reasoning there rather than in a separate design note.
-
-_These steps were derived from what is actually in `~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2`._
+`check-spec-output.js` does not read a `backlog` key (the greenfield log noted it);
+`storiesOf()` reads `stories` and `sprints[].stories` only. A decision, not a bug.

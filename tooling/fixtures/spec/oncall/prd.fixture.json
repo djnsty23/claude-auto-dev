@@ -1,0 +1,112 @@
+{
+  "project": "oncall-this-week",
+  "sprint": "sprint-1",
+  "stories": {
+    "S1-001": {
+      "id": "S1-001",
+      "title": "Sign in with an emailed magic link and appear in the team's member list",
+      "priority": 0,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "auth",
+      "notes": "Entering an email on /login and clicking Send link sends a Supabase magic link; following it lands on / signed in, and a members row exists for that user with display_name defaulting to the part of the email before @. A second sign-in does not create a second row. Signed-out visitors to / are redirected to /login.",
+      "resolution": ""
+    },
+    "S1-002": {
+      "id": "S1-002",
+      "title": "See who is on call this week, or that nobody is, on the home page",
+      "priority": 0,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "rota",
+      "notes": "/ shows the current ISO week's Monday date and the display_name of the member in oncall_weeks for that week_start. With no row for this week it shows the text \"Nobody is on call this week yet\". The week is computed from the browser's local date and starts on Monday.",
+      "blockedBy": ["S1-001"],
+      "resolution": ""
+    },
+    "S1-003": {
+      "id": "S1-003",
+      "title": "Set or change this week's on-call person from the member list, and have it survive a reload",
+      "priority": 0,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "rota",
+      "notes": "A select listing every members row plus a Save button. Saving upserts oncall_weeks for this week's Monday with member_id, updated_by and updated_at, inserts one oncall_changes row carrying previous_member_id (null on first set), new_member_id, changed_by and the announcement message, and the page shows the new name without a full reload. After a reload the same name is shown. Saving the same person again is rejected in the UI with the text \"Already on call\" and inserts no change row.",
+      "blockedBy": ["S1-002"],
+      "resolution": ""
+    },
+    "S1-004": {
+      "id": "S1-004",
+      "title": "Read a Slack-style preview of the announcement after the on-call person changes",
+      "priority": 1,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "preview",
+      "notes": "Under the rota, a message block styled like a Slack post (square avatar, bold sender \"On-call bot\", APP tag, HH:MM timestamp, message body) renders the stored message of the latest oncall_changes row for this week. The body reads \"<new> is on call this week (w/c <Mon D Mon>), taking over from <previous>. Changed by <changer>.\" and omits the taking-over clause when previous_member_id is null. With no change row the block is replaced by the text \"No announcement yet\". The rendered text is identical before and after a reload because it is read from the stored message, not recomputed.",
+      "blockedBy": ["S1-003"],
+      "resolution": ""
+    },
+    "S1-005": {
+      "id": "S1-005",
+      "title": "Step forward to any of the next four weeks and set who is on call for that week",
+      "priority": 1,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "rota",
+      "notes": "Next and Previous buttons move a week at a time between this week and four weeks ahead; the heading shows that week's Monday date; the on-call name, the select and the preview all describe the selected week, and saving writes oncall_weeks and oncall_changes with that week's week_start. Previous is disabled on the current week and Next on the fourth week ahead, so a week in the past is never editable.",
+      "blockedBy": ["S1-004"],
+      "resolution": ""
+    },
+    "S1-006": {
+      "id": "S1-006",
+      "title": "See the last ten changes for the selected week under the preview",
+      "priority": 2,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "preview",
+      "notes": "A list of up to ten oncall_changes rows for the selected week, newest first, each line showing changed_at as a local date-time, the new member's display_name, and the changer's display_name. With no rows the list is replaced by the text \"No changes yet\". An eleventh change pushes the oldest off the list.",
+      "blockedBy": ["S1-004"],
+      "resolution": ""
+    },
+    "S1-007": {
+      "id": "S1-007",
+      "title": "Open the page on a deployment with no Supabase variables and get a setup notice instead of an error",
+      "priority": 1,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "config",
+      "notes": "When NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is unset at request time, every route renders a notice that names both variables and the Vercel Environment Variables page, returns HTTP 200, and logs nothing to the browser console. The build succeeds with both variables unset, which is what makes a deploy-before-configure preview possible.",
+      "resolution": ""
+    }
+  },
+  "backlog": {
+    "S2-001": {
+      "id": "S2-001",
+      "title": "Copy the announcement text to the clipboard with one click",
+      "priority": 2,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "preview",
+      "notes": "A Copy button on the preview writes the stored message to the clipboard and shows \"Copied\" for two seconds; pasting into a text field yields the exact message.",
+      "resolution": ""
+    },
+    "S2-002": {
+      "id": "S2-002",
+      "title": "Post the announcement to a real Slack channel through an incoming webhook",
+      "priority": 3,
+      "passes": null,
+      "realness": null,
+      "type": "feature",
+      "category": "integration",
+      "notes": "With SLACK_WEBHOOK_URL set on the server, saving a change POSTs the stored message to the webhook and records the HTTP status on the change row; the message appears in the channel within five seconds. With the variable unset the Save still succeeds and the preview shows \"Not sent: no webhook configured\".",
+      "resolution": ""
+    }
+  }
+}
