@@ -419,6 +419,12 @@ function main() {
     return 0;
 }
 
-if (require.main === module) process.exit(main());
+// exitCode, never process.exit(): stdout to a PIPE is asynchronous on macOS
+// and Windows, so exit() right after a console.log larger than the 64 KiB pipe
+// buffer drops the tail. `[measured 2026-09-07]` the --json report for the
+// committed fixtures is 84,752 bytes and reached its spawnSync reader as
+// exactly 65,536, which JSON.parse refused at position 65536. The gate ran
+// green on Linux, where pipes are synchronous, and red on this Mac.
+if (require.main === module) process.exitCode = main();
 
 module.exports = { report, selftest };

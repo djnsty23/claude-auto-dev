@@ -412,7 +412,33 @@ function checkHookWiring() {
 // the reason (no CLI, a timeout, or neither verdict printed). A scan that
 // passed but listed no hooks is a FAIL too — it means the `modules` entry was
 // not read, and an unread module is the silent kind of broken.
+//
+// The host has to be NEW ENOUGH TO KNOW WHAT A MODULE IS before "passed with no
+// hooks" can mean "unread". `[measured 2026-09-07]` the scan was built against
+// Claude Code 2.1.259 (docs/function-hooks/README.md), and the `claude` on this
+// machine's PATH was 2.1.233: it printed "Validation passed" and nothing else,
+// exactly as it does for a plugin with no module at all, and this check called
+// that a FAIL for two days while CI (no CLI on PATH) stayed green. An old host
+// cannot read the entry, so its silence is `skipped` with the version named,
+// which is the same verdict as no CLI: unverified here, never passed.
+const HOOKS_MODULE_MIN_HOST = [2, 1, 259];
+function hostVersion() {
+  const r = cp.spawnSync('claude --version', { encoding: 'utf8', timeout: 30000, windowsHide: true, shell: true });
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(((r && r.stdout) || '') + ((r && r.stderr) || ''));
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function predatesHooksModules(v) {
+  for (let i = 0; i < 3; i++) {
+    if (v[i] < HOOKS_MODULE_MIN_HOST[i]) return true;
+    if (v[i] > HOOKS_MODULE_MIN_HOST[i]) return false;
+  }
+  return false;
+}
 function scanHooksModule(pluginDir) {
+  const v = hostVersion();
+  if (v && predatesHooksModules(v)) {
+    return { status: 'skipped', reason: `claude ${v.join('.')} on PATH predates hooks modules (first scanned by ${HOOKS_MODULE_MIN_HOST.join('.')})` };
+  }
   // One quoted command string through the shell: `claude` on PATH is a shim
   // (a .cmd on Windows), which spawnSync cannot run without a shell, and an
   // args array under shell:true is concatenated unescaped (DEP0190).

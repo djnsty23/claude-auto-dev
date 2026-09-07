@@ -559,6 +559,13 @@ for (const p of PAGES) {
     const json = run(['--dir', SNAPS, '--json']);
     let parsed = null;
     try { parsed = JSON.parse(json.stdout); } catch { /* left null */ }
+    // Control for the parse case: the report must be LARGER than one pipe
+    // buffer, or the case cannot see the defect it exists for. The gate used to
+    // process.exit() straight after console.log, which on macOS truncates a
+    // piped stdout at 65,536 bytes; a fixture set small enough to fit would
+    // have kept that green everywhere.
+    check('--json output exceeds the 64 KiB pipe buffer, so the parse case exercises the drain',
+        json.stdout.length > 65536, json.stdout.length);
     check('--json parses', !!parsed);
     check('--json groups the snapshots by page, not into one muddled table',
         parsed && parsed.pages.length === 4, parsed && parsed.pages.length);

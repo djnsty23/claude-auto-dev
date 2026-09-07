@@ -5,6 +5,7 @@
 
 const { spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -106,6 +107,62 @@ check('  and gives a restore command', /restore with: git checkout --/.test(with
 // Removing it must clear the failure, or the check is a one-way trap.
 const after = runValidate();
 check('removing the backup clears the failure', after.status === 0);
+
+// The hooks-module scan, driven through a fake `claude` planted first on PATH.
+//
+// `[measured 2026-09-07]` the real defect: Claude Code 2.1.233 on this machine
+// prints "Validation passed" and no scan lines for ANY plugin, because it
+// predates hooks modules. validate read that as "the modules entry was not
+// read" and failed the tree for two days while CI, with no CLI on PATH, stayed
+// green. Three hosts below: one too old to know what a module is, one new
+// enough that silence really is an unread entry, and one that scans. The fake
+// answers `--version` and `plugin validate` and nothing else, so a validate that
+// started asking the CLI something new would fail here rather than pass by
+// accident.
+{
+    const fakeDir = path.join(os.tmpdir(), `zz-fake-claude.${process.pid}`);
+    fs.mkdirSync(fakeDir, { recursive: true });
+    const sh = [
+        '#!/bin/sh',
+        'if [ "$1" = "--version" ]; then echo "$FAKE_CLAUDE_VERSION (Claude Code)"; exit 0; fi',
+        'echo "Validating plugin manifest: $3"',
+        'echo ""',
+        'if [ -n "$FAKE_CLAUDE_SCAN" ]; then echo "  ❯ hooks: session.start, prompt.submit"; echo "  ❯ calls: ui.status, fs.exists"; fi',
+        'echo "✔ Validation passed"',
+        '',
+    ].join('\n');
+    fs.writeFileSync(path.join(fakeDir, 'claude'), sh, { mode: 0o755 });
+    fs.writeFileSync(path.join(fakeDir, 'claude.cmd'), [
+        '@echo off',
+        'if "%1"=="--version" (echo %FAKE_CLAUDE_VERSION% (Claude Code^) & exit /b 0)',
+        'echo Validating plugin manifest: %3',
+        'echo.',
+        'if defined FAKE_CLAUDE_SCAN (echo   ^> hooks: session.start, prompt.submit & echo   ^> calls: ui.status, fs.exists)',
+        'echo Validation passed',
+        '',
+    ].join('\r\n'));
+    const onPath = (extra) => runValidate({ PATH: fakeDir + path.delimiter + process.env.PATH, ...extra });
+    const moduleLine = (r) => (r.stdout || '').split('\n').find((l) => /hooks module/.test(l)) || '';
+    try {
+        const old = onPath({ FAKE_CLAUDE_VERSION: '2.1.233', FAKE_CLAUDE_SCAN: '' });
+        check('an old host that cannot scan is a WARN, not a FAIL', old.status === 0 && /^\[WARN\]/.test(moduleLine(old)));
+        check('  and the warning names the host version it saw', /2\.1\.233/.test(moduleLine(old)));
+        check('  and the version it would need', /2\.1\.259/.test(moduleLine(old)));
+
+        const silent = onPath({ FAKE_CLAUDE_VERSION: '2.1.259', FAKE_CLAUDE_SCAN: '' });
+        check('a host new enough to scan that lists no hooks is a FAIL', silent.status === 1 && /^\[FAIL\]/.test(moduleLine(silent)));
+        check('  and says the entry was not read', /modules entry was not read/.test(moduleLine(silent)));
+
+        const scanned = onPath({ FAKE_CLAUDE_VERSION: '2.1.259', FAKE_CLAUDE_SCAN: '1' });
+        check('a host that scans the module is a PASS', scanned.status === 0 && /^\[PASS\]/.test(moduleLine(scanned)));
+        check('  and the scan lines are carried into the verdict', /hooks: session\.start/.test(moduleLine(scanned)));
+        // Control: the three verdicts came from the fake, not from whatever
+        // `claude` this machine has. Only the fake echoes the planted version.
+        check('  control: the fake is what answered', /2\.1\.233/.test(moduleLine(old)) && !/2\.1\.233/.test(moduleLine(scanned)));
+    } finally {
+        fs.rmSync(fakeDir, { recursive: true, force: true });
+    }
+}
 
 // find-untested-hooks.js — a hook wired into hooks.json that no suite drives.
 //
