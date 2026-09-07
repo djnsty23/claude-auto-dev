@@ -17,6 +17,7 @@ npm run gate                 # THE GATE: six steps chained with &&. Run this.
 npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 6.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
+node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md; check:agents-md (in the gate) fails on drift
 ```
 
 **`npm test` is ONE SIXTH of the gate, and every step it skips fails silently.**

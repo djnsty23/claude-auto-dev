@@ -3,6 +3,27 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: AGENTS.md is generated from the rule-* skills, gated, and kept under a hand-written half
+
+The 16 always-on `rule-*` skills (128,794 bytes) load into every Claude Code
+session by path glob; a Codex session in the same repo read a 4,200-byte
+hand-written `AGENTS.md` and never saw them, which mattered because Codex is the
+adversarial auditor here. The reference harness we compared against in the entry
+below scores 9 on portability with a hand-maintained `AGENTS.md` that was five
+months stale, so "hand-maintain a copy" was the failure to design against.
+
+Decision: `tooling/generate-agents-md.js` distils each rule into its description,
+its `paths:` globs, its first paragraph, and every paragraph carrying a dated
+claim; `npm run check:agents-md` regenerates to a temp path and fails the gate
+when the committed file drifts. Everything above the GENERATED marker stays
+hand-written and is copied through verbatim, so the Codex-only facts keep their
+home. Measured over the real rules (`--measure`): full bodies 128,384 bytes,
+this shape 21,233 keeping 25 of 25 dated claims, the brief's literal "dated
+lines" shape 14,673 keeping 2 of 25 because no marker begins a line, descriptions
+alone 7,044 keeping 0. The effect on Codex's answers is COULD NOT CHECK: the CLI
+is not installed on this machine. Evidence and the exact question to ask once it
+is: `docs/evidence-agents-md-2026-09-08.md`.
+
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 
 The question was whether a 249k-star harness is better than this one, and if
