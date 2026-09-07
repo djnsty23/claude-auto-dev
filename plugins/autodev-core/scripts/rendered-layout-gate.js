@@ -163,14 +163,24 @@ wolf, and says nothing about precision across a corpus. Collect real runs before
 anyone promotes this past advisory.`);
 }
 
+// Thrown instead of calling process.exit() from deep in the call stack; see the
+// note on the runner at the foot of this file for why no path here may exit.
+// Taken from the parallel fix on claude/infallible-sutherland-eebec7 (8bf85a3c)
+// in preference to the sentinel this file carried first: a sentinel is only
+// checked where a caller remembers to check it, and the next deep exit someone
+// adds gets no protection from it. An exception carrying its own status does.
+class Bail extends Error {
+    constructor(code) { super('bail'); this.code = code; }
+}
+
 function readSnapshots() {
     const dir = val('--dir', null);
     const files = [];
     if (dir) {
-        // Return the miss rather than exiting here: process.exit() discards
-        // whatever has not yet reached an async stdio stream (see the bottom of
-        // this file), and every exit in this process has to go through main().
-        if (!fs.existsSync(dir)) { console.error(`No such directory: ${dir}`); return null; }
+        // Bail rather than exit here: process.exit() discards whatever has not
+        // yet reached an async stdio stream (see the bottom of this file), and
+        // every exit in this process has to go through the runner.
+        if (!fs.existsSync(dir)) { console.error(`No such directory: ${dir}`); throw new Bail(2); }
         for (const f of fs.readdirSync(dir).sort()) {
             if (f.endsWith('.json')) files.push(path.join(dir, f));
         }
@@ -374,7 +384,6 @@ function main() {
     if (has('--selftest')) return selftest();
 
     const files = readSnapshots();
-    if (files === null) return 2;
     if (!files.length) { usage(); console.error('\nNo snapshots given. See --how.'); return 2; }
 
     const opts = { strict: has('--strict'), quiet: has('--quiet') };
@@ -443,6 +452,13 @@ function main() {
 //   - run it on Linux CI and the write is synchronous, so CI is green
 //   - read the exit status and it is 0, because the write never failed
 // Whoever pipes this next gets the truncation and no signal that they did.
-if (require.main === module) process.exitCode = main();
+if (require.main === module) {
+    try {
+        process.exitCode = main();
+    } catch (e) {
+        if (!(e instanceof Bail)) throw e;
+        process.exitCode = e.code;
+    }
+}
 
 module.exports = { report, selftest };

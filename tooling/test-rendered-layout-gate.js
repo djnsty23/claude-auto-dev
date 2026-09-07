@@ -549,6 +549,24 @@ for (const p of PAGES) {
     const none = run([]);
     check('no input exits 2, distinct from a clean run', none.status === 2, none.status);
 
+    // The bad --dir path had NO assertion until 2026-09-08, which is why the
+    // process.exit(2) sitting in readSnapshots() survived the first pass at this
+    // defect: nothing here would have noticed it change at all.
+    //
+    // BE CLEAR WHAT THESE THREE CATCH, because it is not the truncation.
+    // Mutation-checked both ways: swapping the Bail back to process.exit(2)
+    // leaves this suite GREEN, and dropping the catch in the runner takes it RED
+    // (status 0 instead of 2). So they prove the Bail is WIRED, not that this
+    // path drains. They cannot prove the drain, and no test here can: the path
+    // emits one short line to stderr, which always fits inside the pipe buffer,
+    // so there is no observable truncation to assert against. The drain on this
+    // path is an argument from the runner's shape, not a measurement.
+    // The --json case above is where the truncation itself is measured.
+    const badDir = run(['--dir', path.join(SNAPS, 'no-such-directory-here')]);
+    check('a missing --dir exits 2 rather than crashing or passing', badDir.status === 2, badDir.status);
+    check('and says which directory it could not find', /No such directory/.test(badDir.stderr), badDir.stderr.slice(0, 120));
+    check('a missing --dir prints no report to stdout', badDir.stdout === '', badDir.stdout.slice(0, 120));
+
     const printed = run(['--print-probe', '--width', '414']);
     check('--print-probe emits a pasteable expression', printed.status === 0 && /414/.test(printed.stdout));
 
