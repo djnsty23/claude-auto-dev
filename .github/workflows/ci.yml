@@ -77,7 +77,15 @@ jobs:
       # population or carrying a runtime control. It runs here so a regression
       # is caught on the PR that introduces it; a detector nobody runs reports
       # nothing and looks identical to a clean one.
-      - name: Population and control reporting (advisory)
+      #
+      # The name said "(advisory)" until 2026-09-08 and that was false: there is
+      # no continue-on-error here, and check-population-reporting.js ends on
+      # `process.exit(failed ? 1 : 0)`, so a finding fails the job like any other
+      # step. Two readings were available and only one is right — the LABEL was
+      # stale, not the behaviour. Adding continue-on-error to make the word true
+      # would have weakened a mutation-verified gate to fix a caption. The
+      # comment directly above already called it a gate; the name now agrees.
+      - name: Population and control reporting (gate)
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:population
 
