@@ -313,13 +313,27 @@ if (require.main === module) {
             exitCode(5, 1) === 2 && exitCode(5, 0) === 1 && exitCode(0, 0) === 0,
             `${exitCode(5, 1)}/${exitCode(5, 0)}/${exitCode(0, 0)}`);
 
+        // A cap set EQUAL to the base always binds, because the factor is clamped
+        // at or above 1 and so the widened budget can never fall below the base.
+        // That makes this decidable without knowing how fast the machine is.
+        //
+        // It is worth saying why, because the first draft got it wrong in the
+        // way this whole module exists to prevent: it used base 300 with a cap
+        // of 450 and asserted the result was exactly 450, which holds only when
+        // the factor exceeds 1.5. On an idle fast machine the factor sits near
+        // 1, so it passed standalone and went red in a full gate run — a
+        // machine-speed dependent assertion, inside the module for removing
+        // machine-speed dependent assertions.
         const capped = runBudgeted(NODE, ['-e', HANG],
-            { encoding: 'utf8', timeout: 300, maxTimeout: 450 });
-        t('maxTimeout caps the widened retry budget', capped.attempts === 2 && capped.budgetMs === 450,
+            { encoding: 'utf8', timeout: 300, maxTimeout: 300 });
+        t('maxTimeout caps the widened retry budget', capped.attempts === 2 && capped.budgetMs === 300,
             `attempts=${capped.attempts} budgetMs=${capped.budgetMs}`);
-        t('  control: the same run widens past that cap when none is given, so the '
-            + 'cap is doing the work rather than the factor happening to be small',
-            hungRetried.budgetMs > Math.round(400 * 450 / 300), `budgetMs=${hungRetried.budgetMs}`);
+        t('  and the cap holds whatever the factor measured, rather than only when it is small',
+            capped.budgetMs <= 300 && capped.factor >= 1, `budgetMs=${capped.budgetMs} factor=${capped.factor}`);
+        t('  control: without a cap the SAME base widens to the measured factor instead, so '
+            + 'the cap is what clamped it and not an incidental equality',
+            hungRetried.budgetMs === Math.round(400 * hungRetried.factor)
+                && hungRetried.budgetMs >= 400, `budgetMs=${hungRetried.budgetMs} factor=${hungRetried.factor}`);
 
         let bad = false;
         try { runBudgeted(NODE, ['-e', '0'], { encoding: 'utf8' }); } catch { bad = true; }

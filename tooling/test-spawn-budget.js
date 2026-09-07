@@ -42,12 +42,17 @@ function check(label, ok, detail) {
 // --- the CLI contract, which only a subprocess can see ----------------------
 {
     const st = spawnSync(process.execPath, [SUBJECT, '--selftest'], { encoding: 'utf8', timeout: 300000 });
+    const childFails = (st.stdout || '').split('\n').filter((l) => l.startsWith('FAIL'));
     check("the module's own --selftest is RUN here, so it is not a check nobody executes",
-        st.status === 0, `status=${st.status} signal=${st.signal}`);
+        st.status === 0,
+        `status=${st.status} signal=${st.signal}`
+        + (childFails.length ? ' -> ' + childFails.join(' | ') : ''));
     const m = /population: (\d+) assertions run, (\d+) passed, (\d+) failed/.exec(st.stdout || '');
     check('  and it reports the population it ran, not a bare verdict', !!m,
         JSON.stringify((st.stdout || '').slice(-200)));
-    check('  with nothing failing', m && m[3] === '0', m && m[3]);
+    check('  with nothing failing', m && m[3] === '0',
+        (m ? m[3] + ' failed' : 'no population line')
+        + (childFails.length ? ': ' + childFails.join(' | ') : ''));
     check('  over a non-trivial number of cases', !!m && Number(m[1]) >= 20, m ? m[1] : 'none');
 
     const h = spawnSync(process.execPath, [SUBJECT, '--help'], { encoding: 'utf8', timeout: 60000 });
