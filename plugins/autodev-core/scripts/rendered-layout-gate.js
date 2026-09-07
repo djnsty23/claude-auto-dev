@@ -167,7 +167,10 @@ function readSnapshots() {
     const dir = val('--dir', null);
     const files = [];
     if (dir) {
-        if (!fs.existsSync(dir)) { console.error(`No such directory: ${dir}`); process.exit(2); }
+        // Return the miss rather than exiting here: process.exit() discards
+        // whatever has not yet reached an async stdio stream (see the bottom of
+        // this file), and every exit in this process has to go through main().
+        if (!fs.existsSync(dir)) { console.error(`No such directory: ${dir}`); return null; }
         for (const f of fs.readdirSync(dir).sort()) {
             if (f.endsWith('.json')) files.push(path.join(dir, f));
         }
@@ -371,6 +374,7 @@ function main() {
     if (has('--selftest')) return selftest();
 
     const files = readSnapshots();
+    if (files === null) return 2;
     if (!files.length) { usage(); console.error('\nNo snapshots given. See --how.'); return 2; }
 
     const opts = { strict: has('--strict'), quiet: has('--quiet') };
@@ -419,6 +423,26 @@ function main() {
     return 0;
 }
 
-if (require.main === module) process.exit(main());
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is asynchronous when it is a PIPE on macOS, and
+// synchronous when it is a pipe on Linux or Windows; it is synchronous for a
+// FILE and for a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so on macOS a piped run of this gate delivered only the
+// 64KiB the OS pipe buffer had absorbed - `--json` over the 20 committed
+// snapshots is ~84KB, so it arrived as 65536 bytes of invalid JSON under exit
+// status 0. A silent wrong answer, not a visible failure.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing in this file holds the loop
+// open - it is fs reads and string building - so "exit on its own" is
+// immediate.
+//
+// The three ways this hides from you, all of which it used:
+//   - redirect to a file and the write is synchronous, so it looks complete
+//   - run it on Linux CI and the write is synchronous, so CI is green
+//   - read the exit status and it is 0, because the write never failed
+// Whoever pipes this next gets the truncation and no signal that they did.
+if (require.main === module) process.exitCode = main();
 
 module.exports = { report, selftest };
