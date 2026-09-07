@@ -41,3 +41,19 @@ after the step below; a fresh session continues from here.
 
 - No release. No push before the gate.
 - Memory-injection idea not measured (recall use unknown), so not proposed as work.
+
+## Spawned after this session stopped (2026-09-08, operator-started, each in its own worktree)
+
+Nine sessions carry the follow-ups, so nothing here is for a fresh session to re-derive; check `gh pr list` and the session list before starting any of them again:
+
+1. `--no-verify` ask-guard in pre-tool-filter (bypass must be deliberate and recorded, never impossible).
+2. One measured greenfield build, spec → setup-project → auto → ship, throwaway product, evidence doc is the deliverable.
+3. AGENTS.md generator from the 16 `rule-*` skills, with a drift gate and a Codex before/after.
+4. Memory recall measurement: is anything ever recalled, then ranked injection only if the sample warrants it.
+5. Coverage threshold in the gate at today's measured floor, zero new dependencies preferred.
+6. Production signals → candidate stories, read-only on the live product, direct writes only on the no-users repo.
+7. needs-setup made first-class: spec emits the setup manifest, auto marks on wizard handback, status says "blocked on you: N".
+8. Quota-wall survival: triage script over run directories, phase-shape rule, non-blocking resume note.
+9. Deploy pre-authorisation: three drafted sentences with measured consequences, decision put to the operator, never made by a session.
+
+Each was briefed to open its own PR against main with an evidence doc under docs/ and a decisions.md entry, no VERSION bump, and to leave the live product and client repos read-only.
