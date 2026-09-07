@@ -55,7 +55,7 @@
 
 'use strict';
 
-const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, timedOut, tally } = require('./spawn-budget.js');
 
 // Any uncaught throw in this suite is INFRASTRUCTURE: exit 2, never the
 // ambient exit 1 the sweep could score as evidence (Sol rounds 20-21).
@@ -72,6 +72,13 @@ const SUBJECT = path.resolve(
 );
 
 let pass = 0, fail = 0;
+// Every reason this run could not be read as a claim about the code. Until
+// 2026-09-07 the three exitCode=2 branches below were invisible to the tally,
+// so a load-induced infrastructure verdict printed "180 passed, 0 failed" and
+// exited 2 - a green summary describing something other than the subject, which
+// is the exact shape CLAUDE.md warns about. The exit code was right all along;
+// the last line a reader sees is what had to change.
+const indeterminate = [];
 
 function check(label, ok, detail) {
     if (ok) pass++; else fail++;
@@ -140,11 +147,17 @@ function env(extra) {
 }
 
 function run(args, extra, timeout, expect) {
-    const r = spawnSync(process.execPath, [SUBJECT].concat(args), {
+    const r = runBudgeted(process.execPath, [SUBJECT].concat(args), {
         // 60s, not 15: a cold node start under machine load blew 15s, and a
         // timed-out child is now classified infrastructure rather than being
         // absorbed - so the budget must only be exceedable by a real hang.
         encoding: 'utf8', env: env(extra), timeout: timeout || 60000,
+        // On a timeout that budget is retried ONCE at a contention-scaled one.
+        // Not under 'kill': there the timeout is the ANSWER the call site is
+        // asserting, and a retry would sit out a deliberate 2.5s wait again at
+        // a multiple of it.
+        retryOnTimeout: expect !== 'kill',
+        maxTimeout: 300000,
     });
     // A child that errored, was signalled, carries a null status, or exited
     // 2 without this call site expecting it produced no verdict: that is
@@ -156,27 +169,15 @@ function run(args, extra, timeout, expect) {
     // child survived to the timeout or exited early is precisely what the
     // call site's assertion adjudicates, so it must reach that assertion
     // (Sol round-22: the old shape accepted exit 1 and arbitrary signals as
-    // the expected timeout).
-    const timedOut = !!(r.error && r.error.code === 'ETIMEDOUT');
-    // Under 'kill' exactly ONE outcome is a verdict: our timeout fired and
-    // the child died to the SIGTERM it sent, leaving a null status. An early
-    // numeric 0/1 self-exit is the behavioural red the scenario exists to
-    // catch, so it reaches the assertion. EVERY other incomplete shape is
-    // infrastructure (Sol round-24): a non-timeout signal, ETIMEDOUT with a
-    // non-SIGTERM signal such as SIGKILL, ETIMEDOUT carrying a status, a
-    // self-exit 2, or any other spawn error.
-    const killVerdict = timedOut && r.signal === 'SIGTERM' && r.status === null;
-    const earlyNumericExit = !r.error && !r.signal && (r.status === 0 || r.status === 1);
-    const bad = expect === 'kill'
-        ? !(killVerdict || earlyNumericExit)
-        : (!!r.error || !!r.signal || r.status === null
-            || (r.status === 2 && expect !== 'exit2'));
-    if (bad) {
-        console.error('infrastructure: subject run ' + JSON.stringify(args) + ' did not produce a verdict ('
-            + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
+    // the expected timeout). The full contract now lives in classify().
+    if (classify(r, expect) === 'infrastructure') {
+        const why = reason(r) + (r.attempts > 1 ? `; ${r.attempts} attempts, budget ${r.budgetMs}ms` : '');
+        const what = 'subject run ' + JSON.stringify(args);
+        console.error('infrastructure: ' + what + ' did not produce a verdict (' + why + ')');
+        indeterminate.push(what + ' (' + why + ')');
         process.exitCode = 2;
     }
-    return { status: r.status, signal: r.signal, timedOut, stdout: r.stdout || '', stderr: r.stderr || '' };
+    return { status: r.status, signal: r.signal, timedOut: timedOut(r), stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
 let stateSeq = 0;
@@ -944,7 +945,11 @@ try {
     }
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
+if (process.exitCode === 2 && indeterminate.length === 0) {
+    indeterminate.push('the fixture could not be cleaned up; see the line above');
+}
+console.log(`\n${tally(pass, fail, indeterminate.length)}`);
+if (indeterminate.length) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
 // Precedence 2 -> 1 -> 0: an infrastructure problem outranks assertion
 // failures, because a run that could not maintain its own sandbox is
 // indeterminate, not red (Sol round-19).

@@ -13,20 +13,40 @@ never ships.
 ## Commands
 
 ```bash
-npm run gate                 # THE GATE: npm test, then check:suites. What CI runs.
-npm test                     # every tooling/test-*.js suite, then validate. HALF the gate.
+npm run gate                 # THE GATE: SIX steps, && chained. See below.
+npm test                     # every tooling/test-*.js suite, then validate. ONE SIXTH of the gate.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
 ```
 
-**`npm test` is HALF the gate, and the missing half fails silently.**
-`[measured 2026-08-30]` CI runs `npm test` and `npm run check:suites` as two
+**`npm test` is a FRACTION of the gate, and the rest fails silently.**
+`[measured 2026-08-30]` CI ran `npm test` and `npm run check:suites` as two
 separate steps. A session ran nine green `npm test` runs and never executed the
 second, so a newly added suite was reported green while `check-suites-can-fail.js`
 had it counted as NOT verified. The suite in question was the one gating pushes.
 
-Nothing about the first command hints at the second, which is why `npm run gate`
-now exists: it chains both and is what CI runs.
+Nothing about the first command hints at the rest, which is why `npm run gate`
+exists.
+
+⚠️ **This section said the gate "chains both" — two steps — until 2026-09-08. It
+is SIX**, and has been for longer than anyone checked:
+
+```
+npm test && check:suites && check:probe-shapes && check:population
+         && check:entrypoints && check:skill-tools
+```
+
+They are `&&`-chained, so **a failing `npm test` skips the other five and you
+learn about one of six problems.** That is the same trap as reading a pipeline's
+exit status: the chain reports the first red, not the worst one. When `npm test`
+goes red, fix it and re-run the WHOLE chain rather than assuming the tail was
+fine — it was never executed.
+
+And the gate is no longer the same set as CI: CI runs five of the six as separate
+jobs and does not run `check:probe-shapes` at all, so `npm run gate` is now the
+stricter of the two. "What CI runs" was true when it was written and is the kind
+of sentence this file warns about two paragraphs down — an implementation
+description, naming a chain a refactor can change, which read as an invariant.
 
 **Run it on a CLEAN tree, after committing and before pushing.** `check:suites`
 grades HEAD, in a private worktree under tmpdir, so it refuses a dirty tree and
