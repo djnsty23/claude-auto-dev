@@ -320,3 +320,38 @@ Four new scenarios cover it, all on real git repositories: a reviewer at the
 same tip, a reviewer on an **ancestor** commit, two worktrees at one tip **both
 dirty on the same file** (must fire), and a partial case where two branches
 share history and diverge on exactly one path (only that path may be named).
+
+
+## The gate, re-run on the fixed commit
+
+The reviewer fix changed the subject, so the earlier run stopped speaking for it.
+All six steps re-run individually against `8928459` on a clean tree:
+
+| # | step | exit | |
+|---|---|---|---|
+| 1 | `npm test` | 1 | `110/113 suites passed — 3 FAILED`. `test-fleet-overlap` **PASS**, `tree-inert` **PASS** |
+| 2 | `check:suites` | 1 | `109 verified able to fail · 3 NOT verified`, each labelled *already failing*. **`test-fleet-overlap.js` ✓ ok.** `sweep worktree clean, source tree refs unmoved` |
+| 3 | `check:probe-shapes` | **0** | |
+| 4 | `check:population` | **0** | |
+| 5 | `check:entrypoints` | **0** | |
+| 6 | `check:skill-tools` | **0** | |
+
+Identical to the pre-fix run: four of six green, and both reds are the same three
+suites — `validate`, `test-validate`, `test-rendered-layout-gate` — which
+`check:suites` labels *already failing* on its own initiative, and which a
+pristine worktree at `origin/main` reproduces.
+
+## What a later reader should not re-derive
+
+The interesting failure in this work was not the missing signal. It was that the
+row I offered as **evidence the signal worked** — a pair that grew from 4 shared
+paths to 17 within an hour — was the strongest evidence it did **not**. A
+collision accumulates gradually and partially; a copy arrives at once and matches
+exactly. Growth rate and set-equality were the discriminator, and I read both
+backwards because they pointed at the answer I wanted.
+
+The generalisation, since this file is read by people building detectors: **a
+detector's most confident row deserves the most suspicion, precisely because
+nobody checks the row that agrees with them.** The ledger exclusions were derived
+by measurement and were right; the top row was derived by intuition and was
+wrong. Both were in the same run.
