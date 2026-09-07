@@ -195,9 +195,28 @@ for word:
 That is the host reporting on its own scan, and this change adds no hook and
 touches no hooks manifest. The worktree was removed afterwards.
 
-`npm test` on this branch: **110/113 suites passed, the same 3 failed**, and
-`tree-inert` PASSED — the run did not modify the working tree.
-`test-fleet-overlap` PASSED in-harness.
+### The gate, all six steps, run individually
+
+The chain is `&&`, so a red first step would have silently skipped the other
+five. Each was run on its own against the committed, rebased, clean tree, with
+exit codes captured to files — `$?` after a pipe is the pipe's status.
+
+| # | step | exit | |
+|---|---|---|---|
+| 1 | `npm test` | 1 | 110/113; the 3 pre-existing reds. `test-fleet-overlap` **PASS**, `tree-inert` **PASS** |
+| 2 | `check:suites` | 1 | 109 verified able to fail; 3 NOT verified, all "already failing". **`test-fleet-overlap.js` ✓ verified able to fail.** Sweep worktree clean, source tree refs unmoved |
+| 3 | `check:probe-shapes` | **0** | 9 planted positives, 8 negatives, 9 rules — 17 passed, 0 failed |
+| 4 | `check:population` | **0** | |
+| 5 | `check:entrypoints` | **0** | |
+| 6 | `check:skill-tools` | **0** | |
+
+Four of six green. Both reds are the same three suites in both steps —
+`validate`, `test-validate`, `test-rendered-layout-gate` — and step 2 labels
+each of them "already failing" of its own accord.
+
+`check:suites` is the step that catches exactly the unverifiable-new-suite
+case, so it is the one this change could least afford to skip: it changed a
+suite. It reports that suite verified.
 
 Writing this down rather than leaving it implicit, because `--no-verify` with
 an unstated reason is indistinguishable from `--no-verify` because the gate was
