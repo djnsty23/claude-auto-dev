@@ -221,3 +221,26 @@ suite. It reports that suite verified.
 Writing this down rather than leaving it implicit, because `--no-verify` with
 an unstated reason is indistinguishable from `--no-verify` because the gate was
 inconvenient.
+
+
+## Away-window actions, logged
+
+The operator was away with a standing order: take the recommended option on
+anything reversible, log it here, keep working. The end-of-turn panel was held
+by that order and resolved to *act on the live collisions*. Classified branch 2
+(reversible, not otherwise covered), except where noted.
+
+| what | why | how to reverse |
+|---|---|---|
+| **[A]** Ran the new detector over the live fleet and filed a collision report **outside this repo**, in the operator's private notes directory | The report names repositories and session titles. This repo is PUBLIC and `check-no-private-names.js` gates the tree; a collision report is exactly the kind of machine-specific content that belongs in the private notes, which are on the backup allowlist. Nothing was added to the repo. | delete the file; nothing here depends on it |
+| **[B]** Stated the overlap to the coordinator session as bare fact, with **no next step attached** | Covered by a standing rule, so branch 1 rather than 2: `brain/SKILL.md` says overlap is a fact about git refs and may be stated plainly to a peer, provided no next step rides along. Sent to the coordinator alone — it holds authority this window — rather than to the ten worker sessions involved, because interrupting ten live turns is the blast radius this change deliberately declined to take on in hook form. | none needed; a message with no instruction in it |
+| **[C]** Did **not** message the colliding worker sessions | I hold no merge authority and am not the coordinator. The detector's job is to name the collision; dispatching is someone else's. | n/a |
+| **[D]** Corrected `harness-audit-plan.md` C6 and recorded that its threshold is **not met** | The row asserted behaviour this branch had just falsified. Its threshold asks for 0 live pairs sharing 3+ changed files; there are 5. No suite reads that file and no live worktree had it touched — checked with the detector this branch adds. | `git revert` the docs commit |
+
+One result worth keeping: the detector's **top-scoring pair (185)** is a duplicate
+the coordinator had already found by hand, hours into the night. Agreeing with a
+judgement someone had already reached the slow way is weak evidence on its own,
+but it is the right direction, and it arrived without anyone looking.
+
+A second pair **grew from 4 shared paths to 17 within the hour** between two runs.
+That is the window this signal exists to see into, and it is not hypothetical.
