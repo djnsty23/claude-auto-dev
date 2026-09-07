@@ -196,3 +196,41 @@ about anything in this change.
 
 VERSION untouched. `fleet-snapshot.js` reads only population fields that are
 unchanged (`olderThanAgeDays`, `openStateAndDated`, `present`).
+
+---
+
+## Appendix — decisions taken while the operator was away
+
+The options panel at the end of this work was held: the operator had declared
+AWAY, scoping the window to **qr and autodev only**. Both questions resolved
+under **branch 2 — reversible and not covered by a standing order** — so the
+recommended option was taken and is logged here.
+
+**1. "The mutation rounds turned up a general lesson that lives only in this
+PR's files." → took: add the veto lesson to `rule-gate-integrity`.**
+
+Reversible: a docs-only addition to one `SKILL.md`, revertable in one commit,
+touching no code path and no gate wiring. Checked first that no open PR or
+remote branch held that skill — PR #186 is docs-only, PR #183 touches the
+flaky suites rather than the skills.
+
+Shipped as a separate branch and draft PR rather than folded into this one,
+because it is a different subject with a different reviewer question: this PR
+asks *is the tool fixed*, that one asks *is the rule true in general*.
+
+The half that is new: the checklist already says *"every negative assertion was
+confirmed to reach the code it denies"*, which is the assertion-side guard and
+is what eventually caught the broken veto. What it does not reach is the
+**measurement** side — that a census recording "0 firings" is two claims
+wearing one number, and that is where the wrong conclusion was first written
+down.
+
+**2. "How should PR #187 be reviewed?" → took: leave for the coordinator.**
+
+Reversible and, in fact, the null action: the PR is a draft, it is not merged,
+and the framing was agreed with the coordinator beforehand. Nothing was done to
+it.
+
+**Nothing hit branch 3.** No money, no production rows, no deletes of unmeasured
+shared state, no taste call on a daily surface. Both changes are additive, on
+draft PRs, in autodev — inside the declared scope.
