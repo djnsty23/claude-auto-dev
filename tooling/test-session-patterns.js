@@ -192,5 +192,77 @@ run(mixed, ['--days', '1']);
 const after = fs.readdirSync(path.join(mixed, 'C--Users-x-code-demo')).sort().join(',');
 check('the tool writes nothing into the tree it reads', before === after);
 
+// ---- the pipe delivers every byte ----
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A script that prints past the 64KiB OS pipe
+// buffer and then exits therefore hands its caller exactly 65536 bytes under
+// exit status 0 — the shape rendered-layout-gate.js shipped with until
+// 2026-09-07. `--json` here grows with the session store, so this is reachable
+// on real data; the fixture below reaches it on purpose.
+//
+// PARSING IS NOT THE ASSERTION FOR THIS. Two things have to hold, and the first
+// is what stops the second passing by construction:
+//   1. the output is LARGER than one pipe buffer, so a truncating run would
+//      actually lose something here
+//   2. the piped byte count equals the same run redirected to a FILE, where the
+//      write is synchronous on every platform
+{
+    const PIPE_BUF = 64 * 1024;
+    // 800 distinct sessions, three hits of one class each. `stuck` carries one
+    // row per session-with-3+, so the JSON grows linearly with this number and
+    // the session key is the first 8 chars of the uuid — hence distinct
+    // prefixes rather than distinct suffixes.
+    const bigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sesspat-big-'));
+    const bigProj = path.join(bigRoot, 'C--Users-x-code-demo');
+    fs.mkdirSync(bigProj, { recursive: true });
+    const err = '<tool_use_error>File has not been read yet. Read it first.</tool_use_error>';
+    for (let i = 0; i < 800; i++) {
+        const rows = [line(iso(3600_000), { error: err }), line(iso(3600_000), { error: err }),
+            line(iso(3600_000), { error: err })];
+        fs.writeFileSync(path.join(bigProj, `${String(i).padStart(8, '0')}-1111-2222-3333-444444444444.jsonl`),
+            rows.join('\n') + '\n');
+    }
+
+    const viaFileBytes = (extra) => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sesspat-file-'));
+        const out = path.join(dir, 'out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, [TOOL, '--root', bigRoot, ...extra], { stdio: ['ignore', fd, 'ignore'] });
+        fs.closeSync(fd);
+        const n = fs.statSync(out).size;
+        fs.rmSync(dir, { recursive: true, force: true });
+        return n;
+    };
+
+    const jsonPipe = spawnSync(process.execPath, [TOOL, '--root', bigRoot, '--days', '1', '--json'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const jsonPipeBytes = Buffer.byteLength(jsonPipe.stdout, 'utf8');
+    const jsonFileBytes = viaFileBytes(['--days', '1', '--json']);
+
+    check('--json on a large store exceeds one pipe buffer, so the next check is not vacuous',
+        jsonFileBytes > PIPE_BUF, JSON.stringify({ bytes: jsonFileBytes, buffer: PIPE_BUF }));
+    check('  and through a PIPE it delivers every byte it writes to a FILE',
+        jsonPipeBytes === jsonFileBytes, JSON.stringify({ pipe: jsonPipeBytes, file: jsonFileBytes }));
+    check('  so a truncated run cannot be reported as a success',
+        jsonPipe.status === 0 && jsonPipeBytes === jsonFileBytes, 'exit ' + jsonPipe.status);
+    let bigParsed = null;
+    try { bigParsed = JSON.parse(jsonPipe.stdout); } catch { /* reported */ }
+    check('  and the piped JSON still parses at that size', bigParsed !== null,
+        jsonPipe.stdout.slice(-60));
+
+    // The human report shares the exit path, so it shares the defect. It stays
+    // under the buffer here — which is why it needs the comparison rather than a
+    // size assertion of its own, and why this one line cannot catch the
+    // regression on its own.
+    const reportPipe = Buffer.byteLength(spawnSync(process.execPath,
+        [TOOL, '--root', bigRoot, '--days', '1'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout, 'utf8');
+    check('  the human report through a PIPE also delivers every byte',
+        reportPipe === viaFileBytes(['--days', '1']), reportPipe);
+
+    fs.rmSync(bigRoot, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
