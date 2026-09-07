@@ -171,7 +171,16 @@ const infra = (r, what, expect2 = false) => {
     return r;
 };
 
+// The checker exits 2 when ANY of its 27 candidate suites fails inside the
+// sandbox, and it names them in `failedSuites`. Until 2026-09-08 this suite
+// discarded that: a gate run reported only `the checker (status 2)`, so the
+// culprit had to be re-derived by hand. A count with no members
+// (rule-gate-integrity 4). The JSON still parses on a 2, so the names are read
+// out of the same result and attached to the infrastructure line.
 const runChecker = (expect2 = false) => {
+    // Compared AFTER the call, so the names are attached to the entry THIS call
+    // pushed and never to one left by an earlier run.
+    const before = indeterminate.length;
     const result = infra(runBudgeted(process.execPath, [CHECK, '--json'], {
         cwd: SANDBOX,
         encoding: 'utf8',
@@ -187,6 +196,12 @@ const runChecker = (expect2 = false) => {
     }), 'the checker', expect2);
     let json = null;
     try { json = JSON.parse(result.stdout); } catch { /* reported by controls */ }
+    const failed = (json && json.failedSuites) || [];
+    if (failed.length && indeterminate.length > before) {
+        indeterminate[indeterminate.length - 1] += ' — candidate suite(s) that failed inside the '
+            + `sandbox: ${failed.join('; ')}`;
+        console.error('  the checker named its failed candidate(s): ' + failed.join('; '));
+    }
     return { result, json };
 };
 
