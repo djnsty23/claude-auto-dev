@@ -49,12 +49,35 @@ unless the mutation is proven to have landed:
 | clean | 177 passed, 0 failed, exit 0 |
 | full revert of the fixed hunk (cherry line back at `brain-brief.js:1107`) | 173 passed, **4 failed**, exit 1 |
 | half-applied fix (both tools recommended) | 176 passed, **1 failed**, exit 1 |
+| **the author's actual mutant** (cherry line back AND the primitive sentence removed) | 174 passed, **3 failed**, exit 1 |
 
-Four, not three, on a full revert; one on a narrow reinstatement. Never three.
-The assertions are non-vacuous either way, which is what the claim was really
-load-bearing for, and the half-applied case confirms the pairing works as its
-comment says — but the stated count does not survive measurement, and is
-recorded here rather than repeated.
+`[measured 2026-09-08]` **"Never three" was wrong, and the fourth row is why.**
+The row above was added by the original author after this document claimed the
+count could not be reproduced. All four runs used the same guard — the subject
+must differ from `HEAD` or the result is discarded — and the subject was
+restored byte-identical afterwards.
+
+Three is exactly what the author's mutant yields, reproducibly. It is neither
+of the two mutants measured above: it reinstates the `cherry` line AND replaces
+`headRefOid EQUALS THE BRANCH TIP`, while leaving the empty-PR-search prose
+intact. That is the whole mechanism — the fourth assertion stays GREEN because
+the text it looks for is still there, so three fail rather than four.
+
+**The real defect was the DESCRIPTION, not the number.** The commit message
+said "reinstating the cherry line turns three of them red". Reinstating the
+cherry line *alone* is the half-applied row: one. A reader re-measuring from
+that sentence gets 1 or 4, finds neither matches, and concludes the number was
+invented. It was not; the sentence simply understated what the mutant changed.
+
+Which generalises past this row. A mutation result is only reproducible if the
+MUTANT is stated, not just its score — "N assertions went red" is a claim about
+an experiment nobody else can run. Report the diff you applied, or report
+nothing. Two sessions measured honestly here and reached different true numbers
+because only the score crossed between them.
+
+The assertions are non-vacuous under all three mutants, which is what the claim
+was really load-bearing for, and the half-applied case confirms the pairing
+works as its comment says.
 
 ## Gate: red, and every red is pre-existing
 
