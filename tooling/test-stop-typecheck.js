@@ -158,7 +158,12 @@ const PASSING = 'node -e "process.exit(0)"';
     const counter = path.join(TMP, 'runs-' + (n + 1));
     // Single quotes around the path: the script itself sits inside the double
     // quotes of `node -e "..."` in package.json, which the shell reads first.
-    const counting = `node -e "require('fs').appendFileSync('${counter}', 'x'); console.log('TYPE_ERROR_MARKER'); process.exit(1)"`;
+    // Forward slashes: on Windows the tmpdir path carries backslashes, which a
+    // single-quoted JS string reads as escapes, and the counter file was then
+    // written nowhere. `[measured 2026-09-08]` CI windows-latest: this one case
+    // failed, the hook checker treated the failing suite as INDETERMINATE and
+    // exited 2, and two more suites went red on that exit code.
+    const counting = `node -e "require('fs').appendFileSync('${counter.replace(/\\/g, '/')}', 'x'); console.log('TYPE_ERROR_MARKER'); process.exit(1)"`;
     const dir = project({ scripts: { typecheck: counting }, pending: ['src/app.ts', 'src/app.ts', 'src/app.ts'] });
     const r = run(dir);
     check('three edits of one file are one file', blocked(r) && /\b1 file\(s\) edited/.test(r.json.reason));
