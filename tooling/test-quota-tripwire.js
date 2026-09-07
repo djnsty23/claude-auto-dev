@@ -73,11 +73,38 @@ const SUBJECT = path.resolve(
 
 let pass = 0, fail = 0;
 // Every reason this run could not be read as a claim about the code. Until
-// 2026-09-07 the three exitCode=2 branches below were invisible to the tally,
-// so a load-induced infrastructure verdict printed "180 passed, 0 failed" and
-// exited 2 - a green summary describing something other than the subject, which
-// is the exact shape CLAUDE.md warns about. The exit code was right all along;
-// the last line a reader sees is what had to change.
+// 2026-09-07 the exitCode=2 branches below were invisible to the tally, so an
+// infrastructure verdict printed "180 passed, 0 failed" and exited 2 - a green
+// summary describing something other than the subject, which is the exact shape
+// CLAUDE.md warns about.
+//
+// ⚠️ AN EARLIER VERSION OF THIS PARAGRAPH SAID "the exit code was right all
+// along; the last line a reader sees is what had to change". That is true for a
+// TIMEOUT and false for the case that prompted the work, and the difference
+// matters because it is the difference between a symptom and a cause.
+//
+// I reproduced the green-tally/red-exit by forcing the CLEANUP branch and
+// generalised from it. `[measured 2026-09-08]` the session on the same three
+// suites found the real path, and it is section 7 below: it renames the TRACKED
+// plugins/autodev-core/scripts/quota-burn.js out of the SHARED working tree and
+// restores it with linkSync, which refuses EEXIST. Two concurrent runs collide,
+// the loser prints NOT RESTORED and exits 2 with every assertion green. That
+// exit 2 is SELF-INFLICTED, not an honest infrastructure verdict - and a run
+// killed inside that window leaves a tracked file deleted, which is precisely
+// tree-inert's "a suite rewrote what it grades".
+//
+// Measured there with no load generator at all: 3 of 6 concurrent runs of this
+// suite alone went red, in BOTH directions - one saw code=source-missing where
+// section 7a demands the sibling win, another lost its own rename race, read the
+// ENOENT correctly as "genuinely absent", and then had the file restored
+// underneath it.
+//
+// So the tally fix below is necessary and NOT sufficient: it makes the symptom
+// legible while leaving the cause in the tree. The cure is to stage the absence
+// inside the fixture instead, since the subject resolves its sibling from its
+// own __dirname. And the general lesson is the one rule-diagnosis states:
+// forcing a branch reproduces the SYMPTOM, running a suite concurrently WITH
+// ITSELF reproduces the CAUSE.
 const indeterminate = [];
 
 function check(label, ok, detail) {
