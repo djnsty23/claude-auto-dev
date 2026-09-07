@@ -64,6 +64,38 @@ const RULES = [
         say: 'git cherry compares PATCH IDs, so it cannot answer "did this land". A squash rewrites the id and every original commit still reads `+`; and a `+` cannot distinguish MISSING from SUPERSEDED. Compare the merged PR\'s headRefOid against the branch tip, then read the FILES.',
     },
     {
+        id: 'left-right-as-landed-check',
+        // `rev-list --left-right --count A...B` is the ahead-count's two-sided
+        // sibling, and its AHEAD half fails the same way for the same reason: a
+        // squash-merged branch is never an ancestor of the trunk, so it reports
+        // its original commits ahead FOREVER. The BEHIND half is trustworthy.
+        // [measured 2026-09-07] three branches read +1, +3 and +5 ahead and a
+        // session was dispatched to land them. All three were already merged, as
+        // PRs #168, #163 and #161.
+        test: (c) => /\bgit\s+rev-list\b/.test(c) && /--left-right/.test(c),
+        say: 'rev-list --left-right reports a squash-merged branch AHEAD forever, because such a branch is never an ancestor of the trunk. The BEHIND half is a real staleness signal; the AHEAD half is not a quantity of pending work. To ask whether a branch landed, find a merged PR whose headRefOid equals the branch tip BY SHA, then read the FILES.',
+    },
+    {
+        id: 'three-dot-diff-as-unlanded-count',
+        // `git diff A...B` measures from the MERGE BASE, so it reports the
+        // branch's entire contribution since it forked, landed or not. Quoted as
+        // a size of unlanded work it is wrong by exactly the amount already
+        // merged. [measured 2026-09-07] 213, 773 and 1033 insertions of
+        // "unlanded" work on three branches whose true figure was 0.
+        test: (c) => /\bgit\s+diff\b/.test(c) && /\S\.\.\.\S/.test(c),
+        say: 'git diff with THREE dots measures from the merge base, so it counts everything the branch added since it forked -- including whatever has already landed upstream. As a size of unlanded work it is wrong by exactly the amount already merged. Use two dots to compare against the trunk as it is now, and settle landing with the merged PR head rather than any line count.',
+    },
+    {
+        id: 'empty-pr-search-as-proof',
+        // Not a malformed command -- a malformed READING. An empty result from a
+        // loose full-text search is a claim about the QUERY. [measured
+        // 2026-09-07] `gh pr list --state merged --search <branch>` returned
+        // nothing for a branch that had merged as PR #163, because the search
+        // matches titles and bodies rather than the head ref.
+        test: (c) => /\bgh\s+pr\s+list\b/.test(c) && /--search/.test(c),
+        say: 'gh pr list --search is a loose full-text match over titles and bodies, so an EMPTY result is a claim about the query, not evidence that no PR merged this branch. Look the PR up BY COMMIT SHA instead: gh api repos/<owner>/<repo>/commits/<sha>/pulls.',
+    },
+    {
         id: 'ahead-count-as-lost-work',
         // An ahead-count is an ANCESTRY claim. After any rebase, squash or filter
         // the same diffs sit upstream under new SHAs and every one is counted.
@@ -94,6 +126,9 @@ function selftest() {
         ['exit-code-through-a-pipe', `npm run check:suites | tail -3; echo $?`],
         ['degenerate-pattern', `grep -c $'\\0' file.js`],
         ['cherry-as-landed-check', `git cherry -v origin/main HEAD`],
+        ['left-right-as-landed-check', `git rev-list --left-right --count origin/main...origin/feat/x`],
+        ['three-dot-diff-as-unlanded-count', `git diff --shortstat origin/main...origin/feat/x`],
+        ['empty-pr-search-as-proof', `gh pr list --state merged --search feat/x --json number`],
         ['ahead-count-as-lost-work', `git rev-list --count origin/main..HEAD`],
         ['rev-path-on-a-dot-path', `git show origin/main:.github/workflows/ci.yml`],
     ];
@@ -106,6 +141,8 @@ function selftest() {
         `MSYS_NO_PATHCONV=1 git show "origin/main:.github/workflows/ci.yml"`,
         `git rev-list --count HEAD | cat`,   // counting, but not compared to anything
         `gh pr view 656 --json files`,
+        `git diff --numstat origin/main origin/feat/x`,   // two dots: the correct form
+        `gh api repos/o/r/commits/abc123/pulls`,          // the SHA lookup itself
     ];
 
     let pass = 0, fail = 0;
