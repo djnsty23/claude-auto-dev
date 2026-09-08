@@ -154,6 +154,47 @@ about prose rules on 2026-08-16.
 The three changes above are each one skill edit and one suite, and each has a
 log line to test against.
 
+## 2026-09-07: ECC re-measured on every axis, still not adopted, three ideas ported
+
+A second, independent measurement of the 2026-09-05 question, from a macOS
+machine and rating thirteen axes instead of latency alone. Full record in
+`evidence-ecc-comparison-2026-09-07.md`. Same answer: ECC is ahead on breadth
+(286 skills, 13 harness adapters) and community (252k stars, 100+
+contributors), level on memory, and behind on everything that costs a
+session something: 74 KB of skill index against 12 KB, 575 ms of hooks per
+Edit against 247 ms, 0 of 23 hooks silent on the no-op path against 19 of
+22, ten files written by one `ls` against two. Its content cites almost no
+measurements, two of its skills reference seven files that do not exist,
+and its own working-context file has been five months stale.
+
+Three of its ideas were cheaper than what we had, and each shipped in the
+shape the measurement chose rather than ECC's:
+
+- **Typecheck once at Stop.** The old PostToolUse hook ran typecheck and
+  lint after every edit and printed failures where the model never reads
+  them. Now an accumulator plus a Stop hook that blocks once with the errors
+  as the reason. Not ECC's stderr report, and not its reformatting of the
+  user's files.
+- **Lint-config protection as a branch in pre-tool-filter.js**, `ask` not
+  `deny`: a second subprocess is 58 ms per Edit, and ECC's env-var escape
+  cannot be set from the desktop app.
+- **A hook profile through plugin userConfig**, one value (`minimal`), and
+  a suite whose point is that the eleven guarding hooks do NOT honour it.
+
+Not ported, and why: GateGuard (denies the first edit of every file blind,
+then allows any retry), the continuous-learning observer (appends every tool
+input to a jsonl at 340 ms per call), the inline `node -e` bootstrap in every
+hook command (the thing the 2026-09-05 record found tripping Windows
+Defender), Stop-time reformatting of a user's tree.
+
+The two local-only gate reds found on the way, the hooks-module scan on a
+host older than 2.1.259 and a 64 KiB pipe truncation in the layout gate that
+only macOS can see, were fixed by this session as `5fa045b` (PR #182) and
+that PR was closed in review: a version threshold would have turned a
+genuinely failing module into a WARN on an old host. #184 (a control that
+reads the host's output, not its version) and #191 are the fixes that
+landed, and this branch dropped its own half and rebased onto them.
+
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 
 The question was whether a 249k-star harness is better than this one, and if
