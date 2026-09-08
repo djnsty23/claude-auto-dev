@@ -48,11 +48,15 @@ const check = (label, ok, detail) => cases.push([label, ok, detail]);
 const STUB_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'validate-host-scan-'));
 const STUB_JS = path.join(STUB_DIR, 'claude-stub.js');
 const MODE_ENV = 'AUTODEV_TEST_CLAUDE_STUB_MODE';
+// What the stub answers to `claude --version`. Defaults to a version far above
+// the floor validate.js carries, so every scenario that is not ABOUT the floor
+// measures the branch it means to.
+const VERSION_ENV = 'AUTODEV_TEST_CLAUDE_STUB_VERSION';
 
 fs.writeFileSync(STUB_JS, `
 const mode = process.env[${JSON.stringify(MODE_ENV)}] || 'noscan';
 const argv = process.argv.slice(2);
-if (argv.includes('--version')) { process.stdout.write('9.9.9-stub (Claude Code)\\n'); process.exit(0); }
+if (argv.includes('--version')) { process.stdout.write((process.env[${JSON.stringify(VERSION_ENV)}] || '9.9.9-stub') + ' (Claude Code)\\n'); process.exit(0); }
 // A shell that cannot find the command prints NOTHING to stdout, so this
 // has to run before the Validating line below — emulating the failure
 // after announcing a successful start would test a state no shell produces.
@@ -73,6 +77,19 @@ if (mode.indexOf('shell-') === 0) {
 }
 const dir = argv[argv.length - 1];
 process.stdout.write('Validating plugin manifest: ' + dir + '/.claude-plugin/plugin.json\\n\\n');
+if (mode === 'rejects') {
+  // \`[measured 2026-09-08, claude 2.1.258]\` byte-for-byte what a host whose
+  // scan predates the module's event vocabulary prints: it reads the modules
+  // entry, runs the scan, and refuses the first event name. 2.1.246 prints the
+  // same words. This is a REAL rejection from the host's point of view, and a
+  // correct module from the repo's, which is why the verdict depends on WHICH
+  // host said it.
+  process.stdout.write('Validating hooks: ' + dir + '/hooks/hooks.json\\n\\n');
+  process.stdout.write('\\u2718 Found 1 error:\\n');
+  process.stdout.write('  \\u276f modules../fn/autodev-fn.mjs: autodev-core: ' + dir + '/hooks/fn/autodev-fn.mjs:57: "session.start" is not an event; $ is always spelled $.noun.event(...) at the call site, and on is always on("<event>", hook)\\n\\n');
+  process.stdout.write('\\u2718 Validation failed\\n');
+  process.exit(1);
+}
 if (mode === 'scan') {
   // What a host that reads the modules entry prints: the module's own hooks
   // and the harness calls it makes.
@@ -119,12 +136,13 @@ const PATH_WITHOUT_CLAUDE = pathDirs().filter((d) => !holdsClaude(d)).join(path.
 
 // ---------------------------------------------------------------- the runner
 
-function runValidate(mode) {
+function runValidate(mode, version) {
     const env = { ...process.env };
     // Both scan-bearing modes and the no-scan one put the stub FIRST; the
     // no-CLI one must not see it at all.
     env[PATH_KEY] = mode === 'nocli' ? PATH_WITHOUT_CLAUDE : STUB_DIR + path.delimiter + pathDirs().join(path.delimiter);
     if (mode) env[MODE_ENV] = mode;
+    if (version) env[VERSION_ENV] = version;
     const r = spawnSync(process.execPath, [VALIDATE], { encoding: 'utf8', cwd: ROOT, env });
     const out = (r.stdout || '') + (r.stderr || '');
     return {
@@ -228,6 +246,47 @@ for (const [shell, label] of [['shell-bash', 'macOS /bin/sh'], ['shell-dash', 'U
     check(`  and ${label}'s wording is read as "did not run", not as a missing verdict`,
         /did not run|not on PATH/.test(r.line), r.line);
 }
+
+// 5. A host that RAN the scan and rejected the module. `[measured 2026-09-08]`
+//    2.1.246 and 2.1.258 both do, with `"session.start" is not an event`,
+//    while 2.1.259 and 2.1.263 list the module's hooks and pass it. The module
+//    is written against 2.1.259's vocabulary, so the same output means two
+//    opposite things depending on which host printed it — and the check must
+//    read the host's version to tell them apart, which is the one place a
+//    version number IS the discriminator (the rejection itself is measured
+//    from output; the version only says whose rejection it is).
+const oldHost = runValidate('rejects', '2.1.258');
+check('a host BELOW the floor that rejects the module is a WARN, not a FAIL',
+    /^\[WARN\]/.test(oldHost.line), oldHost.line);
+check('  naming the host that rejected it',
+    /claude 2\.1\.258/.test(oldHost.line), oldHost.line);
+check('  and the floor it predates, so the reader knows what to install',
+    /claude 2\.1\.259/.test(oldHost.line), oldHost.line);
+check('  carrying the host\'s own words rather than a paraphrase',
+    /"session\.start" is not an event/.test(oldHost.line), oldHost.line);
+check('  and leaving validate.js\'s exit status where the scanning host left it',
+    oldHost.status === scan.status, `old=${oldHost.status} scan=${scan.status}`);
+// THE CONTROL, and the assertion that goes red if the floor ever becomes a
+// blanket. A host AT the floor printing the identical rejection is reporting
+// a broken module, and that must still block. Mutating the comparison to
+// `<=`, or the floor upward by one, turns exactly this red.
+const atFloor = runValidate('rejects', '2.1.259');
+check('a host AT the floor that rejects the module still FAILs',
+    /^\[FAIL\]/.test(atFloor.line) && atFloor.status !== 0, `${atFloor.line} status=${atFloor.status}`);
+check('  naming the host, so a false alarm is diagnosable from the line',
+    /claude 2\.1\.259/.test(atFloor.line), atFloor.line);
+check('  and carrying the host\'s error',
+    /"session\.start" is not an event/.test(atFloor.line), atFloor.line);
+const farAbove = runValidate('rejects');
+check('a host far above the floor that rejects the module FAILs',
+    /^\[FAIL\]/.test(farAbove.line), farAbove.line);
+// A host whose `--version` does not parse gets no benefit of the doubt: a
+// rejection is a positive finding, and not knowing who spoke is no reason to
+// disbelieve what was said. Softening on an unparseable version would let a
+// host that prints its version in a new shape hide a real defect.
+const unversioned = runValidate('rejects', 'nightly-build');
+check('a host with an unparseable version that rejects the module FAILs',
+    /^\[FAIL\]/.test(unversioned.line), unversioned.line);
 
 // 4. No CLI at all: the CI shape. Unchanged by this fix, asserted so the three
 //    host behaviours are all pinned in one place rather than two.

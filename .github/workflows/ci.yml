@@ -54,6 +54,23 @@ jobs:
         with:
           # node:sqlite (autodev-memory) is built in from Node 22.
           node-version: '22'
+      # validate.js asks `claude plugin validate` to scan autodev-core's hooks
+      # module, and when no `claude` is on PATH it WARNs instead of passing.
+      # Until 2026-09-08 none was on PATH here, and the operator's machine
+      # carried 2.1.233, which prints no scan at all — so the module was
+      # verified NOWHERE while every environment reported green or yellow.
+      #
+      # PINNED, not `latest`: the scan's event vocabulary moved between 2.1.258
+      # and 2.1.259 (the measured table is beside HOOKS_MODULE_HOST_FLOOR in
+      # tooling/validate.js), and a floating install would turn the next such
+      # move into a red on main with no commit to bisect. Bump the pin on
+      # purpose, with validate re-run against the new version in the commit
+      # message. Install measured at 3 s. All three legs, because the mac and
+      # windows legs are the ones that exercise the shell spawn and the .cmd
+      # shim the check's own comments document; a scan that runs only on Linux
+      # would say nothing about either.
+      - name: Install a Claude Code that scans hooks modules
+        run: npm install -g @anthropic-ai/claude-code@2.1.263
       - name: Run test suites and validator
         run: npm test
       - name: Check every hook parses

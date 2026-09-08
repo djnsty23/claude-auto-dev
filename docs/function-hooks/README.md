@@ -11,6 +11,13 @@ session. Without it the `modules` entry in `hooks.json` is skipped and every
 shell hook beside it runs unchanged, so shipping the module is inert for a
 user who has not opted in.
 
+`[measured 2026-09-08]` the scan's event vocabulary is 2.1.259's, and older
+hosts disagree in two different ways: 2.1.233 prints no component scan at
+all, while 2.1.246 and 2.1.258 run `Validating hooks:` and reject the module
+with `"session.start" is not an event`. 2.1.259 and 2.1.263 list its hooks
+and calls and pass it, flag on or off. `tooling/validate.js` carries that
+table beside `HOOKS_MODULE_HOST_FLOOR`.
+
 autodev-core's module is [`plugins/autodev-core/hooks/fn/autodev-fn.mjs`](../../plugins/autodev-core/hooks/fn/autodev-fn.mjs).
 It does four things a shell hook structurally cannot:
 
@@ -67,7 +74,12 @@ it is the vendor's file and marked as changing without notice.
 `tooling/validate.js` checks the `modules` entry: one path, the file exists,
 and when `claude` is on PATH it runs `claude plugin validate` with the flag on
 and fails on the host's own scan errors. Without the CLI it warns that the
-module was not scanned rather than passing it. `tooling/find-untested-hooks.js`
+module was not scanned rather than passing it; with a CLI older than the floor
+above that rejects the module, it warns naming the floor, because that
+rejection is about the host's vocabulary and not the module. CI installs a
+pinned CLI above the floor (`.github/workflows/ci.yml`), so the module is
+scanned on every push whatever the developer's machine carries; a green
+local validate on an older CLI says nothing about it. `tooling/find-untested-hooks.js`
 lists the module as a wired hook, so it needs a suite that loads it;
 `tooling/test-hooks-module.js` drives `register` with a fake `on` and `$`.
 

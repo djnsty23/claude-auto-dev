@@ -399,6 +399,7 @@ function checkHookWiring() {
       const scan = scanHooksModule(path.join(PLUGINS_DIR, p));
       if (scan.status === 'passed') log('PASS', `plugins/${p}: hooks module ${m} scanned by the host: ${scan.detail}`);
       else if (scan.status === 'failed') { log('FAIL', `plugins/${p}: hooks module ${m} failed the host's scan: ${scan.detail}`); ok = false; }
+      else if (scan.status === 'rejected-by-older-host') log('WARN', `plugins/${p}: hooks module ${m} was rejected by ${scan.host}, which predates the claude ${HOOKS_MODULE_HOST_FLOOR} vocabulary the module targets (${scan.detail}); upgrade claude to verify it here — CI scans it with a pinned newer host`);
       else log('WARN', `plugins/${p}: hooks module ${m} exists but was NOT scanned (${scan.reason}); its hooks and $ calls are unverified here`);
     }
 
@@ -406,11 +407,13 @@ function checkHookWiring() {
   }
 }
 
-// Ask the installed Claude Code to scan a plugin's hooks module. Four
+// Ask the installed Claude Code to scan a plugin's hooks module. Five
 // outcomes, and only ONE of them is a pass: `passed` with the scan's own
-// hooks/calls lines, `failed` with the host's error lines, and `skipped` with
+// hooks/calls lines, `failed` with the host's error lines, `skipped` with
 // the reason — no CLI, a timeout, neither verdict printed, or a host that
-// prints no component scan at all.
+// prints no component scan at all — and `rejected-by-older-host`, a host
+// below HOOKS_MODULE_HOST_FLOOR that ran the scan and refused the module's
+// event vocabulary, which is a fact about that host (see the floor's table).
 //
 // That last one is why this function now carries a CONTROL. Reading
 // "validation passed, and no `hooks:` line" as "the modules entry was not
@@ -468,6 +471,40 @@ function claudeOnPath() {
   return false;
 }
 
+// The oldest host whose scan the module is written against. `[measured
+// 2026-09-08]`, each version installed from npm into a scratch prefix and
+// run against this tree, with CLAUDE_CODE_ENABLE_FUNCTION_HOOKS on and off
+// (the output was identical either way):
+//
+//   2.1.233  no component scan at all                                   -> skipped
+//   2.1.246  `Validating hooks:`, then `"session.start" is not an event` -> Validation failed
+//   2.1.258  the same words as 2.1.246                                   -> Validation failed
+//   2.1.259  `hooks: session.start, prompt.submit, ...` and `calls: ...` -> passed
+//   2.1.263  identical to 2.1.259                                        -> passed
+//
+// So a host below this floor that rejects the module is reporting its own
+// event vocabulary, not a defect in the module, and the check says so rather
+// than blocking the push with a red about a file that is correct. The floor
+// is used ONLY to word a rejection the host actually printed: never to decide
+// whether to spawn, never to skip a host that might still scan, and never to
+// soften a rejection from a host at or above it — D1 in
+// docs/DECISIONS-2026-09-08-validate-host-scan.md is why a version number is
+// not trusted to PREDICT output here. CI installs a pinned host above the
+// floor (.github/workflows/ci.yml), so the module is verified on every push
+// whatever the developer's machine carries; raise this when the module is
+// rewritten for a newer vocabulary, and re-measure the table in the same
+// commit.
+const HOOKS_MODULE_HOST_FLOOR = '2.1.259';
+
+function versionTuple(s) {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(s || ''));
+  return m ? [+m[1], +m[2], +m[3]] : null;
+}
+function versionBelow(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i];
+  return false;
+}
+
 let claudeVersionCache;
 function claudeVersion() {
   if (claudeVersionCache !== undefined) return claudeVersionCache;
@@ -522,8 +559,15 @@ function scanHooksModule(pluginDir) {
   if (r.error) return { status: 'skipped', reason: r.error.code === 'ENOENT' ? 'claude is not on PATH' : String(r.error.message) };
   const out = (r.stdout || '') + (r.stderr || '');
   if (/Validation failed/.test(out)) {
-    const detail = out.split('\n').filter((l) => /❯|error/i.test(l) && !/^Validating/.test(l)).map((l) => l.trim()).join(' | ');
-    return { status: 'failed', detail: detail || out.trim().slice(-400) };
+    const detail = out.split('\n').filter((l) => /❯|error/i.test(l) && !/^Validating/.test(l)).map((l) => l.trim()).join(' | ') || out.trim().slice(-400);
+    // A rejection is a positive finding, so it is softened ONLY when the
+    // host's version parsed AND sits below the measured floor. An
+    // unparseable version keeps the FAIL: not knowing which host spoke is no
+    // reason to disbelieve what it said.
+    const host = claudeVersion();
+    const v = versionTuple(host);
+    if (v && versionBelow(v, versionTuple(HOOKS_MODULE_HOST_FLOOR))) return { status: 'rejected-by-older-host', host, detail };
+    return { status: 'failed', detail: `${host} rejected it: ${detail}` };
   }
   // Did the CLI run at all? A missing `claude` never reaches r.error under
   // `shell: true` — the shell runs, fails to find the command, and reports it

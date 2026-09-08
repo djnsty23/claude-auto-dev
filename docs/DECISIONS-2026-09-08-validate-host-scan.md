@@ -152,6 +152,13 @@ pins that the version appears, so the diagnostic cannot be dropped silently.
 Revisit when a CLI in the 2.1.233–2.1.259 window is actually available to measure. Until
 then this is a recorded risk with a named falsifier, not a fix deferred.
 
+**Addendum, same day, another session.** Measured. Two CLIs inside the window (2.1.246
+and 2.1.258, installed from npm into a scratch prefix) do NOT take this branch: neither
+prints `skills:` without `hooks:`. Both print `Validating hooks:` and then reject the
+module outright with `"session.start" is not an event`, i.e. `Validation failed`. The
+speculative false FAIL was in the other branch. See
+`DECISIONS-2026-09-08-ci-host-scan.md`.
+
 ## D10. Third macOS-only verification miss in one session, in the control itself
 
 `[measured 2026-09-08, CI run 34193900645]` `e3b0ea3` turned ubuntu-latest GREEN — the

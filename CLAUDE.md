@@ -48,7 +48,11 @@ chain's exit status is a verdict on one step, not on six.
 `node --check` parse loop over every `plugins/*/hooks/*.js` that the gate has no
 equivalent for, and the gate runs `check:probe-shapes`, which CI does not. Four
 of CI's steps are `if: matrix.os == 'ubuntu-latest'`, so a green local gate on
-macOS and a green CI run are not claims about the same set of checks.
+macOS and a green CI run are not claims about the same set of checks. CI also
+installs a pinned `claude` so validate's hooks-module scan actually runs there;
+locally that scan runs only when the `claude` on PATH is at or above the floor
+named in `tooling/validate.js`, and otherwise validate says WARN, so a green
+local validate is not a claim about the module.
 
 **Run it on a CLEAN tree, after committing and before pushing.** `check:suites`
 grades HEAD, in a private worktree under tmpdir, so it refuses a dirty tree and
