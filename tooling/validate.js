@@ -572,7 +572,18 @@ function scanHooksModule(pluginDir) {
   if (!detail.some((l) => /\bhooks:/.test(l))) {
     return {
       status: 'failed',
-      detail: `the host printed a component scan (${sections.join('; ').slice(0, 300)}) and listed no hooks: the modules entry was not read`,
+      // The one reading this branch cannot make on its own: whether this host
+      // knows what a hooks MODULE is. It scanned and named components, so the
+      // absence is real — but a host that reports skills/agents/commands and
+      // has never heard of modules would look identical. Unobservable here
+      // (2.1.233 prints no sections at all, 2.1.259 prints hooks:), so the
+      // alternative is NAMED rather than guessed at, and the reader is pointed
+      // at the right question in one line instead of a day. See
+      // docs/DECISIONS-2026-09-08-validate-host-scan.md D9 for why the
+      // obvious control — demand a hooks: line from some OTHER plugin — is
+      // NOT applied: autodev-core is the only plugin here with a modules
+      // entry, so that control would make this branch permanently dead.
+      detail: `the host printed a component scan (${sections.join('; ').slice(0, 300)}) and listed no hooks: the modules entry was not read — unless ${claudeVersion()} scans components without knowing hooks modules at all, which would make this a false alarm; check that before editing the module`,
     };
   }
   return { status: 'passed', detail: detail.join('; ') };

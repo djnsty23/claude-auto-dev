@@ -180,6 +180,12 @@ check('  naming the unread modules entry',
     /modules entry was not read/.test(nohooks.line), nohooks.line);
 check('  and validate.js exits non-zero on it',
     nohooks.status !== 0, `status=${nohooks.status}`);
+// The FAIL must carry its own alternative explanation. A host that scans
+// components but has never heard of hooks modules would produce this exact
+// output, and that state is unobservable from here — so the message names it
+// rather than asserting the module is broken and leaving the reader to find out.
+check('  and names the host, so a false alarm is diagnosable from the line',
+    /9\.9\.9-stub/.test(nohooks.line), nohooks.line);
 
 // 3b. A DIAGNOSTIC that looks like a scan line. On 2.1.233 a warning bullet is
 //     `\u276f <field>: <text>`, the same shape the scan uses, so a plugin.json

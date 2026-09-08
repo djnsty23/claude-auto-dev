@@ -119,3 +119,35 @@ to decide whether to spawn, so a resolution it misses costs a less precise sente
 
 Reversible: the suite now emulates all three shells, so any future narrowing goes red on a
 mac instead of in CI.
+
+## D9. A speculative false-FAIL recorded and NOT mitigated, because the obvious control kills the gate
+
+Raised in review of #184: `SCAN_SECTION` matches `hooks|calls|skills|agents|commands`, and
+the FAIL fires when any component section printed but no `hooks:` line. A CLI that scans
+skills/agents/commands but has never heard of hooks MODULES would print `skills: 58`, no
+`hooks:`, and take that FAIL — the exact class this branch fixes, in a narrower version
+window. Plausible if `modules` arrived in 2.1.259. Unobservable here: 2.1.233 prints no
+sections at all (measured), 2.1.259 prints `hooks:` (measured by the author of a84eb3e).
+
+The suggested control — treat a missing `hooks:` as a finding only when the host printed a
+`hooks:` section for some OTHER plugin in the same run — is **not** applied, and the reason
+is measurable rather than a matter of taste:
+
+    autodev-core   modules=1
+    autodev-memory modules=0
+    autodev-stack  no hooks.json
+
+`[measured 2026-09-08]` autodev-core is the ONLY plugin here with a `modules` entry. If a
+host prints `hooks:` only for modules, no other plugin can ever satisfy that control and
+the FAIL branch becomes **permanently dead** — a gate that cannot fail, which
+`rule-gate-integrity` §1 names as the worse outcome. Whether a host prints `hooks:` for
+shell hooks too is exactly the unmeasured fact the mitigation would depend on. Trading a
+speculative false FAIL for a certain dead gate is the wrong direction.
+
+What is done instead, at zero behavioural risk: the FAIL message NAMES the alternative
+explanation and the host version, so if it ever does fire spuriously the reader is pointed
+at the right question in one line rather than editing a healthy module. A suite assertion
+pins that the version appears, so the diagnostic cannot be dropped silently.
+
+Revisit when a CLI in the 2.1.233–2.1.259 window is actually available to measure. Until
+then this is a recorded risk with a named falsifier, not a fix deferred.
