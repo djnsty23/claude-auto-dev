@@ -54,8 +54,10 @@ fed the old concept column, since nothing read them any more; the plugin now
 registers three hook events. A fourth made the CLI refuse a swapped
 `<projectPath> <query>` when the query slot holds an absolute directory and
 the project slot does not, which is the exact shape of the one real query.
-The per-change counts, and the one thing deliberately left alone (the
-existing rows), are in `docs/DECISIONS-2026-09-08.md`.
+The existing rows were left alone under the protocol; after the window ended
+the operator confirmed the count on a panel and the prune ran, 6,972 of
+7,480 rows removed with a verified backup first. The per-change counts and
+the 36-row reversibility gap are in `docs/DECISIONS-2026-09-08.md`.
 
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 

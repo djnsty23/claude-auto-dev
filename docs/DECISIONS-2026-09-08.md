@@ -79,3 +79,16 @@ path that no longer exists is left alone because asking about a deleted
 project is legitimate. The suite pins all three edges as controls. Exit 1 with
 the usage on stderr and nothing on stdout, so a caller parsing JSON gets a
 non-zero status rather than an empty array.
+
+## D7. The one-time prune, on the operator's confirmation, not the protocol's
+
+Branch 3 all along: a deletion of shared state. It was not taken under the
+away window. After the window ended the operator selected the prune on a
+panel and then confirmed the count on a second one, so it ran: backup first
+(`~/.claude/backups/auto-dev-memory-2026-09-08-pre-prune.db`, 7,444 rows,
+integrity ok), then one DELETE with the predicate in the evidence doc,
+6,972 of 7,480 rows removed, 508 kept, WAL checkpointed. The 36 rows that
+arrived between backup and delete are the reversibility gap, stated in the
+evidence doc rather than smoothed over. Sessions rows were left alone; 71 of
+them now have no observations, which `cleanup()` will fold in after 90 days
+as it always would have.

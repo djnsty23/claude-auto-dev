@@ -290,9 +290,20 @@ it was before the row's own session changed it. That is the CLAUDE.md
 the 8 KB variant also delivers a production hostname and production secret
 manager invocations that a captured prompt happened to contain.
 
-## Pruning, measured not done
+## Pruning, measured first, then done on confirmation
 
-Nothing here was deleted. `cleanup(90)` exists in `memory-db.js` and has
+`[executed 2026-09-08, later the same day]` The counts below were taken with
+nothing deleted. After the operator confirmed the count on a panel, proposal 7
+ran: a `.backup` of the store (7,444 rows, integrity ok) went to
+`~/.claude/backups/auto-dev-memory-2026-09-08-pre-prune.db`, then one DELETE
+with the predicate reproduced at the end of this section removed **6,972 of
+7,480 rows, leaving 508**, followed by a WAL checkpoint. The store had grown by
+36 rows between the backup and the delete because other sessions were still
+capturing with the installed build, so any of those 36 that matched the
+predicate are not in the backup. Restore is one `cp` of the backup over the
+database with the `-wal` and `-shm` files removed.
+
+Before that, nothing was deleted. `cleanup(90)` exists in `memory-db.js` and has
 nothing to delete: the store is 21 days old. `memory-audit.js` and the
 `memory-maintenance` skill audit the markdown memory files under
 `~/.claude/projects/*/memory/`, not this database. No suite or script grades
@@ -336,9 +347,20 @@ deletion run by a person after reading a sample:
    Today that is about 5,900 of 6,072 rows, which is the honest size of the
    store.
 
-Whether the remaining ~170 rows justify keeping the capture hooks at all is a
-separate measurement: they would be `Created`/`Modified`/`Fixed` records of
-real repo files, which `git log --stat` already holds.
+Whether the remaining rows justify keeping the capture hooks at all is a
+separate measurement: they are `Created`/`Modified`/`Fixed` records of real
+repo files, which `git log --stat` already holds.
+
+The predicate the prune ran with, so the deletion can be disputed row by row
+against the backup:
+
+```sql
+title LIKE 'Ran: %' OR title LIKE 'Tests %' OR title LIKE 'Read %' OR title LIKE 'Git: %'
+OR title LIKE 'Build/Deploy: %' OR title LIKE 'Dependency: %' OR title LIKE 'Searched for %'
+OR title LIKE '%scratchpad%' OR title LIKE '%/tmp/claude-501%'
+OR source_files LIKE '%scratchpad%' OR source_files LIKE '%/tmp/claude-501%'
+OR source_files LIKE '%/.claude/probe/%' OR source_files LIKE '%/.claude/projects/%'
+```
 
 ## Decision
 
