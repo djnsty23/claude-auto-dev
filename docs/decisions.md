@@ -5,8 +5,8 @@ One entry per decision, newest first.
 
 ## 2026-09-08: a coverage floor, wired as a gate, at the number HEAD scored
 
-`npm run check:coverage` (`find-untested-functions.js --gate`) now runs in the
-gate chain and in CI, and fails only when the count of plugin functions no
+`npm run check:coverage` (`find-untested-functions.js --gate`) now runs as the
+last step of the gate chain (eighth, after #198 added check:agents-md) and in CI, and fails only when the count of plugin functions no
 suite enters, or of plugin files no suite loads, rises above the floor
 measured on HEAD the day it was wired. Three variants were costed against
 each other in `docs/evidence-coverage-gate-2026-09-08.md`: extending the
