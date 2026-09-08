@@ -216,10 +216,25 @@ const SOURCE_BY_BASENAME = (() => {
 
 // --- 1. run the suite with coverage on -------------------------------------
 const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodev-cov-'));
+// The runner's output goes to a FILE, never through spawnSync's buffer.
+// `[measured 2026-09-08]` the review of this gate bracketed a cliff at node's
+// 1 MiB default maxBuffer: a runner that prints past it is killed with SIGTERM
+// and would have been reported below as KILLED, which is the same misreading
+// of a non-verdict this exit-2 path exists to stop. The whole gate prints
+// 258 KB today, so nothing had hit it yet; the day a suite gets chatty is the
+// day this would have started lying. A file has no ceiling, and stdout to a
+// file is synchronous on every platform, so the tail is never truncated either.
+const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodev-cov-log-'));
+const runnerLog = path.join(logDir, 'runner.log');
+const logFd = fs.openSync(runnerLog, 'w');
 const run = spawnSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js')], {
-    cwd: ROOT, encoding: 'utf8',
+    cwd: ROOT,
+    stdio: ['ignore', logFd, logFd],
     env: { ...process.env, NODE_V8_COVERAGE: covDir },
 });
+fs.closeSync(logFd);
+const runnerOut = fs.readFileSync(runnerLog, 'utf8');
+fs.rmSync(logDir, { recursive: true, force: true });
 
 // WHICH suites failed, when the run is red. The runner prints a summary block
 // of `PASS  <label>` / `FAIL  <label>` lines; before this the exit-2 path said
@@ -227,9 +242,9 @@ const run = spawnSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js
 // here are load-sensitive) left the reader re-running the whole thing to learn
 // a name. The runner's last lines are kept for a runner that never reached its
 // summary (a crash, a refusal).
-const failedSuites = (run.stdout || '').split('\n')
+const failedSuites = runnerOut.split('\n')
     .map((l) => l.match(/^FAIL {2}(.+?)\s*$/)).filter(Boolean).map((m) => m[1]);
-const runnerTail = ((run.stdout || '') + (run.stderr || '')).trim().split('\n').slice(-12).join('\n');
+const runnerTail = runnerOut.trim().split('\n').slice(-12).join('\n');
 
 // --- 2. fold every process's coverage into one map -------------------------
 // A function counts as EXECUTED if any process entered it. Suites spawn their
@@ -318,6 +333,7 @@ if (asJson) {
         suitePassed: run.status === 0,
         failedSuites,
         runnerSignal: run.signal || null,
+        runnerOutputBytes: Buffer.byteLength(runnerOut),
         gate,
         sourceFiles: ALL_SOURCES.size,
         filesLoaded: loadedFiles.size,
@@ -347,6 +363,7 @@ if (run.status !== 0) {
         console.error('The runner was KILLED by ' + run.signal + ' (no suite failed; something outside this run ended it).');
     } else if (failedSuites.length) console.error('Failed suite(s): ' + failedSuites.join(', '));
     else console.error('The runner printed no FAIL line; its last lines were:\n' + runnerTail);
+    console.error(`(runner output: ${Buffer.byteLength(runnerOut)} bytes, read from a file, no buffer ceiling)`);
     console.error('');
     process.exit(2);
 }

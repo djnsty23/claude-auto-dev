@@ -44,7 +44,7 @@ const run = (args, timeout = 60000) => spawnSync(process.execPath, [CHECK, ...ar
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-fx-'));
 process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ } });
 let n = 0;
-function fixture({ runnerCalls, extraFile = false, runnerFails = false, runnerKilled = false }) {
+function fixture({ runnerCalls, extraFile = false, runnerFails = false, runnerKilled = false, runnerChatty = false }) {
     const root = path.join(TMP, 'fx' + (++n));
     const scripts = path.join(root, 'plugins', 'fx', 'scripts');
     fs.mkdirSync(scripts, { recursive: true });
@@ -62,6 +62,7 @@ function fixture({ runnerCalls, extraFile = false, runnerFails = false, runnerKi
         `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n` +
         "const lib = require('../plugins/fx/scripts/fixture-census-lib.js');\n" +
         runnerCalls.map((f) => `lib.${f}();\n`).join('') +
+        (runnerChatty ? "process.stdout.write('x'.repeat(2 * 1024 * 1024) + '\\n');\n" : '') +
         (runnerKilled
             ? "process.kill(process.pid, 'SIGKILL');\n"
             : runnerFails
@@ -190,6 +191,23 @@ if (process.platform !== 'win32') {
         j.status === 2 && payload && payload.runnerSignal === 'SIGKILL' && payload.suitePassed === false, detail(j));
 } else {
     console.log('SKIP  killed-runner case on win32 (signal reporting differs; covered on the Linux runner)');
+}
+
+// --- 6c. a CHATTY runner is a verdict, not a kill -----------------------------------
+// `[measured 2026-09-08]` the review of this gate found that a runner printing
+// past node's 1 MiB default maxBuffer was killed with SIGTERM and reported as
+// KILLED. The output now goes to a file. This runner prints 2 MiB and then its
+// PASS line; the gate must read the verdict through it.
+{
+    const fx = fixture({ runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'], runnerChatty: true });
+    const r = run(['--root', fx.root, '--max-untested', '0', '--json'], 120000);
+    let payload = null;
+    try { payload = JSON.parse(r.stdout); } catch { /* asserted below */ }
+    check('a runner that prints 2 MiB before its PASS line still yields a verdict: exit 0, not KILLED',
+        r.status === 0 && !r.error && payload && payload.suitePassed === true && payload.runnerSignal === null
+            && payload.functionsSeen === 2 && payload.executed === 2, detail(r));
+    check('  and the output size is reported past the old 1 MiB cliff',
+        !!payload && payload.runnerOutputBytes > 1024 * 1024, payload ? String(payload.runnerOutputBytes) : 'unparsed');
 }
 
 // --- 7. --gate carries a dated floor ---------------------------------------------------

@@ -6,7 +6,8 @@ One entry per decision, newest first.
 ## 2026-09-08: a coverage floor, wired as a gate, at the number HEAD scored
 
 `npm run check:coverage` (`find-untested-functions.js --gate`) now runs as the
-last step of the gate chain (eighth, after #198 added check:agents-md) and in CI, and fails only when the count of plugin functions no
+last step of the gate chain (ninth, after #198 and #210 added check:agents-md and
+check:claude-md) and in CI, and fails only when the count of plugin functions no
 suite enters, or of plugin files no suite loads, rises above the floor
 measured on HEAD the day it was wired. Three variants were costed against
 each other in `docs/evidence-coverage-gate-2026-09-08.md`: extending the
@@ -36,7 +37,7 @@ at f870b15, and the two are follow-up tests, not a reason to hold the gate.
 check runs `test-all.js` under coverage, which runs `test-check-coverage.js`,
 so a HEAD run inside the suite recurses. The suite proves the gate can fail,
 on a fixture tree, in about a second.
-## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
+
 ## 2026-09-08: production signals become candidate stories, never direct writes on a live repo
 
 The stage between "production knows" and "the backlog knows" did not exist:

@@ -33,7 +33,7 @@ it for more than it is.
 | HEAD scores today | **37 never-called of 774, 1 never-loaded of 88** (read one by one below) | functions 94.29 % (744/789), statements 89.04 %, lines 89.04 %, **branches 79.51 %** | the same numbers, unread |
 | at ECC's thresholds | n/a (counts) | **green**, with 0.51 points of headroom on branches; 38 branches flipping turns it red | – |
 | wall time of the check alone | **327 s** quiet (load 7.6 to 11.1); 876 s at load 111, where the suite was red | 566 s (load 26 to 68) | 0 |
-| what it adds to `npm run gate` | one more suite run. Before: **1,570 s** for the six-step chain (load 68 falling to 2.8). After: the seven-step re-run ended INDETERMINATE at step 2 (check:suites hit ETIMEDOUT on the unmodified test-validate baseline, load 9 rising to 38, 4,426 s, 112 suites graded ok including the new one), so the last five steps were run one by one on the same commit: 15 s for four of them and **2,125 s** for check:coverage at load 34 to 26, against **327 s** for the same step quiet. Then, after the rebase onto f870b15 and on the worktree itself (validate green locally once #181 landed): the full seven-step chain **exited 0 in 2,352 s** at load 9 to 17, 119 of 119 suites, the new suite graded ok by the sweep, 117 of 117 entry points returned, coverage 39 against 39. Loaded, the added step alone can cost more than the old chain did quiet. (#198 then added check:agents-md as a seventh step, so this step is the eighth; the chain was not re-timed for a sub-second addition.) | the same order, plus the install | 0 |
+| what it adds to `npm run gate` | one more suite run. Before: **1,570 s** for the six-step chain (load 68 falling to 2.8). After: the seven-step re-run ended INDETERMINATE at step 2 (check:suites hit ETIMEDOUT on the unmodified test-validate baseline, load 9 rising to 38, 4,426 s, 112 suites graded ok including the new one), so the last five steps were run one by one on the same commit: 15 s for four of them and **2,125 s** for check:coverage at load 34 to 26, against **327 s** for the same step quiet. Then, after the rebase onto f870b15 and on the worktree itself (validate green locally once #181 landed): the full seven-step chain **exited 0 in 2,352 s** at load 9 to 17, 119 of 119 suites, the new suite graded ok by the sweep, 117 of 117 entry points returned, coverage 39 against 39. Loaded, the added step alone can cost more than the old chain did quiet. (#198 and #210 then added check:agents-md and check:claude-md as the seventh and eighth steps, so this step is the ninth and last; the chain was not re-timed for two sub-second additions.) | the same order, plus the install | 0 |
 | can it be red on the introducing commit | no: the ceilings are the numbers above | no today, and the branch margin is half a point | – |
 | exit on what it prints | 2 when the suite is red (no verdict, failed suites named, a killed runner named as killed), 1 above a ceiling, 0 otherwise | 1 below a threshold | 1 always |
 
@@ -159,6 +159,24 @@ time of the stub run), which is what `check:suites` grades.
 the suite recurses whenever the suite is itself under the check. It is asserted by
 the `check:coverage` step of `npm run gate` and of CI instead, and the suite prints
 a SKIP line saying so. `AUTODEV_COVERAGE_FULL=1` runs it by hand.
+
+## What the review found, and what changed
+
+The gate-step review (2026-09-08) approved the mechanism, 7 of 7 effective
+mutations killed, and returned one defect worth fixing: **a runner printing
+more than node's 1 MiB default `maxBuffer` was killed with SIGTERM and reported
+as KILLED**, the same misreading of a non-verdict the exit-2 path exists to
+stop. Reproduced here before fixing: the shipped check against a fixture runner
+that prints 2 MiB and then its PASS line exited 2 with `runnerSignal: SIGTERM`.
+The runner's output now goes to a file (no ceiling, and synchronous on every
+platform, so the tail is never truncated either); the same fixture exits 0 with
+`runnerOutputBytes: 2097167`, and the suite carries that case. The whole gate
+prints 258 KB today, so nothing had hit the cliff; it was latent, which is the
+kind a review is for.
+
+The review's second point, that a green board on macOS and Windows says nothing
+about this step because only `ubuntu-latest` runs it, is why every CI line in
+this document names the Ubuntu job and its coverage step rather than the run.
 
 ## Known limits, stated so a green run is not read as more
 
