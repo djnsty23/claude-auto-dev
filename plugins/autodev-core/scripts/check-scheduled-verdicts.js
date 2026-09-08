@@ -458,10 +458,10 @@ function selftest() {
 
     if (fails.length) {
         console.error('SELFTEST FAILED: ' + fails.join('; '));
-        process.exit(1);
+        return 1;
     }
     console.log('selftest ok: 8 cases including one mutation, one regression and two false-positive guards');
-    process.exit(0);
+    return 0;
 }
 
 function main() {
@@ -471,10 +471,25 @@ function main() {
     const jobs = run(repo);
     if (has('--json')) {
         console.log(JSON.stringify({ repo, jobs }, null, 2));
-        process.exit(0);
+        return 0;
     }
-    process.exit(report(repo, jobs));
+    return report(repo, jobs);
 }
 
-if (require.main === module) main();
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+if (require.main === module) process.exitCode = main();
 module.exports = { run, inspectHandler, classify, GATING_FIELD, EXPIRY };
