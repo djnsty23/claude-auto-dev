@@ -174,6 +174,80 @@ for (const [label, dirName, queueAge, idleMin] of [
         'scanned=' + (parsed && parsed.scanned));
 }
 
+// ---- the pipe delivers every byte -----------------------------------------
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under a status that says
+// nothing failed — the shape rendered-layout-gate.js shipped with until
+// 2026-09-07. --json here carries a row per flagged session, so it grows with
+// the fleet.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+{
+    const PIPE_BUF = 64 * 1024;
+    const bigFleet = path.join(tmp, 'big-fleet');
+    fs.mkdirSync(bigFleet);
+    // A separate fleet directory from the one above, so nothing here changes
+    // the population the cases before it assert on. Cheap: JSON files and a
+    // QUEUE.md each, no git and no network.
+    for (let i = 0; i < 400; i++) {
+        const id = String(i).padStart(8, '0') + '-0000-0000-0000-000000000000';
+        const d = path.join(tmp, 'big-work', 'session-' + 'w'.repeat(40) + '-' + i);
+        fs.mkdirSync(d, { recursive: true });
+        const q = path.join(d, 'QUEUE.md');
+        fs.writeFileSync(q, '# QUEUE\n\nstill open\n');
+        fs.writeFileSync(path.join(bigFleet, id + '.json'), JSON.stringify({
+            cliSessionId: id,
+            cwd: d,
+            transcript: path.join(tmp, id + '.jsonl'),
+            stoppedAt: new Date(Date.now() - 90 * 60000).toISOString(),
+            stopHookActive: false,
+        }));
+    }
+    const env = Object.assign({}, process.env, { AUTODEV_FLEET_DIR: bigFleet });
+    const viaFileBytes = (args) => {
+        const out = path.join(tmp, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'], env });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const piped = spawnSync(process.execPath, [SUBJECT, '--json'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+    const fileBytes = viaFileBytes(['--json']);
+
+    check('--json over a large fleet exceeds one pipe buffer, so the next check is not vacuous',
+        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+    check('  and through a PIPE it delivers every byte it writes to a FILE',
+        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+    check('  and the piped JSON still parses at that size, under the flagged exit 1',
+        (() => { try { return JSON.parse(piped.stdout).rows.length === 400 && piped.status === 1; } catch { return false; } })(),
+        'exit ' + piped.status + ', tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
+
+    // The human report shares the exit path and clears the buffer too at this
+    // size — and BE CLEAR WHAT ITS PAIR CATCHES, because it is measurably less
+    // than the --json pair. Restoring process.exit(main()) takes the two --json
+    // checks RED and leaves these two GREEN: the report is 800 small
+    // console.log calls that drain opportunistically while the parent reads, so
+    // little is still pending at the exit, where the single 94KB JSON write
+    // strands 29KB. Keep them for the size and the equality they state; do not
+    // read them as cover for this defect.
+    const reportPipe = spawnSync(process.execPath, [SUBJECT],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    const reportFileBytes = viaFileBytes([]);
+    check('  the human report exceeds one pipe buffer too', reportFileBytes > PIPE_BUF,
+        JSON.stringify({ bytes: reportFileBytes, buffer: PIPE_BUF }));
+    check('  and it also delivers every byte through a PIPE',
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === reportFileBytes,
+        JSON.stringify({ pipe: Buffer.byteLength(reportPipe.stdout || '', 'utf8'), file: reportFileBytes }));
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);
