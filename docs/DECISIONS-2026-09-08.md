@@ -1,94 +1,66 @@
-# Decisions — 2026-09-08, memory capture fixed at source
+# DECISIONS — 2026-09-08 — mutation-count reconciliation
 
-Reversible calls made without asking, per the operator's away window (scope
-qr and autodev only; "take the recommended option on anything reversible and
-log it"). Session worktree `unruffled-faraday-86e0c3`, branch
-`claude/unruffled-faraday-86e0c3`, base `origin/main` b8eae1f.
+Operator AWAY (window to 2026-09-08T06:52:24Z, scope: qr and autodev only).
+Both decisions below resolved under branch 2 of the away protocol — reversible
+and not covered by a standing rule — and are logged here rather than queued.
 
-## D1. The measurement shipped first, on its own, as #190
+## D1 — Corrected "Never three" on main. (branch 2: reversible)
 
-The brief was to measure before changing. The evidence record and the
-`decisions.md` entry went up as PR #190 with no code change, so the decision
-"no new hook" stands on its own commit and can be read without the fix that
-followed it.
+`docs/DECISIONS-2026-09-07-landed-check-rescue.md` stated that the mutation
+count in 60a5eaf's commit message "does not survive measurement" and concluded
+"Never three." A guarded three-way re-measurement disproves the universal:
 
-## D2. Capture fixed at source, on the same branch, as a second commit
+| mutant | brain-brief.js change | result |
+|---|---|---|
+| clean | — | 177 passed, 0 failed |
+| full revert of the hunk | all original prose restored | 173 passed, **4 failed** |
+| half-applied | cherry line added alongside the tool | 176 passed, **1 failed** |
+| the author's actual mutant | cherry line back AND primitive sentence removed | 174 passed, **3 failed** |
 
-The evidence doc's proposal 1 to 5. At the closing decision panel the away
-protocol held the panel and named the recommended option, "fix capture at
-source", which is a code change on a branch in this repo and reversible by
-revert. Taken.
+Guard: the subject had to differ from `HEAD` or the run was discarded. Subject
+restored byte-identical afterwards, confirmed by an empty `git status` and a
+177/0 re-run.
 
-What changed, each against the count that motivated it:
+All three counts are real. Three is what the author's mutant yields, and it is
+neither of the two the rescuing session tried: the empty-PR-search assertion
+stays green because that prose was left intact, so three fail rather than four.
 
-| change | count on 2026-09-08 |
-|---|---|
-| Bash, Read, Grep and Glob no longer produce observations | 5,493 of 6,072 rows were their echoes |
-| a Write or Edit outside the project, or under `/scratchpad/`, `/.claude/probe/` or `/.claude/projects/`, is not recorded | 911 rows pointed at scratch paths; 66 recorded a memory file being written; 60 filed a file under another repo |
-| type is `change` for every captured row; the prompt keyword regex is gone | 88 of 143 "bugfix" rows were plain file creations; 5 of 17 "decision" rows were writes to README and .gitignore |
-| concept is the edit (`old → new`, or the new file's path), never the prompt | 383 rows carried another session's message as their concept; one carried a production hostname |
-| one row per (session, type, title) in `saveObservation` | 1,785 rows were exact-title repeats |
+**The commit message's defect was its DESCRIPTION, not its number.** It said
+"reinstating the cherry line", which alone is the half-applied row and yields
+one. A reader re-measuring from that sentence gets 1 or 4, matches neither, and
+reasonably concludes the count was invented.
 
-Not changed in this commit: the `UserPromptSubmit` hook and the prompt carrier
-(removed in D5, the next commit) and the existing rows. The one-time prune by
-shape stays a proposal with its count, because deleting shared state the
-operator has not read is branch 3 of the protocol.
+The generalisable form, which is the reason this was worth a commit rather than
+a reply: **a mutation result is reproducible only if the MUTANT is stated, not
+just the score.** "N assertions went red" describes an experiment nobody else
+can run. Two sessions measured honestly here and got different true numbers
+because only the score crossed between them.
 
-## D3. The prompt argument is ignored, not removed
+Reversible: one doc, no code, and it lands as a DRAFT PR the Brain merges.
 
-`classifyObservation`'s fourth parameter used to be the prompt. It now takes
-`{ cwd }`, and a string there is ignored rather than rejected, so an older
-caller keeps working and records a row rather than throwing inside a hook that
-must exit 0. The suite asserts both forms and that the prompt's words reach
-neither type nor concept.
+## D2 — Took no new work. (branch 2, erring toward stopping)
 
-## D4. The dedupe rule is keyed on the harness-independent memory session id
+The Brain named two unowned items — the `./fn/autodev-fn.mjs` validate failure
+and chip `task_c7c801f2` — and asked that anyone confirm with it before
+starting. `SendMessage` is not available in this session (verified: ToolSearch
+returns no match), so confirmation is impossible and both are owned-adjacent.
+Starting either risks colliding with a live session in a shared clone.
 
-`saveObservation` skips a title already stored under the same `session_id` and
-type; the same title under two types is two facts, which `test-knowledge.js`
-asserts. A null session id is guarded out of the rule, but it never stored
-anyway: node:sqlite enforces the `FOREIGN KEY` to `sessions`, so a caller with
-no carrier is refused one step later by the database and the circuit breaker
-returns null. The suite asserts that cause, so nobody reads the guard as "a
-session-less save is recorded".
+## Measured this session, for whoever picks those up
 
-## D5. The prompt-capture hook removed, third commit
-
-The second decision panel was held by the same away window and its
-recommended option was this. After D2 nothing reads the carried prompt, so the
-`UserPromptSubmit` hook was 35 ms per prompt spent writing verbatim user text
-to `.claude/memory-sessions/<id>.prompt` for no reader. Removed together:
-the hook's `hooks.json` entry, `hooks/memory-prompt-capture.js`, and the
-carrier's `writePrompt`/`readPrompt`/`clearPrompt`. `clear()` now also unlinks
-a `.prompt` sibling, so a project that ran the older build does not keep a
-prompt on disk past the session that wrote it; both suites plant one and
-assert it is gone. CLAUDE.md's plugin line goes from four hook events to
-three. Reversible by revert; the carrier directory keeps its self-ignore
-because a stale `.prompt` is still a prompt.
-
-## D6. The CLI refuses swapped `<projectPath> <query>`, fourth commit
-
-Third panel, same window, same protocol. The evidence doc's proposal 6: the
-one genuine query in the transcripts put the query in the project slot and
-the project in the query slot, got `[]` twice, and read that as an absence.
-The rule is narrow on purpose: it fires only when the second argument is an
-ABSOLUTE existing directory and the first is not, for `search`, `semantic`,
-`timeline` and `knowledge`. A relative name in the query slot is left alone
-because a query can legitimately match a directory in the cwd, and a project
-path that no longer exists is left alone because asking about a deleted
-project is legitimate. The suite pins all three edges as controls. Exit 1 with
-the usage on stderr and nothing on stdout, so a caller parsing JSON gets a
-non-zero status rather than an empty array.
-
-## D7. The one-time prune, on the operator's confirmation, not the protocol's
-
-Branch 3 all along: a deletion of shared state. It was not taken under the
-away window. After the window ended the operator selected the prune on a
-panel and then confirmed the count on a second one, so it ran: backup first
-(`~/.claude/backups/auto-dev-memory-2026-09-08-pre-prune.db`, 7,444 rows,
-integrity ok), then one DELETE with the predicate in the evidence doc,
-6,972 of 7,480 rows removed, 508 kept, WAL checkpointed. The 36 rows that
-arrived between backup and delete are the reversibility gap, stated in the
-evidence doc rather than smoothed over. Sessions rows were left alone; 71 of
-them now have no observations, which `cleanup()` will fold in after 90 days
-as it always would have.
+- **Trunk gate at b8eae1f: GATE_EXIT=1, 110/113.** Failures: `test-rendered-layout-gate`,
+  `test-validate`, `validate`. Exactly three, run serially — `test-hook-execution-evidence`,
+  `test-path-filter-deadlock` and `test-quota-tripwire` all PASSED here, independently
+  corroborating that their reds under load are contention rather than defects.
+- **`validate`'s `fn/autodev-fn.mjs` failure is host-shaped.** `validate.js:435`
+  fails when `claude plugin validate` prints no `hooks:` scan line. This host's
+  claude 2.1.233 prints only "Validating plugin manifest / ✔ Validation passed"
+  — no component scan at all — so the check reports the repo's hooks module as
+  broken while measuring the host CLI's output format. CI never sees it: CI does
+  not install `claude`, so the check returns `skipped`. The check therefore has
+  three behaviours by host — pass, skip, fail — and only one is about the repo.
+- **The background-task summary reports a redirect's status, not the command's.**
+  Three gate runs this session were announced as "exit code 0" while the real
+  status was 1. CLAUDE.md documents this for `| tail`; it also arrives through
+  the task-notification layer, which CLAUDE.md does not mention. Write the exit
+  code to a FILE and read it back; do not trust the summary line.

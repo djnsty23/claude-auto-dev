@@ -29,7 +29,7 @@ The store: 508 rows after the prune, backup with 7,444 rows at
 between backup and delete named in the evidence doc. Restore is one `cp` of
 the backup over the database with `-wal` and `-shm` removed.
 
-Decisions D1–D7 in `docs/DECISIONS-2026-09-08.md`. D2–D6 taken under the
+Decisions D1–D7 in `docs/DECISIONS-2026-09-08-memory-recall.md`. D2–D6 taken under the
 away window's recommended-option branch; D7 on the operator's confirmation
 after the window ended.
 

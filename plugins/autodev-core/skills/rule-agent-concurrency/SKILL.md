@@ -119,7 +119,7 @@ The next stage can read the file.
 
 ## Losing agents: it is the quota wall, not the width
 
-`[measured]` 42 of 280 agents (15%) were lost — 20,680 agent-seconds and 1,119
+`[measured 2026-08-25]` 42 of 280 agents (15%) were lost — 20,680 agent-seconds and 1,119
 tool calls, journaled as nothing, because the journal records a result only on
 completion. **20 of them carry a `<synthetic>` row reading "You've hit your
 session limit", and 0 of those 20 journaled.** That is 48% of all lost work from
@@ -130,12 +130,70 @@ Resist reading a loss *rate* by shape as evidence about width: 1-agent runs lost
 radius of an interruption; it does not predict one. The caps above stand on
 usage limits and on second-wave-beats-bigger-wave, not on a loss rate.
 
-## Workflows specifically
+### The wall takes what is in flight, and the resume gives back what finished
 
-The session's dynamic-workflow guideline (`workflowSizeGuideline`, or the
-`/config` row) is advisory and defaults to **medium: under 15 agents**. These
-caps are stricter and win. Set `phases` in `meta` so the user can see the shape
-before it runs.
+`[measured 2026-09-08]` (`docs/evidence-quota-wall-2026-09-08.md`) the wall
+lands on every agent in flight at once and on the main thread two seconds
+later, so nothing can act at that moment. The recovery already exists:
+`Workflow({scriptPath, resumeFromRunId})` re-runs only the `agent()` calls whose
+key has no `result` row in `journal.jsonl` and returns the rest from cache. On
+the one real resume on this machine it re-started exactly the walled calls and
+nothing else. **Nothing calls it automatically, and the notification that names
+it arrives while the thread is walled.** Two things now close that gap:
+
+- `scripts/workflow-run-triage.js <wf_id | --latest | --all-since <date>>`
+  prints, per agent, journaled / lost-quota-wall / lost-interrupted /
+  lost-other with agent-seconds and tool calls, and the exact resume call.
+- The `stop-workflow-wall-note.js` Stop hook says once, at the end of the first
+  turn after the reset, that this session's latest run has walled agents, and
+  puts the resume call in the model's context. It never blocks.
+
+**Resume; never relaunch.** A fresh `Workflow({script})` gets a new run id and
+re-runs every agent. The session that made the one real resume wrote "nothing
+cached, clean start" and was right only because nothing had finished.
+
+### Width is the bill for a wall, and serial is the bill for avoiding it
+
+Both are measured, so pick with numbers rather than instinct. Over the 12 runs
+on this machine, wall-clock against the serial floor (the sum of agent-seconds):
+
+| width in flight | runs | wall-clock as a fraction of serial |
+|---|---|---|
+| 3–4 | 8 | median **1 / 2.0** (serial costs 2.0×) |
+| 8–12 | 4 | median **1 / 4.1** (serial costs 4.1×) |
+
+And what a wall costs at a given width is width × the work each agent had done
+when it landed: the real wall took **5 agents at 40–59 s each, 190 agent-seconds
+in total**, because it landed early; the same run's resume then lost **one agent
+at 2,305 s** to a user interrupt. So the rule is:
+
+**Anything that must not be lost runs in a serial chain, or in waves no wider
+than what you can afford to redo. A wide parallel phase is only for work that
+is cheap to re-run.** With resume available, "afford to redo" means width ×
+the per-agent cost, not the whole run; without it, it means the whole run.
+
+The `phase()` convention that makes the choice visible before it runs: every
+entry in `meta.phases` states its width and its re-run cost in `detail`, e.g.
+`{ title: 'Verify', detail: '2 wide, ~15 min each, must not be lost' }` or
+`{ title: 'Scan', detail: '8 wide, ~1 min each, cheap to redo' }`. A phase that
+must not be lost and has more items than its width runs them in waves:
+
+```js
+// Bounded blast radius: a wall takes at most `width` agents of this phase,
+// and resumeFromRunId re-runs only those.
+async function waves(items, width, fn) {
+  const out = []
+  for (let i = 0; i < items.length; i += width) {
+    const slice = items.slice(i, i + width)
+    out.push(...await parallel(slice.map((it, j) => () => fn(it, i + j))))
+  }
+  return out
+}
+```
+
+Note that the built-in `workflow-authoring` reference (the Workflow tool's
+script API) ships with Claude Code and is not in this repo, so this convention
+lives here, where the `**/*.workflow.js` glob loads it.
 
 ## The Task tools are gone on current models
 
