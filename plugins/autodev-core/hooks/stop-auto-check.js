@@ -66,9 +66,8 @@ const CACHE_MAX_AGE_DAYS = 14;
 function nextStoryNudge(prdPath) {
     try {
         if (!fs.existsSync(prdPath)) return null;
-        const { storiesOf, isActionable } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
-        const stories = storiesOf(JSON.parse(fs.readFileSync(prdPath, 'utf8')));
-        const open = Object.entries(stories).filter(([, s]) => isActionable(s));
+        const { workPlan } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
+        const open = workPlan(JSON.parse(fs.readFileSync(prdPath, 'utf8'))).ready;
         if (!open.length) return null;
         const [id, s] = open[0];
         const title = String(s.title || '').slice(0, 70);
@@ -205,7 +204,7 @@ try {
         approve();
     }
 
-    let stories;
+    let plan;
     try {
         // BOTH container shapes, via the shared reader. This read `prd.stories`
         // alone, so a nested `{ sprints: [{ stories }] }` file — the shape
@@ -213,8 +212,8 @@ try {
         // stories here. The hook then printed "Sprint complete" over a full
         // sprint and approved the stop on the next turn, deleting auto-active
         // with every story still pending. `[measured 2026-08-29]`
-        const { storiesOf } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
-        stories = storiesOf(JSON.parse(fs.readFileSync(prdPath, 'utf8')));
+        const { workPlan } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
+        plan = workPlan(JSON.parse(fs.readFileSync(prdPath, 'utf8')));
     } catch (parseErr) {
         // Auto mode has no task list it can act on. Blocking here would loop the
         // session against a file that cannot be read.
@@ -236,11 +235,9 @@ try {
     // the session unable to end its own turn. An agent cannot conjure a
     // credential; blocking on one is blocking on a human who is not looking.
     //
-    // isActionable() is the shared predicate, so the four readers that had their
-    // own copy of this filter can no longer disagree about it.
-    const { isActionable, needsSetup } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
-    const pending = Object.entries(stories).filter(([, s]) => isActionable(s));
-    const blockedOnOperator = Object.entries(stories).filter(([, s]) => needsSetup(s));
+    // Readiness also depends on prerequisites. workPlan is the same selector
+    // auto uses, including work carried in earlier sprints.
+    const pending = plan.ready;
 
     // A story nobody has edited in months is a decision not to do the work that
     // nobody wrote down. One repo had 14 of 15 pending stories untouched for over
@@ -255,6 +252,9 @@ try {
     const active = pending.filter(([id]) => !skipped.includes(id));
 
     if (active.length > 0) {
+        // A previous reconciliation/completion nudge cannot consume the next
+        // idle transition after real work became ready again.
+        try { fs.unlinkSync(idleMarker); } catch { /* no prior idle transition */ }
         process.stderr.write(`[Auto-Dev] Auto mode active. ${active.length} tasks remaining. Continuing...\n`);
         block(`${active.length} tasks remaining. Next: ${active[0][0]}. Continue working.`);
     }
@@ -268,29 +268,36 @@ try {
         );
     }
 
-    // Sprint complete. Give Claude exactly one turn to choose a next action,
-    // tracked by a marker file so this can never become a loop.
+    const unresolved = [...plan.blocked, ...plan.invalid].map((b) => `${b.id}: ${b.reason}`);
+    if (skipped.length) unresolved.push(`${skipped.length} story(ies) were skipped as untouched >${STALE_DAYS}d (${skipped.join(', ')}) — they are still pending in prd.json`);
+    if (!plan.summary.total) unresolved.push('no stories found; check the prd.json shape before declaring completion');
+    const deferred = plan.summary.deferred;
+    // A broken backlog can contain thousands of blocked records. Keep the
+    // Stop message bounded while reporting how much detail remains in prd.json.
+    const details = unresolved.slice(0, 12).map((s) => s.length > 300 ? s.slice(0, 297) + '...' : s).join('. ')
+        + (unresolved.length > 12 ? `. ${unresolved.length - 12} more; inspect prd.json` : '');
+    const status = plan.complete
+        ? `[Auto-Dev] Sprint complete${deferred ? ` (${deferred} deferred)` : ''} - running smart next action`
+        : `[Auto-Dev] Sprint incomplete; no dependency-ready work. ${unresolved.length} unresolved: ` + details
+          + '. Reconcile the dependency graph or report the blocker; preserve unfinished story states.';
+
+    // Give one reconciliation/next-action turn. An unresolved dependency is not
+    // an invitation to retry it forever, and approving Stop is not completion.
     if (fs.existsSync(idleMarker)) {
         for (const f of [idleMarker, autoFlag]) {
             try { fs.unlinkSync(f); } catch { /* already gone */ }
         }
+        if (!plan.complete) carryNote = carryNote ? carryNote + '\n' + status : status;
         process.stderr.write('[Auto-Dev] IDLE detection already ran. Allowing stop.\n');
         approve();
     }
 
     fs.writeFileSync(idleMarker, new Date().toISOString());
-    const deferred = Object.values(stories).filter((s) => s.passes === 'deferred').length;
-    process.stderr.write(`[Auto-Dev] Sprint complete${deferred ? ` (${deferred} deferred)` : ''}. Running IDLE detection...\n`);
+    process.stderr.write(status + '\n');
     block(
-        '[Auto-Dev] Sprint complete - running smart next action' +
+        status +
         (deferred ? `. ${deferred} story(ies) deferred; do not treat them as outstanding work.` : '') +
-        // Surfaced to Claude, not just to stderr: these stories are still
-        // `passes: null` and auto walked past them. Reconciling or deferring
-        // them for real is the next action, and it needs a human.
-        (skipped.length
-            ? `. ${skipped.length} story(ies) were skipped as untouched >${STALE_DAYS}d (${skipped.join(', ')})` +
-              ' — they are still pending in prd.json. Reconcile them or mark them deferred rather than leaving them to age.'
-            : '')
+        (skipped.length ? ' Reconcile skipped stories or explicitly defer them rather than leaving them to age.' : '')
     );
 } catch (err) {
     // Hook must never crash — a thrown error here would strand the session.

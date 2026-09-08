@@ -203,13 +203,16 @@ if (!prior || typeof prior.sha !== 'string') {
     silent();
 }
 
-if (prior.sha === sha) silent();                   // no commit landed since last look
+if (prior.sha === sha) silent();                   // no change from the baseline or last notice
 
 // A commit landed. Throttle on the last NOTICE, not the last look, so a session
 // committing every turn produces one notice per window rather than one per commit.
 const lastNotice = Number(prior.reportedAt) || 0;
 if (lastNotice && now - lastNotice < cooldownMs) {
-    writeState(state, sessionId, { sha, at: now, reportedAt: lastNotice });
+    // Suppression is not delivery. Retain the last notified HEAD so the final
+    // commit can trigger a notice on a later Stop after the window expires,
+    // even when the worker has made no further commits.
+    writeState(state, sessionId, { sha: prior.sha, at: now, reportedAt: lastNotice });
     silent();
 }
 
