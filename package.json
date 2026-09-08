@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "node tooling/test-all.js",
-    "gate": "npm test && npm run check:suites && npm run check:probe-shapes && npm run check:population && npm run check:entrypoints && npm run check:skill-tools && npm run check:agents-md",
+    "gate": "npm test && npm run check:suites && npm run check:probe-shapes && npm run check:population && npm run check:entrypoints && npm run check:skill-tools && npm run check:agents-md && npm run check:claude-md",
     "validate": "node tooling/validate.js",
     "bump": "node tooling/bump.js",
     "check:suites": "node tooling/check-suites-can-fail.js",
@@ -58,7 +58,8 @@
     "gate:release": "npm run gate && node tooling/check-runtime.js --pre-release",
     "verify:release": "node tooling/check-runtime.js",
     "check:collisions": "node tooling/check-skill-collisions.js --selftest && node tooling/check-skill-collisions.js",
-    "check:agents-md": "node tooling/generate-agents-md.js --check"
+    "check:agents-md": "node tooling/generate-agents-md.js --check",
+    "check:claude-md": "node tooling/check-claude-md.js --selftest && node tooling/check-claude-md.js"
   },
   "author": "djnsty23",
   "license": "MIT",

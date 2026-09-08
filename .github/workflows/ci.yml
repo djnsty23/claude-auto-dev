@@ -110,3 +110,23 @@ jobs:
       - name: AGENTS.md matches the rules it is generated from
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:agents-md
+
+      # CLAUDE.md is the file every session loads before it does anything, and
+      # a false claim in it is acted on rather than read. Three went stale
+      # inside 48 hours: the gate's step count (a session skipped check:suites
+      # and reported an unverified suite green), "force-push is blocked" (two
+      # sessions took worse git paths on its authority in one morning), and the
+      # `passes` table, which listed four states for as long as five existed.
+      #
+      # Only mechanically checkable claims are graded, each against one named
+      # authority. Prose judgement is out of scope on purpose: a checker that
+      # guesses produces false positives, and a gate with false positives gets
+      # switched off, at which point it protects nothing.
+      #
+      # RUNS WITHOUT CREDENTIALS. Exactly one claim needs the GitHub API, and
+      # there is no token here, so that claim SKIPs with a printed reason and
+      # the run stays green. Unreachable never reads as verified — the skip is
+      # in the log. The local gate, where `gh` is authenticated, grades it.
+      - name: CLAUDE.md still describes the tree
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:claude-md
