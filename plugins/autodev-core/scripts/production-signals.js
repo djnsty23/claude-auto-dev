@@ -700,7 +700,11 @@ async function main() {
   const configPath = path.resolve(cwd, argValue('--config', CONFIG_DEFAULT));
   const config = readJson(configPath, null);
   if (!config || !Array.isArray(config.sources) || !config.sources.length) {
-    process.stderr.write(`production-signals: no sources configured at ${path.relative(cwd, configPath) || configPath}. The production-radar skill documents the shape.\n`);
+    // Displayed with forward slashes on every platform: `[measured 2026-09-08]` the
+    // Windows CI leg printed `.claude\\production-signals.json` and the suite's
+    // expectation, written on a Mac, did not match it.
+    const shown = (path.relative(cwd, configPath) || configPath).split(path.sep).join('/');
+    process.stderr.write(`production-signals: no sources configured at ${shown}. The production-radar skill documents the shape.\n`);
     return 2;
   }
   const nowRaw = argValue('--now', null);
