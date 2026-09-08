@@ -13,47 +13,55 @@ never ships.
 ## Commands
 
 ```bash
-npm run gate                 # THE GATE: seven steps chained with &&. Run this.
-npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 7.
+npm run gate                 # THE GATE: eight steps chained with &&. Run this.
+npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 8.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
 node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md; step 7 fails on drift
+node tooling/check-claude-md.js        # step 8: does THIS FILE still describe the tree?
 ```
 
-**`npm test` is ONE SEVENTH of the gate, and every step it skips fails silently.**
+**`npm test` is ONE EIGHTH of the gate, and every step it skips fails silently.**
 `[measured 2026-08-30]` a session ran nine green `npm test` runs and never
 executed `check:suites`, so a newly added suite was reported green while
 `check-suites-can-fail.js` had it counted as NOT verified. The suite in question
 was the one gating pushes.
 
 Nothing about the first command hints at the rest, which is why `npm run gate`
-now exists: it chains all seven.
+now exists: it chains all eight.
 
 `[measured 2026-09-07]` **THE CHAIN IS `&&`, so a red first step means the other
-six NEVER RAN.** The gate is
+seven NEVER RAN.** The gate is
 
 ```
 npm test && npm run check:suites && npm run check:probe-shapes
   && npm run check:population && npm run check:entrypoints
   && npm run check:skill-tools && npm run check:agents-md
+  && npm run check:claude-md
 ```
 
-The seventh step, `check:agents-md`, is last on purpose: it regenerates
-`AGENTS.md` from the `rule-*` skills to a temp path and diffs, takes
-milliseconds, and its only failure is a stale document. Last, it can never hide
-an expensive step behind it, and nothing that matters is skipped when it is the
-one that goes red.
+The last two steps are the cheap ones, and they are last for the reason `&&`
+makes unavoidable: a cheap step that goes red early hides every expensive step
+behind it, so nothing that matters is skipped when one of these is the one that
+fails. `check:agents-md` regenerates `AGENTS.md` from the `rule-*` skills to a
+temp path and diffs it, takes milliseconds, and its only failure is a stale
+document. `check:claude-md` grades the mechanically checkable claims in THIS
+FILE against the tree — the gate chain above, the `passes` table, the population
+counts, the branch-protection claim. **It is also the reason the numbers in this
+section can be trusted now.** Every one of them used to be a sentence that went
+stale in silence, and three did inside 48 hours; this very sentence pair is what
+the eighth step reads.
 
 A session landing a rescued commit read the resulting exit 1 as "the gate is
 red", and was one step from describing the commit as gated when `check:suites` —
 the step that catches exactly the unverifiable-new-suite case above — had not
 executed at all. Its change ADDED a suite, so that was the one step it could not
-afford to skip. When the first step fails, run the remaining six yourself; the
-chain's exit status is a verdict on one step, not on seven.
+afford to skip. When the first step fails, run the remaining seven yourself; the
+chain's exit status is a verdict on one step, not on eight.
 
 **And `npm run gate` is NOT "what CI runs"**, in both directions. CI adds a
 `node --check` parse loop over every `plugins/*/hooks/*.js` that the gate has no
-equivalent for, and the gate runs `check:probe-shapes`, which CI does not. Five
+equivalent for, and the gate runs `check:probe-shapes`, which CI does not. Six
 of CI's steps are `if: matrix.os == 'ubuntu-latest'`, so a green local gate on
 macOS and a green CI run are not claims about the same set of checks.
 
@@ -252,7 +260,20 @@ you started work; in a shared clone it moves under you.
 - **macOS `realpathSync`**: `/var/folders` and `/private/var/folders` are the same
   directory. Resolve any path compared against a child's `process.cwd()`.
 - **`git commit -F <file>`, never `-m`** — the shell eats backticks as command
-  substitution, and force-push is blocked so the message cannot be amended.
+  substitution. ⚠️ **The second half of this line said "and force-push is blocked
+  so the message cannot be amended" until 2026-09-08, and it was false.**
+  `[measured 2026-09-08]` **force-push is not blocked**: `main` carries no branch
+  protection (the API answers 404 *Branch not protected*), the repo has zero
+  rulesets, `tooling/githooks/` holds only `commit-msg` and a `pre-push` that
+  runs `validate.js` and says nothing about force, and `pre-tool-filter.js`
+  records blocking `--force-with-lease` as a PAST mistake it will not repeat.
+  Two sessions took worse paths on that sentence's authority in one morning —
+  one kept an unwanted merge commit and carried an eleven-file diff into review,
+  another merged where a rebase was correct. The real reason not to amend is two
+  bullets down and has nothing to do with force: several sessions commit to this
+  clone at once. `check:claude-md` now grades this line against the API in BOTH
+  directions, so enabling protection tomorrow makes it stale the other way round
+  and says so.
 - **`;` is not `&&`**, and never pipe a validation run into `head`/`tail` inside a
   chain: the pipeline's exit status is the last command's, so red reads as green.
 - **This repo is PUBLIC.** `check-no-private-names.js` gates the tree and
