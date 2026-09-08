@@ -189,6 +189,20 @@ how the gate is consumed, a canary has to **spawn it** and assert the status.
 The same trap catches the fix: a later instrument printed "answers that once
 existed are gone" and returned 0. Writing the warning is not the gate.
 
+Also assert complete output through the transport the caller uses. An immediate
+`process.exit()` can discard pending writes while returning 0. Node documents
+asynchronous stdout/stderr pipes on POSIX, including Linux and macOS; a passing
+file redirect or another platform does not prove a pipe drained. Prefer
+`process.exitCode` and natural completion, and compare a substantial known
+payload byte-for-byte through a pipe and a file control. A callback for one
+write does not establish that unrelated pending work finished.
+
+`[measured 2026-09-09]` Node 24.19.0 on macOS, 1,048,576 expected bytes:
+immediate exit delivered 65,536 pipe bytes; natural completion and a write
+callback each delivered all 1,048,576. All three variants exited 0 and all file
+controls were complete. See the [platform contract](https://nodejs.org/api/process.html#a-note-on-process-io);
+Linux and Windows were not executed in this control.
+
 ## 6. A gate must not rewrite what it grades
 
 Exit codes are structurally blind to this, because the offender exits 0.

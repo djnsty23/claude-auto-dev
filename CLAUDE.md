@@ -313,23 +313,26 @@ you started work; in a shared clone it moves under you.
   shared history. Commit small and forward; never rewrite.
 - **Stage explicit paths, never `git add -A`** — the same concurrency sweeps
   another session's in-flight work into your commit.
-- **`process.exit()` after printing TRUNCATES, on macOS only.** node's
-  `process.stdout` is asynchronous when it is a PIPE on darwin, and synchronous
-  when it is a pipe on linux and win32; it is synchronous for a FILE and a TTY
-  everywhere. `process.exit()` does not drain a pending async write, so a script
-  that prints more than the 64KiB OS pipe buffer and then exits delivers exactly
-  65536 bytes — and exits 0, because the write never failed. 2026-09-07:
-  `rendered-layout-gate.js --json` did this with 84752 bytes of output, and its
-  suite had failed 2 of 282 on every mac in the project since the day it was
-  written while CI stayed green on `[ubuntu, windows]`.
-  Set `process.exitCode` and let the event loop drain; do not call
-  `process.exit()` on a path that has written to stdout.
-  **Three things hide it, and it used all three**: redirect to a file and the
-  write is synchronous so the output looks whole; run it on Linux CI and the
-  write is synchronous so CI is green; check the exit status and it is 0. Any
-  assertion here has to drive the subject through a PIPE and compare byte counts
-  against a FILE redirect — and assert the output EXCEEDS one buffer first, or
-  the comparison passes by construction on small fixtures.
+- **`process.exit()` can truncate pending output.** This is not macOS-only.
+  [Node's process I/O contract](https://nodejs.org/api/process.html#a-note-on-process-io)
+  makes stdout/stderr pipes asynchronous on POSIX, including Linux and macOS,
+  and synchronous on Windows. File output is synchronous on both; terminal
+  output is asynchronous on Windows and synchronous on POSIX. Passing Linux CI
+  does not establish that a pipe write was synchronous or completely drained.
+  The 2026-09-07 incident reported 65,536 of 84,752 bytes from
+  `rendered-layout-gate.js --json`, with exit 0. That observed byte boundary is
+  not a portable buffer-size guarantee.
+  `[measured 2026-09-09]` Node 24.19.0 on macOS, three variants each writing
+  1,048,576 bytes to a pipe and a file: immediate exit delivered 65,536 pipe
+  bytes; setting `process.exitCode` and waiting for the write callback each
+  delivered all 1,048,576. All six runs exited 0, and all three file redirects
+  were complete. Linux and Windows were not executed in this control.
+  Set `process.exitCode` and let the event loop drain. A callback for one write
+  is sufficient only if no other pending work needs to finish. Test the actual
+  subject through a pipe with output large enough to exercise backpressure,
+  compare exact content against an independently known payload, and use a file
+  redirect as a separate control. Exit 0 or a complete redirected file alone
+  does not prove that piped output survived.
 - Avoid nested quoting in `node -e`; write a scratch file.
 
 ## Product repos

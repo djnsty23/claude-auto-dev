@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 129,410 | 17 of 17 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 18,837 | 17 of 17 |
-| B′ same, but dated LINES instead of paragraphs | 13,956 | 1 of 17 |
-| C  description only | 7,069 | 0 of 17 |
+| A  full body | 130,328 | 18 of 18 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 19,230 | 18 of 18 |
+| B′ same, but dated LINES instead of paragraphs | 14,030 | 1 of 18 |
+| C  description only | 7,069 | 0 of 18 |
 
 ### rule-ab-testing
 
@@ -246,6 +246,12 @@ where it expected 4. **The safety assertion passed**, because the filter that
 actually protects those rows had not been touched. Mutating the second filter
 instead failed the safety assertion and its control together, which is the real
 check.
+
+`[measured 2026-09-09]` Node 24.19.0 on macOS, 1,048,576 expected bytes:
+immediate exit delivered 65,536 pipe bytes; natural completion and a write
+callback each delivered all 1,048,576. All three variants exited 0 and all file
+controls were complete. See the [platform contract](https://nodejs.org/api/process.html#a-note-on-process-io);
+Linux and Windows were not executed in this control.
 
 `[measured 2026-09-07]` A staleness detector grew a veto so that
 `NO prod tag is pending` -- a sentence asserting the ABSENCE of open work, in
