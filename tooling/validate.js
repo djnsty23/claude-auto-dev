@@ -464,6 +464,31 @@ function claudeVersion() {
   return (claudeVersionCache = v);
 }
 
+// Component-scan lines only: the host's report of what it FOUND in the plugin,
+// with its diagnostics excluded.
+//
+// `[measured 2026-09-07, claude 2.1.233]` a warning or error bullet is
+// formatted exactly like a scan line — `❯ <field>: <text>` — so a
+// plugin.json carrying a warning on a field named `hooks` would read as "the
+// host listed hooks", and a module nothing ever scanned would be reported as a
+// PASS. That is the worse direction of this whole defect: a false FAIL blocks a
+// push and gets looked at, a false PASS is the silent kind. The bullets are
+// therefore excluded by STRUCTURE — everything under a `Found N warnings:` or
+// `Found N errors:` header, up to the next `Validating` line or the verdict —
+// rather than by guessing which field names a host might warn about.
+function componentSections(out) {
+  const sections = [];
+  let inFindings = false;
+  for (const raw of String(out).split('\n')) {
+    if (/Found \d+ (?:warning|error)/i.test(raw)) { inFindings = true; continue; }
+    if (/^\s*(?:Validating\b|[✔✘✖]\s*Validation\b)/.test(raw)) { inFindings = false; continue; }
+    if (inFindings) continue;
+    const line = raw.replace(/^\s*❯\s*/, '').trim();
+    if (SCAN_SECTION.test(line)) sections.push(line);
+  }
+  return sections;
+}
+
 function scanHooksModule(pluginDir) {
   // One quoted command string through the shell: `claude` on PATH is a shim
   // (a .cmd on Windows), which spawnSync cannot run without a shell, and an
@@ -498,8 +523,7 @@ function scanHooksModule(pluginDir) {
   // The control, before the finding. `sections` is every component line the
   // host printed, of any kind; an empty one means nothing was reported for
   // this plugin and there is no absence here to read.
-  const lines = out.split('\n').filter((l) => !/^\s*Validating\b/.test(l)).map((l) => l.replace(/^\s*❯\s*/, '').trim());
-  const sections = lines.filter((l) => SCAN_SECTION.test(l));
+  const sections = componentSections(out);
   if (!sections.length) {
     const beside = pluginComponents(pluginDir);
     return {

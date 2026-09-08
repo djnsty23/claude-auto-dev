@@ -60,6 +60,14 @@ if (mode === 'scan') {
   // and the harness calls it makes.
   process.stdout.write('\\u276f hooks: session.start, prompt.submit, tool.call, attribution.text, turn.complete\\n');
   process.stdout.write('\\u276f calls: $.store, $.session\\n');
+} else if (mode === 'warning-named-hooks') {
+  // 2.1.233's real diagnostic shape. The bullet is formatted exactly like a
+  // scan line, and the field here is literally named hooks.
+  process.stdout.write('\\u26a0 Found 2 warnings:\\n\\n');
+  process.stdout.write('  \\u276f hooks: Unknown field "hooks". Claude Code ignores it at load time.\\n');
+  process.stdout.write('  \\u276f author: No author information provided\\n\\n');
+  process.stdout.write('\\u2714 Validation passed with warnings\\n');
+  process.exit(0);
 } else if (mode === 'scanned-no-hooks') {
   // A host that scans and names components, listing everything EXCEPT hooks.
   // This is the state the FAIL message describes, and the only one it may fire on.
@@ -154,6 +162,28 @@ check('  naming the unread modules entry',
     /modules entry was not read/.test(nohooks.line), nohooks.line);
 check('  and validate.js exits non-zero on it',
     nohooks.status !== 0, `status=${nohooks.status}`);
+
+// 3b. A DIAGNOSTIC that looks like a scan line. On 2.1.233 a warning bullet is
+//     `\u276f <field>: <text>`, the same shape the scan uses, so a plugin.json
+//     warning on a field named `hooks` can be mistaken for the host having
+//     listed hooks. Reading it that way reports an UNSCANNED module as a PASS,
+//     which is the silent direction of this defect and the one worth a suite.
+const warned = runValidate('warning-named-hooks');
+check('a warning bullet named `hooks:` is not mistaken for a scan',
+    !/^\[PASS\]/.test(warned.line), warned.line);
+check('  the module stays unverified rather than passing on a diagnostic',
+    /^\[WARN\]/.test(warned.line) && /NOT scanned/.test(warned.line), warned.line);
+// Control, read from the STUB rather than from validate.js. validate.js never
+// echoes the host's raw output — only its own verdict — so asserting against
+// that would have been vacuous: it would pass just as well against a stub that
+// emitted no bullet at all, making this case a duplicate of `noscan`. Asking
+// the stub directly is a known-positive with different provenance.
+const stubSaid = spawnSync(path.join(STUB_DIR, IS_WIN ? 'claude.cmd' : 'claude'),
+    ['plugin', 'validate', ROOT],
+    { encoding: 'utf8', env: { ...process.env, [MODE_ENV]: 'warning-named-hooks' } });
+check('  control: the stub really did emit a hooks:-shaped bullet to be fooled by',
+    /\bhooks:\s*Unknown field/.test((stubSaid.stdout || '') + (stubSaid.stderr || '')),
+    JSON.stringify((stubSaid.stdout || '').slice(0, 200)));
 
 // 4. No CLI at all: the CI shape. Unchanged by this fix, asserted so the three
 //    host behaviours are all pinned in one place rather than two.
