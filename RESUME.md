@@ -1,52 +1,21 @@
-# RESUME
+# RESUME — greenfield run session, 2026-09-08
 
-Written by `session-exit.js` from state READ at generation time, never from
-a recollection. Every number came from a command; anything a command could
-not answer says so rather than rendering as empty.
+Branch `claude/zealous-bhaskara-12b623`, base `origin/main` b8eae1f. Context depth passed 300k after the gate; this session stops here.
 
-| field | value |
+## Done, and how each was verified
+
+| what | verified by |
 |---|---|
-| directory | `~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2` |
-| branch | `claude/intelligent-brattain-6a09ad` |
-| upstream | `origin/claude/intelligent-brattain-6a09ad` |
-| HEAD committed | 2026-09-02T22:01:15+03:00 |
+| The run itself: spec → setup-project → auto → ship on `~/Code/greenfield-run-2026-09-08` (throwaway, 11 commits, preview + one accidental production deploy) | `docs/evidence-greenfield-run-2026-09-08-log.txt`, 80 lines, every transition timestamped |
+| `docs/evidence-greenfield-run-2026-09-08.md`, the log beside it, `docs/decisions.md` entry (commit 904cbbc) | `node tooling/check-no-private-names.js` → names clean; `check-no-home-paths.js` → clean |
+| `npm run gate` on the clean tree at 904cbbc | 110/113 suites, 3 FAILED: test-rendered-layout-gate (2 of 282), test-validate, validate (`hooks module ./fn/autodev-fn.mjs failed the host's scan`). Re-run serially: all three still red, so not load. They are the three local reds recorded in `docs/evidence-ecc-comparison-2026-09-07.md`, fixed in 5fa045b on PR #182, not on main; this commit touches only docs. |
 
-**Re-read before acting on any of this.** A resume file is a snapshot, and
-the two facts most likely to have moved are the two below: someone may have
-pushed, and someone may have merged.
+## Next, in order
 
-## Unpushed commits
+1. Merge PR #182 (5fa045b) to main; then this branch's gate goes green without a change.
+2. The three harness changes in the decisions entry, each one skill edit + one suite, each with a log line to test against: ship reads `target` from the deploy JSON; setup-project scaffolds into a scratch dir and ships `next typegen && tsc`; auto/stop hook follow the project path instead of cwd.
+3. Handbacks #1–#3 in the log are the operator's, if the throwaway product is ever to run: Supabase project, Deployment Protection, production promotion.
 
-- `8b79aa2 fix(session-exit): --help wrote RESUME.md, and the usage named flags that do not exist`
-- `0d0d6cb fix(selftests): derive three population counts, one of which was already wrong`
+## Not done, deliberately
 
-## Uncommitted changes
-
-- `M RESUME.md`
-
-## Open PRs
-
-- [#127](https://github.com/djnsty23/claude-auto-dev/pull/127) `fix/test-validate-orphan-fixture` - fix(suites): two baselines that failed for reasons outside themselves, and v8.155.0
-
-## Worktrees
-
-Another session may hold one of these. Run `git status` in a tree before
-touching it: a dirty tree you did not dirty means someone is in there.
-
-```
-~/claude-auto-dev                                               e1a53d6 [main]
-~/claude-auto-dev/.claude/worktrees/autodev-core-brain-81ae78   e4942c1 (detached HEAD)
-~/claude-auto-dev/.claude/worktrees/codex-radar-20260902-184238 e1a53d6 [codex/radar-20260902-184238]
-~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2    8b79aa2 [claude/intelligent-brattain-6a09ad]
-~/claude-auto-dev/.claude/worktrees/vigorous-maxwell-7ac5dc     b6f25ad [fix/test-validate-orphan-fixture]
-~/Downloads/code/autodev                                        3f8101f [test/brain-panels-vacuity-gaps]
-```
-
-## What a reader should do first
-
-1. `git fetch`, then re-check the sections above. They decay fastest.
-2. Run `npm run gate` before believing anything is green. That name was read from `package.json` here, not assumed.
-3. Read `CHANGELOG.md`, `README.md` - present in this directory, checked rather than assumed.
-4. Read recent commit bodies. Many projects put the reasoning there rather than in a separate design note.
-
-_These steps were derived from what is actually in `~/claude-auto-dev/.claude/worktrees/codex-usage-guide-9a3bb2`._
+No harness code change, no VERSION bump, no production promotion (the first `vercel --yes` was assigned to production by Vercel; documented, not reverted).
