@@ -154,6 +154,17 @@ function isDuplicate(db, hash, windowSeconds = 30) {
     }
 }
 
+function isRepeatInSession(db, sessionId, type, title) {
+    try {
+        const row = db
+            .prepare('SELECT 1 AS hit FROM observations WHERE session_id = ? AND type = ? AND title = ? LIMIT 1')
+            .get(sessionId, type, title);
+        return !!row;
+    } catch {
+        return false;
+    }
+}
+
 // --- Knowledge briefs (roadmap §3.2 "domain brains") ---
 // Distill accumulated observations for a code AREA into a focused brief.
 // The "area" is a path prefix / directory / fragment (e.g. "src/auth").
@@ -417,6 +428,17 @@ const api = {
 
             // Dedup: skip if same hash within 30s
             if (isDuplicate(db, hash)) return null;
+
+            // Dedup, second rule: one row per (session, type, title). The hash
+            // rule above misses an edit repeated with different content — the
+            // same file edited seven times in one session produced seven
+            // identical `Modified x.test.ts` titles, and 1,785 of 6,072 rows
+            // were such repeats when this was measured on 2026-09-08. A second
+            // edit of a file within one session tells a reader nothing the
+            // first did not. Type stays in the key: the same title stored
+            // deliberately as a decision and as a bugfix is two facts, and
+            // test-knowledge.js asserts both survive.
+            if (sessionId && isRepeatInSession(db, sessionId, type, stripPrivate(title))) return null;
 
             const id = genId('obs');
             const stmt = db.prepare(`

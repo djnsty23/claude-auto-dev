@@ -26,14 +26,25 @@ Search the project's persistent memory database. Observations are captured autom
 
 ## How It Works
 
-Memory is stored in SQLite at `~/.claude/auto-dev-memory.db`. Observations are captured automatically by the PostToolUse hook and classified by type:
+Memory is stored in SQLite at `~/.claude/auto-dev-memory.db`. The PostToolUse
+hook records one observation per Write or Edit of a file inside the project,
+typed `change`, titled `Created <file>` or `Modified <file>`, with the edit
+itself as the concept, one row per file per session. It records nothing for
+Bash, Read, Grep or Glob, and nothing for writes outside the project or under
+a scratchpad, probe or memory directory. `[measured 2026-09-08]` the previous
+capture recorded most commands as `Ran: …` discoveries and took the type from a
+keyword in the prompt; 90 % of the store was command echoes and nothing read
+it back (`docs/evidence-memory-recall-2026-09-08.md`).
+
+Rows written before that date still carry the older types, and the API still
+accepts them for rows written deliberately:
 
 - **decision** — Architectural or design choices
 - **bugfix** — Bug fixes and patches
 - **feature** — New functionality added
 - **refactor** — Code restructuring
 - **discovery** — Investigations and findings
-- **change** — General modifications
+- **change** — General modifications, and everything capture records now
 
 ## Progressive Disclosure (Token-Efficient)
 

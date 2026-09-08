@@ -1,154 +1,130 @@
 #!/usr/bin/env node
-// Tests for plugins/autodev-memory/scripts/observation-classifier.js — the PostToolUse observation
-// classifier. Pure logic, NO database, auto-discovered by tooling/test-all.js.
-// Asserts the module's ACTUAL contract (verified against the source), so a
-// change in classification behavior fails these tests.
+// Tests for plugins/autodev-memory/scripts/observation-classifier.js — the
+// PostToolUse observation classifier. Pure logic, no database, auto-discovered
+// by tooling/test-all.js.
+//
+// Rewritten 2026-09-08 with the classifier. The old contract (Bash commands as
+// `Ran:` discoveries, type from a prompt keyword, concept = the prompt) was
+// measured in docs/evidence-memory-recall-2026-09-08.md and dropped. Every case
+// here asserts the NEW contract, and the controls at the top establish that a
+// real project write IS still recorded — a classifier that returns null for
+// everything would pass the exclusion cases and fail those.
 // Run: node tooling/test-observation-classifier.js
 
-const { classifyObservation, VALID_TYPES } = require('../plugins/autodev-memory/scripts/observation-classifier');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { classifyObservation, isProjectFile, VALID_TYPES } =
+  require('../plugins/autodev-memory/scripts/observation-classifier');
 
 const cases = [];
 const eq = (label, actual, expected) =>
   cases.push([`${label} (got ${JSON.stringify(actual)})`, actual === expected]);
 const truthy = (label, v) => cases.push([label, !!v]);
 
-// --- classifyObservation: Write ---
-// Write with a neutral prompt defaults to the 'feature' type and a
-// "Created <file>" title; the file path is captured in sourceFiles.
-{
-  const o = classifyObservation('Write', { file_path: 'x.js' }, '', '');
-  truthy('Write: returns an observation', o);
-  eq('Write: default type is feature', o.type, 'feature');
-  eq('Write: title is "Created x.js"', o.title, 'Created x.js');
-  eq('Write: sourceFiles captures the path', JSON.stringify(o.sourceFiles), JSON.stringify(['x.js']));
-}
-// A prompt keyword overrides the default type via detectType.
-{
-  const o = classifyObservation('Write', { file_path: 'x.js' }, '', 'please fix the bug');
-  eq('Write: "fix" prompt classifies as bugfix', o.type, 'bugfix');
-}
+// A real project directory, so the inside/outside decision runs on real paths
+// (realpath is applied to both sides; a /var vs /private/var mismatch on macOS
+// would otherwise make every file look outside the project).
+const PROJ = fs.mkdtempSync(path.join(os.tmpdir(), 'obs-cls-'));
+const OUTSIDE = fs.mkdtempSync(path.join(os.tmpdir(), 'obs-cls-out-'));
+fs.mkdirSync(path.join(PROJ, 'src'), { recursive: true });
+const inProj = (rel) => path.join(PROJ, rel);
+const ctx = { cwd: PROJ };
+const DISTINCT_PROMPT = 'zebra-lantern-prompt-token';
 
-// --- classifyObservation: Edit ---
-// Edit with a neutral prompt defaults to the 'change' type ("Modified <file>").
+// --- CONTROLS: a project write is recorded ---
 {
-  const o = classifyObservation('Edit', { file_path: 'x.js', old_string: 'a', new_string: 'b' }, '', '');
-  eq('Edit: default type is change', o.type, 'change');
-  eq('Edit: title is "Modified x.js"', o.title, 'Modified x.js');
+  const o = classifyObservation('Write', { file_path: inProj('src/app.js') }, '', ctx);
+  truthy('control: Write inside the project returns an observation', o);
+  eq('control: Write type is change', o && o.type, 'change');
+  eq('control: Write title is "Created app.js"', o && o.title, 'Created app.js');
+  eq('control: Write concept names the project-relative path', o && o.concept, 'New file: src/app.js');
+  eq('control: Write sourceFiles keeps the absolute path',
+    o && JSON.stringify(o.sourceFiles), JSON.stringify([inProj('src/app.js')]));
 }
-// A "refactor" prompt yields the refactor type + "Refactored" verb.
 {
-  const o = classifyObservation('Edit', { file_path: 'x.js' }, '', 'refactor this module');
-  eq('Edit: "refactor" prompt classifies as refactor', o.type, 'refactor');
-  eq('Edit: refactor verb in title', o.title, 'Refactored x.js');
+  const o = classifyObservation('Edit', { file_path: inProj('src/app.js'), old_string: 'a', new_string: 'b' }, '', ctx);
+  truthy('control: Edit inside the project returns an observation', o);
+  eq('control: Edit type is change', o && o.type, 'change');
+  eq('control: Edit title is "Modified app.js"', o && o.title, 'Modified app.js');
+  eq('control: Edit concept is the edit itself', o && o.concept, 'a → b');
 }
+// A relative path cannot be placed, so it is taken as project-relative.
+{
+  const o = classifyObservation('Write', { file_path: 'x.js' }, '', ctx);
+  truthy('relative path: recorded', o);
+  eq('relative path: concept shows the path as given', o && o.concept, 'New file: x.js');
+}
+// With no cwd at all, only the fragment exclusions apply.
+truthy('no cwd: a plain path is recorded',
+  classifyObservation('Write', { file_path: '/somewhere/else/x.js' }, '', undefined));
 
-// --- classifyObservation: Bash ---
-// NOTE (actual contract): a git commit is typed 'change', NOT 'decision'.
+// --- The prompt no longer shapes anything ---
+// The fourth argument used to be the prompt. A string there is ignored, an
+// object carries the cwd. Both forms assert that the prompt's words reach
+// neither the type nor the concept.
 {
-  const o = classifyObservation('Bash', { command: 'git commit -m "x"' }, '', '');
-  eq('Bash git commit: type is change', o.type, 'change');
-  truthy('Bash git commit: title starts with "Git:"', o.title.startsWith('Git:'));
+  const o = classifyObservation('Write', { file_path: inProj('src/x.js') }, '', `please fix the bug ${DISTINCT_PROMPT}`);
+  truthy('legacy string 4th arg: still recorded', o);
+  eq('legacy string 4th arg: "fix" does NOT make it a bugfix', o && o.type, 'change');
+  truthy('legacy string 4th arg: the prompt is not the concept', o && !o.concept.includes(DISTINCT_PROMPT));
 }
-// A test command is typed 'discovery'; pass/fail is read from the result text.
 {
-  const pass = classifyObservation('Bash', { command: 'npm test' }, 'all good', '');
-  eq('Bash test (passing): type is discovery', pass.type, 'discovery');
-  truthy('Bash test (passing): title says passed', pass.title.includes('passed'));
-  const fail = classifyObservation('Bash', { command: 'npm test' }, '1 FAIL', '');
-  eq('Bash test (failing): type is discovery', fail.type, 'discovery');
-  truthy('Bash test (failing): title says FAILED', fail.title.includes('FAILED'));
+  const o = classifyObservation('Edit', { file_path: inProj('src/x.js'), old_string: 'q', new_string: 'r' }, '', { cwd: PROJ, prompt: DISTINCT_PROMPT });
+  eq('object 4th arg: "refactor"-free type is change', o && o.type, 'change');
+  truthy('object 4th arg: a prompt field is ignored', o && !o.concept.includes(DISTINCT_PROMPT));
 }
-// NOTE (actual contract): a package install is typed 'change' (title "Dependency:").
 {
-  const o = classifyObservation('Bash', { command: 'npm install lodash' }, '', '');
-  eq('Bash install: type is change', o.type, 'change');
-  truthy('Bash install: title starts with "Dependency:"', o.title.startsWith('Dependency:'));
+  const o = classifyObservation('Edit', { file_path: inProj('src/x.js') }, '', ctx);
+  eq('Edit with no strings: concept falls back to the path', o && o.concept, 'Edited src/x.js');
 }
-// NOTE (actual contract): a build/deploy command is typed 'change' (title "Build/Deploy:").
-{
-  const o = classifyObservation('Bash', { command: 'docker build .' }, '', '');
-  eq('Bash build: type is change', o.type, 'change');
-  truthy('Bash build: title starts with "Build/Deploy:"', o.title.startsWith('Build/Deploy:'));
-}
-// Trivial commands are skipped (null).
-eq('Bash trivial "ls": null', classifyObservation('Bash', { command: 'ls -la' }, '', ''), null);
-eq('Bash trivial "cd": null', classifyObservation('Bash', { command: 'cd /tmp' }, '', ''), null);
-
-// --- classifyObservation: Read ---
-// A significant source read is typed 'discovery'; an insignificant one is skipped.
-{
-  const o = classifyObservation('Read', { file_path: 'src/app.js' }, '', '');
-  eq('Read significant .js: type is discovery', o.type, 'discovery');
-  eq('Read significant .js: title is "Read app.js"', o.title, 'Read app.js');
-}
-eq('Read package-lock.json: null (skip)',
-  classifyObservation('Read', { file_path: 'package-lock.json' }, '', ''), null);
-eq('Read extensionless (Makefile): null (skip)',
-  classifyObservation('Read', { file_path: 'Makefile' }, '', ''), null);
-
-// A skip-pattern file read is skipped (null), even with a significant extension.
-eq('Read tsconfig.json: null (skip-pattern)',
-  classifyObservation('Read', { file_path: 'tsconfig.json' }, '', ''), null);
-eq('Read .env: null (skip-pattern)',
-  classifyObservation('Read', { file_path: '.env' }, '', ''), null);
-
-// --- classifyObservation: Grep ---
-// Grep is always captured as a 'discovery'; the path (when given) is a sourceFile.
-{
-  const o = classifyObservation('Grep', { pattern: 'TODO', path: 'src' }, '', '');
-  truthy('Grep: returns an observation', o);
-  eq('Grep: type is discovery', o.type, 'discovery');
-  truthy('Grep: title references the pattern', o.title.includes('TODO'));
-  eq('Grep: path captured in sourceFiles', JSON.stringify(o.sourceFiles), JSON.stringify(['src']));
-}
-// Grep without a path yields empty sourceFiles.
-{
-  const o = classifyObservation('Grep', { pattern: 'foo' }, '', '');
-  eq('Grep (no path): sourceFiles empty', JSON.stringify(o.sourceFiles), JSON.stringify([]));
-}
-
-// --- classifyObservation: Bash "Other significant" (>20 chars, no keyword) ---
-// A non-trivial command with no test/git/install/build keyword and length > 20
-// falls through to the generic 'discovery' capture ("Ran: <cmd>").
-{
-  const o = classifyObservation('Bash', { command: 'find . -name "*.config.js"' }, '', '');
-  truthy('Bash other-significant: returns an observation', o);
-  eq('Bash other-significant: type is discovery', o.type, 'discovery');
-  truthy('Bash other-significant: title starts with "Ran:"', o.title.startsWith('Ran:'));
-}
-// A short (<=20 char) non-trivial command is skipped.
-eq('Bash short non-trivial "make all": null',
-  classifyObservation('Bash', { command: 'make all' }, '', ''), null);
-
-// --- classifyObservation: Glob is always skipped; unknown tools skipped ---
-eq('Glob: null', classifyObservation('Glob', { pattern: '**/*.js' }, '', ''), null);
-eq('missing toolName: null', classifyObservation('', {}, '', ''), null);
-eq('unknown tool: null', classifyObservation('NotARealTool', {}, '', ''), null);
-
-// --- detectType keyword mapping (exercised via Write's prompt-driven type) ---
-// Keywords are checked in order bugfix → refactor → feature → discovery → decision;
-// first match wins. Use single-keyword prompts to avoid overlap.
-const detect = (prompt) => classifyObservation('Write', { file_path: 'x.js' }, '', prompt).type;
-eq('detectType: "bug" → bugfix', detect('there is a bug here'), 'bugfix');
-eq('detectType: "refactor" → refactor', detect('refactor the parser'), 'refactor');
-eq('detectType: "add" → feature', detect('add a new endpoint'), 'feature');
-eq('detectType: "investigate" → discovery', detect('investigate the slowdown'), 'discovery');
-eq('detectType: "choose" → decision', detect('choose the database'), 'decision');
-eq('detectType: no keyword → Write fallback feature', detect('just some neutral words'), 'feature');
-
-// --- extractConcept truncation cap (200 chars) ---
 {
   const long = 'z'.repeat(300);
-  const o = classifyObservation('Write', { file_path: 'x.js' }, '', long);
-  eq('extractConcept: caps concept at 200 chars', o.concept.length, 200);
-}
-// A short/empty prompt falls back to the provided default (not the prompt).
-{
-  const o = classifyObservation('Write', { file_path: 'x.js' }, '', '');
-  eq('extractConcept: empty prompt uses fallback', o.concept, 'New file: x.js');
+  const o = classifyObservation('Edit', { file_path: inProj('src/x.js'), old_string: long, new_string: long }, '', ctx);
+  eq('Edit concept caps each side at 80 chars', o && o.concept.length, 80 + 3 + 80);
 }
 
-// --- VALID_TYPES matches the set the DB accepts (memory-db saveObservation) ---
+// --- Writes that must NOT become rows ---
+eq('outside the project: null',
+  classifyObservation('Write', { file_path: path.join(OUTSIDE, 'x.js') }, '', ctx), null);
+eq('under a scratchpad: null',
+  classifyObservation('Write', { file_path: inProj('scratchpad/x.js') }, '', ctx), null);
+eq('under .claude/probe: null',
+  classifyObservation('Write', { file_path: inProj('.claude/probe/x.js') }, '', ctx), null);
+eq('a memory file under ~/.claude/projects: null',
+  classifyObservation('Write', { file_path: '/home/u/.claude/projects/-home-u-proj/memory/note.md' }, '', undefined), null);
+eq('Edit outside the project: null',
+  classifyObservation('Edit', { file_path: path.join(OUTSIDE, 'x.js'), old_string: 'a', new_string: 'b' }, '', ctx), null);
+eq('Write with no path: null', classifyObservation('Write', {}, '', ctx), null);
+
+// --- Every other tool is null, including the shapes the old classifier kept ---
+for (const [label, name, input, result] of [
+  ['Bash test run', 'Bash', { command: 'npm test' }, 'all good'],
+  ['Bash failing test run', 'Bash', { command: 'npm test' }, '1 FAIL'],
+  ['Bash git commit', 'Bash', { command: 'git commit -m "x"' }, ''],
+  ['Bash npm install', 'Bash', { command: 'npm install lodash' }, ''],
+  ['Bash docker build', 'Bash', { command: 'docker build .' }, ''],
+  ['Bash long find', 'Bash', { command: 'find . -name "*.config.js"' }, ''],
+  ['Bash trivial ls', 'Bash', { command: 'ls -la' }, ''],
+  ['Read of a source file', 'Read', { file_path: inProj('src/app.js') }, 'contents'],
+  ['Grep', 'Grep', { pattern: 'TODO', path: 'src' }, ''],
+  ['Glob', 'Glob', { pattern: '**/*.js' }, ''],
+  ['unknown tool', 'NotARealTool', {}, ''],
+]) {
+  eq(`${label}: null`, classifyObservation(name, input, result, ctx), null);
+}
+eq('missing toolName: null', classifyObservation('', {}, '', ctx), null);
+
+// --- isProjectFile directly, so a future caller has a contract to lean on ---
+eq('isProjectFile: inside', isProjectFile(inProj('src/a.js'), PROJ), true);
+eq('isProjectFile: the project root itself', isProjectFile(PROJ, PROJ), true);
+eq('isProjectFile: sibling dir sharing a prefix is outside',
+  isProjectFile(PROJ + '-sibling/a.js', PROJ), false);
+eq('isProjectFile: empty path', isProjectFile('', PROJ), false);
+eq('isProjectFile: backslash path with an excluded fragment',
+  isProjectFile('C:\\u\\proj\\scratchpad\\x.js', undefined), false);
+
+// --- VALID_TYPES still matches the set the DB accepts (memory-db saveObservation) ---
 {
   const dbAccepted = ['decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change'];
   eq('VALID_TYPES matches DB-accepted set',
@@ -161,5 +137,6 @@ cases.forEach(([label, ok]) => {
   console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
   ok ? pass++ : fail++;
 });
+try { fs.rmSync(PROJ, { recursive: true, force: true }); fs.rmSync(OUTSIDE, { recursive: true, force: true }); } catch {}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);
