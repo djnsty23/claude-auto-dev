@@ -214,6 +214,44 @@ you started work; in a shared clone it moves under you.
   shared history. Commit small and forward; never rewrite.
 - **Stage explicit paths, never `git add -A`** — the same concurrency sweeps
   another session's in-flight work into your commit.
+- **`process.exit()` after printing TRUNCATES, on macOS only.** node's
+  `process.stdout` is asynchronous when it is a PIPE on darwin, and synchronous
+  when it is a pipe on linux and win32; it is synchronous for a FILE and a TTY
+  everywhere. `process.exit()` does not drain a pending async write, so a script
+  that prints more than the 64KiB OS pipe buffer and then exits delivers exactly
+  65536 bytes — and exits 0, because the write never failed. 2026-09-07:
+  `rendered-layout-gate.js --json` did this with 84752 bytes of output, and its
+  suite had failed 2 of 282 on every mac in the project since the day it was
+  written while CI stayed green on `[ubuntu, windows]`.
+  Set `process.exitCode` and let the event loop drain; do not call
+  `process.exit()` on a path that has written to stdout.
+  **Three things hide it, and it used all three**: redirect to a file and the
+  write is synchronous so the output looks whole; run it on Linux CI and the
+  write is synchronous so CI is green; check the exit status and it is 0. Any
+  assertion here has to drive the subject through a PIPE and compare byte counts
+  against a FILE redirect — and assert the output EXCEEDS one buffer first, or
+  the comparison passes by construction on small fixtures.
+- **A pipe-vs-file byte check is a canary for ONE LARGE WRITE, and much weaker
+  for a stream of small ones.** `[measured 2026-09-08]` across the 19 scripts
+  that carried the truncation above: a `--json` branch emitting one 94KB
+  `console.log` stranded 29KB at the exit, while the human report on the SAME
+  fixture — 70KB, also over the buffer — lost nothing and stayed green under the
+  mutation. Hundreds of small writes drain opportunistically while the parent
+  reads; one big write does not. So a size assertion plus an equality is not
+  automatically a canary. Say in the test which of the two shapes it is grading,
+  or the green line reads as cover it does not give.
+  And where a subject's output is STRUCTURALLY BOUNDED — a fixed taxonomy, a
+  `slice(0, 10)` — no fixture can reach 64KiB and no threshold belongs there.
+  Assert the equality alone and record that the mutation leaves it green, rather
+  than planting a size check that can only ever fail for the wrong reason.
+- **A scripted rewrite of `process.exit(X)` into `return X` misses nested
+  parens.** `process.exit(rows.some((r) => r.bad) ? 1 : 0)` is two levels deep,
+  so a one-level regex skips it and leaves a function that returns everywhere
+  else and still exits there — half-converted, and silent. Match the argument by
+  COUNTING parens, then grep every touched file for a surviving `process.exit(`
+  before believing the conversion. Watch for files that carry the call as a
+  STRING: `find-orphan-checks.js` has `process\.exit\(1\)` inside its own
+  assertion-detecting regex, and a loose substitution rewrites the detector.
 - Avoid nested quoting in `node -e`; write a scratch file.
 
 ## Product repos
