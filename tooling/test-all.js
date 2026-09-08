@@ -110,19 +110,42 @@ function run(label, args) {
     cwd: repoRoot,
   });
   // spawnSync returns non-null `signal` if the child was killed, or a numeric
-  // `status`. Anything other than a clean 0 exit is a failure.
-  let ok;
+  // `status`.
+  //
+  // THREE OUTCOMES, NOT TWO. A suite that never ran, was killed, or exited 2
+  // produced NO VERDICT. Exit 2 is this repo's refusal/indeterminate
+  // convention — check-suites-can-fail.js has honoured it for as long as it
+  // has existed ("a child that REFUSED is not a child that FAILED"), and four
+  // suites end with `process.exit(process.exitCode === 2 ? 2 : ...)` precisely
+  // so an infrastructure problem cannot be read as a red verdict.
+  //
+  // [measured 2026-09-07] this aggregator threw that distinction away on the
+  // last step: `ok = res.status === 0` collapsed 2 into 1, and the summary
+  // printed a bare `FAIL  test-hook-execution-evidence` for a run whose own
+  // stderr said `infrastructure: the checker did not produce a verdict
+  // (ETIMEDOUT)`. On a loaded machine — several sessions running the gate at
+  // once is normal here — that is a session being handed somebody else's load
+  // as a red suite, with the one word that would have explained it discarded
+  // between the suite and the summary. The cost is not the red; it is the turn
+  // spent attributing it to a change that did not cause it.
+  //
+  // Indeterminate still exits non-zero: this reports honestly, it does not
+  // soften the gate. A run that graded nothing is not a run that passed.
+  let state;
   if (res.error) {
-    console.error(`\n[${label}] failed to spawn: ${res.error.message}`);
-    ok = false;
+    console.error(`\n[${label}] DID NOT RUN: ${res.error.code || res.error.message}`);
+    state = 'indet';
   } else if (res.signal) {
-    console.error(`\n[${label}] terminated by signal ${res.signal}`);
-    ok = false;
+    console.error(`\n[${label}] terminated by signal ${res.signal} before completing`);
+    state = 'indet';
+  } else if (res.status === 2) {
+    console.error(`\n[${label}] exited 2 — a refusal or indeterminate result, not a verdict`);
+    state = 'indet';
   } else {
-    ok = res.status === 0;
+    state = res.status === 0 ? 'pass' : 'fail';
   }
-  results.push([label, ok]);
-  return ok;
+  results.push([label, state]);
+  return state === 'pass';
 }
 
 for (const file of suites) {
@@ -161,22 +184,37 @@ if (treeBefore !== null) {
       for (const l of gone.slice(0, 15)) console.error('  was:  ' + l);
     }
     console.error('Every suite above exited 0. That is the point — no exit code can see this.');
-    results.push(['tree-inert', false]);
+    results.push(['tree-inert', 'fail']);
   } else {
-    results.push(['tree-inert', true]);
+    results.push(['tree-inert', 'pass']);
   }
 }
 
 // --- Summary ---
 console.log('\n──────── summary ────────');
 let failed = 0;
-for (const [label, ok] of results) {
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
-  if (!ok) failed++;
+let indeterminate = 0;
+const indetLabels = [];
+for (const [label, state] of results) {
+  console.log(`${state === 'pass' ? 'PASS ' : state === 'fail' ? 'FAIL ' : 'INDET'}  ${label}`);
+  if (state === 'fail') failed++;
+  else if (state === 'indet') { indeterminate++; indetLabels.push(label); }
 }
 console.log(
-  `\n${results.length - failed}/${results.length} suites passed` +
-    (failed ? ` — ${failed} FAILED` : '')
+  `\n${results.length - failed - indeterminate}/${results.length} suites passed` +
+    (failed ? ` — ${failed} FAILED` : '') +
+    (indeterminate ? ` — ${indeterminate} INDETERMINATE` : '')
 );
+if (indeterminate) {
+  console.log(
+    '\nINDETERMINATE means the suite produced no verdict — it did not run, was killed,\n' +
+    'or refused (exit 2). Its own stderr above names the cause. These are NOT evidence\n' +
+    'that anything is broken in the code under test, and on a loaded machine they are\n' +
+    'usually starvation rather than a regression. Re-run them alone on a quiet machine\n' +
+    'before attributing them to a change:\n' +
+    indetLabels.map((l) => '  node tooling/' + l + '.js').join('\n')
+  );
+}
 
-process.exit(failed > 0 ? 1 : 0);
+// Both still fail the gate: a run that graded nothing has not passed.
+process.exit(failed > 0 || indeterminate > 0 ? 1 : 0);
