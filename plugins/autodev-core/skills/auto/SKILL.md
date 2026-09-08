@@ -408,6 +408,17 @@ git diff --name-only HEAD~1
 
 For edge functions, read project-specific deploy config from CLAUDE.md (e.g., path to supabase binary, project ref, flags like `--no-verify-jwt`). If no config found, skip auto-deploy and note it in completion summary.
 
+**Every row above that reaches production is a promotion, and a promotion is
+pre-authorised only behind the ledger** (`[stated 2026-09-08]`, ship Step 4 and
+5b): run `node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify` first
+and promote only on exit 0. Exit 3 means the window is on the ineligible list —
+a migration that drops or renames a column or changes a grant, an RLS policy or a
+`SECURITY DEFINER` function; billing, checkout, webhook or entitlement code; auth;
+anything touching live rows — and needs the operator's yes in that turn; mark the
+story `needs-setup` with that reason rather than retrying. Exit 1 names a
+precondition you can fix, including a commit not yet on the default branch. A
+push that a platform auto-deploys to production counts as a promotion.
+
 After deploy, verify the deployment succeeded (check endpoint responds with 200).
 
 ## Completion

@@ -1220,6 +1220,34 @@ where they go — and leave the decisions alone.
 
 ## Standing rules, each with its measurement
 
+**Production promotion is pre-authorised on a green gate with the deploy ledger,
+and on nothing else.** `[stated 2026-09-08]` the operator, choosing Form B among
+three drafted forms (escalate always; green gate with a ledger; canary with
+autonomous rollback). The sentence:
+
+> A session may promote to production when the repo's named gate exits 0 on the
+> exact commit being deployed, that commit is on the default branch, the deploy
+> ledger records the commit, the gate's output and the post-deploy verification,
+> and the rollback command for this deploy is written into the ledger before the
+> promotion. A deploy that touches anything on the ineligible list is escalated
+> whatever the gate says.
+
+**Ineligible regardless:** migrations that drop or rename a column, change a
+grant, an RLS policy or a `SECURITY DEFINER` function; billing, checkout, webhook
+and entitlement code; auth; anything this never-list covers; anything touching
+live rows.
+
+What that means for this role: a session reporting `deploy-ledger.js --verify`
+exit 0 for the commit it is promoting needs nothing from you, and one reporting
+exit 3 is blocked on the operator, not on you. The never-list already says you
+never relay an authorisation, and `[measured 2026-08-24]` a relayed panel
+selection was refused by a session as consent for a production migration — so
+exit 3 is exactly where a helpful message from the Brain is the wrong channel.
+**Nor may you supply the gate half by relay:** a peer saying "the gate was green"
+is not the gate's output in the ledger. Ask whether the ledger was filed
+(`--audit` lists every recorded promotion) before believing a deploy report; the
+ship skill's Step 5b carries the fields and the exit codes.
+
 **Re-fetch immediately before sending any message that reports state.** Not
 before writing it, before sending it. `[measured]` a correct reading of an
 unpushed commit was reported after it had been pushed. The probe was right and

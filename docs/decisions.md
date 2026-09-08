@@ -3,6 +3,60 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: production promotion is pre-authorised on a green gate with the ledger (Form B)
+
+The question was which of three deploy policies a session may act on without a
+panel: escalate every promotion (A), pre-authorise behind a green gate and a
+filled ledger (B), or B plus a canary with autonomous rollback (C). The operator
+chose B, `[stated 2026-09-08]`. The sentence: a session may promote when the
+repo's named gate exits 0 on the exact commit, that commit is on the default
+branch, the ledger records the commit, the gate's output and the post-deploy
+verification, and the rollback command is written into the ledger before the
+promotion — and anything on the ineligible list escalates whatever the gate says.
+
+Provenance is the part worth recording, because PR #201 refused a weaker version
+of this question and was right to: an away-hook self-resolution of the same panel
+is logged as BLOCKED and was not acted on. What authorises this is two first-hand
+statements — an interactive panel in the coordinating session with the away window
+over, and the operator's own words in the implementing session. A peer relay would
+have been neither.
+
+What landed: `deploy-ledger.js --verify` is now the authorisation. Exit 0 means
+promote, and it prints nothing; 1 names an unmet precondition (a surface, a
+metric, a promotion field, or a commit not on the default branch); 2 means nothing
+was decided; 3 means ineligible and needs the operator's yes in that turn. The
+record carries the commit, the gate with its exit and last lines, the `prove`
+evidence pair, the rollback command and the standing rule by date. `--record`
+files it per promotion and `--audit` lists what was filed.
+
+Three choices inside that. Eligibility is checked before any field, because an
+ineligible window is not fixed by filling a form. A project with no
+deploy-sensitive marking gets a refusal with the instruction to add one rather
+than a pass, on the same reasoning as a missing deploy ref: an unasked question
+and a clean answer must not print the same. And the gate's output is recorded
+rather than queried from a forge — `[measured 2026-09-08]` a count of non-success
+check-runs returned 1 on a commit whose green round was complete, because two
+re-runs were still in progress, so any future CI reader must group by job name
+and never read the run rollup.
+
+**A measured decision was reversed on the operator's list, and that is the useful
+part.** An earlier draft measured that all 12 `DROP POLICY` statements in a
+product repo's migrations are recreated in the same file, concluded a policy drop
+is a recreate pattern rather than a risk, and pinned it as ELIGIBLE in its own
+selftest. The list says an RLS change escalates regardless. The measurement was
+right about the syntax and wrong about the question: "does this file put the
+policy back" is not "is the policy it puts back the same policy", and a recreate
+is where an RLS mistake hides. Under the six rules that corpus scores 195
+ineligible lines where the narrow rule scored 0 — grant 98, rls 37,
+security-definer 35, live-rows 25 — so nearly every migration escalates, which is
+the intended reading rather than a defect.
+
+Implementation record, the corpus measurement and the refusals the suite was
+watched making: `docs/evidence-deploy-implementation-2026-09-08.md`. The baseline
+evidence — the sample of 20 deployments, the incidents, the three sentences — is
+another session's and stays on PR #201 at
+`docs/evidence-deploy-authorisation-2026-09-08.md`; this branch does not touch it.
+
 ## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
 
 The brief was to make workflow runs survive the session quota wall, on the
