@@ -99,8 +99,10 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         + 'and the work tree or --git-dir is outside the home repos that role file declares.\n'
         + 'pull and fetch are excluded: a coordinator updating a clone to READ it is the job.\n'
         + 'Role file: $AUTODEV_BRAIN_ROLE_FILE, else ~/.claude/brain-role.json. Absent = inert.\n'
-        + 'Also ASKS (permissionDecision: ask on stdout) before git commit/push/merge/rebase/cherry-pick/am\n'
-        + 'with --no-verify, commit/am -n, or -c core.hooksPath=; the justification belongs in the commit or PR body.');
+        + 'Also ASKS (permissionDecision: ask on stdout) before git commit/push/merge/rebase/cherry-pick/am, but only\n'
+        + 'when a bypass flag is present: --no-verify, commit/am -n, or -c core.hooksPath=. In an unattended run\n'
+        + '(AI_AGENT ends _harness, or CLAUDE_CODE_ENTRYPOINT starts sdk-) the same text is a note, not a gate.\n'
+        + 'Either way the justification belongs in the commit or PR body.');
     process.exit(0);
 }
 
@@ -404,13 +406,32 @@ try {
         bypass = lib.findHookBypass(command, cwd);
         bypassReason = lib.bypassReason;
     }
+    //
+    // AN ASK NOBODY CAN ANSWER IS A DENIAL, and this repo has legitimate
+    // bypasses, so an unattended session that cannot push is a stall, not a
+    // save. [measured 2026-09-08] a hook under `claude -p` from a clean
+    // environment sees CLAUDE_CODE_ENTRYPOINT=sdk-cli and AI_AGENT ending
+    // _harness; this desktop session sees claude-desktop and _agent. A -p run
+    // nested inside the desktop session INHERITS the entrypoint but the child
+    // still sets its own AI_AGENT suffix, so both are read and either one means
+    // unattended. There the same text goes out as additionalContext with no
+    // permissionDecision: the model is told what it is skipping and where the
+    // record goes, and is not gated on an answer nobody can give. An
+    // interactive terminal session was not measured; if it were ever read as
+    // unattended it would get the note instead of the prompt, which fails soft.
+    const unattended = /_harness$/.test(process.env.AI_AGENT || '')
+        || /^sdk-/.test(process.env.CLAUDE_CODE_ENTRYPOINT || '');
     const allow = () => {
         if (bypass) {
-            process.stdout.write(JSON.stringify({ hookSpecificOutput: {
-                hookEventName: 'PreToolUse',
-                permissionDecision: 'ask',
-                permissionDecisionReason: bypassReason(bypass),
-            } }) + '\n');
+            const reason = bypassReason(bypass);
+            const out = { hookEventName: 'PreToolUse' };
+            if (unattended) {
+                out.additionalContext = '[no-verify] Unattended run, so this is a note rather than a question: ' + reason;
+            } else {
+                out.permissionDecision = 'ask';
+                out.permissionDecisionReason = reason;
+            }
+            process.stdout.write(JSON.stringify({ hookSpecificOutput: out }) + '\n');
         }
         process.exit(0);
     };

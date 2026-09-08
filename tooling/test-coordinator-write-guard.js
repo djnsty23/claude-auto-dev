@@ -52,7 +52,9 @@ function run({ roleFile = ROLE, payload, raw = null, args = [], env = {} }) {
     const r = spawnSync(process.execPath, [HOOK, ...args], {
         input,
         encoding: 'utf8',
-        env: { ...process.env, AUTODEV_BRAIN_ROLE_FILE: roleFile, ...env },
+        // The ATTENDED spelling of the two unattended-run signals is pinned, so
+        // the ask cases below hold when this suite itself runs under `claude -p`.
+        env: { ...process.env, AI_AGENT: 'claude-code_suite_agent', CLAUDE_CODE_ENTRYPOINT: 'cli', AUTODEV_BRAIN_ROLE_FILE: roleFile, ...env },
         timeout: 20000,
     });
     return {
@@ -758,6 +760,41 @@ expectSilentAllow('a plain push stays silent', noRole('git push origin HEAD'));
         shellWords('git -C /a\\ b/repo commit -n')[0][2] === '/a b/repo');
     check('  and an escaped quote is still a quote',
         shellWords('git commit -m it\\"s -n')[0][3] === 'it"s');
+}
+
+// UNATTENDED: THE SAME TEXT AS A NOTE, NOT A QUESTION. An ask nobody can
+// answer is a denial, and a headless session that cannot push is a stall. The
+// hook reads two signals measured under `claude -p` on 2026-09-08 (AI_AGENT
+// ending _harness; CLAUDE_CODE_ENTRYPOINT starting sdk-); every other case in
+// this suite pins the ATTENDED spelling of both in run()'s env, so this suite
+// still asserts asks when it is itself run from a headless session.
+{
+    const headlessEnv = (over) => ({ AI_AGENT: 'claude-code_suite_agent', CLAUDE_CODE_ENTRYPOINT: 'cli', ...over });
+    const note = (command, envOver) => {
+        const res = run({ roleFile: ABSENT, payload: bash(command), env: headlessEnv(envOver) });
+        let out = null;
+        try { out = JSON.parse(res.stdout).hookSpecificOutput; } catch { out = null; }
+        return { res, out };
+    };
+    for (const [label, envOver] of [
+        ['AI_AGENT ending _harness', { AI_AGENT: 'claude-code_2-1-233_harness' }],
+        ['CLAUDE_CODE_ENTRYPOINT starting sdk-', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }],
+    ]) {
+        const { res, out } = note('git push --no-verify origin HEAD', envOver);
+        check(`unattended (${label}): a bypass is a NOTE, not an ask`,
+            res.exit === 0 && res.stderr.length === 0 && !!out && out.permissionDecision === undefined
+            && /^\[no-verify\] Unattended run/.test(out.additionalContext || ''),
+            `exit ${res.exit}, stderr ${res.stderr.length}B, stdout ${JSON.stringify(res.stdout.slice(0, 100))}`);
+        check(`  and the note still names the gate and where the record goes`,
+            !!out && /pre-push hook/.test(out.additionalContext || '') && /commit or PR body/.test(out.additionalContext || ''));
+    }
+    expectSilentAllow('unattended: a plain push is still silent',
+        run({ roleFile: ABSENT, payload: bash('git push origin HEAD'), env: headlessEnv({ AI_AGENT: 'claude-code_2-1-233_harness' }) }));
+    // CONTROL, different provenance from the two positives: the attended
+    // spelling of both signals gets the question. Without this, a hook that
+    // always emitted the note would pass the pair above.
+    expectAsk('CONTROL: the attended spelling of both signals still asks',
+        run({ roleFile: ABSENT, payload: bash('git push --no-verify origin HEAD'), env: headlessEnv({}) }), /pre-push/);
 }
 
 // Interaction with the ban: a block wins, and a permitted write is still asked.
