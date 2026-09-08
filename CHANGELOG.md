@@ -1,5 +1,56 @@
 # Changelog
 
+## [8.166.0]
+
+### The shipped defect this release exists for
+
+- **`agent-browser-cleanup` no longer kills by name pattern.** It ran
+  `execSync('pkill -f "agent-browser-(linux|darwin)"')`, which selects by
+  command-line regex — on a machine where every concurrent session runs the same
+  command names, that matched every peer's browser rather than the caller's. It
+  now kills by pid from its own registry, and the suite runs decoys matching the
+  production pattern and requires them to SURVIVE. Corroborated the same day by an
+  unrelated tool with the identical shape: a sweep of `check-suites-wt-*`
+  worktrees hit peers' in-flight runs, which then reported INDETERMINATE with no
+  stated cause. (#217)
+
+### Two gates that grade what prose claims
+
+- **`check:claude-md`** grades CLAUDE.md's mechanically checkable claims against
+  the tree — the gate step count derived from `package.json`, the `passes` state
+  table against `prd-states.js`, branch protection against the API. It caught real
+  drift within hours of landing. (#210, #212)
+- **`check:agents-md`** generates AGENTS.md from the `rule-*` skills and fails on
+  drift, so a Codex session reading AGENTS.md sees what a Claude session reading
+  the skills sees. (#198)
+
+The gate is now **eight steps**.
+
+### Security
+
+- **production-radar refuses a credential destination by name before reading the
+  credential.** A repo-local config could name any environment variable AND any
+  host, and exit 0. Redaction also moved to the point values ENTER the record,
+  before any transform — `clip()` collapsed whitespace and truncated before the
+  scrub ran, so a newline-containing secret survived in plaintext. (#196)
+
+### Deploy policy
+
+- **Form B** is recorded: a session may promote when the named gate exits 0 on the
+  exact commit, the commit is on the default branch, the ledger records commit +
+  gate output + verification, and the rollback command is in the ledger BEFORE
+  promotion. The ineligible list escalates regardless. (#201)
+
+### Gate and suite integrity
+
+- A timeout is not a verdict: three suites each said so differently, and
+  `check:suites` exit 2 is INDETERMINATE rather than red. (#183, #197)
+- `fleet-overlap` scores the files a worktree touched rather than words in its
+  title. (#189)
+- `check-doc-staleness` names the tree it read and the corpus it did not. (#187)
+- A suppressor that fires zero times may be incapable rather than unexercised.
+  (#188)
+
 ## [8.165.0] - 2026-09-08
 
 One feature and two gate fixes, with the docs that measured them. Cut now
