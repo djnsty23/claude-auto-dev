@@ -464,6 +464,49 @@ try {
         eq('...and printing no report at all', r.stdout, '');
     }
 
+    // -----------------------------------------------------------------------
+    // The pipe delivers every byte — AND WHAT THIS PAIR CANNOT DO.
+    //
+    // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+    // synchronous when it is a pipe on linux/win32, and process.exit() does not
+    // drain a pending async write, so a run that prints past the 64KiB OS pipe
+    // buffer and then exits hands its caller exactly 65536 bytes under a status
+    // that says nothing failed. That is the shape rendered-layout-gate.js
+    // shipped with until 2026-09-07, and it is why this subject's exit is now
+    // process.exitCode rather than process.exit().
+    //
+    // THIS SUBJECT CANNOT BE DRIVEN OVER THE BUFFER, from a fixture or from a
+    // real repository. Its output is structurally bounded: `classes` is at most
+    // the eight CLASSES entries carrying three 110-character examples each, and
+    // `hotFiles` is capped at ten, so --json lands near 3KB whatever the history
+    // behind it. The sibling suites in this series assert a SIZE first, because
+    // there the pipe-versus-file comparison would otherwise pass by
+    // construction; here there is no size to assert, and saying so is more
+    // honest than planting a threshold the fixture can never reach.
+    //
+    // So these two lines state the equality and NOTHING MORE. They cannot catch
+    // the regression on their own — mutation-checked, they stay green with
+    // process.exit(main()) restored. What keeps this file honest is that its
+    // exit is the one shape the whole series uses, and that shape is measured
+    // where it can be: see tooling/test-drift-audit-config.js, which drives the
+    // same defect past 64KiB for 0.07s of fixture.
+    {
+        const viaFileBytes = (args) => {
+            const out = path.join(fixture, 'via-file.out');
+            const fd = fs.openSync(out, 'w');
+            spawnSync(process.execPath, [SUBJECT, ...args],
+                { stdio: ['ignore', fd, 'ignore'], env: { ...process.env, ...GIT_ENV } });
+            fs.closeSync(fd);
+            return fs.statSync(out).size;
+        };
+        const jsonPipe = run([REPO, '--json']);
+        eq('--json through a PIPE delivers every byte it writes to a FILE',
+            Buffer.byteLength(jsonPipe.stdout, 'utf8'), viaFileBytes([REPO, '--json']));
+        const reportPipe = run([REPO]);
+        eq('the human report through a PIPE also delivers every byte',
+            Buffer.byteLength(reportPipe.stdout, 'utf8'), viaFileBytes([REPO]));
+    }
+
 } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
 }
