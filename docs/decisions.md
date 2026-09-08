@@ -3,49 +3,94 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
-## 2026-09-08: needs-setup gets a writer, a manifest and a line of its own
+## 2026-09-08: AGENTS.md is generated from the rule-* skills, gated, and kept under a hand-written half
 
-The five-state table has said since August that `needs-setup` is remaining work
-an agent cannot move. `[measured 2026-09-08]` on the trunks of three product
-repos the state had been written once, against 75 writes of `deferred`, while
-six of one client repo's ten pending stories were waiting on a person (a CI
-variable, a partner's API, three decisions) and had sat as `passes: null` for
-56 to 122 days. The semantics did not change; what was missing was any
-mechanism that wrote the state, and any line that read it back to the person.
-Three changes, each measured against doing nothing and one variant, in
-`docs/evidence-needs-setup-2026-09-08.md`:
+The 16 always-on `rule-*` skills (128,794 bytes) load into every Claude Code
+session by path glob; a Codex session in the same repo read a 4,200-byte
+hand-written `AGENTS.md` and never saw them, which mattered because Codex is the
+adversarial auditor here. The reference harness we compared against in the entry
+below scores 9 on portability with a hand-maintained `AGENTS.md` that was five
+months stale, so "hand-maintain a copy" was the failure to design against.
 
-- **`spec` emits setup stories on day one.** SPEC.md gains a mechanical
-  `## External services` section; each item becomes a `type: "setup"` story
-  born `needs-setup`, with the handback in `blockedReason` and dependents
-  pointing at it through `blockedBy`. `check-spec-output.js --spec SPEC.md`
-  fails a spec with no such section when its prose names a service. A lexicon
-  hard-fail was measured first and rejected: 35 of 49 hits on real prose were
-  integrations, 14 were mentions, and "Slack-style preview" would have failed
-  the one real spec. The section is the verdict; the lexicon only guards its
-  absence. That spec, committed as a fixture, passed the old gate on
-  2026-09-07 and fails the new one.
-- **`auto` marks on handback through one script.** `prd-mark-needs-setup.js`
-  is the only writer: mark, `--clear`, `--list`; refuses an unknown id, a
-  `true` or `deferred` story and an empty reason; idempotent. The handback
-  lives in `blockedReason`, not `notes`, because `notes` is the acceptance
-  criterion the agent verifies once the person says done. `--clear` returns
-  the story to `null`, not `true`, for the same reason.
-- **`status` and the Stop hook name who is waited on.** "Blocked on you: N
-  (ids)" is its own line, and the hook's sprint-complete reason lists the ids
-  it computed and had never printed. A needs-setup-only backlog reaching
-  `approve` is now pinned by a test; the old suite asserted "Sprint complete"
-  and stopped there.
+Decision: `tooling/generate-agents-md.js` distils each rule into its description,
+its `paths:` globs, its first paragraph, and every paragraph carrying a dated
+claim; `npm run check:agents-md` regenerates to a temp path and fails the gate
+when the committed file drifts. Everything above the GENERATED marker stays
+hand-written and is copied through verbatim, so the Codex-only facts keep their
+home. Measured over the real rules (`--measure`): full bodies 128,384 bytes,
+this shape 21,233 keeping 25 of 25 dated claims, the brief's literal "dated
+lines" shape 14,673 keeping 2 of 25 because no marker begins a line, descriptions
+alone 7,044 keeping 0. The effect on Codex's answers is COULD NOT CHECK: the CLI
+is not installed on this machine. Evidence and the exact question to ask once it
+is: `docs/evidence-agents-md-2026-09-08.md`.
 
-`blockedBy` was not invented: `auto`'s selector had read it for months and one
-repo carries it on every story. It gained a shared reader, `isReady()`, beside
-the five states. The CLAUDE.md table is unchanged and `prd-states.js`'s states
-are unchanged, which is the invariant the brief asked to preserve.
+Two choices made while landing it. **The step is last in the chain**, not
+first: it takes milliseconds and its only failure is a stale document, so last
+it can never hide an expensive step behind it, and the brief's instruction to
+put it in the chain is met without adding a place for a red to conceal the
+steps that catch real defects. **The first gate run was three reds that were
+not this change.** `validate` (`hooks module ./fn/autodev-fn.mjs failed the
+host's scan`), `test-validate`, and `test-rendered-layout-gate` (`2 of 282`)
+reproduced identically on an untouched HEAD worktree and serially, with CI on
+main green; the `claude` CLI itself exits with a Bun ENOENT on this machine.
+Both roots landed on main the same evening (#184 and #191), the branch was
+rebased onto them, and `validate` went to 19 PASS 0 FAIL, so the push went
+through the pre-push hook without `--no-verify`. Written down because the
+alternative that night was to push around the hook and leave the reason
+implicit.
 
-Two premises of the brief were measured on stale checkouts (353 and 387
-commits behind their trunks) and are corrected in the evidence document. The
-class is real and small: six live stories, all in one client repo, listed
-there as a proposal for its owner rather than committed.
+## 2026-09-08: memory recall measured at zero; ranked injection built and not shipped
+
+The question was whether the autodev-memory store is ever read back, and
+whether injecting a ranked slice of it at session start (the ECC design, up
+to 8 KB) would beat the current 91-byte line. Both were measured before any
+change; the record is `docs/evidence-memory-recall-2026-09-08.md`.
+
+**Recall.** Six evidence shapes were written down first, then searched for
+across 281 transcripts (2026-08-15 to 2026-09-07), `history.jsonl` and
+`bash-commands.log`. Skill invocations of `mem-search`: 0. The injected line
+quoted by any assistant: 0. Genuine queries of the store: 1, made with the
+CLI's `<project> <query>` arguments swapped, returning `[]` twice and read as
+"nothing there". Every other hit was a session developing or measuring the
+plugin itself.
+
+**Content.** A stratified 40-row sample, read row by row: 0 rows hold a fact
+a later session needs and could not get from git in a minute, 21 are
+derivable, 19 are noise. Weighted by the store's type mix that is about 92 %
+noise, because 90 % of the 6,072 rows are `Ran:`/`Tests`/`Read`/`Git:` echoes
+of a command line. The `type` comes from a keyword in the user's prompt, so
+scratch files are filed as bugfixes; the `concept` column IS the prompt, and
+383 rows carry another session's message as theirs.
+
+**Injection.** A ranked variant (recency × type weight × FTS match on branch
+and last five subjects, stale-file rows excluded, byte-capped) was built and
+run against the four real project paths at 2 KB and 8 KB. It injected 40 and
+154 observation lines respectively; 0 were actionable, 28 and 118 were
+misleading (wrong labels, repeats, scratch files, prompts describing a state
+the row's own session changed, and at 8 KB a production hostname and
+production secret-manager commands). Cost was about 300 ms over the current
+hook, which does not matter given the content.
+
+**Decision.** Keep the one-liner. No new hook. The store is left untouched;
+the evidence record carries a pruning proposal by shape (about 5,900 of 6,072
+rows) with the counts, for a person to act on after re-taking them. The ECC
+"memory 6 v 6" row is level at zero on both sides, not at six.
+
+Landed as this entry and the evidence document, no version bump.
+
+**Follow-on, same day.** The closing panel was held by the operator's away
+window, whose protocol takes the recommended reversible option and logs it.
+That option was the evidence doc's proposals 1 to 6: capture records only
+Write and Edit inside the project, typed by the tool, with the edit as the
+concept and one row per (session, type, title); the prompt-capture hook and
+its carrier are removed; the CLI refuses a swapped `<projectPath> <query>`.
+Those change four hook files under `plugins/`, which is the review class in
+the merge policy, so they are PR #190 with a reviewer, not this entry. Their
+per-change counts are in that PR's `docs/DECISIONS-2026-09-08-memory-recall.md`.
+The existing rows were left alone under the protocol; after the window ended
+the operator confirmed the count on a panel and the prune ran, 6,972 of
+7,480 rows removed with a verified backup first.
+
 ## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
 
 The brief was to make workflow runs survive the session quota wall, on the

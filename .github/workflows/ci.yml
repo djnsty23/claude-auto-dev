@@ -100,3 +100,13 @@ jobs:
       - name: Skill bodies declare the tools they mandate
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:skill-tools
+
+      # AGENTS.md's generated half is distilled from the rule-* skills, so a
+      # Codex session in this repo sees the conventions it audits against. This
+      # regenerates to a temp path and diffs against the committed file: exit 1
+      # when a rule changed and AGENTS.md did not. Linux only because the
+      # comparison is byte-exact and a CRLF checkout would be a red about line
+      # endings, not about drift.
+      - name: AGENTS.md matches the rules it is generated from
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:agents-md
