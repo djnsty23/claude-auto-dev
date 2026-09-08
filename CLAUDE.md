@@ -153,7 +153,7 @@ cannot work — if core needs a file, core ships it.
 **That sentence carried four counts until 2026-09-08, and three of them were
 wrong.** It was written on 2026-08-17 as "43 skills, 4 agents, 7 hook events"
 for core and "4 hook events" for memory, and all four were exact that day.
-`[measured 2026-09-08]` core has **58 skills, 5 agents and 10 hook events**;
+`[measured 2026-09-08]` core has **59 skills, 5 agents and 10 hook events**;
 memory's 4 is still right, and it is right because nobody has added a memory
 hook, not because anything checks.
 
