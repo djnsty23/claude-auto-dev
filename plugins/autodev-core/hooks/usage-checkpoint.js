@@ -193,6 +193,7 @@ function git(args, cwd, timeout, stdin) {
         const r = spawnSync('git', args, {
             cwd,
             encoding: 'utf8',
+            windowsHide: true,
             timeout: timeout || GIT_TIMEOUT_MS,
             input: stdin === undefined ? undefined : stdin,
             maxBuffer: 32 * 1024 * 1024,
@@ -313,6 +314,7 @@ function windowCost() {
         if (!fs.existsSync(source)) return null;
         const r = spawnSync(process.execPath, [source, '--json', '--days', '0'], {
             encoding: 'utf8',
+            windowsHide: true,
             timeout: QUOTA_TIMEOUT_MS,
             maxBuffer: 8 * 1024 * 1024,
         });
