@@ -53,6 +53,11 @@ role. Where this runtime has no compatible registry, use its native agent return
 channel and state that Claude's fleet hooks do not cover it. Notify existing
 workers of an address change only within the user's authorized coordination.
 
+When the record is `degraded`, use its positively verified reachable address
+for existing work and re-stamp the stale field before broadcasting the record.
+A decayed peer name does not mean the coordinator disappeared. A `fault` or
+unchecked address requires diagnosis; a missing check is not proof of death.
+
 ## 2. Turn the mission into executable outcomes
 
 Read `SPEC.md`, `prd.json`, decisions and resume state at named refs. Fetch before

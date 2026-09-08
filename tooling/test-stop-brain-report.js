@@ -245,8 +245,84 @@ const LIVE = (() => {
     commitIn(repo2, 'v2 delivered\n');
     const ok = spoke(run({ input: { session_id: 's5', cwd: repo2 }, roleFile: liveRole, stateFile: state2, env: LIVE.env }));
     check('  control: a live record in the same fixture is handed out as an address',
-        !!ok && /Message it before you go quiet: peer name `brain-peer`, desktop session id `local_brain-desk`/.test(ok.hookSpecificOutput.additionalContext),
+        !!ok && /Message it before you go quiet: desktop session id `local_brain-desk`, peer name `brain-peer`/.test(ok.hookSpecificOutput.additionalContext),
         ok ? ok.hookSpecificOutput.additionalContext.split('\n')[1] : 'silent');
+}
+
+// --- a PARTLY stale role file: the case that was wrong five times ------------
+/* `[measured 2026-09-08]` `peer_name` takes a fresh suffix on every restart --
+   one coordinator's went -c1 -> -d2 -> -ab -> -31 -> -a7 in a day -- while
+   `desktop_session_id` did not move. This hook read `state === 'fault'` and told
+   five sessions "nobody can be reached ... report to the operator instead",
+   while check-brain-role's own text on the SAME call said "PARTLY STALE AND
+   STILL REACHABLE. Use desktop session id ...". Every one of those sessions
+   reached the coordinator at that address anyway; a less suspicious one would
+   have woken a person for nothing, which is the failure this hook exists to
+   prevent.
+
+   All three states are driven here from FIXTURES rather than argued about: a
+   wholly live record (above), this one, and a wholly dead one (above). */
+{
+    const repo = makeRepo();
+    // Live session_id and a live desktop record; only the peer suffix decayed.
+    const role = writeRole({ session_id: 'brain-1', peer_name: 'brain-peer-a7', desktop_session_id: 'local_brain-desk', home_repos: ['C:/somewhere/coordinator'] });
+    const state = stateFilePath();
+
+    run({ input: { session_id: 's6', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    commitIn(repo, 'v2 delivered\n');
+    const fired = run({ input: { session_id: 's6', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    const j = spoke(fired);
+    const ctx = j ? j.hookSpecificOutput.additionalContext : '';
+
+    check('partly stale role: the hook speaks', !!j, fired.out.slice(0, 120));
+    check('  it hands out the address that RESOLVES',
+        /Message it before you go quiet: desktop session id `local_brain-desk`/.test(ctx), ctx.split('\n')[1]);
+    check('  it does NOT send the session to the operator',
+        !/operator/.test(ctx), ctx);
+    check('  it does NOT claim the record names no live coordinator',
+        !/DOES NOT NAME A LIVE COORDINATOR/.test(ctx) && !/Nobody can be reached/.test(ctx), ctx.split('\n')[0]);
+    check('  it names the stale FIELD, and as a field rather than an address',
+        /PART OF THE ROLE FILE IS STALE/.test(ctx) && /`peer_name` \(not the name of any live session\)/.test(ctx)
+        && /a field to re-stamp, not an address/.test(ctx), ctx.split('\n')[2]);
+    check('  it does not offer the decayed peer name as an address',
+        !/Message it before you go quiet[^\n]*brain-peer-a7/.test(ctx), ctx.split('\n')[1]);
+    check('  it still does NOT emit session_id as an address',
+        !/brain-1/.test(ctx), ctx);
+    check('  and never by cwd', !/by cwd/.test(ctx) && !/somewhere\/coordinator/.test(ctx));
+    check('  it does NOT block the turn', fired.status === 0 && !!j && !('decision' in j), 'exit=' + fired.status);
+
+    /* THE CONTROL THAT KEEPS THE ABOVE FROM BEING UNCONDITIONAL: the same
+       decayed peer name with a desktop record that is ALSO gone. Nothing
+       reaches, so the escalation is correct and must still happen. Without this
+       pair, a hook that never escalates passes the block above. */
+    const repo2 = makeRepo();
+    const state2 = stateFilePath();
+    const gone = writeRole({ session_id: 'brain-dead', peer_name: 'brain-peer-a7', desktop_session_id: 'local_brain-desk-old' });
+    run({ input: { session_id: 's7', cwd: repo2 }, roleFile: gone, stateFile: state2, env: LIVE.env });
+    commitIn(repo2, 'v2 delivered\n');
+    const dead = spoke(run({ input: { session_id: 's7', cwd: repo2 }, roleFile: gone, stateFile: state2, env: LIVE.env }));
+    const deadCtx = dead ? dead.hookSpecificOutput.additionalContext : '';
+    check('  control: when NOTHING resolves, the operator is still the answer',
+        /DOES NOT NAME A LIVE COORDINATOR/.test(deadCtx) && /Report to the operator instead/.test(deadCtx)
+        && !/PART OF THE ROLE FILE IS STALE/.test(deadCtx), deadCtx.split('\n')[1]);
+
+    /* ABSENT COVERAGE MUST NOT READ AS COVERAGE, in either direction. The same
+       partly-stale record with no readable desktop store: the desktop id may
+       well be alive and nothing read it, so this must NOT reach the degraded
+       branch (a green from a check that never ran), and must NOT claim nobody
+       can be reached either. */
+    const repo3 = makeRepo();
+    const state3 = stateFilePath();
+    run({ input: { session_id: 's8', cwd: repo3 }, roleFile: role, stateFile: state3, env: Object.assign({}, LIVE.env, { CLAUDE_SESSION_STORE: path.join(os.tmpdir(), 'sbr-no-such-store') }) });
+    commitIn(repo3, 'v2 delivered\n');
+    const unchecked = spoke(run({ input: { session_id: 's8', cwd: repo3 }, roleFile: role, stateFile: state3, env: Object.assign({}, LIVE.env, { CLAUDE_SESSION_STORE: path.join(os.tmpdir(), 'sbr-no-such-store') }) }));
+    const unCtx = unchecked ? unchecked.hookSpecificOutput.additionalContext : '';
+    check('  an UNCHECKED address does not reach the degraded branch',
+        !!unchecked && !/PART OF THE ROLE FILE IS STALE/.test(unCtx)
+        && !/Message it before you go quiet/.test(unCtx), unCtx.split('\n')[1]);
+    check('  and it is not called dead either: it says what went unchecked',
+        /`desktop_session_id` \(no readable desktop store/.test(unCtx)
+        && /could not be checked/.test(unCtx) && !/Nobody can be reached/.test(unCtx), unCtx.split('\n')[1]);
 }
 
 // --- the throttle ----------------------------------------------------------
@@ -390,10 +466,15 @@ const LIVE = (() => {
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
-    + (pass + fail) + ' cases over 6 inert paths, the firing path against a LIVE role '
-    + 'record (own pid, nested fixture store), a STALE role record with a live control, '
-    + 'a throttle with same-HEAD delivery after expiry, duplicate suppression and a cooldown-0 control, a corrupt ledger, and the merged-to-trunk shape with an off-trunk control and a no-origin case. Every quiet '
-    + 'case asserts zero bytes on BOTH streams; the address line never offers cwd.');
+    + (pass + fail) + ' cases over 6 inert paths, all THREE role-record states driven '
+    + 'from fixtures (a wholly live record; a PARTLY stale one whose peer name decayed '
+    + 'while its desktop id resolves; a wholly dead one), each beside the control that '
+    + 'flips it, plus an unreadable-store case proving an UNCHECKED address reaches '
+    + 'neither the degraded branch nor the dead one, a throttle with same-HEAD delivery '
+    + 'after expiry, duplicate suppression and a cooldown-0 control, a corrupt ledger, '
+    + 'and the merged-to-trunk shape with an off-trunk control '
+    + 'and a no-origin case. Every quiet case asserts zero bytes on BOTH streams; the '
+    + 'address line never offers cwd and never carries session_id.');
 if (fail) {
     console.log('failed: ' + failures.join('; '));
     process.exit(1);

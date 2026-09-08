@@ -276,9 +276,16 @@ try {
     verdict = null;
 }
 
+/* THE STABLE ADDRESS FIRST. `[measured 2026-09-08]` `peer_name` takes a fresh
+   suffix on every restart -- one coordinator's went -c1 -> -d2 -> -ab -> -31 ->
+   -a7 in a single day -- while `desktop_session_id` does not move. A reader
+   takes the first address it is offered, so the first one offered is the one
+   least likely to have decayed since the record was written. `peer_name` stays
+   as the convenience it is: a session on the peer protocol cannot resolve a
+   `local_<uuid>`, so both are still handed out. */
 const addr = [
-    role.peer_name ? 'peer name `' + role.peer_name + '`' : null,
     role.desktop_session_id ? 'desktop session id `' + role.desktop_session_id + '`' : null,
+    role.peer_name ? 'peer name `' + role.peer_name + '`' : null,
 ].filter(Boolean).join(', ');
 
 const REPORT_SHAPE =
@@ -288,13 +295,55 @@ const REPORT_SHAPE =
     + 'signal it cannot read.\n'
     + 'If you have already reported this work, ignore this and carry on.';
 
+/* ESCALATING TO A PERSON IS CORRECT ONLY WHEN NO CHANNEL EXISTS, and for two
+   days this hook could not tell the difference. `[measured 2026-09-08]` a
+   coordinator's `peer_name` decayed on a restart while its `desktop_session_id`
+   kept resolving, and this branch -- reading `state === 'fault'` alone -- told
+   five sessions in one day that "nobody can be reached at that record ... report
+   to the operator instead". checkBrainRole knew better ON THE SAME CALL: its
+   own operator-facing text said "THIS RECORD IS PARTLY STALE AND STILL
+   REACHABLE. Use desktop session id `local_...`", and every session that got the
+   escalation reached the coordinator anyway, at exactly that address. The
+   verdict now carries the distinction as `degraded`, so the three cases are
+   three branches:
+
+     ok / absent  -> hand out the record's addresses
+     degraded     -> hand out the address that was VERIFIED to reach, name the
+                     stale field as a field, and do NOT send anyone to a person
+     fault        -> nothing reaches; escalate, which is what that word is for
+
+   `degraded` requires an address positively verified against a registry that
+   was read, so a broken install or an unfindable store cannot produce one: it
+   falls to `fault`, and `fault` says which fields went unchecked rather than
+   claiming they are dead. Absent coverage must not read as coverage in either
+   direction. */
+const reach = verdict && verdict.reach ? verdict.reach : null;
 let context;
-if (verdict && verdict.state === 'fault') {
+if (verdict && verdict.state === 'degraded' && reach && reach.usable.length) {
+    const stale = reach.unusable.map((u) => '`' + u.field + '` (' + u.why + ')').join(', ');
+    context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + ').\n'
+        + 'Message it before you go quiet: ' + reach.usable.map((u) => u.label).join(' or ')
+        + ' - checked against the live registries just now.\n'
+        + 'PART OF THE ROLE FILE IS STALE and the rest still reaches'
+        + (stale ? ': ' + stale : '') + '. That is a field to re-stamp, not an address to try, '
+        + 'and it is NOT a reason to escalate: a channel exists, so use it. Say in your report '
+        + 'that ' + roleFilePath() + ' needs re-stamping (check: scripts/check-brain-role.js --status).\n'
+        + REPORT_SHAPE;
+} else if (verdict && verdict.state === 'fault') {
+    const unchecked = reach && reach.unchecked.length
+        ? reach.unchecked.map((u) => '`' + u.field + '` (' + u.why + ')').join(', ')
+        : null;
     context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + '), '
         + 'BUT THE ROLE FILE DOES NOT NAME A LIVE COORDINATOR: '
         + verdict.faults.map((f) => f.code + ' (' + f.detail + ')').join('; ') + '.\n'
-        + 'Nobody can be reached at that record, and do not resolve a coordinator by cwd: a '
-        + 'worktree outlives the session in it. Report to the operator instead, and say the '
+        + (unchecked
+            ? 'No address in it was verified reachable and ' + unchecked + ' could not be checked '
+              + 'at all, so try that address before you conclude there is nobody there; '
+            : 'Nobody can be reached at that record, and ')
+        + 'do not resolve a coordinator by cwd: a '
+        + 'worktree outlives the session in it. Report to the operator '
+        + (unchecked ? 'if that address does not resolve either' : 'instead')
+        + ', and say the '
         + 'role file at ' + roleFilePath() + ' is stale (check: scripts/check-brain-role.js --status).\n'
         + REPORT_SHAPE;
 } else {

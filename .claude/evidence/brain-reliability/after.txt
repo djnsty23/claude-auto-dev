@@ -1,4 +1,5 @@
-Brain reliability candidate, 2026-09-09. Full-gate results belong to the exact
+Initial Brain reliability candidate d88586b, 2026-09-09. Later upstream
+integration is recorded separately. Full-gate results belong to the exact
 committed candidate's run log; these are targeted behavioral results.
 
 node tooling/test-check-spec-output.js: 48 passed, 0 failed. Independent
