@@ -152,9 +152,19 @@ try {
     // names the family, which is the signal wanted and costs no false positive
     // in the gate itself.
     const mutations = [
-        ['the gate step count word', /THE GATE: (\w+) steps/, 'THE GATE: eight steps',
+        // The mutated value must be one the gate chain can never actually
+        // hold, or the mutation is a no-op the day the real count catches up
+        // to it. `[measured 2026-09-08]` this is not hypothetical: these two
+        // read `eight` and `9`, and rebasing onto #198 took the chain to
+        // EIGHT steps — so the first mutation rewrote "eight steps" as
+        // "eight steps" and three assertions below were suddenly grading an
+        // unmutated file. The `mutation applied` assertion caught it and the
+        // suite went red; without that assertion it would have gone green
+        // while testing nothing, which is the whole failure class this suite
+        // exists to rule out. Nineteen is not a plausible step count.
+        ['the gate step count word', /THE GATE: (\w+) steps/, 'THE GATE: nineteen steps',
             /CLAUDE\.md:\d+ {2}gate-header/],
-        ['the "Step 1 of N" digit', /Step 1 of \d+\./, 'Step 1 of 9.',
+        ['the "Step 1 of N" digit', /Step 1 of \d+\./, 'Step 1 of 19.',
             /step-1-of-n/],
         ['the literal chain', /&& npm run check:claude-md/, '&& npm run check:nothing',
             /the literal gate chain/],
