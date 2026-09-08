@@ -35,7 +35,18 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { runBudgeted } = require('./spawn-budget.js');
+const __sb = require('./spawn-budget.js');
+// Deliberately exit 2 and NOT 1 here, unlike the suites that require this same
+// helper. In this script exit 1 asserts a PROVEN GAP -- a wired hook nothing
+// executes -- and a missing helper proves nothing of the sort. Letting the
+// TypeError escape would have exited 1 and published a gap that was never
+// measured. Exit 2 says what is true: this run could not measure.
+if (typeof __sb.runBudgeted !== 'function') {
+    console.error('spawn-budget.js does not export runBudgeted() -- this checker cannot run its '
+        + 'candidate suites, so it measured nothing. Indeterminate, not a proven gap.');
+    process.exit(2);
+}
+const { runBudgeted } = __sb;
 const { fileURLToPath } = require('url');
 
 const ROOT = path.resolve(__dirname, '..');

@@ -98,6 +98,22 @@ const CONTENTION_MAX = 20;
  * than no factor at all (C2e above, 0/4).
  */
 function contentionFactor() {
+    // TEST-ONLY OVERRIDE, and it exists because this file shipped the same defect
+    // three times: an assertion whose truth depended on where the ambient factor
+    // happened to land. `> base` is false at factor 1.0 (an idle machine);
+    // `=== cap` is false below the cap. Both passed standalone and went red in a
+    // gate, which is the class this module exists to remove.
+    //
+    // The cure is not more careful assertions, it is DETERMINISM: the suite runs
+    // the selftest pinned at the floor (1) and well above it, so both extremes
+    // are covered on every machine instead of whichever one the box supplies.
+    // It only ever sizes a retry that a timeout already justified, and it is
+    // clamped exactly like a measured value.
+    const pinned = process.env.AUTODEV_SPAWN_BUDGET_FACTOR;
+    if (pinned !== undefined && pinned !== '') {
+        const v = Number(pinned);
+        if (Number.isFinite(v)) return Math.min(CONTENTION_MAX, Math.max(1, v));
+    }
     const started = Date.now();
     let x = 0;
     for (let i = 0; i < SPIN_ITERATIONS; i++) x = (x * 31 + i) % 1000003;
@@ -260,9 +276,12 @@ if (require.main === module) {
 
         const hungRetried = runBudgeted(NODE, ['-e', HANG], { encoding: 'utf8', timeout: 400 });
         t('a timeout is retried once by default', hungRetried.attempts === 2, `attempts=${hungRetried.attempts}`);
-        t('  and the retry is given a WIDER budget than the first attempt, which is '
-            + 'the whole difference between variant C3 and variant D',
-            hungRetried.budgetMs > 400, `budgetMs=${hungRetried.budgetMs}`);
+        t('  and the retry budget is never NARROWER than the first attempt, and equals '
+            + 'the base scaled by the measured factor — the whole difference between '
+            + 'variant C3 and variant D, which reuses the same budget',
+            hungRetried.budgetMs >= 400
+                && hungRetried.budgetMs === Math.round(400 * hungRetried.factor),
+            `budgetMs=${hungRetried.budgetMs} factor=${hungRetried.factor}`);
         t('  and the widening is the contention measured at the timeout',
             hungRetried.factor !== null && hungRetried.budgetMs === Math.round(400 * hungRetried.factor),
             `factor=${hungRetried.factor} budgetMs=${hungRetried.budgetMs}`);
