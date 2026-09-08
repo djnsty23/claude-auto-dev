@@ -60,3 +60,36 @@ is empty) on base 7b157a8. The re-run on that tree ended INDETERMINATE, exit 2:
 shared a machine at load 72. That is a verdict about the load, and it is not
 being reported as a pass. The commit adding this file is docs-only; it was
 checked by `validate` and the private-name gate, and CI runs the gate on the PR.
+
+## D3 — Two Form B provenances exist, and only one of them could be his
+
+Added after the Brain's message of 2026-09-08, which relayed and did not
+assert the following, and this entry does the same.
+
+**Provenance 1, not authority:** this session's panel, self-resolved to B by the
+away hook. D1 above.
+
+**Provenance 2, relayed:** the Brain reports that a different session (worktree
+`bold-haibt-31b4d6`) records the operator answering it directly and first-hand,
+quoted as *"Form B, [stated 2026-09-08]: pre-authorised on a green gate with the
+ledger"*, and that it has built against that on branch `claude/bold-haibt-31b4d6`
+(HEAD `15320a0` at the time of the message): the deploy-ledger script, its suite,
+and edits to the ship, auto and brain skills. Not pushed, no PR, and the Brain
+verified Form B is on no skill in `origin/main`.
+
+**Why neither session resolves this.** The two accounts are not in conflict: a
+self-resolution under the away window is not his decision, and a direct answer
+in another session would be. But this session cannot see that chat, and the Brain
+cannot either; a relayed quotation is exactly the class D12 in the live product's
+decisions file records two correct refusals of. So the quote is recorded here as
+a claim with a named source, not as the decision.
+
+**What resolves it:** the operator confirming, in a session or on PR #201, that
+the quoted words are his. If they are, the question is answered and only the
+record is missing: the other session's branch carries the implementation, and
+this PR's evidence doc is the measurement it should cite. If they are not, the
+question is still A, B or C on #201. The Brain holds the queue item in that
+two-part form.
+
+**Unchanged by this entry:** nothing written into any skill from this branch, no
+`decisions.md` entry, no VERSION bump.
