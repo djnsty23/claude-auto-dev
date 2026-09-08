@@ -278,6 +278,65 @@ function multiRoot(name, files) {
         /1 reachable by a draft pull request/.test(r.out));
 }
 
+// ---- the pipe delivers every byte -----------------------------------------
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under a status that says
+// nothing failed — the shape rendered-layout-gate.js shipped with until
+// 2026-09-07. --json here carries one row per workflow file, so it grows with
+// the repo it is pointed at.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+{
+    const PIPE_BUF = 64 * 1024;
+    const bigRoot = path.join(tmp, 'big');
+    const bigWf = path.join(bigRoot, '.github', 'workflows');
+    fs.mkdirSync(bigWf, { recursive: true });
+    // Cheap: this fixture is file reads, not git or network, so the row count
+    // rather than the row width is what carries it over the buffer.
+    for (let i = 0; i < 340; i++) {
+        fs.writeFileSync(path.join(bigWf, 'workflow-' + String(i).padStart(4, '0') + '.yml'),
+            'name: w' + i + '\non:\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n'
+            + GUARD + '    steps:\n      - run: echo hi\n');
+    }
+
+    const viaFileBytes = (args) => {
+        const out = path.join(tmp, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'] });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const jsonArgs = [bigRoot, '--json'];
+    const piped = spawnSync(process.execPath, [SUBJECT].concat(jsonArgs),
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+    const fileBytes = viaFileBytes(jsonArgs);
+
+    check('--json over many workflows exceeds one pipe buffer, so the next check is not vacuous',
+        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+    check('  and through a PIPE it delivers every byte it writes to a FILE',
+        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+    check('  and the piped JSON still parses at that size',
+        (() => { try { return JSON.parse(piped.stdout).rows.length === 340; } catch { return false; } })(),
+        'tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
+
+    // The human report shares the exit path, so it shares the defect. It prints
+    // a summary rather than a row per workflow, so it stays under the buffer
+    // here — which is why it gets the equality alone, and why THIS LINE CANNOT
+    // CATCH THE REGRESSION on its own.
+    const reportPipe = spawnSync(process.execPath, [SUBJECT, bigRoot],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    check('  the human report through a PIPE also delivers every byte',
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === viaFileBytes([bigRoot]),
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8'));
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);

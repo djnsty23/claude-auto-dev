@@ -70,7 +70,7 @@ const path = require('path');
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 
-if (has('--help') || has('-h')) {
+function usage() {
     console.log('usage: check-draft-skip-guard.js [root] [--json] [--selftest]\n'
         + 'Two ways a draft-skip policy can be a fiction:\n'
         + '  INERT    a guard (github.event.pull_request.draft) in a workflow that ALSO\n'
@@ -81,7 +81,6 @@ if (has('--help') || has('-h')) {
         + '           skip is evidence for a policy that does not hold.\n'
         + 'A repo where NO workflow guards is neither: that is a coherent choice.\n'
         + 'Exit 0 clean, 1 a finding of either kind, 2 no workflows to scan.');
-    process.exit(0);
 }
 
 /**
@@ -499,7 +498,7 @@ function partialCoverage(rows) {
 // --- selftest -------------------------------------------------------------
 // Plants all four combinations, because the risk here is a checker that cannot
 // fire. Three of the four must NOT be reported, and each is a different reason.
-if (has('--selftest')) {
+function selftest() {
     const os = require('os');
     let pass = 0;
     let fail = 0;
@@ -715,90 +714,112 @@ if (has('--selftest')) {
         + 'partial coverage with BOTH consistent states as negatives, a guard that exists '
         + 'only inside a comment, and a branch filter both with and without a '
         + 'pull_request trigger)');
-    process.exit(fail ? 1 : 0);
+    return fail ? 1 : 0;
 }
 
 // --- live run -------------------------------------------------------------
-const root = path.resolve(argv.find((a) => !a.startsWith('-')) || '.');
-const rows = scan(root);
+function main() {
+    if (has('--help') || has('-h')) { usage(); return 0; }
+    if (has('--selftest')) return selftest();
 
-if (rows === null) {
-    console.error(`no .github/workflows under ${root}.`);
-    console.error('No population, so this run vouches for NOTHING, not even an all-clear.');
-    process.exit(2);
-}
+    const root = path.resolve(argv.find((a) => !a.startsWith('-')) || '.');
+    const rows = scan(root);
 
-const inert = rows.filter((r) => r.inert);
-const partial = partialCoverage(rows);
-
-if (has('--json')) {
-    console.log(JSON.stringify({
-        root,
-        scanned: rows.length,
-        inert: inert.length,
-        partial: partial ? { guarded: partial.guarded.map((r) => r.file), unguarded: partial.unguarded.map((r) => r.file) } : null,
-        rows,
-    }, null, 2));
-    process.exit(inert.length || partial ? 1 : 0);
-}
-
-// Population before the verdict: a bare "none found" cannot be told apart from a
-// scan that read no files. Both denominators are printed, because the two checks
-// grade different populations — every workflow for inertness, only the
-// draft-reachable ones for coverage.
-const guarded = rows.filter((r) => r.guard).length;
-const reachable = rows.filter((r) => r.draftReachable);
-console.log(`${rows.length} workflow(s) in ${root}, ${guarded} carrying a draft-skip guard`);
-console.log(`${reachable.length} reachable by a draft pull request `
-    + `(${reachable.filter((r) => r.guard).length} guarded, ${reachable.filter((r) => !r.guard).length} not)`);
-
-for (const r of inert) {
-    console.log(`\n  INERT  ${r.file}`);
-    console.log('         carries `github.event.pull_request.draft` AND triggers on push.');
-    console.log('         That field is null on a push event, so the job runs anyway and');
-    console.log('         drafts save nothing. Remove the push trigger, or drop the guard');
-    console.log('         and stop describing this workflow as draft-aware.');
-}
-
-if (partial) {
-    console.log('\n  PARTIAL  this repo guards some draft-reachable workflows and not others.');
-    console.log('           A draft pull request shows the guarded one skipping, which reads');
-    console.log('           as the policy holding, while every workflow below runs in full.');
-    console.log('           The skip is real, which is what makes it misleading.');
-    console.log('\n           guarded:');
-    for (const r of partial.guarded) console.log(`             ${r.file}`);
-    console.log('           NOT guarded:');
-    for (const r of partial.unguarded) {
-        const c = r.cost.length ? `   [${r.cost.join('; ')}]` : '';
-        console.log(`             ${r.file}${c}`);
+    if (rows === null) {
+        console.error(`no .github/workflows under ${root}.`);
+        console.error('No population, so this run vouches for NOTHING, not even an all-clear.');
+        return 2;
     }
-    console.log('\n           Guard them too, or drop the guard from the one that has it and');
-    console.log('           stop describing this repo as draft-aware. Either is coherent;');
-    console.log('           the present state is what is not.');
-    const withCost = partial.unguarded.filter((r) => r.cost.length);
-    if (withCost.length) {
-        console.log(`\n           ${withCost.length} of the unguarded `
-            + `${withCost.length === 1 ? 'carries' : 'carry'} a load signal, shown above.`);
-        console.log('           Those are facts read off the file, not a minute estimate, and');
-        console.log('           NOT necessarily money: GitHub bills Actions minutes on PRIVATE');
-        console.log('           repositories, while a public one runs standard hosted runners');
-        console.log('           for free. The multipliers are real either way for wall-clock');
-        console.log('           and for contention with everything else queued.');
+
+    const inert = rows.filter((r) => r.inert);
+    const partial = partialCoverage(rows);
+
+    if (has('--json')) {
+        console.log(JSON.stringify({
+            root,
+            scanned: rows.length,
+            inert: inert.length,
+            partial: partial ? { guarded: partial.guarded.map((r) => r.file), unguarded: partial.unguarded.map((r) => r.file) } : null,
+            rows,
+        }, null, 2));
+        return inert.length || partial ? 1 : 0;
     }
+
+    // Population before the verdict: a bare "none found" cannot be told apart from a
+    // scan that read no files. Both denominators are printed, because the two checks
+    // grade different populations — every workflow for inertness, only the
+    // draft-reachable ones for coverage.
+    const guarded = rows.filter((r) => r.guard).length;
+    const reachable = rows.filter((r) => r.draftReachable);
+    console.log(`${rows.length} workflow(s) in ${root}, ${guarded} carrying a draft-skip guard`);
+    console.log(`${reachable.length} reachable by a draft pull request `
+        + `(${reachable.filter((r) => r.guard).length} guarded, ${reachable.filter((r) => !r.guard).length} not)`);
+
+    for (const r of inert) {
+        console.log(`\n  INERT  ${r.file}`);
+        console.log('         carries `github.event.pull_request.draft` AND triggers on push.');
+        console.log('         That field is null on a push event, so the job runs anyway and');
+        console.log('         drafts save nothing. Remove the push trigger, or drop the guard');
+        console.log('         and stop describing this workflow as draft-aware.');
+    }
+
+    if (partial) {
+        console.log('\n  PARTIAL  this repo guards some draft-reachable workflows and not others.');
+        console.log('           A draft pull request shows the guarded one skipping, which reads');
+        console.log('           as the policy holding, while every workflow below runs in full.');
+        console.log('           The skip is real, which is what makes it misleading.');
+        console.log('\n           guarded:');
+        for (const r of partial.guarded) console.log(`             ${r.file}`);
+        console.log('           NOT guarded:');
+        for (const r of partial.unguarded) {
+            const c = r.cost.length ? `   [${r.cost.join('; ')}]` : '';
+            console.log(`             ${r.file}${c}`);
+        }
+        console.log('\n           Guard them too, or drop the guard from the one that has it and');
+        console.log('           stop describing this repo as draft-aware. Either is coherent;');
+        console.log('           the present state is what is not.');
+        const withCost = partial.unguarded.filter((r) => r.cost.length);
+        if (withCost.length) {
+            console.log(`\n           ${withCost.length} of the unguarded `
+                + `${withCost.length === 1 ? 'carries' : 'carry'} a load signal, shown above.`);
+            console.log('           Those are facts read off the file, not a minute estimate, and');
+            console.log('           NOT necessarily money: GitHub bills Actions minutes on PRIVATE');
+            console.log('           repositories, while a public one runs standard hosted runners');
+            console.log('           for free. The multipliers are real either way for wall-clock');
+            console.log('           and for contention with everything else queued.');
+        }
+    }
+
+    if (!inert.length && !partial) {
+        console.log('\n0 inert guards, and draft-skip coverage is consistent.');
+        if (!guarded) {
+            console.log('NOT an endorsement: no workflow here uses a draft-skip guard at all, so');
+            console.log('there is nothing for a push trigger to defeat and nothing to be');
+            console.log('inconsistent with. This says nothing about whether one SHOULD be added.');
+        }
+        return 0;
+    }
+
+    const findings = [];
+    if (inert.length) findings.push(`${inert.length} of ${rows.length} workflow(s) carry a guard a push trigger makes inert`);
+    if (partial) findings.push(`${partial.unguarded.length} of ${partial.reachable.length} draft-reachable workflow(s) unguarded beside ${partial.guarded.length} guarded`);
+    console.log(`\n${findings.join('; ')}.`);
+    return 1;
 }
 
-if (!inert.length && !partial) {
-    console.log('\n0 inert guards, and draft-skip coverage is consistent.');
-    if (!guarded) {
-        console.log('NOT an endorsement: no workflow here uses a draft-skip guard at all, so');
-        console.log('there is nothing for a push trigger to defeat and nothing to be');
-        console.log('inconsistent with. This says nothing about whether one SHOULD be added.');
-    }
-    process.exit(0);
-}
-
-const findings = [];
-if (inert.length) findings.push(`${inert.length} of ${rows.length} workflow(s) carry a guard a push trigger makes inert`);
-if (partial) findings.push(`${partial.unguarded.length} of ${partial.reachable.length} draft-reachable workflow(s) unguarded beside ${partial.guarded.length} guarded`);
-console.log(`\n${findings.join('; ')}.`);
-process.exit(1);
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();
