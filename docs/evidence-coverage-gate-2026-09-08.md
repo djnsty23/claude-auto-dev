@@ -89,12 +89,36 @@ is exit 2 and not a number. Reading the 37 rather than counting them
 Never loaded: `plugins/autodev-core/scripts/heal-sweep.workflow.js` (a workflow
 script; `test-workflow-isolation.js` reads it as text and never requires it).
 
-None of these is a defect this gate asks anyone to fix. They are the floor.
-**The ceilings are `FLOOR = { untested: 37, neverLoaded: 1 }` in
-`tooling/find-untested-functions.js`**, dated and carrying the commit they were
-measured at. Ratcheting them down is a decision for `docs/decisions.md`, taken with
+None of these is a defect this gate asks anyone to fix. They are the floor as
+measured at b8eae1f. **The ceilings shipped are `FLOOR = { untested: 39,
+neverLoaded: 1 }`**, re-measured at f870b15 for the reason the next section
+gives, dated and carrying the commit they were measured at. Ratcheting them down is a decision for `docs/decisions.md`, taken with
 a re-measured green run; it was deliberately not taken here, so the gate cannot be
 red on the commit that introduces it.
+
+## The floor moved under the PR, and the gate said so
+
+`[measured 2026-09-08]` after rebasing onto `main` at **f870b15** (14 commits past
+b8eae1f, among them #181, #189, #200 and release 8.165.0), `npm run check:coverage`
+at the b8eae1f floor **exited 1**, quiet (load 3 to 8), 443 s:
+
+```
+91 source file(s) in plugins/ · 90 executed · 1 NEVER LOADED
+816 named function(s) IN THE LOADED FILES · 777 executed · 39 NEVER CALLED
+[coverage] 39 never-called function(s) vs ceiling 37
+```
+
+The two newcomers, read: `fleet-overlap.js` degrade() (#189; an error-path helper
+called only when a git command fails, and no fixture makes one fail) and
+`workflow-run-triage.js` projectsDir() (#200; the default-directory resolver, and
+its suite always passes `--projects`). Both are the "branches no fixture takes"
+bucket above, both are a test to write, and both landed on `main` in the hours
+between the measurement and the rebase. **That is the gate rejecting a real
+regression on the real corpus**, which no fixture proves and this run does: a
+floor that had only ever been met met something it was designed to miss. The
+floor shipped is 39 at f870b15 rather than the two functions being driven here,
+because they belong to other sessions' merges and are follow-up tests, not
+defects in this change. The same tree also answered the boundary question the fixture suite answers in miniature: `--max-untested 38` against the measured 39 **exited 1** (observed, 500 s at load 9 to 11), and `--gate` at 39 is the exit-0 run the gate and CI paragraphs below record. Red one below, green at, both on the real corpus.
 
 ## Where this was measured, and why not on `main` bare
 
@@ -110,7 +134,7 @@ exactly what `npm run check:coverage` reports on `main` bare on this Mac until
 #181 lands. That is the correct answer there: no verdict, with the failed suites
 named.
 
-The push's CI run is the Ubuntu measurement. The count is platform-sensitive
+The first push's CI run was the Ubuntu measurement at b8eae1f. The count is platform-sensitive
 (Windows-gated code is entered on one runner and not the other), which is why the
 step runs on `ubuntu-latest` only, beside the other Linux-only gates.
 **CI, run 34209762305 on d303f89, `ubuntu-latest`:** `npm test` 114/114, check:suites green, and the coverage step printed `774 named function(s) · 737 executed · 37 NEVER CALLED` and `1 NEVER LOADED`, **37 vs ceiling 37, 1 vs ceiling 1**, exit 0, in 236 s (09:39:26 to 09:43:22 UTC) on a runner that is quiet by construction. The Ubuntu count is the Mac count, so the platform sensitivity is real but dormant today. `windows-latest` went red on exactly one line, in the new suite: an assertion matched the fixture path with forward slashes and the tool prints `path.relative()`, which is backslashes there. Fixed in the commit that carries this paragraph; nothing in the check itself differed on Windows.

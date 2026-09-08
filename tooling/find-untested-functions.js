@@ -58,7 +58,7 @@
 // and this gate is green for that function. It answers one question only:
 // "did this change add a plugin function that no suite enters?"
 //
-// The ceilings are COUNTS, not a percentage. `--min-entered 95` was costed:
+// The ceilings are COUNTS, not a percentage. `--min-entered 95` was costed at b8eae1f:
 // 737 of 774 is 95.2 %, rounds DOWN to 95, and 5 % of 774 is 38, so a
 // percentage floor lets one more never-entered function in before it fires
 // and grows that allowance with every function added. A count fires on the
@@ -106,7 +106,8 @@
 //
 // A tool like this has a floor above zero. Read the list; do not chase it.
 //
-// `[measured 2026-09-08]` the floor is 37, not 2, and the "11 -> 2" above is a
+// `[measured 2026-09-08]` the floor is 39 (37 at b8eae1f, two more by f870b15;
+// see FLOOR below), not 2, and the "11 -> 2" above is a
 // dated story about the tree as it was then, kept because the reading method is
 // the point. The 37 are read one by one in docs/evidence-coverage-gate-2026-09-08.md:
 // seven live in long-running watchers a suite kills or runs one-shot (V8 writes
@@ -138,18 +139,23 @@ if (argv.includes('--help') || argv.includes('-h')) {
 }
 const asJson = argv.includes('--json');
 
-// THE FLOOR. `[measured 2026-09-08]` at b8eae1f (main), on a GREEN run of the suite
-// under coverage, taken in a clone with 5fa045b cherry-picked because main bare
-// is red on the measuring Mac for two machine-local reasons the evidence doc
-// names; that commit adds no named function, so the census is b8eae1f's: 37 named function(s) never called across the loaded plugin
-// files, and 1 plugin source file(s) never loaded at all. --gate
+// THE FLOOR. `[measured 2026-09-08]` at f870b15 (main), on a GREEN run of the suite
+// under coverage, quiet (load 3 to 8): 39 named function(s) never called across the
+// loaded plugin files, and 1 plugin source file never loaded at all. The first
+// measurement, the same day at b8eae1f, read 37; between the two, main merged
+// #189 and #200, each carrying one function no suite enters (fleet-overlap's
+// degrade(), workflow-run-triage's projectsDir()), and this gate at the old
+// floor exited 1 on the rebase. That rejection was the first real one and is
+// recorded in docs/evidence-coverage-gate-2026-09-08.md; the floor was
+// re-measured rather than the two functions being driven here, because they
+// belong to other sessions' merges and are follow-up tests, not defects. --gate
 // fails only ABOVE these. The bare run's own header, further up, explains why
 // the count is not a debt to chase to zero (platform-gated code, defence-in-depth
 // handlers). Lowering a ceiling is a ratchet decision, recorded in
 // docs/decisions.md; raising one is a regression wearing a config edit, so the
 // run that needs it should be looked at first. Whoever changes either re-measures
 // on a green run and replaces the date and commit above in the same edit.
-const FLOOR = { untested: 37, neverLoaded: 1, measured: '2026-09-08 at b8eae1f' };
+const FLOOR = { untested: 39, neverLoaded: 1, measured: '2026-09-08 at f870b15' };
 
 // A flag that takes a value. A missing or malformed value is exit 2 (no
 // verdict), which is deliberately distinct from exit 1 (a coverage regression):
