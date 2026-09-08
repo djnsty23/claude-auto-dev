@@ -111,7 +111,12 @@ try {
     const bigRules = path.join(bigRepo, '.claude', 'rules');
     fs.mkdirSync(bigRules, { recursive: true });
     fs.writeFileSync(path.join(bigRepo, 'CLAUDE.md'), '# unconditional fixture\n');
-    for (let i = 0; i < 400; i++) {
+    // SIZED BY FILE COUNT, NEVER BY PATH LENGTH. Every unreachable entry carries
+    // an absolute path, so the payload's width follows os.tmpdir() — ~49 chars on
+    // darwin, 5 on Linux. At 400 files this was 79307 bytes on a mac and 61575 on
+    // ubuntu, so the size assertion failed on CI while passing here. Count is
+    // portable; path length is not.
+    for (let i = 0; i < 700; i++) {
         fs.writeFileSync(path.join(bigRules, 'rule-with-a-realistically-long-name-'
             + String(i).padStart(4, '0') + '.md'), '# rule ' + i + '\n');
     }
@@ -151,7 +156,7 @@ try {
     check('--json through a PIPE delivers every byte it writes to a FILE',
         pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
     check('the piped JSON still parses at that size',
-        (() => { try { return JSON.parse(piped.stdout).unreachable.length === 401; } catch { return false; } })(),
+        (() => { try { return JSON.parse(piped.stdout).unreachable.length === 701; } catch { return false; } })(),
         `tail=${JSON.stringify((piped.stdout || '').slice(-40))}`);
 } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

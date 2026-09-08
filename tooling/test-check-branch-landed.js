@@ -178,11 +178,19 @@ check('  and says so rather than printing an all-clear', /UNKNOWN/.test(bogus.st
 // on every platform.
 //
 // THE FIXTURE IS SHAPED FOR SPAWN COUNT. Every branch costs two git
-// invocations, so the rows are made WIDE rather than numerous: 200 refs with
-// 200-character names, all pointing at trunk's own tip so gatherEvidence
+// invocations, so the rows are made wide as well as numerous: 280 refs with
+// 80-character names, all pointing at trunk's own tip so gatherEvidence
 // short-circuits on ancestry after two calls instead of running the content
-// comparison. 200 is close to the ceiling — a ref name near 255 bytes fails to
-// create at all, with "File name too long".
+// comparison.
+//
+// 80 RATHER THAN 200, AND THE CEILING IS NOT THE ONE THIS COMMENT FIRST NAMED.
+// It said 200 was near the limit because a ref approaching 255 bytes fails on
+// darwin. The real ceiling is Windows: the loose ref is written as
+// <tmp>/.git/refs/remotes/origin/<name>.lock, and at 200 characters that whole
+// path passed MAX_PATH and `git update-ref --stdin` died with "Filename too
+// long" — a CI-only crash, green on both POSIX legs. A row here carries no
+// filesystem path (branch, tip, verdict, reason, pr), so the byte count is
+// portable and only the ref FILE path was ever at risk.
 {
     const PIPE_BUF = 64 * 1024;
     const bigRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'cbl-pipe-'));
@@ -195,8 +203,8 @@ check('  and says so rather than printing an all-clear', /UNKNOWN/.test(bogus.st
     g(['commit', '-qm', 'seed']);
     const tip = g(['rev-parse', 'HEAD']).trim();
     let refs = 'create refs/remotes/origin/main ' + tip + '\n';
-    for (let i = 0; i < 200; i++) {
-        refs += 'create refs/remotes/origin/feature-' + 'y'.repeat(200) + '-' + String(i).padStart(4, '0')
+    for (let i = 0; i < 280; i++) {
+        refs += 'create refs/remotes/origin/feature-' + 'y'.repeat(80) + '-' + String(i).padStart(4, '0')
             + ' ' + tip + '\n';
     }
     g(['update-ref', '--stdin'], { input: refs });
@@ -219,7 +227,7 @@ check('  and says so rather than printing an all-clear', /UNKNOWN/.test(bogus.st
     check('  and through a PIPE it delivers every byte it writes to a FILE',
         jsonPipeBytes === jsonFileBytes, JSON.stringify({ pipe: jsonPipeBytes, file: jsonFileBytes }));
     check('  and the piped JSON still parses at that size, under exit 0',
-        (() => { try { return JSON.parse(jsonPipe.stdout).rows.length === 200 && jsonPipe.status === 0; } catch { return false; } })(),
+        (() => { try { return JSON.parse(jsonPipe.stdout).rows.length === 280 && jsonPipe.status === 0; } catch { return false; } })(),
         'exit ' + jsonPipe.status + ', tail ' + JSON.stringify((jsonPipe.stdout || '').slice(-40)));
 
     // NO SECOND PAIR FOR THE HUMAN TABLE, deliberately. present() lists only the

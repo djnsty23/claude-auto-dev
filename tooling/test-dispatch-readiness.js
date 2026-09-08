@@ -297,12 +297,18 @@ try {
     // count must equal the same run redirected to a FILE, where the write is
     // synchronous on every platform.
     //
-    // THE FIXTURE IS SHAPED FOR WORKTREE COUNT, because `git worktree add` and
-    // the six git invocations each row then costs are what this block spends.
-    // Rows are made WIDE rather than numerous: the worktree paths are nested ten
-    // levels deep and the branch names are long, so 56 worktrees clear the
-    // buffer where ~150 short ones would be needed. Do not deepen it much
-    // further — these paths already run to ~700 characters.
+    // THE FIXTURE IS WIDENED BY A FLAG VALUE, NOT BY THE FILESYSTEM, and that is
+    // the point of its shape. It used to nest the worktree paths ten levels deep
+    // to make each row wide; those paths reached ~700 characters, sailed past
+    // Windows MAX_PATH, and `git worktree add` died with "Filename too long" — a
+    // CI-only crash, green on both POSIX legs.
+    //
+    // A path is the one dimension that is not portable: MAX_PATH at one end, and
+    // os.tmpdir() being 5 characters on Linux against ~49 on darwin at the other.
+    // So the width now comes from --trunk, an unresolvable ref whose name is
+    // echoed back in every row's TRUNK UNREADABLE finding. That string is
+    // identical everywhere, costs no filesystem, and lets 30 worktrees clear the
+    // buffer where 56 deep ones were needed — faster as well as portable.
     {
         const PIPE_BUF = 64 * 1024;
         const bigBase = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-pipe-'));
@@ -315,13 +321,16 @@ try {
         fs.writeFileSync(path.join(bigRepo, 'seed.txt'), 'seed\n');
         g(['add', '.']);
         g(['commit', '-qm', 'seed']);
-        const seg = 'w'.repeat(60);
-        for (let i = 0; i < 56; i++) {
-            const p = path.join(bigBase, 'wt', ...Array(10).fill(seg + '-' + i), 'leaf-' + i);
-            g(['worktree', 'add', '-q', '-b', 'claude/' + seg + '-branch-' + i, p]);
+        for (let i = 0; i < 30; i++) {
+            g(['worktree', 'add', '-q', '-b', 'claude/fixture-branch-' + i, path.join(bigBase, 'wt-' + i)]);
         }
+        // Unresolvable by construction, so every row carries a TRUNK UNREADABLE
+        // finding echoing this name back. 2000 characters is not a realistic
+        // branch name; it is a portable way to buy bytes, which is what this
+        // block grades.
+        const fatTrunk = 'origin/' + 't'.repeat(2000);
 
-        const argv = [SUBJECT, bigRepo, '--json'];
+        const argv = [SUBJECT, bigRepo, '--trunk', fatTrunk, '--json'];
         const out = path.join(bigBase, 'via-file.json');
         const fd = fs.openSync(out, 'w');
         spawnSync(process.execPath, argv, { stdio: ['ignore', fd, 'ignore'], windowsHide: true });
@@ -336,15 +345,15 @@ try {
             fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
         ok('  and through a PIPE it delivers every byte it writes to a FILE',
             pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
-        // 57 rows: the 56 added worktrees plus the repo's own checkout.
+        // 31 rows: the 30 added worktrees plus the repo's own checkout.
         ok('  and the piped JSON still parses at that size',
-            (() => { try { return JSON.parse(piped.stdout).rows.length === 57; } catch { return false; } })(),
+            (() => { try { return JSON.parse(piped.stdout).rows.length === 31; } catch { return false; } })(),
             'tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
 
         // NO SECOND PAIR FOR THE HUMAN REPORT. It shares the exit path, and the
         // drain being asserted is a property of that shared exit, so the pair
-        // above covers it; a third and fourth run of this fixture would cost
-        // another three seconds to assert the same thing about the same runner.
+        // above covers it; a third and fourth run of this fixture would assert
+        // the same thing twice about the same runner.
         fs.rmSync(bigBase, { recursive: true, force: true, maxRetries: 3 });
     }
 

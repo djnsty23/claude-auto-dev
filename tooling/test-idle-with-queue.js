@@ -195,7 +195,15 @@ for (const [label, dirName, queueAge, idleMin] of [
     // A separate fleet directory from the one above, so nothing here changes
     // the population the cases before it assert on. Cheap: JSON files and a
     // QUEUE.md each, no git and no network.
-    for (let i = 0; i < 400; i++) {
+    //
+    // SIZED BY ROW COUNT, NEVER BY PATH LENGTH. Each row carries a cwd, so the
+    // report's width depends on os.tmpdir() — which is `/var/folders/<hash>/T`
+    // on darwin (~49 chars) and `/tmp` on Linux (5). At 400 rows this block was
+    // 70498 bytes on a mac and 52898 on ubuntu, so the size assertion failed on
+    // CI while passing here. Row COUNT is identical everywhere; path length is
+    // not. Do not re-tune this by lengthening the directory names — that trades
+    // an ubuntu failure for a Windows MAX_PATH one.
+    for (let i = 0; i < 800; i++) {
         const id = String(i).padStart(8, '0') + '-0000-0000-0000-000000000000';
         const d = path.join(tmp, 'big-work', 'session-' + 'w'.repeat(40) + '-' + i);
         fs.mkdirSync(d, { recursive: true });
@@ -227,7 +235,7 @@ for (const [label, dirName, queueAge, idleMin] of [
     check('  and through a PIPE it delivers every byte it writes to a FILE',
         pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
     check('  and the piped JSON still parses at that size, under the flagged exit 1',
-        (() => { try { return JSON.parse(piped.stdout).rows.length === 400 && piped.status === 1; } catch { return false; } })(),
+        (() => { try { return JSON.parse(piped.stdout).rows.length === 800 && piped.status === 1; } catch { return false; } })(),
         'exit ' + piped.status + ', tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
 
     // The human report shares the exit path and clears the buffer too at this

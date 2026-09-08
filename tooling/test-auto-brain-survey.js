@@ -260,22 +260,43 @@ try {
     //
     // The fixture is built for BYTES PER SECOND, because every repo here costs a
     // clone plus eight git invocations and this suite runs inside `npm test`. A
-    // stub `gh` on PATH returns 20 PRs per repo, the PR titles and branch names
-    // are at the long end of what people really write, and the directory names
-    // are long, so TEN repos clear the buffer. Driven by repo count alone it
-    // takes ~45, and the wall-clock goes up by a minute.
-    {
+    // stub `gh` on PATH returns 20 PRs per repo, so TEN repos clear the buffer.
+    // Driven by repo count alone it takes ~45, and the wall-clock goes up by a
+    // minute.
+    //
+    // THE WIDTH COMES FROM THE PR TEXT, NOT FROM THE DIRECTORY NAMES. It used to
+    // come from 200-character repo directories, and `git clone` died on Windows
+    // with "Filename too long" — a CI-only crash, green on both POSIX legs. A
+    // path is the one dimension that is not portable, so the bytes now come from
+    // the stub's own titles and branch names, which are identical everywhere.
+    //
+    // AND THE STUB CANNOT EXIST ON WINDOWS, so this block is skipped there, out
+    // loud: an extensionless `gh` with a shebang is not executable on win32, and
+    // a .cmd is not a drop-in because node will not spawn one with shell:false —
+    // which is how the subject spawns gh, and correctly, that being the
+    // injection-safe form. The defect being guarded is darwin-only, so the
+    // platform where it bites still runs this, and so does ubuntu.
+    if (process.platform === 'win32') {
+        console.log('SKIP  the pipe-delivers-every-byte block — no stub `gh` is possible on win32 '
+            + '(no shebang, and node will not spawn a .cmd without shell:true). '
+            + 'The defect it guards is darwin-only; macOS and ubuntu both run it.');
+    } else {
         const PIPE_BUF = 64 * 1024;
         const bigTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-brain-big-'));
         const bin = path.join(bigTmp, 'bin');
         fs.mkdirSync(bin);
         const fakePrs = [];
         for (let i = 0; i < 20; i++) {
+            // Long strings rather than long paths: this is where the bytes come
+            // from now, and a string is the same length on every platform.
             fakePrs.push({
                 number: 1000 + i,
                 title: 'a fixture pull request title at the long end of what people really write, '
-                    + 'describing the change and the reason for it, number ' + i,
-                headRefName: 'claude/a-long-but-entirely-ordinary-generated-branch-name-' + i,
+                    + 'describing the change, the reason for it, the surface it touches and the '
+                    + 'verification it carried, written out at the length a careful author uses '
+                    + 'when the title is the only thing most readers see, number ' + i,
+                headRefName: 'claude/a-long-but-entirely-ordinary-generated-branch-name-'
+                    + 'that-a-tool-produced-from-the-issue-title-' + i,
             });
         }
         // Stubbed rather than real: this block is about byte counts, and a live
@@ -303,7 +324,7 @@ try {
         const scan = path.join(bigTmp, 'scan');
         fs.mkdirSync(scan);
         for (let i = 0; i < 10; i++) {
-            const dir = path.join(scan, 'repo-' + 'x'.repeat(200) + '-' + String(i).padStart(4, '0'));
+            const dir = path.join(scan, 'repo-' + String(i).padStart(4, '0'));
             execFileSync('git', ['clone', '-q', bare, dir], { stdio: 'pipe' });
             for (const f of ['RESUME.md', 'PUBLISH-QUEUE.md', 'DECISIONS.md', 'prd.json', 'TASKS.md', 'CLAUDE.md']) {
                 fs.writeFileSync(path.join(dir, f), f === 'prd.json' ? '{}' : 'x');

@@ -174,7 +174,25 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
 // gh is STUBBED on PATH. A live gh would make these byte counts depend on
 // somebody else's check matrix, which is the thing this file's header already
 // refuses for the classification cases.
-{
+//
+// AND THAT STUB CANNOT EXIST ON WINDOWS, so this block is skipped there — out
+// loud, because a silent skip is indistinguishable from a pass. An
+// extensionless `gh` carrying a shebang is not executable on Windows at all:
+// PATH lookup goes through PATHEXT, and there is no shebang. A `gh.cmd` is not
+// a drop-in either — node refuses to spawn .cmd/.bat when `shell` is false,
+// which is exactly how the subject spawns gh, and correctly so, since that is
+// the injection-safe form. Stubbing it there would mean weakening the subject
+// to suit its test.
+//
+// The cost of the skip is small and worth naming: the defect being guarded is
+// darwin-only (a pipe is asynchronous there and synchronous on linux and
+// win32), so the platform where it can actually bite still runs this, and so
+// does ubuntu.
+if (process.platform === 'win32') {
+    console.log('SKIP  the pipe-delivers-every-byte block — no stub `gh` is possible on win32 '
+        + '(no shebang, and node will not spawn a .cmd without shell:true). '
+        + 'The defect it guards is darwin-only; macOS and ubuntu both run it.');
+} else {
     const os = require('os');
     const { spawnSync } = require('child_process');
     const PIPE_BUF = 64 * 1024;
