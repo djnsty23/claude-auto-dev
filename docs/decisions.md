@@ -3,7 +3,57 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
-## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
+## 2026-09-08: memory recall measured at zero; ranked injection built and not shipped
+
+The question was whether the autodev-memory store is ever read back, and
+whether injecting a ranked slice of it at session start (the ECC design, up
+to 8 KB) would beat the current 91-byte line. Both were measured before any
+change; the record is `docs/evidence-memory-recall-2026-09-08.md`.
+
+**Recall.** Six evidence shapes were written down first, then searched for
+across 281 transcripts (2026-08-15 to 2026-09-07), `history.jsonl` and
+`bash-commands.log`. Skill invocations of `mem-search`: 0. The injected line
+quoted by any assistant: 0. Genuine queries of the store: 1, made with the
+CLI's `<project> <query>` arguments swapped, returning `[]` twice and read as
+"nothing there". Every other hit was a session developing or measuring the
+plugin itself.
+
+**Content.** A stratified 40-row sample, read row by row: 0 rows hold a fact
+a later session needs and could not get from git in a minute, 21 are
+derivable, 19 are noise. Weighted by the store's type mix that is about 92 %
+noise, because 90 % of the 6,072 rows are `Ran:`/`Tests`/`Read`/`Git:` echoes
+of a command line. The `type` comes from a keyword in the user's prompt, so
+scratch files are filed as bugfixes; the `concept` column IS the prompt, and
+383 rows carry another session's message as theirs.
+
+**Injection.** A ranked variant (recency × type weight × FTS match on branch
+and last five subjects, stale-file rows excluded, byte-capped) was built and
+run against the four real project paths at 2 KB and 8 KB. It injected 40 and
+154 observation lines respectively; 0 were actionable, 28 and 118 were
+misleading (wrong labels, repeats, scratch files, prompts describing a state
+the row's own session changed, and at 8 KB a production hostname and
+production secret-manager commands). Cost was about 300 ms over the current
+hook, which does not matter given the content.
+
+**Decision.** Keep the one-liner. No new hook. The store is left untouched;
+the evidence record carries a pruning proposal by shape (about 5,900 of 6,072
+rows) with the counts, for a person to act on after re-taking them. The ECC
+"memory 6 v 6" row is level at zero on both sides, not at six.
+
+Landed as this entry and the evidence document, no version bump.
+
+**Follow-on, same day.** The closing panel was held by the operator's away
+window, whose protocol takes the recommended reversible option and logs it.
+That option was the evidence doc's proposals 1 to 6: capture records only
+Write and Edit inside the project, typed by the tool, with the edit as the
+concept and one row per (session, type, title); the prompt-capture hook and
+its carrier are removed; the CLI refuses a swapped `<projectPath> <query>`.
+Those change four hook files under `plugins/`, which is the review class in
+the merge policy, so they are PR #190 with a reviewer, not this entry. Their
+per-change counts are in that PR's `docs/DECISIONS-2026-09-08-memory-recall.md`.
+The existing rows were left alone under the protocol; after the window ended
+the operator confirmed the count on a panel and the prune ran, 6,972 of
+7,480 rows removed with a verified backup first.## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
 
 The brief was to make workflow runs survive the session quota wall, on the
 2026-08-25 measurement (42 of 280 agents lost, 20 of them to a `<synthetic>`
