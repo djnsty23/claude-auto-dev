@@ -51,9 +51,11 @@ is `change` from the tool rather than a prompt keyword; concept is the edit,
 never the prompt; one row per (session, type, title). A third commit, taken
 the same way, removed the `UserPromptSubmit` hook and the prompt carrier that
 fed the old concept column, since nothing read them any more; the plugin now
-registers three hook events. The per-change counts, and the one thing
-deliberately left alone (the existing rows), are in
-`docs/DECISIONS-2026-09-08.md`.
+registers three hook events. A fourth made the CLI refuse a swapped
+`<projectPath> <query>` when the query slot holds an absolute directory and
+the project slot does not, which is the exact shape of the one real query.
+The per-change counts, and the one thing deliberately left alone (the
+existing rows), are in `docs/DECISIONS-2026-09-08.md`.
 
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 

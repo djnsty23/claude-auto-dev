@@ -823,6 +823,27 @@ if (require.main === module) {
     const cmd = args[0];
     const projectPath = args[1] || process.cwd();
 
+    // The query commands take `<projectPath> <query>`. The only genuine query
+    // of the store in 21 days of transcripts (2026-08-28, see
+    // docs/evidence-memory-recall-2026-09-08.md) passed them the other way
+    // round, searched a project named by the query for a query that was a
+    // path, got `[]` twice, and read that as "nothing there". A swap is
+    // unmistakable when the second argument is an absolute directory and the
+    // first is not, so refuse it out loud rather than answer a question nobody
+    // asked. Relative names are left alone: a query can legitimately match a
+    // directory name in the cwd, and an absent project path is a legitimate
+    // way to ask about a project that has since been deleted.
+    const QUERY_COMMANDS = new Set(['search', 'semantic', 'timeline', 'knowledge']);
+    const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+    if (QUERY_COMMANDS.has(cmd) && args[1] && args[2]
+        && path.isAbsolute(args[2]) && isDir(args[2]) && !isDir(args[1])) {
+        process.stderr.write(
+            `memory-db.js ${cmd}: arguments look swapped — "${args[2]}" is a directory and "${args[1]}" is not.\n` +
+            `Usage: node memory-db.js ${cmd} <projectPath> <query>\n`
+        );
+        process.exit(1);
+    }
+
     switch (cmd) {
         case 'stats':
             console.log(JSON.stringify(api.getStats(projectPath), null, 2));

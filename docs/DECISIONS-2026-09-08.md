@@ -65,3 +65,17 @@ prompt on disk past the session that wrote it; both suites plant one and
 assert it is gone. CLAUDE.md's plugin line goes from four hook events to
 three. Reversible by revert; the carrier directory keeps its self-ignore
 because a stale `.prompt` is still a prompt.
+
+## D6. The CLI refuses swapped `<projectPath> <query>`, fourth commit
+
+Third panel, same window, same protocol. The evidence doc's proposal 6: the
+one genuine query in the transcripts put the query in the project slot and
+the project in the query slot, got `[]` twice, and read that as an absence.
+The rule is narrow on purpose: it fires only when the second argument is an
+ABSOLUTE existing directory and the first is not, for `search`, `semantic`,
+`timeline` and `knowledge`. A relative name in the query slot is left alone
+because a query can legitimately match a directory in the cwd, and a project
+path that no longer exists is left alone because asking about a deleted
+project is legitimate. The suite pins all three edges as controls. Exit 1 with
+the usage on stderr and nothing on stdout, so a caller parsing JSON gets a
+non-zero status rather than an empty array.

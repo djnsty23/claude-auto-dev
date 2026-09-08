@@ -56,7 +56,11 @@ This 3-layer approach saves ~10x tokens vs dumping full context.
 
 ## Implementation
 
-Run queries via the memory-db CLI:
+Run queries via the memory-db CLI. The order is `<projectPath> <query>`; the
+CLI refuses the two swapped (an absolute directory in the query slot, a
+non-directory in the project slot) with exit 1 and a message, because the one
+real query in the transcripts made exactly that mistake and read `[]` as
+"nothing there".
 
 ```bash
 # Search — exact FTS5 first, auto-falls back to conceptual search when <3 exact hits
