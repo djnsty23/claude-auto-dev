@@ -18,13 +18,17 @@
  * Two steps are 99.46% of it. The other five are 8.8 SECONDS TOGETHER. The merge
  * bar requires a re-run AFTER every rebase and docs/decisions.md is newest-first,
  * so roughly half the open queue rebases on every merge to main; that product,
- * not any single step, is the fleet's dominant cost. This runs the 8.8-second
- * half so a rebase can be re-checked in seconds.
+ * not any single step, is the fleet's dominant cost. This runs that half.
+ *
+ * 8.8 s is the SUM of those step times, not the cost of a run: each step is
+ * spawned through `npm run`, which adds ~0.3 s apiece. `[measured 2026-09-08,
+ * load 5.9, 14 cores]` end to end this script is 11.1 s (n=3) against 27 min.
  *
  * `check:entrypoints` was the one worth measuring rather than assuming: it
  * probes ~118 scripts with `--help` under a 10 s budget each, so its worst case
  * is minutes and a cost model that guessed would have put it in the wrong tier.
- * Measured, it is 7.8 s - 89% of this tier and still under eight seconds.
+ * Measured, it was 7.8 s at load 4.2 and 9.5 s at load 5.9 - nearly the whole
+ * of this tier either way, and the only step in it whose cost tracks the load.
  *
  * WHAT IT IS NOT. It is NOT the gate and it never reports as though it were.
  * `npm run gate` still means every step, unchanged; a session running that from
