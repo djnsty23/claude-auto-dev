@@ -108,9 +108,18 @@ Before the `--prod` line below, all four must be true and written down:
    output, and (after Step 5) the verification. Until `deploy-ledger.js` carries
    these fields, write them at the top of `DEPLOY-LEDGER.md` by hand; the surface
    checklist it generates is Step 5b, not this.
-4. The rollback command for THIS deploy is in the ledger before you promote:
+4. The undo command for THIS deploy is in the ledger before you promote, and it
+   splits by case. Where production traffic already exists:
    `vercel rollback <previous production url>` (from `vercel ls --prod`), or for
    an edge function the previous commit and the deploy command from Step 6.
+   Where this is the project's FIRST production deployment there is no previous
+   URL, `vercel ls --prod` names nothing and `vercel rollback` has nothing to
+   return to; the undo is `vercel remove <project> --yes`, `[measured 2026-09-08]`
+   by a peer session on an accidental production alias, which returned 404 within
+   a second. A first deployment is also the case `npx vercel --yes` above does
+   not reliably keep as a preview (Vercel assigns a project's first deployment to
+   production and says so afterwards), so on a new project write the remove
+   command down before the preview line, not only before `--prod`.
 
 If the change touches anything on the ineligible list (a migration that drops or
 renames a column or changes a grant, RLS or a `SECURITY DEFINER`; billing,
