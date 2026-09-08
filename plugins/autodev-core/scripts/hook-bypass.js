@@ -268,7 +268,11 @@ function gateFileClause(hit) {
                 const live = fs.readFileSync(file, 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
                 const runs = [...new Set((live.match(/(?:[\w.-]+[/\\])+[\w.-]+\.(?:m?js|cjs|sh|py)\b/g) || [])
                     .map((p) => p.split(/[/\\]/).slice(-2).join('/')))];
-                const rel = path.relative(hit.dir, file);
+                // Shown with forward slashes on every platform: the suites assert on
+                // the text, and on Windows path.relative answers with backslashes.
+                // [measured 2026-09-08] three cases red on windows-latest, green on
+                // the other two, for exactly that.
+                const rel = path.relative(hit.dir, file).split(/[\\/]/).join('/');
                 found.push(`${rel && !rel.startsWith('..') ? rel : file}${runs.length ? ` (runs ${runs.join(', ')})` : ''}`);
             }
             if (found.length) here = ` Here that is ${found.join(' and ')}.`;
