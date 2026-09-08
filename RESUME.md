@@ -1,40 +1,42 @@
 # RESUME — needs-setup as a first-class state, 2026-09-08
 
-Branch `claude/keen-haslett-b76054`, worktree `keen-haslett-b76054`, base `origin/main`
-b8eae1f. Context depth passed 300k, so this session stopped after the step below; a fresh
-session continues from here.
+Branch `claude/keen-haslett-b76054`, PR #194 against `main`. HEAD 2515cfb on origin.
+This session passed 400k context after the third merge of main; a fresh session continues
+from here. The evidence is `docs/evidence-needs-setup-2026-09-08.md`; the decision entry is
+at the top of `docs/decisions.md`.
 
 ## Done, and how each was verified
 
-| what | verified by |
-|---|---|
-| `prd-states.js`: `blockers()`, `isReady()`, `summarise().ready` | `node tooling/test-prd-states.js` → 54/54 |
-| `scripts/prd-mark-needs-setup.js` (mark / `--clear` / `--list`, refusals, idempotent) | `node tooling/test-prd-mark-needs-setup.js` → 58/58 (new suite) |
-| `check-spec-output.js --spec SPEC.md`: External services section, `type: setup`, `blockedReason` URL, `blockedBy` resolves; fixture `tooling/fixtures/spec/oncall/` | `node tooling/test-check-spec-output.js` → 53/53 (was 21) |
-| `hooks/stop-auto-check.js` names blocked-on-operator ids; needs-setup-only backlog reaches approve | `node tooling/test-stop-auto-check.js` → 70/70 |
-| `status` and `auto` inline commands print "Blocked on you: N (ids)" | `node tooling/test-skill-prd-commands.js` → 6/6 states |
-| skills: auto (Handback section), spec (External services + setup stories + `--spec`), wizard (mark first), core (schema rows), status | `node tooling/check-skill-tool-declarations.js` clean |
-| docs: `docs/evidence-needs-setup-2026-09-08.md`, `docs/decisions.md` entry | `check-no-private-names.js` clean (Project A/B/C/D anonymised); `check-claim-provenance.js --check-message` on each → 0 unlabelled |
-| `node tooling/validate.js` | 18 PASS, 1 FAIL — the FAIL (`hooks module ./fn/autodev-fn.mjs ... modules entry was not read`) reproduces on a scratch worktree of HEAD; open PRs #182/#184 address it. Not this change. |
+| commit | what | verified by |
+|---|---|---|
+| 6298b62 | (a) `spec` setup manifest + `check-spec-output.js --spec`; (b) `prd-mark-needs-setup.js` + auto/wizard Handback; (c) "Blocked on you" in status/auto and the Stop hook; `prd-states.js` `blockers()/isReady()/ready` (a DERIVED bucket, not a sixth `passes` value) | test-prd-states 54/54 · test-prd-mark-needs-setup 58/58 · test-check-spec-output 53/53 · test-stop-auto-check 70/70 · test-skill-prd-commands 6/6 states |
+| d0e2c3a | merge origin/main (#184, #191) and mirror `ready` into `hooks/fn/sprint-status.mjs` — the parity red that made all three CI platforms fail | `node tooling/test-hooks-module.js` → 108 passed, 0 failed |
+| 28dab85 | merge origin/main (8.165.0, #181) | full `npm run gate` → 119/119 suites, check:suites 118 verified able to fail, 0 NOT verified, gate exit 0; CI on 28dab85 green on all three platforms (2 completed-success each, job-level) |
+| cd4a9c1 + 2515cfb | merge origin/main (#198, #207); decisions.md entry re-inserted (the merge resolution had dropped it) | `awk '/^## /{if(prev!~/^$/&&prev!="")print}' docs/decisions.md` prints nothing; `npm run check:agents-md` → OK, 16 rules; CI on 2515cfb: every platform ≥1 completed-success; local seven-step gate: step 1 `npm test` exit 0 (118 suites); steps 2–7 see the exit files noted below |
 
-Evidence: 36 stories pending >30d across three trunks; 6 live blocked-on-a-human, all in one
-client repo (proposal in the evidence doc, no commit there); qr and autodev have no prd.json
-on any ref, so nothing to backfill. Two brief premises came from checkouts 353/387 commits
-behind their trunks and are corrected in the doc.
+Local seven-step gate at 2515cfb, each step run on its own with its exit code to a file:
+`test` 0 (120/120 suites) · `check:suites` 0 (120 suites, 119 verified able to fail, 0 NOT
+verified, 1 canaried elsewhere) · `check:probe-shapes` 0 (17/17) · `check:population` 0 ·
+`check:entrypoints` 0 · `check:skill-tools` 0 · `check:agents-md` 0 (16 rules).
 
-## Next, in order
+## Not done, by design
 
-1. `npm test` was started on the dirty tree (log in the session scratchpad); if this file
-   is in the tree, it finished and the commit below was made after it.
-2. Commit: `git -c user.email=djnsty23@users.noreply.github.com commit -F <msg>` with
-   explicit paths (see the branch). Then `npm run gate` on the CLEAN tree — tens of minutes,
-   three suites are load-sensitive, re-run a red serially before attributing it. CI runs the
-   same gate on the PR.
-3. Push, open the PR against `main` (no VERSION bump). If the PR is already open, step 2's
-   local gate is the only thing left to confirm.
-4. Not done, by the brief's design: applying the six Project C marks (client repo, read-only).
+- **Not self-merged.** `~/claude-memory/MERGE-POLICY.md` keeps review for anything under
+  `plugins/` that ships; this PR changes `stop-auto-check.js` (a Stop hook) and five
+  skills. A review session (chip "Review PR #194 before merge") was started by the operator.
+- **Client-repo backfill** is a proposal in the evidence doc (six marks, two `blockedBy`
+  chains). Each names a person to confirm; it stays with the operator.
+- **qr and autodev**: no `prd.json` on any ref, nothing to backfill.
+- `~/.claude/brain-role.json` names a peer that is not a live session; the Stop hook says so
+  every turn. Operator's to refresh (`scripts/check-brain-role.js --status`).
 
-## Seen in passing
+## Next, in order (chosen by the operator 2026-09-08)
 
-`check-spec-output.js` does not read a `backlog` key (the greenfield log noted it);
-`storiesOf()` reads `stories` and `sprints[].stories` only. A decision, not a bug.
+1. Review lands or requests changes on #194; act on findings. Merge per policy: job-level
+   check-runs grouped by name, ≥1 `completed`/`success` per platform, never the rollup.
+2. Client repo: apply the six marks on a branch after confirming each with its person.
+3. Client repo: `blockedBy` S3-010→S3-009 and S4-008→S4-004.
+4. Decide whether `storiesOf()` should read a `backlog` key (greenfield run's held-back
+   stories were invisible to the checker).
+
+Never amend; commit with `git -c user.email=98432064+djnsty23@users.noreply.github.com commit -F <file>`.
