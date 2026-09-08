@@ -25,10 +25,17 @@
  * claim names no PR. A 683-item list is not actionable at boot; it is the shape
  * of detector that gets muted. This one is deliberately tiny:
  *
- *   - only the documents a Brain actually reads at boot, about eight per repo
- *   - only the TRACKED tree at the trunk, so worktree copies cannot double-count
- *   - only claims asserting an OPEN state, which are the ones that decay silently
- *   - ranked by age, capped, and it prints the population it scanned
+ *   - only the documents a Brain actually reads at boot, about eight per repo,
+ *     and it NAMES the kin documents it declined rather than implying eight is
+ *     the whole corpus
+ *   - the TRACKED tree at the trunk is the population, so worktree copies
+ *     cannot double-count; the working copy is read too, but only to say which
+ *     findings a session has already fixed and not yet merged
+ *   - only claims asserting an OPEN state, which are the ones that decay
+ *     silently, plus PR handles a line calls open, which name their own probe
+ *   - ranked by age, capped, and it prints the population it scanned WITH its
+ *     denominator, because a numerator alone cannot tell a corpus that was read
+ *     from one that was half read
  *
  * It does NOT decide staleness. Deciding needs a probe per claim, and guessing
  * one is how you get a gate that is confidently wrong. It hands a Brain a short
@@ -43,6 +50,7 @@
  */
 
 const { execFileSync } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 /** The documents a Brain reads at boot and then acts on. Not the whole repo. */
@@ -50,6 +58,39 @@ const BOOT_DOCS = [
     'RESUME.md', 'CLAUDE.md', 'AGENTS.md', 'ROADMAP.md',
     'PUBLISH-QUEUE.md', 'DECISIONS.md', 'GAME.md', 'PLAN.md',
 ];
+
+/**
+ * A KIN DOCUMENT carries a boot document's name with a suffix -
+ * `DECISIONS-2026-09-07.md`, `PLAN-SITE-V2.md`. BOOT_DOCS is an allowlist, so
+ * the tool declines these in silence, and its population line then reports
+ * "6 of 8 boot docs present" over a repo whose Brain-read corpus is larger
+ * than eight documents. That reads as 75% coverage of a corpus it never
+ * measured.
+ *
+ * `[measured 2026-09-07]` censused across the five trunks this tool runs
+ * against: **11 kin documents**, spread 0 / 0 / 3 / 5 / 3, and they are not
+ * marginal. In one product a `PLAN-*.md` is named inside the very RESUME.md
+ * the tool DOES read, as "the partner's brief", beside a `*-LEDGER.md`
+ * described as "the record"; two other products each carry three dated
+ * `DECISIONS-*.md` siblings, which is where the last week of decisions lives
+ * while `DECISIONS.md` holds the older ones.
+ *
+ * DELIBERATELY NOT SCANNED, only NAMED. Reading them would be a different
+ * tool: this one is small because it reads about eight documents, and the
+ * 683-item sweep it exists to replace is what happens when that stops being
+ * true. Naming the gap costs one line and lets a reader tell a clean corpus
+ * from a half-read one, which is the entire complaint. Widening the scan is a
+ * decision with a precision census attached, and this is not that change.
+ *
+ * WHY KIN AND NOT EVERY ROOT DOCUMENT. The same census over all root markdown
+ * gives autodev 4 unexamined documents totalling 6,873 lines - of which 6,283
+ * are `CHANGELOG.md`, which no Brain reads at boot and which would put
+ * autodev's "coverage" at 5%. A denominator that wrong is worse than none: it
+ * manufactures alarm rather than reporting a gap. Kin is the narrow signal,
+ * and it is the one that names documents a Brain demonstrably reads.
+ */
+const BOOT_STEMS = BOOT_DOCS.map((d) => d.replace(/\.md$/i, ''));
+const KIN_DOC = new RegExp('^(' + BOOT_STEMS.join('|') + ')[-_.].+\\.md$', 'i');
 
 /**
  * Assertions that something is NOT done. Deliberately narrow: each must be a
@@ -278,6 +319,71 @@ const STRICT_HANDLE =
 const SELF_RESOLVED =
     /~~|\b(done|merged|closed|fixed|shipped|landed|resolved|complete|is pushed|are pushed)\b/i;
 
+/**
+ * A LINE THAT NAMES A PR AND CALLS IT OPEN. This is the false negative that
+ * motivated the second half of this file's rewrite.
+ *
+ * `[measured 2026-09-07]` one product's `RESUME.md:32`, on the trunk, read:
+ *
+ *     Phases 6 and 7 are PR #47, open at f6d1e67, gate green
+ *
+ * `gh pr view 47` -> MERGED three days earlier, and the head sha is not the
+ * one named: f6d1e67 is a branch tip from four minutes before it. The tool
+ * reported `nothing to re-check` over that document, and a coordinator ranked
+ * the repo's documents clean on the strength of that run.
+ *
+ * NOT ONE OF THE OPEN_STATE PATTERNS MATCHES IT, and no suppressor was
+ * involved - checked directly rather than assumed, because the standing
+ * hypothesis was that a suppression rule had eaten it. `OPEN_STATE` scores
+ * zero on that line; `CONDITIONAL`, `DECIDED` and `RESOLVED` are all false.
+ * The lexical vocabulary is built around "unproven" and "still broken", and
+ * the commonest open-state claim in these documents is none of those: it is a
+ * PR number with the word `open` next to it.
+ *
+ * WHY THIS IS SAFE TO ADD WHEN `## Open PRs` HAD TO BE AN ALLOWLIST. The
+ * structural rule could not use a heading that merely SOUNDS open, because a
+ * heading governs every row beneath it and the census put that at ~8%. This
+ * rule is line-local and demands a HANDLE on the same line, so it reports only
+ * claims that NAME THEIR OWN REFUTATION - one `gh pr view` settles each one.
+ *
+ * CENSUSED BEFORE ADOPTION, on the same five trunks. The first draft also
+ * accepted `pending` and `awaiting` and matched 6 lines, of which 3 were
+ * false - and two of those were NEGATIONS, `**Prod is serving ... NO prod tag
+ * is pending**`, which is the shape that says the opposite. Restricted to
+ * `open`/`unmerged`, with the negation veto below, it matches 3 lines:
+ *
+ *     product A  RESUME.md:32         PR #47   -> MERGED, 3 days earlier
+ *     product B  RESUME.md:166        PR #610  -> MERGED, 9 days earlier
+ *     product B  PUBLISH-QUEUE.md:367 PR #507  -> MERGED, 15 days earlier
+ *
+ * **3 of 3 genuine**, each verified with `gh`. Two of them are in a repo
+ * nobody had flagged. Compare the structural rule's 4-of-6 at adoption.
+ *
+ * NO DATE IS REQUIRED, like the structural path and unlike the lexical one. A
+ * PR handle is checkable whatever its age, so an age threshold would only
+ * discard findings that are already refutable in one call - and these carry no
+ * date on the line in two of the three instances above.
+ */
+const HANDLE_OPEN_HANDLE = /\/pull\/(\d{1,4})\b|\bPR\s+#(\d{1,4})\b/;
+const HANDLE_OPEN_ASSERT =
+    /\b(is|are|remains?|stays?|still)\s+(still\s+)?(open|unmerged)\b|\bopen\s+at\b|\bstill\s+open\b/i;
+
+/**
+ * `NO prod tag is pending` and `NO PR #88 is open` assert the ABSENCE of open
+ * work, in the exact grammar of asserting its presence. Both false positives
+ * the census threw up were this sentence, in two snapshots of one RESUME.md.
+ *
+ * THE SUBJECT IS A NOUN PHRASE, NOT A WORD, and the first version of this
+ * pattern allowed exactly one token between `no` and the verb. It therefore
+ * failed to match `NO prod tag is pending` - the sentence it was written for -
+ * and vetoed nothing at all. It read as a working veto for as long as no test
+ * drove a line through it, and the fleet census agreed, because the census
+ * counted how often it fired rather than whether it could.
+ *
+ * Caught by mutation: deleting the veto entirely left the suite green.
+ */
+const HANDLE_OPEN_NEGATED = /\bno\s+(?:[\w#.-]+\s+){0,3}(?:is|are)\b/i;
+
 function git(args, cwd) {
     try {
         return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -294,35 +400,31 @@ function trunkOf(cwd) {
 }
 
 /**
- * @returns {{repo, trunk, population:object, findings:Array, note:string[]}}
+ * Scan ONE tree. Factored out so the trunk and the working copy go through
+ * byte-identical logic: a classification that compared two DIFFERENT scanners
+ * would report differences the documents do not have.
+ *
+ * @param {(doc:string)=>(string|null)} readDoc
+ * @returns {{findings:Array, structural:Array, counts:object, present:number,
+ *            absent:number, linesPresent:number}}
  */
-function checkDocStaleness(cwd, opts) {
-    opts = opts || {};
-    const ageDays = Number(opts.age || 7);
-    const max = Number(opts.max || 12);
-    const note = [];
-
-    const trunk = trunkOf(cwd);
-    if (!trunk) {
-        return { repo: cwd, trunk: null, population: {}, findings: [],
-            note: ['could not resolve a trunk; nothing scanned, which is NOT the same as nothing found'] };
-    }
-
-    let scanned = 0, missing = 0, lines = 0, dated = 0;
+function scanTree(readDoc, ageDays, now) {
+    let scanned = 0, missing = 0, lines = 0, dated = 0, linesPresent = 0;
     let conditional = 0, decided = 0, resolved = 0;
     let quoted = 0, shipped = 0, structural = 0, structuralSeen = 0;
-    let headings = 0;
+    let headings = 0, handleOpen = 0;
     const findings = [];
     const structuralFindings = [];
-    const now = Date.now();
 
     for (const doc of BOOT_DOCS) {
-        // Read the TRACKED tree at the trunk. A working copy has as many current
-        // values as there are checkouts, and worktree copies double-count.
-        const body = git(['show', trunk + ':' + doc], cwd);
+        const body = readDoc(doc);
         if (body === null) { missing++; continue; }
         scanned++;
         const rows = body.split('\n');
+        // The DENOMINATOR for the lines actually considered. Without it the
+        // report prints a numerator alone, and a numerator alone cannot tell a
+        // corpus that was read from one that was half read.
+        linesPresent += rows.length;
         let section = '';
         let heading = '';
         // Quote state is carried ACROSS lines: a label can open on one row and
@@ -351,13 +453,31 @@ function checkDocStaleness(cwd, opts) {
                 if (STRICT_HANDLE.test(line) && !SELF_RESOLVED.test(line)) {
                     structural++;
                     structuralFindings.push({ doc, line: i + 1, section: heading,
-                        text: line.trim().slice(0, 150) });
+                        text: line.trim().slice(0, 150), kind: 'generated-status' });
                 }
                 continue;
             }
 
             if (line.length < 20) continue;
             lines++;
+
+            // ---- RULE 2 (narrow): a PR handle CALLED OPEN --------------------
+            // Runs before the lexical path and needs no date: the handle is the
+            // probe, so one `gh pr view` settles it whatever its age. Placed
+            // here rather than inside OPEN_STATE because it must not inherit
+            // the date requirement, and because a suppressor tuned for prose
+            // has no business vetoing a machine-checkable identifier.
+            const ho = line.match(HANDLE_OPEN_HANDLE);
+            if (ho && HANDLE_OPEN_ASSERT.test(line)
+                && !HANDLE_OPEN_NEGATED.test(line)
+                && !SELF_RESOLVED.test(line) && !quotesBefore) {
+                handleOpen++;
+                structuralFindings.push({ doc, line: i + 1, section: heading,
+                    text: line.trim().slice(0, 150), kind: 'handle-open',
+                    handle: 'PR #' + (ho[1] || ho[2]) });
+                continue;
+            }
+
             if (!OPEN_STATE.some((re) => re.test(line))) continue;
             // A match inside a span that was ALREADY open when this line began
             // is quoted text - a UI label, an error string - not a claim.
@@ -386,29 +506,201 @@ function checkDocStaleness(cwd, opts) {
             findings.push({ doc, line: i + 1, age, isHeading: !!sm, text: line.trim().slice(0, 150) });
         }
     }
-
     findings.sort((a, b) => b.age - a.age);
     return {
-        repo: path.basename(cwd), trunk,
-        population: { bootDocsLookedFor: BOOT_DOCS.length, present: scanned, absent: missing,
-            linesConsidered: lines, suppressedAsConditional: conditional,
-            suppressedAsDecided: decided, suppressedAsResolved: resolved,
-            suppressedAsQuotedSpan: quoted, suppressedAsShippedSection: shipped,
-            generatedStatusRowsSeen: structuralSeen, structuralFindings: structural,
-            assertedInAHeading: headings,
-            openStateAndDated: dated, olderThanAgeDays: findings.length },
-        findings: findings.slice(0, max),
-        structural: structuralFindings.slice(0, max), note,
+        findings, structural: structuralFindings, present: scanned, absent: missing,
+        linesPresent,
+        counts: { lines, dated, conditional, decided, resolved, quoted, shipped,
+            structural, structuralSeen, headings, handleOpen },
     };
 }
 
+/**
+ * The documents a Brain reads that this tool DECLINES to open, named so the
+ * gap is visible rather than inferable. See KIN_DOC.
+ */
+function kinDocs(cwd, trunk) {
+    const listing = git(['ls-tree', '--name-only', trunk], cwd);
+    if (listing === null) return [];
+    return listing.split('\n')
+        .filter((f) => f && !BOOT_DOCS.includes(f) && KIN_DOC.test(f))
+        .sort();
+}
+
+/**
+ * WHICH TREE ANSWERED, AND WHY THE REPORT HAS TO SAY SO.
+ *
+ * `[measured 2026-09-07]` this tool read `git show <trunk>:<doc>` and nothing
+ * else, so a session that FIXED a stale claim, opened a PR and re-ran the
+ * sweep saw all four of its findings reported back verbatim. That reads as
+ * "my fix failed". It means "not merged yet", and the output could not tell
+ * the two apart. Another session hit this for real and had to work out on its
+ * own that a repeated finding was not a failed fix.
+ *
+ * Reading the working copy INSTEAD would be the same defect mirrored: a Brain
+ * at boot wants the trunk, because the trunk is what every other session and
+ * every reader of the repo will see. So the fix is neither tree - it is
+ * reading BOTH and saying which one each claim survives in:
+ *
+ *   open           at the trunk AND in the working copy -> genuinely stale
+ *   fixed-locally  at the trunk, GONE from the working copy -> unmerged fix
+ *   local-only     only in the working copy -> a claim not yet pushed
+ *
+ * THE POPULATION STAYS TRUNK-BASED, which preserves the invariant the original
+ * trunk-only design was protecting: "a working copy has as many current values
+ * as there are checkouts, and worktree copies double-count." That concern is
+ * about a FLEET SWEEP counting one document once per checkout. It does not
+ * apply here, because the working copy is used only to CLASSIFY the trunk's
+ * findings inside a single repo path - it never contributes a count.
+ *
+ * @returns {{repo, trunk, source, population:object, findings:Array,
+ *            structural:Array, note:string[]}}
+ */
+function checkDocStaleness(cwd, opts) {
+    opts = opts || {};
+    const ageDays = Number(opts.age || 7);
+    const max = Number(opts.max || 12);
+    const source = opts.source || 'both';
+    const note = [];
+
+    const trunk = trunkOf(cwd);
+    if (!trunk) {
+        return { repo: path.basename(cwd), trunk: null, source, population: {},
+            findings: [], structural: [], localOnly: [],
+            note: ['could not resolve a trunk; nothing scanned, which is NOT the same as nothing found'] };
+    }
+
+    const now = Date.now();
+    const readTrunk = (doc) => git(['show', trunk + ':' + doc], cwd);
+    const readWorktree = (doc) => {
+        try { return fs.readFileSync(path.join(cwd, doc), 'utf8'); }
+        catch (e) { return null; }
+    };
+
+    // `worktree` grades the working copy alone and reports it as the population,
+    // for a session that wants to check what it is ABOUT to commit.
+    const base = source === 'worktree'
+        ? scanTree(readWorktree, ageDays, now)
+        : scanTree(readTrunk, ageDays, now);
+
+    let compared = null;
+    let comparedLabel = null;
+    if (source === 'both') {
+        // A repo with no checked-out working copy - a bare clone, or a path
+        // whose documents live only in git - yields nothing to compare, and
+        // saying so is better than silently grading one tree and implying two.
+        const anyOnDisk = BOOT_DOCS.some((d) => readWorktree(d) !== null);
+        if (anyOnDisk) {
+            compared = scanTree(readWorktree, ageDays, now);
+            comparedLabel = 'working copy';
+        } else {
+            note.push('no working copy on disk, so every finding is reported at the trunk only');
+        }
+    }
+
+    // Classify by TEXT rather than by line number: a fix elsewhere in the file
+    // shifts every line below it, and matching on position would report the
+    // whole tail of a document as newly fixed.
+    const key = (f) => f.doc + ' ' + f.text;
+    const label = (list, otherList, both, only) => {
+        const other = new Set((otherList || []).map(key));
+        for (const f of list) f.state = otherList ? (other.has(key(f)) ? both : only) : 'unclassified';
+        return list;
+    };
+
+    label(base.findings, compared && compared.findings, 'open', 'fixed-locally');
+    label(base.structural, compared && compared.structural, 'open', 'fixed-locally');
+
+    // A claim the working copy has and the trunk does not is one this session
+    // is about to ship. Reported separately so it cannot be mistaken for a
+    // trunk finding, which is the confusion this whole change exists to end.
+    const localOnly = [];
+    if (compared) {
+        const atTrunk = new Set(base.findings.map(key));
+        const atTrunkS = new Set(base.structural.map(key));
+        for (const f of compared.findings) if (!atTrunk.has(key(f))) { f.state = 'local-only'; localOnly.push(f); }
+        for (const f of compared.structural) if (!atTrunkS.has(key(f))) { f.state = 'local-only'; localOnly.push(f); }
+    }
+
+    const c = base.counts;
+    const kin = kinDocs(cwd, trunk);
+    const fixedLocally = base.findings.filter((f) => f.state === 'fixed-locally').length
+        + base.structural.filter((f) => f.state === 'fixed-locally').length;
+
+    return {
+        repo: path.basename(cwd), trunk, source,
+        comparedAgainst: comparedLabel,
+        population: {
+            bootDocsLookedFor: BOOT_DOCS.length, present: base.present, absent: base.absent,
+            // NUMERATOR AND DENOMINATOR TOGETHER. `linesConsidered` alone was
+            // printable over a corpus it had half read.
+            linesConsidered: c.lines, linesPresent: base.linesPresent,
+            kinDocsNotExamined: kin.length,
+            kinDocNames: kin,
+            suppressedAsConditional: c.conditional,
+            suppressedAsDecided: c.decided, suppressedAsResolved: c.resolved,
+            suppressedAsQuotedSpan: c.quoted, suppressedAsShippedSection: c.shipped,
+            generatedStatusRowsSeen: c.structuralSeen, structuralFindings: c.structural,
+            handleCalledOpen: c.handleOpen,
+            assertedInAHeading: c.headings,
+            openStateAndDated: c.dated, olderThanAgeDays: base.findings.length,
+            fixedLocallyNotMerged: fixedLocally,
+            localOnly: localOnly.length,
+        },
+        findings: base.findings.slice(0, max),
+        structural: base.structural.slice(0, max),
+        localOnly: localOnly.slice(0, max),
+        note,
+    };
+}
+
+/**
+ * ABSENCE MUST NOT PRINT AS HEALTH.
+ *
+ * `[measured 2026-09-07]` the run this rewrite exists for, on qr:
+ *
+ *     population: 6 of 8 boot docs present, 3307 lines considered, 3 suppressed
+ *     nothing to re-check
+ *
+ * Three separate things are wrong with those two lines and only the third is
+ * about a missing finding:
+ *
+ *  1. `3307 lines considered` has NO DENOMINATOR. The six documents hold 4,179
+ *     lines, so 872 were skipped by the length filter. A reader cannot tell
+ *     that from the output, and a clean corpus and a half-read one print the
+ *     same sentence.
+ *  2. The corpus itself is larger than the eight names. qr carries five KIN
+ *     documents the tool declined in silence, one of which - PLAN-SITE-V2.md -
+ *     the scanned RESUME.md names as the partner's brief.
+ *  3. `nothing to re-check` is a VERDICT with no basis attached. It is the
+ *     exact sentence this repo's rules call out: a verdict emitted before the
+ *     work, saying the same thing whether the corpus was read or was empty.
+ *
+ * A RATIO ALARM ON (1) WAS MEASURED AND REJECTED, and the measurement is the
+ * reason. Line coverage across the five trunks is 73.7% / 69.6% / 84.1% /
+ * 79.0% / 75.7% - a band about fourteen points wide, because it is a property
+ * of markdown having blank lines, not a property of any repo. Any threshold
+ * inside that band fires everywhere or nowhere, which is a light that is
+ * always on. So the denominator is PRINTED, and the loud line is keyed to the
+ * kin count instead, which ranges 0 to 5 across the same five repos and names
+ * documents a reader can go and open.
+ */
 function render(r) {
     const out = [];
-    out.push('  ' + r.repo + '  trunk=' + (r.trunk || 'UNRESOLVED'));
     const p = r.population;
+    // WHICH TREE ANSWERED, on the header line, before any finding. A reader who
+    // sees their own in-flight fix reported back needs this in the first line
+    // they read, not inferable from a flag they did not pass.
+    const read = r.source === 'worktree' ? 'working copy'
+        : (r.comparedAgainst ? 'trunk ' + r.trunk + ', compared against the ' + r.comparedAgainst
+            : 'trunk ' + r.trunk + ' only');
+    out.push('  ' + r.repo + '  trunk=' + (r.trunk || 'UNRESOLVED') + '  read=' + read);
+    if (!r.trunk) { for (const n of r.note) out.push('    NOTE: ' + n); return out.join('\n'); }
+
+    const pct = p.linesPresent ? Math.round(100 * (p.linesConsidered || 0) / p.linesPresent) : 0;
     out.push('    population: ' + (p.present || 0) + ' of ' + (p.bootDocsLookedFor || 0)
         + ' boot docs present (' + (p.absent || 0) + ' absent), ' + (p.linesConsidered || 0)
-        + ' lines considered, '
+        + ' of ' + (p.linesPresent || 0) + ' lines considered (' + pct + '%), '
         + ((p.suppressedAsConditional || 0) + (p.suppressedAsDecided || 0) + (p.suppressedAsResolved || 0))
         + ' suppressed (' + (p.suppressedAsConditional || 0) + ' rules, ' + (p.suppressedAsDecided || 0)
         + ' decided, ' + (p.suppressedAsResolved || 0) + ' resolved), '
@@ -418,18 +710,59 @@ function render(r) {
     // the lexical one, and folding them would hide which rule found what.
     out.push('    structural: ' + (p.generatedStatusRowsSeen || 0)
         + ' rows under a generated status heading, ' + (p.structuralFindings || 0)
-        + ' carrying a handle and not self-resolved'
+        + ' carrying a handle and not self-resolved; ' + (p.handleCalledOpen || 0)
+        + (p.handleCalledOpen === 1 ? ' line calls' : ' lines call') + ' a PR handle open'
         + '; suppressed ' + (p.suppressedAsQuotedSpan || 0) + ' inside a quoted span, '
         + (p.suppressedAsShippedSection || 0) + ' under a shipped section');
+
+    // THE LOUD LINE. Not an inference the reader has to draw from two numbers.
+    if (p.kinDocsNotExamined) {
+        out.push('    NOT A WHOLE-CORPUS READ: ' + p.kinDocsNotExamined
+            + ' document(s) carry a boot-doc name and were NOT examined: '
+            + (p.kinDocNames || []).slice(0, 6).join(', ')
+            + ((p.kinDocNames || []).length > 6 ? ', ...' : ''));
+    }
     for (const n of r.note) out.push('    NOTE: ' + n);
-    if (!r.findings.length) { out.push('    nothing to re-check'); return out.join('\n'); }
-    out.push('    RE-CHECK BEFORE TRUSTING (oldest first):');
-    for (const f of r.findings) {
-        out.push('      [' + String(f.age).padStart(4) + 'd] ' + f.doc + ':' + f.line
-            + (f.isHeading ? '   <- ASSERTED IN A HEADING, longer half-life: readers trust structure' : ''));
-        out.push('             ' + f.text);
+
+    const total = (r.findings || []).length + (r.structural || []).length;
+    if (!total) {
+        // The basis travels WITH the all-clear, in the same sentence, so the
+        // absence cannot be quoted onward without it.
+        out.push('    nothing to re-check in ' + (p.linesConsidered || 0) + ' lines across '
+            + (p.present || 0) + ' document(s)'
+            + (p.kinDocsNotExamined ? ' - but see the unexamined documents above' : ''));
+    } else {
+        out.push('    RE-CHECK BEFORE TRUSTING (oldest first):');
+        for (const f of r.findings) {
+            out.push('      [' + String(f.age).padStart(4) + 'd] ' + f.doc + ':' + f.line
+                + mark(f)
+                + (f.isHeading ? '   <- ASSERTED IN A HEADING, longer half-life: readers trust structure' : ''));
+            out.push('             ' + f.text);
+        }
+        for (const f of r.structural) {
+            out.push('      [handle] ' + f.doc + ':' + f.line + mark(f)
+                + (f.kind === 'handle-open'
+                    ? '   <- CALLS ' + f.handle + ' OPEN; one `gh pr view` settles it'
+                    : '   <- under `' + f.section + '`'));
+            out.push('             ' + f.text);
+        }
+    }
+    if ((r.localOnly || []).length) {
+        out.push('    NOT AT THE TRUNK, only in the working copy (you are about to ship these):');
+        for (const f of r.localOnly) out.push('      ' + f.doc + ':' + f.line + '  ' + f.text);
     }
     return out.join('\n');
+}
+
+/**
+ * The three-state label. `fixed-locally` is the whole point of reading two
+ * trees: without it a session re-running the sweep over its own in-flight fix
+ * reads its findings back verbatim and concludes the fix failed.
+ */
+function mark(f) {
+    if (f.state === 'fixed-locally') return '   [FIXED LOCALLY, NOT MERGED]';
+    if (f.state === 'local-only') return '   [LOCAL ONLY, not at the trunk]';
+    return '';
 }
 
 function selftest() {
@@ -506,12 +839,50 @@ function selftest() {
     t('a date is required, so an undated claim is not reported', DATE_RE.test('[measured 2026-08-21]'));
     t('a non-date number is not read as a date', !DATE_RE.test('port 8080 and 5173'));
 
+    // ---- RULE 2: a PR handle a line calls OPEN ----------------------------
+    //
+    // The verbatim line the tool returned `nothing to re-check` over. PR #47
+    // merged 2026-09-04T07:28:48Z; the sha named is not even the head.
+    const QR = 'on main (#44 to #46). Phases 6 and 7 are PR #47, open at f6d1e67, gate green';
+    const openOn = (l) => HANDLE_OPEN_HANDLE.test(l) && HANDLE_OPEN_ASSERT.test(l)
+        && !HANDLE_OPEN_NEGATED.test(l) && !SELF_RESOLVED.test(l);
+    t('the qr false negative matches the handle-open rule', openOn(QR), QR);
+    t('  and it matches NONE of the lexical open-state patterns',
+        !OPEN_STATE.some((re) => re.test(QR)),
+        'the standing hypothesis was a suppressor ate it; the vocabulary never saw it');
+    t('  and no suppressor was involved either',
+        !CONDITIONAL.test(QR) && !DECIDED.test(QR) && !RESOLVED.test(QR));
+    t('"PR #610 is open and unmerged" matches',
+        openOn('Nothing unpushed. **PR #610 is open and unmerged.** The cron in it does not run'));
+    t('a pull URL row saying Still open matches',
+        openOn('| [#507](https://github.com/o/r/pull/507) | Still open - now verifiable via the harness |'));
+
+    // The three false positives the first draft produced, all from one repo.
+    const NEG = '> **Prod is serving `prod-v1.60.0` (`70cec586`). NO prod tag is pending, and `origin/main` ==';
+    t('a NEGATED pending claim does NOT match',
+        !openOn(NEG),
+        'accepting `pending` matched this twice; it asserts the absence of open work');
+    t('a row that reports its own MERGED state does not match',
+        !openOn('- [#49](https://github.com/o/r/pull/49) is **MERGED**, recorded so nobody redoes it'));
+    t('a bare number with no PR handle does not match',
+        !HANDLE_OPEN_HANDLE.test('UI-CONTRACT #1 is still open for discussion'),
+        'a bare #N is not a PR reference and resolves as merged almost always');
+
+    // ---- kin documents ----------------------------------------------------
+    t('a dated DECISIONS sibling is recognised as kin', KIN_DOC.test('DECISIONS-2026-09-07.md'));
+    t('a suffixed PLAN is recognised as kin', KIN_DOC.test('PLAN-SITE-V2.md'));
+    t('a boot document itself is NOT kin', !KIN_DOC.test('DECISIONS.md'),
+        'it is scanned, so naming it as unexamined would be false');
+    t('CHANGELOG.md is NOT kin', !KIN_DOC.test('CHANGELOG.md'),
+        'a denominator that counts a 6,283-line changelog manufactures alarm');
+
     console.log('\nselftest: ' + pass + ' passed, ' + fail + ' failed');
     return fail === 0;
 }
 
 module.exports = { checkDocStaleness, OPEN_STATE, CONDITIONAL, DECIDED, DECIDED_SECTION,
-    RESOLVED, SECTION_RE, BOOT_DOCS, render };
+    RESOLVED, SECTION_RE, BOOT_DOCS, KIN_DOC, render,
+    HANDLE_OPEN_HANDLE, HANDLE_OPEN_ASSERT, HANDLE_OPEN_NEGATED };
 
 if (require.main === module) {
     const argv = process.argv.slice(2);
@@ -519,11 +890,23 @@ if (require.main === module) {
     if (argv.includes('--selftest')) process.exit(selftest() ? 0 : 1);
     if (argv.includes('--help') || !arg('--repo')) {
         console.log('check-doc-staleness.js --repo <path> [--age 7] [--max 12] [--json]\n'
+            + '                          [--source both|trunk|worktree]\n'
             + 'Re-check the open-state claims in the documents a Brain reads at boot.\n'
+            + '\n'
+            + '  --source both      (default) grade the trunk, then say which findings the\n'
+            + '                     working copy has already fixed but not yet merged\n'
+            + '  --source trunk     the trunk alone, for a Brain at boot\n'
+            + '  --source worktree  the working copy alone, for what you are about to commit\n'
+            + '\n'
             + 'Reports; never decides. Always exits 0.');
         process.exit(0);
     }
-    const r = checkDocStaleness(arg('--repo'), { age: arg('--age'), max: arg('--max') });
+    const src = arg('--source') || 'both';
+    if (['both', 'trunk', 'worktree'].indexOf(src) === -1) {
+        console.error('unknown --source ' + src + '; expected both, trunk or worktree');
+        process.exit(0);
+    }
+    const r = checkDocStaleness(arg('--repo'), { age: arg('--age'), max: arg('--max'), source: src });
     console.log(argv.includes('--json') ? JSON.stringify(r, null, 2) : render(r));
     process.exit(0);
 }

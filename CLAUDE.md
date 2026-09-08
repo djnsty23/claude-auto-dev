@@ -13,20 +13,42 @@ never ships.
 ## Commands
 
 ```bash
-npm run gate                 # THE GATE: npm test, then check:suites. What CI runs.
-npm test                     # every tooling/test-*.js suite, then validate. HALF the gate.
+npm run gate                 # THE GATE: six steps chained with &&. Run this.
+npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 6.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
 ```
 
-**`npm test` is HALF the gate, and the missing half fails silently.**
-`[measured 2026-08-30]` CI runs `npm test` and `npm run check:suites` as two
-separate steps. A session ran nine green `npm test` runs and never executed the
-second, so a newly added suite was reported green while `check-suites-can-fail.js`
-had it counted as NOT verified. The suite in question was the one gating pushes.
+**`npm test` is ONE SIXTH of the gate, and every step it skips fails silently.**
+`[measured 2026-08-30]` a session ran nine green `npm test` runs and never
+executed `check:suites`, so a newly added suite was reported green while
+`check-suites-can-fail.js` had it counted as NOT verified. The suite in question
+was the one gating pushes.
 
-Nothing about the first command hints at the second, which is why `npm run gate`
-now exists: it chains both and is what CI runs.
+Nothing about the first command hints at the rest, which is why `npm run gate`
+now exists: it chains all six.
+
+`[measured 2026-09-07]` **THE CHAIN IS `&&`, so a red first step means the other
+five NEVER RAN.** The gate is
+
+```
+npm test && npm run check:suites && npm run check:probe-shapes
+  && npm run check:population && npm run check:entrypoints
+  && npm run check:skill-tools
+```
+
+A session landing a rescued commit read the resulting exit 1 as "the gate is
+red", and was one step from describing the commit as gated when `check:suites` —
+the step that catches exactly the unverifiable-new-suite case above — had not
+executed at all. Its change ADDED a suite, so that was the one step it could not
+afford to skip. When the first step fails, run the remaining five yourself; the
+chain's exit status is a verdict on one step, not on six.
+
+**And `npm run gate` is NOT "what CI runs"**, in both directions. CI adds a
+`node --check` parse loop over every `plugins/*/hooks/*.js` that the gate has no
+equivalent for, and the gate runs `check:probe-shapes`, which CI does not. Four
+of CI's steps are `if: matrix.os == 'ubuntu-latest'`, so a green local gate on
+macOS and a green CI run are not claims about the same set of checks.
 
 **Run it on a CLEAN tree, after committing and before pushing.** `check:suites`
 grades HEAD, in a private worktree under tmpdir, so it refuses a dirty tree and
@@ -89,12 +111,49 @@ entered every run while nothing asserts anything about it.
 and `validate` fails while a `*.vacuity-backup` exists. After killing a run,
 `pkill -9` then `pgrep` to confirm — a survivor rewrites the file underneath you.
 
+**Kill by pid, never by pattern.** Every session runs these suites from its own
+worktree with the same command line, so `pkill -f test-all.js` is a fleet-wide
+action: it matches every peer's run exactly as well as it matches yours.
+`[measured 2026-09-08]` this clone had 34 worktrees registered, one of them a
+live `check:suites` sweep, and all of them would have matched; a session that
+ran that pattern kill the same day reported ending a peer's `check:suites` and
+another session's `test-hook-execution-evidence`. The cost is worse than the
+interruption, because a killed run writes no exit file and an ABSENT verdict is
+indistinguishable from a failing one — the peer inherits a red they did not
+cause and cannot explain. `pgrep -f <pattern>` is the right way to LIST
+candidates and the wrong way to choose among them: confirm a pid's cwd is yours,
+then `kill -9 <pid>`.
+
 ## Architecture
 
-`autodev-core` (the workflow, 43 skills, 4 agents, 7 hook events, the sprint
-system) · `autodev-memory` (sqlite memory, 4 hook events) · `autodev-stack`
-(vendor skills). `${CLAUDE_PLUGIN_ROOT}` resolves **per plugin**, so cross-plugin
-paths cannot work — if core needs a file, core ships it.
+`autodev-core` (the workflow, its skills, agents and hooks, the sprint system) ·
+`autodev-memory` (sqlite memory, its own hooks) · `autodev-stack` (vendor
+skills). `${CLAUDE_PLUGIN_ROOT}` resolves **per plugin**, so cross-plugin paths
+cannot work — if core needs a file, core ships it.
+
+**That sentence carried four counts until 2026-09-08, and three of them were
+wrong.** It was written on 2026-08-17 as "43 skills, 4 agents, 7 hook events"
+for core and "4 hook events" for memory, and all four were exact that day.
+`[measured 2026-09-08]` core has **58 skills, 5 agents and 10 hook events**;
+memory's 4 is still right, and it is right because nobody has added a memory
+hook, not because anything checks.
+
+The drift is not carelessness, it is the shape of the sentence. Of the 526
+commits since it was written, 18 added a skill to core and 14 touched core's
+`hooks.json` — and 9 edited this file, none of them noticing. A count is the
+purest IMPLEMENTATION DESCRIPTION in the sense used above: it is falsified by
+the ordinary act of doing the work here, and falsifying it emits nothing. The
+shipped manifests already know this — `marketplace.json` and every `plugin.json`
+name what a plugin *does* ("brainstorm, auto, iterate, audit, review, ship, plus
+the prd.json sprint system") and count nothing.
+
+**So do not put the numbers back.** `ls plugins/autodev-core/skills | wc -l` is
+correct every day; a number in prose is correct only on the day it is typed. And
+no gate would have caught this one. `check:population` is the plausible
+candidate and is not it: it asks whether a script reporting an absence says what
+it scanned, it never reads a document, and it is advisory by design because it
+has demonstrated false positives. Nothing in the gate grades prose against the
+tree — which is the reason the prose must not make claims the tree can falsify.
 
 ### Skills are the unit of behaviour
 
@@ -214,6 +273,23 @@ you started work; in a shared clone it moves under you.
   shared history. Commit small and forward; never rewrite.
 - **Stage explicit paths, never `git add -A`** — the same concurrency sweeps
   another session's in-flight work into your commit.
+- **`process.exit()` after printing TRUNCATES, on macOS only.** node's
+  `process.stdout` is asynchronous when it is a PIPE on darwin, and synchronous
+  when it is a pipe on linux and win32; it is synchronous for a FILE and a TTY
+  everywhere. `process.exit()` does not drain a pending async write, so a script
+  that prints more than the 64KiB OS pipe buffer and then exits delivers exactly
+  65536 bytes — and exits 0, because the write never failed. 2026-09-07:
+  `rendered-layout-gate.js --json` did this with 84752 bytes of output, and its
+  suite had failed 2 of 282 on every mac in the project since the day it was
+  written while CI stayed green on `[ubuntu, windows]`.
+  Set `process.exitCode` and let the event loop drain; do not call
+  `process.exit()` on a path that has written to stdout.
+  **Three things hide it, and it used all three**: redirect to a file and the
+  write is synchronous so the output looks whole; run it on Linux CI and the
+  write is synchronous so CI is green; check the exit status and it is 0. Any
+  assertion here has to drive the subject through a PIPE and compare byte counts
+  against a FILE redirect — and assert the output EXCEEDS one buffer first, or
+  the comparison passes by construction on small fixtures.
 - Avoid nested quoting in `node -e`; write a scratch file.
 
 ## Product repos
