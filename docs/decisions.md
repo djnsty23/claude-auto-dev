@@ -3,6 +3,67 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: one greenfield run through spec → setup-project → auto → ship, measured
+
+The question was whether the Brain can take a one-line idea to
+production-grade software by itself. Until this run no product on this machine
+had entered through `spec` and `setup-project` (0 of 4, measured 2026-09-07), so
+the answer rested on nothing. One session ran the four skills on *"a page where
+a small team logs who is on call this week and gets a Slack-style message
+preview when it changes; Supabase for the table, Vercel for the page"* with no
+human in the loop. Full evidence in `docs/evidence-greenfield-run-2026-09-08.md`
+and the log beside it; line numbers below are that log's.
+
+**What the answer is now.** *It can take an idea to a deployed page in 23
+minutes, and it cannot take that page to a working product without a person,
+and the first place it needs one is story 1.* The idea named Supabase, so the
+sign-in story needed a project that only a dashboard can create (L26–L36). The
+harness did the right thing with that: one handback, no retry, no invented
+value, `needs-setup` written into a product `prd.json` for the first time ever
+(8 by the end, L78), and every line of code written anyway. But 6 of 7 stories
+ended the run at realness 20, the migration was never executed, and the
+primary flow was never driven in a browser (L70). "Production-grade" was not
+reached and could not have been; the measurement is that the harness knows
+when to stop and says so in a form a person can act on in six minutes.
+
+**What it changes about the harness, in order of what the log showed.**
+
+1. **The ship skill's "preview" command deploys to production on a new
+   project** (L57). `npx vercel --yes` on a project's first deployment is
+   assigned to production by Vercel, with a hint saying exactly that. The
+   skill must read `target` from the deploy JSON and stop when it says
+   `production` and the intent was preview; on a first deployment it should
+   say beforehand that no preview is possible until a production deployment
+   exists. This broke the run's hardest rule, on a throwaway, in 32 s.
+2. **`spec` and `setup-project` cannot run in one directory in the documented
+   order** (L11), and setup-project's step 4 cannot pass on its own output
+   (L18, L19): `create-next-app .` refuses the files spec wrote; `tsc` fails on
+   the untouched scaffold because Next 16 needs `next typegen` first; the
+   Biome template uses `files.ignore`, removed in Biome 2. Three pin sources
+   disagree on TypeScript and Biome (L13). Setup-project should scaffold into
+   a scratch directory and merge, ship a `typecheck` script of
+   `next typegen && tsc --noEmit`, and carry ONE pin table.
+3. **Skills and hooks are bound to the session cwd** (L24, L50). `/auto` printed
+   *"No prd.json"* against a `prd.json` that existed one directory over, and
+   `stop-auto-check.js` never saw the `auto-active` flag. Every fleet session
+   here drives a product from another cwd. Either the auto skill refuses when
+   its argument names a directory other than cwd, or the flag file carries the
+   project path and the hook follows it.
+
+**What the browser found that the gates called green** (L42, L44): a
+self-referential `--font-sans` from `shadcn init` that put every page in the
+browser serif, a 32 px input against the 44 px rule the constraints file
+states in prose, and a raw *"fetch failed"* shown to the user. Three fixes on
+four features, 0.75 raw and 0.5 by the three-day definition (L79). All three
+came from looking; none from typecheck, lint, build or the ten tests. The two
+that are assertable, computed font family and control height, belong in the
+a11y pass as code, which is the same conclusion `failure-evidence.md` reached
+about prose rules on 2026-08-16.
+
+**Not done.** No harness code changed in this entry; it is the measurement.
+The three changes above are each one skill edit and one suite, and each has a
+log line to test against.
+
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 
 The question was whether a 249k-star harness is better than this one, and if
