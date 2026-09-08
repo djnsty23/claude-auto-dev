@@ -14,7 +14,29 @@
 // finding that computes correctly while exiting the wrong way is a broken gate
 // in whichever direction it is wrong.
 
-const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
+const __sb = require('./spawn-budget.js');
+// A STUBBED OR BROKEN HELPER IS A RED, NOT AN INDETERMINATE RUN.
+// check-suites-can-fail.js proves a suite can fail by replacing its subject with
+// `module.exports = {}` and requiring every covering suite to exit 1. Once these
+// suites started requiring a shared helper, that stub made `runBudgeted`
+// undefined; the resulting TypeError reached the uncaughtException handler,
+// which correctly calls an unexpected throw INFRASTRUCTURE and exits 2 -- and
+// the sweep reads a 2 as a REFUSAL, not a failure, so it reported a mid-sweep
+// conflict and went INDETERMINATE. The honest classification poisoned the canary
+// that proves the suite works. `[measured 2026-09-08]` found by the session on
+// the same three suites; reproduced here at 55a841a with the stub applied by
+// hand: two suites exited 2 and test-path-filter-deadlock, which has no
+// uncaughtException handler, exited 1 -- three suites, one stub, two answers.
+// A missing export is a defect in this repo's own code and belongs in the RED
+// column. Only a CHILD PROCESS that produced no verdict is infrastructure.
+for (const __fn of ['classify', 'reason', 'runBudgeted', 'tally', 'exitCode']) {
+    if (typeof __sb[__fn] !== 'function') {
+        console.error('FAIL  spawn-budget.js does not export ' + __fn + '() -- this suite\'s own '
+            + 'helper is missing or stubbed. That is a RED, not an indeterminate run.');
+        process.exit(1);
+    }
+}
+const { classify, reason, runBudgeted, tally, exitCode } = __sb;
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -55,6 +55,31 @@ function check(label, ok, detail) {
         + (childFails.length ? ': ' + childFails.join(' | ') : ''));
     check('  over a non-trivial number of cases', !!m && Number(m[1]) >= 20, m ? m[1] : 'none');
 
+    // BOTH EXTREMES, ON EVERY MACHINE. The selftest above runs at whatever the box
+    // happens to be doing, and this file's history is three assertions that were
+    // true only in part of that range: `> base` is false at factor 1.0, `=== cap`
+    // is false below the cap. Each passed standalone and went red in a gate.
+    // Pinning the factor turns "the machine did not happen to expose it" into a
+    // covered case.
+    for (const pin of ['1', '8', '20']) {
+        const r = spawnSync(process.execPath, [SUBJECT, '--selftest'], {
+            encoding: 'utf8', timeout: 300000,
+            env: { ...process.env, AUTODEV_SPAWN_BUDGET_FACTOR: pin },
+        });
+        const fails = (r.stdout || '').split('\n').filter((l) => l.startsWith('FAIL'));
+        check(`  and it passes with the contention factor pinned at ${pin}, not only at whatever `
+            + 'this machine happens to measure', r.status === 0,
+            `status=${r.status}` + (fails.length ? ' -> ' + fails.join(' | ') : ''));
+    }
+    // The floor is the case that actually bit: an idle fast machine returns
+    // exactly 1, and a strict `>` against the base is false there.
+    const atFloor = spawnSync(process.execPath, [SUBJECT, '--probe'], {
+        encoding: 'utf8', timeout: 300000,
+        env: { ...process.env, AUTODEV_SPAWN_BUDGET_FACTOR: '0.01' },
+    });
+    check('  and a pinned factor below the floor is clamped up to 1, never used raw',
+        /contention factor 1\.00/.test(atFloor.stdout || ''), (atFloor.stdout || '').trim());
+
     const h = spawnSync(process.execPath, [SUBJECT, '--help'], { encoding: 'utf8', timeout: 60000 });
     check('--help RETURNS rather than doing anything, which check-entrypoints requires of '
         + 'every tooling/*.js', h.status === 0 && /usage:/.test(h.stdout || ''), `status=${h.status}`);
