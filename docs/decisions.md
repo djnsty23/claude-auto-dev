@@ -3,6 +3,50 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: needs-setup gets a writer, a manifest and a line of its own
+
+The five-state table has said since August that `needs-setup` is remaining work
+an agent cannot move. `[measured 2026-09-08]` on the trunks of three product
+repos the state had been written once, against 75 writes of `deferred`, while
+six of one client repo's ten pending stories were waiting on a person (a CI
+variable, a partner's API, three decisions) and had sat as `passes: null` for
+56 to 122 days. The semantics did not change; what was missing was any
+mechanism that wrote the state, and any line that read it back to the person.
+Three changes, each measured against doing nothing and one variant, in
+`docs/evidence-needs-setup-2026-09-08.md`:
+
+- **`spec` emits setup stories on day one.** SPEC.md gains a mechanical
+  `## External services` section; each item becomes a `type: "setup"` story
+  born `needs-setup`, with the handback in `blockedReason` and dependents
+  pointing at it through `blockedBy`. `check-spec-output.js --spec SPEC.md`
+  fails a spec with no such section when its prose names a service. A lexicon
+  hard-fail was measured first and rejected: 35 of 49 hits on real prose were
+  integrations, 14 were mentions, and "Slack-style preview" would have failed
+  the one real spec. The section is the verdict; the lexicon only guards its
+  absence. That spec, committed as a fixture, passed the old gate on
+  2026-09-07 and fails the new one.
+- **`auto` marks on handback through one script.** `prd-mark-needs-setup.js`
+  is the only writer: mark, `--clear`, `--list`; refuses an unknown id, a
+  `true` or `deferred` story and an empty reason; idempotent. The handback
+  lives in `blockedReason`, not `notes`, because `notes` is the acceptance
+  criterion the agent verifies once the person says done. `--clear` returns
+  the story to `null`, not `true`, for the same reason.
+- **`status` and the Stop hook name who is waited on.** "Blocked on you: N
+  (ids)" is its own line, and the hook's sprint-complete reason lists the ids
+  it computed and had never printed. A needs-setup-only backlog reaching
+  `approve` is now pinned by a test; the old suite asserted "Sprint complete"
+  and stopped there.
+
+`blockedBy` was not invented: `auto`'s selector had read it for months and one
+repo carries it on every story. It gained a shared reader, `isReady()`, beside
+the five states. The CLAUDE.md table is unchanged and `prd-states.js`'s states
+are unchanged, which is the invariant the brief asked to preserve.
+
+Two premises of the brief were measured on stale checkouts (353 and 387
+commits behind their trunks) and are corrected in the evidence document. The
+class is real and small: six live stories, all in one client repo, listed
+there as a proposal for its owner rather than committed.
+
 ## 2026-09-08: AGENTS.md is generated from the rule-* skills, gated, and kept under a hand-written half
 
 The 16 always-on `rule-*` skills (128,794 bytes) load into every Claude Code
