@@ -24,10 +24,12 @@ and typing. Nothing in this plugin read a production signal. The stage between
 
 ## 1. Configure once per repo
 
-The collector reads `.claude/production-signals.json` in the repo root. That
-directory is gitignored in the repos this operator runs, so the config never
-ships; copy the shape from `references/config-template.json` and fill in what
-the repo actually has. Every credential is named by its ENVIRONMENT VARIABLE
+The collector reads `.claude/production-signals.json` in the repo root. Before
+writing it, run `git check-ignore -v .claude/production-signals.json` and
+`git check-ignore -v .claude/reports/x.md`: the config names credential
+VARIABLES and the reports carry production error text, and neither belongs in a
+commit. If either path is not ignored, add it to `.gitignore` first. Copy the
+shape from `references/config-template.json` and fill in what the repo has. Every credential is named by its ENVIRONMENT VARIABLE
 NAME, never by value. If the repo uses Doppler, run the collector under
 `doppler run`; the value never enters the transcript.
 
@@ -89,9 +91,12 @@ config with a dated comment in the story that closed it.
 
 `--apply` writes candidates straight into prd.json and is permitted ONLY when
 the repo's origin `owner/repo` digest is on the allowlist inside the script.
-That list holds one entry, a repo with no users. It refuses everything else with
-the reason and still writes the proposal file, so nothing is lost. Do not add a
-live product to that list while it has users.
+`[decided 2026-09-08]` that list holds one real repo, which has no users, plus
+the suite's fixture remote. It refuses everything else with the reason and still
+writes the proposal file, so nothing is lost. Do not add a live product to that
+list while it has users. The config is DATA from a repo: a Sentry `region` must
+be a `sentry.io` host, the Vercel binary is fixed, and every credential value the
+config names is scrubbed from every byte the collector writes.
 
 ## 5. Thresholds are decisions, not constants
 

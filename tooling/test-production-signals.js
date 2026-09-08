@@ -30,7 +30,9 @@ const check = (label, cond, detail) => {
 const NOW = '2026-09-08T12:00:00.000Z';
 const nowMs = Date.parse(NOW);
 const ago = (hours) => new Date(nowMs - hours * 3600000).toISOString();
-const CANARY = 'sk-live-CANARY-7Qz9pX2mLr41';
+// The canary carries a quote and a backslash ON PURPOSE: the first cut scrubbed
+// serialised JSON, where both are escaped, and a plain canary could not fail it.
+const CANARY = 'sk-live-CANARY-7Qz9\\pX"2mLr41';
 const CANARY_URL = 'https://canary-project-ref.supabase.co';
 
 function mkRepo(name, { remote, prd, config, fixtures } = {}) {
@@ -80,7 +82,7 @@ const CONFIG = {
 };
 const PRD = { stories: { 'S16-AUD-001': { title: 'existing', passes: true }, 'S16-AUD-002': { title: 'pending', passes: null } } };
 const LIVE_REMOTE = 'https://github.com/example-org/live-product.git';
-const ALLOWED_REMOTE = 'https://github.com/djnsty23/qr.git';
+const ALLOWED_REMOTE = 'https://example.invalid/production-signals-apply-fixture.git';
 
 const QUIET_FIXTURES = {
   'server-errors': errorRows('save-thing', 'HTTP_429', 1, 100),
@@ -162,6 +164,7 @@ console.log('control: a fresh signal IS proposed, once per issue, in story shape
   check('canary URL absent everywhere too', !everything.includes(CANARY_URL));
   check('  and it was redacted, not dropped: the leaky message survives with [REDACTED]', /leaky-fn[\s\S]*\[REDACTED\]/.test(report), report.slice(0, 300));
   check('  the sentry title that echoed the token is redacted as well', /TypeError: cannot read x \(token \[REDACTED\]\)/.test(report));
+  check('  the JSON report and the ledger are scrubbed as parsed objects, not as escaped text', !JSON.stringify(readReportJson(dir)).includes(JSON.stringify(CANARY).slice(1, -1)) && !JSON.stringify(readLedger(dir)).includes(JSON.stringify(CANARY).slice(1, -1)));
 
   console.log('the ledger prevents a re-proposal');
   const before = fs.statSync(path.join(dir, '.claude', 'reports', 'production-candidates-2026-09-08.md')).mtimeMs;
@@ -174,6 +177,30 @@ console.log('control: a fresh signal IS proposed, once per issue, in story shape
   check('the quiet run is still recorded in the ledger', l2.runs.length === 2 && l2.runs[1].candidates === 0 && l2.runs[1].held === 13, JSON.stringify(l2.runs[1]));
   const r3 = run(dir, ['--summary']);
   check('--summary prints the population on a quiet run', /4\/4 sources checked, .* 0 new candidate/.test(r3.out), r3.out);
+  check('a seen-but-held signal refreshes its ledger last_seen', readLedger(dir).proposed['server-errors:research-tracks:TIMEOUT'].first_proposed === NOW && readLedger(dir).proposed['server-errors:research-tracks:TIMEOUT'].last_proposed === NOW);
+}
+
+// ---------------------------------------------------------------------------
+console.log('a chronic signal that never goes quiet is proposed ONCE across sliding windows');
+{
+  const cfg = { sources: [CONFIG.sources[0]] };
+  const dir = mkRepo('chronic', { remote: LIVE_REMOTE, prd: PRD, config: cfg, fixtures: {} });
+  const day = 86400000;
+  const proposals = [];
+  // Runs every 10 days, closer together than the 14-day window, which is how the
+  // skill is meant to be run. (Two runs 45 days apart with a 14-day window leave a
+  // real 31-day hole in what the collector SAW, and a return after a hole is a
+  // regression by definition.)
+  for (const dayOffset of [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]) {
+    const at = nowMs + dayOffset * day;
+    // rows spread over the 14 days ending at `at`, so first_seen slides forward with the window
+    const rows = Array.from({ length: 10 }, (_, i) => ({ created_at: new Date(at - i * 1.2 * day).toISOString(), function_name: 'chronic', error_code: 'E', message: 'always' }));
+    fs.writeFileSync(path.join(dir, 'fixtures', 'server-errors.json'), JSON.stringify(rows));
+    const r = spawnSync(process.execPath, [SCRIPT, '--fixture-dir', 'fixtures', '--now', new Date(at).toISOString()], { cwd: dir, encoding: 'utf8', env: Object.assign({}, process.env, { SUPABASE_SERVICE_ROLE_KEY: CANARY, SUPABASE_URL: CANARY_URL }) });
+    proposals.push(/new candidate/.test(r.stdout) ? 1 : 0);
+  }
+  check('proposed on day 0 and never again across nine later runs', proposals.join(',') === '1,0,0,0,0,0,0,0,0,0', proposals.join(','));
+  check('first_proposed survives, last_seen moved to day 90', (() => { const p = readLedger(dir).proposed['server-errors:chronic:E']; return p.first_proposed === NOW && Date.parse(p.last_seen) > nowMs + 89 * day; })());
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +256,10 @@ console.log('--apply refuses a live repo, applies to the allowlisted one');
   check('live repo: ledger marks the proposals as NOT applied', Object.values(readLedger(live).proposed).every((p) => p.applied === false));
 
   const allowed = mkRepo('allowed', { remote: ALLOWED_REMOTE, prd: PRD, config: CONFIG, fixtures: NOISY_FIXTURES });
+  const allowedBefore = fs.readFileSync(path.join(allowed, 'prd.json'), 'utf8');
+  const r1 = run(allowed);
+  check('allowlisted repo WITHOUT --apply: prd.json byte-identical (the allowlist is not the guard, the flag is)', r1.code === 0 && fs.readFileSync(path.join(allowed, 'prd.json'), 'utf8') === allowedBefore, r1.all);
+  fs.rmSync(path.join(allowed, '.claude', 'reports'), { recursive: true, force: true });
   const r2 = run(allowed, ['--apply']);
   check('allowlisted repo: exit 0', r2.code === 0, r2.all);
   check('allowlisted repo: stdout reports the apply', /applied 6 stories into prd.json/.test(r2.out), r2.out);
@@ -252,7 +283,7 @@ console.log('--apply refuses a live repo, applies to the allowlisted one');
   const nested = mkRepo('nested', { remote: ALLOWED_REMOTE, config: { sources: [CONFIG.sources[0]] }, fixtures: { 'server-errors': errorRows('a', 'B', 12, 72) }, prd: { sprints: [{ id: 'S1', stories: { 'S1-001': { passes: true } } }, { id: 'S2', stories: { 'S2-001': { passes: null } } }] } });
   const r6 = run(nested, ['--apply']);
   const nprd = JSON.parse(fs.readFileSync(path.join(nested, 'prd.json'), 'utf8'));
-  check('nested prd.json: the story lands in the NEWEST sprint, id prefixed from the majority prefix', r6.code === 0 && nprd.sprints[1].stories['S1-PROD-001'] !== undefined || (nprd.sprints[1].stories['S2-PROD-001'] !== undefined), JSON.stringify(nprd.sprints.map((s) => Object.keys(s.stories))));
+  check('nested prd.json: exit 0 and the story lands in the NEWEST sprint under the first-seen prefix (S1: stable sort, equal counts)', r6.code === 0 && nprd.sprints[1].stories['S1-PROD-001'] !== undefined, r6.all + JSON.stringify(nprd.sprints.map((s) => Object.keys(s.stories))));
   check('nested prd.json: sprint 1 untouched', Object.keys(nprd.sprints[0].stories).join(',') === 'S1-001');
 }
 
@@ -285,8 +316,12 @@ console.log('unit seams');
   check('derivePrefix picks the majority prefix', subject.derivePrefix({ stories: { 'S16-A': {}, 'S16-B': {}, 'S15-C': {} } }) === 'S16');
   check('derivePrefix falls back to PROD with no prd.json', subject.derivePrefix(null) === 'PROD');
   check('--sprint overrides derivation', subject.derivePrefix({ stories: { 'S16-A': {} } }, 'S17') === 'S17');
-  check('APPLY_ALLOWLIST holds digests, not names', subject.APPLY_ALLOWLIST.every((d) => /^[a-f0-9]{64}$/.test(d)) && subject.APPLY_ALLOWLIST.length === 1);
-  check('the allowlist digest matches the one allowlisted origin', subject.APPLY_ALLOWLIST.includes(subject.sha256('djnsty23/qr')));
+  check('APPLY_ALLOWLIST holds two well-formed digests and no names', subject.APPLY_ALLOWLIST.every((d) => /^[a-f0-9]{64}$/.test(d)) && subject.APPLY_ALLOWLIST.length === 2);
+  check('the fixture remote is one of them; a refused remote is not', subject.APPLY_ALLOWLIST.includes(subject.sha256('example.invalid/production-signals-apply-fixture')) && !subject.APPLY_ALLOWLIST.includes(subject.sha256('example-org/live-product')));
+  check('sentryRegion accepts sentry.io hosts over https only', subject.sentryRegion({ region: 'https://de.sentry.io' }) === 'https://de.sentry.io' && subject.sentryRegion({}) === 'https://sentry.io');
+  check('sentryRegion refuses any other host before a credential is read', ['http://127.0.0.1:9', 'https://sentry.io.evil.test', 'https://example.com', 'not a url'].every((r) => { try { subject.sentryRegion({ region: r }); return false; } catch (e) { return /refusing|not a URL/.test(e.message); } }));
+  check('a bare PROD prefix yields PROD-001, not PROD-PROD-001', (() => { const d = mkRepo('noprd', { remote: LIVE_REMOTE, config: { sources: [CONFIG.sources[0]] }, fixtures: { 'server-errors': errorRows('a', 'B', 12, 72) } }); run(d); return Object.values(readLedger(d).proposed)[0].story_id === 'PROD-001'; })());
+  check('a malformed --now is an error, not a silent fallback to the wall clock', (() => { const d = mkRepo('badnow', { remote: LIVE_REMOTE, prd: PRD, config: { sources: [CONFIG.sources[0]] }, fixtures: { 'server-errors': [] } }); const r = spawnSync(process.execPath, [SCRIPT, '--fixture-dir', 'fixtures', '--now', 'yesterday-ish'], { cwd: d, encoding: 'utf8' }); return r.status === 2 && /--now is not a parseable timestamp/.test(r.stderr); })());
   check('originOwnerRepo parses ssh and https shapes', (() => {
     const d = mkRepo('ssh', { remote: 'git@github.com:Some-Org/Some.Repo.git' });
     return subject.originOwnerRepo(d) === 'some-org/some.repo';
@@ -296,8 +331,54 @@ console.log('unit seams');
   check('staleHoursFor: exact key beats glob beats default', subject.staleHoursFor('a_last_run', { intervals: { a_last_run: 10, 'a_*': 20 } }, { stale_hours: 48 }) === 10 && subject.staleHoursFor('a_x', { intervals: { 'a_*': 20 } }, { stale_hours: 48 }) === 20 && subject.staleHoursFor('b', { intervals: { 'a_*': 20 } }, { stale_hours: 48 }) === 48);
   check('DEFAULT_THRESHOLDS carries every source kind', ['sentry-issues', 'postgrest-errors', 'postgrest-heartbeats', 'vercel-deploys'].every((k) => subject.DEFAULT_THRESHOLDS[k]));
   const src = fs.readFileSync(SCRIPT, 'utf8');
-  check('thresholds are dated in the source', /\[measured 2026-09-08\]/.test(src) && /\[decided 2026-09-08\]/.test(src));
-  check('the script never issues a mutating HTTP request', !/method:\s*['"](POST|PUT|PATCH|DELETE)['"]/i.test(src));
+  const thresholdDoc = src.slice(src.indexOf('DEFAULT THRESHOLDS'), src.indexOf('const DEFAULT_THRESHOLDS'));
+  check('the threshold doc block itself carries dated measurements', (thresholdDoc.match(/\[measured 2026-09-08\]/g) || []).length >= 3);
+}
+
+// ---------------------------------------------------------------------------
+console.log('real network path: GET only, Content-Range pagination, host refusal — against a local server');
+{
+  const http = require('http');
+  const seen = [];
+  const rowsAll = Array.from({ length: 1500 }, (_, i) => ({ created_at: ago(72 - (i % 70)), function_name: 'paged', error_code: 'P', message: 'row ' + i }));
+  const server = http.createServer((req, res) => {
+    seen.push({ method: req.method, url: req.url, auth: req.headers.authorization || '', range: req.headers.range || '' });
+    const m = /^(\d+)-(\d+)$/.exec(req.headers.range || '');
+    const from = m ? Number(m[1]) : 0;
+    const page = rowsAll.slice(from, from + 700); // server clamps at 700, BELOW the client's 1000
+    res.setHeader('content-range', `${from}-${from + page.length - 1}/${rowsAll.length}`);
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify(page));
+  });
+  const done = new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  done.then(() => {
+    const port = server.address().port;
+    const dir = mkRepo('net', { remote: LIVE_REMOTE, prd: PRD, config: { sources: [
+      { id: 'server-errors', kind: 'postgrest-errors', url_env: 'SUPABASE_URL', key_env: 'SUPABASE_SERVICE_ROLE_KEY', table: 'server_errors', group_by: ['function_name', 'error_code'] },
+      { id: 'sentry', kind: 'sentry-issues', org: 'o', project: 'p', region: `http://127.0.0.1:${port}`, token_env: 'SUPABASE_SERVICE_ROLE_KEY' },
+    ] } });
+    // spawn, not spawnSync: the server lives in THIS process and must answer while the child runs
+    const { spawn } = require('child_process');
+    const child = spawn(process.execPath, [SCRIPT, '--now', NOW, '--summary'], { cwd: dir, env: Object.assign({}, process.env, { SUPABASE_URL: `http://127.0.0.1:${port}`, SUPABASE_SERVICE_ROLE_KEY: CANARY }) });
+    let out = '', err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    return new Promise((resolve) => child.on('close', (status) => resolve({ status, stdout: out, stderr: err })));
+  }).then((r) => {
+    server.close();
+    check('every request the collector made was a GET', seen.length > 0 && seen.every((s) => s.method === 'GET'), JSON.stringify(seen.map((s) => s.method)));
+    check('it paged past a server clamp of 700 using Content-Range: 3 pages for 1500 rows', seen.filter((s) => /rest\/v1/.test(s.url)).length === 3, JSON.stringify(seen.map((s) => s.range)));
+    check('  and counted all 1500 rows into one group (on stderr: a failed source routes the whole report there)', /1500 over/.test(r.stderr), r.stdout + r.stderr);
+    check('the credential went only to the host the ENVIRONMENT named, never to the host the config named', seen.every((s) => /rest\/v1/.test(s.url)) && !seen.some((s) => /api\/0\/projects/.test(s.url)), JSON.stringify(seen.map((s) => s.url)));
+    check('the config-named sentry host was refused by name on stderr, exit 2', r.status === 2 && /COULD NOT CHECK sentry: sentry region 127\.0\.0\.1:\d+ is not a sentry\.io host/.test(r.stderr), r.stderr);
+    check('no canary in that output either', !(r.stdout + r.stderr).includes(CANARY));
+    console.log(`\n${pass} passed, ${fail} failed`);
+    process.exitCode = fail ? 1 : 0;
+  });
+}
+
+// the skill section below runs synchronously before the network section resolves
+{
 }
 
 // ---------------------------------------------------------------------------
@@ -311,5 +392,3 @@ console.log('the skill runs this script and never as a hook');
   check('no hook wires production-signals (it must not run every turn)', !JSON.stringify(hooks).includes('production-signals'));
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);

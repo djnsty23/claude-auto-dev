@@ -66,9 +66,8 @@ hand-typed, none from the two channels the product pays for (Sentry, monitors).
 No Sentry, no health route, no monitor commit, **no prd.json** (work is tracked in
 markdown). Live signals: Vercel Web Analytics (wired, dashboard-only), scan tables
 and a Stripe event ledger with a partial index for stuck rows, both behind the
-Supabase management API with `SUPABASE_ACCESS_TOKEN` — which B's own scripts fetch
-from **A's** Doppler config, not B's (B's `prd` holds 11 names, none of them a
-Supabase URL or service key). GA4/GTM is wired but inert (container id unset).
+Supabase management API with `SUPABASE_ACCESS_TOKEN`, which B's own secret store
+does not hold (its `prd` config carries no Supabase URL or key). GA4/GTM is wired but inert (container id unset).
 Search Console property is not verified, by the repo's own notes. Vercel deploys
 readable via the CLI. `.claude/reports/` would be gitignored (`.gitignore:48`).
 
@@ -90,10 +89,10 @@ proposals never ship.
 ## 4. Handbacks (recorded, not requested in chat)
 
 1. **Sentry read token for A.** ~3 min. Sentry → Settings → Auth Tokens → create a
-   token with `event:read` and `project:read` only → `doppler secrets set
-   SENTRY_AUTH_TOKEN --project app-<A> --config prd` from a silent prompt (the
-   `wizard` skill's `read -rsp` shape). Done looks like: `doppler secrets --only-names
-   -p app-<A> -c prd | grep SENTRY_AUTH_TOKEN` prints the name. Then the `sentry`
+   token with `event:read` and `project:read` only → store it under the name
+   `SENTRY_AUTH_TOKEN` in A's production secret config from a silent prompt (the
+   `wizard` skill's `read -rsp` shape). Done looks like: listing that config's
+   NAMES shows `SENTRY_AUTH_TOKEN`. Then the `sentry`
    source stops printing `COULD NOT CHECK`.
 2. **Search Console API access for A** (and B once verified). ~15 min, Google Cloud
    console: enable the Search Console API, create a service account, add its email as
@@ -124,11 +123,26 @@ ledger were scrubbed, the candidate OBJECTS were not. Fixed by scrubbing the
 candidates before anything consumes them. Everything downstream of that point had
 looked correct.
 
+**And an independent review found the fix was still half a fix.** `[measured
+2026-09-08]` the scrub ran over SERIALISED JSON, so a secret containing a quote or
+a backslash survived into every JSON output, and the suite's canary had neither
+character, so it could not fail. Now: the redactor registers the JSON-escaped form
+of every value, objects are scrubbed leaf by leaf before rendering, and the canary
+carries both characters. The same review found that a repo-local config could
+send any named environment variable to any host (a Sentry `region` must now be a
+`sentry.io` host, refused before the credential is read), that the Vercel binary
+was config-chosen (now fixed), that `process.exit` after a large stdout write
+truncated at 64 KB (now `exitCode`), and that a chronic signal was re-filed as a
+"regression" every ~38 days because held signals never refreshed the ledger's
+`last_seen` (now every seen signal does). Each has a suite case, and the network
+cases run against a local HTTP server so "GET only" and "paged past a server clamp
+using Content-Range" are executed, not grepped.
+
 ## 6. The real run, read-only, product A, 14 days
 
 Run from a scratch directory with `--config`, `--reports-dir` and `--prd` pointing
-outward, under `doppler run -p app-<A> -c prd`, so the live repo received no
-writes. Two client-error groupings were run side by side as an A/B on the grouping
+outward, with A's secrets injected by its secret manager, so the live repo
+received no writes. Two client-error groupings were run side by side as an A/B on the grouping
 key. Sentry was configured deliberately so its failure would be recorded.
 
 ```
@@ -140,17 +154,17 @@ production-signals: 5/6 sources checked, 65 signals, 52 held back, 13 new candid
 
 | # | signal | count / 14 d | span | reading |
 |---|---|---|---|---|
-| 1 | research fn, no code: "All Gemini paths failed — no AI provider available" (78 of 84 share it) | 84 | 08-31 → 09-07, continuous | **REAL.** A recurring AI-provider outage class; an incident of this shape is on file from 08-16, no open story. |
-| 2 | spotify→youtube converter, no code: "YouTube is rate-limiting… will retry automatically" | 36 | 08-25 → 09-07 | **REAL, regression.** Story S16-AUD-153 closed this row class on 08-21 having established the rows are failures a user saw. Still written at ~2.5/day. The ledger's requiet rule exists for exactly this. |
-| 3 | curator-playlist fn / `SPOTIFY_CURATOR_429` (message varies per row: Retry-After seconds) | 484 | 08-25 → 09-05 | **REAL.** The single curator account is rate-limited for hours at a time; S16-AUD-124 fixed the recovery path, not the capacity. Grouping by message would have shattered this into 480 groups; by code it is one. |
-| 4 | curator-playlist fn, no code: "All 1 active curator(s) are in a rate-limit cooldown… This is transient" | 729 | 08-25 → 09-04 | **NOISE row** (duplicate of 3): an expected transient state written as a server error 729 times. Same class as S16-AUD-123. The story, if any, is "stop writing it". |
-| 5 | spotify→youtube converter / `HTTP_429`: "Spotify is rate-limiting… still limited" (61 of 63) | 63 | 08-25 → 09-04 | **REAL** (user-facing failure after retries), overlapping 3's lockout windows. |
-| 6 | analytics-batch fn: "invalid input syntax for type json" | 60 | **9 minutes** on 09-02 | **UNSURE → held after the fix.** A malformed-payload burst, never again. A real validation gap, but an incident, not a chronic defect. |
-| 7 | youtube→spotify converter: "Failed to create Spotify playlist" | 6 | 08-27 → 08-30 | **UNSURE.** Low, inside 3's lockout days, nothing since. |
-| 8 | analyze-playlist / `HTTP_429` | 5 | **45 minutes** on 08-30 | **NOISE → held after the fix.** One rate-limit burst. |
-| 9/11 | client: "get-vibes-collection returned no volumes: Failed to send a request to the Edge Function" (both groupings) | 16 / 17 | 08-25 → 09-07 | **UNSURE, likely residual of S16-AUD-151** (closed 08-14 as a CORS fix). ~1.2/day continues; "failed to send" is the client's network error, so offline/blocked clients are a competing cause. Worth a story that names both. |
+| 1 | the research function, no code: "all AI provider paths failed" (78 of 84 share it) | 84 | 08-31 → 09-07, continuous | **REAL.** A recurring AI-provider outage class; an incident of this shape is on file from 08-16, no open story. |
+| 2 | the playlist converter, no code: "the destination is rate-limiting… will retry automatically" | 36 | 08-25 → 09-07 | **REAL, regression.** Story S16-AUD-153 closed this row class on 08-21 having established the rows are failures a user saw. Still written at ~2.5/day. The ledger's requiet rule exists for exactly this. |
+| 3 | the curator-save function / a vendor 429 code (message varies per row: Retry-After seconds) | 484 | 08-25 → 09-05 | **REAL.** The single curator account is rate-limited for hours at a time; S16-AUD-124 fixed the recovery path, not the capacity. Grouping by message would have shattered this into 480 groups; by code it is one. |
+| 4 | the curator-save function, no code: "the only curator account is in a rate-limit cooldown… This is transient" | 729 | 08-25 → 09-04 | **NOISE row** (duplicate of 3): an expected transient state written as a server error 729 times. Same class as S16-AUD-123. The story, if any, is "stop writing it". |
+| 5 | the playlist converter / `HTTP_429`: "the source is rate-limiting… still limited" (61 of 63) | 63 | 08-25 → 09-04 | **REAL** (user-facing failure after retries), overlapping 3's lockout windows. |
+| 6 | the analytics batch function: "invalid input syntax for type json" | 60 | **9 minutes** on 09-02 | **UNSURE → held after the fix.** A malformed-payload burst, never again. A real validation gap, but an incident, not a chronic defect. |
+| 7 | the reverse converter: "failed to create playlist" | 6 | 08-27 → 08-30 | **UNSURE.** Low, inside 3's lockout days, nothing since. |
+| 8 | the playlist analyser / `HTTP_429` | 5 | **45 minutes** on 08-30 | **NOISE → held after the fix.** One rate-limit burst. |
+| 9/11 | client: "a collection fetch returned nothing: failed to send a request to the edge function" (both groupings) | 16 / 17 | 08-25 → 09-07 | **UNSURE, likely residual of S16-AUD-151** (closed 08-14 as a CORS fix). ~1.2/day continues; "failed to send" is the client's network error, so offline/blocked clients are a competing cause. Worth a story that names both. |
 | 10/12 | client: "An error occurred processing your request" on the generate page | 16 / 13 | 08-31 → 09-01 (22 h) | **UNSURE.** Generic message; the by-message group spans 21.9 h and is held as a burst after the fix; the by-url group still passes. |
-| 13 | heartbeat `weekly_mix_send_last_run` at 86 h | 1 | — | **FALSE POSITIVE.** A weekly job against a 48 h default. |
+| 13 | a weekly job's heartbeat at 86 h | 1 | — | **FALSE POSITIVE.** A weekly job against a 48 h default. |
 
 Distinct signals 11 (two were the A/B duplicate). **Real 4, noise 3, unsure 4.**
 

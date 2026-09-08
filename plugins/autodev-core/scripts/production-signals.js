@@ -131,6 +131,11 @@ const DEFAULT_THRESHOLDS = {
  */
 const APPLY_ALLOWLIST = [
   'ecc4d2aa88ccbbd22f98148c95d4d98c8f0a3b82a2cb5f043fb3a952bd8ecd9f',
+  // The suite's fixture remote, `example.invalid/production-signals-apply-fixture`.
+  // A repo matches it only by deliberately setting its origin to that string,
+  // which is the same act as editing this list. It exists so the apply path is
+  // exercised without naming the real allowlisted repo in a public test file.
+  'cb3b67944eb67124f0add6732c463f2196f99f6c502efca5193212abafd027b2',
 ];
 
 // ---------------------------------------------------------------------------
@@ -188,11 +193,31 @@ function readJson(file, fallback) {
  */
 class Redactor {
   constructor() { this.values = new Set(); }
-  add(value) { if (typeof value === 'string' && value.length >= 8) this.values.add(value); }
+  add(value) {
+    if (typeof value !== 'string' || value.length < 8) return;
+    this.values.add(value);
+    // `[measured 2026-09-08]` review of the first cut: scrubbing SERIALISED JSON
+    // missed any secret containing a quote, a backslash or a control character,
+    // because JSON.stringify had already escaped it. Register the escaped form
+    // too, so a scrub over serialised text catches it either way.
+    const escaped = JSON.stringify(value).slice(1, -1);
+    if (escaped !== value) this.values.add(escaped);
+  }
   scrub(text) {
     let out = String(text);
     for (const v of this.values) out = out.split(v).join('[REDACTED]');
     return out;
+  }
+  /** Scrub every string leaf of a parsed object, keys included. */
+  scrubDeep(value) {
+    if (typeof value === 'string') return this.scrub(value);
+    if (Array.isArray(value)) return value.map((v) => this.scrubDeep(v));
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(value)) out[this.scrub(k)] = this.scrubDeep(v);
+      return out;
+    }
+    return value;
   }
 }
 
@@ -206,15 +231,32 @@ function env(name, redactor) {
 // fetching — every request is a GET; fixtures replace the network entirely
 // ---------------------------------------------------------------------------
 
-async function httpGetJson(url, headers) {
+async function httpGet(url, headers) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, { method: 'GET', headers: Object.assign({ 'user-agent': USER_AGENT, accept: 'application/json' }, headers), signal: controller.signal });
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).host}${new URL(url).pathname}`);
-    return JSON.parse(text);
+    return { body: JSON.parse(text), headers: res.headers };
   } finally { clearTimeout(timer); }
+}
+async function httpGetJson(url, headers) { return (await httpGet(url, headers)).body; }
+
+/**
+ * Hosts a Sentry source may be pointed at. `[measured 2026-09-08]` review of the
+ * first cut: `region` came straight from the repo-local config and `token_env`
+ * named any variable, so a cloned repo carrying a config could send any secret
+ * in the environment to any host, exit 0, zero bytes. The config is DATA from a
+ * repo; it does not get to choose where credentials go.
+ */
+const SENTRY_HOST = /^([a-z0-9-]+\.)*sentry\.io$/;
+function sentryRegion(source) {
+  const raw = source.region || 'https://sentry.io';
+  let u;
+  try { u = new URL(raw); } catch { throw new Error(`sentry region is not a URL: ${raw}`); }
+  if (u.protocol !== 'https:' || !SENTRY_HOST.test(u.hostname)) throw new Error(`sentry region ${u.host} is not a sentry.io host; refusing to send a credential there`);
+  return u.origin;
 }
 
 function fixturePayload(fixtureDir, source) {
@@ -227,10 +269,11 @@ function fixturePayload(fixtureDir, source) {
 
 async function rawSentry(source, ctx) {
   if (ctx.fixtureDir) return fixturePayload(ctx.fixtureDir, source);
+  sentryRegion(source); // refuse the host BEFORE touching the credential
   const token = env(source.token_env || 'SENTRY_AUTH_TOKEN', ctx.redactor);
   if (!token) throw new Error(`env ${source.token_env || 'SENTRY_AUTH_TOKEN'} is not set`);
   if (!source.org || !source.project) throw new Error('sentry source needs org and project');
-  const region = (source.region || 'https://sentry.io').replace(/\/$/, '');
+  const region = sentryRegion(source);
   const period = source.stats_period || `${ctx.days}d`;
   const url = `${region}/api/0/projects/${encodeURIComponent(source.org)}/${encodeURIComponent(source.project)}/issues/?query=${encodeURIComponent(source.query || 'is:unresolved')}&statsPeriod=${encodeURIComponent(period)}&limit=100`;
   return httpGetJson(url, { authorization: `Bearer ${token}` });
@@ -261,16 +304,29 @@ function postgrestHeaders(source, ctx) {
   return { base: url.replace(/\/$/, ''), headers: { apikey: key, authorization: `Bearer ${key}` } };
 }
 
+/**
+ * Pages until the server's Content-Range says the range is exhausted. The
+ * server's max-rows setting is per deployment and configurable, so a page
+ * shorter than PAGE_SIZE is NOT proof of the last page; the header is. A table
+ * larger than MAX_PAGES pages is a named failure, never a silent undercount.
+ */
 async function postgrestPaged(base, headers, query) {
   const rows = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const from = page * PAGE_SIZE;
-    const batch = await httpGetJson(`${base}/rest/v1/${query}`, Object.assign({ range: `${from}-${from + PAGE_SIZE - 1}`, 'range-unit': 'items' }, headers));
+    const from = rows.length;
+    const { body: batch, headers: h } = await httpGet(`${base}/rest/v1/${query}`, Object.assign({ range: `${from}-${from + PAGE_SIZE - 1}`, 'range-unit': 'items', prefer: 'count=exact' }, headers));
     if (!Array.isArray(batch)) throw new Error('postgrest payload is not an array');
     rows.push(...batch);
-    if (batch.length < PAGE_SIZE) break;
+    if (batch.length === 0) return rows;
+    const cr = /^(\d+)-(\d+)\/(\d+|\*)$/.exec(String(h.get('content-range') || ''));
+    if (cr) {
+      const end = Number(cr[2]); const total = cr[3] === '*' ? null : Number(cr[3]);
+      if (total !== null && end + 1 >= total) return rows;
+    } else if (batch.length < PAGE_SIZE) {
+      return rows; // no header at all: fall back to the length heuristic
+    }
   }
-  return rows;
+  throw new Error(`more than ${MAX_PAGES * PAGE_SIZE} rows in the window; narrow --days or add a filter rather than read a truncated table`);
 }
 
 async function rawPostgrestErrors(source, ctx) {
@@ -328,7 +384,7 @@ async function rawPostgrestHeartbeats(source, ctx) {
   const { base, headers } = postgrestHeaders(source, ctx);
   const keyCol = source.key_column || 'key';
   const like = source.key_like || '%_last_run';
-  const q = `${source.table}?select=${keyCol},${source.value_column || 'value'},${source.updated_column || 'updated_at'}&${keyCol}=like.${encodeURIComponent(like)}`;
+  const q = `${source.table}?select=${keyCol},${source.value_column || 'value'},${source.updated_column || 'updated_at'}&${keyCol}=like.${encodeURIComponent(like)}&order=${keyCol}.asc`;
   return postgrestPaged(base, headers, q);
 }
 
@@ -368,8 +424,11 @@ function normaliseHeartbeats(source, rows, ctx) {
 
 function rawVercelDeploys(source, ctx) {
   if (ctx.fixtureDir) return fixturePayload(ctx.fixtureDir, source);
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(String(source.project || ''))) throw new Error('vercel project must be a plain project name');
+  // The binary is fixed. A config-chosen command would let a repo run anything
+  // under the collector's name; `[measured 2026-09-08]` review of the first cut.
   const args = ['ls', source.project, '--json', '--yes'];
-  const r = spawnSync(source.command || 'vercel', args, { encoding: 'utf8', timeout: 60000 });
+  const r = spawnSync('vercel', args, { encoding: 'utf8', timeout: 60000 });
   if (r.error) throw new Error(`vercel CLI: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`vercel ls exited ${r.status}: ${clip(r.stderr, 160)}`);
   const start = r.stdout.indexOf('{');
@@ -383,7 +442,7 @@ function normaliseVercel(source, payload, ctx) {
   const out = [];
   for (const d of deps) {
     const created = Number(d.createdAt || d.created || 0);
-    if (created && created < ctx.cutoffMs) continue;
+    if (!created || created < ctx.cutoffMs) continue; // an undated deployment cannot be placed in the window
     const isProd = d.target === 'production';
     const state = String(d.state || d.readyState || '').toUpperCase();
     if (!isProd || state !== 'ERROR') continue;
@@ -421,11 +480,12 @@ function thresholdsFor(kind, config) {
 /** Hours a heartbeat key may stay silent: the config's `intervals` map (exact key or `prefix*`), else the kind default. */
 function staleHoursFor(key, config, t) {
   const map = (config.intervals && typeof config.intervals === 'object') ? config.intervals : {};
-  if (Object.prototype.hasOwnProperty.call(map, key)) return Number(map[key]);
+  const num = (v, name) => { const n = Number(v); if (!Number.isFinite(n) || n <= 0) throw new Error(`intervals.${name} must be a positive number of hours`); return n; };
+  if (Object.prototype.hasOwnProperty.call(map, key)) return num(map[key], key);
   for (const [pattern, hours] of Object.entries(map)) {
-    if (pattern.endsWith('*') && key.startsWith(pattern.slice(0, -1))) return Number(hours);
+    if (pattern.endsWith('*') && key.startsWith(pattern.slice(0, -1))) return num(hours, pattern);
   }
-  return t.stale_hours || 48;
+  return t.stale_hours ?? 48;
 }
 
 function crossesThreshold(signal, config, ctx) {
@@ -435,14 +495,14 @@ function crossesThreshold(signal, config, ctx) {
     if (signal._stale_hours >= limit) return { pass: true, reason: `stale ${signal._stale_hours === Infinity ? '∞' : signal._stale_hours.toFixed(0)} h ≥ ${limit} h` };
     return { pass: false, reason: `fresh (${signal._stale_hours.toFixed(0)} h < ${limit} h)` };
   }
-  if (signal.count < (t.min_count || 1)) return { pass: false, reason: `count ${signal.count} < min_count ${t.min_count}` };
+  if (signal.count < (t.min_count ?? 1)) return { pass: false, reason: `count ${signal.count} < min_count ${t.min_count}` };
   const first = Date.parse(signal.first_seen);
   const last = Date.parse(signal.last_seen);
   const age = Number.isFinite(first) ? hoursBetween(first, ctx.nowMs) : Infinity;
-  if (age < (t.min_age_hours || 0)) return { pass: false, reason: `age ${age.toFixed(1)} h < min_age_hours ${t.min_age_hours} (deploy in progress?)` };
+  if (age < (t.min_age_hours ?? 0)) return { pass: false, reason: `age ${age.toFixed(1)} h < min_age_hours ${t.min_age_hours} (deploy in progress?)` };
   const span = Number.isFinite(first) && Number.isFinite(last) ? hoursBetween(first, last) : Infinity;
   if (t.min_span_hours && span < t.min_span_hours) return { pass: false, reason: `burst: spanned ${span.toFixed(1)} h < min_span_hours ${t.min_span_hours} (an incident, not a chronic defect)` };
-  return { pass: true, reason: `count ${signal.count} ≥ ${t.min_count || 1}, age ${age === Infinity ? '?' : age.toFixed(0)} h ≥ ${t.min_age_hours || 0}, span ${span === Infinity ? '?' : span.toFixed(0)} h` };
+  return { pass: true, reason: `count ${signal.count} ≥ ${t.min_count ?? 1}, age ${age === Infinity ? '?' : age.toFixed(0)} h ≥ ${t.min_age_hours ?? 0}, span ${span === Infinity ? '?' : span.toFixed(0)} h` };
 }
 
 function isIgnored(signal, config) {
@@ -469,9 +529,9 @@ function ledgerDecision(signal, ledger, config, ctx) {
     return { propose: true, reason: `returned after ${((Date.parse(signal.first_seen) - priorLast) / 86400000).toFixed(0)} quiet days (regression of ${prior.story_id || prior.report})` };
   }
   if (prior.count && signal.count >= prior.count * factor) {
-    return { propose: true, reason: `escalated ${prior.count} → ${signal.count} (≥ ${factor}x since ${prior.first_proposed.slice(0, 10)})` };
+    return { propose: true, reason: `escalated ${prior.count} → ${signal.count} (≥ ${factor}x since ${(prior.last_proposed || prior.first_proposed).slice(0, 10)})` };
   }
-  return { propose: false, reason: `already proposed ${prior.first_proposed.slice(0, 10)}${prior.story_id ? ` as ${prior.story_id}` : ''}` };
+  return { propose: false, reason: `already proposed ${(prior.last_proposed || prior.first_proposed).slice(0, 10)}${prior.story_id ? ` as ${prior.story_id}` : ''}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +557,8 @@ function derivePrefix(prd, explicit) {
 
 function nextStoryNumber(prefix, prd, ledger) {
   let max = 0;
-  const re = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-PROD-(\\d+)$`);
+  const lane = prefix === 'PROD' ? 'PROD' : `${prefix}-PROD`;
+  const re = new RegExp(`^${lane.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)$`);
   for (const id of Object.keys(prdStates.storiesOf(prd))) { const m = re.exec(id); if (m) max = Math.max(max, Number(m[1])); }
   for (const p of Object.values(ledger.proposed)) { const m = p.story_id && re.exec(p.story_id); if (m) max = Math.max(max, Number(m[1])); }
   return max + 1;
@@ -642,7 +703,9 @@ async function main() {
     process.stderr.write(`production-signals: no sources configured at ${path.relative(cwd, configPath) || configPath}. The production-radar skill documents the shape.\n`);
     return 2;
   }
-  const nowMs = Date.parse(argValue('--now', '')) || Date.now();
+  const nowRaw = argValue('--now', null);
+  const nowMs = nowRaw === null ? Date.now() : Date.parse(nowRaw);
+  if (!Number.isFinite(nowMs)) throw new Error(`--now is not a parseable timestamp: ${nowRaw}`);
   const days = Number(argValue('--days', config.days || 14));
   if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error('--days must be an integer from 1 to 365');
   const ctx = { cwd, nowMs, nowIso: iso(nowMs), days, cutoffMs: nowMs - days * 86400000, fixtureDir: argValue('--fixture-dir', null) && path.resolve(cwd, argValue('--fixture-dir')), redactor };
@@ -692,7 +755,7 @@ async function main() {
     if (!th.pass) { held.push({ source: s.source, id: s.id, count: s.count, reason: th.reason }); continue; }
     const ld = ledgerDecision(s, ledger, config, ctx);
     if (!ld.propose) { held.push({ source: s.source, id: s.id, count: s.count, reason: ld.reason }); continue; }
-    const id = `${prefix}-PROD-${String(nextNo).padStart(3, '0')}`;
+    const id = `${prefix === 'PROD' ? 'PROD' : `${prefix}-PROD`}-${String(nextNo).padStart(3, '0')}`;
     nextNo += 1;
     candidates.push(candidateStory(s, id, ctx, `${th.reason}; ${ld.reason}`));
   }
@@ -701,9 +764,8 @@ async function main() {
   // built from an error message can carry a key the upstream echoed, and --apply
   // writes the object into prd.json. `[measured 2026-09-08]` the first suite run
   // planted a canary in a fixture message and found it in the applied prd.json.
-  const scrubbed = JSON.parse(redactor.scrub(JSON.stringify({ candidates, held })));
-  candidates.splice(0, candidates.length, ...scrubbed.candidates);
-  held.splice(0, held.length, ...scrubbed.held);
+  candidates.splice(0, candidates.length, ...redactor.scrubDeep(candidates));
+  held.splice(0, held.length, ...redactor.scrubDeep(held));
 
   // --apply is decided BEFORE anything is written, so a refusal leaves the tree exactly as found
   // apart from the proposal file, which is the safe output.
@@ -717,7 +779,7 @@ async function main() {
     fs.mkdirSync(reportsDir, { recursive: true });
     reportPath = path.join(reportsDir, `production-candidates-${date}.md`);
     fs.writeFileSync(reportPath, redactor.scrub(renderMarkdown(candidates, held, failures, ctx, config)));
-    fs.writeFileSync(reportPath.replace(/\.md$/, '.json'), redactor.scrub(JSON.stringify({ schema: SCHEMA_VERSION, collected_at: ctx.nowIso, candidates, held, failures }, null, 2)) + '\n');
+    fs.writeFileSync(reportPath.replace(/\.md$/, '.json'), JSON.stringify(redactor.scrubDeep({ schema: SCHEMA_VERSION, collected_at: ctx.nowIso, candidates, held, failures }), null, 2) + '\n');
   }
 
   if (apply && applyVerdict.ok && candidates.length) {
@@ -725,16 +787,30 @@ async function main() {
     applied = true;
   }
 
+  // Every signal SEEN refreshes its ledger entry's last_seen, not only the ones
+  // proposed. `[measured 2026-09-08]` review of the first cut: with last_seen
+  // frozen at proposal time, a chronic signal that never went quiet was re-filed
+  // as a "regression" every ~38 days, forever — the rule manufactured the thing
+  // it exists to detect. `count` stays the count AT PROPOSAL, because escalation
+  // compares against it.
+  for (const s of signals) {
+    const prior = ledger.proposed[ledgerKey(s)];
+    if (prior && s.last_seen && (!prior.last_seen || Date.parse(s.last_seen) > Date.parse(prior.last_seen))) prior.last_seen = s.last_seen;
+  }
   for (const c of candidates) {
-    ledger.proposed[`${c.source.source}:${c.source.id}`] = {
-      first_proposed: ctx.nowIso, last_seen: c.source.last_seen, count: c.source.count, title: c.title,
+    const key = `${c.source.source}:${c.source.id}`;
+    const prior = ledger.proposed[key];
+    ledger.proposed[key] = {
+      first_proposed: prior && prior.first_proposed ? prior.first_proposed : ctx.nowIso,
+      last_proposed: ctx.nowIso,
+      last_seen: c.source.last_seen, count: c.source.count, title: c.title,
       report: reportPath ? path.basename(reportPath) : null, story_id: c.id, applied,
     };
   }
   ledger.runs.push({ at: ctx.nowIso, days, sources_checked: checked, sources_failed: failures.map((f) => f.source), signals: signals.length, held: held.length, candidates: candidates.length, applied });
   if (ledger.runs.length > 200) ledger.runs = ledger.runs.slice(-200);
   fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
-  fs.writeFileSync(ledgerPath, redactor.scrub(JSON.stringify(ledger, null, 2)) + '\n');
+  fs.writeFileSync(ledgerPath, JSON.stringify(redactor.scrubDeep(ledger), null, 2) + '\n');
 
   // Output. Zero bytes when everything was checked and nothing is new.
   const out = [];
@@ -753,14 +829,17 @@ async function main() {
 }
 
 if (require.main === module) {
-  main().then((code) => process.exit(code)).catch((e) => {
+  // Never process.exit() after writing to stdout: a piped stdout is truncated at
+  // 64 KB on macOS when the process exits before the write drains. Set exitCode
+  // and let the event loop drain.
+  main().then((code) => { process.exitCode = code; }).catch((e) => {
     process.stderr.write(`production-signals: ${e && e.message ? e.message : e}\n`);
-    process.exit(2);
+    process.exitCode = 2;
   });
 }
 
 module.exports = {
   DEFAULT_THRESHOLDS, APPLY_ALLOWLIST, Redactor, sha256,
   normaliseSentry, normalisePostgrestErrors, normaliseHeartbeats, normaliseVercel,
-  crossesThreshold, staleHoursFor, isIgnored, ledgerDecision, derivePrefix, nextStoryNumber, candidateStory, applyPermitted, originOwnerRepo,
+  crossesThreshold, staleHoursFor, isIgnored, ledgerDecision, sentryRegion, postgrestPaged, derivePrefix, nextStoryNumber, candidateStory, applyPermitted, originOwnerRepo,
 };
