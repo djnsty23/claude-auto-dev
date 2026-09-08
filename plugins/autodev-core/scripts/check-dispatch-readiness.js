@@ -258,10 +258,10 @@ function positionalsOf(args) {
     return out;
 }
 
-if (require.main === module) {
+function main() {
     if (has('--help') || !argv.length) {
         process.stdout.write(USAGE);
-        process.exit(argv.length ? 0 : 2);
+        return argv.length ? 0 : 2;
     }
     const positionals = positionalsOf(argv);
     // A second positional is a typo, not a repo. Silently ignoring it means
@@ -270,13 +270,30 @@ if (require.main === module) {
         process.stderr.write('dispatch-readiness: expected exactly one <repo>, got '
             + positionals.length + (positionals.length ? ' (' + positionals.join(', ') + ')' : '')
             + '\n' + USAGE + 'This run vouches for nothing.\n');
-        process.exit(2);
+        return 2;
     }
     const opts = { trunk: valOf('--trunk'), expectOrigin: valOf('--expect-origin') };
     if (has('--json')) {
         const res = inspect(positionals[0], opts);
         process.stdout.write(JSON.stringify(res, null, 2) + '\n');
-        process.exit(exitCodeFor(res));                  // the SAME verdict as the human form
+        return exitCodeFor(res);                         // the SAME verdict as the human form
     }
-    process.exit(report(positionals[0], opts));
+    return report(positionals[0], opts);
 }
+
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+if (require.main === module) process.exitCode = main();

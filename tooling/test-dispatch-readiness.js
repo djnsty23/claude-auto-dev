@@ -16,7 +16,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const SUBJECT = path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'check-dispatch-readiness.js');
@@ -281,6 +281,73 @@ try {
     fail++;
     console.log('FAIL  suite threw: ' + (err && err.message));
 } finally {
+
+    // ---- 8. the pipe delivers every byte ------------------------------------
+    //
+    // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+    // synchronous when it is a pipe on linux/win32, and process.exit() does not
+    // drain a pending async write. A run that prints past the 64KiB OS pipe
+    // buffer and then exits hands its caller exactly 65536 bytes under a status
+    // that says nothing failed — the shape rendered-layout-gate.js shipped with
+    // until 2026-09-07. This tool decides whether a session may be dispatched
+    // into a worktree, so a truncated answer is a worktree nobody vouched for.
+    //
+    // TWO ASSERTIONS, and the first is what stops the second passing by
+    // construction: the output must EXCEED one pipe buffer, and the piped byte
+    // count must equal the same run redirected to a FILE, where the write is
+    // synchronous on every platform.
+    //
+    // THE FIXTURE IS SHAPED FOR WORKTREE COUNT, because `git worktree add` and
+    // the six git invocations each row then costs are what this block spends.
+    // Rows are made WIDE rather than numerous: the worktree paths are nested ten
+    // levels deep and the branch names are long, so 56 worktrees clear the
+    // buffer where ~150 short ones would be needed. Do not deepen it much
+    // further — these paths already run to ~700 characters.
+    {
+        const PIPE_BUF = 64 * 1024;
+        const bigBase = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-pipe-'));
+        const bigRepo = path.join(bigBase, 'repo');
+        fs.mkdirSync(bigRepo);
+        const g = (a) => execFileSync('git', a, { cwd: bigRepo, encoding: 'utf8', stdio: 'pipe', windowsHide: true });
+        g(['init', '-q', '-b', 'main']);
+        g(['config', 'user.email', 't@t']);
+        g(['config', 'user.name', 'T']);
+        fs.writeFileSync(path.join(bigRepo, 'seed.txt'), 'seed\n');
+        g(['add', '.']);
+        g(['commit', '-qm', 'seed']);
+        const seg = 'w'.repeat(60);
+        for (let i = 0; i < 56; i++) {
+            const p = path.join(bigBase, 'wt', ...Array(10).fill(seg + '-' + i), 'leaf-' + i);
+            g(['worktree', 'add', '-q', '-b', 'claude/' + seg + '-branch-' + i, p]);
+        }
+
+        const argv = [SUBJECT, bigRepo, '--json'];
+        const out = path.join(bigBase, 'via-file.json');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, argv, { stdio: ['ignore', fd, 'ignore'], windowsHide: true });
+        fs.closeSync(fd);
+        const fileBytes = fs.statSync(out).size;
+
+        const piped = spawnSync(process.execPath, argv,
+            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+        const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+
+        ok('--json over many worktrees exceeds one pipe buffer, so the next check is not vacuous',
+            fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+        ok('  and through a PIPE it delivers every byte it writes to a FILE',
+            pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+        // 57 rows: the 56 added worktrees plus the repo's own checkout.
+        ok('  and the piped JSON still parses at that size',
+            (() => { try { return JSON.parse(piped.stdout).rows.length === 57; } catch { return false; } })(),
+            'tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
+
+        // NO SECOND PAIR FOR THE HUMAN REPORT. It shares the exit path, and the
+        // drain being asserted is a property of that shared exit, so the pair
+        // above covers it; a third and fourth run of this fixture would cost
+        // another three seconds to assert the same thing about the same runner.
+        fs.rmSync(bigBase, { recursive: true, force: true, maxRetries: 3 });
+    }
+
     try { fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 3 }); } catch { /* windows file locks */ }
 }
 
