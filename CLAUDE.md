@@ -14,7 +14,7 @@ never ships.
 
 ```bash
 npm run gate                 # THE GATE: ten steps chained with &&. Run this.
-npm run gate:fast            # the 6 cheap steps only. NOT the gate; 4 steps DEFERRED.
+npm run gate:fast            # the cheap steps only, in seconds. NOT the gate; see below.
 npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 10.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
@@ -200,24 +200,32 @@ timed INDEPENDENTLY on a clean tree, each exit code captured to a FILE because
 | **total** | **1618.7 (27.0 min)** | |
 
 **Two steps are 99.46% of it. The other five are 8.8 SECONDS TOGETHER.** So
-`gate:fast` runs those five, and `npm run gate` still runs everything. The bar
-wants a re-run after every rebase and `docs/decisions.md` is newest-first, so
+`gate:fast` runs the cheap ones, and `npm run gate` still runs everything. The
+bar wants a re-run after every rebase and `docs/decisions.md` is newest-first, so
 roughly half the open queue rebases on every merge to main — that product, not
-any single step, is the fleet's dominant cost. A post-rebase re-check measured
-8.6 s end to end against 27 minutes.
+any single step, is the fleet's dominant cost.
+
+That 8.8 s is the SUM OF STEP TIMES, not what a re-run costs: `gate:fast` spawns
+each step through `npm run`, which adds ~0.3 s apiece. `[measured 2026-09-08,
+load 5.9, 14 cores]` end to end the tier is 11.1 s (n=3) against 27 minutes —
+`check:entrypoints` alone was 9.47 s as two direct `node` calls and 9.75 s
+through `npm run`, n=3 interleaved. Both figures move with the load; the ratio
+does not.
 
 `check:entrypoints` was the one worth measuring rather than assuming: it probes
 ~118 scripts with `--help` under a 10 s budget each, so its worst case is
 minutes, and a cost model that guessed would have put it in the wrong tier.
-Measured, it is 7.8 s — 89% of this tier and still under eight seconds.
+Measured, it was 7.8 s at load 4.2 and 9.5 s at load 5.9 — nearly the whole of
+this tier either way, and the only step in it whose cost tracks the load.
 
 **`gate:fast` IS NOT THE GATE, and it says so on every run — including a clean
-one.** It prints what it ran, what it DEFERRED, and a line reading `5 of 7 gate
-steps ran. 2 DEFERRED.` A partial run that renders like a complete one is
-precisely the false green this file exists to prevent, so silence is not
-available to it; the other steps already print their population on a clean run
-for the same reason. **Nothing was dropped and no existing name changed meaning**
-— a session running `npm run gate` from memory still gets all seven.
+one.** It prints what it ran, what it DEFERRED, and a summary line counting the
+steps that ran against the steps in `scripts.gate`, then the number deferred. A
+partial run that renders like a complete one is precisely the false green this
+file exists to prevent, so silence is not available to it; the other steps
+already print their population on a clean run for the same reason. **Nothing was
+dropped and no existing name changed meaning** — a session running
+`npm run gate` from memory still gets every step.
 
 It is a script and not a second `&&` chain, for three reasons the chain itself
 demonstrates. `&&` short-circuits, so a red step hides every step behind it.
