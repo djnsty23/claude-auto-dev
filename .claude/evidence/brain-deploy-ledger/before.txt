@@ -37,7 +37,7 @@ Same actual CLI suite in disposable repositories, 48 assertions per variant.
       "FAIL  malformed candidate option refuses: [\"--candidate\",\"not-a-real-ref\"]",
       "FAIL  malformed candidate option refuses: [\"--candidate\",\"9f554284088a0d640f547c1cf4c739cb7a2e4f3d\",\"--candidate\",\"66b11bf53bdf8e8ace6487e2a38feba7cba67eca\"]"
     ],
-    "output": "/Users/andynastasa/Code/autodev/.claude/worktrees/codex-brain-live-audit/.claude/reports/brain-live-audit/deploy-ledger-draft/baseline-verification.txt"
+    "output": ".claude/reports/brain-live-audit/deploy-ledger-draft/baseline-verification.txt"
   },
   {
     "variant": "alternative-always-reset",
@@ -50,6 +50,6 @@ Same actual CLI suite in disposable repositories, 48 assertions per variant.
       "FAIL  regenerating archived frozen-candidate evidence is byte-stable",
       "FAIL  old candidate remains verifiable as explicitly historical after later source edits"
     ],
-    "output": "/Users/andynastasa/Code/autodev/.claude/worktrees/codex-brain-live-audit/.claude/reports/brain-live-audit/deploy-ledger-draft/alternative-always-reset-verification.txt"
+    "output": ".claude/reports/brain-live-audit/deploy-ledger-draft/alternative-always-reset-verification.txt"
   }
 ]
