@@ -65,6 +65,23 @@ const SKIP_READ_PATTERNS = [
     /\.turbo[/\\]/,
 ];
 
+// Basenames, lowercase: matched case-insensitively because on the default
+// macOS and Windows filesystems `.ESLINTRC.JS` is the same inode as
+// `.eslintrc.js`, so a case-sensitive list is a list with a hole in it.
+// Linter and formatter configs only. tsconfig.json is deliberately absent:
+// changing compiler options is ordinary work, and a `strict: false` there is
+// caught by review, not by a prompt on every tsconfig edit.
+const LINT_CONFIG_NAMES = new Set([
+    '.eslintrc', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.mjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
+    'eslint.config.js', 'eslint.config.cjs', 'eslint.config.mjs', 'eslint.config.ts', '.eslintignore',
+    '.prettierrc', '.prettierrc.js', '.prettierrc.cjs', '.prettierrc.mjs', '.prettierrc.json', '.prettierrc.yml',
+    '.prettierrc.yaml', '.prettierrc.toml', 'prettier.config.js', 'prettier.config.cjs', 'prettier.config.mjs',
+    '.prettierignore',
+    'biome.json', 'biome.jsonc',
+    '.stylelintrc', '.stylelintrc.js', '.stylelintrc.cjs', '.stylelintrc.json', '.stylelintrc.yml', '.stylelintrc.yaml',
+    'stylelint.config.js', 'stylelint.config.cjs', 'stylelint.config.mjs',
+]);
+
 try {
     const input = fs.readFileSync(0, 'utf8');
 
@@ -88,6 +105,33 @@ try {
                 process.stderr.write(`Blocked: Cannot modify security-critical file: ${filePath}\nInstalled plugin files are managed by Claude Code — edit them in the source repo and run /plugin marketplace update.\n`);
                 process.exit(2);
             }
+        }
+    }
+
+    // Lint/format config protection, ported from ECC's config-protection hook
+    // on 2026-09-07 (docs/evidence-ecc-comparison-2026-09-07.md). A branch in
+    // THIS hook rather than a hook of its own: a separate PreToolUse subprocess
+    // costs 58 ms on every Edit (median of 3, no-op path, this machine), and a
+    // Set lookup here costs nothing that can be measured.
+    //
+    // `ask`, where ECC denies. The legitimate case (the user asked for a rule
+    // change) needs a human answer, and ECC's escape is an environment variable
+    // in the session, which cannot be set from the desktop app. Interactive
+    // sessions get a prompt; a headless session cannot answer one and is
+    // denied, which is the right default for an autonomous run weakening a
+    // linter. Exit 0 with a JSON decision, never exit 2: this is a question,
+    // not a block.
+    if (toolName === 'Write' || toolName === 'Edit') {
+        const base = path.basename(toolInput.file_path || '').toLowerCase();
+        if (LINT_CONFIG_NAMES.has(base)) {
+            console.log(JSON.stringify({
+                hookSpecificOutput: {
+                    hookEventName: 'PreToolUse',
+                    permissionDecision: 'ask',
+                    permissionDecisionReason: `${base} is a lint/format config. A rule turned off here hides every finding it would have made; fix the code instead, unless the user asked for this config change.`,
+                },
+            }));
+            process.exit(0);
         }
     }
 

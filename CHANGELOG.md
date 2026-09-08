@@ -1,5 +1,57 @@
 # Changelog
 
+## [8.165.0] - 2026-09-08
+
+One feature and two gate fixes, with the docs that measured them. Cut now
+because the Stop hook below ships installed and does nothing for anyone until
+the plugin-cache key moves.
+
+### Added
+
+- **A workflow run's loss to the session quota wall is now detected, costed and
+  resumable from the model's own context.** `[measured 2026-08-25]` 42 of 280
+  workflow agents on one machine ran and left no journal result, 20 of them
+  carrying a `<synthetic>` "You've hit your session limit" row. Re-measured on
+  2026-09-08: only 12 of those 52 run directories remain and nothing has run
+  since, so the work stands on those 12 (100 agents, 94 journaled, 6 lost: 5
+  to the wall, 1 to a user interrupt). The harness already recovers correctly,
+  `Workflow({scriptPath, resumeFromRunId})` re-ran exactly the four walled
+  calls on the one real resume on disk, but it names that call two seconds
+  before the main thread hits the same wall, and nothing calls it after the
+  reset. `scripts/workflow-run-triage.js` prints, per agent, journaled /
+  lost-quota-wall / lost-interrupted / lost-api-error / lost-other with
+  agent-seconds and tool calls, and the exact resume call; COULD NOT CHECK on
+  anything unreadable, never a zero. `hooks/stop-workflow-wall-note.js` (Stop)
+  says once, at the end of the first turn that ends normally after the reset,
+  that this session's latest run has walled agents, and puts the resume call in
+  context; never a `decision` key, 64 ms on an ordinary turn against a 54 ms
+  process floor. The phase rule now carries its price: serial costs 2.0× the
+  wall-clock of a 3–4-wide phase and 4.1× of 8–12-wide, and a wall costs
+  width × elapsed-at-wall. Evidence in `docs/evidence-quota-wall-2026-09-08.md`.
+  (#200)
+
+### Fixed
+
+- **`validate` read a fact about the installed host as a broken hooks module.**
+  A check with no control treated a `claude plugin validate` that printed no
+  scan lines as "the modules entry was not read", so a clean tree went red on
+  the newer host and every suite that asserts validate is green went with it.
+  (#184)
+- **The rendered-layout gate's `--json` truncated at 64 KiB through a pipe on
+  macOS and exited 0**, so its grouped report could read as complete while
+  being cut mid-object. (#191)
+- **The Brain asked whether a branch was an ancestor of main when the question
+  was whether it LANDED**; this repo squash-merges, which destroys the ancestry
+  the old probe relied on. (#179)
+
+### Docs
+
+- All 39 unmerged heads classified, with the two probes that lied while doing
+  it (#178); the gate is six steps and `&&` hides five of them (#180); the
+  "never three" mutant claim corrected (#186); the CLAUDE.md architecture line
+  counted four things and got three wrong (#192); one measured greenfield run
+  from idea to preview through spec, setup-project, auto and ship (#195).
+
 ## [8.164.0] - 2026-09-06
 
 One fix, cut as its own release because the version number is a plugin-cache
