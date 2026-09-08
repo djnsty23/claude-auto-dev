@@ -113,10 +113,34 @@ and `validate` fails while a `*.vacuity-backup` exists. After killing a run,
 
 ## Architecture
 
-`autodev-core` (the workflow, 43 skills, 4 agents, 7 hook events, the sprint
-system) · `autodev-memory` (sqlite memory, 4 hook events) · `autodev-stack`
-(vendor skills). `${CLAUDE_PLUGIN_ROOT}` resolves **per plugin**, so cross-plugin
-paths cannot work — if core needs a file, core ships it.
+`autodev-core` (the workflow, its skills, agents and hooks, the sprint system) ·
+`autodev-memory` (sqlite memory, its own hooks) · `autodev-stack` (vendor
+skills). `${CLAUDE_PLUGIN_ROOT}` resolves **per plugin**, so cross-plugin paths
+cannot work — if core needs a file, core ships it.
+
+**That sentence carried four counts until 2026-09-08, and three of them were
+wrong.** It was written on 2026-08-17 as "43 skills, 4 agents, 7 hook events"
+for core and "4 hook events" for memory, and all four were exact that day.
+`[measured 2026-09-08]` core has **58 skills, 5 agents and 10 hook events**;
+memory's 4 is still right, and it is right because nobody has added a memory
+hook, not because anything checks.
+
+The drift is not carelessness, it is the shape of the sentence. Of the 526
+commits since it was written, 18 added a skill to core and 14 touched core's
+`hooks.json` — and 9 edited this file, none of them noticing. A count is the
+purest IMPLEMENTATION DESCRIPTION in the sense used above: it is falsified by
+the ordinary act of doing the work here, and falsifying it emits nothing. The
+shipped manifests already know this — `marketplace.json` and every `plugin.json`
+name what a plugin *does* ("brainstorm, auto, iterate, audit, review, ship, plus
+the prd.json sprint system") and count nothing.
+
+**So do not put the numbers back.** `ls plugins/autodev-core/skills | wc -l` is
+correct every day; a number in prose is correct only on the day it is typed. And
+no gate would have caught this one. `check:population` is the plausible
+candidate and is not it: it asks whether a script reporting an absence says what
+it scanned, it never reads a document, and it is advisory by design because it
+has demonstrated false positives. Nothing in the gate grades prose against the
+tree — which is the reason the prose must not make claims the tree can falsify.
 
 ### Skills are the unit of behaviour
 
