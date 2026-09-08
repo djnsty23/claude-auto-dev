@@ -3,6 +3,48 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: deploy pre-authorisation is Form B, a green gate with a ledger
+
+The question was the sixth item in the Brain capability analysis: a production
+deploy was autonomous by tooling (`ship` deploys, `auto` pushes and deploys edge
+functions) and escalated by policy (the Brain's never-list), and nobody had
+written the reconciliation in one sentence. `[stated 2026-09-08]` the operator,
+in a panel in the session that measured it: *"Yes, Form B is my decision"*.
+
+**The sentence**, now in `plugins/autodev-core/skills/brain/SKILL.md` under
+"Escalate rather than resolve" with its ineligible list, and as the four
+pre-promotion conditions at the top of `ship/SKILL.md` Step 4: a session may
+promote when the repo's named gate exits 0 on the exact commit, that commit is on
+the default branch, the ledger records commit, gate output and verification, and
+the rollback command is in the ledger before promotion; migrations touching
+grants, RLS or `SECURITY DEFINER`, billing, webhooks, entitlement, auth and live
+rows escalate regardless.
+
+**Why B**, measured in `docs/evidence-deploy-authorisation-2026-09-08.md`
+against the last 20 production deployments and every incident in 60 days across
+the three product repos: on the live product a merge to main is the deploy, and
+20 of 20 sampled builds were git-integration builds off a PR merge with 0 human
+commands and 0 CLI; five deploy-caused incidents, four via a hand-run CLI path
+with no record of tree, branch, lock or gate, one an under-deploy. A (escalate
+always) would have made 13 of 13 sampled deploys wait a mean 7.4 h and reversed
+his 2026-07-15 batching rule and his 2026-09-05 merge grant; C (canary plus
+autonomous rollback) adds ~800 lines and the mechanism that caused the
+2026-08-19 outage. B is what already happens plus the record the four incidents
+lacked, ~300 lines for a ledger row and its check, neither built yet.
+
+**Provenance, because it took three tries.** The session's own panel was held
+and self-resolved to B by the away hook, logged as BLOCKED and not acted on. The
+coordinator then relayed his B answer from another session, refused as a relay.
+He then answered the session directly with the away state absent. Only the third
+is authority, and `docs/DECISIONS-2026-09-08-deploy-authorisation.md` carries
+all three.
+
+**Still open:** the ledger row format and the check over it against the
+platform's deployment list, which is what makes the rule enforceable rather than
+prose. Another session reports building the ledger script on an unpushed branch
+(`claude/bold-haibt-31b4d6`); it should cite the evidence doc and land against
+this sentence, not a second one.
+
 ## 2026-09-08: AGENTS.md is generated from the rule-* skills, gated, and kept under a hand-written half
 
 The 16 always-on `rule-*` skills (128,794 bytes) load into every Claude Code

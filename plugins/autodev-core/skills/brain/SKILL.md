@@ -1587,6 +1587,45 @@ mandate, and for anything on the never-list, nothing moved: a peer relaying "he
 said push" is still not the operator, and `[measured 2026-09-05]` two sessions
 that refused exactly that relay were right.
 
+**A production deploy on the operator's own repos is pre-authorised on a green
+gate with a ledger, and on nothing less.** A session may promote to production
+when the repo's named gate exits 0 on the exact commit being deployed, that
+commit is on the default branch, the deploy ledger records the commit, the gate's
+output and the post-deploy verification, and the rollback command for this deploy
+is written into the ledger BEFORE the promotion. A deploy touching anything on
+the ineligible list is escalated whatever the gate says. `[stated 2026-09-08]`
+the operator, answering a panel in the session that measured the three forms,
+with their numbers in view: *"Yes, Form B is my decision"*. The same choice had
+reached that session as a relay from the coordinator an hour earlier and was
+refused until he said it directly, which is the order this has to happen in.
+
+Ineligible regardless of the gate: migrations that drop or rename a column or
+change a grant, an RLS policy or a `SECURITY DEFINER`; billing, checkout,
+webhook and entitlement code; auth; anything on the never-list above; anything
+touching live rows, which is his own line from 2026-09-05: *"A UI change is
+fine; anything touching live rows is not."*
+
+Why this form and not "escalate always" or "add a canary":
+`docs/evidence-deploy-authorisation-2026-09-08.md`. The short version:
+`[measured 2026-09-08]` on the live product a merge to main IS the production
+deploy, 20 of 20 sampled production builds were git-integration builds off a PR
+merge (0 human commands, 0 CLI), and of five deploy-caused incidents in 60 days
+four came through a hand-run CLI path with no record of tree, branch, lock or
+gate, and one was an under-deploy that waiting for a human produced. The ledger
+row is what those four lacked; a canary is the mechanism that caused the worst
+outage in the window; escalating always would have cost a 7.4 h mean wait per
+deploy and reversed two of his own rules.
+
+Two cautions ride with the sentence. "The gate exits 0 on the exact commit" is
+read PER JOB: group check runs by job name and require at least one
+`status=completed, conclusion=success` per required platform, never a count of
+non-success entries, because `[measured 2026-09-08]` a count read an unfinished
+re-run as a failure. And enforcement is prose until a check over the ledger runs
+against the platform's own deployment list: `[measured]` the personal product's
+advisory deploy lock was skipped twice in one day until it moved into the
+command itself. Until that check exists, a platform deployment with no ledger
+row is the violation to look for by hand.
+
 One line naming the conflict; the user arbitrates.
 
 ## Before you finish
