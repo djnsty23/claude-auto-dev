@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "node tooling/test-all.js",
-    "gate": "npm test && npm run check:suites && npm run check:probe-shapes && npm run check:population && npm run check:entrypoints && npm run check:skill-tools && npm run check:agents-md && npm run check:claude-md",
+    "gate": "npm test && npm run check:suites && npm run check:probe-shapes && npm run check:population && npm run check:entrypoints && npm run check:skill-tools && npm run check:agents-md && npm run check:claude-md && npm run check:coverage",
     "validate": "node tooling/validate.js",
     "bump": "node tooling/bump.js",
     "check:suites": "node tooling/check-suites-can-fail.js",
@@ -26,6 +26,7 @@
     "check:skills": "node plugins/autodev-core/scripts/analyze-skill-invocations.js --selftest",
     "check:versions": "node tooling/check-version-drift.js",
     "check:functions": "node tooling/find-untested-functions.js",
+    "check:coverage": "node tooling/find-untested-functions.js --gate",
     "check:drift": "node tooling/find-record-drift.js",
     "check:superseded": "node tooling/check-superseded.js",
     "check:agent-cost": "node tooling/analyze-agent-cost.js",

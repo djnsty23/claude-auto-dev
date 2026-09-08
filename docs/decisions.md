@@ -3,6 +3,35 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: a coverage floor, wired as a gate, at the number HEAD scored
+
+`npm run check:coverage` (`find-untested-functions.js --gate`) now runs in the
+gate chain and in CI, and fails only when the count of plugin functions no
+suite enters, or of plugin files no suite loads, rises above the floor
+measured on HEAD the day it was wired. Three variants were costed against
+each other in `docs/evidence-coverage-gate-2026-09-08.md`: extending the
+existing NODE_V8_COVERAGE census (chosen, zero dependencies), `c8
+--check-coverage` (55 packages for the same V8 data), and leaving it
+informational (the state that let the count drift unseen).
+
+**Counts, not a percentage.** 737 of 774 named functions is 95.2 %, which
+rounds down to 95, and 5 % of 774 lets one more never-entered function in
+before the gate fires, with the allowance growing as the tree grows. A count
+ceiling fires on the first newcomer.
+
+**The floor is a floor, not a target.** Coverage measures execution;
+mutation measures verification. The number is not to be chased to zero (the
+tool's own header records why: platform-gated code, defence-in-depth
+handlers, subjects a suite must kill). **Ratcheting the ceilings down is a
+separate decision**, to be taken with a re-measured green run and a reading
+of what each remaining entry is; it was deliberately not taken here, so the
+gate could not be red on the commit that introduced it.
+
+**Where "green on HEAD" lives.** In the gate step, not in the suite: the
+check runs `test-all.js` under coverage, which runs `test-check-coverage.js`,
+so a HEAD run inside the suite recurses. The suite proves the gate can fail,
+on a fixture tree, in about a second.
+## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
 ## 2026-09-08: production signals become candidate stories, never direct writes on a live repo
 
 The stage between "production knows" and "the backlog knows" did not exist:
