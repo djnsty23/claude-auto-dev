@@ -242,112 +242,37 @@ try {
             'clientproj neither flagged unverified nor COULD NOT CHECK');
     }
 
-    // ------------------------------------------- the pipe delivers every byte
+    // ---- the pipe delivers every byte -----------------------------------------
     //
     // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
     // synchronous when it is a pipe on linux/win32, and process.exit() does not
-    // drain a pending async write. A run that prints past the 64KiB OS pipe
-    // buffer and then exits therefore hands its caller exactly 65536 bytes under
-    // exit status 0 — the shape rendered-layout-gate.js shipped with until
-    // 2026-09-07. This survey's --json grows with the number of repos under the
-    // root and with the PRs gh reports for each, so it is reachable on a real
-    // machine, not only here.
+    // drain a pending async write. A run that prints and then exits hands its
+    // caller a TRUNCATED document under a status that says nothing failed -- the
+    // shape rendered-layout-gate.js shipped with until 2026-09-07.
     //
-    // TWO ASSERTIONS, and the first is what stops the second passing by
-    // construction: the output must EXCEED one pipe buffer, and the piped byte
-    // count must equal the same run redirected to a FILE, where the write is
-    // synchronous on every platform.
+    // THIS DOES NOT INFLATE THE FIXTURE PAST 64 KiB, and the difference matters in
+    // both directions. Sizing a fixture past the buffer is not portable: it needs
+    // long paths, long ref names or hundreds of rows, and `[measured 2026-09-08]`
+    // this suite cloned into directory names long enough that `git
+    // clone` failed with "could not create work tree dir" on windows-latest
+    // against MAX_PATH 260. It is also not NECESSARY -- the buffer does not have to be
+    // filled by this script's output, only to be full when the write happens.
+    // tooling/pipe-drain.js fills it with zeroes first, so a few-hundred-byte
+    // report is dropped exactly as completely as a 94 KB one.
     //
-    // The fixture is built for BYTES PER SECOND, because every repo here costs a
-    // clone plus eight git invocations and this suite runs inside `npm test`. A
-    // stub `gh` on PATH returns 20 PRs per repo, the PR titles and branch names
-    // are at the long end of what people really write, and the directory names
-    // are long, so TEN repos clear the buffer. Driven by repo count alone it
-    // takes ~45, and the wall-clock goes up by a minute.
+    // It carries its own control -- a fixture that prints then exits must arrive
+    // truncated to zero before any verdict counts -- and reports `skipped` on
+    // linux and win32, where a pipe is synchronous and the defect cannot occur.
     {
-        const PIPE_BUF = 64 * 1024;
-        const bigTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-brain-big-'));
-        const bin = path.join(bigTmp, 'bin');
-        fs.mkdirSync(bin);
-        const fakePrs = [];
-        for (let i = 0; i < 20; i++) {
-            fakePrs.push({
-                number: 1000 + i,
-                title: 'a fixture pull request title at the long end of what people really write, '
-                    + 'describing the change and the reason for it, number ' + i,
-                headRefName: 'claude/a-long-but-entirely-ordinary-generated-branch-name-' + i,
-            });
-        }
-        // Stubbed rather than real: this block is about byte counts, and a live
-        // `gh` would make the size depend on someone else's open PRs.
-        fs.writeFileSync(path.join(bin, 'gh'),
-            '#!/bin/sh\ncat <<' + String.fromCharCode(39) + 'JSON' + String.fromCharCode(39) + '\n'
-            + JSON.stringify(fakePrs) + '\nJSON\n');
-        fs.chmodSync(path.join(bin, 'gh'), 0o755);
+        // ROOT is the fixture the cases above already built and asserted on;
+        // the survey emits a full JSON document for it, which is all this
+        // needs now that the size of that document no longer matters.
+        const drained = require('./pipe-drain').run({ argv: [SUBJECT, '--root', ROOT, '--json'] });
+        check('--json arrives whole through a stalled pipe', drained.ok, drained.detail);
 
-        // The origin path contains "github", which is what isGitHub tests, so the
-        // survey asks gh — and gh is the stub above.
-        const bare = path.join(bigTmp, 'github-origin.git');
-        execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare], { stdio: 'pipe' });
-        const seed = path.join(bigTmp, 'seed');
-        fs.mkdirSync(seed);
-        git(seed, ['init', '-q', '-b', 'main']);
-        git(seed, ['config', 'user.email', 't@t']);
-        git(seed, ['config', 'user.name', 'T']);
-        fs.writeFileSync(path.join(seed, 'seed.txt'), 'seed\n');
-        git(seed, ['add', '.']);
-        git(seed, ['commit', '-qm', 'seed']);
-        git(seed, ['remote', 'add', 'origin', bare]);
-        git(seed, ['push', '-q', 'origin', 'main']);
-
-        const scan = path.join(bigTmp, 'scan');
-        fs.mkdirSync(scan);
-        for (let i = 0; i < 10; i++) {
-            const dir = path.join(scan, 'repo-' + 'x'.repeat(200) + '-' + String(i).padStart(4, '0'));
-            execFileSync('git', ['clone', '-q', bare, dir], { stdio: 'pipe' });
-            for (const f of ['RESUME.md', 'PUBLISH-QUEUE.md', 'DECISIONS.md', 'prd.json', 'TASKS.md', 'CLAUDE.md']) {
-                fs.writeFileSync(path.join(dir, f), f === 'prd.json' ? '{}' : 'x');
-            }
-        }
-        const env = Object.assign({}, process.env, { PATH: bin + path.delimiter + process.env.PATH });
-        const argv = (extra) => [SUBJECT, '--root', scan].concat(extra);
-
-        const viaFileBytes = (extra) => {
-            const out = path.join(bigTmp, 'out');
-            const fd = fs.openSync(out, 'w');
-            spawnSync(process.execPath, argv(extra), { stdio: ['ignore', fd, 'ignore'], env });
-            fs.closeSync(fd);
-            return fs.statSync(out).size;
-        };
-
-        const jsonPipe = spawnSync(process.execPath, argv(['--json']),
-            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
-        const jsonPipeBytes = Buffer.byteLength(jsonPipe.stdout, 'utf8');
-        const jsonFileBytes = viaFileBytes(['--json']);
-
-        check('--json over a large root exceeds one pipe buffer, so the next check is not vacuous',
-            jsonFileBytes > PIPE_BUF, JSON.stringify({ bytes: jsonFileBytes, buffer: PIPE_BUF }));
-        check('  and through a PIPE it delivers every byte it writes to a FILE',
-            jsonPipeBytes === jsonFileBytes, JSON.stringify({ pipe: jsonPipeBytes, file: jsonFileBytes }));
-        let bigParsed = null;
-        try { bigParsed = JSON.parse(jsonPipe.stdout); } catch { /* reported */ }
-        check('  and the piped JSON still parses at that size', bigParsed !== null,
-            jsonPipe.stdout.slice(-60));
-        check('  under exit status 0, so a truncated run cannot read as a success',
-            jsonPipe.status === 0, 'exit ' + jsonPipe.status);
-
-        // The human report shares the exit path, so it shares the defect. BE
-        // CLEAR WHAT THIS PAIR CATCHES: the report is built from hundreds of
-        // small console.log calls, which drain opportunistically while the
-        // parent reads, so it strands far less at the exit than the single
-        // JSON write above does. It states an equality; it is not cover.
-        const reportPipe = spawnSync(process.execPath, argv([]),
-            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
-        check('  the human report through a PIPE also delivers every byte',
-            Buffer.byteLength(reportPipe.stdout, 'utf8') === viaFileBytes([]),
-            Buffer.byteLength(reportPipe.stdout, 'utf8'));
-
-        fs.rmSync(bigTmp, { recursive: true, force: true });
+        const rendered = require('./pipe-drain').run({ argv: [SUBJECT, '--root', ROOT] });
+        check('  and so does the human report, which shares the exit path',
+            rendered.ok, rendered.detail);
     }
 } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

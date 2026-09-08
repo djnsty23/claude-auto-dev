@@ -87,72 +87,34 @@ try {
         noEvidence.status === 0 && noEvidence.signal === null && !noEvidence.error,
         detail(noEvidence));
 
-    // ---- the pipe delivers every byte ------------------------------------
+    // ---- the pipe delivers every byte -----------------------------------------
     //
     // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
     // synchronous when it is a pipe on linux/win32, and process.exit() does not
-    // drain a pending async write. A run that prints past the 64KiB OS pipe
-    // buffer and then exits hands its caller exactly 65536 bytes under a status
-    // that says nothing failed — the shape rendered-layout-gate.js shipped with
-    // until 2026-09-07. This suite is the right home for it: it is the one that
-    // drives the live entrypoints rather than the analyser.
+    // drain a pending async write. A run that prints and then exits hands its
+    // caller a TRUNCATED document under a status that says nothing failed -- the
+    // shape rendered-layout-gate.js shipped with until 2026-09-07.
     //
-    // --json lists every unreachable rule file, so it grows with the rule tree.
+    // THIS DOES NOT INFLATE THE FIXTURE PAST 64 KiB, and the difference matters in
+    // both directions. Sizing a fixture past the buffer is not portable: it needs
+    // long paths, long ref names or hundreds of rows, and `[measured 2026-09-08]`
+    // this suite's 400-file rule tree did not clear the buffer on
+    // ubuntu-latest, so its own vacuity guard went RED and the equality beside
+    // it was proving nothing anyway. It is also not NECESSARY -- the buffer does not have to be
+    // filled by this script's output, only to be full when the write happens.
+    // tooling/pipe-drain.js fills it with zeroes first, so a few-hundred-byte
+    // report is dropped exactly as completely as a 94 KB one.
     //
-    // TWO ASSERTIONS, and the first is what stops the second passing by
-    // construction: the output must EXCEED one pipe buffer, and the piped byte
-    // count must equal the same run redirected to a FILE, where the write is
-    // synchronous on every platform.
-    //
-    // A SEPARATE REPO from fixtureRepo on purpose — the controls above assert
-    // onDisk === 1 there, and 400 more rule files would falsify them.
-    const PIPE_BUF = 64 * 1024;
-    const bigRepo = path.join(tempRoot, 'big-repo');
-    const bigRules = path.join(bigRepo, '.claude', 'rules');
-    fs.mkdirSync(bigRules, { recursive: true });
-    fs.writeFileSync(path.join(bigRepo, 'CLAUDE.md'), '# unconditional fixture\n');
-    for (let i = 0; i < 400; i++) {
-        fs.writeFileSync(path.join(bigRules, 'rule-with-a-realistically-long-name-'
-            + String(i).padStart(4, '0') + '.md'), '# rule ' + i + '\n');
+    // It carries its own control -- a fixture that prints then exits must arrive
+    // truncated to zero before any verdict counts -- and reports `skipped` on
+    // linux and win32, where a pipe is synchronous and the defect cannot occur.
+    {
+        const drained = require('./pipe-drain').run({
+            argv: [CHECK, fixtureRepo, '--json'],
+            env: Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: configDir }),
+        });
+        check('--json arrives whole through a stalled pipe', drained.ok, drained.detail);
     }
-    // The log path comes from CLAUDE_CONFIG_DIR, so the big repo reuses the
-    // config the controls above already populated; its own session_start row is
-    // appended to the same file. Appended rather than written: overwriting it
-    // would strip the fixtureRepo evidence the controls above depend on.
-    fs.appendFileSync(logFile, JSON.stringify({
-        reason: 'session_start',
-        at: '2026-01-01T00:00:00Z',
-        cwd: bigRepo,
-        file: path.join(bigRepo, '.claude', 'observed.md'),
-    }) + '\n');
-
-    const outFile = path.join(tempRoot, 'via-file.json');
-    const fd = fs.openSync(outFile, 'w');
-    spawnSync(process.execPath, [CHECK, bigRepo, '--json'], {
-        cwd: ROOT,
-        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
-        stdio: ['ignore', fd, 'ignore'],
-        windowsHide: true,
-    });
-    fs.closeSync(fd);
-    const fileBytes = fs.statSync(outFile).size;
-
-    const piped = spawnSync(process.execPath, [CHECK, bigRepo, '--json'], {
-        cwd: ROOT,
-        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
-        windowsHide: true,
-    });
-    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
-
-    check('--json over a large rule tree exceeds one pipe buffer, so the next check is not vacuous',
-        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
-    check('--json through a PIPE delivers every byte it writes to a FILE',
-        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
-    check('the piped JSON still parses at that size',
-        (() => { try { return JSON.parse(piped.stdout).unreachable.length === 401; } catch { return false; } })(),
-        `tail=${JSON.stringify((piped.stdout || '').slice(-40))}`);
 } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

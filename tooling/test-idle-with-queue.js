@@ -178,74 +178,37 @@ for (const [label, dirName, queueAge, idleMin] of [
 //
 // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
 // synchronous when it is a pipe on linux/win32, and process.exit() does not
-// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
-// and then exits hands its caller exactly 65536 bytes under a status that says
-// nothing failed — the shape rendered-layout-gate.js shipped with until
-// 2026-09-07. --json here carries a row per flagged session, so it grows with
-// the fleet.
+// drain a pending async write. A run that prints and then exits hands its
+// caller a TRUNCATED document under a status that says nothing failed -- the
+// shape rendered-layout-gate.js shipped with until 2026-09-07.
 //
-// TWO ASSERTIONS, and the first is what stops the second passing by
-// construction: the output must EXCEED one pipe buffer, and the piped byte count
-// must equal the same run redirected to a FILE, where the write is synchronous
-// on every platform.
+// THIS DOES NOT INFLATE THE FIXTURE TO 64 KiB, and the difference matters in
+// both directions. Sizing a fixture past the buffer is not portable -- it
+// needs long paths, long ref names or hundreds of rows, and `[measured
+// 2026-09-08]` this suite's 400-session fleet produced a 52,898-byte human
+// report on ubuntu, under the buffer, so its own vacuity guard went RED and
+// the equality beside it was proving nothing anyway. It is also not
+// NECESSARY: the buffer does not have to be filled by this script's output,
+// only to be full when the write happens. tooling/pipe-drain.js fills it with
+// zeroes first, so a 105-byte report is dropped exactly as completely as a
+// 94 KB one, and the check works at whatever size the fixture happens to be.
+//
+// It carries its own control -- a fixture that prints then exits must arrive
+// truncated to zero before any verdict counts -- and reports `skipped` on
+// linux and win32, where a pipe is synchronous and the defect cannot occur.
 {
-    const PIPE_BUF = 64 * 1024;
-    const bigFleet = path.join(tmp, 'big-fleet');
-    fs.mkdirSync(bigFleet);
-    // A separate fleet directory from the one above, so nothing here changes
-    // the population the cases before it assert on. Cheap: JSON files and a
-    // QUEUE.md each, no git and no network.
-    for (let i = 0; i < 400; i++) {
-        const id = String(i).padStart(8, '0') + '-0000-0000-0000-000000000000';
-        const d = path.join(tmp, 'big-work', 'session-' + 'w'.repeat(40) + '-' + i);
-        fs.mkdirSync(d, { recursive: true });
-        const q = path.join(d, 'QUEUE.md');
-        fs.writeFileSync(q, '# QUEUE\n\nstill open\n');
-        fs.writeFileSync(path.join(bigFleet, id + '.json'), JSON.stringify({
-            cliSessionId: id,
-            cwd: d,
-            transcript: path.join(tmp, id + '.jsonl'),
-            stoppedAt: new Date(Date.now() - 90 * 60000).toISOString(),
-            stopHookActive: false,
-        }));
-    }
-    const env = Object.assign({}, process.env, { AUTODEV_FLEET_DIR: bigFleet });
-    const viaFileBytes = (args) => {
-        const out = path.join(tmp, 'via-file.out');
-        const fd = fs.openSync(out, 'w');
-        spawnSync(process.execPath, [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'], env });
-        fs.closeSync(fd);
-        return fs.statSync(out).size;
-    };
-    const piped = spawnSync(process.execPath, [SUBJECT, '--json'],
-        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
-    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
-    const fileBytes = viaFileBytes(['--json']);
+    const drained = require('./pipe-drain').run({
+        argv: [SUBJECT, '--json'],
+        env: Object.assign({}, process.env, { AUTODEV_FLEET_DIR: fleet }),
+    });
+    check('--json arrives whole through a stalled pipe', drained.ok, drained.detail);
 
-    check('--json over a large fleet exceeds one pipe buffer, so the next check is not vacuous',
-        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
-    check('  and through a PIPE it delivers every byte it writes to a FILE',
-        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
-    check('  and the piped JSON still parses at that size, under the flagged exit 1',
-        (() => { try { return JSON.parse(piped.stdout).rows.length === 400 && piped.status === 1; } catch { return false; } })(),
-        'exit ' + piped.status + ', tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
-
-    // The human report shares the exit path and clears the buffer too at this
-    // size — and BE CLEAR WHAT ITS PAIR CATCHES, because it is measurably less
-    // than the --json pair. Restoring process.exit(main()) takes the two --json
-    // checks RED and leaves these two GREEN: the report is 800 small
-    // console.log calls that drain opportunistically while the parent reads, so
-    // little is still pending at the exit, where the single 94KB JSON write
-    // strands 29KB. Keep them for the size and the equality they state; do not
-    // read them as cover for this defect.
-    const reportPipe = spawnSync(process.execPath, [SUBJECT],
-        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
-    const reportFileBytes = viaFileBytes([]);
-    check('  the human report exceeds one pipe buffer too', reportFileBytes > PIPE_BUF,
-        JSON.stringify({ bytes: reportFileBytes, buffer: PIPE_BUF }));
-    check('  and it also delivers every byte through a PIPE',
-        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === reportFileBytes,
-        JSON.stringify({ pipe: Buffer.byteLength(reportPipe.stdout || '', 'utf8'), file: reportFileBytes }));
+    const rendered = require('./pipe-drain').run({
+        argv: [SUBJECT],
+        env: Object.assign({}, process.env, { AUTODEV_FLEET_DIR: fleet }),
+    });
+    check('  and so does the human report, which shares the exit path',
+        rendered.ok, rendered.detail);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

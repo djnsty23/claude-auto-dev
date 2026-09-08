@@ -153,85 +153,53 @@ check('only the benign wording is excluded from the blocking reasons',
 check('the changed-file list is requested from gh, or the helper has nothing to judge',
     /headRefName,files'/.test(SRC));
 
-// ---- the pipe delivers every byte ------------------------------------------
-//
-// THE FIRST CASE HERE THAT DRIVES THE SUBJECT AS A SUBPROCESS. Everything above
-// reads the source or calls the exported helpers, which cannot see the CLI's
-// exit at all — and the exit is where this defect lives.
+// ---- the pipe delivers every byte -----------------------------------------
 //
 // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
 // synchronous when it is a pipe on linux/win32, and process.exit() does not
-// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
-// and then exits hands its caller exactly 65536 bytes under exit status 0 — the
-// shape rendered-layout-gate.js shipped with until 2026-09-07. --json here
-// carries one entry per rollup check, so it grows with the PR's check matrix.
+// drain a pending async write. A run that prints and then exits hands its
+// caller a TRUNCATED document under a status that says nothing failed -- the
+// shape rendered-layout-gate.js shipped with until 2026-09-07.
 //
-// TWO ASSERTIONS, and the first is what stops the second passing by
-// construction: the output must EXCEED one pipe buffer, and the piped byte count
-// must equal the same run redirected to a FILE, where the write is synchronous
-// on every platform.
+// THIS DOES NOT INFLATE THE FIXTURE PAST 64 KiB, and the difference matters in
+// both directions. Sizing a fixture past the buffer is not portable: it needs
+// long paths, long ref names or hundreds of rows, and `[measured 2026-09-08]`
+// this suite's 300-entry rollup did not clear the buffer on
+// windows-latest, so its own vacuity guard went RED and the equality beside
+// it was proving nothing anyway. It is also not NECESSARY -- the buffer does not have to be
+// filled by this script's output, only to be full when the write happens.
+// tooling/pipe-drain.js fills it with zeroes first, so a few-hundred-byte
+// report is dropped exactly as completely as a 94 KB one.
 //
-// gh is STUBBED on PATH. A live gh would make these byte counts depend on
-// somebody else's check matrix, which is the thing this file's header already
-// refuses for the classification cases.
+// It carries its own control -- a fixture that prints then exits must arrive
+// truncated to zero before any verdict counts -- and reports `skipped` on
+// linux and win32, where a pipe is synchronous and the defect cannot occur.
 {
     const os = require('os');
-    const { spawnSync } = require('child_process');
-    const PIPE_BUF = 64 * 1024;
     const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-pr-ready.js');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-ready-pipe-'));
     const bin = path.join(tmp, 'bin');
     fs.mkdirSync(bin);
-    const rollup = [];
-    for (let i = 0; i < 300; i++) {
-        rollup.push({
-            name: 'a-fairly-long-check-name-as-workflows-really-name-them / job-' + i,
-            status: 'COMPLETED',
-            conclusion: 'SUCCESS',
-        });
-    }
+    // A fake gh answering one small, READY-shaped PR. Three checks, not 300:
+    // the size of the answer is irrelevant once the pipe is pre-filled.
     fs.writeFileSync(path.join(bin, 'gh'),
         '#!/bin/sh\ncat <<' + String.fromCharCode(39) + 'JSON' + String.fromCharCode(39) + '\n'
         + JSON.stringify({
             number: 1, state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE',
-            mergeStateStatus: 'CLEAN', statusCheckRollup: rollup,
-            baseRefName: 'main', headRefName: 'claude/x', files: [{ path: 'a.js' }],
-        }) + '\nJSON\n');
-    fs.chmodSync(path.join(bin, 'gh'), 0o755);
+            mergeStateStatus: 'CLEAN', baseRefName: 'main', headRefName: 'topic',
+            files: [{ path: 'src/a.js' }],
+            statusCheckRollup: [0, 1, 2].map((i) => ({
+                name: 'ci / job-' + i, status: 'COMPLETED', conclusion: 'SUCCESS',
+            })),
+        }) + '\nJSON\n', { mode: 0o755 });
     const env = Object.assign({}, process.env, { PATH: bin + path.delimiter + process.env.PATH });
 
-    const viaFileBytes = (args) => {
-        const out = path.join(tmp, 'via-file.out');
-        const fd = fs.openSync(out, 'w');
-        spawnSync(process.execPath, [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'], env });
-        fs.closeSync(fd);
-        return fs.statSync(out).size;
-    };
-    const piped = spawnSync(process.execPath, [SUBJECT, '1', '--json'],
-        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
-    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
-    const fileBytes = viaFileBytes(['1', '--json']);
+    const drained = require('./pipe-drain').run({ argv: [SUBJECT, '1', '--json'], env });
+    check('--json arrives whole through a stalled pipe', drained.ok, drained.detail);
 
-    check('--json over a large check rollup exceeds one pipe buffer, so the next check is not vacuous',
-        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
-    check('--json through a PIPE delivers every byte it writes to a FILE',
-        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
-    check('the piped JSON still parses at that size, under the READY exit 0',
-        (() => { try { return JSON.parse(piped.stdout).checks.length === 300 && piped.status === 0; } catch { return false; } })(),
-        'exit ' + piped.status + ', tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
-
-    // The rendered report shares the exit path, so it shares the defect — but
-    // BE CLEAR WHAT THIS LINE CATCHES, which is not this defect. It renders
-    // 23471 bytes on this fixture, well under one buffer, so it stays GREEN
-    // under the mutation that takes the two --json checks red. It states the
-    // equality; the --json pair is what proves the drain.
-    const rendered = spawnSync(process.execPath, [SUBJECT, '1'],
-        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
-    check('the rendered report through a PIPE also delivers every byte',
-        Buffer.byteLength(rendered.stdout || '', 'utf8') === viaFileBytes(['1']),
-        Buffer.byteLength(rendered.stdout || '', 'utf8'));
-
-    fs.rmSync(tmp, { recursive: true, force: true });
+    const rendered = require('./pipe-drain').run({ argv: [SUBJECT, '1'], env });
+    check('  and so does the rendered report, which shares the exit path',
+        rendered.ok, rendered.detail);
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
