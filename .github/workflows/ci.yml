@@ -111,6 +111,22 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:agents-md
 
+      # docs/decisions.md is one shared insertion point, so every PR that records
+      # a decision conflicts with every other one that does. `[measured
+      # 2026-09-08]` of 13 open PRs, 6 touched it and all 15 pairs among those 6
+      # conflicted, on that file. This lints the wreckage a botched resolution
+      # leaves: a `## <date>` heading welded into a paragraph (markdown renders it
+      # as prose and the entry vanishes), an entry with no body, the same decision
+      # twice. Three open PRs carried the identical welded line when it was wired.
+      #
+      # NOT gated to ubuntu. The comparison is not byte-exact — the subject
+      # normalises CRLF before reading — so a Windows checkout cannot produce a
+      # red about line endings, and this repo's own merge policy notes that five
+      # of the other steps being ubuntu-only is what makes a green board mean less
+      # than it looks. It costs milliseconds on a leg that already runs.
+      - name: docs/decisions.md carries no welded, empty or duplicated entry
+        run: npm run check:decisions
+
       # CLAUDE.md is the file every session loads before it does anything, and
       # a false claim in it is acted on rather than read. Three went stale
       # inside 48 hours: the gate's step count (a session skipped check:suites
