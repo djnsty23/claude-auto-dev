@@ -452,6 +452,22 @@ function pluginComponents(pluginDir) {
   return out;
 }
 
+// Resolve `claude` against PATH directly. Used ONLY to word the reason above —
+// never to decide whether to spawn — so a resolution this misses (a shell
+// function, an exotic shim) costs a less precise sentence and nothing more.
+function claudeOnPath() {
+  const exts = process.platform === 'win32'
+    ? String(process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)
+    : [''];
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+  for (const dir of String(process.env[key] || '').split(path.delimiter).filter(Boolean)) {
+    for (const e of exts) {
+      try { if (fs.statSync(path.join(dir, 'claude' + e)).isFile()) return true; } catch { /* keep looking */ }
+    }
+  }
+  return false;
+}
+
 let claudeVersionCache;
 function claudeVersion() {
   if (claudeVersionCache !== undefined) return claudeVersionCache;
@@ -509,15 +525,33 @@ function scanHooksModule(pluginDir) {
     const detail = out.split('\n').filter((l) => /❯|error/i.test(l) && !/^Validating/.test(l)).map((l) => l.trim()).join(' | ');
     return { status: 'failed', detail: detail || out.trim().slice(-400) };
   }
-  // A missing `claude` never reaches r.error under `shell: true`: the shell
-  // runs, fails to find the command, and exits 127 (/bin/sh) or 9009
-  // (cmd.exe). `[measured 2026-09-07]` the ENOENT branch above is unreachable
-  // on POSIX for that reason, so the case EVERY CI run takes — no CLI
-  // installed at all — was being reported as "printed neither verdict", which
-  // describes the output rather than the cause.
-  const NOT_FOUND = /(command not found|not recognized as an internal or external command|No such file or directory)/i;
-  if ((r.status === 127 || r.status === 9009) && !/^\s*Validating\b/m.test(out) && (NOT_FOUND.test(out) || !out.trim()))
-    return { status: 'skipped', reason: 'claude is not on PATH' };
+  // Did the CLI run at all? A missing `claude` never reaches r.error under
+  // `shell: true` — the shell runs, fails to find the command, and reports it
+  // in its own words and its own status. Both vary, and a check written
+  // against one host's words is the very defect this function exists to fix:
+  //
+  //   macOS /bin/sh   exit 127, "claude: command not found"
+  //   Ubuntu dash     exit 127, "claude: not found"        <- no "command"
+  //   Windows cmd.exe exit 1,   "'claude' is not recognized as ..."
+  //
+  // `[measured 2026-09-08, CI]` a first attempt matched on that text plus
+  // 127/9009 and so passed on macOS and failed on BOTH ubuntu-latest and
+  // windows-latest, which is the same shape of error one layer down.
+  //
+  // The robust signal is the CLI's OWN first line: a claude that ran always
+  // prints `Validating ...` before anything else. No such line plus a non-zero
+  // status means it never ran, whatever the shell called that. This is checked
+  // AFTER the spawn, never before — returning early on a host that might still
+  // have validated something is precisely the ordering bug that sank the
+  // version-threshold approach.
+  if (!/^\s*Validating\b/m.test(out) && r.status !== 0) {
+    return {
+      status: 'skipped',
+      reason: claudeOnPath()
+        ? `claude is on PATH but did not run (exit ${r.status})`
+        : 'claude is not on PATH',
+    };
+  }
   if (!/Validation passed/.test(out)) return { status: 'skipped', reason: 'claude plugin validate printed neither verdict (exit ' + r.status + ')' };
 
   // The control, before the finding. `sections` is every component line the

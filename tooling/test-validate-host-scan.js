@@ -53,6 +53,24 @@ fs.writeFileSync(STUB_JS, `
 const mode = process.env[${JSON.stringify(MODE_ENV)}] || 'noscan';
 const argv = process.argv.slice(2);
 if (argv.includes('--version')) { process.stdout.write('9.9.9-stub (Claude Code)\\n'); process.exit(0); }
+// A shell that cannot find the command prints NOTHING to stdout, so this
+// has to run before the Validating line below — emulating the failure
+// after announcing a successful start would test a state no shell produces.
+if (mode.indexOf('shell-') === 0) {
+  // The three ways a shell reports a command it could not find. From
+  // validate.js's side these are indistinguishable from the real thing: it
+  // sees stdout+stderr and a status, and cannot tell the shell's complaint
+  // from the binary's. Emulating them here is what makes the ubuntu and
+  // windows cases reachable on a mac.
+  const shells = {
+    'shell-bash': ['claude: command not found', 127],
+    'shell-dash': ['claude: not found', 127],
+    'shell-cmd': ["'claude' is not recognized as an internal or external command,", 1],
+  };
+  const [text, code] = shells[mode];
+  process.stderr.write('/bin/sh: ' + text + '\\n');
+  process.exit(code);
+}
 const dir = argv[argv.length - 1];
 process.stdout.write('Validating plugin manifest: ' + dir + '/.claude-plugin/plugin.json\\n\\n');
 if (mode === 'scan') {
@@ -184,6 +202,21 @@ const stubSaid = spawnSync(path.join(STUB_DIR, IS_WIN ? 'claude.cmd' : 'claude')
 check('  control: the stub really did emit a hooks:-shaped bullet to be fooled by',
     /\bhooks:\s*Unknown field/.test((stubSaid.stdout || '') + (stubSaid.stderr || '')),
     JSON.stringify((stubSaid.stdout || '').slice(0, 200)));
+
+// 3c. THE CI REGRESSION. `[measured 2026-09-08]` the first version of the
+//     not-on-PATH branch matched on the shell's ENGLISH plus exit 127/9009. It
+//     passed on macOS and failed on BOTH ubuntu-latest and windows-latest —
+//     the same defect this file exists to fix, one layer down, and caught only
+//     because CI runs shells this machine does not. Ubuntu's dash says "not
+//     found" without the word "command"; cmd.exe exits 1, not 9009. The check
+//     now reads the CLI's own first line instead, which no shell authors.
+for (const [shell, label] of [['shell-bash', 'macOS /bin/sh'], ['shell-dash', 'Ubuntu dash'], ['shell-cmd', 'Windows cmd.exe']]) {
+    const r = runValidate(shell);
+    check(`a CLI that never ran under ${label} is a WARN`,
+        /^\[WARN\]/.test(r.line), r.line);
+    check(`  and ${label}'s wording is read as "did not run", not as a missing verdict`,
+        /did not run|not on PATH/.test(r.line), r.line);
+}
 
 // 4. No CLI at all: the CI shape. Unchanged by this fix, asserted so the three
 //    host behaviours are all pinned in one place rather than two.

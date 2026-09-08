@@ -90,3 +90,32 @@ pass: `test-all.js (runner canary run) did not run (ETIMEDOUT)` under fleet load
 `Re-run when the tree is quiet`. The line that matters was still recorded:
 `✓ test-validate-host-scan.js ok` — the new suite is independently verified able to
 fail. It also flagged `✗ test-rendered-layout-gate.js RED — already failing`.
+
+## D8. The fix's own not-on-PATH branch had the defect it was fixing
+
+`[measured 2026-09-08, CI]` `3ccd51b`'s not-on-PATH branch matched on the shell's English
+plus exit 127/9009. It was written and verified on macOS, and CI went red on BOTH
+ubuntu-latest and windows-latest — the sole failing suite on either, `113/114`, with
+`validate` itself printing `19 PASS, 0 FAIL, 1 WARN` on both.
+
+| shell | status | what it says |
+|---|---|---|
+| macOS `/bin/sh` | 127 | `claude: command not found` |
+| Ubuntu `dash` | 127 | `claude: not found` — no "command" |
+| Windows `cmd.exe` | **1** | `'claude' is not recognized as an internal or external command,` |
+
+A check written against one host's wording, failing on hosts that word it differently, is
+precisely the defect this branch exists to fix, one layer down. It read as WARN either way
+so it never risked a false FAIL — only the reason was wrong — but the assertion was right
+and the implementation was not.
+
+Replaced with the CLI's own first line: a `claude` that ran always prints `Validating ...`
+first, and no shell authors that string. Checked AFTER the spawn, never before — returning
+early on a host that might still validate something is the ordering bug that sank the
+version-threshold approach, and it would have been easy to reintroduce here.
+
+`claudeOnPath()` resolves the binary directly, but is used ONLY to word the reason, never
+to decide whether to spawn, so a resolution it misses costs a less precise sentence.
+
+Reversible: the suite now emulates all three shells, so any future narrowing goes red on a
+mac instead of in CI.
