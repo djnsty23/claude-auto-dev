@@ -414,7 +414,13 @@ it must not be mistaken for a safety net for this class.**
 ## Q4 — the gate still gates
 
 **Green, all six steps, on a clean tree at `38ab642` with nothing of this PR's
-applied.** Each step was run separately and its exit status captured to its own file —
+applied** — and green again on the committed result at `2ef9574`.
+
+> **The gate became SEVEN steps while this section was being written.** #198 landed
+> `check:agents-md` an hour after the run below. The seventh step was run separately
+> against the rebased branch and is reported at the end of this section. The six-step
+> table is left as measured rather than retro-fitted: it is what the gate was when it
+> was run, and rewriting it would be the exact substitution this document is about. Each step was run separately and its exit status captured to its own file —
 never through a pipe, because `$?` after a pipe is the pipe's status.
 
 | # | step | exit | wall | load at start |
@@ -458,6 +464,18 @@ did not have to be exercised — but it nearly did. The first attempt at this ga
 rebooted and killed it. The rerun, at load 4.7–12, cleared the same suite in under
 seven minutes. Under load this step is the sweep working, not a red; the answer is to
 re-run quiet, not to raise a timeout.
+
+### The seventh step, run after the rebase
+
+#198 added `check:agents-md` (`generate-agents-md.js --check`) as gate step 7 while
+this audit was in flight. Run separately against the rebased branch:
+
+> `check:agents-md OK — AGENTS.md matches 16 rules under
+> plugins/autodev-core/skills/rule-*/SKILL.md (27,786 bytes)` — **exit 0**.
+
+Its population line independently confirms this document's rule count: **16**
+`rule-*` skills, of which — per Q1 — three are not auto-loaded at all and five more
+are scoped to file types this repo does not contain.
 
 ### One thing the green does not cover
 
@@ -541,9 +559,24 @@ exactly this shape.
 | `CLAUDE.md:44` | "run the **remaining five** yourself" |
 
 Five statements of one number, in four grammatical forms — a cardinal, an ordinal, a
-fraction and a remainder — so no single search finds them all. **PR #198 (open) adds a
-seventh gate step.** On the day it lands, all five are wrong, and the gate that would
-catch it does not exist: nothing in this repo grades prose against `package.json`.
+fraction and a remainder — so no single search finds them all.
+
+**This resolved itself while the audit was being written, and the resolution is the
+more useful half of the finding.** PR #198 landed a *seventh* gate step
+(`check:agents-md`) roughly an hour after the table above was measured — and it
+updated **all five sites correctly**, in the same commit, cardinal and ordinal and
+fraction and remainder together. The hazard was real; the author of the change caught
+it by hand.
+
+That is the whole point, and it is not reassuring. **Nothing checked that work.**
+Nothing in this repo grades prose against `package.json`, so the five sites were
+correct on 2026-09-08 because one careful person went looking for all four
+grammatical forms of a number. #192's architecture line was wrong for three weeks
+because a different careful person did not. The distance between those two outcomes is
+attention, not machinery.
+
+This document was itself stale within the hour on exactly this claim — it said "six
+steps" in a section whose subject is numbers in prose going stale.
 
 This is the same failure `CLAUDE.md` already documents about the architecture line
 ("43 skills, 4 agents, 7 hook events" — three of four wrong within three weeks), and
