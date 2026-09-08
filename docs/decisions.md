@@ -24,6 +24,21 @@ alone 7,044 keeping 0. The effect on Codex's answers is COULD NOT CHECK: the CLI
 is not installed on this machine. Evidence and the exact question to ask once it
 is: `docs/evidence-agents-md-2026-09-08.md`.
 
+Two choices made while landing it. **The step is last in the chain**, not
+first: it takes milliseconds and its only failure is a stale document, so last
+it can never hide an expensive step behind it, and the brief's instruction to
+put it in the chain is met without adding a place for a red to conceal the
+steps that catch real defects. **The first gate run was three reds that were
+not this change.** `validate` (`hooks module ./fn/autodev-fn.mjs failed the
+host's scan`), `test-validate`, and `test-rendered-layout-gate` (`2 of 282`)
+reproduced identically on an untouched HEAD worktree and serially, with CI on
+main green; the `claude` CLI itself exits with a Bun ENOENT on this machine.
+Both roots landed on main the same evening (#184 and #191), the branch was
+rebased onto them, and `validate` went to 19 PASS 0 FAIL, so the push went
+through the pre-push hook without `--no-verify`. Written down because the
+alternative that night was to push around the hook and leave the reason
+implicit.
+
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 
 The question was whether a 249k-star harness is better than this one, and if
