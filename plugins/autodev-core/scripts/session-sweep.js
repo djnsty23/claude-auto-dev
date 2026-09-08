@@ -12,17 +12,27 @@
  * the point of this script; the classification around it is the easy part.
  *
  * Usage:
- *   node session-sweep.js                  # classify, print table
- *   node session-sweep.js --stale-days 14  # override staleness threshold
- *   node session-sweep.js --write-resume   # also write resume stubs for SAFE rows
- *   node session-sweep.js --json           # machine-readable output
+ *   node session-sweep.js                     # classify, print table
+ *   node session-sweep.js --stale-days 14     # idle days before a session is stale
+ *   node session-sweep.js --live-minutes 240  # recent transcript window treated as in use
+ *   node session-sweep.js --ephemeral-days 2  # age below which a session counts as ephemeral
+ *   node session-sweep.js --write-resume      # also write resume stubs for SAFE rows
+ *   node session-sweep.js --archive-orphaned  # clear records the app no longer tracks
+ *   node session-sweep.js --json              # machine-readable output
  */
 
-if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+function helpHeader() {
     // Print this file's own header block. A probe asking what this script is
     // must never cause it to DO what this script does: several entry points
     // here reach the network, and one made 21 registry calls from a --help
-    // probe before this branch existed.
+    // probe before this branch existed. main() calls this FIRST, before any
+    // part of the sweep.
+    //
+    // THIS COMMENT LIVES INSIDE THE FUNCTION ON PURPOSE. The loop below takes
+    // every comment line from the top of the file until the first line that is
+    // not one, so a comment written ABOVE this function becomes part of what
+    // --help prints. That happened once, during the 2026-09-08 exit refactor,
+    // and the tail of --help grew four lines of implementation note.
     const lines = require('fs').readFileSync(__filename, 'utf8').split('\n');
     const head = [];
     for (const line of lines.slice(1)) {
@@ -31,7 +41,6 @@ if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
         else break;
     }
     console.log(head.join('\n').trim());
-    process.exit(0);
 }
 
 const fs = require('fs');
@@ -75,21 +84,6 @@ const flag = (n) => args.includes(n);
 // The deeper point, worth keeping: that gate's verdict was never about --help
 // for a script like this. It measured whether the DEFAULT action finished in
 // time, and scored that identically to handling the flag.
-if (flag('--help') || flag('-h')) {
-  console.log([
-    'session-sweep.js: classify Claude Code sessions for archiving. READ-ONLY.',
-    '',
-    'Usage: node session-sweep.js [options]',
-    '',
-    '  --stale-days N     idle days before a session is stale (default 14)',
-    '  --live-minutes N   recent transcript window treated as in use (default 240)',
-    '  --help, -h         this text',
-    '',
-    'Never archives anything. Archiving is a separate MCP call made after',
-    'reading this output, so a bug here cannot destroy a worktree.',
-  ].join('\n'));
-  process.exit(0);
-}
 const opt = (n, d) => {
   const i = args.indexOf(n);
   return i >= 0 && args[i + 1] ? args[i + 1] : d;
@@ -559,175 +553,206 @@ carries the conclusions without the cost.
 
 // ---------------------------------------------------------------------- main
 
-// Refuse before any count is printed. Everything downstream reads as a real
-// zero, so an unreadable store must never reach it.
-if (!storeIsReadable()) {
-  console.error(`COULD NOT READ the session store — this is NOT a zero.`);
-  console.error(`  path: ${STORE}`);
-  console.error(`  platform: ${process.platform}`);
-  console.error(`  Nothing was scanned, so no verdict below would have meant anything.`);
-  console.error(`  Set SESSION_SWEEP_STORE to the correct directory if the app keeps it elsewhere.`);
-  process.exit(2);
-}
+function main() {
+    // --help returns BEFORE any sweep. The scan reads every transcript and
+    // shells out to git per worktree — 6.8s, 10.0s and 6.8s measured over three
+    // quiet runs 2026-09-02, against check-entrypoints.js's 10s budget — so this
+    // has to be the first thing main() does. It was a top-level guard that
+    // exited; it is a function now, called here, and nothing between module
+    // scope and this line does more than parse flags and read one denylist file.
+    //
+    // There were TWO --help blocks, with identical predicates 55 lines apart, so
+    // the second never ran. It is gone, and the four option lines only it
+    // documented are in the header block above — which is what --help prints.
+    if (flag('--help') || flag('-h')) { helpHeader(); return 0; }
 
-const all = collectSessions();
-const live = all.filter((s) => !s.isArchived);
-const { current: currentWorkspace, orphaned: orphanedWorkspaces } = detectWorkspaces(all);
-
-const prStates = refreshPrStates(live);
-
-/**
- * Mark SAFE records archived by editing the store, for orphaned workspaces only.
- *
- * A string replace, deliberately, not parse-then-stringify: reserializing would
- * rewrite field order and escaping across a file the app owns, so any breakage
- * would be indistinguishable from the one change being made. Anything whose
- * shape does not match exactly one needle is skipped rather than guessed at.
- */
-function archiveOrphaned(rows) {
-  const NEEDLE = '"isArchived":false';
-  const done = [];
-  const skipped = [];
-
-  for (const r of rows) {
-    if (!r.safe) continue;
-    const ws = r.s.__workspace;
-    if (!ws || ws === currentWorkspace || !orphanedWorkspaces.has(ws)) {
-      skipped.push([r.s.title, 'app tracks this workspace — use archive_session']);
-      continue;
+    // Refuse before any count is printed. Everything downstream reads as a real
+    // zero, so an unreadable store must never reach it.
+    if (!storeIsReadable()) {
+      console.error(`COULD NOT READ the session store — this is NOT a zero.`);
+      console.error(`  path: ${STORE}`);
+      console.error(`  platform: ${process.platform}`);
+      console.error(`  Nothing was scanned, so no verdict below would have meant anything.`);
+      console.error(`  Set SESSION_SWEEP_STORE to the correct directory if the app keeps it elsewhere.`);
+      return 2;
     }
-    let raw;
-    try { raw = fs.readFileSync(r.s.__file, 'utf8'); } catch { skipped.push([r.s.title, 'unreadable']); continue; }
-    if ((raw.split(NEEDLE).length - 1) !== 1) { skipped.push([r.s.title, 'unexpected shape']); continue; }
-    try {
-      fs.writeFileSync(r.s.__file, raw.replace(NEEDLE, '"isArchived":true'), 'utf8');
-      JSON.parse(fs.readFileSync(r.s.__file, 'utf8'));   // prove it still parses
-      done.push(r.s.title);
-    } catch (e) {
-      try { fs.writeFileSync(r.s.__file, raw, 'utf8'); } catch { /* caller holds a backup */ }
-      skipped.push([r.s.title, 'write failed: ' + e.message]);
+
+    const all = collectSessions();
+    const live = all.filter((s) => !s.isArchived);
+    const { current: currentWorkspace, orphaned: orphanedWorkspaces } = detectWorkspaces(all);
+
+    const prStates = refreshPrStates(live);
+
+    /**
+     * Mark SAFE records archived by editing the store, for orphaned workspaces only.
+     *
+     * A string replace, deliberately, not parse-then-stringify: reserializing would
+     * rewrite field order and escaping across a file the app owns, so any breakage
+     * would be indistinguishable from the one change being made. Anything whose
+     * shape does not match exactly one needle is skipped rather than guessed at.
+     */
+    function archiveOrphaned(rows) {
+      const NEEDLE = '"isArchived":false';
+      const done = [];
+      const skipped = [];
+
+      for (const r of rows) {
+        if (!r.safe) continue;
+        const ws = r.s.__workspace;
+        if (!ws || ws === currentWorkspace || !orphanedWorkspaces.has(ws)) {
+          skipped.push([r.s.title, 'app tracks this workspace — use archive_session']);
+          continue;
+        }
+        let raw;
+        try { raw = fs.readFileSync(r.s.__file, 'utf8'); } catch { skipped.push([r.s.title, 'unreadable']); continue; }
+        if ((raw.split(NEEDLE).length - 1) !== 1) { skipped.push([r.s.title, 'unexpected shape']); continue; }
+        try {
+          fs.writeFileSync(r.s.__file, raw.replace(NEEDLE, '"isArchived":true'), 'utf8');
+          JSON.parse(fs.readFileSync(r.s.__file, 'utf8'));   // prove it still parses
+          done.push(r.s.title);
+        } catch (e) {
+          try { fs.writeFileSync(r.s.__file, raw, 'utf8'); } catch { /* caller holds a backup */ }
+          skipped.push([r.s.title, 'write failed: ' + e.message]);
+        }
+      }
+      return { done, skipped };
     }
-  }
-  return { done, skipped };
-}
 
-const rows = live.map((s) => {
-  const c = classify(s, prStates);
-  const finished = c.state === 'MERGED' || c.state === 'STALE';
-  const thirdParty = finished ? isThirdParty(s) : false;
-  const risk = finished ? worktreeRisk(s, all) : null;
-  // The app has its own opt-out. Honour it rather than inventing a second one.
-  const exempt = s.autoArchiveExempt === true;
-  return {
-    s, c, risk, thirdParty, exempt,
-    safe: finished && !thirdParty && !exempt && risk === null,
-  };
-});
+    const rows = live.map((s) => {
+      const c = classify(s, prStates);
+      const finished = c.state === 'MERGED' || c.state === 'STALE';
+      const thirdParty = finished ? isThirdParty(s) : false;
+      const risk = finished ? worktreeRisk(s, all) : null;
+      // The app has its own opt-out. Honour it rather than inventing a second one.
+      const exempt = s.autoArchiveExempt === true;
+      return {
+        s, c, risk, thirdParty, exempt,
+        safe: finished && !thirdParty && !exempt && risk === null,
+      };
+    });
 
-if (AS_JSON) {
-  console.log(JSON.stringify(rows.map((r) => ({
-    sessionId: r.s.sessionId,
-    title: r.s.title,
-    cwd: r.s.originCwd || r.s.cwd,
-    branch: r.s.branch,
-    state: r.c.state,
-    why: r.c.why,
-    ageDays: Math.floor(r.c.ageDays),
-    thirdParty: r.thirdParty,
-    ephemeral: r.c.ephemeral,
-    exempt: r.exempt,
-    risk: r.risk,
-    safe: r.safe,
-  })), null, 2));
-  process.exit(0);
-}
-
-// Population first — a bare verdict is indistinguishable from a probe that found
-// nothing, so always print what was scanned.
-console.log(`POPULATION: ${all.length} session records on disk, ${live.length} not yet archived.`);
-console.log(`Store: ${STORE}`);
-console.log(`Denylist: ${DENY.length} entr${DENY.length === 1 ? 'y' : 'ies'} from ${DENYLIST_FILE}`);
-console.log(`PR states refreshed live: ${prStates.size} (0 means gh was unavailable — verdicts fell back to the stale on-disk snapshot)`);
-console.log(`Staleness threshold: ${STALE_DAYS}d for hand-started work, ${EPHEMERAL_DAYS}d for scheduled tasks`);
-console.log(`Live workspace: ${currentWorkspace || '(undetermined)'} — ${orphanedWorkspaces.size} orphaned workspace(s) alongside it\n`);
-
-const order = { MERGED: 0, STALE: 1, 'PR-OPEN': 2, ACTIVE: 3 };
-rows.sort((a, b) => (order[a.c.state] - order[b.c.state]) || (b.c.ageDays - a.c.ageDays));
-
-const pad = (v, n) => String(v == null ? '' : v).slice(0, n).padEnd(n);
-console.log(pad('VERDICT', 9) + pad('AGE', 6) + pad('TITLE', 40) + pad('DISPOSITION', 22) + 'PROJECT');
-console.log('-'.repeat(112));
-for (const r of rows) {
-  const disp = r.safe ? 'SAFE' : r.exempt ? 'exempt' : r.thirdParty ? 'third-party' : (r.risk || 'keep');
-  console.log(
-    pad(r.c.state, 9) +
-    pad(Math.floor(r.c.ageDays) + 'd', 6) +
-    pad(r.s.title || '(untitled)', 40) +
-    pad(disp, 22) +
-    path.basename(r.s.originCwd || r.s.cwd || '')
-  );
-}
-
-const safe = rows.filter((r) => r.safe);
-const finished = rows.filter((r) => !r.safe && (r.c.state === 'MERGED' || r.c.state === 'STALE'));
-
-// Two very different things were sharing one list, and the permanent one drowns
-// the urgent one. `blocked` means WORK EXISTS IN EXACTLY ONE PLACE — act on it.
-// `excluded` means third-party or opted-out: correct, permanent, and identical
-// every run. Five such rows appeared under BLOCKED every time, so a reader
-// learns to skip the section that is the only place a real warning can appear.
-const blocked = finished.filter((r) => !r.thirdParty && !r.exempt);
-const excluded = finished.filter((r) => r.thirdParty || r.exempt);
-
-console.log('\n--- SUMMARY ---');
-for (const st of ['MERGED', 'STALE', 'PR-OPEN', 'ACTIVE']) {
-  console.log(`${st.padEnd(9)} ${rows.filter((r) => r.c.state === st).length}`);
-}
-console.log(`\nSAFE TO ARCHIVE: ${safe.length}`);
-console.log(`BLOCKED — work exists in exactly one place, act on these: ${blocked.length}`);
-for (const b of blocked) {
-  console.log(`  - ${b.s.title} — ${b.risk}`);
-  if (b.s.worktreePath) console.log(`      ${b.s.worktreePath}`);
-}
-if (!blocked.length) console.log('  (none — every finished own-repo session is committed and pushed)');
-
-// Counted, never listed. It is the same rows every run; naming them each time is
-// what taught the reader to skip the section above.
-console.log(`\nExcluded by policy (third-party remote or autoArchiveExempt): ${excluded.length}`);
-if (excluded.length) {
-  console.log('  Permanent and expected. Re-run with --list-excluded to see them.');
-  if (flag('--list-excluded')) {
-    for (const e of excluded) {
-      console.log(`  - ${e.s.title} — ${e.exempt ? 'autoArchiveExempt' : 'third-party remote'}`);
+    if (AS_JSON) {
+      console.log(JSON.stringify(rows.map((r) => ({
+        sessionId: r.s.sessionId,
+        title: r.s.title,
+        cwd: r.s.originCwd || r.s.cwd,
+        branch: r.s.branch,
+        state: r.c.state,
+        why: r.c.why,
+        ageDays: Math.floor(r.c.ageDays),
+        thirdParty: r.thirdParty,
+        ephemeral: r.c.ephemeral,
+        exempt: r.exempt,
+        risk: r.risk,
+        safe: r.safe,
+      })), null, 2));
+      return 0;
     }
-  }
+
+    // Population first — a bare verdict is indistinguishable from a probe that found
+    // nothing, so always print what was scanned.
+    console.log(`POPULATION: ${all.length} session records on disk, ${live.length} not yet archived.`);
+    console.log(`Store: ${STORE}`);
+    console.log(`Denylist: ${DENY.length} entr${DENY.length === 1 ? 'y' : 'ies'} from ${DENYLIST_FILE}`);
+    console.log(`PR states refreshed live: ${prStates.size} (0 means gh was unavailable — verdicts fell back to the stale on-disk snapshot)`);
+    console.log(`Staleness threshold: ${STALE_DAYS}d for hand-started work, ${EPHEMERAL_DAYS}d for scheduled tasks`);
+    console.log(`Live workspace: ${currentWorkspace || '(undetermined)'} — ${orphanedWorkspaces.size} orphaned workspace(s) alongside it\n`);
+
+    const order = { MERGED: 0, STALE: 1, 'PR-OPEN': 2, ACTIVE: 3 };
+    rows.sort((a, b) => (order[a.c.state] - order[b.c.state]) || (b.c.ageDays - a.c.ageDays));
+
+    const pad = (v, n) => String(v == null ? '' : v).slice(0, n).padEnd(n);
+    console.log(pad('VERDICT', 9) + pad('AGE', 6) + pad('TITLE', 40) + pad('DISPOSITION', 22) + 'PROJECT');
+    console.log('-'.repeat(112));
+    for (const r of rows) {
+      const disp = r.safe ? 'SAFE' : r.exempt ? 'exempt' : r.thirdParty ? 'third-party' : (r.risk || 'keep');
+      console.log(
+        pad(r.c.state, 9) +
+        pad(Math.floor(r.c.ageDays) + 'd', 6) +
+        pad(r.s.title || '(untitled)', 40) +
+        pad(disp, 22) +
+        path.basename(r.s.originCwd || r.s.cwd || '')
+      );
+    }
+
+    const safe = rows.filter((r) => r.safe);
+    const finished = rows.filter((r) => !r.safe && (r.c.state === 'MERGED' || r.c.state === 'STALE'));
+
+    // Two very different things were sharing one list, and the permanent one drowns
+    // the urgent one. `blocked` means WORK EXISTS IN EXACTLY ONE PLACE — act on it.
+    // `excluded` means third-party or opted-out: correct, permanent, and identical
+    // every run. Five such rows appeared under BLOCKED every time, so a reader
+    // learns to skip the section that is the only place a real warning can appear.
+    const blocked = finished.filter((r) => !r.thirdParty && !r.exempt);
+    const excluded = finished.filter((r) => r.thirdParty || r.exempt);
+
+    console.log('\n--- SUMMARY ---');
+    for (const st of ['MERGED', 'STALE', 'PR-OPEN', 'ACTIVE']) {
+      console.log(`${st.padEnd(9)} ${rows.filter((r) => r.c.state === st).length}`);
+    }
+    console.log(`\nSAFE TO ARCHIVE: ${safe.length}`);
+    console.log(`BLOCKED — work exists in exactly one place, act on these: ${blocked.length}`);
+    for (const b of blocked) {
+      console.log(`  - ${b.s.title} — ${b.risk}`);
+      if (b.s.worktreePath) console.log(`      ${b.s.worktreePath}`);
+    }
+    if (!blocked.length) console.log('  (none — every finished own-repo session is committed and pushed)');
+
+    // Counted, never listed. It is the same rows every run; naming them each time is
+    // what taught the reader to skip the section above.
+    console.log(`\nExcluded by policy (third-party remote or autoArchiveExempt): ${excluded.length}`);
+    if (excluded.length) {
+      console.log('  Permanent and expected. Re-run with --list-excluded to see them.');
+      if (flag('--list-excluded')) {
+        for (const e of excluded) {
+          console.log(`  - ${e.s.title} — ${e.exempt ? 'autoArchiveExempt' : 'third-party remote'}`);
+        }
+      }
+    }
+
+    if (WRITE_RESUME) {
+      const outDir = path.join(process.cwd(), '.claude', 'handoffs');
+      fs.mkdirSync(outDir, { recursive: true });
+      let n = 0;
+      for (const r of safe) {
+        const slug = (r.s.title || r.s.sessionId).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
+        fs.writeFileSync(path.join(outDir, `resume-${slug}.md`), resumeStub(r.s, r.c, r.risk), 'utf8');
+        n++;
+      }
+      console.log(`\nWrote ${n} resume stub${n === 1 ? '' : 's'} to ${outDir}`);
+    }
+
+    if (ARCHIVE_ORPHANED) {
+      const { done, skipped } = archiveOrphaned(rows);
+      console.log(`\n--- --archive-orphaned ---`);
+      console.log(`marked archived in the store: ${done.length}`);
+      console.log(`left for archive_session    : ${skipped.filter((x) => /app tracks/.test(x[1])).length}`);
+      const other = skipped.filter((x) => !/app tracks/.test(x[1]));
+      if (other.length) {
+        console.log(`skipped for other reasons  : ${other.length}`);
+        for (const [t, why] of other.slice(0, 10)) console.log(`  - ${t}: ${why}`);
+      }
+      console.log('\nNo git worktree was touched. Records in the live workspace are untouched');
+      console.log('and still require archive_session.');
+    } else {
+      console.log('\nNothing was archived. Pass the SAFE list to archive_session to act on it,');
+      console.log('or re-run with --archive-orphaned to clear the ones the app no longer tracks.');
+    }
 }
 
-if (WRITE_RESUME) {
-  const outDir = path.join(process.cwd(), '.claude', 'handoffs');
-  fs.mkdirSync(outDir, { recursive: true });
-  let n = 0;
-  for (const r of safe) {
-    const slug = (r.s.title || r.s.sessionId).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
-    fs.writeFileSync(path.join(outDir, `resume-${slug}.md`), resumeStub(r.s, r.c, r.risk), 'utf8');
-    n++;
-  }
-  console.log(`\nWrote ${n} resume stub${n === 1 ? '' : 's'} to ${outDir}`);
-}
-
-if (ARCHIVE_ORPHANED) {
-  const { done, skipped } = archiveOrphaned(rows);
-  console.log(`\n--- --archive-orphaned ---`);
-  console.log(`marked archived in the store: ${done.length}`);
-  console.log(`left for archive_session    : ${skipped.filter((x) => /app tracks/.test(x[1])).length}`);
-  const other = skipped.filter((x) => !/app tracks/.test(x[1]));
-  if (other.length) {
-    console.log(`skipped for other reasons  : ${other.length}`);
-    for (const [t, why] of other.slice(0, 10)) console.log(`  - ${t}: ${why}`);
-  }
-  console.log('\nNo git worktree was touched. Records in the live workspace are untouched');
-  console.log('and still require archive_session.');
-} else {
-  console.log('\nNothing was archived. Pass the SAFE list to archive_session to act on it,');
-  console.log('or re-run with --archive-orphaned to clear the ones the app no longer tracks.');
-}
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();
