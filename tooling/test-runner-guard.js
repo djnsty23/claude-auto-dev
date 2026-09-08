@@ -26,6 +26,7 @@
 // Run: node tooling/test-runner-guard.js
 
 const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -33,6 +34,8 @@ const RUNNER = path.resolve(__dirname, 'test-all.js');
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
+let infra = 0;
+const indeterminate = [];
 
 // Distinctive names so a stray file left by a crash is obviously this suite's.
 const FIXTURES = [
@@ -50,12 +53,33 @@ function cleanup() {
 // survive a throw AND a hard exit, not just the happy path.
 process.on('exit', cleanup);
 
+// EXIT 2 IS THE ANSWER THIS SUITE ASKS FOR -- it is the guard's refusal, and
+// both assertions below read it -- so it is a verdict here, never the "child
+// declared itself indeterminate" classify() reads a bare 2 as.
+//
+// What is NOT a verdict is a child that never answered. Measured 2026-09-08 by
+// forcing this spawn to return `status=null signal=SIGTERM ETIMEDOUT`: the very
+// next assertion, `fired.status === 2`, printed
+// `FAIL  a *.vacuity-backup in tooling/ makes the runner refuse with exit 2
+// -> exit null` and the suite exited 1. A killed child, reported as the guard
+// failing to fire -- which is precisely the regression this file exists to
+// catch, so the false red is indistinguishable from the real one.
 function runRunner() {
-    return spawnSync(process.execPath, [RUNNER], {
+    const r = runBudgeted(process.execPath, [RUNNER], {
         encoding: 'utf8',
         cwd: path.resolve(__dirname, '..'),
         timeout: 60000,
+        // Contention is clamped at 20, so an uncapped widening would let this
+        // one child hold the gate for twenty minutes.
+        maxTimeout: 300000,
     });
+    if (classify(r, 'exit2') === 'infrastructure') {
+        infra++;
+        indeterminate.push('the runner run (' + reason(r) + ')');
+        console.error('infrastructure: the runner run produced no verdict (' + reason(r)
+            + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms)');
+    }
+    return r;
 }
 
 try {
@@ -98,5 +122,6 @@ for (const [label, ok, detail] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label + (ok || !detail ? '' : '  -> ' + detail));
     ok ? pass++ : fail++;
 }
-console.log(`\n${pass} passed, ${fail} failed  (guard population: tooling/*.vacuity-backup)`);
-process.exit(fail > 0 ? 1 : 0);
+console.log(`\n${tally(pass, fail, infra)}  (guard population: tooling/*.vacuity-backup)`);
+if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+process.exit(exitCode(fail, infra));

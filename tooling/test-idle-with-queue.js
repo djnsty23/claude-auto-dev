@@ -16,7 +16,7 @@
 // arms are therefore asserted here: a planted positive that must flag, and the
 // three near-misses that must not.
 
-const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -25,7 +25,9 @@ const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'script
 
 let pass = 0;
 let fail = 0;
+let infra = 0;
 const failures = [];
+const indeterminate = [];
 function check(label, ok, detail) {
     if (ok) pass++; else { fail++; failures.push(label); }
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
@@ -59,12 +61,32 @@ function heartbeat(id, cwd, agoMinutes) {
     }));
 }
 
-function run(args, env) {
-    const r = spawnSync(process.execPath, [SUBJECT].concat(args || []), {
+// A child that produced no verdict is INFRASTRUCTURE, not a finding about the
+// gate. Measured 2026-09-08 by forcing this suite's subject spawn to return
+// `status=null signal=SIGTERM ETIMEDOUT`: it printed `FAIL  --selftest exits 0
+// (exit null)` and three more reds, and exited 1 -- four claims about
+// check-idle-with-queue.js that the run had no evidence for.
+//
+// `expect` names an outcome this call site provokes on purpose: the absent-fleet
+// case drives the subject down its own indeterminate path, and that 2 is the
+// answer being asserted rather than a failure to answer.
+function run(args, env, expect) {
+    const r = runBudgeted(process.execPath, [SUBJECT].concat(args || []), {
         encoding: 'utf8',
         env: Object.assign({}, process.env, { AUTODEV_FLEET_DIR: fleet }, env || {}),
         timeout: 20000,
+        // Contention is clamped at 20, so cap the widening: a contended machine
+        // gives an indeterminate run either way, and the cap only bounds how
+        // long the reader waits to be told so.
+        maxTimeout: 300000,
     });
+    if (classify(r, expect) === 'infrastructure') {
+        infra++;
+        const what = 'the subject run ' + JSON.stringify(args || []);
+        indeterminate.push(what + ' (' + reason(r) + ')');
+        console.error('infrastructure: ' + what + ' produced no verdict (' + reason(r)
+            + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms)');
+    }
     return { status: r.status, out: r.stdout || '', err: r.stderr || '' };
 }
 
@@ -152,7 +174,7 @@ for (const [label, dirName, queueAge, idleMin] of [
 // caller can branch on, and an `||` across two independent claims can be
 // satisfied by either while the other is false.
 {
-    const r = run([], { AUTODEV_FLEET_DIR: path.join(tmp, 'no-such-fleet') });
+    const r = run([], { AUTODEV_FLEET_DIR: path.join(tmp, 'no-such-fleet') }, 'exit2');
     check('an absent fleet directory exits 2, never 0', r.status === 2, 'exit ' + r.status);
     check('  and says the run vouches for nothing',
         /vouches for NOTHING/.test(r.out + r.err),
@@ -176,9 +198,10 @@ for (const [label, dirName, queueAge, idleMin] of [
 
 fs.rmSync(tmp, { recursive: true, force: true });
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SUBJECT)}; driven as a subprocess `
     + `against a FIXTURE fleet (AUTODEV_FLEET_DIR), never the real one. Both arms asserted: `
     + `one planted positive that must flag, three near-misses that must not.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
-process.exit(fail ? 1 : 0);
+if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+process.exit(exitCode(fail, infra));
