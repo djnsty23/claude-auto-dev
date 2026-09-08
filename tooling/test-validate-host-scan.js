@@ -202,8 +202,13 @@ check('  the module stays unverified rather than passing on a diagnostic',
 // that would have been vacuous: it would pass just as well against a stub that
 // emitted no bullet at all, making this case a duplicate of `noscan`. Asking
 // the stub directly is a known-positive with different provenance.
-const stubSaid = spawnSync(path.join(STUB_DIR, IS_WIN ? 'claude.cmd' : 'claude'),
-    ['plugin', 'validate', ROOT],
+// Run the stub's JS through node rather than its shim. `[measured 2026-09-08,
+// CI]` spawning `claude.cmd` without `shell: true` returns empty output on
+// windows-latest — the exact shim problem scanHooksModule's own comment
+// documents, reproduced here in the control meant to guard against sloppiness.
+// The control needs the stub's OUTPUT, not its shim, and node runs the same
+// file on every platform.
+const stubSaid = spawnSync(process.execPath, [STUB_JS, 'plugin', 'validate', ROOT],
     { encoding: 'utf8', env: { ...process.env, [MODE_ENV]: 'warning-named-hooks' } });
 check('  control: the stub really did emit a hooks:-shaped bullet to be fooled by',
     /\bhooks:\s*Unknown field/.test((stubSaid.stdout || '') + (stubSaid.stderr || '')),

@@ -151,3 +151,28 @@ pins that the version appears, so the diagnostic cannot be dropped silently.
 
 Revisit when a CLI in the 2.1.233–2.1.259 window is actually available to measure. Until
 then this is a recorded risk with a named falsifier, not a fix deferred.
+
+## D10. Third macOS-only verification miss in one session, in the control itself
+
+`[measured 2026-09-08, CI run 34193900645]` `e3b0ea3` turned ubuntu-latest GREEN — the
+shell-wording fix worked — and windows-latest still failed, on a DIFFERENT assertion:
+
+    FAIL  control: the stub really did emit a hooks:-shaped bullet to be fooled by
+          ""
+
+The control spawned `claude.cmd` with no `shell: true`. Node cannot execute a `.cmd`
+directly, so it returned empty output. `scanHooksModule`'s own comment, eleven lines
+away, says exactly this: *"`claude` on PATH is a shim (a .cmd on Windows), which spawnSync
+cannot run without a shell"*. The production code knew; the control written to guard it
+did not.
+
+Fixed by running the stub's JS through `process.execPath`. The control needs the stub's
+OUTPUT, not its shim, and node runs the same file on every platform. Re-verified as a
+real known-positive by mutation: renaming the stub's `hooks:` bullet to `author:` turns
+exactly that control red.
+
+The pattern is the point, and it is the same one three times in one session: the CI red
+in D8, the shim here, and — one level up — the original defect itself. Each was written
+and verified on macOS by someone who had just finished explaining why that is not enough.
+A rule of thumb worth keeping: when a suite spawns anything, the spawn is the part most
+likely to be platform-specific, and it is the part a green local run says least about.
