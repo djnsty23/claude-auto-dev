@@ -1,0 +1,67 @@
+# .vercelignore — what Vercel must never upload from this tree.
+#
+# THIS REPO HAS NO DEPLOYABLE SURFACE. It is a plugin marketplace; nothing here
+# is a web app. This file exists because on 2026-09-08 a `vercel --yes` was run
+# against a worktree of this repo by accident, and the CLI deployed it anyway:
+# with no framework detected Vercel set the output directory to "." and served
+# the tree statically. `/.claude/settings.local.json` returned HTTP 200 to an
+# unauthenticated curl while `/` returned 404.
+#
+# THE VERCEL CLI DOES NOT READ .gitignore. That is the whole defect. On that
+# deploy, 423 tracked files AND 16 gitignored files were uploaded --
+# .claude/settings.local.json, .claude/memory-sessions/*, and
+# .claude/reports/telemetry-*.jsonl among them. Nothing warned; the failure is
+# silent and after the fact.
+#
+# .vercelignore IS NOT .gitignore AGAIN. The two files answer different
+# questions. .gitignore decides what is TRACKED. .vercelignore decides what is
+# UPLOADED AND SERVED. Every file in this repo is tracked and none of it should
+# ever be served, so "matches .gitignore" is a FLOOR and not the rule.
+#
+# In particular: this repo's .gitignore names individual .claude/ paths rather
+# than the directory, because partial tracking under .claude/ is deliberate for
+# git. No such reason applies here, so .claude/ is excluded wholesale. When in
+# doubt between the narrow and the wide pattern, a deploy manifest takes the
+# wide one -- the cost of over-excluding is a missing asset, and the cost of
+# under-excluding is a public URL.
+#
+# Verified by: node plugins/autodev-core/scripts/check-deploy-target.js --ignore-file .
+
+# --- session, agent and coordinator state. Machine-local by construction, and
+# --- the reason the 2026-09-08 deploy became a disclosure rather than noise.
+.claude/
+
+# --- git internals. Uploading .git/ publishes every branch and every deleted
+# --- file in the history, not just the working tree.
+.git/
+.github/
+
+# --- dependencies and build output
+node_modules/
+dist/
+build/
+.next/
+.vercel/
+
+# --- credentials
+.env
+.env.*
+*.pem
+*.key
+
+# --- repo machinery. Never ships inside a plugin, never belongs on a host.
+tooling/
+docs/
+scripts/
+
+# --- local scratch and generated artefacts named by .gitignore
+tmpclaude-*
+*.log
+.DS_Store
+prd.json
+prd-backup-*.json
+prd-archive-*.json
+handoff-*.md
+ledger.json
+settings.backup.json
+*.vacuity-backup
