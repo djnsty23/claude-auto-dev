@@ -3,8 +3,8 @@
 `[measured 2026-09-08]` on this Mac (Node 24.19.0, 14 cores, with up to thirteen other
 sessions running their own gates: **the load average is printed beside every timing**,
 and only the runs marked quiet had one below 12). Tree: `main` at **b8eae1f** (VERSION
-8.164.0). **Population: 88 plugin source files, 774 named functions in the 83 of them
-the suite loads, 113 suites.**
+8.164.0). **Population: 88 plugin source files, 87 loaded by the suite, 774 named functions
+in the 83 loaded files that declare any, 113 suites.**
 
 ## The question, and the sentence the answer has to carry
 
@@ -33,7 +33,7 @@ it for more than it is.
 | HEAD scores today | **37 never-called of 774, 1 never-loaded of 88** (read one by one below) | functions 94.29 % (744/789), statements 89.04 %, lines 89.04 %, **branches 79.51 %** | the same numbers, unread |
 | at ECC's thresholds | n/a (counts) | **green**, with 0.51 points of headroom on branches; 38 branches flipping turns it red | – |
 | wall time of the check alone | **327 s** quiet (load 7.6 to 11.1); 876 s at load 111, where the suite was red | 566 s (load 26 to 68) | 0 |
-| what it adds to `npm run gate` | one more suite run: gate went from **1,570 s** (load 68 falling to 2.8) to **__GATE_AFTER_S__ s** (__GATE_AFTER_LOAD__) in the same clone | the same order, plus the install | 0 |
+| what it adds to `npm run gate` | one more suite run. Before: **1,570 s** for the six-step chain (load 68 falling to 2.8). After: the seven-step re-run ended INDETERMINATE at step 2 (check:suites hit ETIMEDOUT on the unmodified test-validate baseline, load 9 rising to 38, 4,426 s, 112 suites graded ok including the new one), so the last five steps were run one by one on the same commit: 15 s for four of them and **2,125 s** for check:coverage at load 34 to 26, against **327 s** for the same step quiet. Quiet, the chain is about 1,900 s; loaded, the added step alone can cost more than the old chain did quiet. | the same order, plus the install | 0 |
 | can it be red on the introducing commit | no: the ceilings are the numbers above | no today, and the branch margin is half a point | – |
 | exit on what it prints | 2 when the suite is red (no verdict, failed suites named, a killed runner named as killed), 1 above a ceiling, 0 otherwise | 1 below a threshold | 1 always |
 
@@ -65,7 +65,7 @@ census, so it cannot move the first number.
 `node tooling/find-untested-functions.js --json` on b8eae1f, suite green, quiet:
 
 ```
-88 source file(s) in plugins/ · 83 executed · 1 NEVER LOADED · 4 ran but declare no named function
+88 source file(s) in plugins/ · 87 executed · 1 NEVER LOADED · 4 ran but declare no named function
 774 named function(s) IN THE LOADED FILES · 737 executed · 37 NEVER CALLED
 ```
 
@@ -113,7 +113,7 @@ named.
 The push's CI run is the Ubuntu measurement. The count is platform-sensitive
 (Windows-gated code is entered on one runner and not the other), which is why the
 step runs on `ubuntu-latest` only, beside the other Linux-only gates.
-__CI_PARAGRAPH__
+The CI result for this branch is recorded in the commit that follows this one.
 
 ## What the suite proves and what it does not
 
