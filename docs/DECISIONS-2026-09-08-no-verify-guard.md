@@ -1,5 +1,10 @@
 # Decisions — 2026-09-08, the `--no-verify` ask-guard (PR #199)
 
+Named for its subject because `docs/DECISIONS-2026-09-08.md` already existed on `main`
+from another session (#186) by the time this branch was previewed against it: an
+add/add conflict, found by the merge preview D9 describes. Two sessions logging one day
+need two files.
+
 Reversible calls made without asking, per the away rules in force until
 2026-09-08T16:33:45Z. Session worktree `affectionate-shaw-5e5b35`, branch
 `claude/affectionate-shaw-5e5b35`, base `origin/main` b8eae1f.
@@ -82,3 +87,11 @@ without a bypass: `[measured 2026-09-08]` validate on that base is 19 PASS, 0 FA
 the WARN naming the host's 2.1.233. So #182 has landed, the trunk red D1 describes is
 gone at main, and this branch will be green on a merge with main; its own pushes stayed
 bypasses only because it still sits on b8eae1f.
+
+## D9. Merge preview against current main, taken under branch 2
+
+The third panel recommended proving this branch green on a merge with main rather than
+claiming it. A detached scratch worktree at `origin/main` 7b157a8 with this branch merged
+in: the first attempt CONFLICTED on `docs/DECISIONS-2026-09-08.md`, which another session
+had added the same day. Renamed this file, then re-ran the preview and the six-step gate on
+the merged tree; the result is on the PR.
