@@ -95,3 +95,17 @@ does not imply an empty queue should publish.
 A backup mirror is a separate authorized scope, not a universal exception that
 lets any repository push. Read its actual configuration and result before
 claiming an automatic backup exists.
+
+An automated checkpoint of at-risk work is likewise a separate scope rather than
+a widening of this one. Where a project configures one, it commits and pushes the
+session's OWN branch without asking, on the reasoning that work which exists only
+in a working tree cannot be recovered from a forge and that a session stopped by
+a quota or a crash can no longer be asked. Such a mechanism is bounded to that
+branch: never a default branch, never another session's ref, never a PR or a
+merge. Read its configuration for how to disable it rather than assuming it is
+on or off.
+
+It grants nothing further. A checkpoint push does not authorize pushing the same
+branch again by hand at the end of the task — the batching policy above still
+governs that — and a checkpoint commit is not a reviewed state. Reset onto it and
+carry on.
