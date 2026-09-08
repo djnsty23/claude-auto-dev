@@ -56,3 +56,17 @@ after the window ended.
    needed on this branch.
 3. If the prune needs disputing: the predicate is in the evidence doc's
    pruning section; diff any row against the backup by `id`.
+
+## Update, later 2026-09-08: main merged in, PR mergeable
+
+#190 had gone CONFLICTING (CLAUDE.md, docs/decisions.md, an add/add on
+`docs/DECISIONS-2026-09-08.md`). Merged `origin/main` in as 3ceaa05, pushed
+through the pre-push hook with no bypass (validate is a WARN on this host now
+that #184 landed). Verified on the merged tree: the eight memory suites green
+(`node tooling/test-observation-classifier.js` 43/43 and the rest),
+`node tooling/validate.js` → 19 PASS 0 FAIL 1 WARN, both tree checkers clean.
+NOT run: full `npm test` and `check:suites`, load average 91 at the time; CI is
+running on 3ceaa05. GitHub: MERGEABLE, pending checks. The Brain has two
+messages about this PR and a third was budget-blocked; the merge note is in
+the PR body. Next: Brain runs one serial `check:suites` when quiet, merges,
+then the release (`cat VERSION` immediately before `node tooling/bump.js`).
