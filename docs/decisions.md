@@ -45,9 +45,6 @@ prose. Another session reports building the ledger script on an unpushed branch
 (`claude/bold-haibt-31b4d6`); it should cite the evidence doc and land against
 this sentence, not a second one.
 
-<<<<<<< HEAD
-## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
-
 ## 2026-09-08: AGENTS.md is generated from the rule-* skills, gated, and kept under a hand-written half
 
 The 16 always-on `rule-*` skills (128,794 bytes) load into every Claude Code
@@ -84,8 +81,6 @@ through the pre-push hook without `--no-verify`. Written down because the
 alternative that night was to push around the hook and leave the reason
 implicit.
 
-=======
->>>>>>> 552efec (docs(decisions): drop a heading the conflict resolution kept without its body)
 ## 2026-09-08: memory recall measured at zero; ranked injection built and not shipped
 
 The question was whether the autodev-memory store is ever read back, and
