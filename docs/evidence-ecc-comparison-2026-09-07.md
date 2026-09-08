@@ -79,8 +79,13 @@ autodev: 109 of 112 suites in 5 m 49 s, 3 red on this machine and green in
 CI. Both reds were local: the hooks-module scan read Claude Code 2.1.233's
 silence as an unread entry, and the layout gate's 84,752-byte JSON report
 was truncated at 65,536 by `process.exit()` after an asynchronous pipe
-write. Fixed in `5fa045b`; both had a measured explanation and neither was
-the code under test.
+write. Both had a measured explanation and neither was the code under test.
+This session's fix for them (`5fa045b`, PR #182) was closed in review and
+superseded: its validate half skipped the scan on any host below 2.1.259,
+which would have reported a module that genuinely fails validation on this
+Mac's 2.1.233 as a WARN. #184 reads the host's output instead of its version
+and is the fix that landed; #191 landed the layout-gate half. Both are on
+main and this PR is rebased on them.
 
 ## Content substance
 

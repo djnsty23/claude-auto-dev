@@ -34,6 +34,9 @@ const check = (label, ok, detail) => cases.push([label, ok, detail]);
 const ADVISORY = [
     'post-tool-typecheck.js', 'stop-typecheck.js', 'telemetry.js', 'context-depth-nudge.js',
     'inbox-notify.js', 'user-prompt-image-scan.js', 'instructions-loaded.js',
+    // #200's Stop note: names a lost workflow run and its resume command, as a
+    // systemMessage with no decision key. It advises.
+    'stop-workflow-wall-note.js',
 ];
 // Hooks that guard, block, or keep state the sprint and the Brain depend on.
 const GUARDING = [

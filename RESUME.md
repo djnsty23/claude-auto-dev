@@ -12,7 +12,7 @@ Branch `claude/zealous-bhaskara-12b623`, base `origin/main` b8eae1f. Context dep
 
 ## Next, in order
 
-1. Merge PR #182 (5fa045b) to main; then this branch's gate goes green without a change.
+1. (Superseded 2026-09-08: PR #182 was closed in review; #184 and #191 fixed the same two reds and are on main, so a rebase onto main makes this branch's gate green.)
 2. The three harness changes in the decisions entry, each one skill edit + one suite, each with a log line to test against: ship reads `target` from the deploy JSON; setup-project scaffolds into a scratch dir and ships `next typegen && tsc`; auto/stop hook follow the project path instead of cwd.
 3. Handbacks #1–#3 in the log are the operator's, if the throwaway product is ever to run: Supabase project, Deployment Protection, production promotion.
 
@@ -32,7 +32,7 @@ after the step below; a fresh session continues from here.
 
 | commit | what | verified by |
 |---|---|---|
-| 5fa045b | validate.js version-gates the hooks-module scan (host < 2.1.259 → WARN, not FAIL); rendered-layout-gate.js uses `process.exitCode` so a >64 KiB `--json` report survives a macOS pipe | `node tooling/test-validate.js` → 36 passed, 0 failed; `node tooling/test-rendered-layout-gate.js` → PASS 283 assertions; `node tooling/validate.js` → 19 PASS, 0 FAIL, 1 WARN |
+| 5fa045b (superseded by #184 and #191, dropped from this branch) | validate.js version-gates the hooks-module scan (host < 2.1.259 → WARN, not FAIL); rendered-layout-gate.js uses `process.exitCode` so a >64 KiB `--json` report survives a macOS pipe | `node tooling/test-validate.js` → 36 passed, 0 failed; `node tooling/test-rendered-layout-gate.js` → PASS 283 assertions; `node tooling/validate.js` → 19 PASS, 0 FAIL, 1 WARN |
 | 51c03e0 | three ECC ports: typecheck batched at Stop with `decision: block` (post-tool-typecheck.js + stop-typecheck.js), lint-config `ask` inside pre-tool-filter.js, `hooks_profile=minimal` via plugin userConfig | test-post-tool-typecheck 17/17, test-stop-typecheck 33/33, test-hooks-profile 32/32, test-pre-tool-filter 44/44; suites for every guarded hook green; `node tooling/find-untested-hooks.js` → 24 wired, 24 executed |
 | e408c49 | docs/evidence-ecc-comparison-2026-09-07.md + decisions.md entry | `node tooling/check-no-private-names.js` clean, `check-no-home-paths.js` clean |
 
@@ -43,7 +43,7 @@ after the step below; a fresh session continues from here.
 1. The local `npm run gate` at e408c49 was killed after `npm test` finished 110/112 suites under a 13-session load; CI runs the same gate on both PRs. (It was at 43 of 112 suites when the
    session stopped; the log was in the session scratchpad, so re-run it if the
    log is gone: `npm run gate` on a clean tree, tens of minutes).
-2. DONE: PR A #182 (5fa045b alone, the trunk fix, Brain merges on green checks) and PR B #181 (all three commits + this file). Originally:
+2. PR A #182 (5fa045b alone) was CLOSED in review: its validate half would have turned a genuinely failing module into a WARN on an old host; #184 and #191 landed instead. PR B #181 was rebased onto them with its own 5fa045b dropped. Originally:
    via the panel ("Commit the evidence doc … opens a PR"). Commit with
    `-c user.email=djnsty23@users.noreply.github.com`.
 3. Not a release: no `VERSION` bump was made. The ported hooks run on nobody's

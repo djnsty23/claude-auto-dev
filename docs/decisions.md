@@ -144,9 +144,13 @@ input to a jsonl at 340 ms per call), the inline `node -e` bootstrap in every
 hook command (the thing the 2026-09-05 record found tripping Windows
 Defender), Stop-time reformatting of a user's tree.
 
-The two local-only gate reds found on the way are in `5fa045b`: the
-hooks-module scan on a host older than 2.1.259, and a 64 KiB pipe truncation
-in the layout gate that only macOS can see.
+The two local-only gate reds found on the way, the hooks-module scan on a
+host older than 2.1.259 and a 64 KiB pipe truncation in the layout gate that
+only macOS can see, were fixed by this session as `5fa045b` (PR #182) and
+that PR was closed in review: a version threshold would have turned a
+genuinely failing module into a WARN on an old host. #184 (a control that
+reads the host's output, not its version) and #191 are the fixes that
+landed, and this branch dropped its own half and rebased onto them.
 
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 
