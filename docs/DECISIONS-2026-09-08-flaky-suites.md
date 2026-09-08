@@ -80,8 +80,40 @@ error is the instructive part.
 
 - `pkill -f 'test-all.js'` matches every session on this box, because each runs
   that exact command from its own worktree. It killed a gate run here. #183's
-  session owned it and has stopped. **The identical hazard is documented in this
-  repo's own CLAUDE.md, in the vacuity sweep's `pkill -9` step** — that ships to
-  users and is nobody's chip.
-- Trunk reds: `validate` / `test-validate` (PR #184) and
-  `test-rendered-layout-gate` (`2 of 282`, both `--json`, macOS-only).
+  session owned it and has stopped.
+
+- **CORRECTION, 2026-09-08, to an earlier version of this file.** It said the
+  same hazard in this repo's own `CLAUDE.md` (the vacuity sweep's `pkill -9`
+  step) *"ships to users"*. **That is false**, and `CLAUDE.md:10` says so in its
+  own opening paragraph: *"Everything outside `plugins/` is repo machinery and
+  never ships."* I had read that line at the start of the session and asserted
+  the opposite anyway. The blast radius of the `CLAUDE.md` text is contributors
+  to this repo — 39 concurrent sessions tonight, so still serious, but not what
+  the claim said. It is also no longer unowned: PR #192 (`d89864b`) carries it.
+
+- **The one that genuinely ships is a hook**, and it is worse, because it
+  executes in a stranger's session on their machine:
+
+  ```
+  plugins/autodev-core/hooks/agent-browser-cleanup.js:115
+      execSync('pkill -f "agent-browser-(linux|darwin)"')
+  ```
+
+  Verified present. Its `catch` reasons carefully about the no-zombie case
+  (*"taskkill/pkill/wmic exit non-zero on no match"*) and **not at all** about
+  the multi-session case, so on any box running more than one Claude session it
+  reaps peers' live agent-browsers alongside the zombies it was written for —
+  the identical defect this file spent the night on, shipped. Unowned at the
+  time of writing; handed over rather than started here, because this session
+  was past its context-depth line. Any fix needs a suite proving it still reaps
+  a genuine zombie while leaving a peer's live browser alone: a test that only
+  proves it kills nothing is as useless as the current behaviour is dangerous.
+
+- Trunk reds **as measured at `8e27cc2`**: `validate`, `test-validate` (PR #184)
+  and `test-rendered-layout-gate` (`2 of 282`, both `--json`, macOS-only).
+  **Re-baselined at `2e5ed24`: the layout gate is FIXED** — #191 merged, and a
+  clean detached worktree at current `origin/main` prints
+  `290 assertions over 20 real-browser snapshots`, exit 0. **Trunk is down to
+  two reds, both #184's.** Recorded rather than silently edited, because a
+  baseline that was correct when taken and stale an hour later is exactly the
+  hazard this file is about.
