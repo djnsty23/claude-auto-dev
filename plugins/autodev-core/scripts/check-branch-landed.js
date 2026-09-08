@@ -340,5 +340,5 @@ if (require.main === module) {
     let code = 3;
     try { code = main(process.argv); }
     catch (err) { console.error('check-branch-landed: ' + (err && err.message)); code = 3; }
-    process.exit(code);
+    process.exitCode = code;
 }

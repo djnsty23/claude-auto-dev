@@ -305,7 +305,8 @@ function main() {
         // startup was observed AND an unconditional rule was never seen; a
         // payload that lists unreachable rules while exiting 0 is a verdict
         // the caller's shell never receives.
-        process.exit(r.rows !== null && r.sawStart && r.unreachable.length ? 1 : 0);
+        process.exitCode = r.rows !== null && r.sawStart && r.unreachable.length ? 1 : 0;
+        return;
     }
     process.exit(report(repo, r, lf));
 }

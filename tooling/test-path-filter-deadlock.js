@@ -116,6 +116,12 @@ function run(args) {
     check('the population is printed beside the count, not just the finding',
         /3 workflow\(s\)/.test(r.out) && /1 with a path filter/.test(r.out));
 
+    // The report must also arrive whole through a pipe nobody is reading yet.
+    // process.exit() straight after console.log truncates a piped stdout on macOS
+    // (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+    // check from passing by construction).
+    const drained = require('./pipe-drain').run(Object.assign({ argv: [SUBJECT, r0, '--json'] }, {}));
+    check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
     const j = run([r0, '--json']);
     let parsed = null;
     try { parsed = JSON.parse(j.out); } catch { /* stays null */ }

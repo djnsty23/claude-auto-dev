@@ -195,6 +195,12 @@ for (const [label, arg] of [
         `exit ${r.status}, stdout ${JSON.stringify((r.stdout || '').split('\n')[0].slice(0, 70))}`);
 }
 {
+    // The report must also arrive whole through a pipe nobody is reading yet.
+    // process.exit() straight after console.log truncates a piped stdout on macOS
+    // (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+    // check from passing by construction).
+    const drained = require('./pipe-drain').run(Object.assign({ argv: [SUBJECT, '--json', '--file', path.join(fixture, 'nope.md')] }, {}));
+    check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
     const r = spawnSync(process.execPath, [SUBJECT, '--json', '--file', path.join(fixture, 'nope.md')],
         { input: '', encoding: 'utf8' });
     let parsed = null;

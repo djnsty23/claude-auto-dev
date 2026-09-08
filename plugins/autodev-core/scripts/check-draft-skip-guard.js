@@ -739,7 +739,8 @@ if (has('--json')) {
         partial: partial ? { guarded: partial.guarded.map((r) => r.file), unguarded: partial.unguarded.map((r) => r.file) } : null,
         rows,
     }, null, 2));
-    process.exit(inert.length || partial ? 1 : 0);
+    process.exitCode = inert.length || partial ? 1 : 0;
+    return;
 }
 
 // Population before the verdict: a bare "none found" cannot be told apart from a

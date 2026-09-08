@@ -154,7 +154,8 @@ if (require.main === module) {
 
     if (argv.includes('--json')) {
         console.log(JSON.stringify(s, null, 2));
-        process.exit(0);
+        process.exitCode = 0;
+        return;
     }
 
     // Population beside the verdict: WHICH file was read, so a reader can tell

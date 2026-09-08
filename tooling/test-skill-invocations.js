@@ -83,6 +83,12 @@ check('selftest refuses a regex literal as a command',
 // ---------------------------------------------------------------------------
 // 2. BOTH channels counted. This is the regression that shipped once.
 // ---------------------------------------------------------------------------
+// The report must also arrive whole through a pipe nobody is reading yet.
+// process.exit() straight after console.log truncates a piped stdout on macOS
+// (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+// check from passing by construction).
+const drained = require('./pipe-drain').run(Object.assign({ argv: [SCRIPT, '--dir', projects, '--plugins', plugins, '--json'] }, {}));
+check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
 const r = run(['--json']);
 let j = null;
 try { j = JSON.parse(r.stdout || '{}'); } catch (e) { /* asserted below */ }

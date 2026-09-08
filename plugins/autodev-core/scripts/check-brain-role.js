@@ -522,5 +522,5 @@ if (require.main === module) {
     const r = checkBrainRole({ roleFile: val('--role'), sessionsDir: val('--sessions-dir') });
     if (argv.includes('--json')) { console.log(JSON.stringify(r, null, 2)); }
     else process.stdout.write(render(r));
-    process.exit(r.state === 'fault' ? 2 : 0);
+    process.exitCode = r.state === 'fault' ? 2 : 0;
 }

@@ -414,6 +414,4 @@ if (AS_JSON) {
     }
 }
 
-if (stale.length || missing.length) process.exit(3);
-if (!checked) process.exit(2);
-process.exit(0);
+process.exitCode = stale.length || missing.length ? 3 : !checked ? 2 : 0;

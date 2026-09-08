@@ -217,7 +217,8 @@ const results = list.map(([n, d]) => survey(n, d));
 
 if (has('--json')) {
     console.log(JSON.stringify({ root: ROOT, scanned: list.length, repos: results }, null, 2));
-    process.exit(0);
+    process.exitCode = 0;
+    return;
 }
 
 console.log('\nAUTO-BRAIN SURVEY');

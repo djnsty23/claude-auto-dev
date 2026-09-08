@@ -368,6 +368,7 @@ const result = analyse({
 
 if (flag('--json')) {
     console.log(JSON.stringify(result, null, 2));
-    process.exit(result.total === 0 ? 2 : (result.never.length ? 1 : 0));
+    process.exitCode = result.total === 0 ? 2 : (result.never.length ? 1 : 0);
+    return;
 }
 process.exit(report(result));

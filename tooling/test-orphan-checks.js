@@ -45,6 +45,12 @@ const ASSERTS = 'if (x !== 1) { throw new Error("bad"); }\n';
 const MIGRATION = 'await db.query("update things set a = 1");\n';
 
 // 1. An assertion script nothing references is an orphan.
+// The report must also arrive whole through a pipe nobody is reading yet.
+// process.exit() straight after console.log truncates a piped stdout on macOS
+// (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+// check from passing by construction).
+const drained = require('./pipe-drain').run(Object.assign({ argv: [TOOL, path.join(__dirname, '..'), '--json'] }, {}));
+check('--json arrives whole through a stalled pipe (stdout drains before the process ends) — ' + drained.detail, drained.ok);
 let out = run(repo({
     'package.json': JSON.stringify({ name: 'r', scripts: { test: 'vitest run' } }),
     'scripts/lonely-check.mjs': ASSERTS,

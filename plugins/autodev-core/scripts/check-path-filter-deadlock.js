@@ -250,7 +250,8 @@ const atRisk = rows.filter((r) => r.atRisk);
 
 if (has('--json')) {
     console.log(JSON.stringify({ root, scanned: rows.length, atRisk: atRisk.length, strict: has('--strict'), rows }, null, 2));
-    process.exit(has('--strict') && atRisk.length ? 1 : 0);
+    process.exitCode = has('--strict') && atRisk.length ? 1 : 0;
+    return;
 }
 
 console.log(`${rows.length} workflow(s) in ${root}, `

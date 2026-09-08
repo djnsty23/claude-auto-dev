@@ -394,7 +394,8 @@ const stuck = [...bySession.entries()]
 
 if (AS_JSON) {
     console.log(JSON.stringify({ window_days: DAYS, population: stats, classes: ranked, stuck }, null, 2));
-    process.exit(0);
+    process.exitCode = 0;
+    return;
 }
 
 // Population FIRST. A ranked list with no denominator is indistinguishable from

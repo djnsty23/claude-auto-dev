@@ -75,7 +75,8 @@ if (fixes.length === 0) {
     const msg = 'No conventional `fix:` commits found — this analysis needs conventional commit subjects.';
     if (asJson) console.log(JSON.stringify({ error: msg, commits: commits.length }));
     else console.log(msg);
-    process.exit(0);
+    process.exitCode = 0;
+    return;
 }
 
 // ---- Rework: a fix landing on code a feature just touched
@@ -133,7 +134,8 @@ if (asJson) {
         classes: ranked.map(([name, count]) => ({ name, count, examples: (classExamples[name] || []).slice(0, 3) })),
         hotFiles: Object.entries(reworkFiles).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([file, count]) => ({ file, count })),
     }, null, 2));
-    process.exit(0);
+    process.exitCode = 0;
+    return;
 }
 
 const line = '='.repeat(70);

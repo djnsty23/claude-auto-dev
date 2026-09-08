@@ -135,6 +135,14 @@ const BEACON = 'PREMISE: repo=demo-app expect=present match="mode: \\"payment\\"
 {
     // Nothing has moved yet. Every premise must hold — the control that proves
     // the fixtures are readable before any of them is expected to go stale.
+    // The report must also arrive whole through a pipe nobody is reading yet.
+    // process.exit() straight after console.log truncates a piped stdout on macOS
+    // (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+    // check from passing by construction).
+    const drainQueue = path.join(fixture, 'Q-drain.md');
+    fs.writeFileSync(drainQueue, '# queue\n\n- nothing here\n');
+    const drained = require('./pipe-drain').run(Object.assign({ argv: [SUBJECT, '--queue', drainQueue, '--repo-root', CODE, '--no-fetch', '--json'] }, {}));
+    check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
     const res = run([
         '## Items',
         '**A · the login CTA** PREMISE: repo=demo-app expect=present match=href="/login" file=src/plan-card.tsx',

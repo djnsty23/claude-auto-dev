@@ -184,7 +184,8 @@ for (const [key, arr] of Object.entries(manifest.plugins)) {
 
 if (AS_JSON) {
     console.log(JSON.stringify({ manifest: MANIFEST, results }, null, 2));
-    process.exit(results.some((r) => r.status === 'DRIFTED') ? 1 : 0);
+    process.exitCode = results.some((r) => r.status === 'DRIFTED') ? 1 : 0;
+    return;
 }
 
 const drifted = results.filter((r) => r.status === 'DRIFTED');

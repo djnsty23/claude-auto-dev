@@ -286,6 +286,12 @@ const forRepo = (findings, name) => (findings || [])
     const repo = makeRepo('clean');
     commitPrd(repo, { 'S-1': story(true), 'S-2': story('deferred') }, 200, 'chore: prd');
     filler(repo, 20, 1);
+    // The report must also arrive whole through a pipe nobody is reading yet.
+    // process.exit() straight after console.log truncates a piped stdout on macOS
+    // (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+    // check from passing by construction).
+    const drained = require('./pipe-drain').run(Object.assign({ argv: [AUDIT, '--json'] }, { env: Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: CONFIG }) }));
+    check('--json arrives whole through a stalled pipe (stdout drains before the process ends) — ' + drained.detail, drained.ok);
     check('all stories done/deferred → no prd findings at all', forRepo(run(), 'clean').length === 0);
 }
 

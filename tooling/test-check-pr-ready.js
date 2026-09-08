@@ -153,5 +153,17 @@ check('only the benign wording is excluded from the blocking reasons',
 check('the changed-file list is requested from gh, or the helper has nothing to judge',
     /headRefName,files'/.test(SRC));
 
+// The report must also arrive whole through a pipe nobody is reading yet.
+// process.exit() straight after console.log truncates a piped stdout on macOS
+// (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+// check from passing by construction).
+// A fake gh on PATH, so the CLI's JSON path runs without a network and with
+// a stable answer both times.
+const os = require('os');
+const ghBin = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-ready-gh-'));
+fs.writeFileSync(path.join(ghBin, 'gh'), '#!/bin/sh\nprintf %s \'' + JSON.stringify({ number: 1, state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [], baseRefName: 'main', headRefName: 'x', files: [] }) + '\'\n', { mode: 0o755 });
+const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-pr-ready.js');
+const drained = require('./pipe-drain').run(Object.assign({ argv: [SUBJECT, '1', '--json'] }, { env: Object.assign({}, process.env, { PATH: ghBin + path.delimiter + process.env.PATH }) }));
+check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

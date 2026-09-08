@@ -352,6 +352,12 @@ try {
     // rendered separately from the JSON ones - so a divergence is reachable.
     // -----------------------------------------------------------------------
     {
+        // The report must also arrive whole through a pipe nobody is reading yet.
+        // process.exit() straight after console.log truncates a piped stdout on macOS
+        // (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+        // check from passing by construction).
+        const drained = require('./pipe-drain').run(Object.assign({ argv: [SUBJECT, REPO, '--json'] }, { env: Object.assign({}, process.env, GIT_ENV) }));
+        check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
         const r = run([REPO]);
         eq('the default report exits 0', r.status, 0);
         eq('a clean run writes nothing to stderr', r.stderr, '');

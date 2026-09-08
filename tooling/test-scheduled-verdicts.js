@@ -43,6 +43,12 @@ check('--selftest reports a regression case', /regression/i.test(st.stdout || ''
 
 // --- a repo with no scheduled jobs at all must exit 0 and say so ---
 const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'sv-empty-'));
+// The report must also arrive whole through a pipe nobody is reading yet.
+// process.exit() straight after console.log truncates a piped stdout on macOS
+// (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+// check from passing by construction).
+const drained = require('./pipe-drain').run(Object.assign({ argv: [SCRIPT, empty, '--json'] }, {}));
+check('--json arrives whole through a stalled pipe (stdout drains before the process ends) — ' + drained.detail, drained.ok);
 const emptyRun = spawnSync('node', [SCRIPT, empty], { encoding: 'utf8' });
 check('a repo with no scheduled jobs exits 0', emptyRun.status === 0);
 check('an empty scan still prints its population',

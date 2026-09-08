@@ -471,7 +471,8 @@ function main() {
     const jobs = run(repo);
     if (has('--json')) {
         console.log(JSON.stringify({ repo, jobs }, null, 2));
-        process.exit(0);
+        process.exitCode = 0;
+        return;
     }
     process.exit(report(repo, jobs));
 }

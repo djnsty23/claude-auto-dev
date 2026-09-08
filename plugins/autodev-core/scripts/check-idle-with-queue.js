@@ -181,7 +181,8 @@ if (has('--json')) {
     console.log(JSON.stringify({
         idleMinutes: IDLE_MIN, queueHours: QUEUE_H, ...result,
     }, null, 2));
-    process.exit(result.rows.length ? 1 : 0);
+    process.exitCode = result.rows.length ? 1 : 0;
+    return;
 }
 
 // The population always, before the verdict. A bare "none found" here is

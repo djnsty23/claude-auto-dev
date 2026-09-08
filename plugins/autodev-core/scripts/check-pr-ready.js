@@ -216,5 +216,5 @@ if (require.main === module) {
     const r = checkPrReady(num, cwd);
     if (argv.includes('--json')) console.log(JSON.stringify(r, null, 2));
     else console.log(render(r));
-    process.exit(r.verdict === 'READY' ? 0 : r.verdict === 'NOT_READY' ? 2 : 3);
+    process.exitCode = r.verdict === 'READY' ? 0 : r.verdict === 'NOT_READY' ? 2 : 3;
 }

@@ -322,7 +322,8 @@ if (asJson) {
         includeGlobs,
         orphanChecks, orphanOther: showAll ? orphanOther : undefined,
     }, null, 2));
-    process.exit(orphanChecks.length ? 1 : 0);
+    process.exitCode = orphanChecks.length ? 1 : 0;
+    return;
 }
 
 console.log(`\n${path.basename(REPO)} — ${results.length} scripts`);

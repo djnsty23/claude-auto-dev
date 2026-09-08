@@ -639,7 +639,8 @@ if (AS_JSON) {
     risk: r.risk,
     safe: r.safe,
   })), null, 2));
-  process.exit(0);
+  process.exitCode = 0;
+  return;
 }
 
 // Population first — a bare verdict is indistinguishable from a probe that found

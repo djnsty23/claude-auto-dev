@@ -124,6 +124,12 @@ try {
     check('control: the OK record reads dead when its pid is dead, so the probe discriminates',
         flipped.status === 2 && /FAULT dead-session: session_id cli-live/.test(flipped.out) && /0 with a live pid, 1 dead/.test(flipped.out), flipped.out);
 
+    // The report must also arrive whole through a pipe nobody is reading yet.
+    // process.exit() straight after console.log truncates a piped stdout on macOS
+    // (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+    // check from passing by construction).
+    const drained = require('./pipe-drain').run(Object.assign({ argv: [SUBJECT, '--json', '--role', okRole] }, { env: Object.assign({}, process.env, { AUTODEV_SESSIONS_DIR: SESSIONS, CLAUDE_SESSION_STORE: STORE }) }));
+    check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
     const json = run(['--json', '--role', okRole]);
     check('--json is parseable and carries the population', (() => { try { const j = JSON.parse(json.out); return j.state === 'ok' && j.population.livePids === 1; } catch { return false; } })(), json.out.slice(0, 200));
 } finally {

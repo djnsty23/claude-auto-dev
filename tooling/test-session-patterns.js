@@ -171,6 +171,12 @@ check('a token-shaped secret in an error message is redacted from the report',
 check('  but the call is still reported', /1 errored/.test(leakOut.out), leakOut.out.slice(0, 200));
 
 // ---- machine-readable ----
+// The report must also arrive whole through a pipe nobody is reading yet.
+// process.exit() straight after console.log truncates a piped stdout on macOS
+// (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+// check from passing by construction).
+const drained = require('./pipe-drain').run(Object.assign({ argv: [TOOL, '--root', mixed, '--days', '1', '--json'] }, {}));
+check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
 const jsonOut = run(mixed, ['--days', '1', '--json']);
 let parsed = null;
 try { parsed = JSON.parse(jsonOut.stdout); } catch { /* reported below */ }

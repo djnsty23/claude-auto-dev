@@ -624,13 +624,13 @@ census.push('prd: ' + prdAudited + ' repo(s) with a prd.json, ' + prdSkipped + '
 // because a caller parses it without a person ever seeing it.
 if (!fs.existsSync(CONFIG)) {
     const blind = { configDir: CONFIG, error: 'config dir does not exist', probeBlind: true, findings: null };
-    if (asJson) { console.log(JSON.stringify(blind, null, 2)); process.exit(1); }
+    if (asJson) { console.log(JSON.stringify(blind, null, 2)); process.exitCode = 1; return; }
     console.log('\n  COULD NOT AUDIT: ' + CONFIG + ' does not exist.');
     console.log('  The probe is blind, not the population clean.\n');
     process.exit(1);
 }
 
-if (asJson) { console.log(JSON.stringify({ configDir: CONFIG, findings }, null, 2)); process.exit(findings.some((f) => f.severity === 'fail') ? 1 : 0); }
+if (asJson) { console.log(JSON.stringify({ configDir: CONFIG, findings }, null, 2)); process.exitCode = findings.some((f) => f.severity === 'fail') ? 1 : 0; return; }
 
 const order = { fail: 0, warn: 1, info: 2 };
 findings.sort((a, b) => order[a.severity] - order[b.severity]);

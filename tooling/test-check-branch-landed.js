@@ -156,6 +156,12 @@ check('  and reports how many assertions it ran', /selftest assertion\(s\) passe
 
 // A subject that cannot classify must not exit 0. Pointed at a ref that does
 // not exist, in a real repo, the answer is UNKNOWN and the exit is 3.
+// The report must also arrive whole through a pipe nobody is reading yet.
+// process.exit() straight after console.log truncates a piped stdout on macOS
+// (tooling/pipe-drain.js: the mechanism, and the control that keeps this
+// check from passing by construction).
+const drained = require('./pipe-drain').run(Object.assign({ argv: [SUBJECT, 'refs/heads/definitely-not-a-branch-here', '--repo', path.join(__dirname, '..'), '--trunk', 'HEAD', '--json'] }, {}));
+check('--json arrives whole through a stalled pipe (stdout drains before the process ends)', drained.ok, drained.detail);
 const bogus = run(['refs/heads/definitely-not-a-branch-here', '--repo', path.join(__dirname, '..'), '--trunk', 'HEAD']);
 check('an unresolvable branch exits 3 (could not tell), not 0', bogus.status === 3, bogus.status);
 check('  and says so rather than printing an all-clear', /UNKNOWN/.test(bogus.stdout), bogus.stdout.slice(0, 200));
