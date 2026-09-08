@@ -261,7 +261,7 @@ evidence say nothing about this one.
 | `gate exit` | its exit code | anything but `0` |
 | `gate tail` | its last 20 lines, inside the fence | empty |
 | `evidence` | the `.claude/evidence/<slug>/` directory per `prove` | missing, or lacks `before.*` or `after.*` |
-| `rollback` | the exact command that undoes THIS promotion — see the first-deployment case below | empty, or still holds a `<placeholder>` |
+| `rollback` | the exact command that undoes THIS promotion | empty, or still holds a `<placeholder>` |
 | `authorised` | the standing rule, by date: `[stated 2026-09-08] Form B, pre-authorised on a green gate with the ledger` | no `[stated YYYY-MM-DD]`, or a date with no rule |
 
 Only the commit is derived. Filling the rest is your work, and `--verify` asks
@@ -364,13 +364,9 @@ The command to run is the one in the ledger's `rollback` field, written before
 the promotion while the previous build was still known. The lines below are the
 shapes it usually takes, not a substitute for reading the field.
 
-**A first deployment is the case where the usual shape is unsatisfiable.** There
-is no previous production URL to name, so `vercel rollback` has no target and
-cannot undo it; the ledger's `rollback` field must say `vercel remove <project>
---yes` instead, with the real project name rather than a placeholder — `--verify`
-rejects a `<placeholder>`, and a rollback command that names nothing is the
-failure this field exists to prevent. Write the field for the deploy you are
-actually about to make, not the one the template assumes.
+Write the field for the deploy you are actually about to make, not the one the
+template assumes: `--verify` checks that the field is FILLED, never that the
+command in it works.
 
 ```bash
 # Vercel - instant rollback to previous
@@ -378,10 +374,6 @@ vercel rollback
 
 # Netlify
 netlify rollback
-
-# Vercel, FIRST deployment of a project - there is nothing to roll back TO, so
-# `vercel rollback` cannot undo it. Removing the project is the undo.
-vercel remove <project> --yes
 
 # Supabase Edge Functions - redeploy previous version
 git log --oneline supabase/functions/
