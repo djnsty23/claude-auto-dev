@@ -84,6 +84,40 @@ function needsSetup(story) {
 }
 
 /**
+ * The ids in `blockedBy` that are not yet done, so this story cannot start.
+ *
+ * `blockedBy` is a DEPENDENCY list, not a state. It already existed before this
+ * function did: auto/SKILL.md's selector has read it since the sprint system
+ * was written, and one product's prd.json carries the key on all 122 of its
+ * stories. It was simply never read from here, so its meaning lived in a
+ * markdown fence — the same per-reader guess `passes` used to be.
+ *
+ * `[measured 2026-09-08]` the field earned a shared reader when `spec` began
+ * emitting needs-setup stories on day one: a story that depends on "create the
+ * Supabase project" is not actionable until that human step is done, and the
+ * only way `auto` can know is through this list. A dep that names a story
+ * which does not exist blocks forever and is reported by `blockers()` as
+ * `missing`, never silently treated as satisfied.
+ */
+function blockers(story, stories) {
+    const deps = story && Array.isArray(story.blockedBy) ? story.blockedBy : [];
+    const all = stories && typeof stories === 'object' ? stories : {};
+    return deps.filter((id) => !isDone(all[id]));
+}
+
+/**
+ * Actionable AND unblocked: the predicate a work selector wants.
+ *
+ * isActionable() answers "could an agent do this kind of work"; this answers
+ * "could an agent do it NOW". They differ exactly on a pending story whose
+ * blockedBy names something not yet done — most often a needs-setup story,
+ * which is the case that made the distinction worth a function.
+ */
+function isReady(story, stories) {
+    return isActionable(story) && blockers(story, stories).length === 0;
+}
+
+/**
  * Safe to remove when archiving.
  *
  * ONLY completed work. needs-setup was missing from the keep-list, so archiving
@@ -116,6 +150,11 @@ function summarise(stories) {
     counts.total = all.length;
     counts.actionable = all.filter(isActionable).length;
     counts.outstanding = all.filter(isOutstanding).length;
+    // Actionable minus blocked-by-a-dependency. Only computable when the
+    // container is keyed by id; an array of stories has no ids to resolve
+    // `blockedBy` against, so every story counts as ready there.
+    const byId = Array.isArray(stories) ? {} : (stories || {});
+    counts.ready = all.filter((s) => isReady(s, byId)).length;
     return counts;
 }
 
@@ -196,5 +235,6 @@ function storiesOf(prd) {
 module.exports = {
     DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP, VALID,
     isActionable, isOutstanding, isDeferred, isDone, needsSetup, isArchivable,
+    blockers, isReady,
     summarise, storiesOf,
 };

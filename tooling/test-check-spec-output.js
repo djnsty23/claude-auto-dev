@@ -96,6 +96,112 @@ const cases = [
 ];
 for (const [label, r, want] of cases) check(label, r.code === want, `exit ${r.code}, wanted ${want}`);
 
+// ---- the setup manifest: SPEC.md's External services vs setup stories ----
+//
+// [measured 2026-09-07] a greenfield run's SPEC.md named Supabase and Vercel
+// and its prd.json planned no human step for either; the gate passed it, and
+// `auto` discovered the missing project on story one. The fixture under
+// tooling/fixtures/spec/oncall/ is that run's SPEC.md and prd.json exactly as
+// committed, so the case below is the incident, not a paraphrase of it.
+
+const FIX = path.resolve(__dirname, 'fixtures', 'spec', 'oncall');
+const runSpec = (stories, specText, extraArgs = []) => {
+  const dir = path.join(tmp, 'c' + seq++);
+  fs.mkdirSync(dir);
+  const prd = path.join(dir, 'prd.json');
+  fs.writeFileSync(prd, typeof stories === 'string' ? stories : JSON.stringify({ stories }, null, 2));
+  const spec = path.join(dir, 'SPEC.md');
+  fs.writeFileSync(spec, specText);
+  const r = spawnSync(process.execPath, [CHECK, prd, '--spec', spec, ...extraArgs], { encoding: 'utf8' });
+  return { code: r.status, out: r.stdout || '', err: r.stderr || '' };
+};
+
+const setupStory = (over = {}) => ({
+  'S1-000': {
+    id: 'S1-000', title: 'Create the Supabase project and put its URL and anon key in Vercel', priority: 0,
+    passes: 'needs-setup', realness: null, type: 'setup', category: 'setup',
+    notes: 'The Vercel project lists NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY and a deploy renders the home page rather than the setup notice.',
+    blockedReason: 'Create a project at https://supabase.com/dashboard (about 5 minutes), apply supabase/migrations/0001_init.sql, then paste the URL and anon key into the Vercel project settings.',
+    resolution: '', ...over,
+  },
+});
+const withDep = () => ({ ...setupStory(), ...good({ blockedBy: ['S1-000'] }) });
+const SPEC_DECLARES = '# Thing\n\n## What it is\n\nSupabase holds the rows. Vercel serves the page.\n\n## Non-goals\n\n- Posting to Slack.\n\n## External services\n\n- Supabase — a project, its URL and anon key (https://supabase.com/dashboard)\n\n## Done means\n\nA row appears.\n';
+const SPEC_NONE = '# Thing\n\n## What it is\n\nA local page.\n\n## External services\n\nnone\n\n## Done means\n\nA row appears.\n';
+const SPEC_NO_SECTION = '# Thing\n\n## What it is\n\nSupabase holds the rows.\n\n## Done means\n\nA row appears.\n';
+
+// The incident itself, from the committed files.
+{
+  const r = spawnSync(process.execPath, [CHECK, path.join(FIX, 'prd.fixture.json'), '--spec', path.join(FIX, 'SPEC.md')], { encoding: 'utf8' });
+  check('FIXTURE: the greenfield spec that shipped with no setup story is rejected', r.status === 1, 'exit ' + r.status);
+  check('  and the rejection names the services the prose mentions',
+    /names Supabase, Vercel, Slack/.test(r.stderr), r.stderr.trim());
+  check('  and says what to add', /External services/.test(r.stderr) && /setup story/.test(r.stderr));
+  check('  and the population line says the section is absent', /\[no External services section\]/.test(r.stdout), r.stdout.trim());
+  // Without --spec the same files pass, exactly as they did on 2026-09-07 —
+  // the control that shows the new verdict comes from the spec argument.
+  const ctl = spawnSync(process.execPath, [CHECK, path.join(FIX, 'prd.fixture.json')], { encoding: 'utf8' });
+  check('  CONTROL: the same prd.json without --spec still passes (the old verdict)', ctl.status === 0, ctl.stderr.trim());
+}
+
+const specCases = [
+  ['a declared service with a matching setup story passes', runSpec(withDep(), SPEC_DECLARES), 0],
+  ['a declared service with NO setup story is rejected', runSpec(good(), SPEC_DECLARES), 1],
+  ['no section, prose names a service → rejected', runSpec(good(), SPEC_NO_SECTION), 1],
+  ['no section, prose names nothing → still rejected (say "none")', runSpec(good(), '# T\n\n## What it is\n\nA page.\n'), 1],
+  ['section says "none", prose names nothing → passes', runSpec(good(), SPEC_NONE), 0],
+  // A comparison is not an integration, and a mention outside the section is a
+  // note, not a verdict: the author wrote the section and did not list it.
+  ['"Slack-style preview" with section "none" → passes', runSpec(good(), SPEC_NONE.replace('A local page.', 'A local page with a Slack-style preview.')), 0],
+  ['a prose mention outside the section → passes with a note', runSpec(good(), SPEC_NONE.replace('A local page.', 'Nothing posts to Slack.')), 0],
+  ['a service named only under Non-goals → excused, passes', runSpec(good(), SPEC_NONE.replace('## External services', '## Non-goals\n\n- Posting to Slack.\n\n## External services')), 0],
+  // The setup story's own shape.
+  ['a setup story that is passes: null is rejected', runSpec({ ...setupStory({ passes: null }), ...good({ blockedBy: ['S1-000'] }) }, SPEC_DECLARES), 1],
+  ['a setup story with no blockedReason is rejected', runSpec({ ...setupStory({ blockedReason: '' }), ...good({ blockedBy: ['S1-000'] }) }, SPEC_DECLARES), 1],
+  ['a blockedReason with no URL is rejected', runSpec({ ...setupStory({ blockedReason: 'Create the project in the dashboard and paste the keys into Vercel.' }), ...good({ blockedBy: ['S1-000'] }) }, SPEC_DECLARES), 1],
+  ['needs-setup on a non-setup type is rejected', runSpec({ ...setupStory({ type: 'feature' }), ...good({ blockedBy: ['S1-000'] }) }, SPEC_DECLARES), 1],
+  ['type "setup" is a valid type', run({ ...setupStory(), ...good({ blockedBy: ['S1-000'] }) }), 0],
+  // blockedBy must resolve.
+  ['blockedBy naming a story that does not exist is rejected', run(good({ blockedBy: ['S1-999'] })), 1],
+  ['blockedBy naming itself is rejected', run(good({ blockedBy: ['S1-001'] })), 1],
+  ['blockedBy that is not an array is rejected', run(good({ blockedBy: 'S1-000' })), 1],
+  ['an empty blockedBy is allowed', run(good({ blockedBy: [] })), 0],
+];
+for (const [label, r, want] of specCases) check(label, r.code === want, `exit ${r.code}, wanted ${want}\n${(r.err || r.out).trim()}`);
+
+// The messages, not only the exit codes, so a mutant that rejects for the wrong
+// reason is seen.
+{
+  const r = runSpec(good(), SPEC_DECLARES);
+  check('  the declared-but-unplanned message names the service', /declares Supabase under External services and no setup story/.test(r.err), r.err.trim());
+  const noted = runSpec(good(), SPEC_NONE.replace('A local page.', 'Nothing posts to Slack.'));
+  check('  the prose-mention note names the service', /note: SPEC\.md also names Slack outside External services/.test(noted.out), noted.out.trim());
+  const excused = runSpec(good(), SPEC_NONE.replace('## External services', '## Non-goals\n\n- Posting to Slack.\n\n## External services'));
+  check('  the Non-goals excuse is reported in the population line', /under Non-goals: Slack/.test(excused.out), excused.out.trim());
+  const ok = runSpec(withDep(), SPEC_DECLARES);
+  check('  the population line counts setup stories', /1 setup, blocked on you/.test(ok.out) && /declares 1 external service\(s\) \(Supabase\)/.test(ok.out), ok.out.trim());
+  check('  a setup story WITH a dependent draws no "no dependents" note', !/no dependents/.test(ok.out), ok.out.trim());
+  const lonely = runSpec({ ...setupStory(), ...good() }, SPEC_DECLARES);
+  check('  a setup story with NO dependent passes with a note', lonely.code === 0 && /S1-000 has no dependents/.test(lonely.out), lonely.out.trim());
+  const hinted = runSpec({ ...setupStory({ type: 'feature' }), ...good({ blockedBy: ['S1-000'] }) }, SPEC_DECLARES);
+  check('  needs-setup on a feature hints at type "setup"', /or type "setup" if this is a human step/.test(hinted.err), hinted.err.trim());
+}
+
+// Argument order: --spec may come first or last, and never eats a positional.
+{
+  const dir = path.join(tmp, 'c' + seq++);
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'prd.json'), JSON.stringify({ stories: withDep() }, null, 2));
+  fs.writeFileSync(path.join(dir, 'schema.sql'), GOOD_SQL);
+  fs.writeFileSync(path.join(dir, 'SPEC.md'), SPEC_DECLARES);
+  const a = spawnSync(process.execPath, [CHECK, '--spec', 'SPEC.md', 'prd.json', 'schema.sql'], { cwd: dir, encoding: 'utf8' });
+  const b = spawnSync(process.execPath, [CHECK, 'prd.json', 'schema.sql', '--spec', 'SPEC.md'], { cwd: dir, encoding: 'utf8' });
+  check('--spec first: prd and schema both read', a.status === 0 && /1 tables/.test(a.stdout), (a.stderr || a.stdout).trim());
+  check('--spec last: prd and schema both read', b.status === 0 && /1 tables/.test(b.stdout), (b.stderr || b.stdout).trim());
+  const missing = spawnSync(process.execPath, [CHECK, 'prd.json', '--spec', 'nope.md'], { cwd: dir, encoding: 'utf8' });
+  check('a missing SPEC.md path is an error, not a pass', missing.status === 1 && /no nope\.md/.test(missing.stderr), missing.stderr.trim());
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

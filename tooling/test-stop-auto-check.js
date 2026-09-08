@@ -118,6 +118,44 @@ check('idle marker cleared', !exists(d, 'auto-idle-triggered'));
     // is waiting on him.
     check('...and the reason names it rather than dropping it',
         /setup|blocked/i.test(said) || decision !== null);
+    // Named, not merely counted. `blockedOnOperator` was computed by this hook
+    // and never printed, so the sprint-complete line could not say WHICH story
+    // was waiting on a person. [measured 2026-09-08]
+    check('...the block reason names the story id under "blocked on the operator"',
+        /blocked on the operator \(S2\)/.test(decision?.reason || ''), decision?.reason);
+    check('...and stderr carries "Blocked on you: 1 (S2)"',
+        /Blocked on you: 1 \(S2\)/.test(r.stderr || ''), r.stderr);
+    // THE TERMINATION PROPERTY, pinned: a backlog whose only remaining story is
+    // needs-setup must let the turn END, not merely say "complete" on the first
+    // stop. The deferred case below drives this to approve; this one did not.
+    let dec = decision;
+    let guard = 0;
+    while (dec?.decision === 'block' && guard++ < 5) ({ decision: dec } = run(d));
+    check('...and a needs-setup-only backlog reaches approve within a few stops',
+        dec?.decision === 'approve', dec);
+    check('...leaving the auto flag cleared', !exists(d, 'auto-active'));
+}
+{
+    // Two blocked and one done: the count and both ids appear, so a mutant
+    // that prints only the first, or the count of something else, is seen.
+    const d = project({ auto: true, prd: { stories: {
+        S1: { title: 'done', passes: true },
+        S2: { title: 'needs a key', passes: 'needs-setup' },
+        S3: { title: 'needs a domain', passes: 'needs-setup' },
+    } } });
+    const { decision } = run(d);
+    check('two needs-setup stories: count is 2 and both ids are named',
+        /2 story\(ies\) blocked on the operator \(S2, S3\)/.test(decision?.reason || ''), decision?.reason);
+}
+{
+    // CONTROL for the naming: with no needs-setup story the phrase must be
+    // absent, or the assertion above passes against a hook that always says it.
+    const d = project({ auto: true, prd: { stories: {
+        S1: { title: 'done', passes: true },
+    } } });
+    const { decision, r } = run(d);
+    check('CONTROL: no needs-setup story → no "blocked on the operator" phrase',
+        !/blocked on the operator/.test(decision?.reason || '') && !/Blocked on you/.test(r.stderr || ''));
 }
 {
     // The known-positive control, through the identical path. Without it, both

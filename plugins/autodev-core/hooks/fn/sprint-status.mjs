@@ -25,6 +25,22 @@ function isOutstanding(story) {
     return p === PENDING || p === undefined || p === FAILED || p === NEEDS_SETUP;
 }
 
+function isDone(story) {
+    return !!story && story.passes === DONE;
+}
+
+// Mirrors prd-states.js blockers()/isReady(): a story's blockedBy ids that
+// are not yet done, and "actionable AND unblocked".
+function blockers(story, stories) {
+    const deps = story && Array.isArray(story.blockedBy) ? story.blockedBy : [];
+    const all = stories && typeof stories === 'object' ? stories : {};
+    return deps.filter((id) => !isDone(all[id]));
+}
+
+function isReady(story, stories) {
+    return isActionable(story) && blockers(story, stories).length === 0;
+}
+
 export function storiesOf(prd) {
     if (!prd || typeof prd !== 'object') return {};
     const sprints = Array.isArray(prd.sprints) ? prd.sprints : [];
@@ -57,6 +73,10 @@ export function summarise(stories) {
     counts.total = all.length;
     counts.actionable = all.filter(isActionable).length;
     counts.outstanding = all.filter(isOutstanding).length;
+    // Actionable minus blocked-by-a-dependency; an array container has no ids
+    // to resolve blockedBy against, so every story counts as ready there.
+    const byId = Array.isArray(stories) ? {} : (stories || {});
+    counts.ready = all.filter((s) => isReady(s, byId)).length;
     return counts;
 }
 
