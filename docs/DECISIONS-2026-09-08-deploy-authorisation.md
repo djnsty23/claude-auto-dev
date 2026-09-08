@@ -93,3 +93,19 @@ two-part form.
 
 **Unchanged by this entry:** nothing written into any skill from this branch, no
 `decisions.md` entry, no VERSION bump.
+
+## D4 — RESOLVED: Form B, by his direct answer in this session
+
+**Branch: 3, answered by the operator.** Away state ABSENT (`away-state.js
+--status`), so the panel reached him; he selected *"Yes, Form B is my
+decision"*. That is the third provenance and the only one that counts: D1 was
+the hook, D3 was a relay, this was him. Written into `brain/SKILL.md` and
+`ship/SKILL.md` with `[stated 2026-09-08]`, and into `docs/decisions.md`, in the
+commit that carries this entry.
+
+**Not self-merged.** The coordinator's merge policy of 2026-09-08 lets a session
+merge its own docs PR on job-level green, and the same policy lists "anything
+under `plugins/` that ships" as still requiring review. This commit edits two
+shipped skills, so #201 waits for a review or the Brain's merge, and this entry
+says so rather than reading the coordinator's "self-merge" as overriding the
+policy's own list.

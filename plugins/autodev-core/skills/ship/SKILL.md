@@ -91,6 +91,33 @@ Do not ask which platform — detect or default.
 
 ## Step 4: Deploy
 
+**Promotion to production is pre-authorised on a green gate with a ledger, and
+on nothing less.** `[stated 2026-09-08]` the operator, choosing this over
+"escalate always" and "add a canary" with the measured numbers in view; the rule
+and its ineligible list live in the Brain skill under "Escalate rather than
+resolve", and the evidence in `docs/evidence-deploy-authorisation-2026-09-08.md`.
+Before the `--prod` line below, all four must be true and written down:
+
+1. The repo's named gate exited 0 on the EXACT commit you are deploying, read per
+   job (at least one completed success per required platform, never a count of
+   non-success entries).
+2. That commit is on the default branch. A deploy from an unpushed branch or a
+   tree missing a merged fix is the shape of two of the five incidents in the
+   evidence doc.
+3. The ledger records the commit sha, the gate command with its exit code and
+   output, and (after Step 5) the verification. Until `deploy-ledger.js` carries
+   these fields, write them at the top of `DEPLOY-LEDGER.md` by hand; the surface
+   checklist it generates is Step 5b, not this.
+4. The rollback command for THIS deploy is in the ledger before you promote:
+   `vercel rollback <previous production url>` (from `vercel ls --prod`), or for
+   an edge function the previous commit and the deploy command from Step 6.
+
+If the change touches anything on the ineligible list (a migration that drops or
+renames a column or changes a grant, RLS or a `SECURITY DEFINER`; billing,
+checkout, webhook or entitlement code; auth; live rows), stop here and escalate
+whatever the gate says. On a repo where a merge to the default branch is itself
+the production deploy, the four conditions apply to the merge.
+
 ### Vercel
 
 ```bash
