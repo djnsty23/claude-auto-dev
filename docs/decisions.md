@@ -39,8 +39,6 @@ through the pre-push hook without `--no-verify`. Written down because the
 alternative that night was to push around the hook and leave the reason
 implicit.
 
-## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
-
 ## 2026-09-08: memory recall measured at zero; ranked injection built and not shipped
 
 The question was whether the autodev-memory store is ever read back, and
@@ -91,7 +89,9 @@ the merge policy, so they are PR #190 with a reviewer, not this entry. Their
 per-change counts are in that PR's `docs/DECISIONS-2026-09-08-memory-recall.md`.
 The existing rows were left alone under the protocol; after the window ended
 the operator confirmed the count on a panel and the prune ran, 6,972 of
-7,480 rows removed with a verified backup first.## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
+7,480 rows removed with a verified backup first.
+
+## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
 
 The brief was to make workflow runs survive the session quota wall, on the
 2026-08-25 measurement (42 of 280 agents lost, 20 of them to a `<synthetic>`
