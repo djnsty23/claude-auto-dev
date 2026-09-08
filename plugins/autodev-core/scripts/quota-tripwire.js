@@ -471,6 +471,20 @@ function selftest() {
   const CAL = [{ t: base - 40 * MIN, cost: 9559, pct: 83 }, { t: base, cost: 10069, pct: 86 }];
   const withCal = () => { const s = emptyState(); s.calibration = CAL.map((x) => Object.assign({}, x)); return s; };
 
+  // Every scratch file this selftest writes lives in ONE mkdtemp directory,
+  // which is collision-free by construction.
+  //
+  // [measured 2026-09-07] these paths were `os.tmpdir()` + a name + `Date.now()`.
+  // os.tmpdir() is shared by every process on the machine and Date.now() has
+  // millisecond resolution, so two selftests running concurrently — routine
+  // here, where several sessions run the gate at once — compute the SAME path,
+  // and the first to reach its `finally` unlinks the file the second is still
+  // reading. A13b then sees `source-missing` where it demands `source-failed`,
+  // and A13/A14 fail the same way. It presented as ~1 failed assertion out of
+  // 18, only under load, which reads as flakiness rather than as a shared name.
+  // pid+timestamp would only narrow the window; mkdtemp closes it.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'qt-selftest-'));
+
   // A1 - the ceiling uses the DELTA slope, and is measurably not the absolute ratio.
   T('A1 ceiling from delta slope, not absolute ratio', () => {
     const c = deriveCeiling(withCal(), O);
@@ -591,14 +605,14 @@ function selftest() {
 
   // A12 - a missing source is a diagnostic, never silence.
   T('A12 missing source => source-missing diagnostic', () => {
-    const r = readSource(path.join(os.tmpdir(), 'definitely-not-here-' + Date.now() + '.js'));
+    const r = readSource(path.join(scratch, 'definitely-not-here.js'));
     eq(r.ok, false); eq(r.code, 'source-missing');
     ok(/not found/.test(r.detail), 'detail should name the miss');
   });
 
   // A13 - a source that runs but prints junk is a diagnostic, not a zero.
   T('A13 unparseable source => source-unparseable diagnostic', () => {
-    const p = path.join(os.tmpdir(), 'qt-junk-' + Date.now() + '.js');
+    const p = path.join(scratch, 'junk.js');
     fs.writeFileSync(p, 'console.log("not json at all");', 'utf8');
     try {
       const r = readSource(p);
@@ -608,7 +622,7 @@ function selftest() {
 
   // A13b - a source that exits nonzero is a diagnostic.
   T('A13b failing source => source-failed diagnostic', () => {
-    const p = path.join(os.tmpdir(), 'qt-fail-' + Date.now() + '.js');
+    const p = path.join(scratch, 'fail.js');
     fs.writeFileSync(p, 'process.exit(3);', 'utf8');
     try {
       const r = readSource(p);
@@ -618,7 +632,7 @@ function selftest() {
 
   // A14 - state survives a save/load round trip.
   T('A14 state round-trips through disk', () => {
-    const p = path.join(os.tmpdir(), 'qt-state-' + Date.now() + '.json');
+    const p = path.join(scratch, 'state.json');
     try {
       const s = withCal();
       s.samples = [{ t: base, cost: 1 }, { t: base + MIN, cost: 2 }];
@@ -660,6 +674,8 @@ function selftest() {
     const r = deriveRate([{ t: base, cost: 1000 }, { t: base + 30000, cost: 1100 }], base + 30000, O);
     eq(r.ok, false); eq(r.code, 'span-too-short');
   });
+
+  try { fs.rmSync(scratch, { recursive: true, force: true }); } catch (e) {}
 
   const failed = results.filter((r) => !r.ok);
   for (const r of results) console.log((r.ok ? 'PASS  ' : 'FAIL  ') + r.name + (r.ok ? '' : '\n        ' + r.err));
