@@ -3,6 +3,205 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: memory recall measured at zero; ranked injection built and not shipped
+
+The question was whether the autodev-memory store is ever read back, and
+whether injecting a ranked slice of it at session start (the ECC design, up
+to 8 KB) would beat the current 91-byte line. Both were measured before any
+change; the record is `docs/evidence-memory-recall-2026-09-08.md`.
+
+**Recall.** Six evidence shapes were written down first, then searched for
+across 281 transcripts (2026-08-15 to 2026-09-07), `history.jsonl` and
+`bash-commands.log`. Skill invocations of `mem-search`: 0. The injected line
+quoted by any assistant: 0. Genuine queries of the store: 1, made with the
+CLI's `<project> <query>` arguments swapped, returning `[]` twice and read as
+"nothing there". Every other hit was a session developing or measuring the
+plugin itself.
+
+**Content.** A stratified 40-row sample, read row by row: 0 rows hold a fact
+a later session needs and could not get from git in a minute, 21 are
+derivable, 19 are noise. Weighted by the store's type mix that is about 92 %
+noise, because 90 % of the 6,072 rows are `Ran:`/`Tests`/`Read`/`Git:` echoes
+of a command line. The `type` comes from a keyword in the user's prompt, so
+scratch files are filed as bugfixes; the `concept` column IS the prompt, and
+383 rows carry another session's message as theirs.
+
+**Injection.** A ranked variant (recency × type weight × FTS match on branch
+and last five subjects, stale-file rows excluded, byte-capped) was built and
+run against the four real project paths at 2 KB and 8 KB. It injected 40 and
+154 observation lines respectively; 0 were actionable, 28 and 118 were
+misleading (wrong labels, repeats, scratch files, prompts describing a state
+the row's own session changed, and at 8 KB a production hostname and
+production secret-manager commands). Cost was about 300 ms over the current
+hook, which does not matter given the content.
+
+**Decision.** Keep the one-liner. No new hook. The store is left untouched;
+the evidence record carries a pruning proposal by shape (about 5,900 of 6,072
+rows) with the counts, for a person to act on after re-taking them. The ECC
+"memory 6 v 6" row is level at zero on both sides, not at six.
+
+Landed as this entry and the evidence document, no version bump.
+
+**Follow-on, same day.** The closing panel was held by the operator's away
+window, whose protocol takes the recommended reversible option and logs it.
+That option was the evidence doc's proposals 1 to 6: capture records only
+Write and Edit inside the project, typed by the tool, with the edit as the
+concept and one row per (session, type, title); the prompt-capture hook and
+its carrier are removed; the CLI refuses a swapped `<projectPath> <query>`.
+Those change four hook files under `plugins/`, which is the review class in
+the merge policy, so they are PR #190 with a reviewer, not this entry. Their
+per-change counts are in that PR's `docs/DECISIONS-2026-09-08-memory-recall.md`.
+The existing rows were left alone under the protocol; after the window ended
+the operator confirmed the count on a panel and the prune ran, 6,972 of
+7,480 rows removed with a verified backup first.## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
+
+The brief was to make workflow runs survive the session quota wall, on the
+2026-08-25 measurement (42 of 280 agents lost, 20 of them to a `<synthetic>`
+"session limit" row). Re-measuring first changed the shape of the work:
+**12 of the 52 run directories still exist and no workflow has run on this
+machine since 2026-08-25**, so the loss rate could not be re-sampled and the
+work stands on the 12 that remain. Full numbers in
+[`evidence-quota-wall-2026-09-08.md`](evidence-quota-wall-2026-09-08.md).
+
+**The resume already exists and is correct; what is missing is anyone calling
+it.** `Workflow({scriptPath, resumeFromRunId})` re-runs only the `agent()`
+calls with no journal result. On the one real resume on this disk it
+re-started exactly the four walled calls with identical key hashes. The
+harness names that call in the failure notification — two seconds before the
+main thread receives the same wall — and again in a later "stopped"
+notification that went unread. `grep resumeFromRunId` over plugins, tooling
+and docs found nothing. So this work builds on it rather than beside it:
+
+- `scripts/workflow-run-triage.js` reads a run directory and prints per agent
+  journaled / lost-quota-wall / lost-interrupted / lost-api-error /
+  lost-other, the agent-seconds and tool calls each cost, and the exact resume
+  call; COULD NOT CHECK on anything unreadable, never a zero. Over the real
+  population: 100 agents, 94 journaled, 6 lost (5 wall, 1 interrupt), one
+  resumable run keeping 6,497 journaled agent-seconds that nobody resumed.
+- `hooks/stop-workflow-wall-note.js` (Stop) says once, at the end of the first
+  turn that ends normally after the reset, that this session's latest run has
+  walled agents, and puts the resume call in the model's context. Never a
+  `decision` key: a Stop hook that blocks on a wall is a session that cannot
+  end at the wall. 64 ms on an ordinary turn against a 54 ms process floor;
+  a run already noted costs a stamp of mtimes, not a transcript read.
+- The phase rule, with its price: serial costs **2.0×** the wall-clock of a
+  3–4-wide phase and **4.1×** that of 8–12-wide, measured over the 12 runs;
+  a wall costs width × elapsed-at-wall (the real one: 5 agents at 40–59 s).
+  So a must-keep phase runs serial or in waves no wider than what you can
+  afford to redo, states width and re-run cost in `meta.phases[].detail`, and
+  a wide parallel phase is only for cheap-to-redo work. Prose in
+  `rule-agent-concurrency` and `WORKFLOW-STRUCTURE.md` D6/D7; no hook and no
+  cap, because a cap charges every workflow the 2–4× whether or not a wall is
+  plausible.
+
+Not done, and why: the built-in `workflow-authoring` skill is part of Claude
+Code, not this repo, so the convention lives in the rule that auto-loads on
+`**/*.workflow.js`. Auto-resume itself was not wired: the moment the wall is
+detectable is the moment nothing can run, and the first turn after the reset
+already has the note in context.
+
+## 2026-09-08: one greenfield run through spec → setup-project → auto → ship, measured
+
+The question was whether the Brain can take a one-line idea to
+production-grade software by itself. Until this run no product on this machine
+had entered through `spec` and `setup-project` (0 of 4, measured 2026-09-07), so
+the answer rested on nothing. One session ran the four skills on *"a page where
+a small team logs who is on call this week and gets a Slack-style message
+preview when it changes; Supabase for the table, Vercel for the page"* with no
+human in the loop. Full evidence in `docs/evidence-greenfield-run-2026-09-08.md`
+and the log beside it; line numbers below are that log's.
+
+**What the answer is now.** *It can take an idea to a deployed page in 23
+minutes, and it cannot take that page to a working product without a person,
+and the first place it needs one is story 1.* The idea named Supabase, so the
+sign-in story needed a project that only a dashboard can create (L26–L36). The
+harness did the right thing with that: one handback, no retry, no invented
+value, `needs-setup` written into a product `prd.json` for the first time ever
+(8 by the end, L78), and every line of code written anyway. But 6 of 7 stories
+ended the run at realness 20, the migration was never executed, and the
+primary flow was never driven in a browser (L70). "Production-grade" was not
+reached and could not have been; the measurement is that the harness knows
+when to stop and says so in a form a person can act on in six minutes.
+
+**What it changes about the harness, in order of what the log showed.**
+
+1. **The ship skill's "preview" command deploys to production on a new
+   project** (L57). `npx vercel --yes` on a project's first deployment is
+   assigned to production by Vercel, with a hint saying exactly that. The
+   skill must read `target` from the deploy JSON and stop when it says
+   `production` and the intent was preview; on a first deployment it should
+   say beforehand that no preview is possible until a production deployment
+   exists. This broke the run's hardest rule, on a throwaway, in 32 s.
+2. **`spec` and `setup-project` cannot run in one directory in the documented
+   order** (L11), and setup-project's step 4 cannot pass on its own output
+   (L18, L19): `create-next-app .` refuses the files spec wrote; `tsc` fails on
+   the untouched scaffold because Next 16 needs `next typegen` first; the
+   Biome template uses `files.ignore`, removed in Biome 2. Three pin sources
+   disagree on TypeScript and Biome (L13). Setup-project should scaffold into
+   a scratch directory and merge, ship a `typecheck` script of
+   `next typegen && tsc --noEmit`, and carry ONE pin table.
+3. **Skills and hooks are bound to the session cwd** (L24, L50). `/auto` printed
+   *"No prd.json"* against a `prd.json` that existed one directory over, and
+   `stop-auto-check.js` never saw the `auto-active` flag. Every fleet session
+   here drives a product from another cwd. Either the auto skill refuses when
+   its argument names a directory other than cwd, or the flag file carries the
+   project path and the hook follows it.
+
+**What the browser found that the gates called green** (L42, L44): a
+self-referential `--font-sans` from `shadcn init` that put every page in the
+browser serif, a 32 px input against the 44 px rule the constraints file
+states in prose, and a raw *"fetch failed"* shown to the user. Three fixes on
+four features, 0.75 raw and 0.5 by the three-day definition (L79). All three
+came from looking; none from typecheck, lint, build or the ten tests. The two
+that are assertable, computed font family and control height, belong in the
+a11y pass as code, which is the same conclusion `failure-evidence.md` reached
+about prose rules on 2026-08-16.
+
+**Not done.** No harness code changed in this entry; it is the measurement.
+The three changes above are each one skill edit and one suite, and each has a
+log line to test against.
+
+## 2026-09-07: ECC re-measured on every axis, still not adopted, three ideas ported
+
+A second, independent measurement of the 2026-09-05 question, from a macOS
+machine and rating thirteen axes instead of latency alone. Full record in
+`evidence-ecc-comparison-2026-09-07.md`. Same answer: ECC is ahead on breadth
+(286 skills, 13 harness adapters) and community (252k stars, 100+
+contributors), level on memory, and behind on everything that costs a
+session something: 74 KB of skill index against 12 KB, 575 ms of hooks per
+Edit against 247 ms, 0 of 23 hooks silent on the no-op path against 19 of
+22, ten files written by one `ls` against two. Its content cites almost no
+measurements, two of its skills reference seven files that do not exist,
+and its own working-context file has been five months stale.
+
+Three of its ideas were cheaper than what we had, and each shipped in the
+shape the measurement chose rather than ECC's:
+
+- **Typecheck once at Stop.** The old PostToolUse hook ran typecheck and
+  lint after every edit and printed failures where the model never reads
+  them. Now an accumulator plus a Stop hook that blocks once with the errors
+  as the reason. Not ECC's stderr report, and not its reformatting of the
+  user's files.
+- **Lint-config protection as a branch in pre-tool-filter.js**, `ask` not
+  `deny`: a second subprocess is 58 ms per Edit, and ECC's env-var escape
+  cannot be set from the desktop app.
+- **A hook profile through plugin userConfig**, one value (`minimal`), and
+  a suite whose point is that the eleven guarding hooks do NOT honour it.
+
+Not ported, and why: GateGuard (denies the first edit of every file blind,
+then allows any retry), the continuous-learning observer (appends every tool
+input to a jsonl at 340 ms per call), the inline `node -e` bootstrap in every
+hook command (the thing the 2026-09-05 record found tripping Windows
+Defender), Stop-time reformatting of a user's tree.
+
+The two local-only gate reds found on the way, the hooks-module scan on a
+host older than 2.1.259 and a 64 KiB pipe truncation in the layout gate that
+only macOS can see, were fixed by this session as `5fa045b` (PR #182) and
+that PR was closed in review: a version threshold would have turned a
+genuinely failing module into a WARN on an old host. #184 (a control that
+reads the host's output, not its version) and #191 are the fixes that
+landed, and this branch dropped its own half and rebased onto them.
+
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 
 The question was whether a 249k-star harness is better than this one, and if

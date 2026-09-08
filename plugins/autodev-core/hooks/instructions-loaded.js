@@ -34,6 +34,10 @@
  * than by age so a machine left idle for a month does not lose its history.
  */
 'use strict';
+// hooks_profile=minimal (plugin userConfig, reaching hooks as CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE)
+// skips this hook: it advises, it never guards. tooling/test-hooks-profile.js holds the list.
+if (/^minimal$/i.test(process.env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE || process.env.CLAUDE_PLUGIN_OPTION_hooks_profile || '')) process.exit(0);
+
 
 const MAX_LINES = 4000;
 

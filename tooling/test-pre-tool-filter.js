@@ -325,6 +325,41 @@ for (const [label, tool, input, expected] of cases) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  unparseable input fails CLOSED  (got ${r.status}, expected 2)`);
 }
 
+// Lint/format config protection, ported from ECC on 2026-09-07. Asserted on
+// STDOUT, which the table above never reads: the answer is a JSON `ask` with
+// exit 0, not a stderr block with exit 2, because the legitimate edit needs a
+// human answer rather than a refusal.
+{
+  const ask = (tool, file) => {
+    const input = JSON.stringify({ tool_name: tool, tool_input: { file_path: file, content: 'x', new_string: 'x' } });
+    const r = spawnSync('node', [HOOK], { input, encoding: 'utf8' });
+    let j = null;
+    try { j = JSON.parse(r.stdout); } catch { /* not JSON */ }
+    return { r, j };
+  };
+  const asked = ({ r, j }, file) => r.status === 0 && !!j && !!j.hookSpecificOutput
+    && j.hookSpecificOutput.hookEventName === 'PreToolUse'
+    && j.hookSpecificOutput.permissionDecision === 'ask'
+    && String(j.hookSpecificOutput.permissionDecisionReason).includes(path.basename(file).toLowerCase());
+  const allowed = ({ r }) => r.status === 0 && r.stdout === '' && r.stderr === '';
+  const table = [
+    ['Edit .eslintrc.json asks', 'Edit', '/p/.eslintrc.json', true],
+    ['Write biome.json asks', 'Write', '/p/biome.json', true],
+    ['Edit eslint.config.mjs asks', 'Edit', '/p/eslint.config.mjs', true],
+    ['Edit .prettierignore asks (ignoring is weakening)', 'Edit', '/p/.prettierignore', true],
+    ['case-insensitive: .ESLINTRC.JS asks', 'Edit', '/p/.ESLINTRC.JS', true],
+    ['a source file that merely mentions eslint is not asked', 'Edit', '/p/src/eslint-rules.ts', false],
+    ['tsconfig.json is not a lint config and is not asked', 'Edit', '/p/tsconfig.json', false],
+    ['Read of a lint config is not asked', 'Read', '/p/.eslintrc.json', false],
+  ];
+  for (const [label, tool, file, expectAsk] of table) {
+    const out = ask(tool, file);
+    const ok = expectAsk ? asked(out, file) : allowed(out);
+    if (ok) pass++; else fail++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : `  (exit ${out.r.status}, stdout ${JSON.stringify(out.r.stdout.slice(0, 80))})`}`);
+  }
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);
