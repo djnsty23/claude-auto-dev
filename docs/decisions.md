@@ -3,6 +3,49 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: a per-story runtime flow check, wired into `auto` and not into the Stop hook
+
+The question was whether driving the primary user flow in a real browser and
+asserting on state, once per story, would catch the first-pass failures that a
+screenshot cannot, and what it costs. `docs/evidence-flow-verification-2026-09-08.md`
+carries the numbers; the decisions are these.
+
+**The ceiling was measured before anything was built, and it is small.** Of
+the 30 most recent rework fixes in the live consumer app, 4 were catchable by
+the primary flow with a state assertion, 3 more only with specific data, 23 not
+at all (copy, contrast, cron, admin routes, server-side counts). Built anyway,
+because the replay decides whether the 4 are real: three of those fixes were
+replayed against the parent of the fix and the fix itself in worktrees, and the
+check went red on every parent and green on every fix, 3 of 3.
+
+**The record is validated, the browser is not driven, by code.**
+`scripts/flow-evidence.js` refuses a record with no assertion, a `visual`
+subject, a "looked fine" claim or no observed value, and computes the verdict
+from `expected` against `observed` rather than reading a `passed` flag. Driving
+stays in the skill, with the in-app browser tools, because the flow is the
+story's and no script knows it.
+
+**The Stop hook is untouched.** A block on a missing flow record would hold
+every turn in a repo with no dev server, no browser tools, or criteria naming
+nothing user-visible. Enforcement lives in the verification step.
+
+**Console errors fail against a recorded baseline, not against zero.** Two dev
+trees carried errors before any flow ran; a rule that fails on any error fails
+every record there and gets skipped. The baseline is in the record, so it is
+visible, not an allowance.
+
+**Cost:** about 50 s and three to five tool calls per story, measured on five
+throwaway stories; the two full `auto` sprints the brief asked for were not run
+because at N=5 the comparison is story-implementation variance, and the check
+is additive.
+
+**Two probe findings worth more than the wiring.** While the Browser pane is
+hidden, `computer` clicks and key presses never reach the page while `find`,
+`form_input` and `javascript_tool` do; a check that reads an outcome after an
+input it cannot prove arrived reports a false red. And `mine-fixes.js` had no
+date window; it has `--since` now, so "the last 60 days" is a flag rather than
+a scratch reimplementation.
+
 ## 2026-09-08: a coverage floor, wired as a gate, at the number HEAD scored
 
 `npm run check:coverage` (`find-untested-functions.js --gate`) now runs as the

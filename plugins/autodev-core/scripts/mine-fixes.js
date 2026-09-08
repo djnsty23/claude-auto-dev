@@ -6,7 +6,16 @@
 // broken. Cluster those by stated root cause and you get an evidence-ranked
 // list of what to gate, instead of inheriting someone else's checklist.
 //
-// Usage: node mine-fixes.js [repo-path] [--json] [--window-days N]
+// Usage: node mine-fixes.js [repo-path] [--json] [--window-days=N] [--since=<git date>]
+//
+// --window-days is the REWORK window: how soon after a feature a fix on the
+// same file counts as first-pass failure. --since is the DATE window: which
+// commits are read at all, passed to `git log --since` unchanged, so
+// `--since=60.days` or `--since=2026-07-01` both work. They answer different
+// questions and `[measured 2026-09-08]` conflating them cost a session a
+// scratch reimplementation of this file: asked for the last 60 days, it found
+// only the rework flag and had to re-derive the counting to add a date
+// filter. Both are plain git log windows and belong here.
 //
 // Pure Node, no dependencies, read-only. Never writes to the repo.
 
@@ -17,6 +26,7 @@ const args = process.argv.slice(2);
 const repo = path.resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
 const asJson = args.includes('--json');
 const windowDays = Number((args.find((a) => a.startsWith('--window-days=')) || '').split('=')[1]) || 3;
+const since = (args.find((a) => a.startsWith('--since=')) || '').slice('--since='.length);
 
 function git(a) {
     return execSync(`git ${a}`, { cwd: repo, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
@@ -26,7 +36,13 @@ function git(a) {
 // and the file list, so splitting on a blank line mis-frames every record.
 let RAW;
 try {
-    RAW = git('log --format=%x00%H%x01%ct%x01%s --name-only --no-merges');
+    // The date goes through as one shell word. A `since` value carrying a quote
+    // or a space is a caller error worth failing on, not one to interpolate.
+    if (/[^\w.:+\-TZ@ ]/.test(since)) {
+        console.error(`--since must be a git date such as 60.days or 2026-07-01, got: ${since}`);
+        process.exit(1);
+    }
+    RAW = git(`log --format=%x00%H%x01%ct%x01%s --name-only --no-merges${since ? ` --since="${since}"` : ''}`);
 } catch (e) {
     console.error(`Not a git repository, or git failed: ${repo}`);
     process.exit(1);
@@ -124,6 +140,7 @@ const ranked = Object.entries(classCounts).sort((a, b) => b[1] - a[1]);
 if (asJson) {
     console.log(JSON.stringify({
         repo,
+        since: since || null,
         commits: commits.length,
         feats: feats.length,
         fixes: fixes.length,
@@ -137,7 +154,7 @@ if (asJson) {
 }
 
 const line = '='.repeat(70);
-console.log(`\n${line}\n${path.basename(repo)} — ${commits.length} engineering commits\n${line}`);
+console.log(`\n${line}\n${path.basename(repo)} — ${commits.length} engineering commits${since ? ` since ${since}` : ''}\n${line}`);
 console.log(`\n  ${fixes.length} fixes : ${feats.length} features  =  ${(fixes.length / Math.max(feats.length, 1)).toFixed(2)} fixes per feature`);
 console.log(`  ${rework.length} of them (${Math.round(rework.length / fixes.length * 100)}%) landed on code a feature touched in the previous ${windowDays} days.`);
 console.log('  Those are first-pass failures, not maintenance.\n');
