@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 131,740 | 19 of 19 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 20,691 | 19 of 19 |
-| B′ same, but dated LINES instead of paragraphs | 14,660 | 1 of 19 |
-| C  description only | 7,069 | 0 of 19 |
+| A  full body | 136,036 | 21 of 21 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 21,766 | 21 of 21 |
+| B′ same, but dated LINES instead of paragraphs | 14,828 | 1 of 21 |
+| C  description only | 7,069 | 0 of 21 |
 
 ### rule-ab-testing
 
@@ -285,6 +285,22 @@ export function hasComment(text, fileName) {
 substantial selftest — planted violations, both directions, a clean fixture
 required to stay silent. Nothing in the repository ever ran either one: not the
 gate, not CI, not a test. Standing in for execution was
+
+`[measured 2026-09-08]` a shipped collector scrubbed credentials out of everything
+it wrote by holding the secret's value in a set and doing
+`text.split(value).join('[REDACTED]')`. It ran that scrub over **serialised
+JSON**. A secret containing a `"` was already `\"` in the serialised text, so the
+raw value was not present, no replacement happened, and the credential landed in
+the report, the ledger and the candidates file — recoverable with one
+`JSON.parse`. The suite asserted `!everything.includes(CANARY)` and was green,
+because the canary was `sk-live-CANARY-7Qz9pX2mLr41`: **JSON-safe by
+construction, so the assertion could not fail for the defect it named.**
+
+and it is **wrong for exactly the reason the subject was wrong**: in a JSON file
+the value is stored escaped, so grepping the raw form misses a secret that is
+fully present. `[measured 2026-09-08]` this was hit three times in one session —
+twice by a reviewer auditing the code above, once in the code itself. A "clean"
+result from a detector that searches the pre-transform value is not evidence.
 
 Full text: `plugins/autodev-core/skills/rule-gate-integrity/SKILL.md`
 
