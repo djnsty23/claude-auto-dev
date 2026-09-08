@@ -28,6 +28,7 @@
 // Run: node tooling/test-rendered-layout-gate.js
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -548,6 +549,24 @@ for (const p of PAGES) {
     const none = run([]);
     check('no input exits 2, distinct from a clean run', none.status === 2, none.status);
 
+    // The bad --dir path had NO assertion until 2026-09-08, which is why the
+    // process.exit(2) sitting in readSnapshots() survived the first pass at this
+    // defect: nothing here would have noticed it change at all.
+    //
+    // BE CLEAR WHAT THESE THREE CATCH, because it is not the truncation.
+    // Mutation-checked both ways: swapping the Bail back to process.exit(2)
+    // leaves this suite GREEN, and dropping the catch in the runner takes it RED
+    // (status 0 instead of 2). So they prove the Bail is WIRED, not that this
+    // path drains. They cannot prove the drain, and no test here can: the path
+    // emits one short line to stderr, which always fits inside the pipe buffer,
+    // so there is no observable truncation to assert against. The drain on this
+    // path is an argument from the runner's shape, not a measurement.
+    // The --json case above is where the truncation itself is measured.
+    const badDir = run(['--dir', path.join(SNAPS, 'no-such-directory-here')]);
+    check('a missing --dir exits 2 rather than crashing or passing', badDir.status === 2, badDir.status);
+    check('and says which directory it could not find', /No such directory/.test(badDir.stderr), badDir.stderr.slice(0, 120));
+    check('a missing --dir prints no report to stdout', badDir.stdout === '', badDir.stdout.slice(0, 120));
+
     const printed = run(['--print-probe', '--width', '414']);
     check('--print-probe emits a pasteable expression', printed.status === 0 && /414/.test(printed.stdout));
 
@@ -559,16 +578,69 @@ for (const p of PAGES) {
     const json = run(['--dir', SNAPS, '--json']);
     let parsed = null;
     try { parsed = JSON.parse(json.stdout); } catch { /* left null */ }
-    // Control for the parse case: the report must be LARGER than one pipe
-    // buffer, or the case cannot see the defect it exists for. The gate used to
-    // process.exit() straight after console.log, which on macOS truncates a
-    // piped stdout at 65,536 bytes; a fixture set small enough to fit would
-    // have kept that green everywhere.
-    check('--json output exceeds the 64 KiB pipe buffer, so the parse case exercises the drain',
-        json.stdout.length > 65536, json.stdout.length);
     check('--json parses', !!parsed);
     check('--json groups the snapshots by page, not into one muddled table',
         parsed && parsed.pages.length === 4, parsed && parsed.pages.length);
+}
+
+// ------------------------------------------------ the pipe delivers every byte
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on macOS, and
+// synchronous when it is a pipe on Linux or Windows. A process.exit() therefore
+// discarded whatever had not drained: `--json` here is ~84KB, the OS pipe buffer
+// holds 64KiB, and a piped run delivered 65536 bytes of invalid JSON under exit
+// status 0. Both assertions above failed on macOS from the day they were
+// written, and passed on the CI matrix, which is [ubuntu, windows].
+//
+// PARSING IS NOT THE ASSERTION FOR THIS. `--json parses` catches truncation
+// only for as long as the fixture set happens to exceed the buffer, and it
+// reports the wrong cause when it does. Two things have to hold, and the first
+// is what keeps the second from passing by construction:
+//
+//   1. the output is LARGER than one pipe buffer, so a truncating gate would
+//      actually lose something here
+//   2. the piped byte count equals the byte count of the same run redirected to
+//      a FILE, where the write is synchronous on every platform
+//
+// Without (1) this whole block goes quietly vacuous the day someone trims the
+// fixtures, which is the failure mode it exists to prevent.
+
+{
+    const PIPE_BUF = 64 * 1024;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'layout-gate-pipe-'));
+    const outfile = path.join(tmp, 'via-file.json');
+    const fd = fs.openSync(outfile, 'w');
+    spawnSync(process.execPath, [GATE, '--dir', SNAPS, '--json'],
+        { stdio: ['ignore', fd, 'ignore'] });
+    fs.closeSync(fd);
+    const viaFile = fs.statSync(outfile).size;
+    fs.rmSync(tmp, { recursive: true, force: true });
+
+    const viaPipe = run(['--dir', SNAPS, '--json']);
+    const pipeBytes = Buffer.byteLength(viaPipe.stdout, 'utf8');
+
+    check('--json is larger than one pipe buffer, so the next check is not vacuous',
+        viaFile > PIPE_BUF, { bytes: viaFile, buffer: PIPE_BUF });
+    check('--json through a PIPE delivers every byte it writes to a FILE',
+        pipeBytes === viaFile, { pipe: pipeBytes, file: viaFile });
+    check('--json ends by closing the top-level object',
+        viaPipe.stdout.trimEnd().endsWith('}'), viaPipe.stdout.slice(-60));
+    check('a truncated --json would not have been reported as a success',
+        viaPipe.status === 0 && pipeBytes === viaFile, viaPipe.status);
+
+    // The human report shares the exit path, so it shares the defect. It is
+    // smaller than the buffer today, which is exactly why it needs the
+    // comparison rather than a size assertion of its own.
+    const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'layout-gate-txt-'));
+    const outfile2 = path.join(tmp2, 'via-file.txt');
+    const fd2 = fs.openSync(outfile2, 'w');
+    spawnSync(process.execPath, [GATE, '--dir', SNAPS], { stdio: ['ignore', fd2, 'ignore'] });
+    fs.closeSync(fd2);
+    const reportFile = fs.statSync(outfile2).size;
+    fs.rmSync(tmp2, { recursive: true, force: true });
+    const reportPipe = Buffer.byteLength(run(['--dir', SNAPS]).stdout, 'utf8');
+    check('the human report through a PIPE also delivers every byte',
+        reportPipe === reportFile, { pipe: reportPipe, file: reportFile });
 }
 
 // --------------------------------------------------------------------------

@@ -624,22 +624,68 @@ assignments before peers caught them, and one of those — merging a branch that
 and deleted two test suites, because the branch was 494 lines BEHIND main rather
 than ahead.
 
-The check that actually settles it, per branch:
+**`rev-list --left-right` AND THREE-DOT `--shortstat` FAIL THE SAME WAY, and
+this block listed both as if they answered the question.** `[measured
+2026-09-07]` a coordinator read `+1 / +3 / +5` commits ahead and 213 / 773 /
+1033 insertions off them, and dispatched a session to land three branches that
+were already merged as PRs #168, #163 and #161. A squash-merged branch is never
+an ancestor of the trunk, so `--left-right` reports it ahead FOREVER; three-dot
+`A...B` counts the branch's whole contribution since the merge base whether or
+not that content is already upstream. Both numbers were real and neither
+measured landing.
+
+Run the tool, which encodes the order below and prints its population:
 
 ```powershell
-gh pr list --state merged --search <branch> --json number,mergedAt,headRefOid
-git merge-base --is-ancestor <merge-commit> origin/HEAD
-git diff origin/HEAD..<branch> --shortstat
-git rev-list --left-right --count origin/HEAD...<branch>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/check-branch-landed.js --repo <path> --trunk origin/HEAD
 ```
+
+By hand, in this order, and the ORDER is the content of the rule:
+
+```powershell
+# 1. plain ancestry -- proves LANDED only; its negative proves nothing
+git merge-base --is-ancestor <branch-tip> origin/HEAD
+
+# 2. THE PRIMITIVE: a merged PR whose head IS this tip, found BY SHA
+gh api repos/<owner>/<repo>/commits/<branch-tip>/pulls \
+   -H "Accept: application/vnd.github.groot-preview+json" \
+   --jq '.[] | select(.merged_at != null) | "\(.number) \(.merge_commit_sha)"'
+git merge-base --is-ancestor <merge-commit> origin/HEAD   # BOTH halves required
+
+# 3. no PR carries the tip? compare FILES, not counts
+git diff --name-only $(git merge-base origin/HEAD <branch>) <branch>
+git rev-parse origin/HEAD:<path> <branch>:<path>          # identical blob = landed
+
+# 4. only now read the diff SHAPE, two dots
+git diff --numstat origin/HEAD <branch>
+```
+
+**Look up the PR BY COMMIT SHA, never by `gh pr list --search <branch>`.** That
+search is a loose full-text match, and on 2026-09-07 its EMPTY result was read
+as an affirmative "this branch was never merged". An empty result from an
+unvalidated probe is a claim about the PROBE, never about the world — the same
+sentence this skill already applies to a `gh` failure, applied to a `gh`
+success that found nothing. Absence of a PR is not evidence of anything; fall
+through to step 3.
+
+**Both halves of step 2 are load-bearing.** A merged PR whose merge commit is
+not an ancestor of THIS trunk landed on a different base, and that is UNKNOWN,
+not landed.
 
 Read the SHAPE of the diff, not its size. A branch whose diff is mostly
 DELETIONS relative to the trunk is behind it, not ahead — that is the trunk's
 newer work missing from the branch, and "landing" it is a revert wearing a
-merge's clothes. `--left-right` states it directly: 24 behind / 13 ahead is a
-stale branch, not pending work. And where the merged PR's `headRefOid` equals
-the branch tip that exists today, the branch never continued past its merge and
-there is nothing to land at all.
+merge's clothes. `[measured 2026-09-07]` five branches reported that shape at
++676/-14725, +361/-10892, +550/-34535, +1262/-32694 and +691/-42544; every one
+of them would have reverted the trunk.
+
+**The two halves of `--left-right` are not equally trustworthy, and reading
+them as if they were is what went wrong.** A large BEHIND count is a real
+signal: the branch genuinely lacks the trunk's newer commits. The AHEAD count
+proves nothing either way, because a squash-merged branch reports its original
+commits ahead forever. So use the behind half to spot staleness, and never
+treat the ahead half as a quantity of pending work — that is step 2's job, and
+only step 2's.
 
 Run a KNOWN-POSITIVE CONTROL on whatever command you settle on. `[measured
 2026-08-29]` a session's first content check mangled its own pathspec and

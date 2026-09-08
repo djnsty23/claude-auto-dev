@@ -575,6 +575,27 @@ try {
         '2 commit(s) unreachable from any origin ref (CONTENT NOT CHECKED)');
     hasText('A: a clone that never fetched says UNKNOWN rather than zero', a4,
         'last fetch UNKNOWN (no FETCH_HEAD)');
+
+    // The unreachable count is an ANCESTRY claim, and the advice printed beside
+    // it is what a Brain acts on. Until 2026-09-07 that advice recommended
+    // `git cherry`, while skills/brain/SKILL.md had already retired it -- the
+    // skill was corrected and the shipped script beside it was not, so the tool
+    // went on teaching the probe the documentation had dropped. A coordinator
+    // then reported three merged branches as carrying 213, 773 and 1033
+    // insertions of unlanded work and dispatched a session to re-land them.
+    //
+    // Asserted as a PAIR. Only checking that the right tool is named would pass
+    // against output that recommends both, which is what a half-applied fix
+    // looks like; only checking that cherry is absent would pass against a
+    // section that gives no advice at all.
+    hasText('A: the content advice names the landed-check tool', a4,
+        'check-branch-landed.js');
+    hasText('A: and states the primitive that settles it', a4,
+        'headRefOid EQUALS THE BRANCH TIP');
+    lacksText('A: and no longer recommends git cherry as the content check', a4,
+        'cherry -v origin/HEAD HEAD');
+    hasText('A: and warns that an empty PR search proves nothing', a4,
+        'claim about the');
     lacksText('A: a dirty repo is not reported as clean', a4, 'all clean and pushed');
     // The FRESH half of the abandoned-tree pair. Scenario H holds the stale half;
     // neither is evidence alone, because a script that never labels anything

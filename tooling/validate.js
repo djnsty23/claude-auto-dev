@@ -406,39 +406,106 @@ function checkHookWiring() {
   }
 }
 
-// Ask the installed Claude Code to scan a plugin's hooks module. Three
-// outcomes, and the third is deliberately not a pass: `passed` with the scan's
-// own hooks/calls lines, `failed` with the host's error lines, `skipped` with
-// the reason (no CLI, a timeout, or neither verdict printed). A scan that
-// passed but listed no hooks is a FAIL too — it means the `modules` entry was
-// not read, and an unread module is the silent kind of broken.
+// Ask the installed Claude Code to scan a plugin's hooks module. Four
+// outcomes, and only ONE of them is a pass: `passed` with the scan's own
+// hooks/calls lines, `failed` with the host's error lines, and `skipped` with
+// the reason — no CLI, a timeout, neither verdict printed, or a host that
+// prints no component scan at all.
 //
-// The host has to be NEW ENOUGH TO KNOW WHAT A MODULE IS before "passed with no
-// hooks" can mean "unread". `[measured 2026-09-07]` the scan was built against
-// Claude Code 2.1.259 (docs/function-hooks/README.md), and the `claude` on this
-// machine's PATH was 2.1.233: it printed "Validation passed" and nothing else,
-// exactly as it does for a plugin with no module at all, and this check called
-// that a FAIL for two days while CI (no CLI on PATH) stayed green. An old host
-// cannot read the entry, so its silence is `skipped` with the version named,
-// which is the same verdict as no CLI: unverified here, never passed.
-const HOOKS_MODULE_MIN_HOST = [2, 1, 259];
-function hostVersion() {
-  const r = cp.spawnSync('claude --version', { encoding: 'utf8', timeout: 30000, windowsHide: true, shell: true });
-  const m = /(\d+)\.(\d+)\.(\d+)/.exec(((r && r.stdout) || '') + ((r && r.stderr) || ''));
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+// That last one is why this function now carries a CONTROL. Reading
+// "validation passed, and no `hooks:` line" as "the modules entry was not
+// read" is sound only on a host that PRINTS a component scan. On a host that
+// prints none, the same absence is a fact about the host and says nothing
+// whatever about the module — and the two states are opposite.
+//
+// `[measured 2026-09-07, claude 2.1.233]` the entire output for all three
+// plugins here is the manifest path and `✔ Validation passed`: no component
+// section for the hooks module, and none for the skills, agents or commands
+// beside it either, with or without `--strict` (2.1.233 has no scan flag).
+// This check was written against 2.1.259, which does print one. Between those
+// versions the gate reported a healthy module as broken and blocked every
+// push, while CI — which never installs `claude` — stayed green on `skipped`.
+// One repo, three environments, three different answers, and only the middle
+// one was about the repo.
+//
+// So: establish that this host names components AT ALL before reading their
+// absence as a finding. The premise is checked against the host's own output
+// rather than its version number, because a version test would go stale the
+// next time the format moves. Neither branch may report a pass — an unscanned
+// module is still the silent kind of broken — but neither may report the
+// module broken on evidence that cannot tell the two apart.
+const SCAN_SECTION = /\b(?:hooks|calls|skills|agents|commands)\s*:/;
+
+// Named in the `skipped` reason so a reader can tell "this host prints no
+// scan" from "this module was not read". Counted from disk, which the host's
+// output cannot move — a control derived from the same output it grades would
+// shrink whenever that output did.
+function pluginComponents(pluginDir) {
+  const out = [];
+  for (const [dir, label] of [['skills', 'skill'], ['agents', 'agent'], ['commands', 'command']]) {
+    let n = 0;
+    try {
+      n = fs.readdirSync(path.join(pluginDir, dir)).filter((e) => !e.startsWith('.')).length;
+    } catch { /* the plugin ships none of that kind; the reason just omits it */ }
+    if (n) out.push(`${n} ${label}${n === 1 ? '' : 's'}`);
+  }
+  return out;
 }
-function predatesHooksModules(v) {
-  for (let i = 0; i < 3; i++) {
-    if (v[i] < HOOKS_MODULE_MIN_HOST[i]) return true;
-    if (v[i] > HOOKS_MODULE_MIN_HOST[i]) return false;
+
+// Resolve `claude` against PATH directly. Used ONLY to word the reason above —
+// never to decide whether to spawn — so a resolution this misses (a shell
+// function, an exotic shim) costs a less precise sentence and nothing more.
+function claudeOnPath() {
+  const exts = process.platform === 'win32'
+    ? String(process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)
+    : [''];
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+  for (const dir of String(process.env[key] || '').split(path.delimiter).filter(Boolean)) {
+    for (const e of exts) {
+      try { if (fs.statSync(path.join(dir, 'claude' + e)).isFile()) return true; } catch { /* keep looking */ }
+    }
   }
   return false;
 }
-function scanHooksModule(pluginDir) {
-  const v = hostVersion();
-  if (v && predatesHooksModules(v)) {
-    return { status: 'skipped', reason: `claude ${v.join('.')} on PATH predates hooks modules (first scanned by ${HOOKS_MODULE_MIN_HOST.join('.')})` };
+
+let claudeVersionCache;
+function claudeVersion() {
+  if (claudeVersionCache !== undefined) return claudeVersionCache;
+  let v = 'the installed claude';
+  try {
+    const r = cp.spawnSync('claude --version', { encoding: 'utf8', timeout: 20000, windowsHide: true, shell: true });
+    const first = String((r.stdout || '') + (r.stderr || '')).trim().split('\n')[0].trim();
+    if (first) v = `claude ${first}`;
+  } catch { /* the caller only needs a name for the host, not a version */ }
+  return (claudeVersionCache = v);
+}
+
+// Component-scan lines only: the host's report of what it FOUND in the plugin,
+// with its diagnostics excluded.
+//
+// `[measured 2026-09-07, claude 2.1.233]` a warning or error bullet is
+// formatted exactly like a scan line — `❯ <field>: <text>` — so a
+// plugin.json carrying a warning on a field named `hooks` would read as "the
+// host listed hooks", and a module nothing ever scanned would be reported as a
+// PASS. That is the worse direction of this whole defect: a false FAIL blocks a
+// push and gets looked at, a false PASS is the silent kind. The bullets are
+// therefore excluded by STRUCTURE — everything under a `Found N warnings:` or
+// `Found N errors:` header, up to the next `Validating` line or the verdict —
+// rather than by guessing which field names a host might warn about.
+function componentSections(out) {
+  const sections = [];
+  let inFindings = false;
+  for (const raw of String(out).split('\n')) {
+    if (/Found \d+ (?:warning|error)/i.test(raw)) { inFindings = true; continue; }
+    if (/^\s*(?:Validating\b|[✔✘✖]\s*Validation\b)/.test(raw)) { inFindings = false; continue; }
+    if (inFindings) continue;
+    const line = raw.replace(/^\s*❯\s*/, '').trim();
+    if (SCAN_SECTION.test(line)) sections.push(line);
   }
+  return sections;
+}
+
+function scanHooksModule(pluginDir) {
   // One quoted command string through the shell: `claude` on PATH is a shim
   // (a .cmd on Windows), which spawnSync cannot run without a shell, and an
   // args array under shell:true is concatenated unescaped (DEP0190).
@@ -450,16 +517,76 @@ function scanHooksModule(pluginDir) {
     shell: true,
     env: { ...process.env, CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1' },
   });
+  // Reached when the SHELL itself cannot be spawned, or on a timeout; a
+  // missing `claude` is handled below, where the shell reports it.
   if (r.error) return { status: 'skipped', reason: r.error.code === 'ENOENT' ? 'claude is not on PATH' : String(r.error.message) };
   const out = (r.stdout || '') + (r.stderr || '');
   if (/Validation failed/.test(out)) {
     const detail = out.split('\n').filter((l) => /❯|error/i.test(l) && !/^Validating/.test(l)).map((l) => l.trim()).join(' | ');
     return { status: 'failed', detail: detail || out.trim().slice(-400) };
   }
+  // Did the CLI run at all? A missing `claude` never reaches r.error under
+  // `shell: true` — the shell runs, fails to find the command, and reports it
+  // in its own words and its own status. Both vary, and a check written
+  // against one host's words is the very defect this function exists to fix:
+  //
+  //   macOS /bin/sh   exit 127, "claude: command not found"
+  //   Ubuntu dash     exit 127, "claude: not found"        <- no "command"
+  //   Windows cmd.exe exit 1,   "'claude' is not recognized as ..."
+  //
+  // `[measured 2026-09-08, CI]` a first attempt matched on that text plus
+  // 127/9009 and so passed on macOS and failed on BOTH ubuntu-latest and
+  // windows-latest, which is the same shape of error one layer down.
+  //
+  // The robust signal is the CLI's OWN first line: a claude that ran always
+  // prints `Validating ...` before anything else. No such line plus a non-zero
+  // status means it never ran, whatever the shell called that. This is checked
+  // AFTER the spawn, never before — returning early on a host that might still
+  // have validated something is precisely the ordering bug that sank the
+  // version-threshold approach.
+  if (!/^\s*Validating\b/m.test(out) && r.status !== 0) {
+    return {
+      status: 'skipped',
+      reason: claudeOnPath()
+        ? `claude is on PATH but did not run (exit ${r.status})`
+        : 'claude is not on PATH',
+    };
+  }
   if (!/Validation passed/.test(out)) return { status: 'skipped', reason: 'claude plugin validate printed neither verdict (exit ' + r.status + ')' };
-  const scan = out.split('\n').filter((l) => /\bhooks:|\bcalls:/.test(l)).map((l) => l.replace(/^\s*❯\s*/, '').trim());
-  if (!scan.some((l) => /\bhooks:/.test(l))) return { status: 'failed', detail: 'validation passed but the scan listed no hooks: the modules entry was not read' };
-  return { status: 'passed', detail: scan.join('; ') };
+
+  // The control, before the finding. `sections` is every component line the
+  // host printed, of any kind; an empty one means nothing was reported for
+  // this plugin and there is no absence here to read.
+  const sections = componentSections(out);
+  if (!sections.length) {
+    const beside = pluginComponents(pluginDir);
+    return {
+      status: 'skipped',
+      reason:
+        `${claudeVersion()} printed no component scan for this plugin — no hooks:, calls:, skills:, agents: or commands: section` +
+        (beside.length ? `, not even for the ${beside.join(', ')} it ships` : '') +
+        '; on this host an absent hooks: line is a fact about the host, not about the module',
+    };
+  }
+  const detail = sections.filter((l) => /\bhooks:|\bcalls:/.test(l));
+  if (!detail.some((l) => /\bhooks:/.test(l))) {
+    return {
+      status: 'failed',
+      // The one reading this branch cannot make on its own: whether this host
+      // knows what a hooks MODULE is. It scanned and named components, so the
+      // absence is real — but a host that reports skills/agents/commands and
+      // has never heard of modules would look identical. Unobservable here
+      // (2.1.233 prints no sections at all, 2.1.259 prints hooks:), so the
+      // alternative is NAMED rather than guessed at, and the reader is pointed
+      // at the right question in one line instead of a day. See
+      // docs/DECISIONS-2026-09-08-validate-host-scan.md D9 for why the
+      // obvious control — demand a hooks: line from some OTHER plugin — is
+      // NOT applied: autodev-core is the only plugin here with a modules
+      // entry, so that control would make this branch permanently dead.
+      detail: `the host printed a component scan (${sections.join('; ').slice(0, 300)}) and listed no hooks: the modules entry was not read — unless ${claudeVersion()} scans components without knowing hooks modules at all, which would make this a false alarm; check that before editing the module`,
+    };
+  }
+  return { status: 'passed', detail: detail.join('; ') };
 }
 
 function checkScriptReferences() {
