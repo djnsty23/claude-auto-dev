@@ -111,6 +111,19 @@ entered every run while nothing asserts anything about it.
 and `validate` fails while a `*.vacuity-backup` exists. After killing a run,
 `pkill -9` then `pgrep` to confirm — a survivor rewrites the file underneath you.
 
+**Kill by pid, never by pattern.** Every session runs these suites from its own
+worktree with the same command line, so `pkill -f test-all.js` is a fleet-wide
+action: it matches every peer's run exactly as well as it matches yours.
+`[measured 2026-09-08]` this clone had 34 worktrees registered, one of them a
+live `check:suites` sweep, and all of them would have matched; a session that
+ran that pattern kill the same day reported ending a peer's `check:suites` and
+another session's `test-hook-execution-evidence`. The cost is worse than the
+interruption, because a killed run writes no exit file and an ABSENT verdict is
+indistinguishable from a failing one — the peer inherits a red they did not
+cause and cannot explain. `pgrep -f <pattern>` is the right way to LIST
+candidates and the wrong way to choose among them: confirm a pid's cwd is yours,
+then `kill -9 <pid>`.
+
 ## Architecture
 
 `autodev-core` (the workflow, its skills, agents and hooks, the sprint system) ·
