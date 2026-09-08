@@ -140,9 +140,18 @@ function shellWords(command) {
         }
         if (c === '"' || c === "'") { quote = c; if (word === null) word = ''; continue; }
         if (c === '\\') {
+            // A BACKSLASH IS NOT ALWAYS AN ESCAPE, the 2026-09-02 lesson from the
+            // coordinator guard arriving here a third time: [measured 2026-09-08]
+            // windows-latest red on `git -C C:\\Users\\…\\repo push --no-verify`
+            // because `C:\\Users` had become `C:Users` and no gate file was found
+            // there. Only a quote, another backslash, whitespace or a newline is
+            // consumed as an escape; anything else keeps its backslash, because on
+            // Windows that character is a path separator far more often than not.
             const n = s[i + 1];
-            if (n === '\n') { i++; continue; }               // line continuation
-            if (n !== undefined) { put(n); i++; }            // literal next char
+            if (n === '\n') { i++; continue; }                            // line continuation
+            if (n === ' ' || n === '\t') { put(n); i++; continue; }      // escaped space holds a word together
+            if (n === '"' || n === "'" || n === '\\') { put(n); i++; continue; }
+            put(c);
             continue;
         }
         if (c === '#' && word === null) { while (i < s.length && s[i] !== '\n') i++; endSeg(); continue; }

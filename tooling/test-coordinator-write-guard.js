@@ -743,6 +743,23 @@ expectSilentAllow('a plain push stays silent', noRole('git push origin HEAD'));
     }
 }
 
+// A WINDOWS PATH INSIDE THE COMMAND, on every platform. [measured 2026-09-08]
+// windows-latest was red on the `-C <repo>` case above while ubuntu and macos
+// were green: the fixture path carried backslashes, the tokeniser consumed
+// each as an escape, `C:\Users` became `C:Users`, and no gate file was found
+// there. The hook can only be driven with this repo's own paths, so the
+// recogniser is asked directly, with the Windows spelling as a literal.
+{
+    const { shellWords } = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'hook-bypass.js'));
+    const words = shellWords('git -C C:\\Users\\RUNNER~1\\Temp\\hooked push --no-verify origin HEAD')[0];
+    check('a Windows path after -C survives tokenising with its backslashes',
+        words[2] === 'C:\\Users\\RUNNER~1\\Temp\\hooked', JSON.stringify(words[2]));
+    check('  while an escaped space still holds a word together',
+        shellWords('git -C /a\\ b/repo commit -n')[0][2] === '/a b/repo');
+    check('  and an escaped quote is still a quote',
+        shellWords('git commit -m it\\"s -n')[0][3] === 'it"s');
+}
+
 // Interaction with the ban: a block wins, and a permitted write is still asked.
 writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
 {
