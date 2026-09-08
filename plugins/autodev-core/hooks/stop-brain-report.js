@@ -307,6 +307,10 @@ const REPORT_SHAPE =
      ok / absent  -> hand out the record's addresses
      degraded     -> hand out the address that was VERIFIED to reach, name the
                      stale field as a field, and do NOT send anyone to a person
+     fault +
+       collision  -> an address resolves to SOMEBODY ELSE; message nobody at all
+                     and escalate, which is a different instruction from "nothing
+                     reaches" and the one a reader needs here
      fault        -> nothing reaches; escalate, which is what that word is for
 
    `degraded` requires an address positively verified against a registry that
@@ -325,6 +329,25 @@ if (verdict && verdict.state === 'degraded' && reach && reach.usable.length) {
         + (stale ? ': ' + stale : '') + '. That is a field to re-stamp, not an address to try, '
         + 'and it is NOT a reason to escalate: a channel exists, so use it. Say in your report '
         + 'that ' + roleFilePath() + ' needs re-stamping (check: scripts/check-brain-role.js --status).\n'
+        + REPORT_SHAPE;
+} else if (verdict && verdict.state === 'fault' && reach && reach.collision) {
+    /* A COLLISION IS NOT A STALE FIELD, and folding it into the branch below
+       loses the only instruction that matters here. A name freed by an archived
+       session can be TAKEN BY ANOTHER, so an address that resolves is not an
+       address that reaches who you mean: the record needs a person to look at
+       it, and until then nobody is messaged at all. The branch below says
+       "nobody can be reached", which is true and insufficient -- it does not
+       say that trying anyway lands on a stranger.
+       Ported from `fix/coordinator-reachable-by-either-address` @ 62a42be0,
+       which had this branch where this file did not. */
+    context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + '), '
+        + 'BUT AN ADDRESS IN THE ROLE FILE RESOLVES TO SOMEBODY ELSE: '
+        + verdict.faults.map((f) => f.code + ' (' + f.detail + ')').join('; ') + '.\n'
+        + 'Message NOBODY at that record, and do not resolve a coordinator by cwd: a worktree '
+        + 'outlives the session in it. A name freed by an archived session can be taken by '
+        + 'another, so an address that resolves is not an address that reaches who you mean. '
+        + 'Report to the operator instead, and say the role file at ' + roleFilePath() + ' names '
+        + 'somebody else (check: scripts/check-brain-role.js --status).\n'
         + REPORT_SHAPE;
 } else if (verdict && verdict.state === 'fault') {
     const unchecked = reach && reach.unchecked.length
