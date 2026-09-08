@@ -90,8 +90,8 @@ Never loaded: `plugins/autodev-core/scripts/heal-sweep.workflow.js` (a workflow
 script; `test-workflow-isolation.js` reads it as text and never requires it).
 
 None of these is a defect this gate asks anyone to fix. They are the floor as
-measured at b8eae1f. **The ceilings shipped are `FLOOR = { untested: 39,
-neverLoaded: 1 }`**, re-measured at f870b15 for the reason the next section
+measured at b8eae1f. **The ceilings shipped are `FLOOR = { untested: 40,
+neverLoaded: 1 }`**, re-measured at fcfb8fa for the reason the next section
 gives, dated and carrying the commit they were measured at. Ratcheting them down is a decision for `docs/decisions.md`, taken with
 a re-measured green run; it was deliberately not taken here, so the gate cannot be
 red on the commit that introduces it.
@@ -119,6 +119,19 @@ floor that had only ever been met met something it was designed to miss. The
 floor shipped is 39 at f870b15 rather than the two functions being driven here,
 because they belong to other sessions' merges and are follow-up tests, not
 defects in this change. The same tree also answered the boundary question the fixture suite answers in miniature: `--max-untested 38` against the measured 39 **exited 1** (observed, 500 s at load 9 to 11), and `--gate` at 39 is the exit-0 run the gate and CI paragraphs below record. Red one below, green at, both on the real corpus.
+
+**It happened a second time.** `[measured 2026-09-08]` after the rebase onto
+`main` at **fcfb8fa** (#210, #196, #183 and others), the nine-step gate ran green
+through step eight and **exited 1 at step nine**: `40 never-called function(s) vs
+ceiling 39`, 3,331 s for the chain at load 9 to 33. The newcomer is
+`production-signals.js` httpGetJson() (#196), the HTTP fetcher of a script whose
+suite stays offline, the same bucket as the eleven gh/git helpers above. Three
+measurements in one day, 37, 39, 40, each rejected at the previous floor: main
+adds a never-entered plugin function roughly every ten merges, and this gate is
+the first thing in the repo that says so at the moment it happens. The shipped
+floor is 40 at fcfb8fa. Whoever merges next after adding one either drives it
+from a suite or re-measures with a dated commit; both are one commit, and the
+second is now a documented habit rather than a silent drift.
 
 ## Where this was measured, and why not on `main` bare
 

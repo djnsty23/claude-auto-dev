@@ -30,8 +30,9 @@ gate could not be red on the commit that introduced it.
 
 **The floor moved before the PR merged, and that is the evidence.** Measured
 37 at b8eae1f; after rebasing onto f870b15 the same gate exited 1 at 39, on two
-functions merged by #189 and #200 in between. The floor shipped is 39, dated
-at f870b15, and the two are follow-up tests, not a reason to hold the gate.
+functions merged by #189 and #200 in between; after rebasing onto fcfb8fa it
+exited 1 again at 40, on #196's httpGetJson(). The floor shipped is 40, dated
+at fcfb8fa, and the three are follow-up tests, not a reason to hold the gate.
 
 **Where "green on HEAD" lives.** In the gate step, not in the suite: the
 check runs `test-all.js` under coverage, which runs `test-check-coverage.js`,
