@@ -107,13 +107,32 @@ exactly when Step 5b's `--verify` exits 0 for the commit being promoted. Every
 other state of that command is an instruction not to promote, and a window
 `--verify` calls INELIGIBLE (exit 3) needs the operator's yes in that turn, from
 him, not relayed — a peer saying "he approved it" is not an authorisation, and a
-peer saying "the gate was green" is not the gate output in the ledger. Preview
-deploys need no ledger; they are how the ledger gets filled.
+peer saying "the gate was green" is not the gate output in the ledger.
+
+**Preview deploys need no ledger; they are how the ledger gets filled. But you
+cannot tell a preview from a promotion by the command you typed.** `[measured
+2026-09-08]` on a project's FIRST deployment Vercel assigns it to production
+whatever the flags say, and tells you only afterwards: *"This is the project's
+first deployment, so it was assigned to production. Future deployments will be
+preview deployments unless you use --prod."* A greenfield run hit exactly that,
+from the `npx vercel --yes` line below labelled "preview first", and had a public
+production alias 32 seconds later
+(`docs/evidence-greenfield-run-2026-09-08-log.txt`); the same line caught a
+coordinator the same day and published a worktree's `.claude/settings.local.json`
+over the internet. So **a first deployment to a project is a promotion** and
+belongs behind `--verify` like any other; what makes something a preview is the
+`target` read back out of the deploy afterwards, not the flag that went in. Treat
+"is there already a production deployment on this project" as the question, and
+if the answer is no, there is no preview to be had until one exists.
 
 ### Vercel
 
 ```bash
-# Preview first. This is where Step 5's checks and the ledger's boxes get their evidence.
+# Preview — ON A PROJECT THAT ALREADY HAS A PRODUCTION DEPLOYMENT. This is where
+# Step 5's checks and the ledger's boxes get their evidence. On a project's FIRST
+# deployment this command goes to PRODUCTION whatever the flags say, so on a new
+# project it is a promotion: gate it with --verify below and read `target` back
+# out of the deployment afterwards rather than trusting the flag.
 npx vercel --yes
 
 # Promotion, pre-authorised only behind the ledger. The chain reads the exit code.
@@ -242,7 +261,7 @@ evidence say nothing about this one.
 | `gate exit` | its exit code | anything but `0` |
 | `gate tail` | its last 20 lines, inside the fence | empty |
 | `evidence` | the `.claude/evidence/<slug>/` directory per `prove` | missing, or lacks `before.*` or `after.*` |
-| `rollback` | the exact command that undoes THIS promotion | empty, or still holds a `<placeholder>` |
+| `rollback` | the exact command that undoes THIS promotion — see the first-deployment case below | empty, or still holds a `<placeholder>` |
 | `authorised` | the standing rule, by date: `[stated 2026-09-08] Form B, pre-authorised on a green gate with the ledger` | no `[stated YYYY-MM-DD]`, or a date with no rule |
 
 Only the commit is derived. Filling the rest is your work, and `--verify` asks
@@ -345,12 +364,24 @@ The command to run is the one in the ledger's `rollback` field, written before
 the promotion while the previous build was still known. The lines below are the
 shapes it usually takes, not a substitute for reading the field.
 
+**A first deployment is the case where the usual shape is unsatisfiable.** There
+is no previous production URL to name, so `vercel rollback` has no target and
+cannot undo it; the ledger's `rollback` field must say `vercel remove <project>
+--yes` instead, with the real project name rather than a placeholder — `--verify`
+rejects a `<placeholder>`, and a rollback command that names nothing is the
+failure this field exists to prevent. Write the field for the deploy you are
+actually about to make, not the one the template assumes.
+
 ```bash
 # Vercel - instant rollback to previous
 vercel rollback
 
 # Netlify
 netlify rollback
+
+# Vercel, FIRST deployment of a project - there is nothing to roll back TO, so
+# `vercel rollback` cannot undo it. Removing the project is the undo.
+vercel remove <project> --yes
 
 # Supabase Edge Functions - redeploy previous version
 git log --oneline supabase/functions/
