@@ -156,6 +156,13 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-typecheck.js"],
             "timeout": 60,
             "statusMessage": "Typechecking this response's edits..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-intent-record.js"],
+            "timeout": 8,
+            "statusMessage": "Checking the intent record..."
           }
         ]
       }
