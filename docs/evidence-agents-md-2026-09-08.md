@@ -67,6 +67,25 @@ paragraph, which for `rule-ab-testing` is the sentence that answers the
 question ("measure it against what happens today and against at least one
 alternative").
 
+## Re-measured after merging main f870b15 (release 8.165.0)
+
+The tables above were measured at base 99bb597. Between that and the merge,
+`rule-agent-concurrency` gained 70 lines and `rule-gate-integrity` 33, two of
+them dated. `check:agents-md` went red on the merge (first difference: the
+version line), which is the drift it exists to catch. Same command, same day:
+
+| variant | bytes | dated claims kept |
+|---|---|---|
+| A | 133,422 | 27 of 27 |
+| **B** (emitted) | **22,231** | **27 of 27** |
+| B′ | 14,827 | 2 of 27 |
+| C | 7,044 | 0 of 27 |
+
+AGENTS.md after regeneration: 27,786 bytes. The ordering and the conclusion
+did not move; the numbers did, and a number in prose is only correct on the
+day it is typed, so the generated file carries its own table computed at
+generation time rather than quoting this one.
+
 ## The file before and after
 
 | | bytes |

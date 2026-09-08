@@ -87,7 +87,7 @@ this machine. `CLAUDE.md` has the specifics.
 <!-- GENERATED BELOW — DO NOT EDIT BY HAND.
      Generator: tooling/generate-agents-md.js
      Source:    plugins/autodev-core/skills/rule-*/SKILL.md (16 rules)
-     Version:   autodev 8.164.0
+     Version:   autodev 8.165.0
      Variant:   B
      Regenerate with: node tooling/generate-agents-md.js --write
      Drift gate:      node tooling/generate-agents-md.js --check   (npm run check:agents-md) -->
@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 128,384 | 25 of 25 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 21,233 | 25 of 25 |
-| B′ same, but dated LINES instead of paragraphs | 14,673 | 2 of 25 |
-| C  description only | 7,044 | 0 of 25 |
+| A  full body | 133,422 | 27 of 27 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,231 | 27 of 27 |
+| B′ same, but dated LINES instead of paragraphs | 14,827 | 2 of 27 |
+| C  description only | 7,044 | 0 of 27 |
 
 ### rule-ab-testing
 
@@ -157,11 +157,20 @@ returns was **0.008** (max 0.060 across 51 pairs). Serial chains averaged
 in a serial refine chain. One chain returned 113,915 characters re-emitting
 substantially the same document **fifteen times**.
 
-`[measured]` 42 of 280 agents (15%) were lost — 20,680 agent-seconds and 1,119
+`[measured 2026-08-25]` 42 of 280 agents (15%) were lost — 20,680 agent-seconds and 1,119
 tool calls, journaled as nothing, because the journal records a result only on
 completion. **20 of them carry a `<synthetic>` row reading "You've hit your
 session limit", and 0 of those 20 journaled.** That is 48% of all lost work from
 one cause, and it is greppable after the fact.
+
+`[measured 2026-09-08]` (`docs/evidence-quota-wall-2026-09-08.md`) the wall
+lands on every agent in flight at once and on the main thread two seconds
+later, so nothing can act at that moment. The recovery already exists:
+`Workflow({scriptPath, resumeFromRunId})` re-runs only the `agent()` calls whose
+key has no `result` row in `journal.jsonl` and returns the rest from cache. On
+the one real resume on this machine it re-started exactly the walled calls and
+nothing else. **Nothing calls it automatically, and the notification that names
+it arrives while the thread is walled.** Two things now close that gap:
 
 **Never nest fan-outs.** A depth of 3 means six agents each spawning six is
 
@@ -241,6 +250,12 @@ where it expected 4. **The safety assertion passed**, because the filter that
 actually protects those rows had not been touched. Mutating the second filter
 instead failed the safety assertion and its control together, which is the real
 check.
+
+`[measured 2026-09-07]` A staleness detector grew a veto so that
+`NO prod tag is pending` -- a sentence asserting the ABSENCE of open work, in
+the exact grammar of asserting its presence -- would not be reported. The veto
+allowed one token between `no` and the verb. The subject is a noun phrase, so
+it never matched the sentence it was written for, and it vetoed nothing.
 
 `[measured 2026-09-02]` git 2.54.0.windows.1, two throwaway repos, both forms of
 `git merge-tree` against a real conflict and against a clean merge of the same
