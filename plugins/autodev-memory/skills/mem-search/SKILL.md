@@ -79,8 +79,11 @@ needed. A previous `next_steps` summary can be stale; reconcile it with the
 current PRD/source before resuming work. A lexical similarity score is a
 retrieval ranking, not factual confidence or a completion verdict.
 
-Private-tag filtering handles some paired tags at write time, not arbitrary
-secrets, malformed nesting or legacy stored values. Inspect retrieved content
-before displaying it, omit sensitive details and never dump raw prompts or
-session carriers for convenience. Report unavailable retrieval and bounded
-no-match as distinct outcomes.
+The current writer filters exact `<private>`/`</private>` tags case-insensitively,
+including nested regions and an opening left unclosed within one string.
+Structured string values/keys are independent; regions do not span fields,
+prompts or entries. This applies to new writes through the updated active
+writer, not unmarked secrets, non-exact tag syntax or previously stored data.
+Inspect retrieved content before displaying it, omit sensitive details and
+never dump raw prompts or session carriers for convenience. Report unavailable
+retrieval and bounded no-match as distinct outcomes.

@@ -11,7 +11,7 @@
 //
 // The prompt never leaves the machine: it goes to .claude/memory-sessions/,
 // which the file-organization rule already keeps out of git, and SessionEnd
-// deletes it. Anything wrapped in <private></private> is redacted first, matching
+// deletes it. Exact <private> tags (case-insensitive, nested or unclosed) are redacted first, matching
 // what memory-db does before writing an observation.
 //
 // Must be cheap — it runs on every single user turn. Always exits 0.
@@ -42,7 +42,8 @@ try {
     // disk that nothing will ever read is pure cost.
     if (!carrier.read(cwd, harnessSessionId)) process.exit(0);
 
-    const redacted = prompt.replace(/<private>[\s\S]*?<\/private>/g, '[REDACTED]');
+    const { stripPrivate } = require(path.join(PLUGIN_ROOT, 'scripts', 'private-redaction.js'));
+    const redacted = stripPrivate(prompt);
     carrier.writePrompt(cwd, harnessSessionId, redacted);
 } catch (err) {
     process.stderr.write(`[Memory] prompt capture error: ${err.message}\n`);

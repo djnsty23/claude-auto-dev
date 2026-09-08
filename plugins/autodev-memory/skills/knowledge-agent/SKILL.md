@@ -79,7 +79,17 @@ from the first 1–2 directory segments, so a monorepo package can share one bro
 throttle key. Invoke a deeper path explicitly when the task needs it. Hook
 silence is not proof of no knowledge.
 
-The writer strips paired lowercase `<private>...</private>` blocks in supported
-fields, but this is not a secret scanner or a guarantee about older, malformed
-or nested content. Inspect retrieved material before display, omit sensitive
-values and never copy raw conversation carriers into a knowledge brief.
+For new writes through the current memory writer and capture hooks,
+exact `<private>` and `</private>` tags are case-insensitive. Nested regions
+remain private until the outer close; an unclosed opening redacts the rest of
+that string. JSON string values and keys are filtered independently, and a
+serialization/redaction error rejects the observation instead of storing its
+original payload. Regions do not carry across fields, prompts or entries.
+PostToolUse capture filters marked text before deriving filenames, classifying
+or shortening text and encoding tool results. A marked file path skips domain
+knowledge lookup and its area marker; a redacted path is not used as a filesystem
+identity.
+This does not scan unmarked secrets, recognize arbitrary HTML-like tags, or
+clean previously stored content. Confirm the updated writer is installed and
+active. Inspect retrieved material before display, omit sensitive values and
+never copy raw conversation carriers into a knowledge brief.

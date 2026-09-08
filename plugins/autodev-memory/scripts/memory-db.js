@@ -6,6 +6,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const { stripPrivate, stringifyPrivate } = require('./private-redaction');
 
 const HOME = process.env.HOME || process.env.USERPROFILE;
 const DB_DIR = path.join(HOME, '.claude');
@@ -121,10 +122,6 @@ function contentHash(type, title, concept) {
     return crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
 }
 
-function stripPrivate(text) {
-    if (!text) return text;
-    return text.replace(/<private>[\s\S]*?<\/private>/g, '[REDACTED]');
-}
 
 // One canonical form for project paths, applied at EVERY write and query —
 // without it three spellings of the same project silo into three memories:
@@ -430,10 +427,10 @@ const api = {
                 type,
                 stripPrivate(title),
                 stripPrivate(concept || null),
-                stripPrivate(JSON.stringify(sourceFiles || [])),
+                stringifyPrivate(sourceFiles || []),
                 tokenCost || 0,
                 hash,
-                rawData ? stripPrivate(JSON.stringify(rawData)) : null
+                rawData ? stringifyPrivate(rawData) : null
             );
             return id;
         });
