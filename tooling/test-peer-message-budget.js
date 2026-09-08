@@ -28,11 +28,26 @@ const TARGET = 'local_target-session-0000';
 const OTHER = 'local_other-session-9999';
 
 /** One transcript row holding one send_message tool_use, at `minutesAgo`. */
-function sendRow(to, minutesAgo, text) {
+function sendRow(to, minutesAgo, text, id) {
+    const block = { type: 'tool_use', name: TOOL, input: { session_id: to, message: text || 'x' } };
+    if (id) block.id = id;
     return JSON.stringify({
         type: 'assistant',
         timestamp: new Date(Date.now() - minutesAgo * 60000).toISOString(),
-        message: { content: [{ type: 'tool_use', name: TOOL, input: { session_id: to, message: text || 'x' } }] },
+        message: { content: [block] },
+    });
+}
+
+/**
+ * The result row a call leaves behind. `isError` true is the shape a PreToolUse
+ * DENIAL leaves -- which is what this hook's own refusals look like in the
+ * transcript it later reads.
+ */
+function resultRow(id, minutesAgo, isError, text) {
+    return JSON.stringify({
+        type: 'user',
+        timestamp: new Date(Date.now() - minutesAgo * 60000).toISOString(),
+        message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: !!isError, content: text || 'ok' }] },
     });
 }
 
@@ -51,8 +66,10 @@ function run(payload, env) {
     return { code: r.status, out: r.stdout || '', err: r.stderr || '' };
 }
 
-function payloadFor(file, to, message) {
-    return { tool_name: TOOL, tool_input: { session_id: to, message: message || 'hello' }, transcript_path: file };
+function payloadFor(file, to, message, selfId) {
+    const p = { tool_name: TOOL, tool_input: { session_id: to, message: message || 'hello' }, transcript_path: file };
+    if (selfId) p.tool_use_id = selfId;
+    return p;
 }
 
 const cleanups = [];
@@ -157,6 +174,80 @@ try {
         check('sends from a DIFFERENT tool sharing the substring do not count', r.code === 0,
             'a substring match would count Slack or email sends as peer messages; exit ' + r.code);
     }
+    // ---- an ATTEMPT IS NOT A SEND ----------------------------------------
+    // `[measured 2026-09-09]` Both defects below were live in the shipped
+    // 8.166.0 build and were hit three times in one night by one coordinator.
+
+    // A call this hook REFUSED is still a tool_use block in the transcript it
+    // later reads. Counting it made the budget unrecoverable: once blocked,
+    // every retry raised the count it was measured against, so the window could
+    // never be waited out and the only exits were OVERRIDE-BUDGET or the env
+    // switch. A budget you cannot get back under is a ban, and it trains the
+    // override it exists to make deliberate.
+    {
+        const rows = [];
+        for (let i = 0; i < LIMIT; i++) {
+            const id = 'toolu_refused_' + i;
+            rows.push(sendRow(TARGET, 5 + i, 'x', id));
+            rows.push(resultRow(id, 5 + i, true, 'Peer message BLOCKED: this is number ' + (i + 1)));
+        }
+        const t = writeTranscript(rows); cleanups.push(t.dir);
+        const r = run(payloadFor(t.file, TARGET));
+        check('REFUSED attempts do not consume budget', r.code === 0,
+            'LIMIT refusals must leave the budget clean, or a blocked sender can never recover; exit ' + r.code);
+    }
+
+    // The positive control for the case above: identical transcript, results
+    // that are NOT errors. Without this, the assertion above passes for the
+    // wrong reason -- a hook that counted nothing at all would satisfy it.
+    {
+        const rows = [];
+        for (let i = 0; i < LIMIT; i++) {
+            const id = 'toolu_ok_' + i;
+            rows.push(sendRow(TARGET, 5 + i, 'x', id));
+            rows.push(resultRow(id, 5 + i, false, 'delivered'));
+        }
+        const t = writeTranscript(rows); cleanups.push(t.dir);
+        const r = run(payloadFor(t.file, TARGET));
+        check('CONTROL: the same calls with non-error results DO consume budget', r.code === 2,
+            'if this passes while the refusal case also passes, the hook has stopped counting; exit ' + r.code);
+    }
+
+    // A refusal recorded against a DIFFERENT call must not exempt this one.
+    {
+        const rows = [];
+        for (let i = 0; i < LIMIT; i++) rows.push(sendRow(TARGET, 5 + i, 'x', 'toolu_live_' + i));
+        rows.push(resultRow('toolu_someone_elses_call', 4, true, 'unrelated failure'));
+        const t = writeTranscript(rows); cleanups.push(t.dir);
+        const r = run(payloadFor(t.file, TARGET));
+        check('an unrelated is_error result does not exempt a counted send', r.code === 2, 'exit ' + r.code);
+    }
+
+    // The in-flight call is already in the transcript when PreToolUse runs, so
+    // it counted ITSELF as a prior send -- refusing the THIRD message while
+    // reporting it as "number 4", over a list of two.
+    {
+        const rows = [];
+        for (let i = 0; i < LIMIT - 1; i++) rows.push(sendRow(TARGET, 5 + i, 'x', 'toolu_prior_' + i));
+        rows.push(sendRow(TARGET, 0, 'the call being judged right now', 'toolu_self'));
+        const t = writeTranscript(rows); cleanups.push(t.dir);
+        const r = run(payloadFor(t.file, TARGET, 'the call being judged right now', 'toolu_self'));
+        check('the in-flight call is not its own precedent', r.code === 0,
+            'counting itself refuses the LIMITth message, not the (LIMIT+1)th; exit ' + r.code);
+    }
+
+    // And the count it PRINTS has to match the count it enforced, because that
+    // number is the sender's only evidence about their own budget.
+    {
+        const rows = [];
+        for (let i = 0; i < LIMIT; i++) rows.push(sendRow(TARGET, 5 + i, 'x', 'toolu_n_' + i));
+        rows.push(sendRow(TARGET, 0, 'self', 'toolu_self_n'));
+        const t = writeTranscript(rows); cleanups.push(t.dir);
+        const r = run(payloadFor(t.file, TARGET, 'self', 'toolu_self_n'));
+        check('the printed count excludes the in-flight call', r.code === 2 && new RegExp('number ' + (LIMIT + 1) + ' ').test(r.err),
+            'reported: ' + (r.err.split('\n')[0] || '').slice(0, 70));
+    }
+
     const src = fs.readFileSync(HOOK, 'utf8');
     check('the hook fails open on any thrown error', /catch \{ code = 0; \}/.test(src) || /catch\s*\{\s*code\s*=\s*0/.test(src));
 } finally {
