@@ -124,7 +124,11 @@ entered every run while nothing asserts anything about it.
 
 `check:vacuity` **rewrites its subject with mutants**. It refuses a dirty subject,
 and `validate` fails while a `*.vacuity-backup` exists. After killing a run,
-`pkill -9` then `pgrep` to confirm — a survivor rewrites the file underneath you.
+confirm no survivor is left — one rewrites the file underneath you. Kill it the
+way the next paragraph says, by pid; this line used to read "`pkill -9` then
+`pgrep` to confirm" and was still saying it after the paragraph below was added
+to forbid exactly that. Two sentences, each plausible alone, contradicting each
+other four lines apart.
 
 **Kill by pid, never by pattern.** Every session runs these suites from its own
 worktree with the same command line, so `pkill -f test-all.js` is a fleet-wide
