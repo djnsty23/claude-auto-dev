@@ -143,10 +143,12 @@ function readOneProcess(pid) {
 // Pure. `ps -o pid=,ppid=,uid=,command=` gives three integers then the rest of
 // the line verbatim, so the command may contain any amount of whitespace and
 // must not be re-joined from tokens.
+const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/;
+
 function parseProcessTable(text) {
     const rows = [];
     for (const line of String(text).split('\n')) {
-        const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+        const m = PS_ROW.exec(line);
         if (!m) continue;
         rows.push({
             pid: Number(m[1]),
