@@ -40,6 +40,13 @@ git status --short         # Warn if uncommitted changes
 | Uncommitted changes | Warn user, ask if they want to commit (use git directly, do not invoke the commit skill) |
 | All pass | Continue to Step 2 |
 
+**A red that is also red at the base branch is not this change's, and is not a
+licence to skip it either.** Before acting on a Stop row, run the same command in
+a detached worktree of the default branch; the recipe and the verdict table are in
+the `commit` skill under *When a git hook refuses*. Green there and red here: fix
+it. Red there with the same lines: say so in the PR body, fix nothing in this PR
+that belongs to trunk, and decide the deploy on the rows that ARE this change's.
+
 ## Step 1b: Evidence for the human reviewer
 
 The gates above are for the machine. Before opening a PR, check the `prove`

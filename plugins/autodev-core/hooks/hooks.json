@@ -142,6 +142,20 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/context-depth-nudge.js"],
             "timeout": 5,
             "statusMessage": "Checking context depth..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-workflow-wall-note.js"],
+            "timeout": 5,
+            "statusMessage": "Checking workflow runs..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/stop-typecheck.js"],
+            "timeout": 60,
+            "statusMessage": "Typechecking this response's edits..."
           }
         ]
       }

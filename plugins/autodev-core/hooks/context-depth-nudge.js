@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// hooks_profile=minimal (plugin userConfig, reaching hooks as CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE)
+// skips this hook: it advises, it never guards. tooling/test-hooks-profile.js holds the list.
+if (/^minimal$/i.test(process.env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE || process.env.CLAUDE_PLUGIN_OPTION_hooks_profile || '')) process.exit(0);
+
 // Stop hook — says, once, when a session has grown past the restart line.
 //
 // THE RULE IT ENFORCES. Context depth is the bill: measured over 19,419

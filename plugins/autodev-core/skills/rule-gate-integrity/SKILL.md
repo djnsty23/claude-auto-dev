@@ -247,6 +247,38 @@ Three things that generalise past this one check:
   result instead. "This class needs a semantic comparison, here is the
   measurement that says so" is a finding.
 
+### Counting how often a suppressor FIRED is not measuring whether it CAN
+
+A census over the corpus answers "how much does this rule change the output".
+It does not answer "does this rule work", and the two come apart exactly where
+it matters: **a suppressor that fires zero times looks unexercised and may be
+incapable.** Both produce the same number, and the reassuring reading is the
+one a census invites.
+
+`[measured 2026-09-07]` A staleness detector grew a veto so that
+`NO prod tag is pending` -- a sentence asserting the ABSENCE of open work, in
+the exact grammar of asserting its presence -- would not be reported. The veto
+allowed one token between `no` and the verb. The subject is a noun phrase, so
+it never matched the sentence it was written for, and it vetoed nothing.
+
+The fleet census scored it **0 firings**. That was read as "defensive, not yet
+needed on this corpus". It meant "structurally cannot match anything". The two
+were indistinguishable from the measurement, and the sentence that motivated
+the veto was sitting in the corpus being counted, unmatched.
+
+What separated them was a mutation: **deleting the veto entirely left the suite
+green**, which is the signal that the assertion guarding it never reached it.
+Chasing that survivor found the defect in the subject.
+
+- A veto, a filter, an allowlist carve-out -- anything that can only REMOVE
+  output -- needs a case proving it removes something, not a count of how often
+  it did.
+- Assert the intermediate, not the outcome. "This row matches the pattern AND
+  matches the veto" fails loudly when either half stops being true; "this row is
+  not reported" passes just as happily when the row never matched anything.
+- **A zero in a census is two claims wearing one number.** Before recording a
+  rule as unexercised, run one input through it by hand and watch it fire.
+
 ## 8. A probe is bound to the command form it was measured on
 
 > Two spellings of one command. Each is discriminated by exactly one probe, and
@@ -420,6 +452,7 @@ selector that will drift.
 - [ ] It fails when the population is empty, not just when it differs.
 - [ ] Each deliberate breakage was confirmed to fire, and for the right reason.
 - [ ] Every negative assertion was confirmed to reach the code it denies.
+- [ ] Every suppressor was watched firing on one input, not scored by how often it fired.
 - [ ] No count was reported without reading its members.
 - [ ] The exit code depends on every finding the gate prints.
 - [ ] Running it leaves the tree, and the fixtures, unchanged.
