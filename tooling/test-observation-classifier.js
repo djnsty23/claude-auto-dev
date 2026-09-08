@@ -92,7 +92,7 @@ eq('under a scratchpad: null',
 eq('under .claude/probe: null',
   classifyObservation('Write', { file_path: inProj('.claude/probe/x.js') }, '', ctx), null);
 eq('a memory file under ~/.claude/projects: null',
-  classifyObservation('Write', { file_path: '/home/u/.claude/projects/-home-u-proj/memory/note.md' }, '', undefined), null);
+  classifyObservation('Write', { file_path: '/srv/cfg/.claude/projects/-srv-proj/memory/note.md' }, '', undefined), null);
 eq('Edit outside the project: null',
   classifyObservation('Edit', { file_path: path.join(OUTSIDE, 'x.js'), old_string: 'a', new_string: 'b' }, '', ctx), null);
 eq('Write with no path: null', classifyObservation('Write', {}, '', ctx), null);

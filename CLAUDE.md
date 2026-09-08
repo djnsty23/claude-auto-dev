@@ -92,7 +92,7 @@ and `validate` fails while a `*.vacuity-backup` exists. After killing a run,
 ## Architecture
 
 `autodev-core` (the workflow, 43 skills, 4 agents, 7 hook events, the sprint
-system) · `autodev-memory` (sqlite memory, 4 hook events) · `autodev-stack`
+system) · `autodev-memory` (sqlite memory, 3 hook events) · `autodev-stack`
 (vendor skills). `${CLAUDE_PLUGIN_ROOT}` resolves **per plugin**, so cross-plugin
 paths cannot work — if core needs a file, core ships it.
 

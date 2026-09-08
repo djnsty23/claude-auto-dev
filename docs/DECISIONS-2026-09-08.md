@@ -29,13 +29,10 @@ What changed, each against the count that motivated it:
 | concept is the edit (`old → new`, or the new file's path), never the prompt | 383 rows carried another session's message as their concept; one carried a production hostname |
 | one row per (session, type, title) in `saveObservation` | 1,785 rows were exact-title repeats |
 
-Not changed, deliberately: the `UserPromptSubmit` hook and the prompt carrier
-still run. Nothing reads the prompt now that the classifier does not, so that
-hook is 35 ms per prompt for a file nobody opens. Removing it touches
-`hooks.json`, `session-carrier.js` and two suites, and is a separate
-reversible call for whoever picks this up next. The existing rows are also
-untouched: the one-time prune by shape stays a proposal with its count, because
-deleting shared state the operator has not read is branch 3 of the protocol.
+Not changed in this commit: the `UserPromptSubmit` hook and the prompt carrier
+(removed in D5, the next commit) and the existing rows. The one-time prune by
+shape stays a proposal with its count, because deleting shared state the
+operator has not read is branch 3 of the protocol.
 
 ## D3. The prompt argument is ignored, not removed
 
@@ -54,3 +51,17 @@ anyway: node:sqlite enforces the `FOREIGN KEY` to `sessions`, so a caller with
 no carrier is refused one step later by the database and the circuit breaker
 returns null. The suite asserts that cause, so nobody reads the guard as "a
 session-less save is recorded".
+
+## D5. The prompt-capture hook removed, third commit
+
+The second decision panel was held by the same away window and its
+recommended option was this. After D2 nothing reads the carried prompt, so the
+`UserPromptSubmit` hook was 35 ms per prompt spent writing verbatim user text
+to `.claude/memory-sessions/<id>.prompt` for no reader. Removed together:
+the hook's `hooks.json` entry, `hooks/memory-prompt-capture.js`, and the
+carrier's `writePrompt`/`readPrompt`/`clearPrompt`. `clear()` now also unlinks
+a `.prompt` sibling, so a project that ran the older build does not keep a
+prompt on disk past the session that wrote it; both suites plant one and
+assert it is gone. CLAUDE.md's plugin line goes from four hook events to
+three. Reversible by revert; the carrier directory keeps its self-ignore
+because a stale `.prompt` is still a prompt.

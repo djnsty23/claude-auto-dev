@@ -101,7 +101,6 @@ try {
         // Clear only THIS session's carrier — other sessions on the same
         // project keep theirs.
         carrier.clear(cwd, harnessSessionId);
-        carrier.clearPrompt(cwd, harnessSessionId);
     }
 } catch (err) {
     // Memory close is non-critical — never interfere with session teardown.

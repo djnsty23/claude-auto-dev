@@ -48,9 +48,12 @@ and logs it. That option was the evidence doc's proposal 1 to 5, fixing
 capture at source: Bash, Read, Grep and Glob no longer produce rows; a write
 outside the project or under a scratch, probe or memory path is skipped; type
 is `change` from the tool rather than a prompt keyword; concept is the edit,
-never the prompt; one row per (session, type, title). The per-change counts and the
-two things deliberately left alone (the prompt-capture hook, the existing
-rows) are in `docs/DECISIONS-2026-09-08.md`.
+never the prompt; one row per (session, type, title). A third commit, taken
+the same way, removed the `UserPromptSubmit` hook and the prompt carrier that
+fed the old concept column, since nothing read them any more; the plugin now
+registers three hook events. The per-change counts, and the one thing
+deliberately left alone (the existing rows), are in
+`docs/DECISIONS-2026-09-08.md`.
 
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 
