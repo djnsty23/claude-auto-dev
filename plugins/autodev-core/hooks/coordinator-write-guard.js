@@ -452,8 +452,16 @@ try {
                 const { checkBrainRole } = require(path.join(__dirname, '..', 'scripts', 'check-brain-role.js'));
                 verdict = checkBrainRole({ roleFile: rolePath, role, store: null });
             } catch { verdict = null; }
-            const dead = verdict && verdict.state === 'fault'
-                ? verdict.faults.find((f) => f.code === 'dead-session') : null;
+            /* READ THE FAULT, NOT THE STATE. This asked for `state === 'fault'`
+               first, which coupled one question -- is the claimed session live,
+               the only thing this rail turns on -- to a verdict that answers a
+               different one: whether any ADDRESS in the record still reaches.
+               Those came apart when `degraded` was added on 2026-09-08, and a
+               record can now be `degraded` (a peer name still reaches) while
+               `session_id` is dead and this rail is armed for nobody. `faults`
+               is empty for `ok` and `absent`, so the find alone is the whole
+               condition. */
+            const dead = verdict ? verdict.faults.find((f) => f.code === 'dead-session') : null;
             if (dead) {
                 const sub = segments.map((seg) => parseGitSegment(seg, cwd)).find((g) => g && BLOCKED_SUBCOMMANDS.has(g.sub)).sub;
                 process.stderr.write(`coordinator-write-guard: ${rolePath} names session ${claimed} as the coordinator, `

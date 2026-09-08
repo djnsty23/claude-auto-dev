@@ -494,10 +494,19 @@ So, after step 4 and before anything is dispatched, in this order:
    Stop hook falls back to "find it by cwd", which names a place rather than
    a correspondent, and the guard protects nobody.
 3. **Verify the claim before you act on it.** `node "$B\check-brain-role.js"
-   --status`. Exit 0 means a live session holds the record; **exit 2 means it
-   does not, and then you do NOT broadcast** -- an address that resolves to
-   nobody is worse than none, because a session cannot tell a dead coordinator
-   from a busy one. Fix the record and re-run rather than announcing it.
+   --status`. Exit 0 means a live session holds the record; **exit 2 means the
+   record needs rewriting before it is broadcast** -- an address that resolves
+   to nobody is worse than none, because a session cannot tell a dead
+   coordinator from a busy one. Fix the record and re-run rather than
+   announcing it.
+
+   Exit 2 covers two verdicts, and the difference is what to fix rather than
+   whether to broadcast. `FAULT` means nothing in the record reaches, or an
+   address reaches a stranger. `DEGRADED` means a field decayed while another
+   address is still verified live, and the check names which -- usually
+   `peer_name`, which takes a fresh suffix on **every restart** while
+   `session_id` and `desktop_session_id` do not. Re-stamp the named field; you
+   do not need a new claim.
 
    This step exists because writing the file is not the same as writing it
    correctly. `[measured 2026-09-04]` the Brain that added step 2 then filled
@@ -525,9 +534,18 @@ a hook wants a check, not another correction. **That check now exists** --
 `check-brain-role.js`, added the same day -- which is why step 3 above is a
 command rather than a warning. It reads the sessions directory for a live file
 whose `name` and `sessionId` match and whose pid answers, joins the desktop
-store on `cliSessionId`, and reports absent / ok / fault, naming the dead id on
-a fault. It never resolves a coordinator by cwd: that fallback is the bug
-rather than the mitigation, because a worktree outlives the session in it.
+store on `cliSessionId`, and reports absent / ok / degraded / fault, naming the
+dead id and any address that still reaches. It never resolves a coordinator by
+cwd: that fallback is the bug rather than the mitigation, because a worktree
+outlives the session in it.
+
+`[measured 2026-09-08]` `degraded` was split out of `fault` because the two
+consumers of that verdict disagreed with each other: the check's own text said
+"PARTLY STALE AND STILL REACHABLE, use desktop session id ..." while the state
+it returned said `fault`, and the Stop hook, which reads the state, told five
+sessions in one day that nobody could be reached and to wake the operator. All
+five reached the coordinator at the address in that same record. A record with
+one decayed field is a field to re-stamp, not a lost channel.
 
 ## When the boot finishes — report, then act
 

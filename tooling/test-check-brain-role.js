@@ -59,7 +59,7 @@ function run(args, env) {
 try {
     // --help and --selftest are what check-entrypoints and check-suites lean on.
     const help = run(['--help']);
-    check('--help exits 0 and names the four states', help.status === 0 && /absent/.test(help.out) && /fault/.test(help.out), 'exit ' + help.status);
+    check('--help exits 0 and names the four states', help.status === 0 && /absent/.test(help.out) && /degraded/.test(help.out) && /fault/.test(help.out), 'exit ' + help.status);
     const self = run(['--selftest']);
     check('--selftest passes on this machine', self.status === 0, self.out.slice(-400));
     /* Assert the ARITHMETIC, not the literal. This line read `fixture of 2
@@ -98,9 +98,36 @@ try {
     check('desktop uuid in session_id: exit 2', conf.status === 2, 'exit ' + conf.status);
     check('  says the two registries key differently', /FAULT desktop-mismatch: desktop record local_desk-live belongs to CLI session cli-live, not to session_id desk-live/.test(conf.out), conf.out);
 
-    // This morning's record: a peer name nobody resolves, everything else fine.
+    /* This morning's record: a peer name nobody resolves, everything else fine.
+       `[measured 2026-09-08]` five times over, and the verdict said `fault` while
+       the text beneath it offered the desktop id. It is DEGRADED: the fault is
+       exact, exit 2 is unchanged, and the difference is what the reader -- a
+       person here, `stop-brain-report.js` in the hook -- is told to do next. */
     const suffix = run(['--status', '--role', role({ session_id: 'cli-live', peer_name: 'peer-live-71', desktop_session_id: 'local_desk-live' })]);
-    check('a stale peer suffix alone is a fault', suffix.status === 2 && /FAULT dead-peer: peer_name peer-live-71/.test(suffix.out) && !/dead-session/.test(suffix.out), suffix.out);
+    check('a stale peer suffix alone: exit 2, and the fault named',
+        suffix.status === 2 && /FAULT dead-peer: peer_name peer-live-71/.test(suffix.out) && !/dead-session/.test(suffix.out), suffix.out);
+    check('  the verdict line says DEGRADED, not FAULT, because an address survives',
+        /^brain-role: DEGRADED/m.test(suffix.out), suffix.out.split('\n')[0]);
+    check('  and the advice offers the desktop id and names peer_name as the stale FIELD',
+        /PARTLY STALE AND STILL REACHABLE\. Use desktop session id `local_desk-live`/.test(suffix.out)
+        && /Stale, so a field to re-stamp and not an address: `peer_name`/.test(suffix.out)
+        && !/Nobody can be reached/.test(suffix.out), suffix.out);
+    /* The control: same shape, but the desktop id is gone too. Nothing reaches,
+       so DEGRADED must not be printed. Without this pair a subject that says
+       DEGRADED on every fault passes the three checks above. */
+    const bothGone = run(['--status', '--role', role({ session_id: 'cli-live', peer_name: 'peer-live-71', desktop_session_id: 'local_desk-archived' })]);
+    check('  control: with the desktop record archived too, nothing reaches -> FAULT',
+        bothGone.status === 2 && /^brain-role: FAULT/m.test(bothGone.out)
+        && /Nobody can be reached/.test(bothGone.out) && !/PARTLY STALE/.test(bothGone.out), bothGone.out);
+    /* And the third state, from the same fixture: DEGRADED must not be reachable
+       by "the check did not run". The desktop id above is live, and with no
+       store to read it against the verdict may not lean on it. */
+    const unchecked = run(['--status', '--role', role({ session_id: 'cli-live', peer_name: 'peer-live-71', desktop_session_id: 'local_desk-live' })],
+        { CLAUDE_SESSION_STORE: path.join(ROOT, 'no-such-store') });
+    check('  an UNCHECKED address never produces DEGRADED, and is not called dead either',
+        unchecked.status === 2 && !/DEGRADED/.test(unchecked.out) && !/PARTLY STALE/.test(unchecked.out)
+        && /NO ADDRESS HERE WAS VERIFIED REACHABLE/.test(unchecked.out) && !/Nobody can be reached/.test(unchecked.out),
+        unchecked.out);
 
     // Half an address.
     const half = run(['--status', '--role', role({ session_id: 'cli-live', peer_name: 'peer-live' })]);
@@ -132,5 +159,5 @@ try {
 
 console.log('');
 console.log(pass + ' passed, ' + fail + ' failed');
-console.log('subject: plugins/autodev-core/scripts/check-brain-role.js; fixture of 2 session files (own pid live, 999999 dead), 2 nested store records (1 archived); every fault case beside the passing record, plus a dead-pid control.');
+console.log('subject: plugins/autodev-core/scripts/check-brain-role.js; fixture of 2 session files (own pid live, 999999 dead), 2 nested store records (1 archived); every fault case beside the passing record, a dead-pid control, and the three verdicts driven off one record shape -- DEGRADED with a live desktop id, FAULT with it archived, and neither when no store could be read.');
 if (fail) { console.log('failed: ' + failures.join('; ')); process.exit(1); }
