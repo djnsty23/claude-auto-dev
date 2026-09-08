@@ -113,7 +113,7 @@ named.
 The push's CI run is the Ubuntu measurement. The count is platform-sensitive
 (Windows-gated code is entered on one runner and not the other), which is why the
 step runs on `ubuntu-latest` only, beside the other Linux-only gates.
-The CI result for this branch is recorded in the commit that follows this one.
+**CI, run 34209762305 on d303f89, `ubuntu-latest`:** `npm test` 114/114, check:suites green, and the coverage step printed `774 named function(s) · 737 executed · 37 NEVER CALLED` and `1 NEVER LOADED`, **37 vs ceiling 37, 1 vs ceiling 1**, exit 0, in 236 s (09:39:26 to 09:43:22 UTC) on a runner that is quiet by construction. The Ubuntu count is the Mac count, so the platform sensitivity is real but dormant today. `windows-latest` went red on exactly one line, in the new suite: an assertion matched the fixture path with forward slashes and the tool prints `path.relative()`, which is backslashes there. Fixed in the commit that carries this paragraph; nothing in the check itself differed on Windows.
 
 ## What the suite proves and what it does not
 

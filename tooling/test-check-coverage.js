@@ -87,7 +87,10 @@ const ranRunner = (fx) => fs.existsSync(fx.marker);
     check('fixture with one never-entered function: exit 1', r.status === 1 && !r.error, detail(r));
     check('  the never-entered function is NAMED', /✗ neverEnteredByAnything\(\)/.test(r.stdout), detail(r));
     check('  and the entered one is not', !/✗ enteredByTheRunner\(\)/.test(r.stdout), detail(r));
-    check('  the file is named', /plugins\/fx\/scripts\/fixture-census-lib\.js/.test(r.stdout), detail(r));
+    // Either separator: the tool prints path.relative(), which is backslashes on
+    // Windows. `[measured 2026-09-08]` this was the one red line on windows-latest
+    // in CI run 34209762305, with ubuntu green through the coverage step.
+    check('  the file is named', /plugins[\/\\]fx[\/\\]scripts[\/\\]fixture-census-lib\.js/.test(r.stdout), detail(r));
     check('  the population is printed (1 source file, 2 named functions, 1 never called)',
         /1 source file\(s\) in plugins\//.test(r.stdout) && /2 named function\(s\)/.test(r.stdout) && /1 NEVER CALLED/.test(r.stdout), detail(r));
     check('  the verdict names the ceiling it exceeded', /1 never-called function\(s\) exceeds the ceiling of 0/.test(r.stdout), detail(r));
