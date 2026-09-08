@@ -17,8 +17,13 @@ Complete deployment pipeline: pre-flight → security → deploy → verify → 
 
 ## Step 1: Blocking Quality Gates
 
-Read the repository guidance and actual package scripts. Run its required
-checks with the detected package manager and test runner, preserving every exit
+Read the repository guidance and actual package scripts. Freeze the complete
+implementation as a full `candidate_commit` SHA before running required checks.
+If implementation or integration changes it, select the new candidate and repeat
+the required verification. Keep this value through evidence archival; a later
+artifact commit is not automatically the tested or deployed candidate.
+
+Run the required checks with the detected package manager and test runner, preserving every exit
 code and the full output. Independent checks may run in parallel; checks that
 share mutable fixtures or depend on another stage run in order. Do not add
 Jest-only flags to another runner or interpret an empty test population as green.
@@ -97,7 +102,7 @@ promotion does not need a repeated permission question; a historical account of
 another user's permission grants none. Use Brain's current scope/exception rules.
 Before the deployment, or a push/merge that triggers one, record:
 
-1. The exact tested candidate SHA/base and evidence that all required checks ran.
+1. The frozen `candidate_commit` SHA/base and evidence that all required checks ran.
    A default-branch name or a prior run on an earlier SHA cannot replace this.
    If merging changes the tested candidate, test the integration result before
    production is triggered or use the platform's supported promotion procedure.
@@ -110,7 +115,8 @@ Before the deployment, or a push/merge that triggers one, record:
    would erase the change window.
 3. The gate command/results, live verification plan and artifact paths in the
    deploy ledger. Resolve `autodev_core_root` from the loaded plugin and generate
-   the ledger using the saved `previous_deployed_commit` before promotion.
+   the ledger with `--since "$previous_deployed_commit" --candidate "$candidate_commit"`
+   before promotion.
    Checklist ticks are recorded assertions, not independent proof.
 4. The specific authorized recovery procedure, previous artifact/version where
    one exists, and the conditions that trigger recovery. A first deployment has
@@ -181,7 +187,7 @@ Public and internal/admin UI both need live behavior checks with the appropriate
 role, console/network inspection and resulting data/reload verification.
 
 Read back `deployed_candidate_sha` and the target environment after promotion;
-compare that SHA with the exact tested candidate. Keep it separate from the
+compare that SHA with the frozen `candidate_commit`. Keep it separate from the
 saved `previous_deployed_commit`, which remains the ledger baseline. If the
 readback differs, resolve the mismatch before claiming candidate verification.
 Use a fresh isolated
@@ -227,26 +233,36 @@ as unresolved and continue checks that can actually run.
 The ledger enumerates what needs checking. Reuse `autodev_core_root` and the
 immutable `previous_deployed_commit` captured before promotion in Step 4. Do not
 resolve the current platform SHA again as the baseline: it now names the new
-candidate. Run against the same tested candidate checkout, then read back the
-ledger header and affected population to verify the saved range is still used.
+candidate. Reuse the frozen `candidate_commit` from Step1 as the other end of
+that range. The checkout may now contain a later evidence commit; read back the
+ledger header and population to verify the explicit candidate is still used.
 
 ```bash
-node "$autodev_core_root/scripts/deploy-ledger.js" --write --since "$previous_deployed_commit"
-node "$autodev_core_root/scripts/deploy-ledger.js" --verify --since "$previous_deployed_commit"
+node "$autodev_core_root/scripts/deploy-ledger.js" --write --since "$previous_deployed_commit" --candidate "$candidate_commit"
+node "$autodev_core_root/scripts/deploy-ledger.js" --verify --since "$previous_deployed_commit" --candidate "$candidate_commit"
 ```
 
-`--write` reads `<last deploy>..HEAD` and produces `DEPLOY-LEDGER.md` at the
-repo root: one row per affected surface, each needing a desktop pass, 390, 414,
-console clean and network clean. `--verify` checks empty boxes only in rows
-still present in the written ledger; it does not prove expected rows were kept.
-Independently inventory affected flows from the actual changed files and product
-contract, reconcile every required surface against the ledger, and add omitted
-checks before relying on its verdict. A deleted row can otherwise disappear from
-verification entirely. Run
-it before calling a deploy verified. Existing ticks survive regeneration, so
-bind each result to its tested SHA/environment and invalidate stale checks when
-code or the base changes. The tool does not perform that evidence binding for
-you. Re-read the written ledger; preserved ticks alone are not a fresh test.
+`--write` records the resolved base and candidate commits and produces
+`DEPLOY-LEDGER.md` at the repo root. Each derived surface needs desktop, 390,
+414, console and network checks. `--verify` requires every expected row exactly
+once, matching changed-file details and five checked cells; it rejects missing,
+malformed or stale commit-window records. Run it before calling a deploy verified.
+
+Regeneration preserves checks and metrics only for the same resolved base and
+candidate. Changing either commit or loading an older ledger without that
+provenance resets them. Without `--candidate`, the CLI uses current HEAD and
+still rejects evidence from an earlier candidate. An explicit older candidate
+verifies only that historical record, never the newer checkout or deployment.
+Commit/archive the evidence separately from a production trigger. If a later
+commit is actually promoted, it is a new candidate requiring its own checks and
+live readback; do not reuse historical verification to claim that commit passed.
+
+This binds recorded assertions to a commit window, not to the actual
+browser, deployed environment or business outcome. Keep those artifacts and
+readbacks separately. Independently inventory affected flows from the product
+contract and add checks the file/route heuristics cannot derive. Unsupported
+Markdown/control characters in a surface path produce an explicit tool gap,
+not a checked surface or permission to rename the user's files.
 
 For a verified first deployment there is no prior deployed commit. Treat the
 entire candidate as the affected surface inventory; the current ledger CLI
@@ -262,14 +278,14 @@ tell what changed" are opposite answers and must not print the same.
 
 Three things it deliberately does not do:
 
-- **It does not decide whether a check passed.** A human or a browser-driving
-  agent ticks the boxes; `--verify` only asks whether they are ticked. A checker
-  that both generates and satisfies its own checklist proves nothing.
-- **Its WIDE detection is incomplete.** It tests only files selected by its UI
-  extension filter. A changed `tailwind.config.js` can report one changed file
-  but zero UI files and zero WIDE effects. Independently inspect shared config,
-  tokens, data and layout dependencies; a zero detector count is not proof
-  that no user-facing behavior changed.
+- **It does not execute verification.** A human or a browser-driving agent
+  records the result. Row/commit validation cannot prove that a browser flow
+  ran or its business outcome passed.
+- **Its WIDE detection is heuristic.** Known config, token and layout names are
+  considered across UI, JavaScript/TypeScript and JSON files, including
+  `tailwind.config.js`. Other shared dependencies may still be omitted.
+  Independently inspect them; a zero detector count does not prove that no
+  user-facing behavior changed.
 - **It does not derive metrics.** The ledger has a metrics section that must be
   filled or explicitly waived, and an empty one fails `--verify`. Nothing here
   knows which metrics your deploy could move.

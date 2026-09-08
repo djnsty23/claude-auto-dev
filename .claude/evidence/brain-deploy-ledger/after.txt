@@ -1,0 +1,55 @@
+Subject SHA256: 74db21c7ee14741c13a4dc31634bc739209842b927fc4636553a2d6bc8fadab0
+Command: node tooling/test-deploy-ledger.js
+  PASS  derives the two routes and the wide file
+  PASS  counts only user-facing files, not lib/helper.ts
+  PASS  writes a ledger with a row per surface
+  PASS  refuses while boxes are unticked
+  PASS  names metrics as unchecked
+  PASS  passes once every box is ticked and metrics recorded
+  PASS  preserves existing ticks across a rewrite
+  PASS  refuses when the last deploy cannot be determined
+  PASS  WIDE discovery includes runtime config/data before filtering by UI extension
+  PASS  WIDE positive control is CSS; ordinary helper and Markdown remain excluded
+  PASS  WIDE-only change cannot be rendered as no user-facing changes
+  PASS  properly checked WIDE-only ledger can pass
+  PASS  complete two-route ledger passes positive control
+  PASS  valid checks survive ordinary CRLF Markdown editing
+  PASS  deleting one expected route fails and names the missing route
+  PASS  deleting every expected route cannot become empty success
+  PASS  partial cells cannot satisfy a route despite no literal unchecked box
+  PASS  duplicate checked route rows are rejected
+  PASS  checked row with wrong changed-file details cannot substitute for expected row
+  PASS  same-window regeneration preserves valid route evidence and metrics
+  PASS  verification refuses a ledger generated for another base even with the same route set
+  PASS  base change resets route checks and metrics
+  PASS  equivalent base refs preserve same-window evidence by resolved SHA
+  PASS  same-base new-HEAD verification rejects stale ticks before regeneration
+  PASS  same-base new-HEAD regeneration resets route checks and metrics
+  PASS  new candidate passes only after recording fresh checks
+  PASS  legacy or removed provenance is unresolved, not a verified current window
+  PASS  legacy ledger regeneration resets unsupported inherited claims
+  PASS  genuine zero-surface docs-only population can still pass with recorded metrics
+  PASS  leading-space path retains its exact identity instead of becoming an app route
+  PASS  leading-space surface can pass after its actual row is checked
+  PASS  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: "app/with|pipe/page.tsx"
+  PASS  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: "app/with`tick/page.tsx"
+  PASS  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: "app/with\nnewline/page.tsx"
+  PASS  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: "\tapp/page.tsx"
+  PASS  explicit candidate accepts fresh valid evidence
+  PASS  ledger is actually tracked in a later evidence commit
+  PASS  default HEAD verification still rejects evidence from the earlier candidate after archival
+  PASS  tracked archival commit does not invalidate explicit frozen-candidate verification
+  PASS  explicit historical verdict prints candidate and current checkout separately
+  PASS  regenerating archived frozen-candidate evidence is byte-stable
+  PASS  old candidate remains verifiable as explicitly historical after later source edits
+  PASS  requesting the newer candidate does not inherit old candidate checks
+  PASS  default HEAD cannot turn historical candidate success into current-source success
+  PASS  malformed candidate option refuses: ["--candidate"]
+  PASS  malformed candidate option refuses: ["--candidate","--verify"]
+  PASS  malformed candidate option refuses: ["--candidate","not-a-real-ref"]
+  PASS  malformed candidate option refuses: ["--candidate","ebbc21e59f742f6136df74712441f95ca92a198b","--candidate","f0ddba350f2c1420589d8e05c2b3e5ae887c8c40"]
+[control] 48 assertion(s), 48 passed, 0 failed
+
+Targeted mutation comparison: WIDE46/48, row membership43/48, window binding39/48; each exit1 at the corresponding assertions.
+Tracked ledger workflow: frozen candidate verify0 after later evidence commit; regeneration has no diff. Default HEAD and explicit newer source verify1.
+This checks recorded row membership and commit identity, not actual browser, deployment target, artifact authenticity or business outcomes. Full integration gate pending.
