@@ -13,40 +13,47 @@ never ships.
 ## Commands
 
 ```bash
-npm run gate                 # THE GATE: six steps chained with &&. Run this.
-npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 6.
+npm run gate                 # THE GATE: seven steps chained with &&. Run this.
+npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 7.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
+node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md; step 7 fails on drift
 ```
 
-**`npm test` is ONE SIXTH of the gate, and every step it skips fails silently.**
+**`npm test` is ONE SEVENTH of the gate, and every step it skips fails silently.**
 `[measured 2026-08-30]` a session ran nine green `npm test` runs and never
 executed `check:suites`, so a newly added suite was reported green while
 `check-suites-can-fail.js` had it counted as NOT verified. The suite in question
 was the one gating pushes.
 
 Nothing about the first command hints at the rest, which is why `npm run gate`
-now exists: it chains all six.
+now exists: it chains all seven.
 
 `[measured 2026-09-07]` **THE CHAIN IS `&&`, so a red first step means the other
-five NEVER RAN.** The gate is
+six NEVER RAN.** The gate is
 
 ```
 npm test && npm run check:suites && npm run check:probe-shapes
   && npm run check:population && npm run check:entrypoints
-  && npm run check:skill-tools
+  && npm run check:skill-tools && npm run check:agents-md
 ```
+
+The seventh step, `check:agents-md`, is last on purpose: it regenerates
+`AGENTS.md` from the `rule-*` skills to a temp path and diffs, takes
+milliseconds, and its only failure is a stale document. Last, it can never hide
+an expensive step behind it, and nothing that matters is skipped when it is the
+one that goes red.
 
 A session landing a rescued commit read the resulting exit 1 as "the gate is
 red", and was one step from describing the commit as gated when `check:suites` —
 the step that catches exactly the unverifiable-new-suite case above — had not
 executed at all. Its change ADDED a suite, so that was the one step it could not
-afford to skip. When the first step fails, run the remaining five yourself; the
-chain's exit status is a verdict on one step, not on six.
+afford to skip. When the first step fails, run the remaining six yourself; the
+chain's exit status is a verdict on one step, not on seven.
 
 **And `npm run gate` is NOT "what CI runs"**, in both directions. CI adds a
 `node --check` parse loop over every `plugins/*/hooks/*.js` that the gate has no
-equivalent for, and the gate runs `check:probe-shapes`, which CI does not. Four
+equivalent for, and the gate runs `check:probe-shapes`, which CI does not. Five
 of CI's steps are `if: matrix.os == 'ubuntu-latest'`, so a green local gate on
 macOS and a green CI run are not claims about the same set of checks.
 

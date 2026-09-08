@@ -180,7 +180,13 @@ try {
         rec.status === 0 && filed.length === 1 && new RegExp(`^\\d{8}T\\d{6}Z-${head2.slice(0, 7)}\\.md$`).test(filed[0]),
         rec.out + ' files=' + filed.join(','));
     check('record: .claude/last-deploy now names HEAD', read('.claude/last-deploy').trim() === head2, read('.claude/last-deploy'));
-    check('record: says where it filed', /\[record\] deploy-ledgers\//.test(rec.out), rec.out);
+    // [\\/] because this line is the only assertion here reading a
+    // `path.relative` result, which is platform-native: Windows printed
+    // `deploy-ledgers\...` and a hard-coded `/` failed 1 of 54 there while macOS
+    // and Linux stayed green. The other path assertions in this file read `git
+    // diff --name-only` output or a literal `/` in the script's format string,
+    // both of which are forward slashes on every platform.
+    check('record: says where it filed', /\[record\] deploy-ledgers[\\/]/.test(rec.out), rec.out);
 
     // ---- INELIGIBLE BY PATH: fields are irrelevant, the window itself is refused ----
     w('src/billing/plans.ts', 'export const PRO = 10;\n');
