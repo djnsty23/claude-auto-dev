@@ -166,58 +166,77 @@ function checkPlugin(key, entry) {
 
 // ------------------------------------------------------------------- main
 
-const manifest = (() => {
-    try { return JSON.parse(fs.readFileSync(MANIFEST, 'utf8')); } catch { return null; }
-})();
+function main() {
+    const manifest = (() => {
+        try { return JSON.parse(fs.readFileSync(MANIFEST, 'utf8')); } catch { return null; }
+    })();
 
-if (!manifest || !manifest.plugins) {
-    console.error('COULD NOT READ the plugin manifest — this is NOT "no drift".');
-    console.error(`  path: ${MANIFEST}`);
-    console.error('  Nothing was compared, so no verdict here would have meant anything.');
-    process.exit(2);
-}
-
-const results = [];
-for (const [key, arr] of Object.entries(manifest.plugins)) {
-    for (const entry of (Array.isArray(arr) ? arr : [arr])) results.push(checkPlugin(key, entry));
-}
-
-if (AS_JSON) {
-    console.log(JSON.stringify({ manifest: MANIFEST, results }, null, 2));
-    process.exit(results.some((r) => r.status === 'DRIFTED') ? 1 : 0);
-}
-
-const drifted = results.filter((r) => r.status === 'DRIFTED');
-const unknown = results.filter((r) => r.status === 'COULD NOT CHECK');
-const matched = results.filter((r) => r.status === 'MATCHES');
-
-if (!QUIET || drifted.length || unknown.length) {
-    console.log(`POPULATION: ${results.length} installed plugin(s) from ${MANIFEST}`);
-    console.log(`  ${matched.length} match their recorded commit, ${drifted.length} DRIFTED, ${unknown.length} COULD NOT BE CHECKED`);
-    console.log('  Content, not version numbers: two trees can share a version, and the cache is keyed on the number.\n');
-}
-
-for (const r of drifted) {
-    console.log(`DRIFTED  ${r.plugin} v${r.version} vs ${String(r.sha).slice(0, 12)}`);
-    console.log(`  ${r.installPath}`);
-    for (const f of r.differing.slice(0, 20)) console.log(`    differs: ${f}`);
-    if (r.differing.length > 20) console.log(`    ...and ${r.differing.length - 20} more differing`);
-    for (const f of r.missing.slice(0, 10)) console.log(`    missing from the install: ${f}`);
-    if (r.missing.length > 10) console.log(`    ...and ${r.missing.length - 10} more missing`);
-    console.log('  The installed code is NOT the code at that commit. Reinstall, or find out');
-    console.log(`  who wrote it: claude plugin marketplace update ${r.marketplace} && claude plugin update ${r.plugin}@${r.marketplace} -y\n`);
-}
-
-for (const r of unknown) {
-    console.log(`COULD NOT CHECK  ${r.plugin} v${r.version}`);
-    console.log(`  ${r.reason}`);
-    console.log('  That is not a pass. Nothing was compared.\n');
-}
-
-if (!QUIET && matched.length) {
-    for (const r of matched) {
-        console.log(`MATCHES  ${r.plugin} v${r.version} — ${r.scanned} file(s) identical to ${String(r.sha).slice(0, 12)}`);
+    if (!manifest || !manifest.plugins) {
+        console.error('COULD NOT READ the plugin manifest — this is NOT "no drift".');
+        console.error(`  path: ${MANIFEST}`);
+        console.error('  Nothing was compared, so no verdict here would have meant anything.');
+        return 2;
     }
+
+    const results = [];
+    for (const [key, arr] of Object.entries(manifest.plugins)) {
+        for (const entry of (Array.isArray(arr) ? arr : [arr])) results.push(checkPlugin(key, entry));
+    }
+
+    if (AS_JSON) {
+        console.log(JSON.stringify({ manifest: MANIFEST, results }, null, 2));
+        return results.some((r) => r.status === 'DRIFTED') ? 1 : 0;
+    }
+
+    const drifted = results.filter((r) => r.status === 'DRIFTED');
+    const unknown = results.filter((r) => r.status === 'COULD NOT CHECK');
+    const matched = results.filter((r) => r.status === 'MATCHES');
+
+    if (!QUIET || drifted.length || unknown.length) {
+        console.log(`POPULATION: ${results.length} installed plugin(s) from ${MANIFEST}`);
+        console.log(`  ${matched.length} match their recorded commit, ${drifted.length} DRIFTED, ${unknown.length} COULD NOT BE CHECKED`);
+        console.log('  Content, not version numbers: two trees can share a version, and the cache is keyed on the number.\n');
+    }
+
+    for (const r of drifted) {
+        console.log(`DRIFTED  ${r.plugin} v${r.version} vs ${String(r.sha).slice(0, 12)}`);
+        console.log(`  ${r.installPath}`);
+        for (const f of r.differing.slice(0, 20)) console.log(`    differs: ${f}`);
+        if (r.differing.length > 20) console.log(`    ...and ${r.differing.length - 20} more differing`);
+        for (const f of r.missing.slice(0, 10)) console.log(`    missing from the install: ${f}`);
+        if (r.missing.length > 10) console.log(`    ...and ${r.missing.length - 10} more missing`);
+        console.log('  The installed code is NOT the code at that commit. Reinstall, or find out');
+        console.log(`  who wrote it: claude plugin marketplace update ${r.marketplace} && claude plugin update ${r.plugin}@${r.marketplace} -y\n`);
+    }
+
+    for (const r of unknown) {
+        console.log(`COULD NOT CHECK  ${r.plugin} v${r.version}`);
+        console.log(`  ${r.reason}`);
+        console.log('  That is not a pass. Nothing was compared.\n');
+    }
+
+    if (!QUIET && matched.length) {
+        for (const r of matched) {
+            console.log(`MATCHES  ${r.plugin} v${r.version} — ${r.scanned} file(s) identical to ${String(r.sha).slice(0, 12)}`);
+        }
+    }
+
+    return drifted.length ? 1 : 0;
 }
 
-process.exit(drifted.length ? 1 : 0);
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();
