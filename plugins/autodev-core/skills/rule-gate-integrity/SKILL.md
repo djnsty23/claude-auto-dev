@@ -13,7 +13,7 @@ paths:
 
 # A gate that cannot fail is not a gate
 
-These four failure modes were hit independently by two sessions on the same day,
+These failure modes were hit independently by two sessions on the same day,
 working on unrelated problems — a mutation harness for a token generator, and a
 test-vacuity sweep across a plugin marketplace. Both arrived here the hard way.
 Each one produces a **green result that means nothing**, and each is invisible
@@ -66,9 +66,14 @@ was to move the line to the end and give it the count it actually read — *"so 
 empty scan is visible instead of reassuring."* That repo now carries an explicit
 `read 0 files, so nothing was checked` branch. Copy the shape.
 
+A zero finding can be valid; zero execution cannot prove coverage. Establish
+expected population from independent inputs and distinguish an intentionally
+empty workload from missing, unreadable or wrongly filtered input. Do not invent
+work merely to satisfy a positive floor.
+
 ## 3. A canary must fire, and fire for the RIGHT reason
 
-Confirm two things about every deliberate breakage:
+Confirm all three properties of every deliberate breakage:
 
 1. **It fired at all.** A mutation that matches nothing proves nothing. If a
    canary reports an assertion vacuous, suspect the *mutation* first — one that
@@ -321,8 +326,9 @@ and the probe on the same line**, and re-measure when either moves.
 
 The remedy that survives both forms is to stop reading status and read the
 RESULT: perform the merge in a throwaway worktree and parse the output. For a
-JSON file that is `JSON.parse` throwing on the markers, which also proves the
-records you cared about survived rather than only that a conflict existed.
+JSON file, parse the actual merged result and independently assert the expected
+record identities and values. Valid JSON alone does not prove records survived;
+a successfully parsed empty object is the counterexample.
 
 ## 9. Sample the input before you build the reader
 
@@ -413,12 +419,13 @@ A suite built entirely from the first two rows cannot fail on anything in the
 third, no matter how complete its coverage. That is not a gap in the corpus, it
 is a gap in the assertion's shape, and adding routes never closes it.
 
-**The same defect is in this repo.** `check-skill-triggers.js` scores every
+**Historical instance in this repo.** `check-skill-triggers.js` scores every
 description alone: `!r.hasCondition`, `r.len > 320`, `!r.hasWhenToUse`. Every
 predicate reads one row and there is no pairwise comparison in the file. So
-nothing detects two skills whose descriptions match the SAME situation, which is
-the dispatch collision `rule-workflow-spine` exists to address. The one checker
-that touches descriptions cannot see the failure the descriptions cause.
+that checker alone cannot detect two skills matching the same situation. The
+current `check-skill-collisions.js` adds pairwise candidate detection; read its
+actual results and triage reasons. Lexical overlap is a review signal, not proof
+of semantic ambiguity, and a lexical pass is not an observed dispatch outcome.
 
 Two reasons this shape survives review, both of which apply above:
 
@@ -540,12 +547,23 @@ than behind a flag. A flag nobody passes is not an entry point.
 **Ask of every selftest: name the command that executes it.** If the answer is
 its own `--selftest` flag, grep for who passes that flag before believing it.
 
+## 13. Bind evidence to the candidate and transition
+
+Capture the prior deployed artifact before changing the target. A baseline read
+after promotion can equal the candidate and erase the entire verification set.
+Freeze baseline and candidate identities, derive expected members independently,
+and require fresh evidence when either identity or the acceptance contract changes.
+A ledger rewrite must not transfer old checkmarks to a new candidate; deleting
+an expected row cannot turn missing verification into completion. Exercise those
+transitions with controls, not just an unchanged happy-path ledger.
+
 ## Before shipping a gate
 
 - [ ] It runs the real implementation, not a reconstruction.
 - [ ] The shape it keys on was confirmed to EXIST in the real input, with a control.
 - [ ] Its first corpus run was triaged by hand, and the precision written down.
-- [ ] It fails when the population is empty, not just when it differs.
+- [ ] It fails on missing expected input/coverage; a legitimate empty workload is
+      explicitly distinguished from a broken or unexecuted scan.
 - [ ] Each deliberate breakage was confirmed to fire, and for the right reason.
 - [ ] Every negative assertion was confirmed to reach the code it denies.
 - [ ] Every suppressor was watched firing on one input, not scored by how often it fired.

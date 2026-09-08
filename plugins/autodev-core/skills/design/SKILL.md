@@ -9,13 +9,9 @@ user-invocable: true
 
 # Frontend Design
 
-> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
-> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
-> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
-> which `resize_window` alone does not guarantee. The `browser` skill and the
-> `agent-browser` steps were dropped in 8.79.0 — do not reach for that CLI here.
-> (The binary itself is still installed for kb-factory's JS-rendered crawls;
-> that is a separate consumer, not a fallback for page verification.)
+Use the browser driver actually exposed by the current host and its documented
+schema. Resolve it before promising live verification; historical tool names
+and opening a browser window do not establish agent control.
 
 Create distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics.
 
@@ -28,10 +24,12 @@ Create distinctive, production-grade frontend interfaces that avoid generic "AI 
 
 ## Design Thinking
 
-Before coding, commit to a **bold aesthetic direction**:
+Read the requested scope and existing design system first. For new visual
+exploration, choose a clear direction grounded in the user's task; routine
+feature work preserves established tokens, structure and interaction patterns:
 
 1. **Purpose**: What problem does this solve? Who uses it?
-2. **Tone**: Pick an extreme:
+2. **Tone**: Choose an appropriate direction; possible references include:
    - Brutally minimal
    - Maximalist chaos
    - Retro-futuristic
@@ -58,7 +56,8 @@ Create working code (React/Vue/HTML) that is:
 
 ## Responsive Design (required)
 
-Every layout must adapt to mobile-first breakpoints:
+Adapt layouts to the actual content, task and supported breakpoints. The table
+is a set of possible patterns, not a mandate to replace existing navigation:
 
 | Pattern | Mobile | Tablet+ | Desktop+ |
 |---------|--------|---------|----------|
@@ -87,9 +86,10 @@ Test at 375px width before considering any UI complete.
 ## Aesthetics Guidelines
 
 ### Typography
-- Choose **unique, interesting fonts** - avoid generic fonts
-- Pair distinctive display font with refined body font
-- Use Google Fonts or custom fonts, not system defaults
+- Preserve established type tokens when extending a product.
+- For a new visual direction, choose legible type that supports hierarchy and
+  loading/performance constraints; system fonts are valid when they serve it.
+- Pair a display font with body type only when the content benefits.
 
 ### Color & Theme
 - Commit to a cohesive palette
@@ -122,7 +122,9 @@ that the hero shows no product UI at all. Load
 
 ## AI Slop Detection Checklist
 
-Before finalizing any design, check for these patterns. If 3+ are present, start over with a bolder direction:
+Use these signals as prompts to inspect fit with the actual task, not a score
+or restart gate. Three shared patterns do not prove poor design. Preserve
+accessible, consistent components unless observed evidence supports a change:
 
 | Signal | What It Looks Like | Fix |
 |--------|-------------------|-----|
@@ -136,7 +138,8 @@ Before finalizing any design, check for these patterns. If 3+ are present, start
 | **Predictable layout** | Header → hero → 3 cards → CTA → footer | Break the flow with unexpected sections |
 | **Same as last time** | Reusing a previous design's patterns | Deliberately choose a different aesthetic direction |
 
-No design should be the same. Interpret creatively and make unexpected choices that feel genuinely designed for the context.
+Consistency across an existing product is valuable. Make intentional choices
+for the context; novelty alone is not a requirement or acceptance criterion.
 
 ## Design Quality Gate
 
@@ -156,25 +159,24 @@ Before shipping any new UI, check these against the existing design:
 
 After implementing a design, validate visually:
 
-### Browser tools
+### Browser verification
 
-`navigate` to the page, `computer` `screenshot` for desktop, then `resize_window`
-`{preset: 'mobile'}` and screenshot again. Check 390 **and** 414 — one width is not
-"mobile". For a device gate rather than a width breakpoint, use chrome-devtools
-`emulate` and reload so load-time checks re-run.
+Use the available driver's actual navigation, viewport, DOM, screenshot and
+interaction methods. Test the verified local URL at the project's supported
+mobile/desktop sizes, with fresh navigation/reload where device behavior depends
+on initial load. Inspect the resulting screenshots and operate the affected
+flow, including loading, empty, error and permission states where applicable.
+An opened Playwright window without an agent-controllable driver is not an
+autonomous test.
 
-**Contrast has to be measured on the rendered surface, not the stylesheet.** A static
-contrast checker assumes a white background, so on a dark theme every light-on-dark
-token reports as a failure. The real question is never "is this background faint" but
-"is there an opaque surface underneath it" — and only the rendered tree can answer
-that. Sweep the DOM and flag only elements with no opaque card ancestor.
+Measure contrast against the rendered composite background. An opaque card does
+not prove its text has sufficient contrast, and a static tool does not always
+assume white. Inspect both elements on cards and those over images/transparent
+surfaces; keep the measurement method and unsupported cases explicit.
 
-### Playwright (fallback — more capabilities)
-```bash
-npx playwright open http://localhost:3000
-```
-
-Check for: trimmed text, overlapping elements, unequal font sizes, bad scroll behavior, inconsistent spacing, dark mode contrast issues.
+Check for trimmed text, unintended overlap, scroll behavior, consistent spacing,
+focus/keyboard operation, supported themes and reduced motion. Visual appeal is
+not evidence that a control performs the intended action.
 
 ## Reference Designs (Study Before Designing)
 
@@ -343,8 +345,10 @@ Load `${CLAUDE_SKILL_DIR}/references/preserve-ui.md` for the full protocol, chec
 
 ## Proving the run
 
-**Observable:** a screenshot of the changed surface, at the viewport it will be
-used at, looked at before saying it is done.
+**Observable:** inspect screenshots of the actual changed surface at supported
+viewports and verify its affected user behavior, resulting state and reload.
+Bind the evidence to the tested version/environment. A screenshot is necessary
+for a visible change, but it cannot prove that its controls work.
 
 A diff cannot show a modal hanging off the edge of a phone, a token that resolves
 to the same colour as its background, or an animation that lands wrong. Capture

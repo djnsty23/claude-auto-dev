@@ -40,8 +40,9 @@ Three thresholds, because "finished" and "cold" are different questions:
 
 - **`--stale-days` (default 14)** for hand-started work.
 - **`--ephemeral-days` (default 2)** for sessions the app launched from a
-  schedule. These are disposable by construction — the task regenerates them
-  tomorrow — and they dominate the population: on the machine this was built
+  schedule. Recurrence does not make their uncommitted work or ignored evidence
+  disposable; the same safety checks still apply. They dominated the population
+  on the machine this was built
   for, 261 of ~480 records carried a `scheduledTaskId`.
 
 - **`--merged-min-minutes` (default 30)** floors the MERGED verdict. A settled
@@ -125,11 +126,15 @@ it is around 50MB.
 
 ## Step 3 — archive, only the SAFE list
 
-For each SAFE row, call `archive_session` with its `sessionId`. Never archive a
-row the script did not mark SAFE, and never archive `self` unless asked.
+Use the current host's actual archive API and semantics. For Claude Desktop's
+`archive_session`, re-read the SAFE row immediately before acting; retain needed
+ignored reports/evidence and the resume stub outside any worktree the API removes.
+A closed PR can mean rejected work, so record that disposition rather than calling
+it delivered. Never archive a row the script did not mark SAFE, or self unless asked.
 
-Show the user the list and the count before acting. This is a bulk mutation of
-their workspace: a big number is a reason to confirm, not a reason to hurry.
+Show the concrete list and count. An explicit request to archive the safe,
+finished set authorizes that scoped action; ask only if the proposed set or
+destructive consequences exceed that request. Preserve ongoing work.
 
 ## Do NOT then start a session per archived item
 

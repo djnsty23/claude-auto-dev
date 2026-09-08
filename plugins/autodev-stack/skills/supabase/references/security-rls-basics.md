@@ -5,46 +5,30 @@ impactDescription: Database-enforced tenant isolation, prevent data leaks
 tags: rls, row-level-security, multi-tenant, security
 ---
 
-## Enable Row Level Security for Multi-Tenant Data
+## Bind row policies to a verified identity boundary
 
-Row Level Security (RLS) enforces data access at the database level, ensuring users only see their own data.
+RLS applies policy expressions; it cannot make a user-controlled identity value
+trustworthy. A direct SQL client able to set `app.current_user_id` can choose
+another value, so that setting alone is not database-enforced authentication.
+If a trusted backend sets request context, document and test who can set it,
+how it is scoped/reset with pooling, and which database roles can bypass RLS.
 
-**Incorrect (application-level filtering only):**
-
-```sql
--- Relying only on application to filter
-select * from orders where user_id = $current_user_id;
-
--- Bug or bypass means all data is exposed!
-select * from orders;  -- Returns ALL orders
-```
-
-**Correct (database-enforced RLS):**
+For Supabase Auth with UUID ownership, a starting policy is:
 
 ```sql
--- Enable RLS on the table
-alter table orders enable row level security;
-
--- Create policy for users to see only their orders
-create policy orders_user_policy on orders
-  for all
-  using (user_id = current_setting('app.current_user_id')::bigint);
-
--- Force RLS even for table owners
-alter table orders force row level security;
-
--- Set user context and query
-set app.current_user_id = '123';
-select * from orders;  -- Only returns orders for user 123
+alter table public.orders enable row level security;
+create policy orders_user_policy on public.orders
+  for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 ```
 
-Policy for authenticated role:
+Apply only the needed grants, and test the whole policy set with populated rows.
+The owner can perform allowed operations; another user and anonymous callers
+cannot access or mutate protected rows. Check denied writes left data unchanged.
+Privileged/service paths need separate review because their access differs.
 
-```sql
-create policy orders_user_policy on orders
-  for all
-  to authenticated
-  using (user_id = auth.uid());
-```
+An empty response without a populated positive control is not isolation proof.
+A declaration check cannot substitute for these runtime tests.
 
 Reference: [Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)

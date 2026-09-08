@@ -10,24 +10,16 @@ argument-hint: "[url or scope]"
 
 # Scan — Live Site QA
 
-> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
-> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
-> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
-> which `resize_window` alone does not guarantee. The `browser` skill and the
-> `agent-browser` steps were dropped in 8.79.0 — do not reach for that CLI here.
-> (The binary itself is still installed for kb-factory's JS-rendered crawls;
-> that is a separate consumer, not a fallback for page verification.)
+Use an available browser driver with its actual schema; inspect capabilities
+before naming tools/arguments. Reuse supported navigation, DOM, console/network
+and screenshot tools, or an existing project browser suite. A missing preferred
+driver is not proof that all browser execution is unavailable.
 
 Catches what typecheck and build cannot: visual bugs, broken links, console
-errors, accessibility violations, performance regressions.
-
-Drivers, in preference order:
-
-- **Built-in browser tools** — the default. `navigate` + `read_page` +
-  `read_console_messages` cover unauthenticated scanning, and the user can watch.
-- **chrome-devtools `emulate`** — when a mobile device gate has to fire, not just a width.
-- **Playwright script** — only for auth flows the other two cannot complete
-  (OAuth redirects, SSO, 2FA), or when you need a repeatable checked-in script.
+errors, accessibility violations and performance regressions. Page loading is
+only one check: exercise the affected user flow and relevant state transitions.
+Use device emulation when pointer/touch/DPR/UA matters; width alone does not
+establish those conditions. Load `rule-local-first` for browser provenance.
 
 ## Usage
 
@@ -35,8 +27,8 @@ Drivers, in preference order:
 |---------|-------------|
 | `scan` | Detect URL from project, run quick scan on key pages |
 | `scan http://localhost:3000` | Scan specific URL |
-| `scan full` | Deep scan — all pages, all categories |
-| `scan auth` | Login via Playwright, then scan authenticated pages |
+| `scan full` | Inventory routes and scan the declared population; report any cap/exclusions |
+| `scan auth` | Verify the intended account/role, then exercise protected flows |
 | `scan compare` | Scan and compare against last baseline |
 | `scan errors` | Console + network errors only |
 | `scan a11y` | axe-core accessibility audit |
@@ -45,146 +37,92 @@ Drivers, in preference order:
 
 ## Step 1: Detect or Start Target URL
 
-Check in order:
-1. User provided a URL → use it
-2. Dev server already running → check ports 3000, 3001, 5173, 8080:
-   ```bash
-   for port in 3000 3001 5173 8080; do curl -s http://localhost:$port > /dev/null 2>&1 && echo "http://localhost:$port" && break; done
-   ```
-3. **No server running → auto-start one:**
-   ```bash
-   node -e "const p=require('./package.json');const s=p.scripts||{};console.log(s.dev||s.start||'')"
-   ```
-   If a dev script exists, start it with `preview_start` (preferred — it
-   supervises the server and exposes `preview_logs`). Only when the project has
-   no `.claude/launch.json` entry, fall back to a detached Bash:
-   ```
-   Bash({ command: "npm run dev", run_in_background: true })
-   ```
-   Wait 5 seconds, then re-check ports.
-4. Vercel preview → check `.vercel/` or recent deploy URL
-5. Production URL → check `package.json` homepage or CLAUDE.md
-
-If nothing found after all checks, ask the user.
+1. Resolve the requested URL or the project’s startup configuration. Confirm
+   process ownership, cwd and build identity before reusing a local server.
+   A response on port 3000/5173/etc. can belong to another project.
+2. If needed, start the real project command through available supervision or an
+   owned background process. Retain PID/logs and poll readiness with a deadline;
+   fixed sleeps and HTTP status alone do not prove the expected app loaded.
+3. Identify the deployed revision for a preview/live target. An old deployment
+   cannot verify uncommitted local code. Preserve the current authorization for
+   external actions and use isolated test data. If no target can be established,
+   record that gap and continue independent checks.
 
 ## Step 2: Discover Site Structure
 
-```bash
-# Fetch homepage, extract internal links
-curl -sL "$TARGET_URL" | grep -oE 'href="[^"]+"' | sed 's/href="//;s/"$//' | sort -u | head -30
-```
+Enumerate routes from source/config plus the live navigation and intended user
+journeys. Record the population, excluded paths and reason. A grep of the first
+30 links misses hydrated, authenticated and unlinked routes; empty output can
+mean the fetch failed. Use the available DOM/browser tools and retain request
+failures. Test reachability through the real navigation as well as direct URLs.
 
-Better, on the built-in path: `navigate` to `$TARGET_URL`, then `read_page` —
-it returns the nav structure with refs already attached, so discovery and the
-first interaction step share one read.
-
-`navigate` to the target, then `read_page` with `filter: 'interactive'` for the
-controls and links. Use `find` to locate a specific element in that tree rather than
-re-reading it.
-
-**Priority pages** (scan these first):
-1. Landing/home page
-2. Auth pages (login, signup)
-3. Dashboard/main app page
-4. Settings/profile
-5. Any page with forms
+Prioritize landing/home, auth, the main app, settings/profile, changed pages and
+forms according to the task. For each flow name the role, data state, expected
+outcome and cleanup. Track loading/empty/error/success states where applicable.
 
 ## Step 3: Run Scans (Unauthenticated)
 
-### Quick Scan (default) — built-in path
+### Quick scan example for Claude Browser
 
+The named tools/arguments below are examples for a host exposing that driver.
+Confirm its actual schema or adapt the same checks to the available driver.
 For each priority page:
 
 1. `navigate` to the page URL.
-2. `read_console_messages` with `onlyErrors: true`. **A page that renders
-   correctly but logs an error has failed this scan.**
-3. `read_page` — check the page has a single `h1`, that images carry alt text,
+2. Capture relevant console and network failures using supported tools.
+   Investigate their source, impact and whether they predate the change; retain
+   unresolved application failures. Do not turn every console line or expected
+   negative-test HTTP response into a critical defect.
+3. Read the DOM/accessibility tree — check meaningful headings, image alternatives,
    and that no interactive element is unlabelled.
 4. `computer` with `action: "screenshot"` for the desktop view.
 5. `resize_window` with `preset: "mobile"`, reload, screenshot again.
 6. `resize_window` back to `preset: "desktop"` before the next page.
 
-Save screenshots the user should keep under
-`.claude/screenshots/$(date +%Y-%m-%d)/` and reference them in the report.
+Store durable before/after proof according to `prove` and
+`rule-file-organization`; `.claude/screenshots/` is disposable in some projects.
+Reference artifacts with URL, revision, viewport, role and state.
 
-### Quick scan — per page
+Record findings as you go with page, viewport, role and observed state.
+Screenshots alone are not a report; retain the flow assertions and relevant
+network failures alongside them.
 
-For each page: `navigate`, `computer` `screenshot`, `resize_window`
-`{preset: 'mobile'}`, screenshot again, then `read_console_messages`
-`{onlyErrors: true}` and `read_network_requests` for failed loads.
-
-Screenshots come back to the session rather than being written to a path, so record
-findings as you go — note the page, the viewport and what was wrong. A scan whose
-output is 40 unlabelled images is not a report.
-
-Dismiss any tour or consent overlay **before** the screenshot and assert it is gone;
-an overlay that appears between the action and the capture changes the screen you
-thought you measured. On consent banners, decline non-essential cookies.
+Check the initial tour/consent state when part of the journey. For an
+unobstructed layout check, dismiss it deliberately and assert it is gone before
+capturing. On consent banners, decline non-essential cookies unless the test
+requires another already authorized choice. Record the state you measured.
 
 ### Full Scan (all pages)
 
-Loop over discovered URLs, scanning each. Cap at 20 pages to keep scan time reasonable (~5-10 min).
+Scan the declared route/state population within the run budget. If capped
+(for example at 20 pages), list the remaining routes/states and retain them as
+unverified work. Do not call a capped sample “all pages” or infer coverage from
+the page count.
 
-## Step 4: Authenticated Scan (Playwright)
+## Step 4: Authenticated Scan
 
-The browser tools handle a simple form login via `form_input` and a click. Use
-Playwright for OAuth, Google SSO, 2FA, or any redirect-heavy flow — it behaves more
-like a real user.
+Use the supported browser driver or the project’s Playwright suite with an
+approved QA account. Assert the expected principal/role after login and on each
+protected page; a redirect away from `/login` is not a success assertion.
+Confirm the expected page/data state before screenshots; a login page, spinner
+or error page is not proof of protected content. A session cookie alone does
+not prove the current account or permissions.
 
-**A stored session can strip demo mode.** If `?demo=1` appears to do nothing, that is
-usually a guard clearing the demo flag because a real session exists, which is
-correct behaviour. Scan from a fresh context rather than the signed-in profile, and
-re-assert that state after every navigation — it does not always survive one.
+Use a fresh context for signed-out/demo checks. Inspect auth and URL state after
+navigation; if demo parameters disappear, investigate the actual guard rather
+than assuming the cause. Complete account setup/2FA only through available,
+authorized mechanisms; a missing factor is a specific blocked step.
 
-Create `.claude/scripts/auth-scan.js`:
-```javascript
-const { chromium } = require('playwright');
+For repeatable scripts: validate required config, register console/pageerror/
+response listeners before navigation, wait for an application-specific readiness
+assertion, exercise the flow, assert persisted results, and clean up owned test
+records/context in `finally`. `networkidle` alone can hang on a healthy realtime
+app and cannot establish that a mutation succeeded. Retain raw diagnostics and
+make failed assertions produce a nonzero exit.
 
-(async () => {
-  const browser = await chromium.launch({ headless: false });  // headless:false lets you complete 2FA/SSO manually once
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  const page = await ctx.newPage();
-
-  // Capture errors as they happen
-  const errors = [];
-  page.on('console', m => m.type() === 'error' && errors.push(m.text()));
-  page.on('pageerror', e => errors.push(`UNCAUGHT: ${e.message}`));
-  page.on('response', r => r.status() >= 400 && errors.push(`${r.status()} ${r.url()}`));
-
-  // Login
-  await page.goto(process.env.LOGIN_URL);
-  await page.fill('input[type="email"]', process.env.TEST_USER_EMAIL);
-  await page.fill('input[type="password"]', process.env.TEST_USER_PASSWORD);
-  await page.click('button[type="submit"]');
-  await page.waitForURL(url => !url.pathname.includes('login'), { timeout: 30000 });
-
-  // Save auth state for reuse
-  await ctx.storageState({ path: '.claude/auth-state.json' });
-
-  // Scan protected pages
-  const pages = (process.env.PAGES || '/dashboard').split(',');
-  for (const path of pages) {
-    await page.goto(new URL(path, process.env.BASE_URL).href);
-    await page.waitForLoadState('networkidle');
-    await page.screenshot({ path: `.claude/screenshots/auth-${path.replace(/\//g, '_')}.png`, fullPage: true });
-  }
-
-  require('fs').writeFileSync('.claude/screenshots/auth-errors.txt', errors.join('\n'));
-  await browser.close();
-})();
-```
-
-Run it:
-```bash
-LOGIN_URL=http://localhost:3000/login \
-TEST_USER_EMAIL=$TEST_USER_EMAIL \
-TEST_USER_PASSWORD=$TEST_USER_PASSWORD \
-BASE_URL=http://localhost:3000 \
-PAGES=/dashboard,/settings,/profile \
-node .claude/scripts/auth-scan.js
-```
-
-For Google SSO: launch with `headless: false`, complete the login manually the first time, and `storageState` persists the session. Subsequent runs can use `storageState: '.claude/auth-state.json'` in the context options.
+Treat any saved browser storage state as credentials: keep it in a verified
+ignored/private path, never in screenshots/reports or public evidence. Reuse it
+only for the intended account and clear it when no longer needed.
 
 ## Step 5: Analyze Screenshots
 
@@ -219,17 +157,21 @@ const results = await new AxeBuilder({ page }).analyze();
 console.log(JSON.stringify(results.violations, null, 2));
 ```
 
-Install once: `npm install -D @axe-core/playwright`
+Prefer the project’s existing axe integration. If absent, record the missing
+check or add a reviewed dev dependency when setup is within scope; a scan does
+not silently install arbitrary versions into the project.
 
 ## Step 7: Performance (Lighthouse)
 
 Standalone, no MCP needed:
 ```bash
-npx lighthouse "$PAGE_URL" --only-categories=performance --chrome-flags="--headless" --output=json --output-path=.claude/lighthouse.json
+npx --no-install lighthouse "$PAGE_URL" --only-categories=performance --chrome-flags="--headless" --output=json --output-path=.claude/lighthouse.json
 node -e "const r=require('./.claude/lighthouse.json');console.log('Perf:',r.categories.performance.score*100,'LCP:',r.audits['largest-contentful-paint'].displayValue)"
 ```
 
-For mobile: add `--preset=perf --emulated-form-factor=mobile`.
+Inspect the installed Lighthouse version’s supported mobile/desktop options.
+Create the output directory and retain command exit status before reading the
+JSON. Use `perf` for lab/field distinctions; a Lighthouse score is not INP.
 
 ## Step 8: Compare with Baseline
 
@@ -244,9 +186,12 @@ mkdir -p .claude/scans
 # Subsequent → scan-YYYY-MM-DD.json
 ```
 
-Save JSON with: URLs scanned, error counts per page, Lighthouse scores, axe violation counts, screenshot paths.
+Save JSON with: tested revision/build, time, route/state population, actual
+checks and outcomes, errors with attribution, tool versions/settings, scores
+only where measured, artifacts and unverified gaps.
 
-Compare with previous baseline — report regressions and resolutions.
+Compare like-for-like conditions with the previous baseline. Preserve its
+identity and do not overwrite a red baseline just to make a regression disappear.
 
 ## Step 9: Report
 
@@ -292,7 +237,10 @@ Compared to baseline: [improved/regressed/new scan]
 - Always scan both desktop AND mobile viewports
 - Screenshot every page you scan — visual issues are invisible to code analysis
 - Compare with baselines when available — regressions matter more than absolute scores
-- Don't create stories for Lighthouse scores above 90 — focus on real issues
-- Console errors are always critical — fix them before anything else
+- Triage reproduced impact regardless of Lighthouse score; a score above 90
+  does not rule out a broken or slow critical flow.
+- Prioritize console/network findings by demonstrated impact and source; keep
+  unexplained application failures unresolved without calling every log critical.
 - Save scan results to `.claude/scans/` for future comparisons
-- For OAuth/SSO, use Playwright with `storageState` — don't try to automate password entry on Google
+- For OAuth/SSO, follow the actual provider flow and current authorization;
+  saved state does not verify a fresh login.

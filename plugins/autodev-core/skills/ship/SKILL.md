@@ -9,43 +9,32 @@ user-invocable: true
 
 # Ship Workflow
 
-> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
-> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
-> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
-> which `resize_window` alone does not guarantee. The `browser` skill and the
-> `agent-browser` steps were dropped in 8.79.0 — do not reach for that CLI here.
-> (The binary itself is still installed for kb-factory's JS-rendered crawls;
-> that is a separate consumer, not a fallback for page verification.)
+For UI verification, use the browser driver actually available in the current
+host and its exposed schema. Resolve that capability before promising a live
+check; another host's historical tool names are not an available API.
 
 Complete deployment pipeline: pre-flight → security → deploy → verify → report.
 
 ## Step 1: Blocking Quality Gates
 
-ALL must pass before deploying. Run in parallel:
+Read the repository guidance and actual package scripts. Run its required
+checks with the detected package manager and test runner, preserving every exit
+code and the full output. Independent checks may run in parallel; checks that
+share mutable fixtures or depend on another stage run in order. Do not add
+Jest-only flags to another runner or interpret an empty test population as green.
 
-```bash
-npm run typecheck          # BLOCKING — zero errors
-npm run build              # BLOCKING — zero errors
-npm run test -- --watchAll=false  # BLOCKING — all pass
-npm audit --production 2>/dev/null | grep -E "critical|high"  # BLOCKING — zero critical/high
-git status --short         # Warn if uncommitted changes
-```
+A required check must have run on the exact candidate. A chained command that
+failed early leaves later stages unrun; name those stages and execute them
+before claiming full verification. A grep-filtered audit/build summary is a
+report, not the command's verdict. Keep scanner/tool failures distinct from
+vulnerabilities or a clean result.
 
-| Result | Action |
-|--------|--------|
-| Build fails | Stop — fix errors first |
-| Typecheck fails | Stop — fix types first |
-| Tests fail | Stop — fix tests first |
-| npm audit critical/high | Stop — fix vulnerabilities first |
-| Uncommitted changes | Warn user, ask if they want to commit (use git directly, do not invoke the commit skill) |
-| All pass | Continue to Step 2 |
-
-**A red that is also red at the base branch is not this change's, and is not a
-licence to skip it either.** Before acting on a Stop row, run the same command in
-a detached worktree of the default branch; the recipe and the verdict table are in
-the `commit` skill under *When a git hook refuses*. Green there and red here: fix
-it. Red there with the same lines: say so in the PR body, fix nothing in this PR
-that belongs to trunk, and decide the deploy on the rows that ARE this change's.
+If a check fails, compare its actual failure with the base in an isolated
+worktree. A matching base failure establishes ownership, not release readiness.
+Resolve the required gate or an explicitly authorized exception before deploy;
+record the exception without calling the failed check passed. Fix owned defects
+and commit them. Preserve any existing authority to commit/publish instead of
+asking again merely because a new workflow step was reached.
 
 ## Step 1b: Evidence for the human reviewer
 
@@ -55,17 +44,26 @@ that moved, and put it in the PR body.
 
 A relative path does not reliably render there. After the branch is pushed, use
 the raw URL:
-`https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.claude/evidence/<slug>/after.png`
+`https://raw.githubusercontent.com/<owner>/<repo>/<tested-commit-sha>/.claude/evidence/<slug>/after.png`
 
-Skip it and say so when the change is purely additive. A step skipped and named
-is a decision; a step skipped silently is indistinguishable from one forgotten.
+Bind the artifact to the tested candidate SHA and environment, and read back the
+link with the reviewer's intended access. A mutable branch can later display
+different evidence. For a private repository, use its supported authenticated
+artifact/review link; do not publish private evidence to make a raw URL render.
+
+For new behavior, record that no earlier implementation existed and capture the
+new acceptance evidence. Additive code still needs verification through its real
+entry point; a missing historical screenshot does not waive that check.
 
 ## Step 2: Security Scan
 
 Run before every deploy (uses `security` skill):
 
 - [ ] No hardcoded API keys, tokens, or secrets in code
-- [ ] `.env` files not committed (check `.gitignore`)
+- [ ] Inspect the actual staged paths and candidate commit for secret-bearing
+      `.env` files and credentials, allowing only reviewed placeholder examples.
+      `.gitignore` prevents new untracked additions; it does not remove a file
+      that is already tracked or prove the candidate contains no secrets.
 - [ ] Supabase RLS enabled on all public tables
 - [ ] Input validation on all user-facing forms
 - [ ] No `dangerouslySetInnerHTML` without sanitization
@@ -80,52 +78,53 @@ If critical issues found, fix before deploying.
 
 ## Step 3: Auto-detect Deploy Target
 
-Check in order:
-1. `vercel.json` or `.vercel/` exists → **Vercel**
-2. `netlify.toml` exists → **Netlify**
-3. `supabase/functions/` exists → **Supabase Edge Functions** (deploy alongside)
-4. User specified "ship to X" → Use X
-5. None found → Default to Vercel
+Honor an explicit target in the current request first. Otherwise inspect the
+actual deployment records and configuration: `vercel.json` / `.vercel/`,
+`netlify.toml`, and any `supabase/functions/` surface that changed. Several targets
+may coexist, so directory existence alone does not choose the environment or
+authorize deploying every component. If no target is known, resolve it before
+invoking a platform command.
 
-Do not ask which platform — detect or default.
+Reuse the configured/requested platform. Resolve ordinary setup within the
+existing mandate; ask only if an unresolved target entails a materially different
+external commitment. The absence of config does not authorize creating one on a
+particular vendor.
 
 ## Step 4: Deploy
 
-**Promotion to production is pre-authorised on a green gate with a ledger, and
-on nothing less.** `[stated 2026-09-08]` the operator, choosing this over
-"escalate always" and "add a canary" with the measured numbers in view; the rule
-and its ineligible list live in the Brain skill under "Escalate rather than
-resolve", and the evidence in `docs/evidence-deploy-authorisation-2026-09-08.md`.
-Before the `--prod` line below, all four must be true and written down:
+Apply the current request and mandate's release authority. An authorized ordinary
+promotion does not need a repeated permission question; a historical account of
+another user's permission grants none. Use Brain's current scope/exception rules.
+Before the deployment, or a push/merge that triggers one, record:
 
-1. The repo's named gate exited 0 on the EXACT commit you are deploying, read per
-   job (at least one completed success per required platform, never a count of
-   non-success entries).
-2. That commit is on the default branch. A deploy from an unpushed branch or a
-   tree missing a merged fix is the shape of two of the five incidents in the
-   evidence doc.
-3. The ledger records the commit sha, the gate command with its exit code and
-   output, and (after Step 5) the verification. Until `deploy-ledger.js` carries
-   these fields, write them at the top of `DEPLOY-LEDGER.md` by hand; the surface
-   checklist it generates is Step 5b, not this.
-4. The undo command for THIS deploy is in the ledger before you promote, and it
-   splits by case. Where production traffic already exists:
-   `vercel rollback <previous production url>` (from `vercel ls --prod`), or for
-   an edge function the previous commit and the deploy command from Step 6.
-   Where this is the project's FIRST production deployment there is no previous
-   URL, `vercel ls --prod` names nothing and `vercel rollback` has nothing to
-   return to; the undo is `vercel remove <project> --yes`, `[measured 2026-09-08]`
-   by a peer session on an accidental production alias, which returned 404 within
-   a second. A first deployment is also the case `npx vercel --yes` above does
-   not reliably keep as a preview (Vercel assigns a project's first deployment to
-   production and says so afterwards), so on a new project write the remove
-   command down before the preview line, not only before `--prod`.
+1. The exact tested candidate SHA/base and evidence that all required checks ran.
+   A default-branch name or a prior run on an earlier SHA cannot replace this.
+   If merging changes the tested candidate, test the integration result before
+   production is triggered or use the platform's supported promotion procedure.
+2. Before any promotion or deploy-triggering push/merge, read the actual target
+   platform/project/environment and save its current live commit as
+   `previous_deployed_commit` in the deployment record. Keep this value immutable
+   through verification; a tag/local marker is only a candidate baseline until
+   its live meaning is checked. Plan the full change range from that saved SHA
+   to the tested candidate. Replacing the baseline with the post-deploy SHA
+   would erase the change window.
+3. The gate command/results, live verification plan and artifact paths in the
+   deploy ledger. Resolve `autodev_core_root` from the loaded plugin and generate
+   the ledger using the saved `previous_deployed_commit` before promotion.
+   Checklist ticks are recorded assertions, not independent proof.
+4. The specific authorized recovery procedure, previous artifact/version where
+   one exists, and the conditions that trigger recovery. A first deployment has
+   no previous version: establish its recovery without assuming permission to
+   delete a shared project or its state.
 
-If the change touches anything on the ineligible list (a migration that drops or
-renames a column or changes a grant, RLS or a `SECURITY DEFINER`; billing,
-checkout, webhook or entitlement code; auth; live rows), stop here and escalate
-whatever the gate says. On a repo where a merge to the default branch is itself
-the production deploy, the four conditions apply to the merge.
+Check migrations, access grants, auth/billing/entitlements and live data changes
+against the current mandate's exceptions. Resolve missing authority or an
+ineligible action after preparing the reviewable result; continue independent
+eligible work. Do not manufacture permission from a green gate.
+
+Commands below are examples only after the target and installed CLI syntax are
+verified. A first deployment can become production even when a command is called
+preview; inspect the platform behavior before taking that step.
 
 ### Vercel
 
@@ -133,7 +132,7 @@ the production deploy, the four conditions apply to the merge.
 # Preview first (recommended)
 npx vercel --yes
 
-# If preview looks good, promote to production
+# After exact-candidate preview acceptance passes and production is authorized
 npx vercel --prod --yes
 ```
 
@@ -149,8 +148,8 @@ npx netlify deploy --prod
 # Single function
 supabase functions deploy [function-name] --project-ref [ref]
 
-# All functions
-supabase functions deploy --project-ref [ref]
+# Multiple functions: deploy the verified affected set, including shared imports;
+# use the project's documented command rather than an unscoped blanket deploy
 ```
 
 ### Environment Variables
@@ -176,33 +175,33 @@ A successful deploy does not mean the app works. Verify after deploying.
 
 ### Visual verification
 
-`navigate` to the deploy URL, `read_page` to assert structure, `computer`
-`screenshot` for desktop, then `resize_window` `{preset: 'mobile'}` and screenshot
-again.
+Use an actually available browser driver and its exposed schema to navigate,
+inspect the DOM, capture desktop/mobile views and operate the affected flows.
+Public and internal/admin UI both need live behavior checks with the appropriate
+role, console/network inspection and resulting data/reload verification.
 
-**Assert the build before you measure anything.** A service worker will serve the
-previous build against the new URL, and `ignoreCache` does not fix it — call
-`getRegistrations()` then `unregister()`, clear `caches.keys()`, and only then
-reload. If the app exposes a version marker, read it and confirm it is the build you
-just shipped. Otherwise a screenshot of the old build is indistinguishable from a
-successful deploy.
-
-### Fallback: Playwright (more capabilities, higher token cost)
-
-```bash
-npx playwright open [DEPLOY_URL]
-```
+Read back `deployed_candidate_sha` and the target environment after promotion;
+compare that SHA with the exact tested candidate. Keep it separate from the
+saved `previous_deployed_commit`, which remains the ledger baseline. If the
+readback differs, resolve the mismatch before claiming candidate verification.
+Use a fresh isolated
+verification session where appropriate. If service-worker/cache behavior is part
+of the product, verify its supported update path too; deleting the user's caches
+to get a passing screenshot can hide an upgrade defect. A browser window opened
+for a human is not autonomous verification without an agent-controllable driver.
+If the necessary driver or credential is unavailable, report that verification
+as unresolved and continue checks that can actually run.
 
 ### Verification Checklist
 
 | Check | How | Pass Criteria |
 |-------|-----|---------------|
 | **Page loads** | Open deploy URL | No 404, no blank screen |
-| **No console errors** | `read_console_messages` | Zero errors in console |
+| **No console errors** | Available driver console inspection | No new unexplained errors during the tested flow |
 | **Auth flow** | Login → protected page → logout | All transitions work |
 | **Critical path** | Complete main user action | End-to-end success |
-| **API calls** | Check network tab | No 500s, no CORS errors |
-| **Mobile layout** | Resize to 375px width | Sidebar hidden, grids stacked, no overflow |
+| **API calls** | Inspect request/response and resulting state | Expected authorization, domain payload, persistence and failure behavior |
+| **Mobile layout** | Test supported viewport/device sizes | Intended navigation and content usable, no unintended overflow |
 
 ### What to Test by App Type
 
@@ -215,31 +214,49 @@ npx playwright open [DEPLOY_URL]
 
 ### If Verification Fails
 
-1. **Console errors** → Check browser console, fix and redeploy
-2. **API failures** → Check env vars on platform, check CORS settings
-3. **Auth broken** → Check OAuth redirect URLs match deploy URL
-4. **Blank page** → Check build output, check base path config
+1. Preserve the failed evidence and stop subsequent releases.
+2. Execute the authorized recovery procedure when its trigger is met, then
+   verify the recovered live behavior.
+3. Reproduce and diagnose the failure at the actual boundary; env/CORS/redirect
+   settings are hypotheses until the observed failure supports them.
+4. Fix, re-run the required candidate checks, and repeat live verification. Keep
+   the failed attempt in the ledger rather than overwriting it with a later pass.
 
 ## Step 5b: The deploy ledger — what changed, and was each surface looked at
 
-Everything above tells you HOW to verify. Nothing above records WHAT needed
-verifying, so the surface most likely to be skipped is the one nobody
-remembered was touched. The ledger closes that.
+The ledger enumerates what needs checking. Reuse `autodev_core_root` and the
+immutable `previous_deployed_commit` captured before promotion in Step 4. Do not
+resolve the current platform SHA again as the baseline: it now names the new
+candidate. Run against the same tested candidate checkout, then read back the
+ledger header and affected population to verify the saved range is still used.
 
 ```bash
-node plugins/autodev-core/scripts/deploy-ledger.js --write    # derive from the diff
-node plugins/autodev-core/scripts/deploy-ledger.js --verify   # exit 1 while a box is empty
+node "$autodev_core_root/scripts/deploy-ledger.js" --write --since "$previous_deployed_commit"
+node "$autodev_core_root/scripts/deploy-ledger.js" --verify --since "$previous_deployed_commit"
 ```
 
 `--write` reads `<last deploy>..HEAD` and produces `DEPLOY-LEDGER.md` at the
 repo root: one row per affected surface, each needing a desktop pass, 390, 414,
-console clean and network clean. `--verify` refuses while any box is empty. Run
-it before calling a deploy verified, and re-run `--write` afterwards — existing
-ticks survive a regenerate, because a tool that wipes your work is a tool nobody
-re-runs.
+console clean and network clean. `--verify` checks empty boxes only in rows
+still present in the written ledger; it does not prove expected rows were kept.
+Independently inventory affected flows from the actual changed files and product
+contract, reconcile every required surface against the ledger, and add omitted
+checks before relying on its verdict. A deleted row can otherwise disappear from
+verification entirely. Run
+it before calling a deploy verified. Existing ticks survive regeneration, so
+bind each result to its tested SHA/environment and invalidate stale checks when
+code or the base changes. The tool does not perform that evidence binding for
+you. Re-read the written ledger; preserved ticks alone are not a fresh test.
 
-The last deploy is read from `--since`, then `.claude/last-deploy`, then the
-most recent tag. **If none resolves it refuses with exit 2 rather than
+For a verified first deployment there is no prior deployed commit. Treat the
+entire candidate as the affected surface inventory; the current ledger CLI
+requires a commit baseline and cannot derive that first-release case from an
+empty tree. Record that tool limitation and perform the complete first-release
+acceptance checks; do not invent a deployed SHA or use HEAD to make it pass.
+
+The CLI falls back from `--since` to `.claude/last-deploy`, then the most recent
+tag. This workflow supplies the saved verified baseline explicitly; fallback
+resolution is not evidence that a marker/tag was actually deployed. **If none resolves it refuses with exit 2 rather than
 diffing against something arbitrary** — "no surfaces changed" and "I could not
 tell what changed" are opposite answers and must not print the same.
 
@@ -248,9 +265,11 @@ Three things it deliberately does not do:
 - **It does not decide whether a check passed.** A human or a browser-driving
   agent ticks the boxes; `--verify` only asks whether they are ticked. A checker
   that both generates and satisfies its own checklist proves nothing.
-- **It does not guess narrowly.** A change to a token file, a global
-  stylesheet or a layout is reported as WIDE, meaning every surface is
-  potentially affected. Narrowing that would be a false all-clear.
+- **Its WIDE detection is incomplete.** It tests only files selected by its UI
+  extension filter. A changed `tailwind.config.js` can report one changed file
+  but zero UI files and zero WIDE effects. Independently inspect shared config,
+  tokens, data and layout dependencies; a zero detector count is not proof
+  that no user-facing behavior changed.
 - **It does not derive metrics.** The ledger has a metrics section that must be
   filled or explicitly waived, and an empty one fails `--verify`. Nothing here
   knows which metrics your deploy could move.
@@ -261,30 +280,18 @@ which is honest rather than wrong — the row still has to be checked.
 
 ## Step 6: Rollback (if needed)
 
-```bash
-# Vercel - instant rollback to previous
-vercel rollback
-
-# Netlify
-netlify rollback
-
-# Supabase Edge Functions - redeploy previous version
-git log --oneline supabase/functions/
-git checkout [prev-commit] -- supabase/functions/
-supabase functions deploy --project-ref [ref]
-```
+Execute the recovery procedure recorded for this deployment and platform. Read
+back the recovered version and repeat its critical live checks. For a function
+rollback needing old source, create an isolated worktree at the verified previous
+commit and deploy only the intended affected functions from there. Do not check
+old files into a worker's active checkout or overwrite its uncommitted changes.
 
 ## Step 7: Quality Metrics (non-blocking, report only)
 
-```bash
-# Coverage (if available)
-npm run test -- --coverage --watchAll=false 2>/dev/null | grep "All files" | head -1
-
-# Bundle size
-npm run build 2>&1 | grep -i "size\|chunk\|bundle" | head -5
-```
-
-Report these as informational — they don't block the deploy.
+Report metrics from the completed check artifacts with the measured population,
+commit and conditions. Run additional metrics only when they answer a relevant
+question, using the actual runner and preserved exit status. A missing metric is
+unmeasured, not zero; a subjective score is not a completion condition.
 
 ## Step 8: Report
 
@@ -302,7 +309,10 @@ Verification: [pass/fail]
   - Critical path: ✓
 ```
 
-If any verification failed, list specific failures and next steps.
+Populate the report from actual check artifacts with candidate SHA, environment
+and tested scope. Distinguish deployed-but-unverified, recovered and verified
+outcomes. Failed or unavailable verification leaves the promised live outcome
+unresolved; list its evidence, owner and next action.
 
 ---
 
@@ -310,17 +320,19 @@ If any verification failed, list specific failures and next steps.
 
 | Skill | Role in Ship |
 |-------|-------------|
-| `review` | Code quality check (auto-loaded via requires) |
-| `security` | Vulnerability scan (auto-loaded via requires) |
-| `test` | Run tests before deploy (auto-loaded via requires) |
-| `deploy` | Deploy patterns and CI/CD pipeline reference |
+| `review` | Explicitly load for code quality review |
+| `security` | Explicitly load for the applicable vulnerability review |
+| `test` | Explicitly load for project tests before deploy |
+| Platform skill actually installed | Load its current deployment/rollback guidance |
 
 ## Feeding the learning loop
 
-**Threshold — record what the gates did not catch.** If shipping was clean, there
-is nothing to learn and nothing to write.
+Record a lesson when the release exposes a gap or establishes a useful new
+contract, verification method or recovery result. A routine unchanged success
+needs no separate learning entry; a clean release can still provide new evidence.
 
-When something surfaces only at ship time, the finding is not the bug — it is the
-missing gate. Note which check would have caught it and where it would have run,
-in `.claude/project-rules.md`. That converts a one-off into the thing
-`learn-from-fixes` proposes gates from.
+When something surfaces only at ship time, record the reproduced failure and
+why earlier evidence missed it. Load `rule-diagnosis` before proposing a gate:
+first check whether an existing check was skipped, pointed at the wrong state,
+or had the wrong assertion. Add machinery only when the demonstrated class
+warrants it, and preserve the evidence in the project's durable decision record.

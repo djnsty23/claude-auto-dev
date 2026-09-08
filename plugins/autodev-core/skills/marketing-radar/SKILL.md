@@ -10,6 +10,11 @@ argument-hint: "[days | YouTube URL]"
 
 # Marketing Radar
 
+Resolve the actual loaded `autodev-core` directory into `autodev_core_root`
+before running the shell examples. Use the loaded skill's location; do not
+guess from the target project's working directory or assume another host set
+`CLAUDE_PLUGIN_ROOT`. Verify the named script exists under that resolved root.
+
 Collect first, separate claims from promotion, then test only what the available
 population can actually answer. Primary, research-method, trade/community and
 practitioner-audience evidence are separate populations. Platform narration,
@@ -20,8 +25,8 @@ popularity, comments and proxy scores are leads, not proof of business impact.
 Run the shared collector with this profile:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" \
-  --config "${CLAUDE_PLUGIN_ROOT}/scripts/marketing-radar-sources.json" \
+node "${autodev_core_root}/scripts/framework-radar.js" \
+  --config "${autodev_core_root}/scripts/marketing-radar-sources.json" \
   --days 14
 ```
 
@@ -120,6 +125,11 @@ Select at most three hypotheses. Every selected hypothesis must be executed in
 this run. Anything that cannot run now stays `watch`; do not disguise it as an
 experiment.
 
+If execution becomes unavailable after selection, retain the selected id,
+completed attempts, missing prerequisite and owner as pending. Do not relabel
+it `reject`/`no winner`, fabricate measurements or mark the manifest fully
+reviewed merely to make selected and verdict counts agree.
+
 Before results, preregister:
 
 - hypothesis and exact population or fixture;
@@ -156,7 +166,10 @@ Scheduled runs are read-only toward ad accounts, analytics properties, CRM,
 email systems, domains and product repositories. They may create local fixtures,
 draft artifacts and reports. They must not publish content, send messages,
 change tracking, upload audiences, alter campaigns or budgets, or start spend.
-Those actions require fresh explicit authorization and their own rollback plan.
+Those actions require explicit authority covering the actual system, action
+and effects, plus the applicable recovery plan. Preserve an existing grant; a
+new research cycle does not erase it. Carry separately authorized live work to
+the appropriate execution workflow after its prerequisites are satisfied.
 
 ### Verdict
 
@@ -166,8 +179,11 @@ targeted tests plus the repository gate.
 
 A scheduled run may push a winning `codex/marketing-radar-*` branch and open a
 review PR only when its automation prompt explicitly grants that exact standing
-authorization. Interactive runs require fresh push authorization. Never merge,
-deploy, tag, release, update installed plugins or mutate a live marketing system.
+authorization. Interactive runs use the current request and still-valid
+publication grant. This research workflow does not itself merge, deploy, tag,
+release, update installed plugins or mutate live marketing systems. If the user
+also authorized implementation/delivery, continue through the appropriate
+workflow with the measured winner rather than asking them to transport the plan.
 
 ### Record outcomes and adoption state
 
@@ -180,7 +196,7 @@ measurements under `variants.a/b/c`, `tested_at`, and at least one raw `evidence
 location.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
+node "${autodev_core_root}/scripts/radar-learning.js" \
   --manifest <manifest-path> \
   --verdicts .claude/reports/marketing-radar-verdicts-YYYY-MM-DD.json
 ```
@@ -217,7 +233,7 @@ After the report is complete and any PR is remotely readable, mark the exact
 manifest reviewed:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" \
+node "${autodev_core_root}/scripts/framework-radar.js" \
   --mark-reviewed <manifest-path>
 ```
 
