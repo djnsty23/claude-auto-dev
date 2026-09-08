@@ -121,6 +121,34 @@ try {
         }
     } catch { /* the queue report must never be why a commit looks failed */ }
 
+    // Third rider, same measurement: after a git call that SKIPPED a git hook
+    // (--no-verify, commit/am -n, -c core.hooksPath=), ask for the record.
+    //
+    // coordinator-write-guard.js already asks BEFORE such a call, and its ask
+    // reason says where the justification goes. But an ask is answered by
+    // whoever is at the panel, and with self-resolving panels (an away window)
+    // that is nobody: the recommended option is taken and the reason is never
+    // read. PostToolUse is the one surface that sees the command AFTER it ran
+    // and can put text in front of the model, so the record gets asked for
+    // here, once, on the successful call. `[measured 2026-09-07]` four
+    // sessions bypassed a trunk-red pre-push in one night and were right to;
+    // the artefact worth having from each is the reason, not the friction.
+    //
+    // Gated on the same substring test the guard uses, so the recogniser is
+    // required on well under 1% of calls and this hook still does not print
+    // on the ordinary one. Only on a call that did not fail: a refused push
+    // skipped nothing. Under hooks_profile=minimal this rider goes with the
+    // rest of this hook, which is the advisory half by design.
+    try {
+        const cmd = (toolInput && typeof toolInput.command === 'string') ? toolInput.command : '';
+        const MAY_BYPASS = /no-verify|hookspath|(?:^|[\s"'=])-[A-Za-z]*n(?=[\s"']|$)/i;   // same as scripts/hook-bypass.js
+        if (event.tool === 'Bash' && !failed && MAY_BYPASS.test(cmd)) {
+            const { findHookBypass, bypassRecordNote } = require(path.join(__dirname, '..', 'scripts', 'hook-bypass.js'));
+            const hit = findHookBypass(cmd, data.cwd || process.cwd());
+            if (hit) notes.push(bypassRecordNote(hit));
+        }
+    } catch { /* a missing record note must never be why a push looks failed */ }
+
     if (notes.length) {
         process.stdout.write(JSON.stringify({
             hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: notes.join('\n\n') },
