@@ -161,6 +161,14 @@ function matches(label, haystack, re) {
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-tripwire-'));
 const FIXHOME = path.join(fixture, 'home');
 
+// A copy of the subject in a directory with NO quota-burn.js beside it. The
+// script resolves its source from its own __dirname, so this stages "the
+// shipped sibling is absent" entirely inside the fixture — see section 7 for
+// what staging it in the working tree cost.
+const NO_SIBLING = path.join(fixture, 'no-sibling', 'quota-tripwire.js');
+fs.mkdirSync(path.dirname(NO_SIBLING), { recursive: true });
+fs.copyFileSync(SUBJECT, NO_SIBLING);
+
 const MIN = 60000;
 // A fixed instant, so every projected timestamp in an expected string is a
 // constant rather than something recomputed from the clock.
@@ -195,8 +203,8 @@ function env(extra) {
     return Object.assign(e, extra || {});
 }
 
-function run(args, extra, timeout, expect) {
-    const r = runBudgeted(process.execPath, [SUBJECT].concat(args), {
+function run(args, extra, timeout, expect, subject) {
+    const r = runBudgeted(process.execPath, [subject || SUBJECT].concat(args), {
         // 60s, not 15: a cold node start under machine load blew 15s, and a
         // timed-out child is now classified infrastructure rather than being
         // absorbed - so the budget must only be exceedable by a real hang.
@@ -683,42 +691,38 @@ try {
     }
     {
         // The legacy path is still honoured for anyone who already has one there:
-        // remove the sibling and the old location must be found again. Without
-        // this, "prefer the sibling" could have been implemented as "ignore the
-        // home path entirely", and the fallback would be untested.
+        // with no sibling beside the script, the old location must be found
+        // again. Without this, "prefer the sibling" could have been implemented
+        // as "ignore the home path entirely", and the fallback would be untested.
+        //
+        // ABSENCE IS STAGED IN THE FIXTURE, NEVER IN THE REPO.
+        //
+        // [measured 2026-09-07] this block used to renameSync the shipped
+        // plugins/autodev-core/scripts/quota-burn.js out of the working tree and
+        // link it back afterwards. The working tree is shared by every session
+        // and every worktree in this clone, so for the width of that window the
+        // file flickered out of existence for ALL of them. 3 of 6 concurrent runs
+        // of this suite alone went red, in BOTH directions: a run that reached
+        // section 7a inside someone else's window saw `code=source-missing`
+        // where 7a demands the sibling win, and a run whose own rename lost the
+        // race got ENOENT — read, correctly by its own lights, as "the sibling is
+        // genuinely absent" — then had the file restored underneath it and saw no
+        // fallback at all. Neither run did anything wrong; the resource was
+        // global. Killing a run mid-window also left a tracked file deleted,
+        // which is exactly what `tree-inert` reports as a suite rewriting what
+        // it grades.
+        //
+        // The subject resolves the sibling from its OWN __dirname, so a copy in
+        // a directory that has no sibling stages the identical absence while
+        // touching nothing anyone else can see. It also pins the resolution as
+        // __dirname-relative rather than tied to this repo's layout.
         const sp = seed('src-legacy');
-        const shipped = path.join(path.dirname(SUBJECT), 'quota-burn.js');
-        // Unique per run: a fixed stash name could silently replace a
-        // preserved original left by an earlier failed run on POSIX.
-        const stash = shipped + '.suite-stashed-' + process.pid + '-' + Date.now();
-        let moved = false;
-        try { fs.renameSync(shipped, stash); moved = true; }
-        catch (e) {
-            // ENOENT means the sibling genuinely is not present, which is the
-            // scenario's premise. Anything else is infrastructure and must
-            // not be silently read as absence (Sol round-22).
-            if (e.code !== 'ENOENT') {
-                console.error('infrastructure: could not stash ' + shipped + ' (' + (e.code || e.message) + ')');
-                process.exitCode = 2;
-            }
-        }
-        try {
-            const r = run(['--once', '--state', sp]);
-            has('with the sibling absent it falls back to the home path',
-                r.stdout, path.join(FIXHOME, '.claude', 'scripts', 'quota-burn.js'));
-            has('...and reports the miss rather than assuming zero', r.stdout, 'code=source-missing');
-        } finally {
-            // link() refuses EEXIST, so a file recreated at the shipped path
-            // while it was stashed survives instead of being replaced.
-            if (moved) {
-                try { fs.linkSync(stash, shipped); fs.unlinkSync(stash); }
-                catch (e) {
-                    console.error('NOT RESTORED: ' + shipped + ' was recreated while stashed ('
-                        + (e.code || e.message) + '); the original is kept at ' + stash);
-                    process.exitCode = 2;
-                }
-            }
-        }
+        eq('precondition: the sibling-free copy of the subject really has no sibling',
+            fs.existsSync(path.join(path.dirname(NO_SIBLING), 'quota-burn.js')), false);
+        const r = run(['--once', '--state', sp], null, null, null, NO_SIBLING);
+        has('with the sibling absent it falls back to the home path',
+            r.stdout, path.join(FIXHOME, '.claude', 'scripts', 'quota-burn.js'));
+        has('...and reports the miss rather than assuming zero', r.stdout, 'code=source-missing');
     }
 
     // =======================================================================

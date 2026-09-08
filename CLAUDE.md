@@ -153,7 +153,7 @@ cannot work — if core needs a file, core ships it.
 **That sentence carried four counts until 2026-09-08, and three of them were
 wrong.** It was written on 2026-08-17 as "43 skills, 4 agents, 7 hook events"
 for core and "4 hook events" for memory, and all four were exact that day.
-`[measured 2026-09-08]` core has **58 skills, 5 agents and 10 hook events**;
+`[measured 2026-09-08]` core has **59 skills, 5 agents and 10 hook events**;
 memory's 4 is still right, and it is right because nobody has added a memory
 hook, not because anything checks.
 
@@ -177,10 +177,17 @@ tree — which is the reason the prose must not make claims the tree can falsify
 ### Skills are the unit of behaviour
 
 `plugins/<plugin>/skills/<name>/SKILL.md`, frontmatter-driven. User-invocable ones
-take their command name from the directory. **`rule-*` skills are always-on**
-(`user-invocable: false`, auto-loaded by a `paths:` glob) and encode conventions
-derived from real failures — read `rule-diagnosis`, `rule-ab-testing` and
-`rule-gate-integrity` before proposing a cause, a detector or a gate. Long
+take their command name from the directory. **A `rule-*` skill is auto-loaded only
+if its own frontmatter says so** — `user-invocable: false` *and* a `paths:` glob
+matching a file the session actually reads. The prefix guarantees neither: some
+`rule-*` skills are ordinary invocable skills, and some carry globs that nothing in
+this repo matches. Both are silently ABSENT rather than always-on, and an absent rule
+looks exactly like a rule nobody needed — the lesson `rule-gate-integrity` draws
+about vetoes, turned on the rule library itself. So **load `rule-diagnosis`,
+`rule-ab-testing` and `rule-gate-integrity` explicitly** before proposing a cause, a
+detector or a gate; `[measured 2026-09-08]` only the last of the three auto-loads
+here. `head -12 plugins/autodev-core/skills/rule-*/SKILL.md` answers which is which,
+and it is correct every day — a count in this file would not be. Long
 reference material goes in `references/` beside the skill so it loads on demand.
 
 ### The prd.json sprint system
@@ -247,8 +254,9 @@ a subprocess, following `tooling/test-pre-tool-filter.js`.
 ### Version is six files and one writer
 
 `VERSION` is the source of truth; `bump.js` propagates it to `package.json`,
-`marketplace.json` and every `plugins/*/plugin.json`, enumerating plugins from
-disk. Hand-editing is how a release got tagged on a commit that failed validate.
+`.claude-plugin/marketplace.json` and every
+`plugins/*/.claude-plugin/plugin.json`, enumerating plugins from disk. Hand-editing
+is how a release got tagged on a commit that failed validate.
 
 **A version number is a plugin-cache key, so two trees must never share one.**
 2026-08-21: two sessions released 8.98.0 from this clone within minutes, with

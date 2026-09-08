@@ -1,0 +1,81 @@
+{
+  "days": 14,
+  "sprint": null,
+  "sources": [
+    {
+      "id": "server-errors",
+      "kind": "postgrest-errors",
+      "url_env": "SUPABASE_URL",
+      "key_env": "SUPABASE_SERVICE_ROLE_KEY",
+      "table": "server_errors",
+      "time_column": "created_at",
+      "group_by": [
+        "function_name",
+        "error_code"
+      ],
+      "title_column": "message",
+      "filter": "resolved=is.false"
+    },
+    {
+      "id": "client-errors",
+      "kind": "postgrest-errors",
+      "url_env": "SUPABASE_URL",
+      "key_env": "SUPABASE_SERVICE_ROLE_KEY",
+      "table": "client_errors",
+      "time_column": "created_at",
+      "group_by": [
+        "error_type",
+        "message"
+      ],
+      "_why": "[measured 2026-09-08] grouping client errors by (error_type, url) and by (error_type, message) found the same two top groups; by message is closer to a Sentry fingerprint and does not fragment across pages. Server errors group by (function_name, error_code) because their messages carry variable content such as Retry-After seconds."
+    },
+    {
+      "id": "heartbeats",
+      "kind": "postgrest-heartbeats",
+      "url_env": "SUPABASE_URL",
+      "key_env": "SUPABASE_SERVICE_ROLE_KEY",
+      "table": "app_settings",
+      "key_column": "key",
+      "key_like": "%_last_run",
+      "value_column": "value",
+      "at_path": "at",
+      "updated_column": "updated_at"
+    },
+    {
+      "id": "deploys",
+      "kind": "vercel-deploys",
+      "project": "your-vercel-project-name"
+    },
+    {
+      "id": "sentry",
+      "kind": "sentry-issues",
+      "org": "your-org-slug",
+      "project": "your-project-slug",
+      "region": "https://sentry.io",
+      "token_env": "SENTRY_AUTH_TOKEN",
+      "query": "is:unresolved"
+    }
+  ],
+  "thresholds": {
+    "postgrest-errors": {
+      "min_count": 5,
+      "min_age_hours": 24,
+      "min_span_hours": 24
+    },
+    "postgrest-heartbeats": {
+      "stale_hours": 48
+    },
+    "requiet_days": 30,
+    "escalation_factor": 10,
+    "sentry-issues": {
+      "min_count": 5,
+      "min_age_hours": 24,
+      "min_span_hours": 24
+    }
+  },
+  "ignore": [],
+  "intervals": {
+    "weekly_*": 192,
+    "_why": "hours a heartbeat key may stay silent; exact key or prefix*; default is 48. [measured 2026-09-08] a weekly job was proposed as dead at 86 h until this map existed."
+  }
+}
