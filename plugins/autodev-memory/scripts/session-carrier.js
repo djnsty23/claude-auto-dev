@@ -24,11 +24,13 @@ function carrierDir(cwd) {
     return path.join(cwd, '.claude', DIR_NAME);
 }
 
-// This directory holds the user's verbatim prompts. Projects do not reliably
-// ignore all of .claude/ — this repo itself ignores only four specific paths
-// inside it — so the directory excludes ITSELF the moment it is created. That
-// holds no matter what the surrounding project's .gitignore says, which is the
-// only version of this guarantee worth having when the repo might be public.
+// This directory holds per-session state, and until 2026-09-08 it held the
+// user's verbatim prompts. Projects do not reliably ignore all of .claude/ —
+// this repo itself ignores only four specific paths inside it — so the
+// directory excludes ITSELF the moment it is created. That holds no matter what
+// the surrounding project's .gitignore says, which is the only version of this
+// guarantee worth having when the repo might be public, and it stays now the
+// prompts are gone: a stale `.prompt` from an older build is still a prompt.
 function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
     const ignore = path.join(dir, '.gitignore');
@@ -65,6 +67,9 @@ function read(cwd, harnessSessionId) {
 
 function clear(cwd, harnessSessionId) {
     try { fs.unlinkSync(carrierPath(cwd, harnessSessionId)); } catch { /* already gone */ }
+    // A `.prompt` sibling written by a pre-2026-09-08 build holds verbatim user
+    // text; remove it with the session so an upgrade never leaves one behind.
+    try { fs.unlinkSync(carrierPath(cwd, harnessSessionId) + '.prompt'); } catch { /* none */ }
     // Remove the directory when this was the last live session. The self-ignore
     // file is ours, so it does not count as "still in use" — drop it only when
     // nothing else remains, and never touch a directory another session is using.
@@ -78,32 +83,13 @@ function clear(cwd, harnessSessionId) {
     } catch { /* other sessions still live, or already gone */ }
 }
 
-// The user's latest prompt, stored beside the session id.
-//
-// The observation classifier takes the prompt as an argument and uses it for
-// BOTH the observation type and its concept text. It was wired to
-// `AUTO_DEV_LAST_PROMPT`, which nothing ever set, so every observation ever
-// captured fell back to a generic type and a generic concept string.
-function promptPath(cwd, harnessSessionId) {
-    return carrierPath(cwd, harnessSessionId) + '.prompt';
-}
+// Until 2026-09-08 a `<id>.prompt` file sat beside each session id, written by
+// a UserPromptSubmit hook and read by the observation classifier to derive an
+// observation's type and concept. The classifier stopped reading the prompt
+// (docs/evidence-memory-recall-2026-09-08.md: it produced a keyword guess and a
+// concept column full of other sessions' messages), so the hook, this file and
+// the three functions that carried it were removed together. A stale
+// `.prompt` file from an older plugin build is deleted by clear() below along
+// with the session id, so nothing verbatim outlives its session.
 
-function writePrompt(cwd, harnessSessionId, prompt) {
-    const file = promptPath(cwd, harnessSessionId);
-    ensureDir(path.dirname(file));
-    fs.writeFileSync(file, String(prompt || '').slice(0, 2000));
-}
-
-function readPrompt(cwd, harnessSessionId) {
-    try {
-        return fs.readFileSync(promptPath(cwd, harnessSessionId), 'utf8');
-    } catch {
-        return '';
-    }
-}
-
-function clearPrompt(cwd, harnessSessionId) {
-    try { fs.unlinkSync(promptPath(cwd, harnessSessionId)); } catch { /* already gone */ }
-}
-
-module.exports = { carrierDir, carrierPath, write, read, clear, writePrompt, readPrompt, clearPrompt };
+module.exports = { carrierDir, carrierPath, write, read, clear };

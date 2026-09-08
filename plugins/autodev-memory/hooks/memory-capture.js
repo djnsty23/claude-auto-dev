@@ -51,13 +51,13 @@ try {
                 const toolResult = (typeof rawResult === 'string'
                     ? rawResult
                     : (rawResult ? JSON.stringify(rawResult) : '')).slice(0, 500);
-                // The classifier derives BOTH the observation type and its concept
-                // text from the prompt. It used to read AUTO_DEV_LAST_PROMPT, which
-                // nothing ever set, so every observation fell back to a generic type
-                // and a generic concept.
-                const userPrompt = carrier.readPrompt(cwd, harnessSessionId);
-
-                const obs = classifyObservation(toolName, toolInput, toolResult, userPrompt);
+                // The classifier used to take the observation's type and concept
+                // from the user's last prompt. Measured 2026-09-08
+                // (docs/evidence-memory-recall-2026-09-08.md), that produced a
+                // keyword guess for the type and the prompt itself as the concept.
+                // It now takes the cwd instead, to keep writes outside the project
+                // out of the store.
+                const obs = classifyObservation(toolName, toolInput, toolResult, { cwd });
                 if (obs && sessionId) {
                     memDB.saveObservation({
                         sessionId,

@@ -1,250 +1,118 @@
 #!/usr/bin/env node
-// observation-classifier.js — Classifies tool usage into typed observations
-// Used by post-tool hook to auto-capture what Claude is doing
+// observation-classifier.js — decides which tool calls become observations.
+// Used by hooks/memory-capture.js on every PostToolUse event.
+//
+// Rewritten 2026-09-08 from the measurement in
+// docs/evidence-memory-recall-2026-09-08.md. The previous classifier recorded
+// most Bash commands as `Ran: <command>`, test-shaped commands as `Tests
+// passed`, file reads and greps as discoveries, and took BOTH the type and the
+// concept from the user's last prompt. Read row by row, 90 % of the store was
+// command echoes, the type was a keyword guess (88 of 143 "bugfix" rows were
+// plain file creations), and the concept column held the prompt, including
+// other sessions' messages. Nothing ever read any of it back.
+//
+// What is recorded now, and why only this:
+//   - a Write or Edit of a file INSIDE the project. That is the one event whose
+//     record is not already better kept by git, because it exists before the
+//     commit does.
+//   - type is what the tool did, not what the prompt said: every row is a
+//     `change`. The other types stay valid in the database for rows written
+//     deliberately through the API; capture no longer guesses them.
+//   - concept is the edit itself (old → new, or the new file's path), never the
+//     prompt. A prompt is the user's words about the whole task, not about this
+//     edit, and it carried cross-session messages and production command lines
+//     into a column that session-start injection would have replayed.
+// Everything else returns null: Bash, Read, Grep, Glob, and any write that lands
+// outside the project, in a scratchpad, in a probe directory, or in the memory
+// directory (the memory file IS the memory; a row saying it was written is not).
 
+const fs = require('fs');
 const path = require('path');
 
 const VALID_TYPES = ['decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change'];
 
-// Keywords that indicate specific observation types
-const TYPE_KEYWORDS = {
-    bugfix: /\b(fix|bug|error|crash|broken|issue|patch|hotfix|debug|resolve|repair)\b/i,
-    refactor: /\b(refactor|restructure|reorganize|clean\s?up|simplify|extract|rename|move)\b/i,
-    feature: /\b(add|create|implement|build|introduce|new|feature|enable|support)\b/i,
-    discovery: /\b(investigate|explore|understand|analyze|research|check|inspect|diagnose|why|how)\b/i,
-    decision: /\b(decide|choose|switch|migrate|replace|adopt|prefer|select|pick)\b/i,
-};
+// Path fragments that mark a write nobody needs a row for. Matched on a
+// slash-normalised, lowercased path. `/scratchpad/` is the session scratch
+// directory; `/.claude/probe/` is where suites plant probe files; the memory
+// directory lives under `~/.claude/projects/<slug>/memory/`.
+const EXCLUDED_FRAGMENTS = ['/scratchpad/', '/.claude/probe/', '/.claude/projects/'];
 
-/**
- * Classify a tool usage into an observation (or null to skip)
- *
- * @param {string} toolName - Name of the tool (Write, Edit, Bash, Read, Grep, Glob, etc.)
- * @param {object} toolInput - Input parameters passed to the tool
- * @param {string} toolResult - Result/output from the tool (may be truncated)
- * @param {string} userPrompt - The user's most recent prompt (for context)
- * @returns {object|null} - Observation object or null to skip
- */
-function classifyObservation(toolName, toolInput, toolResult, userPrompt) {
-    if (!toolName) return null;
-
-    const prompt = (userPrompt || '').toLowerCase();
-    const resultStr = (typeof toolResult === 'string' ? toolResult : '').slice(0, 500);
-
-    switch (toolName) {
-        case 'Write': {
-            const filePath = toolInput?.file_path || toolInput?.path || '';
-            const fileName = path.basename(filePath);
-            const type = detectType(prompt, 'feature');
-            return {
-                type,
-                title: `Created ${fileName}`,
-                concept: extractConcept(prompt, `New file: ${filePath}`),
-                sourceFiles: [filePath]
-            };
+// Resolve symlinks on as much of the path as exists. A Write's target usually
+// does not exist yet, and `realpathSync` on a missing path throws; falling back
+// to the raw path then compares `/var/folders/...` against a cwd that resolved
+// to `/private/var/folders/...`, and every new file looks outside the project.
+// So the nearest existing ancestor is resolved and the missing tail re-attached.
+function realpathOr(p) {
+    let head = p;
+    const tail = [];
+    for (let i = 0; i < 64 && head; i++) {
+        try {
+            const real = fs.realpathSync(head);
+            return tail.length ? path.join(real, ...tail) : real;
+        } catch {
+            const parent = path.dirname(head);
+            if (parent === head) return p;
+            tail.unshift(path.basename(head));
+            head = parent;
         }
-
-        case 'Edit': {
-            const filePath = toolInput?.file_path || toolInput?.path || '';
-            const fileName = path.basename(filePath);
-            const type = detectType(prompt, 'change');
-            const oldStr = (toolInput?.old_string || '').slice(0, 80);
-            const newStr = (toolInput?.new_string || '').slice(0, 80);
-            return {
-                type,
-                title: `${typeVerb(type)} ${fileName}`,
-                concept: extractConcept(prompt, `${oldStr} → ${newStr}`),
-                sourceFiles: [filePath]
-            };
-        }
-
-        case 'Bash': {
-            const cmd = toolInput?.command || '';
-
-            // Skip trivial commands
-            if (isTrivialBash(cmd)) return null;
-
-            // Test runs
-            if (/\b(test|jest|vitest|pytest|mocha|playwright|cypress)\b/i.test(cmd)) {
-                const passed = !/\b(fail|error|FAIL|ERROR)\b/.test(resultStr);
-                return {
-                    type: 'discovery',
-                    title: `Tests ${passed ? 'passed' : 'FAILED'}: ${cmd.slice(0, 50)}`,
-                    concept: passed ? 'All tests passing' : `Test failures detected`,
-                    sourceFiles: []
-                };
-            }
-
-            // Git operations
-            if (/\bgit\s+(commit|push|merge|rebase|cherry-pick)\b/.test(cmd)) {
-                return {
-                    type: 'change',
-                    title: `Git: ${cmd.slice(0, 60)}`,
-                    concept: extractConcept(prompt, 'Version control operation'),
-                    sourceFiles: []
-                };
-            }
-
-            // Package install
-            if (/\b(npm|yarn|pnpm|pip|cargo)\s+(install|add|i)\b/.test(cmd)) {
-                return {
-                    type: 'change',
-                    title: `Dependency: ${cmd.slice(0, 60)}`,
-                    concept: 'Package installation',
-                    sourceFiles: ['package.json']
-                };
-            }
-
-            // Build/deploy
-            if (/\b(build|deploy|vercel|netlify|docker)\b/i.test(cmd)) {
-                return {
-                    type: 'change',
-                    title: `Build/Deploy: ${cmd.slice(0, 60)}`,
-                    concept: extractConcept(prompt, 'Build or deployment operation'),
-                    sourceFiles: []
-                };
-            }
-
-            // Other significant commands
-            if (cmd.length > 20) {
-                return {
-                    type: 'discovery',
-                    title: `Ran: ${cmd.slice(0, 60)}`,
-                    concept: resultStr.slice(0, 150) || 'Command execution',
-                    sourceFiles: []
-                };
-            }
-
-            return null;
-        }
-
-        case 'Read': {
-            const filePath = toolInput?.file_path || '';
-            // Only capture reads of significant files, not every file scan
-            if (isSignificantRead(filePath)) {
-                return {
-                    type: 'discovery',
-                    title: `Read ${path.basename(filePath)}`,
-                    concept: `Investigated: ${filePath}`,
-                    sourceFiles: [filePath]
-                };
-            }
-            return null;
-        }
-
-        case 'Grep': {
-            const pattern = toolInput?.pattern || '';
-            const searchPath = toolInput?.path || '';
-            return {
-                type: 'discovery',
-                title: `Searched for "${pattern.slice(0, 40)}"`,
-                concept: `Code search in ${searchPath || 'project'}`,
-                sourceFiles: searchPath ? [searchPath] : []
-            };
-        }
-
-        // Skip Glob — too noisy
-        case 'Glob':
-            return null;
-
-        default:
-            return null;
     }
+    return p;
 }
 
-/**
- * Detect observation type from user prompt context
- */
-function detectType(prompt, fallback) {
-    for (const [type, regex] of Object.entries(TYPE_KEYWORDS)) {
-        if (regex.test(prompt)) return type;
-    }
-    return fallback;
-}
-
-/**
- * Get a verb for the observation type (for titles)
- */
-function typeVerb(type) {
-    const verbs = {
-        bugfix: 'Fixed',
-        feature: 'Added',
-        refactor: 'Refactored',
-        change: 'Modified',
-        discovery: 'Explored',
-        decision: 'Decided on'
-    };
-    return verbs[type] || 'Updated';
-}
-
-/**
- * Extract a meaningful concept from context
- */
-function extractConcept(prompt, fallback) {
-    if (prompt && prompt.length > 5) {
-        // Clean up and truncate prompt
-        return prompt.slice(0, 200).trim();
-    }
-    return fallback;
-}
-
-/**
- * Filter out trivial bash commands that don't warrant observations
- */
-function isTrivialBash(cmd) {
-    const trivial = [
-        /^\s*ls\b/,
-        /^\s*pwd\b/,
-        /^\s*echo\b/,
-        /^\s*cat\b/,
-        /^\s*head\b/,
-        /^\s*tail\b/,
-        /^\s*wc\b/,
-        /^\s*which\b/,
-        /^\s*whoami\b/,
-        /^\s*date\b/,
-        /^\s*cd\b/,
-        /^\s*mkdir\b/,
-        /^\s*rm\b/,
-        /^\s*cp\b/,
-        /^\s*mv\b/,
-        /^\s*node\s+-[ev]\b/,  // Quick node evaluations
-        /^\s*git\s+(status|log|diff|branch|show)\b/,  // Read-only git
-        /^\s*git\s+stash\b/,
-    ];
-    return trivial.some(r => r.test(cmd));
-}
-
-/**
- * Determine if a file read is significant enough to track
- */
-function isSignificantRead(filePath) {
+// True when the file belongs to the project the hook is running in. A relative
+// path is taken as project-relative. With no cwd the location cannot be judged,
+// so only the fragment exclusions apply.
+function isProjectFile(filePath, cwd) {
     if (!filePath) return false;
-
-    // Skip common config/meta files
-    const skipPatterns = [
-        /node_modules/,
-        /\.git\//,
-        /package-lock\.json/,
-        /yarn\.lock/,
-        /\.env/,
-        /\.DS_Store/,
-        /tsconfig\.json/,
-        /\.eslintrc/,
-        /\.prettierrc/,
-    ];
-
-    if (skipPatterns.some(r => r.test(filePath))) return false;
-
-    // Track reads of source code, configs, and docs
-    const significantExtensions = [
-        '.js', '.ts', '.jsx', '.tsx', '.py', '.go', '.rs', '.rb',
-        '.md', '.json', '.yaml', '.yml', '.toml',
-        '.sql', '.graphql', '.prisma',
-        '.css', '.scss', '.html', '.svelte', '.vue',
-    ];
-
-    const ext = path.extname(filePath).toLowerCase();
-    return significantExtensions.includes(ext);
+    const norm = String(filePath).replace(/\\/g, '/').toLowerCase();
+    if (EXCLUDED_FRAGMENTS.some((f) => norm.includes(f))) return false;
+    if (!cwd || !path.isAbsolute(filePath)) return true;
+    const rel = path.relative(realpathOr(cwd), realpathOr(filePath));
+    if (!rel) return true;
+    return !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
-module.exports = { classifyObservation, VALID_TYPES };
+/**
+ * Classify a tool usage into an observation, or null to skip.
+ *
+ * @param {string} toolName - Write, Edit, Bash, Read, Grep, Glob, ...
+ * @param {object} toolInput - the tool's input parameters
+ * @param {string} toolResult - unused; kept so older callers still resolve
+ * @param {object|string} context - `{ cwd }` of the session. A string here is
+ *   the pre-2026-09-08 prompt argument and is ignored: the prompt no longer
+ *   shapes an observation.
+ * @returns {object|null}
+ */
+function classifyObservation(toolName, toolInput, toolResult, context) {
+    if (!toolName) return null;
+    if (toolName !== 'Write' && toolName !== 'Edit') return null;
+
+    const cwd = context && typeof context === 'object' ? context.cwd : undefined;
+    const filePath = (toolInput && (toolInput.file_path || toolInput.path)) || '';
+    if (!isProjectFile(filePath, cwd)) return null;
+
+    const fileName = path.basename(filePath);
+    const shown = cwd && path.isAbsolute(filePath)
+        ? path.relative(realpathOr(cwd), realpathOr(filePath)).replace(/\\/g, '/')
+        : filePath;
+
+    if (toolName === 'Write') {
+        return {
+            type: 'change',
+            title: `Created ${fileName}`,
+            concept: `New file: ${shown}`,
+            sourceFiles: [filePath],
+        };
+    }
+
+    const oldStr = String((toolInput && toolInput.old_string) || '').slice(0, 80);
+    const newStr = String((toolInput && toolInput.new_string) || '').slice(0, 80);
+    return {
+        type: 'change',
+        title: `Modified ${fileName}`,
+        concept: oldStr || newStr ? `${oldStr} → ${newStr}` : `Edited ${shown}`,
+        sourceFiles: [filePath],
+    };
+}
+
+module.exports = { classifyObservation, isProjectFile, VALID_TYPES };

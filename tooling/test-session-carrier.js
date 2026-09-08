@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Tests for autodev-memory's cross-process session state.
 //
-// This covers the three mechanisms that previously failed silently:
+// This covers the mechanisms that previously failed silently:
 //   1. The session id carrier — was an env var that died with its process, then
 //      a single per-project file that concurrent sessions clobbered.
-//   2. The prompt carrier — the classifier's `userPrompt` argument was read from
-//      AUTO_DEV_LAST_PROMPT, which nothing set, so every observation fell back
-//      to a generic type and concept.
-//   3. memory-prompt-capture.js and memory-session-start.js, which had no tests.
+//   2. memory-session-start.js, which had no tests.
+//   3. The `.prompt` sibling a pre-2026-09-08 build wrote beside each session
+//      id (verbatim user text): the hook and the carrier functions are gone,
+//      and clear() must still remove a stale one.
 //
 // Run: node tooling/test-session-carrier.js
 
@@ -56,14 +56,27 @@ const dirIgnore = path.join(PROJ, '.claude', 'memory-sessions', '.gitignore');
 check('carrier dir self-ignores on creation', fs.existsSync(dirIgnore));
 check('self-ignore excludes everything', fs.readFileSync(dirIgnore, 'utf8').includes('\n*'));
 
-// Prompt carrier
-carrier.writePrompt(PROJ, 'harness-B', 'fix the login redirect bug');
-check('prompt round-trips', carrier.readPrompt(PROJ, 'harness-B') === 'fix the login redirect bug');
-check('prompt is per-session', carrier.readPrompt(PROJ, 'harness-Z') === '');
-carrier.clearPrompt(PROJ, 'harness-B');
-check('prompt clears', carrier.readPrompt(PROJ, 'harness-B') === '');
+// The prompt carrier is gone (2026-09-08), and so is the hook that wrote it.
+// The module must not quietly keep exporting either half, or a caller would
+// write verbatim prompts to disk that nothing reads and nothing clears.
+check('writePrompt is no longer exported', typeof carrier.writePrompt === 'undefined');
+check('readPrompt is no longer exported', typeof carrier.readPrompt === 'undefined');
+check('the prompt-capture hook file is gone',
+    !fs.existsSync(path.join(PLUGIN_SRC, 'hooks', 'memory-prompt-capture.js')));
+check('and hooks.json no longer registers a UserPromptSubmit hook',
+    !('UserPromptSubmit' in (JSON.parse(fs.readFileSync(path.join(PLUGIN_SRC, 'hooks', 'hooks.json'), 'utf8')).hooks || {})));
 
-// ------------------------------------------------- memory-prompt-capture.js
+// A `.prompt` sibling left by an older build still holds verbatim user text.
+// clear() removes it with the session id; the control plants one and reads
+// it back first, so a clear() that ignores the sibling is what fails here.
+{
+    carrier.write(PROJ, 'harness-old', 'ses_old');
+    const stale = carrier.carrierPath(PROJ, 'harness-old') + '.prompt';
+    fs.writeFileSync(stale, 'something the user typed last week');
+    check('control: the stale .prompt sibling exists before clear()', fs.existsSync(stale));
+    carrier.clear(PROJ, 'harness-old');
+    check('clear() removes a stale .prompt sibling from an older build', !fs.existsSync(stale));
+}
 
 function runHook(hookFile, payload, env = {}) {
     return spawnSync(process.execPath, [path.join(PLUGIN_SRC, 'hooks', hookFile)], {
@@ -73,43 +86,7 @@ function runHook(hookFile, payload, env = {}) {
         env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC, ...env },
     });
 }
-
-// No carrier for this session → nothing recorded. Writing prompts to disk that
-// nothing will read is pure cost.
-let r = runHook('memory-prompt-capture.js', {
-    prompt: 'no session here', cwd: PROJ, session_id: 'harness-none',
-});
-check('prompt capture exits 0 with no session', r.status === 0);
-check('prompt capture writes nothing without a carrier', carrier.readPrompt(PROJ, 'harness-none') === '');
-
-// With a live carrier the prompt is recorded.
-carrier.write(PROJ, 'harness-C', 'ses_ccc');
-r = runHook('memory-prompt-capture.js', {
-    prompt: 'refactor the auth middleware', cwd: PROJ, session_id: 'harness-C',
-});
-check('prompt capture exits 0', r.status === 0);
-check('prompt capture records the prompt', carrier.readPrompt(PROJ, 'harness-C') === 'refactor the auth middleware');
-check('prompt capture emits nothing on stdout', (r.stdout || '') === '');
-
-// <private> content is redacted before it ever touches disk.
-runHook('memory-prompt-capture.js', {
-    prompt: 'deploy with <private>sk_live_abc123</private> please',
-    cwd: PROJ,
-    session_id: 'harness-C',
-});
-const stored = carrier.readPrompt(PROJ, 'harness-C');
-check('private blocks are redacted', !stored.includes('sk_live_abc123') && stored.includes('[REDACTED]'));
-
-// An empty prompt is a no-op, not an overwrite.
-runHook('memory-prompt-capture.js', { prompt: '', cwd: PROJ, session_id: 'harness-C' });
-check('empty prompt does not clobber the stored one', carrier.readPrompt(PROJ, 'harness-C') === stored);
-
-// Malformed stdin must never break a turn.
-r = spawnSync(process.execPath, [path.join(PLUGIN_SRC, 'hooks', 'memory-prompt-capture.js')], {
-    input: 'not json', encoding: 'utf8', cwd: PROJ,
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC },
-});
-check('malformed stdin → exit 0', r.status === 0);
+let r;
 
 // -------------------------------------------------- memory-session-start.js
 

@@ -89,25 +89,24 @@ function run(dir, sessionId) {
     const dir = project({ 'prd.json': JSON.stringify({ stories: { 'S1-001': { title: 'a', passes: true } } }) });
     carrier.write(dir, 'sess-A', 'ses_a');
     carrier.write(dir, 'sess-B', 'ses_b');
-    carrier.writePrompt(dir, 'sess-B', 'B is still working');
 
     const r = run(dir, 'sess-A');
 
     check('ending a session exits 0', r.status === 0);
     check("clears only the ending session's carrier", carrier.read(dir, 'sess-A') === null);
     check("  and leaves the other session's carrier intact", carrier.read(dir, 'sess-B') === 'ses_b');
-    check("  and leaves the other session's prompt intact",
-        carrier.readPrompt(dir, 'sess-B') === 'B is still working');
 }
 
-// The prompt carrier holds verbatim user text and must not outlive its session.
+// A `.prompt` sibling written by a pre-2026-09-08 build holds verbatim user
+// text and must not outlive its session, even though nothing writes one now.
 {
     const dir = project();
     carrier.write(dir, 'sess-P', 'ses_p');
-    carrier.writePrompt(dir, 'sess-P', 'something the user typed');
+    const stale = carrier.carrierPath(dir, 'sess-P') + '.prompt';
+    fs.writeFileSync(stale, 'something the user typed');
+    check('control: the stale prompt file exists before session end', fs.existsSync(stale));
     run(dir, 'sess-P');
-    check('the ending session\'s stored prompt is cleared',
-        carrier.readPrompt(dir, 'sess-P') === '');
+    check("the ending session's stale prompt file is removed", !fs.existsSync(stale));
 }
 
 // ------------------------------------------------------- the summary it writes
