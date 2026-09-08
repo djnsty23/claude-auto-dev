@@ -71,3 +71,14 @@ Nothing outside the scratch directory was written; the throwaway remote holds tw
 ## D7. `VERSION` untouched
 
 No release. The plugin cache key must move only when a tree is cut for install.
+
+## D8. The trunk A/B folded into the commit and ship skills, as PR #202
+
+The second end-of-turn panel recommended giving the base-branch check a recipe in the
+skills that own the push; held by the panel hook, taken under branch 2 (reversible, a
+skill edit, autodev only) and logged here. Branch `claude/trunk-ab-skill-step` off
+`origin/main` 7b157a8, PR #202. That push went THROUGH `tooling/githooks/pre-push`
+without a bypass: `[measured 2026-09-08]` validate on that base is 19 PASS, 0 FAIL, 1 WARN,
+the WARN naming the host's 2.1.233. So #182 has landed, the trunk red D1 describes is
+gone at main, and this branch will be green on a merge with main; its own pushes stayed
+bypasses only because it still sits on b8eae1f.
