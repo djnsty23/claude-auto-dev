@@ -14,6 +14,7 @@ never ships.
 
 ```bash
 npm run gate                 # THE GATE: ten steps chained with &&. Run this.
+npm run gate:fast            # the 6 cheap steps only. NOT the gate; 4 steps DEFERRED.
 npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 10.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
@@ -180,6 +181,57 @@ two wrong readings in the session that wrote this paragraph.
 
 `test-all.js` discovers suites by pattern (`/^test-.*\.js$/`) — a new
 `tooling/test-*.js` needs no registration.
+
+### The fast tier: `npm run gate:fast`
+
+`[measured 2026-09-08, this machine, load 4.2 rising to 12.5]` the seven steps
+timed INDEPENDENTLY on a clean tree, each exit code captured to a FILE because
+`$?` after a pipe is the pipe's:
+
+| step | seconds | share |
+|---|---|---|
+| `npm test` | 323.7 | 20.00% |
+| `check:suites` | 1286.2 | 79.46% |
+| `check:probe-shapes` | 0.1 | 0.01% |
+| `check:population` | 0.4 | 0.02% |
+| `check:entrypoints` | 7.8 | 0.48% |
+| `check:skill-tools` | 0.3 | 0.02% |
+| `check:agents-md` | 0.2 | 0.01% |
+| **total** | **1618.7 (27.0 min)** | |
+
+**Two steps are 99.46% of it. The other five are 8.8 SECONDS TOGETHER.** So
+`gate:fast` runs those five, and `npm run gate` still runs everything. The bar
+wants a re-run after every rebase and `docs/decisions.md` is newest-first, so
+roughly half the open queue rebases on every merge to main — that product, not
+any single step, is the fleet's dominant cost. A post-rebase re-check measured
+8.6 s end to end against 27 minutes.
+
+`check:entrypoints` was the one worth measuring rather than assuming: it probes
+~118 scripts with `--help` under a 10 s budget each, so its worst case is
+minutes, and a cost model that guessed would have put it in the wrong tier.
+Measured, it is 7.8 s — 89% of this tier and still under eight seconds.
+
+**`gate:fast` IS NOT THE GATE, and it says so on every run — including a clean
+one.** It prints what it ran, what it DEFERRED, and a line reading `5 of 7 gate
+steps ran. 2 DEFERRED.` A partial run that renders like a complete one is
+precisely the false green this file exists to prevent, so silence is not
+available to it; the other steps already print their population on a clean run
+for the same reason. **Nothing was dropped and no existing name changed meaning**
+— a session running `npm run gate` from memory still gets all seven.
+
+It is a script and not a second `&&` chain, for three reasons the chain itself
+demonstrates. `&&` short-circuits, so a red step hides every step behind it.
+Exit 2 is INDETERMINATE here, and a chain folds that refusal into a verdict.
+And a partial run has to be able to LOOK partial. Every step runs on its own and
+the three states stay three.
+
+**The step list is DERIVED from `scripts.gate`, never copied.** `gate-fast.js`
+splits that chain on `&&` — the same authority `check-claude-md.js` grades this
+file's counts against — and anything it does not recognise is DEFERRED, so a step
+added to the chain lands in the slow tier by default rather than being assumed
+cheap. A hand-maintained copy would rot the first time someone added a step,
+silently, exactly as the `passes` table came to list four states while five
+existed. The safe default is for the fast tier to claim LESS than it covers.
 
 ### Four coverage questions, none substituting for another
 
