@@ -3,6 +3,53 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
+
+The brief was to make workflow runs survive the session quota wall, on the
+2026-08-25 measurement (42 of 280 agents lost, 20 of them to a `<synthetic>`
+"session limit" row). Re-measuring first changed the shape of the work:
+**12 of the 52 run directories still exist and no workflow has run on this
+machine since 2026-08-25**, so the loss rate could not be re-sampled and the
+work stands on the 12 that remain. Full numbers in
+[`evidence-quota-wall-2026-09-08.md`](evidence-quota-wall-2026-09-08.md).
+
+**The resume already exists and is correct; what is missing is anyone calling
+it.** `Workflow({scriptPath, resumeFromRunId})` re-runs only the `agent()`
+calls with no journal result. On the one real resume on this disk it
+re-started exactly the four walled calls with identical key hashes. The
+harness names that call in the failure notification — two seconds before the
+main thread receives the same wall — and again in a later "stopped"
+notification that went unread. `grep resumeFromRunId` over plugins, tooling
+and docs found nothing. So this work builds on it rather than beside it:
+
+- `scripts/workflow-run-triage.js` reads a run directory and prints per agent
+  journaled / lost-quota-wall / lost-interrupted / lost-api-error /
+  lost-other, the agent-seconds and tool calls each cost, and the exact resume
+  call; COULD NOT CHECK on anything unreadable, never a zero. Over the real
+  population: 100 agents, 94 journaled, 6 lost (5 wall, 1 interrupt), one
+  resumable run keeping 6,497 journaled agent-seconds that nobody resumed.
+- `hooks/stop-workflow-wall-note.js` (Stop) says once, at the end of the first
+  turn that ends normally after the reset, that this session's latest run has
+  walled agents, and puts the resume call in the model's context. Never a
+  `decision` key: a Stop hook that blocks on a wall is a session that cannot
+  end at the wall. 64 ms on an ordinary turn against a 54 ms process floor;
+  a run already noted costs a stamp of mtimes, not a transcript read.
+- The phase rule, with its price: serial costs **2.0×** the wall-clock of a
+  3–4-wide phase and **4.1×** that of 8–12-wide, measured over the 12 runs;
+  a wall costs width × elapsed-at-wall (the real one: 5 agents at 40–59 s).
+  So a must-keep phase runs serial or in waves no wider than what you can
+  afford to redo, states width and re-run cost in `meta.phases[].detail`, and
+  a wide parallel phase is only for cheap-to-redo work. Prose in
+  `rule-agent-concurrency` and `WORKFLOW-STRUCTURE.md` D6/D7; no hook and no
+  cap, because a cap charges every workflow the 2–4× whether or not a wall is
+  plausible.
+
+Not done, and why: the built-in `workflow-authoring` skill is part of Claude
+Code, not this repo, so the convention lives in the rule that auto-loads on
+`**/*.workflow.js`. Auto-resume itself was not wired: the moment the wall is
+detectable is the moment nothing can run, and the first turn after the reset
+already has the note in context.
+
 ## 2026-09-08: one greenfield run through spec → setup-project → auto → ship, measured
 
 The question was whether the Brain can take a one-line idea to
