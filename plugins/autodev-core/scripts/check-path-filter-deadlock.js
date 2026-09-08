@@ -73,7 +73,7 @@ const path = require('path');
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 
-if (has('--help') || has('-h')) {
+function usage() {
     console.log('usage: check-path-filter-deadlock.js [root] [--json] [--strict] [--selftest]\n'
         + 'Finds a `paths:` or `paths-ignore:` filter on a pull_request trigger. A pull\n'
         + 'request touching none of those paths does not run the workflow, and its checks\n'
@@ -82,7 +82,6 @@ if (has('--help') || has('-h')) {
         + 'Advisory by default, because whether a check is required lives in branch\n'
         + 'protection and not in the file. --strict exits 1 on a finding.\n'
         + 'Exit 0 clean or advisory, 1 under --strict with a finding, 2 no workflows.');
-    process.exit(0);
 }
 
 /**
@@ -177,7 +176,7 @@ function scan(root) {
 }
 
 // --- selftest -------------------------------------------------------------
-if (has('--selftest')) {
+function selftest() {
     const os = require('os');
     let pass = 0;
     let fail = 0;
@@ -233,64 +232,86 @@ if (has('--selftest')) {
     console.log(`\n${pass} passed, ${fail} failed  (${pass + fail} cases: both filter kinds on a `
         + 'pull_request trigger, a push-only filter and three other negatives, and the '
         + 'no-population case)');
-    process.exit(fail ? 1 : 0);
+    return fail ? 1 : 0;
 }
 
 // --- live run -------------------------------------------------------------
-const root = path.resolve(argv.find((a) => !a.startsWith('-')) || '.');
-const rows = scan(root);
+function main() {
+    if (has('--help') || has('-h')) { usage(); return 0; }
+    if (has('--selftest')) return selftest();
 
-if (rows === null) {
-    console.error(`no .github/workflows under ${root}.`);
-    console.error('No population, so this run vouches for NOTHING, not even an all-clear.');
-    process.exit(2);
+    const root = path.resolve(argv.find((a) => !a.startsWith('-')) || '.');
+    const rows = scan(root);
+
+    if (rows === null) {
+        console.error(`no .github/workflows under ${root}.`);
+        console.error('No population, so this run vouches for NOTHING, not even an all-clear.');
+        return 2;
+    }
+
+    const atRisk = rows.filter((r) => r.atRisk);
+
+    if (has('--json')) {
+        console.log(JSON.stringify({ root, scanned: rows.length, atRisk: atRisk.length, strict: has('--strict'), rows }, null, 2));
+        return has('--strict') && atRisk.length ? 1 : 0;
+    }
+
+    console.log(`${rows.length} workflow(s) in ${root}, `
+        + `${atRisk.length} with a path filter on a pull_request trigger`);
+
+    if (!atRisk.length) {
+        console.log('\nNo pull_request trigger here carries a path filter, so no check of this');
+        console.log('kind can be withheld from a pull request.');
+        return 0;
+    }
+
+    for (const r of atRisk) {
+        const kinds = [...new Set(r.filters.map((f) => f.filter))].join(' and ');
+        console.log(`\n  AT RISK  ${r.file}`);
+        console.log(`           ${kinds} on its ${[...new Set(r.filters.map((f) => f.event))].join('/')} trigger.`);
+    }
+
+    console.log('\nWhat this means, and the half it cannot answer:');
+    console.log('  A pull request touching none of those paths does not run the workflow.');
+    console.log('  Its checks are then not SKIPPED, they stay PENDING, because no run ever');
+    console.log('  reports a conclusion. If any of them is a REQUIRED status check, that');
+    console.log('  pull request can NEVER merge, and the interface shows CI still running');
+    console.log('  rather than anything explaining why.');
+    console.log('');
+    console.log('  Whether any IS required lives in branch protection, not in these files,');
+    console.log('  so this is a pairing to check rather than a defect to fix. One lookup');
+    console.log('  settles it, per branch:');
+    console.log('');
+    console.log('    gh api repos/{owner}/{repo}/branches/{branch}/protection \\');
+    console.log('      --jq .required_status_checks.contexts');
+    console.log('');
+    console.log('  If a required context belongs to a workflow above, GitHub\'s own remedy is');
+    console.log('  a second workflow of the SAME NAME with the inverse filter and a job that');
+    console.log('  does nothing, so the check always reports. Removing the filter also works');
+    console.log('  and costs the runs the filter was saving.');
+
+    if (has('--strict')) {
+        console.log(`\n--strict: ${atRisk.length} of ${rows.length} workflow(s) can withhold a pull request check.`);
+        return 1;
+    }
+    console.log('\nAdvisory: exit 0. Re-run with --strict to gate on this once you have');
+    console.log('checked branch protection and want the pairing kept out from now on.');
+    return 0;
 }
 
-const atRisk = rows.filter((r) => r.atRisk);
-
-if (has('--json')) {
-    console.log(JSON.stringify({ root, scanned: rows.length, atRisk: atRisk.length, strict: has('--strict'), rows }, null, 2));
-    process.exit(has('--strict') && atRisk.length ? 1 : 0);
-}
-
-console.log(`${rows.length} workflow(s) in ${root}, `
-    + `${atRisk.length} with a path filter on a pull_request trigger`);
-
-if (!atRisk.length) {
-    console.log('\nNo pull_request trigger here carries a path filter, so no check of this');
-    console.log('kind can be withheld from a pull request.');
-    process.exit(0);
-}
-
-for (const r of atRisk) {
-    const kinds = [...new Set(r.filters.map((f) => f.filter))].join(' and ');
-    console.log(`\n  AT RISK  ${r.file}`);
-    console.log(`           ${kinds} on its ${[...new Set(r.filters.map((f) => f.event))].join('/')} trigger.`);
-}
-
-console.log('\nWhat this means, and the half it cannot answer:');
-console.log('  A pull request touching none of those paths does not run the workflow.');
-console.log('  Its checks are then not SKIPPED, they stay PENDING, because no run ever');
-console.log('  reports a conclusion. If any of them is a REQUIRED status check, that');
-console.log('  pull request can NEVER merge, and the interface shows CI still running');
-console.log('  rather than anything explaining why.');
-console.log('');
-console.log('  Whether any IS required lives in branch protection, not in these files,');
-console.log('  so this is a pairing to check rather than a defect to fix. One lookup');
-console.log('  settles it, per branch:');
-console.log('');
-console.log('    gh api repos/{owner}/{repo}/branches/{branch}/protection \\');
-console.log('      --jq .required_status_checks.contexts');
-console.log('');
-console.log('  If a required context belongs to a workflow above, GitHub\'s own remedy is');
-console.log('  a second workflow of the SAME NAME with the inverse filter and a job that');
-console.log('  does nothing, so the check always reports. Removing the filter also works');
-console.log('  and costs the runs the filter was saving.');
-
-if (has('--strict')) {
-    console.log(`\n--strict: ${atRisk.length} of ${rows.length} workflow(s) can withhold a pull request check.`);
-    process.exit(1);
-}
-console.log('\nAdvisory: exit 0. Re-run with --strict to gate on this once you have');
-console.log('checked branch protection and want the pairing kept out from now on.');
-process.exit(0);
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();
