@@ -265,12 +265,34 @@ const where = [
    call, and it cannot throw. If the sibling script is missing (a broken
    install) the record is handed out unchecked, WITHOUT the cwd line, and the
    text says it was unchecked: absent coverage must not read as coverage. */
+/* ⚠️ A FAULT IS NOT AN UNREACHABLE COORDINATOR, AND READING IT AS ONE MISROUTED
+   TWO HANDOVERS. `[measured 2026-09-08]` this branched on `verdict.state`
+   alone. `peer_name` is a session's ephemeral display name and it CHANGES ON
+   EVERY COORDINATOR RESTART, so a restart alone raises `dead-peer` while
+   `desktop_session_id` still resolves to the same live session. On that record
+   `check-brain-role.js --status` said PARTLY STALE AND STILL REACHABLE and
+   named the desktop id, and this hook said the role file named no live
+   coordinator and to escalate. One file, two mechanisms, two answers — and the
+   session that was told the address resolved nowhere then reached the
+   coordinator at it, twice.
+   The cost is misrouting rather than noise: the operator is woken for a channel
+   that works, and the coordinator loses the status it is coordinating on, on
+   the LAST turn of a session, which is when a handover matters most.
+   So the reachability question is asked of `resolveCoordinator`, which is the
+   same function `--status` renders from — not of `state`, which is a two-value
+   summary of a three-value question. `usable` is what gets printed: naming the
+   stale field as an address would be this same defect one level down. */
 let verdict = null;
+let resolution = null;
 try {
-    const { checkBrainRole } = require(path.join(__dirname, '..', 'scripts', 'check-brain-role.js'));
-    verdict = checkBrainRole({ roleFile: roleFilePath(), role });
+    const cbr = require(path.join(__dirname, '..', 'scripts', 'check-brain-role.js'));
+    verdict = cbr.checkBrainRole({ roleFile: roleFilePath(), role });
+    if (verdict && typeof cbr.resolveCoordinator === 'function') {
+        resolution = cbr.resolveCoordinator(verdict);
+    }
 } catch {
     verdict = null;
+    resolution = null;
 }
 
 const addr = [
@@ -285,11 +307,39 @@ const REPORT_SHAPE =
     + 'signal it cannot read.\n'
     + 'If you have already reported this work, ignore this and carry on.';
 
+const faultList = resolution ? resolution.faults
+    : (verdict ? verdict.faults.map((f) => f.code + ' (' + f.detail + ')').join('; ') : '');
+
 let context;
-if (verdict && verdict.state === 'fault') {
+if (verdict && verdict.state === 'fault' && resolution && resolution.verdict === 'reachable') {
+    /* THE STALE FIELD IS REWRITTEN, THE CHANNEL IS NOT ABANDONED. `peer_name` is
+       read back from ListAgents because that is the authority for a session's
+       own name; copying it out of a message — including this one — is how a
+       name that was already stale gets re-enshrined. */
+    context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + '). '
+        + 'THE ROLE FILE IS PARTLY STALE AND STILL REACHABLE: ' + faultList + '.\n'
+        + 'Report to the coordinator at ' + resolution.usable.join(' or ') + '. Do NOT escalate to '
+        + 'the operator and do NOT use the stale field named above; the surviving address reaches '
+        + 'the same session.\n'
+        + 'Then rewrite the stale field in ' + roleFilePath() + ' rather than abandoning the channel: '
+        + 'read `peer_name` from ListAgents, which is the authority for a session\'s own name, and '
+        + '`session_id` from ~/.claude/sessions/<pid>.json — from the authority, not from this message.\n'
+        + REPORT_SHAPE;
+} else if (verdict && verdict.state === 'fault' && resolution && resolution.verdict === 'collision') {
+    /* A COLLISION IS NOT A STALE FIELD. An address here RESOLVES, to somebody
+       else: a name freed by an archived session can be taken by another. A
+       stale field wants rewriting; this wants nobody messaged until a person
+       has looked, so it must not be folded into the branch above. */
     context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + '), '
-        + 'BUT THE ROLE FILE DOES NOT NAME A LIVE COORDINATOR: '
-        + verdict.faults.map((f) => f.code + ' (' + f.detail + ')').join('; ') + '.\n'
+        + 'BUT AN ADDRESS IN THE ROLE FILE RESOLVES TO SOMEBODY ELSE: ' + faultList + '.\n'
+        + 'Message nobody at that record: a name freed by an archived session can be taken by '
+        + 'another, so an address that resolves is not an address that reaches who you mean. '
+        + 'Report to the operator instead, and say the role file at ' + roleFilePath() + ' needs '
+        + 'rewriting before any of it is used (check: scripts/check-brain-role.js --status).\n'
+        + REPORT_SHAPE;
+} else if (verdict && verdict.state === 'fault') {
+    context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + '), '
+        + 'BUT THE ROLE FILE DOES NOT NAME A LIVE COORDINATOR: ' + faultList + '.\n'
         + 'Nobody can be reached at that record, and do not resolve a coordinator by cwd: a '
         + 'worktree outlives the session in it. Report to the operator instead, and say the '
         + 'role file at ' + roleFilePath() + ' is stale (check: scripts/check-brain-role.js --status).\n'

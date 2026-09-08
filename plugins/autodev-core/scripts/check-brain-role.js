@@ -324,6 +324,54 @@ function emptyPopulation(sessionsDir, store) {
     return { sessionsDir, sessionFiles: 0, livePids: 0, deadPids: 0, sessionsReadable: false, store: store || null, storeReadable: false, storeRecords: 0, storeArchived: 0 };
 }
 
+/**
+ * IS THE COORDINATOR STILL REACHABLE, AND AT WHICH ADDRESS. One answer, for
+ * every consumer of a `checkBrainRole` result.
+ *
+ * `[measured 2026-09-08]` this reasoning existed only inside `render()`, so
+ * `--status` and `stop-brain-report.js` read ONE role file and gave TWO answers
+ * about it. A coordinator restart had left `peer_name` behind while
+ * `desktop_session_id` still resolved: `--status` said PARTLY STALE AND STILL
+ * REACHABLE and named the desktop id, and the Stop hook — branching on
+ * `state === 'fault'` alone — told the session the record named no live
+ * coordinator and to escalate to the operator. The operator got traffic they
+ * had not asked for; the coordinator silently lost the status it was
+ * coordinating on. Messaging by the desktop id worked before and after, twice.
+ *
+ * `state` is a two-value summary of a three-value question: `fault` says
+ * something in the record is wrong, and says nothing about whether what is left
+ * still reaches anybody. Anything routing a report needs THIS, not `state`.
+ *
+ * The block this was lifted out of carried the 2026-09-06 fix for exactly this
+ * failure — a `peer_name` gone stale on a rename while the other addresses
+ * resolved — which is the argument for one function rather than two copies: the
+ * second copy went on being wrong for two more days while the first was right.
+ *
+ * @param {ReturnType<typeof checkBrainRole>} r
+ * @returns {{verdict:'ok'|'reachable'|'collision'|'unreachable'|'unknown',
+ *            usable:string[], faults:string}}
+ */
+function resolveCoordinator(r) {
+    const a = r && r.addresses;
+    const faults = ((r && r.faults) || []).map((f) => f.code + ' (' + f.detail + ')').join('; ');
+    if (!a) return { verdict: 'unknown', usable: [], faults };
+    const usable = [
+        a.peer.usable ? 'peer name `' + a.peer.value + '`' : null,
+        a.desktop.usable ? 'desktop session id `' + a.desktop.value + '`' : null,
+    ].filter(Boolean);
+    if (r.state !== 'fault') return { verdict: 'ok', usable, faults };
+    /* `desktop-mismatch` is NOT a collision when the two addresses agree with
+       each other: that is a partly updated record whose stale field is
+       `session_id`, and both addresses reach the session they name. It IS a
+       collision when they disagree, because then one of them reaches somebody
+       else. The usable check already encodes which, so read that rather than
+       the fault code alone. */
+    if (usable.length) return { verdict: 'reachable', usable, faults };
+    const collision = r.faults.some((f) => f.code === 'mismatch'
+        || f.code === 'desktop-mismatch' || f.code === 'unattributable-peer');
+    return { verdict: collision ? 'collision' : 'unreachable', usable, faults };
+}
+
 function render(r) {
     const p = r.population;
     const out = [];
@@ -346,24 +394,11 @@ function render(r) {
        A red gets acted on where a green gets challenged, so a red that
        OVERSTATES what it found costs a working channel. The faults were exact;
        only the conclusion was one size too large. */
-    const a = r.addresses;
-    if (r.state === 'fault' && a) {
-        const usable = [
-            a.peer.usable ? 'peer name `' + a.peer.value + '`' : null,
-            a.desktop.usable ? 'desktop session id `' + a.desktop.value + '`' : null,
-        ].filter(Boolean);
-        /* `desktop-mismatch` is NOT a collision when the two addresses agree
-           with each other: that is a partly updated record whose stale field is
-           `session_id`, and both addresses reach the session they name. It IS a
-           collision when they disagree, because then one of them reaches
-           somebody else. The usable check already encodes which, so read that
-           rather than the fault code alone. */
-        const anyUsable = a.peer.usable || a.desktop.usable;
-        const collision = !anyUsable && r.faults.some((f) => f.code === 'mismatch'
-            || f.code === 'desktop-mismatch' || f.code === 'unattributable-peer');
+    if (r.state === 'fault' && r.addresses) {
+        const { verdict, usable } = resolveCoordinator(r);
 
         out.push('');
-        if (collision) {
+        if (verdict === 'collision') {
             /* A COLLISION IS NOT A STALE FIELD, and the operator action differs:
                a stale field wants rewriting, a collision wants nobody messaged
                until a human looks. Folding it into "some addresses survive"
@@ -372,7 +407,7 @@ function render(r) {
             out.push('   until a person has looked: a name freed by an archived session can be');
             out.push('   taken by another, so a resolving address is not an address that reaches');
             out.push('   who you mean. Rewrite the record before using any of it.');
-        } else if (usable.length) {
+        } else if (verdict === 'reachable') {
             out.push('   THIS RECORD IS PARTLY STALE AND STILL REACHABLE. Use ' + usable.join(' or ') + '.');
             out.push('   Rewrite the stale field rather than abandoning the channel: read `peer_name`');
             out.push('   from ListAgents, which is the authority for a session\'s own name, and');
@@ -509,7 +544,7 @@ function selftest() {
     return failed.length === 0;
 }
 
-module.exports = { checkBrainRole, isPidAlive, readLiveSessions, findStoreRecord, render };
+module.exports = { checkBrainRole, resolveCoordinator, isPidAlive, readLiveSessions, findStoreRecord, render };
 
 if (require.main === module) {
     const argv = process.argv.slice(2);
