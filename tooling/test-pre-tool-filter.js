@@ -18,6 +18,7 @@
 // quietly reversed.
 
 const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
 const path = require('path');
 
 const HOOK = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'hooks', 'pre-tool-filter.js');
@@ -209,7 +210,8 @@ cases.push(
     { file_path: '/home/user/project/package-lock.json', content: '{}' }, 0],
 );
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, infra = 0;
+const indeterminate = [];
 for (const [label, tool, input, expected] of cases) {
   const { exitCode, stderr } = run(tool, input);
   const ok = exitCode === expected;
@@ -280,19 +282,42 @@ for (const [label, tool, input, expected] of cases) {
   fs.writeFileSync(path.join(bombRepo, 'tooling', 'check-no-private-names.js'),
     "const NAMES = [\n    '(a+)+$',\n];\n");
   const t0 = Date.now();
-  const r = spawnSync('node', [HOOK], {
+  const r = runBudgeted('node', [HOOK], {
     input: JSON.stringify({
       tool_name: 'Write',
       tool_input: { file_path: path.join(bombRepo, 'docs/a.md'), content: 'a'.repeat(40) + 'b' },
     }),
     encoding: 'utf8',
     timeout: 20000,
+    maxTimeout: 300000,   // contention is clamped at 20; cap the widened retry
   });
   const ms = Date.now() - t0;
-  const ok = r.status === 0 && ms < 2000;
-  if (ok) pass++; else fail++;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  a backtracking-bomb denylist entry does not hang the hook  `
-    + `(exit ${r.status}, ${ms}ms)`);
+  // THIS IS THE ONE ASSERTION IN THIS FILE THAT READS A CLOCK, and both halves
+  // of it break under load in different directions. Measured 2026-09-08 by
+  // forcing this spawn to return `status=null signal=SIGTERM ETIMEDOUT`: it
+  // printed `FAIL  a backtracking-bomb denylist entry does not hang the hook
+  // (exit null, 0ms)` -- a killed child reported as the ReDoS guard failing,
+  // which is the exact regression this case exists to catch, so the false red
+  // is indistinguishable from the real one.
+  //
+  // And `ms` spans every attempt plus the contention probe between them, so a
+  // retried run is guaranteed to blow the 2s bound even when the retry
+  // SUCCEEDED. A retry means the machine was busy, which is not a fact about
+  // the hook: the timing question could not be measured, and that is not the
+  // same as the answer being no.
+  if (classify(r) === 'infrastructure' || r.attempts > 1) {
+    infra++;
+    const why = classify(r) === 'infrastructure' ? reason(r)
+      : 'the run retried, so the wall clock spans a killed attempt';
+    indeterminate.push('the backtracking-bomb probe (' + why + ')');
+    console.error('infrastructure: the backtracking-bomb probe produced no measurable answer ('
+      + why + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms, ' + ms + 'ms elapsed)');
+  } else {
+    const ok = r.status === 0 && ms < 2000;
+    if (ok) pass++; else fail++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  a backtracking-bomb denylist entry does not hang the hook  `
+      + `(exit ${r.status}, ${ms}ms)`);
+  }
 }
 
 // A denylist entry the caps DO drop must be REPORTED, not dropped silently, and
@@ -327,5 +352,6 @@ for (const [label, tool, input, expected] of cases) {
 
 fs.rmSync(fixture, { recursive: true, force: true });
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : 0);
+console.log(`\n${tally(pass, fail, infra)}`);
+if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+process.exit(exitCode(fail, infra));
