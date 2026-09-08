@@ -30,9 +30,20 @@ const check = (label, cond, detail) => {
 const NOW = '2026-09-08T12:00:00.000Z';
 const nowMs = Date.parse(NOW);
 const ago = (hours) => new Date(nowMs - hours * 3600000).toISOString();
-// The canary carries a quote and a backslash ON PURPOSE: the first cut scrubbed
-// serialised JSON, where both are escaped, and a plain canary could not fail it.
-const CANARY = 'sk-live-CANARY-7Qz9\\pX"2mLr41';
+// The canary is built for the CLASS, not for the cases two reviews demonstrated:
+// it carries a quote and a backslash (JSON escaping), two NEWLINES (whitespace
+// collapse in clip), and it is 172 characters long (longer than every clip width,
+// so a truncate-then-scrub leaves a plaintext tail). A canary widened only to a
+// reported defect is green for exactly the next variant nobody has shown yet.
+const CANARY = ['-----BEGIN CANARY-----', 'sk-live-CANARY-7Qz9\\pX"2mLr41' + 'Q'.repeat(54), 'ZmFrZS1iYXNlNjQtd3JhcHBlZC1hdC02NC1jb2x1bW5z', '-----END CANARY-----'].join('\n');
+if (CANARY.length !== 172) throw new Error(`canary must be 172 chars, is ${CANARY.length}`);
+// Partial disclosure counts: no 16-character window of the canary, raw or
+// whitespace-collapsed, may appear in anything the collector writes.
+const leaks = (text) => {
+  const forms = [CANARY, CANARY.replace(/\s+/g, ' ')];
+  for (const f of forms) for (let i = 0; i + 16 <= f.length; i += 1) if (text.includes(f.slice(i, i + 16))) return f.slice(i, i + 16);
+  return null;
+};
 const CANARY_URL = 'https://canary-project-ref.supabase.co';
 
 function mkRepo(name, { remote, prd, config, fixtures } = {}) {
@@ -161,6 +172,7 @@ console.log('control: a fresh signal IS proposed, once per issue, in story shape
   console.log('no secret reaches any byte the collector writes');
   const everything = r.all + everyByteWritten(dir);
   check('canary key absent from stdout, stderr, report, json and ledger', !everything.includes(CANARY));
+  check('  and no 16-char window of it survives, raw or whitespace-collapsed (clip runs AFTER the scrub now)', leaks(everything) === null, leaks(everything));
   check('canary URL absent everywhere too', !everything.includes(CANARY_URL));
   check('  and it was redacted, not dropped: the leaky message survives with [REDACTED]', /leaky-fn[\s\S]*\[REDACTED\]/.test(report), report.slice(0, 300));
   check('  the sentry title that echoed the token is redacted as well', /TypeError: cannot read x \(token \[REDACTED\]\)/.test(report));
@@ -267,7 +279,7 @@ console.log('--apply refuses a live repo, applies to the allowlisted one');
   const stories = prdStates.storiesOf(prd);
   check('allowlisted repo: the six stories are in prd.json, pending', prdStates.summarise(stories).pending === 7 && stories['S16-PROD-001'] && stories['S16-PROD-001'].passes === null, Object.keys(stories).join(','));
   check('allowlisted repo: existing stories untouched', stories['S16-AUD-001'].passes === true && stories['S16-AUD-002'].passes === null);
-  check('allowlisted repo: applied prd.json carries no canary', !fs.readFileSync(path.join(allowed, 'prd.json'), 'utf8').includes(CANARY));
+  check('allowlisted repo: applied prd.json carries no canary window', leaks(fs.readFileSync(path.join(allowed, 'prd.json'), 'utf8')) === null);
   check('allowlisted repo: ledger marks applied', Object.values(readLedger(allowed).proposed).every((p) => p.applied === true));
   const r3 = run(allowed, ['--apply']);
   check('allowlisted repo: a second --apply has nothing new and applies nothing', r3.code === 0 && /apply: nothing new to apply/.test(r3.out) && prdStates.summarise(prdStates.storiesOf(JSON.parse(fs.readFileSync(path.join(allowed, 'prd.json'), 'utf8')))).pending === 7, r3.all);
@@ -298,7 +310,7 @@ console.log('a source that cannot be checked is named, never silently empty');
   check('the other three sources still produced candidates', /5 new candidate/.test(r.err), r.err);
   check('the report carries a "Could not check" section', /## Could not check[\s\S]*\*\*sentry\*\*/.test(readReport(dir)));
   check('the failed source is recorded in the ledger run', readLedger(dir).runs[0].sources_failed.join(',') === 'sentry');
-  check('no canary on the failure path either', !(r.all + everyByteWritten(dir)).includes(CANARY));
+  check('no canary on the failure path either, not even a window', leaks(r.all + everyByteWritten(dir)) === null);
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +340,7 @@ console.log('unit seams');
   })());
   const red = new subject.Redactor(); red.add('short'); red.add(CANARY);
   check('Redactor scrubs long values and ignores values under 8 chars', red.scrub(`a ${CANARY} b short`) === 'a [REDACTED] b short');
+  check('Redactor.scrubDeep reaches every leaf and key of a payload', JSON.stringify(red.scrubDeep({ [CANARY]: [{ m: `x ${CANARY} y` }] })) === '{"[REDACTED]":[{"m":"x [REDACTED] y"}]}');
   check('staleHoursFor: exact key beats glob beats default', subject.staleHoursFor('a_last_run', { intervals: { a_last_run: 10, 'a_*': 20 } }, { stale_hours: 48 }) === 10 && subject.staleHoursFor('a_x', { intervals: { 'a_*': 20 } }, { stale_hours: 48 }) === 20 && subject.staleHoursFor('b', { intervals: { 'a_*': 20 } }, { stale_hours: 48 }) === 48);
   check('DEFAULT_THRESHOLDS carries every source kind', ['sentry-issues', 'postgrest-errors', 'postgrest-heartbeats', 'vercel-deploys'].every((k) => subject.DEFAULT_THRESHOLDS[k]));
   const src = fs.readFileSync(SCRIPT, 'utf8');
@@ -359,7 +372,9 @@ console.log('real network path: GET only, Content-Range pagination, host refusal
     ] } });
     // spawn, not spawnSync: the server lives in THIS process and must answer while the child runs
     const { spawn } = require('child_process');
-    const child = spawn(process.execPath, [SCRIPT, '--now', NOW, '--summary'], { cwd: dir, env: Object.assign({}, process.env, { SUPABASE_URL: `http://127.0.0.1:${port}`, SUPABASE_SERVICE_ROLE_KEY: CANARY }) });
+    // A bearer header cannot carry newlines, so this case uses a single-line key of its own.
+    const NET_KEY = 'sk-net-CANARY-' + 'K'.repeat(40);
+    const child = spawn(process.execPath, [SCRIPT, '--now', NOW, '--summary'], { cwd: dir, env: Object.assign({}, process.env, { SUPABASE_URL: `http://127.0.0.1:${port}`, SUPABASE_SERVICE_ROLE_KEY: NET_KEY }) });
     let out = '', err = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
@@ -371,7 +386,8 @@ console.log('real network path: GET only, Content-Range pagination, host refusal
     check('  and counted all 1500 rows into one group (on stderr: a failed source routes the whole report there)', /1500 over/.test(r.stderr), r.stdout + r.stderr);
     check('the credential went only to the host the ENVIRONMENT named, never to the host the config named', seen.every((s) => /rest\/v1/.test(s.url)) && !seen.some((s) => /api\/0\/projects/.test(s.url)), JSON.stringify(seen.map((s) => s.url)));
     check('the config-named sentry host was refused by name on stderr, exit 2', r.status === 2 && /COULD NOT CHECK sentry: sentry region 127\.0\.0\.1:\d+ is not a sentry\.io host/.test(r.stderr), r.stderr);
-    check('no canary in that output either', !(r.stdout + r.stderr).includes(CANARY));
+    check('the network key is absent from that output', !(r.stdout + r.stderr).includes('sk-net-CANARY'));
+    check('  and the server saw it as the bearer, so it was really sent to the environment-named host', seen.some((s) => s.auth === 'Bearer sk-net-CANARY-' + 'K'.repeat(40)));
     console.log(`\n${pass} passed, ${fail} failed`);
     process.exitCode = fail ? 1 : 0;
   });

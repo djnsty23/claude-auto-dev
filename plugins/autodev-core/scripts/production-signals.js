@@ -205,7 +205,9 @@ class Redactor {
   }
   scrub(text) {
     let out = String(text);
-    for (const v of this.values) out = out.split(v).join('[REDACTED]');
+    // Longest first, so a value that contains another registered value cannot
+    // leave a fragment behind after the shorter one is replaced.
+    for (const v of [...this.values].sort((a, b) => b.length - a.length)) out = out.split(v).join('[REDACTED]');
     return out;
   }
   /** Scrub every string leaf of a parsed object, keys included. */
@@ -739,7 +741,16 @@ async function main() {
     const kind = KINDS[source.kind];
     if (!source.id || !kind) { failures.push({ source: source.id || '(unnamed)', reason: `unknown kind ${JSON.stringify(source.kind)}` }); continue; }
     try {
-      const raw = await kind.raw(source, ctx);
+      // SCRUB AT THE POINT OF ENTRY, before any transform. `[measured 2026-09-08]`
+      // two review passes found the same root cause twice: redaction ran AFTER a
+      // text transform (JSON.stringify, then clip's whitespace collapse and
+      // truncation) while the redactor knew only untransformed forms, so a
+      // secret with a quote, a newline, or more characters than the clip width
+      // survived with one character changed or 115 of 172 characters intact.
+      // Registering each transform's output is whack-a-mole. Scrubbing the raw
+      // payload here means every downstream transform operates on text that no
+      // longer contains the value. The later scrubs stay as defence in depth.
+      const raw = redactor.scrubDeep(await kind.raw(source, ctx));
       signals.push(...kind.normalise(source, raw, ctx));
       checked.push(source.id);
     } catch (e) {
