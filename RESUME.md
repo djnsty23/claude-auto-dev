@@ -16,6 +16,13 @@ Worktree `suspicious-turing-04a310`, branches `codex/audit-1-fixes` .. `codex/au
 
 All commits: author and committer `98432064+djnsty23@users.noreply.github.com`.
 
+## Round 3, 10 Sep 01:35: CI green; B06, B07, B08 built locally; session stops at its context line
+
+- CI on the pushed heads finished GREEN on macOS, Windows and Ubuntu for #226 0412ffb, #227 ceb5182 and #229 c1278f4 (watched per job). #228 closed by the operator.
+- Three more slices of the mission supervisor exist locally, ungated, no PRs, each in its own worktree under .claude/worktrees/: B06 codex/audit-5-mission-dispatch 126c0cb (mission-dispatch.js start/reconcile, local-node adapter; `node tooling/test-mission-dispatch.js` 33/33), B07 codex/audit-6-mission-deliver 9275220 (mission-deliver.js deliver/accept/reject/status; `node tooling/test-mission-deliver.js` 22/22), B08 codex/audit-7-mission-supervisor 279a09e (mission-supervisor.js tick with --worktrees; `node tooling/test-mission-supervisor.js` 18/18). Each stacked on the one below; PR bodies drafted in the handoff dir (pr-bodies/5.md, 6.md, 7.md) with a GATE_LINE placeholder.
+- Operator's instructions: hold; gate each head one at a time when the machine is quiet (load was 30 to 110 all night from other sessions); open the B06 PR (base codex/audit-4-mission-store) when its gate is green, then B07 (base the B06 branch), then B08 (base the B07 branch); refresh the gate lines in #226, #227, #229 after their gates. Session-local monitors were armed for exactly that chain; if this file is being read by a fresh session, they are gone: run the gates by hand in that order (`git -C <gate wt> checkout --detach <sha>; npm run gate`), never two at once.
+- Design fact worth knowing: the store lets ONE worktree hold one live reservation, and an accepted-but-unverified attempt keeps it, so missions sharing a root queue (reported worktree-held); the tick's --worktrees gives each mission its own detached worktree. The missing transition is a verifier that can turn an accepted envelope into passes: true (B09, B10); nothing in the stack fakes it.
+
 ## Round 2b, 23:45: macOS CI defect diagnosed and fixed; pushed ungated by the operator's choice
 
 - macOS CI's fleet-decisions 42/44 (3 of 4 runs, two heads) was the suite's 6000 ms wall-clock ceiling on a slow three-core runner, not the subject: the full refusal text was present. A pipe-truncation hypothesis was measured first (30/30 complete under load 30) and withdrawn. Fixed in the suite: ceiling 30 s, elapsed printed. `node tooling/test-fleet-decisions.js` 44/44.
