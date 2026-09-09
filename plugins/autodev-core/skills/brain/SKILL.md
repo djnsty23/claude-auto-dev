@@ -90,9 +90,18 @@ changes. Do not reactivate deferred work to manufacture a fresh queue.
 ## 3. Start bounded workers with one owner per unit
 
 Load `isolate` and `rule-agent-concurrency`. Before dispatch, record story,
-worker, repository, base SHA, worktree, owned paths and return artifact. One
+worker, repository, base SHA, worktree, owned paths and return artifact. Record
+it durably, not in the conversation: `scripts/mission-contract.js` turns the
+story's acceptance criterion, verified repository identity and base SHA into an
+immutable contract, and `scripts/mission-store.js` `admit` then `claim`
+persist it under a fenced owner (both answer `--help`). The same story at the
+same base yields the same contract; a changed criterion is refused under the
+original event, so stale evidence cannot be carried forward by re-admitting. The
+store records and fences; it starts nothing, delivers nothing and verifies
+nothing, and every status it returns says `verified: false`. One
 coordinator assigns this mission's work. A decision log is not a cross-machine
-lease; inspect existing ownership before a second dispatch.
+lease; inspect existing ownership, including `mission-store.js status`,
+before a second dispatch.
 
 Choose a channel that actually starts work:
 
@@ -174,7 +183,10 @@ not update running sessions.
 
 Consume completion/failure events and inspect durable work. Stop hooks request
 reports; they are not acknowledged message queues. Keep dispatch records until
-results are acknowledged. A cooldown, crash or first Stop may emit no report.
+results are acknowledged: after a restart, `mission-store.js status` returns
+the mission's attempts, results, launches and outbox as recorded, and a replayed
+event returns its first answer instead of acting twice. A cooldown, crash or
+first Stop may emit no report.
 Before retrying, inspect commits, the working tree and journal: a timed-out
 worker may still be running. Never kill by command pattern or spawn blindly.
 
