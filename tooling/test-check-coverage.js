@@ -44,12 +44,12 @@ const run = (args, timeout = 60000) => spawnSync(process.execPath, [CHECK, ...ar
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-fx-'));
 process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ } });
 let n = 0;
-function fixture({ runnerCalls, extraFile = false, runnerFails = false, runnerKilled = false, runnerChatty = false }) {
+function fixture({ runnerCalls, extraFile = false, runnerFails = false, runnerKilled = false, runnerChatty = false, emptyPlugins = false }) {
     const root = path.join(TMP, 'fx' + (++n));
     const scripts = path.join(root, 'plugins', 'fx', 'scripts');
     fs.mkdirSync(scripts, { recursive: true });
     fs.mkdirSync(path.join(root, 'tooling'), { recursive: true });
-    fs.writeFileSync(path.join(scripts, 'fixture-census-lib.js'),
+    if (!emptyPlugins) fs.writeFileSync(path.join(scripts, 'fixture-census-lib.js'),
         'function enteredByTheRunner() { return 1; }\n' +
         'function neverEnteredByAnything() { return 2; }\n' +
         'module.exports = { enteredByTheRunner, neverEnteredByAnything };\n');
@@ -60,7 +60,7 @@ function fixture({ runnerCalls, extraFile = false, runnerFails = false, runnerKi
     const marker = path.join(root, 'runner-ran.marker');
     fs.writeFileSync(path.join(root, 'tooling', 'test-all.js'),
         `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n` +
-        "const lib = require('../plugins/fx/scripts/fixture-census-lib.js');\n" +
+        (emptyPlugins ? '' : "const lib = require('../plugins/fx/scripts/fixture-census-lib.js');\n") +
         runnerCalls.map((f) => `lib.${f}();\n`).join('') +
         (runnerChatty ? "process.stdout.write('x'.repeat(2 * 1024 * 1024) + '\\n');\n" : '') +
         (runnerKilled
@@ -208,6 +208,31 @@ if (process.platform !== 'win32') {
             && payload.functionsSeen === 2 && payload.executed === 2, detail(r));
     check('  and the output size is reported past the old 1 MiB cliff',
         !!payload && payload.runnerOutputBytes > 1024 * 1024, payload ? String(payload.runnerOutputBytes) : 'unparsed');
+}
+
+// --- 6d. an EMPTY census is no verdict --------------------------------------------
+// rule-gate-integrity §2, found by the second review (2026-09-08): a plugins/
+// directory with no source files scored 0 against the ceiling and passed --gate.
+// "No output never differs from no output." Exit 2, the same class as a red
+// runner; never 0, never 1.
+{
+    const fx = fixture({ runnerCalls: [], emptyPlugins: true });
+    const r = run(['--root', fx.root, '--gate']);
+    check('a plugins/ directory with no source files is NO VERDICT: exit 2, not a clean floor',
+        r.status === 2 && !r.error && /nothing was measured/.test(r.stderr) && /NO VERDICT/.test(r.stderr), detail(r));
+    check('  control: the runner ran and passed, so the suite is not what refused', ranRunner(fx), fx.marker);
+    const j = run(['--root', fx.root, '--gate', '--json']);
+    let payload = null;
+    try { payload = JSON.parse(j.stdout); } catch { /* asserted below */ }
+    check('  --json: exit 2, suitePassed true, emptyCensus names the reason, sourceFiles 0',
+        j.status === 2 && payload && payload.suitePassed === true && payload.sourceFiles === 0
+            && typeof payload.emptyCensus === 'string' && /nothing was measured/.test(payload.emptyCensus), detail(j));
+    const bare = run(['--root', fx.root]);
+    check('  bare mode refuses the same census rather than printing "every function is entered"',
+        bare.status === 2 && !bare.error && !/Every named function/.test(bare.stdout), detail(bare));
+    const ok = fixture({ runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'] });
+    const g = run(['--root', ok.root, '--gate']);
+    check('  control: the two-function fixture under --gate still exits 0', g.status === 0 && !g.error && /2 named function\(s\)/.test(g.stdout), detail(g));
 }
 
 // --- 7. --gate carries a dated floor ---------------------------------------------------

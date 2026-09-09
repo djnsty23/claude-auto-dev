@@ -34,6 +34,13 @@ functions merged by #189 and #200 in between; after rebasing onto fcfb8fa it
 exited 1 again at 40, on #196's httpGetJson(). The floor shipped is 40, dated
 at fcfb8fa, and the three are follow-up tests, not a reason to hold the gate.
 
+**An empty census is no verdict.** The second independent review found that a
+`plugins/` directory with no source files passed `--gate` at 0 against 40. It
+now exits 2 with "nothing was measured", the same class as a red runner, and the
+suite carries the reviewer's probe. The gate guards a count rising and a count
+that cannot be taken; it still cannot see verification, which is the point of
+the first sentence above.
+
 **Where "green on HEAD" lives.** In the gate step, not in the suite: the
 check runs `test-all.js` under coverage, which runs `test-check-coverage.js`,
 so a HEAD run inside the suite recurses. The suite proves the gate can fail,

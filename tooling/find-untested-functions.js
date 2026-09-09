@@ -321,9 +321,29 @@ const dead = all.filter((f) => f.count === 0).sort((a, b) =>
     a.file.localeCompare(b.file) || a.name.localeCompare(b.name));
 
 // --- 3. report --------------------------------------------------------------
+// process.exitCode, never process.exit(), after anything was written to stdout:
+// stdout to a PIPE is asynchronous on darwin and exit() drops the unflushed tail
+// past 64 KiB (CLAUDE.md, "process.exit() after printing TRUNCATES"). The gate's
+// own output is ~2 KB today; the second review named this as latent, and the
+// change is one wrapper. Every early exit below is a return, and the code is
+// set once at the end.
+function report() {
 // The gate verdict, computed once for both renderers. Bare mode ignores it.
 const overUntested = maxUntested !== null && dead.length > maxUntested;
 const overNeverLoaded = maxNeverLoaded !== null && neverLoaded.length > maxNeverLoaded;
+// THE POPULATION FLOOR (rule-gate-integrity §2, found by the second review of
+// this gate, 2026-09-08): a census that read NO plugin files, or read files and
+// saw no named function in any of them, scored 0 against the ceiling and
+// reported a clean floor. A walker that silently stops finding files would have
+// passed --gate forever. "No output never differs from no output", so an empty
+// census is NO VERDICT (exit 2), the same class as a red runner, never a pass
+// and never a regression.
+const emptyCensus = ALL_SOURCES.size === 0
+    ? 'read 0 plugin files under plugins/, so nothing was measured'
+    : (all.length === 0
+        ? `read ${ALL_SOURCES.size} plugin file(s) but saw no named function in any loaded one, so nothing was measured`
+        : null);
+
 const gate = gating ? {
     maxUntested, maxNeverLoaded, overUntested, overNeverLoaded,
     floorMeasured: gateMode ? FLOOR.measured : null,
@@ -335,6 +355,7 @@ if (asJson) {
         failedSuites,
         runnerSignal: run.signal || null,
         runnerOutputBytes: Buffer.byteLength(runnerOut),
+        emptyCensus,
         gate,
         sourceFiles: ALL_SOURCES.size,
         filesLoaded: loadedFiles.size,
@@ -348,8 +369,9 @@ if (asJson) {
     // the text renderer. A red suite means the measurement is untrustworthy and
     // exits 2 - previously only dead functions fed this exit, so a run that
     // loaded ZERO plugin files reported an empty census as success.
-    if (run.status !== 0) process.exit(2);
-    process.exit(gating ? ((overUntested || overNeverLoaded) ? 1 : 0) : (dead.length ? 1 : 0));
+    if (run.status !== 0) return 2;
+    if (emptyCensus) return 2;
+    return gating ? ((overUntested || overNeverLoaded) ? 1 : 0) : (dead.length ? 1 : 0);
 }
 
 if (run.status !== 0) {
@@ -366,7 +388,14 @@ if (run.status !== 0) {
     else console.error('The runner printed no FAIL line; its last lines were:\n' + runnerTail);
     console.error(`(runner output: ${Buffer.byteLength(runnerOut)} bytes, read from a file, no buffer ceiling)`);
     console.error('');
-    process.exit(2);
+    return 2;
+}
+
+if (emptyCensus) {
+    console.error(`\n${ALL_SOURCES.size} source file(s) in plugins/ · ${all.length} named function(s) seen`);
+    console.error('[coverage] NO VERDICT: ' + emptyCensus + '.');
+    console.error('A ceiling compared against nothing is met by construction; this is exit 2, not a pass.');
+    return 2;
 }
 
 console.log(`\n${ALL_SOURCES.size} source file(s) in plugins/ · ${filesWithCoverage.size} executed · ${neverLoaded.length} NEVER LOADED · ${loadedNoNamed.length} ran but declare no named function`);
@@ -408,19 +437,19 @@ if (gating) {
         console.log('subprocess run counts; NODE_V8_COVERAGE follows children). If the floor itself');
         console.log('moved for a reason, re-measure on a green run and update FLOOR in');
         console.log('tooling/find-untested-functions.js with the new date and commit in the same edit.');
-        process.exit(1);
+        return 1;
     }
     console.log('[coverage] at or below the floor. This is a floor against regression, not a claim of');
     console.log('quality: coverage measures execution, not verification. Every function counted as');
     console.log('entered may still be asserted on by nothing; check:vacuity is the tool for that question.');
-    process.exit(0);
+    return 0;
 }
 
 if (!dead.length) {
     console.log(neverLoaded.length
         ? `Every named function in the ${loadedFiles.size} LOADED file(s) is entered by the suite. ${neverLoaded.length} file(s) above were never loaded and remain unchecked.\n`
         : 'Every named function in every plugin source is entered by the suite.\n');
-    process.exit(neverLoaded.length ? 1 : 0);
+    return neverLoaded.length ? 1 : 0;
 }
 
 let lastFile = '';
@@ -430,4 +459,7 @@ for (const d of dead) {
 }
 console.log('\nA function no test enters is not weakly covered — it is unverified.');
 console.log('Mutation testing cannot help here: every mutant in dead code survives.\n');
-process.exit(1);
+return 1;
+}
+
+process.exitCode = report();

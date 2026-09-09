@@ -191,6 +191,25 @@ The review's second point, that a green board on macOS and Windows says nothing
 about this step because only `ubuntu-latest` runs it, is why every CI line in
 this document names the Ubuntu job and its coverage step rather than the run.
 
+**A second, independent review (2026-09-08, head 2c97678)** ran eight mutants
+against the suite and killed all eight, each by the case predicted for it, then
+found the defect this document's own second section describes: **an empty
+census passed `--gate` green.** A `plugins/` directory with no source files,
+and a runner that passes, scored `0 never-called vs ceiling 40` and printed the
+clean-floor sentence, exit 0. The gate guarded the count RISING and nothing
+else; a walker that silently stopped finding files would have reported a clean
+floor forever. That is rule-gate-integrity §2 verbatim ("no output never
+differs from no output; a scan needs a floor asserted separately from the
+comparison"), and this document quoted the rule while the script broke it. Fixed
+in the same shape as a red runner: a census that read zero plugin files, or saw
+no named function in any loaded one, is **NO VERDICT, exit 2**, in both
+renderers, with the population printed beside the refusal. The suite carries the
+reviewer's exact probe (empty `plugins/`, passing runner: exit 2 under `--gate`,
+under `--json`, and bare) with a control that the two-function fixture still
+exits 0. The same commit moves every exit in the report section to
+`process.exitCode`, the review's non-blocking note: the gate's own stdout was
+2 KB, so the darwin pipe truncation was latent, and the fix is one wrapper.
+
 ## Known limits, stated so a green run is not read as more
 
 - **Load.** Three suites here are load-sensitive. The check runs the whole suite
