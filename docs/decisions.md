@@ -3,6 +3,49 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: a coverage floor, wired as a gate, at the number HEAD scored
+
+`npm run check:coverage` (`find-untested-functions.js --gate`) now runs as the
+last step of the gate chain (ninth, after #198 and #210 added check:agents-md and
+check:claude-md) and in CI, and fails only when the count of plugin functions no
+suite enters, or of plugin files no suite loads, rises above the floor
+measured on HEAD the day it was wired. Three variants were costed against
+each other in `docs/evidence-coverage-gate-2026-09-08.md`: extending the
+existing NODE_V8_COVERAGE census (chosen, zero dependencies), `c8
+--check-coverage` (55 packages for the same V8 data), and leaving it
+informational (the state that let the count drift unseen).
+
+**Counts, not a percentage.** 737 of 774 named functions is 95.2 %, which
+rounds down to 95, and 5 % of 774 lets one more never-entered function in
+before the gate fires, with the allowance growing as the tree grows. A count
+ceiling fires on the first newcomer.
+
+**The floor is a floor, not a target.** Coverage measures execution;
+mutation measures verification. The number is not to be chased to zero (the
+tool's own header records why: platform-gated code, defence-in-depth
+handlers, subjects a suite must kill). **Ratcheting the ceilings down is a
+separate decision**, to be taken with a re-measured green run and a reading
+of what each remaining entry is; it was deliberately not taken here, so the
+gate could not be red on the commit that introduced it.
+
+**The floor moved before the PR merged, and that is the evidence.** Measured
+37 at b8eae1f; after rebasing onto f870b15 the same gate exited 1 at 39, on two
+functions merged by #189 and #200 in between; after rebasing onto fcfb8fa it
+exited 1 again at 40, on #196's httpGetJson(). The floor shipped is 40, dated
+at fcfb8fa, and the three are follow-up tests, not a reason to hold the gate.
+
+**An empty census is no verdict.** The second independent review found that a
+`plugins/` directory with no source files passed `--gate` at 0 against 40. It
+now exits 2 with "nothing was measured", the same class as a red runner, and the
+suite carries the reviewer's probe. The gate guards a count rising and a count
+that cannot be taken; it still cannot see verification, which is the point of
+the first sentence above.
+
+**Where "green on HEAD" lives.** In the gate step, not in the suite: the
+check runs `test-all.js` under coverage, which runs `test-check-coverage.js`,
+so a HEAD run inside the suite recurses. The suite proves the gate can fail,
+on a fixture tree, in about a second.
+
 ## 2026-09-08: production signals become candidate stories, never direct writes on a live repo
 
 The stage between "production knows" and "the backlog knows" did not exist:
