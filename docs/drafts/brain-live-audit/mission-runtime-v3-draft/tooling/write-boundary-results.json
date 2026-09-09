@@ -1,0 +1,156 @@
+{
+  "rows": [
+    {
+      "case": "normal",
+      "authorizedEffects": [
+        "read",
+        "write"
+      ],
+      "exit": 0,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 95492,
+            "nonce": "8a191017-8c32-4a7c-b07b-851df0c52fc6"
+          }
+        },
+        {
+          "kind": "completion",
+          "hookStatus": "completed",
+          "nativeStatus": "completed"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": true,
+      "targetSymlink": false,
+      "outsideExists": false,
+      "outsideContent": null,
+      "outsideSha256": null,
+      "delivery": [
+        "acked"
+      ],
+      "readiness": {
+        "state": "review-ready",
+        "verified": false,
+        "candidate": {
+          "kind": "inline-artifact-manifest",
+          "hash": "344359dc63e7501c8fb1b2d853034f0cb9e14afe5489e49213620645e605c556"
+        },
+        "baseSha": "e97836581f0255739e0de584e3b6e904cc4b106f"
+      }
+    },
+    {
+      "case": "read-only",
+      "authorizedEffects": [
+        "read"
+      ],
+      "refused": "synthetic-scope-required",
+      "targetExists": false,
+      "outsideExists": false
+    },
+    {
+      "case": "dangling-symlink",
+      "authorizedEffects": [
+        "read",
+        "write"
+      ],
+      "exit": 1,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 95628,
+            "nonce": "60ca207d-02b0-433d-a101-d8b55cb6a78d"
+          }
+        },
+        {
+          "kind": "refused",
+          "code": "artifact-symlink"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": false,
+      "targetSymlink": true,
+      "outsideExists": false,
+      "outsideContent": null,
+      "outsideSha256": null,
+      "delivery": [],
+      "readiness": {
+        "state": "execution-incomplete",
+        "verified": false
+      }
+    },
+    {
+      "case": "existing-symlink",
+      "authorizedEffects": [
+        "read",
+        "write"
+      ],
+      "exit": 1,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 95698,
+            "nonce": "18901b8f-3a0b-4a8d-bb1c-9808481ff599"
+          }
+        },
+        {
+          "kind": "refused",
+          "code": "artifact-symlink"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": true,
+      "targetSymlink": true,
+      "outsideExists": true,
+      "outsideContent": "sentinel\n",
+      "outsideSha256": "b5f7e7d285029324d9b3acae19cc05099271454ac98bfc059a92b0581625cd51",
+      "delivery": [],
+      "readiness": {
+        "state": "execution-incomplete",
+        "verified": false
+      }
+    },
+    {
+      "case": "hardlink",
+      "authorizedEffects": [
+        "read",
+        "write"
+      ],
+      "exit": 1,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 95770,
+            "nonce": "8eec7b66-5e5a-4a0a-9042-0d5639a343f7"
+          }
+        },
+        {
+          "kind": "refused",
+          "code": "artifact-linked-or-nonregular"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": true,
+      "targetSymlink": false,
+      "outsideExists": true,
+      "outsideContent": "sentinel\n",
+      "outsideSha256": "b5f7e7d285029324d9b3acae19cc05099271454ac98bfc059a92b0581625cd51",
+      "delivery": [],
+      "readiness": {
+        "state": "execution-incomplete",
+        "verified": false
+      }
+    }
+  ],
+  "fixtureRemoved": true,
+  "remainingChildren": 0,
+  "modelCalls": 0
+}

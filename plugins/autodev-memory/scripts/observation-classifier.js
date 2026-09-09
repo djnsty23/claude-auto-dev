@@ -3,6 +3,7 @@
 // Used by post-tool hook to auto-capture what Claude is doing
 
 const path = require('path');
+const { stripPrivate, stringifyPrivate } = require('./private-redaction');
 
 const VALID_TYPES = ['decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change'];
 
@@ -27,8 +28,12 @@ const TYPE_KEYWORDS = {
 function classifyObservation(toolName, toolInput, toolResult, userPrompt) {
     if (!toolName) return null;
 
-    const prompt = (userPrompt || '').toLowerCase();
-    const resultStr = (typeof toolResult === 'string' ? toolResult : '').slice(0, 500);
+    // Redact before basename, type detection, case normalization or clipping
+    // can remove a privacy boundary. Keep this boundary for direct API callers
+    // as well as the PostToolUse hook; the database remains the final guard.
+    toolInput = JSON.parse(stringifyPrivate(toolInput || {}));
+    const prompt = stripPrivate(userPrompt || '').toLowerCase();
+    const resultStr = stripPrivate(typeof toolResult === 'string' ? toolResult : '').slice(0, 500);
 
     switch (toolName) {
         case 'Write': {

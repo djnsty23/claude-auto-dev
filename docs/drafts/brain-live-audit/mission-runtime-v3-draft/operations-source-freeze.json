@@ -1,0 +1,37 @@
+[
+  {
+    "path": "plugins/autodev-core/scripts/mission-store.js",
+    "sha256": "f81db7e3aa5225c849f25a6e37e67191f46d15ec89304b925fc8f862b4989ac3",
+    "bytes": 33262
+  },
+  {
+    "path": "fixtures/synthetic-adapter.cjs",
+    "sha256": "702ad6393595ae98b92bcab851c6795e12f2c0d933ef95d8eee4b24015775744",
+    "bytes": 11585
+  },
+  {
+    "path": "fixtures/synthetic-worker.cjs",
+    "sha256": "1fc209d87aad1d695ace677985817370c301d37624734c59fea745f296ed2122",
+    "bytes": 3664
+  },
+  {
+    "path": "tooling/test-hardening.cjs",
+    "sha256": "f7ee4251f130de9fa2f371693c7a38e553f71ab3cb63fe499e34d1756f27fa20",
+    "bytes": 10528
+  },
+  {
+    "path": "tooling/check-hardening-mutations.py",
+    "sha256": "6faf48ebcd21799aa02e67cbb0702e6ff64d4ac6dcd746761822112a0fad2238",
+    "bytes": 4393
+  },
+  {
+    "path": "tooling/test-runtime-boundaries.js",
+    "sha256": "8f6b3062130b2791530468ec4b2534e369b458f28fcb4bdff5d4f9172bddb00d",
+    "bytes": 5096
+  },
+  {
+    "path": "tooling/test-runtime-crashes.js",
+    "sha256": "b87b94ba72e00b9a5cf5c06fe9163d4755681cdc59838c203f7e33e5d2d5f737",
+    "bytes": 6951
+  }
+]

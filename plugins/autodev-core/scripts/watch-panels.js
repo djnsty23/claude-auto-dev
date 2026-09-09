@@ -44,7 +44,7 @@ if (argv.includes('--help') || argv.includes('-h')) {
     'watch-panels.js - one line per newly-blocked session, for the Monitor tool',
     '',
     '  node watch-panels.js                 # scan every 60s until stopped',
-    '  node watch-panels.js --once          # one scan, then exit',
+    '  node watch-panels.js --once          # one scan; exit 2 if the scan failed',
     '  node watch-panels.js --self <id>     # never report this session\'s own panels',
     '',
     'Dedup state: $AUTODEV_FLEET_DIR/watch-panels-seen.json (default ~/.claude/fleet).',
@@ -87,6 +87,23 @@ function saveSeen(set) {
 const seen = loadSeen();
 let consecutiveErrors = 0;
 
+function validRow(r) {
+  const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const optionalText = (v) => v == null || typeof v === 'string';
+  if (!object(r) || typeof r.sessionId !== 'string' || !r.sessionId.trim()
+    || !['blocked', 'working', 'waiting', 'stalled', 'cold', 'done'].includes(r.state)
+    || !['title', 'addressableId', 'lastTs'].every((key) => optionalText(r[key]))) return false;
+  if (r.pending == null) return true;
+  if (!object(r.pending) || !optionalText(r.pending.askedAt)) return false;
+  // An uncaptured question remains a visible blocked row with the existing
+  // '(no questions parsed)' fallback. A captured array must be safe to render.
+  if (!Array.isArray(r.pending.questions)) return true;
+  return r.pending.questions.every((q) => object(q)
+    && optionalText(q.question) && optionalText(q.header)
+    && (q.options == null || (Array.isArray(q.options) && q.options.every((o) =>
+      typeof o === 'string' || (object(o) && optionalText(o.label))))));
+}
+
 function scan() {
   let raw;
   try {
@@ -127,16 +144,30 @@ function scan() {
     if (consecutiveErrors === 3 || (consecutiveErrors > 3 && consecutiveErrors % 30 === 0)) {
       console.log(`WATCHER-ERROR ${consecutiveErrors} consecutive scans failed: ${String(err.message).slice(0, 160)}`);
     }
-    return;
+    return false;
   }
 
-  let rows;
+  let d;
   try {
-    const d = JSON.parse(raw);
-    rows = Array.isArray(d) ? d : d.sessions || d.rows || [];
+    d = JSON.parse(raw);
   } catch {
     console.log('WATCHER-ERROR fleet-status returned unparseable JSON');
-    return;
+    return false;
+  }
+  // Match fleet-overlap's envelope contract before touching dedup state.
+  const sessionKeys = d && typeof d === 'object' && !Array.isArray(d)
+    ? ['sessions', 'rows'].filter((key) => Object.prototype.hasOwnProperty.call(d, key)) : [];
+  const rows = Array.isArray(d) ? d : sessionKeys.length === 1 ? d[sessionKeys[0]] : null;
+  if (!Array.isArray(rows)) {
+    console.log('WATCHER-ERROR fleet-status returned unsupported session envelope');
+    return false;
+  }
+  // Complete validation before emitting even the first valid panel or adding
+  // its dedup key. A malformed later row must not consume an earlier panel.
+  const invalidRow = rows.findIndex((r) => !validRow(r));
+  if (invalidRow !== -1) {
+    console.log('WATCHER-ERROR fleet-status returned invalid session row ' + (invalidRow + 1));
+    return false;
   }
 
   let added = 0;
@@ -165,12 +196,14 @@ function scan() {
     console.log(`PANEL ${r.title || '(untitled)'} :: ${body} :: ${id}`);
   }
   if (added) saveSeen(seen);
+  return true;
 }
 
 // Side effects live behind require.main, so importing this module for a test
 // neither scans nor arms a timer.
 if (require.main === module) {
-  scan();
-  if (!argv.includes('--once')) setInterval(scan, INTERVAL_MS);
+  const scanned = scan();
+  if (argv.includes('--once')) process.exitCode = scanned ? 0 : 2;
+  else setInterval(scan, INTERVAL_MS);
 }
 module.exports = { scan };

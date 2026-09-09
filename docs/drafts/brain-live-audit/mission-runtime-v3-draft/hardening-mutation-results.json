@@ -1,0 +1,142 @@
+[
+  {
+    "name": "close-read-before-receipt",
+    "mutatedSourceSha256": "dd262e9064ae9e3a607bee1d24a05254f64a64002ea107826b9406820905ba62",
+    "case": "sqlite-lock-close-receipt-survives",
+    "predictedAssertion": "owned close receipt survives database outage",
+    "matchedPredictedAssertion": true,
+    "exit": 1,
+    "actualError": "AssertionError [ERR_ASSERTION]: owned close receipt survives database outage\n\n0 !== 1\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/close-read-before-receipt/tooling/test-hardening.cjs:20:622\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/close-read-before-receipt/tooling/test-hardening.cjs:29:136",
+    "summary": {
+      "population": 1,
+      "passed": 0,
+      "failed": 1,
+      "helpers": 2,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    },
+    "controlExit": 0,
+    "controlSummary": {
+      "population": 1,
+      "passed": 1,
+      "failed": 0,
+      "helpers": 1,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    }
+  },
+  {
+    "name": "omit-independent-bytes",
+    "mutatedSourceSha256": "3a10fec7d2a95e547207bf315cca49a09d1ed50933b9d6b4ee50f7f269a637f1",
+    "case": "hidden-source-assume-unchanged",
+    "predictedAssertion": "hidden out-of-scope bytes cannot become review-ready",
+    "matchedPredictedAssertion": true,
+    "exit": 1,
+    "actualError": "AssertionError [ERR_ASSERTION]: hidden out-of-scope bytes cannot become review-ready\n+ actual - expected\n\n+ 'review-ready'\n- 'scope-mismatch'\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/omit-independent-bytes/tooling/test-hardening.cjs:22:471\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/omit-independent-bytes/tooling/test-hardening.cjs:29:136",
+    "summary": {
+      "population": 1,
+      "passed": 0,
+      "failed": 1,
+      "helpers": 1,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    },
+    "controlExit": 0,
+    "controlSummary": {
+      "population": 1,
+      "passed": 1,
+      "failed": 0,
+      "helpers": 1,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    }
+  },
+  {
+    "name": "unbounded-bootstrap",
+    "mutatedSourceSha256": "d00c9b8de4f54d11119b89c91d78df7089bec2611ac26282d38e76aed87e6307",
+    "case": "bootstrap-budget-persists-across-adapters",
+    "predictedAssertion": "fourth helper must not be created",
+    "matchedPredictedAssertion": true,
+    "exit": 1,
+    "actualError": "AssertionError [ERR_ASSERTION]: Missing expected rejection: fourth helper must not be created\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/unbounded-bootstrap/tooling/test-hardening.cjs:24:207\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/unbounded-bootstrap/tooling/test-hardening.cjs:29:136",
+    "summary": {
+      "population": 1,
+      "passed": 0,
+      "failed": 1,
+      "helpers": 4,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    },
+    "controlExit": 0,
+    "controlSummary": {
+      "population": 1,
+      "passed": 1,
+      "failed": 0,
+      "helpers": 1,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    }
+  },
+  {
+    "name": "replay-bootstrap-permit",
+    "mutatedSourceSha256": "8400bdd211c18667a017f3753887a03cda769e85d82131f9223e5965fdd3ef9f",
+    "case": "bootstrap-permit-replay-and-unissued-registration-refused",
+    "predictedAssertion": "replayed permit never grants another spawn",
+    "matchedPredictedAssertion": true,
+    "exit": 1,
+    "actualError": "AssertionError [ERR_ASSERTION]: replayed permit never grants another spawn\n\ntrue !== false\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/replay-bootstrap-permit/tooling/test-hardening.cjs:25:494\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/replay-bootstrap-permit/tooling/test-hardening.cjs:29:142\n    at Object.<anonymous> (<audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/replay-bootstrap-permit/tooling/test-hardening.cjs:29:990)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14)\n    at Object..js (node:internal/modules/cjs/loader:2003:10)\n    at Module.load (node:internal/modules/cjs/loader:1594:32)\n    at Module._load (node:internal/modules/cjs/loader:1396:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47",
+    "summary": {
+      "population": 1,
+      "passed": 0,
+      "failed": 1,
+      "helpers": 0,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    },
+    "controlExit": 0,
+    "controlSummary": {
+      "population": 1,
+      "passed": 1,
+      "failed": 0,
+      "helpers": 1,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    }
+  },
+  {
+    "name": "unissued-bootstrap-registration",
+    "mutatedSourceSha256": "1c6764073dadafc4fbac53dad2994eb5155f057d778fc4726a01c65af2c37d90",
+    "case": "bootstrap-permit-replay-and-unissued-registration-refused",
+    "predictedAssertion": "registration requires issued nonce",
+    "matchedPredictedAssertion": true,
+    "exit": 1,
+    "actualError": "AssertionError [ERR_ASSERTION]: Missing expected exception: registration requires issued nonce\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/unissued-bootstrap-registration/tooling/test-hardening.cjs:25:190\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/unissued-bootstrap-registration/tooling/test-hardening.cjs:29:142\n    at Object.<anonymous> (<audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/unissued-bootstrap-registration/tooling/test-hardening.cjs:29:990)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14)\n    at Object..js (node:internal/modules/cjs/loader:2003:10)\n    at Module.load (node:internal/modules/cjs/loader:1594:32)\n    at Module._load (node:internal/modules/cjs/loader:1396:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47",
+    "summary": {
+      "population": 1,
+      "passed": 0,
+      "failed": 1,
+      "helpers": 0,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    },
+    "controlExit": 0,
+    "controlSummary": {
+      "population": 1,
+      "passed": 1,
+      "failed": 0,
+      "helpers": 1,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    }
+  }
+]

@@ -100,6 +100,24 @@ runHook('memory-prompt-capture.js', {
 const stored = carrier.readPrompt(PROJ, 'harness-C');
 check('private blocks are redacted', !stored.includes('sk_live_abc123') && stored.includes('[REDACTED]'));
 
+
+// Exercise the real hook before its carrier write; DB redaction alone cannot
+// protect a prompt that already leaked into the on-disk carrier.
+for (const [label, prompt, expected] of [
+    ['unclosed', 'PUBLIC<private>CARRIER_UNCLOSED', 'PUBLIC[REDACTED]'],
+    ['nested', 'LEFT<private>CARRIER_OUTER<private>CARRIER_INNER</private>CARRIER_TAIL</private>RIGHT', 'LEFT[REDACTED]RIGHT'],
+    ['uppercase', 'LEFT<PRIVATE>CARRIER_UPPER</PRIVATE>RIGHT', 'LEFT[REDACTED]RIGHT'],
+    ['multiple', 'A<private>CARRIER_ONE</private>B<private>CARRIER_TWO</private>C', 'A[REDACTED]B[REDACTED]C'],
+    ['public-control', 'PUBLIC<privateer>TAIL', 'PUBLIC<privateer>TAIL'],
+]) {
+    const hook = runHook('memory-prompt-capture.js', { prompt, cwd: PROJ, session_id: 'harness-C' });
+    check(`prompt privacy ${label}: hook exits silently`, hook.status === 0 && hook.stdout === '');
+    check(`prompt privacy ${label}: persists the exact redacted/public boundary`,
+        carrier.readPrompt(PROJ, 'harness-C') === expected);
+}
+// Restore the prior control before the existing no-op assertion below.
+runHook('memory-prompt-capture.js', { prompt: 'deploy with <private>sk_live_abc123</private> please', cwd: PROJ, session_id: 'harness-C' });
+
 // An empty prompt is a no-op, not an overwrite.
 runHook('memory-prompt-capture.js', { prompt: '', cwd: PROJ, session_id: 'harness-C' });
 check('empty prompt does not clobber the stored one', carrier.readPrompt(PROJ, 'harness-C') === stored);
@@ -210,6 +228,61 @@ if ((r.stdout || '').trim()) {
     check('an existing .gitignore is left alone',
         fs.readFileSync(ignore, 'utf8').includes('# edited by hand'));
 }
+
+// Privacy must hold before extraction: basename, case normalization, clipping,
+// JSON encoding and the area throttle can each discard or change a marker.
+// All stores and carriers below are owned fixtures; HOME is never redirected.
+if (memDB.isAvailable()) {
+    const { DatabaseSync } = require('node:sqlite');
+    const privacyRoot = path.join(TMP, 'extraction-privacy');
+    const privacyProj = path.join(privacyRoot, 'project');
+    const privacyStore = path.join(privacyRoot, 'store');
+    fs.mkdirSync(privacyProj, { recursive: true });
+    const dbModule = path.join(PLUGIN_SRC, 'scripts', 'memory-db.js');
+    const preload = path.join(privacyRoot, 'fixture-path.cjs');
+    fs.writeFileSync(preload, `const Module=require('module'),path=require('path');const original=Module._load;Module._load=function(name,parent){if(name==='path'&&parent&&parent.filename===${JSON.stringify(dbModule)})return {...path,join:(...p)=>p.length===2&&p[1]==='.claude'?path.join(${JSON.stringify(privacyStore)},'.claude'):path.join(...p)};return original.apply(this,arguments)};`);
+    const privacyHook = (name, payload) => spawnSync(process.execPath, ['-r', preload, path.join(PLUGIN_SRC, 'hooks', name)], {
+        cwd: privacyProj, input: JSON.stringify({cwd: privacyProj, session_id: 'privacy-extraction', ...payload}),
+        encoding: 'utf8', env: {...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC},
+    });
+    const start = privacyHook('memory-session-start.js', {hook_event_name:'SessionStart'});
+    const sessionId = carrier.read(privacyProj, 'privacy-extraction');
+    check('extraction privacy: real fixture session starts', start.status === 0 && /^ses_/.test(sessionId || ''));
+    const readRows = () => {
+        const db = new DatabaseSync(path.join(privacyStore, '.claude', 'auto-dev-memory.db'), {readOnly:true});
+        try { return db.prepare('SELECT title,concept,source_files,raw_data FROM observations WHERE session_id=? ORDER BY rowid').all(sessionId); }
+        finally { db.close(); }
+    };
+    const prompt = 'Please implement the public fixture.';
+    privacyHook('memory-prompt-capture.js', {prompt});
+    const fixtures = [
+        ['public', 'Write', {file_path:path.join(privacyProj,'public-area','public-control.ts')}, '', 'Created public-control.ts', prompt.toLowerCase(), [], false],
+        ['write-unclosed', 'Write', {file_path:path.join(privacyProj,'<private>PRIVATE_DIR','WRITE_FILENAME_SECRET.ts')}, '', 'Created [REDACTED]', prompt.toLowerCase(), ['PRIVATE_DIR','WRITE_FILENAME_SECRET'], true],
+        ['edit-nested', 'Edit', {file_path:path.join(privacyProj,'<private>OUTER_DIR','<private>INNER_DIR</private>','EDIT_FILENAME_SECRET.ts')}, '', 'Added [REDACTED]', prompt.toLowerCase(), ['OUTER_DIR','INNER_DIR','EDIT_FILENAME_SECRET'], true],
+        ['read-uppercase', 'Read', {file_path:path.join(privacyProj,'<PRIVATE>UPPER_DIR</PRIVATE>','public-read.ts')}, '', 'Read public-read.ts', 'Investigated: '+privacyProj+'/[REDACTED]/public-read.ts', ['UPPER_DIR'], true],
+        ['command-before-classification', 'Bash', {command:'inspect_custom_action <private>deploy COMMAND_SECRET'+ 'x'.repeat(200) +'</private> PUBLIC_TAIL'}, 'VISIBLE_RESULT', 'Ran: inspect_custom_action [REDACTED] PUBLIC_TAIL', 'VISIBLE_RESULT', ['COMMAND_SECRET'], true],
+        ['grep-before-clip', 'Grep', {pattern:'P<private>GREP_SECRET'+'x'.repeat(100)+'</private>PUBLIC_TAIL'}, '', 'Searched for "P[REDACTED]PUBLIC_TAIL"', 'Code search in project', ['GREP_SECRET'], true],
+        ['result-before-clip', 'Bash', {command:'custom_long_result_command'}, 'A<private>RESULT_SECRET'+'x'.repeat(600)+'</private>PUBLIC_TAIL', 'Ran: custom_long_result_command', 'A[REDACTED]PUBLIC_TAIL', ['RESULT_SECRET'], true],
+        ['structured-result-before-encoding', 'Bash', {command:'custom_structured_result_command'}, {note:'A<private>JSON_SECRET"\\\n'+'x'.repeat(600)+'</private>PUBLIC_TAIL',after:'PUBLIC_SIBLING'}, 'Ran: custom_structured_result_command', '{"note":"A[REDACTED]PUBLIC_TAIL","after":"PUBLIC_SIBLING"}', ['JSON_SECRET'], true],
+    ];
+    for (const [label,tool,input,result,title,concept,secrets,redacted] of fixtures) {
+        const before=readRows().length;
+        const hook=privacyHook('memory-capture.js',{tool_name:tool,tool_input:input,tool_response:result});
+        const rows=readRows(), row=rows.at(-1);
+        check(`extraction ${label}: actual PostToolUse persists a row`, hook.status===0 && rows.length===before+1);
+        check(`extraction ${label}: title and public concept survive`, !!row && row.title===title && row.concept===concept);
+        const decoded= row ? [row.title,row.concept,...JSON.parse(row.source_files || '[]'),row.raw_data && JSON.parse(row.raw_data)].join('\n') : '';
+        check(`extraction ${label}: protected text absent with positive redaction control`, !!row && secrets.every(s=>!decoded.includes(s)) && (!redacted || decoded.includes('[REDACTED]')));
+    }
+    const throttle=fs.readFileSync(path.join(privacyProj,'.claude','knowledge-surfaced'),'utf8');
+    check('extraction privacy: private paths skip area lookup while a real public area survives', throttle.includes('privacy-extraction\tpublic-area') && !/PRIVATE_DIR|OUTER_DIR|INNER_DIR|UPPER_DIR|REDACTED/.test(throttle));
+    const { classifyObservation } = require(path.join(PLUGIN_SRC,'scripts','observation-classifier.js'));
+    const direct=classifyObservation('Write',{file_path:'PUBLIC.ts'},'', '<private>FIX PROMPT_SECRET'+'X'.repeat(240)+'</private> PUBLIC_REQUEST');
+    check('extraction privacy: direct classifier redacts before lowercase, type detection and truncation', direct.type==='feature' && direct.concept==='[redacted] public_request');
+    const edit=classifyObservation('Edit',{file_path:'PUBLIC.ts',old_string:'A<private>OLD_SECRET'+'x'.repeat(100)+'</private>OLD_TAIL',new_string:'B<private>NEW_SECRET'+'x'.repeat(100)+'</private>NEW_TAIL'},'','');
+    check('extraction privacy: edit fallback redacts before shortening both strings', edit.concept==='A[REDACTED]OLD_TAIL → B[REDACTED]NEW_TAIL');
+}
+
 
 // ---------------------------------------------------------------- report
 

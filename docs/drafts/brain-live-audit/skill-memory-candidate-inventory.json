@@ -1,0 +1,488 @@
+{
+  "candidate": "95f3737c21a6ee324d73116ec1a745beacd9f041",
+  "baseline": "9f9746f7907721921ce3d15fa5ae5020c0ebd227",
+  "at": "2026-09-09T02:57:44.005747+00:00",
+  "population": 68,
+  "changed": 68,
+  "baselineBytes": 629738,
+  "candidateBytes": 549165,
+  "meaning": "All shipped SKILL.md Git objects differ from baseline; semantic-review provenance remains in the existing per-file manifests. Byte reduction is not measured model reliability. Full eight-stage gate passed on this exact clean candidate.",
+  "skills": [
+    {
+      "path": "plugins/autodev-core/skills/a11y/SKILL.md",
+      "bytes": 3890,
+      "sha256": "1d64572b34bf027d75b60a2d06f60ed1e98af17eda77e26839cd55f6989da233",
+      "baselineBytes": 3039,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/adversarial-loop/SKILL.md",
+      "bytes": 30217,
+      "sha256": "81711a00469e96ed7c92bf5c77e8de86f422ca838c30761db779f541cf5915fe",
+      "baselineBytes": 27997,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/archive-prd/SKILL.md",
+      "bytes": 10840,
+      "sha256": "1bf6b9425341a61fb5ea6cf999367bb564ed7f58a4f4d983e86417a6e4c2a7c7",
+      "baselineBytes": 7993,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/audit/SKILL.md",
+      "bytes": 11150,
+      "sha256": "70e7e77848375c80ae65c740b322953a91e37813ed72ca6ed8af46127a63c6b6",
+      "baselineBytes": 15471,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/auto-brain/SKILL.md",
+      "bytes": 2432,
+      "sha256": "6ac5fbba0a71020e76a1c4b22958b96b0e635202b2ffad4a5a2acc877176923f",
+      "baselineBytes": 27502,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/auto/SKILL.md",
+      "bytes": 26536,
+      "sha256": "dd9d42c25b809066b37feaa1171268263a48e5121276189daa5816e12479c415",
+      "baselineBytes": 26807,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/autodev-init/SKILL.md",
+      "bytes": 7536,
+      "sha256": "217a68751105114bdd5dc21ddfcff7a34fc731a4667ac4a46564f8e6aefd1c2f",
+      "baselineBytes": 7255,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/brain/SKILL.md",
+      "bytes": 11752,
+      "sha256": "b23a90507a5228163d2a5112d4df4c9511f4a947c038f0bf940df8b718e95fb8",
+      "baselineBytes": 96590,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/brainstorm/SKILL.md",
+      "bytes": 12266,
+      "sha256": "c5b9c6b16cebc6719cb638bb79a6dd5ec3b6f9b71ffa27d55bd7ecb6a42c63e7",
+      "baselineBytes": 11649,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/commit/SKILL.md",
+      "bytes": 8943,
+      "sha256": "6c8c7cb9ff20f5bfd850e6af44be9c7cdf84021595e983fc91865a817b83b654",
+      "baselineBytes": 8394,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/core/SKILL.md",
+      "bytes": 6055,
+      "sha256": "b281dc62475e6772b3ba6b94e1b726fbceff3d17f6ee5e2c506a727e6766e1e5",
+      "baselineBytes": 4975,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/design/SKILL.md",
+      "bytes": 16119,
+      "sha256": "2b767aefe6087982960d5c2380674d063c88ab30e4b3dc66f589e488a855c48d",
+      "baselineBytes": 15629,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/fleet/SKILL.md",
+      "bytes": 7336,
+      "sha256": "d7e29aede170f499637d3f5a3e1506417a15f4a7e14c2ac6da558c1a93378c7e",
+      "baselineBytes": 6898,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/framework-radar/SKILL.md",
+      "bytes": 12582,
+      "sha256": "ce2755adb3d306051aba29feb3dc1b29b445b27aca1a83e228e736b8f1e0f8f2",
+      "baselineBytes": 11497,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/grilling/SKILL.md",
+      "bytes": 5127,
+      "sha256": "63a5c4396f9242e328e6db1b5ba19e47e633b2cbc196cb4d80a53dc95d303fc1",
+      "baselineBytes": 4821,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/heal/SKILL.md",
+      "bytes": 6854,
+      "sha256": "7119f70b9e14d373a5c25c156b3860e18e20d4c2dc9a22916c8d8b900da01964",
+      "baselineBytes": 6575,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/isolate/SKILL.md",
+      "bytes": 7433,
+      "sha256": "fea95b8d7debb2748ccdab1fde3aa3f0103d62251ed9d0ec4cf6863c046d3140",
+      "baselineBytes": 6323,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/iterate/SKILL.md",
+      "bytes": 4552,
+      "sha256": "2705f1d4f83621cb7e8a904e0f87f511a729325091b06a96a09717d4850bc724",
+      "baselineBytes": 3931,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/learn-from-fixes/SKILL.md",
+      "bytes": 9500,
+      "sha256": "aaa732f2b000566cade8dd8aa191dee213eabee7b3698bb296f4872204f138f0",
+      "baselineBytes": 8516,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/marketing-radar/SKILL.md",
+      "bytes": 11873,
+      "sha256": "37e7b942876daa01a95963f0bb4278ef202c575f472d29cd45dcb98493122eb4",
+      "baselineBytes": 10831,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/migrate/SKILL.md",
+      "bytes": 5344,
+      "sha256": "05e2a772371799edba5f1f4ed00e33307c5c74314bbc491696c291b2d155dafe",
+      "baselineBytes": 4518,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/perf/SKILL.md",
+      "bytes": 4017,
+      "sha256": "5c79a79cfd756bb028c87745f04341a0f6992f9cf3a9389a9930e6bdb45a45ef",
+      "baselineBytes": 2932,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/phase/SKILL.md",
+      "bytes": 7394,
+      "sha256": "7cba3aba8b8d7ef2b49de2d78b80a788ab63a43997fb72c2db086a3d45b6161b",
+      "baselineBytes": 7005,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/preflight/SKILL.md",
+      "bytes": 12755,
+      "sha256": "67befbac2a07dc784673be0837fe3b9c98baebc1cb617edd3f221e143682fe97",
+      "baselineBytes": 12100,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/production-radar/SKILL.md",
+      "bytes": 7552,
+      "sha256": "1e8c9f1a64a8bbc8e61d982dc348c5ba6555adf76f83d9bfbbc87070301342e1",
+      "baselineBytes": 6492,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/prove/SKILL.md",
+      "bytes": 5193,
+      "sha256": "100a09800503a3f3c9c2152987b21cc71d85a06844bb4a6887fba8a1a67ccd63",
+      "baselineBytes": 4239,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/refactor/SKILL.md",
+      "bytes": 6055,
+      "sha256": "1457b68791193a5134b2048ad09023358aa0d69fbd6996770313f5700676d74d",
+      "baselineBytes": 5552,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/review/SKILL.md",
+      "bytes": 5595,
+      "sha256": "b809257bf0161e3fb0b0e81574dff601c79173c363cca1f85459af001b597e3e",
+      "baselineBytes": 5297,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-ab-testing/SKILL.md",
+      "bytes": 9073,
+      "sha256": "a29bef7c21beda82b3bd99659589912f6884b4e7e44f2ddfb6a93b5a34d0b4a3",
+      "baselineBytes": 8450,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-agent-concurrency/SKILL.md",
+      "bytes": 11769,
+      "sha256": "9900639cfb3eee5a52118836862a7dd5f559cc5fb6d9d2e28fcaef8bf31e259a",
+      "baselineBytes": 10567,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-design-system/SKILL.md",
+      "bytes": 3157,
+      "sha256": "5e8768cac5e6a2a8e05aaee19d0935a35f6643d508fc1657bd86190e87b8c4f2",
+      "baselineBytes": 2876,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-diagnosis/SKILL.md",
+      "bytes": 10826,
+      "sha256": "12fbf725fab3a451b55f6cff31f0445b5eff6d31be89d402062e9c14ab8997cc",
+      "baselineBytes": 10592,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-file-organization/SKILL.md",
+      "bytes": 2827,
+      "sha256": "b60c9b1753387450b71ca6fd4f1b75ea99117ca02d894872f4953ac8730b2555",
+      "baselineBytes": 1808,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-gate-integrity/SKILL.md",
+      "bytes": 32454,
+      "sha256": "6717f33690bf9e4faa692fa6691532a1e6b37da59499cd7eccab626901cbd7d5",
+      "baselineBytes": 24962,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-local-first/SKILL.md",
+      "bytes": 5148,
+      "sha256": "60a4945df81faf20e27037394314acf167afcce5513ccb5f0a78e3f19f09e379",
+      "baselineBytes": 18047,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-options-protocol/SKILL.md",
+      "bytes": 3246,
+      "sha256": "4c041cf6b5137855a94b07fe76cb538e2a648902fce49885cd2d55ad8009fd9d",
+      "baselineBytes": 10538,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-ramifications/SKILL.md",
+      "bytes": 6148,
+      "sha256": "dd000b3190af530e7bbc4af3053bfc7a24327e9c096f3785758e77c5981c7110",
+      "baselineBytes": 5832,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-record-size/SKILL.md",
+      "bytes": 9784,
+      "sha256": "6f6cf2c4a559f770c0d917c0303b90c4b1a1e4c32b7b2cb0e141b7b4f3e3655b",
+      "baselineBytes": 8634,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-report-shell/SKILL.md",
+      "bytes": 4541,
+      "sha256": "cce6abcbb98cbed29086cc931dc80545c31df868c1a0078375f89d71a2dd49b4",
+      "baselineBytes": 4152,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-security/SKILL.md",
+      "bytes": 1603,
+      "sha256": "7840d54789038dff85dffa31d1fc90d146e420358acd107ad9b51afc4596ba6b",
+      "baselineBytes": 782,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-thumb-first/SKILL.md",
+      "bytes": 7440,
+      "sha256": "bad0ff671c09e4e23b16e77b663cd15bf52d05b34d9c36b5614e9dfdffe58687",
+      "baselineBytes": 6857,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-verification/SKILL.md",
+      "bytes": 10874,
+      "sha256": "5d363655ed0cda736bc3b535f8e4ecafe108733b02a67a26468e5c03206a3a43",
+      "baselineBytes": 8294,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-windows/SKILL.md",
+      "bytes": 6913,
+      "sha256": "0c45456b6e498f9ae865976dbf9a65e0272c51c943bef27670392efb26499fdb",
+      "baselineBytes": 6576,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/rule-workflow-spine/SKILL.md",
+      "bytes": 5926,
+      "sha256": "3e0d7991bb1df058e33c4415ad528e98174ab4e05add3464e80b7e2d761f6c9b",
+      "baselineBytes": 4865,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/scan/SKILL.md",
+      "bytes": 10600,
+      "sha256": "43d0ceef31768704047876f9f6815b21b28fcc3b44e505dffe34e3430327d941",
+      "baselineBytes": 11330,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/security/SKILL.md",
+      "bytes": 5631,
+      "sha256": "a1ff0ca5ba8b90d3c8eb0639d923bbd6b98530e5540a26b459deb9dd2cdd7a04",
+      "baselineBytes": 4045,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/seo/SKILL.md",
+      "bytes": 4210,
+      "sha256": "8a4f97ef290cb8e6727be1c12d90099b4139253b5ed56e815a8ac687deef1fc6",
+      "baselineBytes": 2897,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/sessions/SKILL.md",
+      "bytes": 7991,
+      "sha256": "eb93759871259c787eb7a062b7cad97461a2df3afa70fedcfc9b1c4f257cfc09",
+      "baselineBytes": 7635,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/setup-project/SKILL.md",
+      "bytes": 9890,
+      "sha256": "d9f16841d8f7f4ac52519fa91d8bb1b38d43c354059da9d3d31931a5c7af2417",
+      "baselineBytes": 7815,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/ship/SKILL.md",
+      "bytes": 17151,
+      "sha256": "9784aa0827a20f3ac579b995d75791619031ef1c3c0f53867cfffb21ded11971",
+      "baselineBytes": 12805,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/show-your-work/SKILL.md",
+      "bytes": 3216,
+      "sha256": "23396de90d76f1abf7192498db8aebe0d6384f6f85d2ed95d31c55ab71fbd349",
+      "baselineBytes": 2848,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/spec/SKILL.md",
+      "bytes": 7919,
+      "sha256": "16e1c50f592686ee43c951b11e0bccf3a4fa0705e07f8fe1e408d0fed27aee0c",
+      "baselineBytes": 6832,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/sprint/SKILL.md",
+      "bytes": 3263,
+      "sha256": "3276b51cdb9e245fb06457b4aafb94cb764daa972c37f59c86d40b670464e110",
+      "baselineBytes": 3189,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/standards/SKILL.md",
+      "bytes": 4931,
+      "sha256": "a62fada6417f8bb39a7cf8cc9cdd54bf70682dc139b052bd8f85a459cd8af3f3",
+      "baselineBytes": 3771,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/status/SKILL.md",
+      "bytes": 2014,
+      "sha256": "dd21fb72c4bfc574cf3271f72c5a5d871d8b6cbea78a18b7a03c5cb8e0696f83",
+      "baselineBytes": 2286,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/telemetry/SKILL.md",
+      "bytes": 3196,
+      "sha256": "f0ca201cbfa12dba929dcda8633d651f62ea943135510893ead97c2efec19bac",
+      "baselineBytes": 2963,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/test/SKILL.md",
+      "bytes": 8482,
+      "sha256": "a48acfe33a4224d9ec40fdba2826116fa842bdd3d7250cbbf8bfa7c6b55c9a35",
+      "baselineBytes": 8038,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/wizard/SKILL.md",
+      "bytes": 6627,
+      "sha256": "f349e31eec95a02aa04384808b1b635449321351f6ca810ccef4a21f56a633e5",
+      "baselineBytes": 5730,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-core/skills/writing-for-agents/SKILL.md",
+      "bytes": 6586,
+      "sha256": "af577aca90e0fd3ed38ed2f74af7bf3776eb7a1a754918010348807c1f01d003",
+      "baselineBytes": 5705,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-memory/skills/knowledge-agent/SKILL.md",
+      "bytes": 5337,
+      "sha256": "6f6f84cf343a074d2a7f1b3e8eaedb4d67f53d6ffd5be2d9a633a03dad4b59f8",
+      "baselineBytes": 5065,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-memory/skills/mem-dashboard/SKILL.md",
+      "bytes": 3885,
+      "sha256": "67f42a516dc2099d57016763e0a5a2d6ea5070381f0550d8e1dd1ca25dcea3f2",
+      "baselineBytes": 2543,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-memory/skills/mem-search/SKILL.md",
+      "bytes": 4915,
+      "sha256": "a813157012131e3529f8241470eab676c2edb40cccac1d80559da01fe5ee6926",
+      "baselineBytes": 3688,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-memory/skills/memory-backup/SKILL.md",
+      "bytes": 7718,
+      "sha256": "50a54d3a2538da69dd9d2ae6bcab6e8ded3ea9f7ecfdfc1a13160f8ae14ef069",
+      "baselineBytes": 6066,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-memory/skills/memory-maintenance/SKILL.md",
+      "bytes": 6607,
+      "sha256": "a13b2869e99adeae09347c20f7af6eeabd7f6d7e242aa9692df2b4b353f101a0",
+      "baselineBytes": 5925,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-stack/skills/doppler/SKILL.md",
+      "bytes": 4942,
+      "sha256": "3aeddef69979908249c033bf473ea0fe0b56486923400c56063e1ef6910f481f",
+      "baselineBytes": 8333,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-stack/skills/remotion/SKILL.md",
+      "bytes": 3778,
+      "sha256": "d82faf4526e9e9dc4901ee97121601ce5644474a153f3d47bad2a56d64d34b9c",
+      "baselineBytes": 3401,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-stack/skills/stripe/SKILL.md",
+      "bytes": 5512,
+      "sha256": "dac0b106786284b5cfe925388fe820a37945485630a015d3a556989be99bfcd3",
+      "baselineBytes": 4188,
+      "changed": true
+    },
+    {
+      "path": "plugins/autodev-stack/skills/supabase/SKILL.md",
+      "bytes": 6137,
+      "sha256": "e503c133c549a8ce7f50cf7c7547373cf1e6750a11e505a762ace993ca7fa226",
+      "baselineBytes": 7980,
+      "changed": true
+    }
+  ]
+}

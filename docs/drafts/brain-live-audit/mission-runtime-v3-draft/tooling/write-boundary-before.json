@@ -1,0 +1,198 @@
+{
+  "rows": [
+    {
+      "case": "normal",
+      "authorizedEffects": [
+        "read",
+        "write"
+      ],
+      "exit": 0,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 16847,
+            "nonce": "a7562377-ddde-4ae6-a0ad-6c3ec6e9926a"
+          }
+        },
+        {
+          "kind": "completion",
+          "hookStatus": "completed",
+          "nativeStatus": "completed"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": true,
+      "targetSymlink": false,
+      "outsideExists": false,
+      "outsideContent": null,
+      "outsideSha256": null,
+      "delivery": [
+        "acked"
+      ],
+      "readiness": {
+        "state": "review-ready",
+        "verified": false,
+        "candidate": {
+          "kind": "inline-artifact-manifest",
+          "hash": "344359dc63e7501c8fb1b2d853034f0cb9e14afe5489e49213620645e605c556"
+        },
+        "baseSha": "42cc91a67ca354f4d2dd8edf406ba4c49a1dedc4"
+      }
+    },
+    {
+      "case": "read-only",
+      "authorizedEffects": [
+        "read"
+      ],
+      "exit": 0,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 16953,
+            "nonce": "f1748079-b8a9-4af8-bf3a-e0538484219c"
+          }
+        },
+        {
+          "kind": "completion",
+          "hookStatus": "completed",
+          "nativeStatus": "completed"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": true,
+      "targetSymlink": false,
+      "outsideExists": false,
+      "outsideContent": null,
+      "outsideSha256": null,
+      "delivery": [
+        "acked"
+      ],
+      "readiness": {
+        "state": "review-ready",
+        "verified": false,
+        "candidate": {
+          "kind": "inline-artifact-manifest",
+          "hash": "344359dc63e7501c8fb1b2d853034f0cb9e14afe5489e49213620645e605c556"
+        },
+        "baseSha": "f10fe615ecc62aa964f40e6324026680dfb2e7ec"
+      }
+    },
+    {
+      "case": "dangling-symlink",
+      "authorizedEffects": [
+        "read",
+        "write"
+      ],
+      "exit": 0,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 17060,
+            "nonce": "58ec5d73-70ec-4aba-8850-a9176d174fb2"
+          }
+        },
+        {
+          "kind": "completion",
+          "hookStatus": "completed",
+          "nativeStatus": "completed"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": true,
+      "targetSymlink": true,
+      "outsideExists": true,
+      "outsideContent": "module.exports = () => ({ ok: true, source: \"owned-synthetic-worker\" });\n",
+      "outsideSha256": "e3a96c2c048ab166f27e1285a6ad6b86c5a0b3b69faa73340d631ea626326592",
+      "delivery": [
+        "acked"
+      ],
+      "readiness": {
+        "state": "artifact-mismatch",
+        "verified": false
+      }
+    },
+    {
+      "case": "existing-symlink",
+      "authorizedEffects": [
+        "read",
+        "write"
+      ],
+      "exit": 1,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 17342,
+            "nonce": "f8c4f5cb-2a2c-47ce-88d8-a7cc7da14727"
+          }
+        },
+        {
+          "kind": "refused",
+          "code": "artifact-symlink"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": true,
+      "targetSymlink": true,
+      "outsideExists": true,
+      "outsideContent": "sentinel\n",
+      "outsideSha256": "b5f7e7d285029324d9b3acae19cc05099271454ac98bfc059a92b0581625cd51",
+      "delivery": [],
+      "readiness": {
+        "state": "execution-incomplete",
+        "verified": false
+      }
+    },
+    {
+      "case": "hardlink",
+      "authorizedEffects": [
+        "read",
+        "write"
+      ],
+      "exit": 0,
+      "messages": [
+        {
+          "kind": "registered",
+          "identity": {
+            "host": "synthetic-local",
+            "pid": 17730,
+            "nonce": "9d6a4b88-fc49-42da-a8bc-652eeac734e7"
+          }
+        },
+        {
+          "kind": "completion",
+          "hookStatus": "completed",
+          "nativeStatus": "completed"
+        }
+      ],
+      "persistenceError": null,
+      "targetExists": true,
+      "targetSymlink": false,
+      "outsideExists": true,
+      "outsideContent": "module.exports = () => ({ ok: true, source: \"owned-synthetic-worker\" });\n",
+      "outsideSha256": "e3a96c2c048ab166f27e1285a6ad6b86c5a0b3b69faa73340d631ea626326592",
+      "delivery": [
+        "acked"
+      ],
+      "readiness": {
+        "state": "review-ready",
+        "verified": false,
+        "candidate": {
+          "kind": "inline-artifact-manifest",
+          "hash": "344359dc63e7501c8fb1b2d853034f0cb9e14afe5489e49213620645e605c556"
+        },
+        "baseSha": "22946750595bfffc25c259b1257b79ea95011617"
+      }
+    }
+  ],
+  "fixtureRemoved": true,
+  "remainingChildren": 0,
+  "modelCalls": 0
+}
