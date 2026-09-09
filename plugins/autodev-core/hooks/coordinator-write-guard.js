@@ -164,6 +164,10 @@ function stripNonCommandText(command) {
                is emulated here: the character survives and anything that could split a
                command becomes a space. `echo "git push"` still reads as one `echo`
                segment, because segmentation looks at a segment's FIRST word. */
+            // A quoted space belongs to this argument, just like an escaped
+            // space. Keep it opaque until path resolution so -C, cd and the
+            // git-dir/work-tree options all receive the complete path.
+            if (c === ' ') { out += ESCAPED_SPACE; continue; }
             out += /[;&|\n()`]/.test(c) ? ' ' : c;
             continue;
         }

@@ -26,7 +26,15 @@ const harnessSessionId = data.session_id || null;
 const carrier = require(path.join(PLUGIN_ROOT, 'scripts', 'session-carrier.js'));
 
 try {
-    const filePath = (data.tool_input && data.tool_input.file_path) || '';
+    const { stripPrivate, stringifyPrivate } = require(path.join(PLUGIN_ROOT, 'scripts', 'private-redaction.js'));
+    // The classifier and the area throttle both derive text from these fields.
+    // Filter before either path can discard tags through basename/normalization.
+    const toolInput = JSON.parse(stringifyPrivate(data.tool_input || {}));
+    const originalFilePath = (data.tool_input && data.tool_input.file_path) || '';
+    // A redacted path is not a filesystem identity. Skip knowledge lookup and
+    // its area marker when the source path is private; public paths still work.
+    const filePath = typeof originalFilePath === 'string' && originalFilePath === toolInput.file_path
+        ? originalFilePath : '';
 
     // ============================================================
     // Memory: Capture observation from tool usage
@@ -42,15 +50,14 @@ try {
             if (memDB.isAvailable()) {
                 const sessionId = carrier.read(cwd, harnessSessionId);
                 const toolName = data.tool_name || '';
-                const toolInput = data.tool_input || {};
                 // `tool_response` is the real payload key; `tool_output` is the 7.x
                 // name and does not exist on the current CLI, so this read was
                 // handing the classifier an empty string on every single call.
                 // Kept as a fallback for older CLIs only.
                 const rawResult = data.tool_response !== undefined ? data.tool_response : data.tool_output;
                 const toolResult = (typeof rawResult === 'string'
-                    ? rawResult
-                    : (rawResult ? JSON.stringify(rawResult) : '')).slice(0, 500);
+                    ? stripPrivate(rawResult)
+                    : (rawResult ? stringifyPrivate(rawResult) : '')).slice(0, 500);
                 // The classifier derives BOTH the observation type and its concept
                 // text from the prompt. It used to read AUTO_DEV_LAST_PROMPT, which
                 // nothing ever set, so every observation fell back to a generic type

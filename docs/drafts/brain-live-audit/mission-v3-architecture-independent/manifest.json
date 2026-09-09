@@ -1,0 +1,46 @@
+{
+  "sourceHead": "08cd93c3e02f622adc613f0cd683e88641afe3ab",
+  "runtimeHashes": {
+    "plugins/autodev-core/scripts/mission-store.js": "f81db7e3aa5225c849f25a6e37e67191f46d15ec89304b925fc8f862b4989ac3",
+    "fixtures/synthetic-adapter.cjs": "702ad6393595ae98b92bcab851c6795e12f2c0d933ef95d8eee4b24015775744",
+    "fixtures/synthetic-worker.cjs": "1fc209d87aad1d695ace677985817370c301d37624734c59fea745f296ed2122"
+  },
+  "operationsManifestSha256": "b10766e6f4131f33961f3e4b856f46b9f4625988fea281280d688b5ea3a9da16",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "54000b4c07fddc2db0f3a20018b6e0b909a41ed061c592e336bce83ed495df98",
+      "bytes": 6816
+    },
+    {
+      "path": "probe.cjs",
+      "sha256": "d46602513ce396c506ee6f6e6e5626abfe7894fd5272d4691b2b1fbdc21251ca",
+      "bytes": 8201
+    },
+    {
+      "path": "results.json",
+      "sha256": "d9a9f6ecc06f9cb8fddeb331291a3726650eaf90268f14cf4dbc606884f6e8f1",
+      "bytes": 2901
+    },
+    {
+      "path": "source-references.json",
+      "sha256": "e23f410667710d723196c203351862d5831ee16156f2b442c142df6fadc30468",
+      "bytes": 1124
+    },
+    {
+      "path": "integration-inventory.json",
+      "sha256": "337aca7b8090327649a52a8eacc35268ce8313ebebc7ee19e091576cfb99b469",
+      "bytes": 4416
+    }
+  ],
+  "verdict": "No new blocker reproduced within six local synthetic readiness/fencing cases; not Brain integration or verified mission success.",
+  "cleanup": {
+    "population": 6,
+    "passed": 6,
+    "failed": 0,
+    "helpers": 6,
+    "remainingChildren": 0,
+    "fixtureRemoved": true,
+    "modelCalls": 0
+  }
+}

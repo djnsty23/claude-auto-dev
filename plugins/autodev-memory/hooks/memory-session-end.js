@@ -57,7 +57,12 @@ try {
                     let stories = null;
                     for (const sp of sprints) {
                         if (!sp || !sp.stories || typeof sp.stories !== 'object') continue;
-                        stories = Object.assign(stories || {}, sp.stories);
+                        stories = stories || {};
+                        for (const [id, story] of Object.entries(sp.stories)) {
+                            // Match core's reader: __proto__ is an own JSON
+                            // story key, never a prototype mutation.
+                            Object.defineProperty(stories, id, { value: story, enumerable: true, writable: true, configurable: true });
+                        }
                     }
                     if (!stories) stories = (prd.stories && typeof prd.stories === 'object') ? prd.stories : {};
                     const entries = Object.entries(stories);

@@ -111,13 +111,13 @@ check('idle marker cleared', !exists(d, 'auto-idle-triggered'));
     const said = (r.stdout || '') + (r.stderr || '');
     check('needs-setup does NOT count as remaining work',
         !/tasks remaining/.test(said));
-    check('...and the sprint reads complete instead',
-        /Sprint complete/.test(said));
+    check('...and the sprint does NOT read complete',
+        !/Sprint complete/.test(said));
     // The other half: it must not silently vanish either. A human is still on the
     // hook for it, and a report that omits it says the sprint is finished when it
     // is waiting on him.
     check('...and the reason names it rather than dropping it',
-        /setup|blocked/i.test(said) || decision !== null);
+        /S2/.test(decision?.reason || '') && /setup|blocked/i.test(decision?.reason || ''));
 }
 {
     // The known-positive control, through the identical path. Without it, both
@@ -277,13 +277,13 @@ function runWithCfg(dir, cfg) {
     check('  counts 1 remaining, not 2', /\b1 tasks remaining/.test(out?.reason || ''));
 }
 
-// Every pending story stale → the sprint reads as complete, and says what it set aside.
+// Every pending story stale: bounded reconciliation, never a completion claim.
 {
     const dir = project({ auto: true, prd: STALE_PRD });
     const cfg = withAges(dir, { 'S1-002': 200, 'S1-003': 99 });
     const { out, stderr } = runWithCfg(dir, cfg);
-    check('all pending stale → falls through to sprint-complete',
-        /Sprint complete/.test(out?.reason || ''));
+    check('all pending stale → incomplete reconciliation',
+        /incomplete/i.test(out?.reason || '') && !/Sprint complete/.test(out?.reason || ''));
     check('  NOT silent: names both skipped stories in the reason',
         /S1-002/.test(out?.reason || '') && /S1-003/.test(out?.reason || ''));
     check('  tells Claude they are still pending, not done',
@@ -505,6 +505,48 @@ function runWithCfg(dir, cfg) {
     d = project({ auto: true, prd: SPRINT_PENDING });
     ({ decision } = run(d));
     check('nudge: in auto mode the existing BLOCK path still wins', decision?.decision === 'block');
+}
+
+// Dependency graphs with no ready work get one reconciliation turn, then an
+// honest bounded stop. Controls use the same graph with one available root.
+for (const [label, prd, expected] of [
+    ['human dependency', { stories: { H: { passes: 'needs-setup' }, W: { passes: null, blockedBy: ['H'] } } }, /W.*H/],
+    ['missing dependency', { stories: { W: { passes: null, blockedBy: ['MISSING'] } } }, /missing.*MISSING/i],
+    ['dependency cycle', { stories: { A: { passes: null, blockedBy: ['B'] }, B: { passes: null, blockedBy: ['A'] } } }, /cycle/i],
+    ['malformed dependency', { stories: { W: { passes: null, blockedBy: 'wrong' } } }, /blockedBy/],
+    ['unknown state', { stories: { W: { passes: 'future' } } }, /unrecognised.*future/i],
+    ['empty population', {}, /no stories/i],
+]) {
+    const dir = project({ auto: true, prd });
+    const initial = run(dir).decision;
+    check(label + ': one reconciliation turn', initial?.decision === 'block' && expected.test(initial.reason || ''));
+    check(label + ': never claims complete', !/Sprint complete/.test(initial?.reason || ''));
+    const final = run(dir).decision;
+    check(label + ': bounded stop retains unresolved explanation', final?.decision === 'approve' && expected.test(final.systemMessage || ''));
+    check(label + ': prd state preserved', JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'prd.json'), 'utf8'))) === JSON.stringify(prd));
+}
+{
+    const prd = { sprints: [
+        { stories: { EARLY: { passes: null } } },
+        { stories: { LATE: { passes: null, blockedBy: ['EARLY'] } } },
+    ] };
+    const dir = project({ auto: true, prd });
+    const decision = run(dir).decision;
+    check('CONTROL: earlier sprint root is next, dependent is not counted ready',
+        /1 tasks remaining.*Next: EARLY/.test(decision?.reason || ''));
+    // Reconciliation marker must not eat a later finish transition.
+    fs.writeFileSync(path.join(dir, '.claude', 'auto-idle-triggered'), 'old reconciliation');
+    run(dir);
+    check('ready work resets the prior idle marker', !exists(dir, 'auto-idle-triggered'));
+}
+{
+    const stories = Object.fromEntries(Array.from({ length: 100 }, (_, i) =>
+        ['BLOCKED-' + i, { passes: 'needs-setup', blockedReason: 'external requirement '.repeat(1000) }]));
+    const dir = project({ auto: true, prd: { stories } });
+    const { decision, r } = run(dir);
+    check('large blocked population keeps valid bounded hook JSON with the population',
+        decision?.decision === 'block' && /100 unresolved/.test(decision.reason)
+        && /88 more/.test(decision.reason) && Buffer.byteLength(r.stdout) < 6000);
 }
 
 // ---------------------------------------------------------------- report

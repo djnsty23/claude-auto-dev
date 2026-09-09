@@ -1,0 +1,20 @@
+{
+  "command": "npm run gate",
+  "startedAt": "2026-09-09T02:32:27.754169+00:00",
+  "before": {
+    "candidate": "e90547968c0c41252a4a8d3829e27cd30a89f484",
+    "status": "",
+    "branch": "codex/brain-live-audit",
+    "main": "9f9746f7907721921ce3d15fa5ae5020c0ebd227"
+  },
+  "state": "completed",
+  "exit": 0,
+  "endedAt": "2026-09-09T02:56:28.355435+00:00",
+  "elapsedSeconds": 1440.601633917002,
+  "logSha256": "5e423dbde79f3465dab60574cd507ac0041bb349ce11565d9f4f744c5b057f90",
+  "after": {
+    "candidate": "e90547968c0c41252a4a8d3829e27cd30a89f484",
+    "status": "",
+    "main": "9f9746f7907721921ce3d15fa5ae5020c0ebd227"
+  }
+}

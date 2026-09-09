@@ -23,7 +23,7 @@ const check = (label, ok, detail) => {
 };
 
 let seq = 0;
-const run = (stories, sql) => {
+const run = (stories, sql, missingSchema = false) => {
   const dir = path.join(tmp, 'c' + seq++);
   fs.mkdirSync(dir);
   const prd = path.join(dir, 'prd.json');
@@ -31,7 +31,7 @@ const run = (stories, sql) => {
   const args = [CHECK, prd];
   if (sql !== undefined) {
     const s = path.join(dir, 'schema.sql');
-    fs.writeFileSync(s, sql);
+    if (!missingSchema) fs.writeFileSync(s, sql);
     args.push(s);
   }
   const r = spawnSync(process.execPath, args, { encoding: 'utf8' });
@@ -95,6 +95,61 @@ const cases = [
   ['no schema argument is allowed', run(good()), 0],
 ];
 for (const [label, r, want] of cases) check(label, r.code === want, `exit ${r.code}, wanted ${want}`);
+
+// Missing or inert inputs must not earn the same result as the real schema.
+const structuralCases = [
+  ['missing supplied schema is rejected', run(good(), '', true), /could not read schema/],
+  ['empty supplied schema is rejected', run(good(), ''), /no CREATE TABLE/],
+  ['comment-only schema is rejected', run(good(), '-- ' + GOOD_SQL.replace(/\n/g, '\n-- ')), /no CREATE TABLE/],
+  ['commented security is not executable evidence', run(good(),
+    'create table habits (id uuid);\n-- alter table habits enable row level security;\n-- create policy own on habits using (true);'), /habits.*without.*row level security/],
+  ['nested block comments cannot enable RLS', run(good(),
+    'create table habits (id uuid); /* outer /* nested */ alter table habits enable row level security; create policy own on habits using (true); */'), /habits.*without.*row level security/],
+  ['string constants cannot enable RLS', run(good(),
+    "create table habits (id uuid, note text default 'alter table habits enable row level security; create policy own on habits using (true);');"), /habits.*without.*row level security/],
+  ['dollar strings cannot enable RLS', run(good(),
+    'create table habits (id uuid); select $body$alter table habits enable row level security; create policy own on habits using (true);$body$;'), /habits.*without.*row level security/],
+  ['each new table needs its own policy declaration', run(good(), GOOD_SQL +
+    '\ncreate table entries (id uuid); alter table entries enable row level security;'), /entries.*no policy/],
+  ['later disable invalidates earlier enable', run(good(), GOOD_SQL + '\nalter table habits disable row level security;'), /habits.*without.*row level security/],
+  ['dropped policy is not evidence', run(good(), GOOD_SQL + '\ndrop policy habits_own on habits;'), /habits.*no policy/],
+  ['duplicate IDs across sprints are rejected before flattening', run(JSON.stringify({sprints:[{stories:good()},{stories:good()}]})), /S1-001.*duplicate/],
+  ['null story is reported without a stack trace', run({'S1-001':null}), /S1-001.*object/],
+  ['non-string title is reported without a stack trace', run(good({title:42})), /S1-001.*title/],
+  ['non-string notes are reported without a stack trace', run(good({notes:[]})), /S1-001.*acceptance/],
+];
+for (const [label, r, reason] of structuralCases) {
+  check(label, r.code === 1 && reason.test(r.err) && !/TypeError:|at Object\./.test(r.err), r.err.trim());
+}
+for (const [label, sql] of [
+  ['quoted qualified identifiers', 'create table "public"."habits" (id uuid); alter table "public"."habits" enable row level security; create policy "own policy" on "public"."habits" using (true);'],
+  ['mixed-case quoted identifiers', 'create table "Habits" (id uuid); alter table "Habits" enable row level security; create policy own on "Habits" using (true);'],
+  ['unquoted names fold to lower case', 'CREATE TABLE HABITS (id uuid); ALTER TABLE habits ENABLE ROW LEVEL SECURITY; CREATE POLICY own ON Habits USING (true);'],
+  ['comment delimiters in literal strings remain literals', GOOD_SQL.replace('id uuid primary key', "note text default '-- /* not a comment */', id uuid primary key")],
+]) {
+  const r = run(good(), sql);
+  check(label + ' passes', r.code === 0, r.err.trim());
+}
+const differentCase = run(good(), 'create table "Habits" (id uuid); alter table habits enable row level security; create policy own on habits using (true);');
+check('quoted case mismatch is not the same table', differentCase.code === 1 && /Habits/.test(differentCase.err), differentCase.err);
+
+// Independent review: partial SQL interpretation must refuse unsupported
+// lifecycle forms instead of keeping declarations from an earlier table.
+for (const [label, sql] of [
+  ['multi-action disable', GOOD_SQL + '\nalter table habits add column note text, disable row level security;'],
+  ['drop and recreate', GOOD_SQL + '\ndrop table habits; create table habits (id uuid);'],
+  ['renamed table', GOOD_SQL + '\nalter table habits rename to entries;'],
+  ['drop and recreate schema', GOOD_SQL + '\ndrop schema public cascade; create schema public; create table public.habits (id uuid);'],
+  ['move and recreate table', GOOD_SQL + '\nalter table habits set schema archive; create table public.habits (id uuid);'],
+  ['rename and drop policy', GOOD_SQL + '\nalter policy habits_own on habits rename to other; drop policy other on habits;'],
+]) {
+  const r = run(good(), sql);
+  check(label + ' requires database verification', r.code === 1 && /needs database verification/.test(r.err), r.err);
+}
+const mixed = run(JSON.stringify({stories:good(),sprints:[{stories:good()}]}));
+check('mixed root and nested stories cannot hide records', mixed.code === 1 && /mixed root/.test(mixed.err), mixed.err);
+const special = run('{"sprints":[{"stories":{"__proto__":null,"S1-001":' + JSON.stringify(good()['S1-001']) + '}},{"stories":{"__proto__":null}}]}');
+check('special keys cannot disappear while flattening', special.code === 1 && /__proto__: duplicate/.test(special.err) && /__proto__: story must be an object/.test(special.err), special.err);
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

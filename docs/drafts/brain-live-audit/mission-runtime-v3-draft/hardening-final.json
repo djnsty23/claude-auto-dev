@@ -1,0 +1,53 @@
+{
+  "results": [
+    {
+      "id": "positive-authorized-worker-readback",
+      "passed": true
+    },
+    {
+      "id": "sqlite-lock-close-receipt-survives",
+      "passed": true
+    },
+    {
+      "id": "close-receipt-mismatched-identity-refused",
+      "passed": true
+    },
+    {
+      "id": "hidden-source-assume-unchanged",
+      "passed": true
+    },
+    {
+      "id": "hidden-source-skip-worktree",
+      "passed": true
+    },
+    {
+      "id": "ordinary-dirty-source-refused",
+      "passed": true
+    },
+    {
+      "id": "bootstrap-budget-persists-across-adapters",
+      "passed": true
+    },
+    {
+      "id": "bootstrap-permit-replay-and-unissued-registration-refused",
+      "passed": true
+    },
+    {
+      "id": "concurrent-bootstrap-cli-budget",
+      "passed": true
+    },
+    {
+      "id": "permit-commit-crash-spends-budget-without-regrant",
+      "passed": true
+    }
+  ],
+  "summary": {
+    "population": 10,
+    "passed": 10,
+    "failed": 0,
+    "helpers": 10,
+    "remainingChildren": 0,
+    "modelCalls": 0,
+    "fixtureRemoved": true
+  }
+}

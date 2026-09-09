@@ -1,0 +1,34 @@
+{
+  "candidate": "c1fa1c68b146a15b6a8af706aed4da37f7fc0a2c",
+  "command": "npm run gate > .claude/reports/brain-live-audit/gate-runtime-final.log 2>&1",
+  "execSession": 55643,
+  "exitCode": 0,
+  "exitEvidence": "write_stdin returned exit_code 0; all eight chained stage headers and final guidance suite complete",
+  "observedAt": "2026-09-09T00:24:08.136265+00:00",
+  "sourceCleanAfter": true,
+  "sourceRefsUnmoved": true,
+  "log": ".claude/reports/brain-live-audit/gate-runtime-final.log",
+  "log_sha256": "94d63d81042aab889cc19f2805bceb4d8505d8bbd14040722f803a10194bbb60",
+  "suitePopulation": 122,
+  "suitesPassed": 122,
+  "mutationPopulation": 122,
+  "mutationVerified": 121,
+  "separateCanary": 1,
+  "mutationUnverified": 0,
+  "stagesPassed": [
+    "test",
+    "check:suites",
+    "check:probe-shapes",
+    "check:population",
+    "check:entrypoints",
+    "check:skill-tools",
+    "check:agents-md",
+    "check:claude-md"
+  ],
+  "limits": [
+    "macOS host; explicitly unverified Windows-only missing-verdict case",
+    "Installed Claude host module scan warning; not native installed-candidate hook proof",
+    "Actual Codex 0.153.4 core manifest rejected in separate live conformance trial; current source remains unadmitted on that host",
+    "No end-to-end product or deployment mission; ignored mission/fleet prototypes excluded"
+  ]
+}

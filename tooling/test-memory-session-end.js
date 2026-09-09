@@ -244,6 +244,19 @@ function run(dir, sessionId) {
             check('  and is not listed as completed', !/S1-002/.test(row?.completed || ''));
         }
 
+        {
+            const dir = project({
+                'prd.json': '{"sprints":[{"stories":{"__proto__":{"title":"waiting","passes":null},"GOOD":{"title":"done","passes":true}}}]}',
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-proto', sid);
+            run(dir, 'sess-proto');
+            const row = readSession(sid);
+            check('nested __proto__ story remains visible in the memory summary',
+                /1 tasks remaining: __proto__/.test(row?.next_steps || ''));
+            check('CONTROL: ordinary done story survives beside __proto__', /GOOD/.test(row?.completed || ''));
+        }
+
         // An archived project: completed work leaves prd.stories, so the summary
         // must carry archived.totalCompleted or a project that shipped 159
         // stories records almost nothing.
