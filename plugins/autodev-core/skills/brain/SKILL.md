@@ -192,7 +192,12 @@ reports; they are not acknowledged message queues. Keep dispatch records until
 results are acknowledged: after a restart, `mission-store.js status` returns
 the mission's attempts, results, launches and outbox as recorded, and a replayed
 event returns its first answer instead of acting twice. A cooldown, crash or
-first Stop may emit no report.
+first Stop may emit no report. A worker's result lives in the store's outbox
+from the moment it enqueued it; `scripts/mission-deliver.js deliver` consumes
+it once, recovers a lost acknowledgement without a second send, reports an
+exhausted send budget instead of retrying, and `status` keeps sent, received,
+quarantined, rejected and accepted apart. `accept` records only that the
+envelope matches the contract; it is not verification.
 Before retrying, inspect commits, the working tree and journal: a timed-out
 worker may still be running. Never kill by command pattern or spawn blindly.
 
