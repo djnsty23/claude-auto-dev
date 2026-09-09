@@ -107,7 +107,13 @@ Choose a channel that actually starts work:
 
 - Use available native agents or workflows for bounded work in this mission.
   Assign an isolated worktree and verify the worker's actual cwd, origin and
-  base before edits. Agents may inherit the parent's directory.
+  base before edits. Agents may inherit the parent's directory. For a worker
+  that is a local Node script, `scripts/mission-dispatch.js start` is that
+  boundary: it forks the worker in the contract root with no shell, waits for
+  it to register with the store, reads back its pid, cwd and HEAD, and refuses
+  a readback that disagrees with the contract; after a crash, `reconcile`
+  reports prepared, terminal, live or unknown and never starts a second
+  worker. Any other adapter answers `awaiting-start` and records nothing.
 - Reuse an authorized existing worker through a channel that wakes it. Read
   back identity and started state once, then use completion events or bounded
   waits. A queued message is not an acknowledgment or a running process.
