@@ -288,8 +288,17 @@ fs.readFileSync = function(p, ...args) {
         fs.writeFileSync(lock, contents);
         const start = Date.now();
         const r = run(cfg, ['--next', '--repo', 'race', '--author', 'contender']);
+        const elapsed = Date.now() - start;
+        // BOUNDED means "refuses instead of waiting forever": the subject gives up
+        // after 100 x 20 ms. The wall-clock ceiling here only has to sit far below
+        // the suite's own timeout to prove that; it must not encode this machine's
+        // speed. [measured 2026-09-09] a 6000 ms ceiling failed 3 of 4 macOS CI
+        // runs on two heads, with status 4 and the complete refusal text present,
+        // on a three-core runner right after the parallel cases above; the same
+        // file passed 44/44 here every time. The elapsed time is now in the detail.
         check(kind + ' lock: bounded refusal names the lock and recovery requirement',
-            r.status === 4 && Date.now() - start < 6000 && r.stderr.includes(lock) && /owner|process/i.test(r.stderr), r.stderr);
+            r.status === 4 && elapsed < 30000 && r.stderr.includes(lock) && /owner|process/i.test(r.stderr),
+            'status=' + r.status + ' elapsed=' + elapsed + 'ms\n' + r.stderr);
         check(kind + ' lock: never steals the lock or appends to the log',
             fs.readFileSync(lock, 'utf8') === contents && fs.readFileSync(path.join(cfg, 'fleet', 'DECISIONS.jsonl'), 'utf8') === '');
     }
