@@ -1,0 +1,87 @@
+{
+  "sourceHead": "08cd93c3e02f622adc613f0cd683e88641afe3ab",
+  "queries": [
+    {
+      "needle": "mission-store",
+      "command": [
+        "git",
+        "grep",
+        "-n",
+        "mission-store",
+        "HEAD",
+        "--",
+        "plugins/autodev-core"
+      ],
+      "exit": 1,
+      "lines": [],
+      "stderr": ""
+    },
+    {
+      "needle": "workPlan",
+      "command": [
+        "git",
+        "grep",
+        "-n",
+        "workPlan",
+        "HEAD",
+        "--",
+        "plugins/autodev-core"
+      ],
+      "exit": 0,
+      "lines": [
+        "HEAD:plugins/autodev-core/hooks/stop-auto-check.js:69:        const { workPlan } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));",
+        "HEAD:plugins/autodev-core/hooks/stop-auto-check.js:70:        const open = workPlan(JSON.parse(fs.readFileSync(prdPath, 'utf8'))).ready;",
+        "HEAD:plugins/autodev-core/hooks/stop-auto-check.js:215:        const { workPlan } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));",
+        "HEAD:plugins/autodev-core/hooks/stop-auto-check.js:216:        plan = workPlan(JSON.parse(fs.readFileSync(prdPath, 'utf8')));",
+        "HEAD:plugins/autodev-core/hooks/stop-auto-check.js:238:    // Readiness also depends on prerequisites. workPlan is the same selector",
+        "HEAD:plugins/autodev-core/scripts/prd-states.js:46: * dependencies; use workPlan() when choosing the next story.",
+        "HEAD:plugins/autodev-core/scripts/prd-states.js:50: * to do it. This is the state predicate used inside workPlan().",
+        "HEAD:plugins/autodev-core/scripts/prd-states.js:66:function workPlan(prd) {",
+        "HEAD:plugins/autodev-core/scripts/prd-states.js:301:    summarise, storiesOf, workPlan,",
+        "HEAD:plugins/autodev-core/skills/archive-prd/SKILL.md:124:   through their blockedBy links until it stops growing. Run workPlan before",
+        "HEAD:plugins/autodev-core/skills/audit/SKILL.md:30:helpers and `workPlan()` for dependency-ready state; inspect their actual API.",
+        "HEAD:plugins/autodev-core/skills/auto/SKILL.md:24:Read `prd.json` with the shared `workPlan` selector below. Report `plan.summary`, including blocked setup and unrecognised states, across all sprints.",
+        "HEAD:plugins/autodev-core/skills/auto/SKILL.md:119:const { workPlan } = require(require('path').join(autodevCoreRoot, 'scripts', 'prd-states.js'));",
+        "HEAD:plugins/autodev-core/skills/auto/SKILL.md:120:const plan = workPlan(prd);",
+        "HEAD:plugins/autodev-core/skills/brain/SKILL.md:83:Use `workPlan(prd)` from `scripts/prd-states.js` for dependency-ready work from",
+        "HEAD:plugins/autodev-core/skills/brainstorm/SKILL.md:18:`scripts/prd-states.js`'s `workPlan(prd)` for state/dependency readiness.",
+        "HEAD:plugins/autodev-core/skills/commit/SKILL.md:150:story IDs from the shared `workPlan` population. A list of every completed PRD",
+        "HEAD:plugins/autodev-core/skills/core/SKILL.md:17:Read the full story population through `workPlan(prd)` from this plugin's",
+        "HEAD:plugins/autodev-core/skills/core/SKILL.md:25:node -e \"const fs=require('fs'),path=require('path');if(!process.env.AUTODEV_CORE_ROOT)throw new Error('AUTODEV_CORE_ROOT is required');const {workPlan}=require(path.join(process.env.AUTODEV_CORE_ROOT,'scripts','prd-states.js'));const plan=workPlan(JSON.parse(fs.readFileSync('prd.json','utf8')));console.log(JSON.stringify({summary:plan.summary,ready:plan.ready.map(([id])=>id),blocked:plan.blocked,invalid:plan.invalid,complete:plan.complete},null,2))\"",
+        "HEAD:plugins/autodev-core/skills/sprint/SKILL.md:29:3. Run the shared `workPlan(prd)` from core across all sprints. Resolve missing",
+        "HEAD:plugins/autodev-core/skills/status/SKILL.md:16:Read the target project's PRD with the shared `workPlan(prd)` documented in"
+      ],
+      "stderr": ""
+    },
+    {
+      "needle": "fleet-intent",
+      "command": [
+        "git",
+        "grep",
+        "-n",
+        "fleet-intent",
+        "HEAD",
+        "--",
+        "plugins/autodev-core"
+      ],
+      "exit": 1,
+      "lines": [],
+      "stderr": ""
+    },
+    {
+      "needle": "fleet-redispatch",
+      "command": [
+        "git",
+        "grep",
+        "-n",
+        "fleet-redispatch",
+        "HEAD",
+        "--",
+        "plugins/autodev-core"
+      ],
+      "exit": 1,
+      "lines": [],
+      "stderr": ""
+    }
+  ]
+}

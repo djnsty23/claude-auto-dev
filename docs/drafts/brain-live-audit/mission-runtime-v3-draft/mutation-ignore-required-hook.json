@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "id": "required-hook-failure-refuses-existing-valid-artifact",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: blocked required hook must prevent review readiness even with valid output\n+ actual - expected\n\n+ 'review-ready'\n- 'execution-incomplete'\n\n    at /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/ignore-required-hook/tooling/test-synthetic-runtime.js:31:349\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/ignore-required-hook/tooling/test-synthetic-runtime.js:46:116"
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 1,
+    "population": 1,
+    "syntheticHelpers": 2,
+    "modelCalls": 0,
+    "remainingChildren": 0,
+    "remainingServers": 0,
+    "fixtureRemoved": true
+  }
+}

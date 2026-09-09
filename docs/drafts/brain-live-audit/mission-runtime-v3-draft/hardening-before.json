@@ -1,0 +1,60 @@
+{
+  "results": [
+    {
+      "id": "positive-authorized-worker-readback",
+      "passed": true
+    },
+    {
+      "id": "sqlite-lock-close-receipt-survives",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: owned close receipt survives database outage\n\n0 !== 1\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:20:622\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:29:136"
+    },
+    {
+      "id": "close-receipt-mismatched-identity-refused",
+      "passed": true
+    },
+    {
+      "id": "hidden-source-assume-unchanged",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: hidden out-of-scope bytes cannot become review-ready\n+ actual - expected\n\n+ 'review-ready'\n- 'scope-mismatch'\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:22:471\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:29:136"
+    },
+    {
+      "id": "hidden-source-skip-worktree",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: hidden out-of-scope bytes cannot become review-ready\n+ actual - expected\n\n+ 'review-ready'\n- 'scope-mismatch'\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:22:471\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:29:136"
+    },
+    {
+      "id": "ordinary-dirty-source-refused",
+      "passed": true
+    },
+    {
+      "id": "bootstrap-budget-persists-across-adapters",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Missing expected rejection: fourth helper must not be created\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:24:207\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:29:136"
+    },
+    {
+      "id": "bootstrap-permit-replay-and-unissued-registration-refused",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Missing expected exception: registration requires issued nonce\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:25:190\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:29:142\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)"
+    },
+    {
+      "id": "concurrent-bootstrap-cli-budget",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: only three concurrent CLI spawn permissions\n\n0 !== 3\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:26:307\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:29:136"
+    },
+    {
+      "id": "permit-commit-crash-spends-budget-without-regrant",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: actual permit COMMIT reached\n\nfalse !== true\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:27:749\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs:29:136"
+    }
+  ],
+  "summary": {
+    "population": 10,
+    "passed": 3,
+    "failed": 7,
+    "helpers": 11,
+    "remainingChildren": 0,
+    "modelCalls": 0,
+    "fixtureRemoved": true
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "results": [
+    {
+      "id": "sqlite-lock-close-receipt-survives",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: owned close receipt survives database outage\n\n0 !== 1\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/close-read-before-receipt/tooling/test-hardening.cjs:20:622\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/close-read-before-receipt/tooling/test-hardening.cjs:29:136"
+    }
+  ],
+  "summary": {
+    "population": 1,
+    "passed": 0,
+    "failed": 1,
+    "helpers": 2,
+    "remainingChildren": 0,
+    "modelCalls": 0,
+    "fixtureRemoved": true
+  }
+}
