@@ -115,8 +115,10 @@ function build(opts) {
     const git = (...args) => execFileSync('git', ['-C', rootArg, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     let root, commonDir, baseSha;
     try {
-        root = fs.realpathSync(git('rev-parse', '--show-toplevel'));
-        commonDir = fs.realpathSync(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
+        // realpathSync.native: on Windows it expands 8.3 short names (RUNNER~1) that the
+        // JS implementation leaves in place, so a temp-dir cwd and git's answer agree.
+        root = fs.realpathSync.native(git('rev-parse', '--show-toplevel'));
+        commonDir = fs.realpathSync.native(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
         baseSha = git('rev-parse', 'HEAD');
     } catch { fail('repo-unverified', `${rootArg} is not a git working tree with a HEAD commit`); }
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(baseSha)) fail('repo-unverified', `HEAD of ${root} is not a commit sha`);

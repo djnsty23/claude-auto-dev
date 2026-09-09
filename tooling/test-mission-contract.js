@@ -20,7 +20,9 @@ const { spawnSync, execFileSync } = require('node:child_process');
 
 const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'mission-contract.js');
 const STORE = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'mission-store.js');
-const ROOT = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'mission-contract-'));
+// realpathSync.native, not realpathSync: Windows runners hand out an 8.3 temp dir
+// (C:\Users\RUNNER~1\...) that only the native resolver expands to what git reports.
+const ROOT = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'mission-contract-'));
 
 let passed = 0;
 const failures = [];
@@ -56,7 +58,7 @@ fs.writeFileSync(path.join(repo, 'README.md'), 'fixture\n');
 git('add', 'README.md');
 git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'base');
 const HEAD = git('rev-parse', 'HEAD');
-const realRepo = fs.realpathSync(repo);
+const realRepo = fs.realpathSync.native(repo);
 
 const criterion = 'A tooltip near the viewport edge\n  stays fully visible,\t and the pointer\n\n keeps pointing at its anchor.';
 const stories = {
@@ -101,7 +103,7 @@ let s1;
     check('eventId defaults to admit:<story id>', s1 && s1.eventId === 'admit:S1', s1 && s1.eventId);
     check('base is the repository HEAD', s1 && s1.contract.repo.baseSha === HEAD, s1 && s1.contract.repo.baseSha);
     check('root is the real, canonical toplevel', s1 && s1.contract.repo.root === realRepo, s1 && s1.contract.repo.root);
-    check('commonDir is the real git dir', s1 && s1.contract.repo.commonDir === fs.realpathSync(path.join(repo, '.git')), s1 && s1.contract.repo.commonDir);
+    check('commonDir is the real git dir', s1 && s1.contract.repo.commonDir === fs.realpathSync.native(path.join(repo, '.git')), s1 && s1.contract.repo.commonDir);
     check('repo id falls back to the basename when there is no origin', s1 && s1.contract.repo.id === 'repo', s1 && s1.contract.repo.id);
     check('paths are split and kept in order', s1 && JSON.stringify(s1.contract.scope.paths) === JSON.stringify(['src/tooltip/', 'src/index.ts']), s1 && JSON.stringify(s1.contract.scope.paths));
     check('effects default to read,write', s1 && JSON.stringify(s1.contract.scope.effects) === JSON.stringify(['read', 'write']));

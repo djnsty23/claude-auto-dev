@@ -42,6 +42,10 @@ function launch(command, store, payload = {}, preload, writeInput = true) {
   const child = spawn(process.execPath, [...(preload ? ['--require', preload] : []), ENTRY, command, '--store', store], { stdio: ['pipe', 'pipe', 'pipe'] });
   children.add(child);
   let stdout = '', stderr = '';
+  // A child that refuses before reading stdin can close the pipe before the
+  // payload write lands (EPIPE). Its verdict is exit code plus stdout; anything
+  // else on stdin is recorded and fails the assertion that reads stderr.
+  child.stdin.on('error', (e) => { if (e.code !== 'EPIPE') stderr += 'stdin ' + e.code + ' '; });
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
   child.stdout.on('data', x => { stdout += x; }); child.stderr.on('data', x => { stderr += x; });
   const done = new Promise((resolve, reject) => {
