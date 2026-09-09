@@ -57,6 +57,13 @@ acceptance, identify the deployed revision and repeat the relevant user flow
 under the existing authorization. A Stop hook allowing a turn to end proves
 none of those outcomes.
 
+For agent hosts, test native dispatch as well as the hook script. Enumerate
+expected hooks and inspect warnings/trust; an empty catalog may have exit 0.
+Reconcile required hook verdicts with actual operation effects: a blocked hook
+can still produce a completed turn and a successful process exit. Preserve
+unloaded history as unknown rather than interpreting an empty item array as no
+work. See [host admission](../brain/references/host-admission.md).
+
 ## Cross-cutting verification (all task types)
 
 Apply these where the task touches the relevant boundary; record meaningful

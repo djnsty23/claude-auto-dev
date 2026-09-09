@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "tooling/generate-codex-packages.js",
+  "nativeSchema": "rust-v0.153.4",
+  "plugin": "autodev-memory",
+  "version": "8.166.0",
+  "admission": "unverified",
+  "sourceManifestSha256": "75ac1ddc5126a0445a8d81d672be8bc67a9cea779c50882b0d4cb9e877e24f7c",
+  "sourceHooksSha256": "de859c0f4bd138f87bf2806752ab605e5aa3e64073b697a1eeeaad6d96c49990",
+  "sourceScriptsSha256": {
+    "hooks/memory-session-start.js": "7a9f947ce324fa3a86503cceb3e27286caae5a159b6b06c27a7882b5c04d4738",
+    "hooks/memory-prompt-capture.js": "f14e57661742950eed04ddc13c006a9fafa3f1a7ab00c5c2155843ad9f9a456c",
+    "hooks/memory-capture.js": "2c4cc6e08e138cf3e5b70f8a9c0f3a231832328d90e79c5598caf7260f3e725b",
+    "hooks/memory-session-end.js": "daa5265cbfb1de0ea08c5fded450195e56353a27f1b8ee480d32d2a93dc02c8e"
+  },
+  "sourceHandlers": 4,
+  "projectedHandlers": 4,
+  "knownProtectionGaps": [],
+  "unsupportedEventHandlers": [],
+  "unavailableFunctionModules": [],
+  "timeoutLimitations": [
+    {
+      "event": "SessionEnd",
+      "script": "hooks/memory-session-end.js",
+      "sourceTimeout": 10,
+      "codexTimeout": 3,
+      "status": "completion within native budget unverified"
+    }
+  ],
+  "unsupportedUserConfigKeys": [],
+  "remainingChecks": [
+    "Actual installed candidate identity and hook trust",
+    "Native apply_patch exposes command, not Write/Edit file fields; preserved matchers and handlers have no adapter",
+    "Native exec_command hook cwd is the thread cwd, without requested workdir in tool_input; guard target semantics need admission",
+    "Native blocking, side effects, cancellation and timeout completion",
+    "Windows command-shell execution has not been measured"
+  ]
+}

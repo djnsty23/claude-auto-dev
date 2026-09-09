@@ -24,6 +24,12 @@ A chip awaiting a click remains `awaiting-start`; a proposed restart remains
 before quota/process loss. Promise a later wake-up only when an authorized
 scheduler is installed and verified.
 
+Before unattended edits, verify the worker's effective filesystem boundary and
+required controls through Brain's host-admission procedure. A hook payload may
+omit the tool's requested working directory; its thread cwd cannot establish
+where a command will write. Keep reservations through uncertain worker exits,
+and require operation/acceptance evidence beyond native turn completion.
+
 Keep the question channel available. An away window may route reversible
 choices to Brain; denying the question tool removes the escalation route.
 Confirm role and return-address validity before workers rely on the coordinator.

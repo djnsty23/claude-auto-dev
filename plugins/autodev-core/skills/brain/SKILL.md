@@ -37,6 +37,12 @@ skill (`../../scripts`); use each script's `--help`. Label clone measurements
 separately from installed behavior. A plugin-root environment variable need not
 exist in a shell, and a Windows path need not exist on this host.
 
+Before depending on unattended hook protections, load
+[host admission](references/host-admission.md). Verify the native catalog and
+actual allow/deny effects for the required operations on this host/version.
+Missing warnings, empty hook populations and untested function modules are not
+proof that controls ran.
+
 For fleet coordination, run `brain-brief.js`, `fleet-status.js` and
 `fleet-overlap.js`. Bind the repo set to the mandate and exclude client or
 retired projects unless assigned. A `brain-brief.js` exit 2 means that set is
@@ -118,6 +124,11 @@ owned work. Do not take over another worker's uncommitted files.
 Read the commit and artifacts, not just the worker's summary. Load `prove`:
 capture a defect before editing and compare the same observable afterwards.
 For new behavior record that no earlier implementation existed.
+
+Reconcile required hook verdicts and actual tool results with the worker's
+lifecycle status. A native `completed` turn can follow a blocked hook with no
+process error. Do not promote that lifecycle receipt into verified acceptance;
+an unloaded item list is not evidence that no work occurred.
 
 Execute acceptance through the actual interface. UI verification includes
 internal/admin pages: drive the flow at supported desktop and mobile sizes,

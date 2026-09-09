@@ -4,7 +4,7 @@
  *
  * VERSION is the single source of truth. Before 8.0 the version was smeared
  * across nine files and kept in step by platform-specific sed branches; now
- * there are five JSON files and one writer.
+ * the Claude manifests and generated Codex projections share this writer.
  *
  * Usage: node tooling/bump.js <x.y.z>
  */
@@ -37,6 +37,10 @@ function patchJSON(relPath, mutate) {
   console.log(`  ${relPath}`);
 }
 
+// Validate all projection inputs before changing any versioned source. The
+// target-version preflight still permits this writer to repair existing drift.
+require('./generate-codex-packages.js').project(ROOT, version);
+
 fs.writeFileSync(path.join(ROOT, 'VERSION'), version + '\n');
 console.log('  VERSION');
 
@@ -52,6 +56,9 @@ for (const p of fs.readdirSync(path.join(ROOT, 'plugins'))) {
     patchJSON(rel, (j) => { j.version = version; });
   }
 }
+
+// Re-derive the Codex identities/hooks from the updated Claude sources.
+require('./generate-codex-packages.js').sync(ROOT, true);
 
 console.log('\nNext:');
 console.log(`  1. Add a ## [${version}] section to CHANGELOG.md`);

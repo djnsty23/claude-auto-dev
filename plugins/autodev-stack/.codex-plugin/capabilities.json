@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "tooling/generate-codex-packages.js",
+  "nativeSchema": "rust-v0.153.4",
+  "plugin": "autodev-stack",
+  "version": "8.166.0",
+  "admission": "unverified",
+  "sourceManifestSha256": "6d19a982ab9b057e1d6177f7d5429038f9db7a1efecbe8816d50a632e0b65b12",
+  "sourceHooksSha256": null,
+  "sourceScriptsSha256": {},
+  "sourceHandlers": 0,
+  "projectedHandlers": 0,
+  "knownProtectionGaps": [],
+  "unsupportedEventHandlers": [],
+  "unavailableFunctionModules": [],
+  "timeoutLimitations": [],
+  "unsupportedUserConfigKeys": [],
+  "remainingChecks": [
+    "Actual installed candidate identity and hook trust",
+    "Native apply_patch exposes command, not Write/Edit file fields; preserved matchers and handlers have no adapter",
+    "Native exec_command hook cwd is the thread cwd, without requested workdir in tool_input; guard target semantics need admission",
+    "Native blocking, side effects, cancellation and timeout completion",
+    "Windows command-shell execution has not been measured"
+  ]
+}

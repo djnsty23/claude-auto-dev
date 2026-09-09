@@ -630,13 +630,62 @@ try {
         eq('a { rows } envelope is accepted', liveCount(rows.stdout), 2);
         eq('...and paired', pairCount(rows.stdout), 1);
     }
+    // Container validation must precede session filtering. An unknown/malformed
+    // envelope is unavailable evidence, including when another key looks valid.
+    for (const [label, payload] of [
+        ['empty array', []], ['empty sessions', { sessions: [] }],
+        ['empty rows', { rows: [] }], ['empty with metadata', { sessions: [], population: { dirs: 0 } }],
+    ]) {
+        const r = runPayload(payload);
+        eq(label + ' is a successful empty scan', r.status, 0);
+        eq(label + ' explicitly scans zero rows', scanned(r.stdout), 0);
+        eq(label + ' reports zero pairs', pairCount(r.stdout), 0);
+    }
     {
-        const none = runPayload({ population: { dirs: 0 } });
-        eq('an envelope with no recognised session key reports an empty fleet, not a crash',
-            none.status, 0);
-        eq('...scanning nothing', scanned(none.stdout), 0);
-        eq('...pairing nothing', pairCount(none.stdout), 0);
-        eq('...and awaiting nothing', blockedCount(none.stdout), 0);
+        const r = runPayload({ sessions: canary(), population: { dirs: 2 } });
+        eq('metadata does not reject a valid envelope', r.status, 0);
+        eq('metadata control still detects the planted overlap', pairCount(r.stdout), 1);
+    }
+    for (const [label, payload] of [
+        ['null', null], ['boolean', false], ['number', 0], ['string', 'sessions'],
+        ['unknown empty envelope', {}], ['metadata only', { population: { dirs: 0 } }],
+        ['unknown populated envelope', { records: canary() }],
+        ...[null, 0, false, '', {}].map(value => ['invalid sessions ' + JSON.stringify(value), { sessions: value }]),
+        ...[null, 0, false, '', {}].map(value => ['invalid rows ' + JSON.stringify(value), { rows: value }]),
+        ['invalid primary with valid fallback', { sessions: 0, rows: canary() }],
+        ['empty primary hides populated rows', { sessions: [], rows: canary() }],
+        ['populated primary with empty rows', { sessions: canary(), rows: [] }],
+        ['two empty session keys', { sessions: [], rows: [] }],
+    ]) {
+        const r = runPayload(payload);
+        eq(label + ' exits with unavailable evidence', r.status, 2);
+        check(label + ' names the unsupported envelope', /COULD NOT CHECK overlap.*unsupported session envelope/.test(r.stdout), clip(r.stdout));
+        check(label + ' does not print a clearance population', !/^population:/m.test(r.stdout), clip(r.stdout));
+        check(label + ' does not print a pair verdict', !/\d+ overlapping pair\(s\)/.test(r.stdout), clip(r.stdout));
+    }
+
+    // Validate all consumed row fields before filtering or printing clearance.
+    for (const [label, row] of [
+        ...[null, 1, true, 'row', [], {}].map(value => ['invalid row ' + JSON.stringify(value), value]),
+        ['missing identity', { ...canary()[0], sessionId: undefined }],
+        ['empty identity', { ...canary()[0], sessionId: '' }],
+        ['missing idle', { ...canary()[0], idleMinutes: undefined }],
+        ['string idle', { ...canary()[0], idleMinutes: '0' }],
+        ['null idle', { ...canary()[0], idleMinutes: null }],
+        ['string archived', { ...canary()[0], isArchived: 'false' }],
+        ...[null, {}, 'unknown'].map(value => ['invalid state ' + JSON.stringify(value), { ...canary()[0], state: value }]),
+        ...['cwd', 'originCwd', 'gitBranch', 'title', 'addressableId'].map(key => ['invalid ' + key, { ...canary()[0], [key]: {} }]),
+    ]) {
+        const r = runPayload({ sessions: [...canary(), row] });
+        eq(label + ' exits unavailable before any population', r.status, 2);
+        check(label + ' names malformed row', /COULD NOT CHECK overlap.*invalid session row 3/.test(r.stdout), clip(r.stdout));
+        check(label + ' produces no partial clearance', !/^population:|\d+ overlapping pair\(s\)/m.test(r.stdout), clip(r.stdout));
+    }
+    {
+        const rows = canary().map(({ isArchived, ...r }) => ({ ...r, extraMetadata: { future: true } }));
+        const r = runPayload({ sessions: rows });
+        eq('missing archive lookup remains a valid visible row', r.status, 0);
+        eq('unknown metadata preserves the positive overlap', pairCount(r.stdout), 1);
     }
 
     // =======================================================================

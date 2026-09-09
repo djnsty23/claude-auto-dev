@@ -88,7 +88,9 @@ function checkVersionSync() {
 
   for (const p of pluginDirs()) {
     const manifest = readJSON(path.join(PLUGINS_DIR, p, '.claude-plugin', 'plugin.json'));
-    sources.push([`${p}/plugin.json`, manifest?.version]);
+    sources.push([`${p}/.claude-plugin/plugin.json`, manifest?.version]);
+    const codex = readJSON(path.join(PLUGINS_DIR, p, '.codex-plugin', 'plugin.json'));
+    sources.push([`${p}/.codex-plugin/plugin.json`, codex?.version]);
   }
 
   let ok = true;
@@ -986,6 +988,11 @@ function checkSlugReversalRestoresDrive() {
 console.log('Validating autodev marketplace...\n');
 
 checkVersionSync();
+try {
+  const count = require('./generate-codex-packages.js').sync(ROOT);
+  log('PASS', `Codex projection: ${count}/${count} generated files match`);
+  log('WARN', 'Codex package consistency is not native admission; review each .codex-plugin/capabilities.json before activation');
+} catch (error) { log('FAIL', error.message); }
 checkMarketplace();
 checkPluginManifests();
 checkSkillFrontmatter();

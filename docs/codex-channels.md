@@ -1,5 +1,54 @@
 # Reaching Codex from Claude Code
 
+## Current host boundary, measured 2026-09-09
+
+The channel comparisons below are historical 0.151.0 measurements, not a current
+ban on structured desktop or app-server APIs. Native `codex app-server --stdio`
+on 0.153.4 was exercised through `initialize`, `hooks/list`, `config/batchWrite`,
+`thread/start`, `turn/start` and `thread/unsubscribe` in an owned child runtime
+on macOS. This establishes those tested protocol boundaries, not authenticated
+production-worker reliability or the old channel latency ranking.
+
+A standalone app-server is not filesystem read-only: initialization opens an
+installation ID for writing and creates database state. Configure an owned
+child `CODEX_HOME`, `sqlite_home` and `log_dir`, keep the parent environment
+unchanged, and verify OS-level containment when testing without live state.
+The canaries denied network access and outside writes; no credentials were
+copied. A thread may prepare startup work before a model turn, while SessionStart
+hooks are actually consumed on the first turn; `thread/start` alone cannot prove
+they ran.
+
+Four reconciled native cases produced these observations:
+
+- A Claude hooks file containing top-level `modules` yielded zero Codex hooks,
+  a parse warning and an empty errors array. Catalog warnings and the expected
+  hook population are required checks.
+- A `.codex-plugin/plugin.json` selecting `hooks: "./hooks/selected.json"`
+  loaded that file while the coexisting default Claude hooks file remained
+  incompatible. Host-specific packaging can preserve Claude's module surface.
+- Native separate `args` did not reach a command. A quoted placeholder command
+  also failed when the expanded root contained a dollar token. A static Node
+  wrapper reading `process.env.PLUGIN_ROOT` and spawning the script with an argv
+  array preserved a root containing spaces, an apostrophe and a dollar token.
+  This command form was tested on macOS, not Windows.
+- In all three completed-turn cases, the UserPromptSubmit hook was `blocked`
+  while the native turn was `completed`, its error was null and the CLI exited
+  0. The serialized empty item list carried `itemsView: "notLoaded"`; it does
+  not establish absence of generated items. Reconcile required hook results,
+  materialized tool/item events and acceptance artifacts separately.
+
+The comparison's positive startup hook ran beside each failing command form;
+the wrong resume matcher stayed silent. SessionEnd produced a receipt, which
+does not establish its entire timeout/recovery contract. These were synthetic
+host canaries, not an installed autodev admission. The operational checklist is
+in [Brain host admission](../plugins/autodev-core/skills/brain/references/host-admission.md).
+
+Version-pinned source for this measurement is OpenAI's `rust-v0.153.4` tag at
+`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`; inspect its actual hook configuration,
+runner and session startup implementation when adapting another event.
+
+## Historical channel comparison
+
 Three channels reach GPT from a Claude session. The channel decides token cost,
 whether you can thread, and whether the run survives the machine being locked.
 It is not a style preference.

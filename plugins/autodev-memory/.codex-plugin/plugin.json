@@ -1,0 +1,6 @@
+{
+  "name": "autodev-memory",
+  "version": "8.166.0",
+  "description": "Cross-session project memory: observation capture, semantic search, domain-knowledge briefs, and repo-backed backup. Codex hook admission incomplete; see .codex-plugin/capabilities.json.",
+  "hooks": "./hooks/codex.json"
+}

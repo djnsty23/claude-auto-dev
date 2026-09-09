@@ -239,7 +239,15 @@ otherwise blocks `auto` indefinitely.
 
 ### Hooks run on every turn
 
-Registered in `plugins/<plugin>/hooks/hooks.json`. Resolve paths only through
+Claude declarations live in `plugins/<plugin>/hooks/hooks.json`. Codex's
+separate `.codex-plugin/plugin.json` selects generated `hooks/codex.json`;
+run `node tooling/generate-codex-packages.js --write` after changing canonical
+hook declarations or their script bytes. The drift check validates packaging,
+not native activation or safety: `.codex-plugin/capabilities.json` records
+unsupported events, function modules and unverified host semantics. Require
+native effect/denial controls before relying on those protections.
+
+In canonical Claude declarations, resolve paths only through
 `${CLAUDE_PLUGIN_ROOT}` — validate rejects `~/.claude` and relative paths. Wrap
 the body in try/catch and `process.exit(0)` unless blocking *is* the purpose:
 `pre-tool-filter.js` fails **closed**, but its private-name block deliberately
@@ -251,12 +259,14 @@ stderr, not merely "no context". Mutants have survived because a test checked on
 stream. Every wired hook needs a suite (`check:hooks` is a hard gate); drive it as
 a subprocess, following `tooling/test-pre-tool-filter.js`.
 
-### Version is six files and one writer
+### Version has one writer
 
 `VERSION` is the source of truth; `bump.js` propagates it to `package.json`,
 `.claude-plugin/marketplace.json` and every
-`plugins/*/.claude-plugin/plugin.json`, enumerating plugins from disk. Hand-editing
-is how a release got tagged on a commit that failed validate.
+`plugins/*/.claude-plugin/plugin.json`, enumerating plugins from disk. It then
+regenerates each plugin's Codex manifest and capability record from those sources.
+`validate.js` checks both host identities and exact generated output. Hand-editing
+versions or generated projections is how a release becomes internally inconsistent.
 
 **A version number is a plugin-cache key, so two trees must never share one.**
 2026-08-21: two sessions released 8.98.0 from this clone within minutes, with
