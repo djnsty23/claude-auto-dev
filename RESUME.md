@@ -21,7 +21,7 @@ All commits: author and committer `98432064+djnsty23@users.noreply.github.com`.
 Monitor task `bqgjwa8b0` (persistent) in the detached gate worktree `.claude/worktrees/codex-audit-gate`:
 gate-2 on 84c50e9 (started 10:14, log `scratchpad/gate-2.log`), then gate-3 on 030568c, gate-4 on 06d4121, gate-5 on 33e7541, logs `gate-3.log` .. `gate-5.log`. Each log ends with `GATE_EXIT=<rc>` when done. If the session restarted, the monitor died: check which logs have a `GATE_EXIT` line and re-run the missing gates one at a time (`git -C <gate wt> checkout --detach <sha>; npm run gate`). Never two gates at once (load here is 6 to 7; check:suites goes INDETERMINATE under load).
 
-Scratchpad: `/private/tmp/claude-501/-Users-andynastasa-Code-autodev--claude-worktrees-suspicious-turing-04a310/4e6e0744-7765-4106-9aff-1a41eec04c3c/scratchpad/`
+Scratchpad and gate logs: the absolute paths are in the memory note `codex-brain-live-audit-branch-state` (outside this public repo; they contain the home directory in slug form), with copies of the finished artifacts under the project Claude directory `handoff-2026-09-09-codex-audit-split/`.
 
 ## Next, in order
 
