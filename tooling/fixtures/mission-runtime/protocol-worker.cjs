@@ -3,7 +3,8 @@
 // script, registers itself with the store, writes exactly one owned artifact inside
 // the contract's scope, enqueues its result, reports completion. The dispatcher
 // forks workers with a minimal environment on purpose, so the mode comes from a
-// file beside the store, '<store>.mode' (env MISSION_WORKER_MODE as a fallback):
+// file beside the store: '<store>.mode.<missionId>' first, then '<store>.mode'
+// (env MISSION_WORKER_MODE as a fallback), so one store can host missions that behave differently:
 //   normal          register, write owned.js, enqueue, complete, exit 0
 //   chdir           report a cwd outside the contract root (the dispatcher must refuse)
 //   refuse          send refused and exit 1 without registering
@@ -20,7 +21,7 @@ process.once('message', async (m) => {
         if (!m || m.kind !== 'assignment') throw Object.assign(new Error('expected an assignment'), { publicCode: 'protocol' });
         const { store, fence, nonce, contract } = m;
         let mode = process.env.MISSION_WORKER_MODE || 'normal';
-        try { mode = fs.readFileSync(store + '.mode', 'utf8').trim() || mode; } catch { /* no mode file */ }
+        for (const f of [store + '.mode', store + '.mode.' + fence.missionId]) { try { mode = fs.readFileSync(f, 'utf8').trim() || mode; } catch { /* no mode file */ } }
         const command = (c, p = {}) => execute(c, store, { ...fence, eventId: randomUUID(), ...p });
         if (mode === 'refuse') { await send({ kind: 'refused', code: 'fixture-refuses' }); process.exitCode = 1; if (process.connected) process.disconnect(); return; }
         const identity = { host: os.hostname(), pid: process.pid, nonce };

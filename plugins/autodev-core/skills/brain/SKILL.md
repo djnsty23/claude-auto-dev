@@ -81,7 +81,14 @@ loading/empty/error/success states where applicable. Identify external setup and
 the release step. A wording check does not prove completeness or database access.
 
 Use `workPlan(prd)` from `scripts/prd-states.js` for dependency-ready work from
-all sprints, as Auto and its Stop hook do. Keep pending, failed, done, deferred,
+all sprints, as Auto and its Stop hook do. For missions recorded in the store,
+`scripts/mission-supervisor.js tick` is one bounded pass over that plan: it
+settles claimed missions (reconcile, deliver, accept the envelope or fail the
+attempt with the store's retry codes), starts what is ready or past its
+backoff through the dispatcher, admits each mission in its own worktree with
+`--worktrees`, and reports exhausted, blocked and invalid work by name. It
+never loops, never writes `prd.json`, and reports an accepted envelope as
+awaiting verification, never as done. Keep pending, failed, done, deferred,
 needs-setup and invalid records distinct. No ready work with unresolved stories
 means blocked or inconsistent, never complete. Diagnose dependency faults once,
 preserve the blocker and work elsewhere; retry only after a relevant condition
