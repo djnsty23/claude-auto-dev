@@ -105,14 +105,18 @@ function project(root, nextVersion) {
       plugin, version, admission: 'unverified', sourceManifestSha256: digest(manifestText),
       sourceHooksSha256: inputText === null ? null : digest(inputText), sourceScriptsSha256: scriptHashes, sourceHandlers, projectedHandlers,
       knownProtectionGaps: plugin === 'autodev-core' ? [
-        'Native apply_patch command payload bypasses pre-tool-filter protected-path checks even when matcher is widened; the original Write/Edit matchers also do not cover apply_patch',
-        'Native exec_command requested workdir is absent from hook input while cwd is the thread cwd; coordinator-write-guard can allow a foreign-workdir command without explicit git -C',
+        'Native apply_patch protected-path checks do not enforce workspace ownership or cover other write tools and racing filesystem changes',
+        'Native apply_patch content/private-name and lint/format-config protections are unavailable',
+        'Custom CODEX_HOME installation paths not named .codex are not identified by the protected-path patterns',
+        'Native exec_command requested workdir is absent from hook input while cwd is the thread cwd; coordinator-write-guard needs independently admitted filesystem containment and must not substitute hook cwd for execution workdir',
       ] : [],
       unsupportedEventHandlers: unsupported,
       unavailableFunctionModules: modules.map((source) => ({ source, reason: 'Codex hook manifest does not accept Claude modules; source is preserved for Claude' })),
       timeoutLimitations: limitations,
       unsupportedUserConfigKeys: Object.keys(sourceManifest.userConfig || {}).sort(),
-      remainingChecks: ['Actual installed candidate identity and hook trust', 'Native apply_patch exposes command, not Write/Edit file fields; preserved matchers and handlers have no adapter', 'Native exec_command hook cwd is the thread cwd, without requested workdir in tool_input; guard target semantics need admission', 'Native blocking, side effects, cancellation and timeout completion', 'Windows command-shell execution has not been measured'],
+      remainingChecks: ['Actual installed candidate identity and hook trust',
+        ...(plugin === 'autodev-core' ? ['Generated pre-tool-filter apply_patch registration and exact runtime protected/ordinary path controls on the target host', 'Native worker filesystem containment for the actual sandbox policy, approval policy, writable roots and runtime version; hook cwd does not identify requested exec_command workdir'] : []),
+        'Native hooks: blocking, side effects, cancellation and timeout completion', 'Windows command-shell execution has not been measured'],
     }));
     if (inputText !== null) files.set(`${rel}/hooks/codex.json`, json({ description, hooks }));
   }

@@ -103,6 +103,48 @@ try {
     result=cp.spawnSync('/bin/sh',['-c',command],{encoding:'utf8',timeout:10000,maxBuffer:2*1048576,env:{...process.env,PLUGIN_ROOT:large}});
     check('child large output/stderr drain and exit2 propagate',result.status===2 && result.stdout.length===1048576 && result.stderr==='evidence-stderr',`${result.status}/${result.stdout.length}/${result.stderr}`);
   } else console.log('NOT CHECKED: native Windows command-shell execution requires its own host canary; this suite does not admit Windows');
+  // Native canaries show Write/Edit aliases already select apply_patch. Keep
+  // declarations intact; metadata must state the payload adapter's real limits.
+  const boundary=path.join(ROOT,'native-boundary');
+  const boundaryGenerator=path.join(boundary,'tooling/generate-codex-packages.js');
+  write(boundaryGenerator,fs.readFileSync(generator));write(path.join(boundary,'VERSION'),'1.2.3\n');
+  const adaptedArgs=['${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-filter.js'];
+  const nativeSource={hooks:{PreToolUse:[{matcher:'Read|Write|Edit',hooks:[
+    {type:'command',command:'node',args:argv,timeout:10},
+    {type:'command',command:'node',args:adaptedArgs,timeout:5},
+    {type:'command',command:'node',args:argv,timeout:10},
+  ]}],PostToolUse:[{matcher:'Write|Edit',hooks:[{type:'command',command:'node',args:adaptedArgs,timeout:5}]}]}};
+  for(const name of ['autodev-core','demo']){
+    const dir=path.join(boundary,'plugins',name);
+    write(path.join(dir,'.claude-plugin/plugin.json'),json({name,version:'1.2.3',description:'Synthetic matcher boundary'}));
+    write(path.join(dir,'hooks/hooks.json'),json(nativeSource));
+    write(path.join(dir,'hooks/pre-tool-filter.js'),receiptSource);write(path.join(dir,'hooks/receipt.js'),receiptSource);
+  }
+  result=run(boundaryGenerator,['--write']);
+  check('native adapter fixture generates through actual CLI',result.status===0,result.stderr);
+  const native=JSON.parse(fs.readFileSync(path.join(boundary,'plugins/autodev-core/hooks/codex.json')));
+  const peer=JSON.parse(fs.readFileSync(path.join(boundary,'plugins/demo/hooks/codex.json')));
+  const nativeCaps=JSON.parse(fs.readFileSync(path.join(boundary,'plugins/autodev-core/.codex-plugin/capabilities.json')));
+  const matching=(doc,event,tool)=>doc.hooks[event].filter(g=>g.matcher===undefined||new RegExp(g.matcher).test(tool)).flatMap(g=>g.hooks);
+  const decoded=hook=>JSON.parse(Buffer.from(hook.command.match(/Buffer\.from\('([^']+)'/)[1],'base64').toString('utf8'))[0];
+  const patches=matching(native,'PreToolUse','Write').filter(h=>decoded(h)===adaptedArgs[0]);
+  check('pre-tool-filter transport exists once within its preserved registration',patches.length===1);
+  check('Write keeps every original handler in order',json(matching(native,'PreToolUse','Write').map(decoded))===json([argv[0],adaptedArgs[0],argv[0]]));
+  check('native matcher and shared-group declarations remain unchanged',native.hooks.PreToolUse.length===1 && native.hooks.PreToolUse[0].matcher==='Read|Write|Edit' && native.hooks.PreToolUse[0].hooks.length===3);
+  check('other plugin projection retains the same source declarations',json(native.hooks)===json(peer.hooks));
+  check('PostToolUse matcher remains unchanged',native.hooks.PostToolUse[0].matcher==='Write|Edit');
+  check('canonical Claude registrations stay byte-identical',fs.readFileSync(path.join(boundary,'plugins/autodev-core/hooks/hooks.json'),'utf8')===json(nativeSource));
+  check('capabilities retain native content, custom home, ownership and workdir limits',
+    nativeCaps.knownProtectionGaps.some(x=>x.includes('content')&&x.includes('lint')) &&
+    nativeCaps.knownProtectionGaps.some(x=>x.includes('CODEX_HOME')) &&
+    nativeCaps.knownProtectionGaps.some(x=>x.includes('ownership')) &&
+    nativeCaps.knownProtectionGaps.some(x=>x.includes('workdir')) && nativeCaps.admission==='unverified');
+  if(process.platform!=='win32' && patches.length===1){
+    const input={tool_name:'apply_patch',tool_input:{command:'*** Begin Patch\n*** Add File: ordinary.txt\n+okay\n*** End Patch'},cwd:boundary};
+    result=cp.spawnSync('/bin/sh',['-c',patches[0].command],{input:JSON.stringify(input),encoding:'utf8',timeout:10000,env:{...process.env,PLUGIN_ROOT:path.join(boundary,'plugins/autodev-core')}});
+    let output;try{output=JSON.parse(result.stdout);}catch{}
+    check('generated adapter preserves native payload and exit2 without Write alias',result.status===2 && json(output?.input)===json(input),result.stderr);
+  } else check('generated native command is available for transport control',patches.length===1);
   const bad=JSON.parse(json(original));bad.hooks.SessionStart[0].hooks[0].guardPolicy=true;write(sourceHooks,json(bad));
   result=run(path.join(ROOT,'tooling/bump.js'),['2.0.0']);
   check('version writer rejects unsupported controls before mutation',result.status===1 && fs.readFileSync(path.join(ROOT,'VERSION'),'utf8')==='1.2.3\n' && JSON.parse(fs.readFileSync(manifest)).version==='1.2.3',result.stderr);

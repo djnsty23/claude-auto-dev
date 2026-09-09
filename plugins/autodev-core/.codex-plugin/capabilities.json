@@ -12,7 +12,7 @@
     "hooks/agent-browser-cleanup.js": "f214e422efc128b4dfe5c614e9c20fd39b4eab1d17701a41806fdf2daa6ab57a",
     "hooks/user-prompt-image-scan.js": "933d0c3c063bdf7a9afe5424cc942778f30540c301890bc7f222412314c9b747",
     "hooks/inbox-notify.js": "dca5d2fa90d8bd6af3103c7a2e44f7da74e79bc35c31b527eeadd95fa8c5ab92",
-    "hooks/pre-tool-filter.js": "7f07fab3aaf16976080f8971a65c908162989e468ec2712716ab6e0d3210cc79",
+    "hooks/pre-tool-filter.js": "16247f94cd6687f09694d3f9779db61d228088c38ab3a96f9d511f162d66107c",
     "hooks/panel-recommendation.js": "3df1b29d4b3e9d9469bdec4a59102b8067d3e8e064ae1db3be9f52768306d9ce",
     "hooks/peer-message-budget.js": "44d675721f31cc70829acba77523794b2ddd7c6c9ba7283634318592bac252d5",
     "hooks/coordinator-write-guard.js": "f79517e7cc1dd727b957d1a8bebc47821d022b50a947d0cebf6f37f57d5becd8",
@@ -31,8 +31,10 @@
   "sourceHandlers": 20,
   "projectedHandlers": 17,
   "knownProtectionGaps": [
-    "Native apply_patch command payload bypasses pre-tool-filter protected-path checks even when matcher is widened; the original Write/Edit matchers also do not cover apply_patch",
-    "Native exec_command requested workdir is absent from hook input while cwd is the thread cwd; coordinator-write-guard can allow a foreign-workdir command without explicit git -C"
+    "Native apply_patch protected-path checks do not enforce workspace ownership or cover other write tools and racing filesystem changes",
+    "Native apply_patch content/private-name and lint/format-config protections are unavailable",
+    "Custom CODEX_HOME installation paths not named .codex are not identified by the protected-path patterns",
+    "Native exec_command requested workdir is absent from hook input while cwd is the thread cwd; coordinator-write-guard needs independently admitted filesystem containment and must not substitute hook cwd for execution workdir"
   ],
   "unsupportedEventHandlers": [
     {
@@ -93,9 +95,9 @@
   ],
   "remainingChecks": [
     "Actual installed candidate identity and hook trust",
-    "Native apply_patch exposes command, not Write/Edit file fields; preserved matchers and handlers have no adapter",
-    "Native exec_command hook cwd is the thread cwd, without requested workdir in tool_input; guard target semantics need admission",
-    "Native blocking, side effects, cancellation and timeout completion",
+    "Generated pre-tool-filter apply_patch registration and exact runtime protected/ordinary path controls on the target host",
+    "Native worker filesystem containment for the actual sandbox policy, approval policy, writable roots and runtime version; hook cwd does not identify requested exec_command workdir",
+    "Native hooks: blocking, side effects, cancellation and timeout completion",
     "Windows command-shell execution has not been measured"
   ]
 }

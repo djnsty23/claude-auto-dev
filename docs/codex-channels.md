@@ -47,6 +47,41 @@ Version-pinned source for this measurement is OpenAI's `rust-v0.153.4` tag at
 `3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`; inspect its actual hook configuration,
 runner and session startup implementation when adapting another event.
 
+### Native tools and filesystem containment
+
+Later native turns used a deterministic loopback Responses provider to request
+actual `exec_command` and `apply_patch` calls. These test native dispatch and
+effects without measuring model quality. Hook inputs report `Bash` for shell
+execution and `apply_patch` for patching, with the operation in `command`.
+The requested shell `workdir` is absent from the hook payload; its `cwd` remains
+the thread directory even when execution occurs elsewhere. An explicit `git -C`
+guard control blocks, but a foreign workdir without that textual path can pass.
+Do not treat that hook as containment under `danger-full-access`.
+
+Generated-manifest canaries also showed that the existing `Read|Write|Edit`
+matcher selects the `apply_patch` guard through native matching semantics. Both
+that registration and an explicit `apply_patch` alternative allowed ordinary
+patches and denied protected ones with the repaired payload handler. The tool
+name alone had led to the incorrect inference that registration was missing.
+Keep the measured registration; repair the operation payload and verify the
+actual handler invocation instead of inferring matching from names.
+
+First-level native workspace-write tests on the same version passed eight
+decisive cases: exec and patch inside the workspace succeeded; foreign-workdir,
+absolute-path and symlink exec writes, a foreign Git commit, and absolute and
+traversal patch writes were refused without their tested effects. Readback was
+`workspaceWrite`, no extra writable roots, `networkAccess: false` and approval
+policy `never`; temporary-directory write exceptions remained enabled. This is
+a bounded admission for that policy on macOS, not universal path isolation.
+
+An earlier cohort nested native sandboxing inside an outer Seatbelt profile;
+its allowed control failed with `sandbox_apply: Operation not permitted`, so
+that cohort establishes no containment. The first-level fixture therefore
+omitted the incompatible outer wrapper and requested only reversible writes in
+owned directories. A short Git tool receipt also returned a running session;
+only its later terminal refusal and unchanged HEAD established the result.
+Preserve inconclusive attempts instead of counting them as successful denials.
+
 ## Historical channel comparison
 
 Three channels reach GPT from a Claude session. The channel decides token cost,

@@ -35,6 +35,13 @@ independently tested filesystem sandbox for that assignment. Do not silently
 rewrite the requested directory or rename a patch tool to Write while ignoring
 its additional update/delete/move paths.
 
+Read back the effective sandbox and approval policy, including extra writable
+roots and temporary-directory exceptions. Test the native sandbox at the same
+execution level as the intended worker: nesting a host sandbox inside another
+OS sandbox can break the allowed control. A failed allowed control makes that
+cohort inconclusive. A tool returning a running session is not a terminal
+refusal; collect its final result and inspect effects before accepting denial.
+
 ## Completion has several independent meanings
 
 Reconcile the worker identity and attempt generation, lifecycle status, required
@@ -62,6 +69,9 @@ Owned native canaries on macOS, Claude Code 2.1.233 and Codex 0.153.4:
 | Codex command args | Separate `args` did not reach the command; reading the plugin root in a static Node wrapper preserved it | Generate a tested native command form; do not silently drop arguments |
 | Codex placeholder shell expansion | A root containing a literal dollar token broke a quoted placeholder command; the wrapper control ran | Quoting after eager substitution is insufficient |
 | Codex prompt denial | Hook status `blocked`, turn status `completed`, error null, process exit 0 | Required hook verdicts participate in mission acceptance |
+| Codex shell input | `exec_command` appears as `Bash`, but the requested workdir is absent and hook cwd remains the thread cwd | The hook cannot establish the actual shell write boundary; require independently admitted containment |
+| Codex patch input | `apply_patch` retains its name and carries the patch in `command`; the native host also selects the existing Read/Write/Edit registration | Verify actual matching and operation-path handling separately; a different tool name does not prove a matcher gap |
+| Codex workspace-write containment | Two allowed controls succeeded; six foreign-path exec/Git/patch controls refused with no tested effects | Admit only the measured policy and paths; extra roots, temp exceptions and other modes remain separate |
 
 These measurements describe synthetic native dispatch, not an installed autodev
 release, real model quality or end-to-end product delivery. Keep full commands,

@@ -30,9 +30,7 @@
   "unsupportedUserConfigKeys": [],
   "remainingChecks": [
     "Actual installed candidate identity and hook trust",
-    "Native apply_patch exposes command, not Write/Edit file fields; preserved matchers and handlers have no adapter",
-    "Native exec_command hook cwd is the thread cwd, without requested workdir in tool_input; guard target semantics need admission",
-    "Native blocking, side effects, cancellation and timeout completion",
+    "Native hooks: blocking, side effects, cancellation and timeout completion",
     "Windows command-shell execution has not been measured"
   ]
 }

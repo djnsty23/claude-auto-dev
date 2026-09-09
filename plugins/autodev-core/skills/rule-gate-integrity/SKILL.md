@@ -88,6 +88,14 @@ Confirm all three properties of every deliberate breakage:
 
 The check is cheap: run **one** case by hand and read the actual assertion text.
 
+Check fixture context as well as contents. A directory intended to be outside
+Git can inherit an ancestor repository when temporary files are placed beneath
+the checkout. Verify `git rev-parse --show-toplevel` in both the positive Git
+fixture and the intended non-Git fixture; require failure in the latter. Use
+an OS temporary root outside the source checkout when ancestor discovery is
+part of the behavior. Moving fixtures can otherwise make a correct test fail
+for a different reason while leaving its purported assertion untested.
+
 ### Same-source canaries — two instances, one morning
 
 A colour gate iterated a `FAMILIES` array and built its known-positive by
