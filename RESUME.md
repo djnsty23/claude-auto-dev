@@ -16,6 +16,16 @@ Worktree `suspicious-turing-04a310`, branches `codex/audit-1-fixes` .. `codex/au
 
 All commits: author and committer `98432064+djnsty23@users.noreply.github.com`.
 
+## Round 2, 23:00: PRs open, CI reds fixed, re-gating
+
+- PRs: #226 fixes (base main), #227 skills (base branch 1), #229 B05 (base branch 2). #228 Codex host CLOSED by the operator (branch kept on origin). Opened after gates 2..5 were green: 84c50e9 124/124, 030568c 124/124, 06d4121 126/126, 33e7541 131/131, all exit 0, 8/8 stages.
+- CI then showed what macOS gates cannot: Windows red on every PR, from two test fixtures on branch 1 (test-session-carrier built a Read path with path.join, which mangles the closing </PRIVATE> tag on Windows; that one failure makes find-untested-hooks.js INDETERMINATE, which is why test-validate and test-hook-execution-evidence failed too; test-deploy-ledger writes filenames with | \n \t that NTFS refuses). Ubuntu and Windows red on #229 from the port (EPIPE when a child refuses before reading stdin; 8.3 short temp paths). macOS fleet-decisions 42/44 on the first runs is unexplained; branch 1's own macOS run passed 44/44 with the same file; the fresh runs decide flake vs defect.
+- Fixes as forward commits: branch 1 720ac49 (two fixtures), branch 4 ecf7468 (EPIPE handling in three harnesses, fs.realpathSync.native in mission-contract.js and its suite). Branches 2 and 4 rebased onto the fixed base: 3c5e902 and 677b5c9. All unpushed until gated.
+- Verified: `node tooling/test-deploy-ledger.js` [control] 48/48; `node tooling/test-session-carrier.js` 68 passed; `node tooling/test-mission-*.js` 65 cases + 76 assertions; the win32 branches can only be measured by CI.
+- Running: gates 6, 7, 8 on 720ac49, 3c5e902, 677b5c9 one at a time (logs gate-6..8.log; load was 30+ from other sessions, so INDETERMINATE means re-run quiet, not red).
+- Next: when all three are green run push-round2.sh (branch 1 fast-forward; branches 2 and 4 with force-with-lease pinned to 030568c and 33e7541; then the three PR bodies get new gate lines). Then read the fresh CI matrix per job, not per board.
+- Trap met: an unquoted heredoc executed the backticks in a script's text and started a stray full gate in this worktree; found by cwd, killed by pid. Write scripts with the Write tool or a quoted heredoc.
+
 ## Update 10:35, before the session went quiet
 
 - All five branches are on origin as refs (pushed by the coordinator, no PRs). `git ls-remote --heads origin` read back identical to the local heads; `gh pr list --state all --head <branch>` returns 0 for each.
