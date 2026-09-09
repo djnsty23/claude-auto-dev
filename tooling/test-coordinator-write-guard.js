@@ -769,9 +769,15 @@ expectSilentAllow('a plain push stays silent', noRole('git push origin HEAD'));
 {
     const repo = path.join(fixture, 'hooked');
     fs.mkdirSync(path.join(repo, 'tooling', 'githooks'), { recursive: true });
-    const init = spawnSync('git', ['init', '-q', repo], { encoding: 'utf8' });
+    /* `runBudgeted`, not raw spawnSync: #183 removed every unbudgeted child from
+       tooling/ and this block predates it. The two sides never touched the same
+       LINE, so the merge was clean and the suite crashed with
+       `ReferenceError: spawnSync is not defined` on all three platforms. Adapting
+       to the convention rather than re-adding the import, because the import is
+       precisely what #183 took out. */
+    const init = runBudgeted('git', ['init', '-q', repo], { encoding: 'utf8', timeout: 60000 });
     if (init.status === 0) {
-        spawnSync('git', ['-C', repo, 'config', 'core.hooksPath', 'tooling/githooks'], { encoding: 'utf8' });
+        runBudgeted('git', ['-C', repo, 'config', 'core.hooksPath', 'tooling/githooks'], { encoding: 'utf8', timeout: 60000 });
         fs.writeFileSync(path.join(repo, 'tooling', 'githooks', 'pre-push'),
             '#!/bin/sh\n# comment naming tooling/decoy.js must NOT be reported\nnode "$(git rev-parse --show-toplevel)/tooling/validate.js" || exit 1\n');
         fs.writeFileSync(path.join(repo, 'tooling', 'githooks', 'commit-msg'),
