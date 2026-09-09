@@ -19,20 +19,22 @@ Use the requested project or current checkout and the installed
 `autodev-memory` plugin root. `${CLAUDE_PLUGIN_ROOT}` resolves per plugin; do
 not copy this path from a caller running another plugin.
 
-The current script uses the user's `.claude/auto-dev-memory.db`, derived from
-`HOME` or `USERPROFILE`, not `CLAUDE_CONFIG_DIR`. Verify this is the intended
-store and that it exists. Opening it through the CLI can initialize the file,
-schema and WAL; “dashboard” does not mean strictly read-only filesystem access.
-For a strictly read-only audit use a supported read-only query or a consistent
-private snapshot, or report that limitation.
+The script uses `auto-dev-memory.db` inside configured `CLAUDE_CONFIG_DIR`,
+otherwise the user's `.claude` directory from `HOME` or `USERPROFILE`. Verify
+the intended store and installed script. Updated CLI reads open an existing
+database read-only, without initialization or migration. SQLite may still use
+WAL coordination files; use a consistent snapshot for a filesystem audit that
+forbids those effects too.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/memory-db.js" stats "$(pwd)"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/memory-db.js" dashboard "$(pwd)"
 ```
 
-Keep the command's exit and stderr together with the rendered result. A null
-stats result or DB error is unavailable retrieval. Confirm an in-scope known
+Keep the command's exit and stderr together with the rendered result. Updated
+CLI reads report retrieval failure as exit 2, structured stderr and no stdout.
+Older scripts/API fallbacks can return null or a fallback message instead;
+neither means a healthy empty store. Confirm an in-scope known
 observation is visible before calling an unexpected empty view complete.
 
 ## Explain what was counted
@@ -54,7 +56,7 @@ verify actual hook execution separately when capture health is the question.
 
 | Current rendered output | Interpretation |
 |---|---|
-| `No memory recorded yet.` | The DB query was unavailable; inspect health/errors |
+| `No memory recorded yet.` | Legacy/API fallback for an unavailable query; updated CLI reads emit an error instead |
 | `No memory recorded yet for <project>.` | The returned snapshot has zero stored sessions and observations |
 | `No observations recorded yet for <project> (N sessions).` | Sessions exist but no observations were returned for this project |
 

@@ -22,19 +22,21 @@ checkouts; do not assume an arbitrary worktree or renamed project has the same
 key. Confirm the result population belongs to the intended project.
 
 `${CLAUDE_PLUGIN_ROOT}` must identify this `autodev-memory` plugin. The current
-SQLite path is the user's `.claude/auto-dev-memory.db`, derived from `HOME` or
-`USERPROFILE`; this script does not use `CLAUDE_CONFIG_DIR`. Confirm the intended
-store exists. Opening the CLI can initialize the database/schema; use an actual
-read-only query or consistent private snapshot for a strictly read-only audit.
-Do not create an empty store and call that evidence of missing history.
+SQLite path is `auto-dev-memory.db` inside `CLAUDE_CONFIG_DIR` when configured,
+otherwise the user's `.claude` directory derived from `HOME` or `USERPROFILE`.
+Confirm the intended store and installed script. Updated CLI query commands
+open an existing database read-only and validate its schema; they never create
+an empty database or migrate it. SQLite may still use WAL coordination files.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/memory-db.js" stats "$(pwd)"
 ```
 
-Retain exit, stderr and parsed result. `null` means unavailable, not zero.
-Search can return `[]` and exit 0 on an unavailable database as well as on a
-real no-match. Confirm an in-scope known record is retrievable before drawing
+Retain exit, stderr and parsed result. Updated CLI reads exit 2 with a structured
+error on stderr and no result on stdout when retrieval fails. A successful `[]`
+is a bounded no-match. Older installed scripts and imported API fallbacks can
+still conceal unavailable retrieval, so verify the active command's behavior.
+Confirm an in-scope known record is retrievable before drawing
 an important absence conclusion. For a verified empty store, report its zero
 population and the absence of a positive control honestly.
 

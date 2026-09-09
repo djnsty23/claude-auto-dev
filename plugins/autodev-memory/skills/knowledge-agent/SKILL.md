@@ -20,16 +20,12 @@ Use the requested project, otherwise the current checkout. Read the memory
 script from this installed `autodev-memory` plugin; `${CLAUDE_PLUGIN_ROOT}` is
 per plugin. Do not substitute another plugin's script path.
 
-The current `memory-db.js` resolves its SQLite store at the user's
-`.claude/auto-dev-memory.db` using `HOME` or `USERPROFILE`; it does not honor
-`CLAUDE_CONFIG_DIR`. Confirm that this is the intended store. If it differs
-from the active host configuration, report the mismatch instead of silently
-querying another store. Do not redirect the user's home to work around it.
-
-Check the store exists before querying. The CLI can initialize a database when
-opening it, so it is not a strictly read-only filesystem operation. In a
-strictly read-only audit, use a supported read-only query or a consistent
-private snapshot, or report the limitation.
+`memory-db.js` resolves `auto-dev-memory.db` inside configured
+`CLAUDE_CONFIG_DIR`, otherwise the user's `.claude` directory using `HOME` or
+`USERPROFILE`. Confirm the intended store and installed script. Updated CLI
+queries open an existing database read-only and validate its schema without
+initialization or migration. SQLite may still use WAL coordination files; a
+strict filesystem audit may require a consistent private snapshot.
 
 ## Retrieve the area brief
 
@@ -48,7 +44,9 @@ then groups matching observations into decisions, bug fixes, discoveries and
 changes. It is not a complete history. Print the total stored population and
 the bounded window separately from the number of matching items.
 
-A null stats result or a DB error is a retrieval failure. Before an important
+Updated CLI retrieval failures exit 2 with structured stderr and no stdout.
+Older installed scripts and imported API fallbacks can still return null or
+empty results on failure; those are not proof of an empty store. Before an important
 “nothing recorded” conclusion, query an in-scope observation known to exist.
 If the store is truly empty there is no positive record to use; report that
 limited population instead of inventing a control or claiming the project has

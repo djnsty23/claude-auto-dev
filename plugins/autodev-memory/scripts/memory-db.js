@@ -9,11 +9,17 @@ const fs = require('fs');
 const { stripPrivate, stringifyPrivate } = require('./private-redaction');
 
 const HOME = process.env.HOME || process.env.USERPROFILE;
-const DB_DIR = path.join(HOME, '.claude');
+const DB_DIR = process.env.CLAUDE_CONFIG_DIR
+    ? path.resolve(process.env.CLAUDE_CONFIG_DIR) : path.join(HOME, '.claude');
 const DB_PATH = path.join(DB_DIR, 'auto-dev-memory.db');
 
 let _db = null;
 let _available = null;
+// Hook imports retain graceful degradation. Explicit CLI reads must expose a
+// failed lookup rather than convert it to an apparently successful empty array.
+let _strictErrors = false;
+let _cliReadOnly = false;
+function memoryError(code) { const error = new Error(code); error.memoryCode = code; return error; }
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -85,9 +91,27 @@ function isAvailable() {
 
 function getDB() {
     if (_db) return _db;
-    if (!isAvailable()) return null;
+    if (!isAvailable()) {
+        if (_strictErrors) throw memoryError('memory-sqlite-unavailable');
+        return null;
+    }
 
     const { DatabaseSync } = require('node:sqlite');
+    if (_cliReadOnly) {
+        if (!fs.existsSync(DB_PATH)) throw memoryError('memory-store-missing');
+        let db;
+        try {
+            db = new DatabaseSync(DB_PATH, { readOnly: true });
+            // Schema reads do not create tables, migrate, or change journal mode.
+            db.prepare('SELECT id, project_path, start_time, end_time, user_request, investigated, learned, completed, next_steps, total_observations, total_tokens FROM sessions LIMIT 0').all();
+            db.prepare('SELECT id, session_id, project_path, type, title, concept, source_files, token_cost, timestamp, content_hash, raw_data FROM observations LIMIT 0').all();
+            _db = db;
+            return _db;
+        } catch {
+            if (db) db.close();
+            throw memoryError('memory-store-unreadable');
+        }
+    }
 
     // Ensure directory exists
     if (!fs.existsSync(DB_DIR)) {
@@ -343,12 +367,16 @@ let _failures = 0;
 const MAX_FAILURES = 3;
 
 function withCircuitBreaker(fn) {
-    if (_failures >= MAX_FAILURES) return null;
+    if (_failures >= MAX_FAILURES) {
+        if (_strictErrors) throw memoryError('memory-circuit-open');
+        return null;
+    }
     try {
         const result = fn();
         _failures = 0;
         return result;
     } catch (err) {
+        if (_strictErrors) throw err;
         _failures++;
         process.stderr.write(`[Memory] DB error (${_failures}/${MAX_FAILURES}): ${err.message}\n`);
         return null;
@@ -484,6 +512,7 @@ const api = {
             try {
                 ranker = require('./semantic-search');
             } catch (err) {
+                if (_strictErrors) throw memoryError('memory-ranker-unavailable');
                 process.stderr.write(`[Memory] semantic search unavailable: ${err.message}\n`);
                 return [];
             }
@@ -797,7 +826,11 @@ if (require.main === module) {
     const args = process.argv.slice(2);
     const cmd = args[0];
     const projectPath = args[1] || process.cwd();
+    _strictErrors = true;
+    _cliReadOnly = ['stats', 'recent', 'search', 'semantic', 'timeline',
+        'sessions', 'decisions', 'bugs', 'knowledge', 'dashboard'].includes(cmd);
 
+    try {
     switch (cmd) {
         case 'stats':
             console.log(JSON.stringify(api.getStats(projectPath), null, 2));
@@ -863,5 +896,11 @@ if (require.main === module) {
         default:
             console.log('Usage: node memory-db.js <command> [projectPath] [args]');
             console.log('Commands: stats, recent, search <query>, semantic <query>, timeline <query>, sessions, decisions, bugs, knowledge <area>, dashboard, cleanup [days], test');
+    }
+    } catch (error) {
+        console.error(JSON.stringify({ ok: false, code: error.memoryCode || 'memory-operation-failed' }));
+        process.exitCode = 2;
+    } finally {
+        if (_db) _db.close();
     }
 }
