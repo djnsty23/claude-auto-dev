@@ -3,59 +3,135 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
-## 2026-09-08: production promotion is pre-authorised on a green gate with the ledger (Form B)
+## 2026-09-08: the deploy ledger becomes the check that enforces Form B
 
-The question was which of three deploy policies a session may act on without a
-panel: escalate every promotion (A), pre-authorise behind a green gate and a
-filled ledger (B), or B plus a canary with autonomous rollback (C). The operator
-chose B, `[stated 2026-09-08]`. The sentence: a session may promote when the
-repo's named gate exits 0 on the exact commit, that commit is on the default
-branch, the ledger records the commit, the gate's output and the post-deploy
-verification, and the rollback command is written into the ledger before the
-promotion — and anything on the ineligible list escalates whatever the gate says.
+Closes the "still open" of the Form B decision below — the ledger row format and
+the check over it — and deliberately does not restate that decision, whose entry
+owns the sentence, the provenance and why B beat A and C. One owner per claim:
+that entry is the policy, this one is the mechanism.
 
-Provenance is the part worth recording, because PR #201 refused a weaker version
-of this question and was right to: an away-hook self-resolution of the same panel
-is logged as BLOCKED and was not acted on. What authorises this is two first-hand
-statements — an interactive panel in the coordinating session with the away window
-over, and the operator's own words in the implementing session. A peer relay would
-have been neither.
+`deploy-ledger.js --verify` is now the authorisation, and its exit code is the
+whole of it. **0** promote, printing zero bytes on both streams, because it runs
+as `--verify && <promote>` and text on a pass path gets skimmed rather than read.
+**1** a precondition is unmet and is named: a surface unchecked, a metric missing,
+a promotion field empty, or the commit not on the default branch (`merge-base
+--is-ancestor` against `origin/HEAD`, then conventional names). **2** blind — no
+ledger, no deploy ref, no resolvable default branch, or a project that has not
+marked its deploy-sensitive paths, which gets the instruction to add a section
+rather than a pass. **3** ineligible, which no field fixes. The seven-field
+promotion record carries the commit, the gate with its exit and last lines, the
+`prove` evidence pair, the rollback command and the standing rule by date;
+`--record` files it per promotion and `--audit` lists what was filed.
 
-What landed: `deploy-ledger.js --verify` is now the authorisation. Exit 0 means
-promote, and it prints nothing; 1 names an unmet precondition (a surface, a
-metric, a promotion field, or a commit not on the default branch); 2 means nothing
-was decided; 3 means ineligible and needs the operator's yes in that turn. The
-record carries the commit, the gate with its exit and last lines, the `prove`
-evidence pair, the rollback command and the standing rule by date. `--record`
-files it per promotion and `--audit` lists what was filed.
+Three choices worth keeping. Eligibility is checked before any field, because an
+ineligible window is not fixed by filling a form. An unmarked project is refused
+rather than passed, on the same reasoning as a missing deploy ref: an unasked
+question and a clean answer must not print the same. And the gate's output is
+recorded rather than queried from a forge — `[measured 2026-09-08]` a count of
+non-success check-runs returned 1 on a commit whose green round was complete,
+because two re-runs were still in progress, so any future CI reader must group by
+job name and never read the run rollup.
 
-Three choices inside that. Eligibility is checked before any field, because an
-ineligible window is not fixed by filling a form. A project with no
-deploy-sensitive marking gets a refusal with the instruction to add one rather
-than a pass, on the same reasoning as a missing deploy ref: an unasked question
-and a clean answer must not print the same. And the gate's output is recorded
-rather than queried from a forge — `[measured 2026-09-08]` a count of non-success
-check-runs returned 1 on a commit whose green round was complete, because two
-re-runs were still in progress, so any future CI reader must group by job name
-and never read the run rollup.
-
-**A measured decision was reversed on the operator's list, and that is the useful
-part.** An earlier draft measured that all 12 `DROP POLICY` statements in a
-product repo's migrations are recreated in the same file, concluded a policy drop
-is a recreate pattern rather than a risk, and pinned it as ELIGIBLE in its own
-selftest. The list says an RLS change escalates regardless. The measurement was
-right about the syntax and wrong about the question: "does this file put the
-policy back" is not "is the policy it puts back the same policy", and a recreate
-is where an RLS mistake hides. Under the six rules that corpus scores 195
-ineligible lines where the narrow rule scored 0 — grant 98, rls 37,
+**A measured decision was reversed on the operator's ineligible list, and that is
+the useful part.** An earlier draft measured that all 12 `DROP POLICY` statements
+in a product repo's 33 migrations are recreated in the same file, concluded a
+policy drop is a recreate pattern rather than a risk, and pinned it as ELIGIBLE
+in its own selftest. The list says an RLS change escalates regardless. The
+measurement was right about the syntax and wrong about the question: "does this
+file put the policy back" is not "is the policy it puts back the same policy",
+and a recreate is where an RLS mistake hides. Under the six rules that corpus
+scores 195 ineligible lines where the narrow rule scored 0 — grant 98, rls 37,
 security-definer 35, live-rows 25 — so nearly every migration escalates, which is
 the intended reading rather than a defect.
 
 Implementation record, the corpus measurement and the refusals the suite was
 watched making: `docs/evidence-deploy-implementation-2026-09-08.md`. The baseline
-evidence — the sample of 20 deployments, the incidents, the three sentences — is
-another session's and stays on PR #201 at
-`docs/evidence-deploy-authorisation-2026-09-08.md`; this branch does not touch it.
+evidence is `docs/evidence-deploy-authorisation-2026-09-08.md`, which this cites
+rather than duplicates.
+
+## 2026-09-08: production signals become candidate stories, never direct writes on a live repo
+
+The stage between "production knows" and "the backlog knows" did not exist:
+`[measured 2026-09-08]` 22 of the 121 stories the live product filed in 90 days
+cite a production observation, 0 from Sentry, 0 from a monitor alert, every one
+typed by a person reading a table. `production-signals.js` plus the
+`production-radar` skill are the collector and the reader for that stage. Full
+evidence in `docs/evidence-production-signals-2026-09-08.md`.
+
+**Candidates, not stories.** The collector writes
+`.claude/reports/production-candidates-<date>.md` in prd.json story shape with
+`passes: null` and the evidence query attached. `--apply` writes into prd.json
+only when the origin `owner/repo` sha256 is on a one-entry allowlist inside the
+script (the repo with no users); everything else is refused with the reason and
+the proposal file is still written. Digests, not names, for the same reason the
+private-name denylist is stored that way.
+
+**The unit is the issue, never the event.** Sentry issue, `(function_name,
+error_code)` group, heartbeat key, deployment. A ledger keyed `source:id` stops
+re-proposal; a signal returns only after 30 quiet days (a regression) or a
+tenfold count (an escalation).
+
+**Thresholds were changed by reading the first real run, not by reasoning.**
+13 candidates came out; reading them found a weekly job flagged dead at 86 h and
+two bursts (60 rows in 9 minutes, 5 in 45) proposed as chronic defects. Two knobs
+now exist for those: a per-key `intervals` map for heartbeats and `min_span_hours`
+for error groups. The second run produced 7, of which 4 are real and 2 are
+regressions of stories the live backlog had closed.
+
+**No hook.** It reads live systems; it runs on demand. The suite asserts
+`hooks.json` never names it.
+
+**Sentry and Search Console are handbacks, not adapters nobody can run.** The
+read token is in no store on this machine and no GSC credential exists in any
+repo; both are numbered in the evidence doc with what done looks like.
+
+**The suite caught a leak the design had missed.** A canary planted in a fixture
+error message reached the applied prd.json: the rendered report and the ledger
+were scrubbed, the candidate objects were not. Candidates are now scrubbed before
+anything consumes them. This is the reason the no-secrets assertion covers every
+byte written, not only the streams.
+
+## 2026-09-08: deploy pre-authorisation is Form B, a green gate with a ledger
+
+The question was the sixth item in the Brain capability analysis: a production
+deploy was autonomous by tooling (`ship` deploys, `auto` pushes and deploys edge
+functions) and escalated by policy (the Brain's never-list), and nobody had
+written the reconciliation in one sentence. `[stated 2026-09-08]` the operator,
+in a panel in the session that measured it: *"Yes, Form B is my decision"*.
+
+**The sentence**, now in `plugins/autodev-core/skills/brain/SKILL.md` under
+"Escalate rather than resolve" with its ineligible list, and as the four
+pre-promotion conditions at the top of `ship/SKILL.md` Step 4: a session may
+promote when the repo's named gate exits 0 on the exact commit, that commit is on
+the default branch, the ledger records commit, gate output and verification, and
+the rollback command is in the ledger before promotion; migrations touching
+grants, RLS or `SECURITY DEFINER`, billing, webhooks, entitlement, auth and live
+rows escalate regardless.
+
+**Why B**, measured in `docs/evidence-deploy-authorisation-2026-09-08.md`
+against the last 20 production deployments and every incident in 60 days across
+the three product repos: on the live product a merge to main is the deploy, and
+20 of 20 sampled builds were git-integration builds off a PR merge with 0 human
+commands and 0 CLI; five deploy-caused incidents, four via a hand-run CLI path
+with no record of tree, branch, lock or gate, one an under-deploy. A (escalate
+always) would have made 13 of 13 sampled deploys wait a mean 7.4 h and reversed
+his 2026-07-15 batching rule and his 2026-09-05 merge grant; C (canary plus
+autonomous rollback) adds ~800 lines and the mechanism that caused the
+2026-08-19 outage. B is what already happens plus the record the four incidents
+lacked, ~300 lines for a ledger row and its check, neither built yet.
+
+**Provenance, because it took three tries.** The session's own panel was held
+and self-resolved to B by the away hook, logged as BLOCKED and not acted on. The
+coordinator then relayed his B answer from another session, refused as a relay.
+He then answered the session directly with the away state absent. Only the third
+is authority, and `docs/DECISIONS-2026-09-08-deploy-authorisation.md` carries
+all three.
+
+**Still open:** the ledger row format and the check over it against the
+platform's deployment list, which is what makes the rule enforceable rather than
+prose. Another session reports building the ledger script on an unpushed branch
+(`claude/bold-haibt-31b4d6`); it should cite the evidence doc and land against
+this sentence, not a second one.
 
 ## 2026-09-08: AGENTS.md is generated from the rule-* skills, gated, and kept under a hand-written half
 

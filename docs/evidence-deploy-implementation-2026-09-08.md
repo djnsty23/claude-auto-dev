@@ -3,14 +3,15 @@
 Dated 2026-09-08. This is the **implementation** record. The baseline — how
 deploys happen today, the sample of 20 production deployments, the incidents, and
 the three sentences measured side by side — is a different session's work and
-lives in `docs/evidence-deploy-authorisation-2026-09-08.md` on PR #201. That file
-is deliberately not touched here: two sessions were briefed to write it, and the
-one that measured it owns it.
+lives in `docs/evidence-deploy-authorisation-2026-09-08.md`, merged on
+2026-09-08 via #201. That file is deliberately not touched here: two sessions
+were briefed to write it, and the one that measured it owns it. This file closes
+the "still open" that entry names — the ledger row format and the check over it.
 
 ## The choice, and its provenance
 
 `[stated 2026-09-08]` the operator chose Form B. The sentence, as recorded on
-PR #201 and as relayed by the coordinator:
+the now-merged #201, which owns it:
 
 > A session may promote to production when the repo's named gate exits 0 on the
 > exact commit being deployed, that commit is on the default branch, the deploy
@@ -24,14 +25,19 @@ grant, an RLS policy or a `SECURITY DEFINER` function; billing, checkout, webhoo
 and entitlement code; auth; anything the Brain's never-list covers; anything
 touching live rows.
 
-Provenance matters here because PR #201's D1 refused a weaker version of it, and
-was right to. Two independent first-hand records exist: the operator answered
-directly in an interactive panel in the coordinating session with the away window
-over, and he also stated it in this session, in these words — *"Form B, [stated
-2026-09-08]: pre-authorised on a green gate with the ledger."* Neither is a peer
-relay, which is the shape #201 declined to act on and which the never-list
-forbids. The earlier away-hook self-resolution of the same panel is logged as
-BLOCKED in `~/claude-memory/DECISIONS-2026-09-08.md` and was not acted on.
+**Provenance is #201's to state, and its account is the one to read**, now merged
+in `docs/decisions.md` and in full in
+`docs/DECISIONS-2026-09-08-deploy-authorisation.md`: the panel was self-resolved
+by the away hook and logged as BLOCKED, a coordinator then relayed the answer
+from another session and that was refused as a relay, and only the operator's
+direct answer with the away state absent is authority. An earlier draft of this
+file called the relay a second first-hand record and treated the two as
+independent corroboration. That was wrong on the point #201 spent three tries
+establishing, and it is corrected here rather than left to compete.
+
+What this session has first-hand is the operator's own words in it — *"Form B,
+[stated 2026-09-08]: pre-authorised on a green gate with the ledger"* — which is
+the same third channel, not a fourth.
 
 The sentence names no repo, port or target, so it ships in the public repo whole
 and nothing goes to the machine-local rules directory.

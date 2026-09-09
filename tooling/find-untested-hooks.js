@@ -35,7 +35,18 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const cp = require('child_process');
+const __sb = require('./spawn-budget.js');
+// Deliberately exit 2 and NOT 1 here, unlike the suites that require this same
+// helper. In this script exit 1 asserts a PROVEN GAP -- a wired hook nothing
+// executes -- and a missing helper proves nothing of the sort. Letting the
+// TypeError escape would have exited 1 and published a gap that was never
+// measured. Exit 2 says what is true: this run could not measure.
+if (typeof __sb.runBudgeted !== 'function') {
+    console.error('spawn-budget.js does not export runBudgeted() -- this checker cannot run its '
+        + 'candidate suites, so it measured nothing. Indeterminate, not a proven gap.');
+    process.exit(2);
+}
+const { runBudgeted } = __sb;
 const { fileURLToPath } = require('url');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -156,7 +167,7 @@ if (!referencedOnly) {
         const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hookcov-'));
         let r;
         try {
-            r = cp.spawnSync(process.execPath, [path.join(TOOLING, suiteName)], {
+            r = runBudgeted(process.execPath, [path.join(TOOLING, suiteName)], {
                 cwd: ROOT,
                 encoding: 'utf8',
                 windowsHide: true,
@@ -164,7 +175,12 @@ if (!referencedOnly) {
                 // when the same commit has push and pull_request jobs running.
                 // A timeout is infrastructure, so leave enough headroom to
                 // distinguish a slow evidence producer from a failed one.
+                // Under concurrent load this fixed budget is what turned a
+                // healthy run indeterminate, so a blown one is retried once at
+                // a contention-scaled budget; the cap keeps it below the 900s
+                // ceiling the acceptance suite gives this whole checker.
                 timeout: 180000,
+                maxTimeout: 600000,
                 env: { ...process.env, NODE_V8_COVERAGE: covDir, AUTODEV_HOOKCHECK_CHILD: '1' },
             });
             if (r.error || r.status !== 0) {

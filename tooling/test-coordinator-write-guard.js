@@ -22,7 +22,7 @@
 // read, written or consulted: an acceptance test that could disarm the live
 // rail is worse than no acceptance test.
 
-const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -46,20 +46,49 @@ const PREFIX_TRAP = HOME_REPO + '-extra';
 
 function writeRole(obj) { fs.writeFileSync(ROLE, JSON.stringify(obj)); }
 
-/** Drive the hook as a subprocess. `roleFile` may point at a path that is absent. */
+/**
+ * Drive the hook as a subprocess. `roleFile` may point at a path that is absent.
+ *
+ * THIS SUITE ALREADY KNEW A TIMEOUT COULD HAPPEN and still counted one as a
+ * verdict: `timedOut` was computed here, and its only two readers spelled it
+ * `!res.timedOut` inside an `ok`, which makes a killed child a RED ASSERTION
+ * about the hook. Measured 2026-09-08 by forcing a subject spawn to come back
+ * `status=null signal=SIGTERM ETIMEDOUT`: this suite printed
+ * `FAIL  no role file: a foreign `git commit` is not this hook's business
+ * (exit null, stdout 0B, stderr 0B)` and exited 1. Naming the state is not the
+ * same as keeping it out of the tally.
+ *
+ * EXIT 2 IS THIS HOOK'S BLOCK SIGNAL, so it is a verdict at every call site
+ * here, not the "child declared itself indeterminate" that classify() reads it
+ * as by default. That is why `expect` is 'exit2' rather than undefined: 40 of
+ * the 95 spawns in a clean run return 2, and every one of them is the answer
+ * being asserted.
+ */
 function run({ roleFile = ROLE, payload, raw = null, args = [], env = {} }) {
     const input = raw !== null ? raw : JSON.stringify(payload);
-    const r = spawnSync(process.execPath, [HOOK, ...args], {
+    const r = runBudgeted(process.execPath, [HOOK, ...args], {
         input,
         encoding: 'utf8',
         env: { ...process.env, AUTODEV_BRAIN_ROLE_FILE: roleFile, ...env },
         timeout: 20000,
+        // Contention is clamped at 20, so cap the widened retry: a contended
+        // machine gives an indeterminate run either way, and the cap only
+        // bounds how long the reader waits to be told so.
+        maxTimeout: 300000,
     });
+    if (classify(r, 'exit2') === 'infrastructure') {
+        infra++;
+        const what = 'the hook run ' + JSON.stringify(args.length ? args : (payload ? 'payload' : 'raw'));
+        indeterminate.push(what + ' (' + reason(r) + ')');
+        console.error('infrastructure: ' + what + ' produced no verdict (' + reason(r)
+            + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms)');
+    }
     return {
         exit: r.status,
         stdout: r.stdout || '',
         stderr: r.stderr || '',
         timedOut: !!(r.error && (r.error.code === 'ETIMEDOUT' || r.signal === 'SIGTERM')),
+        attempts: r.attempts,
     };
 }
 
@@ -73,7 +102,9 @@ const bash = (command, over = {}) => ({
 
 let pass = 0;
 let fail = 0;
+let infra = 0;
 const failures = [];
+const indeterminate = [];
 
 function check(label, ok, detail) {
     if (ok) pass++;
@@ -424,9 +455,20 @@ expectSilentAllow('a Bash call with no command is passed through untouched',
     const t0 = Date.now();
     const res = run({ payload: null, raw: '', args: ['--help'] });
     const ms = Date.now() - t0;
-    const ok = res.exit === 0 && res.stdout.length > 0 && !res.timedOut && ms < 10000;
-    check('--help returns 0 with usage on stdout, well inside the entrypoint budget', ok,
-        `exit ${res.exit}, ${ms}ms, stdout ${res.stdout.length}B`);
+    // A RETRIED RUN CANNOT ANSWER A WALL-CLOCK QUESTION. `ms` spans every
+    // attempt plus the contention probe between them, so on a retry it exceeds
+    // the budget that provoked the retry and would fail this for the one reason
+    // it must not: the machine was busy, which is not a fact about the hook.
+    if (res.attempts > 1) {
+        infra++;
+        indeterminate.push('--help timing (the run retried, so the wall clock spans a killed attempt)');
+        console.error('infrastructure: --help timing not measurable (' + res.attempts
+            + ' attempt(s), ' + ms + 'ms spans a killed attempt)');
+    } else {
+        const ok = res.exit === 0 && res.stdout.length > 0 && !res.timedOut && ms < 10000;
+        check('--help returns 0 with usage on stdout, well inside the entrypoint budget', ok,
+            `exit ${res.exit}, ${ms}ms, stdout ${res.stdout.length}B`);
+    }
 }
 
 // A pathological command must not hang the turn. The old denylist's ReDoS
@@ -436,8 +478,16 @@ expectSilentAllow('a Bash call with no command is passed through untouched',
     const t0 = Date.now();
     const res = run({ payload: bash('echo ' + '"a b c" && '.repeat(4000) + 'true') });
     const ms = Date.now() - t0;
-    const ok = res.exit === 0 && !res.timedOut && ms < 5000;
-    check('a 4,000-segment command does not hang the hook', ok, `exit ${res.exit}, ${ms}ms`);
+    // Same reasoning as the --help timing above: a retry makes the clock unreadable.
+    if (res.attempts > 1) {
+        infra++;
+        indeterminate.push('4,000-segment timing (the run retried, so the wall clock spans a killed attempt)');
+        console.error('infrastructure: 4,000-segment timing not measurable (' + res.attempts
+            + ' attempt(s), ' + ms + 'ms spans a killed attempt)');
+    } else {
+        const ok = res.exit === 0 && !res.timedOut && ms < 5000;
+        check('a 4,000-segment command does not hang the hook', ok, `exit ${res.exit}, ${ms}ms`);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -613,11 +663,12 @@ fs.rmSync(fixture, { recursive: true, force: true });
 
 // The population, not a bare verdict: what was driven, and how. Without it a
 // green run is indistinguishable from a suite that asserted nothing.
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
     + `driven as a subprocess ${pass + fail} times over `
     + `${['inert-without-role', 'the ban', 'mention-is-not-execution', 'cwd escapes',
         'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'mutation'].length} case groups; `
     + `every allow asserted zero bytes on BOTH stdout and stderr.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
-process.exit(fail > 0 ? 1 : 0);
+if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+process.exit(exitCode(fail, infra));

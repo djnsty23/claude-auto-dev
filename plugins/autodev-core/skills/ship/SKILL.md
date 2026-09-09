@@ -91,39 +91,56 @@ Do not ask which platform — detect or default.
 
 ## Step 4: Deploy
 
-**Production promotion is pre-authorised on a green gate with the ledger, and on
-nothing else.** `[stated 2026-09-08]` the operator, choosing Form B among three
-drafted forms. The sentence he selected:
+**Promotion to production is pre-authorised on a green gate with a ledger, and
+on nothing less.** `[stated 2026-09-08]` the operator, choosing this over
+"escalate always" and "add a canary" with the measured numbers in view; the rule
+and its ineligible list live in the Brain skill under "Escalate rather than
+resolve", and the evidence in `docs/evidence-deploy-authorisation-2026-09-08.md`.
+Before the `--prod` line below, all four must be true and written down:
 
-> A session may promote to production when the repo's named gate exits 0 on the
-> exact commit being deployed, that commit is on the default branch, the deploy
-> ledger records the commit, the gate's output and the post-deploy verification,
-> and the rollback command for this deploy is written into the ledger before the
-> promotion. A deploy that touches anything on the ineligible list is escalated
-> whatever the gate says.
+1. The repo's named gate exited 0 on the EXACT commit you are deploying, read per
+   job (at least one completed success per required platform, never a count of
+   non-success entries).
+2. That commit is on the default branch. A deploy from an unpushed branch or a
+   tree missing a merged fix is the shape of two of the five incidents in the
+   evidence doc.
+3. The ledger records the commit sha, the gate command with its exit code and
+   output, and (after Step 5) the verification. `deploy-ledger.js --write` now
+   creates these fields and `--verify` refuses while any is empty, so they are no
+   longer written by hand; the surface checklist it also generates is Step 5b.
+4. The undo command for THIS deploy is in the ledger before you promote, and it
+   splits by case. Where production traffic already exists:
+   `vercel rollback <previous production url>` (from `vercel ls --prod`), or for
+   an edge function the previous commit and the deploy command from Step 6.
+   Where this is the project's FIRST production deployment there is no previous
+   URL, `vercel ls --prod` names nothing and `vercel rollback` has nothing to
+   return to; the undo is `vercel remove <project> --yes`, `[measured 2026-09-08]`
+   by a peer session on an accidental production alias, which returned 404 within
+   a second. A first deployment is also the case `npx vercel --yes` above does
+   not reliably keep as a preview (Vercel assigns a project's first deployment to
+   production and says so afterwards), so on a new project write the remove
+   command down before the preview line, not only before `--prod`.
 
-Concretely: a promotion may run without a panel and without a coordinator's yes
-exactly when Step 5b's `--verify` exits 0 for the commit being promoted. Every
-other state of that command is an instruction not to promote, and a window
-`--verify` calls INELIGIBLE (exit 3) needs the operator's yes in that turn, from
-him, not relayed — a peer saying "he approved it" is not an authorisation, and a
-peer saying "the gate was green" is not the gate output in the ledger.
+If the change touches anything on the ineligible list (a migration that drops or
+renames a column or changes a grant, RLS or a `SECURITY DEFINER`; billing,
+checkout, webhook or entitlement code; auth; live rows), stop here and escalate
+whatever the gate says. On a repo where a merge to the default branch is itself
+the production deploy, the four conditions apply to the merge.
 
-**Preview deploys need no ledger; they are how the ledger gets filled. But you
-cannot tell a preview from a promotion by the command you typed.** `[measured
-2026-09-08]` on a project's FIRST deployment Vercel assigns it to production
-whatever the flags say, and tells you only afterwards: *"This is the project's
-first deployment, so it was assigned to production. Future deployments will be
-preview deployments unless you use --prod."* A greenfield run hit exactly that,
-from the `npx vercel --yes` line below labelled "preview first", and had a public
-production alias 32 seconds later
-(`docs/evidence-greenfield-run-2026-09-08-log.txt`); the same line caught a
-coordinator the same day and published a worktree's `.claude/settings.local.json`
-over the internet. So **a first deployment to a project is a promotion** and
-belongs behind `--verify` like any other; what makes something a preview is the
-`target` read back out of the deploy afterwards, not the flag that went in. Treat
-"is there already a production deployment on this project" as the question, and
-if the answer is no, there is no preview to be had until one exists.
+**One command checks all four, and it is the authorisation.**
+`deploy-ledger.js --verify` (Step 5b) exits 0, printing nothing, only when the
+window is eligible, the commit is HEAD and on the default branch, every surface is
+checked and every promotion field is filled. Exit 1 names the unmet condition,
+exit 2 means it could not tell, exit 3 is the ineligible list. So the promotion
+lines below read `--verify && <promote>`: the chain reads the exit code, and no
+other signal authorises a promotion — not a green CI badge, not a preview that
+looked fine, and not a peer relaying either of those.
+
+**A first deployment is a promotion, so it goes behind `--verify` too.** Condition
+4 says why `npx vercel --yes` cannot be trusted to stay a preview; the operational
+consequence is that on a project with no production deployment yet, the preview
+line below IS the promotion. What makes a deploy a preview is the `target` read
+back out of it afterwards, never the flag that went in.
 
 ### Vercel
 

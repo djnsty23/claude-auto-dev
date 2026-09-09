@@ -87,7 +87,7 @@ this machine. `CLAUDE.md` has the specifics.
 <!-- GENERATED BELOW — DO NOT EDIT BY HAND.
      Generator: tooling/generate-agents-md.js
      Source:    plugins/autodev-core/skills/rule-*/SKILL.md (16 rules)
-     Version:   autodev 8.165.0
+     Version:   autodev 8.166.0
      Variant:   B
      Regenerate with: node tooling/generate-agents-md.js --write
      Drift gate:      node tooling/generate-agents-md.js --check   (npm run check:agents-md) -->
@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 133,422 | 27 of 27 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,231 | 27 of 27 |
-| B′ same, but dated LINES instead of paragraphs | 14,827 | 2 of 27 |
-| C  description only | 7,044 | 0 of 27 |
+| A  full body | 138,348 | 29 of 29 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,830 | 29 of 29 |
+| B′ same, but dated LINES instead of paragraphs | 14,989 | 2 of 29 |
+| C  description only | 7,044 | 0 of 29 |
 
 ### rule-ab-testing
 
@@ -268,6 +268,21 @@ time asserted only a per-element floor (every control at least 44px) and a
 page-level absence (no horizontal scroll). Both passed, correctly. `/pricing`
 was in the route list and carried two dedicated tests, so coverage was never
 the gap.
+
+`[measured 2026-09-08]` A comment stripper in a production repo blanked comments
+so a checker would read code and not prose about code. Its completeness control
+was:
+
+```js
+export function hasComment(text, fileName) {
+  return commentRanges(text, fileName).length > 0;   // the function under test
+}
+```
+
+`[measured 2026-09-08]` Two of eight gate steps in a production repo shipped a
+substantial selftest — planted violations, both directions, a clean fixture
+required to stay silent. Nothing in the repository ever ran either one: not the
+gate, not CI, not a test. Standing in for execution was
 
 Full text: `plugins/autodev-core/skills/rule-gate-integrity/SKILL.md`
 
