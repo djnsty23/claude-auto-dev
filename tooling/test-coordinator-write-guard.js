@@ -418,6 +418,61 @@ writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
     expectSilentAllow('a live claim with an unknown desktop id is still silent here',
         run({ payload: fromHome('git commit -m "x"'), env }));
 
+    /* THE CONDITION THIS RAIL TURNS ON IS `dead-session`, NOT THE VERDICT, and
+       the difference is asserted here rather than argued in a comment.
+
+       `[measured 2026-09-09]` the hook's comment claimed a record could be
+       `degraded` while `session_id` was dead, and that reading the state would
+       therefore disarm the rail. It cannot, through this call site: the hook
+       passes `store: null`, so no desktop record resolves and neither
+       attribution anchor can form, so `reach.usable` is empty whenever
+       `dead-session` fires. Every such record is `fault`.
+
+       That makes the two forms equivalent HERE, which is worth an assertion for
+       the reason it is easy to get wrong twice: the equivalence is a property of
+       an argument, not of the code being read, and it evaporates the day someone
+       passes a store. A reader who sees only the `find` should be able to learn
+       from a failing case that the store argument is load-bearing. */
+    {
+        const { checkBrainRole } = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-brain-role.js'));
+        const shapes = [];
+        for (const s of [undefined, 'SESSION-A', 'SESSION-DEAD', 'NO-SUCH'])
+            for (const p of [undefined, 'peer-a', 'peer-dead', 'peer-a7'])
+                for (const d of [undefined, 'local_x']) {
+                    const role = {};
+                    if (s) role.session_id = s;
+                    if (p) role.peer_name = p;
+                    if (d) role.desktop_session_id = d;
+                    shapes.push(role);
+                }
+        let diverge = 0, withDead = 0, degraded = 0;
+        for (const role of shapes) {
+            const v = checkBrainRole({ roleFile: ROLE, role, sessionsDir: sessions, store: null });
+            const byFault = !!v.faults.find((f) => f.code === 'dead-session');
+            const byState = v.state === 'fault' && byFault;
+            if (byFault) withDead++;
+            if (v.state === 'degraded') degraded++;
+            if (byFault !== byState) diverge++;
+        }
+        check('with `store: null`, reading the dead-session FAULT and reading the STATE agree on every role shape',
+            diverge === 0 && withDead > 0,
+            shapes.length + ' shapes, ' + withDead + ' with dead-session, ' + degraded
+            + ' degraded, ' + diverge + ' divergent');
+        /* TWO WAYS THE AGREEMENT ABOVE COULD BE TRUE FOR NOTHING, and only one
+           of them is ruled out by `withDead > 0`. The other is a fixture that
+           never produces `degraded` at all -- then the two conditions agree
+           because the state is never anything but `fault`, and the case would
+           keep passing if `degraded` were deleted from the script entirely.
+           `degraded` IS reachable with `store: null`: a live `session_id` whose
+           `peer_name` names the same live session gives a usable address, and a
+           missing `desktop_session_id` supplies the fault. What is unreachable
+           is `degraded` TOGETHER WITH `dead-session`, which is the actual
+           property, so assert both halves separately. */
+        check('  control: the fixture does reach `degraded`, so the agreement is not vacuous',
+            degraded > 0,
+            'degraded=' + degraded + ' of ' + shapes.length + ' shapes');
+    }
+
     writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
     fs.rmSync(sessions, { recursive: true, force: true });
 }
