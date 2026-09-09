@@ -16,6 +16,12 @@ Worktree `suspicious-turing-04a310`, branches `codex/audit-1-fixes` .. `codex/au
 
 All commits: author and committer `98432064+djnsty23@users.noreply.github.com`.
 
+## Round 2b, 23:45: macOS CI defect diagnosed and fixed; pushed ungated by the operator's choice
+
+- macOS CI's fleet-decisions 42/44 (3 of 4 runs, two heads) was the suite's 6000 ms wall-clock ceiling on a slow three-core runner, not the subject: the full refusal text was present. A pipe-truncation hypothesis was measured first (30/30 complete under load 30) and withdrawn. Fixed in the suite: ceiling 30 s, elapsed printed. `node tooling/test-fleet-decisions.js` 44/44.
+- The operator chose to push the current fixes without new local gates so CI can measure them tonight (the machine's load was 30 to 110 from other sessions; my gate 6 was stopped). Branch 1 fast-forwarded; branches 2 and 4 rebased and pushed with force-with-lease pinned to 030568c and 33e7541. PR bodies say exactly which sha was last gated and what is ungated on top.
+- Next: a full local `npm run gate` on each pushed head once the load is quiet (a monitor waits for that if this session is alive; otherwise run them one at a time by hand), then refresh the gate lines in #226, #227, #229. Then read the CI matrix per job.
+
 ## Round 2, 23:00: PRs open, CI reds fixed, re-gating
 
 - PRs: #226 fixes (base main), #227 skills (base branch 1), #229 B05 (base branch 2). #228 Codex host CLOSED by the operator (branch kept on origin). Opened after gates 2..5 were green: 84c50e9 124/124, 030568c 124/124, 06d4121 126/126, 33e7541 131/131, all exit 0, 8/8 stages.
