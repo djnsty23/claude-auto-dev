@@ -26,6 +26,8 @@
 //
 // Usage:
 //   node flow-evidence.js <record.json>      validate; exit 0 PASS, 1 FAIL, 2 REFUSED
+//   node flow-evidence.js <record.json> --at <sha>
+//                                            verify against <sha> instead of HEAD
 //   node flow-evidence.js --template         print a skeleton record to fill in
 //
 // Exit codes are three, not two, because "the assertion failed" and "there was
@@ -33,13 +35,36 @@
 // the second a defect in the verification. Collapsing them is how a missing
 // check reads as a failing one and gets "fixed" by deleting it.
 //
-// Pure Node, no dependencies. Reads the record and stats the screenshot paths;
-// writes nothing.
+// A RECORD IS BOUND TO THE REVISION IT WAS MEASURED ON. `[measured 2026-09-09]`
+// the Codex audit of this script showed a record dated 2000-01-01 with
+// expected 1 / observed 1 passing with exit 0: nothing tied it to any commit,
+// build or deployment, so one flow.json could be reused across arbitrary
+// revisions and PASS meant only "internally consistent". So `commit` is
+// required — the 40-char sha `git rev-parse HEAD` printed when the flow was
+// driven, the tree the dev server was serving — and a record is REFUSED unless
+// that commit is equal to, or an ancestor of, the commit being verified (`--at`,
+// default HEAD). Ancestry rather than equality, because the record is committed
+// WITH the change, so its commit is the parent of the commit that carries it;
+// ancestry rather than an age bound, because an old proof stays valid while
+// the code it proved is still in the history being verified. A refusal, not a
+// warning: a warning on a reused record is a PASS with a footnote.
+//
+// Paths in `screenshots` resolve from the REPOSITORY ROOT (the nearest `.git`
+// above the record, else the cwd), never from the record's own directory.
+// `[measured 2026-09-09]` the template emitted `.claude/evidence/S00-000/after.png`
+// while the reader resolved it against the record's directory, so a record
+// saved where the skill says to save it looked for
+// `.claude/evidence/S00-000/.claude/evidence/S00-000/after.png` and was refused
+// at exactly the verification step.
+//
+// Pure Node, no dependencies. Reads the record, stats the screenshot paths and
+// asks git one ancestry question; writes nothing.
 
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 // The subjects an assertion may be about. Each names a thing that has a value
 // the check can read back: a DOM count or text, the URL, a request that was or
@@ -55,9 +80,48 @@ const VACUOUS_CLAIM = /^\s*(?:the\s+)?(?:(?:it|page|ui|screen|everything|all)\s+
 
 const FUTURE_SLACK_MS = 5 * 60 * 1000;
 
-function template() {
+const SHA40 = /^[0-9a-f]{40}$/;
+
+// The nearest directory at or above `dir` that holds a `.git` (a directory in
+// a normal clone, a file in a worktree), or null when there is none.
+function repoRootFor(dir) {
+    let d = path.resolve(dir);
+    for (;;) {
+        if (fs.existsSync(path.join(d, '.git'))) return d;
+        const up = path.dirname(d);
+        if (up === d) return null;
+        d = up;
+    }
+}
+
+function git(root, args) {
+    const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+    return { status: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim(), error: r.error };
+}
+
+// Resolve `ref` to a full sha in `root`, or null. Refs are passed as argv, not
+// through a shell, and a leading `-` is refused so a value cannot become a git
+// option.
+function resolveCommit(root, ref) {
+    if (typeof ref !== 'string' || !ref.trim() || ref.startsWith('-')) return null;
+    const r = git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+    return r.status === 0 && SHA40.test(r.stdout) ? r.stdout : null;
+}
+
+// true when `ancestor` is `descendant` or reachable from it, false when both
+// exist and it is not, null when git could not answer (unknown commit, no repo).
+function isAncestor(root, ancestor, descendant) {
+    const r = git(root, ['merge-base', '--is-ancestor', ancestor, descendant]);
+    if (r.status === 0) return true;
+    if (r.status === 1) return false;
+    return null;
+}
+
+function template(cwd = process.cwd()) {
+    const root = repoRootFor(cwd);
     return {
         story: 'S00-000',
+        commit: root ? resolveCommit(root, 'HEAD') : null,
         flow: [
             'navigate /generate',
             'form_input #url = https://example.com',
@@ -94,8 +158,15 @@ function isPlainObject(v) {
 
 // Returns { refusals: string[], failures: string[] }. A refusal is a defect in
 // the record; a failure is a defect in the product the record observed.
+//
+// opts.root    the repository root screenshot paths resolve from and git is
+//              asked in (default: nearest .git above the cwd, else the cwd)
+// opts.at      the full sha the record is verified against; the record's
+//              `commit` must be it or an ancestor of it
+// opts.atError why no `at` could be resolved — reported as a refusal, because
+//              a record whose revision cannot be checked is not a PASS
 function validate(rec, opts = {}) {
-    const cwd = opts.cwd || process.cwd();
+    const root = opts.root || repoRootFor(process.cwd()) || process.cwd();
     const now = opts.now || Date.now();
     const refusals = [];
     const failures = [];
@@ -103,6 +174,19 @@ function validate(rec, opts = {}) {
     if (!isPlainObject(rec)) return { refusals: ['record: not a JSON object'], failures };
 
     if (typeof rec.story !== 'string' || !rec.story.trim()) refusals.push('story: missing or empty');
+
+    if (typeof rec.commit !== 'string' || !SHA40.test(rec.commit)) {
+        refusals.push('commit: must be the 40-character sha the dev server was serving (`git rev-parse HEAD` when the flow was driven)');
+    } else if (opts.atError) {
+        refusals.push(`commit: cannot be verified — ${opts.atError}`);
+    } else if (opts.at) {
+        const reachable = isAncestor(root, rec.commit, opts.at);
+        if (reachable === null) {
+            refusals.push(`commit: ${rec.commit} is not a commit in ${root}`);
+        } else if (!reachable) {
+            refusals.push(`commit: ${rec.commit} is not reachable from ${opts.at} — the record was measured on another revision`);
+        }
+    }
 
     if (!Array.isArray(rec.flow) || rec.flow.length === 0) {
         refusals.push('flow: must be a non-empty array of steps');
@@ -136,7 +220,8 @@ function validate(rec, opts = {}) {
     } else {
         for (const p of rec.screenshots) {
             if (typeof p !== 'string' || !p.trim()) { refusals.push('screenshots: every entry must be a path'); break; }
-            if (!fs.existsSync(path.resolve(cwd, p))) refusals.push(`screenshots: ${p} does not exist`);
+            const resolved = path.resolve(root, p);
+            if (!fs.existsSync(resolved)) refusals.push(`screenshots: ${p} does not exist (resolved from the repository root as ${resolved})`);
         }
     }
 
@@ -185,14 +270,30 @@ function validate(rec, opts = {}) {
     return { refusals, failures };
 }
 
+// `--at <sha>` or `--at=<sha>`; returns { at, rest } with the flag and its
+// value removed so the record path is whatever is left.
+function parseArgs(argv) {
+    const rest = [];
+    let at;
+    let atGiven = false;
+    for (let i = 0; i < argv.length; i++) {
+        const x = argv[i];
+        if (x === '--at') { atGiven = true; at = argv[++i]; }
+        else if (x.startsWith('--at=')) { atGiven = true; at = x.slice(5); }
+        else rest.push(x);
+    }
+    return { at, atGiven, rest };
+}
+
 function main(argv) {
-    if (argv.includes('--template')) {
+    const { at, atGiven, rest } = parseArgs(argv);
+    if (rest.includes('--template')) {
         process.stdout.write(JSON.stringify(template(), null, 2) + '\n');
         return 0;
     }
-    const file = argv.find((x) => !x.startsWith('--'));
+    const file = rest.find((x) => !x.startsWith('--'));
     if (!file) {
-        process.stdout.write('usage: flow-evidence.js <record.json> | --template\n');
+        process.stdout.write('usage: flow-evidence.js <record.json> [--at <sha>] | --template\n');
         return 2;
     }
     let rec;
@@ -202,7 +303,19 @@ function main(argv) {
         process.stdout.write(`flow-evidence: REFUSED ${file} — ${e.code === 'ENOENT' ? 'no such file' : 'not valid JSON'}\n`);
         return 2;
     }
-    const { refusals, failures } = validate(rec, { cwd: path.dirname(path.resolve(file)) });
+    // The repository the record belongs to is the one it sits in; a record
+    // outside any repository is checked against the cwd's.
+    const root = repoRootFor(path.dirname(path.resolve(file))) || repoRootFor(process.cwd()) || process.cwd();
+    let atSha = null;
+    let atError = null;
+    if (atGiven) {
+        atSha = resolveCommit(root, at);
+        if (!atSha) atError = `--at ${JSON.stringify(at === undefined ? '' : at)} is not a commit in ${root}`;
+    } else {
+        atSha = resolveCommit(root, 'HEAD');
+        if (!atSha) atError = `${root} is not a git repository, so there is no HEAD to verify against (pass --at <sha> from inside one)`;
+    }
+    const { refusals, failures } = validate(rec, { root, at: atSha, atError });
     const story = isPlainObject(rec) && typeof rec.story === 'string' ? rec.story : '(no story)';
     if (refusals.length) {
         for (const r of refusals) process.stdout.write(`  ${r}\n`);
@@ -219,7 +332,9 @@ function main(argv) {
 }
 
 if (require.main === module) {
-    process.exit(main(process.argv.slice(2)));
+    // exitCode, not exit(): on darwin a piped stdout is asynchronous and
+    // process.exit() truncates it (CLAUDE.md).
+    process.exitCode = main(process.argv.slice(2));
 }
 
-module.exports = { validate, template, STATE_SUBJECTS };
+module.exports = { validate, template, repoRootFor, STATE_SUBJECTS, SHA40 };

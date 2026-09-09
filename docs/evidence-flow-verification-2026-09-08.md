@@ -127,8 +127,32 @@ reads the outcome back as a value, and writes a record that
 `plugins/autodev-core/scripts/flow-evidence.js` validates. The validator
 computes the verdict from `expected` against `observed`; a `passed` flag would
 be a claim. Three exits: 0 PASS, 1 FAIL (the product), 2 REFUSED (the record has
-no assertion, a `visual` subject, a "looked fine" claim, no observed value).
-`tooling/test-flow-evidence.js` drives it as a subprocess, 42 checks.
+no assertion, a `visual` subject, a "looked fine" claim, no observed value, or
+a `commit` that is missing, malformed, or not reachable from the commit being
+verified). `tooling/test-flow-evidence.js` drives it as a subprocess, 62
+checks, against a throwaway repository with a base commit, its child at HEAD
+and a commit on another branch.
+
+`[measured 2026-09-09]` the Codex overnight audit drove the CLI at `838d025`
+and found two P2 defects, both fixed in this PR. First, nothing bound a record
+to a revision: a record dated `2000-01-01` with expected 1 / observed 1 passed
+with exit 0, so one `flow.json` could be reused across arbitrary commits and
+deployments and PASS meant only "internally consistent". The record now
+carries a required `commit` (the 40-character sha `git rev-parse HEAD` printed
+when the flow was driven), and the validator refuses, exit 2 and not a warning,
+unless that commit equals or is an ancestor of `--at <sha>`, default HEAD of the
+repository the record sits in. Ancestry rather than equality because the record
+is committed with the change, so its commit is the parent of the commit that
+carries it; ancestry rather than an age bound because an old proof stays valid
+while the code it proved is still in the history. Second, the template emitted
+the repository-relative screenshot path `.claude/evidence/S00-000/after.png`
+while the reader resolved paths against the record's own directory, so a
+record saved where the skill says to save it looked for
+`.claude/evidence/S00-000/.claude/evidence/S00-000/after.png` and was refused at
+exactly the verification step. Screenshot paths now resolve from the
+repository root (the nearest `.git` above the record, else the cwd), and the
+refusal names the resolved path. Field names did not change; `commit` was
+added.
 
 Two rules came out of running it rather than designing it:
 

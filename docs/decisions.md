@@ -23,7 +23,11 @@ check went red on every parent and green on every fix, 3 of 3.
 subject, a "looked fine" claim or no observed value, and computes the verdict
 from `expected` against `observed` rather than reading a `passed` flag. Driving
 stays in the skill, with the in-app browser tools, because the flow is the
-story's and no script knows it.
+story's and no script knows it. `[measured 2026-09-09]` the record is also
+bound to the revision it was measured on: a required `commit`, refused unless
+it equals or is an ancestor of the commit being verified, because a record
+nothing tied to a commit passed with a timestamp from 2000 and could be reused
+against any build.
 
 **The Stop hook is untouched.** A block on a missing flow record would hold
 every turn in a repo with no dev server, no browser tools, or criteria naming

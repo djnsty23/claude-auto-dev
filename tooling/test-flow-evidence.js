@@ -21,13 +21,46 @@ const path = require('path');
 
 const SCRIPT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'flow-evidence.js');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-evidence-'));
-const shot = path.join(tmp, 'after.png');
+// A record is bound to the revision it was measured on, so the fixture is a
+// throwaway repository with three commits: BASE, its child HEAD on the main
+// line, and OTHER on a branch off BASE. realpath, because macOS spells the
+// tmpdir two ways and the refusal message names the resolved path.
+const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'flow-evidence-')));
+const repo = path.join(tmp, 'repo');
+fs.mkdirSync(repo);
+const outside = path.join(tmp, 'outside');
+fs.mkdirSync(outside);
+
+function git(cwd, ...args) {
+    const r = spawnSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
+    return (r.stdout || '').trim();
+}
+git(repo, 'init', '-q');
+fs.writeFileSync(path.join(repo, 'a.txt'), 'base\n');
+git(repo, 'add', 'a.txt');
+git(repo, 'commit', '-q', '-m', 'base');
+const BASE = git(repo, 'rev-parse', 'HEAD');
+git(repo, 'checkout', '-q', '-b', 'other');
+fs.writeFileSync(path.join(repo, 'b.txt'), 'other\n');
+git(repo, 'add', 'b.txt');
+git(repo, 'commit', '-q', '-m', 'other');
+const OTHER = git(repo, 'rev-parse', 'HEAD');
+git(repo, 'checkout', '-q', '-');
+fs.writeFileSync(path.join(repo, 'a.txt'), 'head\n');
+git(repo, 'add', 'a.txt');
+git(repo, 'commit', '-q', '-m', 'head');
+const HEAD = git(repo, 'rev-parse', 'HEAD');
+
+// Screenshot paths resolve from the repository root, so the fixture's lives
+// there and records name it as `after.png` wherever the record itself sits.
+const shot = path.join(repo, 'after.png');
 fs.writeFileSync(shot, 'not really a png, existence is what is checked');
 
 function valid(overrides = {}) {
     return Object.assign({
         story: 'S99-001',
+        commit: HEAD,
         flow: ['navigate /generate', 'form_input #url = https://example.com', 'click Generate'],
         assertion: { subject: 'dom', claim: 'exactly one QR image with a data: src is rendered', expected: 1 },
         observed: 1,
@@ -38,10 +71,14 @@ function valid(overrides = {}) {
 }
 
 let n = 0;
-function run(record, label) {
-    const file = path.join(tmp, `rec-${++n}.json`);
+// Records are written INSIDE the fixture repository and the validator is run
+// from a cwd OUTSIDE it, so the repository it checks against is the one found
+// by walking up from the record, not the cwd's.
+function run(record, label, { args = [], dir = repo, cwd = outside } = {}) {
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `rec-${++n}.json`);
     fs.writeFileSync(file, typeof record === 'string' ? record : JSON.stringify(record));
-    const r = spawnSync('node', [SCRIPT, file], { encoding: 'utf8' });
+    const r = spawnSync('node', [SCRIPT, file, ...args], { encoding: 'utf8', cwd });
     return { code: r.status, out: r.stdout || '', err: r.stderr || '', label };
 }
 
@@ -73,7 +110,25 @@ const cases = [
     ['a flow that is not an array is refused', valid({ flow: 'navigate /generate' }), 2, 'flow:'],
     ['a blank flow step is refused', valid({ flow: ['navigate /generate', '  '] }), 2, 'flow:'],
     ['a missing story id is refused', valid({ story: '' }), 2, 'story:'],
-    ['a screenshot path that does not exist is refused', valid({ screenshots: ['missing.png'] }), 2, 'does not exist'],
+    ['a screenshot path that does not exist is refused, naming the path it resolved to',
+        valid({ screenshots: ['missing.png'] }), 2, `missing.png does not exist (resolved from the repository root as ${path.join(repo, 'missing.png')})`],
+    ['a screenshot path resolves from the repository root even when the record sits in a subdirectory',
+        valid(), 0, 'PASS', { dir: path.join(repo, '.claude', 'evidence', 'S99-001') }],
+
+    // ---- The record is bound to a revision. ----
+    ['a commit that is a real ancestor of HEAD passes', valid({ commit: BASE }), 0, 'PASS'],
+    ['a commit on another branch is refused', valid({ commit: OTHER }), 2, `commit: ${OTHER} is not reachable from ${HEAD}`],
+    ['a missing commit is refused', valid({ commit: undefined }), 2, 'commit: must be the 40-character sha'],
+    ['an abbreviated sha is refused', valid({ commit: HEAD.slice(0, 7) }), 2, 'commit: must be the 40-character sha'],
+    ['a malformed sha is refused', valid({ commit: 'g'.repeat(40) }), 2, 'commit: must be the 40-character sha'],
+    ['a well-formed sha that is not a commit in the repository is refused', valid({ commit: 'a'.repeat(40) }), 2, 'is not a commit in'],
+    ['--at overrides HEAD: the other-branch commit passes when verified at itself', valid({ commit: OTHER }), 0, 'PASS', { args: ['--at', OTHER] }],
+    ['--at overrides HEAD: HEAD is refused when verified at its parent', valid(), 2, `commit: ${HEAD} is not reachable from ${BASE}`, { args: ['--at', BASE] }],
+    ['--at=<sha> is accepted', valid({ commit: BASE }), 0, 'PASS', { args: [`--at=${HEAD}`] }],
+    ['an --at that names no commit is refused, not treated as HEAD', valid(), 2, 'commit: cannot be verified', { args: ['--at', 'no-such-ref'] }],
+    ['an --at beginning with a dash is refused rather than handed to git as an option', valid(), 2, 'commit: cannot be verified', { args: ['--at', '--output=x'] }],
+    ['a record outside any repository is checked against the cwd repository', valid(), 0, 'PASS', { dir: outside, cwd: repo }],
+    ['a record outside any repository with no repository cwd is refused', valid(), 2, 'is not a git repository', { dir: outside, cwd: outside }],
     ['screenshots as a string is refused', valid({ screenshots: 'after.png' }), 2, 'screenshots:'],
     ['a string console count is refused', valid({ consoleErrors: '0' }), 2, 'consoleErrors'],
     ['a negative console count is refused', valid({ consoleErrors: -1 }), 2, 'consoleErrors'],
@@ -101,22 +156,78 @@ const cases = [
 ];
 
 let failed = 0;
-for (const [label, record, expectedExit, needle] of cases) {
+let checks = 0;
+function report(ok, label, detail) {
+    checks++;
+    if (ok) { console.log(`ok    ${label}`); return; }
+    failed++;
+    console.log(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
+}
+
+for (const [label, record, expectedExit, needle, opts] of cases) {
     let r;
     if (record === null) {
-        const t = spawnSync('node', [SCRIPT, '--template'], { encoding: 'utf8' });
-        if (t.status !== 0) { console.log(`FAIL  ${label}: --template exited ${t.status}`); failed++; continue; }
-        r = run(t.stdout, label);
+        const t = spawnSync('node', [SCRIPT, '--template'], { encoding: 'utf8', cwd: repo });
+        if (t.status !== 0) { report(false, label, `--template exited ${t.status}`); continue; }
+        r = run(t.stdout, label, opts);
     } else {
-        r = run(record, label);
+        r = run(record, label, opts);
     }
     const ok = r.code === expectedExit && r.out.includes(needle) && r.err === '';
-    if (!ok) {
-        failed++;
-        console.log(`FAIL  ${label}\n      expected exit ${expectedExit} containing ${JSON.stringify(needle)}\n      got exit ${r.code}, stdout ${JSON.stringify(r.out.trim())}, stderr ${JSON.stringify(r.err.trim())}`);
-    } else {
-        console.log(`ok    ${label}`);
-    }
+    report(ok, label, `expected exit ${expectedExit} containing ${JSON.stringify(needle)}\n      got exit ${r.code}, stdout ${JSON.stringify(r.out.trim())}, stderr ${JSON.stringify(r.err.trim())}`);
+}
+
+// The template, filled in and saved where the skill says to save it, must
+// pass with the screenshot at the path the template names. `[measured
+// 2026-09-09]` it did not: the template emitted a repository-relative path
+// and the reader resolved it against the record's directory.
+{
+    const t = spawnSync('node', [SCRIPT, '--template'], { encoding: 'utf8', cwd: repo });
+    const tpl = JSON.parse(t.stdout);
+    report(tpl.commit === HEAD, 'the --template fills commit with HEAD of the cwd repository',
+        `expected ${HEAD}, got ${JSON.stringify(tpl.commit)}`);
+    report(tpl.screenshots.length === 1 && tpl.screenshots[0] === '.claude/evidence/S00-000/after.png',
+        'the --template names the documented screenshot path', JSON.stringify(tpl.screenshots));
+
+    const dir = path.join(repo, '.claude', 'evidence', 'S00-000');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'flow.json');
+    const png = path.join(repo, ...'.claude/evidence/S00-000/after.png'.split('/'));
+    fs.writeFileSync(file, JSON.stringify(Object.assign({}, tpl, { observed: 1 })));
+
+    fs.writeFileSync(png, 'png');
+    const present = spawnSync('node', [SCRIPT, file], { encoding: 'utf8', cwd: outside });
+    report(present.status === 0 && /PASS S00-000/.test(present.stdout) && present.stderr === '',
+        'a template-shaped record at .claude/evidence/<story>/flow.json passes when the template\'s screenshot path exists',
+        `exit ${present.status}, stdout ${JSON.stringify(present.stdout.trim())}, stderr ${JSON.stringify(present.stderr.trim())}`);
+
+    fs.rmSync(png);
+    const absent = spawnSync('node', [SCRIPT, file], { encoding: 'utf8', cwd: outside });
+    const needle = `.claude/evidence/S00-000/after.png does not exist (resolved from the repository root as ${png})`;
+    report(absent.status === 2 && absent.stdout.includes(needle) && absent.stderr === '',
+        'the same record with the screenshot absent is refused, naming the path it resolved to',
+        `exit ${absent.status}, expected ${JSON.stringify(needle)}, stdout ${JSON.stringify(absent.stdout.trim())}`);
+
+    const noRepo = spawnSync('node', [SCRIPT, '--template'], { encoding: 'utf8', cwd: outside });
+    report(noRepo.status === 0 && JSON.parse(noRepo.stdout).commit === null,
+        'the --template outside a repository leaves commit null rather than guessing',
+        `exit ${noRepo.status}, stdout ${JSON.stringify(noRepo.stdout.trim())}`);
+}
+
+// A record's commit must be checked against the repository the record sits
+// in, not the cwd's: the same record file passes from a foreign cwd that is
+// itself a repository, because the walk-up from the record wins.
+{
+    const foreign = path.join(tmp, 'foreign');
+    fs.mkdirSync(foreign);
+    git(foreign, 'init', '-q');
+    fs.writeFileSync(path.join(foreign, 'f.txt'), 'f\n');
+    git(foreign, 'add', 'f.txt');
+    git(foreign, 'commit', '-q', '-m', 'foreign');
+    const r = run(valid(), 'foreign-cwd', { cwd: foreign });
+    report(r.code === 0 && /PASS/.test(r.out) && r.err === '',
+        'a record inside a repository is verified against that repository, not the cwd\'s',
+        `exit ${r.code}, stdout ${JSON.stringify(r.out.trim())}, stderr ${JSON.stringify(r.err.trim())}`);
 }
 
 // The three exits must be distinct for the same file across the three states,
@@ -126,21 +237,21 @@ for (const [label, record, expectedExit, needle] of cases) {
     const failing = run(valid({ observed: 0 }), 'exit-triple');
     const refused = run(valid({ assertion: undefined }), 'exit-triple');
     const distinct = new Set([passing.code, failing.code, refused.code]).size === 3;
-    if (!distinct) { failed++; console.log(`FAIL  exit codes are not three distinct values: ${passing.code}/${failing.code}/${refused.code}`); }
-    else console.log('ok    PASS, FAIL and REFUSED exit with three distinct codes');
+    report(distinct, 'PASS, FAIL and REFUSED exit with three distinct codes',
+        `exit codes are not three distinct values: ${passing.code}/${failing.code}/${refused.code}`);
 }
 
 // Missing file and no argument are refusals too, not crashes.
 {
-    const r = spawnSync('node', [SCRIPT, path.join(tmp, 'nope.json')], { encoding: 'utf8' });
-    if (r.status !== 2 || !/no such file/.test(r.stdout) || r.stderr) { failed++; console.log(`FAIL  missing file: exit ${r.status} ${JSON.stringify(r.stdout)} ${JSON.stringify(r.stderr)}`); }
-    else console.log('ok    a missing record file is refused, not thrown');
-    const u = spawnSync('node', [SCRIPT], { encoding: 'utf8' });
-    if (u.status !== 2 || !/usage/.test(u.stdout)) { failed++; console.log(`FAIL  no argument: exit ${u.status} ${JSON.stringify(u.stdout)}`); }
-    else console.log('ok    no argument prints usage and exits 2');
+    const r = spawnSync('node', [SCRIPT, path.join(tmp, 'nope.json')], { encoding: 'utf8', cwd: outside });
+    report(r.status === 2 && /no such file/.test(r.stdout) && !r.stderr, 'a missing record file is refused, not thrown',
+        `exit ${r.status} ${JSON.stringify(r.stdout)} ${JSON.stringify(r.stderr)}`);
+    const u = spawnSync('node', [SCRIPT], { encoding: 'utf8', cwd: outside });
+    report(u.status === 2 && /usage/.test(u.stdout), 'no argument prints usage and exits 2',
+        `exit ${u.status} ${JSON.stringify(u.stdout)}`);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
 
-console.log(failed ? `\n${failed} failure(s)` : `\nAll ${cases.length + 3} checks passed`);
-process.exit(failed ? 1 : 0);
+console.log(failed ? `\n${failed} failure(s)` : `\nAll ${checks} checks passed`);
+process.exitCode = failed ? 1 : 0;

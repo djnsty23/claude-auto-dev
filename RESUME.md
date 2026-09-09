@@ -7,7 +7,10 @@ Written 2026-09-08 at the 300k context line. Session affectionate-antonelli-3baf
 - PR #206, branch `claude/affectionate-antonelli-3bafae`, rebased onto origin/main at 38ab642, two commits:
   eaa6a25 (the feature) and 433f40e (un-glues a `docs/decisions.md` heading main's 38ab642 had joined to the previous paragraph).
 - Evidence: `docs/evidence-flow-verification-2026-09-08.md`. Decision: top entry of `docs/decisions.md`.
-- Ships: `plugins/autodev-core/scripts/flow-evidence.js` + `tooling/test-flow-evidence.js` (42 checks);
+- 2026-09-10: the two P2 findings from the relayed Codex audit (PR comment of 2026-09-09 06:53) are fixed: a required
+  `commit` field checked for reachability from `--at <sha>` (default HEAD), and screenshot paths resolved from the repository
+  root. Suite grew from 42 to 62 checks, all driven as subprocesses against a throwaway repository.
+- Ships: `plugins/autodev-core/scripts/flow-evidence.js` + `tooling/test-flow-evidence.js` (62 checks);
   `scripts/mine-fixes.js --since=<git date>` + cases in `tooling/test-mine-fixes.js`;
   `skills/auto/SKILL.md` "Runtime flow check" section and three verification rows; `verify-tags.md` `flow` tag;
   one dated sentence in `rule-verification`; `learn-from-fixes` flag mention. `stop-auto-check.js` unchanged. No VERSION bump.

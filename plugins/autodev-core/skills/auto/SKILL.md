@@ -291,13 +291,22 @@ criteria when the tag is absent.
 4. Write `.claude/evidence/<story>/flow.json` — `node
    ${CLAUDE_PLUGIN_ROOT}/scripts/flow-evidence.js --template` prints the
    shape — with the steps, the assertion (`subject`, `claim`, `expected`),
-   the `observed` value, screenshot paths, console error count, timestamp.
+   the `observed` value, screenshot paths, console error count, timestamp,
+   and `commit`: the 40-character sha `git rev-parse HEAD` prints when the
+   flow is driven, the tree the dev server was serving. The template fills it
+   from the cwd; confirm it is still HEAD if you committed between driving and
+   writing. Screenshot paths are **relative to the repository root**
+   (`.claude/evidence/<story>/after.png`), not to the record's directory.
 5. `node ${CLAUDE_PLUGIN_ROOT}/scripts/flow-evidence.js .claude/evidence/<story>/flow.json`.
    Exit 0 is PASS. Exit 1 is the product failing its own criterion: fix,
    re-drive, re-run. Exit 2 is the **record** being refused — no assertion,
-   a "looked fine" claim, a `visual` subject, no observed value — and a
-   refused record does not close a story. Commit the record with the change,
-   as `prove` does with its captures.
+   a "looked fine" claim, a `visual` subject, no observed value, or a
+   `commit` that is missing, malformed, or not reachable from HEAD (the
+   record was measured on another revision; `--at <sha>` verifies against a
+   different commit) — and a refused record does not close a story. Commit the
+   record with the change, as `prove` does with its captures: its `commit`
+   is then the parent of the commit that carries it, which is what the
+   ancestry rule expects.
 
 **What it reaches, honestly.** `[measured 2026-09-08]` over 30 first-pass
 fixes in a live repo, 4 were catchable by driving the primary flow with a state
