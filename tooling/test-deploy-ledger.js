@@ -195,9 +195,17 @@ fixture(({ g, write, commit, cli, read, save, tick, base }) => {
     check('legacy ledger regeneration resets unsupported inherited claims', !read().includes('[x]'), read());
 });
 
+// NTFS cannot hold '|', '\n' or '\t' in a filename, so on win32 the odd-named
+// docs file gets a backtick instead (legal there, still needs Markdown care)
+// and the unrepresentable-path cases below shrink to the one it can create.
+// Both are printed, never silent. [measured 2026-09-09] Windows CI: ENOENT on
+// 'docs/with|pipe.md' took the whole suite down.
+const WIN32 = process.platform === 'win32';
+const ODD_DOC = WIN32 ? 'docs/with`tick.md' : 'docs/with|pipe.md';
+if (WIN32) console.log('  win32: odd-named docs fixture is ' + JSON.stringify(ODD_DOC) + ' (NTFS refuses |)');
 fixture(({ write, commit, cli, tick, base }) => {
-    write('docs/guide.md', 'documentation only\n'); write('docs/with|pipe.md', 'not a surface\n');
-    commit(['docs/guide.md', 'docs/with|pipe.md'], 'docs');
+    write('docs/guide.md', 'documentation only\n'); write(ODD_DOC, 'not a surface\n');
+    commit(['docs/guide.md', ODD_DOC], 'docs');
     cli('--since', base, '--write'); tick();
     const v = cli('--since', base, '--verify');
     check('genuine zero-surface docs-only population can still pass with recorded metrics', v.status === 0 && /2 file\(s\) changed, 0 user-facing/.test(v.out), v.out);
@@ -212,7 +220,10 @@ fixture(({ write, commit, cli, read, tick, base }) => {
     check('leading-space surface can pass after its actual row is checked', v.status === 0, v.out);
 });
 
-for (const file of ['app/with|pipe/page.tsx', 'app/with`tick/page.tsx', 'app/with\nnewline/page.tsx', '\tapp/page.tsx']) {
+const UNREPRESENTABLE = ['app/with|pipe/page.tsx', 'app/with`tick/page.tsx', 'app/with\nnewline/page.tsx', '\tapp/page.tsx'];
+const RUNNABLE = WIN32 ? UNREPRESENTABLE.filter((f) => !/[|\n\t]/.test(f)) : UNREPRESENTABLE;
+if (RUNNABLE.length !== UNREPRESENTABLE.length) console.log(`  win32: ${UNREPRESENTABLE.length - RUNNABLE.length} of ${UNREPRESENTABLE.length} unrepresentable-path cases not run: NTFS cannot hold | \\n or \\t in a filename`);
+for (const file of RUNNABLE) {
     fixture(({ write, commit, cli, base }) => {
         write(file, 'ambiguous markdown path\n'); commit([file], 'unrepresentable surface');
         const v = cli('--since', base, '--write');

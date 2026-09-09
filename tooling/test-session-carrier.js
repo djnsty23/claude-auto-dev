@@ -259,7 +259,12 @@ if (memDB.isAvailable()) {
         ['public', 'Write', {file_path:path.join(privacyProj,'public-area','public-control.ts')}, '', 'Created public-control.ts', prompt.toLowerCase(), [], false],
         ['write-unclosed', 'Write', {file_path:path.join(privacyProj,'<private>PRIVATE_DIR','WRITE_FILENAME_SECRET.ts')}, '', 'Created [REDACTED]', prompt.toLowerCase(), ['PRIVATE_DIR','WRITE_FILENAME_SECRET'], true],
         ['edit-nested', 'Edit', {file_path:path.join(privacyProj,'<private>OUTER_DIR','<private>INNER_DIR</private>','EDIT_FILENAME_SECRET.ts')}, '', 'Added [REDACTED]', prompt.toLowerCase(), ['OUTER_DIR','INNER_DIR','EDIT_FILENAME_SECRET'], true],
-        ['read-uppercase', 'Read', {file_path:path.join(privacyProj,'<PRIVATE>UPPER_DIR</PRIVATE>','public-read.ts')}, '', 'Read public-read.ts', 'Investigated: '+privacyProj+'/[REDACTED]/public-read.ts', ['UPPER_DIR'], true],
+        // Built with '/' on purpose, not path.join: on Windows path.join rewrites the
+        // '/' inside '</PRIVATE>' to '\', the tag never closes, and the filename this
+        // case expects to survive is redacted with it. [measured 2026-09-09] the
+        // Windows CI leg failed exactly this case and no other closed-tag case.
+        // A Windows path with '/' separators is valid input; the subject is the tag.
+        ['read-uppercase', 'Read', {file_path:privacyProj+'/<PRIVATE>UPPER_DIR</PRIVATE>/public-read.ts'}, '', 'Read public-read.ts', 'Investigated: '+privacyProj+'/[REDACTED]/public-read.ts', ['UPPER_DIR'], true],
         ['command-before-classification', 'Bash', {command:'inspect_custom_action <private>deploy COMMAND_SECRET'+ 'x'.repeat(200) +'</private> PUBLIC_TAIL'}, 'VISIBLE_RESULT', 'Ran: inspect_custom_action [REDACTED] PUBLIC_TAIL', 'VISIBLE_RESULT', ['COMMAND_SECRET'], true],
         ['grep-before-clip', 'Grep', {pattern:'P<private>GREP_SECRET'+'x'.repeat(100)+'</private>PUBLIC_TAIL'}, '', 'Searched for "P[REDACTED]PUBLIC_TAIL"', 'Code search in project', ['GREP_SECRET'], true],
         ['result-before-clip', 'Bash', {command:'custom_long_result_command'}, 'A<private>RESULT_SECRET'+'x'.repeat(600)+'</private>PUBLIC_TAIL', 'Ran: custom_long_result_command', 'A[REDACTED]PUBLIC_TAIL', ['RESULT_SECRET'], true],
