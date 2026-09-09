@@ -58,8 +58,9 @@ Existing: `spec`, `brainstorm`, `framework-radar`, `wizard`, `setup-project`
 
 ### `design`: before any UI change
 
-**Publish options before implementing, and ground every variant in the code
-first**. Reading it once surfaced an already-built, never-wired component that
+**Ground design choices in the existing code and the user's settled direction.**
+Explore variants when there is an unresolved product tradeoff; do not pause an
+already-authorized implementation merely to require another options round. Reading it once surfaced an already-built, never-wired component that
 turned a build task into a wiring task. Carry the surface's own invariants into
 every option; an option that silently breaks a rule the codebase already encodes
 is not a real option. Mockups are authoritative about **surface**, meaning palette,
@@ -130,8 +131,11 @@ Say the keyword. That is the whole interface. The point is that it costs
 nothing to reach for, because the measured failure was not bad judgement about
 which skill to use, it was never reaching for one at all.
 
-If the phase is unclear, that is itself the finding: work that cannot be placed
-in a phase is usually work that skipped `spec`.
+If the phase is unclear, inspect the requested outcome and current evidence.
+Work can straddle phases during integration or recovery. Record the next unmet
+acceptance condition; unclear labeling alone is not evidence a spec was skipped.
+For an already-authorized build, proceed to the next necessary phase. Naming the
+phase is orientation, not the delivered product.
 
 ## Keep this honest
 

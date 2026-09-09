@@ -1,6 +1,10 @@
 # Version Defaults (updated 2026-08-17)
 
-Safe choices for greenfield projects. Pin with caret ranges.
+Historical registry/scaffold snapshot from the date above. Use it as a starting
+point, then verify selected releases and compatibility against current official
+sources before creating a new project. This document does not establish that a
+version remains supported or suitable today. Preserve existing lockfile versions
+when onboarding unless an upgrade is in scope.
 
 **How these were set.** Each row was checked against the npm registry on the date
 above, not against memory. Where a major had turned over, the deciding evidence was
@@ -9,7 +13,10 @@ previous major that stopped receiving releases means the ecosystem has moved and
 staying put is the risk. `next` + `react` + `typescript` were additionally proven by
 scaffolding an app on these exact pins and running `tsc --noEmit` and `next build`
 to completion under `strict`, `noUncheckedIndexedAccess` and
-`exactOptionalPropertyTypes`. Re-check with `npm run check:versions`.
+`exactOptionalPropertyTypes`. In the autodev source repository, re-check with
+`npm run check:versions`; consuming projects may not have that script. Use their
+actual tooling and official registry/documentation checks, then run the applicable
+install/build/behavior checks and record resolved versions.
 
 | Package | Version | Risk |
 |---------|---------|------|

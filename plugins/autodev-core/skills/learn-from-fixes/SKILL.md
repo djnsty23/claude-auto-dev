@@ -10,26 +10,32 @@ argument-hint: "[repo path]"
 
 # Learn From Fixes
 
-A project's git history is a labelled dataset of what its first pass gets wrong.
-A `fix` commit landing on a file a `feat` commit touched days earlier is not
-maintenance — it is the feature having shipped broken, with the diagnosis written
-in the commit message.
+Resolve the actual loaded `autodev-core` directory into `autodev_core_root`
+before running the shell examples. Use the loaded skill's location; do not
+guess from the target project's working directory or assume another host set
+`CLAUDE_PLUGIN_ROOT`. Verify the named script exists under that resolved root.
+
+Git history supplies candidates for understanding rework. A nearby `fix` and
+`feat` touching the same file establish temporal overlap, not causation or proof
+that either version reached production. Verify the diff, intended behavior and
+release history before describing a fix as a shipped first-pass failure.
 
 This turns that history into a ranked list of what to gate.
 
 ## 1. Measure
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/mine-fixes.js" .
+node "${autodev_core_root}/scripts/mine-fixes.js" .
 ```
 
 Add `--json` for machine-readable output, `--since=60.days` (any `git log
 --since` date) to read only recent history, `--window-days=7` for slower-moving
 repos. It is read-only and never writes to the repo.
 
-If it reports no conventional `fix:` commits, say so and stop — the analysis
-needs conventional subjects, and inventing a ranking without them would be
-exactly the unverified guess this skill exists to prevent.
+If it reports no conventional `fix:` commits, record that this classifier has
+no applicable population. Do not invent a ranking. Continue other already
+authorized audit/build work using available evidence; an empty mining result
+does not mean the project has no defects.
 
 ## 2. Read the top classes against the real commits
 
@@ -40,16 +46,17 @@ by reading, 5% / 6% / 3% by regex) and on *which class ranked first*. A body
 saying "the phone home raced boot and lost" ships under the subject
 `fix(now): first-paint`; the regex only ever sees the subject.
 
-So: the fix:feature ratio, the rework window and the hot-file list are counts and
-can be quoted. **The class ranking is a starting point, and its number is a
-floor, not a share.** Before drawing conclusions, read the actual commits behind
-the top two or three classes:
+Quote the fix:feature ratio, overlap window and hot-file list with their actual
+populations and definitions. **The keyword ranking is a hypothesis, not a floor
+or verified share:** false positives can overcount a class as well as terse
+subjects undercounting it. Read the actual commits behind the top two or three
+classes, including negative controls, before drawing conclusions:
 
 ```bash
 git log --format='%h %s%n%b' --grep='^fix' -30 -- <hot file from the report>
 ```
 
-You are looking for the **stated cause**, not the label: "because …", "was never
+You are looking for a **stated cause to verify against the diff**, not a label: "because …", "was never
 …", "only fired when …", "in two places". That sentence is what a gate has to
 catch.
 
@@ -67,7 +74,7 @@ For each of the top classes, give:
 Rank by frequency × how expensive each instance was to find. A class that only
 manual QA can catch outranks a more frequent one that a typecheck catches.
 
-## 4. Propose gates, do not write them yet
+## 4. Propose or implement within the current mandate
 
 For the top two or three classes, propose an **executable** check — something
 that runs in preflight or CI and fails the build:
@@ -81,9 +88,12 @@ that runs in preflight or CI and fails the build:
 | Copy / i18n drift | Hash the English string per key; fail when English changed and a locale's hash did not |
 | Lifecycle | Assert every `addEventListener` / `setInterval` / `requestAnimationFrame` has a matching teardown in the same file |
 
-Then hand the chosen ones to `/preflight add <class>`, which owns the gate file and the four laws that keep it honest. Show the user the list and let them choose. Do not generate six gates nobody
-asked for — an unwanted gate gets disabled, and a disabled gate teaches the team
-that gates are noise.
+Use `preflight` for a demonstrated missing check, preserving its gate-integrity
+requirements. A request for analysis ends with measured proposals; an existing
+mandate to improve the harness authorizes implementing the justified winner
+without another planning-only handback. Do not add checks merely to fill the
+table. Test each proposed assertion against the real defect and a valid control;
+the table describes examples, not universally correct predicates.
 
 ## 5. Two rules about gates themselves, both learned the hard way
 
@@ -107,8 +117,9 @@ Append the confirmed classes to `.claude/project-rules.md` under a
 `/autodev-init` owns that file; this skill adds a section to it rather than
 creating a competing one.
 
-That file is what `review` and `audit` read, so a class recorded there is
-checked on every future change — which is the entire point of the exercise.
+Verify that the project actually loads this file and preserves it durably.
+Writing guidance does not prove it reaches every future change; distinguish a
+recorded lesson, a loaded rule, an executed check and a verified outcome.
 
 ## Running it on a schedule
 
@@ -116,20 +127,21 @@ The loop above only closes when someone remembers to ask. A nightly or weekly
 routine can run the **measurement half** unattended and propose the rest:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/mine-fixes.js" <repo> --json
+node "${autodev_core_root}/scripts/mine-fixes.js" <repo> --json
 ```
 
 Report-only rules for the unattended run:
 
-- Quote the tool's counts (fix:feature ratio, rework window, hot files) as
-  counts. **The class ranking is a floor, not a share** — the calibration in
-  step 2 applies doubly when no human is reading the commit bodies.
-- When a repo's numbers look worth a human's time, log a *proposal* to run
-  `/learn-from-fixes` there. Never write gates or edit `project-rules.md`
-  unattended — an unwanted gate teaches the team that gates are noise, and an
-  unreviewed rule is a guess wearing a rule's clothes.
-- End the run by touching the scheduled task's `.last-run` heartbeat, clean or
-  not, so `drift-audit` can tell a quiet week from a dead schedule.
+- Quote the tool's counts with their populations and proxy definitions. The
+  keyword ranking may contain false positives; verify representative diffs
+  before claiming a failure class, whether or not a human is present.
+- A report-only scheduled mandate ends with evidence-backed proposals. If the
+  existing automation also authorizes scoped improvements, use an isolated
+  owned worktree and complete the same diagnosis, comparison and verification
+  required interactively. Being unattended changes supervision, not authority.
+- Record the scheduler's actual attempt, outcome and unresolved work separately.
+  A fresh timestamp must not make a failed analysis look successful. Resolve the
+  actual host's scheduler state/schema rather than inventing a `.last-run` file.
 
 ### The other half: what went wrong IN the session
 
@@ -140,7 +152,7 @@ before its precondition existed, a query naming a column that does not exist.
 They are paid for in retries inside a session and leave no trace in history.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/analyze-session-patterns.js" --days 7 --json
+node "${autodev_core_root}/scripts/analyze-session-patterns.js" --days 7 --json
 ```
 
 Two differences from `mine-fixes` that change how it is run and read:
@@ -167,6 +179,7 @@ Report-only, with the same rules as above, plus two specific to this tool:
   held, so the fall was the change and not a quiet weekend. Propose work for
   classes that are flat or rising, and say which day the series starts.
 
-A class whose fix is already written down and which is still flat is the useful
-finding: it means the rule exists and is not reaching anyone, so the answer is a
-gate or a hook rather than another paragraph.
+A class that persists despite a written fix warrants diagnosis. Verify whether
+the rule is loaded, understood, applicable and executed, and whether the proxy
+classification is correct. A gate or hook is one possible remedy, not a cause
+or solution established by a flat count alone.

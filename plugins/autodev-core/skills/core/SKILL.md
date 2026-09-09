@@ -2,7 +2,7 @@
 name: core
 description: The prd.json schema and task system used by every autodev workflow. Load before reading or writing prd.json, creating stories, or interpreting a task's passes field.
 when_to_use: "Background knowledge, loaded automatically whenever the session touches prd.json. Not user-invocable."
-allowed-tools: Read, Write, Edit, Grep, Glob
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 model: opus
 user-invocable: false
 paths:
@@ -13,9 +13,25 @@ paths:
 # Hybrid Task System
 
 ## Sprint Summary
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const n=f=>s.filter(f).length;const done=n(x=>x.passes===true);const pending=n(x=>x.passes===null||x.passes===undefined);const failed=n(x=>x.passes===false);const deferred=n(x=>x.passes==='deferred');const setup=n(x=>x.passes==='needs-setup');const other=s.length-done-pending-failed-deferred-setup;const arch=p.archived?(Number.isFinite(p.archived.totalCompleted)?' (+'+p.archived.totalCompleted+' archived)':' (archive present, count unreadable)'):'';console.log('Sprint:',name,'| Done:',done+arch,'| Pending:',pending,'| FAILED:',failed,'| Deferred:',deferred,'| Needs-setup:',setup,'| Total:',s.length,other?'| OTHER: '+other+' (unrecognised passes value)':'')}catch(e){console.log('No prd.json')}"`
 
-For large prd.json (100+ stories), use `Grep` to find specific stories. For typical sizes (<50 stories), reading the full file is fine with 1M context.
+Read the full story population through `workPlan(prd)` from this plugin's
+`scripts/prd-states.js`; resolve the plugin directory from the loaded skill's
+location. The same planner drives Auto and its Stop hook. Resolve the actual
+loaded autodev-core directory into the `AUTODEV_CORE_ROOT` environment variable;
+never guess it from the target project's working directory. Run this from the
+verified target project root, where prd.json lives:
+
+```bash
+node -e "const fs=require('fs'),path=require('path');if(!process.env.AUTODEV_CORE_ROOT)throw new Error('AUTODEV_CORE_ROOT is required');const {workPlan}=require(path.join(process.env.AUTODEV_CORE_ROOT,'scripts','prd-states.js'));const plan=workPlan(JSON.parse(fs.readFileSync('prd.json','utf8')));console.log(JSON.stringify({summary:plan.summary,ready:plan.ready.map(([id])=>id),blocked:plan.blocked,invalid:plan.invalid,complete:plan.complete},null,2))"
+```
+
+Report `plan.summary` across every sprint, plus `plan.ready`, `plan.blocked` and
+`plan.invalid`. Keep archived totals separate from the active population. A
+missing file, parse error, invalid story and empty population are distinct
+outcomes; name the actual one. `plan.complete` is false for empty or unresolved
+work. A current-sprint view may be shown separately, labelled with its scope.
+Use targeted reading for story details, but never a header or newest sprint as
+a substitute for the population used to choose work or declare completion.
 
 ## When to Sprint
 
@@ -32,9 +48,10 @@ prd.json is the task system. It is git-tracked, so sprint state survives
 `/clear`, compaction, a crash, and a week away — none of which the session-local
 task list survives.
 
-The native task tools (TaskCreate/TaskUpdate/TaskList) were removed on Opus 4.8,
-Sonnet 5, and newer as of Claude Code 2.1.233, so do not plan around them. Track
-in-flight work in your own message to the user and write the outcome to prd.json.
+Use a native task tool only when the running host actually exposes it. Native
+tasks can display in-flight work, but prd.json remains the durable authority.
+Record the story, owner, branch/base, current action and return artifact before
+dispatch; update the outcome as it changes rather than waiting for session end.
 
 ## prd.json Story Schema
 
@@ -62,7 +79,12 @@ in-flight work in your own message to the user and write the outcome to prd.json
 
 ### Realness Scale (0-100)
 
-`passes: true` is binary and hides the difference between "wired up" and "works in production." Fill in `realness` when closing non-trivial stories so the sprint summary reflects reality.
+`realness` is an optional reviewer judgment about maturity. It does not establish
+completion, production readiness or authorization. Set `passes: true` only when
+the story's observable acceptance criteria have passed at its intended boundary;
+record the tested commit, environment, commands/results and artifact paths in
+its verification record. Pending deployment remains explicit when the story
+promised a live outcome.
 
 | Score | Meaning |
 |-------|---------|
@@ -73,10 +95,11 @@ in-flight work in your own message to the user and write the outcome to prd.json
 | 100 | Battle-tested — used by real users, edge cases caught and fixed |
 
 Rules:
-- Bug fixes default to 80 (fixing a real issue is usually production-ready).
+- Do not assign a default score to a bug fix; describe what was actually verified.
 - Features require a manual rating — don't auto-assign 100 just because `passes: true`.
 - When in doubt, pick the lower number.
-- Sprint summaries report the AVERAGE realness of closed stories, not just the pass count.
+- If reporting an average, include the rated population and unrated count. Keep
+  acceptance failures and unresolved release work visible regardless of the score.
 
 ## Resolution Learning
 
@@ -94,14 +117,15 @@ Examples:
 
 ## Context Tips
 
-With 1M context, aggressive token saving is unnecessary. Prefer clarity over brevity.
+Use the runtime's actual context budget. Keep full decisions and evidence in files
+and concise artifact pointers in the conversation.
 
 | Action | Do This |
 |--------|---------|
-| Check status | Read prd.json header or use dynamic context injection |
+| Check status | Read the shared work plan across all sprints |
 | Start task | Grep specific story |
 | Track progress | Update the story in prd.json |
-| Complete work | Batch edit prd.json at session end |
+| Complete work | Record verified outcomes as each unit finishes |
 
 ## Archive Trigger
 
@@ -111,4 +135,8 @@ When ANY of these are true, run `archive` before starting new work:
 - prd.json > 50KB
 - Starting a new sprint while previous sprint's stories are all complete
 
-Do not ask — just archive. Archive keeps only last 3 sprints active. Completed stories move to `.claude/archives/prd-archive-YYYY-MM.json`.
+Run `archive-prd` within the existing mandate. Archive only eligible completed
+records to its verified tracked `prd-archives/` destination; preserve unresolved
+stories and completed prerequisites still referenced by retained work. Age or
+size never authorizes deleting unfinished sprints. Commit the archive and PRD
+update together, then continue the already authorized work.

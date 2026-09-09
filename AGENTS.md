@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 138,769 | 30 of 30 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 23,721 | 30 of 30 |
-| B′ same, but dated LINES instead of paragraphs | 15,490 | 2 of 30 |
-| C  description only | 7,044 | 0 of 30 |
+| A  full body | 131,740 | 19 of 19 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 20,691 | 19 of 19 |
+| B′ same, but dated LINES instead of paragraphs | 14,660 | 1 of 19 |
+| C  description only | 7,069 | 0 of 19 |
 
 ### rule-ab-testing
 
@@ -128,7 +128,9 @@ Full text: `plugins/autodev-core/skills/rule-ab-testing/SKILL.md`
 
 How many agents to spawn, at which model and effort, so a fan-out does not burn the session's limits. Load before spawning subagents, running a workflow, or dispatching background sessions.
 
-Claude Code's own ceilings are far higher than what is useful here: subagents
+Historical Claude Code observations follow; inspect the current host's actual
+limits and callable tools before dispatch. These values do not configure a
+different host. Claude Code's observed ceilings were higher than useful here: subagents
 default to **20 concurrent** (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`), nesting
 runs **3 deep** (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`), the per-session spawn
 cap was removed entirely in 2.1.224, and a workflow runs
@@ -182,7 +184,10 @@ Full text: `plugins/autodev-core/skills/rule-agent-concurrency/SKILL.md`
 
 Design-token rules: semantic tokens over inline colors, where tokens are defined, and the one case hardcoded colors are allowed. Load before writing or editing component styles.
 
-**Exception:** Hardcoded colors (`text-white`, `bg-black`) are valid on dynamic gradient backgrounds or explicitly themed surfaces where the background is not a standard theme token.
+Read the project's existing design system first; its deliberate conventions
+outrank these defaults. Locate the actual token definitions and framework version.
+The configuration examples below illustrate one setup, not a required filename
+or proof that a custom style is a defect.
 
 `[measured 2026-09-03]` `magicuidesign/magicui`: MIT, a shadcn registry named `magicui`
 carrying 247 items typed `registry:ui`. It installs the way the rest of the components do,
@@ -213,19 +218,10 @@ Full text: `plugins/autodev-core/skills/rule-diagnosis/SKILL.md`
 
 **paths:** `**/prd.json`, `**/.claude/**/*.md`, `**/.claude/**/*.json`
 
-Where generated files belong. Archives, backups, handoffs, reports, and screenshots go under .claude/, never the project root. Load before writing any generated artifact.
+Choose recoverable paths for generated artifacts. Keep scratch state private, and preserve shared PRD archives, project rules and verification evidence in tracked locations. Load before writing an artifact.
 
-| Type | Path | Retention |
-|------|------|-----------|
-| Archives | `.claude/archives/prd-archive-*.json` | 30 days |
-| Backups | `.claude/archives/prd-backup-*.json` | 7 days |
-| Handoffs | `.claude/handoffs/handoff-*.md` | 7 days |
-| Reports | `.claude/reports/*.md` | 7 days |
-| Screenshots | `.claude/screenshots/*.png` | Cleaned each run |
-| Sprint History | `.claude/sprint-history.md` | Persistent |
-| Agent Memory | `.claude/agent-memory/*.md` | Persistent (audit-patterns.md, brainstorm-history.md) |
-| Session carriers | `.claude/memory-sessions/*` | Deleted at SessionEnd. Holds **verbatim user prompts** — the directory writes its own `.gitignore` so it can never be committed. Never move these files elsewhere. |
-| Compaction snapshot | `.claude/pre-compact-state.json` | Overwritten each compaction |
+Generated artifacts need a known home and recovery path. Use the project's
+established layout; classify by purpose before choosing an ignore rule.
 
 Full text: `plugins/autodev-core/skills/rule-file-organization/SKILL.md`
 
@@ -235,7 +231,7 @@ Full text: `plugins/autodev-core/skills/rule-file-organization/SKILL.md`
 
 Ways a gate or test proves nothing while looking decisive: grading a copy of itself, passing on emptiness, a canary firing for the wrong reason, a summary read as a verdict, a probe pointed at the wrong invocation. Load before writing a gate, a mutation harness, or any check guarding generated output.
 
-These four failure modes were hit independently by two sessions on the same day,
+These failure modes were hit independently by two sessions on the same day,
 working on unrelated problems — a mutation harness for a token generator, and a
 test-vacuity sweep across a plugin marketplace. Both arrived here the hard way.
 Each one produces a **green result that means nothing**, and each is invisible
@@ -250,6 +246,12 @@ where it expected 4. **The safety assertion passed**, because the filter that
 actually protects those rows had not been touched. Mutating the second filter
 instead failed the safety assertion and its control together, which is the real
 check.
+
+`[measured 2026-09-09]` Node 24.19.0 on macOS, 1,048,576 expected bytes:
+immediate exit delivered 65,536 pipe bytes; natural completion and a write
+callback each delivered all 1,048,576. All three variants exited 0 and all file
+controls were complete. See the [platform contract](https://nodejs.org/api/process.html#a-note-on-process-io);
+Linux and Windows were not executed in this control.
 
 `[measured 2026-09-07]` A staleness detector grew a veto so that
 `NO prod tag is pending` -- a sentence asserting the ABSENCE of open work, in
@@ -292,85 +294,15 @@ Full text: `plugins/autodev-core/skills/rule-gate-integrity/SKILL.md`
 
 Verification happens on this machine, in a browser you drive, before anything is pushed. Covers the local gate, the batched publish cadence, why GitHub Actions is not the gate, and why a restored browser session fakes a pass. Load before verifying, before pushing, and before any visual check.
 
-Portable copy of `~/.claude/rules/local-first.md`, which is `@`-imported on the Windows
-box and therefore invisible to any other machine. Keep the two in sync. Two passages are
-host-specific and named as such where they appear: the `ClaudeMemorySync` scheduled task
-and the per-repo gate names.
+Run the relevant checks against the candidate on an identified environment.
+A remote CI result complements the local evidence when the project uses CI; it
+does not replace observing the behavior the user requested. Likewise, local
+success alone does not establish that a later deployed artifact works.
 
-Added 2026-08-21, on Andy's instruction: *"always test locally and run visual checks in
-Claude's browser… no more pushes, no more GitHub Actions."*
-
-**`the music product` does NOT have a `gate` script — `[measured]` 2026-08-22.** This line used to
-claim it did, as of 2026-08-21. It is absent from the working branch and from `origin/main`:
-`git show origin/main:package.json` lists 40 scripts and `gate` is not one of them. Until it
-is written, the gate on that repo is the chain by hand:
-
-```bash
-npm run typecheck && npm run test && npm run build
-```
-
-**Carve-out:** the config mirror to `~/claude-memory` (`rules/backup-protocol.md`) is a
-backup of this machine, not shipping code, and it is why a reinstall is survivable. The
-`ClaudeMemorySync` task that pushed it every 4h was **disabled 2026-08-21**, so the mirror
-is a manual, same-session obligation again. That is how it rotted to 49-of-157 files last
-time — so mirror when you edit, do not trust a timer that is no longer running.
-
-**Disabling that task did NOT stop the mirror being pushed, and it never could.**
-`[measured 2026-08-22]` `~/claude-memory` is still committed and pushed every few minutes,
-authored `Dispatch <dispatch@local>` — which is only the repo's local git identity, not an
-actor. Resolving the process tree of a live `sync-claude-memory.ps1` gave
-`claude.exe -> bash -> powershell`: **other Claude sessions**, obeying
-`rules/backup-protocol.md` obligation 1, which says in as many words to commit *and push*
-the mirror in the same session as the edit.
-
-Andy, 2026-08-21: *"what if we commit once per day as a daily publish or when we queue
-2-5 items that need prod validation."* Commits stay local and accumulate. A **publish** is
-the deliberate push of that batch.
-
-**Root, NOT `.claude/publish-queue.md`** — this rule said `.claude/` until 2026-08-22 and
-that path defeats the rule's own reason for existing. `[measured]` `.claude/` is gitignored
-in every repo checked (the music product, the fitness product, the wagering product, analytics), and
-`rules/file-organization.md` explicitly instructs adding it, because that directory is
-ephemeral tooling state. A queue there is never committed, so it is invisible to a session
-on another machine — the precise failure the paragraph above warns about, reintroduced by
-its own filename. The queue is durable shared state, not tooling scratch; it belongs where
-git can carry it.
-
-`[measured]` 2026-08-21 in the in-app Browser pane:
-
-`[measured]` the same day: a foreground tab and a background tab both reported
-`innerWidth: 0, innerHeight: 0`. One `resize_window` call fixed it — 375x812, dpr 2.
-
-Kept HERE, not in the `rule-local-first` plugin skill. That skill ships in a
-PUBLIC repo, and these facts name private and client repos. Three separate
-redactions were needed on 2026-08-22 before the split; the tension is structural,
-not carelessness — the guidance is genuinely *about* specific repos, so writing it
-accurately and publishing it pull in opposite directions.
-
-**Which repo has which gate script** `[measured 2026-08-22]`
-- `the fitness product` — `preflight`
-- `the music product` — **no `gate` script**, despite this rule claiming one on 2026-08-21.
-  Absent from the working branch and from `origin/main`; `git show
-  origin/main:package.json` lists 40 scripts and `gate` is not among them. Until it
-  is written, its gate is `npm run typecheck && npm run test && npm run build`.
-
-**The config mirror** to `~/claude-memory` is the reinstall survival kit and is
-exempt from the no-push rule. The `ClaudeMemorySync` task that pushed it every 4h
-was **disabled 2026-08-21**, so mirroring is a manual, same-session obligation
-again — that is how it rotted to 49-of-157 files last time. Do not trust a timer
-that is no longer running.
-
-`[measured]` 2026-08-22, the music product. A rect-based sweep flagged four controls on `/generate`
-as under the 44px minimum. All four were fine. The project defines a `.tap-target::after`
-utility that expands the hit area to 44x44 under `@media (pointer: coarse)`, and **84
-controls carry it** — `getBoundingClientRect()` returns the element's own box and cannot see
-a pseudo-element, so every one of them reads as undersized.
-
-`[measured]` 2026-08-22. I checked out five branches in the music product's main clone over one
-session. It was not idle: uncommitted work on `clientIp.ts`, `rateLimiter.ts` and a test
-vector file appeared in that tree while I worked, from another session. Uncommitted changes
-travel across a checkout, so nothing was lost — but the branch moved under someone else's
-feet, repeatedly, with no signal to them.
+The current request and project policy determine publication, CI and batching.
+Read [historical notes](references/history-2026-09-09.md) only for earlier
+incidents. Their operator quotes, disabled schedulers and host-specific tool
+limits are not a present grant, prohibition or capability inventory.
 
 Full text: `plugins/autodev-core/skills/rule-local-first/SKILL.md`
 
@@ -380,10 +312,9 @@ Full text: `plugins/autodev-core/skills/rule-local-first/SKILL.md`
 
 How to end a turn: a clickable AskUserQuestion panel of vetted, complementary options with a recommendation in every block.
 
-End every substantive turn with a **clickable panel** — the `AskUserQuestion` tool —
-carrying **four vetted paths**, each genuinely detailed, **multi-select wherever the
-options are not mutually exclusive**. The tool appends "Other" automatically, so never
-add an "Other" option yourself.
+A decision panel gathers direction after delivering substantive work. It is not
+a permission reset or a reason to stop work the user already authorized. Follow
+the user's current preferences and the host's actual question-tool schema.
 
 Full text: `plugins/autodev-core/skills/rule-options-protocol/SKILL.md`
 
@@ -393,8 +324,9 @@ Full text: `plugins/autodev-core/skills/rule-options-protocol/SKILL.md`
 
 The eight ways a change passes typecheck, build, and a clean console and is still wrong. Derived from 3,127 fix commits across three production repos. Load before implementing a feature and again before calling it done.
 
-These are not general best practices. They are the eight failure classes that
-actually shipped, measured across 3,127 `fix` commits in three production repos
+These eight review lenses were derived from keyword-classifying 3,127 `fix`
+commits in three production repositories. Commit messages are candidate
+evidence, not independent proof each change repaired a shipped failure
 (see [`docs/failure-evidence.md`](../../../../docs/failure-evidence.md)).
 
 Full text: `plugins/autodev-core/skills/rule-ramifications/SKILL.md`
@@ -433,12 +365,14 @@ Full text: `plugins/autodev-core/skills/rule-report-shell/SKILL.md`
 
 Security rules this project always applies: secret handling, input validation, parameterized queries, and Supabase RLS. Load before writing code that touches credentials, user input, queries, or auth.
 
-- Never commit .env, API keys, credentials
-- Validate user input with Zod
-- Use parameterized queries
-- Supabase: RLS policies required, secrets in Edge Functions only
-- Test edge functions after deploy (curl with real params, verify response)
-- Verify bulk changes eliminated the old pattern completely (grep for remnants)
+- Keep credentials and secret-bearing env files out of commits and logs. Safe example files contain names/placeholders only.
+- Validate untrusted input at its actual boundary using the project's supported validator or explicit schema checks; Zod is one implementation, not a prerequisite for every language/runtime.
+- Use parameterized queries and validate identifiers separately.
+- Enforce authorization where the operation executes, including hook-internal subprocesses; an outer tool guard does not constrain every child action.
+- Keep privileged credentials in server-side secret mechanisms. Edge Functions are one server environment, not the only permitted one.
+- For exposed Supabase tables, apply and test grants/RLS using representative identities and populated controls; policy text alone is not runtime access proof.
+- After an authorized function deployment, verify the known deployed version with real representative inputs and resulting state.
+- Check related occurrences before declaring a class fixed. A no-hit search needs an eligible population and known-positive control; identical syntax in another context may be legitimate.
 
 Full text: `plugins/autodev-core/skills/rule-security/SKILL.md`
 
@@ -460,19 +394,19 @@ Full text: `plugins/autodev-core/skills/rule-thumb-first/SKILL.md`
 
 **paths:** `**/prd.json`
 
-What counts as done for each kind of change: the required verification per task type, and the six cross-cutting checks that apply to every task. Load before marking any task complete.
+What counts as done for each kind of change: the required verification per task type, and the cross-cutting checks that apply to every task. Load before marking any task complete.
 
 A task is not done because the code was written. It is done when the check for
 its type has passed.
 
 | Task | Required before done |
 |------|----------------------|
-| Edge Function / API | curl with real params, verify 200 + response shape |
-| UI (public) | Browser check: page reads correctly and the console is clean. When a criterion names what the user sees or gets, drive that flow and assert on **state**, recorded through `scripts/flow-evidence.js` (`auto`, "Runtime flow check"). `[measured 2026-09-08]` on three first-pass defects a screenshot had passed, the state assertion went red on the parent of each fix and green on the fix, 3 of 3; over 30 such fixes it reaches about 4, so it is not a substitute for `rule-ramifications` |
-| UI (admin) | typecheck + build only |
-| Refactor | typecheck + build + existing tests pass |
-| Bulk change | grep for the old pattern to confirm full elimination |
-| Auth / Billing / RLS | tests + manual verification of deny-by-default behavior |
+| Edge Function / API | Execute the affected operation with representative inputs; assert expected status, response and side effects, including relevant rejection paths |
+| UI (public or admin) | Drive the affected flow in a browser with the intended role/data; verify loading, empty, error and success behavior where relevant, including persistence after reload for mutations. When a criterion names what the user sees or gets, drive that flow and assert on **state**, recorded through `scripts/flow-evidence.js` (`auto`, "Runtime flow check"). `[measured 2026-09-08]` on three first-pass defects a screenshot had passed, the state assertion went red on the parent of each fix and green on the fix, 3 of 3; over 30 such fixes it reaches about 4, so it is not a substitute for `rule-ramifications` |
+| CLI / hook / worker | Drive the real entry point as a subprocess/event; assert stdout, stderr, exit/result and side effects for success and relevant failure inputs |
+| Refactor | Existing tests and applicable type/build checks; verify affected callers still reach equivalent behavior |
+| Bulk change | Enumerate affected consumers and search for remnants; verify the changed behavior on representative consumers |
+| Auth / Billing / RLS | Allowed and denied cases across relevant roles/accounts; verify resulting state, retries/idempotency where relevant and no unintended charge/data access |
 
 Full text: `plugins/autodev-core/skills/rule-verification/SKILL.md`
 
@@ -480,12 +414,11 @@ Full text: `plugins/autodev-core/skills/rule-verification/SKILL.md`
 
 **paths:** `**/*.ps1`
 
-Windows-specific development rules: cmd /c wrappers for MCP, dev servers in an external terminal, path conventions, and the Supabase CLI firewall workaround. Load only when working on Windows.
+Windows-specific development rules: host-aware command wrappers, supervised servers, environment inheritance, native exit status and path conventions. Load only when working on Windows.
 
-Superseded 2026-08-17. This section used to forbid `npm run dev` outright on the
-grounds that it "gets killed on session end". That premise is now false twice
-over: `run_in_background` detaches the process, and `preview_start` supervises it
-outright. The rule was compensating for a limitation the harness no longer has.
+Historical correction, 2026-08-17: a particular host's background/preview
+facilities invalidated its old ban on starting dev servers. That observation
+does not establish persistence guarantees for another tool or session lifecycle.
 
 **One trap that is not about fences at all.** When a script shells out with a git
 ref, use `execFileSync` with an argv array, never `execSync` with a string.

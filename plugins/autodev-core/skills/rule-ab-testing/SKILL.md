@@ -90,9 +90,11 @@ meant. Neither was obvious from reasoning about it.
 4. **Report the measurement, not just the conclusion.** The reader needs to be
    able to disagree with your interpretation.
 5. **A result of zero is a result — and it needs reading, like any other.**
-   "The gate finds nothing" is worth saying; it usually means the class is
-   already handled, which is the cheapest possible fix. But a zero from a search
-   is a claim about your *search*, not about the world. Before reporting that
+   "The gate finds nothing" is a statement about the inspected population.
+   Distinguish a valid zero finding from unavailable input, a wrong root, skipped
+   execution and empty coverage. Run a known-positive control through the same
+   entry point before inferring absence. A zero from a search is a claim about
+   your *search*, not about the world. Before reporting that
    something is absent, write down what you would accept as evidence that it is
    present; if that list has two entries, expect a false negative. **Search for
    the effect, not for the fix you had in mind.** One "it exists nowhere" here
@@ -117,6 +119,15 @@ meant. Neither was obvious from reasoning about it.
    heard of. See `rule-diagnosis`, which owns this and carries the worked
    examples — a contradiction is information about your frame, not an invitation
    to build a theory that rescues it.
+
+## Compare the whole affected population
+
+Hold the revision, inputs and acceptance criterion constant across variants.
+Include realistic negatives and the state that distinguishes implementations:
+latest-sprint fixtures cannot validate an all-sprint scheduler, and clean live
+PRs cannot establish how skipped CI jobs are handled. Report live equivalence
+separately from discriminating fixture results. A smaller output or a higher
+score is not a behavioral improvement by itself.
 
 ## When you cannot measure
 

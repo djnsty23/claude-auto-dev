@@ -10,14 +10,18 @@ paths:
 
 # Agent concurrency
 
-Claude Code's own ceilings are far higher than what is useful here: subagents
+Historical Claude Code observations follow; inspect the current host's actual
+limits and callable tools before dispatch. These values do not configure a
+different host. Claude Code's observed ceilings were higher than useful here: subagents
 default to **20 concurrent** (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`), nesting
 runs **3 deep** (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`), the per-session spawn
 cap was removed entirely in 2.1.224, and a workflow runs
 `min(16, CPUs − 2)` agents at once. Nothing stops a fan-out from exhausting a
 usage window in one turn.
 
-These are the project's own limits. They are lower on purpose.
+The following are upper bounds, not target agent counts. Use the lower of the
+host's available slots, current budget and these bounds; include the coordinator
+when the host counts it. Each delegate needs independent work and owned paths.
 
 ## Caps
 
@@ -37,7 +41,9 @@ tempts you.
 
 ## Model and effort
 
-Pick one of these three. Do not invent combinations.
+The table records this project's Claude preference, not models available on
+every host. Use the configured model by default and only a currently supported
+model/effort combination. Verify actual execution before model-specific claims.
 
 | Tier | Use for |
 |---|---|
@@ -68,9 +74,9 @@ workflow). Spend `xhigh` on the one agent whose judgement decides the outcome,
    agents to review this" is not.
 2. **Check the budget.** If the user set a `+Nk` target, `budget.remaining()`
    governs; a fan-out that would exhaust it should shrink, not proceed.
-3. **Prefer sequential when order matters.** Parallel agents cannot see each
-   other's findings; if agent 2's work depends on agent 1's, running them at once
-   just produces two half-informed answers.
+3. **Prefer sequential when order matters.** Parallel agents start without each
+   other's unfinished findings; if agent 2 depends on agent 1, pass the verified
+   artifact after completion rather than relying on simultaneous execution.
 
 ## What an agent RETURNS is the cost, not which model ran it
 
@@ -148,7 +154,12 @@ it arrives while the thread is walled.** Two things now close that gap:
   turn after the reset, that this session's latest run has walled agents, and
   puts the resume call in the model's context. It never blocks.
 
-**Resume; never relaunch.** A fresh `Workflow({script})` gets a new run id and
+**Prefer a compatible resume.** First confirm the run belongs to this mission,
+its input/authorization still match, and cached outputs still exist and apply
+to the current revision. Reconcile external effects before retrying unfinished
+work; a missing journal result does not prove that nothing happened. If inputs
+changed or this host lacks resume, preserve prior artifacts and dispatch only
+reconciled outstanding work. A fresh `Workflow({script})` gets a new run id and
 re-runs every agent. The session that made the one real resume wrote "nothing
 cached, clean start" and was right only because nothing had finished.
 
@@ -175,13 +186,14 @@ the per-agent cost, not the whole run; without it, it means the whole run.
 The `phase()` convention that makes the choice visible before it runs: every
 entry in `meta.phases` states its width and its re-run cost in `detail`, e.g.
 `{ title: 'Verify', detail: '2 wide, ~15 min each, must not be lost' }` or
-`{ title: 'Scan', detail: '8 wide, ~1 min each, cheap to redo' }`. A phase that
+`{ title: 'Scan', detail: '3 wide, ~1 min each, cheap to redo' }`. A phase that
 must not be lost and has more items than its width runs them in waves:
 
 ```js
 // Bounded blast radius: a wall takes at most `width` agents of this phase,
 // and resumeFromRunId re-runs only those.
 async function waves(items, width, fn) {
+  if (!Number.isSafeInteger(width) || width < 1) throw new Error('positive integer width required');
   const out = []
   for (let i = 0; i < items.length; i += width) {
     const slice = items.slice(i, i + width)
@@ -195,13 +207,14 @@ Note that the built-in `workflow-authoring` reference (the Workflow tool's
 script API) ships with Claude Code and is not in this repo, so this convention
 lives here, where the `**/*.workflow.js` glob loads it.
 
-## The Task tools are gone on current models
+## Discover task tools on the current host
 
-As of 2.1.233, `TaskCreate` / `TaskGet` / `TaskUpdate` / `TaskList` and
+Historical observation in Claude Code 2.1.233: `TaskCreate` / `TaskGet` / `TaskUpdate` / `TaskList` and
 `TodoWrite` are **not available on Opus 4.8, Sonnet 5, Fable 5, and newer**.
 Any skill that lists them in `allowed-tools` will find them missing at run time.
 
-Track multi-step work in `prd.json` — which is this framework's persistent task
+Do not infer current tool availability from that historical model list. Inspect
+the tools exposed to this session. Track durable multi-step work in `prd.json` — which is this framework's persistent task
 system and survives `/clear`, compaction, and a restart, none of which the
 native task list does. Set `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` only if a user
 explicitly wants the native list back.

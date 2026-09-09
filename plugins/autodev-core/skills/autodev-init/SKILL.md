@@ -129,20 +129,25 @@ what remains undecided.
 
 ## Step 6: Wire it in
 
-`.claude/` is ephemeral tooling state and should be ignored — but this one file
-is worth committing. A bare `!.claude/project-rules.md` negation only works if
-`.claude/` is ignored as a directory, so add both, and check the result rather
-than assuming:
+Keep raw tooling state ignored and this one project-rules file committable.
+Read the existing ignore rules first. A negation cannot re-include a file while
+its parent directory is excluded. For a project currently using the exact
+`.claude/` rule, change that rule to `.claude/*` and add
+`!.claude/project-rules.md`; preserve all other exclusions and existing evidence
+exceptions. Re-open any ignored ancestor required by the project's actual layout.
+
+Verify the effective result after the edit:
 
 ```bash
-grep -q "^\.claude/$" .gitignore || printf '\n# autodev tooling state\n.claude/\n' >> .gitignore
-grep -q "project-rules" .gitignore || printf '# ...except the project rules, which are committed\n!.claude/project-rules.md\n' >> .gitignore
-git check-ignore -v .claude/project-rules.md && echo "STILL IGNORED — fix the negation before continuing"
+git check-ignore -q --no-index -- .claude/project-rules.md
+# exit 0 = still ignored; exit 1 = not ignored; any other exit = probe failure
+git status --short -- .claude/project-rules.md .gitignore
 ```
 
-If the repo already ignores only specific paths inside `.claude/` rather than
-the whole directory, leave that alone and just confirm `project-rules.md` is
-committable. Do not restructure someone's `.gitignore`.
+Also verify a scratch report and a memory-session carrier remain ignored.
+`git check-ignore -v` is diagnostic output, not an ignoredness verdict: a
+matching negation is printed too. If the repo already uses selective ignore
+rules, leave their structure intact and add only the needed exception.
 
 Tell the user that `review`, `audit`, and `auto` should read
 `.claude/project-rules.md` and that **it outranks the plugin's generic
@@ -154,9 +159,8 @@ convention wins over a shipped default.
 - Do not write a rule you did not measure.
 - Do not restate general best practice. "Handle errors" is not a project rule;
   "errors surface through `<ErrorState>`, never a toast" is.
-- Do not reformat or refactor anything. This skill only reads and writes one file.
-- Do not run on a repo with fewer than ~10 source files — there is no convention
-  to observe yet. Say so and stop.
+- Do not reformat or refactor source. This skill writes project rules and the minimal ignore-rule wiring needed to preserve them.
+- With few source files, record the small population and leave unsupported conventions Undecided. This limits the inferred rules; it does not stop other already-authorized work.
 
 ## Proving the run
 

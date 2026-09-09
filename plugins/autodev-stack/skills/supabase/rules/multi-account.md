@@ -1,33 +1,17 @@
-# Multi-Account Support
+# Multiple Supabase accounts
 
-Supabase CLI only supports one login. Workaround using per-project tokens.
+Resolve the target project and account from the current project configuration
+and mandate, not a folder-name guess. Verify the installed CLI's `--profile`
+support and relevant command help. Supported profiles or a scoped
+`SUPABASE_ACCESS_TOKEN` can select credentials; neither authorizes a new target.
 
-## Setup (one-time per account)
+Use only configured credentials associated with the verified target. Keep token
+values out of commands shown to the user and out of logs. When changing a
+process environment temporarily, restore its previous value afterwards.
 
-1. **Generate access token:**
-   Supabase Dashboard → Account → Access Tokens → Generate
+If the expected credential is absent or rejected, report that specific gap and
+continue independent work. Do not silently fall back to the default login or
+deploy all functions merely to test authentication.
 
-2. **Save as system env var:**
-   ```
-   SUPABASE_ACCESS_TOKEN_PROJECTNAME=sbp_xxxxx
-   ```
-
-## Usage
-
-Before supabase CLI commands:
-1. Get folder name: `~/code/myproject` → `MYPROJECT`
-2. Look for `SUPABASE_ACCESS_TOKEN_MYPROJECT`
-3. If found, prefix command:
-
-**Windows (PowerShell):**
-```powershell
-$env:SUPABASE_ACCESS_TOKEN = $env:SUPABASE_ACCESS_TOKEN_MYPROJECT
-npx supabase functions deploy
-```
-
-**Mac/Linux:**
-```bash
-SUPABASE_ACCESS_TOKEN=$SUPABASE_ACCESS_TOKEN_MYPROJECT npx supabase functions deploy
-```
-
-No token found? Falls back to default login.
+[Supabase CLI reference](https://supabase.com/docs/reference/cli/introduction)
+documents current profile, login and command-specific target support.

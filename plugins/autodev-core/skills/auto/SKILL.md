@@ -21,7 +21,7 @@ Fully autonomous development. Works through all tasks without stopping until com
 
 ## Current State
 !`git status --short`
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const n=f=>s.filter(f).length;const done=n(x=>x.passes===true);const pending=n(x=>x.passes===null||x.passes===undefined);const failed=n(x=>x.passes===false);const deferred=n(x=>x.passes==='deferred');const setup=n(x=>x.passes==='needs-setup');const other=s.length-done-pending-failed-deferred-setup;const arch=p.archived?(Number.isFinite(p.archived.totalCompleted)?' (+'+p.archived.totalCompleted+' archived)':' (archive present, count unreadable)'):'';console.log('Sprint:',name,'| Done:',done+arch,'| Pending:',pending,'| FAILED:',failed,'| Deferred:',deferred,'| Needs-setup:',setup,'| Total:',s.length,other?'| OTHER: '+other+' (unrecognised passes value)':'')}catch(e){console.log('No prd.json')}"`
+Read `prd.json` with the shared `workPlan` selector below. Report `plan.summary`, including blocked setup and unrecognised states, across all sprints.
 
 ## Entry Flow
 
@@ -87,63 +87,47 @@ When prd.json does not exist:
 
 ## Pre-flight (Smart)
 
-Before first task, run these checks. Use simple commands that won't trigger security filters:
+Before the first task, read the repo's guidance, package manifest and lockfile to
+identify its package manager and actual gate/build/test scripts. A generic npm
+command is not a substitute for the repo's own checks.
 
 ```bash
-# 1. Git status
 git status --short
-
-# 2. Dependencies fresh?
-# Compare timestamps — if package.json is newer than node_modules, run npm install
-ls -lt package.json node_modules/.package-lock.json 2>/dev/null | head -1
-```
-If package.json is newer or node_modules is missing, run `npm install`.
-
-```bash
-# 3. Detect test runner — read package.json with Read tool, check for vitest/jest/playwright in devDependencies
-# Use the detected runner for all test steps in this session
-
-# 4. Build check
-npm run build 2>&1 | tail -5
-
-# 5. Branch check
 git branch --show-current
 ```
-If on main/master, create a feature branch before making changes.
 
-```bash
-# 6. Worktree cleanup
-git worktree prune 2>/dev/null
-```
+Use an isolated worktree for shared-repo changes. Install dependencies with the
+detected manager's lockfile-preserving command when required; timestamps alone
+do not establish that an installation matches the lockfile.
 
-Skip individual checks if they take >10 seconds. Use Read tool to inspect package.json instead of `node -e` one-liners.
+Run the detected checks directly and capture their actual exit codes and output.
+Do not pipe a gate into `tail` or `head`, or suppress errors. A long check needs
+time or a supervised background run; exceeding ten seconds is not a reason to
+skip it. If a required script is absent, identify the appropriate project check
+or report that verification is unavailable before declaring readiness.
 
 ## Task Execution
 
 ### Find Next Task
 
+Resolve `autodevCoreRoot` to the plugin directory containing this loaded skill
+(the parent of `skills/`). Use the shared planner below; do not copy its state
+or dependency predicates into the skill. The planner reads every sprint,
+reports missing/malformed/cyclic dependencies, and keeps blocked work visible.
+
 ```javascript
-// prd.json has two shapes:
-// Flat:   { stories: { "S1-001": {...} }, sprint: "sprint-1" }
-// Nested: { sprints: [{ id: "sprint-1", stories: { "S1-001": {...} } }] }
-const sp = prd.sprints ? prd.sprints[prd.sprints.length - 1] : prd;
-const stories = sp.stories || prd.stories || {};
-const storyEntries = Object.entries(stories);
-// 'deferred' is a decision NOT to do the work — it is not executable and
-// must not be picked up here. The Stop hook applies the same rule, and the two
-// disagreeing is what made auto loop on an already-finished sprint.
-const executable = storyEntries.filter(([id, s]) =>
-  // FIVE states, not four. `needs-setup` is written by step 6 below for work
-  // blocked on an API key or a console nobody has opened — an agent cannot
-  // conjure a credential, so selecting it re-attempts a blocked story every
-  // single run. [measured 2026-08-28] it was being swept back into the queue.
-  // undefined too: a story authored with no `passes` key is pending, not
-  // invisible. Dropping it here meant it was selected by nothing and (until
-  // the OTHER bucket) counted by nothing — gone, not late.
-  (s.passes === null || s.passes === undefined || s.passes === false) &&
-  (s.blockedBy || []).every(dep => stories[dep]?.passes === true)
-);
+const { workPlan } = require(require('path').join(autodevCoreRoot, 'scripts', 'prd-states.js'));
+const plan = workPlan(prd);
+const stories = plan.stories;
+const executable = plan.ready;
 ```
+
+If `executable` is empty and `plan.complete` is false, the sprint is incomplete.
+Read `plan.blocked` and `plan.invalid`; repair an incorrect dependency only from
+evidence, or report the external blocker and keep its state. Missing ids, cycles,
+unknown states, and zero stories must not be reported as completion. The Stop
+hook gives one reconciliation turn, then permits a bounded stop while retaining
+the unresolved reasons. It resumes blocking when dependency-ready work appears.
 
 ### Size-Gate Before Executing
 
@@ -165,8 +149,8 @@ Before starting a task, assess its scope:
 4. **Apply Generation Constraints** (see below) — before writing code
 5. Implement the solution
 6. **Self-Critique** — re-read your diff before running checks (see below)
-7. `npm run typecheck` — fix if fails
-8. `npm run build` — fix if fails
+7. Run the project's type/static checks — fix if they fail
+8. Run its detected build and required gate — fix failures before completion
 9. Self-Verification (see below)
 10. **Visual verification** — if the task touched UI, screenshot it at 390 and 414 through the browser tools. Do not skip this, and do not substitute reading the diff.
 11. **Test generation** — if the task created an API route, auth logic, or data mutation, write at least one test (see below)
@@ -204,9 +188,9 @@ Before marking a task done, verify each acceptance criterion. "Does it compile?"
 | Task Type | Verification |
 |-----------|--------------|
 | UX/UI (public pages) | `computer` screenshots (desktop + mobile) + `read_console_messages` |
-| UX/UI (admin/internal) | typecheck + build only |
-| Feature (UI) | Build passes + visual check if public UI changed + **runtime flow check** (below) when a criterion names what the user sees or gets |
-| Edge Function / API | Deploy + `curl` with real params + verify 200 + response shape matches expected + **runtime flow check** when a criterion names what the user sees after the call |
+| UX/UI (admin/internal) | Browser screenshots (desktop + mobile), console inspection, and complete the affected flow with the correct role |
+| Feature (UI) | Build passes + visual check for every changed UI + complete the primary user flow once + **runtime flow check** (below) when a criterion names what the user sees or gets |
+| Edge Function / API | Exercise the local/preview endpoint with real parameters; verify expected response, authorization and side effects. Production deploy follows `ship` + **runtime flow check** when a criterion names what the user sees after the call |
 | API Integration | Real request with real credentials + verify response contains expected data |
 | Bug fix | Reproduce, verify fixed, no new errors + **runtime flow check** with `observedBefore` taken from the reproduction |
 | Refactor | Typecheck + build + existing tests pass + no behavior change |
@@ -458,24 +442,31 @@ With 1M context, compaction is almost never needed. Do NOT suggest `/compact` un
 
 Be concise but don't sacrifice clarity for brevity.
 
-## Auto-Deploy (After Commit)
+## Deployment (After Commit)
 
-After committing completed tasks, check if changed files need deployment:
+Run the [ship workflow](../ship/SKILL.md) before any deployment, or any push or
+merge that triggers production. Its current eligibility, exact-commit gate,
+ledger and undo requirements apply here too. Existing user authorization
+persists; check what it covers instead of asking again. Resolve or escalate
+ineligible changes under that policy before a production mutation.
+
+Identify the commit currently deployed from the live platform, then inspect the
+entire undeployed range. Set `deployed_commit` to that verified SHA first:
 
 ```bash
-# Check what changed since last deploy/commit
-git diff --name-only HEAD~1
+git diff --name-only "$deployed_commit" HEAD
 ```
 
-| Changed Files | Deploy Action |
-|--------------|---------------|
-| `supabase/functions/*/index.ts` | Deploy changed edge functions (read deploy command from project CLAUDE.md) |
-| `supabase/migrations/*.sql` | Run `supabase db push` or apply migration |
-| `src/**` (Vercel/Next.js) | Push to trigger Vercel auto-deploy |
+Include shared function imports, migrations and configuration, not only entry
+files or the latest commit. If deployed identity cannot be established, report
+the unresolved baseline and resolve it before choosing deployment scope. Read
+the project's deploy configuration; do not infer production settings or relax
+authentication from an example command.
 
-For edge functions, read project-specific deploy config from CLAUDE.md (e.g., path to supabase binary, project ref, flags like `--no-verify-jwt`). If no config found, skip auto-deploy and note it in completion summary.
-
-After deploy, verify the deployment succeeded (check endpoint responds with 200).
+After an authorized deployment, verify the live version and affected behavior
+with the expected role, response data and side effects, and record the evidence
+in the deploy ledger. A successful HTTP status alone does not establish that the
+feature works or that the intended commit is running.
 
 ## Completion
 
@@ -495,11 +486,12 @@ Run `progress` to see full results.
 ## IDLE Detection (Smart Next Action)
 
 If no tasks to work on:
-1. Are all stories `passes: true`? (`deferred` and `needs-setup` do not block
-   completion — the first is a decision not to do it, the second is waiting on a
-   human, and neither is work an agent can advance)
-   - No: find blocked tasks and resolve blockers
-   - Yes: continue to step 2
+1. Re-read the shared plan. Does `plan.complete` hold?
+   - No: name `plan.blocked` and `plan.invalid`, repair a demonstrated graph
+     error, or report the blocker. `needs-setup` remains incomplete; a bounded
+     stop preserves it and is never a completed sprint.
+   - Yes: continue to step 2. Only done/deferred stories remain, with a nonempty
+     population and no unknown states.
 2. **Auto-transition sprint** (see below)
 3. Output completion summary
 4. Assess context to decide next action
@@ -545,7 +537,7 @@ When all pending tasks are done, auto handles the sprint lifecycle — but verif
 
 | Signal | Action |
 |--------|--------|
-| Deferred tasks from previous sprint | Carry forward, start working |
+| Deferred tasks from previous sprint | Preserve the decision; reactivate only when the mandate explicitly changes |
 | Audit/brainstorm created new stories | Bump sprint, continue |
 | Dev server running + UI changes made | Run visual scan, fix issues found |
 | TODOs/FIXMEs in changed files | Create stories, fix them |

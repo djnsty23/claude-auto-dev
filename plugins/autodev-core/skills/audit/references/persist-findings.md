@@ -4,22 +4,21 @@ After aggregating audit results, write findings to prd.json so they survive sess
 
 ## 1. Read current prd.json
 
-```bash
-node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;console.log('sprint:',sp.id||sp.name||p.sprint||'unknown','stories:',Object.keys(sp.stories||p.stories||{}).length)}catch{console.log('no prd.json')}"
-```
-
-If no prd.json exists, create one with `sprint: 1`.
+Load `core` and use the current `prd-states.js` helpers to enumerate all story
+containers and select the intended sprint/work plan. Read the helper API before
+calling it. Distinguish an absent file from malformed/unreadable JSON: only the
+former permits creating a new file. Never overwrite an unreadable backlog.
+Preserve all existing states and use `core`’s schema for a new backlog.
 
 ## 2. Deduplicate against existing stories
 
-Before adding, check if a similar story already exists:
-
-```javascript
-const isDuplicate = (title, file) => Object.values(stories).some(s =>
-  s.title.toLowerCase().includes(title.toLowerCase().slice(0, 25)) ||
-  (file && s.notes?.includes(file))
-);
-```
+Compare root cause, affected operation/entry point, location and observable
+acceptance behavior across existing stories. Title-prefix or same-filename
+matches are candidate links, not proof of duplication: one file can contain
+both an XSS issue and an unrelated authorization issue. Reconfirm whether a
+previously done story’s fix is present on the current revision before deciding
+a new reproduction is already resolved. Preserve distinct defects and link
+related stories without deleting their separate acceptance criteria.
 
 ## 3. Batch trivial findings
 
@@ -27,25 +26,29 @@ Story count is not a quality metric. A sprint of 12 aria-label stories inflates 
 
 - 1-line fixes in the same category and area → one story (e.g. "Add missing aria-labels to components (5 files)")
 - Same root cause, different files → one story with `notes` listing all files
-- Auto-fixable by a grep + sed → one story
+- Mechanically similar fixes → one story only when their root cause and
+  verification are shared; inspect the sites before bulk replacement
 - Distinct root causes → distinct stories
 
 Only split when issues require individual reasoning.
 
 ## 4. Add new stories
 
-ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`).
+Use `core`’s `S{sprint}-{nnn}` ID format (for example `S3-001`), choosing an
+unused ID across all existing story containers. Store audit provenance in
+`notes`, not an incompatible ID prefix. Preserve evidence: revision, file:line,
+reproduction command/flow, observed/expected behavior and acceptance criterion.
 
 ```json
 {
-  "S3-AUD-001": {
-    "id": "S3-AUD-001",
-    "title": "Fix XSS vulnerability in user input",
+  "S3-001": {
+    "id": "S3-001",
+    "title": "Display saved profile names without executing scripts",
     "priority": 0,
     "passes": null,
     "type": "fix",
     "category": "security",
-    "notes": "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
+    "notes": "src/profile.tsx:45 at <revision>: <reproduction command/flow> executes a script from a saved name. Acceptance: saving a script as the profile name displays literal text after reload and no script executes. <evidence path>",
     "resolution": ""
   }
 }
@@ -63,34 +66,27 @@ ID format: `S{sprint}-AUD-{number}` (e.g., `S3-AUD-001`).
 | Test Coverage | qa | 0 | 1 | 2 | 3 |
 | Deploy Readiness | fix | 0 | 1 | 2 | 3 |
 
-## 5. Create session Tasks
+## 5. Optional session task mirror
 
-So `auto` can start fixing immediately:
-
-```typescript
-TaskCreate({
-  subject: "Fix XSS vulnerability in user input",
-  description: "src/api/auth.ts:45 - dangerouslySetInnerHTML with user data",
-  metadata: { type: "security", priority: 0, prdId: "S3-AUD-001" }
-});
-```
+`prd.json` is the durable shared task record. If this host exposes a native task
+UI, inspect its actual schema before mirroring stories and retain the story ID
+in a supported field. Do not assume `TaskCreate` or `metadata` exists, or that
+session-only tasks survive restart and drive the same scheduler.
 
 ## 6. Report
 
-```
-Created [X] stories in prd.json from audit findings.
-- [N] Critical (priority 0)
-- [N] High (priority 1)
-- [N] Medium (priority 2)
-- [N] Low (priority 3)
-- [N] skipped (duplicates of existing stories)
-
-Say "auto" to start fixing (works Critical→Low), or "audit [feature]" to audit specific area.
-```
+Report created/updated stories by severity, confirmed duplicate links,
+unverified candidates and blocked checks, with their evidence paths. If fixing
+is already authorized, proceed through `auto`’s dependency-ready execution.
+Otherwise deliver the audit and concrete proposed fixes at the requested
+boundary; do not silently turn an audit-only request into product changes.
 
 ## 7. Score tracking
 
-Log the score to `.claude/sprint-history.md` and compare against previous audits:
+When ratings are requested, record the rubric, evidence and unmeasured scope
+alongside /10 ratings in `.claude/sprint-history.md`. Compare only equivalent
+populations/checks, and do not use scores or completed-story counts as proof of
+correctness. Example format (fill from actual evidence):
 
 ```markdown
 ## Audit [DATE]
@@ -108,7 +104,12 @@ Log the score to `.claude/sprint-history.md` and compare against previous audits
 Run alongside the agent swarm (bash, not an agent):
 
 ```bash
-npm audit --production 2>/dev/null | tail -15
+npm audit --omit=dev --json
 ```
 
-Include critical/high vulnerabilities in the Security category of the report.
+For an npm project, inspect the installed command/options and retain the full
+JSON, stderr and process exit status. Distinguish advisories from registry/tool
+failures; a nonzero status alone does not identify which. Production-only audit
+omits dev dependencies, so include build/tooling supply-chain scope when relevant
+and report that population separately. Do not run an automatic dependency fix
+without reviewing its changes and verification.

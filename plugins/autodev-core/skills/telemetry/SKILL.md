@@ -29,6 +29,10 @@ of calls and kilobytes, biggest first.
 
 ## Interpreting it
 
+Tool bytes are an observable cost signal, not billed tokens or end-to-end
+latency. They omit model reasoning, repeated context, caching and unrecorded host
+work; compare them with actual usage/outcomes before changing the workflow.
+
 The number that usually matters is **KB per tool**, not calls. Fifty `Bash` calls
 returning a line each are cheap; three `Read`s of a lockfile are not. A session
 that feels slow and shows most of its bytes in `Read` is usually one where a
