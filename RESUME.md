@@ -16,6 +16,12 @@ Worktree `suspicious-turing-04a310`, branches `codex/audit-1-fixes` .. `codex/au
 
 All commits: author and committer `98432064+djnsty23@users.noreply.github.com`.
 
+## Update 10:35, before the session went quiet
+
+- All five branches are on origin as refs (pushed by the coordinator, no PRs). `git ls-remote --heads origin` read back identical to the local heads; `gh pr list --state all --head <branch>` returns 0 for each.
+- My first chain monitor misread the original gate-2's quiet check:suites sweep as a dead run and started a duplicate `npm run gate` in the same gate worktree at 10:29. Stopped the monitor first, confirmed the duplicate's process tree gone by pid and cwd, gate worktree clean at 84c50e9. The original gate-2 (started 10:14) kept running; `gate-2.log` is its output and receives its GATE_EXIT; `gate-2-duplicate-killed.log` is the partial duplicate. A corrected monitor waits for that GATE_EXIT and then runs gates 3, 4, 5 one at a time, refusing to start while any gate process has its cwd in the gate worktree. Never infer a dead gate from a quiet log; a background Bash task is not cut off at the tool's 10-minute ceiling.
+- Conflict lists below were measured against the audit branch's merge-base 097d13f, which is still origin/main at 10:30; re-measure at resume time anyway.
+
 ## Running when this session stopped
 
 Monitor task `bqgjwa8b0` (persistent) in the detached gate worktree `.claude/worktrees/codex-audit-gate`:
