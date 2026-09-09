@@ -31,7 +31,8 @@ cut, with insert throughput rising from about 625k to 900k entries per second.
 
 The reason this needs a rule rather than a code review is that every one of those
 four wastes is **invisible in the source**. The struct reads correctly, the types
-are the obvious ones, and no test can fail. Only `size_of` says anything.
+are the obvious ones, unless a test asserts the relevant size or memory behavior. Layout probes and
+working-set measurements reveal different parts of the cost.
 
 ## 1. Measure the record against its payload, before anything else
 
@@ -42,10 +43,10 @@ println!("{} bytes", std::mem::size_of::<CacheEntry>());
 ```
 
 Compare that number to the bytes you believe you are storing. A ratio above about
-2 means the sections below apply. A ratio near 1 means stop reading and go do
-something else.
+2 means the sections below apply. A ratio near 1 only rules out obvious inline overhead; inspect retained heap
+allocations when this type still accounts for significant process memory.
 
-Go: `unsafe.Sizeof(x)`, and `fieldalignment` in `go vet`. C and C++: `sizeof`,
+Go: `unsafe.Sizeof(x)` and the separately installed `fieldalignment` analyzer. C and C++: `sizeof`,
 and `pahole` prints padding per field. Zig: `@sizeOf`. Swift:
 `MemoryLayout<T>.size` alongside `.stride`, which are not the same number.
 
@@ -71,8 +72,8 @@ enum Record {
 }
 ```
 
-Clippy has `large_enum_variant` for exactly this and it is off by default in most
-setups. Turn it on. The same shape appears as a tagged union in C, and in Go as a
+Inspect the installed Clippy `large_enum_variant` lint and project lint policy;
+run the configured lint command. Its default warning does not mean CI executes it. The same shape appears as a tagged union in C, and in Go as a
 struct with mutually exclusive fields, which is worse because nothing warns.
 
 **The trade is real and must be measured, not assumed.** Boxing adds a pointer
@@ -89,9 +90,9 @@ inline.
 capacity field only means something if you intend to grow, and a cache entry is
 written once and read forever.
 
-The second-order win is larger than the 8 bytes. Growth doubles, so a vector
-holding 3 items owns 4 slots and one holding 5 owns 8. Average slack is 25 to 50
-percent of the allocation and it appears in no struct-size calculation at all.
+The second-order win is larger than the 8 bytes. Growth can leave spare capacity; its strategy and amount depend on the
+container, construction path and toolchain. Measure actual length/capacity and
+allocator usage; heap slack does not appear in a struct-size calculation.
 
 - `Vec<T>` to `Box<[T]>` with `.into_boxed_slice()`
 - `String` to `Box<str>` with `.into_boxed_str()`
@@ -99,9 +100,10 @@ percent of the allocation and it appears in no struct-size calculation at all.
 
 Across eight such fields that is 64 bytes per record before counting the slack.
 
-Go has no boxed-slice type, so the equivalent is allocating at exact capacity and
-calling `slices.Clip` on anything retained long term. A slice header is 24 bytes
-whatever you do.
+Go's `slices.Clip` only limits the slice's exposed capacity; it retains the
+same backing array. To release an oversized backing allocation, copy live
+elements into a new appropriately sized slice and ensure no aliases retain the
+old array. Header sizes here assume a 64-bit target. See the [Clip contract](https://go.dev/pkg/slices/#Clip).
 
 ## 4. A field the key already determines does not need storing
 
@@ -116,8 +118,10 @@ owner: Option<Box<str>>,
 
 `Option<Box<str>>` is the same size as `Box<str>`, because a `Box` is never null
 and Rust puts the `None` case in the null pointer value. The discriminant is
-free. The same holds for `Option<&T>`, `Option<NonZeroU32>` and any type with a
-spare bit pattern. `Option<u32>` is **not** free and costs 8 bytes, because every
+free. Rust guarantees this for specific types such as `Option<&T>` and
+`Option<NonZeroU32>`; do not generalize to every spare bit pattern or wrapper.
+For example, `UnsafeCell` can prevent niche optimization in an outer `Option`.
+Consult the [Option representation guarantees](https://doc.rust-lang.org/std/option/#representation). `Option<u32>` is **not** free and costs 8 bytes, because every
 `u32` bit pattern is valid.
 
 Look for any field derivable from the key, from a parent, or from a sibling
@@ -140,19 +144,24 @@ additional_start: u16,
 It also turns three allocations into one, which removes two allocator headers
 that `size_of` never showed you, and puts every record on one contiguous run.
 
-## 6. Field order costs nothing in Rust and real bytes almost everywhere else
+## 6. Measure field layout on the actual target
 
-`repr(Rust)` reorders fields to minimise padding. `repr(C)`, C, C++ and Go do
-not, so declaration order is layout order and a `bool` between two `u64` fields
-costs 14 bytes of padding.
+Rust's default representation permits reordering but does not guarantee an
+optimal or stable layout. See the [Rust layout contract](https://doc.rust-lang.org/reference/type-layout.html).
+For ABI-constrained or declaration-ordered layouts, measure internal and tail
+padding together. Moving one field can merely move the same wasted bytes.
 
 ```c
 struct bad  { uint64_t a; bool flag; uint64_t b; };  /* 24 bytes */
-struct good { uint64_t a; uint64_t b; bool flag; };  /* 17, padded to 24 */
+struct same { uint64_t a; uint64_t b; bool flag; };  /* also 24 on an 8-byte-aligned target */
+struct sparse { bool x; uint64_t a; bool y; uint64_t b; }; /* 32 there */
+struct compact { uint64_t a; uint64_t b; bool x; bool y; }; /* 24 there */
 ```
 
-Sort fields widest first in any `repr(C)`, C, C++ or Go struct. `pahole` and
-`go vet -fieldalignment` both find these without thinking.
+Compare candidate field orders using alignment as well as width. Preserve
+public ABI, wire/FFI layout and unsafe-code assumptions; a smaller layout can
+break those contracts. `pahole` and Go's separate `fieldalignment` analyzer can
+identify candidates; neither substitutes for target-specific measurement.
 
 ## 7. `size_of` is a claim about the type, not about the memory you get back
 

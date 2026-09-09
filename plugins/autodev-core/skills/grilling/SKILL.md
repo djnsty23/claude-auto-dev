@@ -28,8 +28,9 @@ questions that can be answered right now, without waiting on another open one.
 Work in rounds:
 
 1. Compute the frontier.
-2. Ask the whole frontier in ONE round. Not one question at a time: a plan
-   interrogated serially takes twenty turns and the user stops answering.
+2. Resolve frontier items from current evidence and existing user decisions first.
+   Choose reversible, in-scope defaults. Bundle only consequential unresolved
+   intent/tradeoff questions into a concise round; continue independent work.
 3. Each answer settles a decision and expands the frontier with whatever it
    unblocked.
 4. Repeat until the frontier is empty.
@@ -58,13 +59,12 @@ Every question carries **your recommendation**, and the reason lives in the
 first clause. A question without one pushes the ranking work back onto the
 person you are supposed to be helping.
 
-- **Frontier of 4 or fewer** — use `AskUserQuestion`. It is clickable and the
-  answers come back structured.
-- **Frontier larger than 4** — use numbered prose instead. `AskUserQuestion`
-  caps at four questions of four options, so a wider frontier would have to be
-  truncated, and silently dropping a decision from a design tree is far worse
-  than a less clickable turn. Number them so the user can answer `1b, 2a, 3 —
-  own everything`:
+- **A small frontier** — use the current host's question tool and actual schema.
+  Do not assume `AskUserQuestion` exists or that tool limits transfer between hosts.
+- **A wider frontier** — persist the full decision tree and ask the smallest
+  consequential set that unlocks work. Do not dump every leaf on the operator.
+  If no question tool exists, use concise prose. For a user-requested broad
+  design interview, a numbered format can support a grouped answer:
 
 ```
 Q1 — <the decision, as a question>
@@ -97,4 +97,6 @@ that were settled with their answers. That block is the artifact — it goes int
 `DECISIONS.md` or the spec, because a decision that lives only in this
 conversation is invisible to the next session and will be re-made differently.
 
-Then say what you are going to do first.
+Then execute the authorized next step. In an away mission, record defaults and
+revisit them when evidence changes. Missing consequential intent blocks only
+its dependent branch; silence supplies neither new permission nor a decision.

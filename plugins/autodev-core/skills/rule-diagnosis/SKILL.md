@@ -71,16 +71,17 @@ comment, a PR body and a memory file all record what was true WHEN THEY WERE
 WRITTEN.** They do not update when the world moves, and nothing marks the moment
 they stop being true.
 
-For "is this built, and how does it work today", the authoritative sources are the
-repo's own agent-facing instructions — `AGENTS.md`, `CLAUDE.md`, `README` — plus
-the config that activates the thing and the git log. Read those first. They are
-maintained precisely because they are read first.
+For "is this built, and how does it work today", read the repo's guidance to
+locate the intended implementation, then inspect current code, activating
+configuration and a direct behavior/readback on the relevant revision/target.
+`AGENTS.md`, `CLAUDE.md` and `README` can drift too. They govern repository
+conventions but their descriptions do not prove installed or deployed state.
 
 | the question | what answers it | what merely mentions it |
 |---|---|---|
-| is this capability live? | `AGENTS.md` / `CLAUDE.md`, the env var that switches it, the deploy | a migration header, a TODO, a memory file |
+| is this capability live? | target identity, active configuration and a successful real invocation tied to the deployed artifact | docs, a migration header, a TODO, a memory file |
 | which backend does it use? | the config the running code reads | a credentials map, which is authoritative about credentials and silent about consumers |
-| did this land? | `git log`, `gh pr view` | a commit body saying "fixes", a doc saying "planned" |
+| did this land? | target branch ancestry for integration; installed/deployed artifact readback for release | commit message, PR status alone, a doc saying "planned" |
 
 **The incident.** `[measured 2026-08-27]` A session read the header of a migration
 dated six weeks earlier, which described a data-in-git problem in the present
@@ -188,8 +189,9 @@ diagnosis that was skipped.
 - [ ] I read the real failure text, not a count or a status line.
 - [ ] For any claim about WHO said or did something, I opened the message rather
       than recalling it.
-- [ ] At least one PRIMARY source is in my evidence: the agent-facing docs,
-      the activating config, or the git log. Not only a comment or a memory file.
+- [ ] The evidence answers this layer: code/config for implementation, target
+      artifact and observed behavior for live state. Guidance and history alone
+      do not prove a capability is active.
 - [ ] If something went red after a change, I attributed it before fixing it.
 - [ ] Where I could not measure, I said so and said which way I am guessing.
 - [ ] If I am proposing a new gate, I said why diagnosis alone will not hold.

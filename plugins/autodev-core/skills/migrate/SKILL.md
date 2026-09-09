@@ -17,23 +17,22 @@ Safe dependency updates with breaking change detection and resolution.
 | Command | What It Does |
 |---------|-------------|
 | `migrate` | Check all outdated deps, suggest updates |
-| `migrate all` | Update all safe deps (patch + minor) |
+| `migrate all` | Update authorized patch + minor candidates |
 | `migrate react` | Update specific package |
 | `upgrade` | Same as migrate |
 | `outdated` | Just show outdated deps, no changes |
 
 ## Step 1: Audit Current State
 
-```bash
-# List outdated packages
-npm outdated 2>/dev/null || true
+Read the lockfile, package manager and actual project gate first. For npm,
+capture `npm outdated --json` and `npm audit --json` with their real exit status
+and full output. An outdated/vulnerability result can be nonzero; distinguish
+that result from network, authentication or malformed-output failure. Missing
+metadata is unknown, not zero vulnerabilities. Do not silence stderr or use
+`|| true` as the verdict.
 
-# Check for known vulnerabilities
-npm audit --json 2>/dev/null | node -e "const d=require('fs').readFileSync(0,'utf8');try{const a=JSON.parse(d);console.log('Vulnerabilities:',a.metadata?.vulnerabilities?.total||0)}catch{}"
-
-# Current package counts
-node -e "const p=require('./package.json');console.log('deps:',Object.keys(p.dependencies||{}).length,'devDeps:',Object.keys(p.devDependencies||{}).length)"
-```
+Record dependency populations and exact installed/requested versions before
+changing them. Consult the package's official version-specific migration notes.
 
 ## Step 2: Classify Updates
 
@@ -41,26 +40,36 @@ Sort all outdated packages into safety tiers:
 
 | Tier | Type | Action |
 |------|------|--------|
-| **Safe** | Patch updates (1.2.3 → 1.2.4) | Auto-update |
-| **Safe** | Minor updates (1.2.3 → 1.3.0) | Auto-update |
+| **Candidate** | Patch updates (1.2.3 → 1.2.4) | Update within the authorized scope, then verify |
+| **Candidate** | Minor updates (1.2.3 → 1.3.0) | Update within the authorized scope, then verify |
 | **Review** | Major updates (1.x → 2.x) | Check changelog for breaking changes |
 | **Critical** | Security vulnerabilities | Prioritize regardless of version jump |
 | **Skip** | Pinned for a reason | Check if pin reason still applies |
 
-## Step 3: Safe Updates (Patch + Minor)
+## Step 3: Patch and minor candidates
+
+The following all-package example applies only to `migrate all`. For a named
+package, restrict the update to that package and its required compatible peers;
+inspect the package-manager diff before installing. Do not use an all-dependency
+command for a targeted request.
 
 ```bash
-# Update all patch and minor versions
+# Update all authorized patch and minor candidates
 npx npm-check-updates -u --target minor
 npm install
 
 # Verify nothing broke
-npm run typecheck 2>/dev/null
+npm run typecheck
 npm run build
-npm test -- --passWithNoTests --watchAll=false 2>/dev/null
+npm test
+# Use these only if they are the actual project scripts; retain each exit status.
+# An absent test suite is a verification gap, not a pass.
 ```
 
-If any check fails, revert and update one package at a time to isolate the issue.
+Patch/minor labels are compatibility intent, not a safety guarantee. If a check
+fails, preserve its output, restore only this attempt's dependency edits, and
+isolate the responsible package. Do not discard unrelated work. Run the actual
+project gate and affected runtime flows before calling the migration complete.
 
 ## Step 4: Major Updates (One at a Time)
 
@@ -82,7 +91,7 @@ For each major update:
 2. **Update and test:**
    ```bash
    npm install [package]@latest
-   npm run typecheck 2>/dev/null
+   npm run typecheck
    npm run build
    ```
 
@@ -116,8 +125,8 @@ Dependency Migration
 ═══════════════════
 
 Updated: [N] packages
-- [N] patch updates (safe)
-- [N] minor updates (safe)
+- [N] patch updates (verified scope named)
+- [N] minor updates (verified scope named)
 - [N] major updates (breaking changes resolved)
 - [N] security fixes
 
@@ -126,7 +135,7 @@ Skipped: [N] packages
 
 Vulnerabilities: [before] → [after]
 
-All checks pass: typecheck ✓ build ✓ tests ✓
+Checks: [actual commands, exit statuses and observed scope; missing checks named]
 ```
 
 ## Rules

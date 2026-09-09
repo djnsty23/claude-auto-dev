@@ -15,10 +15,11 @@ app, so this runs the shared registry across all of them at once rather than one
 repo at a time.
 
 **The default filter is REACHABLE FROM OUTSIDE.** That is deliberate and it is the
-thing that makes the output worth reading. A sweep with no filter returns two
-hundred items, most of them style, and gets ignored. A sweep that only reports what
-an unauthenticated stranger on the internet can trigger returns a handful, and every
-one of them is worth a commit. Widen the filter only if the user asks.
+thing that makes the output worth reading. Define untrusted actors at the actual
+boundary, including authenticated low-privilege users when they can cross a
+permission boundary. Do not equate “reachable” with “unauthenticated only”; that
+would omit tenant-isolation and privilege-escalation defects. Keep style findings
+separate from security claims.
 
 ## Run it
 
@@ -68,9 +69,9 @@ Ask what is actually being worked on, or read it off the fleet:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/fleet-status.js" --days 2
 ```
 
-Sweep those. A repo nobody has touched in a month is not where a newly-introduced
-class will be, and the whole premise here is that a defect propagates through
-recent work.
+Intersect observed activity with the current authorized repository scope.
+Activity is a prioritization signal, not permission to mutate every visible repo.
+Include older affected repositories when the shared defect or mandate calls for it.
 
 **Never sweep a client repo into a shared report.** Check `git remote get-url origin`
 first and exclude anything that is not the user's own.
@@ -82,8 +83,9 @@ adversarial verification, the ones that were **refuted** and why, what was fixed
 its mutation test, what was skipped as needing a human call, and the gate result.
 
 **Read the refuted list.** It is not filler — it is how you tell a real sweep from a
-generator. A report that refuted nothing did not verify anything, and a detector that
-cries wolf gets muted, which is how the real one gets missed.
+generator. Zero refutations alone says nothing about verification quality; read
+the actual adversarial checks and controls. A detector that repeatedly cries wolf
+needs its inputs and criteria corrected.
 
 **Read `couldNotCheck` before you believe any zero.** A static read cannot see
 runtime, live RLS policies, or deployed configuration. Silence must never be reported
@@ -129,9 +131,10 @@ one careless stage from being committed.
 ## Fixes commit, they do not push
 
 Each fix agent works in its own git worktree, because other sessions have
-uncommitted work in the main clone. It commits and stops. Pushing needs the user's
-explicit yes in the turn — these repos deploy on push, so a push is a production
-deploy wearing different clothes.
+uncommitted work in the main clone. Default delivery is a locally verified commit.
+If the existing mandate includes publishing, continue through `ship` after its
+checks; otherwise retain the publish boundary as pending. Resolve whether push
+or merge deploys before executing it. Authorization persists across turns.
 
 ## Feeding the registry
 

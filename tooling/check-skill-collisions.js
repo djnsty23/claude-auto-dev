@@ -73,14 +73,18 @@ const MIN_TOKEN_LEN = 5;
 // rare shared words locate pairs built from one TEMPLATE, which correlates with
 // competing for a situation without being the same property.
 const TRIAGED = new Map([
+    ['auto-brain|brain',
+        'Intentional entry-point wrapper: auto-brain handles an explicitly away ' +
+        'mission and loads brain\'s single procedure. It does not carry a second ' +
+        'implementation or independent completion/authorization rules.'],
     ['framework-radar|marketing-radar',
         'Same template, different domain. Both triggers name their domain in the ' +
         'first clause. The discriminating words appear in more than two ' +
         'descriptions, so they are not corpus-rare and this signal cannot see them.'],
     ['grilling|rule-diagnosis',
-        'Different moments: before building a plan, versus before stating a cause. ' +
-        'rule-diagnosis is unconditional and already resident, so it is not ' +
-        'competing to be found.'],
+        'Different purposes: grilling resolves consequential plan decisions; ' +
+        'rule-diagnosis establishes evidence for a proposed cause. A plan can ' +
+        'need both. Their overlap does not require selecting one implementation.'],
     ['learn-from-fixes|preflight',
         'Sequential, not competing. preflight\'s trigger names learn-from-fixes as ' +
         'its predecessor.'],

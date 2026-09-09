@@ -9,7 +9,10 @@ user-invocable: true
 
 # Stripe Integration Best Practices
 
-Based on [stripe/ai](https://github.com/stripe/ai) (MIT). Latest API version: 2026-01-28.
+Based on [stripe/ai](https://github.com/stripe/ai) (MIT). Read the installed SDK,
+account/request API version and webhook endpoint version before changing an
+integration. Do not treat a date cached in this skill as the latest version.
+See [Stripe versioning](https://docs.stripe.com/api/versioning).
 
 ## API Selection
 
@@ -20,9 +23,9 @@ Based on [stripe/ai](https://github.com/stripe/ai) (MIT). Latest API version: 20
 
 ### Payment Intents (for off-session or custom flows)
 - Use when you need full control over the checkout UI
-- Required for off-session payments (saved cards, recurring)
+- Match the chosen off-session flow to Stripe's current integration guide; subscriptions can be managed through Billing
 
-### Deprecated (never use)
+### Legacy integrations to review
 - **Charges API** - migrate to Checkout Sessions or Payment Intents
 - **Sources API** - use Payment Methods instead
 - **Tokens API** - use Confirmation Tokens for card inspection
@@ -55,7 +58,9 @@ Keep `sk_` keys server-side only. Only `pk_` keys may be exposed to the browser.
 
 ## Webhook Verification
 
-Always verify webhook signatures:
+Verify webhook signatures on the raw body. The following is a routing skeleton,
+not a complete fulfillment handler; its comments must become durable, tested
+business operations before it can acknowledge a handled event:
 
 ```typescript
 import Stripe from 'stripe';
@@ -92,6 +97,20 @@ export async function POST(req: Request) {
   return new Response('OK', { status: 200 });
 }
 ```
+
+## Delivery and business correctness
+
+Persist event identity and make each business transition idempotent. Test
+duplicate deliveries, concurrent handlers, retries after a partial failure and
+events arriving out of order. Retrieve authoritative object state when required;
+a timestamp alone is not a deduplication or ordering key. See
+[Stripe webhook guidance](https://docs.stripe.com/webhooks).
+
+Separate receipt from fulfillment: acknowledge handled events only after durable
+acceptance for processing, and verify the resulting order/entitlement state.
+Cover delayed payment success/failure, cancellation and denied access as relevant
+to the selected payment methods. A successful checkout page or webhook HTTP 200
+alone does not establish payment or fulfillment.
 
 ## Subscriptions
 
@@ -135,7 +154,7 @@ try {
 
 ## Pre-Launch Checklist
 
-- [ ] Switch from test keys to live keys
+- [ ] Test-mode flows and failure/replay cases pass; switching to the verified live account is within the existing release authorization
 - [ ] Webhook endpoints configured for production
 - [ ] Error handling covers all Stripe error types
 - [ ] Idempotency keys on create/update operations

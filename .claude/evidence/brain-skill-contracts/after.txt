@@ -1,0 +1,14 @@
+Reviewed library candidate, local source changes only.
+All68 shipped skills received semantic review and targeted updates across two phases.
+Hash-checked adoption:64 skill files +12 references, four independently verified overlays;
+Brain, Auto Brain, Auto and Spec were corrected in the prior source commit.
+node tooling/test-skill-prd-commands.js =>68 skills,2 inline commands,1 PRD command;
+PASS for six independently pinned states in flat and earlier-sprint layouts.
+node tooling/test-skill-prd-commands-selftest.js =>10/10 pass, exit0.
+Independent removal of either new safeguard fails its corresponding assertion.
+node tooling/test-skill-collisions.js =>11 pass,0 fail.
+node tooling/check-skill-tool-declarations.js =>68/68 declare tools,0 flagged.
+npm run validate =>19 PASS,0 FAIL,1 WARN: host did not scan the hooks module.
+Full exact-candidate gate is recorded separately after this commit.
+Provider workflows, installed runtime and arbitrary unattended mission success
+are not established by these command/contract checks.

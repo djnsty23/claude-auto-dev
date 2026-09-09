@@ -25,8 +25,9 @@ green and nothing working.
 
 So the bar is not "produced a backlog". It is **every story names something a
 person can do, and says how you would know it works.** `check-spec-output.js`
-enforces that mechanically; the rules below are how to satisfy it honestly rather
-than by wording around it.
+catches structural omissions and several vague wording patterns. A pass does
+not establish that the plan is complete or its acceptance conditions useful;
+review the actual core loop before handing it to a worker.
 
 ## Step 1 — Infer hard, ask at most once
 
@@ -99,9 +100,11 @@ Follow the `core` skill's story shape exactly. Two fields carry the weight here:
 Everything else: `passes: null`, `realness: null`, `priority` 0-3 with at most a
 couple of 0s, `type` from fix/feature/refactor/qa/perf.
 
-Order by dependency, not importance — the first story should be the one with
-nothing in front of it. Group 5-8 into sprint 1 and leave the rest unsprinted;
-a 40-story sprint 1 is a wish, not a plan.
+Record dependencies as `blockedBy: ["S1-001"]`, not just ordering in prose.
+The first story should have nothing in front of it. Group 5-8 into sprint 1
+and put later work in later sprints using the same container shape. Do not mix
+root-level stories with sprint-level stories: runtime readers prefer the latter
+and can hide the former. Keep every story id unique across the fresh spec.
 
 ## Step 5 — Verify before handing over
 
@@ -109,25 +112,36 @@ a 40-story sprint 1 is a wish, not a plan.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/check-spec-output.js" prd.json supabase/migrations/0001_init.sql
 ```
 
-It fails on generic titles, ids that do not match `S{n}-{nnn}`, stories that are
-already marked done, acceptance criteria that lean on "works" / "correctly" /
-"as expected" instead of saying what is observably true, and any table created
-without RLS. **A failure is a real finding about the plan, not a
-formatting nit** — a story it rejects as generic is one `auto` could not have
-finished either.
+Resolve the installed scripts directory from this skill when the plugin-root
+environment variable is unavailable. Pass the actual PostgreSQL initial-schema
+path; a supplied missing or empty file is a failure. For another backend, omit
+that argument and run its native schema checks separately, naming what ran.
+
+The checker rejects malformed/duplicate stories, several generic title and
+acceptance patterns, and new PostgreSQL tables without explicit RLS and policy
+declarations. Comments and strings do not count. It supports ALTER TABLE for
+RLS settings only, and refuses other ALTER/DROP lifecycle forms (except DROP
+POLICY). Put initial columns and constraints in CREATE TABLE.
+Use direct declarations in the initial schema; execute migrations in an isolated
+database to verify SQL and the actual access model. A policy declaration does
+not prove ownership, operation coverage or grants. Verify authorized and denied
+access with real queries before calling the data layer complete.
+
+Read each rejection: wording heuristics can reject concrete criteria too.
+Clarify the observable instead of inferring that the feature is impossible.
 
 Then report:
 
 ```
 Spec: <name>
   SPEC.md         — core loop, N assumptions, M non-goals
-  0001_init.sql   — T tables, all with RLS
+  0001_init.sql   — T tables, RLS/policy declarations checked; runtime pending
   prd.json        — S stories in sprint 1, K held back
 
 Assumptions I made without asking: <list>
 
-Say 'auto' to start building, or correct any assumption first — they are one
-line each in SPEC.md.
+Next: continue to setup-project and auto when implementation was requested;
+otherwise hand over the spec and its assumptions.
 ```
 
 Surfacing the assumptions in the handover is the cheap half of this skill. The

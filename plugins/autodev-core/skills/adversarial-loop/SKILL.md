@@ -1,6 +1,6 @@
 ---
 name: adversarial-loop
-description: "Run a cross-vendor tests-first review loop: an adversary model authors failing acceptance tests, the building agent fixes against them, and bounded review rounds end on an exact verdict token. Use for changes where a wrong fix is expensive — gates, harnesses, security paths, anything that grades other code."
+description: "Run an independent-context tests-first review loop: an adversary model authors failing acceptance tests, the building agent fixes against them, and bounded review rounds end on an exact verdict token. Use for changes where a wrong fix is expensive — gates, harnesses, security paths, anything that grades other code."
 when_to_use: "Invoked for high-stakes fixes and audits: the user says \"adversarial loop\", \"tests-first review\", or asks a second model to audit a change before merge."
 allowed-tools: Bash, Read, Grep, Glob, Task
 user-invocable: true
@@ -12,7 +12,9 @@ argument-hint: "[audit|round <n>|verdict]"
 Two agents with asymmetric roles and separate contexts, tests before fixes —
 a second vendor is one way to get that separation, not a requirement (see
 the tool-posture section). The building agent never grades its own work, and
-the adversary never merges its own opinion — the merge condition is a green gate plus an exact verdict token.
+the adversary never merges its own opinion. Review convergence requires a green
+required gate and the exact verdict for the reviewed candidate; landing also
+follows the current authorization, ownership and `ship` requirements.
 
 This exists because diff review after the code is written cannot catch the
 worst class: a suite that passes without asserting anything. A reviewer reading
@@ -22,9 +24,11 @@ not comments.
 
 ## Roles
 
-- **Adversary** (a different vendor's model): audits the subject, writes
+- **Adversary** (an independent context; another vendor is optional): audits the subject, writes
   acceptance tests that FAIL on current code, and reviews each fix round. It
-  never edits the fix branch and never runs the gate.
+  never edits the fix branch. Give it a private scratch/test worktree and enough
+  tooling to reproduce findings and run its acceptance checks; keep competing
+  mutation sweeps isolated.
 - **Builder** (this session): confirms each finding against the real code
   before starting, implements, runs the complete gate, and owns the evidence.
   It never edits the test branch.
@@ -49,8 +53,9 @@ So the split is not "a second opinion". It is:
 
 The builder ships past contract defects precisely because its own tests encode
 its own assumptions. That is the gap the adversary fills, and it is narrow: the
-adversary cannot run your gates, cannot see your tree, and will keep producing
-ever-narrower findings well past the point of value.
+adversary needs the actual subject and executable controls, as specified below;
+its separate context does not excuse unverified claims. Bound its scope and
+review rounds so increasingly narrow findings do not consume an unlimited run.
 
 ### The adversary needs TOOLS, or you are buying assertions
 
@@ -92,7 +97,13 @@ Three rules follow, and they outrank the routing table above:
 And when comparing two reviewers: **an A/B is void unless their tool grants
 match.** Check that before believing any comparison, including the one above.
 
-## Reach the adversary over MCP, not a desktop app
+## Use the actually available agent transport
+
+Resolve the current host's agent capability and exposed schema before dispatch.
+The MCP names and measurements below describe that measured deployment; they
+do not prove those tools exist on another host. A native worker acknowledgment
+and recorded owner/return artifact establish dispatch, not a clickable task chip.
+Preserve scope and current authorization across rounds.
 
 `[measured 2026-08-31]` The same audit was driven by computer-use into a
 desktop app, and the transport — not the model — produced most of the waste:
@@ -181,10 +192,15 @@ already agreed with you.
 4. **Review round.** The adversary gets the commit range (`git diff
    <test-tip>..<fix-tip>`) as a REPLY into the loop's existing thread, not a
    fresh call, and answers with either new blockers or the exact
-   token `VERDICT: CLEAN`. Nothing else counts as approval — prose verdicts
-   get misread, so the token is agreed up front and matched exactly.
-5. **Loop or land.** Blockers go back to step 2 or 3. On the token AND a green
-   gate, merge. Neither alone is sufficient.
+   token `VERDICT: CLEAN`, bound to the exact reviewed candidate SHA/range and
+   acceptance contract in the round record. A token from another round, stale
+   candidate or failed review transport is not approval. Keep unresolved findings
+   visible alongside the token.
+5. **Loop or land.** Blockers go back to step 2 or 3. With the matching verdict
+   and required green gate, the review is complete. Merge only within the current
+   mandate and after ownership/integration checks; invoke `ship` before a merge
+   or push that triggers production. Neither a review token nor a test result
+   supplies release authority or live acceptance evidence.
 
 ## Bounding the rounds, and why a round cap is not the bound
 
@@ -193,7 +209,10 @@ run of this loop was capped at 5 and ran to 24, because every round raised a
 **real** blocker in the previous round's fix. Nobody was padding. The
 adversary was asked whether it had softened under pressure and answered that
 it had rejected "clean" through four consecutive rounds and reached it on a
-full outcome truth table. A cap you would be wrong to enforce is not a bound.
+full outcome truth table. The overrun does not justify discarding budgets. At the authorized time/round
+bound, record unresolved findings and a durable continuation or blocked outcome.
+Do not call the code clean merely to fit the budget, and do not silently expand
+the run because another real defect arrived.
 
 What actually converges the loop is narrowing what each round may reopen:
 
@@ -208,9 +227,11 @@ What actually converges the loop is narrowing what each round may reopen:
 - **Run the targeted check during iteration and the complete gate at
   convergence.** Fourteen full 85-suite gate runs were safe and mostly
   wasted; the affected suite answers a micro-fix in seconds.
-- **A human reads the delta every round** — raised, fixed, refuted — and
-  decides whether another round buys anything. That judgement is cheap
-  outside the loop and re-bills a full context inside it.
+- **The supervising agent reads the delta every round** — raised, fixed,
+  refuted — and decides within the current mandate whether another round is
+  useful. Escalate an unresolved scope, authority or design decision only when
+  it cannot be resolved from available evidence; routine review does not require
+  the user to transport or approve every round.
 
 ### Make the decay observable: a round log
 
@@ -271,9 +292,10 @@ The stop rule, computed by the caller from the log:
   converge by being attacked again.
 - **A repeated subject is a prompt to look, never evidence on its own.** It
   tells you to read the dispositions; it does not tell you the loop is done.
-- **New scope is a separate loop, always.** A finding that does not map to a
-  frozen acceptance test is the next audit's input. Logging it in the `new
-  scope` column is how it survives without extending this run.
+- **New scope becomes a separate work item.** Log its evidence, impact and
+  owner instead of silently expanding this loop. A newly discovered release
+  blocker still prevents landing the affected candidate; moving it outside the
+  frozen test set cannot turn a known unsafe outcome into an eligible release.
 
 ### The stop rule that matters most: a rising `wrongly fixed` count
 
@@ -297,7 +319,9 @@ worthless and no round converged. The adversary was not padding: each finding
 came with a runnable counterexample, and the builder independently reproduced
 the last one before accepting it.
 
-**A rising `wrongly fixed` count means the DESIGN is wrong, not the patches.**
+**A rising `wrongly fixed` count is a reason to pause and diagnose.** Check the
+reproductions, acceptance contract, implementation and environment before naming
+a cause. A design flaw is one explanation, not a conclusion implied by the count.
 That run refuted three designs for the same sub-problem — parenthesis
 balancing, then continuation-on-a-trailing-operator, then a fixed radius — and
 each replacement was a considered response to the previous refutation. The
@@ -311,10 +335,10 @@ Two things to do instead of round six:
   know it. That run needed a JavaScript parser to find where a call ends. No
   parser was available, so every design was an approximation, and approximating
   is fine — claiming gate-grade precision from one is not.
-- **Downgrade rather than keep patching.** A check whose false positives are
-  demonstrated must not gate; advisory costs a wrong line of output, gating
-  costs a wrong red build and then gets muted. Landing it advisory keeps the
-  real value and drops the false claim.
+- **Reconsider an unsound check rather than patching indefinitely.** Repair its
+  semantics or propose an advisory role with the measured limits. Changing a
+  required gate into advice needs the current owner's mandate and an explicit
+  account of the protection lost; it is not an automatic way to get green.
 
 **Record the run as unconverged and say so.** A loop that stops without a clean
 verdict is an honest outcome with a written reason. A loop that keeps going
@@ -363,8 +387,9 @@ Two sweep rules that bite here:
   the run twice.
 - **The repo is the only shared memory.** Findings and test contracts live in
   committed files, never in one session's chat. The round log is the exception
-  and lives in the gitignored reports directory; it is durable by being
-  appended every round rather than by being committed. The other vendor
+  and lives in the gitignored reports directory. Appending each round preserves
+  progress across interrupted turns, but it is still local-only; preserve an
+  approved private copy before removing its worktree. The other vendor
   cannot read your context window.
 
 ## A timeout aborts the call, not the process
@@ -432,9 +457,10 @@ it. Recovering it from the delegate's session log:
 | Stitched result | 11 of 11 findings, 27,609 chars |
 
 So a recovery script cannot take the last write or the biggest one. It has to
-**collect every payload, split on headings, and keep the longest copy of each**
-— a later append can extend a section an earlier one truncated, so longest-wins
-rather than last-wins. Byte count will not match the original, because the log
+**collect payloads in event order and distinguish append, replacement and explicit
+correction**. Preserve provenance and conflicts when an operation is unclear. A
+longer earlier section can contain a defect that a shorter correction removes;
+neither longest-wins nor last-wins reconstructs arbitrary edits safely. Byte count will not match the original, because the log
 holds what was written and not the file's final assembly; count the SECTIONS
 recovered against the sections you expect.
 
@@ -484,14 +510,16 @@ they replace a single `confirmed`/`refuted` pair: knowing a finding was real
 does not tell you whether the loop is still finding things.
 
 **That path is gitignored in this repo, deliberately, so raw audit output
-cannot be staged.** The log is durable because it is appended every round, not
-because it is committed. Do not describe it as committed and do not relocate it
-in order to commit it.
+cannot be staged.** Appending preserves local progress; it does not provide a
+git recovery path. Do not describe the log as committed or as recoverable from
+git. Preserve an approved private copy outside a worktree before removing it;
+append-only content is still lost when its sole directory disappears.
 
 Close with: rounds to clean, defects caught after the builder first believed
-it was done, and defects found in the adversary's own tests. That last number
-is the honest one — if it is always zero, nobody is mutation-testing the
-tests, and the loop has degraded into review theatre.
+it was done, and defects found in the adversary's own tests. Report mutation
+coverage and each relevant canary result separately. Zero test defects can be a
+valid result; it does not prove mutation testing was skipped and is never a
+quota of flaws the reviewer must invent.
 
 Worked example — the first production run, an 8-finding audit of a plugin
 repo's own gates, merged as one squashed PR:

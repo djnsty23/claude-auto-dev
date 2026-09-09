@@ -10,6 +10,11 @@ argument-hint: "[days | YouTube URL]"
 
 # Framework Radar
 
+Resolve the actual loaded `autodev-core` directory into `autodev_core_root`
+before running the shell examples. Use the loaded skill's location; do not
+guess from the target project's working directory or assume another host set
+`CLAUDE_PLUGIN_ROOT`. Verify the named script exists under that resolved root.
+
 Collect first, judge second, test third. The collector owns source retrieval,
 transcript storage, population counts and deduplication. This skill owns
 relevance, corroboration, controlled experiments and evidence-backed adoption.
@@ -19,7 +24,7 @@ relevance, corroboration, controlled experiments and evidence-backed adoption.
 Run the shipped collector from this plugin:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" --days 14
+node "${autodev_core_root}/scripts/framework-radar.js" --days 14
 ```
 
 If the invocation includes a YouTube URL or ID, append one `--video <ID-or-URL>`
@@ -119,6 +124,11 @@ hypothesis must be executed in this run.** Do not create a heading called
 "hypothesis" for an idea that cannot be tested now; keep it under `watch` with
 the missing prerequisite.
 
+If execution becomes unavailable after selection, retain the selected id,
+completed attempts, missing prerequisite and owner as pending. Do not relabel
+it `reject`/`no winner`, fabricate measurements or mark the manifest fully
+reviewed merely to make selected and verdict counts agree.
+
 Before seeing results, record:
 
 - Hypothesis and affected workflow.
@@ -140,7 +150,10 @@ nothing" is otherwise incomplete.
 
 Never experiment in the shared checkout. Fetch the remote, verify the exact
 default-branch commit, and create a dedicated worktree and `codex/radar-*`
-branch from that commit. Run A before editing. Run B and C on the same fixtures
+branch from that commit. Read open candidate branches/PRs and current authorized work too: a remote
+default is the stable baseline, but a capability may already exist in an
+unmerged candidate. Verify ancestry/content before proposing a duplicate.
+Run A before editing. Run B and C on the same fixtures
 and environment. Preserve raw commands, exit statuses, elapsed time and output
 paths in the report.
 
@@ -160,9 +173,12 @@ When B or C wins, implement only the winning variant in the isolated worktree
 and run its targeted verification plus the repository gate. Commit explicit
 paths. A scheduled run may push the winning experiment branch for review and
 open a PR only when its automation prompt explicitly grants standing
-authorization for that exact `codex/radar-*` branch. In an interactive run,
-obtain fresh push authorization from the user. No radar run may merge, deploy,
-tag, release or update installed plugins. When neither variant wins, leave no
+authorization for the selected experiment branch. In an interactive run, use
+the current request and still-valid publication grant; do not require a fresh
+approval for the same authorized action. This research workflow does not itself
+merge, deploy, tag, release or update installed plugins. If the user also
+authorized delivery, continue through `commit`/`ship` with the winning candidate
+and their verification/ownership requirements instead of ending at the report. When neither variant wins, leave no
 framework change or PR behind.
 
 Completion: the count of selected hypotheses equals the count with executed
@@ -182,7 +198,7 @@ selected hypothesis has run. It must use `schema_version: 1`, the exact manifest
 Then update the durable learning ledger and regenerate the user artifacts:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
+node "${autodev_core_root}/scripts/radar-learning.js" \
   --manifest <manifest-path> \
   --verdicts .claude/reports/framework-radar-verdicts-YYYY-MM-DD.json
 ```
@@ -197,7 +213,7 @@ for each transition. `default` requires `--revalidate-by`; an expired default is
 reported as `stale` and must return to shadow or retire.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
+node "${autodev_core_root}/scripts/radar-learning.js" \
   --state-dir <manifest-state-dir> --transition <experiment-id> \
   --to shadow --evidence <evidence-path-or-summary>
 ```
@@ -237,7 +253,7 @@ winning PR has been read back from the remote, mark exactly that manifest
 reviewed:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" --mark-reviewed <manifest-path>
+node "${autodev_core_root}/scripts/framework-radar.js" --mark-reviewed <manifest-path>
 ```
 
 This writes the review heartbeat. Do not mark reviewed before the report exists,

@@ -10,25 +10,19 @@ argument-hint: "[quick|deep]"
 
 # Review
 
-**Run Claude Code's built-in reviewer first. Do not re-implement it here.**
+Use the host’s code review capability when available. Inspect the installed
+command/tool and its supported arguments; do not infer effort flags or cloud
+behavior from a skill example. If unavailable, perform the review directly and
+state which reviewer ran. For CLI review channels load `docs/codex-channels.md`
+when present. Existing authorization applies; an unavailable preferred reviewer
+does not prevent local review.
 
-```
-/code-review
-```
-
-Pass an effort level when the user asked for one: `/code-review low` for a quick
-look, `/code-review high` or `max` for a thorough pass. `/code-review ultra`
-launches a multi-agent cloud review — it is user-triggered and billed, so
-suggest it rather than assuming it.
-
-That skill already covers correctness bugs, edge cases, error handling, unsafe
-casts, reuse and simplification, and it verifies its own findings before
-reporting. Everything below is the delta: things it cannot know because they are
-decisions this project made.
+Review correctness, edge cases, error handling, data boundaries, reuse and
+simplification. The project-specific checks below supplement that review.
 
 ## Before a release: review twice, independently
 
-**A single review pass finds roughly half of what two passes find.** Measured
+**Independent passes can find different defects.** In one measurement on
 2026-08-17: two reviewers were given a byte-identical prompt over the same two
 files, and both ran the same model. They converged on about six findings — and
 each surfaced about six more the other missed entirely. One caught a
@@ -37,14 +31,15 @@ routes through `cmd.exe`, where `^` is the escape character. The other caught tw
 live instructions in shipped skills that contradicted a rule in the same plugin.
 Neither pass was worse; their overlap was simply partial.
 
-So for a pre-release gate, dispatch **two independent passes** rather than one
-deeper one:
+For a risky release, use **two independent passes** where capability and budget
+allow. Load `rule-agent-concurrency` before dispatching; use supported tools and
+sequential passes if independent agents are unavailable. Record that limitation:
 
 - Identical prompt, both read the files themselves. Do not hand the second pass
   the first one's findings — priming collapses the independence that produces the
   extra yield.
 - Merge and de-duplicate afterwards, then check each surviving finding against the
-  code before acting on it. Two passes also double the false positives.
+  code before acting on it. Extra passes can add false positives too.
 - **Ask each pass to state what it checked and found clean**, not only what it
   found. The categories one pass declares empty are where the other's unique
   findings tend to land.
@@ -54,10 +49,6 @@ matters when a mistake ships — pre-release, a risky migration, anything touchi
 money, auth, or data you cannot re-derive. For a one-line change, one pass is the
 right amount of review.
 
-`/code-review ultra` is the built-in version of this idea and is the better choice
-when it is available: suggest it rather than hand-rolling two passes, since it is
-user-triggered and billed.
-
 ## Then check the project-specific delta
 
 **Read `.claude/project-rules.md` first if it exists** — it was measured from
@@ -65,7 +56,8 @@ this codebase and outranks both the list below and the `standards` skill. A rule
 listed there as "Undecided" must not be flagged in either direction. If it does
 not exist, suggest `/autodev-init` once, then continue with the defaults below.
 
-Work through these against the changed files only.
+Work through these against the changed files and affected callers/contracts;
+keep the review tied to the change’s reachable behavior.
 
 ### 1. prd.json alignment
 If a `prd.json` story covers this change, does the diff actually satisfy its
@@ -85,13 +77,16 @@ when it compiles.
 
 ### 4. Verification actually ran
 Cross-check against `rule-verification`: an API change needs a real curl with
-real params, a UI change needs a browser check with a clean console, a bulk
-change needs a grep proving the old pattern is gone. "Types pass" is not
+real params and expected status/body/side effects, a UI change needs the
+affected user flow and states in a browser, and a bulk change needs an enumerated
+search proving the old behavior is gone. Check the tested revision/environment
+and preserve failures or gaps; an unrelated green run is not current proof. "Types pass" is not
 verification for any of those.
 
 ### 5. Supabase specifics (if the diff touches the database)
-RLS policies present and deny-by-default. Secrets only in Edge Functions. Edge
-functions tested after deploy, not just deployed. Defer to the `supabase` skill
+RLS policies enforce the intended access matrix. Secrets remain in trusted
+server runtimes, never client-reachable code. For deployment scope, verify the
+deployed revision and exercise affected functions after deploy. Defer to the `supabase` skill
 for the details.
 
 ## Reporting
@@ -104,9 +99,9 @@ manufactures findings to look thorough is worse than a short one.
 
 ## Feeding the learning loop
 
-**Threshold — a finding that appears in a second review is no longer a finding,
-it is a class.** Leaving the same comment twice is the signal that the codebase
-will keep producing it.
+**Threshold — a reproduced failure recurring in separate changes suggests a
+class.** Two reviewers reporting the same instance is one observation, not
+recurrence. Distinguish independently confirmed incidents from duplicate reports.
 
 When that happens, add the class to `.claude/project-rules.md` under
 `## What this project keeps getting wrong` with its count, rather than writing

@@ -26,13 +26,16 @@ screenshot.
 
 **Not `.claude/screenshots/`.** That directory is gitignored and documented as
 cleaned each run, so a before state stored there is destroyed by the run that
-produces the after state. `.claude/` is deliberately not ignored wholesale, so
-`.claude/evidence/` is tracked and survives.
+produces the after state. Check the destination with `git check-ignore -v` in the actual project; a
+plugin cannot assume every repo tracks `.claude/evidence/`. Follow
+`rule-file-organization` for durable evidence and keep credentials, session
+state and private user data out of published artifacts.
 
 **Tracked means commit it WITH the change, not beside it.** Left uncommitted the
 evidence dirties the tree, and any gate that refuses a dirty tree then refuses
 to run at all, which is a self-inflicted block right at the step that needs the
-gate green. Same commit as the code is also where a reviewer wants it.
+gate green. Identify the code revision/tree tested separately from any later
+evidence-only commit; do not imply a gate ran on a SHA it never checked.
 
 ## Step 1: before, and it is a probe
 
@@ -40,7 +43,10 @@ gate green. Same commit as the code is also where a reviewer wants it.
 mkdir -p .claude/evidence/<slug>
 ```
 
-Reproduce the defect, then capture. Which observable depends on the change:
+Record the expected result before editing, reproduce the defect, then capture.
+For each capture retain the command/flow, cwd, code revision and working-tree
+state, time, environment/URL, build identity, role/account and relevant data
+state. Do not record credential values. Which observable depends on the change:
 
 | Change has | Capture |
 |---|---|
@@ -58,15 +64,13 @@ not observed. Load `rule-diagnosis` rather than editing.
 Same observable, same viewport, same command, same population. A pair taken two
 different ways compares two different things and proves nothing.
 
-Then check the pair actually differs:
-
-```bash
-ls -l .claude/evidence/<slug>/
-cmp -s .claude/evidence/<slug>/before.png .claude/evidence/<slug>/after.png && echo "IDENTICAL: the capture did not observe the change"
-```
-
-Two byte-identical captures mean the probe was blind, not that the change was
-subtle. Find what you failed to observe before reporting anything.
+Assert the expected behavior against both captures: the before fails for the
+defect’s reason, the after satisfies the same criterion, and a valid control
+still works. Inspect screenshots when visual behavior matters. Byte inequality
+alone proves nothing: timestamps or unrelated pixels can differ while the bug
+persists. Identical screenshots can be valid for a nonvisual fix; then use an
+observable that actually distinguishes the behavior instead of forcing pixels
+to change. For output contracts, compare meaningful fields and retain raw logs.
 
 ## Step 3: put it where a reviewer reads it
 
@@ -77,7 +81,7 @@ person deciding whether to merge.
   stay local. Name the paths and state what changed between them in one line.
 - **Pull request body**, when one is opened. A relative path does not reliably
   render there; after the branch is pushed, reference the raw URL:
-  `https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.claude/evidence/<slug>/after.png`
+  `https://raw.githubusercontent.com/<owner>/<repo>/<commit-sha>/.claude/evidence/<slug>/after.png`
 
 Write the delta in words beside the images. A reviewer scanning two screenshots
 should not have to find the difference themselves, and a difference you cannot
@@ -88,3 +92,7 @@ state in a sentence is one you have not checked.
 It does not replace the gate. Evidence is for the human; the gate is for the
 machine, and `rule-gate-integrity` covers whether that gate can fail at all. A
 change with a beautiful before/after pair and a red gate is not shippable.
+Local proof, merged code, deployment and verified live behavior are separate
+claims. For a live acceptance criterion, check the deployed revision and repeat
+the relevant flow there under the current authorization; local screenshots do
+not establish that deployment worked.

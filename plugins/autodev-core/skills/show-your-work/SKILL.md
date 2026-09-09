@@ -29,7 +29,12 @@ ts	phase	decision	why	evidence	result
 - **why** — the reason, in one line.
 - **evidence** — the command, file:line, or measurement that supports it. A row
   whose evidence column says "seemed right" is the row a reviewer will delete.
-- **result** — what happened. Fill it in when you know; `pending` until then.
+- **result** — what happened, or `pending`. When the result arrives, append a new
+  row referring to the original decision; do not edit the earlier row.
+
+Escape embedded tabs/newlines as \\t and \\n so every record stays one physical
+line. Record the mission/attempt and commit when they distinguish otherwise
+similar runs.
 
 **One row is one decision.** If it does not fit one line, the decision is not
 crisp yet, and writing it down is how you find that out.
@@ -50,10 +55,11 @@ crisp yet, and writing it down is how you find that out.
 
 ## Local by default
 
-The file lives under `.claude/reports/` and stays there. Commit it only when a
-reviewer needs the trail to trust the result — a risky migration, an
-unsupervised fleet run, anything touching money or auth. Committing every run
-turns the log into sediment.
+The raw file lives under `.claude/reports/` and stays ignored. When a reviewer
+needs durable evidence, copy a deliberately sanitized decision summary and proof
+pointer into the project's tracked evidence or review artifact. Check it for
+private paths, prompts and secrets before committing. Do not force-add the raw
+report. Preserve the local trail before removing its worktree.
 
 Nothing enforces this and nothing should. A decision log that a hook writes is a
 transcript with extra steps; the value is entirely in a judgement about what
