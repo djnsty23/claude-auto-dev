@@ -69,7 +69,9 @@ function run({ roleFile = ROLE, payload, raw = null, args = [], env = {} }) {
     const r = runBudgeted(process.execPath, [HOOK, ...args], {
         input,
         encoding: 'utf8',
-        env: { ...process.env, AUTODEV_BRAIN_ROLE_FILE: roleFile, ...env },
+        // The ATTENDED spelling of the two unattended-run signals is pinned, so
+        // the ask cases below hold when this suite itself runs under `claude -p`.
+        env: { ...process.env, AI_AGENT: 'claude-code_suite_agent', CLAUDE_CODE_ENTRYPOINT: 'cli', AUTODEV_BRAIN_ROLE_FILE: roleFile, ...env },
         timeout: 20000,
         // Contention is clamped at 20, so cap the widened retry: a contended
         // machine gives an indeterminate run either way, and the cap only
@@ -659,6 +661,222 @@ expectSilentAllow('a Bash call with no command is passed through untouched',
         + `(${disarmed.stdout.length}B out, ${disarmed.stderr.length}B err)`);
 }
 
+// ---------------------------------------------------------------------------
+// H. THE `--no-verify` ASK. Second guard in the same file, added 2026-09-08.
+//
+//    Population first: this runs in every session, role file or not, so every
+//    case here uses the ABSENT role file unless it is testing the interaction.
+//    An ask is exit 0, a JSON permissionDecision on stdout, and ZERO bytes on
+//    stderr; an allow is still zero bytes on both. The reason must name the
+//    git hook the flag skips and say the justification belongs in the commit
+//    or PR body, because that sentence IS the "recorded" half of the design:
+//    the hook cannot see the answer to its own question.
+//
+//    `-n` is asserted per subcommand from `git <sub> -h` on 2.50.1, not from
+//    the brief: commit and am mean --no-verify; push means --dry-run, merge and
+//    rebase --no-stat, cherry-pick --no-commit. Each of those four is a silent
+//    allow below, so a future "match -n everywhere" is a red test, not a drift.
+// ---------------------------------------------------------------------------
+/** An ask: exit 0, silent stderr, and a PreToolUse ask decision whose reason matches `extra`. */
+function expectAsk(label, res, extra = /./) {
+    let out = null;
+    try { out = JSON.parse(res.stdout).hookSpecificOutput; } catch { out = null; }
+    const ok = res.exit === 0 && res.stderr.length === 0 && !!out
+        && out.hookEventName === 'PreToolUse' && out.permissionDecision === 'ask'
+        && extra.test(out.permissionDecisionReason || '');
+    check(label, ok, `exit ${res.exit}, stderr ${res.stderr.length}B, stdout ${JSON.stringify(res.stdout.slice(0, 120))}`);
+}
+const noRole = (command, over = {}) => run({ roleFile: ABSENT, payload: bash(command, over) });
+
+// The brief's table, verbatim.
+expectAsk('`git push --no-verify origin HEAD` asks, naming pre-push',
+    noRole('git push --no-verify origin HEAD'), /`git push --no-verify` skips the pre-push hook/);
+expectAsk('`git commit -n -m x` asks, naming pre-commit and commit-msg',
+    noRole('git commit -n -m x'), /`git commit -n` skips the pre-commit and commit-msg hooks/);
+expectAsk('`git commit --no-verify -F msg.txt` asks',
+    noRole('git commit --no-verify -F msg.txt'), /git commit --no-verify/);
+expectAsk('`git -c core.hooksPath=/dev/null push` asks: same effect, different spelling',
+    noRole('git -c core.hooksPath=/dev/null push'), /core\.hooksPath/);
+expectSilentAllow('`git log --grep=\'no-verify\'` does NOT ask: grepping for the flag is not using it',
+    noRole("git log --grep='no-verify'"));
+expectSilentAllow('`git commit -m "explain --no-verify"` does NOT ask: the flag is inside the message',
+    noRole('git commit -m "explain --no-verify"'));
+expectSilentAllow('`echo \'--no-verify\' | cat` does NOT ask: no git in command position',
+    noRole("echo '--no-verify' | cat"));
+expectSilentAllow('`git checkout -n` is not a match: checkout is not on the list',
+    noRole('git checkout -n'));
+expectSilentAllow('malformed stdin keeps this hook\'s existing fail-OPEN shape: exit 0, zero bytes',
+    run({ roleFile: ABSENT, raw: '{"tool_name":"Bash","tool_input":{"command":"git push --no-verify"', payload: null }));
+
+// The recorded half: the reason has to send the justification somewhere durable.
+expectAsk('the reason says the justification belongs in the commit or PR body',
+    noRole('git push --no-verify origin HEAD'), /justification in the commit or PR body/);
+expectAsk('  and says what it is for: telling a deliberate bypass from one that simply skipped',
+    noRole('git push --no-verify origin HEAD'), /distinguishable from a push that simply skipped the gate/);
+
+// Spellings a model reaches for once the plain one has been asked about.
+expectAsk('`-an` clusters -n with -a and still asks', noRole('git commit -an -m x'), /git commit -n/);
+expectAsk('the flag after the positionals still asks', noRole('git push origin HEAD --no-verify'), /pre-push/);
+expectAsk('a later segment of a chain still asks', noRole('npm test && git push --no-verify'), /pre-push/);
+expectAsk('a brace group still asks', noRole('{ git commit -n -m x; }'), /commit-msg/);
+expectAsk('`cd` then commit still asks', noRole('cd /tmp && git commit -m x --no-verify'), /commit-msg/);
+expectAsk('`bash -c "…"` is followed one level', noRole('bash -c "git commit -n -m x"'), /commit-msg/);
+expectAsk('core.hooksPath is a case-insensitive key', noRole('git -c core.HOOKSPATH=/dev/null push origin HEAD'), /hooksPath/);
+expectAsk('`-ccore.hooksPath=` joined form asks too', noRole('git -ccore.hooksPath=/dev/null push'), /hooksPath/);
+expectAsk('`git merge --no-verify` asks, naming pre-merge-commit', noRole('git merge --no-verify feature'), /pre-merge-commit/);
+expectAsk('`git rebase --no-verify` asks, naming pre-rebase', noRole('git rebase --no-verify main'), /pre-rebase/);
+expectAsk('`git am -n` asks: measured on 2.50.1, -n IS --no-verify for am', noRole('git am -n patch.mbox'), /applypatch/);
+
+// QUOTES DO NOT HIDE A FLAG. The shell strips them before git sees the word,
+// so the quoted spelling is the same bypass, and the first draft of this
+// matcher was silent on it. What keeps a quoted MESSAGE quiet is that -m
+// takes a value, asserted beside it so the two cannot be confused.
+expectAsk('a quoted "--no-verify" is still the flag once the shell unquotes it',
+    noRole('git push origin HEAD "--no-verify"'), /pre-push/);
+expectAsk('  single-quoted, the same', noRole("git commit '-n' -m x"), /commit-msg/);
+expectSilentAllow('`-am "--no-verify"` is a message: the cluster ends in a value letter that takes the next word',
+    noRole('git commit -am "--no-verify"'));
+expectSilentAllow('`git merge -m "--no-verify" feature` is a message too',
+    noRole('git merge -m "--no-verify" feature'));
+expectSilentAllow('`git push -o "--no-verify"` is a push option value',
+    noRole('git push -o "--no-verify" origin HEAD'));
+
+// `-n` means something else on every other listed subcommand. Silent, each.
+expectSilentAllow('`git push -n` is --dry-run, not a bypass', noRole('git push -n origin HEAD'));
+expectSilentAllow('`git merge -n` is --no-stat, not a bypass', noRole('git merge -n feature'));
+expectSilentAllow('`git rebase -n` is --no-stat, not a bypass', noRole('git rebase -n main'));
+expectSilentAllow('`git cherry-pick -n` is --no-commit, not a bypass', noRole('git cherry-pick -n abc123'));
+
+// Mention is not execution, the 2026-08-17 lesson again, for this flag.
+expectSilentAllow('a shell comment carrying the flag is not a flag', noRole('git commit -m x # --no-verify'));
+expectSilentAllow('a heredoc body carrying the flag is argument text',
+    noRole('cat <<EOF > notes.md\ngit push --no-verify origin main\nEOF'));
+expectSilentAllow('a here-string carrying the flag is argument text', noRole('git commit -F - <<< "--no-verify"'));
+expectSilentAllow('a redirected echo of the flag is not a push', noRole('echo "git push --no-verify" > x.sh'));
+expectSilentAllow('grep -- for the flag is not using it', noRole("grep -rn -- '--no-verify' tooling/"));
+expectSilentAllow('a single-quoted -n in a message is text', noRole("git commit -m 'explain -n'"));
+expectSilentAllow('`-mno` is message "no", not -n (the value letter swallows the cluster)', noRole('git commit -mno -m x'));
+expectSilentAllow('after `--` everything is a pathspec', noRole('git commit -m x -- --no-verify'));
+expectSilentAllow('overriding hooksPath on a READ skips no gate', noRole('git -c core.hooksPath=/dev/null log -1'));
+expectSilentAllow('the SAFE force push is still not this hook\'s business', noRole('git push --force-with-lease origin HEAD'));
+expectSilentAllow('a plain push stays silent', noRole('git push origin HEAD'));
+
+// Naming the gate FILE. A throwaway git repo with core.hooksPath set and two
+// hooks whose live lines run scripts: the reason must name the file and what
+// it runs, read from the hook rather than from a table in this suite. Control
+// beside it: the same command where no hook file exists names only the git
+// hook, so "Here that is" cannot be a constant string.
+{
+    const repo = path.join(fixture, 'hooked');
+    fs.mkdirSync(path.join(repo, 'tooling', 'githooks'), { recursive: true });
+    /* `runBudgeted`, not raw spawnSync: #183 removed every unbudgeted child from
+       tooling/ and this block predates it. The two sides never touched the same
+       LINE, so the merge was clean and the suite crashed with
+       `ReferenceError: spawnSync is not defined` on all three platforms. Adapting
+       to the convention rather than re-adding the import, because the import is
+       precisely what #183 took out. */
+    const init = runBudgeted('git', ['init', '-q', repo], { encoding: 'utf8', timeout: 60000 });
+    if (init.status === 0) {
+        runBudgeted('git', ['-C', repo, 'config', 'core.hooksPath', 'tooling/githooks'], { encoding: 'utf8', timeout: 60000 });
+        fs.writeFileSync(path.join(repo, 'tooling', 'githooks', 'pre-push'),
+            '#!/bin/sh\n# comment naming tooling/decoy.js must NOT be reported\nnode "$(git rev-parse --show-toplevel)/tooling/validate.js" || exit 1\n');
+        fs.writeFileSync(path.join(repo, 'tooling', 'githooks', 'commit-msg'),
+            '#!/bin/sh\nROOT="$(git rev-parse --show-toplevel)"\nnode "$ROOT/tooling/check-no-private-names.js" --check-message "$1"\n');
+        expectAsk('the reason names the pre-push FILE and the script it runs',
+            noRole('git push --no-verify origin HEAD', { cwd: repo }),
+            /Here that is tooling\/githooks\/pre-push \(runs tooling\/validate\.js\)/);
+        expectAsk('  and a commit names the commit-msg file and its private-name checker',
+            noRole('git commit -n -m x', { cwd: repo }),
+            /tooling\/githooks\/commit-msg \(runs tooling\/check-no-private-names\.js\)/);
+        expectAsk('  a script named only in a comment is not reported as running',
+            noRole('git push --no-verify origin HEAD', { cwd: repo }), /^(?!.*decoy)/);
+        expectAsk('  `-C <repo>` from elsewhere finds the same file',
+            noRole(`git -C ${repo} push --no-verify origin HEAD`, { cwd: fixture }),
+            /pre-push \(runs tooling\/validate\.js\)/);
+        expectAsk('CONTROL: outside any repo the reason names the git hook only',
+            noRole('git push --no-verify origin HEAD', { cwd: path.join(fixture, 'nowhere') }),
+            /^(?!.*Here that is).*pre-push hook\./);
+    } else {
+        check('git init available for the hook-file cases', false, init.stderr.slice(0, 80));
+    }
+}
+
+// A WINDOWS PATH INSIDE THE COMMAND, on every platform. [measured 2026-09-08]
+// windows-latest was red on the `-C <repo>` case above while ubuntu and macos
+// were green: the fixture path carried backslashes, the tokeniser consumed
+// each as an escape, `C:\Users` became `C:Users`, and no gate file was found
+// there. The hook can only be driven with this repo's own paths, so the
+// recogniser is asked directly, with the Windows spelling as a literal.
+{
+    const { shellWords } = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'hook-bypass.js'));
+    const words = shellWords('git -C C:\\Users\\RUNNER~1\\Temp\\hooked push --no-verify origin HEAD')[0];
+    check('a Windows path after -C survives tokenising with its backslashes',
+        words[2] === 'C:\\Users\\RUNNER~1\\Temp\\hooked', JSON.stringify(words[2]));
+    check('  while an escaped space still holds a word together',
+        shellWords('git -C /a\\ b/repo commit -n')[0][2] === '/a b/repo');
+    check('  and an escaped quote is still a quote',
+        shellWords('git commit -m it\\"s -n')[0][3] === 'it"s');
+}
+
+// UNATTENDED: THE SAME TEXT AS A NOTE, NOT A QUESTION. An ask nobody can
+// answer is a denial, and a headless session that cannot push is a stall. The
+// hook reads two signals measured under `claude -p` on 2026-09-08 (AI_AGENT
+// ending _harness; CLAUDE_CODE_ENTRYPOINT starting sdk-); every other case in
+// this suite pins the ATTENDED spelling of both in run()'s env, so this suite
+// still asserts asks when it is itself run from a headless session.
+{
+    const headlessEnv = (over) => ({ AI_AGENT: 'claude-code_suite_agent', CLAUDE_CODE_ENTRYPOINT: 'cli', ...over });
+    const note = (command, envOver) => {
+        const res = run({ roleFile: ABSENT, payload: bash(command), env: headlessEnv(envOver) });
+        let out = null;
+        try { out = JSON.parse(res.stdout).hookSpecificOutput; } catch { out = null; }
+        return { res, out };
+    };
+    for (const [label, envOver] of [
+        ['AI_AGENT ending _harness', { AI_AGENT: 'claude-code_2-1-233_harness' }],
+        ['CLAUDE_CODE_ENTRYPOINT starting sdk-', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }],
+    ]) {
+        const { res, out } = note('git push --no-verify origin HEAD', envOver);
+        check(`unattended (${label}): a bypass is a NOTE, not an ask`,
+            res.exit === 0 && res.stderr.length === 0 && !!out && out.permissionDecision === undefined
+            && /^\[no-verify\] Unattended run/.test(out.additionalContext || ''),
+            `exit ${res.exit}, stderr ${res.stderr.length}B, stdout ${JSON.stringify(res.stdout.slice(0, 100))}`);
+        check(`  and the note still names the gate and where the record goes`,
+            !!out && /pre-push hook/.test(out.additionalContext || '') && /commit or PR body/.test(out.additionalContext || ''));
+    }
+    expectSilentAllow('unattended: a plain push is still silent',
+        run({ roleFile: ABSENT, payload: bash('git push origin HEAD'), env: headlessEnv({ AI_AGENT: 'claude-code_2-1-233_harness' }) }));
+    // CONTROL, different provenance from the two positives: the attended
+    // spelling of both signals gets the question. Without this, a hook that
+    // always emitted the note would pass the pair above.
+    expectAsk('CONTROL: the attended spelling of both signals still asks',
+        run({ roleFile: ABSENT, payload: bash('git push --no-verify origin HEAD'), env: headlessEnv({}) }), /pre-push/);
+}
+
+// Interaction with the ban: a block wins, and a permitted write is still asked.
+writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+{
+    const res = run({ payload: bash('git push --no-verify origin HEAD') });
+    check('role held + foreign push with --no-verify BLOCKS (exit 2), and does not also ask',
+        res.exit === 2 && /^Blocked:/.test(res.stderr) && res.stdout.length === 0,
+        `exit ${res.exit}, stdout ${res.stdout.length}B`);
+}
+expectAsk('role held + push INSIDE the home repo with --no-verify still asks',
+    run({ payload: bash('git push --no-verify origin HEAD', { cwd: HOME_REPO }) }), /pre-push/);
+
+// MUTATION, with different provenance from the matcher: two literal commands
+// that differ by one flag, same process, same fixture. If the ask fires for
+// both or neither, the branch is decorative.
+{
+    const withFlag = noRole('git push --no-verify origin HEAD');
+    const without = noRole('git push origin HEAD');
+    const ok = /"permissionDecision":"ask"/.test(withFlag.stdout) && withFlag.exit === 0
+        && without.exit === 0 && without.stdout.length === 0 && without.stderr.length === 0;
+    check('MUTATION: removing the flag, and nothing else, removes the ask', ok,
+        `with: exit ${withFlag.exit} ${withFlag.stdout.length}B out; without: exit ${without.exit} `
+        + `${without.stdout.length}B out ${without.stderr.length}B err`);
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 // The population, not a bare verdict: what was driven, and how. Without it a
@@ -667,7 +885,7 @@ console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
     + `driven as a subprocess ${pass + fail} times over `
     + `${['inert-without-role', 'the ban', 'mention-is-not-execution', 'cwd escapes',
-        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'mutation'].length} case groups; `
+        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'mutation'].length} case groups; `
     + `every allow asserted zero bytes on BOTH stdout and stderr.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
