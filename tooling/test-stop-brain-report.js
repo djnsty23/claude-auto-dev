@@ -166,9 +166,15 @@ const LIVE = (() => {
     fs.mkdirSync(store, { recursive: true });
     fs.writeFileSync(path.join(sessions, process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'brain-1', name: 'brain-peer' }));
     fs.writeFileSync(path.join(sessions, '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'brain-dead', name: 'brain-dead-peer' }));
+    /* A SECOND LIVE session, unrelated to the record: this is what a `peer_name`
+       freed by an archived coordinator gets taken by. The filename must be
+       `<pid>.json` or the registry skips it, and a fixture that lands unread
+       makes a stranger look merely DEAD -- the wrong half of the control. Its
+       liveness is asserted below rather than assumed. */
+    fs.writeFileSync(path.join(sessions, process.ppid + '.json'), JSON.stringify({ pid: process.ppid, sessionId: 'cli-stranger', name: 'brain-stranger-peer' }));
     fs.writeFileSync(path.join(store, 'local_brain-desk.json'), JSON.stringify({ sessionId: 'local_brain-desk', cliSessionId: 'brain-1', isArchived: false }));
     fs.writeFileSync(path.join(store, 'local_brain-desk-old.json'), JSON.stringify({ sessionId: 'local_brain-desk-old', cliSessionId: 'brain-dead', isArchived: true, title: 'Old brain' }));
-    return { env: { AUTODEV_SESSIONS_DIR: sessions, CLAUDE_SESSION_STORE: path.join(root, 'store') } };
+    return { env: { AUTODEV_SESSIONS_DIR: sessions, CLAUDE_SESSION_STORE: path.join(root, 'store') }, sessionsDir: sessions, store: path.join(root, 'store'), strangerPid: process.ppid };
 })();
 
 {
@@ -325,6 +331,155 @@ const LIVE = (() => {
         && /could not be checked/.test(unCtx) && !/Nobody can be reached/.test(unCtx), unCtx.split('\n')[1]);
 }
 
+check('fixture: a second live pid exists, so a stranger cannot coincide with the record',
+    (() => { try { process.kill(LIVE.strangerPid, 0); return true; } catch (e) { return e.code === 'EPERM'; } })(),
+    'ppid ' + LIVE.strangerPid);
+
+// --- one record, two surfaces, one answer ---------------------------------
+/* THE ASSERTION THIS FILE WAS MISSING, and the defect it exists for.
+
+   The original bug was never "the hook says something wrong" in isolation --
+   it was TWO SURFACES DISAGREEING about one file: `--status` said PARTLY STALE
+   AND STILL REACHABLE while the hook said no live coordinator existed. Every
+   other assertion in this suite reads ONE surface, so none of them could see a
+   disagreement; they only see a hook whose text they already predicted.
+
+   `[measured 2026-09-10]` that gap was still open after the first fix, one
+   level down: `check-brain-role.js` computed `reach.collision`, `render()`
+   acted on it -- "AN ADDRESS HERE RESOLVES TO SOMEBODY ELSE. Message nobody" --
+   and the hook had no branch for it, so a collision fell through to `fault` and
+   the session was told "Nobody can be reached at that record". A resolving
+   address described as nobody: the reader tries it and hands the handover to a
+   stranger, and the lookup SUCCEEDS, so the sender never learns.
+
+   THE PROPERTY, and the shape of it matters. Comparing the two rendered texts
+   as sets does NOT hold: `--status` prints its advice block only for a faulted
+   or degraded record, so on a healthy one it names no address while the hook
+   correctly hands out both -- that comparison fails a hook that is right. What
+   holds everywhere is the ENDORSEMENT: the addresses the hook tells you to
+   message are exactly the addresses `--status` shows as live and usable, read
+   from whichever form the run produced. */
+{
+    const CHECK = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-brain-role.js');
+    const ticked = (line) => (line.match(/`([^`]+)`/g) || []).map((t) => t.slice(1, -1)).sort();
+
+    /** Addresses `--status` endorses for this record. */
+    function statusEndorses(roleFile) {
+        const r = spawnSync(process.execPath, [CHECK, '--status', '--role', roleFile,
+            '--sessions-dir', LIVE.sessionsDir, '--store', LIVE.store],
+        { encoding: 'utf8', env: Object.assign({}, process.env, LIVE.env) });
+        const out = r.stdout || '';
+        // An address that reaches a stranger, or nothing at all: endorses none.
+        if (/RESOLVES TO SOMEBODY ELSE|Nobody can be reached at this record/.test(out)) return [];
+        const use = out.split('\n').find((l) => /STILL REACHABLE\. Use /.test(l));
+        if (use) return ticked(use);
+        // A healthy record prints no advice block at all -- the endorsement is
+        // the `->` live lines, and `session_id` is never an address.
+        return out.split('\n')
+            .filter((l) => /-> live/.test(l) && !/^\s*session_id /.test(l))
+            .map((l) => l.trim().split(' ')[1]).sort();
+    }
+
+    /** Addresses the HOOK tells you to message. Scoped to that line: stale
+        field names are backticked too, and they are not addresses. */
+    function hookEndorses(ctx) {
+        const line = ctx.split('\n').find((l) => /Message it before you go quiet:/.test(l));
+        return line ? ticked(line) : [];
+    }
+
+    function fire(role) {
+        const repo = makeRepo();
+        const roleFile = writeRole(role);
+        const state = stateFilePath();
+        const id = 'agree-' + Math.random().toString(36).slice(2);
+        run({ input: { session_id: id, cwd: repo }, roleFile, stateFile: state, env: LIVE.env });
+        commitIn(repo, 'v2 delivered\n');
+        const j = spoke(run({ input: { session_id: id, cwd: repo }, roleFile, stateFile: state, env: LIVE.env }));
+        return { ctx: j ? j.hookSpecificOutput.additionalContext : '', roleFile, j };
+    }
+
+    const RECORDS = [
+        ['peer_name stale, desktop id live', { session_id: 'brain-1', peer_name: 'brain-gone', desktop_session_id: 'local_brain-desk' }],
+        ['peer_name live, desktop id stale', { session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk-old' }],
+        ['both stale', { session_id: 'brain-dead', peer_name: 'brain-dead-peer', desktop_session_id: 'local_brain-desk-old' }],
+        ['both live', { session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk' }],
+        ['a stranger holds the freed name', { session_id: 'brain-dead', peer_name: 'brain-stranger-peer', desktop_session_id: 'local_brain-desk-old' }],
+    ];
+
+    const seen = [];
+    for (const [label, role] of RECORDS) {
+        const f = fire(role);
+        const h = hookEndorses(f.ctx);
+        const s = statusEndorses(f.roleFile);
+        seen.push(h.join('|'));
+        check('agreement: ' + label,
+            !!f.j && JSON.stringify(h) === JSON.stringify(s),
+            'hook=[' + h.join(', ') + '] --status=[' + s.join(', ') + ']');
+    }
+
+    /* THE CONTROL WITHOUT WHICH THE FIVE ABOVE PROVE NOTHING. If every record
+       produced the same endorsement, five agreeing comparisons would be one
+       comparison run five times -- and a hook that endorsed a constant, or
+       nothing at all, would pass all five. */
+    check('  control: the five records do NOT all yield one endorsement',
+        new Set(seen).size >= 3, 'distinct endorsements: ' + new Set(seen).size + ' of 5');
+    check('  control: at least one record endorses NOTHING, and at least one endorses something',
+        seen.some((s) => s === '') && seen.some((s) => s !== ''),
+        JSON.stringify(seen));
+}
+
+// --- a resolving address that reaches a stranger --------------------------
+/* `reach.collision` was computed by check-brain-role and read by `render()`
+   alone; the hook had no branch and let it fall to `fault`. "Nobody can be
+   reached" about an address that DOES resolve is the dangerous direction: it
+   reads as a claim the address is dead, so the reader tries it, and it lands on
+   whoever now holds that reused name. */
+{
+    const repo = makeRepo();
+    const role = writeRole({ session_id: 'brain-dead', peer_name: 'brain-stranger-peer', desktop_session_id: 'local_brain-desk-old' });
+    const state = stateFilePath();
+    run({ input: { session_id: 'coll-1', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    commitIn(repo, 'v2 delivered\n');
+    const fired = run({ input: { session_id: 'coll-1', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    const j = spoke(fired);
+    const ctx = j ? j.hookSpecificOutput.additionalContext : '';
+
+    check('collision: the hook speaks (a commit landed)', !!j, fired.out.slice(0, 90));
+    check('  it says an address RESOLVES TO SOMEBODY ELSE',
+        /RESOLVES TO SOMEBODY ELSE/.test(ctx), ctx.split('\n')[0]);
+    check('  it does NOT describe a resolving address as nobody',
+        !/Nobody can be reached/.test(ctx), ctx.split('\n')[1]);
+    check('  it tells the reader to message nobody at that record',
+        /MESSAGE NOBODY AT THAT RECORD/.test(ctx), ctx.split('\n')[1]);
+    check('  it hands out no address', hookEndorsesNone(ctx), ctx.split('\n')[1]);
+    check('  it names the unattributable-peer fault so the reason is visible',
+        /unattributable-peer/.test(ctx));
+    check('  it still escalates to the operator, which is right here',
+        /Report to the operator instead/.test(ctx));
+    check('  and never by cwd', /do not resolve a coordinator by cwd|Do not resolve a coordinator by cwd/i.test(ctx));
+    check('  zero bytes on stderr, exit 0, turn not blocked',
+        fired.err.length === 0 && fired.status === 0 && !('decision' in (j || {})),
+        `err=${fired.err.length}B exit=${fired.status}`);
+
+    /* THE CONTROL: same fixture, same dead session_id and same archived desktop
+       record -- the ONLY change is a peer name nothing live holds. That must
+       fall to the ordinary fault text, which is what proves the branch above is
+       driven by the COLLISION and not by the two faults it shares with it. */
+    const repo2 = makeRepo();
+    const role2 = writeRole({ session_id: 'brain-dead', peer_name: 'brain-dead-peer', desktop_session_id: 'local_brain-desk-old' });
+    const state2 = stateFilePath();
+    run({ input: { session_id: 'coll-2', cwd: repo2 }, roleFile: role2, stateFile: state2, env: LIVE.env });
+    commitIn(repo2, 'v2 delivered\n');
+    const ctx2 = (spoke(run({ input: { session_id: 'coll-2', cwd: repo2 }, roleFile: role2, stateFile: state2, env: LIVE.env })) || { hookSpecificOutput: {} }).hookSpecificOutput.additionalContext || '';
+    check('  control: a dead name, not a stranger, keeps the ordinary fault text',
+        /DOES NOT NAME A LIVE COORDINATOR/.test(ctx2) && !/RESOLVES TO SOMEBODY ELSE/.test(ctx2),
+        ctx2.split('\n')[0]);
+}
+
+function hookEndorsesNone(ctx) {
+    return !/Message it before you go quiet:/.test(ctx);
+}
+
 // --- the throttle ----------------------------------------------------------
 // Without this, a session committing every turn wakes the coordinator every turn.
 {
@@ -441,7 +596,13 @@ console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
     + (pass + fail) + ' cases over 6 inert paths, all THREE role-record states driven '
     + 'from fixtures (a wholly live record; a PARTLY stale one whose peer name decayed '
     + 'while its desktop id resolves; a wholly dead one), each beside the control that '
-    + 'flips it, plus an unreadable-store case proving an UNCHECKED address reaches '
+    + 'flips it, plus a COLLISION record where a second live pid holds a freed peer name '
+    + '(caught by 3 assertions under a disable-the-branch mutant; NOT caught by the '
+    + 'endorsement agreement below, which compares addresses and this defect agrees on '
+    + 'addresses while disagreeing on the reason), a five-record cross-surface check that '
+    + 'the addresses the hook offers are the addresses `--status` shows live -- with a '
+    + 'control that the five do not collapse to one endorsement -- an unreadable-store '
+    + 'case proving an UNCHECKED address reaches '
     + 'neither the degraded branch nor the dead one, a 3-step throttle with a cooldown-0 '
     + 'control, a corrupt ledger, and the merged-to-trunk shape with an off-trunk control '
     + 'and a no-origin case. Every quiet case asserts zero bytes on BOTH streams; the '

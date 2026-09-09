@@ -307,6 +307,8 @@ const REPORT_SHAPE =
      ok / absent  -> hand out the record's addresses
      degraded     -> hand out the address that was VERIFIED to reach, name the
                      stale field as a field, and do NOT send anyone to a person
+     collision    -> an address RESOLVES, to somebody else; message nobody and
+                     escalate (see the block below -- this was the fourth case)
      fault        -> nothing reaches; escalate, which is what that word is for
 
    `degraded` requires an address positively verified against a registry that
@@ -325,6 +327,36 @@ if (verdict && verdict.state === 'degraded' && reach && reach.usable.length) {
         + (stale ? ': ' + stale : '') + '. That is a field to re-stamp, not an address to try, '
         + 'and it is NOT a reason to escalate: a channel exists, so use it. Say in your report '
         + 'that ' + roleFilePath() + ' needs re-stamping (check: scripts/check-brain-role.js --status).\n'
+        + REPORT_SHAPE;
+} else if (verdict && verdict.state === 'fault' && reach && reach.collision) {
+    /* ⚠️ `reach.collision` WAS COMPUTED AND ONLY ONE OF ITS TWO CONSUMERS READ
+       IT, which is this file's own defect surviving one level down.
+       `[measured 2026-09-10]` `check-brain-role.js` set `reach.collision` and
+       `render()` acted on it -- `--status` said "AN ADDRESS HERE RESOLVES TO
+       SOMEBODY ELSE. Message nobody at this record" -- while this hook, having
+       no branch for it, let a collision fall through to `fault` and told the
+       session "Nobody can be reached at that record".
+
+       Those are not the same instruction and the difference is the whole point.
+       A collision means the address DOES resolve, to a session that is not the
+       coordinator: a `peer_name` freed by an archived session can be taken by
+       another, and this fleet reuses names. "Nobody can be reached" invites
+       trying it anyway, because it reads as a claim about the address being
+       dead; the session then hands its handover to a stranger, and the failure
+       is silent in the SENDER's session because the lookup succeeds.
+
+       A stale field wants re-stamping and a collision wants nobody messaged
+       until a person has looked. Same escalation, different reason, and the
+       reason is what stops the reader improvising. */
+    context = 'YOU HAVE COMMITTED WORK THE COORDINATOR HAS NOT BEEN TOLD ABOUT (' + where + '), '
+        + 'BUT AN ADDRESS IN THE ROLE FILE RESOLVES TO SOMEBODY ELSE: '
+        + verdict.faults.map((f) => f.code + ' (' + f.detail + ')').join('; ') + '.\n'
+        + 'MESSAGE NOBODY AT THAT RECORD. An address that resolves is not an address that '
+        + 'reaches who you mean: a name freed by an archived session can be taken by another, '
+        + 'so sending your handover there delivers it to a stranger and succeeds while doing it. '
+        + 'Do not resolve a coordinator by cwd either: a worktree outlives the session in it. '
+        + 'Report to the operator instead, and say the role file at ' + roleFilePath() + ' needs '
+        + 'rewriting before any of it is used (check: scripts/check-brain-role.js --status).\n'
         + REPORT_SHAPE;
 } else if (verdict && verdict.state === 'fault') {
     const unchecked = reach && reach.unchecked.length
