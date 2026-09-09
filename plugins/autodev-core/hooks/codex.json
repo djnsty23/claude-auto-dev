@@ -1,0 +1,161 @@
+{
+  "description": "Generated Codex projection (rust-v0.153.4); native admission incomplete: 3 unsupported event handler(s), 1 unavailable function module(s). Tool matcher/payload and timeout semantics require host canaries. See .codex-plugin/capabilities.json.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3Mvc2Vzc2lvbi1zdGFydC5qcyJd','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 15,
+            "statusMessage": "Loading sprint context..."
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvYWdlbnQtYnJvd3Nlci1jbGVhbnVwLmpzIl0=','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvdXNlci1wcm9tcHQtaW1hZ2Utc2Nhbi5qcyJd','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvaW5ib3gtbm90aWZ5LmpzIl0=','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvcHJlLXRvb2wtZmlsdGVyLmpzIl0=','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvcGFuZWwtcmVjb21tZW5kYXRpb24uanMiXQ==','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__ccd_session_mgmt__send_message",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvcGVlci1tZXNzYWdlLWJ1ZGdldC5qcyJd','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvY29vcmRpbmF0b3Itd3JpdGUtZ3VhcmQuanMiXQ==','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvcG9zdC10b29sLXR5cGVjaGVjay5qcyJd','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvdGVsZW1ldHJ5LmpzIl0=','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3Mvc3RvcC1hdXRvLWNoZWNrLmpzIl0=','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5,
+            "statusMessage": "Checking auto mode..."
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3Mvc3RvcC1icmFpbi1yZXBvcnQuanMiXQ==','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5,
+            "statusMessage": "Checking for unreported work..."
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvY29udGV4dC1kZXB0aC1udWRnZS5qcyJd','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5,
+            "statusMessage": "Checking context depth..."
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3Mvc3RvcC13b3JrZmxvdy13YWxsLW5vdGUuanMiXQ==','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5,
+            "statusMessage": "Checking workflow runs..."
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3Mvc3RvcC10eXBlY2hlY2suanMiXQ==','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 60,
+            "statusMessage": "Typechecking this response's edits..."
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvcHJlLWNvbXBhY3QuanMiXQ==','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5,
+            "statusMessage": "Saving sprint state..."
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const a=JSON.parse(Buffer.from('WyIke0NMQVVERV9QTFVHSU5fUk9PVH0vaG9va3MvcG9zdC1jb21wYWN0LmpzIl0=','base64').toString('utf8')),r=process.env.PLUGIN_ROOT;if(!r||!require('node:path').isAbsolute(r))throw Error('Missing or non-absolute PLUGIN_ROOT');const s=require('node:child_process').spawnSync(process.execPath,a.map(x=>x.split(String.fromCharCode(36)+'{CLAUDE_PLUGIN_ROOT}').join(r)),{stdio:'inherit',windowsHide:true});if(s.error)console.error('autodev Codex hook spawn: '+s.error.code);process.exitCode=Number.isInteger(s.status)?s.status:1;\"",
+            "timeout": 5,
+            "statusMessage": "Restoring sprint state..."
+          }
+        ]
+      }
+    ]
+  }
+}

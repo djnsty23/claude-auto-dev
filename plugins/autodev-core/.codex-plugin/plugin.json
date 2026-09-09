@@ -1,0 +1,6 @@
+{
+  "name": "autodev-core",
+  "version": "8.166.0",
+  "description": "Autonomous development workflow: brainstorm, auto, iterate, audit, review, ship, plus the prd.json sprint system. Codex hook admission incomplete; see .codex-plugin/capabilities.json.",
+  "hooks": "./hooks/codex.json"
+}

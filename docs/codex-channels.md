@@ -1,5 +1,89 @@
 # Reaching Codex from Claude Code
 
+## Current host boundary, measured 2026-09-09
+
+The channel comparisons below are historical 0.151.0 measurements, not a current
+ban on structured desktop or app-server APIs. Native `codex app-server --stdio`
+on 0.153.4 was exercised through `initialize`, `hooks/list`, `config/batchWrite`,
+`thread/start`, `turn/start` and `thread/unsubscribe` in an owned child runtime
+on macOS. This establishes those tested protocol boundaries, not authenticated
+production-worker reliability or the old channel latency ranking.
+
+A standalone app-server is not filesystem read-only: initialization opens an
+installation ID for writing and creates database state. Configure an owned
+child `CODEX_HOME`, `sqlite_home` and `log_dir`, keep the parent environment
+unchanged, and verify OS-level containment when testing without live state.
+The canaries denied network access and outside writes; no credentials were
+copied. A thread may prepare startup work before a model turn, while SessionStart
+hooks are actually consumed on the first turn; `thread/start` alone cannot prove
+they ran.
+
+Four reconciled native cases produced these observations:
+
+- A Claude hooks file containing top-level `modules` yielded zero Codex hooks,
+  a parse warning and an empty errors array. Catalog warnings and the expected
+  hook population are required checks.
+- A `.codex-plugin/plugin.json` selecting `hooks: "./hooks/selected.json"`
+  loaded that file while the coexisting default Claude hooks file remained
+  incompatible. Host-specific packaging can preserve Claude's module surface.
+- Native separate `args` did not reach a command. A quoted placeholder command
+  also failed when the expanded root contained a dollar token. A static Node
+  wrapper reading `process.env.PLUGIN_ROOT` and spawning the script with an argv
+  array preserved a root containing spaces, an apostrophe and a dollar token.
+  This command form was tested on macOS, not Windows.
+- In all three completed-turn cases, the UserPromptSubmit hook was `blocked`
+  while the native turn was `completed`, its error was null and the CLI exited
+  0. The serialized empty item list carried `itemsView: "notLoaded"`; it does
+  not establish absence of generated items. Reconcile required hook results,
+  materialized tool/item events and acceptance artifacts separately.
+
+The comparison's positive startup hook ran beside each failing command form;
+the wrong resume matcher stayed silent. SessionEnd produced a receipt, which
+does not establish its entire timeout/recovery contract. These were synthetic
+host canaries, not an installed autodev admission. The operational checklist is
+in [Brain host admission](../plugins/autodev-core/skills/brain/references/host-admission.md).
+
+Version-pinned source for this measurement is OpenAI's `rust-v0.153.4` tag at
+`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`; inspect its actual hook configuration,
+runner and session startup implementation when adapting another event.
+
+### Native tools and filesystem containment
+
+Later native turns used a deterministic loopback Responses provider to request
+actual `exec_command` and `apply_patch` calls. These test native dispatch and
+effects without measuring model quality. Hook inputs report `Bash` for shell
+execution and `apply_patch` for patching, with the operation in `command`.
+The requested shell `workdir` is absent from the hook payload; its `cwd` remains
+the thread directory even when execution occurs elsewhere. An explicit `git -C`
+guard control blocks, but a foreign workdir without that textual path can pass.
+Do not treat that hook as containment under `danger-full-access`.
+
+Generated-manifest canaries also showed that the existing `Read|Write|Edit`
+matcher selects the `apply_patch` guard through native matching semantics. Both
+that registration and an explicit `apply_patch` alternative allowed ordinary
+patches and denied protected ones with the repaired payload handler. The tool
+name alone had led to the incorrect inference that registration was missing.
+Keep the measured registration; repair the operation payload and verify the
+actual handler invocation instead of inferring matching from names.
+
+First-level native workspace-write tests on the same version passed eight
+decisive cases: exec and patch inside the workspace succeeded; foreign-workdir,
+absolute-path and symlink exec writes, a foreign Git commit, and absolute and
+traversal patch writes were refused without their tested effects. Readback was
+`workspaceWrite`, no extra writable roots, `networkAccess: false` and approval
+policy `never`; temporary-directory write exceptions remained enabled. This is
+a bounded admission for that policy on macOS, not universal path isolation.
+
+An earlier cohort nested native sandboxing inside an outer Seatbelt profile;
+its allowed control failed with `sandbox_apply: Operation not permitted`, so
+that cohort establishes no containment. The first-level fixture therefore
+omitted the incompatible outer wrapper and requested only reversible writes in
+owned directories. A short Git tool receipt also returned a running session;
+only its later terminal refusal and unchanged HEAD established the result.
+Preserve inconclusive attempts instead of counting them as successful denials.
+
+## Historical channel comparison
+
 Three channels reach GPT from a Claude session. The channel decides token cost,
 whether you can thread, and whether the run survives the machine being locked.
 It is not a style preference.

@@ -82,6 +82,74 @@ const LINT_CONFIG_NAMES = new Set([
     'stylelint.config.js', 'stylelint.config.cjs', 'stylelint.config.mjs',
 ]);
 
+// Native apply_patch supplies one raw patch in tool_input.command, not a
+// Write/Edit file_path. Inventory every source/destination before any verdict.
+// This protects paths only; it does not claim native content/lint validation.
+const CODEX_PROTECTED_FILE_PATTERNS = [
+    /[/\\]\.codex[/\\](?:plugins|hooks)[/\\]/,
+    /[/\\]\.codex[/\\](?:config\.toml|hooks\.json)$/,
+];
+
+function nativePatchPaths(command) {
+    if (typeof command !== 'string') throw new Error('apply_patch command must be text');
+    let lines = command.trim().split(/\r?\n/);
+    if (["<<EOF", "<<'EOF'", '<<"EOF"'].includes(lines[0]) && lines.at(-1) === 'EOF') {
+        lines = lines.slice(1, -1);
+    }
+    if (lines[0]?.trim() !== '*** Begin Patch' || lines.at(-1)?.trim() !== '*** End Patch') {
+        throw new Error('unsupported apply_patch framing');
+    }
+    const paths = [];
+    let operation = null, moved = false;
+    for (const line of lines.slice(1, -1)) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        // In Update hunks a leading space is content, even when it names a
+        // patch marker. Native streaming_parser preserves that prefix.
+        if (operation === 'Update File' && line.startsWith(' ')) continue;
+        if (trimmed.startsWith('*** Environment ID:')) {
+            throw new Error('remote apply_patch path protection is unsupported');
+        }
+        const header = trimmed.match(/^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$/);
+        if (header) {
+            const [, action, target] = header;
+            if (target.includes('\0') || /^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+                throw new Error('unsupported apply_patch path');
+            }
+            if (action === 'Move to') {
+                if (operation !== 'Update File' || moved) throw new Error('unsupported apply_patch move');
+                moved = true;
+            } else { operation = action; moved = false; }
+            paths.push(target);
+            continue;
+        }
+        if (trimmed === '*** End of File' && operation === 'Update File') continue;
+        if (trimmed.startsWith('***')) throw new Error('unsupported apply_patch header');
+        if (operation === 'Add File' && line.startsWith('+')) continue;
+        if (operation === 'Update File' && (/^[ +\-]/.test(line) || line === '@@' || line.startsWith('@@ '))) continue;
+        throw new Error('unsupported apply_patch body');
+    }
+    return paths;
+}
+
+function nativePatchResolvedPaths(cwd, target) {
+    // Match native PathUri's lexical '..' normalization first, then inspect
+    // existing symlink ancestors of that target. Raw kernel alias/.. traversal
+    // differs from native apply_patch and would falsely block ordinary paths.
+    const lexical = path.resolve(cwd, target);
+    let probe = lexical;
+    const suffix = [];
+    for (;;) {
+        try { return [lexical, path.resolve(fs.realpathSync(probe), ...suffix)]; }
+        catch (error) {
+            if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error;
+            const parent = path.dirname(probe);
+            if (parent === probe) throw error;
+            suffix.unshift(path.basename(probe)); probe = parent;
+        }
+    }
+}
+
 try {
     const input = fs.readFileSync(0, 'utf8');
 
@@ -96,6 +164,23 @@ try {
 
     const toolName = data.tool_name || '';
     const toolInput = data.tool_input || {};
+
+    if (toolName === 'apply_patch') {
+        if (typeof data.cwd !== 'string' || !path.isAbsolute(data.cwd)) {
+            throw new Error('native apply_patch requires an absolute local cwd');
+        }
+        const targets = nativePatchPaths(toolInput.command);
+        for (const target of targets) {
+            for (const resolved of nativePatchResolvedPaths(data.cwd, target)) {
+                const candidate = process.platform === 'linux' ? resolved : resolved.toLowerCase();
+                if ([...PROTECTED_FILE_PATTERNS, ...CODEX_PROTECTED_FILE_PATTERNS].some((pattern) => pattern.test(candidate))) {
+                    process.stderr.write(`Blocked: native apply_patch cannot modify security-critical path: ${resolved}\n`);
+                    process.exit(2);
+                }
+            }
+        }
+        process.exit(0);
+    }
 
     // Write/Edit protection - prevent Claude from modifying security-critical files
     if (toolName === 'Write' || toolName === 'Edit') {

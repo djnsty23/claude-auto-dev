@@ -1,0 +1,5 @@
+{
+  "name": "autodev-stack",
+  "version": "8.166.0",
+  "description": "Opinionated integrations for a specific stack: Supabase, Doppler, Stripe, and Remotion. Codex hook admission incomplete; see .codex-plugin/capabilities.json."
+}
