@@ -3,6 +3,327 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-08: production signals become candidate stories, never direct writes on a live repo
+
+The stage between "production knows" and "the backlog knows" did not exist:
+`[measured 2026-09-08]` 22 of the 121 stories the live product filed in 90 days
+cite a production observation, 0 from Sentry, 0 from a monitor alert, every one
+typed by a person reading a table. `production-signals.js` plus the
+`production-radar` skill are the collector and the reader for that stage. Full
+evidence in `docs/evidence-production-signals-2026-09-08.md`.
+
+**Candidates, not stories.** The collector writes
+`.claude/reports/production-candidates-<date>.md` in prd.json story shape with
+`passes: null` and the evidence query attached. `--apply` writes into prd.json
+only when the origin `owner/repo` sha256 is on a one-entry allowlist inside the
+script (the repo with no users); everything else is refused with the reason and
+the proposal file is still written. Digests, not names, for the same reason the
+private-name denylist is stored that way.
+
+**The unit is the issue, never the event.** Sentry issue, `(function_name,
+error_code)` group, heartbeat key, deployment. A ledger keyed `source:id` stops
+re-proposal; a signal returns only after 30 quiet days (a regression) or a
+tenfold count (an escalation).
+
+**Thresholds were changed by reading the first real run, not by reasoning.**
+13 candidates came out; reading them found a weekly job flagged dead at 86 h and
+two bursts (60 rows in 9 minutes, 5 in 45) proposed as chronic defects. Two knobs
+now exist for those: a per-key `intervals` map for heartbeats and `min_span_hours`
+for error groups. The second run produced 7, of which 4 are real and 2 are
+regressions of stories the live backlog had closed.
+
+**No hook.** It reads live systems; it runs on demand. The suite asserts
+`hooks.json` never names it.
+
+**Sentry and Search Console are handbacks, not adapters nobody can run.** The
+read token is in no store on this machine and no GSC credential exists in any
+repo; both are numbered in the evidence doc with what done looks like.
+
+**The suite caught a leak the design had missed.** A canary planted in a fixture
+error message reached the applied prd.json: the rendered report and the ledger
+were scrubbed, the candidate objects were not. Candidates are now scrubbed before
+anything consumes them. This is the reason the no-secrets assertion covers every
+byte written, not only the streams.
+
+## 2026-09-08: deploy pre-authorisation is Form B, a green gate with a ledger
+
+The question was the sixth item in the Brain capability analysis: a production
+deploy was autonomous by tooling (`ship` deploys, `auto` pushes and deploys edge
+functions) and escalated by policy (the Brain's never-list), and nobody had
+written the reconciliation in one sentence. `[stated 2026-09-08]` the operator,
+in a panel in the session that measured it: *"Yes, Form B is my decision"*.
+
+**The sentence**, now in `plugins/autodev-core/skills/brain/SKILL.md` under
+"Escalate rather than resolve" with its ineligible list, and as the four
+pre-promotion conditions at the top of `ship/SKILL.md` Step 4: a session may
+promote when the repo's named gate exits 0 on the exact commit, that commit is on
+the default branch, the ledger records commit, gate output and verification, and
+the rollback command is in the ledger before promotion; migrations touching
+grants, RLS or `SECURITY DEFINER`, billing, webhooks, entitlement, auth and live
+rows escalate regardless.
+
+**Why B**, measured in `docs/evidence-deploy-authorisation-2026-09-08.md`
+against the last 20 production deployments and every incident in 60 days across
+the three product repos: on the live product a merge to main is the deploy, and
+20 of 20 sampled builds were git-integration builds off a PR merge with 0 human
+commands and 0 CLI; five deploy-caused incidents, four via a hand-run CLI path
+with no record of tree, branch, lock or gate, one an under-deploy. A (escalate
+always) would have made 13 of 13 sampled deploys wait a mean 7.4 h and reversed
+his 2026-07-15 batching rule and his 2026-09-05 merge grant; C (canary plus
+autonomous rollback) adds ~800 lines and the mechanism that caused the
+2026-08-19 outage. B is what already happens plus the record the four incidents
+lacked, ~300 lines for a ledger row and its check, neither built yet.
+
+**Provenance, because it took three tries.** The session's own panel was held
+and self-resolved to B by the away hook, logged as BLOCKED and not acted on. The
+coordinator then relayed his B answer from another session, refused as a relay.
+He then answered the session directly with the away state absent. Only the third
+is authority, and `docs/DECISIONS-2026-09-08-deploy-authorisation.md` carries
+all three.
+
+**Still open:** the ledger row format and the check over it against the
+platform's deployment list, which is what makes the rule enforceable rather than
+prose. Another session reports building the ledger script on an unpushed branch
+(`claude/bold-haibt-31b4d6`); it should cite the evidence doc and land against
+this sentence, not a second one.
+
+## 2026-09-08: AGENTS.md is generated from the rule-* skills, gated, and kept under a hand-written half
+
+The 16 always-on `rule-*` skills (128,794 bytes) load into every Claude Code
+session by path glob; a Codex session in the same repo read a 4,200-byte
+hand-written `AGENTS.md` and never saw them, which mattered because Codex is the
+adversarial auditor here. The reference harness we compared against in the entry
+below scores 9 on portability with a hand-maintained `AGENTS.md` that was five
+months stale, so "hand-maintain a copy" was the failure to design against.
+
+Decision: `tooling/generate-agents-md.js` distils each rule into its description,
+its `paths:` globs, its first paragraph, and every paragraph carrying a dated
+claim; `npm run check:agents-md` regenerates to a temp path and fails the gate
+when the committed file drifts. Everything above the GENERATED marker stays
+hand-written and is copied through verbatim, so the Codex-only facts keep their
+home. Measured over the real rules (`--measure`): full bodies 128,384 bytes,
+this shape 21,233 keeping 25 of 25 dated claims, the brief's literal "dated
+lines" shape 14,673 keeping 2 of 25 because no marker begins a line, descriptions
+alone 7,044 keeping 0. The effect on Codex's answers is COULD NOT CHECK: the CLI
+is not installed on this machine. Evidence and the exact question to ask once it
+is: `docs/evidence-agents-md-2026-09-08.md`.
+
+Two choices made while landing it. **The step is last in the chain**, not
+first: it takes milliseconds and its only failure is a stale document, so last
+it can never hide an expensive step behind it, and the brief's instruction to
+put it in the chain is met without adding a place for a red to conceal the
+steps that catch real defects. **The first gate run was three reds that were
+not this change.** `validate` (`hooks module ./fn/autodev-fn.mjs failed the
+host's scan`), `test-validate`, and `test-rendered-layout-gate` (`2 of 282`)
+reproduced identically on an untouched HEAD worktree and serially, with CI on
+main green; the `claude` CLI itself exits with a Bun ENOENT on this machine.
+Both roots landed on main the same evening (#184 and #191), the branch was
+rebased onto them, and `validate` went to 19 PASS 0 FAIL, so the push went
+through the pre-push hook without `--no-verify`. Written down because the
+alternative that night was to push around the hook and leave the reason
+implicit.
+
+## 2026-09-08: memory recall measured at zero; ranked injection built and not shipped
+
+The question was whether the autodev-memory store is ever read back, and
+whether injecting a ranked slice of it at session start (the ECC design, up
+to 8 KB) would beat the current 91-byte line. Both were measured before any
+change; the record is `docs/evidence-memory-recall-2026-09-08.md`.
+
+**Recall.** Six evidence shapes were written down first, then searched for
+across 281 transcripts (2026-08-15 to 2026-09-07), `history.jsonl` and
+`bash-commands.log`. Skill invocations of `mem-search`: 0. The injected line
+quoted by any assistant: 0. Genuine queries of the store: 1, made with the
+CLI's `<project> <query>` arguments swapped, returning `[]` twice and read as
+"nothing there". Every other hit was a session developing or measuring the
+plugin itself.
+
+**Content.** A stratified 40-row sample, read row by row: 0 rows hold a fact
+a later session needs and could not get from git in a minute, 21 are
+derivable, 19 are noise. Weighted by the store's type mix that is about 92 %
+noise, because 90 % of the 6,072 rows are `Ran:`/`Tests`/`Read`/`Git:` echoes
+of a command line. The `type` comes from a keyword in the user's prompt, so
+scratch files are filed as bugfixes; the `concept` column IS the prompt, and
+383 rows carry another session's message as theirs.
+
+**Injection.** A ranked variant (recency × type weight × FTS match on branch
+and last five subjects, stale-file rows excluded, byte-capped) was built and
+run against the four real project paths at 2 KB and 8 KB. It injected 40 and
+154 observation lines respectively; 0 were actionable, 28 and 118 were
+misleading (wrong labels, repeats, scratch files, prompts describing a state
+the row's own session changed, and at 8 KB a production hostname and
+production secret-manager commands). Cost was about 300 ms over the current
+hook, which does not matter given the content.
+
+**Decision.** Keep the one-liner. No new hook. The store is left untouched;
+the evidence record carries a pruning proposal by shape (about 5,900 of 6,072
+rows) with the counts, for a person to act on after re-taking them. The ECC
+"memory 6 v 6" row is level at zero on both sides, not at six.
+
+Landed as this entry and the evidence document, no version bump.
+
+**Follow-on, same day.** The closing panel was held by the operator's away
+window, whose protocol takes the recommended reversible option and logs it.
+That option was the evidence doc's proposals 1 to 6: capture records only
+Write and Edit inside the project, typed by the tool, with the edit as the
+concept and one row per (session, type, title); the prompt-capture hook and
+its carrier are removed; the CLI refuses a swapped `<projectPath> <query>`.
+Those change four hook files under `plugins/`, which is the review class in
+the merge policy, so they are PR #190 with a reviewer, not this entry. Their
+per-change counts are in that PR's `docs/DECISIONS-2026-09-08-memory-recall.md`.
+The existing rows were left alone under the protocol; after the window ended
+the operator confirmed the count on a panel and the prune ran, 6,972 of
+7,480 rows removed with a verified backup first.
+
+## 2026-09-08: the quota wall — detect it, name the resume, do not add a cap
+
+The brief was to make workflow runs survive the session quota wall, on the
+2026-08-25 measurement (42 of 280 agents lost, 20 of them to a `<synthetic>`
+"session limit" row). Re-measuring first changed the shape of the work:
+**12 of the 52 run directories still exist and no workflow has run on this
+machine since 2026-08-25**, so the loss rate could not be re-sampled and the
+work stands on the 12 that remain. Full numbers in
+[`evidence-quota-wall-2026-09-08.md`](evidence-quota-wall-2026-09-08.md).
+
+**The resume already exists and is correct; what is missing is anyone calling
+it.** `Workflow({scriptPath, resumeFromRunId})` re-runs only the `agent()`
+calls with no journal result. On the one real resume on this disk it
+re-started exactly the four walled calls with identical key hashes. The
+harness names that call in the failure notification — two seconds before the
+main thread receives the same wall — and again in a later "stopped"
+notification that went unread. `grep resumeFromRunId` over plugins, tooling
+and docs found nothing. So this work builds on it rather than beside it:
+
+- `scripts/workflow-run-triage.js` reads a run directory and prints per agent
+  journaled / lost-quota-wall / lost-interrupted / lost-api-error /
+  lost-other, the agent-seconds and tool calls each cost, and the exact resume
+  call; COULD NOT CHECK on anything unreadable, never a zero. Over the real
+  population: 100 agents, 94 journaled, 6 lost (5 wall, 1 interrupt), one
+  resumable run keeping 6,497 journaled agent-seconds that nobody resumed.
+- `hooks/stop-workflow-wall-note.js` (Stop) says once, at the end of the first
+  turn that ends normally after the reset, that this session's latest run has
+  walled agents, and puts the resume call in the model's context. Never a
+  `decision` key: a Stop hook that blocks on a wall is a session that cannot
+  end at the wall. 64 ms on an ordinary turn against a 54 ms process floor;
+  a run already noted costs a stamp of mtimes, not a transcript read.
+- The phase rule, with its price: serial costs **2.0×** the wall-clock of a
+  3–4-wide phase and **4.1×** that of 8–12-wide, measured over the 12 runs;
+  a wall costs width × elapsed-at-wall (the real one: 5 agents at 40–59 s).
+  So a must-keep phase runs serial or in waves no wider than what you can
+  afford to redo, states width and re-run cost in `meta.phases[].detail`, and
+  a wide parallel phase is only for cheap-to-redo work. Prose in
+  `rule-agent-concurrency` and `WORKFLOW-STRUCTURE.md` D6/D7; no hook and no
+  cap, because a cap charges every workflow the 2–4× whether or not a wall is
+  plausible.
+
+Not done, and why: the built-in `workflow-authoring` skill is part of Claude
+Code, not this repo, so the convention lives in the rule that auto-loads on
+`**/*.workflow.js`. Auto-resume itself was not wired: the moment the wall is
+detectable is the moment nothing can run, and the first turn after the reset
+already has the note in context.
+
+## 2026-09-08: one greenfield run through spec → setup-project → auto → ship, measured
+
+The question was whether the Brain can take a one-line idea to
+production-grade software by itself. Until this run no product on this machine
+had entered through `spec` and `setup-project` (0 of 4, measured 2026-09-07), so
+the answer rested on nothing. One session ran the four skills on *"a page where
+a small team logs who is on call this week and gets a Slack-style message
+preview when it changes; Supabase for the table, Vercel for the page"* with no
+human in the loop. Full evidence in `docs/evidence-greenfield-run-2026-09-08.md`
+and the log beside it; line numbers below are that log's.
+
+**What the answer is now.** *It can take an idea to a deployed page in 23
+minutes, and it cannot take that page to a working product without a person,
+and the first place it needs one is story 1.* The idea named Supabase, so the
+sign-in story needed a project that only a dashboard can create (L26–L36). The
+harness did the right thing with that: one handback, no retry, no invented
+value, `needs-setup` written into a product `prd.json` for the first time ever
+(8 by the end, L78), and every line of code written anyway. But 6 of 7 stories
+ended the run at realness 20, the migration was never executed, and the
+primary flow was never driven in a browser (L70). "Production-grade" was not
+reached and could not have been; the measurement is that the harness knows
+when to stop and says so in a form a person can act on in six minutes.
+
+**What it changes about the harness, in order of what the log showed.**
+
+1. **The ship skill's "preview" command deploys to production on a new
+   project** (L57). `npx vercel --yes` on a project's first deployment is
+   assigned to production by Vercel, with a hint saying exactly that. The
+   skill must read `target` from the deploy JSON and stop when it says
+   `production` and the intent was preview; on a first deployment it should
+   say beforehand that no preview is possible until a production deployment
+   exists. This broke the run's hardest rule, on a throwaway, in 32 s.
+2. **`spec` and `setup-project` cannot run in one directory in the documented
+   order** (L11), and setup-project's step 4 cannot pass on its own output
+   (L18, L19): `create-next-app .` refuses the files spec wrote; `tsc` fails on
+   the untouched scaffold because Next 16 needs `next typegen` first; the
+   Biome template uses `files.ignore`, removed in Biome 2. Three pin sources
+   disagree on TypeScript and Biome (L13). Setup-project should scaffold into
+   a scratch directory and merge, ship a `typecheck` script of
+   `next typegen && tsc --noEmit`, and carry ONE pin table.
+3. **Skills and hooks are bound to the session cwd** (L24, L50). `/auto` printed
+   *"No prd.json"* against a `prd.json` that existed one directory over, and
+   `stop-auto-check.js` never saw the `auto-active` flag. Every fleet session
+   here drives a product from another cwd. Either the auto skill refuses when
+   its argument names a directory other than cwd, or the flag file carries the
+   project path and the hook follows it.
+
+**What the browser found that the gates called green** (L42, L44): a
+self-referential `--font-sans` from `shadcn init` that put every page in the
+browser serif, a 32 px input against the 44 px rule the constraints file
+states in prose, and a raw *"fetch failed"* shown to the user. Three fixes on
+four features, 0.75 raw and 0.5 by the three-day definition (L79). All three
+came from looking; none from typecheck, lint, build or the ten tests. The two
+that are assertable, computed font family and control height, belong in the
+a11y pass as code, which is the same conclusion `failure-evidence.md` reached
+about prose rules on 2026-08-16.
+
+**Not done.** No harness code changed in this entry; it is the measurement.
+The three changes above are each one skill edit and one suite, and each has a
+log line to test against.
+
+## 2026-09-07: ECC re-measured on every axis, still not adopted, three ideas ported
+
+A second, independent measurement of the 2026-09-05 question, from a macOS
+machine and rating thirteen axes instead of latency alone. Full record in
+`evidence-ecc-comparison-2026-09-07.md`. Same answer: ECC is ahead on breadth
+(286 skills, 13 harness adapters) and community (252k stars, 100+
+contributors), level on memory, and behind on everything that costs a
+session something: 74 KB of skill index against 12 KB, 575 ms of hooks per
+Edit against 247 ms, 0 of 23 hooks silent on the no-op path against 19 of
+22, ten files written by one `ls` against two. Its content cites almost no
+measurements, two of its skills reference seven files that do not exist,
+and its own working-context file has been five months stale.
+
+Three of its ideas were cheaper than what we had, and each shipped in the
+shape the measurement chose rather than ECC's:
+
+- **Typecheck once at Stop.** The old PostToolUse hook ran typecheck and
+  lint after every edit and printed failures where the model never reads
+  them. Now an accumulator plus a Stop hook that blocks once with the errors
+  as the reason. Not ECC's stderr report, and not its reformatting of the
+  user's files.
+- **Lint-config protection as a branch in pre-tool-filter.js**, `ask` not
+  `deny`: a second subprocess is 58 ms per Edit, and ECC's env-var escape
+  cannot be set from the desktop app.
+- **A hook profile through plugin userConfig**, one value (`minimal`), and
+  a suite whose point is that the eleven guarding hooks do NOT honour it.
+
+Not ported, and why: GateGuard (denies the first edit of every file blind,
+then allows any retry), the continuous-learning observer (appends every tool
+input to a jsonl at 340 ms per call), the inline `node -e` bootstrap in every
+hook command (the thing the 2026-09-05 record found tripping Windows
+Defender), Stop-time reformatting of a user's tree.
+
+The two local-only gate reds found on the way, the hooks-module scan on a
+host older than 2.1.259 and a 64 KiB pipe truncation in the layout gate that
+only macOS can see, were fixed by this session as `5fa045b` (PR #182) and
+that PR was closed in review: a version threshold would have turned a
+genuinely failing module into a WARN on an old host. #184 (a control that
+reads the host's output, not its version) and #191 are the fixes that
+landed, and this branch dropped its own half and rebased onto them.
+
 ## 2026-09-05: ECC (affaan-m/ecc) measured and not adopted
 
 The question was whether a 249k-star harness is better than this one, and if

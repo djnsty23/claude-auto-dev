@@ -18,11 +18,32 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execSync, spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
 
 const SCRIPT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'session-sweep.js');
 
 let passed = 0;
 const failures = [];
+let infra = 0;
+const indeterminate = [];
+
+// A child that produced no verdict is INFRASTRUCTURE, not a finding about
+// session-sweep.js. Measured 2026-09-08 by forcing a budgeted spawn here to
+// return `status=null signal=SIGTERM ETIMEDOUT`: this suite printed
+// `session-sweep: 20/21 passed, 1 FAILED` with `✗ script exited null` -- a
+// killed child counted as the script exiting wrongly.
+//
+// Only the four spawns that already carried a 180s budget go through this. The
+// unbudgeted ones cannot be killed by a budget and are left alone.
+function settle(r, what, expect) {
+  if (classify(r, expect) === 'infrastructure') {
+    infra++;
+    indeterminate.push(what + ' (' + reason(r) + ')');
+    console.error('infrastructure: ' + what + ' produced no verdict (' + reason(r)
+      + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms)');
+  }
+  return r;
+}
 
 function check(name, actual, expected) {
   const ok = typeof expected === 'function' ? expected(actual) : actual === expected;
@@ -483,11 +504,12 @@ function run() {
 
   const ids = cases.map((c, i) => writeSession(c, i));
 
-  const res = spawnSync(process.execPath, [SCRIPT, '--json'], {
+  const res = settle(runBudgeted(process.execPath, [SCRIPT, '--json'], {
     encoding: 'utf8',
     env: { ...process.env, SESSION_SWEEP_STORE: STORE, SESSION_SWEEP_OWNER: '' },
     timeout: 180000,
-  });
+    maxTimeout: 600000,   // contention is clamped at 20; cap the widened retry
+  }), 'the --json classification run');
 
   if (res.status !== 0) {
     failures.push(`script exited ${res.status}\n${(res.stderr || '').slice(0, 600)}`);
@@ -547,11 +569,12 @@ function run() {
   // `<` comparison false — disabling it SILENTLY rather than loudly. Drive a
   // garbage value through the real flag and assert the warm record is still
   // held back. Fails open otherwise, which is the direction that loses work.
-  const bad = spawnSync(process.execPath, [SCRIPT, '--json', '--merged-min-minutes', 'garbage'], {
+  const bad = settle(runBudgeted(process.execPath, [SCRIPT, '--json', '--merged-min-minutes', 'garbage'], {
     encoding: 'utf8',
     env: { ...process.env, SESSION_SWEEP_STORE: STORE, SESSION_SWEEP_OWNER: '' },
     timeout: 180000,
-  });
+    maxTimeout: 600000,
+  }), 'the unparseable-floor run');
   let badRows = [];
   try { badRows = JSON.parse(bad.stdout || '[]'); } catch { /* asserted below */ }
   check('unparseable floor value: still classified a population', badRows.length, cases.length);
@@ -566,12 +589,13 @@ function run() {
   {
     const RESUME_CWD = path.join(ROOT, 'resume-cwd');
     fs.mkdirSync(RESUME_CWD, { recursive: true });
-    const w = spawnSync(process.execPath, [SCRIPT, '--write-resume'], {
+    const w = settle(runBudgeted(process.execPath, [SCRIPT, '--write-resume'], {
       encoding: 'utf8',
       cwd: RESUME_CWD,               // stubs land under the CALLER's cwd
       env: { ...process.env, SESSION_SWEEP_STORE: STORE, SESSION_SWEEP_OWNER: '' },
       timeout: 180000,
-    });
+      maxTimeout: 600000,
+    }), 'the --write-resume run');
     const out = w.stdout || '';
     check('write-resume exits 0', w.status, 0);
 
@@ -618,11 +642,12 @@ function run() {
   check('no flag: orphaned record untouched', readArchived(orphanCase), false);
   check('no flag: live record untouched', readArchived(liveCase), false);
 
-  const w = spawnSync(process.execPath, [SCRIPT, '--archive-orphaned'], {
+  const w = settle(runBudgeted(process.execPath, [SCRIPT, '--archive-orphaned'], {
     encoding: 'utf8',
     env: { ...process.env, SESSION_SWEEP_STORE: STORE, SESSION_SWEEP_OWNER: '' },
     timeout: 180000,
-  });
+    maxTimeout: 600000,
+  }), 'the --archive-orphaned run');
   if (w.status !== 0) {
     failures.push(`--archive-orphaned exited ${w.status}\n${(w.stderr || '').slice(0, 400)}`);
   } else {
@@ -648,9 +673,10 @@ try {
 }
 
 const total = passed + failures.length;
-if (failures.length) {
-  console.error(`session-sweep: ${passed}/${total} passed, ${failures.length} FAILED\n`);
+if (failures.length || infra) {
+  console.error(`session-sweep: ${tally(passed, failures.length, infra)}\n`);
   for (const f of failures) console.error('  ✗ ' + f);
-  process.exit(1);
+  for (const i of indeterminate) console.error('  ? ' + i);
+  process.exit(exitCode(failures.length, infra));
 }
 console.log(`session-sweep: ${passed}/${total} passed — ${cases.length} planted worktree states, every safety label asserted by name`);

@@ -13,7 +13,7 @@
 // pull_request-only workflow (correct usage), a push trigger with no guard
 // (nothing to defeat), and a root with no workflows at all (no population).
 
-const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -22,7 +22,9 @@ const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'script
 
 let pass = 0;
 let fail = 0;
+let infra = 0;
 const failures = [];
+const indeterminate = [];
 function check(label, ok, detail) {
     if (ok) pass++; else { fail++; failures.push(label); }
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
@@ -39,8 +41,34 @@ function root(name, body) {
     return r;
 }
 
-function run(args) {
-    const r = spawnSync(process.execPath, [SUBJECT].concat(args), { encoding: 'utf8', timeout: 20000 });
+// A child that produced no verdict is INFRASTRUCTURE, not a finding about the
+// checker. Measured 2026-09-08 by forcing this suite's subject spawn to return
+// `status=null signal=SIGTERM ETIMEDOUT`: it printed
+// `FAIL  a guard beside a push trigger exits 1  (exit null)` and four more reds,
+// and exited 1. Every one of those is a claim about check-draft-skip-guard.js
+// that the run had no evidence for.
+//
+// `expect` names an outcome this call site provokes on purpose, so it reaches
+// the assertion instead of being absorbed. Only 'exit2' is used here: the
+// no-workflows root drives the subject down its own indeterminate path, and
+// that 2 is the answer being asserted rather than a failure to answer.
+function run(args, expect) {
+    const r = runBudgeted(process.execPath, [SUBJECT].concat(args), {
+        encoding: 'utf8',
+        timeout: 20000,
+        // Contention is clamped at 20, so an unbounded widening would let one
+        // stuck child hold `npm test` for nearly seven minutes. A contended
+        // machine yields an indeterminate run either way; the cap only bounds
+        // how long the reader waits to be told so.
+        maxTimeout: 300000,
+    });
+    if (classify(r, expect) === 'infrastructure') {
+        infra++;
+        const what = 'the subject run ' + JSON.stringify(args);
+        indeterminate.push(what + ' (' + reason(r) + ')');
+        console.error('infrastructure: ' + what + ' produced no verdict (' + reason(r)
+            + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms)');
+    }
     return { status: r.status, out: r.stdout || '', err: r.stderr || '' };
 }
 
@@ -155,7 +183,7 @@ const GUARD = '    if: github.event.pull_request.draft == false\n';
 {
     const bare = path.join(tmp, 'empty');
     fs.mkdirSync(bare, { recursive: true });
-    const r = run([bare]);
+    const r = run([bare], 'exit2');   // the 2 IS the answer here, not a failure to answer
     check('a root with no .github/workflows exits 2, never 0', r.status === 2, 'exit ' + r.status);
     check('  and says the run vouches for nothing', /vouches for NOTHING/.test(r.err + r.out));
 }
@@ -305,15 +333,22 @@ function multiRoot(name, files) {
             + GUARD + '    steps:\n      - run: echo hi\n');
     }
 
+    // Spawned through runBudgeted, not raw spawnSync: #183 replaced every
+    // unbudgeted child in tooling/ because a timeout under concurrent load was
+    // being recorded as a verdict. Both legs share one budget, so the pipe and
+    // the file are never compared across different amounts of patience.
+    const budgetedSpawn = (argv, opts) => runBudgeted(process.execPath, argv,
+        Object.assign({ timeout: 60000, maxTimeout: 180000 }, opts));
+
     const viaFileBytes = (args) => {
         const out = path.join(tmp, 'via-file.out');
         const fd = fs.openSync(out, 'w');
-        spawnSync(process.execPath, [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'] });
+        budgetedSpawn( [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'] });
         fs.closeSync(fd);
         return fs.statSync(out).size;
     };
     const jsonArgs = [bigRoot, '--json'];
-    const piped = spawnSync(process.execPath, [SUBJECT].concat(jsonArgs),
+    const piped = budgetedSpawn( [SUBJECT].concat(jsonArgs),
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
     const fileBytes = viaFileBytes(jsonArgs);
@@ -330,7 +365,7 @@ function multiRoot(name, files) {
     // a summary rather than a row per workflow, so it stays under the buffer
     // here — which is why it gets the equality alone, and why THIS LINE CANNOT
     // CATCH THE REGRESSION on its own.
-    const reportPipe = spawnSync(process.execPath, [SUBJECT, bigRoot],
+    const reportPipe = budgetedSpawn( [SUBJECT, bigRoot],
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     check('  the human report through a PIPE also delivers every byte',
         Buffer.byteLength(reportPipe.stdout || '', 'utf8') === viaFileBytes([bigRoot]),
@@ -339,10 +374,11 @@ function multiRoot(name, files) {
 
 fs.rmSync(tmp, { recursive: true, force: true });
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SUBJECT)}; every case plants its `
     + 'own workflow fixture, because this repo carries no draft-skip guard and a live run here '
     + 'would report zero forever. Both findings are covered, each with its own negatives: for '
     + 'INERT, three near-misses; for PARTIAL, both consistent states and an unreachable workflow.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
-process.exit(fail ? 1 : 0);
+if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+process.exit(exitCode(fail, infra));

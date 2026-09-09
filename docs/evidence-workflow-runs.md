@@ -1,5 +1,15 @@
 # Evidence: what 52 real workflow runs on disk actually did
 
+> **Addendum `[measured 2026-09-08]`.** Re-scanned on the same machine two weeks
+> later: **12 of these 52 run directories still exist** (the other 40 went with
+> their session directories; cause not established), every one of the 12 predates
+> 2026-08-25, and **no workflow has run on this machine since**. The loss-cause
+> finding below stands on the 12 that remain (5 agents lost to the wall, all in
+> `wf_f9e30118`, and the one real `resumeFromRunId` on this disk), the shape
+> tables cannot be re-derived, and the follow-up — detection, the phase rule with
+> its serial cost, and a Stop hook that names the resume — is in
+> [`evidence-quota-wall-2026-09-08.md`](evidence-quota-wall-2026-09-08.md).
+
 `[measured 2026-08-25]` on one machine. Every number below comes from
 `<claude-home>/projects/*/*/subagents/workflows/wf_*/`, read directly.
 Product repos are anonymised as **Project A / B / C** per this repo's public-name

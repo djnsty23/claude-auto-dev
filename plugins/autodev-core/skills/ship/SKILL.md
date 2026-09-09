@@ -40,6 +40,13 @@ git status --short         # Warn if uncommitted changes
 | Uncommitted changes | Warn user, ask if they want to commit (use git directly, do not invoke the commit skill) |
 | All pass | Continue to Step 2 |
 
+**A red that is also red at the base branch is not this change's, and is not a
+licence to skip it either.** Before acting on a Stop row, run the same command in
+a detached worktree of the default branch; the recipe and the verdict table are in
+the `commit` skill under *When a git hook refuses*. Green there and red here: fix
+it. Red there with the same lines: say so in the PR body, fix nothing in this PR
+that belongs to trunk, and decide the deploy on the rows that ARE this change's.
+
 ## Step 1b: Evidence for the human reviewer
 
 The gates above are for the machine. Before opening a PR, check the `prove`
@@ -83,6 +90,42 @@ Check in order:
 Do not ask which platform — detect or default.
 
 ## Step 4: Deploy
+
+**Promotion to production is pre-authorised on a green gate with a ledger, and
+on nothing less.** `[stated 2026-09-08]` the operator, choosing this over
+"escalate always" and "add a canary" with the measured numbers in view; the rule
+and its ineligible list live in the Brain skill under "Escalate rather than
+resolve", and the evidence in `docs/evidence-deploy-authorisation-2026-09-08.md`.
+Before the `--prod` line below, all four must be true and written down:
+
+1. The repo's named gate exited 0 on the EXACT commit you are deploying, read per
+   job (at least one completed success per required platform, never a count of
+   non-success entries).
+2. That commit is on the default branch. A deploy from an unpushed branch or a
+   tree missing a merged fix is the shape of two of the five incidents in the
+   evidence doc.
+3. The ledger records the commit sha, the gate command with its exit code and
+   output, and (after Step 5) the verification. Until `deploy-ledger.js` carries
+   these fields, write them at the top of `DEPLOY-LEDGER.md` by hand; the surface
+   checklist it generates is Step 5b, not this.
+4. The undo command for THIS deploy is in the ledger before you promote, and it
+   splits by case. Where production traffic already exists:
+   `vercel rollback <previous production url>` (from `vercel ls --prod`), or for
+   an edge function the previous commit and the deploy command from Step 6.
+   Where this is the project's FIRST production deployment there is no previous
+   URL, `vercel ls --prod` names nothing and `vercel rollback` has nothing to
+   return to; the undo is `vercel remove <project> --yes`, `[measured 2026-09-08]`
+   by a peer session on an accidental production alias, which returned 404 within
+   a second. A first deployment is also the case `npx vercel --yes` above does
+   not reliably keep as a preview (Vercel assigns a project's first deployment to
+   production and says so afterwards), so on a new project write the remove
+   command down before the preview line, not only before `--prod`.
+
+If the change touches anything on the ineligible list (a migration that drops or
+renames a column or changes a grant, RLS or a `SECURITY DEFINER`; billing,
+checkout, webhook or entitlement code; auth; live rows), stop here and escalate
+whatever the gate says. On a repo where a merge to the default branch is itself
+the production deploy, the four conditions apply to the merge.
 
 ### Vercel
 

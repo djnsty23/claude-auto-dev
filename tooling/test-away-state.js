@@ -38,7 +38,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
 
 const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'away-state.js');
 const { readAwayState } = require(SUBJECT);
@@ -48,7 +48,9 @@ const NOW = new Date('2026-09-02T18:00:00Z');
 
 let pass = 0;
 let fail = 0;
+let infra = 0;
 const failures = [];
+const indeterminate = [];
 function check(label, ok, detail) {
     if (ok) pass++; else { fail++; failures.push(label); }
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
@@ -163,12 +165,52 @@ for (const [label, arg] of [
 // closed, under a 10s budget. And a state nobody can print is one nobody can
 // debug, so --status has to name the file it read: "no away window" and
 // "looked at the wrong path" are otherwise identical output.
+//
+// A child that produced no verdict is INFRASTRUCTURE, not a finding about
+// away-state.js. Measured 2026-09-08 by forcing a subject spawn to come back
+// `status=null signal=SIGTERM ETIMEDOUT`: this suite printed
+// `FAIL  --help returns 0 with usage, inside the entrypoint budget (exit null, 0ms)`
+// and exited 1, which is a claim about the subject the run had no evidence for.
+//
+// Three of these four spawns carried NO budget before this change. An unbudgeted
+// spawn cannot produce that false red -- but it can hang the whole gate forever,
+// so they are bounded here too: a bounded indeterminate beats an unbounded wait.
+function cli(args, over = {}) {
+    const r = runBudgeted(process.execPath, [SUBJECT].concat(args), Object.assign({
+        input: '', encoding: 'utf8', timeout: 15000,
+        // Contention is clamped at 20, so cap the widened retry rather than let
+        // one stuck child hold `npm test` for five minutes.
+        maxTimeout: 120000,
+    }, over));
+    if (classify(r) === 'infrastructure') {
+        infra++;
+        const what = 'the subject run ' + JSON.stringify(args);
+        indeterminate.push(what + ' (' + reason(r) + ')');
+        console.error('infrastructure: ' + what + ' produced no verdict (' + reason(r)
+            + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms)');
+    }
+    return r;
+}
+
 {
     const t0 = Date.now();
-    const r = spawnSync(process.execPath, [SUBJECT, '--help'], { input: '', encoding: 'utf8', timeout: 15000 });
+    const r = cli(['--help']);
     const ms = Date.now() - t0;
-    check('--help returns 0 with usage, inside the entrypoint budget',
-        r.status === 0 && (r.stdout || '').length > 0 && ms < 10000, `exit ${r.status}, ${ms}ms`);
+    // THE TIMING HALF IS ONLY MEASURABLE ON A SINGLE-ATTEMPT RUN. `ms` spans
+    // every attempt plus the contention probe between them, so on a retried run
+    // it is guaranteed to exceed the budget that provoked the retry and would
+    // fail this assertion for the one reason it must not: the machine was busy.
+    // A retry means the timing question could not be measured, not that the
+    // answer was no.
+    if (r.attempts > 1) {
+        infra++;
+        indeterminate.push('--help timing (the run retried, so the wall clock spans a killed attempt)');
+        console.error('infrastructure: --help timing not measurable (' + r.attempts
+            + ' attempt(s), ' + ms + 'ms spans a killed attempt)');
+    } else {
+        check('--help returns 0 with usage, inside the entrypoint budget',
+            r.status === 0 && (r.stdout || '').length > 0 && ms < 10000, `exit ${r.status}, ${ms}ms`);
+    }
 }
 {
     // WALL-CLOCK FIXTURE, RELATIVE ON PURPOSE. This case spawns the real binary,
@@ -189,14 +231,13 @@ for (const [label, arg] of [
     // under test, so `Date.now() + 4h` cannot expire no matter when it runs.
     const soon = new Date(Date.now() + 4 * 3600 * 1000).toISOString();
     const f = write('cli-active.md', `# AWAY\n\nuntil: ${soon}\n\nrelative, so it cannot expire\n`);
-    const r = spawnSync(process.execPath, [SUBJECT, '--status', '--file', f], { input: '', encoding: 'utf8' });
+    const r = cli(['--status', '--file', f]);
     const ok = r.status === 0 && r.stdout.includes(f) && /SELF-RESOLVE/.test(r.stdout);
     check('--status names the file it read, and says which licence the state grants', ok,
         `exit ${r.status}, stdout ${JSON.stringify((r.stdout || '').split('\n')[0].slice(0, 70))}`);
 }
 {
-    const r = spawnSync(process.execPath, [SUBJECT, '--json', '--file', path.join(fixture, 'nope.md')],
-        { input: '', encoding: 'utf8' });
+    const r = cli(['--json', '--file', path.join(fixture, 'nope.md')]);
     let parsed = null;
     try { parsed = JSON.parse(r.stdout); } catch { /* stays null */ }
     check('--json emits parseable JSON carrying the state', r.status === 0 && parsed && parsed.state === 'absent',
@@ -205,9 +246,7 @@ for (const [label, arg] of [
 // The env override, because the hook that will consume this needs it to be
 // testable without touching the operator's real away file.
 {
-    const r = spawnSync(process.execPath, [SUBJECT, '--json'], {
-        input: '',
-        encoding: 'utf8',
+    const r = cli(['--json'], {
         // Relative for the same reason as the case above. A past instant only
         // gets more past, so `expired.md` is safe by luck rather than by design,
         // and copying a construction that is safe by luck is how the active one
@@ -250,16 +289,23 @@ for (const [label, arg] of [
     }
     const bigFile = write('cli-big.md', `# AWAY\n\nuntil: ${soon}\n\n${long.join('\n')}\n`);
 
+    // Spawned through runBudgeted, not raw spawnSync: #183 replaced every
+    // unbudgeted child in tooling/ because a timeout under concurrent load was
+    // being recorded as a verdict. Both legs share one budget, so the pipe and
+    // the file are never compared across different amounts of patience.
+    const budgetedSpawn = (argv, opts) => runBudgeted(process.execPath, argv,
+        Object.assign({ timeout: 60000, maxTimeout: 180000 }, opts));
+
     const viaFileBytes = (extra) => {
         const out = path.join(fixture, 'via-file.out');
         const fd = fs.openSync(out, 'w');
-        spawnSync(process.execPath, [SUBJECT, '--file', bigFile].concat(extra),
+        budgetedSpawn( [SUBJECT, '--file', bigFile].concat(extra),
             { stdio: ['ignore', fd, 'ignore'] });
         fs.closeSync(fd);
         return fs.statSync(out).size;
     };
 
-    const pipeRun = spawnSync(process.execPath, [SUBJECT, '--json', '--file', bigFile],
+    const pipeRun = budgetedSpawn( [SUBJECT, '--json', '--file', bigFile],
         { input: '', encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     const pipeBytes = Buffer.byteLength(pipeRun.stdout, 'utf8');
     const fileBytes = viaFileBytes(['--json']);
@@ -278,7 +324,7 @@ for (const [label, arg] of [
     // be driven over the buffer from a fixture at all. It shares the exit path,
     // so it gets the equality on its own; THIS ONE LINE CANNOT CATCH THE
     // REGRESSION, and is here to state the equality rather than to prove it.
-    const statusPipe = spawnSync(process.execPath, [SUBJECT, '--status', '--file', bigFile],
+    const statusPipe = budgetedSpawn( [SUBJECT, '--status', '--file', bigFile],
         { input: '', encoding: 'utf8' });
     check('  --status also delivers every byte, though it stays under the buffer',
         Buffer.byteLength(statusPipe.stdout, 'utf8') === viaFileBytes(['--status']),
@@ -287,9 +333,10 @@ for (const [label, arg] of [
 
 fs.rmSync(fixture, { recursive: true, force: true });
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SUBJECT)}; `
     + `4 states exercised (active, expired, absent, malformed) over ${pass + fail} cases, `
     + 'every one asserting the state NAME and the licence it grants, never just one.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
-process.exit(fail > 0 ? 1 : 0);
+if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+process.exit(exitCode(fail, infra));

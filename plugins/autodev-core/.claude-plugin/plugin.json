@@ -1,7 +1,7 @@
 {
   "name": "autodev-core",
   "description": "Autonomous development workflow: brainstorm, auto, iterate, audit, review, ship, plus the prd.json sprint system.",
-  "version": "8.164.0",
+  "version": "8.166.0",
   "author": {
     "name": "djnsty23",
     "url": "https://github.com/djnsty23"
@@ -15,5 +15,13 @@
     "sprint",
     "code-review",
     "qa"
-  ]
+  ],
+  "userConfig": {
+    "hooks_profile": {
+      "type": "string",
+      "title": "autodev hook profile",
+      "description": "full (default) runs every hook. minimal keeps the hooks that guard or block (write filter, coordinator guard, panel and peer budgets, sprint stop check, brain report, compaction bookkeeping) and skips the advisory ones (typecheck, telemetry, context nudge, inbox notify, image scan, instructions ledger). Any other value reads as full.",
+      "default": "full"
+    }
+  }
 }

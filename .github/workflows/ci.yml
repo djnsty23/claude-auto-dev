@@ -11,18 +11,38 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS dropped 2026-08-17. It was the single largest GROSS line in the
-        # whole account — 376 macOS minutes in 17 days, $23.34 gross — because
-        # this matrix runs on every push and pull_request, and 28 pushes landed
-        # in one day. Public repos bill $0, so it cost nothing; it was noise in
-        # the usage report and it tripled CI wall-clock per push.
+        # macOS dropped 2026-08-17, RE-ADDED 2026-09-07 on the condition the
+        # 2026-08-17 comment set for itself: "the day a macOS-only failure
+        # appears." That day was 2026-09-07.
         #
-        # It also tested nothing the other two do not. This plugin is pure Node
-        # with no native deps and no darwin-specific code paths; the platform
-        # risk it actually carries is Windows (cmd.exe routing, the PowerShell
-        # curl alias, CRLF, reserved device names), which is why windows-latest
-        # stays. Re-add macos-latest the day a macOS-only failure appears.
-        os: [ubuntu-latest, windows-latest]
+        # The claim that justified dropping it was "no darwin-specific code
+        # paths", and it was false. node's process.stdout is ASYNCHRONOUS when
+        # it is a pipe on darwin, and SYNCHRONOUS when it is a pipe on linux and
+        # win32. A process.exit() does not drain a pending async write, so
+        # rendered-layout-gate.js --json delivered 65536 bytes — one OS pipe
+        # buffer — of invalid JSON out of 84752, under exit status 0. Its suite
+        # had been failing 2 of 282 on every mac in the project since the day it
+        # was written, and green here throughout.
+        #
+        # That is the shape of platform risk worth paying for: not a crash, which
+        # any platform shows you, but a divergence that returns a SUCCESS status
+        # over a wrong answer. "Pure Node with no native deps" does not imply
+        # identical behaviour — the stdio semantics of the runtime itself differ.
+        #
+        # The cost, re-measured rather than re-quoted. The 2026-08-17 note said
+        # macOS "tripled CI wall-clock per push"; matrix legs run CONCURRENTLY,
+        # so what tripled was runner MINUTES, and wall-clock moves only by macOS
+        # queue time. This repo is public, so minutes bill $0 gross. The macOS
+        # leg is also the short one: every step below except `npm test` and the
+        # hook parse is gated to ubuntu-latest, so it does not run check:suites
+        # or the four advisory gates. Queue contention on a $0 line is the whole
+        # bill, against a defect class that reports success while lying.
+        #
+        # If that queue time ever does hurt, cut it by EVENT rather than by
+        # platform — the recorded cost driver was 28 pushes in one day, not the
+        # PRs. windows-latest stays for its own reasons: cmd.exe routing, the
+        # PowerShell curl alias, CRLF, reserved device names.
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       # v4 targets Node 20, which the runners now force onto Node 24 and warn
       # about on every run. v7 is the current major for both and runs natively.
@@ -80,3 +100,33 @@ jobs:
       - name: Skill bodies declare the tools they mandate
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:skill-tools
+
+      # AGENTS.md's generated half is distilled from the rule-* skills, so a
+      # Codex session in this repo sees the conventions it audits against. This
+      # regenerates to a temp path and diffs against the committed file: exit 1
+      # when a rule changed and AGENTS.md did not. Linux only because the
+      # comparison is byte-exact and a CRLF checkout would be a red about line
+      # endings, not about drift.
+      - name: AGENTS.md matches the rules it is generated from
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:agents-md
+
+      # CLAUDE.md is the file every session loads before it does anything, and
+      # a false claim in it is acted on rather than read. Three went stale
+      # inside 48 hours: the gate's step count (a session skipped check:suites
+      # and reported an unverified suite green), "force-push is blocked" (two
+      # sessions took worse git paths on its authority in one morning), and the
+      # `passes` table, which listed four states for as long as five existed.
+      #
+      # Only mechanically checkable claims are graded, each against one named
+      # authority. Prose judgement is out of scope on purpose: a checker that
+      # guesses produces false positives, and a gate with false positives gets
+      # switched off, at which point it protects nothing.
+      #
+      # RUNS WITHOUT CREDENTIALS. Exactly one claim needs the GitHub API, and
+      # there is no token here, so that claim SKIPs with a printed reason and
+      # the run stays green. Unreachable never reads as verified — the skip is
+      # in the log. The local gate, where `gh` is authenticated, grades it.
+      - name: CLAUDE.md still describes the tree
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:claude-md

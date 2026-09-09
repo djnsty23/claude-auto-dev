@@ -91,6 +91,39 @@ Once the answer is yes, in that turn:
 git push origin HEAD
 ```
 
+### When a git hook refuses the commit or the push
+
+A `commit-msg` or `pre-push` hook that exits non-zero is a gate, and
+`--no-verify` skips it. The PreToolUse guard asks before that flag runs, and
+its reason names the hook file and the script it runs. The question that decides
+whether skipping is right is not *is the gate red* but **is it red at the base
+branch too**, and it costs one detached worktree to answer:
+
+```bash
+git fetch -q origin
+BASE=$(mktemp -d)
+git worktree add -q --detach "$BASE" origin/main        # or the default branch
+( cd "$BASE" && node <the script the hook runs> ); echo "base exit $?"
+node <the same script>; echo "branch exit $?"
+git worktree remove --force "$BASE"
+```
+
+Compare the FAIL lines, not the exit codes: two reds with different lines are
+two different findings.
+
+| base | branch | verdict |
+|---|---|---|
+| green | red | the red is this change's; fix it, no bypass |
+| red | red, same lines | a trunk red; the bypass is correct and the RECORD is the deliverable |
+| red | red, more lines | both; fix the extra lines, then the rest is trunk's |
+
+Then, with the operator's yes in that turn, push with `--no-verify` and put one
+line in the commit or PR body naming the gate skipped, why it was red, and that
+it reproduces at the base. The PostToolUse note after the push asks for exactly
+this line. `[measured 2026-09-07]` four sessions bypassed a trunk-red pre-push in
+one night and every one was right; the bypass that could be told from a skipped
+gate afterwards was the one that wrote the line down.
+
 ### Branch Strategy
 
 Check before branching:

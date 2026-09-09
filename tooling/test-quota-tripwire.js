@@ -55,7 +55,29 @@
 
 'use strict';
 
-const { spawnSync } = require('child_process');
+const __sb = require('./spawn-budget.js');
+// A STUBBED OR BROKEN HELPER IS A RED, NOT AN INDETERMINATE RUN.
+// check-suites-can-fail.js proves a suite can fail by replacing its subject with
+// `module.exports = {}` and requiring every covering suite to exit 1. Once these
+// suites started requiring a shared helper, that stub made `runBudgeted`
+// undefined; the resulting TypeError reached the uncaughtException handler,
+// which correctly calls an unexpected throw INFRASTRUCTURE and exits 2 -- and
+// the sweep reads a 2 as a REFUSAL, not a failure, so it reported a mid-sweep
+// conflict and went INDETERMINATE. The honest classification poisoned the canary
+// that proves the suite works. `[measured 2026-09-08]` found by the session on
+// the same three suites; reproduced here at 55a841a with the stub applied by
+// hand: two suites exited 2 and test-path-filter-deadlock, which has no
+// uncaughtException handler, exited 1 -- three suites, one stub, two answers.
+// A missing export is a defect in this repo's own code and belongs in the RED
+// column. Only a CHILD PROCESS that produced no verdict is infrastructure.
+for (const __fn of ['classify', 'reason', 'runBudgeted', 'timedOut', 'tally']) {
+    if (typeof __sb[__fn] !== 'function') {
+        console.error('FAIL  spawn-budget.js does not export ' + __fn + '() -- this suite\'s own '
+            + 'helper is missing or stubbed. That is a RED, not an indeterminate run.');
+        process.exit(1);
+    }
+}
+const { classify, reason, runBudgeted, timedOut, tally } = __sb;
 
 // Any uncaught throw in this suite is INFRASTRUCTURE: exit 2, never the
 // ambient exit 1 the sweep could score as evidence (Sol rounds 20-21).
@@ -72,6 +94,40 @@ const SUBJECT = path.resolve(
 );
 
 let pass = 0, fail = 0;
+// Every reason this run could not be read as a claim about the code. Until
+// 2026-09-07 the exitCode=2 branches below were invisible to the tally, so an
+// infrastructure verdict printed "180 passed, 0 failed" and exited 2 - a green
+// summary describing something other than the subject, which is the exact shape
+// CLAUDE.md warns about.
+//
+// ⚠️ AN EARLIER VERSION OF THIS PARAGRAPH SAID "the exit code was right all
+// along; the last line a reader sees is what had to change". That is true for a
+// TIMEOUT and false for the case that prompted the work, and the difference
+// matters because it is the difference between a symptom and a cause.
+//
+// I reproduced the green-tally/red-exit by forcing the CLEANUP branch and
+// generalised from it. `[measured 2026-09-08]` the session on the same three
+// suites found the real path, and it is section 7 below: it renames the TRACKED
+// plugins/autodev-core/scripts/quota-burn.js out of the SHARED working tree and
+// restores it with linkSync, which refuses EEXIST. Two concurrent runs collide,
+// the loser prints NOT RESTORED and exits 2 with every assertion green. That
+// exit 2 is SELF-INFLICTED, not an honest infrastructure verdict - and a run
+// killed inside that window leaves a tracked file deleted, which is precisely
+// tree-inert's "a suite rewrote what it grades".
+//
+// Measured there with no load generator at all: 3 of 6 concurrent runs of this
+// suite alone went red, in BOTH directions - one saw code=source-missing where
+// section 7a demands the sibling win, another lost its own rename race, read the
+// ENOENT correctly as "genuinely absent", and then had the file restored
+// underneath it.
+//
+// So the tally fix below is necessary and NOT sufficient: it makes the symptom
+// legible while leaving the cause in the tree. The cure is to stage the absence
+// inside the fixture instead, since the subject resolves its sibling from its
+// own __dirname. And the general lesson is the one rule-diagnosis states:
+// forcing a branch reproduces the SYMPTOM, running a suite concurrently WITH
+// ITSELF reproduces the CAUSE.
+const indeterminate = [];
 
 function check(label, ok, detail) {
     if (ok) pass++; else fail++;
@@ -104,6 +160,14 @@ function matches(label, haystack, re) {
 
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-tripwire-'));
 const FIXHOME = path.join(fixture, 'home');
+
+// A copy of the subject in a directory with NO quota-burn.js beside it. The
+// script resolves its source from its own __dirname, so this stages "the
+// shipped sibling is absent" entirely inside the fixture — see section 7 for
+// what staging it in the working tree cost.
+const NO_SIBLING = path.join(fixture, 'no-sibling', 'quota-tripwire.js');
+fs.mkdirSync(path.dirname(NO_SIBLING), { recursive: true });
+fs.copyFileSync(SUBJECT, NO_SIBLING);
 
 const MIN = 60000;
 // A fixed instant, so every projected timestamp in an expected string is a
@@ -139,12 +203,18 @@ function env(extra) {
     return Object.assign(e, extra || {});
 }
 
-function run(args, extra, timeout, expect) {
-    const r = spawnSync(process.execPath, [SUBJECT].concat(args), {
+function run(args, extra, timeout, expect, subject) {
+    const r = runBudgeted(process.execPath, [subject || SUBJECT].concat(args), {
         // 60s, not 15: a cold node start under machine load blew 15s, and a
         // timed-out child is now classified infrastructure rather than being
         // absorbed - so the budget must only be exceedable by a real hang.
         encoding: 'utf8', env: env(extra), timeout: timeout || 60000,
+        // On a timeout that budget is retried ONCE at a contention-scaled one.
+        // Not under 'kill': there the timeout is the ANSWER the call site is
+        // asserting, and a retry would sit out a deliberate 2.5s wait again at
+        // a multiple of it.
+        retryOnTimeout: expect !== 'kill',
+        maxTimeout: 300000,
     });
     // A child that errored, was signalled, carries a null status, or exited
     // 2 without this call site expecting it produced no verdict: that is
@@ -156,27 +226,15 @@ function run(args, extra, timeout, expect) {
     // child survived to the timeout or exited early is precisely what the
     // call site's assertion adjudicates, so it must reach that assertion
     // (Sol round-22: the old shape accepted exit 1 and arbitrary signals as
-    // the expected timeout).
-    const timedOut = !!(r.error && r.error.code === 'ETIMEDOUT');
-    // Under 'kill' exactly ONE outcome is a verdict: our timeout fired and
-    // the child died to the SIGTERM it sent, leaving a null status. An early
-    // numeric 0/1 self-exit is the behavioural red the scenario exists to
-    // catch, so it reaches the assertion. EVERY other incomplete shape is
-    // infrastructure (Sol round-24): a non-timeout signal, ETIMEDOUT with a
-    // non-SIGTERM signal such as SIGKILL, ETIMEDOUT carrying a status, a
-    // self-exit 2, or any other spawn error.
-    const killVerdict = timedOut && r.signal === 'SIGTERM' && r.status === null;
-    const earlyNumericExit = !r.error && !r.signal && (r.status === 0 || r.status === 1);
-    const bad = expect === 'kill'
-        ? !(killVerdict || earlyNumericExit)
-        : (!!r.error || !!r.signal || r.status === null
-            || (r.status === 2 && expect !== 'exit2'));
-    if (bad) {
-        console.error('infrastructure: subject run ' + JSON.stringify(args) + ' did not produce a verdict ('
-            + (r.error ? (r.error.code || r.error.message) : (r.signal || ('status ' + r.status))) + ')');
+    // the expected timeout). The full contract now lives in classify().
+    if (classify(r, expect) === 'infrastructure') {
+        const why = reason(r) + (r.attempts > 1 ? `; ${r.attempts} attempts, budget ${r.budgetMs}ms` : '');
+        const what = 'subject run ' + JSON.stringify(args);
+        console.error('infrastructure: ' + what + ' did not produce a verdict (' + why + ')');
+        indeterminate.push(what + ' (' + why + ')');
         process.exitCode = 2;
     }
-    return { status: r.status, signal: r.signal, timedOut, stdout: r.stdout || '', stderr: r.stderr || '' };
+    return { status: r.status, signal: r.signal, timedOut: timedOut(r), stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
 let stateSeq = 0;
@@ -633,42 +691,38 @@ try {
     }
     {
         // The legacy path is still honoured for anyone who already has one there:
-        // remove the sibling and the old location must be found again. Without
-        // this, "prefer the sibling" could have been implemented as "ignore the
-        // home path entirely", and the fallback would be untested.
+        // with no sibling beside the script, the old location must be found
+        // again. Without this, "prefer the sibling" could have been implemented
+        // as "ignore the home path entirely", and the fallback would be untested.
+        //
+        // ABSENCE IS STAGED IN THE FIXTURE, NEVER IN THE REPO.
+        //
+        // [measured 2026-09-07] this block used to renameSync the shipped
+        // plugins/autodev-core/scripts/quota-burn.js out of the working tree and
+        // link it back afterwards. The working tree is shared by every session
+        // and every worktree in this clone, so for the width of that window the
+        // file flickered out of existence for ALL of them. 3 of 6 concurrent runs
+        // of this suite alone went red, in BOTH directions: a run that reached
+        // section 7a inside someone else's window saw `code=source-missing`
+        // where 7a demands the sibling win, and a run whose own rename lost the
+        // race got ENOENT — read, correctly by its own lights, as "the sibling is
+        // genuinely absent" — then had the file restored underneath it and saw no
+        // fallback at all. Neither run did anything wrong; the resource was
+        // global. Killing a run mid-window also left a tracked file deleted,
+        // which is exactly what `tree-inert` reports as a suite rewriting what
+        // it grades.
+        //
+        // The subject resolves the sibling from its OWN __dirname, so a copy in
+        // a directory that has no sibling stages the identical absence while
+        // touching nothing anyone else can see. It also pins the resolution as
+        // __dirname-relative rather than tied to this repo's layout.
         const sp = seed('src-legacy');
-        const shipped = path.join(path.dirname(SUBJECT), 'quota-burn.js');
-        // Unique per run: a fixed stash name could silently replace a
-        // preserved original left by an earlier failed run on POSIX.
-        const stash = shipped + '.suite-stashed-' + process.pid + '-' + Date.now();
-        let moved = false;
-        try { fs.renameSync(shipped, stash); moved = true; }
-        catch (e) {
-            // ENOENT means the sibling genuinely is not present, which is the
-            // scenario's premise. Anything else is infrastructure and must
-            // not be silently read as absence (Sol round-22).
-            if (e.code !== 'ENOENT') {
-                console.error('infrastructure: could not stash ' + shipped + ' (' + (e.code || e.message) + ')');
-                process.exitCode = 2;
-            }
-        }
-        try {
-            const r = run(['--once', '--state', sp]);
-            has('with the sibling absent it falls back to the home path',
-                r.stdout, path.join(FIXHOME, '.claude', 'scripts', 'quota-burn.js'));
-            has('...and reports the miss rather than assuming zero', r.stdout, 'code=source-missing');
-        } finally {
-            // link() refuses EEXIST, so a file recreated at the shipped path
-            // while it was stashed survives instead of being replaced.
-            if (moved) {
-                try { fs.linkSync(stash, shipped); fs.unlinkSync(stash); }
-                catch (e) {
-                    console.error('NOT RESTORED: ' + shipped + ' was recreated while stashed ('
-                        + (e.code || e.message) + '); the original is kept at ' + stash);
-                    process.exitCode = 2;
-                }
-            }
-        }
+        eq('precondition: the sibling-free copy of the subject really has no sibling',
+            fs.existsSync(path.join(path.dirname(NO_SIBLING), 'quota-burn.js')), false);
+        const r = run(['--once', '--state', sp], null, null, null, NO_SIBLING);
+        has('with the sibling absent it falls back to the home path',
+            r.stdout, path.join(FIXHOME, '.claude', 'scripts', 'quota-burn.js'));
+        has('...and reports the miss rather than assuming zero', r.stdout, 'code=source-missing');
     }
 
     // =======================================================================
@@ -944,7 +998,11 @@ try {
     }
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
+if (process.exitCode === 2 && indeterminate.length === 0) {
+    indeterminate.push('the fixture could not be cleaned up; see the line above');
+}
+console.log(`\n${tally(pass, fail, indeterminate.length)}`);
+if (indeterminate.length) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
 // Precedence 2 -> 1 -> 0: an infrastructure problem outranks assertion
 // failures, because a run that could not maintain its own sandbox is
 // indeterminate, not red (Sol round-19).

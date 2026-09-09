@@ -404,13 +404,25 @@ is mandatory, because prose review is then the only verification there is.
 session has already returned a `<synthetic>` session-limit row, or the session has
 been running long enough that a wall is plausible. This is the *conditional* form
 of the width rule — width sizes the loss when a wall lands, so narrow when one is
-likely, and do not pay wall-clock for it when one is not.
+likely, and do not pay wall-clock for it when one is not. `[measured 2026-09-08]`
+what that wall-clock is, over the 12 runs on disk: serial costs **2.0×** the
+wall-clock of width 3–4 and **4.1×** that of width 8–12
+([evidence](evidence-quota-wall-2026-09-08.md)). And what a wall costs is width ×
+the work each agent had done when it landed: the one real wall took 5 agents at
+40–59 s each. Bound the width of a phase that must not be lost to what you can
+afford to redo; state width and re-run cost in each `meta.phases[].detail`; and
+after a wall **resume** (`Workflow({scriptPath, resumeFromRunId})`, which re-runs
+only the calls with no journal result) rather than relaunch.
+`node scripts/workflow-run-triage.js --latest` prints the call.
 
 **D7: split the run into two dispatches.** When the deliverable needs a decision
 from a human between stages. Kill a workflow only **between** phases: the journal
 records a result on agent completion only, so a mid-phase kill loses every agent in
 that phase. Measured: three agents killed mid-phase left 48 to 51 rows of real work
-each and final text of 51 to 138 characters. Nothing recoverable.
+each and final text of 51 to 138 characters. Nothing recoverable from the killed
+agents themselves; `[measured 2026-09-08]` the agents that had already journaled
+are recoverable through `resumeFromRunId`, which skips them, so the loss is the
+in-flight set and not the run.
 
 **D8: a step names a skill.** If any prompt in the workflow mentions a skill by
 name, either invoke it explicitly or inline its instructions. Test:
