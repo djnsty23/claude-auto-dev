@@ -161,14 +161,14 @@ function normalizeProject(p) {
     return s.toLowerCase();
 }
 
-function isDuplicate(db, hash, windowSeconds = 30) {
+function isDuplicate(db, hash, projectPath, sourceFiles, windowSeconds = 30) {
     try {
         // Check if any observation with this hash exists within the time window
         // Use datetime('now', '-N seconds') for SQLite-native comparison
         const stmt = db.prepare(
-            `SELECT id FROM observations WHERE content_hash = ? AND timestamp >= datetime('now', '-${windowSeconds} seconds')`
+            `SELECT id FROM observations WHERE content_hash = ? AND project_path = ? AND source_files = ? AND timestamp >= datetime('now', '-${windowSeconds} seconds')`
         );
-        const row = stmt.get(hash);
+        const row = stmt.get(hash, projectPath, sourceFiles);
         return !!row;
     } catch {
         return false;
@@ -440,8 +440,9 @@ const api = {
 
             const hash = contentHash(type, stripPrivate(title), stripPrivate(concept || null));
 
-            // Dedup: skip if same hash within 30s
-            if (isDuplicate(db, hash)) return null;
+            // Only repeated payloads in the same project and source context are duplicates.
+            const files = stringifyPrivate(sourceFiles || []);
+            if (isDuplicate(db, hash, projectPath, files)) return null;
 
             const id = genId('obs');
             const stmt = db.prepare(`
@@ -455,7 +456,7 @@ const api = {
                 type,
                 stripPrivate(title),
                 stripPrivate(concept || null),
-                stringifyPrivate(sourceFiles || []),
+                files,
                 tokenCost || 0,
                 hash,
                 rawData ? stringifyPrivate(rawData) : null
@@ -756,21 +757,25 @@ const api = {
             const db = getDB();
             if (!db) return null;
             const rows = db.prepare(`
-                SELECT id, timestamp, type, title, concept, source_files
+                SELECT id, session_id, timestamp, type, title, concept, source_files
                 FROM observations
                 WHERE project_path = ?
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, rowid DESC
                 LIMIT ?
             `).all(projectPath, limit);
 
             const groups = { decisions: [], bugfixes: [], gotchas: [], changes: [] };
-            const seen = new Set();
+            const grouped = new Map();
             let total = 0;
             for (const r of rows) {
                 if (!matchesArea(r, needle)) continue;
-                const key = (r.type || '') + ' ' + (r.title || '').toLowerCase().trim();
-                if (seen.has(key)) continue; // dedup by (type,title), most-recent wins (rows are DESC)
-                seen.add(key);
+                // A title is not the decision. Only identical public payloads
+                // share a summary row; keep every contributing observation id.
+                const key = JSON.stringify([r.type, r.title, r.concept, r.source_files]);
+                const prior = grouped.get(key);
+                if (prior) { prior.observationIds.push(r.id); continue; }
+                r.observationIds = [r.id];
+                grouped.set(key, r);
                 total++;
                 if (r.type === 'decision') groups.decisions.push(r);
                 else if (r.type === 'bugfix') groups.bugfixes.push(r);

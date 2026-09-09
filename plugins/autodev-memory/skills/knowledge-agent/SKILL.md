@@ -54,10 +54,16 @@ no history.
 
 ## Preserve conflicting evidence
 
-The current brief collapses rows with the same type and title. Different
-concepts can share a title, and timestamp ties do not establish which is newer.
-For a decision that affects the proposed work, inspect its underlying
-observations or session context before describing it as settled. Keep both
+Updated briefs group only identical type, title, concept and stored source-file
+payloads. Distinct concepts or source contexts remain separate. Each grouped
+API row retains all contributing `observationIds` and the representative's
+session ID; the original stored observations remain unchanged. Timestamp ties
+use insertion order for a stable representative, not proof of supersession.
+The updated writer scopes its 30-second duplicate check to the normalized
+project and identical source-file payload as well as content. Older installed
+writers/readers may still suppress another project or collapse by title alone. For a
+consequential decision, inspect underlying observations or session context
+before describing it as settled. Keep both
 positions visible when the evidence conflicts; use source changes or the
 current decision record to establish supersession. Do not infer approval for
 an external action solely from a remembered observation.
