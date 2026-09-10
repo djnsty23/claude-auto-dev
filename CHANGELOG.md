@@ -77,6 +77,16 @@
   audit recording what the individual green boards could not: that PRs green
   apart can be wrong together. (#216)
 
+- **`session_id` was offered as an address, under a warning that says not to.**
+  `check-brain-role.js` pushed `session_id` into the `unchecked` list, which both
+  consumers render as "try that address before concluding there is nobody there"
+  -- while `stop-brain-report.js` carried, in capitals, the note that
+  `session_id` IS NOT AN ADDRESS and that printing it as one had already sent
+  peers to a dead one. One file stated the prohibition and another performed it.
+  On a machine with no readable sessions directory the Stop hook sent a session
+  to the CLI uuid, and the live, store-confirmed desktop id appeared in neither
+  list -- the address that works omitted, the one that cannot offered. (#232)
+
 ## [8.166.0]
 
 ### The shipped defect this release exists for
