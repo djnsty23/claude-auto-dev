@@ -108,7 +108,32 @@ try {
   console.log('  This is NOT "no overlapping pairs". Nothing was scanned.');
   process.exit(2);
 }
-const all = Array.isArray(d) ? d : d.sessions || d.rows || [];
+// Accept one declared session container. Missing, malformed or competing keys
+// are unavailable evidence, not an empty fleet. Other metadata is allowed.
+const sessionKeys = d && typeof d === 'object' && !Array.isArray(d)
+  ? ['sessions', 'rows'].filter((key) => Object.prototype.hasOwnProperty.call(d, key)) : [];
+const all = Array.isArray(d) ? d : sessionKeys.length === 1 ? d[sessionKeys[0]] : null;
+if (!Array.isArray(all)) {
+  console.log('COULD NOT CHECK overlap - fleet-status returned unsupported session envelope');
+  console.log('  Expected an array or one array-valued sessions/rows key.');
+  console.log('  This is NOT "no overlapping pairs". Nothing was scanned.');
+  process.exit(2);
+}
+
+// Validate the fields this consumer uses before filtering. In particular,
+// undefined/string idle times or truthy archive strings can hide live rows.
+// The producer may omit isArchived when its desktop index has no match.
+const invalidRow = all.findIndex((r) => !r || typeof r !== 'object' || Array.isArray(r)
+  || typeof r.sessionId !== 'string' || !r.sessionId.trim()
+  || typeof r.idleMinutes !== 'number' || !Number.isFinite(r.idleMinutes)
+  || (r.isArchived !== undefined && typeof r.isArchived !== 'boolean')
+  || !['blocked', 'working', 'waiting', 'stalled', 'cold', 'done'].includes(r.state)
+  || ['cwd', 'originCwd', 'gitBranch', 'title', 'addressableId'].some((key) => r[key] != null && typeof r[key] !== 'string'));
+if (invalidRow !== -1) {
+  console.log('COULD NOT CHECK overlap - fleet-status returned invalid session row ' + (invalidRow + 1));
+  console.log('  No overlap verdict was produced; repair the producer payload.');
+  process.exit(2);
+}
 
 // Only sessions that are actually alive: not archived, and touched in the last day.
 const live = all.filter((r) => !r.isArchived && r.idleMinutes < 60 * 24);

@@ -1,0 +1,55 @@
+Baseline: e1b6aacde570ac4ab9ee44c8e1f3d86733410fab
+Command: python3 .claude/reports/brain-live-audit/deploy-ledger-draft/compare.py
+Same actual CLI suite in disposable repositories, 48 assertions per variant.
+[
+  {
+    "variant": "baseline",
+    "exit": 1,
+    "summary": "[control] 48 assertion(s), 19 passed, 29 failed",
+    "failures": [
+      "FAIL  WIDE discovery includes runtime config/data before filtering by UI extension",
+      "FAIL  WIDE-only change cannot be rendered as no user-facing changes",
+      "FAIL  deleting one expected route fails and names the missing route",
+      "FAIL  deleting every expected route cannot become empty success",
+      "FAIL  partial cells cannot satisfy a route despite no literal unchecked box",
+      "FAIL  duplicate checked route rows are rejected",
+      "FAIL  checked row with wrong changed-file details cannot substitute for expected row",
+      "FAIL  same-window regeneration preserves valid route evidence and metrics",
+      "FAIL  verification refuses a ledger generated for another base even with the same route set",
+      "FAIL  base change resets route checks and metrics",
+      "FAIL  equivalent base refs preserve same-window evidence by resolved SHA",
+      "FAIL  same-base new-HEAD verification rejects stale ticks before regeneration",
+      "FAIL  same-base new-HEAD regeneration resets route checks and metrics",
+      "FAIL  legacy or removed provenance is unresolved, not a verified current window",
+      "FAIL  legacy ledger regeneration resets unsupported inherited claims",
+      "FAIL  leading-space path retains its exact identity instead of becoming an app route",
+      "FAIL  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: \"app/with|pipe/page.tsx\"",
+      "FAIL  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: \"app/with`tick/page.tsx\"",
+      "FAIL  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: \"app/with\\nnewline/page.tsx\"",
+      "FAIL  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: \"\\tapp/page.tsx\"",
+      "FAIL  default HEAD verification still rejects evidence from the earlier candidate after archival",
+      "FAIL  explicit historical verdict prints candidate and current checkout separately",
+      "FAIL  regenerating archived frozen-candidate evidence is byte-stable",
+      "FAIL  old candidate remains verifiable as explicitly historical after later source edits",
+      "FAIL  requesting the newer candidate does not inherit old candidate checks",
+      "FAIL  malformed candidate option refuses: [\"--candidate\"]",
+      "FAIL  malformed candidate option refuses: [\"--candidate\",\"--verify\"]",
+      "FAIL  malformed candidate option refuses: [\"--candidate\",\"not-a-real-ref\"]",
+      "FAIL  malformed candidate option refuses: [\"--candidate\",\"9f554284088a0d640f547c1cf4c739cb7a2e4f3d\",\"--candidate\",\"66b11bf53bdf8e8ace6487e2a38feba7cba67eca\"]"
+    ],
+    "output": ".claude/reports/brain-live-audit/deploy-ledger-draft/baseline-verification.txt"
+  },
+  {
+    "variant": "alternative-always-reset",
+    "exit": 1,
+    "summary": "[control] 48 assertion(s), 43 passed, 5 failed",
+    "failures": [
+      "FAIL  preserves existing ticks across a rewrite",
+      "FAIL  same-window regeneration preserves valid route evidence and metrics",
+      "FAIL  equivalent base refs preserve same-window evidence by resolved SHA",
+      "FAIL  regenerating archived frozen-candidate evidence is byte-stable",
+      "FAIL  old candidate remains verifiable as explicitly historical after later source edits"
+    ],
+    "output": ".claude/reports/brain-live-audit/deploy-ledger-draft/alternative-always-reset-verification.txt"
+  }
+]

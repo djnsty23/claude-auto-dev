@@ -1,0 +1,105 @@
+{
+  "command": "node .claude/reports/brain-live-audit/mission-v3-architecture-independent/probe.cjs",
+  "hashes": {
+    "plugins/autodev-core/scripts/mission-store.js": "f81db7e3aa5225c849f25a6e37e67191f46d15ec89304b925fc8f862b4989ac3",
+    "fixtures/synthetic-adapter.cjs": "702ad6393595ae98b92bcab851c6795e12f2c0d933ef95d8eee4b24015775744",
+    "fixtures/synthetic-worker.cjs": "1fc209d87aad1d695ace677985817370c301d37624734c59fea745f296ed2122"
+  },
+  "results": [
+    {
+      "id": "positive-actual-worker-and-parent-acceptance",
+      "pass": true,
+      "detail": {
+        "readiness": {
+          "state": "review-ready",
+          "verified": false,
+          "candidate": {
+            "kind": "inline-artifact-manifest",
+            "hash": "344359dc63e7501c8fb1b2d853034f0cb9e14afe5489e49213620645e605c556"
+          },
+          "baseSha": "b0e055f500ac1c0dbc8ecf766afa843dea148aa9"
+        },
+        "workerHelpers": 1,
+        "parentBehaviorChecked": true,
+        "storeVerified": false
+      }
+    },
+    {
+      "id": "metadata-acceptance-does-not-establish-execution",
+      "pass": true,
+      "detail": {
+        "accepted": {
+          "resultId": "result-52e5fbcb-7df9-4aa5-afa7-7987fbafaff7",
+          "state": "envelope-accepted",
+          "verified": false,
+          "executionObserved": false
+        },
+        "ready": {
+          "state": "execution-incomplete",
+          "verified": false
+        },
+        "launches": 0
+      }
+    },
+    {
+      "id": "cancelled-prelaunch-helper-cannot-write-after-retry",
+      "pass": true,
+      "detail": {
+        "oldClose": 1,
+        "oldRefusal": {
+          "kind": "refused",
+          "code": "stale-owner"
+        },
+        "oldReady": {
+          "state": "stale-owner",
+          "verified": false
+        },
+        "replayedHistoricalClaim": true,
+        "currentAttemptDistinct": true,
+        "replacementReady": "review-ready"
+      }
+    },
+    {
+      "id": "late-delivery-quarantined-with-current-reservation-preserved",
+      "pass": true,
+      "detail": {
+        "transport": "acked",
+        "result": "quarantined",
+        "currentState": "claimed",
+        "currentReservationPreserved": true
+      }
+    },
+    {
+      "id": "wrong-native-hook-completion-cannot-become-ready",
+      "pass": true,
+      "detail": {
+        "code": 0,
+        "acked": true,
+        "ready": {
+          "state": "execution-incomplete",
+          "verified": false
+        }
+      }
+    },
+    {
+      "id": "changed-acceptance-artifact-invalidates-readiness",
+      "pass": true,
+      "detail": {
+        "priorReady": true,
+        "after": {
+          "state": "artifact-mismatch",
+          "verified": false
+        }
+      }
+    }
+  ],
+  "summary": {
+    "population": 6,
+    "passed": 6,
+    "failed": 0,
+    "helpers": 6,
+    "remainingChildren": 0,
+    "fixtureRemoved": true,
+    "modelCalls": 0
+  }
+}

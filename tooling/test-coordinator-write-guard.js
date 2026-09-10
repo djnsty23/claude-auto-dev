@@ -301,6 +301,34 @@ expectSilentAllow('`cd <home> && git commit` from a foreign cwd is allowed',
 expectSilentAllow('a -C into the home repo overrides an earlier cd away',
     run({ payload: bash(`cd ${OTHER_REPO} && git -C ${HOME_REPO} push`, { cwd: HOME_REPO }) }));
 
+// Quoting is the ordinary alternative to backslash-escaping a space. The same
+// foreign directory must block in both forms, and a home directory must remain
+// whole when cd moves the session there before the write.
+{
+    const spacedHome = path.join(fixture, 'home with space');
+    const spacedForeign = path.join(fixture, 'product with space');
+    writeRole({ session_id: 'SESSION-A', home_repos: [spacedHome] });
+    for (const quote of ['"', "'"]) {
+        expectBlock(`a ${quote}-quoted -C path containing spaces still blocks`,
+            run({ payload: bash(`git -C ${quote}${spacedForeign}${quote} commit`, { cwd: spacedHome }) }),
+            /product with space/);
+        expectBlock(`a ${quote}-quoted cd retains the whole foreign path`,
+            run({ payload: bash(`cd ${quote}${spacedForeign}${quote} && git push`, { cwd: spacedHome }) }),
+            /product with space/);
+    }
+    expectSilentAllow('a quoted -C keeps a home path containing spaces intact',
+        run({ payload: bash(`git -C "${spacedHome}" commit`) }));
+    expectSilentAllow('a quoted cd into a home path containing spaces permits its write',
+        run({ payload: bash(`cd "${spacedHome}" && git commit`) }));
+    expectBlock('a quoted --git-dir containing spaces still guards the object store',
+        run({ payload: bash(`git --git-dir="${path.join(spacedForeign, '.git')}" commit`, { cwd: spacedHome }) }),
+        /product with space/);
+    expectBlock('a quoted --work-tree containing spaces still guards the work tree',
+        run({ payload: bash(`git --work-tree="${spacedForeign}" commit`, { cwd: spacedHome }) }),
+        /product with space/);
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+}
+
 // A path held together by an escaped space must resolve WHOLE. Splitting on it
 // resolves a shorter path, which lands wherever that prefix happens to fall —
 // a wrong answer in either direction, arrived at silently.

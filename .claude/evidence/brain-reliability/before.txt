@@ -1,0 +1,35 @@
+Brain reliability audit, baseline origin/main 9f9746f (2026-09-09).
+All behavioral probes use isolated fixtures and the real CLI/hook subprocess.
+No production data or unrelated worker state was modified.
+
+check-spec-output: the final 48-assertion suite run against baseline source
+printed 24 passed, 24 failed; exit 1. Positive specific-plan control passed.
+Missing schema, empty schema, commented security, one policy for two tables,
+duplicate fresh-spec IDs and schema lifecycle evidence produced false passes.
+Quoted qualified identifiers produced a false rejection.
+
+check-pr-ready: added CLI tests yielded 45 passed, 5 failed before the fix.
+A successful lint plus skipped test returned READY. Artifact-only rollup also
+returned READY despite no effective executable check. Real non-skipped controls
+were retained. Same captured 16 open PR responses: 1 READY, 15 NOT_READY.
+
+stop-brain-report: added regressions yielded 35 passed, 2 failed. A throttled
+final HEAD replaced the last-notified SHA; a later unchanged Stop after cooldown
+did not emit a notice. The unthrottled path was the positive control.
+
+coordinator-write-guard: added regressions yielded 95 passed, 7 failed. Quoting
+a foreign repository path containing spaces allowed the write command (exit 0);
+escaping those same spaces blocked it (exit 2).
+
+Auto / stop-auto: executable skill selector and real Stop hook disagreed on
+earlier-sprint and dependency-blocked cases. The selector had no ready work;
+Stop repeatedly blocked with tasks remaining. Setup-only/invalid/empty inputs
+were described as Sprint complete. See targeted fixture tests for controls.
+
+fleet-decisions: concurrent actual CLI processes allocated D1 twice and accepted
+opposing decisions, both exit 0. Serialized controls allocated D1/D2 and refused
+the second decision. Added concurrency/lock tests yielded 37 passed, 7 failed.
+
+Brain and Auto Brain active SKILL.md files: wc -c printed 96590 and 27502 bytes,
+total 124092. Policy and delivery instructions coexisted with superseded rules.
+Byte count measures default context volume, not achieved model reliability.

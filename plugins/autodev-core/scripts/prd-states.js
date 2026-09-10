@@ -42,11 +42,12 @@ const NEEDS_SETUP = 'needs-setup';
 const VALID = [DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP];
 
 /**
- * Work an AGENT can pick up now.
+ * A state that permits engineering work. Readiness also requires satisfied
+ * dependencies; use workPlan() when choosing the next story.
  *
  * Excludes needs-setup: an agent cannot conjure an API key, and re-attempting is
  * how a blocked story burns a turn every run. Excludes deferred: a decision not
- * to do it. This is the predicate `auto` and the Stop hook want.
+ * to do it. This is the state predicate used inside workPlan().
  */
 function isActionable(story) {
     if (!story) return false;
@@ -54,6 +55,103 @@ function isActionable(story) {
     // undefined counts as pending: a story authored without the key is work
     // nobody started, not a story that does not exist to the tooling.
     return p === PENDING || p === undefined || p === FAILED;
+}
+
+/**
+ * Dependency readiness is a property of the graph, not of `passes` alone.
+ * Both auto and its Stop hook consume this plan. An outstanding story can be
+ * waiting on setup, a missing id, or a cycle without there being work to retry.
+ * Nothing here edits a state or infers completion from an empty population.
+ */
+function workPlan(prd) {
+    const stories = storiesOf(prd);
+    const entries = Object.entries(stories);
+    const summary = summarise(stories);
+    const ready = [], blocked = [], invalid = [];
+    const deps = new Map();
+    const hasStory = (id) => Object.prototype.hasOwnProperty.call(stories, id);
+
+    for (const [id, story] of entries) {
+        if (!story || typeof story !== 'object' || Array.isArray(story)) {
+            invalid.push({ id, reason: 'malformed story: expected an object' });
+            continue;
+        }
+        if (story.passes !== undefined && !VALID.includes(story.passes)) {
+            invalid.push({ id, reason: `unrecognised passes state: ${String(story.passes)}` });
+            continue;
+        }
+        if (needsSetup(story)) {
+            blocked.push({ id, reason: 'needs-setup' + (story.blockedReason ? `: ${String(story.blockedReason)}` : '') });
+            continue;
+        }
+        if (!isActionable(story)) continue;
+        if (story.blockedBy !== undefined && (!Array.isArray(story.blockedBy)
+            || story.blockedBy.some((dep) => typeof dep !== 'string' || !dep.trim()))) {
+            blocked.push({ id, reason: 'malformed blockedBy: expected an array of story ids' });
+            continue;
+        }
+        deps.set(id, [...new Set(story.blockedBy || [])]);
+    }
+
+    // Iterative strongly connected components identify every cycle member,
+    // including overlapping cycles. A plain DFS back-edge check misses members
+    // reached through an already visited sibling. Avoid recursion on long PRDs.
+    const indices = new Map(), low = new Map(), cycles = new Set();
+    const component = [], onStack = new Set();
+    let nextIndex = 0;
+    for (const start of deps.keys()) {
+        if (indices.has(start)) continue;
+        const stack = [{ id: start, next: 0 }];
+        while (stack.length) {
+            const frame = stack[stack.length - 1];
+            if (!indices.has(frame.id)) {
+                indices.set(frame.id, nextIndex);
+                low.set(frame.id, nextIndex++);
+                component.push(frame.id);
+                onStack.add(frame.id);
+            }
+            const edges = deps.get(frame.id);
+            if (frame.next >= edges.length) {
+                if (low.get(frame.id) === indices.get(frame.id)) {
+                    const members = [];
+                    let member;
+                    do {
+                        member = component.pop();
+                        onStack.delete(member);
+                        members.push(member);
+                    } while (member !== frame.id);
+                    if (members.length > 1 || edges.includes(frame.id)) members.forEach((id) => cycles.add(id));
+                }
+                stack.pop();
+                if (stack.length) {
+                    const parent = stack[stack.length - 1].id;
+                    low.set(parent, Math.min(low.get(parent), low.get(frame.id)));
+                }
+                continue;
+            }
+            const dep = edges[frame.next++];
+            if (!deps.has(dep)) continue;
+            if (!indices.has(dep)) stack.push({ id: dep, next: 0 });
+            else if (onStack.has(dep)) low.set(frame.id, Math.min(low.get(frame.id), indices.get(dep)));
+        }
+    }
+
+    for (const [id, dependencies] of deps) {
+        const reasons = [];
+        if (cycles.has(id)) reasons.push('dependency cycle');
+        for (const dep of dependencies) {
+            if (!hasStory(dep)) reasons.push(`missing dependency ${dep}`);
+            else if (!isDone(stories[dep])) {
+                const state = stories[dep] && stories[dep].passes;
+                reasons.push(`blocked by ${dep} (${state === undefined || state === null ? 'pending' : String(state)})`);
+            }
+        }
+        if (reasons.length) blocked.push({ id, reason: reasons.join('; ') });
+        else ready.push([id, stories[id]]);
+    }
+
+    return { stories, summary, ready, blocked, invalid,
+        complete: entries.length > 0 && summary.outstanding === 0 && summary.unrecognised === 0 && invalid.length === 0 };
 }
 
 /**
@@ -186,7 +284,11 @@ function storiesOf(prd) {
         const stories = sprint && sprint.stories;
         if (!stories || typeof stories !== 'object') continue;
         sawNested = true;
-        for (const [id, story] of Object.entries(stories)) merged[id] = story;
+        for (const [id, story] of Object.entries(stories)) {
+            // JSON keys are data. Assignment invokes Object.prototype's
+            // __proto__ setter and silently drops that story from enumeration.
+            Object.defineProperty(merged, id, { value: story, enumerable: true, writable: true, configurable: true });
+        }
     }
     if (sawNested) return merged;
 
@@ -196,5 +298,5 @@ function storiesOf(prd) {
 module.exports = {
     DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP, VALID,
     isActionable, isOutstanding, isDeferred, isDone, needsSetup, isArchivable,
-    summarise, storiesOf,
+    summarise, storiesOf, workPlan,
 };

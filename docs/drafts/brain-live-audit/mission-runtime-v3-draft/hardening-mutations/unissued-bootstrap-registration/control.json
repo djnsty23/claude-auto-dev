@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "id": "positive-authorized-worker-readback",
+      "passed": true
+    }
+  ],
+  "summary": {
+    "population": 1,
+    "passed": 1,
+    "failed": 0,
+    "helpers": 1,
+    "remainingChildren": 0,
+    "modelCalls": 0,
+    "fixtureRemoved": true
+  }
+}

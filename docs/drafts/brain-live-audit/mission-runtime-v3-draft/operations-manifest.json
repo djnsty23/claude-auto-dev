@@ -1,0 +1,183 @@
+{
+  "status": "operations-owned v3 slice frozen for independent review; unadopted fixture-only",
+  "frozenAtUtc": "2026-09-09T01:49:33.708281+00:00",
+  "trackedHead": "08cd93c3e02f622adc613f0cd683e88641afe3ab",
+  "ownedFiles": [
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/plugins/autodev-core/scripts/mission-store.js",
+      "sha256": "f81db7e3aa5225c849f25a6e37e67191f46d15ec89304b925fc8f862b4989ac3",
+      "bytes": 33262,
+      "relativePath": "plugins/autodev-core/scripts/mission-store.js",
+      "v2Original": {
+        "path": ".claude/reports/brain-live-audit/mission-runtime-v2-draft/plugins/autodev-core/scripts/mission-store.js",
+        "sha256": "1e9085bb49e65171fecbf284456593a97a0ed29e3c6a62b7f5de0be6be64988a",
+        "bytes": 31438
+      }
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/fixtures/synthetic-adapter.cjs",
+      "sha256": "702ad6393595ae98b92bcab851c6795e12f2c0d933ef95d8eee4b24015775744",
+      "bytes": 11585,
+      "relativePath": "fixtures/synthetic-adapter.cjs",
+      "v2Original": {
+        "path": ".claude/reports/brain-live-audit/mission-runtime-v2-draft/fixtures/synthetic-adapter.cjs",
+        "sha256": "ff53544150c1ca5a686a6727c4d24e53c8fe6111dd8abb2fbc1e4a3716c37cb1",
+        "bytes": 9852
+      }
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-runtime-boundaries.js",
+      "sha256": "8f6b3062130b2791530468ec4b2534e369b458f28fcb4bdff5d4f9172bddb00d",
+      "bytes": 5096,
+      "relativePath": "tooling/test-runtime-boundaries.js",
+      "v2Original": {
+        "path": ".claude/reports/brain-live-audit/mission-runtime-v2-draft/tooling/test-runtime-boundaries.js",
+        "sha256": "0ff0f402530b2d21fe8a68afd6b08c8ca42f983310a21642216a380a9e86708f",
+        "bytes": 4978
+      }
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-runtime-crashes.js",
+      "sha256": "b87b94ba72e00b9a5cf5c06fe9163d4755681cdc59838c203f7e33e5d2d5f737",
+      "bytes": 6951,
+      "relativePath": "tooling/test-runtime-crashes.js",
+      "v2Original": {
+        "path": ".claude/reports/brain-live-audit/mission-runtime-v2-draft/tooling/test-runtime-crashes.js",
+        "sha256": "c7c3f98c75dfb9437dfbbef33658cb02aa38c8e768465f35cfbd8e8e9c380368",
+        "bytes": 6876
+      }
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/test-hardening.cjs",
+      "sha256": "f7ee4251f130de9fa2f371693c7a38e553f71ab3cb63fe499e34d1756f27fa20",
+      "bytes": 10528,
+      "relativePath": "tooling/test-hardening.cjs",
+      "v2Original": null
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/tooling/check-hardening-mutations.py",
+      "sha256": "6faf48ebcd21799aa02e67cbb0702e6ff64d4ac6dcd746761822112a0fad2238",
+      "bytes": 4393,
+      "relativePath": "tooling/check-hardening-mutations.py",
+      "v2Original": null
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/OPERATIONS-NOTES.md",
+      "sha256": "3a1f670403042f2b851e420e1f63a13ed423bade0c0a51873ddb96e95c2bff6c",
+      "bytes": 6071,
+      "relativePath": "OPERATIONS-NOTES.md",
+      "v2Original": null
+    }
+  ],
+  "rootOwnedWorkerContext": {
+    "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/fixtures/synthetic-worker.cjs",
+    "sha256": "1fc209d87aad1d695ace677985817370c301d37624734c59fea745f296ed2122",
+    "bytes": 3664
+  },
+  "evidence": [
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-before.log",
+      "sha256": "bd187031fbb2a435bde597ef3701b82369012cdda85bfd84895fe84b4eeba13e",
+      "bytes": 1055
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-before.json",
+      "sha256": "18c17544fb0a706a3045cc04a6eda10877f9f017a5412274d636adaa6f66853c",
+      "bytes": 4828
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-final.log",
+      "sha256": "c7ab6ff10e7fe7cbb50d74ff96f8002bb3c3e6563a957e421f2bbce70811a6ba",
+      "bytes": 547
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-final.json",
+      "sha256": "80d3100e17fc9ccb8101550d9ee20379d48392ca57aa2295f5904acfeab5133c",
+      "bytes": 1067
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutation-results.json",
+      "sha256": "ecdf20ed1997dd5f93f8fac16aecbd1be025bb39e7cd7bcf4f5f2b2f30725050",
+      "bytes": 8146
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations.log",
+      "sha256": "6480e0887fc051b74e4e7afd4393843bd2f41d1666a363adb7836ba9c92fb2d7",
+      "bytes": 134
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-alternative-results.json",
+      "sha256": "7b3d63463dddb432723b25c031eb23d9c154da5da7f5527808a28ef4dc9e3d41",
+      "bytes": 2269
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/v3-test-mission-store.js.log",
+      "sha256": "2989e930cb5ace598e0363e54d2e1e2bb91725df4e8e4f62a5789f57b559ec62",
+      "bytes": 1842
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/v3-test-runtime-boundaries.js.log",
+      "sha256": "d9a727d3f4d424c83d21b97c8a3ab1a57f7dbf3247e0dd4a642d54bf7cb014c8",
+      "bytes": 243
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/v3-test-synthetic-runtime.js.log",
+      "sha256": "8ab031ee6d4cc3f71cdc99ef847ae17f283085f96d7a4ef82359a60922f61200",
+      "bytes": 1198
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/v3-test-runtime-crashes.js.log",
+      "sha256": "55fbce17779e4e5d2c793a4612e5fd643455bb231dbb7b082f0b391cfd9c4669",
+      "bytes": 332
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/v3-inherited-mutations.log",
+      "sha256": "89c3bf18a3aeb494866d108ce18e3bbfd4d4d3a1e8f218dd009af716f4d85397",
+      "bytes": 80
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/mutation-results.json",
+      "sha256": "47769588b4a85c62a675c5173f970d16fab55695efcca69bf587479296439697",
+      "bytes": 7262
+    },
+    {
+      "path": ".claude/reports/brain-live-audit/mission-runtime-v3-draft/operations-source-freeze.json",
+      "sha256": "7044e188a97fcd35dcd8f3e3919fe08eba0eac48b69f9a39e9852e61bbd7d7b0",
+      "bytes": 1111
+    }
+  ],
+  "validation": {
+    "hardeningBefore": {
+      "passed": 3,
+      "failed": 7,
+      "population": 10
+    },
+    "hardeningFinal": {
+      "population": 10,
+      "passed": 10,
+      "failed": 0,
+      "helpers": 10,
+      "remainingChildren": 0,
+      "modelCalls": 0,
+      "fixtureRemoved": true
+    },
+    "inheritedPopulations": [
+      22,
+      4,
+      20,
+      4
+    ],
+    "newMutants": 5,
+    "newPositiveControls": 5,
+    "inheritedMutants": 5,
+    "inheritedPositiveControls": 5,
+    "modelCalls": 0
+  },
+  "limits": [
+    "One trusted local private SQLite store; schema3 deliberately refuses earlier drafts.",
+    "At most3 one-use bootstrap grants per allocated attempt; uncertain spawn spends its grant without refund.",
+    "Synthetic fixed worker only; no native/model/customer worker, scheduling, production verification or release.",
+    "Owned direct-child receipts do not prove arbitrary descendants terminated.",
+    "Point-in-time Git blob readback; unsupported entries/encodings/filters require later admission work."
+  ]
+}

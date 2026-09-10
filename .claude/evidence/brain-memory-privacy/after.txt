@@ -1,0 +1,200 @@
+Applied subject and dependency hashes: .claude/reports/brain-live-audit/memory-adoption-receipt.json
+
+Command: node tooling/test-session-carrier.js
+PASS  carrier reads back session A
+PASS  carrier reads back session B
+PASS  unknown session reads null
+PASS  clearing A removes only A
+PASS  B survives A closing (concurrent sessions)
+PASS  path-traversal session id cannot escape the carrier dir
+PASS  sanitized id still round-trips
+PASS  carrier dir self-ignores on creation
+PASS  self-ignore excludes everything
+PASS  prompt round-trips
+PASS  prompt is per-session
+PASS  prompt clears
+PASS  prompt capture exits 0 with no session
+PASS  prompt capture writes nothing without a carrier
+PASS  prompt capture exits 0
+PASS  prompt capture records the prompt
+PASS  prompt capture emits nothing on stdout
+PASS  private blocks are redacted
+PASS  prompt privacy unclosed: hook exits silently
+PASS  prompt privacy unclosed: persists the exact redacted/public boundary
+PASS  prompt privacy nested: hook exits silently
+PASS  prompt privacy nested: persists the exact redacted/public boundary
+PASS  prompt privacy uppercase: hook exits silently
+PASS  prompt privacy uppercase: persists the exact redacted/public boundary
+PASS  prompt privacy multiple: hook exits silently
+PASS  prompt privacy multiple: persists the exact redacted/public boundary
+PASS  prompt privacy public-control: hook exits silently
+PASS  prompt privacy public-control: persists the exact redacted/public boundary
+PASS  empty prompt does not clobber the stored one
+PASS  malformed stdin → exit 0
+PASS  session start exits 0
+PASS  session start writes a carrier for its own session
+PASS  session start is silent with no prior memory
+PASS  clear() keeps the directory while another session is live
+PASS    and does not disturb the other session's state
+PASS    and the self-ignore survives, so prompts stay out of git
+PASS  clear() removes the directory once the last session leaves
+PASS  the carrier directory self-ignores
+PASS  .gitignore alone does not keep the directory alive
+PASS  an existing .gitignore is left alone
+PASS  extraction privacy: real fixture session starts
+PASS  extraction public: actual PostToolUse persists a row
+PASS  extraction public: title and public concept survive
+PASS  extraction public: protected text absent with positive redaction control
+PASS  extraction write-unclosed: actual PostToolUse persists a row
+PASS  extraction write-unclosed: title and public concept survive
+PASS  extraction write-unclosed: protected text absent with positive redaction control
+PASS  extraction edit-nested: actual PostToolUse persists a row
+PASS  extraction edit-nested: title and public concept survive
+PASS  extraction edit-nested: protected text absent with positive redaction control
+PASS  extraction read-uppercase: actual PostToolUse persists a row
+PASS  extraction read-uppercase: title and public concept survive
+PASS  extraction read-uppercase: protected text absent with positive redaction control
+PASS  extraction command-before-classification: actual PostToolUse persists a row
+PASS  extraction command-before-classification: title and public concept survive
+PASS  extraction command-before-classification: protected text absent with positive redaction control
+PASS  extraction grep-before-clip: actual PostToolUse persists a row
+PASS  extraction grep-before-clip: title and public concept survive
+PASS  extraction grep-before-clip: protected text absent with positive redaction control
+PASS  extraction result-before-clip: actual PostToolUse persists a row
+PASS  extraction result-before-clip: title and public concept survive
+PASS  extraction result-before-clip: protected text absent with positive redaction control
+PASS  extraction structured-result-before-encoding: actual PostToolUse persists a row
+PASS  extraction structured-result-before-encoding: title and public concept survive
+PASS  extraction structured-result-before-encoding: protected text absent with positive redaction control
+PASS  extraction privacy: private paths skip area lookup while a real public area survives
+PASS  extraction privacy: direct classifier redacts before lowercase, type detection and truncation
+PASS  extraction privacy: edit fallback redacts before shortening both strings
+
+68 passed, 0 failed
+
+Command: node tooling/test-semantic-search.js
+PASS  stem: deployed/deploying/deploys share root
+PASS  expandQuery: "auth" bridges to "authentication"
+PASS  rank: paraphrased query returns relevant doc first
+PASS  rank: relevant doc has positive score
+PASS  rank: irrelevant doc excluded (score>0 filter)
+PASS  rank: empty query → []
+PASS  rank: empty docs → []
+PASS  db: startSession returns id
+PASS  db: saveObservation returns id
+PASS  privacy: row read back
+PASS  privacy: sentinel LEAKME appears in NO field (title/concept/raw_data/source_files)
+PASS  privacy: sentinel absent from entire read-back row
+PASS  privacy: [REDACTED] present in title
+PASS  privacy: [REDACTED] present in concept
+PASS  privacy: [REDACTED] present in raw_data
+PASS  privacy: [REDACTED] present in source_files
+PASS  privacy: non-private raw_data preserved
+PASS  privacy: non-private source_files preserved
+PASS  privacy unclosed: saves a real observation
+PASS  privacy unclosed: protected markers absent and public text preserved
+PASS  privacy unclosed: JSON boundaries and public siblings survive
+PASS  privacy unclosed: all session summary fields use the same boundary
+PASS  privacy nested: saves a real observation
+PASS  privacy nested: protected markers absent and public text preserved
+PASS  privacy nested: JSON boundaries and public siblings survive
+PASS  privacy nested: all session summary fields use the same boundary
+PASS  privacy nested-unclosed: saves a real observation
+PASS  privacy nested-unclosed: protected markers absent and public text preserved
+PASS  privacy nested-unclosed: JSON boundaries and public siblings survive
+PASS  privacy nested-unclosed: all session summary fields use the same boundary
+PASS  privacy uppercase: saves a real observation
+PASS  privacy uppercase: protected markers absent and public text preserved
+PASS  privacy uppercase: JSON boundaries and public siblings survive
+PASS  privacy uppercase: all session summary fields use the same boundary
+PASS  privacy mixed-case: saves a real observation
+PASS  privacy mixed-case: protected markers absent and public text preserved
+PASS  privacy mixed-case: JSON boundaries and public siblings survive
+PASS  privacy mixed-case: all session summary fields use the same boundary
+PASS  privacy multiple: saves a real observation
+PASS  privacy multiple: protected markers absent and public text preserved
+PASS  privacy multiple: JSON boundaries and public siblings survive
+PASS  privacy multiple: all session summary fields use the same boundary
+PASS  privacy stray-close-control: saves a real observation
+PASS  privacy stray-close-control: protected markers absent and public text preserved
+PASS  privacy stray-close-control: JSON boundaries and public siblings survive
+PASS  privacy stray-close-control: all session summary fields use the same boundary
+PASS  privacy literal-lookalike-control: saves a real observation
+PASS  privacy literal-lookalike-control: protected markers absent and public text preserved
+PASS  privacy literal-lookalike-control: JSON boundaries and public siblings survive
+PASS  privacy literal-lookalike-control: all session summary fields use the same boundary
+PASS  privacy: unclosed serialized field keeps valid JSON and unrelated keys
+PASS  privacy: unclosed source-file entry preserves later public entries
+PASS  privacy parse error: no partial or original-content write
+PASS  privacy parse error: reports failure without protected diagnostics
+PASS  privacy serialize error: no partial or original-content write
+PASS  privacy serialize error: reports failure without protected diagnostics
+PASS  db: paraphrase observation saved
+PASS  smart: exact FTS misses the paraphrase (no "login" token)
+PASS  smart: searchSmart finds paraphrase via semantic fallback
+PASS  semantic: searchSemantic finds paraphrase directly
+PASS  tokenize drops stopwords
+PASS  tokenize drops one-character tokens
+PASS    but keeps the real words
+PASS  expandQuery does not repeat a stem
+PASS  rank returns [] for an empty query
+PASS  rank returns [] for no docs
+PASS  rank returns [] when docs is not an array
+PASS  rank still scores when a term is unique to one doc
+
+68 passed, 0 failed
+
+Command: node tooling/test-observation-classifier.js
+PASS  Write: returns an observation
+PASS  Write: default type is feature (got "feature")
+PASS  Write: title is "Created x.js" (got "Created x.js")
+PASS  Write: sourceFiles captures the path (got "[\"x.js\"]")
+PASS  Write: "fix" prompt classifies as bugfix (got "bugfix")
+PASS  Edit: default type is change (got "change")
+PASS  Edit: title is "Modified x.js" (got "Modified x.js")
+PASS  Edit: "refactor" prompt classifies as refactor (got "refactor")
+PASS  Edit: refactor verb in title (got "Refactored x.js")
+PASS  Bash git commit: type is change (got "change")
+PASS  Bash git commit: title starts with "Git:"
+PASS  Bash test (passing): type is discovery (got "discovery")
+PASS  Bash test (passing): title says passed
+PASS  Bash test (failing): type is discovery (got "discovery")
+PASS  Bash test (failing): title says FAILED
+PASS  Bash install: type is change (got "change")
+PASS  Bash install: title starts with "Dependency:"
+PASS  Bash build: type is change (got "change")
+PASS  Bash build: title starts with "Build/Deploy:"
+PASS  Bash trivial "ls": null (got null)
+PASS  Bash trivial "cd": null (got null)
+PASS  Read significant .js: type is discovery (got "discovery")
+PASS  Read significant .js: title is "Read app.js" (got "Read app.js")
+PASS  Read package-lock.json: null (skip) (got null)
+PASS  Read extensionless (Makefile): null (skip) (got null)
+PASS  Read tsconfig.json: null (skip-pattern) (got null)
+PASS  Read .env: null (skip-pattern) (got null)
+PASS  Grep: returns an observation
+PASS  Grep: type is discovery (got "discovery")
+PASS  Grep: title references the pattern
+PASS  Grep: path captured in sourceFiles (got "[\"src\"]")
+PASS  Grep (no path): sourceFiles empty (got "[]")
+PASS  Bash other-significant: returns an observation
+PASS  Bash other-significant: type is discovery (got "discovery")
+PASS  Bash other-significant: title starts with "Ran:"
+PASS  Bash short non-trivial "make all": null (got null)
+PASS  Glob: null (got null)
+PASS  missing toolName: null (got null)
+PASS  unknown tool: null (got null)
+PASS  detectType: "bug" → bugfix (got "bugfix")
+PASS  detectType: "refactor" → refactor (got "refactor")
+PASS  detectType: "add" → feature (got "feature")
+PASS  detectType: "investigate" → discovery (got "discovery")
+PASS  detectType: "choose" → decision (got "decision")
+PASS  detectType: no keyword → Write fallback feature (got "feature")
+PASS  extractConcept: caps concept at 200 chars (got 200)
+PASS  extractConcept: empty prompt uses fallback (got "New file: x.js")
+PASS  VALID_TYPES matches DB-accepted set (got "[\"bugfix\",\"change\",\"decision\",\"discovery\",\"feature\",\"refactor\"]")
+
+48 passed, 0 failed
+
+Frozen draft integration: six suites, 272/272 assertions, no SQLite skips. Independent protected hook cases:3, leaks:0; public control preserved. Both partial extraction-fix variants fail the corresponding assertions. Writer-level baseline/candidate/simple alternative:12 fixtures,9 protected; baseline leaks6/9 through each writer/carrier, candidate0/9; candidate public boundaries12/12 versus simple alternative6/12. Four writer-level mutation variants fail their claimed protections.
+Limits: exact private tags within a string; no unmarked-secret scan, arbitrary tag syntax, cross-field regions or legacy cleanup. Store-health ambiguity and title-conflict loss remain. Full combined source gate pending.

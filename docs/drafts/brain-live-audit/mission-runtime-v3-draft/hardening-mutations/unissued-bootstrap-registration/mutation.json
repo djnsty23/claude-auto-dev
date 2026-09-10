@@ -1,0 +1,18 @@
+{
+  "results": [
+    {
+      "id": "bootstrap-permit-replay-and-unissued-registration-refused",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Missing expected exception: registration requires issued nonce\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/unissued-bootstrap-registration/tooling/test-hardening.cjs:25:190\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/unissued-bootstrap-registration/tooling/test-hardening.cjs:29:142\n    at Object.<anonymous> (<audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/unissued-bootstrap-registration/tooling/test-hardening.cjs:29:990)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14)\n    at Object..js (node:internal/modules/cjs/loader:2003:10)\n    at Module.load (node:internal/modules/cjs/loader:1594:32)\n    at Module._load (node:internal/modules/cjs/loader:1396:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47"
+    }
+  ],
+  "summary": {
+    "population": 1,
+    "passed": 0,
+    "failed": 1,
+    "helpers": 0,
+    "remainingChildren": 0,
+    "modelCalls": 0,
+    "fixtureRemoved": true
+  }
+}

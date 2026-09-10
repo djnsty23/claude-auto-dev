@@ -110,10 +110,10 @@ check('unknown checks are named as a reason for not-ready',
     /unrecognised.*not-ready|counted as not-ready/.test(SRC));
 check('a DRAFT is refused regardless of what its rollup says',
     /isDraft\)\s*reasons\.push/.test(SRC.replace(/\s+/g, ' ')));
-check('an EMPTY rollup is refused, since it looks identical to a clean one',
-    /rollup\.length === 0/.test(SRC));
+check('an EMPTY effective rollup is inspected after artifacts are excluded',
+    /checks\.length === 0/.test(SRC));
 check('every-check-skipped is refused even with no failures',
-    /good === 0 && skipped > 0/.test(SRC));
+    /if \(skipped > 0\)/.test(SRC));
 
 // ---- PENDING is pending, not unknown -----------------------------------------
 //
@@ -152,6 +152,87 @@ check('only the benign wording is excluded from the blocking reasons',
     'the DUE case must stay blocking or an outage reads as a clean docs PR');
 check('the changed-file list is requested from gh, or the helper has nothing to judge',
     /headRefName,files'/.test(SRC));
+
+// ---- verdicts from the real CLI, with only the GitHub transport replaced ----
+// A SUCCESS elsewhere in the rollup cannot establish that a skipped job was
+// optional. Nor can an artifact count as a completed job. Source-shape checks
+// above cannot see either false approval; these cases assert the exit and reason.
+{
+    const os = require('os');
+    const { execFileSync, spawnSync } = require('child_process');
+    const subject = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-pr-ready.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-ready-verdict-'));
+    const preload = path.join(tmp, 'github-transport.cjs');
+    const response = path.join(tmp, 'github-response.json');
+    const git = (...args) => execFileSync('git', args, { cwd: tmp, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+        // Keep git real: the docs-only exception must read the trunk's workflows,
+        // not a reconstructed answer to whether a check should have run.
+        git('init', '-q');
+        git('config', 'user.name', 'readiness fixture');
+        git('config', 'user.email', 'suite@example.invalid');
+        git('config', 'core.hooksPath', path.join(tmp, 'no-hooks'));
+        git('config', 'commit.gpgsign', 'false');
+        fs.mkdirSync(path.join(tmp, '.github', 'workflows'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.github', 'workflows', 'ci.yml'),
+            'name: CI\non:\n  pull_request:\n    paths-ignore:\n      - "**/*.md"\njobs:\n  test:\n    runs-on: ubuntu-latest\n');
+        fs.writeFileSync(path.join(tmp, 'commit-message.txt'), 'fixture workflows\n');
+        git('add', '.github/workflows/ci.yml');
+        git('commit', '-q', '-F', path.join(tmp, 'commit-message.txt'));
+        git('update-ref', 'refs/remotes/origin/main', git('rev-parse', 'HEAD').trim());
+        fs.writeFileSync(preload, [
+            "const cp = require('child_process');",
+            'const original = cp.execFileSync;',
+            'cp.execFileSync = function(command, args, options) {',
+            "  if (command === 'gh') return require('fs').readFileSync(process.env.PR_READY_FIXTURE, 'utf8');",
+            '  return original.call(this, command, args, options);',
+            '};',
+        ].join('\n'));
+        const base = { number: 1, state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE',
+            mergeStateStatus: 'CLEAN', baseRefName: 'main', headRefName: 'feature', files: [{ path: 'src/app.js' }] };
+        const success = { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' };
+        const artifact = { name: null, status: null, conclusion: null };
+        function invoke(statusCheckRollup, extra = {}) {
+            fs.writeFileSync(response, JSON.stringify({ ...base, statusCheckRollup, ...extra }));
+            const r = spawnSync(process.execPath, ['--require', preload, subject, '1', '--repo', tmp, '--json'], {
+                cwd: tmp, encoding: 'utf8', env: { ...process.env, PR_READY_FIXTURE: response },
+            });
+            let result;
+            try { result = JSON.parse(r.stdout); } catch { result = {}; }
+            return { exit: r.status, result, detail: JSON.stringify({ status: r.status, stdout: r.stdout, stderr: r.stderr }) };
+        }
+        let r = invoke([success, { name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }, artifact]);
+        check('CLI: two successful jobs plus an artifact are ready',
+            r.exit === 0 && r.result.verdict === 'READY' && r.result.population?.passing === 2, r.detail);
+        r = invoke([success, { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' }]);
+        check('CLI: a failed job is refused by name and exit despite passing lint',
+            r.exit === 2 && r.result.verdict === 'NOT_READY' && r.result.checks?.some(([name, value]) => name === 'test' && value === 'FAILURE'), r.detail);
+        r = invoke([success, { name: 'test', status: 'COMPLETED', conclusion: 'SKIPPED' }]);
+        check('CLI: passing lint cannot certify a skipped test job',
+            r.exit === 2 && r.result.verdict === 'NOT_READY' && r.result.reasons?.some(x => /SKIPPED/.test(x) && /test/.test(x)), r.detail);
+        r = invoke([success, { ...success, conclusion: 'SKIPPED' }]);
+        check('CLI: a same-name success cannot prove a skipped job optional',
+            r.exit === 2 && r.result.verdict === 'NOT_READY', r.detail);
+        r = invoke([artifact]);
+        check('CLI: artifact-only rollup with code changes reports the due missing workflow',
+            r.exit === 2 && r.result.verdict === 'NOT_READY' && r.result.population?.passing === 0
+            && r.result.reasons?.some(x => /DUE/.test(x) && /ci.yml/.test(x)), r.detail);
+        r = invoke([]);
+        check('CLI: a genuinely empty rollup still refuses a due code workflow',
+            r.exit === 2 && r.result.reasons?.some(x => /DUE/.test(x)), r.detail);
+        r = invoke([], { files: [{ path: 'README.md' }] });
+        check('CLI: verified docs-only path exclusions still allow an empty rollup',
+            r.exit === 0 && r.result.verdict === 'READY' && r.result.reasons?.some(x => /path filter working/.test(x)), r.detail);
+        r = invoke([artifact], { files: [{ path: 'README.md' }] });
+        check('CLI: verified docs-only exclusions also explain an artifact-only rollup',
+            r.exit === 0 && r.result.reasons?.some(x => /path filter working/.test(x)), r.detail);
+        r = invoke([artifact], { files: [] });
+        check('CLI: artifact-only rollup without changed files cannot claim readiness',
+            r.exit === 2 && r.result.reasons?.some(x => /could not read the changed files/.test(x)), r.detail);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
