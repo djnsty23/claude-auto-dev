@@ -308,6 +308,62 @@ try {
     // ---- --help returns, for check-entrypoints and for humans ----
     const help = run('--help');
     check('--help prints usage and exits 0', help.status === 0 && /--verify/.test(help.out) && /--audit/.test(help.out), help.out);
+
+    // ---- THE SHIPPED SKILL MUST NOT INSTRUCT AN UNGATED PROMOTION ----
+    //
+    // Why this lives here rather than in a prose linter: `[measured 2026-09-10]`
+    // two PRs edited ship/SKILL.md's Vercel block in the same window. One added
+    // the `--verify &&` gate, the other rewrote the block around a target
+    // readback and landed FIRST, so `origin/main` carried
+    // `npx vercel --prod --yes` with no gate in front of it. Both PRs were fully
+    // green: neither suite asserted anything about that block, so the integration
+    // of two individually-tested changes was untested. This is the assertion that
+    // makes the next such resolution go red instead of shipping.
+    //
+    // A ROLLBACK IS NOT A PROMOTION and must never be gated: Step 6 redeploys a
+    // previous commit to recover, and requiring a green ledger to recover would
+    // block recovery exactly when it is needed. So the fenced rollback block is
+    // excluded by name, and the exclusion is asserted below — an exclusion nobody
+    // has watched work is how a real finding gets filed as known.
+    const SKILL = path.resolve(__dirname, '..', 'plugins/autodev-core/skills/ship/SKILL.md');
+    const PROMOTE = /^\s*(?:npx\s+)?(?:vercel\s+--prod|netlify\s+deploy\s+--prod|supabase\s+functions\s+deploy)\b/;
+    const GATED = /deploy-ledger\.js"?\s+--verify\s+&&/;
+
+    // Returns the promotion lines that are NOT gated, skipping the rollback step.
+    const ungated = (text) => {
+        const lines = text.split('\n');
+        const out = [];
+        let inRollback = false;
+        for (let i = 0; i < lines.length; i++) {
+            if (/^##\s+Step 6/.test(lines[i])) inRollback = true;
+            else if (/^##\s+Step 7/.test(lines[i])) inRollback = false;
+            if (inRollback) continue;
+            if (PROMOTE.test(lines[i]) && !GATED.test(lines[i])) out.push(`${i + 1}: ${lines[i].trim()}`);
+        }
+        return out;
+    };
+
+    const skillText = fs.readFileSync(SKILL, 'utf8');
+    check('every promotion command in the shipped ship skill is gated by --verify',
+        ungated(skillText).length === 0, 'UNGATED -> ' + ungated(skillText).join(' | '));
+
+    // The control: plant the exact defect that reached main and watch it fire.
+    // Without this the check above passes on a reader that parses nothing.
+    const plantedSkill = skillText.replace(
+        /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/deploy-ledger\.js" --verify && npx vercel --prod --yes/,
+        'npx vercel --prod --yes');
+    check('the control: dropping the gate from the --prod line IS detected',
+        plantedSkill !== skillText && ungated(plantedSkill).length === 1
+        && /vercel --prod/.test(ungated(plantedSkill)[0]),
+        'planted-detected=' + JSON.stringify(ungated(plantedSkill)));
+
+    // And the rollback exclusion is real, not incidental: Step 6's redeploy is
+    // an ungated `supabase functions deploy` and must NOT be reported.
+    check('the rollback redeploy in Step 6 is excluded, not merely absent',
+        /^##\s+Step 6/m.test(skillText)
+        && skillText.split(/^##\s+Step 6/m)[1].split(/^##\s+Step 7/m)[0].split('\n')
+            .some((l) => PROMOTE.test(l) && !GATED.test(l)),
+        'Step 6 has no ungated deploy line to exclude — the exclusion is untested');
 } finally {
     fs.rmSync(T, { recursive: true, force: true });
 }

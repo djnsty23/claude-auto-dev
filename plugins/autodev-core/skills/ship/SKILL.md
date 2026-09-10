@@ -144,18 +144,119 @@ back out of it afterwards, never the flag that went in.
 
 ### Vercel
 
-```bash
-# Preview — ON A PROJECT THAT ALREADY HAS A PRODUCTION DEPLOYMENT. This is where
-# Step 5's checks and the ledger's boxes get their evidence. On a project's FIRST
-# deployment this command goes to PRODUCTION whatever the flags say, so on a new
-# project it is a promotion: gate it with --verify below and read `target` back
-# out of the deployment afterwards rather than trusting the flag.
-npx vercel --yes
+**`vercel --yes` IS NOT RELIABLY A PREVIEW.** On a project's *first* deployment
+Vercel assigns it to production regardless of flags, and says so only after the
+fact:
 
-# Promotion, pre-authorised only behind the ledger. The chain reads the exit code.
+> "This is the project's first deployment, so it was assigned to production.
+> Future deployments will be preview deployments unless you use `--prod`."
+
+`[measured 2026-09-08]` this line of this skill was hit twice in one day — by a
+greenfield run on a throwaway project, and by the fleet coordinator by accident,
+which created a public production alias for a repo worktree. No pre-check can
+prevent it: whether a project has ever deployed is a fact about Vercel's account
+state, not about the tree or the flags. So **declare the intent, deploy, then
+read the target back.**
+
+**Before the first deploy from any directory**, check what would be uploaded.
+The Vercel CLI **does not read `.gitignore`** — see the `.vercelignore` section
+below:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-deploy-target.js" --ignore-file .
+```
+
+`--dry` shows the real answer rather than a pattern floor. It "inspects the
+detected framework preset and source files **without uploading or creating a
+deployment**", and in non-TTY output lists every file it would send:
+
+```bash
+npx vercel deploy --dry --json      # no upload, no deployment — read the file list
+```
+
+Read that list before the first deploy from an unfamiliar directory. The floor
+check above is cheap and CLI-free; this one is what the CLI would actually do.
+
+Then deploy and verify the target that came back:
+
+```bash
+# Preview INTENDED. --target=preview states it; see the caveat below.
+npx vercel deploy --target=preview --yes
+
+# Read the target back from the deploy itself. Exits 1 if it went to production.
+npx vercel inspect <deployment-url> --json > /tmp/deploy.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-deploy-target.js" \
+  --deployment /tmp/deploy.json --intent preview
+
+# Only after the preview is verified, promote — and only behind the ledger.
+# The two checks answer different questions and neither replaces the other:
+# --verify asks whether this promotion is AUTHORISED (Step 5b), before the fact;
+# check-deploy-target asks what the deploy actually DID, after it.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify && npx vercel --prod --yes
+npx vercel inspect <deployment-url> --json > /tmp/deploy.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-deploy-target.js" \
+  --deployment /tmp/deploy.json --intent production
 node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --record
 ```
+
+⚠️ **`--target=preview` is NOT known to override the first-deployment rule.**
+Vercel's own message — *"Future deployments will be preview deployments unless
+you use `--prod`"* — implies the first one is production whatever you pass. It is
+unverified here **deliberately**: the only way to test it is to make a first
+deployment, which is the production side effect this whole section exists to
+prevent. State the intent with the flag, and let the readback settle it.
+
+| Exit | Meaning | Action |
+|---|---|---|
+| 0 | target matches the declared intent | Continue |
+| 1 | **it already went to production** | Stop. Undo, then tell the user what was exposed |
+| 2 | the target could not be read | Treat as unverified. **Never as a preview** |
+
+**If it exits 1 on `--intent preview`, the deploy has already happened.** Undo by
+which case it is — `vercel ls` says whether any earlier production deployment
+exists:
+
+- **First deployment of a new project** — `vercel remove <project> --yes`.
+  `vercel rollback` cannot help here; there is nothing behind it to roll back to.
+- **A project that already had production traffic** — `vercel rollback`.
+
+Then check what was uploaded, which is the *separate* defect below, and report
+both to the user. A production deploy nobody intended is not undone by removing
+it: whatever was served was public while it was up.
+
+### `.vercelignore` — the Vercel CLI does not read `.gitignore`
+
+Independent of the target defect, and the one that turns a harmless mis-deploy
+into a disclosure.
+
+`[measured 2026-09-08]` on the accidental deploy above, **423 tracked files and
+16 gitignored files were uploaded** — `.claude/settings.local.json`,
+`.claude/memory-sessions/*`, `.claude/reports/telemetry-*.jsonl`. With no
+framework detected Vercel set the output directory to `.` and **served the tree
+statically**:
+
+```
+curl /.claude/settings.local.json  ->  HTTP 200     publicly fetchable
+curl /                             ->  HTTP 404
+```
+
+That instance was low-value — a public repo, no secret-shaped strings in the
+uploaded set. The mechanism does not know that. The same command from a product
+worktree uploads whatever that repo gitignores.
+
+**Every directory you deploy from needs a `.vercelignore`** covering at minimum
+`.claude/`, `.git/`, `node_modules/` and `.env`, plus everything that repo's
+`.gitignore` names. `check-deploy-target.js --ignore-file` refuses without one,
+and refuses an empty one — the file existing is not the protection, the patterns
+in it are.
+
+**`.vercelignore` is not `.gitignore` again.** `.gitignore` decides what is
+*tracked*; `.vercelignore` decides what is *uploaded and served*. A file can be
+tracked and still be one you would never serve, so matching `.gitignore` is a
+**floor, not the rule**. Where a repo names narrow paths because partial tracking
+is deliberate, the deploy manifest still takes the wide pattern: over-excluding
+costs a missing asset, under-excluding costs a public URL. This repo's own
+`.vercelignore` is the worked example.
 
 ### Netlify
 

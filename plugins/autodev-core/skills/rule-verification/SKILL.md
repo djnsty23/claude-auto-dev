@@ -35,7 +35,7 @@ No overlap. If brainstorm turns up a bug, note it and suggest `audit`.
 | Task | Required before done |
 |------|----------------------|
 | Edge Function / API | curl with real params, verify 200 + response shape |
-| UI (public) | Browser check: page reads correctly and the console is clean |
+| UI (public) | Browser check: page reads correctly and the console is clean. When a criterion names what the user sees or gets, drive that flow and assert on **state**, recorded through `scripts/flow-evidence.js` (`auto`, "Runtime flow check"). `[measured 2026-09-08]` on three first-pass defects a screenshot had passed, the state assertion went red on the parent of each fix and green on the fix, 3 of 3; over 30 such fixes it reaches about 4, so it is not a substitute for `rule-ramifications` |
 | UI (admin) | typecheck + build only |
 | Refactor | typecheck + build + existing tests pass |
 | Bulk change | grep for the old pattern to confirm full elimination |

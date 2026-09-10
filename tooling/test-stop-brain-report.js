@@ -168,7 +168,7 @@ const LIVE = (() => {
     fs.writeFileSync(path.join(sessions, '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'brain-dead', name: 'brain-dead-peer' }));
     fs.writeFileSync(path.join(store, 'local_brain-desk.json'), JSON.stringify({ sessionId: 'local_brain-desk', cliSessionId: 'brain-1', isArchived: false }));
     fs.writeFileSync(path.join(store, 'local_brain-desk-old.json'), JSON.stringify({ sessionId: 'local_brain-desk-old', cliSessionId: 'brain-dead', isArchived: true, title: 'Old brain' }));
-    return { env: { AUTODEV_SESSIONS_DIR: sessions, CLAUDE_SESSION_STORE: path.join(root, 'store') } };
+    return { sessions, env: { AUTODEV_SESSIONS_DIR: sessions, CLAUDE_SESSION_STORE: path.join(root, 'store') } };
 })();
 
 {
@@ -325,6 +325,131 @@ const LIVE = (() => {
         && /could not be checked/.test(unCtx) && !/Nobody can be reached/.test(unCtx), unCtx.split('\n')[1]);
 }
 
+// --- an address that resolves to a STRANGER ---------------------------------
+/* A COLLISION IS NOT A STALE FIELD. `session_id` dead, `peer_name` resolving to
+   a LIVE session that is somebody else: a name freed by an archived session can
+   be taken by another. "Nobody can be reached" is true here and insufficient —
+   it does not say that trying anyway lands on a stranger. The branch and this
+   fixture are ported from `fix/coordinator-reachable-by-either-address` @
+   62a42be0, which had both where this file had neither.
+
+   The stranger is a SECOND live pid, so it cannot coincide with the record by
+   construction. The parent process is alive for as long as this suite runs; if
+   it is not, that is asserted rather than passing a case that never ran. */
+{
+    const strangerPid = process.ppid;
+    check('fixture: a second live pid exists for the stranger case', (() => {
+        try { process.kill(strangerPid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); }
+    })(), 'ppid ' + strangerPid);
+    fs.writeFileSync(path.join(LIVE.sessions, strangerPid + '.json'),
+        JSON.stringify({ pid: strangerPid, sessionId: 'brain-stranger', name: 'brain-stranger-peer' }));
+
+    const repo = makeRepo();
+    const state = stateFilePath();
+    const role = writeRole({ session_id: 'brain-dead', peer_name: 'brain-stranger-peer', desktop_session_id: 'local_brain-desk-old' });
+    run({ input: { session_id: 's9', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    commitIn(repo, 'v2 delivered\n');
+    const j = spoke(run({ input: { session_id: 's9', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env }));
+    const ctx = j ? j.hookSpecificOutput.additionalContext : '';
+
+    check('a name resolving to a STRANGER: the hook speaks', !!j, ctx.slice(0, 90));
+    check('  it says the address reaches somebody else, not merely that nobody answers',
+        /RESOLVES TO SOMEBODY ELSE/.test(ctx) && /Message NOBODY at that record/.test(ctx), ctx.split('\n')[0]);
+    check('  it does NOT offer the stranger name as an address',
+        !/Message it before you go quiet/.test(ctx) && !/PART OF THE ROLE FILE IS STALE/.test(ctx), ctx.split('\n')[1]);
+    check('  and a person is the right answer here, so it says so',
+        /Report to the operator/.test(ctx), ctx.split('\n')[1]);
+    check('  zero bytes on stderr, exit 0, turn not blocked', (() => {
+        const again = run({ input: { session_id: 's9b', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+        return again.err.length === 0 && again.status === 0;
+    })());
+}
+
+// --- the hook and `--status` must not disagree about the same record ---------
+/* THE DEFECT WAS A DISAGREEMENT, so the regression test is an agreement test.
+   `[measured 2026-09-08]` `check-brain-role.js --status` said "PARTLY STALE AND
+   STILL REACHABLE. Use desktop session id ..." while the hook, reading the same
+   record through the same function in the same minute, said the record named no
+   live coordinator and to escalate. Every assertion above checks ONE of the two
+   surfaces; only this one checks that they still answer the same question the
+   same way, which is the property that actually broke.
+
+   Idea ported from `fix/coordinator-reachable-by-either-address` @ 62a42be0 —
+   the best assertion on either branch, and neither had it in this form. */
+{
+    const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-brain-role.js');
+    /* THE FIRST RUN OF THIS BLOCK FAILED, ON THE ASSERTION RATHER THAN THE
+       SUBJECT, and the distinction is worth keeping: `--status` prints its
+       advice block ONLY for a record with a fault, so on a healthy one it names
+       no address while the hook correctly hands out both. Comparing the two
+       texts as equal sets compares a diagnostic's silence with a router's
+       output, and would have failed a hook that was right.
+
+       The property that actually holds on every record is: THE ADDRESSES THE
+       HOOK OFFERS ARE THE ADDRESSES `--status` SHOWS AS LIVE. So read them from
+       whichever form that run produced -- the "Use X or Y" advice when a field
+       is stale, the "-> live" resolution lines when nothing is. `session_id` is
+       excluded from both sides by construction, which asserts the
+       never-print-session_id property from a second direction. */
+    const fromStatus = (roleFile) => {
+        const r = spawnSync(process.execPath, [SUBJECT, '--status', '--role', roleFile], {
+            encoding: 'utf8', env: Object.assign({}, process.env, LIVE.env),
+        });
+        const out = r.stdout || '';
+        const advice = (out.split('\n').find((l) => /PARTLY STALE AND STILL REACHABLE\. Use /.test(l)) || '');
+        const offers = advice
+            ? (advice.match(/`([^`]+)`/g) || [])
+            : out.split('\n')
+                .filter((l) => /^ {2}(peer_name|desktop_session_id) \S+ -> live/.test(l))
+                .map((l) => '`' + l.trim().split(' ')[1] + '`');
+        return {
+            offers: offers.sort().join(','),
+            sendsToPerson: /Nobody can be reached|Message nobody at this record/.test(out),
+        };
+    };
+    const fromHook = (roleFile) => {
+        const repo = makeRepo();
+        const st = stateFilePath();
+        run({ input: { session_id: 'agree-' + path.basename(path.dirname(roleFile)), cwd: repo }, roleFile, stateFile: st, env: LIVE.env });
+        commitIn(repo, 'v2 delivered\n');
+        const j = spoke(run({ input: { session_id: 'agree-' + path.basename(path.dirname(roleFile)), cwd: repo }, roleFile, stateFile: st, env: LIVE.env }));
+        const ctx = j ? j.hookSpecificOutput.additionalContext : '';
+        const line = (ctx.split('\n').find((l) => /^Message it before you go quiet/.test(l)) || '');
+        return {
+            offers: (line.match(/`([^`]+)`/g) || []).sort().join(','),
+            sendsToPerson: /Report to the operator|Message NOBODY/.test(ctx),
+            ctx,
+        };
+    };
+
+    const records = [
+        ['both live', { session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk' }],
+        ['peer decayed, desktop live', { session_id: 'brain-1', peer_name: 'brain-peer-a7', desktop_session_id: 'local_brain-desk' }],
+        ['peer live, desktop archived', { session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk-old' }],
+        ['nothing resolves', { session_id: 'brain-dead', peer_name: 'brain-peer-a7', desktop_session_id: 'local_brain-desk-old' }],
+    ];
+    for (const [label, rec] of records) {
+        const roleFile = writeRole(rec);
+        const s = fromStatus(roleFile);
+        const h = fromHook(roleFile);
+        check('hook and --status agree on "' + label + '": same addresses offered',
+            s.offers === h.offers, '--status=[' + s.offers + '] hook=[' + h.offers + ']');
+        check('  and agree on whether a person is the answer',
+            s.sendsToPerson === h.sendsToPerson,
+            '--status=' + s.sendsToPerson + ' hook=' + h.sendsToPerson);
+    }
+    /* The pair that makes the four above discriminating: the four records must
+       not all reduce to the same answer, or an agreement test passes on a hook
+       and a script that both say one thing always. */
+    const answers = records.map(([, rec]) => {
+        const f = writeRole(rec);
+        const s = fromStatus(f);
+        return s.offers + '|' + s.sendsToPerson;
+    });
+    check('control: the four records do not all reduce to one answer',
+        new Set(answers).size >= 3, new Set(answers).size + ' distinct of ' + answers.length);
+}
+
 // --- the throttle ----------------------------------------------------------
 // Without this, a session committing every turn wakes the coordinator every turn.
 {
@@ -438,11 +563,14 @@ const LIVE = (() => {
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
-    + (pass + fail) + ' cases over 6 inert paths, all THREE role-record states driven '
+    + (pass + fail) + ' cases over 6 inert paths, all FOUR role-record outcomes driven '
     + 'from fixtures (a wholly live record; a PARTLY stale one whose peer name decayed '
-    + 'while its desktop id resolves; a wholly dead one), each beside the control that '
-    + 'flips it, plus an unreadable-store case proving an UNCHECKED address reaches '
-    + 'neither the degraded branch nor the dead one, a 3-step throttle with a cooldown-0 '
+    + 'while its desktop id resolves; a wholly dead one; and a name resolving to a '
+    + 'STRANGER, which is a different instruction from either), each beside the control '
+    + 'that flips it, plus an unreadable-store case proving an UNCHECKED address reaches '
+    + 'neither the degraded branch nor the dead one, four records cross-checked for '
+    + 'AGREEMENT between the hook and `--status` with a control proving they do not all '
+    + 'reduce to one answer, a 3-step throttle with a cooldown-0 '
     + 'control, a corrupt ledger, and the merged-to-trunk shape with an off-trunk control '
     + 'and a no-origin case. Every quiet case asserts zero bytes on BOTH streams; the '
     + 'address line never offers cwd and never carries session_id.');
