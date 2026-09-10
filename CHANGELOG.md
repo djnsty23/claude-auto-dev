@@ -57,6 +57,26 @@
 - **A per-story runtime flow check for `auto`**, measured before it was wired.
   (#206)
 
+### Also in this release
+
+- **`vercel --yes` is not reliably a preview, and the Vercel CLI does not read
+  `.gitignore`.** On a project's *first* deployment Vercel assigns it to
+  production regardless of flags and says so only afterwards. `[measured
+  2026-09-08]` a `vercel --yes` against a worktree of this repo deployed it: no
+  framework detected, output directory `.`, the tree served statically, and
+  `/.claude/settings.local.json` returned HTTP 200 to an unauthenticated curl
+  while `/` returned 404 -- 423 tracked files and 16 gitignored ones uploaded.
+  Adds `.vercelignore`, a `check-deploy-target.js --ignore-file` floor, and the
+  rule that no pre-check can prevent the first-deploy case because it is a fact
+  about Vercel's account state, not the tree: **declare the intent, deploy, then
+  read the target back.** (#209)
+
+- **The shared-file quota tripwire moved, and a summary hid a refusal.** (#193)
+
+- **The 17 PRs merged in two days, checked as one tree** -- a merge-coherence
+  audit recording what the individual green boards could not: that PRs green
+  apart can be wrong together. (#216)
+
 ## [8.166.0]
 
 ### The shipped defect this release exists for
