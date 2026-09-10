@@ -20,15 +20,27 @@
 //
 // Every file is restored from git afterwards and the tree is verified clean.
 //
-// Usage: node tooling/check-suites-can-fail.js [--verbose]
+// Usage: node tooling/check-suites-can-fail.js [--verbose] [--all-subjects]
+//
+// --all-subjects stubs EVERY derived candidate rather than stopping at the first
+// one that proves the suite can fail. Same verdicts, more runs: it is there for
+// the reader who wants the complete kill set, and it is what this script did
+// unconditionally until 2026-09-10.
 
 const fs = require('fs');
 const path = require('path');
 const { spawnSync, execSync } = require('child_process');
 const sb = require('./spawn-budget.js');
+const ev = require('./subject-evidence.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const VERBOSE = process.argv.includes('--verbose');
+// Stub EVERY candidate instead of stopping at the first one that proves the suite
+// can fail. The verdict is identical either way — asserted over every outcome
+// pattern in subject-evidence.js's selftest — so this exists for the reader who
+// wants the complete kill set rather than the one that decided it, and it is what
+// the sweep did unconditionally until 2026-09-10.
+const ALL_SUBJECTS = process.argv.includes('--all-subjects');
 
 // DERIVED, not declared. The first version of this file hand-listed which source
 // each suite tests, and got it wrong for three of twelve — twice producing a
@@ -144,102 +156,16 @@ const NOT_JAVASCRIPT = {
 };
 
 function deriveSubjects(suiteFile) {
-    const src = fs.readFileSync(suiteFile, 'utf8');
-    const found = new Set();
-
-    // The suite's OWN directory, relative to the repo, as a posix path. Rules 2b
-    // and 3b resolve against it, so they state a fact about where this file sits
-    // rather than matching on resemblance. Read from the path rather than
-    // hardcoded, so a suite that ever moves resolves correctly.
-    const suiteDir = path.relative(SWEEP_ROOT, path.dirname(suiteFile)).split(path.sep).join('/');
-
-    // 1. A slash-separated path literal inside the repo: 'plugins/…/foo.js'
-    //    The alternation is written out rather than assembled from a variable: a
-    //    RegExp built through a template literal loses `\w` and `\.` to escape
-    //    collapsing, and the result is a silent false-empty rather than an error.
-    //    That cost a wrong reading while measuring this very change.
-    for (const m of src.matchAll(/['"`]((?:\.\.\/)*(?:plugins|templates|tooling)\/[\w./-]+\.js)['"`]/g)) {
-        found.add(m[1].replace(/^(\.\.\/)+/, ''));
-    }
-    // 2. path.join / path.resolve segment lists: 'plugins', 'autodev-core', 'hooks', 'x.js'
-    for (const m of src.matchAll(/path\.(?:join|resolve)\(([^)]*)\)/g)) {
-        const call = m[1];
-        const parts = [...call.matchAll(/['"`]([\w.-]+)['"`]/g)].map((x) => x[1]);
-        if (!parts.length || !parts[parts.length - 1].endsWith('.js')) continue;
-        for (const top of ['plugins', 'tooling']) {
-            const i = parts.indexOf(top);
-            if (i >= 0) found.add(parts.slice(i).join('/'));
-        }
-        // 2b. __dirname-anchored with no '..' climb. The suite lives in
-        //     suiteDir, so path.resolve(__dirname, 'check-foo.js') IS
-        //     suiteDir/check-foo.js. A '..' among the segments means the call
-        //     leaves that directory and this reading does not hold, so it is
-        //     skipped and rules 1-3 handle it.
-        if (/\b__dirname\b/.test(call) && !/['"`]\.\.['"`]/.test(call)) {
-            found.add(suiteDir + '/' + parts.join('/'));
-        }
-    }
-    // 3. A bare require of a repo-relative module, with or without .js
-    for (const m of src.matchAll(/require\(['"`]((?:\.\.\/)+[\w./-]+)['"`]\)/g)) {
-        const p = m[1].replace(/^(\.\.\/)+/, '');
-        if (/^(plugins|templates|tooling)\//.test(p)) found.add(p.endsWith('.js') ? p : p + '.js');
-    }
-    // 3b. A './' require resolves against the suite's own directory, the same
-    //     fact as 2b. test-standing-order-wake.js names its subject exactly this
-    //     way — `require('./standing-order-wake.js')` — and derived nothing.
-    for (const m of src.matchAll(/require\(['"`]\.\/([\w./-]+)['"`]\)/g)) {
-        const p = m[1];
-        found.add(suiteDir + '/' + (p.endsWith('.js') ? p : p + '.js'));
-    }
-
-    // 4. A bare BASENAME, for suites that build the path in two steps:
-    //      const PLUGIN_ROOT = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
-    //      const HOOK        = path.join(PLUGIN_ROOT, 'hooks', 'stop-auto-check.js');
-    //    Rules 1-3 see neither half. Four of twelve suites are written this way,
-    //    and without this they derive nothing and get waved through as
-    //    NO-SUBJECT — the silent-skip failure this whole script is about.
-    //
-    //    Safe because it demands a UNIQUE match: a basename resolving to two
-    //    files under plugins/ is ambiguous and ignored rather than guessed.
-    //
-    //    The character class allows DOTS, and that is not cosmetic. It was
-    //    `[\w-]+\.js`, which cannot match a basename carrying a second dot, so
-    //    every `*.workflow.js`, `*.config.js` and `*.test.js` in the tree was
-    //    invisible to this rule. `[measured 2026-08-29]` that is exactly how
-    //    test-workflow-isolation.js came back NO-SUBJECT while naming
-    //    `heal-sweep.workflow.js` on one line — reported as a suite with nothing
-    //    to check, which is the silent-skip signature this rule exists to close,
-    //    reappearing inside the rule itself.
-    //    NOT widened to tooling/ when rules 1-3 were, on 2026-09-03. This is the
-    //    one rule that guesses — it infers a subject from a name that resembles
-    //    a file — and `[measured 2026-09-03]` widening its pool covered exactly
-    //    ONE extra suite, test-all.js, which is checked as the runner and never
-    //    consults its own subjects, while adding three more fuzzy matches
-    //    elsewhere. Zero gain for more guessing, so it stays scoped to plugins/.
-    for (const m of src.matchAll(/['"`]([\w.-]+\.js)['"`]/g)) {
-        const hits = allPluginFiles().filter((p) => path.basename(p) === m[1]);
-        if (hits.length === 1) found.add(hits[0]);
-    }
-
-    return [...found].filter((p) => fs.existsSync(path.join(SWEEP_ROOT, p)));
+    return [...derivedWithProvenance(suiteFile).keys()];
 }
 
-let _pluginFiles = null;
-function allPluginFiles() {
-    if (_pluginFiles) return _pluginFiles;
-    const out = [];
-    const walk = (dir) => {
-        for (const e of fs.readdirSync(path.join(SWEEP_ROOT, dir), { withFileTypes: true })) {
-            if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
-            const rel = dir + '/' + e.name;
-            if (e.isDirectory()) walk(rel);
-            else if (e.name.endsWith('.js')) out.push(rel);
-        }
-    };
-    for (const top of ['plugins']) {
-        if (fs.existsSync(path.join(SWEEP_ROOT, top))) walk(top);
-    }
-    return (_pluginFiles = out);
+// Derivation itself lives in subject-evidence.js, where a suite can reach it —
+// this file cannot be required (it resolves a HEAD and creates a worktree at load)
+// so nothing could ever test the rules in place. The Map it returns carries HOW
+// each candidate was found, read only by the ranking, which is a permutation and
+// never a filter.
+function derivedWithProvenance(suiteFile) {
+    return ev.deriveCandidates(suiteFile, SWEEP_ROOT);
 }
 
 // A stub that parses, does nothing, and exports nothing.
@@ -691,7 +617,15 @@ for (const suite of suites) {
         continue;
     }
 
-    const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(SWEEP_TOOLING, suite));
+    // A hand-pinned SUBJECT_OVERRIDES list carries no provenance and keeps the
+    // order its author chose; a derived list is ranked most-likely-first. Ranking
+    // is a permutation, so the candidate SET — and therefore every reachable
+    // verdict — is the same either way.
+    const pinned = SUBJECT_OVERRIDES[suite];
+    const provenance = pinned ? null : derivedWithProvenance(path.join(SWEEP_TOOLING, suite));
+    const subjects = pinned
+        ? pinned.slice()
+        : ev.rankSubjects(suite, [...provenance.keys()], provenance);
     if (!subjects.length) {
         // Worded as a deficiency, and counted as a failure, because the previous
         // wording — "references no plugin source — nothing to stub" — read as a
@@ -766,18 +700,39 @@ for (const suite of suites) {
     //
     // The property under test is "this suite can fail", and one killed subject
     // proves it.
-    const killed = [];
-    let incomplete = false;
-    for (const rel of subjects) {
+    // ONE killed subject proves the property, so the traversal STOPS there —
+    // `[measured 2026-09-10]` the sweep was doing 350 suite process runs for 123
+    // suites, and test-fleet-overlap's real subject sat ninth of eleven behind
+    // eight fixture filenames it never reads. Stopping early changes no verdict
+    // (subject-evidence.js asserts that over every outcome pattern), and a suite
+    // that is genuinely VACUOUS still pays for every candidate, because proving a
+    // negative costs all of them.
+    const runStub = (rel) => {
         const full = path.join(SWEEP_ROOT, rel);
-        if (!installOwn(rel, full, STUB)) { incomplete = true; continue; }
+        if (!installOwn(rel, full, STUB)) return 'incomplete';
         try {
             const r = runSuite(suite);
-            if (!completed(r, suite + ' (with ' + rel + ' stubbed)')) incomplete = true;
-            else if (r.status !== 0) killed.push(rel);
+            if (!completed(r, suite + ' (with ' + rel + ' stubbed)')) return 'incomplete';
+            return r.status !== 0 ? 'killed' : 'green';
         } finally {
             removeOwn(rel);
         }
+    };
+    const killed = [];
+    let incomplete = false;
+    let tried = 0;
+    if (ALL_SUBJECTS) {
+        for (const rel of subjects) {
+            tried++;
+            const o = runStub(rel);
+            if (o === 'killed') killed.push(rel);
+            else if (o === 'incomplete') incomplete = true;
+        }
+    } else {
+        const found = ev.firstKiller(subjects, runStub);
+        tried = found.tried;
+        incomplete = found.incomplete;
+        if (found.killed) killed.push(found.killed);
     }
 
     // VACUOUS is an accusation, and it needs every stub run to have actually
@@ -789,7 +744,13 @@ for (const suite of suites) {
         // wearing the same row. A count cannot carry which one; an identity
         // list can, and this file's own history is of counts that agreed with
         // themselves.
-        ? { suite, status: 'ok', note: `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed: ${killed.join(', ')}` }
+        ? { suite, status: 'ok', note: ALL_SUBJECTS
+            ? `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed: ${killed.join(', ')}`
+            // NOT "1/N are stubbed" — only `tried` of N were, and a note that
+            // implies the rest were checked and survived would be a claim this
+            // run never made.
+            : `goes red when ${killed[0]} is stubbed (candidate ${tried} of ${subjects.length}, `
+              + `evidence-ranked; --all-subjects for the full kill set)` }
         : (incomplete
             ? { suite, status: 'UNCHECKED', note: 'stub run(s) did not complete — indeterminate, not a verdict' }
             : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` }));
