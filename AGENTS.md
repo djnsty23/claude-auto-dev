@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 138,348 | 29 of 29 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,830 | 29 of 29 |
-| B′ same, but dated LINES instead of paragraphs | 14,989 | 2 of 29 |
-| C  description only | 7,044 | 0 of 29 |
+| A  full body | 138,769 | 30 of 30 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 23,721 | 30 of 30 |
+| B′ same, but dated LINES instead of paragraphs | 15,490 | 2 of 30 |
+| C  description only | 7,044 | 0 of 30 |
 
 ### rule-ab-testing
 
@@ -464,6 +464,15 @@ What counts as done for each kind of change: the required verification per task 
 
 A task is not done because the code was written. It is done when the check for
 its type has passed.
+
+| Task | Required before done |
+|------|----------------------|
+| Edge Function / API | curl with real params, verify 200 + response shape |
+| UI (public) | Browser check: page reads correctly and the console is clean. When a criterion names what the user sees or gets, drive that flow and assert on **state**, recorded through `scripts/flow-evidence.js` (`auto`, "Runtime flow check"). `[measured 2026-09-08]` on three first-pass defects a screenshot had passed, the state assertion went red on the parent of each fix and green on the fix, 3 of 3; over 30 such fixes it reaches about 4, so it is not a substitute for `rule-ramifications` |
+| UI (admin) | typecheck + build only |
+| Refactor | typecheck + build + existing tests pass |
+| Bulk change | grep for the old pattern to confirm full elimination |
+| Auth / Billing / RLS | tests + manual verification of deny-by-default behavior |
 
 Full text: `plugins/autodev-core/skills/rule-verification/SKILL.md`
 

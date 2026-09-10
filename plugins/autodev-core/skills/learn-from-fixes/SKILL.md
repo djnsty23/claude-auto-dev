@@ -23,7 +23,8 @@ This turns that history into a ranked list of what to gate.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/mine-fixes.js" .
 ```
 
-Add `--json` for machine-readable output, `--window-days=7` for slower-moving
+Add `--json` for machine-readable output, `--since=60.days` (any `git log
+--since` date) to read only recent history, `--window-days=7` for slower-moving
 repos. It is read-only and never writes to the repo.
 
 If it reports no conventional `fix:` commits, say so and stop — the analysis
