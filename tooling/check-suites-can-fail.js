@@ -32,6 +32,7 @@ const path = require('path');
 const { spawnSync, execSync } = require('child_process');
 const sb = require('./spawn-budget.js');
 const ev = require('./subject-evidence.js');
+const sv = require('./suite-verdict-summary.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const VERBOSE = process.argv.includes('--verbose');
@@ -528,17 +529,17 @@ const rows = [];
 // So: make one child suite fail, and assert the runner notices.
 function checkRunner(suite) {
     const victim = suites.find((s) => s !== suite && deriveSubjects(path.join(SWEEP_TOOLING, s)).length);
-    if (!victim) return { suite, status: 'NO-SUBJECT', note: 'no child suite to fail' };
+    if (!victim) return { suite, status: 'NO-SUBJECT', cause: sv.CAUSE.NO_SUBJECT, note: 'no child suite to fail' };
 
     const full = path.join(SWEEP_TOOLING, victim);
     const CANARY = '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n';
     if (!installOwn('tooling/' + victim, full, CANARY)) {
-        return { suite, status: 'UNCHECKED', note: 'could not install the runner canary — see conflicts' };
+        return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'could not install the runner canary — see conflicts' };
     }
     try {
         const r = runSuite(suite);
         if (!completed(r, suite + ' (runner canary run)')) {
-            return { suite, status: 'UNCHECKED', note: 'canary run did not complete — indeterminate, not a verdict' };
+            return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'canary run did not complete — indeterminate, not a verdict' };
         }
         return r.status !== 0
             ? { suite, status: 'ok', note: `reports failure when ${victim} fails` }
@@ -558,23 +559,23 @@ function checkRunner(suite) {
 function checkValidator() {
     const suite = 'validate.js';
     const file = path.join(SWEEP_ROOT, 'VERSION');
-    if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', note: 'no VERSION file' };
+    if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', cause: sv.CAUSE.NO_SUBJECT, note: 'no VERSION file' };
 
     const run = () => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
         cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS,
     });
     const base = run();
-    if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate' };
+    if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate' };
     if (base.status !== 0) return { suite, status: 'RED', note: 'already failing' };
 
     const CANARY = '0.0.0-canary\n';
     if (!installOwn('VERSION', file, CANARY)) {
-        return { suite, status: 'UNCHECKED', note: 'could not install the VERSION canary — see conflicts' };
+        return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'could not install the VERSION canary — see conflicts' };
     }
     try {
         const r = run();
         if (!completed(r, 'validate (VERSION canary run)')) {
-            return { suite, status: 'UNCHECKED', note: 'canary run did not complete — indeterminate, not a verdict' };
+            return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'canary run did not complete — indeterminate, not a verdict' };
         }
         return r.status !== 0
             ? { suite, status: 'ok', note: 'goes red on a version-sync break' }
@@ -609,6 +610,7 @@ for (const suite of suites) {
             rows.push({
                 suite,
                 status: 'UNCHECKED',
+                cause: sv.CAUSE.EXEMPTION_REFUSED,
                 note: 'declared NOT_JAVASCRIPT but its canary ' + exempt.canary
                     + (canaryExists ? ' is not among the suites run' : ' does not exist')
                     + ' — the exemption is REFUSED, so this suite is NOT verified.',
@@ -636,6 +638,7 @@ for (const suite of suites) {
         rows.push({
             suite,
             status: 'UNCHECKED',
+            cause: sv.CAUSE.NO_SUBJECT,
             note: 'subject not derived — this suite is NOT verified. Name its subject where '
                 + 'derivation can read it (a full path literal, a __dirname-anchored '
                 + 'path.join/resolve, or a relative require), or add it to SUBJECT_OVERRIDES '
@@ -681,7 +684,7 @@ for (const suite of suites) {
     // must have actually RUN. A timed-out or signalled baseline is not a red.
     const base = runSuite(suite);
     if (!completed(base, suite + ' (baseline)')) {
-        rows.push({ suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate, not a verdict' });
+        rows.push({ suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate, not a verdict' });
         continue;
     }
     if (base.status !== 0) {
@@ -752,7 +755,7 @@ for (const suite of suites) {
             : `goes red when ${killed[0]} is stubbed (candidate ${tried} of ${subjects.length}, `
               + `evidence-ranked; --all-subjects for the full kill set)` }
         : (incomplete
-            ? { suite, status: 'UNCHECKED', note: 'stub run(s) did not complete — indeterminate, not a verdict' }
+            ? { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'stub run(s) did not complete — indeterminate, not a verdict' }
             : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` }));
 
     } finally { cleanNewUntracked(); }
@@ -809,7 +812,7 @@ if (after) {
 }
 
 console.log('\nCan each suite fail?\n');
-let bad = 0;
+const sum = sv.summarise(rows);
 for (const r of rows) {
     // Anything that is not 'ok' means this script did not establish that the
     // suite can fail. There is no third category: a skip is an absence of
@@ -822,14 +825,25 @@ for (const r of rows) {
     // refused outright unless that canary is present and among the suites run.
     // Marked '~' rather than '✓' so it can never be skimmed as a pass.
     const mark = r.status === 'ok' ? '✓' : (r.status === 'NOT-JS' ? '~' : '✗');
-    if (r.status !== 'ok' && r.status !== 'NOT-JS') bad++;
     console.log(`  ${mark} ${r.suite.padEnd(30)} ${r.status.padEnd(9)} ${VERBOSE || r.status !== 'ok' ? r.note : ''}`);
 }
-const unchecked = rows.filter((r) => r.status === 'UNCHECKED' || r.status === 'NO-SUBJECT').length;
-const notJs = rows.filter((r) => r.status === 'NOT-JS').length;
-const verified = rows.length - bad - notJs;
-console.log(`\n${rows.length} suite(s) · ${verified} verified able to fail · ${bad} NOT verified` +
-            (unchecked ? ` (${unchecked} with no derivable subject)` : '') +
+// SPLIT BY CAUSE, in suite-verdict-summary.js, because one filter over both
+// statuses was one number with two meanings. Until 2026-09-10 this line said
+// `(N with no derivable subject)` over every UNCHECKED row, and MOST of the
+// producers above are the SWEEP failing to measure — a killed baseline, a canary
+// that could not be installed, a stub run that hit the budget. `[measured
+// 2026-09-10]` a sweep produced four such rows, all from baseline/canary
+// timeouts, all with subjects that derived perfectly well, and this line called
+// all four "with no derivable subject": a transient contention failure reported
+// as a static property of the suite, sending the reader to fix four suites that
+// had nothing wrong with them. That is the failure the comment above — about a
+// skip labelled reassuringly — exists to prevent, and a confident WRONG label is
+// the costlier half of it, because it does not merely fail to inform, it directs
+// work. Every RUN_INCOMPLETE row is accompanied by a conflict, so the run exits 2
+// INDETERMINATE below; the bug was never the exit code, it was the sentence.
+const notJs = sum.notJs;
+console.log(`\n${rows.length} suite(s) · ${sum.verified} verified able to fail · ${sum.bad} NOT verified` +
+            (sum.family ? ` (${sv.renderCauses(sum)})` : '') +
             (notJs ? ` · ${notJs} canaried elsewhere, not stubbable here` : '') +
             // "tree restored clean" was measured with gitW, in the PRIVATE sweep
             // worktree that is deleted moments later. It reads as reassurance
@@ -859,4 +873,4 @@ if (conflicts.length) {
     console.log('A moved source HEAD, however, IS a reason to re-run on a quiet tree.\n');
     process.exit(2);
 }
-process.exit(bad ? 1 : 0);
+process.exit(sum.bad ? 1 : 0);
