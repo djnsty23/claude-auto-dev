@@ -3,6 +3,64 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-10: the sweep ORDERS spurious subject candidates rather than dropping them
+
+`check-suites-can-fail.js` was doing 348 suite process runs for 124 graded
+subjects, because it stubs every derived candidate and candidates come from path
+literals — so fixture data becomes a subject. `test-fleet-overlap` derives 12, of
+which 7 are seed filenames for throwaway git repos it never reads, and its real
+subject sat ninth. `docs/evidence-subject-evidence-2026-09-10.md` carries the
+numbers; the decisions are these.
+
+**Nothing is excluded, and that is the whole design.** The obvious fix is to stop
+deriving the spurious candidates, and that file's own header argues against it at
+length for a reason that holds: every way of telling a subject from a mention is a
+guess about a FILE, and a wrong guess DROPS a real subject, turning a verified
+suite into an unverified one or an `ok` into a VACUOUS accusation. The asymmetry
+used instead — **a heuristic that ORDERS candidates cannot produce a wrong verdict,
+only a slower run; one that SELECTS them can** — is what lets a resemblance
+heuristic (the suite's namesake) be used at all. It is confined to the one place
+where being wrong costs only time.
+
+**Early exit does the work; the ranking is the smaller half, and the commit says
+so.** Stopping at the first candidate that reddens the suite saves 94 runs; ranking
+adds 8. Ranking matters on exactly one row — `test-fleet-overlap`, 12 runs to 2 —
+which is the row the measurement started from. Everywhere else the first derived
+candidate already killed the suite. Claiming the ranking as the win would have been
+crediting the clever half for the boring half's result.
+
+**Verdict equivalence is asserted, not argued.** The previous exhaustive traversal
+is written out in `subject-evidence.js`'s selftest as a reference implementation and
+compared over all 363 outcome patterns for 1-5 candidates. `deriveSubjects` is
+byte-identical at 125/125 suites, same order, against `origin/main`'s function
+evaluated side by side, with a control that detects a perturbation.
+
+**Derivation moved out of the gate script, because it had no seam.**
+`check-suites-can-fail.js` resolves a HEAD, creates a worktree and refuses a dirty
+tree at module load, so nothing could ever test the derivation rules in place — and
+the first draft of the new suite proved the cost of that by reimplementing rule 1
+alone and covering ZERO of the cases the change is about. It said so only because it
+carried a population floor.
+
+**The run-count headline is not a time claim, and the evidence doc leads with that
+rather than burying it.** 29.3% fewer runs; zero improvement on `test-validate.js`,
+which consumed 45 of the sweep's 206 minutes in three `ETIMEDOUT` kills. Its only
+killing candidate is last of four, behind the three that time out, and ranking puts
+the namesake first — which is one of the three. Identical order, identical cost.
+
+**What the #237 instrumentation bought, including a correction to its own obvious
+reading.** This was the first sweep since `lastWords` landed and the first
+`ETIMEDOUT` here ever to name anything: the intermittent 45x blowup is now located
+to one suite instead of somewhere among 124. But "last output: the first assertion"
+does NOT mean it hung there — `test-validate.js` collects its results and prints
+them all at the end, and ends with `process.exit()` straight after writing to
+stdout, which truncates on darwin because a pipe's stdout is asynchronous there. So
+the truncation has to be fixed before the captured line can be trusted to locate
+anything. Separately, none of that suite's three `spawnSync` calls carries a
+timeout and it is not wired to `spawn-budget.js`, so a block in any of them is
+unbounded. Both are defects on their own terms and both are left for their own
+change, because bundling them would put two unrelated claims in one review.
+
 ## 2026-09-10: `check:suites` publishes its child budget instead of raising it
 
 `npm run check:suites` did not complete cleanly once in three runs over five
