@@ -94,6 +94,47 @@ mechanism. The discriminator is whether the sentence names something a refactor
 can change: a tool, a file, a data structure, a code path. When it does, it is a
 dated claim whether or not it carries a date.
 
+⚠️ **"An exit 2 here is load; re-run it on a quiet machine" was wrong, and it
+was the advice in this file and in the project memory until 2026-09-10.** The
+measurement is in `docs/evidence-check-suites-budget-2026-09-10.md`; three runs
+over five hours, and the quietest was five times the slowest with five times the
+conflicts. Load is not the mechanism in either direction, and the refutation needs
+no theory — it is arithmetic over this repo's own constants. A suite that blows the
+child budget costs seconds through the sweep's exact invocation, so a timeout
+demands a blowup far beyond the largest slowdown `spawn-budget.js` will even admit
+(`CONTENTION_MAX`). Compare the two yourself rather than trusting this sentence:
+time the suite, then read the clamp.
+
+What was actually wrong is a shape worth recognising anywhere: **two timeout
+regimes, nested, with no relationship to each other, and the inner ceiling the
+larger one.** The sweep gave each suite a fixed budget while several suites could
+self-grant more than that through `runBudgeted` — one of them passing a
+`maxTimeout` equal to the whole outer budget, so a single widened retry could eat
+it alone. (`node tooling/check-suites-can-fail.js` and `tooling/spawn-budget.js`
+hold the live numbers; the doc above holds the ones measured that day.) Neither system
+could then report: the outer kill landed mid-retry, so the suite never printed the
+INDETERMINATE line it had computed, and the sweep, holding only `ETIMEDOUT`,
+recorded a conflict with no cause. The fix was not a bigger number — the budget is
+unchanged — it is that the parent now PUBLISHES its deadline and the inner policy
+clamps to it. **When a budget is enforced by a process other than the one spending
+it, the two have to know about each other, or the only reliable outcome is that
+nobody gets to say what happened.**
+
+Two corollaries that keep costing sessions. `os.loadavg()` is not a usable
+contention signal on this box — it read 12.37 at idle and 12.37 under 28 busy
+workers in the same ramp — so a load figure beside a timing proves nothing about
+whether the machine was contended. And a contention probe built from
+single-threaded work reads **1.00 until runnable threads exceed the core count**,
+so on 14 cores every load this gate actually runs at measures as idle.
+
+**And a child killed on timeout still carries everything it printed.** `spawnSync`
+returns its `stdout` and `stderr` populated, and the suites here print their
+assertions as they go, so the last lines name what was in flight. Nine timeouts
+across those three runs were reported as the bare string `ETIMEDOUT` with that
+evidence in hand and discarded, which is why five hours produced no diagnosis.
+Whatever you are writing that reports a result with no exit code: the budget is
+spent either way, so spend it on evidence.
+
 **And do not touch the tree WHILE it runs.** Clean at the start is not enough:
 `test-all.js` snapshots `git status` before the suites and compares after, so a
 file edited mid-run fails `tree-inert` with "THE TEST RUN MODIFIED THE WORKING

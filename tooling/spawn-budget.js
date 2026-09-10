@@ -164,6 +164,87 @@ function reason(r) {
 }
 
 /**
+ * How much wall time is left before a PARENT that will kill this process does so.
+ *
+ * WHY A MODULE ABOUT BUDGETS NEEDS TO KNOW ABOUT SOMEONE ELSE'S. Until now the
+ * budget a suite grants itself and the budget its parent grants the suite were
+ * two unrelated numbers, and `[measured 2026-09-10]` the inner one was the
+ * LARGER for four suites: against check-suites-can-fail.js's fixed 900000 ms
+ * per child, test-entrypoints can self-grant 69.2 min across its call sites
+ * (73.5 min in execution — its three-name --help loop runs one site three
+ * times), test-session-sweep 52 min, test-coordinator-write-guard 47.3 min and
+ * test-hook-execution-evidence 25 min. test-entrypoints' --json call carries
+ * `maxTimeout: 900000`, numerically identical to the whole outer budget, so ONE
+ * widened retry can consume it alone.
+ *
+ * The consequence is not that things are slow, it is that NOBODY GETS TO
+ * REPORT. The outer kill lands mid-retry, so the suite never reaches `tally` or
+ * `exitCode` and never prints the `INDETERMINATE` line this module exists to
+ * produce; the parent, holding only ETIMEDOUT, records a conflict and exits 2
+ * with no cause. Three runs over five hours did exactly that and produced no
+ * diagnosis between them.
+ *
+ * So a parent with a kill deadline publishes it, in epoch ms, and every budget
+ * below is clamped to what remains. Absent the variable NOTHING changes — which
+ * is the whole compatibility story for every file that calls in here.
+ */
+const DEADLINE_ENV = 'AUTODEV_SPAWN_BUDGET_DEADLINE';
+const DEADLINE_FLOOR_MS = 1000;
+
+function deadlineRemaining(now) {
+    const raw = process.env[DEADLINE_ENV];
+    if (raw === undefined || raw === '') return null;
+    const at = Number(raw);
+    if (!Number.isFinite(at)) return null;
+    return at - (now === undefined ? Date.now() : now);
+}
+
+/**
+ * Clamp a budget to the parent's deadline. Only ever NARROWS: the floor applies
+ * to the remaining time, never to the budget, so a caller asking for less than
+ * the floor still gets what it asked for.
+ *
+ * The floor is there because a deadline already blown must still let the attempt
+ * run and fail honestly rather than turning into a zero-length spawn — a child
+ * that never ran, reported as a child that did not finish, is a different lie
+ * than the one being fixed.
+ *
+ * ⚠️ The first version was `max(FLOOR, min(ms, rem))`, which RAISED every budget
+ * below the floor: a 400 ms base became 1000 ms, and five selftest assertions
+ * about widening and about maxTimeout went red the moment a parent published a
+ * deadline — passing standalone, failing inside the gate, which is the class this
+ * module exists to remove. A clamp that can widen is not a clamp.
+ */
+function clampToDeadline(ms) {
+    const rem = deadlineRemaining();
+    if (rem === null) return ms;
+    return Math.min(ms, Math.max(DEADLINE_FLOOR_MS, rem));
+}
+
+/**
+ * The child's own account of itself, for the caller that has to report a result
+ * carrying no exit code.
+ *
+ * `[measured 2026-09-10]` a spawnSync child killed on timeout comes back with
+ * its stdout and stderr POPULATED — everything it managed to write before the
+ * SIGTERM. Every suite here prints its assertions as it goes, so the last lines
+ * name the assertion that was in flight. check-suites-can-fail.js's
+ * `completed()` had all of it in hand at each of three timeouts and printed
+ * `ETIMEDOUT` alone, which is why five hours of runs located nothing. A timeout
+ * is going to cost its budget whatever happens; it may as well be spent on
+ * evidence.
+ */
+function lastWords(r, maxBytes) {
+    const cap = maxBytes === undefined ? 400 : maxBytes;
+    const raw = String(r && r.stdout || '') + String(r && r.stderr || '');
+    const text = raw.replace(/\s+$/, '');
+    if (!text) return 'the child wrote nothing before it was killed';
+    const tail = text.length > cap ? text.slice(-cap) : text;
+    const lines = tail.split('\n').filter((l) => l.trim()).slice(-3);
+    return 'last output: ' + JSON.stringify(lines.join(' | '));
+}
+
+/**
  * spawnSync with the C3 budget policy.
  *
  * opts.timeout      base budget in ms (required; there is no default worth one)
@@ -196,15 +277,33 @@ function runBudgeted(command, args, opts) {
         throw new Error('opts.maxTimeout must be at least opts.timeout');
     }
 
-    let r = cp.spawnSync(command, args, o);
+    // Clamped to the parent's kill deadline if it published one, so the budget
+    // this module grants can never outlive the budget something else is
+    // enforcing on this process. See deadlineRemaining().
+    const firstBudget = clampToDeadline(base);
+    let r = cp.spawnSync(command, args, Object.assign(o, { timeout: firstBudget }));
     if (!timedOut(r) || !retry) {
-        return Object.assign(r, { budgetMs: base, attempts: 1, factor: null });
+        return Object.assign(r, { budgetMs: firstBudget, attempts: 1, factor: null });
     }
     // The child blew a budget that is comfortable on an idle machine. Ask how
     // contended this machine is at THIS moment, and give the retry that much
     // more room. Measured 4/4 where retrying at the same budget was 0/4.
+    //
+    // THE WIDENING IS INERT BELOW CORE SATURATION, and that is not a reason to
+    // drop the retry. `[measured 2026-09-10, 14 cores]` contentionFactor() reads
+    // 1.00 with 0 and with 7 extra busy workers, 1.38 at 14 and 2.47 at 28, so
+    // at the 1-min loads this project's gate actually runs at (5-15) the retry
+    // gets the SAME budget that just failed. What it still buys is RE-EXECUTION
+    // — which is the whole point of the `slow-once` child in
+    // test-spawn-budget.js, a child the retry rescues at any budget — so the
+    // honest reading is that a quiet machine pays one extra full budget for a
+    // second attempt and no extra head-room, not that the second attempt is
+    // worthless. The cost is real either way, which is why the clamp below
+    // matters: under a parent deadline that second budget can no longer be spent
+    // past the moment the parent kills this process.
     const factor = contentionFactor();
-    const widened = Math.min(cap === undefined ? Infinity : cap, Math.round(base * factor));
+    const widened = clampToDeadline(
+        Math.min(cap === undefined ? Infinity : cap, Math.round(base * factor)));
     r = cp.spawnSync(command, args, Object.assign(o, { timeout: widened }));
     return Object.assign(r, { budgetMs: widened, attempts: 2, factor });
 }
@@ -229,7 +328,8 @@ function exitCode(fail, infra) {
 
 module.exports = {
     contentionFactor, timedOut, classify, reason, runBudgeted, tally, exitCode,
-    SPIN_FLOOR_MS, CONTENTION_MAX,
+    lastWords, deadlineRemaining, clampToDeadline,
+    SPIN_FLOOR_MS, CONTENTION_MAX, DEADLINE_ENV, DEADLINE_FLOOR_MS,
 };
 
 // --- CLI -------------------------------------------------------------------
@@ -353,6 +453,104 @@ if (require.main === module) {
             + 'the cap is what clamped it and not an incidental equality',
             hungRetried.budgetMs === Math.round(400 * hungRetried.factor)
                 && hungRetried.budgetMs >= 400, `budgetMs=${hungRetried.budgetMs} factor=${hungRetried.factor}`);
+
+        // THE PARENT DEADLINE. Driven against a real hung child, and both
+        // directions are covered on every machine rather than whichever one the
+        // box supplies: absent the variable nothing changes, present it the
+        // budget is what REMAINS and not what was asked for.
+        //
+        // THE VARIABLE IS CONTROLLED, NOT OBSERVED. The first draft read the
+        // ambient environment for the "no deadline" half, and that is the exact
+        // trap the factor-pinning block above exists to close: this selftest is
+        // spawned by check-suites-can-fail.js, which now PUBLISHES a deadline to
+        // every suite it runs, so an assertion that nothing is published would
+        // have passed standalone and gone red inside the gate. Both halves are
+        // pinned, and the restore is in a finally.
+        {
+            const saved = process.env[DEADLINE_ENV];
+            try {
+                delete process.env[DEADLINE_ENV];
+                t('with no deadline published, deadlineRemaining() is null',
+                    deadlineRemaining() === null, String(deadlineRemaining()));
+                t('  and clampToDeadline is then the identity, so every caller that publishes '
+                    + 'nothing is untouched',
+                    clampToDeadline(123456) === 123456, String(clampToDeadline(123456)));
+                // A deadline 1200ms out against a 60000ms base: the attempt must
+                // run for about the REMAINDER, not the base, and must not be
+                // rounded down to nothing.
+                process.env[DEADLINE_ENV] = String(Date.now() + 1200);
+                const rem = deadlineRemaining();
+                t('a published deadline is read as the time remaining',
+                    rem !== null && rem > 0 && rem <= 1200, String(rem));
+                t('  and a large budget is clamped down to it',
+                    clampToDeadline(60000) <= 1200, String(clampToDeadline(60000)));
+                const t0 = Date.now();
+                const near = runBudgeted(NODE, ['-e', HANG],
+                    { encoding: 'utf8', timeout: 60000, retryOnTimeout: false });
+                const spent = Date.now() - t0;
+                t('  and a 60s budget under a 1.2s deadline really does end in about 1.2s, '
+                    + 'which is the whole defect: an inner budget outliving the outer one',
+                    timedOut(near) && spent < 20000, `spent=${spent}ms ${reason(near)}`);
+                t('  and the attempt reports the CLAMPED budget it ran under, not the one asked for',
+                    near.budgetMs <= 1200, `budgetMs=${near.budgetMs}`);
+
+                // A deadline already in the past must still spawn. Returning a
+                // zero-length budget would trade this module's failure mode for
+                // a different one — a child that never ran, reported as a child
+                // that did not finish.
+                process.env[DEADLINE_ENV] = String(Date.now() - 5000);
+                t('a deadline already blown clamps to the floor rather than to zero',
+                    clampToDeadline(60000) === DEADLINE_FLOOR_MS, String(clampToDeadline(60000)));
+                const past = runBudgeted(NODE, ['-e', 'process.exit(3)'],
+                    { encoding: 'utf8', timeout: 60000, retryOnTimeout: false });
+                t('  and a fast child under a blown deadline still runs and still answers',
+                    past.status === 3, `status=${past.status} ${reason(past)}`);
+
+                // The clamp must only ever NARROW. This is the assertion the
+                // first draft lacked, and its absence cost five reds.
+                process.env[DEADLINE_ENV] = String(Date.now() + 600000);
+                t('a budget SMALLER than the deadline floor is left alone, never widened to it',
+                    clampToDeadline(400) === 400, String(clampToDeadline(400)));
+                t('  and a budget comfortably inside a distant deadline is untouched',
+                    clampToDeadline(30000) === 30000, String(clampToDeadline(30000)));
+                process.env[DEADLINE_ENV] = String(Date.now() - 5000);
+                t('  and even under a BLOWN deadline a small budget is not inflated to the floor',
+                    clampToDeadline(400) === 400, String(clampToDeadline(400)));
+
+                process.env[DEADLINE_ENV] = 'not-a-number';
+                t('an unparseable deadline is ignored, never treated as zero',
+                    deadlineRemaining() === null && clampToDeadline(777) === 777,
+                    `${deadlineRemaining()} / ${clampToDeadline(777)}`);
+            } finally {
+                if (saved === undefined) delete process.env[DEADLINE_ENV];
+                else process.env[DEADLINE_ENV] = saved;
+            }
+        }
+
+        // lastWords: the evidence a killed child leaves behind, which the caller
+        // reporting ETIMEDOUT currently throws away.
+        {
+            const noisy = runBudgeted(NODE,
+                ['-e', 'console.log("PASS  first");console.log("PASS  second");'
+                     + 'console.error("working on third");setInterval(function(){},1000)'],
+                { encoding: 'utf8', timeout: 900, retryOnTimeout: false });
+            t('a killed child still carries the output it managed to write',
+                timedOut(noisy) && (noisy.stdout || '').includes('PASS  first'),
+                `${reason(noisy)} stdout=${JSON.stringify((noisy.stdout || '').slice(0, 60))}`);
+            const lw = lastWords(noisy);
+            t('  and lastWords names the work that was in flight when it died',
+                lw.includes('PASS  second') && lw.includes('working on third'), lw);
+            t('  and it is bounded, so a chatty child cannot flood the conflict line',
+                lastWords({ stdout: 'x'.repeat(50000) }, 200).length < 400,
+                String(lastWords({ stdout: 'x'.repeat(50000) }, 200).length));
+            t('  and a child that wrote nothing says so rather than returning an empty string',
+                lastWords({ stdout: '', stderr: '' }) === 'the child wrote nothing before it was killed',
+                lastWords({ stdout: '', stderr: '' }));
+            t('  control: a child that DID write is not reported as silent, so the line '
+                + 'above is not passing on a function that says "nothing" to everything',
+                lastWords({ stdout: 'something\n' }) !== 'the child wrote nothing before it was killed',
+                lastWords({ stdout: 'something\n' }));
+        }
 
         let bad = false;
         try { runBudgeted(NODE, ['-e', '0'], { encoding: 'utf8' }); } catch { bad = true; }

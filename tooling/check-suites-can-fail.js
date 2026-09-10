@@ -25,6 +25,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync, execSync } = require('child_process');
+const sb = require('./spawn-budget.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const VERBOSE = process.argv.includes('--verbose');
@@ -352,15 +353,24 @@ function removeOwn(rel) {
 // suite (Sol's round-9 blocker: a killed child satisfied `status !== 0` and
 // was scored as a successful canary), it is a failure OF THIS SWEEP, so it
 // poisons the run instead of feeding either branch.
+//
+// AND IT REPORTS WHAT THE CHILD WAS DOING. `[measured 2026-09-10]` a spawnSync
+// child killed on timeout comes back with stdout and stderr POPULATED, and this
+// function had all of it in hand at every timeout and printed the error code
+// alone. Three check:suites runs over five hours — 66 min, 83 min and 3h13m —
+// produced nine such conflicts and not one located cause between them, because
+// the evidence was thrown away nine times. Every suite here prints its
+// assertions as it goes, so the last lines name what was in flight.
 function completed(r, what) {
-    if (r.error) { conflict(`${what} did not run (${r.error.code || r.error.message})`); return false; }
-    if (r.signal) { conflict(`${what} was killed by ${r.signal} before completing`); return false; }
+    if (r.error) { conflict(`${what} did not run (${r.error.code || r.error.message}) — ${sb.lastWords(r)}`); return false; }
+    if (r.signal) { conflict(`${what} was killed by ${r.signal} before completing — ${sb.lastWords(r)}`); return false; }
     if (r.status === 2) {
         // Exit 2 is this repo's refusal/indeterminate convention (dirty-tree
         // guards, lock refusals, restoration failures). A child that REFUSED
         // is not a child that FAILED, and scoring it as a red canary would
         // verify nothing (Sol's round-10 blocker).
-        conflict(`${what} exited 2 — a refusal or indeterminate result, not a verdict`);
+        conflict(`${what} exited 2 — a refusal or indeterminate result, not a verdict`
+            + ` — ${sb.lastWords(r)}`);
         return false;
     }
     return true;
@@ -544,8 +554,39 @@ const suites = fs.readdirSync(SWEEP_TOOLING)
 // blew a 300s budget on a loaded machine. The generous budget is the fix;
 // the conflict detection stays as the backstop for a genuine hang. Suites
 // run FROM and IN the private worktree — nothing they touch is shared.
+//
+// ⚠️ THE GENEROUS BUDGET WAS NOT THE FIX, AND RAISING IT AGAIN IS NOT EITHER.
+// `[measured 2026-09-10]` the suites blowing this budget are not the heaviest
+// one: test-entrypoints costs 20s end to end through this exact invocation and
+// its whole stub cycle costs 66s, and test-fleet-stop-watch costs 20s. A timeout
+// here therefore needs a 45x blowup, and the largest slowdown this project's own
+// contention model will even admit is CONTENTION_MAX = 20 in spawn-budget.js,
+// measured at 1.00-1.38 on this 14-core box at the 1-min loads those runs ran at
+// (4.97-15). Load cannot produce 45x, in either direction — which is why the
+// quietest of three runs was the slowest and carried the most conflicts.
+//
+// WHAT WAS ACTUALLY WRONG was that this number and the budgets the suites grant
+// THEMSELVES were unrelated, and the inner ones were bigger: against the 15
+// minutes below, test-entrypoints can self-grant 69.2 min across its runBudgeted
+// call sites (73.5 min in execution), test-session-sweep 52, test-coordinator-
+// write-guard 47.3 and test-hook-execution-evidence 25. test-entrypoints' --json
+// call passes `maxTimeout: 900000`, the same number as this one, so a single
+// widened retry can eat the whole outer budget on its own.
+//
+// The damage is not slowness, it is that NOBODY GETS TO REPORT: the kill below
+// lands mid-retry, so the suite never reaches its own tally and never prints the
+// INDETERMINATE line spawn-budget.js exists to produce, and this sweep — holding
+// only ETIMEDOUT — records a conflict with no cause. So the budget is PUBLISHED
+// rather than merely enforced: spawn-budget.js clamps every budget it grants to
+// what remains of it, and the margin is the room a suite needs to print why it
+// could not measure. A suite that publishes nothing is unaffected.
+const RUN_BUDGET_MS = 900000;
+const REPORT_MARGIN_MS = 30000;
 const runSuite = (suite) => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
-    cwd: SWEEP_ROOT, encoding: 'utf8', timeout: 900000,
+    cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS,
+    env: Object.assign({}, process.env, {
+        [sb.DEADLINE_ENV]: String(Date.now() + RUN_BUDGET_MS - REPORT_MARGIN_MS),
+    }),
 });
 
 const rows = [];
@@ -594,7 +635,7 @@ function checkValidator() {
     if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', note: 'no VERSION file' };
 
     const run = () => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
-        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: 900000,
+        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS,
     });
     const base = run();
     if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate' };
@@ -845,7 +886,16 @@ if (conflicts.length) {
     console.log('INDETERMINATE — ' + conflicts.length + ' mid-sweep conflict(s) detected:');
     for (const c of conflicts) console.log('  · ' + c);
     console.log('The verdicts above were measured on a tree that changed under this sweep.');
-    console.log('Re-run when the tree is quiet.\n');
+    // NOT "re-run when the machine is quiet". That was the advice here and in
+    // CLAUDE.md until 2026-09-10, and `[measured 2026-09-10]` the quietest of
+    // three runs was the slowest and carried the most conflicts: the suites that
+    // blow the budget cost 15-20 s through this exact invocation, so a timeout
+    // needs a 45x blowup and CONTENTION_MAX is 20. A reader acts on this line,
+    // so it names what to look at — the conflicts above now carry the child's
+    // own last output — rather than sending them to wait for an idle box.
+    console.log('Each conflict above names what the child was doing when it ended. A timeout');
+    console.log('is NOT evidence of load: see docs/evidence-check-suites-budget-2026-09-10.md.');
+    console.log('A moved source HEAD, however, IS a reason to re-run on a quiet tree.\n');
     process.exit(2);
 }
 process.exit(bad ? 1 : 0);

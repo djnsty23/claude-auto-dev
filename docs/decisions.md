@@ -3,6 +3,66 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-10: `check:suites` publishes its child budget instead of raising it
+
+`npm run check:suites` did not complete cleanly once in three runs over five
+hours, and the data contradicted the advice. The quietest run was five times the
+slowest with five times the conflicts, while this file, CLAUDE.md, the project
+memory and the script's own closing line all said an exit 2 there is load and the
+answer is a quiet machine. `docs/evidence-check-suites-budget-2026-09-10.md`
+carries the measurements; the decisions are these.
+
+**The budget was not raised, and the arithmetic is why.** It had already been
+raised once, from 300 s to 900 s, for this class. The suites blowing it now cost
+**15-20 s** through the sweep's exact invocation, so a timeout needs a 45x blowup
+— and the largest slowdown this repo's own contention model will admit is
+`CONTENTION_MAX = 20`. A second raise would have been treating the symptom against
+a number the code already says is too small to be the cause.
+
+**The real defect was two nested timeout regimes with no relationship, the inner
+ceiling being the larger.** Against the sweep's fixed 900000 ms per child, four
+suites could self-grant more through `runBudgeted` — `test-entrypoints` 69.2 min
+across its call sites, `test-session-sweep` 52, `test-coordinator-write-guard`
+47.3, `test-hook-execution-evidence` 25 — and `test-entrypoints`'s `--json` call
+passes `maxTimeout: 900000`, the whole outer budget in one call. The damage was
+not slowness: the outer kill landed mid-retry, so the suite never printed the
+INDETERMINATE line it had computed and the sweep, holding only `ETIMEDOUT`,
+recorded a conflict with no cause. So the parent now PUBLISHES its deadline
+(`AUTODEV_SPAWN_BUDGET_DEADLINE`, minus a 30 s reporting margin) and
+`spawn-budget.js` clamps every budget to what remains. Absent the variable nothing
+changes, which is what makes it safe for every existing caller.
+
+**The retry was left alone, against the first draft of this change.** At the loads
+this gate runs at the widening is inert — `contentionFactor()` reads 1.00 until
+runnable threads exceed the core count, measured 1.00 at 0 and 7 extra workers on
+14 cores — so skipping a retry that cannot widen looked like free savings. It is
+not: the `slow-once` child in `test-spawn-budget.js` is rescued by re-execution at
+any budget, so the second attempt buys something even when the budget does not
+grow. What is true, and is now written where the retry happens, is that below core
+saturation every timeout costs two full budgets for re-execution alone.
+
+**`completed()` reports the child's last words.** A `spawnSync` child killed on
+timeout comes back with `stdout` and `stderr` populated; that was in hand at all
+nine timeouts and discarded nine times, which is why five hours of runs located
+nothing. The budget is spent either way.
+
+**Two cost findings were measured and deliberately not fixed.** The sweep performs
+**350 suite process runs for 123 suites**, because subjects are derived from path
+literals and fixture data therefore becomes a subject — `test-fleet-overlap`
+derives 12, of which 7 are seed filenames for throwaway git repos it never reads,
+each earning an `ok` row for breaking a file the suite does not use. Narrowing
+derivation means guessing, which that file's own header argues against at length,
+and it changes what the gate CLAIMS rather than what it costs per claim: it wants
+its own measurement, not a ride on this one. Separately, tmpdir holds 198,120
+entries of suite fixture debris; harmless at 149 ms to enumerate, and recorded
+because it grows monotonically and nothing reports it.
+
+**What was not established, stated as such.** No timeout was reproduced in this
+session, across the shared tree, a sweep-identical worktree, the sweep's exact
+`runSuite`, and a full stub cycle at loads 7-12. The proximate cause of the 45x
+blowup is still open. The change makes a single inner timeout stop guaranteeing an
+unexplained exit 2, and makes the next one name itself.
+
 ## 2026-09-08: a per-story runtime flow check, wired into `auto` and not into the Stop hook
 
 The question was whether driving the primary user flow in a real browser and
