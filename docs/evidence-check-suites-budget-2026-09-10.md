@@ -150,6 +150,32 @@ outer kill and an unexplained exit 2, and §3 is what will name the cause the ne
 time one fires — which is the honest state of it, and the reason the fix is
 diagnostic as well as structural.
 
+## The run after the change, and what it does not prove
+
+`npm run gate` on the committed tree, clean, starting at 1-min load **6.19** —
+inside the band run 3 sat in (4.97–7.3):
+
+```
+124/124 suites passed · PASS tree-inert
+124 suite(s) · 123 verified able to fail · 0 NOT verified · 1 canaried elsewhere,
+  not stubbable here · sweep worktree clean, source tree refs unmoved
+GATE_EXIT=0      all nine steps, 34 minutes end to end
+```
+
+Zero conflicts, zero `ETIMEDOUT`, and every suite that had timed out —
+`test-entrypoints`, `test-fleet-overlap`, `test-fleet-stop-watch`,
+`test-hook-execution-evidence`, `test-all.js` as the runner canary — came back
+`ok`. Against 66 min, 83 min and 3h13m, at a comparable load.
+
+**This is one clean run where three consecutive runs failed, and that is all it
+is.** §6 applies: no timeout was reproduced in this session at all, so a run
+without one is consistent with the clamp working and equally consistent with the
+intermittent condition simply not occurring. It is not evidence that the blowup is
+gone. What the change guarantees is narrower and does not depend on this run: an
+inner timeout can no longer consume the outer budget, so the suite reaches its own
+tally, and whatever does fire next is reported with the child's last output beside
+it instead of as the bare string `ETIMEDOUT`.
+
 ## The changes
 
 1. **`spawn-budget.js` learns about the parent's deadline.** A parent that will
