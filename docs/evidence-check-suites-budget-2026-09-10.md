@@ -167,14 +167,32 @@ Zero conflicts, zero `ETIMEDOUT`, and every suite that had timed out —
 `test-hook-execution-evidence`, `test-all.js` as the runner canary — came back
 `ok`. Against 66 min, 83 min and 3h13m, at a comparable load.
 
-**This is one clean run where three consecutive runs failed, and that is all it
-is.** §6 applies: no timeout was reproduced in this session at all, so a run
-without one is consistent with the clamp working and equally consistent with the
-intermittent condition simply not occurring. It is not evidence that the blowup is
-gone. What the change guarantees is narrower and does not depend on this run: an
-inner timeout can no longer consume the outer budget, so the suite reaches its own
-tally, and whatever does fire next is reported with the child's last output beside
-it instead of as the bare string `ETIMEDOUT`.
+A second `check:suites` sweep was then run on its own, specifically to take that
+from one observation to two — and it drew the quietest machine of any run in this
+file:
+
+| run | code | 1-min load at launch | duration | conflicts |
+|---|---|---|---|---|
+| 1 | before | 10–15 | 66 min, completed | 1 |
+| 2 | before | 8–11 | stopped at 83 min | 3 |
+| 3 | before | 4.97–7.3 | stopped at 3h13m | 5 |
+| gate | after | 6.19 | 34 min all nine steps | 0 |
+| sweep 2 | after | **2.25** | **18.8 min**, exit 0 | **0** |
+
+**The inversion is inverted.** Before, the quietest run was the slowest; sweep 2
+drew the lowest load of any run here and was the fastest, at exit 0 with zero
+conflicts and zero `ETIMEDOUT` anywhere in its output. CI on the same head is
+green across the whole conclusion set — 6 runs, two per job over macOS, Ubuntu and
+Windows, no disagreement between the paired runs.
+
+**This is two clean runs where three consecutive runs failed, and that is all it
+is.** §6 still applies: no timeout was reproduced in this session at all, so runs
+without one are consistent with the clamp working and equally consistent with the
+intermittent condition not occurring. Two is not a refutation of an intermittent
+failure, and nobody should read the table above as one. What the change guarantees
+does not depend on either run: an inner timeout can no longer consume the outer
+budget, so the suite reaches its own tally, and whatever does fire next is reported
+with the child's last output beside it instead of as the bare string `ETIMEDOUT`.
 
 ## The changes
 
