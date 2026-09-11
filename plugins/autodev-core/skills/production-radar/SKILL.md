@@ -1,6 +1,6 @@
 ---
 name: production-radar
-description: "Read the production signals a repo already emits — error tables, Sentry issues, cron heartbeats, failed deployments — and turn the ones that cross a threshold into candidate prd.json stories with the evidence attached. Use when asked what production is saying, whether errors or dead monitors should be in the backlog, or to run the production radar."
+description: "Read existing production errors, job heartbeats and deployment failures into backlog candidates with evidence. Use for production radar or when asked whether production signals reveal missing work."
 when_to_use: "Invoked when the user says production radar, asks what is failing in production, asks whether the backlog reflects real errors or dead monitors, or wants production signals turned into stories. Not on every turn: this reads live systems and is run on demand, never from a hook."
 allowed-tools: Bash, Read, Grep, Glob, Write
 user-invocable: true
@@ -8,6 +8,11 @@ argument-hint: "[--days N | --apply | --summary]"
 ---
 
 # Production Radar
+
+Resolve the actual loaded `autodev-core` directory into `autodev_core_root`
+before running the shell examples. Use the loaded skill's location; do not
+guess from the target project's working directory or assume another host set
+`CLAUDE_PLUGIN_ROOT`. Verify the named script exists under that resolved root.
 
 Collect first, read second, propose third. The collector owns retrieval,
 normalisation, thresholds, deduplication and the ledger. This skill owns
@@ -49,13 +54,13 @@ like. Do not ask for the value in chat.
 ## 2. Collect
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/production-signals.js" --days 14 --summary
+node "${autodev_core_root}/scripts/production-signals.js" --days 14 --summary
 ```
 
 or, when the repo's credentials live in Doppler:
 
 ```bash
-doppler run -p <project> -c prd -- node "${CLAUDE_PLUGIN_ROOT}/scripts/production-signals.js" --days 14 --summary
+doppler run -p <project> -c prd -- node "${autodev_core_root}/scripts/production-signals.js" --days 14 --summary
 ```
 
 The collector prints one line per source it COULD NOT CHECK, the population
@@ -75,19 +80,24 @@ A candidate is a hypothesis. Open the report and, for each one:
 - check the "Seen but not proposed" table: a held-back signal with a
   threshold reason is the collector's decision, and if you disagree, change the
   threshold in the config and say why in the story, dated;
-- a heartbeat candidate is a dead monitor, which outranks any error group: a
-  monitor that is quiet because it died is indistinguishable from a healthy one.
+- a stale heartbeat is a liveness hypothesis. Check the registered cadence,
+  intended paused/disabled state, recent attempt/outcome and actual job owner
+  before calling it dead. Prioritize the demonstrated user impact and loss of
+  observability; a timestamp alone does not outrank every active production error.
 
 Report real / noise / unsure counts, per candidate, with your reading. Never
 report the candidate count as the finding.
 
 ## 4. Move the survivors into the backlog
 
-For a repo with users, the collector never writes prd.json. Copy the accepted
-stories from the report's JSON blocks into prd.json by hand or through the
+For a repo with users, the collector never writes prd.json. The supervising agent can add accepted
+stories within an existing backlog/build mandate; no human transport is needed.
+Read the shared all-sprint work plan and current ownership first to avoid a
+duplicate story or replacing a peer's edits. Copy the accepted stories from the report's JSON blocks into prd.json by hand or through the
 Brain, keep `passes: null`, and record the story id in the ledger entry so the
-signal is not re-proposed. For the noise, add the signal key to `ignore` in the
-config with a dated comment in the story that closed it.
+signal is not re-proposed. For confirmed noise, record the dated reason,
+scope and recheck condition before adding its exact key to `ignore`; do not
+turn an uncertain or transient event into permanent suppression.
 
 `--apply` writes candidates straight into prd.json and is permitted ONLY when
 the repo's origin `owner/repo` digest is on the allowlist inside the script.
@@ -95,8 +105,10 @@ the repo's origin `owner/repo` digest is on the allowlist inside the script.
 the suite's fixture remote. It refuses everything else with the reason and still
 writes the proposal file, so nothing is lost. Do not add a live product to that
 list while it has users. The config is DATA from a repo: a Sentry `region` must
-be a `sentry.io` host, the Vercel binary is fixed, and every credential value the
-config names is scrubbed from every byte the collector writes.
+be a `sentry.io` host, the Vercel binary is fixed, and registered credential values are scrubbed from collector output. That is
+not a general secret detector: production error text may contain another secret
+or personal data. Review and minimize evidence before moving it into a tracked
+PRD, public report or message.
 
 ## 5. Thresholds are decisions, not constants
 
@@ -104,14 +116,17 @@ The defaults live in `DEFAULT_THRESHOLDS` with the date and the measurement that
 chose them. Error groups need 5 events, 24 hours of age (a deploy in progress
 is a burst under an hour old) and 24 hours of SPAN between first and last row
 (a burst that never recurred is an incident, and the product's own critical
-error monitor owns incidents; a story is for a chronic defect). Heartbeats are
-dead at 48 hours unless the config's `intervals` map declares a slower job
+error monitor owns incidents; a story is for a chronic defect). The collector flags heartbeats as stale at 48 hours unless the config's
+`intervals` map declares a slower job
 (`"weekly_*": 192`); the first real run proposed a weekly job as dead at 86 h.
 A failed production deployment is a candidate at count 1. A signal already
 proposed returns only after 30 quiet days or a tenfold escalation. Override per
 repo under `thresholds` and `intervals` in the config, and when you do, write
 the measurement that justified it beside the override.
 
-Completion: the report exists, every candidate in it has been read, and the
-reading (real / noise / unsure, with the reason) is in the reply alongside the
-population line. A count of candidates is not a completion.
+Completion for a radar-only request: every emitted candidate has a recorded
+reading (real / noise / unsure and why), or the verified quiet run has its actual
+ledger entry and checked population. No new-candidate report is required when
+the collector legitimately emits none. Keep failed sources explicit. If fixing
+or delivery is also authorized, continue accepted dependency-ready stories
+through the execution workflow and verify the promised live outcome.

@@ -119,6 +119,9 @@ function runIn(dir, command) {
   try {
     return execFileSync(SHELL, ['-c', command], {
       cwd: dir, encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'],
+      // The consumer project and the loaded plugin are different directories.
+      // Supply the actual scanned plugin root, never resolve it from fixture cwd.
+      env: { ...process.env, AUTODEV_CORE_ROOT: path.join(ROOT, 'plugins', 'autodev-core') },
     });
   } catch (e) {
     // status is null when the child never ran or was killed by a signal. That
@@ -131,9 +134,16 @@ function runIn(dir, command) {
   }
 }
 
-function writeFixture(dir, extraStory) {
+function writeFixture(dir, extraStory, layout = 'flat') {
   const prd = JSON.parse(JSON.stringify(BASE));
   if (extraStory) prd.stories['F-2'] = { id: 'F-2', title: 'the added story', ...extraStory };
+  if (layout === 'earlier-sprint') {
+    prd.sprints = [
+      { sprint: 'S1', stories: prd.stories },
+      { sprint: 'S2', stories: { 'F-3': { id: 'F-3', title: 'latest done story', passes: true } } },
+    ];
+    delete prd.stories;
+  }
   fs.writeFileSync(path.join(dir, 'prd.json'), JSON.stringify(prd, null, 2));
 }
 
@@ -147,6 +157,7 @@ const failures = [];
 
 const notRunnable = [];
 const broken = [];
+const shapeErrors = [];
 // Commands the suite could not RUN. Kept apart from `broken` on purpose: one
 // says the command is defective, the other says this machine could not ask.
 // Folding them together is what named five healthy skills broken.
@@ -190,7 +201,31 @@ for (const { plugin, skill, file } of skills) {
     const blind = [];
     for (const { label, story } of STATES) {
       writeFixture(tmp, story);
-      if (runIn(tmp, command) === base) blind.push(label);
+      const result = runIn(tmp, command);
+      if (/^__(?:NOSHELL|NOSPAWN|EXITED)__/.test(result)) {
+        shapeErrors.push({ plugin, skill, kind, rel, layout: 'flat', result: label + ': ' + result });
+        break;
+      } else if (result === base) blind.push(label);
+    }
+
+    // A latest-sprint-only command passes every flat-state test above while
+    // hiding unfinished work in an earlier sprint. Keep the latest sprint
+    // byte-identical and vary only the older population to test that boundary.
+    writeFixture(tmp, null, 'earlier-sprint');
+    const nestedBase = runIn(tmp, command);
+    if (/^__(?:NOSHELL|NOSPAWN|EXITED)__/.test(nestedBase)) {
+      shapeErrors.push({ plugin, skill, kind, rel, result: nestedBase });
+    } else {
+      for (const { label, story } of STATES) {
+        writeFixture(tmp, story, 'earlier-sprint');
+        const result = runIn(tmp, command);
+        if (/^__(?:NOSHELL|NOSPAWN|EXITED)__/.test(result)) {
+          shapeErrors.push({ plugin, skill, kind, rel, result: label + ': ' + result });
+          break;
+        } else if (result === nestedBase) {
+          blind.push('earlier-sprint ' + label);
+        }
+      }
     }
     if (blind.length) failures.push({ plugin, skill, kind, blind, rel });
   }
@@ -252,8 +287,8 @@ if (!failures.length && !broken.length && checked === 0) {
   process.exit(1);
 }
 
-if (!failures.length && !broken.length) {
-  console.log(`PASS: all ${checked} runnable prd.json command(s) change output for every one of the ${STATES.length} states.`);
+if (!failures.length && !broken.length && !shapeErrors.length && !unverified.length) {
+  console.log(`PASS: all ${checked} runnable prd.json command(s) change output for every one of the ${STATES.length} states in both flat and earlier-sprint layouts.`);
   process.exit(0);
 }
 
@@ -262,10 +297,16 @@ for (const f of failures) {
   console.error(`  output is IDENTICAL whether or not a story exists in: ${f.blind.join(', ')}`);
   console.error('  nothing in this command depends on those stories - they are counted by no bucket.');
 }
+for (const e of shapeErrors) {
+  console.error(`FAIL ${e.plugin}/${e.skill} [${e.kind}] (${e.rel})`);
+  console.error(`  ${e.layout || 'earlier-sprint'} fixture could not be read; this is not identical-output evidence.`);
+  console.error('  ' + e.result.split('\n').slice(0, 5).join(' '));
+}
 if (failures.length) {
   console.error(`\n${failures.length} of ${checked} runnable prd.json command(s) are blind to at least one state.`);
 }
 if (broken.length) {
   console.error(`${broken.length} auto-executed command(s) will not run on a valid prd.json.`);
 }
+if (shapeErrors.length) console.error(`${shapeErrors.length} fixture execution failure(s) violated the input contract.`);
 process.exit(1);

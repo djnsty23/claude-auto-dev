@@ -14,11 +14,12 @@ paths:
 
 # Code Standards
 
-This skill is auto-loaded on every code file, so it stays short on purpose. It
+This skill is auto-loaded on the JavaScript and TypeScript paths above, so it stays short on purpose. It
 holds only the **decisions this project made** — not general React or
 accessibility advice, which you already have.
 
-> **`.claude/project-rules.md` outranks this file.** If it exists, read it and
+> **Current user instructions and repository guidance still apply.**
+> `.claude/project-rules.md` overrides the shipped defaults in this file. If it exists, read it and
 > follow it wherever the two disagree — it was measured from this codebase,
 > while everything below is a shipped default. Run `/autodev-init` to generate
 > it. Where a convention appears under "Undecided" there, do not flag either
@@ -29,7 +30,8 @@ surrounding patterns), **complete** (handles reality, not just the happy path).
 
 ## All UI states
 
-Every component that fetches handles all four:
+Every user-facing fetch has loading, error, empty and content behavior at the
+appropriate component or shared boundary. For list data, for example:
 
 ```tsx
 if (isLoading) return <Skeleton />;
@@ -44,9 +46,11 @@ compiles. This is the single most common review finding in this codebase.
 ## Type-safety boundaries
 
 - No `any`. No `as unknown as Type` on data from a database, an API, or a user —
-  validate the shape with Zod at the boundary instead.
-- `fetch()` always checks `res.ok` and sits inside try/catch. A fire-and-forget
-  fetch is a bug, not a style choice.
+  validate the shape with the project’s runtime validator (for example Zod).
+- Handle HTTP failure (`res.ok` or the API’s explicit status contract) and
+  rejected promises at a named boundary. A shared handler or deliberately
+  best-effort telemetry path can be valid; prove its failure behavior rather
+  than requiring a local try/catch at every call.
 
 ## Query keys
 
@@ -55,11 +59,15 @@ Centralised and `as const`, never inline string arrays:
 ```typescript
 export const queryKeys = {
   reports: {
-    all: ['reports'] as const,
-    detail: (id: string) => ['reports', id] as const,
+    all: (accountId: string) => ['reports', accountId] as const,
+    detail: (accountId: string, id: string) => ['reports', accountId, id] as const,
   }
 } as const;
 ```
+
+For account-scoped data, test account switching/invalidation as well as key
+shape. Public global data need not carry an account key. Keys do not replace
+server-side authorization.
 
 ## Design system
 
@@ -71,14 +79,18 @@ definitions and the one exception.
 ## Anti-patterns — flag these on sight
 
 **Security and data safety**
-- Fail-open auth. `if (!session) redirect` must be the default; `if (session) allow` is backwards.
-- Any `/dashboard/*` or `/api/*` route not covered by the auth middleware.
+- Protected operations without effective deny-by-default authorization. A
+  positive `if (session)` guard is valid when its remaining paths deny access.
+- Protected routes reachable without the intended auth/role checks. Public APIs
+  and signed webhooks have different contracts; middleware presence alone
+  proves neither authorization nor a defect.
 - SSRF: user-supplied URLs fetched without validating against private IP ranges.
 
 **Accessibility**
 - `user-scalable=no` or `maximum-scale=1`.
 - `outline-none` with no `focus-visible` replacement.
-- `transition: all`.
+- Motion that ignores the relevant reduced-motion setting or disrupts use;
+  `transition: all` alone is not an accessibility violation.
 - Hardcoded date and number formats — use `Intl.*`.
 
 **Design**
@@ -103,9 +115,10 @@ Categories: `Type Safety`, `React`, `API`, `Performance`, `A11y`.
 
 **Observable:** violations by category, next to the number of files scanned.
 
-```bash
-rg -l "…" --glob "**/*.tsx" | wc -l    # the denominator, always reported
-```
+Enumerate the files in scope separately from matches, using `rg --files` with
+the relevant globs and exclusions. Then run the detector on that population and
+record matching files/locations. `rg -l PATTERN` counts matching files, not
+scanned files; exit 1 means no matches and exit 2 means the search failed.
 
 Zero violations across 4 files and zero across 400 are different results printed
 the same way. State the denominator. When a category returns nothing, confirm the

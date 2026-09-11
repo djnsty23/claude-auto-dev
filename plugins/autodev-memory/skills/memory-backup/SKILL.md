@@ -1,7 +1,7 @@
 ---
 name: memory-backup
-description: Backs up auto-memory files to a private GitHub repo. One-command setup, committed daily via Task Scheduler (or on-demand). Restore is a single clone.
-when_to_use: "Invoked when the user says \"memory backup\", \"backup memory\", \"restore memory\"."
+description: Back up and restore authorized memory files in a private Git repository, with an exact file manifest and a verified restore before reporting success.
+when_to_use: "Invoked when the user says \"memory backup\", \"backup memory\", or \"restore memory\"."
 allowed-tools: Bash, Read, Write, Edit, Glob
 model: opus
 user-invocable: true
@@ -10,167 +10,135 @@ argument-hint: "[setup|now|restore|status]"
 
 # Memory Backup
 
-Version-controlled snapshot of `~/.claude/projects/*/memory/` in a private GitHub repo. Survives Windows reinstalls, gives you `git diff` on your agent memory over time.
+Preserve the user's memory in a form another session can restore. A successful
+copy, a local commit, a remote backup and a verified restore are separate facts.
+Report the furthest state actually verified.
 
-## What gets backed up
+## Resolve the source and destination
 
-ONLY:
-- `~/.claude/projects/*/memory/*.md` — auto-memory, feedback files, project notes
-- `~/.claude/CLAUDE.md` — global user config (if present)
-- `~/.claude/rules/*.md` — shared rules
+Use the current request and any still-valid backup mandate. Preserve authorized
+repository, account, scope and publication preferences across turns. A statement
+in this public skill grants no access to a particular account or repository.
 
-NOT:
-- `~/.claude/projects/*/sessions/` — session JSONL (huge, ephemeral)
-- `~/.claude/projects/*/tasks/` — native tasks (per-session, ephemeral)
-- Installed plugin files — reinstallable from the marketplace, never user data
-- `~/.claude/settings.json` — may contain machine-specific paths and secrets
+Resolve the active Claude configuration directory from `CLAUDE_CONFIG_DIR` when
+set, otherwise the current user's `.claude` directory. Confirm it is the store
+the host uses before copying. Read an existing `.memory-backup-path` pointer as
+data; require a nonempty absolute path to the expected backup repository, with
+its remote and visibility checked. Never let a failed `cd` leave subsequent
+commands running in the caller's project.
 
-## Setup (one-time per machine)
+For setup, reuse an authorized existing private backup repository. If creating
+one is within the request, derive the account from the authenticated host and
+create it there using the available GitHub tool or CLI. Do not copy a username
+from documentation. Validate that the resulting repository is private before
+uploading memory. Keep any publication work within the current mandate.
 
-```bash
-# 1. Create the private repo
-gh repo create $(gh api user --jq .login)/claude-memory --private --description "Auto-memory backups (claude-auto-dev)" --clone --add-readme
-cd claude-memory
+## Enumerate before copying
 
-# 2. Initial snapshot
-mkdir -p memory rules
-cp -r ~/.claude/projects memory/projects-raw  # we'll filter next
-# Keep only memory/ subdirs, drop everything else
-find memory/projects-raw -mindepth 2 -maxdepth 2 -type d ! -name memory -exec rm -rf {} +
-# Flatten: projects/<slug>/memory/*.md → projects/<slug>/*.md
-# (keeping slug as dir so we know which project)
-mv memory/projects-raw memory/projects
-cp ~/.claude/CLAUDE.md . 2>/dev/null || true
-cp -r ~/.claude/rules . 2>/dev/null || true
+Build an explicit manifest from approved regular files:
 
-# 3. Commit
-git add .
-git commit -m "feat: initial memory snapshot"
-git push -u origin main
+- Approved Markdown files under each included
+  `<config>/projects/<storage-id>/memory/` tree, preserving their relative
+  subdirectory paths. Enumerate regular files recursively without following
+  symlinks; a top-level `*.md` selection can omit a linked domain note.
+- `<config>/CLAUDE.md` and approved Markdown under `<config>/rules/`, preserving
+  relative subdirectories, when included in the backup scope.
 
-# 4. Save repo path for future runs
-echo "$(pwd)" > ~/.claude/.memory-backup-path
+Use filesystem APIs or argument arrays, not unquoted shell globs. Resolve every
+source and destination under their expected roots. Do not follow symlinks or
+guess a repository path by replacing hyphens in a storage id with separators;
+that encoding is lossy. Keep the storage id opaque and record a verified project
+mapping separately. Report unreadable or excluded linked memory files so the
+manifest's coverage is clear.
+
+Copy only the enumerated files. Do not copy the projects directory and filter
+afterward: session transcripts can be files beside `memory/`, not just a
+`sessions/` directory. Exclude conversation JSONL, task/session carriers,
+settings, credentials, installed plugins and the SQLite observation store from
+this Markdown-memory backup. A SQLite backup is a separate scope and requires
+a consistent database snapshot, not a casual copy of a live WAL database.
+
+Memory can contain sensitive material despite its filename. Do not print file
+contents while inventorying, and do not assume `<private>` tags remove all
+secrets. Handle any discovered credential through the project's existing
+incident process; never upload it because the repository is private.
+
+## Build one restorable layout
+
+Use the same mapping for initial setup and every later sync:
+
+```text
+memory/projects/<storage-id>/<relative-memory-path>.md
+CLAUDE.md                         # if included
+rules/<relative-rule-path>.md       # if included
+memory-manifest.json
 ```
 
-Report the repo URL. User should bookmark it.
+The manifest records the format version, capture time, approved roots/project
+mapping, relative source and backup paths, size and SHA256 for every file.
+Keep machine paths and the manifest in the private backup, never a public
+product repository. This mapping removes exactly the source's `memory/` level;
+restoring adds it exactly once. Nested paths such as `domains/auth.md` stay
+nested; do not collapse them to basename or let equal filenames collide.
 
-## `memory backup now` (on-demand sync)
+Build a staging generation from the manifest. Verify the copied file set and
+hashes before updating the backup checkout. If a source changes during capture,
+retry that file and recheck the resulting generation. Do not publish an
+inconsistent snapshot: re-enumerate and hash the full approved source set after
+capture, including added or removed files, and require it to match the manifest.
+Reconcile only paths owned by the previous manifest;
+retain unrelated backup files and record intentional removals. Detect a legacy
+layout first and verify its migration in a temporary directory before changing
+the only existing backup.
 
-```bash
-BACKUP_DIR=$(cat ~/.claude/.memory-backup-path)
-cd "$BACKUP_DIR"
+## Commit and publish the verified snapshot
 
-# Refresh memory/ subtree
-rm -rf memory/projects
-mkdir -p memory/projects
-for dir in ~/.claude/projects/*/; do
-  slug=$(basename "$dir")
-  if [ -d "$dir/memory" ]; then
-    cp -r "$dir/memory" "memory/projects/$slug"
-  fi
-done
+Inspect tracked changes **and untracked files** for the explicit backup paths.
+`git diff --quiet` alone misses a newly created memory file. Stage only the
+manifest and its owned additions, changes and removals; use argument arrays for
+paths containing spaces. Never sweep the caller's checkout with `git add -A`.
 
-# Refresh top-level files
-cp ~/.claude/CLAUDE.md . 2>/dev/null
-rm -rf rules && cp -r ~/.claude/rules . 2>/dev/null
+Commit with a message file after inspecting the staged path set. If publication
+is authorized, push to the verified backup remote and retain the push exit and
+error output. Read back the destination ref and compare it with the intended
+commit. Do not pipe the operation into `tail` and then print “Backed up.” A local
+commit awaiting publication remains recoverable pending work, not a remote
+backup. If there is no diff, still distinguish “snapshot unchanged” from an
+existing local commit that has not reached the remote.
 
-# Commit only if changed
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  git add .
-  git commit -m "backup: $(date +%Y-%m-%d\ %H:%M)"
-  git push 2>&1 | tail -3
-  echo "Backed up."
-else
-  echo "No changes since last backup."
-fi
-```
+## Restore and prove it
 
-## `memory backup status`
+Validate the manifest and source hashes, then restore into a fresh temporary
+directory first. Check exact file count, relative paths and hashes, including
+a known nested file when the source contains one. Resolve the restored index
+links and report out-of-scope targets separately. A successful
+round trip must yield `<storage-id>/memory/MEMORY.md`, not
+`<storage-id>/memory/memory/MEMORY.md`, and no transcript files.
 
-```bash
-BACKUP_DIR=$(cat ~/.claude/.memory-backup-path 2>/dev/null) || { echo "Not set up. Run 'memory backup setup'."; exit 0; }
-cd "$BACKUP_DIR"
-echo "Repo: $(git config --get remote.origin.url)"
-echo "Last commit: $(git log -1 --format='%ar — %s')"
-echo "Local memory dir timestamps:"
-ls -la ~/.claude/projects/*/memory/*.md 2>/dev/null | awk '{print $NF, $6, $7, $8}' | sort | tail -10
-```
+For the real restore, map each project to its verified current store location;
+cross-machine paths and storage ids may differ. Back up existing destination
+files before replacing them, preserve unique newer content, and merge explicit
+conflicts with provenance. Do not overwrite current instructions or erase
+unmapped projects to make counts agree. Report unmapped or conflicting entries
+as pending. Restore the global config and rules only when they are in scope.
 
-## `memory restore`
+Read back the restored files and their index links. Report restored files and
+unresolved entries separately. Files at the correct path prove restoration;
+claim they loaded into a session only after observing that session's loader.
 
-After Windows reinstall, restore memory state in one command:
+## Status and automation
 
-```bash
-# Assumes you've already installed claude-auto-dev (hooks/skills/agents)
-gh repo clone $(gh api user --jq .login)/claude-memory ~/claude-memory
-cd ~/claude-memory
+Status reports source file count, latest local snapshot commit, verified remote
+commit, last successful restore check, and any pending paths or publication.
+Do not dump memory bodies to show activity.
 
-# Restore memory files
-for dir in memory/projects/*/; do
-  slug=$(basename "$dir")
-  mkdir -p ~/.claude/projects/$slug/memory
-  cp -r "$dir"/* ~/.claude/projects/$slug/memory/ 2>/dev/null
-done
+For a requested schedule, use the scheduler actually available on this host.
+Update the existing matching task rather than duplicating it. Give it the exact
+backup repository, approved scope and publication mandate; verify registration,
+an invocation and its durable result before calling it active. This skill does
+not itself install a Stop hook or background worker. A hook mention or a recent
+file timestamp is not evidence that a backup ran.
 
-# Restore CLAUDE.md + rules
-cp CLAUDE.md ~/.claude/CLAUDE.md 2>/dev/null
-cp -r rules ~/.claude/ 2>/dev/null
-
-# Save path for future backups
-echo "$(pwd)" > ~/.claude/.memory-backup-path
-
-echo "Restored. Memory loaded on next Claude session start."
-```
-
-## Automated daily backup (Windows Task Scheduler)
-
-Create `~/claude-memory/backup.cmd`:
-Write the `memory backup now` block above into `backup.sh` inside the backup
-repo, then have the scheduled task call it. (Earlier versions of this skill
-pointed the task at a `memory-backup.sh` in the global hooks directory that was
-never shipped, so the scheduled task silently did nothing.)
-
-```batch
-@echo off
-cd /d %USERPROFILE%\claude-memory
-bash -c "./backup.sh"
-```
-
-Register task (runs at 11 PM daily):
-```powershell
-$action = New-ScheduledTaskAction -Execute "$env:USERPROFILE\claude-memory\backup.cmd"
-$trigger = New-ScheduledTaskTrigger -Daily -At "23:00"
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd
-Register-ScheduledTask -TaskName "ClaudeMemoryBackup" -Action $action -Trigger $trigger -Settings $settings -Description "Daily backup of ~/.claude/projects/*/memory/"
-```
-
-Verify it runs:
-```powershell
-Get-ScheduledTask -TaskName "ClaudeMemoryBackup" | Get-ScheduledTaskInfo
-```
-
-## Privacy notes
-
-- Repo is **private** — only djnsty23 can access
-- Memory files may contain project names, client info, architecture decisions
-- Do NOT back up `~/.claude/secrets/` or anything under `~/.claude/projects/*/tasks/` — those can contain ephemeral sensitive state
-- `.env` values never touch memory files (that's Doppler's job)
-
-## Size expectations
-
-- Initial backup: ~100-500KB (text only)
-- After a year of daily commits: ~5-20MB repo size — well within GitHub limits
-- If memory grows past 100MB, add `.gitattributes` LFS rule for files >10MB
-
-## Integration with other skills
-
-- `auto` — on session end (via Stop hook), fires background `memory backup now` if repo exists
-- `iterate` — after convergence, commits the new learnings
-- Post-reinstall: `setup-project` offers to restore memory first
-
-## Rules
-
-- **Private repo only** — never public
-- **No secrets in memory files** — if Claude ever writes a token to memory, treat as incident and rotate
-- **Don't backup sessions/** — huge, ephemeral, not worth the bytes
-- **Restore before first session** on a fresh install — otherwise Claude starts cold
+Keep scheduled runs quiet when nothing changed, while recording their run id,
+result and any pending publication in private task state. Notify on a failed
+backup, an actionable conflict, or another outcome the user requested.

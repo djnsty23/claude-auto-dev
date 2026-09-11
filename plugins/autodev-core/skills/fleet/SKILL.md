@@ -113,15 +113,18 @@ not a live connection, so a synced count read as current is the failure mode.
 
 ## What to tell the user, and what not to
 
-**Never offer to answer a blocked session's question for them.** Measured
+**Verify the receiving channel before promising an answer will reach it.** The
+following is a dated observation of one Desktop channel, not a prohibition on
+all current native worker APIs. Measured
 2026-08-21: `send_message` reaches an idle session in ~20 seconds and does not
 reach a busy one at all — over 482 seconds and 166KB of transcript growth it
 never arrived. An AskUserQuestion panel does not end a turn, so a session cycling
 through panels may never reach the boundary where queued mail is delivered.
 
-The sessions most worth answering are exactly the ones that cannot receive an
-answer. Tell the user **which session to go to**. If a row says "not addressable"
-it has no desktop record and cannot be messaged even when idle.
+For that blocked channel, tell the user which session needs attention. If the
+current host provides an authorized reply/resume mechanism, use it and verify
+receipt or resulting state. A row marked “not addressable” by this Desktop reader
+is not proof that every other host adapter is unavailable.
 
 ## States
 
@@ -133,6 +136,10 @@ it has no desktop record and cannot be messaged even when idle.
 | `done` | merged PR, quiet an hour. |
 | `waiting` | it spoke last and stopped. The normal resting state. |
 | `cold` | quiet for a day or more. Most of the fleet, and deliberately the quietest. |
+
+These are activity/triage labels, not mission acceptance. In particular, `done`
+means the classifier saw a merged PR and quiet time; it does not establish a
+working production flow. Confirm actual task and deployment evidence in Brain.
 
 `classify()` in `fleet-status.js` holds these, tuned against the real
 distribution (124 sessions over 7 days) rather than guessed.

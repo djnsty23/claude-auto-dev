@@ -2,7 +2,7 @@
 name: sprint
 description: Creates or advances sprints in prd.json. Use when starting new work cycles or closing completed sprints.
 when_to_use: "Invoked when the user says \"sprint\"."
-allowed-tools: Read, Write, Edit
+allowed-tools: Bash, Read, Write, Edit
 model: opus
 user-invocable: true
 argument-hint: "[new|advance|close]"
@@ -19,60 +19,51 @@ Create a new sprint or advance to the next one.
 
 ## Creating from Description
 
-1. Parse $ARGUMENTS as feature description
-2. Generate epic prefix from description
-3. Create/update prd.json with new sprint
-4. Generate 10-20 stories via TaskCreate with full metadata (see core skill for schema):
-   ```
-   TaskCreate({
-     subject: "[verb] [specific deliverable]",
-     description: "## What\n[Exactly what to build]\n\n## Acceptance Criteria\n- [ ] [Testable outcome]\n- [ ] Build passes\n- [ ] No type errors\n\n## Files\n- `src/path/file.ts` - [what to change]",
-     activeForm: "[Building|Adding] [short desc]",
-     metadata: {
-       sid: "[PREFIX]-[NNN]",
-       sprint: currentSprint,
-       epic: "[epic name]",
-       priority: [1-3],
-       category: "[auth|ui|perf|security|qa|infra]",
-       type: "feature",
-       passes: null,
-       verified: null
-     }
-   })
-   ```
-   - Include file paths, patterns to follow
-   - Set dependencies between stories
-5. Report sprint summary
+1. Read the current request, SPEC.md and existing PRD. Preserve the established
+   story/container schema and existing IDs. When the request includes building,
+   the plan is an intermediate artifact, not the terminal deliverable.
+2. Create the smallest useful set of stories directly in prd.json using `core`.
+   Each names its actor/trigger, observable outcome, acceptance checks,
+   verification method, priority and relevant files. Use `blockedBy` for real
+   dependencies and `needs-setup` with a reason for external requirements.
+3. Load core's `references/requirements.md`. Run `check-spec-output.js --existing
+   prd.json` from the installed scripts directory, then the shared `workPlan(prd)`
+   across all sprints. For spec edits, run the read-only revision report first and
+   reconcile only affected criteria/evidence before updating pinned revisions. Resolve missing
+   or malformed dependency IDs and cycles before selecting work. A native task
+   tool may mirror the queue only if the current host exposes it; it is not the
+   authoritative writer or a prerequisite for creating the sprint.
+4. Report the scope and ready/blocked counts. Continue with `auto` when building
+   is already authorized. A request only to plan ends with the reviewable plan.
 
 ## Advancing (sprint next)
 
-1. Read prd.json
-2. Mark current sprint as "done"
-3. Find next unscheduled roadmap epic(s)
-4. Create new sprint with stories from those epics
-5. Update prd.json
+1. Read the shared work plan and verification records for the existing stories.
+2. Close a sprint only when its acceptance evidence is complete. Neither an
+   old sprint flag nor lack of ready work overrides unresolved story states.
+   Keep pending, failed, setup-blocked and invalid records visible; preserve
+   deferred decisions rather than silently reactivating them.
+3. Select the next unscheduled roadmap outcome within the mandate. Independent
+   new work may proceed while an older sprint is blocked, but that older sprint
+   remains incomplete and its stories remain readable by the shared planner.
+4. Add the new sprint without dropping earlier stories or changing their IDs.
+   Verify dependency readiness, then continue authorized execution.
 
 ## Auto-Archive Check
 
-Before creating a new sprint, check if prd.json needs archiving:
+Use `archive-prd` when completed history makes the PRD unwieldy. Inspect real
+file bytes/lines and the story population instead of counting commas as lines.
+Only eligible completed records may move, regardless of sprint age. Keep passed
+prerequisites that retained stories still reference, since the task planner reads
+active PRD records rather than resolving dependency IDs out of archives.
 
-```bash
-# Count completed sprints. Object.values() handles stories as the id-keyed OBJECT
-# core documents as well as an array — .every on an object threw, the catch ate it,
-# and this printed nothing at all.
-# "complete" = no agent-actionable story left (prd-states.js isActionable): needs-setup is blocked on a HUMAN, not on this sprint's engineering, and archive-prd's keep-list retains those stories — so one credential-blocked leftover must not stop the archive suggestion from ever firing.
-node -e "try{const p=require('./prd.json');const sprints=p.sprints||[];const done=sprints.filter(s=>{const st=Object.values(s.stories||{});return s.passes===true||(st.length>0&&st.every(x=>x.passes===true||x.passes==='deferred'||x.passes==='needs-setup'))});console.log('completed:',done.length,'total:',sprints.length,'lines:',JSON.stringify(p).split(',').length)}catch(e){console.log(e.code==='MODULE_NOT_FOUND'?'no prd.json yet - nothing to archive':'archive check failed: '+e.message)}"
-```
-
-| Condition | Action |
-|-----------|--------|
-| 3+ completed sprints in prd.json | Suggest `archive` before creating new sprint |
-| prd.json > 500 lines | Warn: "prd.json is large, consider `archive` first" |
-
-Large prd.json wastes tokens on every request. Run the check.
+Run the archive split/durability checks before deleting anything from the PRD.
+A blocked sprint may have completed records worth archiving, but must not be
+reported as completed merely because its only remaining work needs setup.
 
 ## Rules
 - HARD CAP: 20 stories per sprint
 - Stories must be detailed enough to implement without guessing
 - Every story must be testable
-- If user asks to "expand", explain roadmap and offer `sprint next`
+- If user asks to expand a plan, produce the concrete stories; when implementation
+  is already authorized, continue into the ready work instead of re-offering it.

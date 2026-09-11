@@ -1,0 +1,10 @@
+Skill contract audit, baseline c32a54ecfd596b19272efa67408247f7a1b99a22.
+Population: 68 shipped skills, 27 immediate references inventoried.
+Strengthened tooling/test-skill-prd-commands.js against the original skills:
+6 PRD commands found; 1 illustrative sample excluded; 4 of 5 runnable commands
+were blind to all six tested states when added to an earlier sprint.
+Independent regression cases for flat-input errors and mixed unverified commands:
+node tooling/test-skill-prd-commands-selftest.js => 8/10 pass, exit1.
+Original gate candidate: npm test121/122 pass, collision suite red;
+mutation120/122 verified able to fail, same red suite, one separate canary.
+These are bounded command/fixture results, not autonomous product success rates.

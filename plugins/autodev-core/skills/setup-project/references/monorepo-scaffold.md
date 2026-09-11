@@ -1,6 +1,9 @@
 # Monorepo Scaffolding Templates
 
-Load this when the user chose monorepo structure in Create mode. For single-app, use `pnpm create next-app .` and skip this file.
+Load this when monorepo structure serves the requested new project. These are
+structural examples; use the selected package manager and versions verified via
+`version-defaults.md` and current official sources, then record exact resolved
+versions. Validate every config with the installed tool before calling setup done.
 
 ## Layout
 
@@ -39,11 +42,15 @@ onlyBuiltDependencies:
 
 ## Root package.json (orchestration only)
 
+Replace the version placeholders before installing. The script list is a starting
+point: verify every package is included in the checks it requires; a recursive
+command must not silently skip a package with a missing script.
+
 ```json
 {
   "private": true,
-  "packageManager": "pnpm@10.8.0",
-  "engines": { "node": ">=22" },
+  "packageManager": "pnpm@<verified-version>",
+  "engines": { "node": "<verified-compatible-range>" },
   "scripts": {
     "build": "pnpm -r run build",
     "dev": "pnpm -r --parallel run dev",
@@ -53,15 +60,19 @@ onlyBuiltDependencies:
     "preinstall": "npx only-allow pnpm"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.0",
-    "typescript": "^5.8.0"
+    "@biomejs/biome": "<verified-version>",
+    "typescript": "<verified-version>"
   }
 }
 ```
 
 ## Web package
 
-Use `pnpm create next-app packages/web --typescript --tailwind --app --src-dir --use-pnpm --skip-install` then clean up: delete the nested `.git`, `.gitignore` (root owns it), README, and ESLint config.
+Use the selected scaffold CLI with verified flags in the new web directory.
+Inspect generated metadata before cleanup: transfer relevant ignore/documentation
+content to the root, retain the selected lint policy, and remove nested git metadata
+only when this scaffold created it and no work or history needs preserving. Never
+delete an existing repository or its conventions as routine scaffold cleanup.
 
 ## Shared package (e.g., `packages/engine`)
 

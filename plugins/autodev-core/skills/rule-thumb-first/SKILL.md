@@ -31,22 +31,25 @@ Three questions, in this order, for anything built:
 ## 1. The screen is two machines
 
 On a 6.1–6.9" phone held one-handed, the thumb sweeps a comfortable arc across
-roughly the **bottom 45%**, biased to the dominant side. Above that the user can
-see but not act.
+a lower-screen region that varies with device, grip, handedness and ability.
+Treat the percentages below as one design hypothesis, not accessibility limits.
 
-- **Top ~30% — the READ plane.** State, identity, numbers, "where am I". Never a
-  control. An unreachable *title* is fine. An unreachable *button* is a bug.
-- **Bottom ~45% — the ACT plane.** Every verb. The primary action sits at the far
-  edge of the arc where the thumb rests, not centred.
+- **Upper region — often the READ plane.** Favor state and orientation here on
+  one-handed touch flows, while preserving established navigation and accessible
+  keyboard, assistive-technology and alternative-input operation.
+- **Lower region — often the ACT plane.** Test primary-action reach with the
+  actual layout, handedness, safe areas and on-screen keyboard. Do not relocate
+  every control or assume an off-center primary action works for everyone.
 - **The band between — TENSION.** Where something lives just before it becomes
   actionable; scrolling brings it into the arc.
 
 **Let the interface fall toward the thumb.** Sheets, menus and confirmations rise
-from the bottom edge, originating from the control that summoned them. Nothing
-important appears top-centre — that is the one place a thumb cannot answer.
+from the bottom edge, originating from the control that summoned them. Placement must fit the actual device and interaction; do not turn one grip's
+reach heuristic into a blanket ban on established controls.
 
-A confirmation dialog placed in the read plane is wrong twice: it demands an
-action where no action is possible, and it demands one at all (see §4).
+Prefer undo for reversible actions. Confirm consequential actions when the
+user needs to understand or authorize their effect; keep the choice reachable
+and preserve focus.
 
 ## 2. Progressive density, never a "pro mode"
 
@@ -76,7 +79,8 @@ What actually earns technical respect:
   danger still reads as danger.
 - **Everything else neutral**, separated by elevation and spacing, not by tint.
 
-Dark-first, and not as an inversion of light. True black grounds with elevation
+Preserve the product's established theme and user/system preference. For a
+dark design chosen by the brief, develop it intentionally rather than inverting light. True black grounds with elevation
 as slightly lifted neutral surfaces. One saturated accent against near-black is
 what gives a product a face recognisable in a screenshot.
 
@@ -101,17 +105,16 @@ carries a mood set at runtime, and the mood moves **hue and tempo together**:
 
 Nothing interactive changes. The accent stays exactly where it was. What changes
 is the *room* — slow and cool when the body needs to back off, fast and warm when
-it is time to work. The user never reads a label saying which mode they are in;
-they feel the tempo before they can name it.
+it is time to work. Do not rely on hue or animation to communicate this state: retain an accessible
+text equivalent and respect reduced-motion settings.
 
 Two rules make this work rather than becoming decoration:
 
 - **The two axes must not collide.** Ambient hue lives in the background and on
   nothing that can be pressed. If ambient warm and the accent are the same
   family, the accent stops being findable in the mood that matters most.
-- **Hue and motion move as a pair.** Warm-but-slow and cool-but-fast read as
-  broken, because tempo is doing one thing while colour does another. If the
-  ambient palette shifts, its motion shifts with it.
+- **Validate the state cue.** Hue/tempo associations are design hypotheses, not
+  universal semantics. Motion can be reduced or disabled without losing state.
 
 Use this only where the app genuinely has a state worth broadcasting. Most
 products do not, and inventing one is exactly the unearned signal §4 is about.
@@ -120,8 +123,8 @@ products do not, and inventing one is exactly the unearned signal §4 is about.
 
 **Unearned signal destroys real signal.**
 
-This is why the accent colour may not decorate a label. It is also why a passing
-typecheck must print *nothing*, why a hook that has nothing to say must emit zero
+This is why the accent colour may not decorate a label. It is also why a routine
+typecheck should avoid unnecessary output while retaining a usable verdict, why a hook that has nothing to say must emit zero
 bytes, and why a confirmation dialog for a reversible action is a cost with no
 benefit. Each is the same mistake: spending the user's attention without buying
 anything with it.
@@ -132,13 +135,15 @@ does not serve that is noise competing with the line that does.
 
 ## Checklist before calling an interface done
 
-- [ ] Every control a user must press is inside the bottom 45%.
+- [ ] Frequent touch actions are reachable in the tested grip/device; keyboard
+      and assistive-technology paths remain usable.
 - [ ] Nothing destructive sits where a thumb rests by default.
 - [ ] The accent colour appears **only** on actionable things.
 - [ ] Hierarchy survives being screenshotted in greyscale.
 - [ ] Numerals are tabular.
-- [ ] Every icon has a label, or is a universally-known glyph.
+- [ ] Every interactive icon has an accessible name; visible labels are used
+      where the symbol or action could be unclear.
 - [ ] The primary action is reachable without shifting grip.
 - [ ] Nothing is printed, shown, or animated that the reader did not need.
-- [ ] If there is an ambient state axis, it touches nothing pressable, and its
-      hue and its tempo move together.
+- [ ] Ambient state has a non-color, non-motion equivalent and remains clear
+      with reduced motion and the user's chosen theme.

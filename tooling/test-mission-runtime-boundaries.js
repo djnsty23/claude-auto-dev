@@ -1,0 +1,43 @@
+'use strict';
+// Suite for mission-store.js through its CLI: one-shot registration, no release
+// while a worker's disposition is unknown, late results quarantined, rejection
+// after envelope acceptance. Run: node tooling/test-mission-runtime-boundaries.js
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
+const {spawnSync}=require('node:child_process');
+const ENTRY=process.env.MISSION_TEST_ENTRY||path.resolve(__dirname,'../plugins/autodev-core/scripts/mission-store.js');
+// HOST BOUNDARY. The store requires node:sqlite and POSIX ownership checks and
+// answers `runtime-unavailable` without them. On such a host this suite proves
+// that refusal and nothing else, and says so; it does not pass on an empty
+// population, and a host that lacks the runtime but does NOT refuse is red.
+{
+  const posix = typeof process.getuid === 'function';
+  let sqlite = false; try { sqlite = typeof require('node:sqlite').DatabaseSync === 'function'; } catch {}
+  if (!(posix && sqlite)) {
+    const cp = require('node:child_process'), osm = require('node:os'), fsm = require('node:fs'), pm = require('node:path');
+    const dir = fsm.mkdtempSync(pm.join(fsm.realpathSync(osm.tmpdir()), 'mission-runtime-boundaries-host-'));
+    const store = pm.join(dir, 'store');
+    const r = cp.spawnSync(process.execPath, [ENTRY, 'init', '--store', store], { input: '{}', encoding: 'utf8', timeout: 10000 });
+    let out = null; try { out = JSON.parse(r.stdout); } catch {}
+    const refused = r.status === 1 && out && out.ok === false && out.error && out.error.code === 'runtime-unavailable' && !fsm.existsSync(store);
+    fsm.rmSync(dir, { recursive: true, force: true });
+    const why = !posix ? 'POSIX ownership checks (win32)' : 'node:sqlite';
+    if (!refused) { console.error('mission-runtime-boundaries: host lacks ' + why + ' and the store did NOT refuse explicitly: exit ' + r.status + ' ' + String(r.stdout).slice(0, 200)); process.exitCode = 1; return; }
+    console.log('mission-runtime-boundaries: 1/1 passed — host lacks ' + why + '; the store refuses with runtime-unavailable and creates nothing. 4 POSIX+SQLite cases not run on this host.');
+    return;
+  }
+}
+const root=fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),'mission-boundary-'));
+let n=0;const results=[];const event=()=>`event-${++n}`;
+function cli(command,store,payload){const r=spawnSync(process.execPath,[ENTRY,command,'--store',store],{input:JSON.stringify(payload),encoding:'utf8',timeout:5000});assert.ifError(r.error);return JSON.parse(r.stdout)}
+function good(r){assert.equal(r.ok,true,JSON.stringify(r));return r.value}function bad(r,code){assert.equal(r.ok,false,JSON.stringify(r));assert.equal(r.error.code,code)}
+function fixture(name){const repo=path.join(root,name);fs.mkdirSync(repo);const git=(...a)=>spawnSync('git',['-c','core.hooksPath='+path.join(root,'nohooks'),'-c','commit.gpgSign=false','-C',repo,...a],{encoding:'utf8'});assert.equal(git('init','-q').status,0);assert.equal(git('-c','user.name=Fixture','-c','user.email=fixture@invalid','commit','--allow-empty','-qm','base').status,0);const baseSha=git('rev-parse','HEAD').stdout.trim(),store=path.join(root,name+'-store');good(cli('init',store,{}));const contract={repo:{id:name,root:repo,commonDir:path.join(repo,'.git'),baseSha},scope:{paths:['owned.js'],effects:['read','write']},target:{kind:'local',identifier:'fixture'},acceptance:[{id:'behavior',description:'Actual synthetic output matches.'}],retry:{maxAttempts:2,backoffMs:1,maxBackoffMs:5}};const admitted=good(cli('admit',store,{missionId:name,eventId:event(),contract}));const a=good(cli('claim',store,{missionId:name,eventId:event(),owner:'fixture-owner'}));return {store,repo,contract,hash:admitted.contractHash,fence:{missionId:name,attemptId:a.attemptId,generation:a.generation,owner:a.owner}}}
+function call(f,cmd,p={}){return cli(cmd,f.store,{...f.fence,eventId:event(),...p})}function status(f){return good(cli('status',f.store,{missionId:f.fence.missionId}))}
+function result(f){return {resultId:'result-'+event(),contractHash:f.hash,repoId:f.contract.repo.id,baseSha:f.contract.repo.baseSha,candidateSha:f.contract.repo.baseSha,acceptanceIds:['behavior'],artifacts:[{path:'owned.js',sha256:'a'.repeat(64)}]}}
+function test(id,fn){try{fn();results.push({id,passed:true});console.log('PASS '+id)}catch(e){results.push({id,passed:false,error:e.message});console.log('FAIL '+id+': '+e.message)}}
+try{
+test('prelaunch-registration-is-one-shot',()=>{const f=fixture('registration');good(call(f,'prepare-start',{operationKey:'operation-1',expectedRevision:status(f).mission.revision}));const identity={host:'synthetic-local',pid:123,nonce:'executor-1'};good(call(f,'authorize-bootstrap',{nonce:identity.nonce}));const p={...f.fence,eventId:event(),identity};good(cli('register-executor',f.store,p));bad(cli('register-executor',f.store,p),'executor-already-registered');bad(call(f,'register-executor',{identity:{...identity,nonce:'executor-2'}}),'executor-already-registered');assert.equal(status(f).launches.length,1)});
+test('registered-or-unknown-cannot-release',()=>{const f=fixture('release');good(call(f,'prepare-start',{operationKey:'operation-2',expectedRevision:status(f).mission.revision}));const identity={host:'synthetic-local',pid:123,nonce:'executor-1'};good(call(f,'authorize-bootstrap',{nonce:identity.nonce}));good(call(f,'register-executor',{identity}));bad(call(f,'fail',{code:'transient'}),'worker-disposition-unknown');good(call(f,'observe-worker',{identity,observation:{kind:'terminal',exitCode:1,hookStatus:'completed',nativeStatus:'failed'}}));good(call(f,'fail',{code:'transient'}));assert.equal(status(f).mission.state,'retry-wait')});
+test('late-first-result-is-quarantined',()=>{const f=fixture('late');good(call(f,'fail',{code:'transient'}));const old=f.fence;const a=good(cli('claim',f.store,{missionId:old.missionId,eventId:event(),owner:'next-owner'}));const receipt=good(call(f,'receive',{result:result(f)}));assert.equal(receipt.state,'quarantined');assert.equal(status(f).mission.activeAttempt,a.attemptId);assert.equal(status(f).results[0].state,'quarantined')});
+test('accepted-envelope-can-be-rejected-without-erasing-result',()=>{const f=fixture('reject');const r=result(f);good(call(f,'receive',{result:r}));good(call(f,'accept-envelope',{resultId:r.resultId}));good(call(f,'reject-result',{resultId:r.resultId,code:'evidence-rejected'}));assert.equal(status(f).mission.state,'retry-wait');assert.equal(status(f).results[0].state,'rejected');assert.equal(status(f).verified,false)});
+}finally{fs.rmSync(root,{recursive:true,force:true})}
+const summary={passed:results.filter(r=>r.passed).length,failed:results.filter(r=>!r.passed).length,population:results.length,fixtureRemoved:!fs.existsSync(root)};console.log(JSON.stringify(summary));console.log('mission-runtime-boundaries: ' + summary.passed + '/' + summary.population + ' passed — one-shot registration, unknown disposition holds, quarantine, rejection');if(process.env.MISSION_TEST_REPORT)fs.writeFileSync(process.env.MISSION_TEST_REPORT,JSON.stringify({results,summary},null,2)+'\n');process.exitCode=summary.failed?1:0;

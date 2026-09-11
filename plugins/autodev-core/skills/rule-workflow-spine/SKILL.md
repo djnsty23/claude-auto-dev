@@ -16,6 +16,15 @@ file is the order. It adds no capability; it decides what fires when.
 Four steps. Each ends on a condition you can check, not on a feeling that the
 step is finished.
 
+## First, retain the mission contract
+
+Record the requested outcome, scope, current authorization, acceptance checks and
+delivery environment. Resolve ordinary reversible details from evidence; carry
+unanswered essential decisions as explicit blockers while independent work proceeds.
+An idea-to-build request continues through `spec`, `setup-project` and `auto`.
+A request for a plan or audit ends at that requested artifact. A skill boundary
+does not reset the user's authorization or imply that the whole mission is done.
+
 ## 1. Isolate: before the first edit
 
 Load `isolate`. Work happens in a git worktree branched from the remote default
@@ -43,8 +52,10 @@ is how a build declares itself proven.
 Load `prove`. The before state is captured **while the defect still reproduces**,
 which is the only moment it is free, and the after state once the change works.
 
-**Ends when** two artifacts exist on disk, they differ, and the difference is
-the change you claim to have made.
+**Ends when** the relevant acceptance checks pass and reviewable artifacts identify
+the code, environment, surface and user/data state they observed. For a defect,
+the before control reproduces it and the same check passes after the fix.
+Two different files or screenshots alone do not prove the claimed behavior.
 
 The trap this prevents: a fix verified only after the fact cannot distinguish
 "I fixed it" from "it was never broken the way I described". `rule-diagnosis`
@@ -55,9 +66,13 @@ carries the cost of that confusion; this step is what makes it observable.
 Load `commit`, then `ship` if the change deploys. Run the repo's whole gate on a
 clean tree, after committing.
 
-**Ends when** the gate is green on the commit you are shipping, and the evidence
-from step 3 is in the commit body or the pull request description where a human
-reads it, not only in the session that produced it.
+**Ends when** the requested delivery boundary is reached with fresh evidence.
+For local delivery, the exact clean commit passes its gate and carries a durable
+proof pointer. For an authorized release, `ship` also binds the deployed artifact
+to that commit and verifies the relevant live flow and recovery path. A push or
+merge that triggers production is itself a release action; resolve its target
+and existing authorization before executing it. Report any remaining boundary
+as pending rather than calling local verification production success.
 
 A gate run before the last edit graded a tree that no longer exists.
 

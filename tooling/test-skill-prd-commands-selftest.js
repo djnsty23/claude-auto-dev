@@ -39,7 +39,27 @@ const GATE = path.resolve(__dirname, 'test-skill-prd-commands.js');
 // the output. This is what a correct command looks like.
 const HEALTHY =
   'node -e "const p=require(process.cwd()+\'/prd.json\');' +
-  'console.log(Object.entries(p.stories).map(([k,v])=>k+\':\'+String(v.passes)).join(\',\'))"';
+  'const groups=p.sprints?p.sprints:[p];' +
+  'console.log(groups.flatMap(s=>Object.entries(s.stories)).map(([k,v])=>k+\':\'+String(v.passes)).join(\',\'))"';
+
+// Flat-state controls all pass, but the current sprint hides prior work.
+const LATEST_ONLY =
+  'node -e "const p=require(process.cwd()+\'/prd.json\');' +
+  'const s=p.sprints?p.sprints[p.sprints.length-1]:p;' +
+  'console.log(JSON.stringify(s.stories))"';
+
+const FLAT_ONLY =
+  'node -e "const p=require(process.cwd()+\'/prd.json\');' +
+  'console.log(Object.entries(p.stories))"';
+
+// Reads the base and nested populations correctly, but errors on added flat work.
+const FLAT_STATE_THROWS = HEALTHY.replace(
+  'const groups=',
+  'if(p.stories&&p.stories[\'F-2\'])throw new Error(\'flat-state failure\');const groups='
+);
+// Simulate the gate's execution-unavailable diagnostic to exercise its aggregate
+// verdict without creating an orphaned timeout subprocess.
+const UNAVAILABLE = 'node -e "require(process.cwd()+\'/prd.json\');console.log(\'__NOSPAWN__ simulated\')"';
 
 // Counts only passes===true, so a story in any other state changes nothing.
 // This is the blindness the gate was built to catch.
@@ -86,6 +106,10 @@ const cases = [
   ['agent-run command that throws is still excused',
     auto(HEALTHY) + fenced(THROWS), 0, 'NOT RUNNABLE'],
   ['healthy auto-executed command passes', auto(HEALTHY), 0, 'PASS'],
+  ['latest-only command fails on the earlier-sprint population', auto(LATEST_ONLY), 1, 'earlier-sprint'],
+  ['unsupported nested input is reported as a read failure', auto(FLAT_ONLY), 1, 'not identical-output evidence'],
+  ['flat state errors cannot count as evidence of classification', auto(FLAT_STATE_THROWS), 1, 'flat-state failure'],
+  ['one unverified command cannot hide beside a healthy command', auto(HEALTHY) + auto(UNAVAILABLE), 1, 'UNVERIFIED'],
 
   // ---- behaviour that already worked and must keep working ----
   ['auto-executed command blind to a state FAILS', auto(BLIND), 1, 'IDENTICAL'],
