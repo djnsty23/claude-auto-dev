@@ -153,8 +153,29 @@ function run(args, opts) {
     // INVARIANT 2 — an identical claim is the same claim.
     const c = intent.writeRecord({ repo: 'r', branch: 'claude/x', claim: { brief: 'B' }, observed: { at: 'x', head: 'ccc' }, dir });
     check('re-asserting an identical claim does NOT move updated_at', c.record.updated_at === a.record.updated_at);
+    /* THE CLOCK MUST NOT DECIDE THIS. `updated_at` is an ISO string at MILLISECOND
+       resolution, so "the date moved" compared against a sibling write asks whether
+       a millisecond elapsed between the two — and on a fast disk it does not.
+       `[measured 2026-09-12]` this assertion failed 7 times in 30 runs on macOS
+       before the sentinel below, and its mirror image inside fleet-intent.js's own
+       selftest let the updated_at mutant survive 6 times in 25. Both directions of
+       the same defect: one hid a real break, the other invented one. Two suites and
+       three assertions were reading a stopwatch that does not tick fast enough.
+
+       Pinning the stored date to a known past value makes "did it move" answerable
+       at any resolution, and keeps the assertion about the WRITE rather than the
+       host's disk speed. */
+    const PAST = '2000-01-01T00:00:00.000Z';
+    const dpath = path.join(dir, intent.keyFor('r', 'claude/x') + '.json');
+    const pinned = JSON.parse(fs.readFileSync(dpath, 'utf8'));
+    pinned.updated_at = PAST;
+    fs.writeFileSync(dpath, JSON.stringify(pinned, null, 1) + '\n');
+
     const d = intent.writeRecord({ repo: 'r', branch: 'claude/x', claim: { brief: 'DIFFERENT' }, observed: { at: 'x', head: 'ccc' }, dir });
-    check('a CHANGED claim does move updated_at', d.record.updated_at !== a.record.updated_at);
+    check('a CHANGED claim does move updated_at', d.record.updated_at !== PAST,
+        PAST + ' -> ' + d.record.updated_at);
+    check('  and it moves it FORWARD, to a parseable date',
+        Date.parse(d.record.updated_at) > Date.parse(PAST), String(d.record.updated_at));
     check('a changed claim re-pins claim_head to the tree it was made about', d.record.claim_head === 'ccc');
 
     // A partial write must not destroy the rest — the commonest write under a

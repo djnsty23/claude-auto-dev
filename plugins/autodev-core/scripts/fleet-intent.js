@@ -497,8 +497,31 @@ function selftest() {
     const w = writeRecord({ repo: 'r', branch: 'claude/x', claim: { brief: 'b', verify: 'npm run gate', state: 'working' }, observed: { at: 'now', head: 'aaa' }, dir: tmp });
     t('write then read round-trips', readRecord('r', 'claude/x', tmp).record.brief === 'b');
 
+    t('a first claim stamps updated_at with a parseable date',
+        typeof w.record.updated_at === 'string' && !Number.isNaN(Date.parse(w.record.updated_at)));
+
+    /* THIS CONTROL MUST NOT DEPEND ON THE CLOCK, and it used to. `updated_at` is
+       an ISO string at MILLISECOND resolution, so comparing two back-to-back
+       writes asks whether a millisecond happened to elapse between them. On a
+       fast disk it does not, and then a rewrite produces a string identical to
+       the one it replaced — the control passes while the property is broken.
+       `[measured 2026-09-12]` that is exactly how test-fleet-intent.js's mutation
+       canary ("the selftest FAILS when updated_at is allowed to move") came to
+       fail on ubuntu-latest, twice, while passing on macOS and Windows: the
+       mutant survived because its damage was invisible at ms resolution. The
+       canary was right and this control was the defect.
+
+       Stamping a sentinel date first removes the clock from the comparison: a
+       rewrite lands on "now", which differs from the year 2000 at any
+       resolution. */
+    const SENTINEL = '2000-01-01T00:00:00.000Z';
+    const wpath = recordPath('r', 'claude/x', tmp);
+    const stamped = JSON.parse(fs.readFileSync(wpath, 'utf8'));
+    stamped.updated_at = SENTINEL;
+    fs.writeFileSync(wpath, JSON.stringify(stamped, null, 1) + '\n');
+
     const w2 = writeRecord({ repo: 'r', branch: 'claude/x', claim: { brief: 'b' }, observed: { at: 'now', head: 'aaa' }, dir: tmp });
-    t('re-asserting the same claim does not refresh updated_at', w2.record.updated_at === w.record.updated_at);
+    t('re-asserting the same claim does not refresh updated_at', w2.record.updated_at === SENTINEL);
     t('merge keeps the brief when only state is written',
         writeRecord({ repo: 'r', branch: 'claude/x', claim: { state: 'checkpointed' }, observed: { at: 'now', head: 'aaa' }, dir: tmp }).record.brief === 'b');
 
