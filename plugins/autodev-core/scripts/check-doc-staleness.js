@@ -810,7 +810,10 @@ function render(r) {
            is ahead of the trunk or behind it, so the heading must say which was measured — and
            must not say "about to ship" about a tree that has nothing to ship. */
         const p = r.population || {};
-        if (p.staleCheckout) {
+        const mixedStates = new Set(r.localOnly.map((f) => f.state)).size > 1;
+        if (mixedStates) {
+            out.push('    NOT AT THE TRUNK: mixed stale checkout history and local work; each row is classified below:');
+        } else if (r.localOnly.every((f) => f.state === 'stale-checkout')) {
             out.push('    NOT AT THE TRUNK, and this checkout is BEHIND it (0 commits the trunk lacks)'
                 + ' — these are STALE, already superseded on the trunk, and nothing here can ship:');
         } else if (p.aheadOfTrunkKnown === false) {
@@ -820,7 +823,8 @@ function render(r) {
             out.push('    NOT AT THE TRUNK, only in the working copy (you are about to ship these'
                 + (p.aheadOfTrunk ? ' — ' + p.aheadOfTrunk + ' commit(s) ahead of the trunk' : '') + '):');
         }
-        for (const f of r.localOnly) out.push('      ' + f.doc + ':' + f.line + '  ' + f.text);
+        for (const f of r.localOnly) out.push('      ' + (mixedStates ? '[' + f.state + '] ' : '')
+            + f.doc + ':' + f.line + '  ' + f.text);
     }
     return out.join('\n');
 }

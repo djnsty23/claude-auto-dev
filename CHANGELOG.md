@@ -39,6 +39,9 @@
   populations. CI timestamps remain a heuristic, not proof of a tested merge.
 - Preserve dispatch-readiness verdict/unknown separation and the runner-canary
   timeout guidance from current main (#242, #243).
+- Preserve current fleet, memory and entrypoint status distinctions (#244), and
+  distinguish stale checkout history from dirty local documents even when both
+  appear in one report (#245).
 - Include current main's mutation-sweep candidate ranking and cause-specific
   reporting (#238, #239), plus the previously merged audit repairs (#226).
 

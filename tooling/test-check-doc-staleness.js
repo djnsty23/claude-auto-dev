@@ -714,6 +714,22 @@ if (tmp) {
             /BEHIND it/.test(render(behind)) && /STALE/.test(render(behind)),
             render(behind));
 
+        // A dirty peer does not turn clean checkout history into new work.
+        fs.writeFileSync(path.join(behindRepo, 'CLAUDE.md'), '# Local\n`[measured 2026-01-02]` The rollout is still blocked on a DNS change.\n', 'utf8');
+        const mixed = checkDocStaleness(behindRepo, { age: 7, max: 12, source: 'both' });
+        check('mixed population includes both stale history and dirty local work',
+            mixed.localOnly.some((f) => f.state === 'stale-checkout')
+            && mixed.localOnly.some((f) => f.state === 'local-only'));
+        const mixedText = render(mixed);
+        check('mixed render distinguishes stale history from local work instead of calling both about to ship',
+            /stale-checkout/.test(mixedText) && /local-only/.test(mixedText)
+            && !/you are about to ship these/.test(mixedText), mixedText);
+        const capped = checkDocStaleness(behindRepo, { age: 7, max: 1, source: 'both' });
+        check('capped mixed report displays stale history without labeling it about to ship',
+            capped.localOnly.length === 1 && capped.localOnly[0].state === 'stale-checkout'
+            && !/about to ship/.test(render(capped)), render(capped));
+        fs.unlinkSync(path.join(behindRepo, 'CLAUDE.md'));
+
         // CANARY, the other direction: dirty the SAME file in the SAME behind tree and the
         // verdict must flip back, or the guard is keying on the tree and ignoring the document.
         fs.writeFileSync(path.join(behindRepo, 'RESUME.md'), FIXTURE + '\n## Later\n`[measured 2026-01-02]` The rollout is still blocked on a DNS change.\n', 'utf8');
