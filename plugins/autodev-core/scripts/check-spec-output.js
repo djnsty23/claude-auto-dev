@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { dependencyProblems, VALID } = require('./prd-states.js');
+const { dependencyProblems, VALID, storiesOf } = require('./prd-states.js');
 const { readRequirements } = require('./prd-requirements.js');
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) { console.log('Usage: node check-spec-output.js [--existing] [prd.json] [schema.sql]'); process.exit(0); }
@@ -56,19 +56,23 @@ if (prd.sprints !== undefined) {
   }
 }
 if (prd.stories !== undefined) {
-  if (containers.length) note('stories', 'mixed root and sprint containers are ambiguous in a new spec');
+  if (!existing && containers.length) note('stories', 'mixed root and sprint containers are ambiguous in a new spec');
   containers.push(prd.stories);
 }
 const rawIds = new Set();
-const entries = [];
+let entries = [];
 for (const container of containers) {
   if (!isObject(container)) { note('stories', 'must be an object keyed by story id'); continue; }
   entries.push(...Object.entries(container));
   for (const key of Object.keys(container)) {
-    if (rawIds.has(key)) note(key, 'duplicate id across story containers');
+    if (!existing && rawIds.has(key)) note(key, 'duplicate id across story containers');
     rawIds.add(key);
   }
 }
+
+// Existing PRDs can carry a story forward; grade the same effective record
+// the runtime reads. Malformed raw containers above remain errors.
+if (existing) entries = Object.entries(storiesOf(prd));
 
 if (!entries.length) { console.error('check-spec-output: zero stories — a spec that plans nothing is not a spec'); process.exit(1); }
 
