@@ -37,6 +37,10 @@ const ADVISORY = [
     // #200's Stop note: names a lost workflow run and its resume command, as a
     // systemMessage with no decision key. It advises.
     'stop-workflow-wall-note.js',
+    // #215's Stop nudge: asks for a fleet-intent claim and refreshes the OBSERVED block.
+    // The nudge is advice, and the refreshed block has no reader — nothing in this repo
+    // reads `record.observed`; `--read` recomputes the facts live. So it advises.
+    'stop-intent-record.js',
 ];
 // Hooks that guard, block, or keep state the sprint and the Brain depend on.
 const GUARDING = [

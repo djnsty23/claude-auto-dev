@@ -55,11 +55,16 @@ function makeRepo() {
 }
 
 /** Run the hook. Returns { status, out, err, spoke, context }. */
-function fire({ cwd, dir, sessionId = 's-1', stdin, state, cooldown } = {}) {
+function fire({ cwd, dir, sessionId = 's-1', stdin, state, cooldown, profile, profileKey } = {}) {
     const env = Object.assign({}, process.env, {
         AUTODEV_FLEET_INTENT_DIR: dir,
         AUTODEV_INTENT_NUDGE_STATE: state,
     });
+    // The inherited environment must not decide this: a session running the suite under
+    // `minimal` would otherwise silence every firing case and read as 35 passes.
+    delete env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE;
+    delete env.CLAUDE_PLUGIN_OPTION_hooks_profile;
+    if (profile !== undefined) env[profileKey || 'CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE'] = profile;
     if (cooldown !== undefined) env.AUTODEV_INTENT_COOLDOWN_MIN = String(cooldown);
     const payload = stdin !== undefined ? stdin : JSON.stringify({ session_id: sessionId, cwd });
     const r = spawnSync(process.execPath, [HOOK], { encoding: 'utf8', input: payload, env, timeout: 30000 });
@@ -271,6 +276,102 @@ function quiet(r) { return r.out.length === 0 && r.err.length === 0; }
     fs.rmSync(root, { recursive: true, force: true });
 }
 
+// --- the hooks_profile split ------------------------------------------------
+/* This hook is classified ADVISORY in tooling/test-hooks-profile.js, which checks
+   only that the guard STRING is present and sits below 'use strict'. A string is
+   not a behaviour: a guard whose regex never matched, or that sat after the stdin
+   read, would pass there and do nothing here. These cases drive the real hook.
+
+   Every one carries a CONTROL in the same directory, because the assertion is
+   "silent under minimal" and an empty run is exactly what a broken setup also
+   produces. The control is the same fire() with no profile, and it must SPEAK. */
+{
+    const { root, main } = makeRepo();
+    const dir = path.join(root, 'records');
+    fs.mkdirSync(dir, { recursive: true });
+    const wt = path.join(root, 'wt');
+    git(main, ['worktree', 'add', '-b', 'claude/feature', wt]);
+    fs.writeFileSync(path.join(wt, 'b.txt'), 'two\n');
+    git(wt, ['add', 'b.txt']);
+    git(wt, [...CFG, 'commit', '-m', 'two']);
+
+    // A fresh state file per run, so a throttle can never be mistaken for the guard.
+    let n = 0;
+    const run = (opts) => fire(Object.assign({ cwd: wt, dir, state: path.join(root, 's' + (++n) + '.json') }, opts));
+
+    /* POSITION, which no behavioural case above can reach. A guard moved below the
+       stdin read is still SILENT under minimal and still touches no record, so every
+       assertion here passes while the hook has already required fleet-intent.js and
+       stat'd the record directory. Verified by mutation: moving the line below the
+       stdin read leaves all nine cases green. The property is that the guard runs
+       before any work, so it is checked where it is observable — in the source. */
+    {
+        const lines = fs.readFileSync(HOOK, 'utf8').split('\n');
+        const gi = lines.findIndex((l) => l.includes('CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE')
+            && /process\.exit\(0\)/.test(l));
+        let inBlock = false;
+        const executable = [];
+        for (let i = 0; i < gi; i++) {
+            let l = lines[i];
+            if (inBlock) { if (l.includes('*/')) { inBlock = false; l = l.slice(l.indexOf('*/') + 2); } else continue; }
+            if (l.includes('/*') && !l.includes('*/')) { inBlock = true; l = l.slice(0, l.indexOf('/*')); }
+            const t = l.replace(/\/\*.*?\*\//g, '').replace(/\/\/.*$/, '').trim();
+            if (!t || t.startsWith('#!') || /^['"]use strict['"];?$/.test(t)) continue;
+            executable.push((i + 1) + ': ' + t);
+        }
+        check('the guard precedes EVERY executable statement, not merely \'use strict\'',
+            gi > 0 && executable.length === 0, executable);
+    }
+
+    let ctl = run({});
+    check('control: this setup SPEAKS with no profile set', ctl.spoke && ctl.status === 0,
+        'exit=' + ctl.status + ' out=' + ctl.out.length + 'B');
+
+    let r = run({ profile: 'minimal' });
+    check('SILENT under hooks_profile=minimal — zero bytes on stdout AND stderr',
+        quiet(r) && r.status === 0,
+        'exit=' + r.status + ' out=' + r.out.length + 'B err=' + r.err.length + 'B');
+
+    r = run({ profile: 'MINIMAL' });
+    check('  and the value is matched case-insensitively', quiet(r) && r.status === 0, 'exit=' + r.status);
+
+    r = run({ profile: 'minimal', profileKey: 'CLAUDE_PLUGIN_OPTION_hooks_profile' });
+    check('  and the lowercase env key is honoured too', quiet(r) && r.status === 0, 'exit=' + r.status);
+
+    r = run({ profile: 'full' });
+    check('SPEAKS under hooks_profile=full', r.spoke && r.status === 0, 'exit=' + r.status);
+
+    /* An unrecognised value must read as FULL, not as minimal. A guard that
+       silenced the hook on anything it did not recognise would turn a typo into
+       a silent uninstall, and silence is the one outcome nothing reports. */
+    r = run({ profile: 'mimimal' });
+    check('a TYPO in the value reads as full rather than silencing the hook', r.spoke,
+        'exit=' + r.status + ' out=' + r.out.length + 'B');
+
+    /* The guard sits above the stdin read, so a minimal run must not consume the
+       payload or touch the record directory either. */
+    const before = fs.readdirSync(dir).length;
+    r = run({ profile: 'minimal' });
+    check('a minimal run leaves the record directory untouched',
+        quiet(r) && fs.readdirSync(dir).length === before, 'files=' + fs.readdirSync(dir).length);
+
+    /* And it must be silent on a path that would otherwise WRITE — the observed
+       refresh, which is the hook's only side effect on an existing record. */
+    const state2 = path.join(root, 'refresh.json');
+    intent.writeRecord({ repo: intent.repoName(wt), branch: 'claude/feature', session_id: 's-9',
+        claim: { brief: 'B', current_step: 'C', next_step: 'N', verify: 'npm run gate', state: 'working' },
+        observed: intent.observe(wt), dir });
+    const stamped = intent.readRecord(intent.repoName(wt), 'claude/feature', dir).record;
+    r = fire({ cwd: wt, dir, state: state2, profile: 'minimal' });
+    const after = intent.readRecord(intent.repoName(wt), 'claude/feature', dir).record;
+    check('a minimal run does not even refresh the observed facts',
+        quiet(r) && JSON.stringify(after.observed) === JSON.stringify(stamped.observed), 'exit=' + r.status);
+    check('  control: the same run with no profile DOES refresh them',
+        (() => { fire({ cwd: wt, dir, state: path.join(root, 'ctl2.json') });
+                 const c = intent.readRecord(intent.repoName(wt), 'claude/feature', dir).record;
+                 return c.observed && c.observed.at !== stamped.observed.at; })());
+}
+
 // --- help -------------------------------------------------------------------
 {
     const r = spawnSync(process.execPath, [HOOK, '--help'], { encoding: 'utf8', timeout: 15000 });
@@ -286,7 +387,10 @@ console.log('subject: plugins/autodev-core/hooks/stop-intent-record.js; ' + (pas
     + 'linked worktrees: 8 inert paths (each asserting ZERO BYTES on stdout AND stderr), all four '
     + 'firing reasons, the throttle and the new-reason escape from it, and the three things the '
     + 'hook must never do to a record — write a claim, move updated_at, or bring one into '
-    + 'existence. Four failure injections assert it never holds a turn.');
+    + 'existence. Four failure injections assert it never holds a turn, and a block of cases drives '
+    + 'the hooks_profile=minimal guard for real — each behavioural one against a control that '
+    + 'SPEAKS, because an empty run is also what a broken setup produces, plus one positional '
+    + 'case for the property no behavioural one can reach: the guard runs before any work.');
 if (fail) {
     console.log('failed: ' + failures.join('; '));
     process.exit(1);
