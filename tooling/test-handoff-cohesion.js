@@ -83,13 +83,43 @@ try {
         const r = cli('check-spec-output.js', [file]);
         check('plan: ' + name, valid ? r.status === 0 : r.status === 1 && /depend|blockedBy|cycle|missing/i.test(r.stdout + r.stderr), r);
     }
+    // Existing plans retain all five passes states while graph validation remains active.
+    const existing = { stories: Object.fromEntries([null, true, false, 'deferred', 'needs-setup'].map((passes, n) => {
+        const id = 'S1-00' + (n + 1); return [id, { ...story(id), passes }];
+    })) };
+    const existingFile = path.join(ROOT, 'existing.json'); fs.writeFileSync(existingFile, JSON.stringify(existing));
+    const existingResult = cli('check-spec-output.js', ['--existing', existingFile]);
+    check('existing-plan mode accepts all five valid passes states', existingResult.status === 0, existingResult);
+    existing.stories['S1-001'].blockedBy = ['S9-999']; fs.writeFileSync(existingFile, JSON.stringify(existing));
+    const existingBad = cli('check-spec-output.js', ['--existing', existingFile]);
+    check('existing-plan mode still rejects dangling dependencies', existingBad.status === 1 && /depend|missing|blockedBy/i.test(existingBad.stdout + existingBad.stderr), existingBad);
+
+    const revisionFixture = fixture();
+    fs.mkdirSync(path.join(revisionFixture.repo, 'specs'));
+    const refs = [['specs/a.md', 'First requirement.\n'], ['specs/b.md', 'Unrelated requirement.\n']];
+    for (const [name, content] of refs) fs.writeFileSync(path.join(revisionFixture.repo, name), content);
+    revisionFixture.doc.stories = {
+        A: { ...story('A'), specRefs: [{ path: refs[0][0], revision: hash(refs[0][1]) }] },
+        B: { ...story('B'), blockedBy: ['A'] },
+        C: { ...story('C'), blockedBy: ['B'] },
+        D: { ...story('D'), specRefs: [{ path: refs[1][0], revision: hash(refs[1][1]) }] },
+    }; revisionFixture.write();
+    const revisions = () => cli('prd-requirements.js', ['revisions', '--prd', revisionFixture.prd, '--root', revisionFixture.repo]);
+    const clean = revisions();
+    check('revision report clean control covers all four stories', clean.status === 0 && clean.json && clean.json.stories === 4 && clean.json.stale.length === 0 && clean.json.affected.length === 0, clean);
+    const editedSpec = 'First requirement now denies suspended owners.\n'; fs.writeFileSync(path.join(revisionFixture.repo, refs[0][0]), editedSpec);
+    const prdBytes = fs.readFileSync(revisionFixture.prd, 'utf8'), changed = revisions();
+    check('revision report identifies direct stale reference with both exact hashes', changed.status === 1 && changed.json && changed.json.stories === 4 && changed.json.stale.some(r => r.id === 'A' && r.path === refs[0][0] && r.expectedRevision === hash(refs[0][1]) && r.actualRevision === hash(editedSpec)), changed);
+    check('revision impact is direct story plus transitive dependents, excluding unrelated story', changed.json && JSON.stringify([...changed.json.affected].sort()) === JSON.stringify(['A', 'B', 'C']) && JSON.stringify(changed.json.unchanged) === JSON.stringify(['D']), changed);
+    check('revision report never rewrites acceptance or declares a new revision', fs.readFileSync(revisionFixture.prd, 'utf8') === prdBytes, changed);
+
     let sqlite = false; try { sqlite = typeof require('node:sqlite').DatabaseSync === 'function'; } catch { /* host unavailable */ }
     if (typeof process.getuid !== 'function' || !sqlite) {
         const r = cli('mission-store.js', ['init', '--store', path.join(ROOT, 'unavailable')], {});
         check('unsupported host refuses runtime explicitly', r.status === 1 && r.json && r.json.error.code === 'runtime-unavailable', r);
         console.log('handoff-cohesion: runtime transition cases not run; host lacks POSIX ownership or node:sqlite');
     } else {
-        for (const variant of ['ready', 'needs-setup', 'unmet-dependency', 'scope-edit', 'acceptance-edit']) {
+        for (const variant of ['ready', 'needs-setup', 'unmet-dependency', 'scope-edit', 'acceptance-edit', 'verification-edit']) {
             const x = fixture(); cli('mission-store.js', ['init', '--store', x.store], {});
             const admitted = tick(x, 'unsupported'); const before = state(x);
             check(variant + ': setup admitted without a launch', admitted.status === 0 && before && before.mission.state === 'ready' && before.launches.length === 0, admitted);
@@ -97,6 +127,7 @@ try {
             if (variant === 'unmet-dependency') { x.doc.stories.A.blockedBy = ['B']; x.doc.stories.B = { id: 'B', passes: 'needs-setup', notes: 'Needs an operator key.', paths: ['second.js'] }; }
             if (variant === 'scope-edit') x.doc.stories.A.paths = ['different.js'];
             if (variant === 'acceptance-edit') x.doc.stories.A.acceptance = ['Unauthenticated requests cannot read the owned record.'];
+            if (variant === 'verification-edit') x.doc.stories.A.verify = ['auth'];
             x.write(); const prdBefore = fs.readFileSync(x.prd, 'utf8'); const result = tick(x); const after = state(x);
             check(variant + ': tick returns a report', result.status === 0 && result.value && Array.isArray(result.value.missions), result);
             if (variant === 'ready') check('ready control launches and writes its actual artifact', after.launches.length === 1 && fs.existsSync(path.join(x.repo, 'owned.js')), result);
