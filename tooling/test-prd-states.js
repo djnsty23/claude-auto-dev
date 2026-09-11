@@ -263,12 +263,23 @@ if (typeof S.workPlan === 'function') {
     check('an empty population is not completion', !S.workPlan({}).complete);
     check('a malformed story is not executable or complete',
         S.workPlan({ stories: { BAD: null } }).ready.length === 0 && !S.workPlan({ stories: { BAD: null } }).complete);
-    const autodevCoreRoot = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
-    const skill = fs.readFileSync(path.join(autodevCoreRoot, 'skills', 'auto', 'SKILL.md'), 'utf8');
+    const pluginRoot = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
+    const skill = fs.readFileSync(path.join(pluginRoot, 'skills', 'auto', 'SKILL.md'), 'utf8');
     const selector = skill.split('### Find Next Task')[1].match(/```javascript\n([\s\S]*?)```/)[1];
-    const selected = vm.runInNewContext(selector + '\nexecutable.map(([id]) => id)', { prd, require, autodevCoreRoot });
+    // The snippet reads CLAUDE_PLUGIN_ROOT, the same variable a host sets, so this
+    // executes the shipped text verbatim instead of a rewritten copy of it.
+    const env = { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot };
+    const selected = vm.runInNewContext(selector + '\nexecutable.map(([id]) => id)', { prd, require, process: { ...process, env } });
     check('the actual auto skill selector agrees with Stop readiness across sprints',
         JSON.stringify(selected) === JSON.stringify(p.ready.map(([id]) => id)), selected);
+    // CONTROL: the guard is not decoration. Unset the variable and the shipped
+    // snippet must refuse by name rather than resolve a path from an empty string.
+    let guarded = null;
+    try {
+        vm.runInNewContext(selector, { prd, require, process: { ...process, env: {} } });
+    } catch (e) { guarded = e.message; }
+    check('the skill snippet throws by name when CLAUDE_PLUGIN_ROOT is unset',
+        guarded && /CLAUDE_PLUGIN_ROOT/.test(guarded), guarded);
     const overlapping = { stories: {
         A: { passes: null, blockedBy: ['B', 'C'] },
         B: { passes: null, blockedBy: ['A'] },

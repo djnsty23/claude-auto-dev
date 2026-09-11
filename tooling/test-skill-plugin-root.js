@@ -48,7 +48,7 @@ const fence = (cmd) => '# Skill\n\n```bash\n' + cmd + '\n```\n';
     check('an unguarded non-CLAUDE_PLUGIN_ROOT variable FAILS', r.code === 1, r);
     check('the failure names the variable', /autodev_core_root/.test(r.out), r.out);
     check('the failure names the file and line', /SKILL\.md:4/.test(r.out), r.out);
-    check('the failure explains the empty expansion', /empty string/.test(r.out), r.out);
+    check('the failure explains what an unset variable does', /empty in a fresh shell call/.test(r.out), r.out);
 }
 {
     const root = tree('bad-bare', {
@@ -66,6 +66,30 @@ const fence = (cmd) => '# Skill\n\n```bash\n' + cmd + '\n```\n';
     const r = run(root);
     check('one bad line among good ones still FAILS', r.code === 1, r);
     check('and the good line is not reported', !/scripts\/a\.js/.test(r.out), r.out);
+}
+
+{
+    // The javascript fence form. Same mistake, different syntax: a free
+    // identifier instead of a shell expansion, so the shell regex cannot see it.
+    const root = tree('bad-js', {
+        'plugins/p/skills/s/SKILL.md':
+            "# Skill\n\n```javascript\nconst { workPlan } = require(require('path').join(autodevCoreRoot, 'scripts', 'prd-states.js'));\n```\n",
+    });
+    const r = run(root);
+    check('an unguarded free identifier in a javascript fence FAILS', r.code === 1, r);
+    check('and the javascript failure names the identifier', /autodevCoreRoot/.test(r.out), r.out);
+}
+{
+    // Paired with a shell line so the population is non-empty: a member
+    // expression is never counted, which is exactly why it cannot be graded alone.
+    const root = tree('good-js', {
+        'plugins/p/skills/s/SKILL.md':
+            fence('node "${CLAUDE_PLUGIN_ROOT}/scripts/a.js"') +
+            "\n```javascript\nconst p = require('path').join(process.env.CLAUDE_PLUGIN_ROOT, 'scripts', 'a.js');\n```\n",
+    });
+    const r = run(root);
+    check('CONTROL: process.env.CLAUDE_PLUGIN_ROOT in javascript passes', r.code === 0, r);
+    check('CONTROL: a member expression is not counted into the population', /1 plugin-path expansion/.test(r.out), r.out);
 }
 
 // ---- what must stay green ------------------------------------------------

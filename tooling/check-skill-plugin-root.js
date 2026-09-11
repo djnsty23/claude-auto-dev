@@ -52,6 +52,12 @@ function skillFiles() {
 // prose variables out of the population.
 const EXPANSION = /\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?\/(scripts|hooks|agents|skills)\//g;
 
+// The same mistake in a javascript fence, where it is a free identifier rather
+// than a shell expansion: `join(someRoot, 'scripts', ...)`. A member expression
+// such as `process.env.CLAUDE_PLUGIN_ROOT` has a dot and so never matches here,
+// which is what makes the allowed form pass without a special case.
+const JOINED = /\bjoin\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*,\s*['"](scripts|hooks|agents|skills)['"]/g;
+
 function guardsVariable(text, name) {
     // A guard must name the variable AND raise. Both, in one construct.
     const guard = new RegExp(
@@ -69,14 +75,16 @@ for (const file of files) {
     const rel = path.relative(ROOT, file);
     const lines = text.split('\n');
     lines.forEach((line, i) => {
-        EXPANSION.lastIndex = 0;
-        let m;
-        while ((m = EXPANSION.exec(line))) {
-            expansions++;
-            const name = m[1];
-            if (name === ALLOWED) continue;
-            if (guardsVariable(text, name)) continue;
-            violations.push({ rel, line: i + 1, name, text: line.trim() });
+        for (const re of [EXPANSION, JOINED]) {
+            re.lastIndex = 0;
+            let m;
+            while ((m = re.exec(line))) {
+                expansions++;
+                const name = m[1];
+                if (name === ALLOWED) continue;
+                if (guardsVariable(text, name)) continue;
+                violations.push({ rel, line: i + 1, name, text: line.trim() });
+            }
         }
     });
 }
@@ -100,6 +108,6 @@ for (const v of violations) {
     console.error(`FAIL ${v.rel}:${v.line} — \$${v.name} is neither \${${ALLOWED}} nor guarded in this file.`);
     console.error(`  ${v.text}`);
 }
-console.error(`\n${violations.length} of ${expansions} plugin-path expansion(s) across ${files.length} skill markdown file(s) would expand to an empty string in a fresh shell call.`);
+console.error(`\n${violations.length} of ${expansions} plugin-path expansion(s) across ${files.length} skill markdown file(s) resolve from a variable nothing sets: empty in a fresh shell call, undefined in a fresh javascript context.`);
 console.error(`Use \${${ALLOWED}} (the host sets it per call), or guard the variable with a throw that names it.`);
 process.exitCode = 1;
