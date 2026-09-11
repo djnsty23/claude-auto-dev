@@ -543,11 +543,26 @@ function fakeQuotaBurn(base, cost) {
 {
     const r = repo({ name: 'proj' });
     dirty(r.top, { ageMinutes: 90 });
-    // A commit that cannot be made: an unwritable object store.
-    const objects = path.join(r.top, '.git', 'objects');
-    fs.chmodSync(objects, 0o500);
+    /* A COMMIT THAT CANNOT BE MADE, INJECTED PORTABLY. This used to chmod
+       .git/objects to 0o500. On Windows that is a no-op for a DIRECTORY — Node
+       maps chmod to the read-only attribute, and not for directories — so the
+       commit SUCCEEDED and four assertions below failed on windows-latest, twice,
+       while macOS and ubuntu passed. The assertions were right; the injection was
+       not portable, and a failure injection that silently does nothing turns a
+       test of the failure path into a test of the success path.
+
+       `.git/index.lock` is the portable mechanism: git refuses to write the index
+       while it exists, on every platform, through permissions nobody has to own.
+       The control below proves the injection took effect rather than assuming it —
+       that is the whole lesson of the chmod version. */
+    const lock = path.join(r.top, '.git', 'index.lock');
+    fs.writeFileSync(lock, '');
     const res = run(r, { sessionId: 'sess-nocommit' });
-    fs.chmodSync(objects, 0o755);
+    check('commit failure: the injection actually took effect (git could not touch the index)',
+        fs.existsSync(lock),
+        fs.existsSync(lock) ? 'lock held throughout the run'
+            : 'index.lock GONE — git removed it, so the failure path was never exercised');
+    fs.rmSync(lock, { force: true });
     const j = parsed(res);
     check('commit failure: exits 0', res.status === 0, 'exit=' + res.status);
     check('commit failure: writes nothing to stderr', res.err === '', JSON.stringify(res.err.slice(0, 300)));
