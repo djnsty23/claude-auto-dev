@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync, execFileSync } = require('node:child_process');
+const { spawn, spawnSync, execFileSync } = require('node:child_process');
 const ROOT = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'handoff-cohesion-'));
 const scripts = path.resolve(__dirname, '../plugins/autodev-core/scripts');
 const worker = path.resolve(__dirname, 'fixtures/mission-runtime/protocol-worker.cjs');
@@ -29,7 +29,7 @@ function fixture() {
     return { dir, repo, prd, store, doc, write };
 }
 function build(f) { return cli('mission-contract.js', ['--prd', f.prd, '--story', 'A', '--paths', 'owned.js', '--root', f.repo]); }
-function tick(f, adapter = 'local-node', wait = '10000') { return cli('mission-supervisor.js', ['tick', '--prd', f.prd, '--root', f.repo, '--store', f.store, '--owner', 'brain', '--adapter', adapter, '--worker', worker, '--wait-ms', wait]); }
+function tick(f, adapter = 'local-node', wait = '10000', extra = []) { return cli('mission-supervisor.js', ['tick', '--prd', f.prd, '--root', f.repo, '--store', f.store, '--owner', 'brain', '--adapter', adapter, '--worker', worker, '--wait-ms', wait, ...extra]); }
 function state(f) { return cli('mission-store.js', ['status', '--store', f.store], { missionId: 'A' }).value; }
 try {
     const f = fixture();
@@ -144,6 +144,38 @@ try {
             else check(variant + ': no worker starts against newly blocked or stale requirements', after.launches.length === 0 && after.mission.attemptCount === 0 && !fs.existsSync(path.join(x.repo, 'owned.js')) && !fs.existsSync(path.join(x.repo, 'different.js')), { result, state: after });
             check(variant + ': PRD stays byte-identical', prdBefore === fs.readFileSync(x.prd, 'utf8'), result);
         }
+        const retried = fixture(); cli('mission-store.js', ['init', '--store', retried.store], {});
+        const retryFlags = ['--backoff-ms', '1', '--max-backoff-ms', '5'];
+        fs.writeFileSync(retried.store + '.mode', 'refuse'); const refusal = tick(retried, 'local-node', '10000', retryFlags);
+        check('retry control reaches retry-wait with exactly one refused attempt', refusal.value && state(retried).mission.state === 'retry-wait' && state(retried).mission.attemptCount === 1, refusal);
+        retried.doc.stories.A.passes = 'needs-setup'; retried.write(); fs.writeFileSync(retried.store + '.mode', 'normal');
+        const retryBlocked = tick(retried, 'local-node', '10000', retryFlags);
+        check('eligible retry rechecks readiness before a second attempt', state(retried).launches.length === 1 && state(retried).mission.attemptCount === 1 && !fs.existsSync(path.join(retried.repo, 'owned.js')) && retryBlocked.value.missions.some(m => m.id === 'A' && m.action === 'not-ready'), retryBlocked);
+
+        const sourced = fixture(), spec = 'Only the owner may view these records.\n';
+        fs.writeFileSync(path.join(sourced.repo, 'SPEC.md'), spec); sourced.doc.stories.A.specRefs = [{ path: 'SPEC.md', revision: hash(spec) }]; sourced.write();
+        const wt = path.join(sourced.dir, 'worker'); execFileSync('git', ['-C', sourced.repo, 'worktree', 'add', '--detach', '-q', wt, 'HEAD'], { stdio: 'pipe' });
+        const sourceArgs = ['--prd', sourced.prd, '--story', 'A', '--paths', 'owned.js', '--root', wt];
+        const noSource = cli('mission-contract.js', sourceArgs);
+        const source = cli('mission-contract.js', [...sourceArgs, '--source-root', sourced.repo]);
+        check('detached worker contract reads explicitly scoped uncommitted spec from planning worktree', noSource.status === 1 && source.status === 0 && source.json.contract.repo.root === fs.realpathSync.native(wt) && source.json.contract.specRefs[0].content === spec, { noSource, source });
+        const foreignSource = fixture(); fs.writeFileSync(path.join(foreignSource.repo, 'SPEC.md'), spec);
+        const wrongSource = cli('mission-contract.js', [...sourceArgs, '--source-root', foreignSource.repo]);
+        check('source-root from a different repository is refused', wrongSource.status === 1 && wrongSource.json.error.code === 'repo-unverified', wrongSource);
+
+        const racing = fixture(); cli('mission-store.js', ['init', '--store', racing.store], {});
+        racing.doc.stories.B = { id: 'B', title: 'Read the second owned record', passes: null, notes: 'The second module returns the current account record.', paths: ['second.js'] }; racing.write();
+        fs.writeFileSync(racing.store + '.mode.A', 'hold');
+        const marker = path.join(racing.dir, 'changed'), watcher = path.join(racing.dir, 'watcher.cjs');
+        fs.writeFileSync(watcher, `const fs=require('node:fs');const {execute}=require(${JSON.stringify(path.join(scripts, 'mission-store.js'))});const stop=Date.now()+20000;const t=setInterval(()=>{try{const s=execute('status',${JSON.stringify(racing.store)},{missionId:'A'});if(s.launches.some(l=>l.state==='registered')){const p=JSON.parse(fs.readFileSync(${JSON.stringify(racing.prd)},'utf8'));p.stories.B.passes='needs-setup';fs.writeFileSync(${JSON.stringify(racing.prd)},JSON.stringify(p));fs.writeFileSync(${JSON.stringify(marker)},'changed');clearInterval(t);}}catch{}if(Date.now()>stop)clearInterval(t);},20);`);
+        const writer = spawn(process.execPath, [watcher], { stdio: 'ignore' }); workerPids.add(writer.pid);
+        const raceResult = tick(racing, 'local-node', '1500', ['--max-dispatch', '2', '--worktrees', path.join(racing.dir, 'wt')]);
+        const raceState = state(racing), raceLaunch = raceState && raceState.launches.find(l => l.state === 'registered');
+        if (raceLaunch) workerPids.add(JSON.parse(raceLaunch.identity_json).pid);
+        const secondState = cli('mission-store.js', ['status', '--store', racing.store], { missionId: 'B' });
+        check('same-tick control changed the second candidate while first worker was awaited', fs.existsSync(marker) && raceLaunch, raceResult);
+        check('second candidate rereads current readiness after awaiting first worker', secondState.status === 1 && secondState.json.error.code === 'mission-missing' && raceResult.value.missions.some(m => m.id === 'B' && m.action === 'not-ready') && !fs.existsSync(path.join(racing.dir, 'wt', 'B', 'second.js')), { raceResult, secondState });
+
         const tamper = fixture(); cli('mission-store.js', ['init', '--store', tamper.store], {});
         const validPayload = build(tamper).json;
         validPayload.contract.specRefs = [{ path: 'SPEC.md', revision: hash('Original requirement.\n'), content: 'Original requirement.\n' }];
