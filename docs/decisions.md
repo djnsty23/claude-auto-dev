@@ -121,6 +121,52 @@ session, across the shared tree, a sweep-identical worktree, the sweep's exact
 blowup is still open. The change makes a single inner timeout stop guaranteeing an
 unexplained exit 2, and makes the next one name itself.
 
+## 2026-09-08: the deploy ledger becomes the check that enforces Form B
+
+Closes the "still open" of the Form B decision below — the ledger row format and
+the check over it — and deliberately does not restate that decision, whose entry
+owns the sentence, the provenance and why B beat A and C. One owner per claim:
+that entry is the policy, this one is the mechanism.
+
+`deploy-ledger.js --verify` is now the authorisation, and its exit code is the
+whole of it. **0** promote, printing zero bytes on both streams, because it runs
+as `--verify && <promote>` and text on a pass path gets skimmed rather than read.
+**1** a precondition is unmet and is named: a surface unchecked, a metric missing,
+a promotion field empty, or the commit not on the default branch (`merge-base
+--is-ancestor` against `origin/HEAD`, then conventional names). **2** blind — no
+ledger, no deploy ref, no resolvable default branch, or a project that has not
+marked its deploy-sensitive paths, which gets the instruction to add a section
+rather than a pass. **3** ineligible, which no field fixes. The seven-field
+promotion record carries the commit, the gate with its exit and last lines, the
+`prove` evidence pair, the rollback command and the standing rule by date;
+`--record` files it per promotion and `--audit` lists what was filed.
+
+Three choices worth keeping. Eligibility is checked before any field, because an
+ineligible window is not fixed by filling a form. An unmarked project is refused
+rather than passed, on the same reasoning as a missing deploy ref: an unasked
+question and a clean answer must not print the same. And the gate's output is
+recorded rather than queried from a forge — `[measured 2026-09-08]` a count of
+non-success check-runs returned 1 on a commit whose green round was complete,
+because two re-runs were still in progress, so any future CI reader must group by
+job name and never read the run rollup.
+
+**A measured decision was reversed on the operator's ineligible list, and that is
+the useful part.** An earlier draft measured that all 12 `DROP POLICY` statements
+in a product repo's 33 migrations are recreated in the same file, concluded a
+policy drop is a recreate pattern rather than a risk, and pinned it as ELIGIBLE
+in its own selftest. The list says an RLS change escalates regardless. The
+measurement was right about the syntax and wrong about the question: "does this
+file put the policy back" is not "is the policy it puts back the same policy",
+and a recreate is where an RLS mistake hides. Under the six rules that corpus
+scores 195 ineligible lines where the narrow rule scored 0 — grant 98, rls 37,
+security-definer 35, live-rows 25 — so nearly every migration escalates, which is
+the intended reading rather than a defect.
+
+Implementation record, the corpus measurement and the refusals the suite was
+watched making: `docs/evidence-deploy-implementation-2026-09-08.md`. The baseline
+evidence is `docs/evidence-deploy-authorisation-2026-09-08.md`, which this cites
+rather than duplicates.
+
 ## 2026-09-08: a per-story runtime flow check, wired into `auto` and not into the Stop hook
 
 The question was whether driving the primary user flow in a real browser and

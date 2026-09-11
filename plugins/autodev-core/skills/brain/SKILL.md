@@ -1238,6 +1238,22 @@ where they go — and leave the decisions alone.
 
 ## Standing rules, each with its measurement
 
+**The deploy rule now has a CHECK, and reading its exit code is this role's
+half.** The rule itself, its ineligible list and the provenance live below under
+"Escalate rather than resolve" — one statement, not two, and that one is
+canonical. What belongs here is how to read a session's deploy report against it.
+
+`deploy-ledger.js --verify` is the check. A session reporting **exit 0** for the
+commit it is promoting needs nothing from you. One reporting **exit 3** is
+blocked on the operator, not on you: the never-list already says you never relay
+an authorisation, and `[measured 2026-08-24]` a relayed panel selection was
+refused by a session as consent for a production migration, so exit 3 is exactly
+where a helpful message from the Brain is the wrong channel. **Nor may you supply
+the gate half by relay:** a peer saying "the gate was green" is not the gate's
+output in the ledger. Before believing any deploy report, ask whether the ledger
+was filed — `--audit` lists every recorded promotion and whether its record is
+complete. The fields and the full exit-code table are in `ship` Step 5b.
+
 **Re-fetch immediately before sending any message that reports state.** Not
 before writing it, before sending it. `[measured]` a correct reading of an
 unpushed commit was reported after it had been pushed. The probe was right and

@@ -105,9 +105,9 @@ Before the `--prod` line below, all four must be true and written down:
    tree missing a merged fix is the shape of two of the five incidents in the
    evidence doc.
 3. The ledger records the commit sha, the gate command with its exit code and
-   output, and (after Step 5) the verification. Until `deploy-ledger.js` carries
-   these fields, write them at the top of `DEPLOY-LEDGER.md` by hand; the surface
-   checklist it generates is Step 5b, not this.
+   output, and (after Step 5) the verification. `deploy-ledger.js --write` now
+   creates these fields and `--verify` refuses while any is empty, so they are no
+   longer written by hand; the surface checklist it also generates is Step 5b.
 4. The undo command for THIS deploy is in the ledger before you promote, and it
    splits by case. Where production traffic already exists:
    `vercel rollback <previous production url>` (from `vercel ls --prod`), or for
@@ -126,6 +126,23 @@ renames a column or changes a grant, RLS or a `SECURITY DEFINER`; billing,
 checkout, webhook or entitlement code; auth; live rows), stop here and escalate
 whatever the gate says. On a repo where a merge to the default branch is itself
 the production deploy, the four conditions apply to the merge.
+
+**One command checks all four, and it is the authorisation.**
+`deploy-ledger.js --verify` (Step 5b) exits 0, printing nothing, only when the
+window is eligible, the commit being promoted is on the default branch, every
+surface is checked and every promotion field is filled. That commit is the
+CANDIDATE — HEAD unless `--candidate` froze an earlier one — not whatever the
+working tree happens to be checked out at. Exit 1 names the unmet condition,
+exit 2 means it could not tell, exit 3 is the ineligible list. So the promotion
+lines below read `--verify && <promote>`: the chain reads the exit code, and no
+other signal authorises a promotion — not a green CI badge, not a preview that
+looked fine, and not a peer relaying either of those.
+
+**A first deployment is a promotion, so it goes behind `--verify` too.** Condition
+4 says why `npx vercel --yes` cannot be trusted to stay a preview; the operational
+consequence is that on a project with no production deployment yet, the preview
+line below IS the promotion. What makes a deploy a preview is the `target` read
+back out of it afterwards, never the flag that went in.
 
 ### Vercel
 
@@ -173,11 +190,15 @@ npx vercel inspect <deployment-url> --json > /tmp/deploy.json
 node "${CLAUDE_PLUGIN_ROOT}/scripts/check-deploy-target.js" \
   --deployment /tmp/deploy.json --intent preview
 
-# Only after the preview is verified, promote deliberately
-npx vercel --prod --yes
+# Only after the preview is verified, promote — and only behind the ledger.
+# The two checks answer different questions and neither replaces the other:
+# --verify asks whether this promotion is AUTHORISED (Step 5b), before the fact;
+# check-deploy-target asks what the deploy actually DID, after it.
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify && npx vercel --prod --yes
 npx vercel inspect <deployment-url> --json > /tmp/deploy.json
 node "${CLAUDE_PLUGIN_ROOT}/scripts/check-deploy-target.js" \
   --deployment /tmp/deploy.json --intent production
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --record
 ```
 
 ⚠️ **`--target=preview` is NOT known to override the first-deployment rule.**
@@ -242,17 +263,23 @@ costs a missing asset, under-excluding costs a public URL. This repo's own
 ### Netlify
 
 ```bash
-npx netlify deploy --prod
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify && npx netlify deploy --prod
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --record
 ```
 
 ### Supabase Edge Functions
 
+An edge-function deploy is a production promotion, so it sits behind the same
+`--verify`. The deploy command itself comes from the project's CLAUDE.md, as
+`auto` already reads it.
+
 ```bash
 # Single function
-supabase functions deploy [function-name] --project-ref [ref]
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify && supabase functions deploy [function-name] --project-ref [ref]
 
 # All functions
-supabase functions deploy --project-ref [ref]
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify && supabase functions deploy --project-ref [ref]
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --record
 ```
 
 ### Environment Variables
@@ -322,34 +349,129 @@ npx playwright open [DEPLOY_URL]
 3. **Auth broken** → Check OAuth redirect URLs match deploy URL
 4. **Blank page** → Check build output, check base path config
 
-## Step 5b: The deploy ledger — what changed, and was each surface looked at
+## Step 5b: The deploy ledger — mandatory before promotion
 
 Everything above tells you HOW to verify. Nothing above records WHAT needed
 verifying, so the surface most likely to be skipped is the one nobody
-remembered was touched. The ledger closes that.
+remembered was touched. The ledger closes that, and since 2026-09-08 it is also
+the authorisation: Step 4's rule says a promotion is pre-authorised on a green
+gate with the ledger, and `--verify` is the one place both are checked.
 
 ```bash
-node plugins/autodev-core/scripts/deploy-ledger.js --write    # derive from the diff
-node plugins/autodev-core/scripts/deploy-ledger.js --verify   # exit 1 while a box is empty
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --write     # derive from the diff, keep what is filled for this window
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --write --candidate <sha>   # ...against a frozen commit rather than HEAD
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify    # 0 promote · 1 incomplete · 2 blind · 3 ineligible
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --record    # after the promotion: file it, move the marker
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --audit     # every recorded promotion, complete or not
 ```
 
-`--write` reads `<last deploy>..HEAD` and produces `DEPLOY-LEDGER.md` at the
+`--write` reads `<last deploy>..<candidate>` (the candidate is HEAD unless
+`--candidate` names one) and produces `DEPLOY-LEDGER.md` at the
 repo root: one row per affected surface, each needing a desktop pass, 390, 414,
-console clean and network clean. `--verify` refuses while any box is empty. Run
-it before calling a deploy verified, and re-run `--write` afterwards — existing
-ticks survive a regenerate, because a tool that wipes your work is a tool nobody
-re-runs.
+console clean and network clean, a metrics line, and the **promotion record**
+below. Ticks and filled fields survive a regenerate for the same window, because
+a tool that wipes your work is a tool nobody re-runs; a regenerate for a NEW
+window starts blank and says so, because the previous window's gate run and
+evidence say nothing about this one. The window is BOTH resolved commits, base
+and candidate, recorded in the file: a candidate that moves while the base holds
+still is a different window, and inheriting a gate tail across it would be a
+promotion authorised by a gate run nobody did.
 
-The last deploy is read from `--since`, then `.claude/last-deploy`, then the
-most recent tag. **If none resolves it refuses with exit 2 rather than
-diffing against something arbitrary** — "no surfaces changed" and "I could not
-tell what changed" are opposite answers and must not print the same.
+### The promotion record, every field required
+
+| field | what goes there | `--verify` refuses when |
+|---|---|---|
+| `commit` | derived: the candidate at `--write` (HEAD unless `--candidate`) | it is not the candidate any more (STALE), or it is not on the default branch |
+| `gate` | the gate command you ran, by name | empty |
+| `gate exit` | its exit code | anything but `0` |
+| `gate tail` | its last 20 lines, inside the fence | empty |
+| `evidence` | the `.claude/evidence/<slug>/` directory per `prove` | missing, or lacks `before.*` or `after.*` |
+| `rollback` | the exact command that undoes THIS promotion | empty, or still holds a `<placeholder>` |
+| `authorised` | the standing rule, by date: `[stated 2026-09-08] Form B, pre-authorised on a green gate with the ledger` | no `[stated YYYY-MM-DD]`, or a date with no rule |
+
+Only the commit is derived. Filling the rest is your work, and `--verify` asks
+only whether it was done: a checker that both generates and satisfies its own
+checklist proves nothing. The `evidence` field is the post-deploy verification
+from Step 5, captured the way `prove` says, against the PREVIEW URL; the record
+is what lets a later reader see that the check happened rather than take your
+word for it.
+
+### Eligibility: what cannot be pre-authorised at all
+
+Exit 3 is not "fill the form". It means this window is outside the rule and the
+promotion needs the operator's yes in that turn. The operator's list, verbatim:
+migrations that drop or rename a column, change a grant, an RLS policy or a
+`SECURITY DEFINER` function; billing, checkout, webhook and entitlement code;
+auth; anything the Brain's never-list covers; anything touching live rows. Two
+sources enforce it, checked before any field is read:
+
+- **Deploy-sensitive paths the PROJECT marks.** In its CLAUDE.md (or a file it
+  `@`-imports), a heading containing "Deploy-sensitive", one backticked glob per
+  bullet, or the single bullet `none`. Billing, auth, webhooks and migrations are
+  the usual entries. **A project with no marking gets exit 2 and the instruction
+  to add one**, never a pass: an unmarked project is one nobody has asked the
+  question of.
+
+  ```markdown
+  ## Deploy-sensitive paths
+  - `supabase/migrations/**`
+  - `src/app/api/stripe-webhook/**`
+  - `src/app/auth/**`
+  ```
+
+- **Six SQL rules, on every project, marked or not**, over added lines in
+  `*.sql`, one per clause of the list above: `schema-drop` (DROP TABLE / COLUMN /
+  SCHEMA, TRUNCATE), `rename`, `grant` (GRANT / REVOKE), `rls` (CREATE / ALTER /
+  DROP POLICY, ROW LEVEL SECURITY), `security-definer`, and `live-rows` (INSERT
+  INTO / DELETE FROM / UPDATE … SET). A refusal names which rule fired.
+
+  `[measured 2026-09-08]` on a product repo's 33 migrations, 4,427 lines: **195
+  ineligible lines** — grant 98, rls 37, security-definer 35, live-rows 25,
+  schema-drop 0, rename 0. Nearly every migration there is ineligible, which is
+  the intended reading rather than a defect: migrations are the class the
+  operator named first. Comments are stripped before any rule runs, because a
+  first probe matched the word "truncated" inside four of them.
+
+  **An earlier draft of this script pinned `DROP POLICY` as ELIGIBLE**, having
+  measured that every policy drop in that corpus is recreated in the same file.
+  That reversed on the operator's list, and the reasoning is worth keeping: "does
+  this file put the policy back" is not "is the policy it puts back the same
+  policy", and a recreate is exactly where an RLS mistake hides.
+
+### Exit codes are instructions, and the pass is silent
+
+`--verify` prints nothing and exits 0 when the promotion may proceed, because it
+runs as `--verify && <promote>` and text on the pass path gets skimmed rather
+than read. `--verify --verbose` prints the population when you want to see it.
+Exit 1 lists every unmet precondition by name — unchecked rows, missing fields,
+and a commit that is not on the default branch. Exit 2 means nothing was decided:
+no ledger, no deploy ref, no resolvable default branch, or no marking.
+
+**The gate's output is recorded, not queried.** Nothing here asks a forge whether
+CI was green: you run the gate and paste its exit code and last lines. If that
+ever changes, `[measured 2026-09-08]` one commit carried nine check-run entries
+across three rounds and a count of "conclusion != success" returned 1, which read
+as a failure and was an unfinished re-run — so a CI reader must group by job name
+and require one `status=completed, conclusion=success` per required platform, and
+must never read the run rollup, which reports success while a job is in progress. The last deploy is
+read from `--since`, then `.claude/last-deploy`, then the most recent tag, and
+**if none resolves it refuses rather than diffing against something arbitrary**,
+because "no surfaces changed" and "I could not tell what changed" are opposite
+answers and must not print the same.
+
+`--record` runs the same verification, then copies the ledger to
+`deploy-ledgers/<timestamp>-<sha>.md` and points `.claude/last-deploy` at HEAD.
+It warns when that directory is gitignored, because a record only this machine
+can read is invisible to the session that audits next. `--audit` lists every
+file there as COMPLETE or INCOMPLETE with the offending fields, and exits 1 on
+any incomplete one; an empty directory is reported as "0 audited", not as a
+pass.
 
 Three things it deliberately does not do:
 
 - **It does not decide whether a check passed.** A human or a browser-driving
-  agent ticks the boxes; `--verify` only asks whether they are ticked. A checker
-  that both generates and satisfies its own checklist proves nothing.
+  agent ticks the boxes and fills the fields; `--verify` only asks whether they
+  are filled.
 - **It does not guess narrowly.** A change to a token file, a global
   stylesheet or a layout is reported as WIDE, meaning every surface is
   potentially affected. Narrowing that would be a false all-clear.
@@ -362,6 +484,14 @@ project routing some other way gets its changed files listed without a route,
 which is honest rather than wrong — the row still has to be checked.
 
 ## Step 6: Rollback (if needed)
+
+The command to run is the one in the ledger's `rollback` field, written before
+the promotion while the previous build was still known. The lines below are the
+shapes it usually takes, not a substitute for reading the field.
+
+Write the field for the deploy you are actually about to make, not the one the
+template assumes: `--verify` checks that the field is FILLED, never that the
+command in it works.
 
 ```bash
 # Vercel - instant rollback to previous
@@ -397,6 +527,7 @@ Shipped to: [URL]
 Platform: Vercel/Netlify
 Build: passed
 Security: passed
+Ledger: deploy-ledgers/<timestamp>-<sha>.md (--verify 0, --record filed)
 Verification: [pass/fail]
   - Page loads: ✓
   - Console errors: none
