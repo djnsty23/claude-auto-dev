@@ -110,13 +110,15 @@ or report that verification is unavailable before declaring readiness.
 
 ### Find Next Task
 
-Resolve `autodevCoreRoot` to the plugin directory containing this loaded skill
-(the parent of `skills/`). Use the shared planner below; do not copy its state
-or dependency predicates into the skill. The planner reads every sprint,
-reports missing/malformed/cyclic dependencies, and keeps blocked work visible.
+The planner is loaded from `CLAUDE_PLUGIN_ROOT`, which the host sets per loaded
+plugin; the snippet throws if it is unset rather than requiring a path built
+here. Use the shared planner below; do not copy its state or dependency
+predicates into the skill. The planner reads every sprint, reports
+missing/malformed/cyclic dependencies, and keeps blocked work visible.
 
 ```javascript
-const { workPlan } = require(require('path').join(autodevCoreRoot, 'scripts', 'prd-states.js'));
+if (!process.env.CLAUDE_PLUGIN_ROOT) throw new Error('CLAUDE_PLUGIN_ROOT is required');
+const { workPlan } = require(require('path').join(process.env.CLAUDE_PLUGIN_ROOT, 'scripts', 'prd-states.js'));
 const plan = workPlan(prd);
 const stories = plan.stories;
 const executable = plan.ready;

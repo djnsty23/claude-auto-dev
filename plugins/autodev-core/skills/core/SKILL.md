@@ -16,13 +16,14 @@ paths:
 
 Read the full story population through `workPlan(prd)` from this plugin's
 `scripts/prd-states.js`; resolve the plugin directory from the loaded skill's
-location. The same planner drives Auto and its Stop hook. Resolve the actual
-loaded autodev-core directory into the `AUTODEV_CORE_ROOT` environment variable;
-never guess it from the target project's working directory. Run this from the
-verified target project root, where prd.json lives:
+location. The same planner drives Auto and its Stop hook. Paths resolve through
+`CLAUDE_PLUGIN_ROOT`, which the host sets per loaded plugin; never guess it from
+the target project's working directory. The command throws if it is unset rather
+than reading an empty path. Run this from the verified target project root, where
+prd.json lives:
 
 ```bash
-node -e "const fs=require('fs'),path=require('path');if(!process.env.AUTODEV_CORE_ROOT)throw new Error('AUTODEV_CORE_ROOT is required');const {workPlan}=require(path.join(process.env.AUTODEV_CORE_ROOT,'scripts','prd-states.js'));const plan=workPlan(JSON.parse(fs.readFileSync('prd.json','utf8')));console.log(JSON.stringify({summary:plan.summary,ready:plan.ready.map(([id])=>id),blocked:plan.blocked,invalid:plan.invalid,complete:plan.complete},null,2))"
+node -e "const fs=require('fs'),path=require('path');if(!process.env.CLAUDE_PLUGIN_ROOT)throw new Error('CLAUDE_PLUGIN_ROOT is required');const {workPlan}=require(path.join(process.env.CLAUDE_PLUGIN_ROOT,'scripts','prd-states.js'));const plan=workPlan(JSON.parse(fs.readFileSync('prd.json','utf8')));console.log(JSON.stringify({summary:plan.summary,ready:plan.ready.map(([id])=>id),blocked:plan.blocked,invalid:plan.invalid,complete:plan.complete},null,2))"
 ```
 
 Report `plan.summary` across every sprint, plus `plan.ready`, `plan.blocked` and

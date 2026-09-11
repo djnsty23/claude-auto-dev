@@ -10,10 +10,12 @@ argument-hint: "[days | YouTube URL]"
 
 # Marketing Radar
 
-Resolve the actual loaded `autodev-core` directory into `autodev_core_root`
-before running the shell examples. Use the loaded skill's location; do not
-guess from the target project's working directory or assume another host set
-`CLAUDE_PLUGIN_ROOT`. Verify the named script exists under that resolved root.
+The shell examples resolve scripts through `${CLAUDE_PLUGIN_ROOT}`, which the
+host sets per loaded plugin — it is an environment variable, so it survives
+across separate shell invocations where a variable you assign does not. Do not
+substitute the target project's working directory. If it is unset the plugin is
+not loaded; fix that rather than hardcoding a path. Verify the named script
+exists under that root.
 
 Collect first, separate claims from promotion, then test only what the available
 population can actually answer. Primary, research-method, trade/community and
@@ -25,8 +27,8 @@ popularity, comments and proxy scores are leads, not proof of business impact.
 Run the shared collector with this profile:
 
 ```bash
-node "${autodev_core_root}/scripts/framework-radar.js" \
-  --config "${autodev_core_root}/scripts/marketing-radar-sources.json" \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" \
+  --config "${CLAUDE_PLUGIN_ROOT}/scripts/marketing-radar-sources.json" \
   --days 14
 ```
 
@@ -196,7 +198,7 @@ measurements under `variants.a/b/c`, `tested_at`, and at least one raw `evidence
 location.
 
 ```bash
-node "${autodev_core_root}/scripts/radar-learning.js" \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
   --manifest <manifest-path> \
   --verdicts .claude/reports/marketing-radar-verdicts-YYYY-MM-DD.json
 ```
@@ -233,7 +235,7 @@ After the report is complete and any PR is remotely readable, mark the exact
 manifest reviewed:
 
 ```bash
-node "${autodev_core_root}/scripts/framework-radar.js" \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" \
   --mark-reviewed <manifest-path>
 ```
 

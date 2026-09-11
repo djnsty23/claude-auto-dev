@@ -9,10 +9,12 @@ argument-hint: "[--days N | --apply | --summary]"
 
 # Production Radar
 
-Resolve the actual loaded `autodev-core` directory into `autodev_core_root`
-before running the shell examples. Use the loaded skill's location; do not
-guess from the target project's working directory or assume another host set
-`CLAUDE_PLUGIN_ROOT`. Verify the named script exists under that resolved root.
+The shell examples resolve scripts through `${CLAUDE_PLUGIN_ROOT}`, which the
+host sets per loaded plugin — it is an environment variable, so it survives
+across separate shell invocations where a variable you assign does not. Do not
+substitute the target project's working directory. If it is unset the plugin is
+not loaded; fix that rather than hardcoding a path. Verify the named script
+exists under that root.
 
 Collect first, read second, propose third. The collector owns retrieval,
 normalisation, thresholds, deduplication and the ledger. This skill owns
@@ -54,13 +56,13 @@ like. Do not ask for the value in chat.
 ## 2. Collect
 
 ```bash
-node "${autodev_core_root}/scripts/production-signals.js" --days 14 --summary
+node "${CLAUDE_PLUGIN_ROOT}/scripts/production-signals.js" --days 14 --summary
 ```
 
 or, when the repo's credentials live in Doppler:
 
 ```bash
-doppler run -p <project> -c prd -- node "${autodev_core_root}/scripts/production-signals.js" --days 14 --summary
+doppler run -p <project> -c prd -- node "${CLAUDE_PLUGIN_ROOT}/scripts/production-signals.js" --days 14 --summary
 ```
 
 The collector prints one line per source it COULD NOT CHECK, the population

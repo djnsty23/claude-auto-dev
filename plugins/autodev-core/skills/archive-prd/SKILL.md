@@ -218,11 +218,10 @@ Check the total before and after and state both numbers. A story dropped during
 the move looks exactly like a story that was never there.
 
 **Observable 2 — DURABILITY: the archive is a file git will keep.** Resolve
-`autodev_core_root` from this loaded plugin and `archive_path` from the file
-actually written before running:
+`archive_path` from the file actually written before running:
 
 ```bash
-node "$autodev_core_root/scripts/check-archive-path.js" "$archive_path"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-archive-path.js" "$archive_path"
 git status --short <the archive you wrote>     # it must appear
 ```
 
