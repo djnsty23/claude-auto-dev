@@ -31,7 +31,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const SCRIPTS = __dirname;
-const { summarise, storiesOf } = require(path.join(SCRIPTS, 'prd-states.js'));
+const { summarise, storiesOf, isActionable } = require(path.join(SCRIPTS, 'prd-states.js'));
 
 function sh(cmd, args, cwd) {
     try {
@@ -78,6 +78,35 @@ function transcriptsFor(repo) {
     return { recent: out, scanned };
 }
 
+/**
+ * The stories an agent could pick up next, newest-state-first in file order.
+ *
+ * isActionable(), not a private copy of it. `[measured 2026-09-11]` the filter
+ * here read `v.passes === null || v.passes === false`, which drops a story
+ * written with NO `passes` key — a state the module counts as pending. On a
+ * six-story fixture the BAR rendered `pending 2` while this list showed 2 of
+ * the 3 stories an agent could actually take. Two surfaces of one panel
+ * disagreeing about one file, with the module already imported at the top.
+ *
+ * The state RIDES ALONG because this list mixes pending with FAILED, and
+ * "S1-003 Farmer" under an unlabelled heading does not tell a reader that the
+ * story has already been attempted and lost. Never collapse the two into the
+ * word "next" alone; `needs-setup` and `deferred` are correctly absent, because
+ * no agent can advance either.
+ *
+ * Exported so the selection can be graded without git, gh or a live fleet.
+ */
+function nextActionable(stories, limit = 3) {
+    return Object.entries(stories || {})
+        .filter(([, v]) => isActionable(v))
+        .slice(0, limit)
+        .map(([id, v]) => ({
+            id,
+            title: String((v && v.title) || '').slice(0, 64),
+            state: v && v.passes === false ? 'failed' : 'pending',
+        }));
+}
+
 function repoFacts(repoPath) {
     const cwd = repoPath;
     sh('git', ['fetch', '-q', 'origin'], cwd);
@@ -99,8 +128,7 @@ function repoFacts(repoPath) {
         if (raw) {
             try {
                 const st = storiesOf(JSON.parse(raw)); const s = summarise(st);
-                const next = Object.entries(st).filter(([, v]) => v && (v.passes === null || v.passes === false)).slice(0, 3)
-                    .map(([id, v]) => ({ id, title: String(v.title || '').slice(0, 64) }));
+                const next = nextActionable(st);
                 prd = { done: s.done, pending: s.pending, failed: s.failed, deferred: s.deferred, needsSetup: s.needsSetup, total: s.total, next };
             } catch (e) { prd = null; }
         }
@@ -138,7 +166,14 @@ function prdBar(p) {
     const segs = [['done', p.done, 'good'], ['pending', p.pending, 'accent'], ['failed', p.failed, 'crit'], ['deferred', p.deferred, 'muted'], ['needs setup', p.needsSetup, 'warn']].filter(([, n]) => n > 0);
     const bar = segs.map(([k, n, c]) => '<i class="seg ' + c + '" style="flex:' + n + '" title="' + k + ' ' + n + '"></i>').join('');
     const legend = segs.map(([k, n]) => '<span><b class="mono">' + n + '</b> ' + k + '</span>').join('');
-    const next = (p.next || []).length ? '<ol class="next">' + p.next.map((s) => '<li><span class="mono">' + esc(s.id) + '</span> ' + esc(s.title) + '</li>').join('') + '</ol>' : '';
+    // A FAILED story is work an agent may retry, which is why it belongs in this
+    // list — and it is NOT the same as work nobody has started, which is why it
+    // is named. One list, two states, one label was the whole defect.
+    const next = (p.next || []).length
+        ? '<p class="nexth muted mono">next actionable</p><ol class="next">' + p.next.map((s) => '<li><span class="mono">' + esc(s.id) + '</span> '
+            + '<span class="chip ' + (s.state === 'failed' ? 'crit' : 'accent') + '">' + esc(s.state || 'pending') + '</span> '
+            + esc(s.title) + '</li>').join('') + '</ol>'
+        : '';
     return '<div class="bar" role="img" aria-label="' + p.total + ' stories: ' + segs.map(([k, n]) => n + ' ' + k).join(', ') + '">' + bar + '</div>'
         + '<div class="legend">' + legend + '<span class="muted">of <b class="mono">' + p.total + '</b></span></div>' + next;
 }
@@ -198,10 +233,11 @@ const CSS = [
     '.prs .t{font-size:.9rem;overflow-wrap:anywhere}',
     '.prs .why{grid-column:1/-1;font-size:.72rem;color:var(--muted)}',
     '.chip{display:inline-flex;align-items:center;font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}',
-    '.chip.good{color:var(--good)}.chip.warn{color:var(--warn)}.chip.crit{color:var(--crit)}.chip.muted{color:var(--muted)}',
+    '.chip.good{color:var(--good)}.chip.warn{color:var(--warn)}.chip.crit{color:var(--crit)}.chip.muted{color:var(--muted)}.chip.accent{color:var(--accent)}',
     '.bar{display:flex;height:10px;border-radius:2px;overflow:hidden;background:var(--sunk);gap:1px}',
     '.seg{display:block}.seg.good{background:var(--good)}.seg.accent{background:var(--accent)}.seg.crit{background:var(--crit)}.seg.muted{background:var(--muted)}.seg.warn{background:var(--warn)}',
     '.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.78rem;margin-top:6px}',
+    '.nexth{margin:10px 0 4px;font-size:.7rem;letter-spacing:.05em;text-transform:uppercase}',
     '.next{margin-top:8px}.next li{display:flex;gap:8px;font-size:.82rem;align-items:baseline}',
     '.sess li{display:flex;justify-content:space-between;gap:8px;font-size:.8rem}',
     '.small{font-size:.82rem;margin:0}',
@@ -234,7 +270,7 @@ function render(d) {
         + '</div>';
 }
 
-module.exports = { gather, render, repoPanel, prdBar, esc };
+module.exports = { gather, render, repoPanel, prdBar, esc, nextActionable };
 
 if (require.main === module) {
     const argv = process.argv.slice(2);

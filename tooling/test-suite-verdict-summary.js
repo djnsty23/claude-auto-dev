@@ -20,8 +20,16 @@
 // producer added tomorrow with no cause on it; the static half reads every
 // `status: 'UNCHECKED'` literal in the sweep and requires a cause in the same
 // object. That is the regression this split can actually suffer.
+//
+// AND IT PLANTS ITS OWN MUTANTS. Everything above says the split HOLDS. The last
+// block says this suite NOTICES when it stops holding: four collapses are written
+// into a scratch copy of the subject and each is watched going red, with an
+// unmutated control run first so a broken scratch copy cannot report four kills
+// while catching nothing. See the tail of this file, and
+// docs/evidence-suite-verdict-mutants-2026-09-11.md.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const sv = require('./suite-verdict-summary.js');
@@ -29,6 +37,10 @@ const sv = require('./suite-verdict-summary.js');
 const TOOLING = __dirname;
 const SUBJECT = path.join(TOOLING, 'suite-verdict-summary.js');
 const SWEEP = path.join(TOOLING, 'check-suites-can-fail.js');
+// Set on the children this suite spawns of ITSELF, so the mutant harness at the
+// bottom does not recurse. Absent in an ordinary run, which is why the harness
+// runs as part of `npm test` rather than as a mode nobody remembers to invoke.
+const CHILD = 'AUTODEV_SVS_MUTANT_CHILD';
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -184,6 +196,121 @@ const MIXED = [
         + 'comment, never something it can print',
         phraseLines.length > 0 && phraseLines.every(({ l }) => l.trim().startsWith('//')),
         phraseLines.map(({ n, l }) => n + ': ' + l.trim().slice(0, 40)).join(' | ') || 'no mention at all');
+}
+
+// --- THE FOUR COLLAPSES, PLANTED AND WATCHED ---------------------------------
+//
+// WHY THIS EXISTS. The assertions above prove the split HOLDS.
+// check-suites-can-fail.js proves this suite can fail AT ALL — it plants one
+// canary and requires a red. Neither proves this suite fails in the specific
+// ways the split exists to catch, and that is the claim a reader actually
+// needs: a suite can be green, canary-verified, and still blind to the one
+// regression it was written for.
+//
+// PROVENANCE, STATED PLAINLY. The mutants run when the split first landed were
+// scratch copies and were NOT preserved; a live sweep receipt from that day
+// survives outside this repo. These four are NOT a recovery of those. They are
+// the four collapses this module can actually suffer, each read off its own
+// design — four things the file says in prose that it must not do — and each is
+// planted here and watched going red, rather than asserted to be caught.
+//
+// THE CONTROL RUNS FIRST AND IS NOT OPTIONAL. A harness whose scratch copy is
+// broken (a file it forgot to carry, a bad path) reports every mutant "caught"
+// while catching nothing. So the UNMUTATED copy must go green in exactly the
+// same scratch directory before any mutant verdict is believed — and each
+// mutant must be killed BY THE ASSERTION THAT NAMES IT, not by whatever red
+// happens to appear first.
+if (!process.env[CHILD]) {
+    const SRC = fs.readFileSync(SUBJECT, 'utf8');
+    const lines = (...l) => l.join('\n');
+
+    // Each mutant: a source anchor that must match EXACTLY ONCE, the collapse it
+    // restores, and the assertion labels that must be among the child's reds.
+    const MUTANTS = [
+        {
+            name: 'the measured incident: one clause for the whole family',
+            why: 'renderCauses totals every unverified row under the derivation wording — '
+                + 'the exact line that sent a reader to fix four suites that were fine',
+            from: lines('function renderCauses(sum) {',
+                        '    const counts = (sum && sum.counts) || {};'),
+            to: lines('function renderCauses(sum) {',
+                      '    const n = (sum && sum.family) || 0;',
+                      "    return n ? CAUSE.NO_SUBJECT.say(n) : '';",
+                      '    // eslint-disable-next-line no-unreachable',
+                      '    const counts = (sum && sum.counts) || {};'),
+            kills: [/names the real deficiency with its own count/, /never attributes the 3 sweep failures/],
+        },
+        {
+            name: 'the reassuring short phrase',
+            why: "RUN_INCOMPLETE says 'N indeterminate' — which the module's own comment says "
+                + 'is read as a verdict by exactly the reader this exists for',
+            from: lines("        say: (n) => `${n} the sweep could not measure this run — indeterminate and `",
+                        "            + `re-runnable, NOT a finding about the suite${n === 1 ? '' : 's'}`,"),
+            to: "        say: (n) => `${n} indeterminate`,",
+            kills: [/they are not a finding about the suite/, /re-runnable/],
+        },
+        {
+            name: 'the uncategorised fold',
+            why: 'a row whose producer set no cause joins the derivation bucket instead of '
+                + 'surfacing — how a sixth producer added tomorrow becomes invisible',
+            from: '        else counts[UNCATEGORISED.key]++;',
+            to: '        else counts[CAUSE.NO_SUBJECT.key]++;',
+            kills: [/no cause is counted apart/, /does not inflate the derivation count/],
+        },
+        {
+            name: 'the family boundary',
+            why: 'VACUOUS and RED join the unverified family, so verdicts ABOUT a suite are '
+                + 'counted as things the sweep could not measure',
+            from: "const UNVERIFIED_FAMILY = Object.freeze(['UNCHECKED', 'NO-SUBJECT']);",
+            to: "const UNVERIFIED_FAMILY = Object.freeze(['UNCHECKED', 'NO-SUBJECT', 'VACUOUS', 'RED']);",
+            kills: [/stay out of the family/, /unverified FAMILY is the 4 without a verdict/],
+        },
+    ];
+
+    /**
+     * Run this suite against one version of the subject, in a scratch directory.
+     * Three files travel: the subject (possibly mutated), this suite, and the
+     * sweep — which the static half only ever READS as text, never runs.
+     */
+    function runAgainst(subjectSrc) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'svs-mutants-'));
+        try {
+            fs.writeFileSync(path.join(dir, 'suite-verdict-summary.js'), subjectSrc);
+            fs.copyFileSync(__filename, path.join(dir, path.basename(__filename)));
+            fs.copyFileSync(SWEEP, path.join(dir, path.basename(SWEEP)));
+            const r = spawnSync(process.execPath, [path.join(dir, path.basename(__filename))], {
+                encoding: 'utf8', windowsHide: true, timeout: 120000,
+                env: { ...process.env, [CHILD]: '1' },
+            });
+            const out = (r.stdout || '') + (r.stderr || '');
+            return { status: r.status, error: r.error, out, reds: out.split('\n').filter((l) => l.startsWith('FAIL')) };
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        }
+    }
+
+    const control = runAgainst(SRC);
+    check('CONTROL: the unmutated subject is GREEN in the same scratch copy',
+        control.status === 0 && control.reds.length === 0,
+        control.error ? String(control.error.code || control.error.message) : control.reds.join(' | ').slice(0, 200));
+
+    for (const m of MUTANTS) {
+        const hits = SRC.split(m.from).length - 1;
+        if (hits !== 1) {
+            // A drifted anchor is a HARNESS defect and must never read as a kill.
+            check(`mutant anchor "${m.name}" still matches the subject exactly once`, false,
+                `matched ${hits} time(s) — the subject was refactored; re-point this mutant`);
+            continue;
+        }
+        const got = runAgainst(SRC.replace(m.from, m.to));
+        check(`mutant: ${m.name} — turns this suite RED`,
+            got.status === 1 && got.reds.length > 0,
+            got.error ? String(got.error.code || got.error.message) : `status=${got.status} reds=${got.reds.length}`);
+        const missed = m.kills.filter((re) => !got.reds.some((l) => re.test(l)));
+        check('  and is caught by the assertions written for it, not by an unrelated red',
+            missed.length === 0, missed.length ? 'these did not go red: ' + missed.join(', ') : '');
+        console.log(`        collapse restored: ${m.why}`);
+    }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

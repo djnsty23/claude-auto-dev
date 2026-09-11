@@ -18,7 +18,8 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'fleet-snapshot.js');
-const { render, esc } = require(SUBJECT);
+const { render, esc, nextActionable } = require(SUBJECT);
+const { summarise } = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'prd-states.js'));
 const SRC = fs.readFileSync(SUBJECT, 'utf8');
 
 let pass = 0, fail = 0;
@@ -40,7 +41,7 @@ const DATA = {
                 { number: 42, title: 'Draft <script>alert(1)</script> title', draft: true, head: 'y', verdict: 'NOT_READY', population: {}, reasons: ['it is a DRAFT, so a guarded gate reports SKIPPED'] },
                 { number: 43, title: 'Unknown', draft: false, head: 'z', verdict: 'CANNOT_TELL', population: {}, reasons: ['gh could not answer'] },
             ],
-            prd: { done: 10, pending: 3, failed: 1, deferred: 2, needsSetup: 1, total: 17, next: [{ id: 'S1-002', title: 'Tilemap' }, { id: 'S1-003', title: 'Farmer' }] },
+            prd: { done: 10, pending: 3, failed: 1, deferred: 2, needsSetup: 1, total: 17, next: [{ id: 'S1-002', title: 'Tilemap', state: 'pending' }, { id: 'S1-003', title: 'Farmer', state: 'failed' }] },
             stale: { olderThanAgeDays: 2, openStateAndDated: 5, present: 4 },
             branchesAhead: 7, transcripts: [{ worktree: 'wt-a', ageMin: 12 }, { worktree: 'wt-b', ageMin: 300 }], transcriptsScanned: 9,
         },
@@ -81,6 +82,38 @@ check('a repo with no PRs says so rather than rendering an empty list', /no open
 check('the story bar names all five states when all are non-zero', ['done', 'pending', 'failed', 'deferred', 'needs setup'].every((k) => new RegExp('<b class="mono">\\d+</b> ' + k).test(html)));
 check('the story bar is labelled for assistive tech with the same totals', /aria-label="17 stories: 10 done, 3 pending, 1 failed, 2 deferred, 1 needs setup"/.test(html));
 check('the next actionable stories are listed by id', /S1-002/.test(html) && /S1-003/.test(html));
+check('the next list is labelled as what it is, not left as a bare list', /next actionable/.test(html));
+check('a FAILED story in that list is NAMED failed, not shown as plain next work',
+    /S1-003<\/span> <span class="chip crit">failed<\/span>/.test(html), 'one list, two states, one label was the defect');
+check('  and a pending one is named pending', /S1-002<\/span> <span class="chip accent">pending<\/span>/.test(html));
+
+// ---- the selection itself: it must agree with prd-states, not re-derive it -----
+//
+// `[measured 2026-09-11]` repoFacts() filtered `passes === null || passes === false`
+// and so dropped a story written with NO `passes` key — a state summarise()
+// counts as pending. The bar and this list then disagreed about one file. The
+// fixture carries all FIVE states plus the keyless one, because a fixture that
+// omits a state cannot catch a filter that omits it too.
+{
+    const FIVE = {
+        'S1-001': { title: 'done', passes: true },
+        'S1-002': { title: 'pending', passes: null },
+        'S1-003': { title: 'FAILED', passes: false },
+        'S1-004': { title: 'deferred', passes: 'deferred' },
+        'S1-005': { title: 'needs a key', passes: 'needs-setup' },
+        'S1-006': { title: 'authored with no passes key' },
+    };
+    const picked = nextActionable(FIVE, 10);
+    const ids = picked.map((n) => n.id);
+    check('a story with NO passes key is offered as next work', ids.includes('S1-006'), ids.join(','));
+    check('  so the list and the summarise() bar agree on how many are actionable',
+        picked.length === summarise(FIVE).actionable, picked.length + ' vs ' + summarise(FIVE).actionable);
+    check('a FAILED story is offered, carrying its own state', picked.some((n) => n.id === 'S1-003' && n.state === 'failed'), JSON.stringify(picked));
+    check('a deferred story is never offered — it is a decision not to do the work', !ids.includes('S1-004'), ids.join(','));
+    check('a needs-setup story is never offered — no agent can supply the key', !ids.includes('S1-005'), ids.join(','));
+    check('a done story is never offered', !ids.includes('S1-001'), ids.join(','));
+    check('the list is capped, so a 400-story backlog cannot fill the panel', nextActionable(FIVE, 2).length === 2);
+}
 check('a repo with no prd says so', /no prd.json at the trunk/.test(html));
 check('document staleness is printed with its population', /<span class="mono">2<\/span> of <span class="mono">5<\/span> dated open-state claims older than 7 d, in <span class="mono">4<\/span> boot docs/.test(html));
 check('a repo not scanned for staleness says so', /not scanned/.test(html));
