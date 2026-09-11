@@ -81,7 +81,10 @@ const PRELOAD = [
     '  for (const pattern of (F.fail || [])) {',
     "    if (line.indexOf(pattern) !== -1) { const e = new Error('gh refused: ' + pattern); e.status = 1; throw e; }",
     '  }',
-    "  if (args[0] === 'repo' && args[1] === 'view') return JSON.stringify(F.repo);",
+    "  if (args[0] === 'repo' && args[1] === 'view') {",
+    "    const scoped = args[2] && args[2].indexOf('--') !== 0;",
+    "    return JSON.stringify(scoped ? (F.repoScoped || F.repo) : F.repo);",
+    '  }',
     "  if (args[0] === 'pr' && args[1] === 'list') return JSON.stringify(F.prs || []);",
     "  if (args[0] === 'api') {",
     '    const url = args[1];',
@@ -349,6 +352,29 @@ check('CONTROL EXECUTED: and it produced a real verdict, not an empty result',
     let zr = null; try { zr = JSON.parse(zero.stdout); } catch (e) { zr = null; }
     check('RACE: with --grace-seconds 0 the same fixture is FRESH, so the window is doing the work',
         !!zr && zr.prs[0].verdict === 'measured-green', JSON.stringify({ s: zero.status, o: zero.stdout.slice(0, 400) }));
+}
+
+// --repo must scope the default-branch lookup. `gh repo view` with no positional
+// argument answers about the checkout in cwd, so asking about another repo from
+// this one took the target's NAME from the flag and its TRUNK from the local
+// checkout. Both are usually called main, which is what makes it dangerous: it
+// is right by coincidence until it is not, and then it is confidently wrong.
+{
+    const r = run(SUBJECT, {
+        repo: { nameWithOwner: 'local/checkout', defaultBranchRef: { name: 'local-trunk' } },
+        repoScoped: { nameWithOwner: 'fixture/repo', defaultBranchRef: { name: 'main' } },
+        prs: [{ number: 7, baseRefName: 'main', headRefName: 'f', headRefOid: 'head1111', isDraft: false }],
+        tips: {
+            main: { sha: 'trunktip0000', commit: { committer: { date: TRUNK_TIP_AT } } },
+            'local-trunk': { sha: 'wrongtip0000', commit: { committer: { date: '2020-01-01T00:00:00Z' } } },
+        },
+        runs: { trunktip0000: runsAt(TRUNK_TIP_AT, 'success'), head1111: runsAt(STALE_RUN_AT, 'success') },
+    }, ['--repo', 'fixture/repo']);
+    check('--repo scopes the default-branch lookup to the TARGET repo, not the local checkout',
+        !!r.result && r.result.trunk === 'main', r.detail);
+    check('--repo: with the wrong trunk this PR would read green; with the right one it is STALE',
+        !!r.result && r.result.prs[0].subtype === 'STALE-EVIDENCE'
+        && r.result.prs[0].baseTipSha === 'trunktip0000', r.detail);
 }
 
 // #2 — the population beside every count.

@@ -348,7 +348,16 @@ function checkCiFreshness(opts) {
     let repo = opts.repo || null;
     let trunk = opts.trunk || null;
     if (!repo || !trunk) {
-        const r = ghJson(['repo', 'view', '--json', 'nameWithOwner,defaultBranchRef'], cwd);
+        // SCOPE THE LOOKUP TO THE REQUESTED REPO. `gh repo view` with no
+        // positional argument answers about the checkout in cwd. With --repo
+        // given and --trunk not, an unscoped call took the TARGET repo's name
+        // from the flag and its DEFAULT BRANCH from whatever repo the shell
+        // happened to be sitting in. Both repos are usually called main, so it
+        // would have been right by coincidence until the day it was not, and
+        // the wrong trunk produces a confident verdict rather than an error.
+        const args = ['repo', 'view'];
+        if (present(repo)) args.push(repo);
+        const r = ghJson(args.concat(['--json', 'nameWithOwner,defaultBranchRef']), cwd);
         if (!r.ok) {
             return { blind: true, error: r.error, repo, trunk,
                 population: { openPrs: null, examined: 0, measuredGreen: 0, measuredRed: 0, unmeasured: 0, couldNotCheck: 0 }, prs: [] };
