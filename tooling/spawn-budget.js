@@ -365,10 +365,55 @@ function exitCode(fail, infra) {
     return infra > 0 ? 2 : (fail > 0 ? 1 : 0);
 }
 
+// ---------------------------------------------------------------------------
+// THE SWEEP'S BUDGETS. One number used to serve two categorically different
+// children, and that is the whole defect.
+//
+// check-suites-can-fail.js spawns a child per suite AND, at checkRunner, a child
+// that is the WHOLE of test-all.js. Both got 900000 ms. For one suite that is
+// enormous — the heaviest costs ~20s through that invocation, so a timeout needs
+// a ~45x blowup and CONTENTION_MAX is 20, which is the argument CLAUDE.md makes
+// for NOT raising it. That argument is sound and it is about the per-suite child.
+//
+// It does not reach checkRunner, where the child needs no blowup at all:
+//
+//   `[measured 2026-09-11]` test-all.js  890s, 6 concurrent peer sweeps
+//   `[measured 2026-09-12]` test-all.js  827s, 8 concurrent test-all.js runs,
+//                                        129/129 suites passed
+//
+// Against a 900s budget that is 1.1% headroom at the worst measured runtime. The
+// canary run is a second full test-all.js, so it times out on ordinary variation
+// and the sweep records a conflict with no cause — and the one check that catches
+// the empty-test-run case (twelve suites reporting PASS having executed nothing)
+// is the check most likely to go unrun.
+//
+// So this is NOT "raise it again". It is one constant that was being applied to a
+// child ~40x the size of the one it was sized for. The per-suite number is
+// unchanged; the runner gets its own, at 3x the worst measured runtime — well
+// past the 7.6% spread between the two runs above, while still bounding how long
+// a reader waits to be told the run was indeterminate.
+//
+// checkValidator is NOT such a call site, though it was reported as one. Its
+// child is validate.js: `[measured 2026-09-12]` 3688/3976/4197 ms over three
+// runs, a ~215x margin against the per-suite budget. It is left alone
+// deliberately — widening a budget that is already 215x its subject buys nothing
+// and would make this change look like the blanket raise it is not.
+const SWEEP_SUITE_BUDGET_MS = 900000;
+const SWEEP_MEASURED_RUNNER_MS = 890000;
+const SWEEP_RUNNER_BUDGET_MS = 2700000;
+
+// Keyed on the suite being spawned, so the decision lives with the numbers rather
+// than at the call site, and can be asserted by RUNNING it rather than by
+// grepping the sweep's source for a constant name.
+function sweepBudgetFor(suite) {
+    return suite === 'test-all.js' ? SWEEP_RUNNER_BUDGET_MS : SWEEP_SUITE_BUDGET_MS;
+}
+
 module.exports = {
     contentionFactor, timedOut, classify, reason, runBudgeted, tally, exitCode,
     lastWords, deadlineRemaining, clampToDeadline,
     SPIN_FLOOR_MS, CONTENTION_MAX, DEADLINE_ENV, DEADLINE_FLOOR_MS,
+    sweepBudgetFor, SWEEP_SUITE_BUDGET_MS, SWEEP_RUNNER_BUDGET_MS, SWEEP_MEASURED_RUNNER_MS,
 };
 
 // --- CLI -------------------------------------------------------------------
