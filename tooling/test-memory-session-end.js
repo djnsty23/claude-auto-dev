@@ -219,6 +219,8 @@ function run(dir, sessionId) {
             const row = readSession(sid);
             check('a FAILED story counts as remaining', /1 tasks remaining/.test(row?.next_steps || '')
                 && /S1-002/.test(row?.next_steps || ''));
+            check('  and is NAMED failed, not just counted as remaining',
+                /FAILED, retry \(S1-002\)/.test(row?.next_steps || ''), row?.next_steps);
             check('  and is not listed as completed', !/S1-002/.test(row?.completed || ''));
         }
 
@@ -241,7 +243,43 @@ function run(dir, sessionId) {
             const row = readSession(sid);
             check('a needs-setup story is outstanding: appears in next_steps',
                 /1 tasks remaining/.test(row?.next_steps || '') && /S1-002/.test(row?.next_steps || ''));
+            check('  and is NAMED as blocked, so the next session does not pick it up',
+                /BLOCKED ON SETUP, no agent can advance these \(S1-002\)/.test(row?.next_steps || ''), row?.next_steps);
             check('  and is not listed as completed', !/S1-002/.test(row?.completed || ''));
+        }
+
+        // THE COLLAPSE ITSELF. `[measured 2026-09-11]` four outstanding stories in
+        // three different states rendered as "4 tasks remaining: S1-002, S1-003,
+        // S1-005, S1-006" — a correct filter under one confident label. The word
+        // FAILED appeared nowhere and nothing said a story was waiting on the
+        // operator, so the next session's obvious move is to pick up the one it
+        // cannot advance. Every state is present in this fixture on purpose: a
+        // fixture missing a state cannot catch a report that drops it.
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({
+                    stories: {
+                        'S1-001': { title: 'done', passes: true },
+                        'S1-002': { title: 'pending', passes: null },
+                        'S1-003': { title: 'broke', passes: false },
+                        'S1-004': { title: 'decided against', passes: 'deferred' },
+                        'S1-005': { title: 'needs a key', passes: 'needs-setup' },
+                        'S1-006': { title: 'authored with no passes key' },
+                    },
+                }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-five', sid);
+            run(dir, 'sess-five');
+            const steps = readSession(sid)?.next_steps || '';
+            check('all four outstanding states are still counted in the total', /4 tasks remaining/.test(steps), steps);
+            check('  the two pending ones are named together', /2 pending \(S1-002, S1-006\)/.test(steps), steps);
+            check('  the FAILED one is named, so the word appears at all', /1 FAILED, retry \(S1-003\)/.test(steps), steps);
+            check('  the blocked one is named as needing a human', /1 BLOCKED ON SETUP[^(]*\(S1-005\)/.test(steps), steps);
+            check('  a deferred story is in neither the count nor the breakdown', !/S1-004/.test(steps), steps);
+            check('  a done story is in neither', !/S1-001/.test(steps), steps);
+            check('  and the breakdown accounts for every story in the total',
+                (steps.match(/S1-00\d/g) || []).length === 4, steps);
         }
 
         {
@@ -253,7 +291,7 @@ function run(dir, sessionId) {
             run(dir, 'sess-proto');
             const row = readSession(sid);
             check('nested __proto__ story remains visible in the memory summary',
-                /1 tasks remaining: __proto__/.test(row?.next_steps || ''));
+                /1 tasks remaining: 1 pending \(__proto__\)/.test(row?.next_steps || ''), row?.next_steps);
             check('CONTROL: ordinary done story survives beside __proto__', /GOOD/.test(row?.completed || ''));
         }
 
