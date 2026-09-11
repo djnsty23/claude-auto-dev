@@ -13,8 +13,8 @@ never ships.
 ## Commands
 
 ```bash
-npm run gate                 # THE GATE: nine steps chained with &&. Run this.
-npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 9.
+npm run gate                 # THE GATE: ten steps chained with &&. Run this.
+npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 10.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
 node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md; step 7 fails on drift
@@ -22,26 +22,27 @@ node tooling/check-claude-md.js        # step 8: does THIS FILE still describe t
 npm run check:coverage       # step 9: the suite again under coverage; red only ABOVE the measured floor
 ```
 
-**`npm test` is ONE NINTH of the gate, and every step it skips fails silently.**
+**`npm test` is ONE TENTH of the gate, and every step it skips fails silently.**
 `[measured 2026-08-30]` a session ran nine green `npm test` runs and never
 executed `check:suites`, so a newly added suite was reported green while
 `check-suites-can-fail.js` had it counted as NOT verified. The suite in question
 was the one gating pushes.
 
 Nothing about the first command hints at the rest, which is why `npm run gate`
-now exists: it chains all nine.
+now exists: it chains all ten.
 
 `[measured 2026-09-07]` **THE CHAIN IS `&&`, so a red first step means the other
-eight NEVER RAN.** The gate is
+nine NEVER RAN.** The gate is
 
 ```
 npm test && npm run check:suites && npm run check:probe-shapes
   && npm run check:population && npm run check:entrypoints
-  && npm run check:skill-tools && npm run check:agents-md
+  && npm run check:skill-tools && npm run check:skill-plugin-root
+  && npm run check:agents-md
   && npm run check:claude-md && npm run check:coverage
 ```
 
-Steps seven and eight are the cheap ones, and they sit where they do for the reason `&&`
+Steps eight and nine are the cheap ones, and they sit where they do for the reason `&&`
 makes unavoidable: a cheap step that goes red early hides every expensive step
 behind it, so nothing that matters is skipped when one of these is the one that
 fails. `check:agents-md` regenerates `AGENTS.md` from the `rule-*` skills to a
@@ -51,7 +52,7 @@ FILE against the tree — the gate chain above, the `passes` table, the populati
 counts, the branch-protection claim. **It is also the reason the numbers in this
 section can be trusted now.** Every one of them used to be a sentence that went
 stale in silence, and three did inside 48 hours; this very sentence pair is what
-the eighth step reads. The ninth, `check:coverage`, is the expensive one and the
+the ninth step reads. The tenth, `check:coverage`, is the expensive one and the
 last: it runs every suite a second time under `NODE_V8_COVERAGE` and fails only
 when the count of plugin functions no suite enters rises above the floor dated
 in its source (`tooling/find-untested-functions.js`), so it sits behind the two
@@ -63,8 +64,8 @@ A session landing a rescued commit read the resulting exit 1 as "the gate is
 red", and was one step from describing the commit as gated when `check:suites` —
 the step that catches exactly the unverifiable-new-suite case above — had not
 executed at all. Its change ADDED a suite, so that was the one step it could not
-afford to skip. When the first step fails, run the remaining eight yourself; the
-chain's exit status is a verdict on one step, not on nine.
+afford to skip. When the first step fails, run the remaining nine yourself; the
+chain's exit status is a verdict on one step, not on ten.
 
 **And `npm run gate` is NOT "what CI runs"**, in both directions. CI adds a
 `node --check` parse loop over every `plugins/*/hooks/*.js` that the gate has no

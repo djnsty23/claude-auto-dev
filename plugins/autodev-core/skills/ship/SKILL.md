@@ -114,7 +114,7 @@ Before the deployment, or a push/merge that triggers one, record:
    to the tested candidate. Replacing the baseline with the post-deploy SHA
    would erase the change window.
 3. The gate command/results, live verification plan and artifact paths in the
-   deploy ledger. Resolve `autodev_core_root` from the loaded plugin and generate
+   deploy ledger. Resolve the scripts through `${CLAUDE_PLUGIN_ROOT}` and generate
    the ledger with `--since "$previous_deployed_commit" --candidate "$candidate_commit"`
    before promotion.
    Checklist ticks are recorded assertions, not independent proof.
@@ -332,7 +332,7 @@ as unresolved and continue checks that can actually run.
 
 ## Step 5b: The deploy ledger — what changed, and was each surface looked at
 
-The ledger enumerates what needs checking. Reuse `autodev_core_root` and the
+The ledger enumerates what needs checking. Reuse `${CLAUDE_PLUGIN_ROOT}` and the
 immutable `previous_deployed_commit` captured before promotion in Step 4. Do not
 resolve the current platform SHA again as the baseline: it now names the new
 candidate. Reuse the frozen `candidate_commit` from Step1 as the other end of
@@ -340,8 +340,8 @@ that range. The checkout may now contain a later evidence commit; read back the
 ledger header and population to verify the explicit candidate is still used.
 
 ```bash
-node "$autodev_core_root/scripts/deploy-ledger.js" --write --since "$previous_deployed_commit" --candidate "$candidate_commit"
-node "$autodev_core_root/scripts/deploy-ledger.js" --verify --since "$previous_deployed_commit" --candidate "$candidate_commit"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --write --since "$previous_deployed_commit" --candidate "$candidate_commit"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify --since "$previous_deployed_commit" --candidate "$candidate_commit"
 ```
 
 `--write` records the resolved base and candidate commits and produces

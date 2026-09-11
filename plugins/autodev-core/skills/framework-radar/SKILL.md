@@ -10,10 +10,12 @@ argument-hint: "[days | YouTube URL]"
 
 # Framework Radar
 
-Resolve the actual loaded `autodev-core` directory into `autodev_core_root`
-before running the shell examples. Use the loaded skill's location; do not
-guess from the target project's working directory or assume another host set
-`CLAUDE_PLUGIN_ROOT`. Verify the named script exists under that resolved root.
+The shell examples resolve scripts through `${CLAUDE_PLUGIN_ROOT}`, which the
+host sets per loaded plugin — it is an environment variable, so it survives
+across separate shell invocations where a variable you assign does not. Do not
+substitute the target project's working directory. If it is unset the plugin is
+not loaded; fix that rather than hardcoding a path. Verify the named script
+exists under that root.
 
 Collect first, judge second, test third. The collector owns source retrieval,
 transcript storage, population counts and deduplication. This skill owns
@@ -24,7 +26,7 @@ relevance, corroboration, controlled experiments and evidence-backed adoption.
 Run the shipped collector from this plugin:
 
 ```bash
-node "${autodev_core_root}/scripts/framework-radar.js" --days 14
+node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" --days 14
 ```
 
 If the invocation includes a YouTube URL or ID, append one `--video <ID-or-URL>`
@@ -198,7 +200,7 @@ selected hypothesis has run. It must use `schema_version: 1`, the exact manifest
 Then update the durable learning ledger and regenerate the user artifacts:
 
 ```bash
-node "${autodev_core_root}/scripts/radar-learning.js" \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
   --manifest <manifest-path> \
   --verdicts .claude/reports/framework-radar-verdicts-YYYY-MM-DD.json
 ```
@@ -213,7 +215,7 @@ for each transition. `default` requires `--revalidate-by`; an expired default is
 reported as `stale` and must return to shadow or retire.
 
 ```bash
-node "${autodev_core_root}/scripts/radar-learning.js" \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/radar-learning.js" \
   --state-dir <manifest-state-dir> --transition <experiment-id> \
   --to shadow --evidence <evidence-path-or-summary>
 ```
@@ -253,7 +255,7 @@ winning PR has been read back from the remote, mark exactly that manifest
 reviewed:
 
 ```bash
-node "${autodev_core_root}/scripts/framework-radar.js" --mark-reviewed <manifest-path>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/framework-radar.js" --mark-reviewed <manifest-path>
 ```
 
 This writes the review heartbeat. Do not mark reviewed before the report exists,

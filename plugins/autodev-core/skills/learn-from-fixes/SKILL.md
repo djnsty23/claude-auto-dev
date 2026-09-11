@@ -10,10 +10,12 @@ argument-hint: "[repo path]"
 
 # Learn From Fixes
 
-Resolve the actual loaded `autodev-core` directory into `autodev_core_root`
-before running the shell examples. Use the loaded skill's location; do not
-guess from the target project's working directory or assume another host set
-`CLAUDE_PLUGIN_ROOT`. Verify the named script exists under that resolved root.
+The shell examples resolve scripts through `${CLAUDE_PLUGIN_ROOT}`, which the
+host sets per loaded plugin — it is an environment variable, so it survives
+across separate shell invocations where a variable you assign does not. Do not
+substitute the target project's working directory. If it is unset the plugin is
+not loaded; fix that rather than hardcoding a path. Verify the named script
+exists under that root.
 
 Git history supplies candidates for understanding rework. A nearby `fix` and
 `feat` touching the same file establish temporal overlap, not causation or proof
@@ -25,7 +27,7 @@ This turns that history into a ranked list of what to gate.
 ## 1. Measure
 
 ```bash
-node "${autodev_core_root}/scripts/mine-fixes.js" .
+node "${CLAUDE_PLUGIN_ROOT}/scripts/mine-fixes.js" .
 ```
 
 Add `--json` for machine-readable output, `--since=60.days` (any `git log
@@ -127,7 +129,7 @@ The loop above only closes when someone remembers to ask. A nightly or weekly
 routine can run the **measurement half** unattended and propose the rest:
 
 ```bash
-node "${autodev_core_root}/scripts/mine-fixes.js" <repo> --json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/mine-fixes.js" <repo> --json
 ```
 
 Report-only rules for the unattended run:
@@ -152,7 +154,7 @@ before its precondition existed, a query naming a column that does not exist.
 They are paid for in retries inside a session and leave no trace in history.
 
 ```bash
-node "${autodev_core_root}/scripts/analyze-session-patterns.js" --days 7 --json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/analyze-session-patterns.js" --days 7 --json
 ```
 
 Two differences from `mine-fixes` that change how it is run and read:

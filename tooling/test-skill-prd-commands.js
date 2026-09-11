@@ -121,7 +121,9 @@ function runIn(dir, command) {
       cwd: dir, encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'],
       // The consumer project and the loaded plugin are different directories.
       // Supply the actual scanned plugin root, never resolve it from fixture cwd.
-      env: { ...process.env, AUTODEV_CORE_ROOT: path.join(ROOT, 'plugins', 'autodev-core') },
+      // This is the same variable a real host sets, so the fixture exercises the
+      // shipped command verbatim rather than a rewritten one.
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: path.join(ROOT, 'plugins', 'autodev-core') },
     });
   } catch (e) {
     // status is null when the child never ran or was killed by a signal. That
