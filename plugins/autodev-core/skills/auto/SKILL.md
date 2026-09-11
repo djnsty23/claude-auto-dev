@@ -516,12 +516,13 @@ When all pending tasks are done, auto handles the sprint lifecycle — but verif
 2. Log summary to .claude/sprint-history.md:
    "Sprint [N]: [done]/[total] tasks | [date] | [one-line summary of work]"
 
-3. Archive completed stories:
-   - Copy current prd.json to .claude/archives/prd-archive-sprint-[N].json
-   - Remove stories with passes: true from prd.json
-   - Keep stories with passes: null, false, "deferred", or "needs-setup"
-     (needs-setup was missing here, so archiving DELETED work that was waiting
-      on the operator — losing the record of what he still owed)
+3. Apply the archive-prd skill's split and durability checks:
+   - Preserve unresolved stories, passed QA records, and the full prerequisite
+     chain referenced by retained work; do not delete every passed record.
+   - Prove a tracked archive destination before writing, read back the archive,
+     and preserve every record by id and payload across archive plus active PRD.
+   - Keep dependency readiness intact and commit the archive and PRD together.
+     If any check fails, preserve the PRD and stop the transition.
 
 4. Decide whether to bump — show a one-line honesty summary first:
 

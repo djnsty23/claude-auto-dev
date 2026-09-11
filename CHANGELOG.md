@@ -1,5 +1,41 @@
 # Changelog
 
+## [8.168.0]
+
+### Requirements survive the planning and worker handoffs
+
+- Preserve explicit acceptance criteria, verification obligations and stable
+  requirement IDs in mission contracts. Legacy notes-only stories remain
+  supported; diagnostic notes no longer replace explicit acceptance.
+- Bind referenced specifications to exact revisions and carry their content to
+  workers. A read-only revision report identifies affected stories and their
+  dependents; updating a specification does not silently refresh its evidence.
+- Route automatic sprint archival through the same durable archive and
+  prerequisite-preservation checks used by manual archival.
+- Validate malformed dependencies, missing prerequisite IDs and cycles at plan
+  admission. Existing plans retain the runtime's carried-story interpretation.
+- Recheck readiness and current requirements before each new worker attempt,
+  including retries and later dispatches in the same tick. Keep existing worker
+  ownership visible for reconciliation when a story changes or disappears.
+
+### Durable mission protocol and executable skills
+
+- Integrate the mission store, dispatch, delivery and bounded supervisor stack
+  (#229, #233, #234, #235). Accepted worker results remain unverified; this release
+  does not add a real model-host adapter or automatically mark stories complete.
+- Integrate the skill rewrite and its executable planning tests (#227), together
+  with the plugin-root correction (#240). Shipped commands use the host's
+  `CLAUDE_PLUGIN_ROOT`; a dedicated check guards unbound root references.
+
+### Validation
+
+- Make survey tests use their real local Git remotes without contacting
+  placeholder network origins. Record how host suspension can produce a timeout
+  even when a child printed a complete passing tally; timeout verdicts remain
+  indeterminate and budgets are unchanged.
+- Include current main's mutation-sweep candidate ranking and cause-specific
+  reporting (#238, #239), plus the previously merged audit repairs (#226).
+
 ## [8.167.0]
 
 ### The reason this release exists: the previous fix never reached anybody
