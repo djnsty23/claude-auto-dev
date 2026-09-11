@@ -129,8 +129,10 @@ the production deploy, the four conditions apply to the merge.
 
 **One command checks all four, and it is the authorisation.**
 `deploy-ledger.js --verify` (Step 5b) exits 0, printing nothing, only when the
-window is eligible, the commit is HEAD and on the default branch, every surface is
-checked and every promotion field is filled. Exit 1 names the unmet condition,
+window is eligible, the commit being promoted is on the default branch, every
+surface is checked and every promotion field is filled. That commit is the
+CANDIDATE — HEAD unless `--candidate` froze an earlier one — not whatever the
+working tree happens to be checked out at. Exit 1 names the unmet condition,
 exit 2 means it could not tell, exit 3 is the ineligible list. So the promotion
 lines below read `--verify && <promote>`: the chain reads the exit code, and no
 other signal authorises a promotion — not a green CI badge, not a preview that
@@ -356,25 +358,30 @@ the authorisation: Step 4's rule says a promotion is pre-authorised on a green
 gate with the ledger, and `--verify` is the one place both are checked.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --write     # derive from the diff, keep what is filled
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --write     # derive from the diff, keep what is filled for this window
+node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --write --candidate <sha>   # ...against a frozen commit rather than HEAD
 node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify    # 0 promote · 1 incomplete · 2 blind · 3 ineligible
 node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --record    # after the promotion: file it, move the marker
 node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --audit     # every recorded promotion, complete or not
 ```
 
-`--write` reads `<last deploy>..HEAD` and produces `DEPLOY-LEDGER.md` at the
+`--write` reads `<last deploy>..<candidate>` (the candidate is HEAD unless
+`--candidate` names one) and produces `DEPLOY-LEDGER.md` at the
 repo root: one row per affected surface, each needing a desktop pass, 390, 414,
 console clean and network clean, a metrics line, and the **promotion record**
 below. Ticks and filled fields survive a regenerate for the same window, because
 a tool that wipes your work is a tool nobody re-runs; a regenerate for a NEW
 window starts blank and says so, because the previous window's gate run and
-evidence say nothing about this one.
+evidence say nothing about this one. The window is BOTH resolved commits, base
+and candidate, recorded in the file: a candidate that moves while the base holds
+still is a different window, and inheriting a gate tail across it would be a
+promotion authorised by a gate run nobody did.
 
 ### The promotion record, every field required
 
 | field | what goes there | `--verify` refuses when |
 |---|---|---|
-| `commit` | derived: HEAD at `--write` | it is not HEAD any more (STALE), or it is not on the default branch |
+| `commit` | derived: the candidate at `--write` (HEAD unless `--candidate`) | it is not the candidate any more (STALE), or it is not on the default branch |
 | `gate` | the gate command you ran, by name | empty |
 | `gate exit` | its exit code | anything but `0` |
 | `gate tail` | its last 20 lines, inside the fence | empty |

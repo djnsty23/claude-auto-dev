@@ -347,6 +347,80 @@ try {
     check('every promotion command in the shipped ship skill is gated by --verify',
         ungated(skillText).length === 0, 'UNGATED -> ' + ungated(skillText).join(' | '));
 
+    // And EVERY OTHER shipped skill, because reading ship/SKILL.md alone cannot
+    // see the two cases that actually happened: a promotion command living in a
+    // different skill, and this PR's clause being dropped from auto/SKILL.md by a
+    // rewrite that owns that section. Both produce a green board today.
+    //
+    // KNOWN GAPS are listed, not tolerated silently. autodev-stack cannot gate
+    // its own deploys: ${CLAUDE_PLUGIN_ROOT} resolves PER PLUGIN, so a skill
+    // there cannot invoke autodev-core's deploy-ledger.js at all. Listing them
+    // makes the gap a fact the suite states rather than one nobody noticed, and
+    // the equality below means CLOSING a gap fails too — deliberately, so the
+    // list cannot rot into a hiding place.
+    const KNOWN_UNGATED = [
+        'plugins/autodev-stack/skills/supabase/SKILL.md',
+    ];
+    const skillsRoot = path.resolve(__dirname, '..', 'plugins');
+    const everySkill = [];
+    for (const plugin of fs.readdirSync(skillsRoot)) {
+        const dir = path.join(skillsRoot, plugin, 'skills');
+        if (!fs.existsSync(dir)) continue;
+        for (const name of fs.readdirSync(dir)) {
+            const file = path.join(dir, name, 'SKILL.md');
+            if (fs.existsSync(file)) everySkill.push(file);
+        }
+    }
+    check('the sweep actually found the shipped skills (a zero-length sweep proves nothing)',
+        everySkill.length > 20 && everySkill.includes(SKILL), everySkill.length + ' skill file(s)');
+
+    const offenders = everySkill
+        .filter((file) => ungated(fs.readFileSync(file, 'utf8')).length)
+        .map((file) => path.relative(path.resolve(__dirname, '..'), file).split(path.sep).join('/'))
+        .sort();
+    check('no skill outside the known-gap list carries an ungated promotion command',
+        JSON.stringify(offenders) === JSON.stringify(KNOWN_UNGATED.slice().sort()),
+        'found ' + JSON.stringify(offenders) + ' expected ' + JSON.stringify(KNOWN_UNGATED.slice().sort()));
+
+    // The control for the sweep: planting the defect in a skill the OLD check
+    // never read must be detected. Without this the sweep passes on a reader
+    // that parses nothing, which is the failure it exists to prevent.
+    const autoSkill = path.resolve(__dirname, '..', 'plugins/autodev-core/skills/auto/SKILL.md');
+    const plantedAuto = fs.readFileSync(autoSkill, 'utf8') + '\n```bash\nnpx vercel --prod --yes\n```\n';
+    check('the control: an ungated promotion planted in auto/SKILL.md IS detected',
+        ungated(plantedAuto).length === 1 && /vercel --prod/.test(ungated(plantedAuto)[0]),
+        JSON.stringify(ungated(plantedAuto)));
+
+    // And auto/SKILL.md must still REQUIRE the ledger before a promotion, so a
+    // rewrite that silently drops the requirement goes red. This is the #227
+    // collision case: that PR deletes the table this clause is anchored to.
+    //
+    // Asserted as the REQUIREMENT, not one spelling of it. Naming `--verify`
+    // here would constrain the SHAPE of a correct re-anchor: once auto delegates
+    // production to ship, it stops naming ship's command and names ship instead,
+    // which is the point of delegating. A gate that reddens a correct fix is a
+    // gate someone switches off, and a gate switched off protects nothing. Any
+    // of these carries the requirement; none of them is satisfied by dropping it.
+    const REQUIRES_LEDGER = [
+        /deploy-ledger/,                 // names the script, with or without the flag
+        /Step 5b/,                       // cites ship's promotion gate by section
+        /ship workflow[\s\S]{0,200}?promot/i,   // delegates to ship for promotion
+    ];
+    const autoText = fs.readFileSync(autoSkill, 'utf8');
+    check('auto/SKILL.md still requires the ledger before a promotion (in any form)',
+        REQUIRES_LEDGER.some((re) => re.test(autoText)),
+        'auto/SKILL.md names neither deploy-ledger, nor Step 5b, nor a ship delegation for promotion: a rewrite dropped the gate');
+
+    // The control for THAT check, because a three-way alternation is exactly the
+    // kind of predicate that quietly matches everything: strip all three forms
+    // and it must go red.
+    const strippedAuto = autoText
+        .replace(/deploy-ledger/g, 'REDACTED')
+        .replace(/Step 5b/g, 'REDACTED')
+        .replace(/ship workflow/gi, 'REDACTED');
+    check('the control: an auto/SKILL.md with the requirement removed IS detected',
+        !REQUIRES_LEDGER.some((re) => re.test(strippedAuto)), 'stripped text still matched');
+
     // The control: plant the exact defect that reached main and watch it fire.
     // Without this the check above passes on a reader that parses nothing.
     const plantedSkill = skillText.replace(
