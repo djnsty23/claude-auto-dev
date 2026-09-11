@@ -222,6 +222,51 @@ function intentFile(r, repoName, branch) {
     silentRun('silent: cwd is not a git repository', run(r));
 }
 
+// ── hooks_profile: this hook GUARDS, so the profile must not reach it ──────
+/* tooling/test-hooks-profile.js classifies this hook GUARDING and asserts only
+   that the guard STRING is absent from the source. That is a check on what is
+   NOT written, and it passes just as well on a hook that reads the profile under
+   a different spelling, or that grew a `minimal` branch later. The property that
+   matters is behavioural: with the profile set to minimal, the rescue still runs.
+
+   "A guard the model could switch off is no guard" — and the model can ask the
+   user for a setting. This is the case that makes that sentence true here. */
+{
+    for (const [key, value] of [
+        ['CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE', 'minimal'],
+        ['CLAUDE_PLUGIN_OPTION_hooks_profile', 'minimal'],
+        ['CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE', 'MINIMAL'],
+    ]) {
+        const r = repo();
+        dirty(r.top, { untracked: ['new.txt'], ageMinutes: 90 });
+        const res = run(r, { env: { [key]: value } });
+        check('still checkpoints under ' + key + '=' + value,
+            /^wip\(checkpoint\)/.test(headSubject(r.top)) && res.status === 0,
+            'HEAD=' + JSON.stringify(headSubject(r.top)) + ' exit=' + res.status);
+        check('  and still says so, rather than acting in silence',
+            Boolean(parsed(res)), 'stdout=' + JSON.stringify(res.out.slice(0, 160)));
+    }
+
+    /* The control the three cases above need: the same setup with NO profile set
+       also checkpoints. Without it, "minimal changed nothing" would be equally
+       consistent with a setup that checkpoints unconditionally for another
+       reason — and with one that was broken in the same way in every arm. */
+    const c = repo();
+    dirty(c.top, { untracked: ['new.txt'], ageMinutes: 90 });
+    const cres = run(c);
+    check('control: the same setup checkpoints with no profile set',
+        /^wip\(checkpoint\)/.test(headSubject(c.top)) && cres.status === 0,
+        'HEAD=' + JSON.stringify(headSubject(c.top)));
+
+    /* And the source must not learn to read it. Kept here beside the behaviour
+       rather than only in test-hooks-profile.js, so a reader of THIS file sees
+       that the omission is deliberate and not an oversight. */
+    const src = fs.readFileSync(HOOK, 'utf8');
+    check('the hook never reads a plugin option at all',
+        !/CLAUDE_PLUGIN_OPTION/i.test(src),
+        (src.match(/CLAUDE_PLUGIN_OPTION\w*/gi) || []).join(','));
+}
+
 // ── the checkpoint ─────────────────────────────────────────────────────────
 
 {
