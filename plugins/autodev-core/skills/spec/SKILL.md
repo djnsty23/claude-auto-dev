@@ -87,15 +87,19 @@ For anything else, emit the equivalent (`schema.sql`, a Drizzle schema, a
 Walk the core loop and ask, at each step, what a person must be able to do. Each
 of those is a story. The schema tells you what data each one touches.
 
-Follow the `core` skill's story shape exactly. Two fields carry the weight here:
+Follow the `core` skill's story shape and load its `references/requirements.md`.
+Two fields carry the weight here:
 
 - **`title`** — a capability, phrased so a stranger knows what changed when it is
   done. "Log a habit for today from the home screen", not "Habit UI".
-- **`notes`** — the acceptance criterion, stating an **observable**: what appears,
-  what a query returns, what gets rejected. "Tapping a habit inserts a check-in
-  for today and the streak count increments without a reload." This is the field
-  `auto` reads to decide whether it is finished, so vagueness here is what causes
-  a story to be closed early.
+- **`acceptance`** — observable outcomes with stable `{id, description}` entries:
+  what appears, what a query returns, what gets rejected. Keep diagnostic context
+  in `notes`; it cannot replace an explicit acceptance list. Record verification
+  tags or explicit obligations in `verify`.
+
+Link each spec-driven story through `specRefs` to the reviewed requirement files
+that constrain it. Keep their plain-English content in `specs/`, linked from
+SPEC.md, and record exact revisions as described in core's requirements reference.
 
 Everything else: `passes: null`, `realness: null`, `priority` 0-3 with at most a
 couple of 0s, `type` from fix/feature/refactor/qa/perf.
@@ -118,7 +122,8 @@ path; a supplied missing or empty file is a failure. For another backend, omit
 that argument and run its native schema checks separately, naming what ran.
 
 The checker rejects malformed/duplicate stories, several generic title and
-acceptance patterns, and new PostgreSQL tables without explicit RLS and policy
+acceptance patterns, malformed/missing/cyclic dependencies, stale spec revisions,
+and new PostgreSQL tables without explicit RLS and policy
 declarations. Comments and strings do not count. It supports ALTER TABLE for
 RLS settings only, and refuses other ALTER/DROP lifecycle forms (except DROP
 POLICY). Put initial columns and constraints in CREATE TABLE.

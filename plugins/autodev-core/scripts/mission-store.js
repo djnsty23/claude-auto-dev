@@ -44,9 +44,10 @@ const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { TextDecoder } = require('node:util');
+const { validateSnapshot } = require('./prd-requirements.js');
 const APP_ID = 0x41554456;
 const VERSION = 3;
-const COMMANDS = ['init', 'status', 'admit', 'claim', 'fail', 'receive', 'accept-envelope', 'prepare-start', 'authorize-bootstrap', 'register-executor', 'observe-worker', 'poll-worker', 'reject-result', 'enqueue-result', 'begin-delivery', 'ack-delivery'];
+const COMMANDS = ['init', 'status', 'list', 'admit', 'claim', 'fail', 'receive', 'accept-envelope', 'prepare-start', 'authorize-bootstrap', 'register-executor', 'observe-worker', 'poll-worker', 'reject-result', 'enqueue-result', 'begin-delivery', 'ack-delivery'];
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 function requireThat(value, code = 'invalid-input') { if (!value) fault(code); }
 function shape(value, keys, code = 'invalid-input') {
@@ -67,7 +68,7 @@ function relative(s) {
 }
 function validateContract(c) {
   const code = 'invalid-contract';
-  shape(c, ['repo', 'scope', 'target', 'acceptance', 'retry'], code);
+  shape(c, ['repo', 'scope', 'target', 'acceptance', 'retry', ...['verification', 'specRefs'].filter(key => Object.prototype.hasOwnProperty.call(c || {}, key))], code);
   shape(c.repo, ['id', 'root', 'commonDir', 'baseSha'], code);
   requireThat(text(c.repo.id) && typeof c.repo.root === 'string' && typeof c.repo.commonDir === 'string' && path.isAbsolute(c.repo.root) && path.isAbsolute(c.repo.commonDir) && sha(c.repo.baseSha), code);
   shape(c.scope, ['paths', 'effects'], code);
@@ -78,6 +79,12 @@ function validateContract(c) {
   requireThat(Array.isArray(c.acceptance) && c.acceptance.length > 0 && c.acceptance.length <= 1000, code);
   for (const a of c.acceptance) { shape(a, ['id', 'description'], code); requireThat(word(a.id) && text(a.description), code); }
   requireThat(new Set(c.acceptance.map(a => a.id)).size === c.acceptance.length, code);
+  if (c.verification !== undefined) {
+    requireThat(Array.isArray(c.verification) && c.verification.length <= 1000, code);
+    for (const item of c.verification) { shape(item, ['id', 'description'], code); requireThat(word(item.id) && text(item.description), code); }
+    requireThat(new Set(c.verification.map(item => item.id)).size === c.verification.length, code);
+  }
+  if (c.specRefs !== undefined) { try { validateSnapshot(c.specRefs); } catch { fault(code, 'Invalid spec snapshot'); } }
   shape(c.retry, ['maxAttempts', 'backoffMs', 'maxBackoffMs'], code);
   requireThat(Number.isInteger(c.retry.maxAttempts) && c.retry.maxAttempts >= 1 && c.retry.maxAttempts <= 100, code);
   requireThat(Number.isSafeInteger(c.retry.backoffMs) && c.retry.backoffMs >= 1 && Number.isSafeInteger(c.retry.maxBackoffMs) && c.retry.maxBackoffMs >= c.retry.backoffMs && c.retry.maxBackoffMs <= 86400000, code);
@@ -195,6 +202,13 @@ function status(db, id) {
     verified: false, executionObserved: false
   };
 }
+// Read-only inventory survives removal of a story from prd.json. Filter by the
+// verified git common directory so a supervisor never reconciles another repo.
+function list(db, commonDir) {
+  const rows = db.prepare('SELECT id,contract_json FROM missions ORDER BY id').all();
+  const missions = rows.filter(row => JSON.parse(row.contract_json).repo.commonDir === commonDir).map(row => row.id);
+  return { missions, total: rows.length, matched: missions.length };
+}
 function validFence(db, m, input) {
   requireThat(m.owner === input.owner && m.generation === input.generation && m.active_attempt === input.attemptId, 'stale-owner');
   const a = db.prepare('SELECT * FROM attempts WHERE id=? AND mission_id=?').get(input.attemptId, m.id);
@@ -202,7 +216,7 @@ function validFence(db, m, input) {
 }
 function validateInput(command, input) {
   const keys = {
-    init: [], status: ['missionId'], admit: ['missionId', 'eventId', 'contract'], claim: ['missionId', 'eventId', 'owner'],
+    init: [], status: ['missionId'], list: ['commonDir'], admit: ['missionId', 'eventId', 'contract'], claim: ['missionId', 'eventId', 'owner'],
     fail: ['missionId', 'eventId', 'owner', 'attemptId', 'generation', 'code'],
     receive: ['missionId', 'eventId', 'owner', 'attemptId', 'generation', 'result'],
     'accept-envelope': ['missionId', 'eventId', 'owner', 'attemptId', 'generation', 'resultId'],
@@ -217,8 +231,9 @@ function validateInput(command, input) {
     'ack-delivery': ['missionId','eventId','messageId','receipt']
   };
   shape(input, keys[command]);
-  if (command !== 'init') requireThat(word(input.missionId));
-  if (!['init', 'status'].includes(command)) requireThat(word(input.eventId));
+  if (!['init', 'list'].includes(command)) requireThat(word(input.missionId));
+  if (command === 'list') requireThat(typeof input.commonDir === 'string' && path.isAbsolute(input.commonDir) && input.commonDir === path.resolve(input.commonDir));
+  if (!['init', 'status', 'list'].includes(command)) requireThat(word(input.eventId));
   if ('owner' in input) requireThat(word(input.owner));
   if ('attemptId' in input) requireThat(word(input.attemptId) && Number.isSafeInteger(input.generation) && input.generation > 0);
   if (command === 'prepare-start') requireThat(word(input.operationKey) && Number.isSafeInteger(input.expectedRevision) && input.expectedRevision >= 0);
@@ -404,8 +419,8 @@ function execute(command, root, input) {
   const encoded=Buffer.from(JSON.stringify(input)); requireThat(encoded.length <= 262144,'input-too-large');
   validateInput(command,input); storePath(root); const DatabaseSync=sqliteRuntime();
   if(command==='init') return initialize(root,DatabaseSync);
-  const db=openStore(root,DatabaseSync,command==='status');
-  try { return command==='status' ? status(db,input.missionId) : transact(db,command,input); } finally { db.close(); }
+  const db=openStore(root,DatabaseSync,['status','list'].includes(command));
+  try { return command==='status' ? status(db,input.missionId) : command==='list' ? list(db,input.commonDir) : transact(db,command,input); } finally { db.close(); }
 }
 module.exports={execute,canonical,digest};
 async function main() {
@@ -427,7 +442,7 @@ async function main() {
     validateInput(command, input);
     let value;
     if (command === 'init') value = initialize(root, DatabaseSync);
-    else { db = openStore(root, DatabaseSync, command === 'status'); value = command === 'status' ? status(db, input.missionId) : transact(db, command, input); }
+    else { db = openStore(root, DatabaseSync, ['status', 'list'].includes(command)); value = command === 'status' ? status(db, input.missionId) : command === 'list' ? list(db, input.commonDir) : transact(db, command, input); }
     process.stdout.write(JSON.stringify({ ok: true, value }) + '\n');
   } catch (e) {
     let code = e.publicCode;

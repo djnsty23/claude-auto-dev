@@ -108,3 +108,12 @@ When that happens, add the class to `.claude/project-rules.md` under
 the comment a third time. `review` and `audit` both read that file, so a class
 recorded once is checked on everything after it — which is the difference between
 reviewing and teaching.
+
+## Requirement handoff
+
+For a PRD story or mission result, load core's `references/requirements.md` and
+read canonical acceptance, verification obligations and pinned spec content.
+Compare the current requirements with the admitted snapshot before using its
+evidence. Report stale or missing criteria explicitly; a passed test, received
+envelope or old spec hash cannot close a revised story. Review affected scope
+without discarding unrelated completed work.

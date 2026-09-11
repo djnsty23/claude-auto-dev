@@ -77,6 +77,15 @@ dispatch; update the outcome as it changes rather than waiting for session end.
 | `priority` | 0=critical, 1=high, 2=medium, 3=low |
 | `resolution` | HOW it was fixed (learning) |
 
+### Requirements and revisions
+
+When authoring/revising a story or reviewing a mission, load
+[the shared requirements contract](references/requirements.md).
+`acceptance` is the canonical outcome list; `verify` carries verification
+obligations, `notes` supplies legacy acceptance only when that list is absent,
+and `specRefs` binds reviewed specification content. Use explicit stable
+criterion IDs for new work. Record dependencies in `blockedBy`.
+
 ### Realness Scale (0-100)
 
 `realness` is an optional reviewer judgment about maturity. It does not establish

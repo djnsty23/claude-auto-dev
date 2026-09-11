@@ -26,7 +26,10 @@ Create a new sprint or advance to the next one.
    Each names its actor/trigger, observable outcome, acceptance checks,
    verification method, priority and relevant files. Use `blockedBy` for real
    dependencies and `needs-setup` with a reason for external requirements.
-3. Run the shared `workPlan(prd)` from core across all sprints. Resolve missing
+3. Load core's `references/requirements.md`. Run `check-spec-output.js --existing
+   prd.json` from the installed scripts directory, then the shared `workPlan(prd)`
+   across all sprints. For spec edits, run the read-only revision report first and
+   reconcile only affected criteria/evidence before updating pinned revisions. Resolve missing
    or malformed dependency IDs and cycles before selecting work. A native task
    tool may mirror the queue only if the current host exposes it; it is not the
    authoritative writer or a prerequisite for creating the sprint.

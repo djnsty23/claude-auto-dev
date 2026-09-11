@@ -13,8 +13,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const prdPath = process.argv[2] || 'prd.json';
-const sqlPath = process.argv[3] || null;
+const { dependencyProblems, VALID } = require('./prd-states.js');
+const { readRequirements } = require('./prd-requirements.js');
+const args = process.argv.slice(2);
+if (args.includes('--help') || args.includes('-h')) { console.log('Usage: node check-spec-output.js [--existing] [prd.json] [schema.sql]'); process.exit(0); }
+const existing = args[0] === '--existing';
+if (existing) args.shift();
+if (args.length > 2 || args.some(arg => arg.startsWith('--'))) { console.error('check-spec-output: usage: [--existing] [prd.json] [schema.sql]'); process.exit(1); }
+const prdPath = args[0] || 'prd.json';
+const sqlPath = args[1] || null;
 
 const problems = [];
 const note = (id, msg) => problems.push(`${id}: ${msg}`);
@@ -88,27 +95,27 @@ for (const [key, s] of entries) {
 
   // passes must be null: a freshly planned story cannot already be done, and
   // `false`/`"deferred"` are decisions nobody has made yet.
-  if (s.passes !== null) note(id, `passes is ${JSON.stringify(s.passes)}; a newly planned story must be null`);
+  if (!existing && s.passes !== null) note(id, `passes is ${JSON.stringify(s.passes)}; a newly planned story must be null`);
+  if (existing && s.passes !== undefined && !VALID.includes(s.passes)) note(id, `unrecognised passes state ${JSON.stringify(s.passes)}`);
   if (!TYPES.has(s.type)) note(id, `type ${JSON.stringify(s.type)} is not one of ${[...TYPES].join(', ')}`);
   if (!Number.isInteger(s.priority) || s.priority < 0 || s.priority > 3) note(id, `priority ${JSON.stringify(s.priority)} is not 0-3`);
 
-  // The acceptance criterion lives in `notes` — the core schema has no dedicated
-  // field and inventing one would drift from every other reader of prd.json.
-  const notes = typeof s.notes === 'string' ? s.notes.trim() : '';
-  if (!notes) note(id, 'no acceptance criterion in notes');
-  else if (notes.split(/\s+/).length < 6) note(id, `acceptance criterion is ${notes.split(/\s+/).length} words; too short to check against`);
-  else {
-    // Deliberately a DENYLIST of vagueness, not an allowlist of good verbs.
-    // The first version of this check required a verb from a list —
-    // shows/returns/rejects/persists — and immediately rejected its own
-    // reference example, whose criterion said "inserts a check-in" and "the
-    // count increments". The set of verbs describing an observable outcome is
-    // open; the set of words used to avoid describing one is small and closed.
-    const VAGUE = /\b(works?|correctly|properly|as expected|appropriately|nice|intuitive|seamless|smooth|robust|user[- ]friendly|good|better|improved|handled|functional|successfully)\b/i;
-    const hit = VAGUE.exec(notes);
-    if (hit) note(id, `acceptance criterion leans on "${hit[1]}" — say what is observably true instead`);
+  // The same reader freezes the worker's contract. Diagnostic notes cannot
+  // substitute for explicit acceptance, and malformed verification is not dropped.
+  let requirements;
+  try { requirements = readRequirements(s, id, path.dirname(path.resolve(prdPath))); }
+  catch (e) { note(id, e.message); continue; }
+  for (const criterion of requirements.acceptance) {
+    const words = criterion.description.split(/\s+/).length;
+    if (words < 6) note(id, `acceptance criterion ${criterion.id} is ${words} words; too short to check against`);
+    else {
+      const VAGUE = /\b(works?|correctly|properly|as expected|appropriately|nice|intuitive|seamless|smooth|robust|user[- ]friendly|good|better|improved|handled|functional|successfully)\b/i;
+      const hit = VAGUE.exec(criterion.description);
+      if (hit) note(id, `acceptance criterion leans on "${hit[1]}" — say what is observably true instead`);
+    }
   }
 }
+for (const problem of dependencyProblems(prd)) note(problem.id, problem.reason);
 
 // This is a structural check of a NEW PostgreSQL schema, not proof that SQL
 // executes or policies implement the intended access model. Comments and

@@ -170,6 +170,11 @@ When creating stories in prd.json, each story can carry a `verify: []` array and
 
 If no `verify` field exists, auto infers from the task type (UI → visual+a11y+design, API → api+security, etc.).
 
+Load core's `references/requirements.md` when reading acceptance or spec revisions.
+Use its canonical requirements reader; explicit acceptance overrides diagnostic
+notes. Reconcile stale `specRefs` before starting or completing affected work,
+and carry the frozen requirement snapshot into a fresh worker's brief.
+
 Before marking a task done, verify each acceptance criterion. "Does it compile?" is not acceptance — "does it behave correctly?" is.
 
 ### Context Loading (before writing any code)

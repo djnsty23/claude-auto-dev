@@ -67,7 +67,7 @@ function workPlan(prd) {
     const stories = storiesOf(prd);
     const entries = Object.entries(stories);
     const summary = summarise(stories);
-    const ready = [], blocked = [], invalid = [];
+    const ready = [], blocked = [], invalid = [], graphProblems = [];
     const deps = new Map();
     const hasStory = (id) => Object.prototype.hasOwnProperty.call(stories, id);
 
@@ -87,7 +87,8 @@ function workPlan(prd) {
         if (!isActionable(story)) continue;
         if (story.blockedBy !== undefined && (!Array.isArray(story.blockedBy)
             || story.blockedBy.some((dep) => typeof dep !== 'string' || !dep.trim()))) {
-            blocked.push({ id, reason: 'malformed blockedBy: expected an array of story ids' });
+            const problem = { id, reason: 'malformed blockedBy: expected an array of story ids' };
+            blocked.push(problem); graphProblems.push(problem);
             continue;
         }
         deps.set(id, [...new Set(story.blockedBy || [])]);
@@ -138,9 +139,9 @@ function workPlan(prd) {
 
     for (const [id, dependencies] of deps) {
         const reasons = [];
-        if (cycles.has(id)) reasons.push('dependency cycle');
+        if (cycles.has(id)) { reasons.push('dependency cycle'); graphProblems.push({ id, reason: 'dependency cycle' }); }
         for (const dep of dependencies) {
-            if (!hasStory(dep)) reasons.push(`missing dependency ${dep}`);
+            if (!hasStory(dep)) { reasons.push(`missing dependency ${dep}`); graphProblems.push({ id, reason: `missing dependency ${dep}` }); }
             else if (!isDone(stories[dep])) {
                 const state = stories[dep] && stories[dep].passes;
                 reasons.push(`blocked by ${dep} (${state === undefined || state === null ? 'pending' : String(state)})`);
@@ -150,8 +151,20 @@ function workPlan(prd) {
         else ready.push([id, stories[id]]);
     }
 
-    return { stories, summary, ready, blocked, invalid,
+    return { stories, summary, ready, blocked, invalid, graphProblems,
         complete: entries.length > 0 && summary.outstanding === 0 && summary.unrecognised === 0 && invalid.length === 0 };
+}
+
+/** Validate the whole dependency graph independently of completion states.
+ * Reuse the runtime planner's graph algorithm with every record pending: done
+ * or setup-blocked records must not hide malformed edges in an authored plan.
+ * Pending prerequisites remain valid; only structural graph problems are errors.
+ */
+function dependencyProblems(prd) {
+    const stories = Object.fromEntries(Object.entries(storiesOf(prd)).map(([id, story]) => [id,
+        story && typeof story === 'object' && !Array.isArray(story) ? { ...story, passes: null } : story]));
+    const plan = workPlan({ stories });
+    return [...plan.invalid, ...plan.graphProblems];
 }
 
 /**
@@ -298,5 +311,5 @@ function storiesOf(prd) {
 module.exports = {
     DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP, VALID,
     isActionable, isOutstanding, isDeferred, isDone, needsSetup, isArchivable,
-    summarise, storiesOf, workPlan,
+    summarise, storiesOf, workPlan, dependencyProblems,
 };

@@ -32,7 +32,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { storiesOf, isActionable } = require('./prd-states.js');
+const { storiesOf, isActionable, workPlan } = require('./prd-states.js');
+const { readRequirements, revisionReport } = require('./prd-requirements.js');
 
 const USAGE = [
     'Usage: node mission-contract.js --prd <prd.json> --story <id> --paths <a,b,..>',
@@ -40,8 +41,9 @@ const USAGE = [
     '         [--target <local|preview|production>:<identifier>]',
     '         [--max-attempts 3] [--backoff-ms 60000] [--max-backoff-ms 1800000]',
     '         [--repo-id <id>] [--mission-id <id>] [--event-id <id>]',
+    '         [--source-root <planning worktree of the same repo, default root>]',
     'Prints the mission-store.js admit payload {missionId, eventId, contract} for one',
-    'story: its acceptance criterion (the story\'s notes, whitespace-normalised), the',
+    'story: canonical acceptance, verification obligations and pinned spec content, the',
     'repository\'s verified root, common git dir and HEAD as base, the paths the worker',
     'may change, the authorised effects, the target and the retry budget.',
     'Deterministic: same story, same base, same flags give the same bytes. Defaults:',
@@ -68,7 +70,7 @@ function parseArgs(argv) {
         if (Object.prototype.hasOwnProperty.call(out, key)) fail('usage', `--${key} given twice`);
         out[key] = value;
     }
-    const known = ['help', 'prd', 'story', 'paths', 'root', 'effects', 'target', 'max-attempts', 'backoff-ms', 'max-backoff-ms', 'repo-id', 'mission-id', 'event-id'];
+    const known = ['help', 'prd', 'story', 'paths', 'root', 'effects', 'target', 'max-attempts', 'backoff-ms', 'max-backoff-ms', 'repo-id', 'mission-id', 'event-id', 'source-root'];
     for (const k of Object.keys(out)) if (!known.includes(k)) fail('usage', `unknown flag --${k}`);
     return out;
 }
@@ -101,15 +103,8 @@ function build(opts) {
     if (!story || typeof story !== 'object' || Array.isArray(story)) fail('story-malformed', `story ${storyId} is not an object`);
     if (!isActionable(story)) fail('story-not-actionable', `story ${storyId} has passes=${JSON.stringify(story.passes)}; only pending (null or absent) and failed (false) stories can be admitted`);
 
-    // The acceptance criterion lives in `notes` (check-spec-output.js reads the
-    // same field). Whitespace is normalised so a re-wrapped criterion is the
-    // same criterion; anything longer than the store accepts is refused rather
-    // than truncated, because a truncated snapshot is a different contract.
-    const raw = typeof story.notes === 'string' ? story.notes : '';
-    const criterion = raw.replace(/\s+/g, ' ').trim();
-    if (!criterion) fail('no-acceptance-criterion', `story ${storyId} has no acceptance criterion in notes`);
-    if (criterion.length > 2048) fail('acceptance-too-long', `story ${storyId}: criterion is ${criterion.length} characters; the store accepts 2048`);
-    if (/[\x00-\x1f\x7f]/.test(criterion)) fail('acceptance-invalid', `story ${storyId}: criterion contains control characters`);
+    const plan = workPlan(prd);
+    if (!plan.ready.some(([id]) => id === storyId)) fail('story-not-ready', `story ${storyId}: ${[...plan.blocked, ...plan.invalid].find(item => item.id === storyId)?.reason || 'not ready'}`);
 
     const rootArg = path.resolve(opts.root || process.cwd());
     const git = (...args) => execFileSync('git', ['-C', rootArg, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -122,6 +117,18 @@ function build(opts) {
         baseSha = git('rev-parse', 'HEAD');
     } catch { fail('repo-unverified', `${rootArg} is not a git working tree with a HEAD commit`); }
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(baseSha)) fail('repo-unverified', `HEAD of ${root} is not a commit sha`);
+
+    // Specs belong to the planning repository, even when the worker owns a
+    // detached worktree. The source must be another worktree of the same repo.
+    const sourceRoot = path.resolve(opts['source-root'] || root);
+    if (opts['source-root']) {
+        let sourceCommon;
+        try { sourceCommon = fs.realpathSync.native(execFileSync('git', ['-C', sourceRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }).trim()); }
+        catch { fail('repo-unverified', 'spec source is not a verified worktree'); }
+        if (sourceCommon !== commonDir) fail('repo-unverified', 'spec source and worker must belong to the same repository');
+    }
+    const requirements = readRequirements(story, storyId, sourceRoot);
+    if (Object.values(stories).some(item => item && item.specRefs !== undefined) && revisionReport(prd, sourceRoot).affected.includes(storyId)) fail('spec-revision-mismatch', `story ${storyId} depends on a requirement needing revision reconciliation`);
 
     let repoId = opts['repo-id'];
     if (repoId === undefined) { try { repoId = git('remote', 'get-url', 'origin'); } catch { repoId = ''; } }
@@ -158,17 +165,19 @@ function build(opts) {
     if (!WORD.test(missionId)) fail('invalid-mission-id', `mission id ${JSON.stringify(missionId)} is not a mission word`);
     if (!WORD.test(eventId)) fail('invalid-event-id', `event id ${JSON.stringify(eventId)} is not a mission word`);
 
-    return {
+    const payload = {
         missionId,
         eventId,
         contract: {
             repo: { id: repoId, root, commonDir, baseSha },
             scope: { paths, effects },
             target: { kind, identifier },
-            acceptance: [{ id: storyId, description: criterion }],
+            ...requirements,
             retry,
         },
     };
+    if (Buffer.byteLength(JSON.stringify(payload)) > 262144) fail('contract-too-large', 'admit payload exceeds the store limit of 256 KiB; split the story');
+    return payload;
 }
 
 module.exports = { build, parseArgs };

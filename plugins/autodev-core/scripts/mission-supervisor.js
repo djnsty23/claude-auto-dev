@@ -45,7 +45,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { execute } = require('./mission-store.js');
+const { execute, canonical } = require('./mission-store.js');
+const { revisionReport, readRequirements } = require('./prd-requirements.js');
 const { workPlan, storiesOf } = require('./prd-states.js');
 const contract = require('./mission-contract.js');
 const dispatch = require('./mission-dispatch.js');
@@ -124,35 +125,60 @@ function settle(opts, store, missionId, s) {
     return { action: 'failed', code, exitCode: observation ? observation.exitCode : null, hookStatus: observation ? observation.hookStatus : null, resultState: result ? result.state : 'none', next: f.state, nextEligibleAt: f.nextEligibleAt };
 }
 
+function readPlan(prdPath) {
+    let prd;
+    try { prd = JSON.parse(fs.readFileSync(prdPath, 'utf8')); }
+    catch (e) { fault('prd-unreadable', `${prdPath}: ${e.code || e.name}`); }
+    return { prd, plan: workPlan(prd), stories: storiesOf(prd) };
+}
+
+// Re-read immediately before EACH start, including retries and later candidates
+// after an awaited worker. Reconciliation does not pass through this guard.
+function currentPayload(opts, prdPath, id, stored) {
+    const current = readPlan(prdPath);
+    if (!current.plan.ready.some(([readyId]) => readyId === id)) {
+        const reason = [...current.plan.blocked, ...current.plan.invalid].find(item => item.id === id)?.reason || 'story removed, completed or deferred';
+        fault('story-not-ready', `${id}: ${reason}`);
+    }
+    const revisions = revisionReport(current.prd, opts.root);
+    if (revisions.affected.includes(id)) fault('spec-revision-mismatch', `${id}: a referenced requirement or prerequisite needs revision reconciliation`);
+    const story = current.stories[id];
+    if (story.paths !== undefined && (!Array.isArray(story.paths) || !story.paths.length || story.paths.some(p => typeof p !== 'string' || !p.trim()))) fault('invalid-paths', `story ${id} has malformed paths`);
+    const paths = story.paths === undefined ? opts.paths : story.paths.join(',');
+    if (!paths) fault('usage', `story ${id} has no paths and --paths was not given`);
+    const root = stored ? stored.repo.root : missionRoot(opts, id);
+    const payload = contract.build({ prd: prdPath, story: id, root, 'source-root': opts.root, paths,
+        'max-attempts': opts['max-attempts'], 'backoff-ms': opts['backoff-ms'], 'max-backoff-ms': opts['max-backoff-ms'] });
+    if (stored && canonical(payload.contract) !== canonical(stored)) fault('contract-stale', `${id}: current requirements, scope, repository or retry policy differ from the admitted contract; reconcile before a new attempt`);
+    return payload;
+}
+
 async function tick(opts) {
     for (const r of ['prd', 'root', 'store', 'owner', 'adapter', 'worker']) if (!opts[r]) fault('usage', `--${r} is required`);
     const maxDispatch = Number(opts['max-dispatch'] === undefined ? 1 : opts['max-dispatch']); if (!Number.isInteger(maxDispatch) || maxDispatch < 0) fault('usage', '--max-dispatch must be a non-negative integer');
     const store = path.resolve(opts.store); const prdPath = path.resolve(opts.prd);
-    let prd; try { prd = JSON.parse(fs.readFileSync(prdPath, 'utf8')); } catch (e) { fault('prd-unreadable', `${prdPath}: ${e.code || e.name}`); }
-    const plan = workPlan(prd); const stories = storiesOf(prd);
+    const { plan } = readPlan(prdPath);
+    let commonDir;
+    try { commonDir = fs.realpathSync.native(execFileSync('git', ['-C', path.resolve(opts.root), 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 }).trim()); }
+    catch { fault('repo-unverified', 'supervisor root is not a verified repository'); }
     const readyIds = plan.ready.map(([id]) => id);
     const candidates = new Set(readyIds);
-    for (const id of Object.keys(stories)) if (!readyIds.includes(id) && statusOrNull(store, id)) candidates.add(id);
+    for (const id of call(store, 'list', { commonDir }).missions) candidates.add(id);
     const missions = []; let dispatched = 0; const now = Date.now();
     for (const id of candidates) {
         let s = statusOrNull(store, id);
         const before = s ? s.mission.state : 'unadmitted';
         const row = { id, before };
         try {
+            if (s && s.mission.contract.repo.commonDir !== commonDir) { fault('repository-conflict', `mission ${id} belongs to another repository in this store`); }
             if (s && s.mission.state === 'claimed') { Object.assign(row, settle(opts, store, id, s)); }
             else if (s && ['result-received', 'envelope-accepted'].includes(s.mission.state)) { Object.assign(row, s.mission.state === 'envelope-accepted' ? { action: 'awaiting-verification' } : settle(opts, store, id, { ...s, mission: { ...s.mission, state: 'claimed' } })); }
             else if (s && s.mission.state === 'exhausted') { Object.assign(row, { action: 'exhausted', reason: s.mission.terminalReason, attempts: s.mission.attemptCount }); }
             else if (s && s.mission.state === 'retry-wait' && s.mission.nextEligibleAt !== null && now < s.mission.nextEligibleAt) { Object.assign(row, { action: 'waiting', nextEligibleAt: s.mission.nextEligibleAt, attempts: s.mission.attemptCount }); }
-            else if (!readyIds.includes(id) && !s) { Object.assign(row, { action: 'not-ready' }); }
             else if (dispatched >= maxDispatch) { Object.assign(row, { action: 'deferred-this-tick', hint: `--max-dispatch ${maxDispatch} reached` }); }
             else {
-                if (!s) {
-                    const story = stories[id];
-                    const paths = Array.isArray(story.paths) && story.paths.length ? story.paths.join(',') : opts.paths;
-                    if (!paths) fault('usage', `story ${id} has no paths and --paths was not given`);
-                    const payload = contract.build({ prd: prdPath, story: id, root: missionRoot(opts, id), paths, 'max-attempts': opts['max-attempts'], 'backoff-ms': opts['backoff-ms'], 'max-backoff-ms': opts['max-backoff-ms'] });
-                    call(store, 'admit', payload); row.admitted = true;
-                }
+                const payload = currentPayload(opts, prdPath, id, s && s.mission.contract);
+                if (!s) { call(store, 'admit', payload); row.admitted = true; }
                 dispatched++;
                 const started = await dispatch.start({ store, mission: id, owner: opts.owner, adapter: opts.adapter, worker: opts.worker, 'wait-ms': opts['wait-ms'] });
                 row.dispatch = started.value.state;
@@ -164,14 +190,28 @@ async function tick(opts) {
             if (!e.publicCode) throw e;
             // A held worktree is a queue, not a fault: the store allows one live reservation per worktree.
             if (e.publicCode === 'worktree-conflict') { row.action = 'worktree-held'; row.hint = 'another mission holds this worktree until its attempt is released; use --worktrees for one per mission'; }
-            else { row.action = 'error'; row.code = e.publicCode; row.message = e.message; }
+            else { row.action = e.publicCode === 'story-not-ready' ? 'not-ready' : ['contract-stale', 'spec-revision-mismatch'].includes(e.publicCode) ? 'requires-reconciliation' : 'error'; row.code = e.publicCode; row.message = e.message; }
         }
         const after = statusOrNull(store, id); row.after = after ? after.mission.state : 'unadmitted'; row.attempts = after ? after.mission.attemptCount : 0;
+        if (after && ['claimed', 'result-received', 'envelope-accepted'].includes(after.mission.state)) {
+            // A historical envelope can settle against its original contract but
+            // cannot become proof of revised requirements. Retain ownership and
+            // history; expose this independently from the reconciliation action.
+            try {
+                const latest = readPlan(prdPath);
+                const requirements = readRequirements(latest.stories[id], id, opts.root);
+                const admitted = after.mission.contract;
+                const frozen = Object.fromEntries(['acceptance', 'verification', 'specRefs'].filter(key => admitted[key] !== undefined).map(key => [key, admitted[key]]));
+                row.requirementsCurrent = canonical(requirements) === canonical(frozen) && !revisionReport(latest.prd, opts.root).affected.includes(id);
+                if (!row.requirementsCurrent) row.verificationBlocked = 'requirements changed; retain the old result as history';
+            } catch (e) { row.requirementsCurrent = false; row.verificationBlocked = e.publicCode || 'requirements-unreadable'; }
+        }
         missions.push(row);
     }
     const totals = {};
     for (const m of missions) totals[m.action || 'none'] = (totals[m.action || 'none'] || 0) + 1;
-    return { tick: { at: new Date(now).toISOString(), prd: prdPath, store, dispatched, maxDispatch }, missions, blocked: plan.blocked, invalid: plan.invalid, summary: plan.summary, prdComplete: plan.complete, totals, verified: false };
+    const finalPlan = readPlan(prdPath).plan;
+    return { tick: { at: new Date(now).toISOString(), prd: prdPath, store, dispatched, maxDispatch }, missions, blocked: finalPlan.blocked, invalid: finalPlan.invalid, summary: finalPlan.summary, prdComplete: finalPlan.complete, totals, verified: false };
 }
 
 module.exports = { tick, parseArgs };
