@@ -226,7 +226,9 @@ function assessPr(pr, ctx) {
         else if (e.classes.every((c) => c === 'NOT_EVIDENCE')) notEvidence++;
         else good++;
         for (const t of e.completedAt) if (newestCompletedMs === null || t > newestCompletedMs) newestCompletedMs = t;
-        jobs.push({ name, runs: e.classes.length, classes: distinct, conclusions: e.conclusions });
+        jobs.push({ name, runs: e.classes.length, classes: distinct, conclusions: e.conclusions,
+            newestCompletedAt: e.completedAt.length ? new Date(Math.max(...e.completedAt)).toISOString() : null,
+            freshness: freshness(e.completedAt.length ? Math.max(...e.completedAt) : null, ctx.baseTipMs, ctx.graceMs) });
     }
 
     // Rule 5, half one: a job the base tip runs and this head does not is ABSENT,
@@ -234,7 +236,12 @@ function assessPr(pr, ctx) {
     const headNames = new Set(byJob.keys());
     const absent = (ctx.baseJobNames || []).filter((n) => !headNames.has(n));
 
-    const fresh = freshness(newestCompletedMs, ctx.baseTipMs, ctx.graceMs);
+    let fresh = freshness(newestCompletedMs, ctx.baseTipMs, ctx.graceMs);
+    const staleJobs = jobs.filter((job) => job.freshness === 'STALE');
+    const graceJobs = jobs.filter((job) => job.freshness === 'WITHIN_GRACE');
+    // Each job must have current evidence; a rerun of one cannot refresh its peers.
+    if (staleJobs.length) fresh = 'STALE';
+    else if (graceJobs.length) fresh = 'WITHIN_GRACE';
 
     // Freshness is asked FIRST and on its own. A red measured against a trunk
     // that has since moved is not a measurement of the merge you would perform,
@@ -250,13 +257,13 @@ function assessPr(pr, ctx) {
                 + 'filtering leaves behind, so this is "did not run", not "is absent"');
         }
     } else if (fresh === 'STALE') {
-        reasons.push('the newest completed check run (' + new Date(newestCompletedMs).toISOString()
-            + ') PREDATES the tip of ' + pr.baseRefName + ' (' + new Date(ctx.baseTipMs).toISOString()
-            + ' at ' + String(ctx.baseTipSha || '').slice(0, 12) + '), so it tested a merge that no longer exists');
+        reasons.push('completed evidence for job(s) ' + staleJobs.map((job) => job.name + ' (' + job.newestCompletedAt + ')').join(', ')
+            + ' PREDATES the tip of ' + pr.baseRefName + ' (' + new Date(ctx.baseTipMs).toISOString()
+            + ' at ' + String(ctx.baseTipSha || '').slice(0, 12) + ')');
     } else if (fresh === 'WITHIN_GRACE') {
-        reasons.push('the newest completed check run post-dates the base tip by only '
-            + Math.round((newestCompletedMs - ctx.baseTipMs) / 1000) + 's, inside the '
-            + Math.round(ctx.graceMs / 1000) + 's window where the merge ref may not have been recomputed yet');
+        reasons.push('job(s) ' + graceJobs.map((job) => job.name).join(', ')
+            + ' completed inside the ' + Math.round(ctx.graceMs / 1000)
+            + 's window where the merge ref may not have been recomputed yet');
     }
 
     if (absent.length) {
@@ -305,6 +312,7 @@ function assessPr(pr, ctx) {
         trunkClaim: baseIsTrunk ? 'this verdict is about ' + ctx.trunk
             : 'NONE — measured against ' + pr.baseRefName + ', not ' + ctx.trunk,
         verdict, subtype, freshness: fresh,
+        evidenceScope: 'timestamp heuristic only; does not prove the tested merge contains this base tip',
         newestCompletedAt: newestCompletedMs === null ? null : new Date(newestCompletedMs).toISOString(),
         baseTipAt: ctx.baseTipMs === null ? null : new Date(ctx.baseTipMs).toISOString(),
         baseTipSha: ctx.baseTipSha || null,
@@ -400,7 +408,19 @@ function checkCiFreshness(opts) {
 
         if (!baseJobs.has(tip.sha)) {
             const br = checkRunsFor(repo, tip.sha, cwd);
-            baseJobs.set(tip.sha, br.ok ? [...groupByJob(br.runs).keys()] : null);
+            baseJobs.set(tip.sha, br);
+        }
+
+        const baseRuns = baseJobs.get(tip.sha);
+        if (!baseRuns.ok || baseRuns.complete === false) {
+            out.push({ number: pr.number, head: String(pr.headRefOid || '').slice(0, 12), base,
+                baseIsTrunk: base === trunk,
+                verdict: baseRuns.ok ? VERDICT.UNMEASURED : VERDICT.BLIND,
+                subtype: baseRuns.ok ? 'TRUNCATED-BASE-JOBS' : 'NO-BASE-JOBS',
+                trunkClaim: 'NONE — the base job population could not be fully read',
+                reasons: [baseRuns.ok ? 'base check-run population is truncated' : baseRuns.error],
+                population: {}, jobs: [], absentJobs: [] });
+            continue;
         }
 
         const head = checkRunsFor(repo, pr.headRefOid, cwd);
@@ -415,7 +435,7 @@ function checkCiFreshness(opts) {
         out.push(assessPr(pr, {
             baseTipMs: tip.ms, baseTipSha: tip.sha, trunk, graceMs,
             headRuns: head.runs, headRunsComplete: head.complete,
-            baseJobNames: baseJobs.get(tip.sha) || [],
+            baseJobNames: [...groupByJob(baseRuns.runs).keys()],
         }));
     }
 

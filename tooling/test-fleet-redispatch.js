@@ -410,6 +410,18 @@ check('  while the population still counts it: 2 records, not 1',
     /POPULATION: 2 intent records/.test(rBroken.out), rBroken.out.slice(-500));
 fs.unlinkSync(path.join(INTENT, 'repoA--broken.json'));
 
+// Valid JSON is not necessarily a valid intent. Bad rows must not abort peers.
+for (const bad of [null, {}, [], { repo: 12, branch: 'feat/x' }, { repo: 'repoA', branch: {} }]) {
+    const file = path.join(INTENT, 'malformed-shape.json');
+    fs.writeFileSync(file, JSON.stringify(bad));
+    const r = run(['--json']);
+    let data; try { data = JSON.parse(r.out); } catch { data = null; }
+    check('malformed shape preserves both rows and reports COULD-NOT-CHECK: ' + JSON.stringify(bad),
+        r.code === 3 && data?.population?.records === 2 && data?.rows?.length === 2,
+        r.out.slice(-300));
+    fs.unlinkSync(file);
+}
+
 // -- a live session is never proposed ----------------------------------------
 // The store record is what the app writes while it holds the session; a fresh
 // `lastActivityAt` is the app saying "still running".

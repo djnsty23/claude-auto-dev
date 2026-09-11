@@ -686,7 +686,12 @@ function readRecords(dir) {
         const f = path.join(dir, n);
         try {
             const o = JSON.parse(fs.readFileSync(f, 'utf8'));
-            records.push({ file: n, record: o });
+            const valid = o && typeof o === 'object' && !Array.isArray(o)
+                && typeof o.repo === 'string' && o.repo.trim()
+                && typeof o.branch === 'string' && o.branch.trim();
+            records.push({ file: n, record: valid ? o : {
+                __unreadable: `${n} must be an object naming a non-empty string repo and branch`,
+            } });
         } catch (err) {
             records.push({ file: n, record: { __unreadable: `${n} did not parse as JSON (${(err && err.message || '').split('\n')[0]})` } });
         }

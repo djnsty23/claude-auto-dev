@@ -140,6 +140,24 @@ function world(pr, runs, extra) {
     }, extra || {});
 }
 
+// A fresh job cannot refresh a different job's stale evidence.
+{
+    const mixed = runsAt(FRESH_RUN_AT, 'success');
+    mixed.check_runs[1].completed_at = STALE_RUN_AT;
+    const r = run(SUBJECT, world({}, { head1111: mixed }));
+    check('MIXED AGE: fresh lint cannot make stale platform checks green',
+        r.exit === 2 && r.result?.prs?.[0]?.verdict === 'UNMEASURED', r.detail);
+}
+for (const [label, baseRuns] of [
+    ['unreadable', 'MALFORMED'],
+    ['truncated', { total_count: 101, check_runs: runsAt(TRUNK_TIP_AT, 'success').check_runs }],
+]) {
+    const r = run(SUBJECT, world({}, { head1111: runsAt(FRESH_RUN_AT, 'success'), trunktip0000: baseRuns }));
+    check('BASE COVERAGE: ' + label + ' jobs cannot become an empty expected set',
+        r.exit === (label === 'unreadable' ? 3 : 2)
+        && r.result?.population?.measuredGreen === 0 && r.result?.prs?.[0]?.verdict !== 'measured-green', r.detail);
+}
+
 // ===========================================================================
 // OUTCOME 1 — a STALE green. The green board that is not evidence.
 // ===========================================================================

@@ -33,6 +33,12 @@
   placeholder network origins. Record how host suspension can produce a timeout
   even when a child printed a complete passing tally; timeout verdicts remain
   indeterminate and budgets are unchanged.
+- Preserve newly merged fleet redispatch and CI-freshness tools (#218, #241).
+  Reject malformed fleet records individually so valid peers still get checked.
+  Require fresh evidence per CI job and refuse unreadable or truncated base-job
+  populations. CI timestamps remain a heuristic, not proof of a tested merge.
+- Preserve dispatch-readiness verdict/unknown separation and the runner-canary
+  timeout guidance from current main (#242, #243).
 - Include current main's mutation-sweep candidate ranking and cause-specific
   reporting (#238, #239), plus the previously merged audit repairs (#226).
 
