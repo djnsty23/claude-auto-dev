@@ -83,6 +83,13 @@ try {
         const r = cli('check-spec-output.js', [file]);
         check('plan: ' + name, valid ? r.status === 0 : r.status === 1 && /depend|blockedBy|cycle|missing/i.test(r.stdout + r.stderr), r);
     }
+    for (const badId of [null, 42, true]) {
+        const malformed = fixture();
+        malformed.doc.stories.A.acceptance = [{ id: badId, description: 'Only the owner may read the stored record.' }]; malformed.write();
+        const r = build(malformed);
+        check('canonical criterion id must be text: ' + JSON.stringify(badId), r.status === 1 && r.json && r.json.error.code === 'acceptance-invalid', r);
+    }
+
     // Existing plans retain all five passes states while graph validation remains active.
     const existing = { stories: Object.fromEntries([null, true, false, 'deferred', 'needs-setup'].map((passes, n) => {
         const id = 'S1-00' + (n + 1); return [id, { ...story(id), passes }];
@@ -113,6 +120,9 @@ try {
     check('revision impact is direct story plus transitive dependents, excluding unrelated story', changed.json && JSON.stringify([...changed.json.affected].sort()) === JSON.stringify(['A', 'B', 'C']) && JSON.stringify(changed.json.unchanged) === JSON.stringify(['D']), changed);
     check('revision report never rewrites acceptance or declares a new revision', fs.readFileSync(revisionFixture.prd, 'utf8') === prdBytes, changed);
 
+    fs.unlinkSync(path.join(revisionFixture.repo, refs[0][0])); const deleted = revisions();
+    check('deleted scoped spec remains stale and affects transitive dependents', deleted.status === 1 && deleted.json && deleted.json.stale.some(r => r.id === 'A' && r.actualRevision === null && r.reason === 'spec-unreadable') && JSON.stringify(deleted.json.affected) === JSON.stringify(['A', 'B', 'C']) && JSON.stringify(deleted.json.unchanged) === JSON.stringify(['D']), deleted);
+
     let sqlite = false; try { sqlite = typeof require('node:sqlite').DatabaseSync === 'function'; } catch { /* host unavailable */ }
     if (typeof process.getuid !== 'function' || !sqlite) {
         const r = cli('mission-store.js', ['init', '--store', path.join(ROOT, 'unavailable')], {});
@@ -134,6 +144,15 @@ try {
             else check(variant + ': no worker starts against newly blocked or stale requirements', after.launches.length === 0 && after.mission.attemptCount === 0 && !fs.existsSync(path.join(x.repo, 'owned.js')) && !fs.existsSync(path.join(x.repo, 'different.js')), { result, state: after });
             check(variant + ': PRD stays byte-identical', prdBefore === fs.readFileSync(x.prd, 'utf8'), result);
         }
+        const tamper = fixture(); cli('mission-store.js', ['init', '--store', tamper.store], {});
+        const validPayload = build(tamper).json;
+        validPayload.contract.specRefs = [{ path: 'SPEC.md', revision: hash('Original requirement.\n'), content: 'Original requirement.\n' }];
+        const original = cli('mission-store.js', ['admit', '--store', tamper.store], validPayload);
+        check('store accepts independently hashed spec snapshot control', original.status === 0 && original.json.ok, original);
+        validPayload.eventId = 'tamper'; validPayload.missionId = 'tampered'; validPayload.contract.specRefs[0].content = 'A different requirement.\n';
+        const tampered = cli('mission-store.js', ['admit', '--store', tamper.store], validPayload);
+        check('store refuses tampered frozen content under original revision', tampered.status === 1 && tampered.json && tampered.json.error.code === 'invalid-contract', tampered);
+
         const x = fixture(); cli('mission-store.js', ['init', '--store', x.store], {});
         fs.writeFileSync(x.store + '.mode', 'hold'); const running = tick(x, 'local-node', '1500'); let before = state(x);
         const registered = before && before.launches.find(l => l.state === 'registered');
@@ -141,6 +160,11 @@ try {
         check('live control registers exactly one held worker', running.status === 0 && registered && before.launches.length === 1, running);
         x.doc.stories.A.passes = 'needs-setup'; x.write(); const reconciled = tick(x); const after = state(x);
         check('newly blocked live attempt is reconciled, never duplicated or released', after && after.launches.length === 1 && after.mission.attemptCount === 1 && after.mission.state === 'claimed' && reconciled.value && reconciled.value.missions.some(m => m.id === 'A' && ['worker-live', 'worker-unknown', 'backoff-active', 'reconciliation-exhausted'].includes(m.action)), reconciled);
+        delete x.doc.stories.A; x.write(); const removed = tick(x); const afterRemoval = state(x);
+        check('removed story live attempt remains visible and reconciled without duplicate', afterRemoval && afterRemoval.launches.length === 1 && afterRemoval.mission.state === 'claimed' && removed.value && removed.value.missions.some(m => m.id === 'A' && m.action.startsWith('worker-') && m.reservationHeld === true), removed);
+        const foreign = fixture(); foreign.store = x.store;
+        const beforeForeign = JSON.stringify(state(x)); const rejected = tick(foreign);
+        check('foreign repository story-id collision never settles original mission', rejected.value && rejected.value.missions.some(m => m.id === 'A' && m.code === 'repository-conflict') && JSON.stringify(state(x)) === beforeForeign, rejected);
     }
 } finally {
     for (const pid of workerPids) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
