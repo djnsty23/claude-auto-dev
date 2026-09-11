@@ -299,6 +299,61 @@ function check(label, ok, detail) {
         sb.lastWords({ stdout: '', stderr: '' }));
 }
 
+// --- lastWords: STDERR IS NOT THE TAIL OF STDOUT ---
+//
+// Every fixture above writes stderr LAST, so concatenating the two pipes
+// happened to produce the right order and the bug was unreachable from them.
+// This is the case they could not express: stderr written FIRST, stdout after
+// it, then a hang. The old implementation reported the chronologically first
+// line as the child's last output.
+//
+// Real spawned child, not a synthetic object: the ordering only exists when
+// something actually writes in that order.
+{
+    const r = spawnSync(process.execPath,
+        ['-e', 'process.stderr.write("WARN-WRITTEN-FIRST\\n");'
+             + 'process.stdout.write("STDOUT-EARLIER\\n");'
+             + 'process.stdout.write("STDOUT-TRUE-TAIL\\n");'
+             + 'setInterval(function(){},1000)'],
+        { encoding: 'utf8', timeout: 1200 });
+    const lw = sb.lastWords(r);
+
+    check('the child really did time out with both streams written, or this proves nothing',
+        !!r.error && r.error.code === 'ETIMEDOUT'
+            && (r.stdout || '').includes('STDOUT-TRUE-TAIL')
+            && (r.stderr || '').includes('WARN-WRITTEN-FIRST'),
+        `${r.error && r.error.code} stdout=${JSON.stringify(r.stdout)} stderr=${JSON.stringify(r.stderr)}`);
+
+    // The assertion that goes red on the old implementation: its output was
+    // `last output: "STDOUT-EARLIER | STDOUT-TRUE-TAIL | WARN-WRITTEN-FIRST"`,
+    // so the stdout tail it presented ended with a stderr line.
+    const stdoutLabel = /last stdout: "([^"]*)"/.exec(lw);
+    check('stdout\'s reported tail is stdout\'s ACTUAL tail, not a stderr line appended to it',
+        !!stdoutLabel && stdoutLabel[1].endsWith('STDOUT-TRUE-TAIL'),
+        lw);
+    check('  and the stderr line is attributed to stderr rather than presented as last',
+        !!stdoutLabel && !stdoutLabel[1].includes('WARN-WRITTEN-FIRST')
+            && /last stderr: "[^"]*WARN-WRITTEN-FIRST/.test(lw),
+        lw);
+
+    // CONTROL, with provenance independent of the function: the literals below
+    // are written here by hand, not derived from anything lastWords computes,
+    // so weakening the function cannot weaken this case in the same motion.
+    const planted = sb.lastWords({ stdout: 'A-OUT\n', stderr: 'B-ERR\n' });
+    check('  CONTROL: with both streams present, each is reported under its own label',
+        /last stdout: "A-OUT"/.test(planted) && /last stderr: "B-ERR"/.test(planted),
+        planted);
+    check('  CONTROL: a stderr-only child still reports its stderr, so the split did not drop it',
+        /last stderr: "ONLY-ERR"/.test(sb.lastWords({ stdout: '', stderr: 'ONLY-ERR\n' })),
+        sb.lastWords({ stdout: '', stderr: 'ONLY-ERR\n' }));
+    check('  CONTROL: a stdout-only child is not given an empty stderr label',
+        !/last stderr/.test(sb.lastWords({ stdout: 'ONLY-OUT\n', stderr: '' })),
+        sb.lastWords({ stdout: 'ONLY-OUT\n', stderr: '' }));
+    check('  and the two-stream line is still bounded, so the second label cannot flood it',
+        sb.lastWords({ stdout: 'x'.repeat(50000), stderr: 'y'.repeat(50000) }, 200).length < 500,
+        String(sb.lastWords({ stdout: 'x'.repeat(50000), stderr: 'y'.repeat(50000) }, 200).length));
+}
+
 console.log(`\n${sb.tally(pass, fail, process.exitCode === 2 ? 1 : 0)}`);
 console.log(`subject: tooling/spawn-budget.js; its own --selftest is spawned here so the exit `
     + `code is asserted, the retry is proven by a child that is slow exactly once, and the `
