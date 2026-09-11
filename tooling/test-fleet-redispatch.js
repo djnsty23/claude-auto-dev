@@ -37,10 +37,17 @@ const {
     VERDICTS, classify, liveness, boundariesCrossed, rank, rankReason, summarise, slugOf,
 } = require(SUBJECT);
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, unchecked = 0;
 function check(label, ok, detail) {
     if (ok) { pass++; console.log('PASS  ' + label); }
     else { fail++; console.log('FAIL  ' + label + (detail === undefined ? '' : '  (' + detail + ')')); }
+}
+// A condition this environment could not produce is NOT a pass. It is counted
+// on its own line so it cannot be read as one, which is the same rule the
+// subject applies to an unreadable population.
+function couldNotCheck(label, why) {
+    unchecked++;
+    console.log('COULD NOT CHECK  ' + label + '  (' + why + ')');
 }
 const MIN = 60000;
 
@@ -272,6 +279,39 @@ const old = new Date(Date.now() - 6 * 3600 * 1000);
 fs.utimesSync(path.join(tdir, 'sid-1.jsonl'), old, old);
 
 const CANARY = P('verify-ran');
+
+// A verify the SHELL cannot misread, and a control proving it.
+//
+// The first fixture here wrote `printf ran > <canary>; exit 1`, which is
+// POSIX-only. The subject runs a verify with `shell: true`, and on Windows that
+// is cmd.exe, where `;` is not a command separator - so `exit 1` became a third
+// argument to printf, printf ignored it, and the command that existed to FAIL
+// exited 0. printf itself resolves there via Git for Windows, so nothing
+// errored and nothing was missing. `[measured 2026-09-11]` on the
+// windows-latest runner BOTH the exit-0 and the exit-1 form returned status=0
+// with the canary written.
+//
+// A fixture that cannot express failure takes the meaning of every assertion
+// downstream of it, silently. The exit status therefore comes from node, whose
+// argv parsing is the same under cmd.exe and sh, and the control below asserts
+// IN THE SHELL THE SUBJECT USES that each form really does exit as named. That
+// control can only fire where the divergence exists, which is Windows - it is
+// green here by construction, and that is the point of running the matrix.
+const VERIFY_JS = P('verify.js');
+fs.writeFileSync(VERIFY_JS,
+    "const fs=require('fs');fs.writeFileSync(process.argv[2],'ran');process.exitCode=Number(process.argv[3]);\n");
+const verifyCmd = (code, canary) => `node ${JSON.stringify(VERIFY_JS)} ${JSON.stringify(canary || CANARY)} ${code}`;
+
+for (const [code, word] of [[0, 'passing'], [1, 'failing']]) {
+    try { fs.unlinkSync(CANARY); } catch { /* first run */ }
+    const probe = spawnSync(verifyCmd(code), { cwd: WT, shell: true, encoding: 'utf8', timeout: 60000 });
+    check(`FIXTURE CONTROL: the ${word} verify really exits ${code} in the shell the subject uses`,
+        probe.status === code, 'status=' + probe.status + ' stderr=' + JSON.stringify(String(probe.stderr || '').slice(0, 120)));
+    check('  and it writes its canary either way, so the canary tracks EXECUTION, not exit status',
+        fs.existsSync(CANARY));
+}
+try { fs.unlinkSync(CANARY); } catch { /* ignore */ }
+
 function writeRecord(o) {
     fs.writeFileSync(path.join(INTENT, 'repoA--feat-x.json'), JSON.stringify(o, null, 1));
 }
@@ -322,7 +362,7 @@ try { fs.unlinkSync(CANARY); } catch { /* first run */ }
 writeRecord({
     repo: 'repoA', branch: 'feat/x', session_id: 'sid-1',
     brief: 'land the thing', current_step: 'wrote the code', next_step: 'run the gate',
-    verify: `printf ran > ${JSON.stringify(CANARY)}; exit 1`,
+    verify: verifyCmd(1),
     state: 'checkpointed', updated_at: '2026-09-07T21:52:00Z',
 });
 const rFail = run([]);
@@ -349,7 +389,7 @@ check('  and reports COULD-NOT-CHECK rather than inventing a verdict',
 try { fs.unlinkSync(CANARY); } catch { /* ignore */ }
 writeRecord({
     repo: 'repoA', branch: 'feat/x', session_id: 'sid-1', brief: 'land the thing',
-    next_step: 'run the gate', verify: `printf ran > ${JSON.stringify(CANARY)}; exit 0`,
+    next_step: 'run the gate', verify: verifyCmd(0),
     state: 'working', updated_at: '2026-09-07T21:52:00Z',
 });
 const rPass = run([]);
@@ -381,7 +421,7 @@ fs.writeFileSync(path.join(sdir, 'local_live.json'), JSON.stringify({
 try { fs.unlinkSync(CANARY); } catch { /* ignore */ }
 writeRecord({
     repo: 'repoA', branch: 'feat/x', session_id: 'sid-1', brief: 'land the thing',
-    next_step: 'run the gate', verify: `printf ran > ${JSON.stringify(CANARY)}; exit 1`,
+    next_step: 'run the gate', verify: verifyCmd(1),
     state: 'checkpointed', updated_at: '2026-09-07T21:52:00Z',
 });
 const rLive = run([]);
@@ -448,6 +488,120 @@ check('  carrying the population and the summary',
 check('  and the boundary readability, so a consumer cannot mistake it for zero',
     !!parsed && parsed.boundary.readable === true);
 
+// ===========================================================================
+// 7. ONE DIRECTORY, TWO NAMES - the spelling collapse.
+// ===========================================================================
+//
+// A transcript directory's NAME is the slug of whichever spelling of the cwd
+// the app recorded, which makes it a lossy index keyed on a choice this tool
+// did not make. Both realpath resolvers collapse spellings in ONE direction
+// only, so when the caller holds a different spelling nothing derives the name
+// back, and a missing directory is indistinguishable from a session that never
+// had a transcript.
+//
+// `[measured 2026-09-11]` this is the whole of PR #218's Windows-only failure,
+// and it is written down because it presented as eleven unrelated reds. On
+// windows-latest `os.tmpdir()` is `C:\Users\RUNNER~1\...` - the 8.3 SHORT name
+// - while `git worktree list` reports `C:/Users/runneradmin/...`. The slugs
+// never met. The same transcript was FOUND by the boundary scan, which WALKS
+// the projects directory, and MISSED by the liveness lookup, which indexes it
+// BY NAME. Liveness is decided before the verify, so one missed lookup produced
+// COULD-NOT-CHECK for every record and no verify ran at all - which is why
+// every positive control failed beside its subject, all carrying exit=3.
+//
+// A symlinked parent gives the same one-way collapse on any platform, so the
+// case is pinned everywhere rather than only where it happened to show. If the
+// environment will not produce two spellings, that is reported as COULD NOT
+// CHECK rather than passing on a condition that was never created.
+const SPELL = mk(P('spell'));
+const REAL2 = mk(path.join(SPELL, 'real'));
+const LINK2 = path.join(SPELL, 'link');
+let linked = null;
+try {
+    // A junction needs no privilege on Windows; a directory symlink does.
+    fs.symlinkSync(REAL2, LINK2, process.platform === 'win32' ? 'junction' : 'dir');
+    linked = fs.statSync(LINK2).isDirectory();
+} catch (err) { linked = String((err && err.code) || err); }
+
+if (linked !== true) {
+    couldNotCheck('a transcript keyed under another spelling of the same directory',
+        `no second spelling could be created here: ${linked}`);
+} else {
+    const REPO2 = mk(path.join(REAL2, 'code', 'repoB'));
+    git(REPO2, ['init', '-q', '-b', 'main', '.']);
+    fs.writeFileSync(path.join(REPO2, 'a.txt'), 'hi\n');
+    git(REPO2, ['add', 'a.txt']);
+    git(REPO2, ['-c', 'user.email=t@example.invalid', '-c', 'user.name=T', 'commit', '-qm', 'init']);
+    git(REPO2, ['branch', 'feat/y']);
+    const WT2_REAL = path.join(REAL2, 'code', 'wtB');
+    git(REPO2, ['worktree', 'add', '-q', WT2_REAL, 'feat/y']);
+    // The spelling the APP recorded: through the link, which realpath resolves
+    // one way only.
+    const WT2_LINK = path.join(LINK2, 'code', 'wtB');
+
+    // The control that makes this case mean anything: the two spellings must
+    // actually differ. If they coincide, it would pass without ever exercising
+    // what it is named for.
+    if (slugOf(WT2_LINK) === slugOf(WT2_REAL)) {
+        couldNotCheck('a transcript keyed under another spelling of the same directory',
+            'both spellings slugged identically here, so the collapse was never created');
+    } else {
+        const t2 = mk(path.join(PROJECTS, slugOf(WT2_LINK)));
+        fs.writeFileSync(path.join(t2, 'sid-2.jsonl'),
+            JSON.stringify({ type: 'user', timestamp: '2026-09-07T21:00:00Z', cwd: WT2_LINK }) + '\n'
+            + JSON.stringify({ ...WALLROW, cwd: WT2_LINK, sessionId: 'sid-2', gitBranch: 'feat/y' }) + '\n');
+        fs.utimesSync(path.join(t2, 'sid-2.jsonl'), old, old);
+
+        const INTENT2 = mk(P('intent-spell'));
+        const CANARY2 = P('verify-ran-2');
+        fs.writeFileSync(path.join(INTENT2, 'repoB--feat-y.json'), JSON.stringify({
+            repo: 'repoB', branch: 'feat/y', session_id: 'sid-2', brief: 'land the other thing',
+            next_step: 'run the gate', verify: verifyCmd(1, CANARY2),
+            state: 'checkpointed', updated_at: '2026-09-07T21:52:00Z',
+        }, null, 1));
+
+        const rSpell = spawnSync(process.execPath,
+            [SUBJECT, '--intent-dir', INTENT2, '--stamp-file', STAMP, '--all'], {
+                encoding: 'utf8',
+                env: {
+                    ...process.env, HOME: HOMEDIR, CLAUDE_CONFIG_DIR: path.join(HOMEDIR, '.claude'),
+                    CLAUDE_SESSION_STORE: STORE, AUTODEV_CODE_DIR: path.join(REAL2, 'code'),
+                },
+                timeout: 120000,
+            });
+        const outSpell = (rSpell.stdout || '') + (rSpell.stderr || '');
+        check('a transcript keyed under ANOTHER spelling of the same directory is still found',
+            !/neither the session store nor a transcript could be read/.test(outSpell),
+            outSpell.slice(-400));
+        check('  so liveness resolves, and the record reaches a verdict rather than COULD-NOT-CHECK',
+            rSpell.status === 2, 'exit=' + rSpell.status);
+        check('  POSITIVE CONTROL: the verify ran, which it cannot do until liveness is decided',
+            fs.existsSync(CANARY2));
+        check('  and the proposal lands under PROPOSED, not under COULD NOT CHECK',
+            /PROPOSED, IN ORDER[\s\S]*repoB @ feat\/y/.test(outSpell), outSpell.slice(-400));
+    }
+}
+
+// -- the half of the fix this platform CANNOT exercise -----------------------
+//
+// Stated rather than hidden. `fs.realpathSync` is Node's JS resolver and
+// expands symlinks only; `fs.realpathSync.native` goes through the platform
+// call and additionally expands a Windows 8.3 short name. On darwin and linux
+// the two agree on every path, so NO behavioural test here can tell them apart
+// - removing the native resolver from the subject leaves this suite green on
+// this machine, which was confirmed by mutation rather than assumed.
+//
+// It is load-bearing on Windows all the same: without it `samePath` cannot
+// match a session-store record written under `C:\Users\RUNNER~1\...` against
+// the `C:\Users\runneradmin\...` that git reports, and the live-session case
+// fails. The behavioural proof is the windows-latest job; what is checkable
+// everywhere is that the subject still consults it. That is the same reasoning
+// the process.exit() assertion below uses, and it is a weaker claim on purpose.
+check('the subject consults the NATIVE realpath, which is the only resolver that expands an 8.3 short name',
+    /realpathSync\.native\s*\(/.test(fs.readFileSync(SUBJECT, 'utf8')));
+check('  and it still consults the JS resolver too, which is the one that follows a symlink',
+    /fs\.realpathSync\s*\(/.test(fs.readFileSync(SUBJECT, 'utf8')));
+
 // -- the repo's own macOS truncation trap ------------------------------------
 //
 // `process.exit()` after writing to stdout delivers exactly 65536 bytes through
@@ -461,5 +615,6 @@ check('  and it does set process.exitCode', /process\.exitCode\s*=/.test(src));
 
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* leave it */ }
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${pass} passed, ${fail} failed`
+    + (unchecked ? `, ${unchecked} COULD NOT CHECK (counted separately - not passes)` : ''));
 process.exitCode = fail ? 1 : 0;

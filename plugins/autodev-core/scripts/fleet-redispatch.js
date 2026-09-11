@@ -485,15 +485,40 @@ function realish(p) {
 }
 
 /**
- * Every spelling one directory can have here. `realpathSync` only resolves in
- * one direction - given `/private/var/x` it returns `/private/var/x`, so a
- * transcript directory keyed on the `/var/x` spelling stays unreachable. The
- * `/private` prefix is therefore added and removed explicitly, which is the
- * documented macOS case and the one this repo has been bitten by before.
+ * The OS's own canonical spelling. This is NOT the same resolver as `realish`:
+ * `fs.realpathSync` is Node's JS implementation and resolves symlinks only,
+ * while `.native` goes through the platform call and additionally expands a
+ * Windows 8.3 short name to its long form. `[measured 2026-09-11]` on the
+ * Windows CI runner `os.tmpdir()` is the SHORT spelling and `git worktree
+ * list` reports the LONG one, and only the native resolver reconciles them.
+ * Returns null rather than the input when it cannot answer, so a caller can
+ * tell a canonical spelling from a guess.
+ */
+function realNative(p) {
+    try {
+        const r = fs.realpathSync.native(p);
+        // The Win32 extended-length prefix names the same file; libuv usually
+        // strips it, and comparing one spelling with it against one without is
+        // exactly the bug this function exists to close.
+        return typeof r === 'string' && r.startsWith('\\\\?\\') ? r.slice(4) : r;
+    } catch { return null; }
+}
+
+/**
+ * Every spelling one directory can have here. Both resolvers only go ONE way -
+ * given `/private/var/x` neither returns `/var/x`, and given a long Windows
+ * path neither returns the 8.3 short form - so a transcript directory keyed on
+ * the other spelling stays unreachable. The `/private` prefix is therefore
+ * added and removed explicitly, and both resolvers are consulted rather than
+ * one being declared canonical.
+ *
+ * This enumerates what CAN be derived, which is not the same as everything the
+ * app might have written. `newestTranscript` below does not rely on it alone
+ * for that reason.
  */
 function pathSpellings(p) {
     const out = [];
-    for (const c of [p, realish(p)]) {
+    for (const c of [p, realish(p), realNative(p)]) {
         if (!c) continue;
         out.push(c);
         if (c.startsWith('/private/')) out.push(c.slice('/private'.length));
@@ -502,24 +527,100 @@ function pathSpellings(p) {
     return [...new Set(out)];
 }
 
+/**
+ * Do two strings name one directory? Every derivable spelling of each is
+ * compared, so a symlinked parent on macOS and an 8.3 short name on Windows
+ * both reconcile. The comparison is case-insensitive on win32 only, where the
+ * filesystem is.
+ */
 function samePath(a, b) {
     if (!a || !b) return false;
-    return path.resolve(realish(a)) === path.resolve(realish(b));
+    const norm = (q) => {
+        const r = path.resolve(q);
+        return process.platform === 'win32' ? r.toLowerCase() : r;
+    };
+    const seen = new Set(pathSpellings(a).map(norm));
+    return pathSpellings(b).map(norm).some((q) => seen.has(q));
 }
 
+/** Every .jsonl in one transcript directory, with its mtime. */
+function transcriptsIn(dir) {
+    let names;
+    try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')); } catch { return []; }
+    const out = [];
+    for (const n of names) {
+        try { out.push({ file: path.join(dir, n), mtimeMs: fs.statSync(path.join(dir, n)).mtimeMs }); } catch { /* skip */ }
+    }
+    return out;
+}
+
+/**
+ * The cwd a transcript says it was written under. Every row carries it, so the
+ * first readable one answers; only the head of the file is read because these
+ * run to tens of megabytes.
+ */
+function recordedCwd(file) {
+    let fd = null;
+    try {
+        fd = fs.openSync(file, 'r');
+        const buf = Buffer.alloc(64 * 1024);
+        const n = fs.readSync(fd, buf, 0, buf.length, 0);
+        for (const line of buf.toString('utf8', 0, n).split('\n')) {
+            if (!line || line.indexOf('"cwd"') === -1) continue;
+            // A truncated final line is expected - the read is a fixed window.
+            try { const row = JSON.parse(line); if (row && row.cwd) return row.cwd; } catch { continue; }
+        }
+    } catch { /* unreadable */ } finally {
+        if (fd !== null) { try { fs.closeSync(fd); } catch { /* ignore */ } }
+    }
+    return null;
+}
+
+/**
+ * The newest transcript for `cwd`, or null.
+ *
+ * THE TRAP THIS CLOSES. A transcript directory's NAME is the slug of whichever
+ * spelling of the cwd the app happened to record, which makes it a lossy index
+ * keyed on a choice this tool did not make. Both realpath resolvers collapse
+ * spellings in ONE direction only, so when the caller holds a different one -
+ * `/var` against `/private/var`, an 8.3 short name against its long form, a
+ * symlinked parent against its target - no amount of deriving gets back to the
+ * name on disk, and the lookup returns nothing. Nothing distinguishes that from
+ * a session with no transcript, so liveness reads `null`, and because liveness
+ * is decided before the verify, the verify never runs either: one missed lookup
+ * turns into COULD-NOT-CHECK for every record.
+ *
+ * `[measured 2026-09-11]` that is the whole of PR #218's Windows-only failure.
+ * The fixture builds its paths from `os.tmpdir()`, which is the short spelling;
+ * `git worktree list` reports the long one; 11 assertions went red, including
+ * every positive control, all of them downstream of this one lookup. The same
+ * shape reproduces on macOS through a symlinked parent, which is how it is
+ * tested on every platform rather than only on the one that showed it.
+ *
+ * So the slug is a FAST PATH and the cwd RECORDED INSIDE the transcript is the
+ * authority. The fallback narrows candidates by the slug of the basename - a
+ * cheap filter that decides nothing - and then compares the recorded cwd.
+ */
 function newestTranscript(cwd) {
     if (!cwd) return null;
     let newest = null;
+    const take = (t) => { if (t && (!newest || t.mtimeMs > newest.mtimeMs)) newest = t; };
+    const root = claudeProjects();
+
     for (const cand of pathSpellings(cwd)) {
-        const dir = path.join(claudeProjects(), slugOf(cand));
-        let names;
-        try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')); } catch { continue; }
-        for (const n of names) {
-            try {
-                const st = fs.statSync(path.join(dir, n));
-                if (!newest || st.mtimeMs > newest.mtimeMs) newest = { file: path.join(dir, n), mtimeMs: st.mtimeMs };
-            } catch { /* skip */ }
-        }
+        for (const t of transcriptsIn(path.join(root, slugOf(cand)))) take(t);
+    }
+    if (newest) return newest;
+
+    const tail = slugOf(path.basename(cwd));
+    let dirs;
+    try { dirs = fs.readdirSync(root, { withFileTypes: true }); } catch { return null; }
+    for (const ent of dirs) {
+        if (!ent.isDirectory() || !tail || !ent.name.endsWith(tail)) continue;
+        const found = transcriptsIn(path.join(root, ent.name));
+        if (!found.length) continue;
+        found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+        if (samePath(recordedCwd(found[0].file), cwd)) take(found[0]);
     }
     return newest;
 }
