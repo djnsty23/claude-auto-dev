@@ -175,6 +175,10 @@ function stripNonCommandText(command) {
                is emulated here: the character survives and anything that could split a
                command becomes a space. `echo "git push"` still reads as one `echo`
                segment, because segmentation looks at a segment's FIRST word. */
+            // A quoted space belongs to this argument, just like an escaped
+            // space. Keep it opaque until path resolution so -C, cd and the
+            // git-dir/work-tree options all receive the complete path.
+            if (c === ' ') { out += ESCAPED_SPACE; continue; }
             out += /[;&|\n()`]/.test(c) ? ' ' : c;
             continue;
         }
@@ -531,11 +535,30 @@ try {
                first, which coupled one question -- is the claimed session live,
                the only thing this rail turns on -- to a verdict that answers a
                different one: whether any ADDRESS in the record still reaches.
-               Those came apart when `degraded` was added on 2026-09-08, and a
-               record can now be `degraded` (a peer name still reaches) while
-               `session_id` is dead and this rail is armed for nobody. `faults`
-               is empty for `ok` and `absent`, so the find alone is the whole
-               condition. */
+               `faults` is empty for `ok` and `absent`, so the find alone is the
+               whole condition.
+
+               ⚠️ THIS IS DEFENCE, NOT A FIX, and the comment said otherwise
+               until 2026-09-09. It claimed a record "can now be `degraded` while
+               `session_id` is dead and this rail is armed for nobody", which is
+               UNREACHABLE THROUGH THIS CALL SITE and always was. The call below
+               passes `store: null`, so `found.record` is null, so
+               `desktop.resolves` is false and the peer/desktop corroboration
+               anchor cannot form; a dead `session_id` kills the other anchor.
+               `reach.usable` is therefore necessarily empty whenever
+               `dead-session` fires, and the state is `fault` every time.
+               `[measured 2026-09-09]` all 75 role shapes reachable here were
+               enumerated: 30 `fault` with dead-session, 39 `fault` without, 2
+               `degraded`, 4 `ok`, and ZERO where the two conditions differ.
+
+               So the two expressions are equivalent at this call site, which is
+               why no suite can tell them apart and why the case below asserts
+               the equivalence rather than a behaviour change. The reason to
+               keep this form is that the equivalence is a property of an
+               argument passed twenty lines up: pass a store here one day and
+               the old form starts answering the wrong question silently. A
+               guard whose correctness depends on a caller's argument should not
+               also depend on the reader noticing that. */
             const dead = verdict ? verdict.faults.find((f) => f.code === 'dead-session') : null;
             if (dead) {
                 const sub = segments.map((seg) => parseGitSegment(seg, cwd)).find((g) => g && BLOCKED_SUBCOMMANDS.has(g.sub)).sub;

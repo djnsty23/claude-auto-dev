@@ -301,6 +301,34 @@ expectSilentAllow('`cd <home> && git commit` from a foreign cwd is allowed',
 expectSilentAllow('a -C into the home repo overrides an earlier cd away',
     run({ payload: bash(`cd ${OTHER_REPO} && git -C ${HOME_REPO} push`, { cwd: HOME_REPO }) }));
 
+// Quoting is the ordinary alternative to backslash-escaping a space. The same
+// foreign directory must block in both forms, and a home directory must remain
+// whole when cd moves the session there before the write.
+{
+    const spacedHome = path.join(fixture, 'home with space');
+    const spacedForeign = path.join(fixture, 'product with space');
+    writeRole({ session_id: 'SESSION-A', home_repos: [spacedHome] });
+    for (const quote of ['"', "'"]) {
+        expectBlock(`a ${quote}-quoted -C path containing spaces still blocks`,
+            run({ payload: bash(`git -C ${quote}${spacedForeign}${quote} commit`, { cwd: spacedHome }) }),
+            /product with space/);
+        expectBlock(`a ${quote}-quoted cd retains the whole foreign path`,
+            run({ payload: bash(`cd ${quote}${spacedForeign}${quote} && git push`, { cwd: spacedHome }) }),
+            /product with space/);
+    }
+    expectSilentAllow('a quoted -C keeps a home path containing spaces intact',
+        run({ payload: bash(`git -C "${spacedHome}" commit`) }));
+    expectSilentAllow('a quoted cd into a home path containing spaces permits its write',
+        run({ payload: bash(`cd "${spacedHome}" && git commit`) }));
+    expectBlock('a quoted --git-dir containing spaces still guards the object store',
+        run({ payload: bash(`git --git-dir="${path.join(spacedForeign, '.git')}" commit`, { cwd: spacedHome }) }),
+        /product with space/);
+    expectBlock('a quoted --work-tree containing spaces still guards the work tree',
+        run({ payload: bash(`git --work-tree="${spacedForeign}" commit`, { cwd: spacedHome }) }),
+        /product with space/);
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+}
+
 // A path held together by an escaped space must resolve WHOLE. Splitting on it
 // resolves a shorter path, which lands wherever that prefix happens to fall —
 // a wrong answer in either direction, arrived at silently.
@@ -417,6 +445,61 @@ writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
     writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO], desktop_session_id: 'local_nothing-here' });
     expectSilentAllow('a live claim with an unknown desktop id is still silent here',
         run({ payload: fromHome('git commit -m "x"'), env }));
+
+    /* THE CONDITION THIS RAIL TURNS ON IS `dead-session`, NOT THE VERDICT, and
+       the difference is asserted here rather than argued in a comment.
+
+       `[measured 2026-09-09]` the hook's comment claimed a record could be
+       `degraded` while `session_id` was dead, and that reading the state would
+       therefore disarm the rail. It cannot, through this call site: the hook
+       passes `store: null`, so no desktop record resolves and neither
+       attribution anchor can form, so `reach.usable` is empty whenever
+       `dead-session` fires. Every such record is `fault`.
+
+       That makes the two forms equivalent HERE, which is worth an assertion for
+       the reason it is easy to get wrong twice: the equivalence is a property of
+       an argument, not of the code being read, and it evaporates the day someone
+       passes a store. A reader who sees only the `find` should be able to learn
+       from a failing case that the store argument is load-bearing. */
+    {
+        const { checkBrainRole } = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-brain-role.js'));
+        const shapes = [];
+        for (const s of [undefined, 'SESSION-A', 'SESSION-DEAD', 'NO-SUCH'])
+            for (const p of [undefined, 'peer-a', 'peer-dead', 'peer-a7'])
+                for (const d of [undefined, 'local_x']) {
+                    const role = {};
+                    if (s) role.session_id = s;
+                    if (p) role.peer_name = p;
+                    if (d) role.desktop_session_id = d;
+                    shapes.push(role);
+                }
+        let diverge = 0, withDead = 0, degraded = 0;
+        for (const role of shapes) {
+            const v = checkBrainRole({ roleFile: ROLE, role, sessionsDir: sessions, store: null });
+            const byFault = !!v.faults.find((f) => f.code === 'dead-session');
+            const byState = v.state === 'fault' && byFault;
+            if (byFault) withDead++;
+            if (v.state === 'degraded') degraded++;
+            if (byFault !== byState) diverge++;
+        }
+        check('with `store: null`, reading the dead-session FAULT and reading the STATE agree on every role shape',
+            diverge === 0 && withDead > 0,
+            shapes.length + ' shapes, ' + withDead + ' with dead-session, ' + degraded
+            + ' degraded, ' + diverge + ' divergent');
+        /* TWO WAYS THE AGREEMENT ABOVE COULD BE TRUE FOR NOTHING, and only one
+           of them is ruled out by `withDead > 0`. The other is a fixture that
+           never produces `degraded` at all -- then the two conditions agree
+           because the state is never anything but `fault`, and the case would
+           keep passing if `degraded` were deleted from the script entirely.
+           `degraded` IS reachable with `store: null`: a live `session_id` whose
+           `peer_name` names the same live session gives a usable address, and a
+           missing `desktop_session_id` supplies the fault. What is unreachable
+           is `degraded` TOGETHER WITH `dead-session`, which is the actual
+           property, so assert both halves separately. */
+        check('  control: the fixture does reach `degraded`, so the agreement is not vacuous',
+            degraded > 0,
+            'degraded=' + degraded + ' of ' + shapes.length + ' shapes');
+    }
 
     writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
     fs.rmSync(sessions, { recursive: true, force: true });

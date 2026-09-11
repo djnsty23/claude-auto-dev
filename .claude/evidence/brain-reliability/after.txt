@@ -1,0 +1,45 @@
+Initial Brain reliability candidate d88586b, 2026-09-09. Later upstream
+integration is recorded separately. Full-gate results belong to the exact
+committed candidate's run log; these are targeted behavioral results.
+
+node tooling/test-check-spec-output.js: 48 passed, 0 failed. Independent
+lifecycle review found and then retested DROP SCHEMA and SET SCHEMA false
+passes: both now exit 1; the protected-table control remains exit 0.
+Same 48 assertions compared three isolated variants:
+  baseline: 24 pass / 24 fail
+  missing-path check + comment regex: 26 pass / 22 fail
+  raw-story validation + lexical declaration inspection: 48 pass / 0 fail
+The checker reports structural declarations, explicitly not runtime access or
+semantic completeness. Unsupported table transformations require DB verification.
+
+node tooling/test-check-pr-ready.js: 50 passed, 0 failed.
+node tooling/test-pr-path-filters.js: 26 passed, 0 failed.
+Unrelated success cannot mask skipped jobs; artifact-only checks follow actual
+path-filter analysis. Same live 16-PR replay: 1 READY, 15 NOT_READY, 0 changed
+verdicts. A stricter rule and a same-name-success alternative were compared;
+same-name jobs are not unique identities across workflows.
+
+node tooling/test-stop-brain-report.js: 37 passed, 0 failed.
+node tooling/test-check-brain-role.js: 22 passed, 0 failed.
+Cooldown preserves the last-notified SHA; the next Stop after expiry emits the
+pending notice once. This does not create a wake event or acknowledge delivery.
+
+node tooling/test-coordinator-write-guard.js: 102 passed, 0 failed.
+node tooling/test-pre-tool-filter.js: 44 passed, 0 failed.
+Quoted-space paths retain complete arguments through both tokenizers, fixing
+foreign-path false allows and home-path false blocks.
+
+Auto and Stop use workPlan(prd), with all-sprint dependency readiness, blocked
+and invalid records, explicit incomplete status and a bounded reconciliation.
+Independent reference: 512 graphs, 1536 cycle-membership comparisons, 0 mismatch.
+
+node tooling/test-fleet-decisions.js: 44 passed, 0 failed.
+An exclusive transaction protects read/check/append. Concurrent reservations
+remain unique and only one conflicting decision succeeds. Busy locks refuse
+within a bounded wait; an interrupted owner's lock requires verified cleanup.
+
+wc -c for Brain and Auto Brain SKILL.md: 10835 and 2045 bytes, total 12880.
+Previous bodies preserved exactly in explicitly historical references. One
+active procedure covers idea/spec, actual worker startup, acceptance, release
+and recovery; Auto Brain loads it. Guidance changes are not an empirical claim
+that arbitrary idea-to-production missions now succeed unattended.

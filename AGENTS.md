@@ -87,7 +87,7 @@ this machine. `CLAUDE.md` has the specifics.
 <!-- GENERATED BELOW — DO NOT EDIT BY HAND.
      Generator: tooling/generate-agents-md.js
      Source:    plugins/autodev-core/skills/rule-*/SKILL.md (16 rules)
-     Version:   autodev 8.166.0
+     Version:   autodev 8.167.0
      Variant:   B
      Regenerate with: node tooling/generate-agents-md.js --write
      Drift gate:      node tooling/generate-agents-md.js --check   (npm run check:agents-md) -->

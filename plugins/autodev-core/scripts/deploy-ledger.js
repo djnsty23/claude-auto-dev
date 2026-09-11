@@ -40,27 +40,33 @@
 //
 // Commands, deliberately separate:
 //
-//   --since <ref>   list the commits and touched surfaces since a ref
-//   --write         create or refresh the ledger file, preserving what was filled
-//   --verify        the promotion gate. exit 0 = promote; anything else = do not
-//   --record        after the promotion: file the ledger and move the deploy marker
-//   --audit         list every recorded promotion and whether its record is complete
+//   --since <ref>      set the previous deployed commit
+//   --candidate <ref>  freeze the checked candidate (defaults to current HEAD)
+//   --write            create or refresh the ledger, preserving what was filled
+//                      only for the same resolved base and candidate
+//   --verify           the promotion gate. exit 0 = promote; anything else = do not
+//   --record           after the promotion: file the ledger and move the deploy marker
+//   --audit            list every recorded promotion and whether its record is complete
 //
 // --verify EXIT CODES, each a different instruction to the reader:
 //   0  pre-authorised. Zero bytes on stdout and stderr, because this runs as
 //      `--verify && <promote>` and text on the pass path is skimmed, never read.
 //   1  a precondition is unmet and the message names it: a surface unchecked,
-//      metrics missing, a promotion field empty or wrong, or the commit not on
-//      the default branch. All of these are yours to fix; re-run after.
-//   2  blind: not a repo, no deploy ref, no ledger, no resolvable default
-//      branch, or the project has not marked its deploy-sensitive paths.
-//      Nothing was decided.
+//      a surface row missing, duplicated or malformed, the ledger's recorded
+//      window stale against the base/candidate pair, metrics missing, a
+//      promotion field empty or wrong, or the commit not on the default branch.
+//      All of these are yours to fix; re-run after.
+//   2  blind: not a repo, no deploy ref, no ledger, an unreadable --candidate,
+//      an unresolvable base or candidate, a path this ledger's table cannot
+//      represent, no resolvable default branch, or the project has not marked
+//      its deploy-sensitive paths. Nothing was decided.
 //   3  INELIGIBLE: the window touches something on the ineligible list. No
 //      amount of filling fixes this; it needs the operator's yes in that turn.
 //
 // It derives the surface list from the diff. It does NOT decide whether a check
 // passed: a human or a browser-driving agent fills the boxes, and --verify only
-// asks whether they are filled. A checker that both generates and satisfies its
+// checks their membership, shape and commit window, not whether they are true.
+// A checker that both generates and satisfies its
 // own checklist proves nothing, which is the failure mode this repo has spent a
 // lot of rounds on. The same holds for every promotion field: --write leaves
 // them empty except the commit, which is a fact and not a verdict.
@@ -140,8 +146,11 @@ const DEFAULT_LEDGER_DIR = 'deploy-ledgers';
 // zero bytes. Caught by the suite's own zero-bytes assertion.
 const git = (...args) => {
     try {
-        return execFileSync('git', ['-C', ROOT, ...args],
-            { encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+        // -z output is returned untrimmed: a trailing NUL is a record separator,
+        // and trimming it merges the last two paths into one.
+        const output = execFileSync('git', ['-C', ROOT, ...args],
+            { encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'pipe'] });
+        return args.includes('-z') ? output : output.trim();
     } catch {
         return null;
     }
@@ -172,6 +181,7 @@ function resolveSince(explicit) {
 // ------------------------------------------------------------- the surfaces
 
 const UI_EXT = /\.(tsx|jsx|vue|svelte|css|scss|sass|less|html|astro)$/i;
+const RUNTIME_EXT = /\.(?:[cm]?[jt]s|json)$/i;
 // A change here can move any screen, so narrowing it would be a false
 // all-clear. Named WIDE in the output for exactly that reason.
 const WIDE = /(^|\/)(tailwind\.config|globals?\.css|theme|tokens?|layout|_app|_document|providers?)\b/i;
@@ -191,11 +201,13 @@ function routeFor(file) {
     return r === '/' ? '/' : r.replace(/\/$/, '');
 }
 
-function surfaces(sinceRef) {
-    const raw = git('diff', '--name-only', `${sinceRef}..HEAD`);
+function surfaces(sinceRef, headRef) {
+    // NUL separation preserves names containing newlines so they can be reported
+    // as unsupported instead of disappearing behind Git's quoted-path display.
+    const raw = git('diff', '--name-only', '-z', `${sinceRef}..${headRef}`);
     if (raw === null) return null;
-    const files = raw.split('\n').filter(Boolean);
-    const ui = files.filter((f) => UI_EXT.test(f));
+    const files = raw.split('\0').filter(Boolean);
+    const ui = files.filter((f) => UI_EXT.test(f) || (RUNTIME_EXT.test(f) && WIDE.test(f)));
     const wide = ui.filter((f) => WIDE.test(f));
     const routed = new Map();
     for (const f of ui) {
@@ -386,7 +398,13 @@ const PLACEHOLDER = /<[^>]+>|\[[^\]]*\]|\bTODO\b|\bTBD\b/i;
 function parseRecord(text) {
     const rec = {};
     for (const f of FIELDS) rec[f] = '';
-    const lines = text.split('\n');
+    // CRLF is normalised FIRST, the way ledgerRows() does it. `.` does not match
+    // \r in JavaScript — it is a line terminator — so `(.*)$` fails on exactly
+    // the CRLF lines that carry a value, while a valueless line like
+    // `- gate tail:` still matches because `\s*` absorbs the \r. The result was
+    // a ledger whose fields are visibly filled and which --verify reports as six
+    // missing fields, on any editor that writes CRLF.
+    const lines = text.replace(/\r\n/g, '\n').split('\n');
     const start = lines.findIndex((l) => /^##\s+Promotion record/i.test(l));
     if (start < 0) return { rec, present: false };
     for (let i = start + 1; i < lines.length; i++) {
@@ -445,35 +463,89 @@ function validateRecord(rec, ctx = {}) {
 const ROW = (label, detail) =>
     `| ${label} | ${detail} | [ ] | [ ] | [ ] | [ ] | [ ] |`;
 
+function expectedRows(s) {
+    const rows = [];
+    if (s.wide.length) rows.push(['WIDE (every surface)', s.wide.map((f) => `\`${f}\``).join('<br>')]);
+    for (const [route, files] of [...s.routed].sort((a, b) => a[0].localeCompare(b[0]))) {
+        rows.push(['`' + route + '`', files.map((f) => `\`${f}\``).join('<br>')]);
+    }
+    for (const file of s.unrouted) rows.push(['`' + file + '`', 'no route derived — check wherever it renders']);
+    return rows;
+}
+
+function ledgerRows(text) {
+    text = text.replace(/\r\n/g, '\n');
+    const start = text.indexOf('## Surfaces to check before this deploy is verified\n');
+    if (start < 0) return [];
+    const end = text.indexOf('\n## ', start + 1);
+    return text.slice(start, end < 0 ? undefined : end).split('\n')
+        .filter((line) => line.startsWith('|'))
+        .map((line) => line.split('|').slice(1, -1).map((cell) => cell.trim()));
+}
+
+function sameWindow(text, window) {
+    const records = [...text.matchAll(/^<!-- deploy-ledger-window: (.+) -->\r?$/gm)];
+    if (records.length !== 1) return false;
+    try {
+        const previous = JSON.parse(records[0][1]);
+        return previous.version === 1 && previous.base === window.base && previous.candidate === window.candidate;
+    } catch {
+        return false;
+    }
+}
+
+function rowProblems(text, s) {
+    const rows = ledgerRows(text);
+    const problems = [];
+    for (const [label, detail] of expectedRows(s)) {
+        const found = rows.filter((cells) => cells[0] === label);
+        if (!found.length) problems.push(`MISSING    ${label}`);
+        else if (found.length !== 1) problems.push(`DUPLICATE  ${label}`);
+        else if (found[0].length !== 7 || found[0][1] !== detail
+            || !found[0].slice(2).every((cell) => /^\[[xX]\]$/.test(cell))) {
+            problems.push(`INVALID    ${label}: expected changed files and five checked cells`);
+        }
+    }
+    return problems;
+}
+
 // Returns { text, reset }. `reset` is true when the previous ledger belonged to
 // a DIFFERENT window and nothing from it was kept.
-function render(sinceRef, how, s, commits, previous, head, baseSha) {
-    // Preserve ticks a human already made, keyed on the row label. A regenerate
-    // that silently unchecks everything trains people to regenerate less often,
-    // and a stale ledger is worse than a noisy one.
+function render(sinceRef, how, s, commits, previous, window, head) {
+    // Preserve ticks a human already made, and the promotion fields they filled.
+    // A regenerate that silently unchecks everything trains people to regenerate
+    // less often, and a stale ledger is worse than a noisy one.
     //
     // BUT ONLY WITHIN ONE WINDOW. `[measured 2026-09-08]` the first version kept
     // fields by name regardless, so after a promotion was filed the next window's
     // --write inherited the previous gate tail, evidence and authorisation and
-    // --verify passed a window nobody had run a gate on. The base commit in the
-    // header is what makes "same window" decidable.
-    const prevBase = (previous || '').match(/window base ([0-9a-f]{7,40})/);
-    const reset = !!previous && !(prevBase && baseSha && baseSha.startsWith(prevBase[1]));
+    // --verify passed a window nobody had run a gate on.
+    //
+    // Window identity is the structured record sameWindow() reads, which pins
+    // BOTH resolved commits. Keying on the base alone was this branch's earlier
+    // version and is weaker in exactly the case --candidate creates: the base
+    // holds still while the promoted commit moves, and a gate tail inherited
+    // across that is the "gate nobody ran" case above with no base change to
+    // notice it. Names alone are not evidence identity either, so a kept row
+    // must still match the expected shape below.
+    const reset = !!previous && !sameWindow(previous, window);
     if (reset) previous = null;
-    const kept = new Map();
-    for (const line of (previous || '').split('\n')) {
-        const m = line.match(/^\| (`[^`]+`|WIDE[^|]*|[^|]+?) \|[^|]*\|(.*)$/);
-        if (m && /\[[xX]\]/.test(m[2])) kept.set(m[1].trim(), line);
-    }
-    const row = (label, detail) => kept.get(label) || ROW(label, detail);
+    const kept = ledgerRows(previous || '');
+    const row = (label, detail) => {
+        const found = kept.filter((cells) => cells[0] === label);
+        if (found.length !== 1 || found[0].length !== 7 || found[0][1] !== detail
+            || !found[0].slice(2).every((cell) => /^\[[ xX]\]$/.test(cell))) return ROW(label, detail);
+        return `| ${label} | ${detail} | ${found[0].slice(2).join(' | ')} |`;
+    };
     const prev = previous ? parseRecord(previous).rec : null;
     const keep = (f, fallback) => (prev && prev[f] ? prev[f] : fallback);
 
     const lines = [];
     lines.push('# Deploy ledger');
     lines.push('');
-    lines.push(`Generated from \`${sinceRef}..HEAD\` (${how}; window base ${baseSha || 'unknown'}). Regenerate with`);
-    lines.push('`deploy-ledger.js --write`; ticks and filled fields are kept while the window base is the same.');
+    lines.push(`<!-- deploy-ledger-window: ${JSON.stringify({ version: 1, ...window })} -->`);
+    lines.push(`Generated from \`${window.base}..${window.candidate}\` (${how}). Regenerate with`);
+    lines.push('`deploy-ledger.js --write --since <previous-deployed-commit> --candidate <checked-commit>`; ticks, metrics and filled promotion fields are kept only for the same resolved base and candidate.');
     lines.push('');
     lines.push(`**${commits.length} commit(s)** touching **${s.files.length} file(s)**, of which `
         + `**${s.ui.length}** can change what a user sees.`);
@@ -485,15 +557,7 @@ function render(sinceRef, how, s, commits, previous, head, baseSha) {
     lines.push('');
     lines.push('| surface | changed files | desktop | 390 | 414 | console clean | network clean |');
     lines.push('|---|---|---|---|---|---|---|');
-    if (s.wide.length) {
-        lines.push(row('WIDE (every surface)', s.wide.map((f) => `\`${f}\``).join('<br>')));
-    }
-    for (const [r, files] of [...s.routed].sort((a, b) => a[0].localeCompare(b[0]))) {
-        lines.push(row('`' + r + '`', files.map((f) => `\`${f}\``).join('<br>')));
-    }
-    for (const f of s.unrouted) {
-        lines.push(row('`' + f + '`', 'no route derived — check wherever it renders'));
-    }
+    for (const [label, detail] of expectedRows(s)) lines.push(row(label, detail));
     if (!s.ui.length) lines.push('| _none_ | no user-facing file changed in this window | n/a | n/a | n/a | n/a | n/a |');
     lines.push('');
     lines.push('## Metrics');
@@ -503,8 +567,9 @@ function render(sinceRef, how, s, commits, previous, head, baseSha) {
     lines.push('fails `--verify`.');
     lines.push('');
     // A recorded-or-waived metrics line survives a regenerate for the same
-    // reason ticks do.
-    const prevMetrics = (previous || '').split('\n').find((l) => /- \[[xX]\] metrics recorded or waived:\s*\S/.test(l));
+    // reason ticks do. Anchored at line start so a quotation of the line inside
+    // prose cannot satisfy it.
+    const prevMetrics = (previous || '').split('\n').find((l) => /^- \[[xX]\] metrics recorded or waived:[^\S\n]*\S/.test(l));
     lines.push(prevMetrics || '- [ ] metrics recorded or waived:');
     lines.push('');
     lines.push('## Promotion record');
@@ -539,10 +604,11 @@ function render(sinceRef, how, s, commits, previous, head, baseSha) {
 
 // ------------------------------------------------------------- the commands
 
-function population(s, sinceRef, how) {
-    console.log(`[population] ${sinceRef}..HEAD (${how}): ${s.files.length} file(s) changed, `
+function population(s, window, how, explicitCandidate, checkoutHead) {
+    console.log(`[population] ${window.base}..${window.candidate} (${how}): ${s.files.length} file(s) changed, `
         + `${s.ui.length} user-facing, ${s.routed.size} route(s) derived, `
         + `${s.wide.length} wide-effect, ${s.unrouted.length} without a route`);
+    console.log(`[window] candidate ${window.candidate} (${explicitCandidate ? 'explicit --candidate' : 'default HEAD'}); checkout HEAD ${checkoutHead}. Checks apply only to candidate ${window.candidate}.`);
     console.log('[scope] routes are derived by convention (app/, pages/, src/routes/); a project '
         + 'routing otherwise lists files without a route. A wide-effect file marks EVERY surface '
         + 'affected rather than guessing narrower. Metrics are never derived.');
@@ -567,7 +633,7 @@ function usage() {
 
 // The whole verification, shared by --verify and --record. Returns
 // { code, lines } and prints nothing itself, so --verify can be silent on 0.
-function verify(ref, how, s, headFull) {
+function verify(ref, how, s, headFull, window) {
     const out = [];
     if (!fs.existsSync(LEDGER)) {
         return { code: 2, err: ['COULD NOT VERIFY: no DEPLOY-LEDGER.md. Run --write first.'] };
@@ -598,10 +664,20 @@ function verify(ref, how, s, headFull) {
     }
     const text = fs.readFileSync(LEDGER, 'utf8');
     const unchecked = text.split('\n').filter((l) => /^\|/.test(l) && /\[ \]/.test(l));
-    const metrics = /- \[[xX]\] metrics recorded or waived:\s*\S/.test(text);
+    const metrics = /^- \[[xX]\] metrics recorded or waived:[^\S\n]*\S/m.test(text);
     const { rec, present } = parseRecord(text);
     const problems = present ? validateRecord(rec, { head: headFull, root: ROOT })
         : [{ field: 'promotion record', why: 'section missing: re-run --write' }];
+
+    // An unchecked-box scan alone passes on a ledger that simply lacks the row:
+    // a surface nobody listed has no `[ ]` to find. These ask the complementary
+    // question — is every expected row PRESENT, unique and correctly shaped —
+    // and whether the file's recorded window is still this base/candidate pair.
+    // Both are exit 1: the fix is to re-run --write and check the surfaces.
+    const rows = rowProblems(text, s);
+    if (!sameWindow(text, window)) {
+        rows.unshift('STALE      base/candidate provenance is missing or differs; re-run --write and record fresh checks');
+    }
 
     // "that commit is on the default branch". Remediable by landing the branch,
     // so it is exit 1 beside the fields rather than exit 3: nothing here needs
@@ -623,11 +699,13 @@ function verify(ref, how, s, headFull) {
         });
     }
 
-    if (unchecked.length || !metrics || problems.length) {
+    if (unchecked.length || !metrics || problems.length || rows.length) {
         out.push(`[verify] ${unchecked.length} row(s) with an unchecked box; metrics ${metrics ? 'recorded' : 'NOT recorded'}; `
+            + `${rows.length} missing, invalid or stale surface record(s); `
             + `${problems.length} promotion field(s) missing or wrong`);
         for (const l of unchecked) out.push('  UNCHECKED  ' + l.split('|')[1].trim());
         if (!metrics) out.push('  UNCHECKED  metrics');
+        for (const r of rows) out.push('  ' + r);
         for (const p of problems) out.push(`  MISSING    ${p.field}: ${p.why}`);
         return { code: 1, lines: out };
     }
@@ -642,12 +720,23 @@ function main() {
     const ledgerDir = path.resolve(ROOT, dirIdx >= 0 ? argv[dirIdx + 1] : DEFAULT_LEDGER_DIR);
 
     if (argv.includes('--help') || argv.includes('-h')) return usage();
+
+    const candidateIdx = argv.indexOf('--candidate');
+    const candidateRef = candidateIdx >= 0 ? argv[candidateIdx + 1] : 'HEAD';
+    if (candidateIdx >= 0 && (!candidateRef || candidateRef.startsWith('-')
+        || argv.filter((arg) => arg === '--candidate').length !== 1)) {
+        console.error('COULD NOT READ --candidate: provide exactly one commit/ref value.');
+        process.exitCode = 2;
+        return;
+    }
+
     if (argv.includes('--selftest')) return selftest();
     if (argv.includes('--audit')) return audit(ledgerDir);
 
     if (!git('rev-parse', '--git-dir')) {
         console.error('COULD NOT READ: not a git repository. The probe is blind, not the deploy clean.');
-        process.exit(2);
+        process.exitCode = 2;
+        return;
     }
 
     const { ref, how } = resolveSince(explicit);
@@ -655,45 +744,73 @@ function main() {
         console.error(`COULD NOT DETERMINE the last deploy (${how}).`);
         console.error('This is NOT "nothing changed". Pass --since <ref>, or write one to');
         console.error('.claude/last-deploy, or tag your deploys.');
-        process.exit(2);
+        process.exitCode = 2;
+        return;
     }
 
-    const s = surfaces(ref);
-    if (!s) {
-        console.error(`COULD NOT DIFF ${ref}..HEAD. The probe is blind, not the tree clean.`);
-        process.exit(2);
+    const checkoutHead = git('rev-parse', '--verify', 'HEAD^{commit}');
+    const window = {
+        base: git('rev-parse', '--verify', ref + '^{commit}'),
+        candidate: candidateIdx >= 0 ? git('rev-parse', '--verify', candidateRef + '^{commit}') : checkoutHead,
+    };
+    if (!window.base || !window.candidate) {
+        console.error('COULD NOT RESOLVE the base or candidate commit. No ledger verification is possible.');
+        process.exitCode = 2;
+        return;
     }
-    const commits = (git('log', '--oneline', `${ref}..HEAD`) || '').split('\n').filter(Boolean);
-    const headFull = (git('rev-parse', 'HEAD') || '').toLowerCase();
+    const s = surfaces(window.base, window.candidate);
+    if (!s) {
+        console.error(`COULD NOT DIFF ${window.base}..${window.candidate}. The probe is blind, not the tree clean.`);
+        process.exitCode = 2;
+        return;
+    }
+    // Markdown delimiters/control characters cannot be represented by this
+    // ledger's simple table format. Refuse rather than emit a row verify can
+    // silently misparse. This does not prohibit those filenames in a project.
+    const unsupported = s.ui.filter((file) => /[|`\r\n\t]/.test(file));
+    if (unsupported.length) {
+        console.error(`COULD NOT CHECK unsupported ledger path(s): ${unsupported.map((file) => JSON.stringify(file)).join(', ')}`);
+        process.exitCode = 2;
+        return;
+    }
+    const commits = (git('log', '--oneline', `${window.base}..${window.candidate}`) || '').split('\n').filter(Boolean);
+    // The commit this authorises is the CANDIDATE, not the checkout HEAD. They
+    // are the same without --candidate; with it, promoting the checkout would
+    // authorise a commit nobody froze.
+    const headFull = window.candidate.toLowerCase();
 
     if (argv.includes('--verify') || argv.includes('--record')) {
-        const v = verify(ref, how, s, headFull);
-        if (v.code === 2) { for (const l of v.err) console.error(l); process.exit(2); }
+        const v = verify(ref, how, s, headFull, window);
+        if (v.code === 2) {
+            for (const l of v.err) console.error(l);
+            process.exitCode = 2;
+            return;
+        }
         if (v.code !== 0) {
-            population(s, ref, how);
+            population(s, window, how, candidateIdx >= 0, checkoutHead);
             for (const l of v.lines) console.log(l);
             if (argv.includes('--record')) console.log('[record] refusing to record a promotion the ledger does not authorise');
-            process.exit(v.code);
+            process.exitCode = v.code;
+            return;
         }
         if (argv.includes('--record')) return record(ledgerDir, headFull, s, ref, how);
         if (argv.includes('--verbose')) {
-            population(s, ref, how);
+            population(s, window, how, candidateIdx >= 0, checkoutHead);
             console.log(`[verify] eligible (${v.marking.globs.length} deploy-sensitive glob(s) + ${SQL_RULES.length} SQL rule(s), 0 hits), `
-                + `on ${v.db.ref}, every surface checked, every promotion field present. `
+                + `on ${v.db.ref}, every surface checked and recorded for this window, every promotion field present. `
                 + `Promotion of ${headFull.slice(0, 7)} is pre-authorised.`);
         }
         return;   // exit 0 with zero bytes: the chain reads the code, not the text
     }
 
-    population(s, ref, how);
+    population(s, window, how, candidateIdx >= 0, checkoutHead);
     if (argv.includes('--write')) {
         const previous = fs.existsSync(LEDGER) ? fs.readFileSync(LEDGER, 'utf8') : null;
-        const baseSha = (git('rev-parse', ref + '^{commit}') || '').toLowerCase();
-        const { text, reset } = render(ref, how, s, commits, previous, headFull, baseSha);
+        const { text, reset } = render(ref, how, s, commits, previous, window, headFull);
         fs.writeFileSync(LEDGER, text, 'utf8');
         console.log(`[write] ${path.relative(ROOT, LEDGER)} updated`
-            + (reset ? ' (previous ledger was for a different window; started blank)'
-                : previous ? ' (existing ticks and filled fields preserved)' : ''));
+            + (reset ? ' (changed or missing commit window; ticks and fields reset)'
+                : previous ? ' (same-window ticks and filled fields preserved)' : ''));
         return;
     }
     for (const [r, files] of s.routed) console.log(`  ${r}  <- ${files.join(', ')}`);
@@ -732,7 +849,8 @@ function audit(ledgerDir) {
     if (!fs.existsSync(ledgerDir) || !fs.statSync(ledgerDir).isDirectory()) {
         console.error(`COULD NOT AUDIT: ${rel}/ does not exist. No promotion has been recorded with --record, `
             + 'or they were recorded elsewhere (pass --ledger-dir).');
-        process.exit(2);
+        process.exitCode = 2;
+        return;
     }
     const files = fs.readdirSync(ledgerDir).filter((f) => f.endsWith('.md')).sort();
     if (!files.length) {
@@ -758,7 +876,11 @@ function audit(ledgerDir) {
         }
     }
     console.log(`[audit] ${files.length} promotion(s) in ${rel}/, ${files.length - incomplete} complete, ${incomplete} incomplete`);
-    process.exit(incomplete ? 1 : 0);
+    // Not process.exit(): this prints one line per recorded promotion, which on
+    // a long-lived project is the case that reaches a pipe's buffer boundary,
+    // and an incomplete-promotion list nobody can read is most of the way to a
+    // refusal nobody obeys. Set the code and let the loop drain.
+    process.exitCode = incomplete ? 1 : 0;
 }
 
 // ------------------------------------------------------------- the selftest
@@ -878,7 +1000,7 @@ function selftest() {
     check('no section is not present', parseRecord('# Deploy ledger\n').present === false, '');
 
     console.log(`[selftest] ${total} case(s) run, ${total - failed} passed, ${failed} failed`);
-    process.exit(failed ? 1 : 0);
+    process.exitCode = failed ? 1 : 0;
 }
 
 if (require.main === module) main();

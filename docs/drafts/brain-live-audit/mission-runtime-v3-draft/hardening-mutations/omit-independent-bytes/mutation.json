@@ -1,0 +1,18 @@
+{
+  "results": [
+    {
+      "id": "hidden-source-assume-unchanged",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: hidden out-of-scope bytes cannot become review-ready\n+ actual - expected\n\n+ 'review-ready'\n- 'scope-mismatch'\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/omit-independent-bytes/tooling/test-hardening.cjs:22:471\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/omit-independent-bytes/tooling/test-hardening.cjs:29:136"
+    }
+  ],
+  "summary": {
+    "population": 1,
+    "passed": 0,
+    "failed": 1,
+    "helpers": 1,
+    "remainingChildren": 0,
+    "modelCalls": 0,
+    "fixtureRemoved": true
+  }
+}

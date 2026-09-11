@@ -15,7 +15,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawnSync, spawn } = require('child_process');
 
 const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'fleet-decisions.js');
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-decisions-'));
@@ -239,7 +239,72 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     check('a reservation appears in --list', /reserved D6/.test(l.stdout || ''), l.stdout);
 }
 
-// -------------------------------------------------------------------- report
+// Actual simultaneous CLIs, with a read delay to expose the check/append gap.
+// The implementation is unmodified; delaying a filesystem read is an execution
+// interleaving, not a replacement of the allocator or contradiction checker.
+async function concurrentChecks() {
+    const preload = path.join(ROOT, 'slow-read.js');
+    fs.writeFileSync(preload, `const fs = require('fs'); const read = fs.readFileSync;
+fs.readFileSync = function(p, ...args) {
+  const value = read.call(fs, p, ...args);
+  if (String(p).endsWith('DECISIONS.jsonl')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120);
+  return value;
+};`);
+    const parallelRun = (cfg, args) => new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, ['--require', preload, SUBJECT, ...args], {
+            env: { ...process.env, CLAUDE_CONFIG_DIR: cfg },
+        });
+        let stdout = '', stderr = '';
+        child.stdout.on('data', (s) => { stdout += s; });
+        child.stderr.on('data', (s) => { stderr += s; });
+        child.on('error', reject);
+        child.on('close', (status) => resolve({ status, stdout, stderr }));
+    });
+    const emptyLog = () => {
+        const cfg = freshCfg();
+        fs.mkdirSync(path.join(cfg, 'fleet'));
+        fs.writeFileSync(path.join(cfg, 'fleet', 'DECISIONS.jsonl'), '');
+        return cfg;
+    };
+    const reserveCfg = emptyLog();
+    const reservations = await Promise.all(Array.from({ length: 4 }, (_, i) =>
+        parallelRun(reserveCfg, ['--next', '--repo', 'race', '--author', 'worker-' + i])));
+    check('CONCURRENT: all four reservations succeed with distinct ids',
+        reservations.every((r) => r.status === 0) && new Set(reservations.map((r) => r.stdout.trim())).size === 4,
+        JSON.stringify(reservations));
+    const decisionCfg = emptyLog();
+    const decisions = await Promise.all(['free', 'paid'].map((choice) =>
+        parallelRun(decisionCfg, ['--record', '--repo', 'race', '--subject', 'pricing', '--author', choice, '--decision', choice])));
+    check('CONCURRENT: opposing decisions produce exactly one success and one refusal',
+        decisions.filter((r) => r.status === 0).length === 1 && decisions.filter((r) => r.status === 3).length === 1,
+        JSON.stringify(decisions));
+    check('CONCURRENT: only one opposing decision reaches the durable log',
+        fs.readFileSync(path.join(decisionCfg, 'fleet', 'DECISIONS.jsonl'), 'utf8').trim().split('\n').length === 1);
+
+    for (const [kind, owner] of [['live', { pid: process.pid }], ['unreadable', 'partial lock']]) {
+        const cfg = emptyLog();
+        const lock = path.join(cfg, 'fleet', 'DECISIONS.jsonl.lock');
+        const contents = JSON.stringify(owner);
+        fs.writeFileSync(lock, contents);
+        const start = Date.now();
+        const r = run(cfg, ['--next', '--repo', 'race', '--author', 'contender']);
+        const elapsed = Date.now() - start;
+        // BOUNDED means "refuses instead of waiting forever": the subject gives up
+        // after 100 x 20 ms. The wall-clock ceiling here only has to sit far below
+        // the suite's own timeout to prove that; it must not encode this machine's
+        // speed. [measured 2026-09-09] a 6000 ms ceiling failed 3 of 4 macOS CI
+        // runs on two heads, with status 4 and the complete refusal text present,
+        // on a three-core runner right after the parallel cases above; the same
+        // file passed 44/44 here every time. The elapsed time is now in the detail.
+        check(kind + ' lock: bounded refusal names the lock and recovery requirement',
+            r.status === 4 && elapsed < 30000 && r.stderr.includes(lock) && /owner|process/i.test(r.stderr),
+            'status=' + r.status + ' elapsed=' + elapsed + 'ms\n' + r.stderr);
+        check(kind + ' lock: never steals the lock or appends to the log',
+            fs.readFileSync(lock, 'utf8') === contents && fs.readFileSync(path.join(cfg, 'fleet', 'DECISIONS.jsonl'), 'utf8') === '');
+    }
+}
+
+function report() {
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* leave it */ }
 
@@ -250,3 +315,8 @@ if (failures.length) {
     process.exit(1);
 }
 console.log(`fleet-decisions: ${passed}/${total} passed — the collision refusal, scoping, normalisation, and a torn log`);
+}
+concurrentChecks().then(report).catch((err) => {
+    failures.push('concurrent CLI harness failed: ' + err.stack);
+    report();
+});

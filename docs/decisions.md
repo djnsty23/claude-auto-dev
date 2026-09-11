@@ -3,6 +3,124 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-10: the sweep ORDERS spurious subject candidates rather than dropping them
+
+`check-suites-can-fail.js` was doing 348 suite process runs for 124 graded
+subjects, because it stubs every derived candidate and candidates come from path
+literals — so fixture data becomes a subject. `test-fleet-overlap` derives 12, of
+which 7 are seed filenames for throwaway git repos it never reads, and its real
+subject sat ninth. `docs/evidence-subject-evidence-2026-09-10.md` carries the
+numbers; the decisions are these.
+
+**Nothing is excluded, and that is the whole design.** The obvious fix is to stop
+deriving the spurious candidates, and that file's own header argues against it at
+length for a reason that holds: every way of telling a subject from a mention is a
+guess about a FILE, and a wrong guess DROPS a real subject, turning a verified
+suite into an unverified one or an `ok` into a VACUOUS accusation. The asymmetry
+used instead — **a heuristic that ORDERS candidates cannot produce a wrong verdict,
+only a slower run; one that SELECTS them can** — is what lets a resemblance
+heuristic (the suite's namesake) be used at all. It is confined to the one place
+where being wrong costs only time.
+
+**Early exit does the work; the ranking is the smaller half, and the commit says
+so.** Stopping at the first candidate that reddens the suite saves 94 runs; ranking
+adds 8. Ranking matters on exactly one row — `test-fleet-overlap`, 12 runs to 2 —
+which is the row the measurement started from. Everywhere else the first derived
+candidate already killed the suite. Claiming the ranking as the win would have been
+crediting the clever half for the boring half's result.
+
+**Verdict equivalence is asserted, not argued.** The previous exhaustive traversal
+is written out in `subject-evidence.js`'s selftest as a reference implementation and
+compared over all 363 outcome patterns for 1-5 candidates. `deriveSubjects` is
+byte-identical at 125/125 suites, same order, against `origin/main`'s function
+evaluated side by side, with a control that detects a perturbation.
+
+**Derivation moved out of the gate script, because it had no seam.**
+`check-suites-can-fail.js` resolves a HEAD, creates a worktree and refuses a dirty
+tree at module load, so nothing could ever test the derivation rules in place — and
+the first draft of the new suite proved the cost of that by reimplementing rule 1
+alone and covering ZERO of the cases the change is about. It said so only because it
+carried a population floor.
+
+**The run-count headline is not a time claim, and the evidence doc leads with that
+rather than burying it.** 29.3% fewer runs; zero improvement on `test-validate.js`,
+which consumed 45 of the sweep's 206 minutes in three `ETIMEDOUT` kills. Its only
+killing candidate is last of four, behind the three that time out, and ranking puts
+the namesake first — which is one of the three. Identical order, identical cost.
+
+**What the #237 instrumentation bought, including a correction to its own obvious
+reading.** This was the first sweep since `lastWords` landed and the first
+`ETIMEDOUT` here ever to name anything: the intermittent 45x blowup is now located
+to one suite instead of somewhere among 124. But "last output: the first assertion"
+does NOT mean it hung there — `test-validate.js` collects its results and prints
+them all at the end, and ends with `process.exit()` straight after writing to
+stdout, which truncates on darwin because a pipe's stdout is asynchronous there. So
+the truncation has to be fixed before the captured line can be trusted to locate
+anything. Separately, none of that suite's three `spawnSync` calls carries a
+timeout and it is not wired to `spawn-budget.js`, so a block in any of them is
+unbounded. Both are defects on their own terms and both are left for their own
+change, because bundling them would put two unrelated claims in one review.
+
+## 2026-09-10: `check:suites` publishes its child budget instead of raising it
+
+`npm run check:suites` did not complete cleanly once in three runs over five
+hours, and the data contradicted the advice. The quietest run was five times the
+slowest with five times the conflicts, while this file, CLAUDE.md, the project
+memory and the script's own closing line all said an exit 2 there is load and the
+answer is a quiet machine. `docs/evidence-check-suites-budget-2026-09-10.md`
+carries the measurements; the decisions are these.
+
+**The budget was not raised, and the arithmetic is why.** It had already been
+raised once, from 300 s to 900 s, for this class. The suites blowing it now cost
+**15-20 s** through the sweep's exact invocation, so a timeout needs a 45x blowup
+— and the largest slowdown this repo's own contention model will admit is
+`CONTENTION_MAX = 20`. A second raise would have been treating the symptom against
+a number the code already says is too small to be the cause.
+
+**The real defect was two nested timeout regimes with no relationship, the inner
+ceiling being the larger.** Against the sweep's fixed 900000 ms per child, four
+suites could self-grant more through `runBudgeted` — `test-entrypoints` 69.2 min
+across its call sites, `test-session-sweep` 52, `test-coordinator-write-guard`
+47.3, `test-hook-execution-evidence` 25 — and `test-entrypoints`'s `--json` call
+passes `maxTimeout: 900000`, the whole outer budget in one call. The damage was
+not slowness: the outer kill landed mid-retry, so the suite never printed the
+INDETERMINATE line it had computed and the sweep, holding only `ETIMEDOUT`,
+recorded a conflict with no cause. So the parent now PUBLISHES its deadline
+(`AUTODEV_SPAWN_BUDGET_DEADLINE`, minus a 30 s reporting margin) and
+`spawn-budget.js` clamps every budget to what remains. Absent the variable nothing
+changes, which is what makes it safe for every existing caller.
+
+**The retry was left alone, against the first draft of this change.** At the loads
+this gate runs at the widening is inert — `contentionFactor()` reads 1.00 until
+runnable threads exceed the core count, measured 1.00 at 0 and 7 extra workers on
+14 cores — so skipping a retry that cannot widen looked like free savings. It is
+not: the `slow-once` child in `test-spawn-budget.js` is rescued by re-execution at
+any budget, so the second attempt buys something even when the budget does not
+grow. What is true, and is now written where the retry happens, is that below core
+saturation every timeout costs two full budgets for re-execution alone.
+
+**`completed()` reports the child's last words.** A `spawnSync` child killed on
+timeout comes back with `stdout` and `stderr` populated; that was in hand at all
+nine timeouts and discarded nine times, which is why five hours of runs located
+nothing. The budget is spent either way.
+
+**Two cost findings were measured and deliberately not fixed.** The sweep performs
+**350 suite process runs for 123 suites**, because subjects are derived from path
+literals and fixture data therefore becomes a subject — `test-fleet-overlap`
+derives 12, of which 7 are seed filenames for throwaway git repos it never reads,
+each earning an `ok` row for breaking a file the suite does not use. Narrowing
+derivation means guessing, which that file's own header argues against at length,
+and it changes what the gate CLAIMS rather than what it costs per claim: it wants
+its own measurement, not a ride on this one. Separately, tmpdir holds 198,120
+entries of suite fixture debris; harmless at 149 ms to enumerate, and recorded
+because it grows monotonically and nothing reports it.
+
+**What was not established, stated as such.** No timeout was reproduced in this
+session, across the shared tree, a sweep-identical worktree, the sweep's exact
+`runSuite`, and a full stub cycle at loads 7-12. The proximate cause of the 45x
+blowup is still open. The change makes a single inner timeout stop guaranteeing an
+unexplained exit 2, and makes the next one name itself.
+
 ## 2026-09-08: the deploy ledger becomes the check that enforces Form B
 
 Closes the "still open" of the Form B decision below — the ledger row format and

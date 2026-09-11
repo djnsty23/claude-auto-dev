@@ -323,6 +323,36 @@ const LIVE = (() => {
     check('  and it is not called dead either: it says what went unchecked',
         /`desktop_session_id` \(no readable desktop store/.test(unCtx)
         && /could not be checked/.test(unCtx) && !/Nobody can be reached/.test(unCtx), unCtx.split('\n')[1]);
+
+    /* THE OTHER UNREADABLE REGISTRY, WHICH IS NOT THE SAME CASE. The pair above
+       loses the desktop STORE, so `unchecked` holds `desktop_session_id` -- a
+       real address, and "try it before concluding there is nobody there" is
+       sound advice about it. Lose the SESSIONS DIR instead and the same list
+       filled with `session_id`, which is not an address in any registry, under
+       the same sentence.
+
+       `[measured 2026-09-09]` it did exactly that from 2026-09-08 until today:
+       on a machine with no readable `~/.claude/sessions` -- a desktop-only
+       install, or one where the CLI has not written it yet -- a session was told
+       to try the CLI uuid, which is the 2026-09-04 defect that produced
+       `Session not found` twice. The store case above passed throughout,
+       because it happens to put an address in that list. One branch, two
+       registries, and only one of them was driven. */
+    const repo4 = makeRepo();
+    const state4 = stateFilePath();
+    const noSessions = Object.assign({}, LIVE.env, { AUTODEV_SESSIONS_DIR: path.join(os.tmpdir(), 'sbr-no-such-sessions-dir') });
+    run({ input: { session_id: 's9', cwd: repo4 }, roleFile: role, stateFile: state4, env: noSessions });
+    commitIn(repo4, 'v2 delivered\n');
+    const noSess = spoke(run({ input: { session_id: 's9', cwd: repo4 }, roleFile: role, stateFile: state4, env: noSessions }));
+    const nsCtx = noSess ? noSess.hookSpecificOutput.additionalContext : '';
+    check('  an unreadable SESSIONS dir never names `session_id` as an address to try',
+        !!noSess && !/`session_id`/.test(nsCtx) && !/brain-1/.test(nsCtx), nsCtx.split('\n')[1]);
+    /* The control, so the case above cannot pass by the hook going quiet or by
+       the branch never being entered: it must still reach the unchecked wording
+       and still name the field that IS an address. */
+    check('    control: it still reaches the unchecked branch and names `peer_name`',
+        /`peer_name` \(no readable sessions directory/.test(nsCtx)
+        && /could not be checked/.test(nsCtx) && !/Nobody can be reached/.test(nsCtx), nsCtx.split('\n')[1]);
 }
 
 // --- an address that resolves to a STRANGER ---------------------------------
@@ -461,11 +491,39 @@ const LIVE = (() => {
     commitIn(repo, 'v2\n');
     const one = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     check('throttle: the first notice fires', !!spoke(one));
+    const notifiedSha = JSON.parse(fs.readFileSync(state, 'utf8')).s4.sha;
 
     commitIn(repo, 'v3\n');
     const two = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     check('throttle: a second commit inside the window is SUPPRESSED', silentOk(two),
         `out=${two.out.length}B`);
+
+    const waiting = JSON.parse(fs.readFileSync(state, 'utf8'));
+    const pendingSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    check('throttle: suppressed work does not advance the notified HEAD',
+        waiting.s4.sha === notifiedSha && pendingSha !== notifiedSha,
+        `stored=${waiting.s4.sha.slice(0, 8)} notified=${notifiedSha.slice(0, 8)} pending=${pendingSha.slice(0, 8)}`);
+    const stillWaiting = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
+    check('throttle: pending work stays quiet while the window is active', silentOk(stillWaiting),
+        `out=${stillWaiting.out.length}B err=${stillWaiting.err.length}B exit=${stillWaiting.status}`);
+
+    // Age only the notice timestamp. A new commit here would hide the defect:
+    // the final commit must be delivered when the cooldown ends without
+    // requiring the worker to create more work first.
+    const expired = JSON.parse(fs.readFileSync(state, 'utf8'));
+    expired.s4.reportedAt = Date.now() - 21 * 60 * 1000;
+    fs.writeFileSync(state, JSON.stringify(expired));
+    const released = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
+    const releasedContext = spoke(released);
+    check('throttle: the same final commit is reported after cooldown expires',
+        !!releasedContext && releasedContext.hookSpecificOutput.additionalContext.includes('HEAD ' + pendingSha.slice(0, 8))
+            && released.err.length === 0,
+        `out=${released.out.length}B err=${released.err.length}B exit=${released.status}`);
+    check('throttle: released work advances the notified HEAD',
+        JSON.parse(fs.readFileSync(state, 'utf8')).s4.sha === pendingSha);
+    const duplicate = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
+    check('throttle: the released commit is not reported twice', silentOk(duplicate),
+        `out=${duplicate.out.length}B err=${duplicate.err.length}B exit=${duplicate.status}`);
 
     commitIn(repo, 'v4\n');
     const three = run({
@@ -567,13 +625,16 @@ console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
     + 'from fixtures (a wholly live record; a PARTLY stale one whose peer name decayed '
     + 'while its desktop id resolves; a wholly dead one; and a name resolving to a '
     + 'STRANGER, which is a different instruction from either), each beside the control '
-    + 'that flips it, plus an unreadable-store case proving an UNCHECKED address reaches '
-    + 'neither the degraded branch nor the dead one, four records cross-checked for '
-    + 'AGREEMENT between the hook and `--status` with a control proving they do not all '
-    + 'reduce to one answer, a 3-step throttle with a cooldown-0 '
-    + 'control, a corrupt ledger, and the merged-to-trunk shape with an off-trunk control '
-    + 'and a no-origin case. Every quiet case asserts zero bytes on BOTH streams; the '
-    + 'address line never offers cwd and never carries session_id.');
+    + 'that flips it, plus BOTH unreadable-registry cases -- no desktop store, and no '
+    + 'sessions directory -- each proving an UNCHECKED address reaches neither the '
+    + 'degraded branch nor the dead one, and the sessions one proving `session_id` is '
+    + 'never named among the addresses to try, four records cross-checked for AGREEMENT '
+    + 'between the hook and `--status` with a control proving they do not all reduce to '
+    + 'one answer, a throttle with same-HEAD delivery after expiry, duplicate '
+    + 'suppression and a cooldown-0 control, a corrupt ledger, and the merged-to-trunk '
+    + 'shape with an off-trunk control and a no-origin case. Every quiet case asserts '
+    + 'zero bytes on BOTH streams; the address line never offers cwd and never carries '
+    + 'session_id.');
 if (fail) {
     console.log('failed: ' + failures.join('; '));
     process.exit(1);

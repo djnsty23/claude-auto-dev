@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-08 22:30:02 UTC",
+  "candidate": "95f3737c21a6ee324d73116ec1a745beacd9f041",
+  "scope": "autodev source and isolated fixtures in current task/worktree",
+  "policy": "Ratings are assessments, never completion gates. Check exact current PR heads before overlapping work. Preserve existing authorization. Append evidence and outcomes.",
+  "items": [
+    {
+      "id": "B01",
+      "priority": "P1",
+      "title": "Bind deployment evidence to exact artifact",
+      "status": "Partially implemented in a806b7c: frozen base/candidate metadata, stale-check reset, required-row membership and WIDE runtime config; 48/48 actual CLI assertions. Dirty-tree release authority, actual artifact/environment proof and PR #208 integration remain.",
+      "dependsOn": [],
+      "acceptance": "Default HEAD rejects stale candidate evidence; an explicitly frozen historical candidate remains verifiable after archival but never certifies a newer checkout or deployment. Changing selected candidate/base requires fresh checks. Release evidence additionally binds current gate/setup/environment, actual artifact and target; deleted required rows fail, WIDE runtime config is included, and unauthorized/dirty promotion refuses. Fresh clean control succeeds."
+    },
+    {
+      "id": "B02",
+      "priority": "P1",
+      "title": "Preserve only owned local work in checkpoints",
+      "status": "OPEN #214; reproduced",
+      "dependsOn": [],
+      "acceptance": "Own/peer fixture preserves peer edits and index; default rescue stays local; publishing follows authorization and ordinary hooks; crash retry does not capture or duplicate work."
+    },
+    {
+      "id": "B03",
+      "priority": "P1",
+      "title": "Repair contradictory skills",
+      "status": "Implemented locally: all 68 skills reviewed/updated and final Git-object hashes recorded; 12 additional references and generated AGENTS. Full eight-stage gate passes on clean c1fa1c6. Installed release and model adherence remain separate.",
+      "dependsOn": [],
+      "acceptance": "Record review depth/disposition for every skill; exercise changed snippets; remove active obsolete APIs, newest-sprint loss, score-as-done and masked checks in affected procedures; gate and generated indexes pass."
+    },
+    {
+      "id": "B04",
+      "priority": "P1",
+      "title": "Repair memory backup scope and restore",
+      "status": "Procedure corrected and synthetic controls reviewed; private live backup/restore not exercised.",
+      "dependsOn": [],
+      "acceptance": "Copy approved auto-memory only; exclude transcript JSONL and session carriers; exact round-trip layout without nested memory or silent overwrite; detect new-only changes; test synthetic local fixture before authorized private publication."
+    },
+    {
+      "id": "B05",
+      "priority": "P1",
+      "title": "Persist mission and worker state transitions",
+      "status": "Reviewed fixture-only mission-v3 prototype: local SQLite fencing, max3 one-use bootstrap permits, actual fixed child registration, durable close receipts, bounded outbox/ACK and conservative readiness. Hardening10/10, inherited22/22+4/4+20/20+4/4, root writes5/5, independent6/6. Not integrated: real host adapter, independent candidate verifier, compare-before-write PRD completion and release/live handoff remain.",
+      "dependsOn": [],
+      "acceptance": "Record scope/acceptance/owner/repo/base/attempt/evidence/target; distinguish requested/running/blocked/failed/verified/released; restart reconstructs state; concurrent claims and duplicate events are idempotent."
+    },
+    {
+      "id": "B06",
+      "priority": "P1",
+      "title": "Execute redispatch and confirm actual start",
+      "status": "#218 proposes only",
+      "dependsOn": [
+        "B26",
+        "B05"
+      ],
+      "acceptance": "Supported adapter starts worker and reads back task id/cwd/origin/base; absent capability stays awaiting-start; crash between request/response reconciles duplicates; runnable fixture completes unattended."
+    },
+    {
+      "id": "B07",
+      "priority": "P1",
+      "title": "Persist result outbox and acknowledge consumption",
+      "status": "Cooldown accounting fixed; delivery incomplete",
+      "dependsOn": [
+        "B05"
+      ],
+      "acceptance": "One-turn worker persists completion on first Stop; cooldown/crash/no later turn cannot lose it; scheduler reconciles; duplicate messages are idempotent; sent/received/accepted distinct."
+    },
+    {
+      "id": "B08",
+      "priority": "P1",
+      "title": "Persist attempts, backoff and exhaustion",
+      "status": "Prose retry limits insufficient",
+      "dependsOn": [
+        "B05"
+      ],
+      "acceptance": "Attempts survive restart/compaction; deterministic failures stop reselecting forever; transient retry has bounded backoff; exhausted/external blockers remain explicitly incomplete."
+    },
+    {
+      "id": "B09",
+      "priority": "P1",
+      "title": "Bind flow evidence to code/setup/deployment",
+      "status": "OPEN #206; reproduced",
+      "dependsOn": [
+        "B01"
+      ],
+      "acceptance": "Stale code/setup/deployment fails; generated template and documented screenshot path resolve consistently; verify actual persisted outcomes across relevant identities/states."
+    },
+    {
+      "id": "B10",
+      "priority": "P1",
+      "title": "Prove repeated autonomous missions",
+      "status": "Not demonstrated",
+      "dependsOn": [
+        "B01",
+        "B03",
+        "B06",
+        "B07",
+        "B08",
+        "B09",
+        "B11"
+      ],
+      "acceptance": "Disposable idea-to-authorized-preview mission needs no intervention; inject worker loss/flaky tools/moving base; observe live version+browser+data+rollback; repeat independent missions and record cost."
+    },
+    {
+      "id": "B11",
+      "priority": "P2",
+      "title": "Validate target before and after deploying",
+      "status": "OPEN #209; partial",
+      "dependsOn": [
+        "B01"
+      ],
+      "acceptance": "Resolve command/provider/project/intended URL before effect within existing authorization; bind observed artifact to target; preview default cannot publish production silently; live known-version journey passes."
+    },
+    {
+      "id": "B12",
+      "priority": "P2",
+      "title": "Reconcile backlog and dependency-supporting archives",
+      "status": "Shared planner fixed; dependency-preserving archive procedure and independent old/new archive controls reviewed. Runtime concurrent PRD update reconciliation remains.",
+      "dependsOn": [
+        "B03",
+        "B05"
+      ],
+      "acceptance": "Archiving done prerequisite preserves unfinished dependent readiness; stale worker updates preserve newer trunk work; duplicate/special/malformed/cyclic inputs remain explicit."
+    },
+    {
+      "id": "B13",
+      "priority": "P2",
+      "title": "Scope away handling to mandate",
+      "status": "Existing hook defect reproduced",
+      "dependsOn": [],
+      "acceptance": "Managed fixture follows scoped away policy; unmanaged control retains normal questions; absent/expired/corrupt scope cannot broaden authority."
+    },
+    {
+      "id": "B14",
+      "priority": "P2",
+      "title": "Recover locks with owner evidence",
+      "status": "Bounded refusal fixed; recovery missing",
+      "dependsOn": [],
+      "acceptance": "Never displace active owner by age; verified dead owner can recover atomically; unknown host refuses clearly; old owner cannot delete successor lock; concurrent ids stay unique."
+    },
+    {
+      "id": "B15",
+      "priority": "P2",
+      "title": "Resolve authoritative required CI jobs",
+      "status": "Skipped masking fixed; missing jobs unresolved",
+      "dependsOn": [],
+      "acceptance": "Unrelated success cannot cover unreported required job; workflow/name collisions distinguished; legitimate optional/docs-only checks recognized from authoritative policy; real discriminating rollup measured."
+    },
+    {
+      "id": "B16",
+      "priority": "P2",
+      "title": "Evaluate semantic product completeness",
+      "status": "Mission evaluation gap",
+      "dependsOn": [
+        "B03"
+      ],
+      "acceptance": "Relevant success/empty/loading/error/permission/responsive/persistence paths included; independent evaluator checks product intent; security/access tested at actual backend with representative identities."
+    },
+    {
+      "id": "B17",
+      "priority": "P2",
+      "title": "Measure cost and quota recovery",
+      "status": "Instruction footprint reduced; library comparison is byte count only. Actual mission cost/reliability remains unmeasured.",
+      "dependsOn": [
+        "B05",
+        "B08"
+      ],
+      "acceptance": "Fixed corpus captures actual model/tokens/time/tools/outcomes; compare baseline+alternative; quota resume starts only missing attempts and records recovery."
+    },
+    {
+      "id": "B18",
+      "priority": "P2",
+      "title": "Activate reviewed runtime and verify it",
+      "status": "Local source only; not released",
+      "dependsOn": [
+        "B03",
+        "B26"
+      ],
+      "acceptance": "Exact clean candidate gate passes; reconcile upstream; follow authorized release/version workflow; read back installed version/hash; run representative actual hooks on installed candidate."
+    },
+    {
+      "id": "B19",
+      "priority": "P3",
+      "title": "Test legacy settings restore",
+      "status": "Source lead only; unconfirmed",
+      "dependsOn": [],
+      "acceptance": "Use an explicitly injected fixture settings directory; later-created settings survive removal of owned temporary entries; absent and pre-existing file controls establish or refute defect. Do not repurpose the active host home/config directories."
+    },
+    {
+      "id": "B20",
+      "priority": "P1",
+      "title": "Distinguish unavailable memory from empty memory",
+      "status": "CLI read boundary implemented in e905479: existing database opened read-only, schema checked, failed retrieval exit2/structured stderr/no stdout; CLAUDE_CONFIG_DIR honored. Candidate117/117, baseline54/117, existence-only74/117; actual read-write mutation fails the two intended write-safety checks. Independent review passed; Full eight-stage gate passed on clean e905479: 125/125 suites, zero unverified suites. Imported API fallback/initialization, case-sensitive project identity and capture/store health remain separate limitations.",
+      "dependsOn": [],
+      "acceptance": "Unavailable/corrupt/wrong store has explicit non-success outcome; real zero matches remains distinct; read-only paths do not initialize a store; configured project/store lookup agrees across commands."
+    },
+    {
+      "id": "B21",
+      "priority": "P1",
+      "title": "Preserve conflicting memory and bounded privacy",
+      "status": "Privacy boundaries implemented in 6494927 with independent protected-content controls. Conflict and writer-scope repair implemented in 95f3737: distinct concepts/source payloads survive, every grouped API row preserves observation IDs, same-second order is deterministic, and a project/source duplicate cannot suppress another context. Actual candidate18/18, baseline8/18, concept-only13/18, no-tie mutant14/18; independent project-constraint mutant17/18 fails exactly cross-project preservation. Applied read-health117/117, knowledge30/30 and CLI34/34 pass. Full eight-stage gate passes on clean 95f3737 with 126/126 suites, zero unverified. Markdown does not expose the API provenance fields. Imported API health, project normalization, legacy privacy and restore remain open.",
+      "dependsOn": [],
+      "acceptance": "Different decisions sharing title remain independently retrievable with provenance and deterministic order; incomplete/nested private regions cannot leak protected payload; positive nonprivate control remains accessible.",
+      "evidence": [
+        "memory-conflict-draft/manifest.json",
+        "memory-conflict-independent/review.md",
+        "memory-conflict-applied.log",
+        "gate-memory-conflicts-receipt.json"
+      ]
+    },
+    {
+      "id": "B22",
+      "priority": "P2",
+      "title": "Make preflight template execute the gate it claims",
+      "status": "Actual template accepts echo preflight and treats missing package as warning exit0",
+      "dependsOn": [],
+      "acceptance": "Echo/comment markers cannot establish execution; required project check is invoked or explicitly unavailable; valid command passes, nonzero child and missing required config fail; appropriate non-Node control supported."
+    },
+    {
+      "id": "B23",
+      "priority": "P2",
+      "title": "Reject skill-command errors and partial verification",
+      "status": "Implemented e1b6aac; 10/10 selftests plus independent isolated safeguard-removal controls; full exact-candidate gate passes.",
+      "dependsOn": [],
+      "acceptance": "Six flat and earlier-sprint states exercised; valid input execution errors and mixed unverified commands cannot pass; healthy controls pass and explicit illustrative samples remain separate from executable coverage."
+    },
+    {
+      "id": "B24",
+      "priority": "P2",
+      "title": "Validate first-release and frozen deployment baseline",
+      "status": "Actual CLI wrong baseline yields0routes/verify0; fixed skill captures baseline before promotion; CLI first-release unsupported",
+      "dependsOn": [
+        "B01"
+      ],
+      "acceptance": "Existing target snapshots prior version before mutation; candidate readback uses separate field; first release independently enumerates complete candidate without invented deployed commit; restart retains both identities."
+    },
+    {
+      "id": "B25",
+      "priority": "P2",
+      "title": "Distinguish unsupported fleet payloads from an empty fleet",
+      "status": "Implemented and gated in 08cd93c: recognized envelope plus consumed row validation. Fleet 295/295, watcher 216/216; actual row matrix 22/22 and 20/20. Independent state and dedup mutations fail for intended reasons. Producer-discovery completeness remains unproven.",
+      "dependsOn": [],
+      "acceptance": "Recognized array/sessions/rows forms validate the container and required row shape; valid empty succeeds distinctly; unrecognized or malformed payload returns explicit indeterminate/failure, never no-collision clearance. Preserve actual positive pairing and structured output; audit sibling watch-panels consumer before shared repair."
+    },
+    {
+      "id": "B26",
+      "priority": "P1",
+      "title": "Admit each host with native hook compatibility evidence",
+      "status": "Implemented and fully gated in c948221: generated native packages plus protected patch payload handling. Applied59/59 patch,49/49 package,44/44 Claude controls; four actual generated-manifest turns and eight measured native workspace-write cases. Full eight-stage gate124/124,123 direct failure checks+1separatecanary,0unverified. Original matcher already selects native patches; explicit alternative rejected as unnecessary. Installed release, function modules, content protections and other host/OS admission remain open.",
+      "dependsOn": [],
+      "acceptance": "Host-specific package/manifest is accepted by the actual installed host without deleting Claude capabilities globally. Verify expected event schema, root resolution, time budget and hook outputs with owned positive and negative execution canaries, then read back installed candidate identity before admitted autonomous work. Code generation success/CLIexit0 cannot substitute for hook admission."
+    }
+  ],
+  "nextExecutionOrder": [
+    "B05",
+    "B20",
+    "B21",
+    "B26",
+    "B06",
+    "B07",
+    "B08",
+    "B01",
+    "B09",
+    "B11",
+    "B10"
+  ],
+  "hostCompatibilityPlan": "host-compatibility-plan.md",
+  "finalSkillInventory": "skill-memory-candidate-inventory.json",
+  "gateReceipt": "gate-memory-conflicts-receipt.json",
+  "lastAssessmentAt": "2026-09-09T03:22:42.827142+00:00",
+  "nativeAdmissionScope": "Every intended host, including Claude and Codex. Source preservation and parser/discovery are not command/function execution proof.",
+  "updatedAt": "2026-09-09T03:22:42.827142+00:00",
+  "ratings": "ratings-memory-candidate.json"
+}

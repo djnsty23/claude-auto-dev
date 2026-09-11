@@ -1,0 +1,30 @@
+{
+  "candidate": "e1b6aacde570ac4ab9ee44c8e1f3d86733410fab",
+  "command": "npm run gate > .claude/reports/brain-live-audit/gate-skills-candidate.log 2>&1",
+  "exitCode": 0,
+  "observedAt": "2026-09-08T23:35:26.408266+00:00",
+  "sourceCleanAfter": true,
+  "log": ".claude/reports/brain-live-audit/gate-skills-candidate.log",
+  "log_sha256": "542bae038fffc37a8d9fe26de68fad2af6cb7fa54b1a30fce3f18d58edec5307",
+  "suitePopulation": 122,
+  "suitesPassed": 122,
+  "mutationPopulation": 122,
+  "mutationVerified": 121,
+  "separateCanary": 1,
+  "mutationUnverified": 0,
+  "stagesPassed": [
+    "test",
+    "check:suites",
+    "check:probe-shapes",
+    "check:population",
+    "check:entrypoints",
+    "check:skill-tools",
+    "check:agents-md",
+    "check:claude-md"
+  ],
+  "limits": [
+    "macOS host; explicitly unverified Windows-only missing-verdict case",
+    "Installed Claude host module scan warning; not installed-candidate hook proof",
+    "Not an end-to-end product or deployment mission"
+  ]
+}

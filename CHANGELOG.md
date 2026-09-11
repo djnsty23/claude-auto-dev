@@ -1,5 +1,92 @@
 # Changelog
 
+## [8.167.0]
+
+### The reason this release exists: the previous fix never reached anybody
+
+- **`brain-role`'s coordinator-liveness fix shipped two days late, and nothing
+  detected the gap.** #222 merged on 2026-09-08 and 8.166.0 had been released
+  *before* it, so `VERSION` never moved and the plugin cache is keyed on that
+  number. Every running session kept executing the pre-fix hook through five
+  subsequent merges to `main`. Two independent confirmations: the installed
+  `8.166.0` bundle greps zero for the `degraded` branch, and live Stop-hook
+  notices were still offering `peer name` before `desktop session id` — the
+  ordering #222 deliberately reversed. **"Fixed on main" and "fixed in the
+  fleet" are different claims, and no gate step grades the second.** (#222,
+  #230)
+
+### The coordinator is reachable when any address still reaches it
+
+- **A decayed `peer_name` is a stale field, not a lost coordinator.**
+  `peer_name` is a session's ephemeral display name and it changes on every
+  coordinator restart, so a restart alone raised `dead-peer`. The Stop hook read
+  `checkBrainRole().state` — a two-value summary of a three-value question — and
+  told sessions the role file named no live coordinator and to escalate to the
+  operator, while `check-brain-role.js --status`, reading the same file on the
+  same call, said `PARTLY STALE AND STILL REACHABLE` and named the working
+  desktop id. Sessions reached the coordinator at that address anyway. The
+  verdict now carries `degraded`, and an `unchecked` list keeps "the registry
+  could not be READ" from reading as "the address is dead". (#222)
+
+- **A resolving address that reaches a stranger is not "nobody".** `peer_name`
+  freed by an archived session can be taken by another, and `reach.collision`
+  was computed and read by `render()` alone — so `--status` said "AN ADDRESS
+  HERE RESOLVES TO SOMEBODY ELSE. Message nobody", while the hook let a
+  collision fall through to `fault` and said "Nobody can be reached at that
+  record". That reads as a claim the address is *dead*, so the reader tries it,
+  the lookup **succeeds**, and the handover lands on a stranger — silently,
+  because the failure happens in the recipient's session. The hook now has its
+  own collision branch, and five records assert that the addresses it offers are
+  exactly the addresses `--status` shows live. (#230)
+
+### Gate
+
+- **A coverage floor at the number HEAD scored**, with zero dependencies — a
+  floor against regression, not a claim of quality: coverage measures execution,
+  verification is `check:vacuity`'s question. The gate is now **nine** steps.
+  (#203)
+- **`--no-verify` asks before, and asks for the record after**, in hooks that
+  already run. (#199)
+- **`test-coordinator-write-guard`** regained two raw `spawnSync` calls #183 had
+  removed.
+- **`rule-gate-integrity`** documents two more ways a control is green because
+  it cannot fail. (#223)
+
+### Also
+
+- **A per-story runtime flow check for `auto`**, measured before it was wired.
+  (#206)
+
+### Also in this release
+
+- **`vercel --yes` is not reliably a preview, and the Vercel CLI does not read
+  `.gitignore`.** On a project's *first* deployment Vercel assigns it to
+  production regardless of flags and says so only afterwards. `[measured
+  2026-09-08]` a `vercel --yes` against a worktree of this repo deployed it: no
+  framework detected, output directory `.`, the tree served statically, and
+  `/.claude/settings.local.json` returned HTTP 200 to an unauthenticated curl
+  while `/` returned 404 -- 423 tracked files and 16 gitignored ones uploaded.
+  Adds `.vercelignore`, a `check-deploy-target.js --ignore-file` floor, and the
+  rule that no pre-check can prevent the first-deploy case because it is a fact
+  about Vercel's account state, not the tree: **declare the intent, deploy, then
+  read the target back.** (#209)
+
+- **The shared-file quota tripwire moved, and a summary hid a refusal.** (#193)
+
+- **The 17 PRs merged in two days, checked as one tree** -- a merge-coherence
+  audit recording what the individual green boards could not: that PRs green
+  apart can be wrong together. (#216)
+
+- **`session_id` was offered as an address, under a warning that says not to.**
+  `check-brain-role.js` pushed `session_id` into the `unchecked` list, which both
+  consumers render as "try that address before concluding there is nobody there"
+  -- while `stop-brain-report.js` carried, in capitals, the note that
+  `session_id` IS NOT AN ADDRESS and that printing it as one had already sent
+  peers to a dead one. One file stated the prohibition and another performed it.
+  On a machine with no readable sessions directory the Stop hook sent a session
+  to the CLI uuid, and the live, store-confirmed desktop id appeared in neither
+  list -- the address that works omitted, the one that cannot offered. (#232)
+
 ## [8.166.0]
 
 ### The shipped defect this release exists for

@@ -205,10 +205,10 @@ async function run(o) {
         },
     });
 
-    let out = '', err = '', closed = false;
+    let out = '', err = '', closed = false, exitCode = null, signal = null;
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
-    const closePromise = new Promise((res) => child.on('close', () => { closed = true; res(); }));
+    const closePromise = new Promise((res) => child.on('close', (code, sig) => { closed = true; exitCode = code; signal = sig; res(); }));
 
     // Wait for proof the scan ran, not for the absence of noise.
     const deadline = Date.now() + 20000;
@@ -220,6 +220,7 @@ async function run(o) {
     return {
         stdout: out,
         stderr: err,
+        exitCode, signal,
         scanned,
         argv: scanned ? fs.readFileSync(ARGVLOG, 'utf8') : null,
         lines: out.split('\n').filter(Boolean),
@@ -502,10 +503,84 @@ async function run(o) {
             const rows = await run({ fleetDir: freshFleetDir(), payload: { rows: [BEACON()] } });
             eq('a { rows } envelope is accepted', rows.lines[0], BEACON_LINE);
 
-            const none = await run({ fleetDir: freshFleetDir(), payload: { population: { dirs: 0 } } });
-            eq('an envelope with no recognised session key is quiet rather than an error',
-                none.stdout, '');
-            eq('...and is not reported as a broken probe', none.stderr, '');
+        }
+
+        // --once exposes scan success to callers; periodic mode keeps its timer.
+        // Errors cannot update dedup state or hide a panel after recovery.
+        for (const [label, payload] of [
+            ['bare array', [BEACON()]], ['sessions', { sessions: [BEACON()] }],
+            ['rows', { rows: [BEACON()] }], ['sessions with metadata', { sessions: [BEACON()], population: { dirs: 1 } }],
+        ]) {
+            const r = await run({ fleetDir: freshFleetDir(), payload, args: ['--once'] });
+            eq(label + ' one-shot succeeds', r.exitCode, 0);
+            eq(label + ' one-shot reports the positive panel', r.stdout, BEACON_LINE + '\n');
+        }
+        for (const [label, payload] of [
+            ['empty array', []], ['empty sessions', { sessions: [] }],
+            ['empty rows', { rows: [] }], ['empty with metadata', { sessions: [], population: { dirs: 0 } }],
+        ]) {
+            const dir = freshFleetDir(), r = await run({ fleetDir: dir, payload, args: ['--once'] });
+            eq(label + ' one-shot succeeds quietly', r.exitCode, 0);
+            eq(label + ' remains quiet', r.stdout, '');
+            check(label + ' creates no dedup state', !fs.existsSync(stateFile(dir)), 'unexpected state write');
+        }
+        for (const [label, payload] of [
+            ['null', null], ['boolean', false], ['number', 0], ['string', 'sessions'],
+            ['unknown empty envelope', {}], ['metadata only', { population: { dirs: 0 } }],
+            ['unknown populated envelope', { records: [BEACON()] }],
+            ...[null, 0, false, '', {}].map(value => ['invalid sessions ' + JSON.stringify(value), { sessions: value }]),
+            ...[null, 0, false, '', {}].map(value => ['invalid rows ' + JSON.stringify(value), { rows: value }]),
+            ['invalid primary with valid fallback', { sessions: 0, rows: [BEACON()] }],
+            ['empty primary hides populated rows', { sessions: [], rows: [BEACON()] }],
+            ['populated primary with empty rows', { sessions: [BEACON()], rows: [] }],
+            ['two empty session keys', { sessions: [], rows: [] }],
+        ]) {
+            const dir = freshFleetDir();
+            fs.writeFileSync(stateFile(dir), JSON.stringify(['already-seen|T0']));
+            const before = fs.readFileSync(stateFile(dir), 'utf8');
+            const r = await run({ fleetDir: dir, payload, args: ['--once'] });
+            eq(label + ' one-shot exits unavailable', r.exitCode, 2);
+            eq(label + ' announces the envelope error', r.stdout, 'WATCHER-ERROR fleet-status returned unsupported session envelope\n');
+            eq(label + ' preserves exact dedup state', fs.readFileSync(stateFile(dir), 'utf8'), before);
+        }
+        {
+            const dir = freshFleetDir();
+            const r = await run({ fleetDir: dir, payload: { records: [BEACON()] } });
+            eq('periodic malformed envelope announces an error', r.stdout, 'WATCHER-ERROR fleet-status returned unsupported session envelope\n');
+            eq('periodic malformed envelope keeps the watcher alive', r.signal, 'SIGTERM');
+            check('periodic malformed envelope creates no dedup state', !fs.existsSync(stateFile(dir)), 'unexpected state write');
+            const recovered = await run({ fleetDir: dir, payload: { sessions: [BEACON()] }, args: ['--once'] });
+            eq('a valid scan after envelope failure still reports the panel', recovered.stdout, BEACON_LINE + '\n');
+            eq('a valid scan after envelope failure succeeds', recovered.exitCode, 0);
+        }
+        for (const mode of ['garbage', 'fail']) {
+            const r = await run({ fleetDir: freshFleetDir(), payload: { sessions: [BEACON()] }, mode, args: ['--once'] });
+            eq(mode + ' one-shot cannot imply a successful scan', r.exitCode, 2);
+        }
+
+        // Reject malformed rows before emitting any panel or modifying dedup.
+        for (const [label, row] of [
+            ...[null, 1, true, 'row', [], {}].map(value => ['invalid row ' + JSON.stringify(value), value]),
+            ['missing identity', { ...BEACON(), sessionId: undefined }],
+            ['empty identity', { ...BEACON(), sessionId: '' }],
+            ['missing state', { ...BEACON(), state: undefined }],
+            ['unknown state', { ...BEACON(), state: 'new-unknown' }],
+            ...['title', 'addressableId', 'lastTs'].map(key => ['invalid ' + key, { ...BEACON(), [key]: {} }]),
+            ['null question', { ...BEACON(), pending: { questions: [null] } }],
+            ['string question', { ...BEACON(), pending: { questions: ['broken'] } }],
+            ['object options', { ...BEACON(), pending: { questions: [{ options: {} }] } }],
+            ['null option', { ...BEACON(), pending: { questions: [{ options: [null] }] } }],
+            ['object ask time', { ...BEACON(), pending: { askedAt: {} } }],
+        ]) {
+            const dir = freshFleetDir();
+            fs.writeFileSync(stateFile(dir), JSON.stringify(['already-seen|T0']));
+            const before = fs.readFileSync(stateFile(dir), 'utf8');
+            const r = await run({ fleetDir: dir, payload: { sessions: [BEACON(), row] }, args: ['--once'] });
+            eq(label + ' one-shot exits unavailable', r.exitCode, 2);
+            eq(label + ' reports only the row error', r.stdout, 'WATCHER-ERROR fleet-status returned invalid session row 2\n');
+            eq(label + ' preserves dedup despite preceding valid row', fs.readFileSync(stateFile(dir), 'utf8'), before);
+            const recovered = await run({ fleetDir: dir, payload: [BEACON()], args: ['--once'] });
+            eq(label + ' does not consume the preceding valid panel', recovered.stdout, BEACON_LINE + '\n');
         }
 
         // -------------------------------------------------------------------

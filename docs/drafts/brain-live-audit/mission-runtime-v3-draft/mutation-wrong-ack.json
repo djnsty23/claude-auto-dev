@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "id": "lost-and-wrong-ack-do-not-start-another-worker",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: wrong receiver cannot clear pending delivery\n+ actual - expected\n\n+ 'acked'\n- 'ack-mismatch'\n      ^\n\n    at /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/wrong-ack/tooling/test-synthetic-runtime.js:28:238\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/wrong-ack/tooling/test-synthetic-runtime.js:46:116"
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 1,
+    "population": 1,
+    "syntheticHelpers": 1,
+    "modelCalls": 0,
+    "remainingChildren": 0,
+    "remainingServers": 0,
+    "fixtureRemoved": true
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "status": "Final local-source assessment after the full eight-stage gate",
+  "candidate": "95f3737c21a6ee324d73116ec1a745beacd9f041",
+  "at": "2026-09-09T03:22:42.827142+00:00",
+  "scope": "Local source/control maturity, not installed success rates. Ungated fixture-only mission-v3 gives no source score increase.",
+  "population": 17,
+  "ratings": [
+    {
+      "aspect": "Idea to executable acceptance",
+      "baseline": 4,
+      "score": 6,
+      "limit": "Structural checks and all-sprint criteria improved; semantic product evaluation remains."
+    },
+    {
+      "aspect": "Backlog and dependencies",
+      "baseline": 3,
+      "score": 7,
+      "limit": "Shared planner and graph controls; durable multi-worker completion is not integrated."
+    },
+    {
+      "aspect": "Worker dispatch",
+      "baseline": 3,
+      "score": 4,
+      "limit": "Actual start and identity distinguished; real mission adapter remains a prototype gap."
+    },
+    {
+      "aspect": "Ownership and concurrency",
+      "baseline": 4,
+      "score": 7,
+      "limit": "Local decision/fleet safeguards plus measured native containment; no distributed lease."
+    },
+    {
+      "aspect": "Authorization and scope",
+      "baseline": 5,
+      "score": 6,
+      "limit": "Native sandbox effects tested and missing hook workdir exposed; global away scope remains."
+    },
+    {
+      "aspect": "Implementation quality",
+      "baseline": 5,
+      "score": 5,
+      "limit": "These fixes are verified; arbitrary product delivery is unmeasured."
+    },
+    {
+      "aspect": "Tests and gates",
+      "baseline": 6,
+      "score": 8,
+      "limit": "Exact clean gates, independent mutations and native effect controls; not all OS paths tested."
+    },
+    {
+      "aspect": "Evidence and completion truthfulness",
+      "baseline": 4,
+      "score": 7,
+      "limit": "Artifact/hook/lifecycle distinctions and ledger repairs; end-to-end mission proof remains."
+    },
+    {
+      "aspect": "UX and live journeys",
+      "baseline": 3,
+      "score": 4,
+      "limit": "All relevant flows required in skills; representative product journeys remain unmeasured."
+    },
+    {
+      "aspect": "PR readiness and integration",
+      "baseline": 4,
+      "score": 6,
+      "limit": "Skipped-job masking fixed; authoritative missing required-job policy remains."
+    },
+    {
+      "aspect": "Deployment and rollback",
+      "baseline": 3,
+      "score": 5,
+      "limit": "Ledger binding improved; actual production artifact, recovery and live acceptance unproven."
+    },
+    {
+      "aspect": "Reporting and notification",
+      "baseline": 4,
+      "score": 6,
+      "limit": "Final SHA reporting fixed; durable outbox is tested only in the unintegrated prototype."
+    },
+    {
+      "aspect": "Crash, quota and retry recovery",
+      "baseline": 3,
+      "score": 4,
+      "limit": "Bounded conservative source behavior; tested mission recovery is not yet wired into Brain."
+    },
+    {
+      "aspect": "Memory and privacy",
+      "baseline": 5,
+      "score": 6,
+      "limit": "CLI failures are distinct from empty results; conflicting payloads and project/source writes survive. Imported API fallback, case-sensitive project identity, legacy privacy and restore remain open."
+    },
+    {
+      "aspect": "Skills and host portability",
+      "baseline": 3,
+      "score": 6,
+      "limit": "68 skills revised; native packaging and patch controls tested; installed activation and Windows remain."
+    },
+    {
+      "aspect": "Context and resource use",
+      "baseline": 5,
+      "score": 6,
+      "limit": "Skill bodies reduced by81265bytes; real mission cost/reliability tradeoff unmeasured."
+    },
+    {
+      "aspect": "Feedback and improvement",
+      "baseline": 4,
+      "score": 7,
+      "limit": "Independent passes falsified original and new assumptions; ranked reproducible backlog retained."
+    }
+  ],
+  "gateReceipt": "gate-memory-conflicts-receipt.json"
+}

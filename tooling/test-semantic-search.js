@@ -91,6 +91,87 @@ if (!memDB.isAvailable()) {
   cases.push(['privacy: non-private raw_data preserved', row && (row.raw_data || '').includes('visible')]);
   cases.push(['privacy: non-private source_files preserved', row && (row.source_files || '').includes('a.js')]);
 
+
+  // Private spans are boundaries, not paired-regex matches. These expected
+  // strings are literal independent controls; no expected value calls a redactor.
+  const privacyCases = [
+    ['unclosed', 'PUBLIC<private>UNCLOSED_SECRET', 'PUBLIC[REDACTED]', ['UNCLOSED_SECRET']],
+    ['nested', 'LEFT<private>OUTER_SECRET<private>INNER_SECRET</private>TAIL_SECRET</private>RIGHT', 'LEFT[REDACTED]RIGHT', ['OUTER_SECRET', 'INNER_SECRET', 'TAIL_SECRET']],
+    ['nested-unclosed', 'LEFT<private>OUTER_OPEN<private>INNER_OPEN</private>TAIL_OPEN', 'LEFT[REDACTED]', ['OUTER_OPEN', 'INNER_OPEN', 'TAIL_OPEN']],
+    ['uppercase', 'LEFT<PRIVATE>UPPER_SECRET</PRIVATE>RIGHT', 'LEFT[REDACTED]RIGHT', ['UPPER_SECRET']],
+    ['mixed-case', 'LEFT<PrIvAtE>MIXED_SECRET</pRiVaTe>RIGHT', 'LEFT[REDACTED]RIGHT', ['MIXED_SECRET']],
+    ['multiple', 'A<private>FIRST_SECRET</private>B<private>SECOND_SECRET</private>C', 'A[REDACTED]B[REDACTED]C', ['FIRST_SECRET', 'SECOND_SECRET']],
+    ['stray-close-control', 'PUBLIC</private>TAIL', 'PUBLIC</private>TAIL', []],
+    ['literal-lookalike-control', 'PUBLIC<privateer>TAIL', 'PUBLIC<privateer>TAIL', []],
+  ];
+  for (const [label, text, expected, secrets] of privacyCases) {
+    const privacySid = memDB.startSession(PROJ);
+    const privacyId = memDB.saveObservation({
+      sessionId: privacySid, projectPath: PROJ, type: 'discovery',
+      title: `${label}: ${text}`, concept: text,
+      sourceFiles: [text, 'src/public-control.js'],
+      rawData: { note: text, nested: { deep: text }, keep: 'PUBLIC_RAW', [text]: 'PUBLIC_KEY_VALUE' },
+    });
+    const saved = privacyId && memDB.getObservation(privacyId);
+    cases.push([`privacy ${label}: saves a real observation`, !!saved]);
+    cases.push([`privacy ${label}: protected markers absent and public text preserved`,
+      !!saved && saved.title === `${label}: ${expected}` && saved.concept === expected &&
+      secrets.every(secret => !JSON.stringify(saved).includes(secret))]);
+    let raw = null, files = null;
+    try { raw = JSON.parse(saved.raw_data); files = JSON.parse(saved.source_files); } catch { /* fails below */ }
+    cases.push([`privacy ${label}: JSON boundaries and public siblings survive`,
+      !!raw && !!files && raw.note === expected && raw.nested.deep === expected &&
+      raw.keep === 'PUBLIC_RAW' && raw[expected] === 'PUBLIC_KEY_VALUE' &&
+      files[0] === expected && files[1] === 'src/public-control.js']);
+    memDB.endSession(privacySid, { request: text, investigated: text, learned: text, completed: text, nextSteps: text });
+    const { DatabaseSync } = require('node:sqlite');
+    const fixtureDB = new DatabaseSync(path.join(TMP_HOME, '.claude', 'auto-dev-memory.db'), { readOnly: true });
+    const summary = fixtureDB.prepare('SELECT user_request, investigated, learned, completed, next_steps FROM sessions WHERE id=?').get(privacySid);
+    fixtureDB.close();
+    cases.push([`privacy ${label}: all session summary fields use the same boundary`,
+      !!summary && Object.values(summary).every(value => value === expected)]);
+  }
+
+  // JSON string values remain independent: an unclosed private value must not
+  // consume another key, corrupt JSON, or make unrelated data disappear.
+  const boundaryId = memDB.saveObservation({ sessionId: sid, projectPath: PROJ, type: 'change',
+    title: 'serialized-boundary-control', sourceFiles: ['src/<private>PATH_SECRET', 'src/keep.js'],
+    rawData: { before: 'visible', hidden: '<private>VALUE_SECRET', after: 'still-visible', quote: 'a "quote" and \\ slash' } });
+  const boundary = boundaryId && memDB.getObservation(boundaryId);
+  let boundaryRaw = null, boundaryFiles = null;
+  try { boundaryRaw = JSON.parse(boundary.raw_data); boundaryFiles = JSON.parse(boundary.source_files); } catch { /* fails below */ }
+  cases.push(['privacy: unclosed serialized field keeps valid JSON and unrelated keys',
+    !!boundaryRaw && boundaryRaw.hidden === '[REDACTED]' && boundaryRaw.after === 'still-visible' &&
+    boundaryRaw.before === 'visible' && boundaryRaw.quote === 'a "quote" and \\ slash']);
+  cases.push(['privacy: unclosed source-file entry preserves later public entries',
+    !!boundaryFiles && boundaryFiles[0] === 'src/[REDACTED]' && boundaryFiles[1] === 'src/keep.js']);
+
+  // A failed redaction/serialization must reject the write, not fall back to
+  // original content or echo a protected error payload. Fault injection is
+  // scoped to this process and restored before subsequent semantic tests.
+  for (const failure of ['parse', 'serialize']) {
+    const beforeCount = memDB.getStats(PROJ).totalObservations;
+    const realParse = JSON.parse, realWrite = process.stderr.write;
+    let diagnostics = '';
+    let rejected;
+    process.stderr.write = (chunk) => { diagnostics += String(chunk); return true; };
+    try {
+      if (failure === 'parse') JSON.parse = () => { throw new Error('<private>PARSE_SECRET</private>'); };
+      const rawData = failure === 'serialize'
+        ? { toJSON() { throw new Error('<private>SERIALIZE_SECRET</private>'); } }
+        : { note: '<private>PARSE_SECRET' };
+      rejected = memDB.saveObservation({ sessionId: sid, projectPath: PROJ, type: 'change',
+        title: `privacy-error-${failure}`, sourceFiles: ['src/control.js'], rawData });
+    } finally {
+      JSON.parse = realParse;
+      process.stderr.write = realWrite;
+    }
+    cases.push([`privacy ${failure} error: no partial or original-content write`,
+      rejected === null && memDB.getStats(PROJ).totalObservations === beforeCount]);
+    cases.push([`privacy ${failure} error: reports failure without protected diagnostics`,
+      diagnostics.includes('[Memory] DB error') && !diagnostics.includes('PARSE_SECRET') && !diagnostics.includes('SERIALIZE_SECRET')]);
+  }
+
   // Paraphrase observation: concept talks about "authentication", query is "login".
   // Neither FTS MATCH nor LIKE '%login%' hits it — only the synonym-aware ranker does.
   const paraId = memDB.saveObservation({
