@@ -236,12 +236,51 @@ function clampToDeadline(ms) {
  */
 function lastWords(r, maxBytes) {
     const cap = maxBytes === undefined ? 400 : maxBytes;
-    const raw = String(r && r.stdout || '') + String(r && r.stderr || '');
-    const text = raw.replace(/\s+$/, '');
-    if (!text) return 'the child wrote nothing before it was killed';
-    const tail = text.length > cap ? text.slice(-cap) : text;
-    const lines = tail.split('\n').filter((l) => l.trim()).slice(-3);
-    return 'last output: ' + JSON.stringify(lines.join(' | '));
+
+    // TWO PIPES ARE NOT ONE STREAM, and this used to pretend they were:
+    // `String(r.stdout) + String(r.stderr)`, then the last three lines of the
+    // concatenation, labelled `last output:`. Whenever the child wrote anything
+    // at all to stderr, those stderr lines ARE the tail by construction — so a
+    // warning emitted in the child's first second is reported as the last thing
+    // it did, and the stdout that says where it actually got to is cut off
+    // exactly when a reader needs it.
+    //
+    // `[measured 2026-09-11]` a child writing stderr FIRST, then two stdout
+    // lines, then hanging until the kill, reported its chronologically FIRST
+    // line as its last output. The fixtures could not see it: every one of them
+    // wrote stderr last, so concatenating happened to give the right order, and
+    // the control shared the subject's blind spot exactly.
+    //
+    // The real cost was a sweep conflict reading `test-all.js (runner canary
+    // run) did not run (ETIMEDOUT) — last output: "...stale sandbox left by dead
+    // pid ... verify and delete it manually"`. Those are stderr warnings about
+    // OTHER sessions' leftovers. The runner prints `=== <suite> ===` to stdout
+    // as it goes, so the one fact that would have said how far the canary got
+    // was in the buffer and discarded by this function.
+    //
+    // Interleaving cannot be reconstructed after the fact from two separate
+    // pipes — the ordering information is simply not in the result object. So
+    // this reports each stream's own tail, labelled, and claims nothing about
+    // which came last.
+    const tailOf = (raw, bytes) => {
+        const text = String(raw || '').replace(/\s+$/, '');
+        if (!text) return null;
+        const tail = text.length > bytes ? text.slice(-bytes) : text;
+        const lines = tail.split('\n').filter((l) => l.trim()).slice(-3);
+        return lines.length ? lines.join(' | ') : null;
+    };
+    // Both streams present: split the budget, so adding the second label cannot
+    // widen the conflict line past what a single stream was already allowed.
+    const share = (String(r && r.stdout || '').trim() && String(r && r.stderr || '').trim())
+        ? Math.max(1, Math.ceil(cap / 2))
+        : cap;
+    const out = tailOf(r && r.stdout, share);
+    const err = tailOf(r && r.stderr, share);
+    if (!out && !err) return 'the child wrote nothing before it was killed';
+    const parts = [];
+    if (out) parts.push('last stdout: ' + JSON.stringify(out));
+    if (err) parts.push('last stderr: ' + JSON.stringify(err));
+    return parts.join(' · ');
 }
 
 /**
@@ -326,10 +365,55 @@ function exitCode(fail, infra) {
     return infra > 0 ? 2 : (fail > 0 ? 1 : 0);
 }
 
+// ---------------------------------------------------------------------------
+// THE SWEEP'S BUDGETS. One number used to serve two categorically different
+// children, and that is the whole defect.
+//
+// check-suites-can-fail.js spawns a child per suite AND, at checkRunner, a child
+// that is the WHOLE of test-all.js. Both got 900000 ms. For one suite that is
+// enormous — the heaviest costs ~20s through that invocation, so a timeout needs
+// a ~45x blowup and CONTENTION_MAX is 20, which is the argument CLAUDE.md makes
+// for NOT raising it. That argument is sound and it is about the per-suite child.
+//
+// It does not reach checkRunner, where the child needs no blowup at all:
+//
+//   `[measured 2026-09-11]` test-all.js  890s, 6 concurrent peer sweeps
+//   `[measured 2026-09-12]` test-all.js  827s, 8 concurrent test-all.js runs,
+//                                        129/129 suites passed
+//
+// Against a 900s budget that is 1.1% headroom at the worst measured runtime. The
+// canary run is a second full test-all.js, so it times out on ordinary variation
+// and the sweep records a conflict with no cause — and the one check that catches
+// the empty-test-run case (twelve suites reporting PASS having executed nothing)
+// is the check most likely to go unrun.
+//
+// So this is NOT "raise it again". It is one constant that was being applied to a
+// child ~40x the size of the one it was sized for. The per-suite number is
+// unchanged; the runner gets its own, at 3x the worst measured runtime — well
+// past the 7.6% spread between the two runs above, while still bounding how long
+// a reader waits to be told the run was indeterminate.
+//
+// checkValidator is NOT such a call site, though it was reported as one. Its
+// child is validate.js: `[measured 2026-09-12]` 3688/3976/4197 ms over three
+// runs, a ~215x margin against the per-suite budget. It is left alone
+// deliberately — widening a budget that is already 215x its subject buys nothing
+// and would make this change look like the blanket raise it is not.
+const SWEEP_SUITE_BUDGET_MS = 900000;
+const SWEEP_MEASURED_RUNNER_MS = 890000;
+const SWEEP_RUNNER_BUDGET_MS = 2700000;
+
+// Keyed on the suite being spawned, so the decision lives with the numbers rather
+// than at the call site, and can be asserted by RUNNING it rather than by
+// grepping the sweep's source for a constant name.
+function sweepBudgetFor(suite) {
+    return suite === 'test-all.js' ? SWEEP_RUNNER_BUDGET_MS : SWEEP_SUITE_BUDGET_MS;
+}
+
 module.exports = {
     contentionFactor, timedOut, classify, reason, runBudgeted, tally, exitCode,
     lastWords, deadlineRemaining, clampToDeadline,
     SPIN_FLOOR_MS, CONTENTION_MAX, DEADLINE_ENV, DEADLINE_FLOOR_MS,
+    sweepBudgetFor, SWEEP_SUITE_BUDGET_MS, SWEEP_RUNNER_BUDGET_MS, SWEEP_MEASURED_RUNNER_MS,
 };
 
 // --- CLI -------------------------------------------------------------------
@@ -550,6 +634,16 @@ if (require.main === module) {
                 + 'above is not passing on a function that says "nothing" to everything',
                 lastWords({ stdout: 'something\n' }) !== 'the child wrote nothing before it was killed',
                 lastWords({ stdout: 'something\n' }));
+            // The fixture above writes stderr LAST, which is why concatenating the
+            // two pipes looked correct for as long as it did. This one writes it
+            // FIRST: the stderr line must not be presented as the tail of stdout.
+            const ordered = runBudgeted(NODE,
+                ['-e', 'process.stderr.write("WARN-FIRST\\n");'
+                     + 'process.stdout.write("OUT-LAST\\n");setInterval(function(){},1000)'],
+                { encoding: 'utf8', timeout: 900, retryOnTimeout: false });
+            const ow = lastWords(ordered);
+            t('  and a stderr line written FIRST is attributed to stderr, not reported as the last stdout',
+                /last stdout: "[^"]*OUT-LAST"/.test(ow) && /last stderr: "[^"]*WARN-FIRST/.test(ow), ow);
         }
 
         let bad = false;
