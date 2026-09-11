@@ -115,17 +115,38 @@ the runner canary must fit the ENTIRE suite population inside the one child
 budget. 129 suites that day, against 900 s: ~1.3x is enough, not 45x. The control
 is what makes this stand rather than a second theory: the same commit, zero code
 change, exit 2 at 15-min load 28.8 with three peer sweeps live, then exit 0 in
-16m17s at load 15.7 with `0 NOT verified`. **So for THAT line, re-running quiet is
-the fix; for a seconds-long suite it still is not.** Rule your own change out
-first by timing the suite you touched — the change measured here added 0.7 s of
-the 900. Receipt:
-`~/claude-memory/evidence-2026-09-11-dispatch-readiness-class-split/`.
+16m17s at load 15.7 with `0 NOT verified`. Rule your own change out first by
+timing the suite you touched — the change measured here added 0.7 s of the 900.
+Receipt: `~/claude-memory/evidence-2026-09-11-dispatch-readiness-class-split/`.
+
+⚠️ **That paragraph ended "so for THAT line, re-running quiet is the fix", and it
+stopped being true within the hour.** The estimate above was also generous:
+`test-all.js` was timed directly at **890 s** (6 concurrent peer sweeps) and
+**827 s** (8 concurrent runs, 129/129 passed) against the 900 s every child
+shared, so the real figure is **1.01x–1.09x**, not 1.3x. That is not a margin, it
+is a coincidence, and it is why the same commit could exit 2 and then exit 0 with
+nothing changed. **The runner call site now carries its own budget** — 2 700 000 ms,
+3x the worst measured runtime, with the per-suite number deliberately unchanged at
+900 000 — so a `runner canary` ETIMEDOUT is a real finding again, and waiting for a
+quiet box is now the wrong move rather than the right one. `checkValidator` was
+never the second such call site: its child is `validate.js` at 3.7–4.2 s, a ~215x
+margin, and it keeps the per-suite budget.
 
 And note which kind of sentence each of these is, by this file's own test two
 paragraphs up: the refutation above is arithmetic over a constant, and this
 qualifier names a CODE PATH — `test-all.js` not failing fast. Make that suite
 stop on first failure and this paragraph is stale the same day, with nothing to
 announce it.
+
+**And it went stale within the hour — by a route that was not on its own list.**
+The sentence above names fail-fast as its expiry condition. What actually
+falsified it was the BUDGET moving, in a PR that landed the same evening. A
+self-declared expiry condition is still far better than none, and this is the
+honest limit of the technique: **the condition is itself a guess, so it narrows
+what you will notice rather than guaranteeing you notice.** Naming one trigger
+does not make it the only one, and the named trigger is the one you already
+thought of — which is exactly the one least likely to catch you. Treat a stated
+expiry as a floor on staleness checking, never a ceiling.
 
 What was actually wrong is a shape worth recognising anywhere: **two timeout
 regimes, nested, with no relationship to each other, and the inner ceiling the
