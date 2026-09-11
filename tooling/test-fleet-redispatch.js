@@ -502,7 +502,7 @@ check('  and the boundary readability, so a consumer cannot mistake it for zero'
 // `[measured 2026-09-11]` this is the whole of PR #218's Windows-only failure,
 // and it is written down because it presented as eleven unrelated reds. On
 // windows-latest `os.tmpdir()` is `C:\Users\RUNNER~1\...` - the 8.3 SHORT name
-// - while `git worktree list` reports `C:/Users/runneradmin/...`. The slugs
+// - while `git worktree list` reports the LONG one. The slugs
 // never met. The same transcript was FOUND by the boundary scan, which WALKS
 // the projects directory, and MISSED by the liveness lookup, which indexes it
 // BY NAME. Liveness is decided before the verify, so one missed lookup produced
@@ -593,7 +593,7 @@ if (linked !== true) {
 //
 // It is load-bearing on Windows all the same: without it `samePath` cannot
 // match a session-store record written under `C:\Users\RUNNER~1\...` against
-// the `C:\Users\runneradmin\...` that git reports, and the live-session case
+// the LONG spelling that git reports, and the live-session case
 // fails. The behavioural proof is the windows-latest job; what is checkable
 // everywhere is that the subject still consults it. That is the same reasoning
 // the process.exit() assertion below uses, and it is a weaker claim on purpose.
