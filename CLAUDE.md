@@ -106,6 +106,28 @@ demands a blowup far beyond the largest slowdown `spawn-budget.js` will even adm
 (`CONTENTION_MAX`). Compare the two yourself rather than trusting this sentence:
 time the suite, then read the clamp.
 
+⚠️ **That holds per SUITE and fails at ONE call site, so read the conflict line
+before applying it.** `[measured 2026-09-11]` `test-all.js (runner canary run)
+did not run (ETIMEDOUT)` is the exception, and for it the paragraph above gives
+backwards advice. The arithmetic there assumes the child is one suite costing
+seconds; this child is `test-all.js`, which does **not** fail fast — it exits only
+after every suite has run (`tooling/test-all.js`, its final `process.exit`) — so
+the runner canary must fit the ENTIRE suite population inside the one child
+budget. 129 suites that day, against 900 s: ~1.3x is enough, not 45x. The control
+is what makes this stand rather than a second theory: the same commit, zero code
+change, exit 2 at 15-min load 28.8 with three peer sweeps live, then exit 0 in
+16m17s at load 15.7 with `0 NOT verified`. **So for THAT line, re-running quiet is
+the fix; for a seconds-long suite it still is not.** Rule your own change out
+first by timing the suite you touched — the change measured here added 0.7 s of
+the 900. Receipt:
+`~/claude-memory/evidence-2026-09-11-dispatch-readiness-class-split/`.
+
+And note which kind of sentence each of these is, by this file's own test two
+paragraphs up: the refutation above is arithmetic over a constant, and this
+qualifier names a CODE PATH — `test-all.js` not failing fast. Make that suite
+stop on first failure and this paragraph is stale the same day, with nothing to
+announce it.
+
 What was actually wrong is a shape worth recognising anywhere: **two timeout
 regimes, nested, with no relationship to each other, and the inner ceiling the
 larger one.** The sweep gave each suite a fixed budget while several suites could
