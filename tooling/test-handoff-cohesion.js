@@ -101,6 +101,16 @@ try {
     const existingBad = cli('check-spec-output.js', ['--existing', existingFile]);
     check('existing-plan mode still rejects dangling dependencies', existingBad.status === 1 && /depend|missing|blockedBy/i.test(existingBad.stdout + existingBad.stderr), existingBad);
 
+    const carried = { sprints: [
+        { id: 1, stories: { 'S1-001': story('S1-001') } },
+        { id: 2, stories: { 'S1-001': { ...story('S1-001'), passes: true }, 'S2-001': { ...story('S2-001'), blockedBy: ['S1-001'] } } },
+    ] };
+    const carriedFile = path.join(ROOT, 'carried.json'); fs.writeFileSync(carriedFile, JSON.stringify(carried));
+    const carriedExisting = cli('check-spec-output.js', ['--existing', carriedFile]);
+    check('existing carried prerequisite uses later sprint completed record', carriedExisting.status === 0, carriedExisting);
+    const carriedNew = cli('check-spec-output.js', [carriedFile]);
+    check('new-plan duplicate control still refuses carried IDs', carriedNew.status === 1 && /duplicate id/.test(carriedNew.stderr), carriedNew);
+
     const revisionFixture = fixture();
     fs.mkdirSync(path.join(revisionFixture.repo, 'specs'));
     const refs = [['specs/a.md', 'First requirement.\n'], ['specs/b.md', 'Unrelated requirement.\n']];
