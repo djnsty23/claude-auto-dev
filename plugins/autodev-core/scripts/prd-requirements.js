@@ -35,7 +35,7 @@ function criteria(raw, field) {
             const text = description(item, field);
             return { id: (field === 'acceptance' ? 'a:' : 'v:') + digest(text), description: text };
         }
-        if (!object(item) || Object.keys(item).sort().join(',') !== 'description,id' || !WORD.test(item.id)) fail(field + '-invalid', `${field} entries must be strings or {id, description}`);
+        if (!object(item) || Object.keys(item).sort().join(',') !== 'description,id' || typeof item.id !== 'string' || !WORD.test(item.id)) fail(field + '-invalid', `${field} entries must be strings or {id, description}`);
         return { id: item.id, description: description(item.description, field) };
     });
     if (new Set(result.map(item => item.id)).size !== result.length) fail(field + '-invalid', `${field} repeats a criterion id`);
