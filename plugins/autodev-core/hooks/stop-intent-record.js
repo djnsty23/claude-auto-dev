@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 'use strict';
+// hooks_profile=minimal (plugin userConfig, reaching hooks as CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE)
+// skips this hook: it advises, it never guards — every path here emits either a nudge or
+// nothing, and the OBSERVED block it refreshes has no reader, so turning it off loses no
+// state. tooling/test-hooks-profile.js holds the list.
+if (/^minimal$/i.test(process.env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE || process.env.CLAUDE_PLUGIN_OPTION_hooks_profile || '')) process.exit(0);
+
 /**
  * stop-intent-record.js — Stop hook. Keeps the intent record honest.
  *
