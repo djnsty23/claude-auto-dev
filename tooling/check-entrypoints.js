@@ -33,7 +33,35 @@
  *   node tooling/check-entrypoints.js --json
  *   node tooling/check-entrypoints.js --selftest
  *
- * Exit: 0 clean, 1 at least one script hung, 2 could not run (no population).
+ * THREE OUTCOMES, NOT TWO. `[measured 2026-09-11]` this file read
+ * `r.error.code === 'ETIMEDOUT' || r.signal === 'SIGTERM'` and called everything
+ * else RETURNED. Five spawnSync shapes on node 24 / macOS say that is wrong in
+ * both directions:
+ *
+ *   ran, exited N          error null       signal null     -> RETURNED   ok
+ *   our timeout killed it  ETIMEDOUT        SIGTERM         -> HUNG       ok
+ *   spawn failed           ENOENT/EACCES    null            -> RETURNED   WRONG
+ *   printed past maxBuffer ENOBUFS          SIGTERM         -> HUNG       WRONG
+ *
+ * A script that never started was counted into "N returned" and then reappeared
+ * in the non-zero note as `exit null` — a second confident sentence about a run
+ * that did not happen. A script killed for printing 9 MiB of usage text failed
+ * the gate as a HANG, sending a reader to look for a loop that is not there.
+ * Both are one filter over several distinct states with one confident label,
+ * which is the failure `tooling/suite-verdict-summary.js` was written for and
+ * `tooling/spawn-budget.js` had already solved here — its `classify()` says in
+ * as many words that "a self-SIGTERM with no timeout is infrastructure". This
+ * file held a private second opinion of that, and got it wrong.
+ *
+ * So a probe now yields RETURNED, HUNG or UNMEASURED, the reason is CARRIED on
+ * the row rather than sniffed back out of prose, and UNMEASURED is never added
+ * to either of the other two. `timedOut()` is imported from spawn-budget.js so
+ * there is ONE definition of "our timeout fired" in this repo.
+ *
+ * Exit: 0 clean, 1 at least one script hung, 2 the probe could not measure
+ * something (an empty population, or any UNMEASURED row). 2 wins over 1 when
+ * both are present — the same precedence check-suites-can-fail.js uses — and
+ * both counts print either way, so a refusal never hides a finding.
  */
 'use strict';
 
@@ -41,6 +69,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { timedOut } = require('./spawn-budget.js');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -91,7 +120,30 @@ function scratchCopy(root) {
     return { dest, copyRoot };
 }
 
-/** Probe one script. Returns { rel, status: RETURNED|HUNG, code, signal, ms, tail }. */
+/**
+ * Classify one spawnSync result as RETURNED, HUNG or UNMEASURED.
+ *
+ * Exported and pure so every shape above can be asserted directly, the way
+ * spawn-budget.js asserts its own classifier. A synthetic-only proof would be a
+ * test of this function's opinion of itself, so the selftest ALSO plants a live
+ * script that overflows the buffer and checks the real spawnSync result lands
+ * on the same label.
+ *
+ * Order matters: ENOBUFS arrives WITH signal SIGTERM, so asking "was it our
+ * timeout" first is what keeps it out of HUNG.
+ */
+function classifyProbe(r) {
+    if (timedOut(r)) return { status: 'HUNG', reason: 'ETIMEDOUT' };
+    if (r.error) return { status: 'UNMEASURED', reason: String(r.error.code || r.error.message) };
+    // No error and no numeric status means something outside this process ended
+    // the child. The probe learned nothing about whether the script returns.
+    if (typeof r.status !== 'number') {
+        return { status: 'UNMEASURED', reason: r.signal ? 'signal ' + r.signal : 'no exit status' };
+    }
+    return { status: 'RETURNED', reason: null };
+}
+
+/** Probe one script. Returns { rel, status: RETURNED|HUNG|UNMEASURED, reason, code, signal, ms, tail }. */
 function probe(copyRoot, rel, env, budgetMs) {
     const started = Date.now();
     const r = spawnSync(process.execPath, [path.join(copyRoot, rel), '--help'], {
@@ -104,11 +156,14 @@ function probe(copyRoot, rel, env, budgetMs) {
         maxBuffer: 8 * 1024 * 1024,
     });
     const ms = Date.now() - started;
-    const hung = r.error && (r.error.code === 'ETIMEDOUT' || r.signal === 'SIGTERM');
+    const { status, reason } = classifyProbe(r);
+    // A killed child still carries everything it printed, and the last lines
+    // name what was in flight. Kept for every status, UNMEASURED included.
     const text = ((r.stdout || '') + (r.stderr || '')).trim();
     return {
         rel,
-        status: hung ? 'HUNG' : 'RETURNED',
+        status,
+        reason,
         code: r.status,
         signal: r.signal,
         ms,
@@ -148,18 +203,45 @@ function report(out, json) {
         return 2;
     }
     const hung = out.results.filter((r) => r.status === 'HUNG');
-    const returned = out.results.length - hung.length;
+    const unmeasured = out.results.filter((r) => r.status === 'UNMEASURED');
+    // Counted positively. `length - hung.length` DEFINED returned as "not hung",
+    // which is how a script that never started became one that returned fine.
+    const returned = out.results.filter((r) => r.status === 'RETURNED').length;
     if (json) {
-        console.log(JSON.stringify({ population: out.results.length, returned, hung: hung.map((h) => h.rel), budgetMs: out.budgetMs }, null, 2));
-        return hung.length ? 1 : 0;
+        console.log(JSON.stringify({
+            population: out.results.length, returned,
+            hung: hung.map((h) => h.rel),
+            unmeasured: unmeasured.map((u) => ({ script: u.rel, reason: u.reason })),
+            budgetMs: out.budgetMs,
+        }, null, 2));
+        return verdict(hung, unmeasured);
     }
-    console.log(`[entrypoints] ${out.results.length} script(s) probed with --help under a ${out.budgetMs}ms budget, ${returned} returned, ${hung.length} hung`);
-    for (const h of hung) console.log(`  HUNG      ${h.rel}  (${h.ms}ms, killed)${h.tail ? '  last: ' + h.tail : ''}`);
+    console.log(`[entrypoints] ${out.results.length} script(s) probed with --help under a ${out.budgetMs}ms budget, `
+        + `${returned} returned, ${hung.length} hung, ${unmeasured.length} unmeasured`);
+    for (const h of hung) console.log(`  HUNG      ${h.rel}  (${h.ms}ms, killed at the budget)${h.tail ? '  last: ' + h.tail : ''}`);
+    if (unmeasured.length) {
+        // Never phrased as a finding about the script. The measured cost of the
+        // opposite wording was a reader sent to hunt a hang that did not exist.
+        console.log(`  note: ${unmeasured.length} probe(s) produced NO verdict — the check could not measure these,`);
+        console.log('        which is indeterminate and re-runnable, NOT a finding about the script:');
+        for (const u of unmeasured) console.log(`    ${u.reason}  ${u.rel}  (${u.ms}ms)${u.tail ? '  last: ' + u.tail : ''}`);
+    }
     const nonzero = out.results.filter((r) => r.status === 'RETURNED' && r.code !== 0);
     if (nonzero.length) {
         console.log(`  note: ${nonzero.length} returned non-zero on --help; reported, not judged:`);
         for (const n of nonzero) console.log(`    exit ${n.code}  ${n.rel}`);
     }
+    return verdict(hung, unmeasured);
+}
+
+/**
+ * An indeterminate result outranks a finding, so a run that could not measure
+ * everything never reports a clean 1 ("we looked, one script hangs") over an
+ * incomplete population. Same precedence as check-suites-can-fail.js, whose
+ * sweep exits 2 with a RED row present. Both counts print either way.
+ */
+function verdict(hung, unmeasured) {
+    if (unmeasured.length) return 2;
     return hung.length ? 1 : 0;
 }
 
@@ -190,9 +272,24 @@ function selftest() {
         // The isolation control: writes a marker beside ITSELF. Must land in the copy.
         fs.writeFileSync(path.join(scripts, 'marker.js'),
             "require('fs').writeFileSync(require('path').join(__dirname, 'MARKER.txt'), 'x'); process.exit(0);\n");
+        // LIVE known-positive for the ENOBUFS split. This script is talkative,
+        // not hung: it returns the instant the write lands. Under the old
+        // two-label filter its SIGTERM made it HUNG and failed the gate.
+        // Planted rather than only synthesised, because a classifier graded
+        // solely on results this file wrote is grading a copy of itself.
+        //
+        // NO process.exit() HERE, and that is load-bearing, not style. The first
+        // version of this fixture ended `write(...); process.exit(0)` and
+        // DELIVERED 65,536 BYTES — the exit truncated the pipe at exactly the
+        // boundary CLAUDE.md records — so it stayed under the buffer, came back
+        // RETURNED, and the assertion failed against a fixture that could not
+        // express the condition it exists to produce. Letting the loop drain
+        // delivers 8,454,144 and the ENOBUFS kill.
+        fs.writeFileSync(path.join(scripts, 'loud.js'),
+            "process.stdout.write('x'.repeat(9 * 1024 * 1024));\n");
 
         const pop = population(root);
-        check('population excludes tooling/test-*.js', !pop.some((p) => /test-excluded/.test(p)) && pop.length === 5, pop.join(','));
+        check('population excludes tooling/test-*.js', !pop.some((p) => /test-excluded/.test(p)) && pop.length === 6, pop.join(','));
 
         const out = run(root, { budgetMs: 1500, keepScratch: true });
         const by = Object.fromEntries(out.results.map((r) => [path.basename(r.rel), r]));
@@ -200,6 +297,32 @@ function selftest() {
         check('control script is classified RETURNED', by['ok.js'] && by['ok.js'].status === 'RETURNED' && by['ok.js'].code === 0, JSON.stringify(by['ok.js']));
         check('stdin-reading hook returns with stdin closed', by['stdin-hook.js'] && by['stdin-hook.js'].status === 'RETURNED', JSON.stringify(by['stdin-hook.js']));
         check('exit 2 on --help is RETURNED, not HUNG', by['usage-exit2.js'] && by['usage-exit2.js'].status === 'RETURNED' && by['usage-exit2.js'].code === 2, JSON.stringify(by['usage-exit2.js']));
+
+        // The measured defect, live. A script killed for printing past the probe
+        // buffer carries signal SIGTERM and NO timeout, and the old filter read
+        // only the signal.
+        check('a script killed for overflowing the buffer is UNMEASURED, not HUNG',
+            by['loud.js'] && by['loud.js'].status === 'UNMEASURED', JSON.stringify(by['loud.js'] && { s: by['loud.js'].status, r: by['loud.js'].reason, sig: by['loud.js'].signal }));
+        check('  and the row carries ENOBUFS as its reason rather than leaving it to be guessed',
+            by['loud.js'] && by['loud.js'].reason === 'ENOBUFS', by['loud.js'] && String(by['loud.js'].reason));
+        check('  and it arrives with the SIGTERM the old filter read as a hang',
+            by['loud.js'] && by['loud.js'].signal === 'SIGTERM', by['loud.js'] && String(by['loud.js'].signal));
+
+        // Every shape of the table in the header, asserted directly. The live
+        // row above proves these synthetic results are the ones node produces.
+        const shapes = [
+            ['a clean exit is RETURNED', { status: 0, signal: null }, 'RETURNED', null],
+            ['a non-zero exit is still RETURNED', { status: 2, signal: null }, 'RETURNED', null],
+            ['our timeout is HUNG', { error: { code: 'ETIMEDOUT' }, status: null, signal: 'SIGTERM' }, 'HUNG', 'ETIMEDOUT'],
+            ['a spawn that never started is UNMEASURED, NOT returned', { error: { code: 'ENOENT' }, status: null, signal: null }, 'UNMEASURED', 'ENOENT'],
+            ['an unrunnable file is UNMEASURED, NOT returned', { error: { code: 'EACCES' }, status: null, signal: null }, 'UNMEASURED', 'EACCES'],
+            ['a buffer overflow is UNMEASURED, NOT hung', { error: { code: 'ENOBUFS' }, status: null, signal: 'SIGTERM' }, 'UNMEASURED', 'ENOBUFS'],
+            ['a kill from outside this process is UNMEASURED', { status: null, signal: 'SIGKILL' }, 'UNMEASURED', 'signal SIGKILL'],
+        ];
+        for (const [label, result, want, reason] of shapes) {
+            const got = classifyProbe(result);
+            check(label, got.status === want && got.reason === reason, JSON.stringify(got));
+        }
         const markerInCopy = fs.existsSync(path.join(out.copyRoot, 'plugins', 'demo', 'scripts', 'MARKER.txt'));
         const markerInSource = fs.existsSync(path.join(scripts, 'MARKER.txt'));
         check('a probe that writes beside itself writes into the scratch copy', markerInCopy, out.copyRoot);
@@ -207,16 +330,52 @@ function selftest() {
         fs.rmSync(out.dest, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
         // Verdict: one hang makes the run exit 1; removing it makes it exit 0.
+        // loud.js comes out FIRST — it is UNMEASURED by design and an UNMEASURED
+        // row outranks a hang, so leaving it in would make both of these read 2
+        // and neither would be testing the hang transition any more.
         const quiet = { write: () => {} };
         const origLog = console.log; console.log = () => {};
         let code1, code0;
         try {
-            code1 = report(out, false);
+            fs.rmSync(path.join(scripts, 'loud.js'));
+            code1 = report(run(root, { budgetMs: 1500 }), false);
             fs.rmSync(path.join(scripts, 'hang.js'));
             code0 = report(run(root, { budgetMs: 1500 }), false);
         } finally { console.log = origLog; void quiet; }
         check('verdict is exit 1 with a hang in the population', code1 === 1, String(code1));
         check('verdict is exit 0 once the hang is removed', code0 === 0, String(code0));
+
+        // An UNMEASURED row is never a pass, is never counted into `returned`,
+        // and outranks a hang so an incomplete run cannot report a clean finding.
+        console.log = () => {};
+        let codeU, codeBoth, humanU;
+        const rows = (extra) => ({ ok: true, budgetMs: 1500, root, results: [
+            { rel: 'a.js', status: 'RETURNED', reason: null, code: 0, ms: 5, tail: '' },
+            { rel: 'b.js', status: 'UNMEASURED', reason: 'ENOBUFS', code: null, signal: 'SIGTERM', ms: 7, tail: 'usage' },
+            ...extra,
+        ] });
+        try {
+            codeU = report(rows([]), false);
+            codeBoth = report(rows([{ rel: 'c.js', status: 'HUNG', reason: 'ETIMEDOUT', code: null, ms: 1500, tail: '' }]), false);
+            const lines = [];
+            console.log = (...a) => lines.push(a.join(' '));
+            report(rows([]), false);
+            humanU = lines.join('\n');
+        } finally { console.log = origLog; }
+        check('an UNMEASURED row is exit 2, never a pass', codeU === 2, String(codeU));
+        check('  and outranks a hang, so an incomplete run never reports a clean 1', codeBoth === 2, String(codeBoth));
+        check('  and is counted apart from returned, not folded into it', /1 returned, 0 hung, 1 unmeasured/.test(humanU), humanU.split('\n')[0]);
+        check('  and is never worded as a finding about the script',
+            /NOT a finding about the script/.test(humanU) && !/HUNG      b\.js/.test(humanU), humanU);
+        check('  and names the carried reason so a reader knows what to do', /ENOBUFS  b\.js/.test(humanU), humanU);
+        let jsonU = '';
+        try {
+            console.log = (...a) => { jsonU += a.join(' '); };
+            report(rows([]), true);
+        } finally { console.log = origLog; }
+        check('  and --json reports it as its own field, with the reason',
+            (() => { try { const j = JSON.parse(jsonU); return j.returned === 1 && j.hung.length === 0
+                && j.unmeasured.length === 1 && j.unmeasured[0].reason === 'ENOBUFS'; } catch (e) { return false; } })(), jsonU.slice(0, 200));
         console.log = () => {};
         let code2;
         try { code2 = report({ ok: false, reason: 'no population', root: tmp }, false); } finally { console.log = origLog; }
@@ -239,4 +398,4 @@ if (require.main === module) {
     else process.exit(report(run(path.resolve(val('--root', DEFAULT_ROOT))), has('--json')));
 }
 
-module.exports = { population, run, probe, report };
+module.exports = { population, run, probe, classifyProbe, report };
