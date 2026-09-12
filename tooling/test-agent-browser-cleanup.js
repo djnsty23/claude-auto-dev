@@ -20,6 +20,10 @@
 // and it killed processes. It had no assertions at all. See the POSIX zombie
 // reaping section below.
 //
+// EXTENDED 2026-09-13. The first paragraph's "not reachable from here" stopped
+// being true of the Windows branch once its decision was split from its
+// spawning. See the Windows zombie reaping section below.
+//
 // Run: node tooling/test-agent-browser-cleanup.js
 
 const { spawn, spawnSync } = require('child_process');
@@ -552,10 +556,478 @@ if (process.platform !== 'win32') {
     try { if (orphanPid) process.kill(orphanPid, 'SIGKILL'); } catch {}
 }
 
+// ========================================================= Windows zombie reaping
+//
+// WHY THIS SECTION EXISTS. Until 2026-09-13 the Windows branch ran, on every
+// session start, a command-line LIKE kill, `taskkill /T /IM` on the binary,
+// `taskkill /IM crashpad_handler.exe` and `taskkill /IM SnippingTool.exe`. The
+// POSIX section above was the fix for the same defect on the other platform, and
+// this file said the Windows half was "not reachable from here". It was not
+// reachable because the decision and the killing were the same line. They are
+// separate now, so the decision is driven over fixtures on EVERY platform (the
+// readers take an injectable runner, the classifier is pure) and over real
+// processes on Windows.
+//
+// The same three layers as POSIX, for the same reason: layers 1 and 2 grade a
+// parser against a table this file wrote, and only layer 3 can fail because the
+// operating system disagrees.
+
+const {
+    WIN_BINARY_IMAGE, candidatesPossible, listBinaryImages, readWindowsProcessTable,
+    parseWindowsProcessTable, readDaemonPids, classifyWindowsProcesses, selectHotkeyTargets,
+    reapWindowsOrphans, selectRunValues,
+} = mod;
+
+const ME = 'S-1-5-21-1111-1000';
+const OTHER = 'S-1-5-21-2222-1001';
+const BIN = 'C:\\ab\\agent-browser-win32-x64.exe';
+const CFT = 'C:\\Users\\u\\.agent-browser\\browsers\\chrome-148\\chrome.exe';
+const PROFILE = (id) => `--user-data-dir=C:\\Users\\u\\AppData\\Local\\Temp\\agent-browser-chrome-${id}`;
+// FILETIMEs are 18 digits. T(n) keeps creation order readable in the fixtures.
+const T = (n) => String(133900000000000000n + BigInt(n));
+const WROWS = (spec) => spec.map(([pid, ppid, created, sid, name, exe, command]) =>
+    ({ pid, ppid, created, sid, name, exe, command }));
+// The same table as `readWindowsProcessTable` prints it, so layer 2 exercises
+// the parser too. Non-candidates are P rows: no owner, no command line.
+const TABLE = (sid, rows) => [`ME\t${sid || ''}`, ...rows.map((r) => (r.name
+    ? ['C', r.pid, r.ppid, r.created || '', r.sid || '', r.name, r.exe, r.command]
+    : ['P', r.pid, r.ppid, r.created || '']).join('\t'))].join('\r\n');
+
+// The whole world of one session start, in one table.
+const WORLD = WROWS([
+    [100, 50, T(1), ME, 'python.exe', 'C:\\py\\python.exe', 'python crawl_js.py'],       // a live crawl
+    [200, 999, T(2), ME, 'agent-browser-win32-x64.exe', BIN, `"${BIN}" eval --stdin`],    // (a) zombie
+    [201, 200, T(3), ME, 'chrome.exe', CFT, `"${CFT}" ${PROFILE('dead')}`],               //     its browser
+    [202, 201, T(4), ME, 'chrome.exe', CFT, `"${CFT}" --type=renderer`],                  //     its renderer
+    [300, 100, T(5), ME, 'agent-browser-win32-x64.exe', BIN, `"${BIN}" open https://x`], // (c) live CLI
+    [400, 998, T(6), ME, 'agent-browser-win32-x64.exe', BIN, `"${BIN}"`],                 // (d) detached daemon
+    [410, 400, T(7), ME, 'chrome.exe', CFT, `"${CFT}" ${PROFILE('live')}`],               //     its browser
+    [500, 997, T(8), ME, 'crashpad_handler.exe', 'C:\\Music\\crashpad_handler.exe',
+        'crashpad_handler.exe --database=C:\\Music\\Crashpad'],                            // (e) another app
+    [600, 996, T(9), ME, 'bash.exe', 'C:\\Git\\bash.exe', `bash -c "until ${BIN} eval; do :; done"`], // (f) mention
+    [700, 995, T(10), OTHER, 'agent-browser-win32-x64.exe', BIN, `"${BIN}"`],             // (g) not mine
+    [800, 994, T(11), ME, 'SnippingTool.exe', 'C:\\W\\SnippingTool.exe', 'SnippingTool.exe'],
+    [801, 994, T(12), OTHER, 'ScreenClippingHost.exe', 'C:\\W\\ScreenClippingHost.exe', 'x'],
+    [50, 4, T(0), null, '', '', ''],                                                       // a P row
+]);
+const REGISTERED = new Set([400]);
+
+// ------------------------------------------------------- layer 1: the decision
+{
+    const v = classifyWindowsProcesses(WORLD, { sid: ME, self: 9999, registered: REGISTERED });
+    const at = (pid) => verdictFor(v, pid);
+
+    check('WIN (a) a zombie binary whose launcher is gone is reaped', at(200).reap && at(200).reason === 'orphaned');
+    check('WIN     and the browser it launched is reaped as its tree', at(201).reap && at(201).reason === 'orphaned-tree');
+    check('WIN     and so is that browser\'s renderer, found by executable path', at(202).reap && at(202).depth === 2);
+    check('WIN (c) a live CLI whose caller is running is spared', !at(300).reap && at(300).reason === 'live-parent');
+    // The POSIX residual, closed here: a detached daemon has a dead parent BY
+    // DESIGN, and without the sidecar registry it is indistinguishable from (a).
+    check('WIN (d) a DETACHED daemon the sidecar registry names is spared', !at(400).reap && at(400).reason === 'registered-daemon');
+    check('WIN     and so is the browser it is driving', !at(410).reap && at(410).reason === 'registered-daemon');
+    check("WIN (e) another app's crashpad_handler.exe with a dead parent is not agent-browser's",
+        !at(500).reap && at(500).reason === 'not-agent-browser');
+    check('WIN (f) a command line that MENTIONS the binary is not the binary',
+        !at(600).reap && at(600).reason === 'not-agent-browser');
+    check("WIN (g) another user's orphaned binary is spared", !at(700).reap && at(700).reason === 'another-user');
+    check('WIN exactly the zombie tree is reaped',
+        JSON.stringify(v.filter((x) => x.reap).map((x) => x.pid)) === '[200,201,202]');
+}
+
+// Without the registry, (d) is exactly the zombie shape. Stated separately so a
+// regression that ignores the registry cannot hide inside the case above.
+{
+    const v = classifyWindowsProcesses(WORLD, { sid: ME, self: 9999, registered: new Set() });
+    check('WIN an unregistered daemon with a dead parent IS reaped, which is why the registry matters',
+        verdictFor(v, 400).reap && verdictFor(v, 410).reason === 'orphaned-tree');
+}
+
+// A browser with no binary above it and a dead launcher: abandoned when no
+// daemon of this user is alive, spared while one is.
+{
+    const root = [900, 993, T(20), ME, 'chrome.exe', CFT, `"${CFT}" ${PROFILE('stray')}`];
+    const alone = classifyWindowsProcesses(WROWS([root]), { sid: ME, self: 9999, registered: new Set() });
+    check('WIN a browser whose launcher is gone, with no live daemon, is reaped', alone[0].reason === 'orphaned');
+    const withDaemon = classifyWindowsProcesses(WROWS([root,
+        [400, 998, T(6), ME, 'agent-browser-win32-x64.exe', BIN, BIN]]), { sid: ME, self: 9999, registered: REGISTERED });
+    check('WIN   and is spared while a registered daemon of this user is alive',
+        !verdictFor(withDaemon, 900).reap && verdictFor(withDaemon, 900).reason === 'daemon-alive');
+}
+
+// Windows does not reparent. A pid held by a process created AFTER the child is a
+// recycled pid, so the real parent is gone.
+{
+    const child = [1000, 1010, T(30), ME, 'agent-browser-win32-x64.exe', BIN, BIN];
+    const younger = classifyWindowsProcesses(WROWS([child, [1010, 4, T(31), ME, 'explorer.exe', 'e', 'e']]), { sid: ME, self: 9999 });
+    const older = classifyWindowsProcesses(WROWS([child, [1010, 4, T(29), ME, 'explorer.exe', 'e', 'e']]), { sid: ME, self: 9999 });
+    const unknown = classifyWindowsProcesses(WROWS([child, [1010, 4, null, ME, 'explorer.exe', 'e', 'e']]), { sid: ME, self: 9999 });
+    check('WIN a parent pid held by a YOUNGER process is a recycled pid: reaped', verdictFor(younger, 1000).reason === 'orphaned');
+    check('WIN   held by an older process it is the real parent: spared', verdictFor(older, 1000).reason === 'live-parent');
+    check('WIN   with no creation time recycling cannot be proven: spared', verdictFor(unknown, 1000).reason === 'live-parent');
+
+    // One tick apart, past 2^53. As Numbers these two are EQUAL, so a Number
+    // comparison reads the recycled holder as the parent and spares a zombie.
+    const a = '133999999999999999';
+    const b = '134000000000000000';
+    check('WIN   (fixture) the two creation times collide as Numbers', Number(a) === Number(b));
+    const tick = classifyWindowsProcesses(WROWS([[1100, 1110, a, ME, 'agent-browser-win32-x64.exe', BIN, BIN],
+        [1110, 4, b, ME, 'explorer.exe', 'e', 'e']]), { sid: ME, self: 9999 });
+    check('WIN   and the classifier still tells them apart', verdictFor(tick, 1100).reason === 'orphaned');
+}
+
+// Ownership that cannot be established is not ownership.
+{
+    const row = [1200, 993, T(40), null, 'agent-browser-win32-x64.exe', BIN, BIN];
+    check('WIN a candidate with no owner SID is spared',
+        classifyWindowsProcesses(WROWS([row]), { sid: ME, self: 9999 })[0].reason === 'owner-unknown');
+    check('WIN with no current-user SID nothing is reaped',
+        classifyWindowsProcesses(WORLD, { sid: undefined, self: 9999 }).every((x) => !x.reap));
+}
+
+// pid reuse can make the parent graph a cycle; a walk that follows it forever
+// would hang session start.
+{
+    const v = classifyWindowsProcesses(WROWS([
+        [1300, 1301, null, ME, 'agent-browser-win32-x64.exe', BIN, BIN],
+        [1301, 1300, null, ME, 'agent-browser-win32-x64.exe', BIN, BIN],
+    ]), { sid: ME, self: 9999 });
+    check('WIN a parent cycle terminates and is spared', v.every((x) => !x.reap && x.reason === 'ambiguous'));
+}
+
+{
+    const v = classifyWindowsProcesses(WROWS([
+        [0, 0, null, ME, 'agent-browser-win32-x64.exe', BIN, BIN],
+        [4, 0, null, ME, 'agent-browser-win32-x64.exe', BIN, BIN],
+        [7007, 993, T(1), ME, 'agent-browser-win32-x64.exe', BIN, BIN],
+    ]), { sid: ME, self: 7007 });
+    check('WIN pid 0, pid 4 and the sweeper itself are never candidates', v.every((x) => x.reason === 'self-or-system'));
+}
+
+{
+    check('WIN the binary rule is an IMAGE NAME: both architectures match',
+        WIN_BINARY_IMAGE.test('agent-browser-win32-x64.exe') && WIN_BINARY_IMAGE.test('AGENT-BROWSER-WIN32-ARM64.EXE'));
+    check('WIN   and the npm shim, node and a renamed copy do not',
+        !WIN_BINARY_IMAGE.test('agent-browser.cmd') && !WIN_BINARY_IMAGE.test('node.exe') &&
+        !WIN_BINARY_IMAGE.test('agent-browser-win32-x64.exe.bak'));
+}
+
+// --------------------------------------------------------- the parser it feeds
+{
+    const text = [
+        'ME\tS-1-5-21-9',
+        'P\t4\t0\t',
+        'C\t4001\t12\t133900000000000123\tS-1-5-21-9\tchrome.exe\tC:\\a b\\chrome.exe\t"C:\\a b\\chrome.exe" --x=1',
+        'garbage line',
+        'C\tnot-a-pid\t1\t1\tS\tn\te\tc',
+    ].join('\r\n');
+    const t = parseWindowsProcessTable(text);
+    check('WIN parser: reads the current SID and drops malformed rows', t.sid === 'S-1-5-21-9' && t.rows.length === 2);
+    check('WIN   keeps a creation time as the exact decimal string', t.rows[1].created === '133900000000000123');
+    check('WIN   keeps paths with spaces intact across CRLF',
+        t.rows[1].exe === 'C:\\a b\\chrome.exe' && t.rows[1].command === '"C:\\a b\\chrome.exe" --x=1');
+    check('WIN   a P row carries no owner or command line', t.rows[0].sid === null && t.rows[0].command === '');
+    check('WIN   an empty ME line is no SID, not an empty-string SID', parseWindowsProcessTable('ME\t\n').sid === undefined);
+    check('WIN   the TABLE fixture writer round-trips through it',
+        parseWindowsProcessTable(TABLE(ME, WORLD)).rows.length === WORLD.length);
+}
+
+// The reader, with the runner injected: what it would run, never running it.
+{
+    let call;
+    const out = readWindowsProcessTable({ run: (...a) => { call = a; return 'ME\tS'; }, alsoLike: "a'b" });
+    const script = Buffer.from(call[1][call[1].indexOf('-EncodedCommand') + 1], 'base64').toString('utf16le');
+    check('WIN reader: one PowerShell run, non-interactive, returning its stdout',
+        call[0] === 'powershell' && call[1].includes('-NonInteractive') && out === 'ME\tS');
+    check('WIN   discards the child\'s stderr, so a progress record cannot reach the hook\'s',
+        Array.isArray(call[2].stdio) && call[2].stdio[2] === 'ignore' && call[2].windowsHide === true);
+    check('WIN   reads owners and creation times', /GetOwnerSid/.test(script) && /ToFileTimeUtc/.test(script));
+    check('WIN   escapes a quote in the widening pattern', script.includes("$also = 'a''b'"));
+    check('WIN   and the script it runs can read but cannot kill',
+        !/Stop-Process|taskkill|Terminate|Remove-/i.test(script));
+}
+
+// ---------------------------------------------------------------- the gate
+{
+    const empty = path.join(TMP, 'gate-empty');
+    fs.mkdirSync(empty, { recursive: true });
+    let listed = 0;
+    const none = () => { listed++; return 'INFO: No tasks are running which match the specified criteria.\r\n'; };
+    check('WIN gate: no binary image and no profile directory keeps PowerShell closed',
+        candidatesPossible({ listImages: none, tempRoot: empty }) === false && listed === 1);
+    check('WIN   a running binary opens it',
+        candidatesPossible({ listImages: () => '"agent-browser-win32-x64.exe","123","Console","2","8 K"\r\n', tempRoot: empty }));
+
+    const withProfile = path.join(TMP, 'gate-profile');
+    fs.mkdirSync(path.join(withProfile, 'agent-browser-chrome-x'), { recursive: true });
+    listed = 0;
+    check('WIN   an agent-browser profile in Temp opens it without listing images',
+        candidatesPossible({ listImages: none, tempRoot: withProfile }) && listed === 0);
+    check('WIN   a failure to list images opens it, costing a read and never a kill',
+        candidatesPossible({ listImages: () => { throw new Error('no tasklist'); }, tempRoot: empty }));
+
+    let call;
+    listBinaryImages({ run: (...a) => { call = a; return ''; } });
+    check('WIN   the listing is filtered to agent-browser images and hides its stderr',
+        call[0] === 'tasklist' && call[1].includes('IMAGENAME eq agent-browser-*') && call[2].stdio[2] === 'ignore');
+}
+
+// --------------------------------------------------------- the daemon registry
+{
+    const dir = path.join(TMP, 'sidecars');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'default.pid'), '35356\n');
+    fs.writeFileSync(path.join(dir, 'other.pid'), 'not a pid');
+    fs.writeFileSync(path.join(dir, 'default.port'), '57922');
+    const pids = readDaemonPids({ dirs: [dir, path.join(TMP, 'no-such-dir')] });
+    check('WIN registry: reads *.pid sidecars and nothing else', pids.size === 1 && pids.has(35356));
+
+    const notADir = path.join(TMP, 'sidecar-file');
+    fs.writeFileSync(notADir, 'x');
+    let threw = false;
+    try { readDaemonPids({ dirs: [notADir] }); } catch { threw = true; }
+    // An empty set here would make every live daemon look unregistered.
+    check('WIN   an unreadable registry THROWS rather than reading as empty', threw);
+}
+
+// ---------------------------------------------- layer 2: the decision, wired up
+const reapWith = (overrides) => {
+    const kills = [];
+    const summary = reapWindowsOrphans({
+        gate: () => true,
+        readTable: () => TABLE(ME, WORLD),
+        readRegistered: () => REGISTERED,
+        kill: (pid) => kills.push(pid),
+        self: 9999,
+        ...overrides,
+    });
+    return { summary, kills };
+};
+
+{
+    const { summary, kills } = reapWith({});
+    check('WIN wired: exactly the zombie tree is killed, launchers first', JSON.stringify(kills.slice(0, 3)) === '[200,201,202]');
+    check('WIN   the killer only ever receives numeric pids', kills.every((k) => typeof k === 'number'));
+    check('WIN   the live CLI, the registered daemon and the other app are never killed',
+        ![300, 400, 410, 500, 600, 700].some((p) => kills.includes(p)));
+    check('WIN   the Snipping Tool reset follows the kill, for this user only',
+        JSON.stringify(summary.hotkeyReset) === '[800]' && kills.includes(800) && !kills.includes(801));
+    check('WIN   the summary reports the population and why each match was spared',
+        summary.scanned === WORLD.length &&
+        summary.spared.some((s) => s.pid === 400 && s.reason === 'registered-daemon') &&
+        summary.spared.some((s) => s.pid === 300 && s.reason === 'live-parent'));
+    check('WIN   and names the profile a spared browser is using, for the Preferences pass',
+        summary.liveProfiles.includes('agent-browser-chrome-live'));
+}
+
+{
+    const quiet = WORLD.filter((r) => ![200, 201, 202].includes(r.pid));
+    const { summary, kills } = reapWith({ readTable: () => TABLE(ME, quiet) });
+    check('WIN with nothing to reap, the Snipping Tool is NOT reset', kills.length === 0 && summary.hotkeyReset.length === 0);
+}
+
+// The reset is gated on a KILL, not on a candidate. The case above cannot tell
+// the two apart, because an empty candidate list returns before the reset is
+// reached: `[measured 2026-09-13]` making the reset unconditional left it green.
+// Here every candidate qualifies and every kill is refused, so the guard is the
+// only thing between a failed sweep and a discarded capture.
+{
+    const attempted = [];
+    const { summary } = reapWith({
+        kill: (pid) => { attempted.push(pid); if (pid !== 800) throw new Error('EPERM'); },
+    });
+    check('WIN candidates found but none killed: the Snipping Tool is NOT reset',
+        summary.killed.length === 0 && !attempted.includes(800) && summary.hotkeyReset.length === 0);
+}
+
+{
+    let reads = 0;
+    const { summary, kills } = reapWith({ gate: () => false, readTable: () => { reads++; return TABLE(ME, WORLD); } });
+    check('WIN a closed gate reads no table and kills nothing', summary.gated && reads === 0 && kills.length === 0);
+}
+
+// The second read is the identity check a pid lacks.
+{
+    let n = 0;
+    const recycled = WORLD.map((r) => (r.pid === 200 ? { ...r, created: T(50) } : r));
+    const { summary, kills } = reapWith({ readTable: () => TABLE(ME, n++ === 0 ? WORLD : recycled) });
+    check('WIN a pid whose creation time changed between reads is not killed',
+        !kills.includes(200) && summary.spared.some((s) => s.pid === 200 && s.reason === 'changed-under-us'));
+}
+{
+    let n = 0;
+    const { kills } = reapWith({ readTable: () => { if (n++ > 0) throw new Error('gone'); return TABLE(ME, WORLD); } });
+    check('WIN a failed re-read kills nothing', kills.length === 0);
+}
+
+// FAIL OPEN, as on POSIX.
+{
+    let threw = false;
+    let out;
+    try {
+        out = reapWith({ readTable: () => { throw new Error('powershell missing'); } });
+    } catch { threw = true; }
+    check('WIN an unreadable process table does not throw and kills nothing', !threw && out.kills.length === 0);
+
+    threw = false;
+    try {
+        out = reapWith({ readRegistered: () => { throw new Error('EACCES'); } });
+    } catch { threw = true; }
+    check('WIN an unreadable daemon registry does not throw and kills nothing', !threw && out.kills.length === 0);
+
+    threw = false;
+    try {
+        out = reapWith({ kill: () => { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; } });
+    } catch { threw = true; }
+    check('WIN a refused kill does not throw and is recorded',
+        !threw && out.summary.spared.some((s) => s.reason === 'kill-refused'));
+}
+
+// The manual reset, --reset-hotkey.
+{
+    const kills = [];
+    const reset = mod.restoreSnippingToolHotkey({ readTable: () => TABLE(ME, WORLD), kill: (p) => kills.push(p) });
+    check('WIN the manual hotkey reset kills this user\'s Snipping Tool by pid only',
+        JSON.stringify(reset) === '[800]' && JSON.stringify(kills) === '[800]');
+    check('WIN   and selects nothing without a current-user SID', selectHotkeyTargets(WORLD, undefined).length === 0);
+}
+
+// ------------------------------------------------------------- the Run key
+{
+    const text = [
+        '',
+        'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',
+        '    OneDrive    REG_SZ    "C:\\OneDrive\\OneDrive.exe" /background',
+        `    ChromiumAutoLaunch_AB12    REG_SZ    "${CFT}" --no-startup-window`,
+        '    Name With Spaces    REG_EXPAND_SZ    %USERPROFILE%\\.agent-browser\\x.exe',
+        '    Blob    REG_BINARY    6167656E742D62726F77736572',
+        '',
+    ].join('\r\n');
+    check('WIN Run values: selects string values whose data names agent-browser, spaces in names intact',
+        JSON.stringify(selectRunValues(text)) === '["ChromiumAutoLaunch_AB12","Name With Spaces"]');
+
+    const calls = [];
+    const removed = mod.removeWindowsAutostartRegistry({ run: (file, args) => { calls.push([file, ...args]); return args[0] === 'query' ? text : ''; } });
+    check('WIN   deletes exactly those, by value name, one reg.exe call each',
+        JSON.stringify(removed) === '["ChromiumAutoLaunch_AB12","Name With Spaces"]' &&
+        calls.filter((c) => c[1] === 'delete').every((c) => c[4] && c[5] === '/f') && calls.length === 3);
+    const none = mod.removeWindowsAutostartRegistry({ run: () => { throw new Error('reg missing'); } });
+    check('WIN   an unreadable key deletes nothing and does not throw', Array.isArray(none) && none.length === 0);
+}
+
+// A profile a spared live browser is using is not rewritten under it.
+{
+    const sb = sandbox();
+    const live = profile(sb.tempRoot, 'agent-browser-chrome-live', { browser: { auto_launch_chrome_on_startup: true } });
+    const dead = profile(sb.tempRoot, 'agent-browser-chrome-dead', { browser: {}, background_mode: {} });
+    const before = fs.readFileSync(live, 'utf8');
+    withSandbox(sb, () => mod.disableAutostartPreferences({ skip: ['AGENT-BROWSER-CHROME-LIVE'] }));
+    check('WIN Preferences: a profile in use by a spared browser is left alone', fs.readFileSync(live, 'utf8') === before);
+    check('WIN   and an abandoned one is still patched', read(dead).browser.auto_launch_chrome_on_startup === false);
+}
+
+// ------------------------------------------ layer 3: real processes, no fixtures
+//
+// The shipped reaper against the real process table: a real PowerShell read, real
+// owner SIDs, real creation times, a real dead launcher and a real
+// TerminateProcess. ONE rule is injected, for the reason the POSIX layer gives:
+// the binary rule is matched on a per-run tag in the command line, so no peer's
+// sweep and no real agent-browser process can be selected by this suite. The
+// killer is wrapped so that the OS kill is applied to this suite's decoys and
+// NOTHING else: a reset of the real Snipping Tool is recorded, not performed,
+// because it would discard a capture the person running the suite has open.
+if (process.platform === 'win32') {
+    const tag = 'abwindecoy-' + process.pid + '-';
+    const decoyDir = path.join(TMP, 'windecoys');
+    fs.mkdirSync(decoyDir, { recursive: true });
+    const decoy = path.join(decoyDir, tag + 'browser.js');
+    fs.writeFileSync(decoy, 'setInterval(() => {}, 1000);\n');
+    const inert = path.join(decoyDir, 'inert-control.js');
+    fs.copyFileSync(decoy, inert);
+    const sidecars = path.join(TMP, 'win-sidecars');
+    fs.mkdirSync(sidecars, { recursive: true });
+
+    // process.kill(pid, 0) on Windows opens the process and reports ESRCH once it
+    // has exited; there is no zombie state to mistake for life.
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+    const waitFor = (fn, ms = 10000) => {
+        const end = Date.now() + ms;
+        for (;;) {
+            if (fn()) return true;
+            if (Date.now() >= end) return false;
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        }
+    };
+    // A grandchild whose launcher exits: the state a browser is left in when the
+    // session that started it goes away. Windows keeps the dead launcher's pid as
+    // its ParentProcessId.
+    const orphan = (label) => {
+        const r = spawnSync(process.execPath, ['-e', `
+            const { spawn } = require('child_process');
+            const g = spawn(process.argv[1], [${JSON.stringify(decoy)}, ${JSON.stringify(label)}], {
+                stdio: 'ignore', detached: true, windowsHide: true,
+            });
+            g.unref();
+            process.stdout.write(String(g.pid));
+        `, process.execPath], { encoding: 'utf8', timeout: 20000, windowsHide: true });
+        return Number((r.stdout || '').trim());
+    };
+
+    const live = spawn(process.execPath, [decoy, '--live-peer'], { stdio: 'ignore', windowsHide: true });
+    const unrelated = spawn(process.execPath, [inert, '--live-unrelated'], { stdio: 'ignore', windowsHide: true });
+    const zombiePid = orphan('--orphan');
+    const daemonPid = orphan('--registered-daemon');
+    fs.writeFileSync(path.join(sidecars, 'default.pid'), String(daemonPid));
+
+    const decoys = new Set([live.pid, unrelated.pid, zombiePid, daemonPid]);
+    const recorded = [];
+    const deps = {
+        gate: () => true,
+        readTable: () => readWindowsProcessTable({ alsoLike: `*${tag}*` }),
+        readRegistered: () => readDaemonPids({ dirs: [sidecars] }),
+        isBinary: (row) => (row.command || '').includes(tag),
+        isBrowser: () => false,
+        kill: (pid) => { if (decoys.has(pid)) process.kill(pid); else recorded.push(pid); },
+    };
+
+    const launched = waitFor(() => alive(live.pid) && alive(unrelated.pid) && alive(zombiePid) && alive(daemonPid));
+    check('WIN fixture: four real decoys are running', launched && !!zombiePid && !!daemonPid);
+
+    // Anti-vacuity: the decoys must be visible, owned and tagged in the real
+    // table, or every "spared" below passes because nothing was ever selected.
+    const first = parseWindowsProcessTable(deps.readTable());
+    const tagged = first.rows.filter((r) => r.command.includes(tag));
+    check('WIN fixture: the real table shows the three tagged decoys, owned by this user',
+        [live.pid, zombiePid, daemonPid].every((p) => tagged.some((r) => r.pid === p && r.sid === first.sid)) && !!first.sid);
+    check('WIN fixture: the orphans\' launchers are really gone',
+        [zombiePid, daemonPid].every((p) => {
+            const row = first.rows.find((r) => r.pid === p);
+            return !!row && !first.rows.some((r) => r.pid === row.ppid && BigInt(r.created || 0) <= BigInt(row.created || 0));
+        }));
+
+    let threw = false;
+    let summary;
+    try { summary = reapWindowsOrphans(deps); } catch { threw = true; }
+
+    check('WIN the real sweep does not throw', !threw);
+    check('WIN (a) REAL: the orphan is killed', waitFor(() => !alive(zombiePid)));
+    check('WIN (b) REAL: an unrelated live process survives', alive(unrelated.pid));
+    check('WIN (c) REAL: a live, tagged child of a running parent survives', alive(live.pid));
+    check('WIN (d) REAL: a detached, tagged process the registry names survives', alive(daemonPid));
+    check('WIN   the sweep spared each for its own reason',
+        !!summary && summary.spared.some((s) => s.pid === live.pid && s.reason === 'live-parent') &&
+        summary.spared.some((s) => s.pid === daemonPid && s.reason === 'registered-daemon'));
+    check('WIN   exactly one process was killed', !!summary && JSON.stringify(summary.killed) === `[${zombiePid}]`);
+    check('WIN   the only non-decoy pids handed to the killer were this user\'s Snipping Tool',
+        !!summary && recorded.every((p) => summary.hotkeyReset.includes(p)));
+    check('WIN   the population it scanned is reported', !!summary && summary.scanned > 10);
+
+    for (const pid of decoys) { try { process.kill(pid); } catch {} }
+}
+
 // ------------------------------------------------------- no pattern kill, ever
 //
-// A tripwire, not a behaviour test. The three layers above prove what the code
-// DOES; this proves the shape it must keep, because the defect was reintroduced
+// A tripwire, not a behaviour test. The layers above prove what the code DOES;
+// this proves the shape it must keep, because the defect was reintroduced
 // trivially — one line — and its return would make every assertion above pass
 // while a peer's browser died, as long as the pattern kill ran alongside them.
 {
@@ -566,20 +1038,20 @@ if (process.platform !== 'win32') {
         .join('\n');
     check('the POSIX branch hands no pattern to a killer',
         !/\b(pkill|killall)\b/.test(executable));
+    check('the Windows branch hands no image name or command-line pattern to a killer',
+        !/\b(taskkill|wmic|Stop-Process)\b/i.test(executable));
     check('  and the source still discusses why, so the ban is not folklore',
-        /pkill/.test(src) && src.length > executable.length);
+        /pkill/.test(src) && /taskkill/.test(src) && src.length > executable.length);
 }
 
 // ------------------------------------------------- deliberately not covered
 //
-// The remaining survivors on this file are all `isWin` platform gates plus the
-// `require.main === module` entrypoint guard. On a non-Windows machine the
-// Windows branches are unreachable, and forcing them on would have this hook
-// shell out to taskkill and PowerShell from a test run. pre-tool-filter.js
-// solved the same problem with an injectable platform, but that file only
-// consults denylists; this one KILLS PROCESSES, and an env var that makes a
-// macOS session take the Windows path is a worse thing to own than the gap.
-// Recorded rather than forced.
+// The `isWin` dispatch in killZombies and cleanup, and the `require.main ===
+// module` entrypoint guard. Every Windows DECISION above runs on every platform,
+// because the readers take an injectable runner; what stays platform-bound is
+// only which reader the shipped entrypoint wires in. Forcing a macOS session down
+// the Windows path would have it spawn tasklist and PowerShell, which do not
+// exist there, to test a one-line ternary.
 
 // ------------------------------------------------------------------ entrypoint
 
@@ -599,11 +1071,12 @@ if (process.platform !== 'win32') {
 }
 
 // The Windows-only paths must be inert elsewhere, or a macOS session start would
-// shell out to taskkill on every launch.
+// shell out to PowerShell on every launch.
 if (process.platform !== 'win32') {
     let threw = false;
-    try { mod.restoreSnippingToolHotkey(); } catch { threw = true; }
-    check('restoreSnippingToolHotkey is a no-op off Windows', !threw);
+    let out;
+    try { out = mod.restoreSnippingToolHotkey(); } catch { threw = true; }
+    check('restoreSnippingToolHotkey is a no-op off Windows', !threw && Array.isArray(out) && out.length === 0);
 }
 
 // ---------------------------------------------------------------- report
