@@ -110,18 +110,58 @@ check('missing inbox → exit 0, silent', r.status === 0 && (r.stdout || '').tri
 r = spawnSync(process.execPath, [HOOK], { input: 'not json', encoding: 'utf8', env });
 check('malformed stdin → exit 0', r.status === 0);
 
-// --- cost: wall-clock must not scale with inbox size
-const timeN = (n) => {
-    const t0 = Date.now();
-    for (let i = 0; i < n; i++) runHook();
-    return (Date.now() - t0) / n;
-};
-runWatch('claim');
-const emptyMs = timeN(5);
-for (let i = 0; i < 25; i++) drop(`bulk-${i}.png`, 4096);
-const fullMs = timeN(5);
-check(`flat cost: ${emptyMs.toFixed(0)}ms empty vs ${fullMs.toFixed(0)}ms with 25 files`,
-    fullMs < emptyMs * 2 + 25);
+// --- cost: the hook must not OPEN what is waiting, however much is waiting
+//
+// This replaced a wall-clock assertion, `fullMs < emptyMs * 2 + 25`, on
+// 2026-09-12. Two reasons, and the second is why no timing threshold is put
+// back in its place.
+//
+// 1. THE FORM WAS MACHINE-DEPENDENT IN THE WRONG DIRECTION. It reduces to
+//    `D < E + 25`, where E is the bare spawn cost (CPU-bound) and D the
+//    marginal cost of the waiting files (filesystem-bound): a fixed I/O cost
+//    budgeted as a MULTIPLE of an unrelated baseline, so a FASTER machine got a
+//    TIGHTER absolute allowance while D did not shrink. PR #213 went red on
+//    macOS CI at E=38 D=113 (budget 63) while ubuntu passed at D=0 and windows
+//    at D=3 ON THE SAME COMMIT, and a 14-core Mac could not reproduce it at
+//    load 68 in 5 runs (E~200, D in [-44,+9]). "Re-run it somewhere quiet" is
+//    the one remedy that cannot work on this shape, because a slow box makes
+//    the budget generous.
+//
+// 2. NO THRESHOLD HERE CAN FAIL FOR THE RIGHT REASON, which is why this is a
+//    replacement and not a repair. `[measured 2026-09-12]` D scales at roughly
+//    16us per waiting file: N=250 D=6ms, N=2500 D=54ms, N=10000 D=157ms. At
+//    N=25 the signal is about 0.4ms against a noise floor of +/-20ms, and 16
+//    consecutive macOS CI jobs ran D in [-11,+8] against that one 113ms
+//    excursion. So any ceiling loose enough not to flake is far too loose to
+//    catch a per-file regression, and any ceiling tight enough to catch one
+//    fires on stalls instead. Planting one anyway is the size check
+//    rule-gate-integrity warns about: green that reads as cover it never gave.
+//
+// The PROPERTY the timing was proxying is exact and cheap to assert directly.
+// `listFiles()` is a readdir plus a stat per entry and nothing else, so an
+// UNREADABLE file must still be announced. Mode 000 is the canary: it costs no
+// wall clock, it does not care how fast the machine is, and it fires for the
+// regression the number never could. Confirmed 2026-09-12 by adding
+// `fs.readFileSync(full)` beside the statSync in `listFiles()` -- the file
+// stops being announced, and this check goes red.
+if (process.platform === 'win32' || process.getuid?.() === 0) {
+    // Out loud, because a silent skip is indistinguishable from a pass: mode
+    // 000 does not deny reads to root, and on Windows chmod only toggles the
+    // read-only bit. macOS and the ubuntu runner both run this as a real user.
+    console.log(`  SKIP  unreadable-file canary (${process.platform}, uid ${process.getuid?.() ?? 'n/a'}) `
+        + '— mode 000 does not deny reads here');
+} else {
+    const locked = drop('locked.png', 4096);
+    fs.chmodSync(locked, 0o000);
+    const rl = runHook();
+    let lctx = '';
+    try { lctx = JSON.parse(rl.stdout).hookSpecificOutput.additionalContext || ''; } catch { /* stays '' */ }
+    check('a file the hook cannot READ is still announced (it only readdirs and stats)',
+        lctx.includes('locked.png'));
+    check('...and the hook still exits 0 and says nothing on stderr',
+        rl.status === 0 && (rl.stderr || '').trim() === '');
+    fs.chmodSync(locked, 0o644);
+}
 
 // --- the inbox must not be CLAIMED when there is nothing to announce.
 //
