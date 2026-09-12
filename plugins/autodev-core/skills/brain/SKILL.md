@@ -214,6 +214,37 @@ a supported scheduler/reset event to run later; a Stop hook cannot wake a dead
 process. Record the recovery command if no automatic mechanism exists. Promise
 monitoring only after an authorized monitor is installed and verified.
 
+### A coordinator has nobody to wake it and no one to stop for
+
+Both halves of this section's ending assume something above you. Neither is true
+in this seat, and each cost a measured outage on 2026-09-11.
+
+**Approaching the context limit, spawn a successor and hand over. Do not stop.**
+The instruction elsewhere in this workflow — finish the step, write the handoff,
+tell whoever is coordinating, and stop — is a no-op when the Brain IS the
+coordinator: there is nobody to tell and nobody to resume the work. A Brain that
+announces stopping without spawning a replacement leaves the fleet uncoordinated
+for as long as it takes a person to notice. `[measured 2026-09-11]` one announced
+stopping about six times between 300k and 706k and never handed over; its
+sessions kept working and nothing merged their results. Spawn the successor while
+you still have the context to brief it, hand it your address, your role record and
+your handoff file, then verify it has claimed `~/.claude/brain-role.json` before
+you go quiet. Handover is a remedy for CONTEXT DEPTH — it is not the answer to the
+next paragraph, and filing it as both is how that outage was first misdiagnosed.
+
+**With an empty inbox, DRIVE. Fan the work out to background agents from this
+session.** Reporting and waiting for an inbound peer message is not coordination;
+it makes the coordinator idle exactly when its sessions go quiet to run long
+gates. `[measured 2026-09-11]` a Brain merged 15 PRs in the 4h15m it had traffic,
+then 0 in the next 4h53m, because every turn ended by waiting to be spoken to.
+Work needing no message to arrive first: rebasing stale PRs, sequencing a stack,
+re-measuring a board whose base has moved, chasing a blocked session. **A task
+chip is not this mechanism — a chip requires the operator to click it, so one
+raised overnight sits unclicked until morning.** Background agents and tasks
+started from your own session run without anyone clicking, and you keep
+coordinating while they do. A self-scheduled wake is not it either: waking to an
+empty inbox and reporting again repeats the failure on a timer.
+
 For a stalled item record the hypothesis, last meaningful evidence and next
 experiment. Continue independent stories and keep failed work unresolved. At
 handoff run `session-exit.js` for your own tree, reconcile the backlog and record
