@@ -166,6 +166,47 @@ const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
 const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error?.message || 'none'}`;
 
+/* THE LABEL MUST NOT OUTRUN THE OBSERVATION. The assertions here report what they
+   saw, deliberately (see the note below), and that is right. What went wrong is
+   the WORDING they report it under: when the checker exits 2 it has declared
+   ITSELF indeterminate — an evidence-producing suite failed and its coverage was
+   discarded — and an assertion named "exits 1 when a wired hook is never
+   executed" then goes red saying, in effect, that a hook is untested. Nothing of
+   the kind was established.
+
+   `[measured 2026-09-11]` that is not hypothetical. Three suites went red on two
+   PRs from ONE cause — an unclassified hook failing test-hooks-profile — and the
+   brief written from those job logs diagnosed "each PR wires a hook that no suite
+   drives", when `--json` on the same heads reported 26 wired, 26 executed, 0
+   without evidence. The same cascade then recurred hours later on a different PR
+   from a different upstream cause (a Windows-only failure in an unrelated suite),
+   so it is a defect class, not an incident. find-untested-hooks.js already prints
+   the honest sentence — "An indeterminate check must never read as a pass or as a
+   proven gap" — and the assertion label one layer up threw it away.
+
+   So the label carries the qualifier, attached to the same line a reader greps. */
+const unresolved = (label, r, named) => (r && r.status === 2
+    ? label + ' [UNRESOLVED, NOT A HOOK FINDING: the checker declared itself '
+        + 'INDETERMINATE because evidence producer(s) failed and their coverage was '
+        + 'discarded' + (named && named.length ? ' — ' + named.join('; ') : '')
+        + '. Fix those suites and re-run; nothing here says a hook is untested.]'
+    : label);
+
+/* Covered directly, because the qualifier only ever appears when something else
+   has already gone wrong — and a message that is only emitted during an incident
+   is a message nobody has read before the incident. These cost no checker run. */
+{
+    const L = 'check:hooks exits 1 when a wired hook is never executed';
+    const q = unresolved(L, { status: 2 }, ['test-foo.js exited 1']);
+    check('the qualifier fires on a status-2 checker', q !== L && /UNRESOLVED/.test(q));
+    check('  and it names the evidence producer that failed', /test-foo\.js exited 1/.test(q));
+    check('  and it denies the hook reading in the LABEL, where a log grep will see it',
+        /NOT A HOOK FINDING/.test(q));
+    check('the label is untouched on a real verdict', unresolved(L, { status: 1 }, []) === L);
+    check('  and on a green run', unresolved(L, { status: 0 }, []) === L);
+    check('  and when there is no result at all', unresolved(L, null, []) === L);
+}
+
 // A child that errored, was signalled, or carries a null status produced no
 // verdict; that is infrastructure (exitCode 2), while the assertions still
 // report what they saw (Sol round-20).
@@ -317,7 +358,8 @@ const rawCoverageEvidence = (coverageDir, file) => {
 };
 
 const baseline = runChecker();
-check('control: the committed hook checker has a parseable green baseline',
+check(unresolved('control: the committed hook checker has a parseable green baseline',
+    baseline.result, baseline.json?.failedSuites),
     baseline.result.status === 0 && baseline.json?.wiredRows?.length > 0,
     detail(baseline.result));
 
@@ -383,7 +425,8 @@ if (target && mutatedCheck) {
     check('check:hooks marks the referenced-but-unexecuted hook untested',
         untestedNames.includes(target.name),
         `untested=${JSON.stringify(untestedNames)}`);
-    check('check:hooks exits 1 when a wired hook is never executed',
+    check(unresolved('check:hooks exits 1 when a wired hook is never executed',
+        mutatedCheck.result, mutatedCheck.json?.failedSuites),
         mutatedCheck.result.status === 1 && mutatedCheck.result.signal === null
             && !mutatedCheck.result.error,
         detail(mutatedCheck.result));
