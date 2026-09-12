@@ -136,8 +136,24 @@ try {
     // Absent, unreadable, and a store nobody can find.
     const absent = run(['--status', '--role', role(null)]);
     check('no role file: exit 0, absent, not a pass', absent.status === 0 && /^brain-role: ABSENT/m.test(absent.out) && /no coordinator has claimed/.test(absent.out), absent.out);
+    /* `[measured 2026-09-13]` the absent state returns before either registry is
+       read, and the census printed "(UNREADABLE)" and "desktop store NOT FOUND"
+       for directories that existed. SESSIONS and STORE exist here, so either
+       word in this output is the script reporting a failure it never attempted.
+       The `nostore` check below is the control: there the store really is
+       missing, and NOT FOUND must still print. */
+    check('  and it reads no registry, so it says "not read" and never UNREADABLE or NOT FOUND',
+        fs.existsSync(SESSIONS) && fs.existsSync(STORE)
+        && /^population: not read \(no role file to check against\)/m.test(absent.out)
+        && !/UNREADABLE|NOT FOUND/.test(absent.out), absent.out);
+    const absentJson = run(['--json', '--role', role(null)]);
+    check('  and --json marks it unscanned with null readable flags, not false',
+        (() => { try { const p = JSON.parse(absentJson.out).population; return p.scanned === false && p.sessionsReadable === null && p.storeReadable === null; } catch { return false; } })(),
+        absentJson.out.slice(0, 300));
     const garbage = run(['--status', '--role', role('{ not json')]);
     check('an unparseable role file: exit 2, named', garbage.status === 2 && /FAULT unreadable/.test(garbage.out), garbage.out);
+    check('  and it too reads no registry, so it never prints UNREADABLE or NOT FOUND',
+        /^population: not read \(/m.test(garbage.out) && !/UNREADABLE|NOT FOUND/.test(garbage.out), garbage.out);
     const nostore = run(['--status', '--role', okRole], { CLAUDE_SESSION_STORE: path.join(ROOT, 'no-such-store') });
     check('a store that cannot be found is NOT CHECKED and does not fail a live record', nostore.status === 0 && /desktop store NOT FOUND/.test(nostore.out) && /NOT CHECKED/.test(nostore.out), nostore.out);
 
@@ -152,7 +168,7 @@ try {
         flipped.status === 2 && /FAULT dead-session: session_id cli-live/.test(flipped.out) && /0 with a live pid, 1 dead/.test(flipped.out), flipped.out);
 
     const json = run(['--json', '--role', okRole]);
-    check('--json is parseable and carries the population', (() => { try { const j = JSON.parse(json.out); return j.state === 'ok' && j.population.livePids === 1; } catch { return false; } })(), json.out.slice(0, 200));
+    check('--json is parseable and carries the population', (() => { try { const j = JSON.parse(json.out); return j.state === 'ok' && j.population.livePids === 1 && j.population.scanned === true; } catch { return false; } })(), json.out.slice(0, 200));
 } finally {
     try { fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* temp */ }
 }
