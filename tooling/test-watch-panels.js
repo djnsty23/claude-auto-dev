@@ -187,6 +187,8 @@ const BEACON_LINE = 'PANEL Beacon Lighthouse :: Ship it? [Yes] :: local_beacon';
  * @param {string[]} o.args      argv for the watcher
  * @param {object} o.env         extra environment
  */
+const prematureKills = [];
+
 async function run(o) {
     fs.writeFileSync(PAYLOAD, JSON.stringify(o.payload, null, 2));
     try { fs.unlinkSync(ARGVLOG); } catch { /* first run */ }
@@ -214,14 +216,55 @@ async function run(o) {
     const deadline = Date.now() + 20000;
     while (!closed && !fs.existsSync(ARGVLOG) && Date.now() < deadline) await sleep(20);
     const scanned = fs.existsSync(ARGVLOG);
-    if (!closed) { await sleep(250); child.kill(); }
+
+    /* A `--once` RUN EXITS ON ITS OWN, SO WAITING FOR THE ARGV LOG IS NOT WAITING
+       FOR THE RUN. The argv log is written by the planted stub when the watcher
+       SPAWNS it, which happens before the watcher has classified anything, written
+       a panel line, or set its own exit code. The old code then slept a flat 250ms
+       and killed the child — a guess about how long the rest of a one-shot run
+       takes, on a machine nobody controls.
+
+       `[measured 2026-09-12]` that guess lost twice on windows-latest, on two
+       different heads of the same PR, each time with the sibling run on the SAME
+       commit passing:
+         FAIL  string one-shot exits unavailable  (got null, expected 2)
+         FAIL  invalid row null does not consume the preceding valid panel
+               (got "", expected "PANEL Beacon Lighthouse :: Ship it? [Yes] :: ...")
+       `exitCode: null` is the tell and it names the mechanism exactly: null is not
+       an exit code the watcher can produce, it is what a KILLED child reports. The
+       assertions were reading a process this harness had shot, and the empty
+       stdout was the same event seen from the other side.
+
+       So for a run that is going to exit, wait for it to exit. `child.kill()` stays
+       for the streaming mode, which by design never exits on its own — a fixed
+       settle is the right instrument there, because proving that nothing more
+       arrives is the only thing a timeout can honestly do. */
+    const oneShot = (o.args || []).includes('--once');
+    let killed = false;
+    if (oneShot) {
+        const exitBy = Date.now() + 20000;
+        while (!closed && Date.now() < exitBy) await sleep(20);
+    }
+    if (!closed) { await sleep(250); child.kill(); killed = true; }
     await closePromise;
+
+    /* A one-shot that still had to be killed is an INFRASTRUCTURE event, and the
+       whole point of the block above is that it must never again arrive disguised
+       as a wrong exit code or a missing panel line. Naming it here costs one line
+       and turns the confusing failure back into the true one. */
+    if (oneShot && killed) {
+        console.error('infrastructure: a --once run did not exit within its budget and was '
+            + 'killed; exitCode/stdout below are from a SHOT process, not from the watcher '
+            + `(scanned=${scanned}, stdout=${JSON.stringify(out.slice(0, 120))})`);
+        prematureKills.push(JSON.stringify(o.args || []) + ' scanned=' + scanned);
+    }
 
     return {
         stdout: out,
         stderr: err,
         exitCode, signal,
         scanned,
+        killed,
         argv: scanned ? fs.readFileSync(ARGVLOG, 'utf8') : null,
         lines: out.split('\n').filter(Boolean),
     };
@@ -719,8 +762,19 @@ async function run(o) {
         fs.rmSync(fixture, { recursive: true, force: true });
     }
 
+    /* READ THE TALLY. A count nobody reads is how the premature kill stayed
+       invisible in the first place, and it would be absurd to add a second one
+       here. This is the ONLY assertion in the file about the harness rather than
+       about the watcher, and it is the one that keeps every other assertion
+       honest: a killed one-shot makes them read a process that was shot. */
+    eq('no --once run had to be killed (their exit codes and output are real)',
+        prematureKills.length ? prematureKills.join('; ') : 'none', 'none');
+
     console.log(`\n${pass} passed, ${fail} failed`);
-    process.exit(fail > 0 ? 1 : 0);
+    if (prematureKills.length) {
+        console.log('premature kills: ' + prematureKills.join('; '));
+    }
+    process.exitCode = fail > 0 ? 1 : 0;
 })().catch((e) => {
     console.error(e && e.stack || e);
     try { fs.rmSync(fixture, { recursive: true, force: true }); } catch { /* already gone */ }
