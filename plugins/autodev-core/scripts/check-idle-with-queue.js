@@ -49,14 +49,13 @@ const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 
-if (has('--help') || has('-h')) {
+function usage() {
     console.log('usage: check-idle-with-queue.js [--idle-minutes N] [--queue-hours N] [--json] [--selftest]\n'
         + 'Flags a session idle past --idle-minutes (default 20) whose cwd holds a QUEUE.md\n'
         + 'written within --queue-hours (default 24). Reads heartbeats via fleet-heartbeat.js.\n'
         + 'C1 specifies a join to QUEUE.md OPEN ITEMS; those do not exist in the data, so this\n'
         + 'keys on staleness instead and answers a narrower question. See the header.\n'
         + 'Exit 0 clean, 1 flagged, 2 no population.');
-    process.exit(0);
 }
 
 const IDLE_MIN = Math.max(0, Number(val('--idle-minutes', 20)) || 20);
@@ -104,7 +103,7 @@ function scan(records, now, idleMin, queueH) {
 // Drives the RULE with planted values, so it needs no fleet and no clock. The
 // negatives matter more than the positive: this gate's whole risk is being
 // unable to fire, and three of the four cases below are the ways that happens.
-if (has('--selftest')) {
+function selftest() {
     let pass = 0;
     let fail = 0;
     const t = (label, ok) => { if (ok) pass++; else { fail++; } console.log(`${ok ? 'ok  ' : 'FAIL'}  ${label}`); };
@@ -146,62 +145,84 @@ if (has('--selftest')) {
     fs.rmSync(dir, { recursive: true, force: true });
 
     console.log(`\n${pass} passed, ${fail} failed  (${pass + fail} cases: 7 rule, 5 scan)`);
-    process.exit(fail ? 1 : 0);
+    return fail ? 1 : 0;
 }
 
 // --- live run -------------------------------------------------------------
-let records;
-try {
-    records = require('./fleet-heartbeat.js').readAll();
-} catch (err) {
-    console.error('could not read heartbeats (' + (err && err.message) + ').');
-    console.error('No population, so this run vouches for NOTHING — not even an all-clear.');
-    process.exit(2);
+function main() {
+    if (has('--help') || has('-h')) { usage(); return 0; }
+    if (has('--selftest')) return selftest();
+
+    let records;
+    try {
+        records = require('./fleet-heartbeat.js').readAll();
+    } catch (err) {
+        console.error('could not read heartbeats (' + (err && err.message) + ').');
+        console.error('No population, so this run vouches for NOTHING — not even an all-clear.');
+        return 2;
+    }
+
+    // ZERO RECORDS IS NOT ZERO FINDINGS. `readAll()` swallows a missing or
+    // unreadable directory and returns [], so without this an absent fleet renders
+    // as a clean run: "0 heartbeat(s) scanned", exit 0, indistinguishable from a
+    // healthy fleet. Caught by this script's own suite, where the case asserting it
+    // passed on the wrong arm of an `||` — so the test was fixed too.
+    //
+    // The exit-2 path above only fires if require() itself throws, which it does not
+    // for a missing directory. This is the branch that actually runs.
+    if (!records.length) {
+        console.error(`0 heartbeats found in ${require('./fleet-heartbeat.js').DIR}.`);
+        console.error('No population, so this run vouches for NOTHING — not even an all-clear.');
+        console.error('Either no session has ever recorded a heartbeat here, or the directory');
+        console.error('is unreadable. Set AUTODEV_FLEET_DIR if the fleet lives elsewhere.');
+        return 2;
+    }
+
+    const result = scan(records, Date.now(), IDLE_MIN, QUEUE_H);
+
+    if (has('--json')) {
+        console.log(JSON.stringify({
+            idleMinutes: IDLE_MIN, queueHours: QUEUE_H, ...result,
+        }, null, 2));
+        return result.rows.length ? 1 : 0;
+    }
+
+    // The population always, before the verdict. A bare "none found" here is
+    // indistinguishable from a heartbeat directory this script could not read, and
+    // the two mean opposite things.
+    console.log(`${result.scanned} heartbeat(s) scanned · ${result.idle} idle past ${IDLE_MIN}m · `
+        + `${result.withQueue} in a directory holding a QUEUE.md`);
+    console.log(`flagging: idle > ${IDLE_MIN}m AND QUEUE.md written within ${QUEUE_H}h\n`);
+
+    if (!result.rows.length) {
+        console.log('0 flagged.');
+        console.log('NOT an all-clear about queued work: this keys on queue FRESHNESS, because');
+        console.log('QUEUE.md files carry no open/done marker. A session sitting on a queue');
+        console.log('nobody has touched in a day is invisible here, by construction.');
+        return 0;
+    }
+
+    for (const r of result.rows) {
+        console.log(`  ${String(r.idleMinutes).padStart(5)}m idle  ${r.session}  queue ${r.queueAgeHours}h old`);
+        console.log(`         ${r.cwd}`);
+    }
+    console.log(`\n${result.rows.length} session(s) stopped while a live queue sat in their directory.`);
+    return 1;
 }
 
-// ZERO RECORDS IS NOT ZERO FINDINGS. `readAll()` swallows a missing or
-// unreadable directory and returns [], so without this an absent fleet renders
-// as a clean run: "0 heartbeat(s) scanned", exit 0, indistinguishable from a
-// healthy fleet. Caught by this script's own suite, where the case asserting it
-// passed on the wrong arm of an `||` — so the test was fixed too.
+// process.exit() TRUNCATES output, and only on some platforms.
 //
-// The exit-2 path above only fires if require() itself throws, which it does not
-// for a missing directory. This is the branch that actually runs.
-if (!records.length) {
-    console.error(`0 heartbeats found in ${require('./fleet-heartbeat.js').DIR}.`);
-    console.error('No population, so this run vouches for NOTHING — not even an all-clear.');
-    console.error('Either no session has ever recorded a heartbeat here, or the directory');
-    console.error('is unreadable. Set AUTODEV_FLEET_DIR if the fleet lives elsewhere.');
-    process.exit(2);
-}
-
-const result = scan(records, Date.now(), IDLE_MIN, QUEUE_H);
-
-if (has('--json')) {
-    console.log(JSON.stringify({
-        idleMinutes: IDLE_MIN, queueHours: QUEUE_H, ...result,
-    }, null, 2));
-    process.exit(result.rows.length ? 1 : 0);
-}
-
-// The population always, before the verdict. A bare "none found" here is
-// indistinguishable from a heartbeat directory this script could not read, and
-// the two mean opposite things.
-console.log(`${result.scanned} heartbeat(s) scanned · ${result.idle} idle past ${IDLE_MIN}m · `
-    + `${result.withQueue} in a directory holding a QUEUE.md`);
-console.log(`flagging: idle > ${IDLE_MIN}m AND QUEUE.md written within ${QUEUE_H}h\n`);
-
-if (!result.rows.length) {
-    console.log('0 flagged.');
-    console.log('NOT an all-clear about queued work: this keys on queue FRESHNESS, because');
-    console.log('QUEUE.md files carry no open/done marker. A session sitting on a queue');
-    console.log('nobody has touched in a day is invisible here, by construction.');
-    process.exit(0);
-}
-
-for (const r of result.rows) {
-    console.log(`  ${String(r.idleMinutes).padStart(5)}m idle  ${r.session}  queue ${r.queueAgeHours}h old`);
-    console.log(`         ${r.cwd}`);
-}
-console.log(`\n${result.rows.length} session(s) stopped while a live queue sat in their directory.`);
-process.exit(1);
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();

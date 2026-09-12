@@ -192,6 +192,70 @@ function run(args, expect) {
     check('  and --help does not scan anything', !/workflow\(s\) in/.test(h.out));
 }
 
+// ---- the pipe delivers every byte -----------------------------------------
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under a status that says
+// nothing failed — the shape rendered-layout-gate.js shipped with until
+// 2026-09-07. --json here carries one row per workflow, so it grows with the
+// repo it is pointed at.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+{
+    const PIPE_BUF = 64 * 1024;
+    const files = {};
+    for (let i = 0; i < 380; i++) {
+        files['workflow-' + String(i).padStart(4, '0') + '.yml'] =
+            'name: w' + i + '\non:\n  pull_request:\n    paths:\n      - src/**\n      - docs/**\n'
+            + 'jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n';
+    }
+    const bigRoot = root('big', files);
+
+    // Spawned through runBudgeted, not raw spawnSync: #183 replaced every
+    // unbudgeted child in tooling/ because a timeout under concurrent load was
+    // being recorded as a verdict. Both legs share one budget, so the pipe and
+    // the file are never compared across different amounts of patience.
+    const budgetedSpawn = (argv, opts) => runBudgeted(process.execPath, argv,
+        Object.assign({ timeout: 60000, maxTimeout: 180000 }, opts));
+
+    const viaFileBytes = (args) => {
+        const out = path.join(tmp, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        budgetedSpawn( [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'] });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const piped = budgetedSpawn( [SUBJECT, bigRoot, '--json'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+    const fileBytes = viaFileBytes([bigRoot, '--json']);
+
+    check('--json over many workflows exceeds one pipe buffer, so the next check is not vacuous',
+        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+    check('  and through a PIPE it delivers every byte it writes to a FILE',
+        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+    check('  and the piped JSON still parses at that size',
+        (() => { try { return JSON.parse(piped.stdout).rows.length === 380; } catch { return false; } })(),
+        'tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
+
+    // The human report shares the exit path, so it shares the defect. BE CLEAR
+    // WHAT THIS LINE CATCHES: it is a stream of small console.log calls, which
+    // drain opportunistically while the parent reads, so it strands far less at
+    // the exit than the single JSON write above — measurably so on the sibling
+    // suites, where the equivalent line stays green under the mutation. It
+    // states the equality; it is not cover for this defect.
+    const reportPipe = budgetedSpawn( [SUBJECT, bigRoot],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    check('  the human report through a PIPE also delivers every byte',
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === viaFileBytes([bigRoot]),
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8'));
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`\n${tally(pass, fail, infra)}`);

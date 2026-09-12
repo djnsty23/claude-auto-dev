@@ -284,10 +284,10 @@ function selftest() {
 
     if (fails.length) {
         console.error('SELFTEST FAILED: ' + fails.join('; '));
-        process.exit(1);
+        return 1;
     }
     console.log('selftest ok: 7 cases, including the no-evidence guard and one mutation');
-    process.exit(0);
+    return 0;
 }
 
 function main() {
@@ -305,10 +305,25 @@ function main() {
         // startup was observed AND an unconditional rule was never seen; a
         // payload that lists unreachable rules while exiting 0 is a verdict
         // the caller's shell never receives.
-        process.exit(r.rows !== null && r.sawStart && r.unreachable.length ? 1 : 0);
+        return r.rows !== null && r.sawStart && r.unreachable.length ? 1 : 0;
     }
-    process.exit(report(repo, r, lf));
+    return report(repo, r, lf);
 }
 
-if (require.main === module) main();
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+if (require.main === module) process.exitCode = main();
 module.exports = { analyse, onDisk, readLog };

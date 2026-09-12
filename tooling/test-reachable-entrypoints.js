@@ -86,6 +86,78 @@ try {
     check('control: JSON mode preserves NO EVIDENCE as exit 0',
         noEvidence.status === 0 && noEvidence.signal === null && !noEvidence.error,
         detail(noEvidence));
+
+    // ---- the pipe delivers every byte ------------------------------------
+    //
+    // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+    // synchronous when it is a pipe on linux/win32, and process.exit() does not
+    // drain a pending async write. A run that prints past the 64KiB OS pipe
+    // buffer and then exits hands its caller exactly 65536 bytes under a status
+    // that says nothing failed — the shape rendered-layout-gate.js shipped with
+    // until 2026-09-07. This suite is the right home for it: it is the one that
+    // drives the live entrypoints rather than the analyser.
+    //
+    // --json lists every unreachable rule file, so it grows with the rule tree.
+    //
+    // TWO ASSERTIONS, and the first is what stops the second passing by
+    // construction: the output must EXCEED one pipe buffer, and the piped byte
+    // count must equal the same run redirected to a FILE, where the write is
+    // synchronous on every platform.
+    //
+    // A SEPARATE REPO from fixtureRepo on purpose — the controls above assert
+    // onDisk === 1 there, and 400 more rule files would falsify them.
+    const PIPE_BUF = 64 * 1024;
+    const bigRepo = path.join(tempRoot, 'big-repo');
+    const bigRules = path.join(bigRepo, '.claude', 'rules');
+    fs.mkdirSync(bigRules, { recursive: true });
+    fs.writeFileSync(path.join(bigRepo, 'CLAUDE.md'), '# unconditional fixture\n');
+    // SIZED BY FILE COUNT, NEVER BY PATH LENGTH. Every unreachable entry carries
+    // an absolute path, so the payload's width follows os.tmpdir() — ~49 chars on
+    // darwin, 5 on Linux. At 400 files this was 79307 bytes on a mac and 61575 on
+    // ubuntu, so the size assertion failed on CI while passing here. Count is
+    // portable; path length is not.
+    for (let i = 0; i < 700; i++) {
+        fs.writeFileSync(path.join(bigRules, 'rule-with-a-realistically-long-name-'
+            + String(i).padStart(4, '0') + '.md'), '# rule ' + i + '\n');
+    }
+    // The log path comes from CLAUDE_CONFIG_DIR, so the big repo reuses the
+    // config the controls above already populated; its own session_start row is
+    // appended to the same file. Appended rather than written: overwriting it
+    // would strip the fixtureRepo evidence the controls above depend on.
+    fs.appendFileSync(logFile, JSON.stringify({
+        reason: 'session_start',
+        at: '2026-01-01T00:00:00Z',
+        cwd: bigRepo,
+        file: path.join(bigRepo, '.claude', 'observed.md'),
+    }) + '\n');
+
+    const outFile = path.join(tempRoot, 'via-file.json');
+    const fd = fs.openSync(outFile, 'w');
+    spawnSync(process.execPath, [CHECK, bigRepo, '--json'], {
+        cwd: ROOT,
+        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+        stdio: ['ignore', fd, 'ignore'],
+        windowsHide: true,
+    });
+    fs.closeSync(fd);
+    const fileBytes = fs.statSync(outFile).size;
+
+    const piped = spawnSync(process.execPath, [CHECK, bigRepo, '--json'], {
+        cwd: ROOT,
+        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true,
+    });
+    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+
+    check('--json over a large rule tree exceeds one pipe buffer, so the next check is not vacuous',
+        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+    check('--json through a PIPE delivers every byte it writes to a FILE',
+        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+    check('the piped JSON still parses at that size',
+        (() => { try { return JSON.parse(piped.stdout).unreachable.length === 701; } catch { return false; } })(),
+        `tail=${JSON.stringify((piped.stdout || '').slice(-40))}`);
 } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

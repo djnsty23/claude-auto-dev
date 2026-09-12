@@ -385,6 +385,77 @@ function checkLiveTranscriptBlocks() {
   check('cold transcript: carries no risk label', cold && cold.risk, null);
 }
 
+// The pipe delivers every byte.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under exit status 0 — the
+// shape rendered-layout-gate.js shipped with until 2026-09-07. This output is
+// consumed by a model that then calls archive_session on what it read, so a
+// truncated --json is a list of sessions to archive with the tail silently
+// removed.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+//
+// Its own store, not the graded one: 200 records here would bury the 17 planted
+// worktree states every other case asserts by name. The records point at
+// directories that do not exist, so classification never shells out to git —
+// 200 rows for 38ms, which is what makes this affordable beside a suite that
+// plants real worktrees.
+function checkPipeDeliversEveryByte() {
+  const PIPE_BUF = 64 * 1024;
+  const store = path.join(ROOT, 'pipe-store', 'acct', 'bucket');
+  fs.mkdirSync(store, { recursive: true });
+  for (let i = 0; i < 200; i++) {
+    const id = 'local_fixture-session-' + String(i).padStart(4, '0');
+    fs.writeFileSync(path.join(store, id + '.json'), JSON.stringify({
+      sessionId: id,
+      isArchived: false,
+      title: 'a fixture session title of about the length people really give them, number ' + i,
+      cwd: path.join(ROOT, 'no-such-worktree', 'a-fairly-long-worktree-directory-name-' + i),
+      originCwd: path.join(ROOT, 'no-such-origin', 'a-fairly-long-repo-directory-name-' + i),
+      branch: 'claude/a-long-but-ordinary-generated-branch-name-' + i,
+      lastActiveAt: new Date(Date.now() - 40 * 86400000).toISOString(),
+    }));
+  }
+  const env = { ...process.env, SESSION_SWEEP_STORE: path.join(ROOT, 'pipe-store') };
+  const viaFileBytes = (args) => {
+    const out = path.join(ROOT, 'via-file.out');
+    const fd = fs.openSync(out, 'w');
+    spawnSync(process.execPath, [SCRIPT, ...args], { stdio: ['ignore', fd, 'ignore'], env });
+    fs.closeSync(fd);
+    return fs.statSync(out).size;
+  };
+  const piped = spawnSync(process.execPath, [SCRIPT, '--json'],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+  const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+  const fileBytes = viaFileBytes(['--json']);
+  let rows = null;
+  try { rows = JSON.parse(piped.stdout); } catch { /* reported below */ }
+
+  check(`--json exceeds one pipe buffer (${fileBytes} bytes), so the next check is not vacuous`,
+    fileBytes > PIPE_BUF, true);
+  check(`--json through a PIPE delivers every byte it writes to a FILE (pipe ${pipeBytes}, file ${fileBytes})`,
+    pipeBytes === fileBytes, true);
+  check('--json still parses at that size, under exit 0',
+    Array.isArray(rows) && rows.length === 200 && piped.status === 0, true);
+
+  // The human table shares the exit path, so it shares the defect. BE CLEAR
+  // WHAT THIS LINE CATCHES: it is a stream of small console.log calls, which
+  // drain opportunistically while the parent reads, so it strands far less at
+  // the exit than the single JSON write — measurably so on the sibling suites,
+  // where the equivalent line stays green under the mutation even above the
+  // buffer. It states the equality; it is not cover for this defect.
+  const tablePipe = spawnSync(process.execPath, [SCRIPT],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+  check('the human table through a PIPE also delivers every byte',
+    Buffer.byteLength(tablePipe.stdout || '', 'utf8') === viaFileBytes([]), true);
+}
+
 function run() {
   setup();
   buildCases();
@@ -394,6 +465,7 @@ function run() {
   checkPlatformDefaultPath();
   checkSharedWorktreeBlocks();
   checkLiveTranscriptBlocks();
+  checkPipeDeliversEveryByte();
 
   // Two extra records for the ephemeral clock: same 5-day idle, differing only
   // by whether a schedule launched them. Derived from the same age so the pair

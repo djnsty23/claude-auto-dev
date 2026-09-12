@@ -263,6 +263,74 @@ function cli(args, over = {}) {
         `state=${parsed && parsed.state}`);
 }
 
+// The pipe delivers every byte.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under exit status 0 — the
+// shape rendered-layout-gate.js shipped with until 2026-09-07.
+//
+// This file's `words` field is the operator's own prose, uncapped, so --json is
+// as large as AWAY.md is. That is why the defect is reachable here at all: the
+// verdict object is a few hundred bytes and the prose beside it is not.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+{
+    const PIPE_BUF = 64 * 1024;
+    const soon = new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+    const long = [];
+    for (let i = 0; i < 1200; i++) {
+        long.push('line ' + i + ' of a long away note, the kind someone writes when they '
+            + 'are handing over a week of context before going offline.');
+    }
+    const bigFile = write('cli-big.md', `# AWAY\n\nuntil: ${soon}\n\n${long.join('\n')}\n`);
+
+    // Spawned through runBudgeted, not raw spawnSync: #183 replaced every
+    // unbudgeted child in tooling/ because a timeout under concurrent load was
+    // being recorded as a verdict. Both legs share one budget, so the pipe and
+    // the file are never compared across different amounts of patience.
+    const budgetedSpawn = (argv, opts) => runBudgeted(process.execPath, argv,
+        Object.assign({ timeout: 60000, maxTimeout: 180000 }, opts));
+
+    const viaFileBytes = (extra) => {
+        const out = path.join(fixture, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        budgetedSpawn( [SUBJECT, '--file', bigFile].concat(extra),
+            { stdio: ['ignore', fd, 'ignore'] });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+
+    const pipeRun = budgetedSpawn( [SUBJECT, '--json', '--file', bigFile],
+        { input: '', encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const pipeBytes = Buffer.byteLength(pipeRun.stdout, 'utf8');
+    const fileBytes = viaFileBytes(['--json']);
+
+    check('--json over a long away note exceeds one pipe buffer, so the next check is not vacuous',
+        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+    check('  and through a PIPE it delivers every byte it writes to a FILE',
+        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+    let bigParsed = null;
+    try { bigParsed = JSON.parse(pipeRun.stdout); } catch { /* reported */ }
+    check('  and the piped JSON still parses at that size, under exit 0',
+        bigParsed !== null && bigParsed.state === 'active' && pipeRun.status === 0,
+        `exit ${pipeRun.status}, tail ${JSON.stringify(pipeRun.stdout.slice(-40))}`);
+
+    // --status caps the operator's words at one line of 100 chars, so it cannot
+    // be driven over the buffer from a fixture at all. It shares the exit path,
+    // so it gets the equality on its own; THIS ONE LINE CANNOT CATCH THE
+    // REGRESSION, and is here to state the equality rather than to prove it.
+    const statusPipe = budgetedSpawn( [SUBJECT, '--status', '--file', bigFile],
+        { input: '', encoding: 'utf8' });
+    check('  --status also delivers every byte, though it stays under the buffer',
+        Buffer.byteLength(statusPipe.stdout, 'utf8') === viaFileBytes(['--status']),
+        Buffer.byteLength(statusPipe.stdout, 'utf8'));
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 console.log(`\n${tally(pass, fail, infra)}`);

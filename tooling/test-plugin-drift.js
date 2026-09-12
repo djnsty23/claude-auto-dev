@@ -210,6 +210,71 @@ resetCache();
         !/POPULATION/.test(r.stdout || ''), r.stdout);
 }
 
+// ------------------------------------------- 4. the pipe delivers every byte
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under a status that says
+// nothing failed — the shape rendered-layout-gate.js shipped with until
+// 2026-09-07. --json here carries one result per installed plugin, so it grows
+// with the manifest.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+{
+    const PIPE_BUF = 64 * 1024;
+    // Entries whose install path does not exist. checkPlugin() returns on the
+    // first branch for those, so this fixture costs no git and no file walk —
+    // it is a large manifest and nothing else. The point here is the byte count
+    // at the exit, not which verdict produced the bytes.
+    const many = {};
+    for (let i = 0; i < 300; i++) {
+        many['fixture-plugin-' + String(i).padStart(4, '0') + '@' + MARKET] = [{
+            version: '1.2.3',
+            gitCommitSha: SHA,
+            installPath: path.join(ROOT, 'no-such-install', 'a'.repeat(60), 'plugin-' + i),
+            scope: 'user',
+        }];
+    }
+    fs.writeFileSync(MANIFEST, JSON.stringify({ plugins: many }, null, 2));
+
+    const env = Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: CFG });
+    const viaFileBytes = (args) => {
+        const out = path.join(ROOT, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'], env });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const piped = spawnSync(process.execPath, [SUBJECT, '--json'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+    const fileBytes = viaFileBytes(['--json']);
+
+    check('--json over a large manifest exceeds one pipe buffer, so the next check is not vacuous',
+        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+    check('--json through a PIPE delivers every byte it writes to a FILE',
+        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+    check('the piped JSON still parses at that size',
+        (() => { try { return JSON.parse(piped.stdout).results.length === 300; } catch { return false; } })(),
+        'tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
+
+    // The human report shares the exit path, so it shares the defect. BE CLEAR
+    // WHAT THIS LINE CATCHES: it is a stream of small console.log calls, which
+    // drain opportunistically while the parent reads, so it strands far less at
+    // the exit than the single JSON write — measurably so on the sibling suites,
+    // where the equivalent line stays green under the mutation even above the
+    // buffer. It states the equality; it is not cover for this defect.
+    const reportPipe = spawnSync(process.execPath, [SUBJECT],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    check('the human report through a PIPE also delivers every byte',
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === viaFileBytes([]),
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8'));
+}
+
 // -------------------------------------------------------------------- report
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* leave it */ }

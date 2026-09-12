@@ -153,6 +153,64 @@ try {
 
     const json = run(['--json', '--role', okRole]);
     check('--json is parseable and carries the population', (() => { try { const j = JSON.parse(json.out); return j.state === 'ok' && j.population.livePids === 1; } catch { return false; } })(), json.out.slice(0, 200));
+
+    // ------------------------------------------ the pipe delivers every byte
+    //
+    // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+    // synchronous when it is a pipe on linux/win32, and process.exit() does not
+    // drain a pending async write. A run that prints past the 64KiB OS pipe
+    // buffer and then exits hands its caller exactly 65536 bytes under an exit
+    // status that says nothing failed — the shape rendered-layout-gate.js
+    // shipped with until 2026-09-07.
+    //
+    // WHY IT IS REACHABLE HERE: --json echoes the role record back whole, and
+    // the role file is operator-written JSON that nothing in this tool caps.
+    //
+    // TWO ASSERTIONS, and the first is what stops the second passing by
+    // construction: the output must EXCEED one pipe buffer, and the piped byte
+    // count must equal the same run redirected to a FILE, where the write is
+    // synchronous on every platform.
+    const bigRole = role({
+        session_id: 'cli-live', peer_name: 'peer-live', desktop_session_id: 'local_desk-live',
+        // A field a coordinator really would carry: the standing brief it is
+        // working from. Long, and echoed straight back by --json.
+        mandate: Array.from({ length: 900 },
+            (unused, i) => 'paragraph ' + i + ' of a standing coordinator brief, long enough that the '
+                + 'record it lives in is not a handful of bytes').join('\n'),
+    });
+    const PIPE_BUF = 64 * 1024;
+    const viaFileBytes = (args) => {
+        const out = path.join(ROOT, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, [SUBJECT].concat(args), {
+            stdio: ['ignore', fd, 'ignore'],
+            env: Object.assign({}, process.env, { AUTODEV_SESSIONS_DIR: SESSIONS, CLAUDE_SESSION_STORE: STORE }),
+        });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const bigPipe = spawnSync(process.execPath, [SUBJECT, '--json', '--role', bigRole], {
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        env: Object.assign({}, process.env, { AUTODEV_SESSIONS_DIR: SESSIONS, CLAUDE_SESSION_STORE: STORE }),
+    });
+    const bigPipeBytes = Buffer.byteLength(bigPipe.stdout || '', 'utf8');
+    const bigFileBytes = viaFileBytes(['--json', '--role', bigRole]);
+    check('--json over a large role record exceeds one pipe buffer, so the next check is not vacuous',
+        bigFileBytes > PIPE_BUF, JSON.stringify({ bytes: bigFileBytes, buffer: PIPE_BUF }));
+    check('  and through a PIPE it delivers every byte it writes to a FILE',
+        bigPipeBytes === bigFileBytes, JSON.stringify({ pipe: bigPipeBytes, file: bigFileBytes }));
+    check('  and the piped JSON still parses at that size, under exit 0',
+        (() => { try { return JSON.parse(bigPipe.stdout).state === 'ok' && bigPipe.status === 0; } catch { return false; } })(),
+        'exit ' + bigPipe.status + ', tail ' + JSON.stringify((bigPipe.stdout || '').slice(-40)));
+
+    // render() prints the faults and lines, not the role record, so --status
+    // cannot be driven over the buffer from a fixture. It shares the exit path,
+    // so it gets the equality alone; THIS LINE CANNOT CATCH THE REGRESSION.
+    const statusPipe = run(['--status', '--role', bigRole]);
+    check('  --status also delivers every byte, though it stays under the buffer',
+        Buffer.byteLength(statusPipe.out, 'utf8') === viaFileBytes(['--status', '--role', bigRole]),
+        Buffer.byteLength(statusPipe.out, 'utf8'));
 } finally {
     try { fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* temp */ }
 }

@@ -404,6 +404,27 @@ you started work; in a shared clone it moves under you.
   compare exact content against an independently known payload, and use a file
   redirect as a separate control. Exit 0 or a complete redirected file alone
   does not prove that piped output survived.
+- **A pipe-vs-file byte check is a canary for ONE LARGE WRITE, and much weaker
+  for a stream of small ones.** `[measured 2026-09-08]` across the 19 scripts
+  that carried the truncation above: a `--json` branch emitting one 94KB
+  `console.log` stranded 29KB at the exit, while the human report on the SAME
+  fixture — 70KB, also over the buffer — lost nothing and stayed green under the
+  mutation. Hundreds of small writes drain opportunistically while the parent
+  reads; one big write does not. So a size assertion plus an equality is not
+  automatically a canary. Say in the test which of the two shapes it is grading,
+  or the green line reads as cover it does not give.
+  And where a subject's output is STRUCTURALLY BOUNDED — a fixed taxonomy, a
+  `slice(0, 10)` — no fixture can reach 64KiB and no threshold belongs there.
+  Assert the equality alone and record that the mutation leaves it green, rather
+  than planting a size check that can only ever fail for the wrong reason.
+- **A scripted rewrite of `process.exit(X)` into `return X` misses nested
+  parens.** `process.exit(rows.some((r) => r.bad) ? 1 : 0)` is two levels deep,
+  so a one-level regex skips it and leaves a function that returns everywhere
+  else and still exits there — half-converted, and silent. Match the argument by
+  COUNTING parens, then grep every touched file for a surviving `process.exit(`
+  before believing the conversion. Watch for files that carry the call as a
+  STRING: `find-orphan-checks.js` has `process\.exit\(1\)` inside its own
+  assertion-detecting regex, and a loose substitution rewrites the detector.
 - Avoid nested quoting in `node -e`; write a scratch file.
 
 ## Product repos
