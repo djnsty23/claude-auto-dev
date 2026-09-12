@@ -216,7 +216,11 @@ monitoring only after an authorized monitor is installed and verified.
 
 For a stalled item record the hypothesis, last meaningful evidence and next
 experiment. Continue independent stories and keep failed work unresolved. At
-handoff run `session-exit.js` for your own tree, reconcile the backlog and record
-commits, exact validation, deployed URLs, unresolved work, owners and next steps.
+handoff run `session-exit.js` for your own tree, reconcile the backlog, and write
+the RESUME.md fields it cannot measure. The six fields are goal, current state,
+files in flight, changes made, failed attempts with why each failed, and next
+steps. Changes made carries commits, exact validation and deployed URLs; failed
+attempts carries every approach that did not work, so a successor does not retry
+it; next steps carries unresolved work and its owners.
 Artifact URLs belong in the durable repo record. Report completion only at the
 verified boundary; otherwise state exactly what remains.

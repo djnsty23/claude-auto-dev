@@ -183,13 +183,21 @@ if (prior && Number.isInteger(prior.bucket) && prior.bucket >= bucket) silent();
 writeLedger(ledger, sessionId, { bucket, depth, at: Date.now() });
 
 const k = (n) => Math.round(n / 1000) + 'k';
+// THE SIX RESUME.md FIELDS, in the order session-exit.js renders them. Failed
+// attempts is the one a progress-only handoff drops, and it is the one that
+// costs most to lose: a session that does not know an approach already failed
+// tries it again. tooling/test-context-depth-nudge.js spells all six, so
+// removing one here goes red.
 const forModel = 'CONTEXT DEPTH IS ' + depth.toLocaleString('en-US') + ' TOKENS, PAST THE '
     + k(threshold) + ' RESTART LINE. Rule 14c: 77% of cost is cache reads and every turn '
     + 're-reads this whole conversation, so a session past this line costs more per turn '
     + 'than it did at the start and clusters wrong diagnoses. Finish the CURRENT step, '
-    + 'write RESUME.md (what is done, what was verified and by which command, what is '
-    + 'next), say so to whoever is coordinating, and stop. Do not start a new piece of '
-    + 'work at this depth.';
+    + 'then write RESUME.md with six fields: goal; current state; files in flight; '
+    + 'changes made, each with the command that verified it; failed attempts, each with '
+    + 'why it failed, so the next session does not try them again; next steps. '
+    + path.join(__dirname, '..', 'scripts', 'session-exit.js') + ' fills the measured '
+    + 'fields and keeps what you write in the others. Say so to whoever is coordinating, '
+    + 'and stop. Do not start a new piece of work at this depth.';
 const forOperator = 'Context depth ' + k(depth) + ' tokens, past the ' + k(threshold)
     + ' restart line (rule 14c). Let this step finish, then start a fresh session.';
 

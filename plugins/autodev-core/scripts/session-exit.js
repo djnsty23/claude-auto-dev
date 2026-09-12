@@ -19,8 +19,11 @@
  * one turn and asserts nothing; guessing costs a wrong brief that becomes
  * built work.
  *
- * Every field below is READ, never remembered. A resume file written from a
- * session's recollection is the stale-premise failure in durable form.
+ * Every MEASURED field below is READ, never remembered. A resume file written
+ * from a session's recollection is the stale-premise failure in durable form.
+ * The AUTHORED fields (goal, changes made, failed attempts, next steps) are the
+ * exception no command can fill, so they render as `_Not written._` until the
+ * ending session writes them, and a rerun carries them forward.
  *
  *   node session-exit.js                 write RESUME.md in the cwd
  *   node session-exit.js --out <path>    write somewhere else
@@ -48,7 +51,10 @@ const val = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] 
 // a human at a prompt has no such copy.
 if (has('--help') || has('-h')) {
     console.log('usage: session-exit.js [--print] [--out <path>] [--force] [--peers]\n'
-        + 'Writes RESUME.md for the next session, from state read at generation time.\n'
+        + 'Writes RESUME.md for the next session, with six fields: goal, current state,\n'
+        + 'files in flight, changes made, failed attempts (each with why it failed), next\n'
+        + 'steps. Current state and files in flight are read at generation time; the\n'
+        + 'other four are written by the ending session, and a rerun keeps them.\n'
         + '  --print   write to stdout instead of a file  (the only non-writing mode)\n'
         + '  --out P   write somewhere other than ./RESUME.md\n'
         + '  --force   skip the refuse-to-clobber check\n'
@@ -117,7 +123,7 @@ const headWhen = inRepo ? git(['log', '-1', '--format=%cI']) : null;
 // --- render ----------------------------------------------------------------
 
 function section(title, value, renderer, absentNote) {
-    const out = ['## ' + title, ''];
+    const out = ['### ' + title, ''];
     if (value === null) {
         out.push('**COULD NOT READ.** ' + absentNote);
         out.push('');
@@ -131,13 +137,35 @@ function section(title, value, renderer, absentNote) {
     return out;
 }
 
-const lines = [
-    '# RESUME',
-    '',
-    'Written by `session-exit.js` from state READ at generation time, never from',
-    'a recollection. Every number came from a command; anything a command could',
-    'not answer says so rather than rendering as empty.',
-    '',
+// --- the six fields ----------------------------------------------------------
+//
+// ONE field list, in this order, shared with hooks/context-depth-nudge.js and
+// skills/brain/SKILL.md: goal, current state, files in flight, changes made,
+// failed attempts (each with why it failed), next steps.
+//
+// Two are MEASURED here. Four are AUTHORED by the session that is ending,
+// because no command can read them. Failed attempts is why the authored half
+// exists: a handoff that carries only progress sends the next session straight
+// back into every dead end the last one already found, and it will try each
+// again because nothing says it failed.
+//
+// An unwritten authored field renders as `_Not written._`, never as an empty
+// section, for the same reason a measured null renders as COULD NOT READ: an
+// empty "Failed attempts" reads as "nothing failed".
+const AUTHORED = {
+    'Goal': '_Not written._ What this session set out to do, in a sentence or two, so'
+        + ' the next one can tell finished work from abandoned work.',
+    'Changes made': '_Not written._ What this session changed, each with the command that'
+        + ' verified it and what that command printed. Unpushed commits are listed'
+        + ' under Current state.',
+    'Failed attempts': '_Not written._ Every approach tried that did not work, each with'
+        + ' the reason it failed. Write "None" if nothing failed, so this field cannot'
+        + ' be mistaken for one nobody filled in.',
+    'Next steps': '_Not written._ What to do next, in order, and what each step is'
+        + ' blocked on.',
+};
+
+const stateRows = [
     '| field | value |',
     '|---|---|',
     // FIRST row, because it dates every other row. Without it a reader cannot
@@ -160,33 +188,37 @@ const lines = [
     '',
 ];
 
-lines.push.apply(lines, section(
-    'Unpushed commits',
-    unpushed,
-    (v) => v.map((l) => '- `' + l + '`'),
-    'No upstream is tracked for this branch, or git could not be reached, so "ahead of origin" has no answer here.',
-));
+// The measured sub-blocks keep their old names as `###` headings on purpose.
+// check-doc-staleness.js recognises `Unpushed commits`, `Uncommitted changes`
+// and `Open PRs` as machine-written status blocks at any heading level, so
+// renaming them would blind that detector to every snapshot written from now on.
+const measuredState = [].concat(
+    section(
+        'Unpushed commits',
+        unpushed,
+        (v) => v.map((l) => '- `' + l + '`'),
+        'No upstream is tracked for this branch, or git could not be reached, so "ahead of origin" has no answer here.',
+    ),
+    section(
+        'Open PRs',
+        prs,
+        (v) => v.map((p) => '- [#' + p.number + '](' + p.url + ') `' + p.headRefName + '` - ' + p.title),
+        'gh did not answer: not a GitHub remote, not authenticated, or gh absent. An empty PR list and an unanswerable one are different facts.',
+    ),
+    worktrees
+        ? ['### Worktrees', '',
+            'Another session may hold one of these. Run `git status` in a tree before',
+            'touching it: a dirty tree you did not dirty means someone is in there.',
+            '', '```', worktrees.split('\n').map(tilde).join('\n'), '```', '']
+        : [],
+);
 
-lines.push.apply(lines, section(
+const measuredInFlight = section(
     'Uncommitted changes',
     dirtyLines,
     (v) => v.map((l) => '- `' + l + '`'),
     'git status did not run.',
-));
-
-lines.push.apply(lines, section(
-    'Open PRs',
-    prs,
-    (v) => v.map((p) => '- [#' + p.number + '](' + p.url + ') `' + p.headRefName + '` - ' + p.title),
-    'gh did not answer: not a GitHub remote, not authenticated, or gh absent. An empty PR list and an unanswerable one are different facts.',
-));
-
-if (worktrees) {
-    lines.push('## Worktrees', '',
-        'Another session may hold one of these. Run `git status` in a tree before',
-        'touching it: a dirty tree you did not dirty means someone is in there.',
-        '', '```', worktrees.split('\n').map(tilde).join('\n'), '```', '');
-}
+);
 
 // The closing advice is DERIVED, not fixed.
 //
@@ -236,13 +268,105 @@ if (inRepo) {
         + ' rather than in a separate design note.');
 }
 
-lines.push('## What a reader should do first', '');
-lines.push.apply(lines, steps);
-lines.push('');
-lines.push('_These steps were derived from what is actually in `' + tilde(CWD) + '`._');
-lines.push('');
+const readerFirst = ['## What a reader should do first', ''].concat(steps, [
+    '',
+    '_These steps were derived from what is actually in `' + tilde(CWD) + '`._',
+    '',
+]);
 
-const doc = lines.join('\n');
+function authored(title, carried) {
+    return ['## ' + title, '', (carried.fields || {})[title] || AUTHORED[title], ''];
+}
+
+/** The whole document, with `carried` authored bodies in place of their placeholders. */
+function render(carried) {
+    return [
+        '# RESUME',
+        '',
+        'Written by `session-exit.js`. Six fields, in this order: goal, current state,',
+        'files in flight, changes made, failed attempts, next steps. Current state and',
+        'files in flight were READ from commands at generation time, never from a',
+        'recollection, and anything a command could not answer says so rather than',
+        'rendering as empty. The other four cannot be read by any command: the session',
+        'that ends writes them under their headings, and a rerun of this script keeps',
+        'what it wrote there and under any heading of its own. Text written inside a',
+        'measured field is regenerated.',
+        '',
+    ].concat(
+        authored('Goal', carried),
+        ['## Current state', ''], stateRows, measuredState,
+        ['## Files in flight', ''], measuredInFlight,
+        authored('Changes made', carried),
+        authored('Failed attempts', carried),
+        authored('Next steps', carried),
+        readerFirst,
+        [].concat(...(carried.extras || []).map((b) => [b, ''])),
+    ).join('\n');
+}
+
+/** Headings this script rebuilds on every run. Text under them is not carried. */
+const MEASURED = ['Current state', 'Files in flight', 'What a reader should do first'];
+
+/**
+ * What a rerun keeps from an existing RESUME.md: `fields`, the authored bodies
+ * keyed by heading; `extras`, whole sections under headings this script does
+ * not own; `keptBytes`, their combined size; `shaped`, whether the file is in
+ * this script's own layout.
+ *
+ * A RERUN MUST NOT ERASE WHAT A SESSION WROTE. The measured fields are rebuilt
+ * on every run; without this, a session that recorded its failed attempts and
+ * then refreshed the snapshot would lose exactly the dead ends the file exists
+ * to carry, and nothing would say so.
+ *
+ * NOTHING UNDER A HEADING THIS SCRIPT DOES NOT OWN IS DROPPED. `[measured
+ * 2026-09-13]` by a peer review of the first version, which ended a field at
+ * the next `## ` and kept only the four authored names: a `## Retry idea`
+ * written inside Failed attempts and a `## Notes` appended at the end were both
+ * deleted by a rerun that exited 0 and printed "kept Failed attempts". So an
+ * unknown `##` heading stays inside the authored field it follows, and one that
+ * follows a measured field is carried as a section of its own, rendered last.
+ *
+ * Read only from a file carrying MARKER: these headings are a contract of our
+ * own output, and a foreign file's `## Goal` is somebody else's structure. A
+ * body still equal to its placeholder is not carried, so an unwritten field
+ * stays recognisably unwritten rather than being frozen as content.
+ */
+function carriedFrom(file) {
+    const none = { fields: {}, extras: [], keptBytes: 0, shaped: false };
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch { return none; }
+    if (text.indexOf(MARKER) === -1) return none;
+    const bodies = {};
+    const extras = [];
+    // null: text a rerun regenerates. A string: the authored field being read.
+    // An array: an extra section being read, heading line included.
+    let owner = null;
+    for (const row of text.split(/\r?\n/)) {
+        const m = row.match(/^## (.+?)\s*$/);
+        if (m && Object.prototype.hasOwnProperty.call(AUTHORED, m[1]) && !(m[1] in bodies)) {
+            owner = m[1];
+            bodies[owner] = [];
+        } else if (m && MEASURED.indexOf(m[1]) !== -1) {
+            owner = null;
+        } else if (m && typeof owner !== 'string') {
+            owner = [row];
+            extras.push(owner);
+        } else if (typeof owner === 'string') {
+            bodies[owner].push(row);
+        } else if (owner) {
+            owner.push(row);
+        }
+    }
+    const fields = {};
+    for (const t of Object.keys(bodies)) {
+        const body = bodies[t].join('\n').trim();
+        if (body && body !== AUTHORED[t]) fields[t] = body;
+    }
+    const blocks = extras.map((b) => b.join('\n').trim());
+    const keptBytes = Object.keys(fields).reduce((n, t) => n + fields[t].length, 0)
+        + blocks.reduce((n, b) => n + b.length, 0);
+    return { fields, extras: blocks, keptBytes, shaped: SHAPE.test(text) };
+}
 
 // The marker that says a RESUME.md is OURS and safe to replace.
 //
@@ -258,11 +382,16 @@ const doc = lines.join('\n');
 // tracking - overwrite what we wrote, never what a person wrote.
 const MARKER = 'Written by `session-exit.js`';
 
+// Our own LAYOUT, not merely our marker: the six-field intro at the very top.
+// Still a string a document could imitate, which is why it only changes WHAT
+// the guard sizes (the bytes a rerun would drop) and never grants a write alone.
+const SHAPE = /^# RESUME\r?\n\r?\nWritten by `session-exit\.js`\. Six fields/;
+
 // Anything we are about to write is a snapshot of a few kB. A foreign file much
 // larger than that is a document somebody maintains.
 const SUSPICIOUS_BYTES = 20000;
 
-function refuseToClobber(out, aboutToWrite) {
+function refuseToClobber(out, aboutToWrite, carry) {
     let existing;
     try { existing = fs.readFileSync(out, 'utf8'); } catch { return null; }   // absent: fine
 
@@ -282,8 +411,18 @@ function refuseToClobber(out, aboutToWrite) {
     // `[measured 2026-08-25]` the file destroyed in the third incident was
     // 458 KB and 6,132 lines against a 5 KB snapshot. Two orders of magnitude is
     // not a warning, it is a hard stop.
-    const huge = existing.length >= SUSPICIOUS_BYTES
-        && existing.length > (aboutToWrite || 0) * 4;
+    //
+    // OUR OWN LAYOUT IS SIZED BY WHAT A RERUN WOULD DROP. `[measured 2026-09-13]`
+    // by a peer review: once authored fields are carried, our own RESUME.md
+    // grows, and a 27,926-byte one with a long Failed attempts was refused as
+    // "QUOTES this script's marker". Nothing was lost, but the message
+    // misdescribed the file and sent the session to --force. For a file in our
+    // layout, the bytes at risk are the ones a rerun does NOT carry, so those
+    // are what is sized. Every other file is sized whole, as before.
+    const shaped = !!(carry && carry.shaped);
+    const measured = shaped ? Math.max(0, existing.length - carry.keptBytes) : existing.length;
+    const huge = measured >= SUSPICIOUS_BYTES
+        && measured > (aboutToWrite || 0) * 4;
 
     // THE MARKER IS A STRING A DOCUMENT CAN QUOTE, so it may only ever DOWNGRADE
     // a refusal, never grant permission. `[measured 2026-09-05]` this test used to
@@ -304,6 +443,15 @@ function refuseToClobber(out, aboutToWrite) {
 
     if (!tracked && !huge) return null;   // small, foreign, untracked: replaceable
 
+    if (shaped) {
+        return 'REFUSING to overwrite ' + out + '\n'
+            + '  It is in this script\'s own layout, but ' + measured + ' bytes of it sit outside\n'
+            + '  the text a rerun keeps: before the first field, or inside Current state,\n'
+            + '  Files in flight or What a reader should do first, which a rerun regenerates.\n'
+            + '  Move that text under a field or a heading of its own, write elsewhere with\n'
+            + '  --out <path>, or --force if it can go.';
+    }
+
     const why = quoted
         ? 'It is ' + existing.length + ' bytes and QUOTES this script\'s marker'
         : tracked && huge ? 'It is tracked by git AND is ' + existing.length + ' bytes'
@@ -321,18 +469,35 @@ function refuseToClobber(out, aboutToWrite) {
         + '  Write elsewhere with --out <path>, or --force if you are certain.';
 }
 
+const target = path.resolve(val('--out', path.join(CWD, 'RESUME.md')));
+const carried = carriedFrom(target);
+const doc = render(carried);
+
 if (has('--print')) {
     process.stdout.write(doc);
 } else {
-    const out = path.resolve(val('--out', path.join(CWD, 'RESUME.md')));
-    const refusal = has('--force') ? null : refuseToClobber(out, doc.length);
+    // THE GUARD IS SIZED AGAINST THE MEASURED SNAPSHOT, NEVER THE CARRIED ONE.
+    // Carried bodies come from the file being replaced, so sizing against them
+    // lets a large file inflate the very output it is compared with: a 60 kB
+    // hand-written handoff that quotes MARKER and has a `## Next steps` heading
+    // would carry its own bulk forward, stop looking four times larger than
+    // what replaces it, and be overwritten without a prompt. That is the
+    // quoted-marker destruction route again, reopened by this feature.
+    const refusal = has('--force') ? null : refuseToClobber(target, render({}).length, carried);
     if (refusal) { console.error(refusal); process.exit(3); }
-    fs.writeFileSync(out, doc, 'utf8');
-    console.log('wrote ' + out + ' (' + doc.length + ' bytes)');
+    fs.writeFileSync(target, doc, 'utf8');
+    console.log('wrote ' + target + ' (' + doc.length + ' bytes)');
     console.log('  measured: '
         + (unpushed === null ? 'unpushed UNKNOWN' : unpushed.length + ' unpushed') + ', '
         + (dirtyLines === null ? 'dirty UNKNOWN' : dirtyLines.length + ' dirty') + ', '
         + (prs === null ? 'PRs UNKNOWN' : prs.length + ' open PR(s)'));
+    const names = Object.keys(AUTHORED);
+    const kept = names.filter((t) => carried.fields[t]);
+    const missing = names.filter((t) => !carried.fields[t]);
+    console.log('  authored: '
+        + (kept.length ? 'kept ' + kept.join(', ') : 'none kept')
+        + (carried.extras.length ? '; kept ' + carried.extras.length + ' section(s) under headings of their own' : '')
+        + (missing.length ? '; NOT WRITTEN, write these by hand: ' + missing.join(', ') : ''));
 }
 
 if (has('--peers')) {

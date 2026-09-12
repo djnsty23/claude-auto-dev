@@ -131,6 +131,15 @@ const FIXTURE = [
     '',
     '- [#900](https://github.com/o/r/pull/900) a row under a heading that only sounds open',
     '',
+    // session-exit.js now nests its status blocks one level down, as `###`
+    // inside `## Current state`. Placed after a non-status heading on purpose:
+    // if `###` stopped counting as a heading, this row would inherit
+    // `What is next` above and go unreported, rather than passing by inheriting
+    // a status heading.
+    '### Open PRs',
+    '',
+    '- [#128](https://github.com/o/r/pull/128) `fix/y` - a PR row under the nested form',
+    '',
 
     // ---- a QUOTED SPAN opening on one line and closing on the next ---------
     '## A record quoting a control name',
@@ -340,6 +349,8 @@ if (tmp) {
     check('a seven-character sha under `## Unpushed commits` still counts',
         stText.indexOf('8b79aa2') !== -1,
         'tightening the sha pattern to 8+ hex silently dropped real findings once');
+    check('a PR row under `### Open PRs`, the level session-exit.js emits, counts too',
+        stText.indexOf('/pull/128') !== -1, stText);
     check('a row with NO handle is not reported', stText.indexOf('no handle at all') === -1);
     check('a BARE #N is not accepted as a handle',
         stText.indexOf('UI-CONTRACT') === -1,
