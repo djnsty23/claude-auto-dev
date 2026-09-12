@@ -1,0 +1,145 @@
+{
+  "plannedPopulation": 15,
+  "cases": [
+    {
+      "plannedCase": "same-receipt-two-executors",
+      "executedTests": [
+        "prelaunch-registration-is-one-shot",
+        "duplicate-helper-registration-allows-one-worker"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "fence-changes-after-status",
+      "executedTests": [
+        "stale-revision-and-changed-base-refuse-prelaunch",
+        "cancel-before-registration-fences-created-helper"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "crash-before-start-intent-commit",
+      "executedTests": [
+        "prepare-start-before-commit-kill-has-no-launch"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "crash-after-launch-before-store-receipt",
+      "executedTests": [
+        "registration-after-commit-kill-never-replays-start-permission",
+        "unknown-and-live-hold-until-owned-close-recovery",
+        "close-receipt-recovers-worker-store-gap"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "local registration/child/store boundaries exercised; parent/host death without close receipt remains unknown, no full native process-group recovery claim"
+    },
+    {
+      "plannedCase": "live-or-unknown-cannot-release",
+      "executedTests": [
+        "unknown-and-live-hold-until-owned-close-recovery",
+        "reconciliation-poll-budget-survives-new-adapter"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "wrong-context-bootstrap",
+      "executedTests": [
+        "wrong-actual-cwd-cannot-register-or-edit",
+        "fixture-readiness-rejects-wrong-sha-and-extra-source"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "first-turn-result-without-stop",
+      "executedTests": [
+        "close-receipt-recovers-worker-store-gap",
+        "happy-path-real-child-artifact-loopback"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "spool-database-gap",
+      "executedTests": [
+        "enqueue-before-commit-kill-does-not-claim-durability",
+        "kill-after-edit-retains-artifact-without-inventing-result"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "replaced with inline SQLite bundle; larger filesystem spool recovery deferred"
+    },
+    {
+      "plannedCase": "lost-receiver-ack",
+      "executedTests": [
+        "lost-and-wrong-ack-do-not-start-another-worker",
+        "receive-after-commit-kill-is-durable-before-ack",
+        "durable-ack-recovers-after-last-send-is-exhausted"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "wrong-ack-and-payload-reuse",
+      "executedTests": [
+        "lost-and-wrong-ack-do-not-start-another-worker",
+        "artifact-content-and-message-identity-are-bound"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "late-result-quarantine",
+      "executedTests": [
+        "late-first-result-is-quarantined",
+        "retired-first-delivery-is-acked-quarantine"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "reject-after-envelope-acceptance",
+      "executedTests": [
+        "accepted-envelope-can-be-rejected-without-erasing-result",
+        "post-envelope-rejection-preserves-bundle-and-retries"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "retry-budgets-survive-restart",
+      "executedTests": [
+        "reconciliation-poll-budget-survives-new-adapter",
+        "delivery-exhaustion-is-persistent-and-incomplete",
+        "transport-replay-cannot-renew-send-budget"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "dirty-source-is-not-head",
+      "executedTests": [
+        "happy-path-real-child-artifact-loopback",
+        "candidate-context-and-envelope-are-rechecked",
+        "fixture-readiness-rejects-wrong-sha-and-extra-source"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    },
+    {
+      "plannedCase": "native-completed-after-required-hook-block",
+      "executedTests": [
+        "native-completed-with-blocked-hook-is-incomplete",
+        "required-hook-failure-refuses-existing-valid-artifact"
+      ],
+      "scope": "local synthetic runtime only; native adapter admission not implied",
+      "status": "covered within local synthetic contract"
+    }
+  ],
+  "nativeModelCalls": 0,
+  "verifiedMissionClaims": 0
+}

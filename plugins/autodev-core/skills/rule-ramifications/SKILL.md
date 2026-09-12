@@ -13,8 +13,9 @@ paths:
 
 # Ramifications
 
-These are not general best practices. They are the eight failure classes that
-actually shipped, measured across 3,127 `fix` commits in three production repos
+These eight review lenses were derived from keyword-classifying 3,127 `fix`
+commits in three production repositories. Commit messages are candidate
+evidence, not independent proof each change repaired a shipped failure
 (see [`docs/failure-evidence.md`](../../../../docs/failure-evidence.md)).
 
 The thing they share is why QA keeps catching them and tooling does not:
@@ -33,7 +34,7 @@ Answer these in one or two lines each. If a question does not apply, say so and
 move on — but do not skip reading it, because the ones that get skipped are the
 ones in the list.
 
-**1. Ordering and async (32–41% of all fixes — the single largest class)**
+**1. Ordering and async (32–41% of messages in that historical keyword sample)**
 What must happen before this runs? What if the user acts before it finishes,
 twice in a row, or navigates away mid-flight? Is anything awaited that could
 resolve after the component is gone?
@@ -72,8 +73,10 @@ It compiles, it is dead.
 
 ## Before calling it done
 
-Re-read the eight. For each, either state the check you ran or state that it
-does not apply. **"Types pass and the console is clean" answers none of them.**
+Re-read the eight and the mission's actual acceptance criteria; these lenses
+are not an exhaustive defect taxonomy. For applicable dimensions, record the
+check and observed result. Include cross-user/role isolation and duplicate or
+interrupted external effects where the flow has them. **"Types pass and the console is clean" answers none of them.**
 
 Then, specifically:
 
@@ -82,9 +85,9 @@ Then, specifically:
 - **Run the flow twice.** A surprising share of these defects only appear on the
   second run, or with data already present from the first.
 - **Check the empty and error states in the browser**, not in your head.
-- **If you changed user-visible English, every locale is now stale.** Tools that
-  fill *missing* keys will not catch it — the old translation is still there and
-  still wrong.
+- **If source-language meaning changed, review affected translations.** Missing-key
+  tools cannot detect a present translation with stale meaning. Punctuation or
+  formatting-only edits do not establish that every translation is wrong.
 
 ## When you cannot check something
 

@@ -1,0 +1,18 @@
+{
+  "results": [
+    {
+      "id": "hidden-source-assume-unchanged",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: unchanged flagged source remains supported\n+ actual - expected\n\n+ 'scope-mismatch'\n- 'review-ready'\n\n    at <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/alternative-reject-index-flags/tooling/test-hardening.cjs:22:228\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async <audit-worktree>/.claude/reports/brain-live-audit/mission-runtime-v3-draft/hardening-mutations/alternative-reject-index-flags/tooling/test-hardening.cjs:29:136"
+    }
+  ],
+  "summary": {
+    "population": 1,
+    "passed": 0,
+    "failed": 1,
+    "helpers": 1,
+    "remainingChildren": 0,
+    "modelCalls": 0,
+    "fixtureRemoved": true
+  }
+}

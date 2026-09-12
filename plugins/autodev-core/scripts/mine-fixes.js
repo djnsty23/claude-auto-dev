@@ -6,7 +6,16 @@
 // broken. Cluster those by stated root cause and you get an evidence-ranked
 // list of what to gate, instead of inheriting someone else's checklist.
 //
-// Usage: node mine-fixes.js [repo-path] [--json] [--window-days N]
+// Usage: node mine-fixes.js [repo-path] [--json] [--window-days=N] [--since=<git date>]
+//
+// --window-days is the REWORK window: how soon after a feature a fix on the
+// same file counts as first-pass failure. --since is the DATE window: which
+// commits are read at all, passed to `git log --since` unchanged, so
+// `--since=60.days` or `--since=2026-07-01` both work. They answer different
+// questions and `[measured 2026-09-08]` conflating them cost a session a
+// scratch reimplementation of this file: asked for the last 60 days, it found
+// only the rework flag and had to re-derive the counting to add a date
+// filter. Both are plain git log windows and belong here.
 //
 // Pure Node, no dependencies, read-only. Never writes to the repo.
 
@@ -17,6 +26,7 @@ const args = process.argv.slice(2);
 const repo = path.resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
 const asJson = args.includes('--json');
 const windowDays = Number((args.find((a) => a.startsWith('--window-days=')) || '').split('=')[1]) || 3;
+const since = (args.find((a) => a.startsWith('--since=')) || '').slice('--since='.length);
 
 function git(a) {
     return execSync(`git ${a}`, { cwd: repo, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
@@ -27,7 +37,13 @@ function main() {
     // and the file list, so splitting on a blank line mis-frames every record.
     let RAW;
     try {
-        RAW = git('log --format=%x00%H%x01%ct%x01%s --name-only --no-merges');
+        // The date goes through as one shell word. A `since` value carrying a quote
+        // or a space is a caller error worth failing on, not one to interpolate.
+        if (/[^\w.:+\-TZ@ ]/.test(since)) {
+            console.error(`--since must be a git date such as 60.days or 2026-07-01, got: ${since}`);
+            return 1;
+        }
+        RAW = git(`log --format=%x00%H%x01%ct%x01%s --name-only --no-merges${since ? ` --since="${since}"` : ''}`);
     } catch (e) {
         console.error(`Not a git repository, or git failed: ${repo}`);
         return 1;
@@ -125,6 +141,7 @@ function main() {
     if (asJson) {
         console.log(JSON.stringify({
             repo,
+            since: since || null,
             commits: commits.length,
             feats: feats.length,
             fixes: fixes.length,
@@ -138,7 +155,7 @@ function main() {
     }
 
     const line = '='.repeat(70);
-    console.log(`\n${line}\n${path.basename(repo)} — ${commits.length} engineering commits\n${line}`);
+    console.log(`\n${line}\n${path.basename(repo)} — ${commits.length} engineering commits${since ? ` since ${since}` : ''}\n${line}`);
     console.log(`\n  ${fixes.length} fixes : ${feats.length} features  =  ${(fixes.length / Math.max(feats.length, 1)).toFixed(2)} fixes per feature`);
     console.log(`  ${rework.length} of them (${Math.round(rework.length / fixes.length * 100)}%) landed on code a feature touched in the previous ${windowDays} days.`);
     console.log('  Those are first-pass failures, not maintenance.\n');
@@ -172,15 +189,8 @@ function main() {
 
     console.log('\nThe top classes are the ones worth an executable gate. A checklist');
     console.log('nobody runs changes nothing — see docs/failure-evidence.md.\n');
+    return 0;
 }
-
-// THE OUTPUT HERE IS STRUCTURALLY BOUNDED, which is why its suite asserts the
-// byte-count equality and no size. `classes` is at most the eight CLASSES
-// entries with three 110-char examples each, and `hotFiles` is capped at ten, so
-// --json lands around 3KB on this repo and cannot reach 64KiB whatever the
-// history. The exit below is still the right shape: the drain is a property of
-// the runner, and the next field added here is not going to arrive with this
-// note attached to it.
 
 // process.exit() TRUNCATES output, and only on some platforms.
 //

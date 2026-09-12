@@ -13,7 +13,10 @@ argument-hint: "[focus area]"
 Feature ideation + architecture improvements. Not bugs — use `audit` for that.
 
 ## Existing Tasks
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;Object.entries(sp.stories||p.stories||{}).forEach(([k,v])=>console.log(k,v.passes===true?'done':v.passes===false?'FAILED':v.passes==='deferred'?'deferred':v.passes==='needs-setup'?'needs-setup':'pending',v.title));const a=p.archived;if(a)console.log(Number.isFinite(a.totalCompleted)?'(+'+a.totalCompleted+' archived, not listed above)':'(archive present, count unreadable)')}catch(e){}"`
+Read the whole `prd.json`, including earlier sprints, archived references and
+explicit deferments. Resolve the loaded autodev-core root and use
+`scripts/prd-states.js`'s `workPlan(prd)` for state/dependency readiness.
+A missing or malformed backlog is unknown, not zero prior work.
 
 ## Scope: Brainstorm vs Audit
 
@@ -27,7 +30,7 @@ Feature ideation + architecture improvements. Not bugs — use `audit` for that.
 | Product differentiation | Performance issues |
 | UX flow improvements | Test coverage gaps |
 
-If you find a bug or violation during brainstorm, note it but don't create a story — suggest running `audit` instead.
+When a confirmed bug appears, route its evidence through `audit`. If fixing it is already within the user's requested scope, create or link the work and continue; a skill boundary does not require another invitation.
 
 ## Usage
 
@@ -43,8 +46,11 @@ If you find a bug or violation during brainstorm, note it but don't create a sto
 For recently-scanned codebases, skip full agent scans:
 
 ```bash
-# 1. Get files changed since last brainstorm
-git diff --name-only HEAD~5 -- '*.ts' '*.tsx' '*.css'
+# 1. Resolve the prior recorded scan commit into BRAINSTORM_BASE; refuse if unknown.
+git diff --name-only "$BRAINSTORM_BASE" -- '*.ts' '*.tsx' '*.css'
+
+# Include relevant untracked additions, then deduplicate the combined path list.
+git ls-files --others --exclude-standard -- '*.ts' '*.tsx' '*.css'
 
 # 2. For each changed file, look for architecture opportunities:
 #    - Large new files that could be split
@@ -52,7 +58,7 @@ git diff --name-only HEAD~5 -- '*.ts' '*.tsx' '*.css'
 #    - New components that could be generalized
 ```
 
-Quick mode takes ~10 seconds. Use after a recent full brainstorm when the codebase hasn't changed much.
+Use quick mode only when a recorded prior scan identifies its commit and scope. Diff from that commit, not an arbitrary five-commit window, and name any unscanned surfaces. Measure elapsed time instead of promising ten seconds.
 
 ## Agent Memory (read before scanning)
 
@@ -76,7 +82,7 @@ After `brainstorm apply`, append the created stories to "Past Suggestions" with 
 
 ## Phase 1: Architecture Scan (Parallel)
 
-Launch 3 scans simultaneously using Task tool with `run_in_background: true`.
+Read `rule-agent-concurrency` and use the current host's actual worker API, within its available slots. The Task examples below describe the briefs on hosts exposing that API; on another host use its supported equivalent, or run the scans sequentially. Verify each worker started and collect its evidence.
 
 Replace `[PROJECT_PATH]` below with the actual working directory path.
 
@@ -89,7 +95,7 @@ Task({ subagent_type: "Explore", run_in_background: true,
   1. Components in src/components/ not imported anywhere else
   2. Exported functions/constants not imported by any other file
   3. Route segments (page.tsx) that import deleted/missing components
-  Cross-reference: for each export, grep for its name across src/. Report only confirmed unused.` })
+  Cross-reference exports against imports, package exports, route conventions, config, scripts, tests and dynamic consumers. A missing literal name in src/ alone is not proof of dead code.` })
 
 // Scan 2: Complexity + splitting opportunities
 Task({ subagent_type: "Explore", run_in_background: true,
@@ -103,7 +109,7 @@ Task({ subagent_type: "Explore", run_in_background: true,
 // Scan 3: Unused dependencies + outdated patterns
 Task({ subagent_type: "researcher", run_in_background: true,
   prompt: `In [PROJECT_PATH]. Limit to 80 tool calls max.
-  1. Read package.json dependencies. For each dependency, grep src/ to check if it's actually imported. Report unused deps.
+  1. Read package.json dependencies. Check imports plus config/plugins/scripts/CLI use, peer contracts and dynamic loading before labeling a dependency unused. State the population examined.
   2. Check for outdated patterns: class components, legacy API usage, deprecated package usage. If Context7 tools are available (mcp__plugin_context7_context7__*), use them to confirm whether patterns are actually deprecated in the current major version — don't flag based on stale training data.
   Report: unused deps list, outdated patterns found (with version context).` })
 ```
@@ -183,16 +189,16 @@ If the codebase is genuinely clean, say so. Do not invent work to fill a table.
 
 ### Auto Mode Exception
 
-If `.claude/auto-active` exists (running in auto mode), skip the presentation and create stories directly in prd.json. Auto mode's IDLE detection depends on story creation to continue the loop.
+When the current mandate authorizes autonomous improvement, create evidence-backed, in-scope stories directly. An activation marker alone is not authority to expand scope. An empty scan is a valid outcome; do not invent stories to keep Auto running.
 
 ### brainstorm apply
 
 When user says `brainstorm apply`:
 1. Read prd.json (or create with `sprint: "S1"` if none exists)
-2. Deduplicate against existing stories (match first 25 chars of title)
+2. Deduplicate by the actual outcome/root cause, affected surface and acceptance criteria across the full PRD; title similarity is a review lead only.
 3. **Push back on padding.** Before creating, review the finding list:
    - If 3+ findings are 1-line changes in the same area, batch into one story
-   - If the full list has fewer than 2 findings that are genuinely non-trivial (require reasoning, multi-file changes, or design decisions), tell the user: "This looks like a 1-story sprint, not 5 — recommend skipping the sprint and just doing the fix directly." Then wait for confirmation before creating.
+   - For one coherent small fix, use one story or the project's lightweight tracking convention. Existing authorization is enough; do not require confirmation merely because the list is short.
    - Never create a sprint of padding to hit a round number.
 4. Create stories with ID format `S{sprint}-{number}`
 5. Report: "Created X stories (batched Y trivial findings), skipped Z duplicates"
@@ -209,22 +215,13 @@ When user says `brainstorm X`:
 
 Before creating any story, check for existing tasks:
 
-```typescript
-const existing = await TaskList();
+Read the persisted PRD and any available host task list as separate evidence.
+Match the intended outcome, cause and acceptance, then link genuine duplicates.
+Two tasks sharing a title prefix or file can still require different fixes.
+Allocate a unique ID following `core`; preserve existing story containers and
+dependencies. Native task widgets are optional mirrors, not the source of truth.
 
-function isDuplicate(newTitle: string): boolean {
-  return existing.some(task =>
-    task.subject.toLowerCase().includes(newTitle.toLowerCase().slice(0, 25)) ||
-    newTitle.toLowerCase().includes(task.subject.toLowerCase().slice(0, 25))
-  );
-}
-
-if (!isDuplicate("Add keyboard shortcuts")) {
-  TaskCreate({ subject: "Add keyboard shortcuts (Cmd+K)", ... });
-}
-```
-
-Report skipped duplicates: "Skipped 2 ideas (already in task list)"
+Report each skipped duplicate with the existing story ID and matching outcome.
 
 ## Design System Awareness
 
@@ -235,11 +232,11 @@ Before proposing UI features:
 
 ## Rules
 
-- **Features and architecture, not bugs** — if you find a bug, note it and suggest `audit`, don't create a story
+- Route bug evidence through `audit`; continue fixes already authorized by the current mission
 - Analyze and propose — do not ask "what do you want?"
 - Quality over quantity — 2 real findings beat 6 padded ones
 - Validate before claiming — grep to confirm, don't assume
-- Deduplicate against existing prd.json stories AND native Tasks before creating
-- Check open tasks overlap: if a finding matches an existing pending story (first 25 chars of title), skip it
+- Deduplicate against the full persisted PRD; use available native task state as supplementary context
+- Check actual outcome/root-cause overlap; never drop a distinct fix solely because its title or file matches
 - "Codebase is clean, nothing to propose" is a valid outcome
 - Cap each scan agent at ~80 tool calls to avoid rate limits

@@ -9,275 +9,120 @@ user-invocable: true
 
 # Supabase
 
-Use CLI instead of MCP - more reliable, fewer permission issues.
+Resolve the actual project, database environment and current authorization before
+any remote write. Use an available supported CLI, connector or approved SQL
+connection; no transport is inherently more reliable or more authorized.
 
-## Common Commands
+## Discover commands and target
 
-```bash
-# Apply migrations (limit output)
-supabase db push --project-ref PROJECT_ID 2>&1 | tail -10
-
-# Run SQL directly
-supabase db execute --sql "SELECT * FROM table LIMIT 5" --project-ref PROJECT_ID
-
-# Deploy edge functions
-supabase functions deploy FUNCTION_NAME --project-ref PROJECT_ID
-
-# Deploy all functions
-supabase functions deploy --project-ref PROJECT_ID
-
-# List projects
-supabase projects list
-
-# Check status
-supabase status --project-ref PROJECT_ID
-```
-
-## Context-Efficient Patterns
+Read the project's Supabase config, installed CLI version and relevant help.
+Consult the [CLI reference](https://supabase.com/docs/reference/cli/introduction)
+when the local command differs. Do not invent `db execute` or assume every
+command accepts `--project-ref`.
 
 ```bash
-# Limit output to reduce context
-supabase db push 2>&1 | tail -5
-
-# Check if migration exists before applying
-supabase db execute --sql "SELECT 1 FROM table LIMIT 1" 2>&1 | grep -q "1" && echo "exists"
-
-# Run in background for long operations
-Bash({ command: "supabase functions deploy --project-ref X", run_in_background: true })
+supabase --version
+supabase db push --help
+supabase functions deploy --help
 ```
 
-## Project IDs
+`supabase status` describes the local stack and can print credentials. It is
+not a remote health probe; keep secret-bearing output out of the transcript.
+Database pushes use the verified linked target or supported explicit database
+connection. Function deployment has its own target flags. Check each operation.
 
-Get from CLAUDE.md or:
-```bash
-supabase projects list 2>&1 | grep -E "^\w"
-```
+Existing login/profile or environment credentials may be reused within scope.
+A 401 can indicate expired, missing or insufficient credentials as well as the
+wrong account. Inspect without printing tokens; do not repeat an unchanged
+request or silently fall back to another account. Load
+[rules/multi-account.md](rules/multi-account.md) when relevant.
 
-## Multi-Org Auth
+## Migrate and prove
 
-CLI only supports one token at a time. System env var may not match the current project — always check. A 401 means wrong token, do not retry.
+1. Read migration history and the intended schema/data change. Capture before
+   behavior and the exact target; distinguish local, preview and production.
+2. Prepare a versioned migration, including data backfill and recovery where
+   needed. Existing scope determines whether remote application is authorized.
+3. Exercise it on a disposable local or approved preview database. A reset
+   destroys data; it is not a generic repair step for a shared database.
+4. For a linked target, `supabase db push --dry-run` shows pending migrations;
+   it does not execute or verify them. Apply only after reconciling that list
+   with the intended target and migration history.
+5. Capture each command's real exit status and output before summarizing.
+   A `tail`, `grep`, background start or “up to date” message is not proof.
+6. Read back schema/history and run the relevant access and business queries.
+   For functions, call the known deployed version with representative inputs;
+   deploy success alone does not prove runtime behavior.
 
-```bash
-# Option 1: Inline token (best for multi-org)
-SUPABASE_ACCESS_TOKEN=$SUPABASE_TOKEN_REELR supabase db push --project-ref XXX
+Use the project's approved SQL mechanism for direct queries. With psql, enable
+`ON_ERROR_STOP` so a script error cannot appear successful. Read connection
+metadata without displaying passwords. Select direct/session/transaction
+connections for the actual client requirements; use the dashboard's connection
+string rather than guessing pooler hostnames, ports or modes.
 
-# Option 2: Source project's .env.local first
-# .env.local is auto-loaded by session-start hook - no need to source
-supabase db push --project-ref $SUPABASE_PROJECT_ID
+## Access control is a runtime property
 
-# Option 3: Use --db-url with connection string (bypasses auth)
-supabase db execute --db-url "postgresql://postgres:PASSWORD@db.XXX.supabase.co:5432/postgres" --sql "..."
-```
+RLS declarations are only a structural start. Verify grants, role identities and
+policy behavior against populated fixtures. An empty anonymous response can
+mean no rows or the wrong target, so it is insufficient by itself.
 
-**Project .env.local should have:**
-```env
-SUPABASE_ACCESS_TOKEN=sbp_xxx
-SUPABASE_PROJECT_ID=xxx
-SUPABASE_DB_PASSWORD=xxx
-```
-
-## Direct psql (Most Reliable)
-
-**Use Pooler URL (IPv4 compatible), not direct connection:**
-```bash
-# Pooler - IPv4 compatible (use this)
-psql "postgresql://postgres.REF:PASS@aws-0-REGION.pooler.supabase.com:6543/postgres" -c "SELECT 1"
-```
-
-Get pooler URL: Dashboard > Connect > Connection String > Session Pooler
-
----
-
-## Postgres Performance
-
-### Missing Indexes (Critical)
-```sql
--- BAD: Full table scan
-SELECT * FROM orders WHERE customer_id = 123;
-
--- GOOD: Add index
-CREATE INDEX idx_orders_customer_id ON orders(customer_id);
-```
-
-### N+1 Queries (Critical)
-```sql
--- BAD: N+1 queries
-SELECT * FROM orders WHERE id = 1;
-SELECT * FROM customers WHERE id = (order.customer_id); -- repeated
-
--- GOOD: Single join
-SELECT o.*, c.*
-FROM orders o
-JOIN customers c ON o.customer_id = c.id
-WHERE o.id = 1;
-```
-
-### RLS Performance (Critical)
-```sql
--- BAD: Function call in RLS (slow)
-CREATE POLICY "users" ON profiles
-  USING (user_id = get_current_user_id());
-
--- GOOD: Use auth.uid() directly
-CREATE POLICY "users" ON profiles
-  USING (user_id = auth.uid());
-```
-
-### Connection Pooling
-```
-Supabase default: Transaction mode (pgbouncer)
-- Use for serverless/edge functions
-- Prepared statements require session mode
-- Set pool size based on: max_connections / num_instances
-```
-
-### Foreign Key Indexes
-```sql
--- Always index foreign keys!
-ALTER TABLE orders ADD CONSTRAINT fk_customer
-  FOREIGN KEY (customer_id) REFERENCES customers(id);
-
-CREATE INDEX idx_orders_customer_id ON orders(customer_id);
-```
-
-### Priority Reference
-
-| Priority | Category | Impact |
-|----------|----------|--------|
-| 1 | Query Performance | High - Missing indexes, composite indexes |
-| 2 | Connection Management | High - Pooling, limits, idle timeout |
-| 3 | Security & RLS | High - RLS basics, RLS performance |
-| 4 | Schema Design | High - Data types, PKs, FK indexes, partitioning |
-| 5 | Concurrency & Locking | Medium-High - Short transactions, deadlock prevention |
-| 6 | Data Access Patterns | Medium - N+1, pagination, batch inserts, upsert |
-
-### Detailed References
-
-| File | When to Load |
-|------|--------------|
-| `${CLAUDE_SKILL_DIR}/references/query-missing-indexes.md` | Query optimization |
-| `${CLAUDE_SKILL_DIR}/references/conn-pooling.md` | Connection issues |
-| `${CLAUDE_SKILL_DIR}/references/security-rls-performance.md` | Slow RLS policies |
-| `${CLAUDE_SKILL_DIR}/references/security-rls-basics.md` | Setting up RLS |
-| `${CLAUDE_SKILL_DIR}/references/data-n-plus-one.md` | Multiple query issues |
-| `${CLAUDE_SKILL_DIR}/references/monitor-explain-analyze.md` | Query debugging |
-
----
-
-## Schema & RLS Patterns
-
-### Standard Table Template
+For a private per-user table, a starting example is:
 
 ```sql
-CREATE TABLE IF NOT EXISTS public.[table_name] (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+CREATE TABLE public.notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  body text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
 );
-
--- Always enable RLS
-ALTER TABLE public.[table_name] ENABLE ROW LEVEL SECURITY;
-
--- User owns row
-CREATE POLICY "Users access own data"
-  ON public.[table_name] FOR ALL
-  USING (auth.uid() = user_id);
+ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY notes_owner ON public.notes
+  FOR ALL TO authenticated
+  USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id);
 ```
 
-### Profiles Table (Standard)
+Grant only the operations the application needs. Test the owning user, a second
+user and anonymous access for those operations; verify denied attempts leave
+data unchanged. Also test intended privileged/service behavior. Keep service
+credentials server-side. The example does not establish a finished schema,
+authorization model or tested migration.
 
-```sql
-CREATE TABLE public.profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT,
-  full_name TEXT,
-  avatar_url TEXT,
-  role TEXT DEFAULT 'user',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+A profile creation trigger needs its own least-privilege review and signup
+failure tests. Do not copy a trigger that creates a new table without applying
+and testing that table's access rules. Choose FK deletion behavior from the data
+lifecycle; `ON DELETE CASCADE` is not a universal default.
 
--- Auto-create on signup
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  INSERT INTO public.profiles (id, email)
-  VALUES (NEW.id, NEW.email);
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+See [RLS guidance](https://supabase.com/docs/guides/database/postgres/row-level-security)
+for current policy semantics and query-planning considerations.
 
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-```
+## Performance follows measurements
 
-### CLI Workflow
+Measure the actual query plan and representative data before adding indexes,
+rewriting policies or changing connection limits. A sequential scan can be
+appropriate for a small table. Check indexes, N+1 round trips, pool saturation
+and row-dependent policy work; compare before/after latency and plans.
 
-```bash
-# View schema
-npx supabase db dump --schema public | head -200
+Load the relevant shipped reference for a concrete question:
 
-# Create migration
-npx supabase migration new create_[table_name]
+- [Query indexes](references/query-missing-indexes.md)
+- [Connection pooling](references/conn-pooling.md)
+- [RLS performance](references/security-rls-performance.md)
+- [RLS basics](references/security-rls-basics.md)
+- [N+1 queries](references/data-n-plus-one.md)
+- [EXPLAIN ANALYZE](references/monitor-explain-analyze.md)
 
-# Apply migration
-npx supabase db push
-```
+Illustrative counts or speedups in references are hypotheses for this project,
+not measured results. `EXPLAIN ANALYZE` executes the statement; use an appropriate
+fixture/transaction for writes and account for external side effects.
 
-### RLS Runtime Verification
+## Recovery and completion
 
-After applying migrations, verify RLS actually works via REST API:
-```bash
-# Test as anonymous (should fail on protected tables)
-curl -s 'https://REF.supabase.co/rest/v1/TABLE?select=*&limit=1' \
-  -H 'apikey: ANON_KEY' \
-  -H 'Authorization: Bearer ANON_KEY' | head -5
+For additive changes, retain compatible readers/writers until the migration is
+verified. For destructive changes, prove a restore or forward-repair path and
+preserve the data it requires. A commented inverse DROP statement is not a
+tested rollback.
 
-# Should return empty array or 401, NOT actual data
-# If data returns, RLS policy is too permissive
-```
-
-### Migration Rollback Pattern
-
-For every migration that changes schema, prepare a rollback:
-```sql
--- Migration: add_column.sql
-ALTER TABLE public.items ADD COLUMN status TEXT DEFAULT 'active';
-
--- Rollback (keep as comment or separate file):
--- ALTER TABLE public.items DROP COLUMN status;
-```
-
-For destructive changes, add columns as nullable with defaults first, migrate data, then drop old columns in a separate migration.
-
-### Safety Rules
-
-**Do:**
-- Enable RLS on every table
-- Use migrations for schema changes
-- Include ON DELETE CASCADE for FKs
-- Add created_at/updated_at columns
-- Add new columns as nullable with defaults (never NOT NULL without default on existing tables)
-- Verify RLS policy logic (not just enabled — check USING clauses are correct)
-- Use service client only in server-side code, never expose to client
-
-**Avoid:**
-- Disable RLS in production
-- Hardcode secrets in migrations
-- Delete tables without confirmation
-- `INSERT` policies with `WITH CHECK (true)` on sensitive tables
-- `USING (true)` on tables containing PII
-
-### Detailed Rules
-
-| Rule | When to Load |
-|------|--------------|
-| `${CLAUDE_SKILL_DIR}/rules/rls-patterns.md` | RLS policy examples |
-| `${CLAUDE_SKILL_DIR}/rules/security-patterns.md` | Security hardening |
-| `${CLAUDE_SKILL_DIR}/rules/multi-account.md` | Multi-account CLI setup |
-
-Source: [supabase/agent-skills](https://github.com/supabase/agent-skills)
+Report the candidate/migration IDs, target, executed checks, observed data/access
+outcomes and remaining gaps. Continue other authorized work if credentials or a
+remote action is blocked; keep the database-dependent acceptance incomplete.

@@ -97,7 +97,13 @@ function repo(name, opts) {
 
 function run(args) {
     const r = spawnSync(process.execPath, [SUBJECT, '--root', ROOT].concat(args || []),
-        { encoding: 'utf8' });
+        {
+            encoding: 'utf8',
+            // URL origins below are metadata fixtures, not remote services this
+            // suite owns. Refuse network Git transport while retaining the real
+            // local bare remotes used to verify stale and current trunk caches.
+            env: { ...process.env, GIT_ALLOW_PROTOCOL: 'file', GIT_TERMINAL_PROMPT: '0' },
+        });
     return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
 

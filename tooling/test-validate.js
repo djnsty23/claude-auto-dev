@@ -13,6 +13,36 @@ const VALIDATE = path.join(ROOT, 'tooling', 'validate.js');
 const cases = [];
 const check = (label, ok) => cases.push([label, ok]);
 
+/* The cause goes in the LABEL, not in a detail argument: the reporter at the
+   bottom of this file prints `label` and discards everything else, so a
+   diagnostic passed as a third argument is written and never read — which is the
+   same defect this branch exists to fix, one level down. Pure so the branch is
+   covered by assertions rather than only by whatever a run happens to hit: a
+   report that only appears when something else is already broken is a report
+   nobody has ever seen. */
+const indeterminateLabel = (failedSuites) => {
+    const failed = failedSuites || [];
+    return 'INDETERMINATE, and NOT a finding about hook wiring: the checker exited 2 because '
+        + 'evidence producer(s) failed and their coverage was DISCARDED'
+        + (failed.length ? ' — ' + failed.join('; ') : ' (it named none)')
+        + '. Fix those suites and re-run.';
+};
+
+// Cover that label without needing a failing producer to exist. `[measured
+// 2026-09-11]` the wording matters more than it looks: the previous label,
+// "exits non-zero while any hook is untested", fired on exit 2 and sent a brief
+// to the conclusion that two PRs each wired an undriven hook, when the tool's own
+// --json reported 0 hooks without evidence on both.
+{
+    const named = indeterminateLabel(['test-foo.js exited 1']);
+    check('the INDETERMINATE label refuses the untested-hook reading', /NOT a finding about hook wiring/.test(named));
+    check('  and names the evidence producer that failed', /test-foo\.js exited 1/.test(named));
+    check('  and never claims a hook is untested', !/hook is untested/.test(named));
+    check('  and says what to do next', /Fix those suites and re-run/.test(named));
+    check('an exit 2 that names nothing says so rather than looking empty',
+        /\(it named none\)/.test(indeterminateLabel([])));
+}
+
 const runValidate = (extraEnv) => {
     // The home-path half of check-no-private-names SKIPS on a CI host, because
     // there it is keyed on the build account and cannot see any developer's home
@@ -165,9 +195,28 @@ check('removing the backup clears the failure', after.status === 0);
     check('a hook a suite actually drives is not listed',
         !names.includes('stop-auto-check.js'));
 
-    // Exit code carries the answer, for anyone wiring this into a gate later.
-    check('exits non-zero while any hook is untested',
-        names.length > 0 ? r.status === 1 : r.status === 0);
+    /* Exit code carries the answer, for anyone wiring this into a gate later —
+       but it carries THREE answers, not two, and this assertion used to know only
+       two. 0 is "no untested hook", 1 is "a wired hook has no execution evidence",
+       and 2 is the tool declaring itself INDETERMINATE: an evidence-producing
+       suite failed, so its coverage was discarded and the question was never
+       answered. Folded into the 0-or-1 test, a 2 fails here under the wording
+       "while any hook is untested", which asserts a cause the run did not
+       establish.
+
+       `[measured 2026-09-11]` that cost a real diagnosis. Two PRs each failed
+       three suites from ONE cause, an unclassified hook breaking
+       test-hooks-profile, and the brief written from those logs concluded that
+       each PR wired a hook no suite drives — while the tool's own --json on the
+       same heads reported 26 wired, 26 executed, 0 without evidence. Then the
+       same cascade recurred on a different PR from an unrelated Windows failure.
+       Both times this line was one of the three reds pointing the wrong way. */
+    if (r.status === 2) {
+        check(indeterminateLabel(out?.failedSuites), false);
+    } else {
+        check('exits non-zero while any hook is untested',
+            names.length > 0 ? r.status === 1 : r.status === 0);
+    }
 }
 
 // checkHookSpawnsHidden — a hook spawn that can pop a console window on Windows.

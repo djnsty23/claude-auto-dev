@@ -1,0 +1,53 @@
+{
+  "host": "macOS",
+  "node": "v24.19.0",
+  "source": "https://nodejs.org/api/process.html#a-note-on-process-io",
+  "sourceContract": "Files synchronous on Windows/POSIX; TTY asynchronous Windows/synchronous POSIX; pipes synchronous Windows/asynchronous POSIX. Linux was not executed here.",
+  "results": [
+    {
+      "variant": "immediate-exit",
+      "command": [
+        "node",
+        "-e",
+        "process.stdout.write('x'.repeat(1048576));process.exit(0);"
+      ],
+      "expectedBytes": 1048576,
+      "pipeExit": 0,
+      "pipeBytes": 65536,
+      "fileExit": 0,
+      "fileBytes": 1048576,
+      "pipeExact": false,
+      "fileExact": true
+    },
+    {
+      "variant": "exit-code",
+      "command": [
+        "node",
+        "-e",
+        "process.stdout.write('x'.repeat(1048576));process.exitCode=0;"
+      ],
+      "expectedBytes": 1048576,
+      "pipeExit": 0,
+      "pipeBytes": 1048576,
+      "fileExit": 0,
+      "fileBytes": 1048576,
+      "pipeExact": true,
+      "fileExact": true
+    },
+    {
+      "variant": "write-callback",
+      "command": [
+        "node",
+        "-e",
+        "process.stdout.write('x'.repeat(1048576),()=>process.exit(0));"
+      ],
+      "expectedBytes": 1048576,
+      "pipeExit": 0,
+      "pipeBytes": 1048576,
+      "fileExit": 0,
+      "fileBytes": 1048576,
+      "pipeExact": true,
+      "fileExact": true
+    }
+  ]
+}

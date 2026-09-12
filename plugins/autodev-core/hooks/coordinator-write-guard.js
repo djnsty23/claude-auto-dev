@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// PreToolUse hook on Bash — the coordinator-write ban, as a mechanism.
-// Exit 2 = block, exit 0 = allow.
+// PreToolUse hook on Bash — the coordinator-write ban, as a mechanism, and
+// since 2026-09-08 the `--no-verify` ask (second header, further down).
+// Exit 2 = block, exit 0 = allow; exit 0 with a JSON decision on stdout = ask.
 //
 // WHY THIS EXISTS. `[measured 2026-09-01]` A coordinator session told to run the
 // fleet with no way to start a worker had two doors: ignore the repo, or work it
@@ -22,10 +23,12 @@
 // This is not that, and the difference is the population rather than the
 // cleverness of the regex:
 //
-//   * It is INERT unless a role file exists. In every session without one — the
-//     overwhelming majority, including every user who installs this plugin and
-//     never coordinates anything — it reads one path that is not there and
-//     exits 0 with zero bytes on both streams.
+//   * The BAN is INERT unless a role file exists. In every session without one
+//     — the overwhelming majority, including every user who installs this
+//     plugin and never coordinates anything — it reads one path that is not
+//     there and exits 0 with zero bytes on both streams. (The --no-verify ASK
+//     added 2026-09-08 is always on, and is a question, never a block; its own
+//     header below carries its population and its cost.)
 //   * It does not judge danger. It enforces a structural fact the model cannot
 //     see from inside a single tool call: which repo it is standing in, versus
 //     which repo it is the coordinator OF. That is the same frame as the two
@@ -95,7 +98,11 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         + 'Refuses git commit / push / merge / rebase when a Brain role file names this session\n'
         + 'and the work tree or --git-dir is outside the home repos that role file declares.\n'
         + 'pull and fetch are excluded: a coordinator updating a clone to READ it is the job.\n'
-        + 'Role file: $AUTODEV_BRAIN_ROLE_FILE, else ~/.claude/brain-role.json. Absent = inert.');
+        + 'Role file: $AUTODEV_BRAIN_ROLE_FILE, else ~/.claude/brain-role.json. Absent = inert.\n'
+        + 'Also ASKS (permissionDecision: ask on stdout) before git commit/push/merge/rebase/cherry-pick/am, but only\n'
+        + 'when a bypass flag is present: --no-verify, commit/am -n, or -c core.hooksPath=. In an unattended run\n'
+        + '(AI_AGENT ends _harness, or CLAUDE_CODE_ENTRYPOINT starts sdk-) the same text is a note, not a gate.\n'
+        + 'Either way the justification belongs in the commit or PR body.');
     process.exit(0);
 }
 
@@ -134,12 +141,16 @@ function roleFilePath() {
  */
 const ESCAPED_SPACE = '\u0000';
 
+
 function stripNonCommandText(command) {
     let s = String(command);
 
     // <<EOF / <<-EOF / <<'EOF' / <<"EOF" … up to a line that is the delimiter.
-    s = s.replace(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n[\s\S]*?(?:^[ \t]*\2[ \t]*$|$)/gm,
-        (m) => m.split('\n')[0]);
+    // One copy of the heredoc regex, owned by scripts/hook-bypass.js. This
+    // function runs only when a role file exists, so the require is off the
+    // quiet path.
+    const { HEREDOC_RE } = require(path.join(__dirname, '..', 'scripts', 'hook-bypass.js'));
+    s = s.replace(HEREDOC_RE, (m) => m.split('\n')[0]);
 
     let out = '';
     let quote = null;
@@ -164,6 +175,10 @@ function stripNonCommandText(command) {
                is emulated here: the character survives and anything that could split a
                command becomes a space. `echo "git push"` still reads as one `echo`
                segment, because segmentation looks at a segment's FIRST word. */
+            // A quoted space belongs to this argument, just like an escaped
+            // space. Keep it opaque until path resolution so -C, cd and the
+            // git-dir/work-tree options all receive the complete path.
+            if (c === ' ') { out += ESCAPED_SPACE; continue; }
             out += /[;&|\n()`]/.test(c) ? ' ' : c;
             continue;
         }
@@ -343,6 +358,27 @@ function isInside(root, child) {
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
+// ===========================================================================
+// THE SECOND GUARD IN THIS FILE: `--no-verify` ASKS. Added 2026-09-08.
+//
+// WHY IT LIVES HERE. `[measured 2026-09-08]` on this machine under load 38,
+// interleaved medians of 7 on a no-op `ls -la` payload: a bare
+// `process.exit(0)` subprocess 52.8 ms, pre-tool-filter.js on a Bash payload
+// 58.5 ms, this hook with no role file 52.4 ms. Any new PreToolUse subprocess
+// on Bash pays that floor on EVERY Bash call. A branch in the hook that already
+// runs on Bash pays one regex on the quiet path and 10-50 µs of tokenising
+// when the regex passes. Putting it in pre-tool-filter.js would also widen
+// that hook's matcher to Bash and reverse the 2026-08-17 decision its suite
+// asserts by name; this file is the one that already argued, at the top, why
+// a narrow Bash guard is not that denylist.
+//
+// The recogniser, the reason, and the measurements behind both are in
+// scripts/hook-bypass.js, shared with telemetry.js's PostToolUse rider, which
+// asks for the RECORD after the command ran. An `ask` is a question, never a
+// block, and with self-resolving panels it can be answered by nobody; the
+// rider is what makes the recommended path the defensible one.
+// ===========================================================================
+
 try {
     let data;
     try {
@@ -360,6 +396,50 @@ try {
     const command = (data.tool_input && data.tool_input.command) || '';
     if (!command) process.exit(0);
 
+    const cwd = path.resolve(data.cwd || process.cwd());
+
+    // The ask is decided up front and DELIVERED at every allow below, so a
+    // block (exit 2) still wins when both apply, and a session with no role
+    // file, the common one, still gets asked. Quiet paths stay quiet: with no
+    // bypass in the command, allow() writes nothing.
+    const MAY_BYPASS = /no-verify|hookspath|(?:^|[\s"'=])-[A-Za-z]*n(?=[\s"']|$)/i;   // same as scripts/hook-bypass.js
+    let bypass = null;
+    let bypassReason = null;
+    if (MAY_BYPASS.test(command)) {
+        const lib = require(path.join(__dirname, '..', 'scripts', 'hook-bypass.js'));
+        bypass = lib.findHookBypass(command, cwd);
+        bypassReason = lib.bypassReason;
+    }
+    //
+    // AN ASK NOBODY CAN ANSWER IS A DENIAL, and this repo has legitimate
+    // bypasses, so an unattended session that cannot push is a stall, not a
+    // save. [measured 2026-09-08] a hook under `claude -p` from a clean
+    // environment sees CLAUDE_CODE_ENTRYPOINT=sdk-cli and AI_AGENT ending
+    // _harness; this desktop session sees claude-desktop and _agent. A -p run
+    // nested inside the desktop session INHERITS the entrypoint but the child
+    // still sets its own AI_AGENT suffix, so both are read and either one means
+    // unattended. There the same text goes out as additionalContext with no
+    // permissionDecision: the model is told what it is skipping and where the
+    // record goes, and is not gated on an answer nobody can give. An
+    // interactive terminal session was not measured; if it were ever read as
+    // unattended it would get the note instead of the prompt, which fails soft.
+    const unattended = /_harness$/.test(process.env.AI_AGENT || '')
+        || /^sdk-/.test(process.env.CLAUDE_CODE_ENTRYPOINT || '');
+    const allow = () => {
+        if (bypass) {
+            const reason = bypassReason(bypass);
+            const out = { hookEventName: 'PreToolUse' };
+            if (unattended) {
+                out.additionalContext = '[no-verify] Unattended run, so this is a note rather than a question: ' + reason;
+            } else {
+                out.permissionDecision = 'ask';
+                out.permissionDecisionReason = reason;
+            }
+            process.stdout.write(JSON.stringify({ hookSpecificOutput: out }) + '\n');
+        }
+        process.exit(0);
+    };
+
     // Cheapest discriminator first: no role file, no opinion, zero bytes. This
     // is the branch that runs in every session that is not coordinating, so it
     // must cost one failed stat and nothing else.
@@ -368,7 +448,7 @@ try {
     try {
         roleRaw = fs.readFileSync(rolePath, 'utf8');
     } catch {
-        process.exit(0);
+        allow();
     }
 
     let role;
@@ -380,7 +460,7 @@ try {
         // session holding it believes otherwise.
         process.stderr.write(`coordinator-write-guard: ${rolePath} is present but did not parse `
             + `(${err.message}); this session's git writes are NOT guarded.\n`);
-        process.exit(0);
+        allow();
     }
 
     /* `expandHome` on the CONFIG side, not only the command side.
@@ -410,14 +490,13 @@ try {
     if (!homes.length) {
         process.stderr.write(`coordinator-write-guard: ${rolePath} declares no home_repo/home_repos, `
             + `so every directory would count as foreign; not guarding rather than blocking everything.\n`);
-        process.exit(0);
+        allow();
     }
 
     const claimed = typeof role.session_id === 'string' && role.session_id.length
         ? role.session_id : null;
     const mine = data.session_id || null;
 
-    const cwd = path.resolve(data.cwd || process.cwd());
     const segments = commandSegments(stripNonCommandText(command));
 
     // A role file with no session_id is a machine-wide claim and applies here.
@@ -456,11 +535,30 @@ try {
                first, which coupled one question -- is the claimed session live,
                the only thing this rail turns on -- to a verdict that answers a
                different one: whether any ADDRESS in the record still reaches.
-               Those came apart when `degraded` was added on 2026-09-08, and a
-               record can now be `degraded` (a peer name still reaches) while
-               `session_id` is dead and this rail is armed for nobody. `faults`
-               is empty for `ok` and `absent`, so the find alone is the whole
-               condition. */
+               `faults` is empty for `ok` and `absent`, so the find alone is the
+               whole condition.
+
+               ⚠️ THIS IS DEFENCE, NOT A FIX, and the comment said otherwise
+               until 2026-09-09. It claimed a record "can now be `degraded` while
+               `session_id` is dead and this rail is armed for nobody", which is
+               UNREACHABLE THROUGH THIS CALL SITE and always was. The call below
+               passes `store: null`, so `found.record` is null, so
+               `desktop.resolves` is false and the peer/desktop corroboration
+               anchor cannot form; a dead `session_id` kills the other anchor.
+               `reach.usable` is therefore necessarily empty whenever
+               `dead-session` fires, and the state is `fault` every time.
+               `[measured 2026-09-09]` all 75 role shapes reachable here were
+               enumerated: 30 `fault` with dead-session, 39 `fault` without, 2
+               `degraded`, 4 `ok`, and ZERO where the two conditions differ.
+
+               So the two expressions are equivalent at this call site, which is
+               why no suite can tell them apart and why the case below asserts
+               the equivalence rather than a behaviour change. The reason to
+               keep this form is that the equivalence is a property of an
+               argument passed twenty lines up: pass a store here one day and
+               the old form starts answering the wrong question silently. A
+               guard whose correctness depends on a caller's argument should not
+               also depend on the reader noticing that. */
             const dead = verdict ? verdict.faults.find((f) => f.code === 'dead-session') : null;
             if (dead) {
                 const sub = segments.map((seg) => parseGitSegment(seg, cwd)).find((g) => g && BLOCKED_SUBCOMMANDS.has(g.sub)).sub;
@@ -470,7 +568,7 @@ try {
                     + `record from ~/.claude/sessions/<pid>.json (check: scripts/check-brain-role.js --status).\n`);
             }
         }
-        process.exit(0);
+        allow();
     }
 
     const hits = [];
@@ -490,7 +588,7 @@ try {
         if (!foreign.length) continue;
         hits.push({ ...g, at: foreign[0] });
     }
-    if (!hits.length) process.exit(0);
+    if (!hits.length) allow();
 
     // Would have blocked, but cannot confirm the holder is this session. Say so
     // HERE rather than on every call: a warning that fires constantly gets
@@ -499,7 +597,7 @@ try {
         process.stderr.write(`coordinator-write-guard: ${rolePath} claims session ${claimed}, but this `
             + `hook payload carries no session_id, so the holder could not be confirmed. `
             + `Allowing \`git ${hits[0].sub}\` in ${hits[0].at} UNCHECKED.\n`);
-        process.exit(0);
+        allow();
     }
 
     // Population beside the verdict: a reader can tell a block that examined

@@ -11,6 +11,11 @@ paths:
   - "**/tailwind.config.*"
 ---
 
+Read the project's existing design system first; its deliberate conventions
+outrank these defaults. Locate the actual token definitions and framework version.
+The configuration examples below illustrate one setup, not a required filename
+or proof that a custom style is a defect.
+
 ## Never Do
 - Inline colors: `text-white`, `bg-black`, `text-gray-500`
 - Hardcoded values in components

@@ -113,3 +113,19 @@ A claim written into a subagent's brief is not a claim, it is built work. A
 wrong steer to a person costs a correction; the same steer to an agent costs a
 branch. So mark which parts of a brief are DECIDED and which are PROPOSALS — an
 agent cannot tell them apart from tone, and confident prose reads as decided.
+
+## Keep the active procedure singular
+
+When two skills share a delivery procedure, one owns it and the other loads it.
+Narrow their invocation triggers so the wrapper's role is explicit. Preserve
+valuable incidents behind references labeled historical; dated permission,
+host capability or workaround prose is not present authority.
+
+Before publishing a revision, compare affected callers and templates as well as
+the skill itself. Execute runnable snippets against a failing input and a valid
+control. Check what tool actually exists in the receiving host. A metadata
+declaration or a skill name in a message is not proof the tool or procedure ran.
+
+Separate observed behavior, proposed improvements and unverified boundaries.
+Measure the effect of instruction changes on representative tasks before
+claiming reliability or resource savings; fewer bytes measures text size only.

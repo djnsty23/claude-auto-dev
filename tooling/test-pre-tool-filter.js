@@ -11,11 +11,17 @@
 //
 // SINCE 2026-09-02 A DIFFERENT HOOK DOES MATCH Bash: coordinator-write-guard.js,
 // tested by tooling/test-coordinator-write-guard.js. It is not a denylist —
-// it is inert unless a Brain role file exists, and it refuses exactly two
-// subcommands writing outside that file's declared home repos. The cases below
+// its ban is inert unless a Brain role file exists, and it refuses four
+// subcommands (commit, push, merge, rebase; this line said "exactly two" until
+// 2026-09-08, a year-old count nobody re-read) writing outside that file's
+// declared home repos. Since 2026-09-08 the same file also ASKS, never blocks,
+// before a git command carrying --no-verify or its equivalents; it went there
+// and not here because a branch in the hook already running on Bash costs
+// nothing, while widening THIS hook's matcher to Bash costs a subprocess on
+// every call and reverses the decision the cases below assert. The cases
 // still hold for THIS hook and still mean what they say; noted here so a reader
-// who finds a blocked Bash call does not conclude the 2026-08-17 decision was
-// quietly reversed.
+// who finds a blocked or asked Bash call does not conclude the 2026-08-17
+// decision was quietly reversed.
 
 const { spawnSync } = require('child_process');
 const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');

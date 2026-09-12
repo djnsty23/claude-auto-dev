@@ -1,8 +1,7 @@
 # Measuring record size, per language
 
-Loaded on demand by `rule-record-size`. Every command here is one you can run
-before changing anything, so the before-and-after exists rather than being
-asserted.
+Loaded on demand by `rule-record-size`. Adapt the illustrative type names and select installed toolchain capabilities
+before execution. Preserve full diagnostics and actual process status.
 
 ## Rust
 
@@ -24,10 +23,12 @@ const _: () = assert!(std::mem::size_of::<Record>() <= 24);
 Per-variant sizes, which is what tells you which variant to box:
 
 ```bash
-cargo rustc -- -Zprint-type-sizes 2>&1 | grep -A20 "type: .Record."   # nightly
+cargo +nightly rustc -- -Zprint-type-sizes > type-sizes.log 2>&1
+# After checking the compiler exit status, inspect Record in the saved log.
 ```
 
-Lints worth turning on in `Cargo.toml` or `lib.rs`:
+Example lint policy in `Cargo.toml` (Rust source uses `#![warn(...)]` attributes
+instead of TOML; confirm the installed lint names/defaults):
 
 ```toml
 [lints.clippy]
@@ -36,8 +37,8 @@ box_collection = "warn"
 result_large_err = "warn"
 ```
 
-`large_enum_variant` fires when the biggest variant is more than about three
-times the smallest. `box_collection` catches `Box<Vec<T>>`, which is two
+Inspect the installed Clippy version's `large_enum_variant` threshold; it is
+not a universal biggest/smallest ratio. `box_collection` catches `Box<Vec<T>>`, which is two
 indirections for one container.
 
 ## Go
@@ -49,21 +50,26 @@ fmt.Println(unsafe.Sizeof(entry), unsafe.Alignof(entry))
 Padding from declaration order, which Go never reorders for you:
 
 ```bash
-go vet -fieldalignment ./...
-go install golang.org/x/tools/go/analysis/passes/fieldalignment/cmd/fieldalignment@latest
-fieldalignment -fix ./...     # rewrites declaration order in place
+# Use a project-approved installed version of the separate analyzer.
+fieldalignment ./...
+# Review proposed field order changes and ABI impact before any -fix invocation.
 ```
 
-A slice header is 24 bytes and there is no boxed-slice type, so the equivalent of
-`into_boxed_slice` is allocating at exact capacity:
+On a 64-bit Go target a slice header is typically 24 bytes. To avoid retaining
+an oversized backing array, copy the live elements (a shallow copy):
 
 ```go
-out := make([]Record, 0, len(in))   // not make([]Record, 0)
-out = slices.Clip(out)              // drop spare capacity before retaining
+var out []Record
+if in != nil {
+    out = make([]Record, len(in))
+    copy(out, in)
+}
+// Old storage can be reclaimed only after every retaining alias is gone.
 ```
 
-An `interface{}` field is 16 bytes and hides an allocation for anything that does
-not fit in a word. A `string` header is 16. Neither shows in a payload estimate.
+On that target interface and string headers are typically 16 bytes. Boxing,
+escape analysis, pointed-to payloads and allocator behavior determine additional
+allocations; do not infer total retained memory from header sizes.
 
 ## C and C++
 

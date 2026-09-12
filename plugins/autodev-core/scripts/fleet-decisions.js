@@ -43,6 +43,44 @@ const HOME = process.env.USERPROFILE || process.env.HOME || '';
 const CFG = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
 const LOG = path.join(CFG, 'fleet', 'DECISIONS.jsonl');
 
+// One transaction covers read/check/append. Atomic append alone cannot stop two
+// readers from allocating the same number or approving opposite decisions.
+// Contention is bounded; never steal a lock by age or a guessed dead PID. A
+// killed writer leaves an explicit refusal with its owner and recovery path.
+function lockDecisions() {
+    const lock = LOG + '.lock';
+    const wait = new Int32Array(new SharedArrayBuffer(4));
+    fs.mkdirSync(path.dirname(LOG), { recursive: true });
+    for (let attempt = 0; attempt < 100; attempt++) {
+        let fd;
+        try { fd = fs.openSync(lock, 'wx'); }
+        catch (err) {
+            if (err.code !== 'EEXIST') {
+                console.error(`REFUSING: cannot acquire decision lock ${lock}: ${err.message}`);
+                process.exit(4);
+            }
+            Atomics.wait(wait, 0, 0, 20);
+            continue;
+        }
+        const identity = fs.fstatSync(fd);
+        process.once('exit', () => {
+            try { fs.closeSync(fd); } catch { /* already closed */ }
+            try {
+                const current = fs.statSync(lock);
+                if (current.dev === identity.dev && current.ino === identity.ino) fs.unlinkSync(lock);
+            } catch { /* removed externally; do not touch another path */ }
+        });
+        fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() }) + '\n');
+        return;
+    }
+    let owner = '(unreadable owner)';
+    try { owner = fs.readFileSync(lock, 'utf8').trim().slice(0, 300); } catch { /* name the path anyway */ }
+    console.error(`REFUSING: decision lock remained busy for 2s: ${lock}\n  owner: ${owner}`);
+    console.error('  Retry after the owner exits. If it was interrupted, verify that the recorded');
+    console.error('  process is dead before explicitly removing this lock; age alone is not proof.');
+    process.exit(4);
+}
+
 // A subject is a coarse topic key, not a title. Two sessions will never write the
 // same sentence; they can plausibly write the same topic. Normalised hard so
 // "AI Pricing", "ai-pricing" and "ai pricing" collide on purpose — a key that is
@@ -110,6 +148,7 @@ if (has('--next')) {
         console.error('  An unattributed reservation cannot be released or questioned.');
         process.exit(2);
     }
+    lockDecisions();
     const { entries } = readAll();
     // Highest reserved number for this repo and prefix, whether or not the
     // decision was ever written. A reservation is a claim on the NAME, so a
@@ -194,6 +233,7 @@ if (has('--record')) {
     // The collision check runs BEFORE the write and blocks it. A log that records
     // the contradiction after the fact documents the failure rather than
     // preventing it — which is what the per-repo DECISIONS.md already did.
+    lockDecisions();
     const prior = priorFor(repo, subject).filter((e) => e.author !== author);
     if (prior.length && !has('--force')) {
         console.error(`REFUSING: ${prior.length} other session(s) already decided on ${repo}/${normSubject(subject)}:\n`);

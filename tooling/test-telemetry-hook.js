@@ -155,6 +155,44 @@ check('a non-Bash tool says nothing',
 check('the ordinary happy path prints nothing at all',
   (run({ tool_name: 'Bash', tool_input: {}, tool_response: 'ok' }).stdout || '') === '');
 
+// ---- the --no-verify record rider ----
+// coordinator-write-guard.js ASKS before a bypass; this rider asks for the
+// RECORD after one ran, because with self-resolving panels the ask can be
+// answered by nobody. Same silence discipline as the riders above: this hook
+// prints on every tool call in the session, so every negative here asserts
+// the rider said nothing, and the commit negatives assert on the note's tag
+// because a commit also wakes the queue rider.
+{
+  const note = (command, over = {}) => advise({ tool_name: 'Bash', tool_input: { command },
+    tool_response: 'To github.com:x/y.git\n   abc..def  HEAD -> main', cwd: os.tmpdir(), ...over }).ctx || '';
+  check('a successful `git push --no-verify` gets the record asked for',
+    /\[no-verify\] This call ran `git push --no-verify`/.test(note('git push --no-verify origin HEAD')));
+  check('  naming the git hook it skipped', /skips the pre-push hook/.test(note('git push --no-verify origin HEAD')));
+  check('  and where the record goes', /commit or PR body/.test(note('git push --no-verify origin HEAD')));
+  check('  and the base-branch A/B that decides whether it was right',
+    /reproduces at the base branch/.test(note('git push --no-verify origin HEAD')));
+  check('`git commit -n` is noted too', /\[no-verify\] This call ran `git commit -n`/.test(note('git commit -n -m x')));
+  check('`-c core.hooksPath=` is noted', /\[no-verify\]/.test(note('git -c core.hooksPath=/dev/null push origin HEAD')));
+
+  // Negatives. A plain push must leave this hook exactly as silent as before.
+  check('a plain push says nothing', note('git push origin HEAD') === '');
+  check('a push whose stdout mentions the flag says nothing',
+    note('git push origin HEAD', { tool_response: 'hint: use --no-verify to skip' }) === '');
+  check('a commit MESSAGE carrying the flag is not a bypass',
+    !/\[no-verify\]/.test(note('git commit -m "explain --no-verify"')));
+  check('`git push -n` is a dry run, not a bypass', note('git push -n origin HEAD') === '');
+  check('a FAILED bypass push skipped nothing, so nothing is asked for',
+    note('git push --no-verify origin HEAD', { tool_response: { is_error: true, content: 'rejected' } }) === '');
+  check('a non-Bash tool says nothing',
+    advise({ tool_name: 'Read', tool_input: { file_path: 'x' }, tool_response: 'git push --no-verify' }).ctx == null);
+  check('  and the rider never changes the exit code',
+    advise({ tool_name: 'Bash', tool_input: { command: 'git push --no-verify origin HEAD' }, tool_response: 'ok' }).r.status === 0);
+
+  // MUTATION with different provenance: two literal commands one flag apart.
+  check('MUTATION: removing the flag, and nothing else, removes the note',
+    note('git push --no-verify origin HEAD') !== '' && note('git push origin HEAD') === '');
+}
+
 // ---- the advisory module, driven DIRECTLY ----
 // The hook guards the call with its own `if (failed)` fast-path, which skips a
 // require on the ~98% of calls that succeed. That guard SHADOWS the module's

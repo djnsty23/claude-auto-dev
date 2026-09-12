@@ -204,6 +204,101 @@ try {
     ok('an unresolvable trunk is TRUNK UNREADABLE, never a pass',
         r7.rows.every((r) => r.findings.some((f) => f.kind === 'TRUNK UNREADABLE')));
 
+    // ---- 6b. VERDICT vs UNMEASURED: two classes, never one count -------------
+    // Both classes are present in every assertion here, with DIFFERENT counts,
+    // because a fixture carrying only one of them passes on the broken code: the
+    // old summary had a single `findings.length` filter under the word NOT READY,
+    // and a row of either class satisfied it.
+    {
+        const { VERDICT, UNMEASURED, verdictsOf, unmeasuredOf } = subject;
+        ok('the subject names both classes', VERDICT === 'verdict' && UNMEASURED === 'unmeasured',
+            JSON.stringify([VERDICT, UNMEASURED]));
+
+        // One worktree, a real verdict AND an unexamined axis at the same time:
+        // an unpushed commit (INHABITED) under a trunk that cannot be resolved.
+        write(path.join(work, 'local-only.txt'), 'not pushed\n');
+        git(work, ['add', '.']);
+        git(work, ['commit', '-m', 'local only']);
+        const mixed = subject.inspect(work, { trunk: 'origin/does-not-exist' });
+        const row = mixed.rows[0];
+        ok('a worktree can be NOT READY and unexamined at once',
+            verdictsOf(row).length === 1 && unmeasuredOf(row).length === 1,
+            'verdicts=' + JSON.stringify(verdictsOf(row).map((f) => f.kind))
+            + ' unmeasured=' + JSON.stringify(unmeasuredOf(row).map((f) => f.kind)));
+        ok('  the verdict is the unpushed commit', verdictsOf(row)[0].kind === 'INHABITED');
+        ok('  and the unresolvable trunk is UNMEASURED, not a verdict about the worktree',
+            unmeasuredOf(row)[0].kind === 'TRUNK UNREADABLE');
+        ok('  and the two are not summed', verdictsOf(row).length !== row.findings.length);
+        ok('every finding carries one of the two classes, so none can be classed by default',
+            mixed.rows.every((r) => r.findings.every((f) => f.class === VERDICT || f.class === UNMEASURED)),
+            JSON.stringify(mixed.rows.flatMap((r) => r.findings.map((f) => f.kind + '=' + f.class))));
+
+        // THE REPORTED INCIDENT: a mistyped or unfetched trunk used to make every
+        // worktree read NOT READY. A clean clone has no verdict to find, so the
+        // whole output must be unmeasured — and the exit code must be the
+        // indeterminate 2, not the 1 that blames the worktree.
+        const fresh = path.join(TMP, 'fresh-clone');
+        execFileSync('git', ['clone', '-q', path.join(TMP, 'alpha.git'), fresh],
+            { stdio: 'ignore', windowsHide: true });
+        const typo = subject.inspect(fresh, { trunk: 'origin/mian' });
+        ok('a mistyped trunk yields NO verdict about a clean worktree',
+            typo.rows.every((r) => verdictsOf(r).length === 0),
+            JSON.stringify(typo.rows.flatMap((r) => verdictsOf(r).map((f) => f.kind))));
+        ok('  but is reported rather than skipped',
+            typo.rows.every((r) => unmeasuredOf(r).some((f) => f.kind === 'TRUNK UNREADABLE')));
+        ok('  and exits 2 (indeterminate), never 1 (not ready) and never 0 (a pass)',
+            subject.exitCodeFor(typo) === 2, 'code=' + subject.exitCodeFor(typo));
+        const mixedCode = subject.exitCodeFor(mixed);
+        ok('  while a real verdict beside an unexamined axis still exits 1',
+            mixedCode === 1, 'code=' + mixedCode);
+
+        // ---- the three axes that used to VANISH -----------------------------
+        // Each skipped its check and left no row, so the worktree read clean on an
+        // axis nobody examined. A silent skip is worse than a mislabelled one.
+
+        // (i) an origin expectation given, and no origin to compare against.
+        const noRemote = path.join(TMP, 'no-remote');
+        fs.mkdirSync(noRemote, { recursive: true });
+        execFileSync('git', ['init', '-q', '-b', 'main', noRemote], { stdio: 'ignore', windowsHide: true });
+        git(noRemote, ['config', 'user.email', 't@example.invalid']);
+        git(noRemote, ['config', 'user.name', 'T']);
+        write(path.join(noRemote, 'a.txt'), 'one\n');
+        git(noRemote, ['add', '.']);
+        git(noRemote, ['commit', '-m', 'one']);
+        const noOrigin = subject.inspect(noRemote, { expectOrigin: 'https://example.invalid/x' });
+        ok('an unreadable origin under an expectation is ORIGIN UNREADABLE, not silence',
+            noOrigin.rows.every((r) => unmeasuredOf(r).some((f) => f.kind === 'ORIGIN UNREADABLE')),
+            JSON.stringify(noOrigin.rows.flatMap((r) => r.findings.map((f) => f.kind))));
+        ok('  and it is never WRONG REPO, which would be a verdict it cannot support',
+            !noOrigin.rows.some((r) => r.findings.some((f) => f.kind === 'WRONG REPO')));
+        // The control is about THIS axis only. With no remote at all the sole
+        // commit is on no origin ref, so INHABITED fires and is correct — this
+        // assertion said "no findings at all" and failed on that, which is the
+        // control doing its job on the assertion rather than on the subject.
+        const noRemoteNoExpect = subject.inspect(noRemote, {});
+        ok('  control: with no expectation, the ORIGIN axis is not reported at all',
+            !noRemoteNoExpect.rows.some((r) => r.findings.some(
+                (f) => f.kind === 'ORIGIN UNREADABLE' || f.kind === 'WRONG REPO')),
+            JSON.stringify(noRemoteNoExpect.rows.flatMap((r) => r.findings.map((f) => f.kind))));
+
+        // (ii)+(iii) an unborn HEAD: ancestry and the unpushed count are both
+        // unanswerable while the trunk resolves perfectly well.
+        const orphan = path.join(TMP, 'orphan');
+        execFileSync('git', ['clone', '-q', path.join(TMP, 'alpha.git'), orphan],
+            { stdio: 'ignore', windowsHide: true });
+        git(orphan, ['checkout', '-q', '--orphan', 'unborn']);
+        const unborn = subject.inspect(orphan, { trunk: 'origin/main' });
+        const kinds = unborn.rows.flatMap((r) => unmeasuredOf(r).map((f) => f.kind));
+        ok('an unborn HEAD reports HEAD UNREADABLE rather than skipping the base check',
+            kinds.includes('HEAD UNREADABLE'), JSON.stringify(kinds));
+        ok('  and UNPUSHED COUNT UNAVAILABLE rather than reading as uninhabited',
+            kinds.includes('UNPUSHED COUNT UNAVAILABLE'), JSON.stringify(kinds));
+        ok('  and claims no verdict from either', unborn.rows.every((r) => verdictsOf(r).length === 0),
+            JSON.stringify(unborn.rows.flatMap((r) => verdictsOf(r).map((f) => f.kind))));
+        ok('  so the run is indeterminate, not a clean bill',
+            subject.exitCodeFor(unborn) === 2, 'code=' + subject.exitCodeFor(unborn));
+    }
+
     // ---- 7. the CLI exits the way its header documents ------------------------
     // A clean checkout for the exit-0 case: ONE clone of the bare origin we
     // already have, rather than a second origin plus clone plus commit plus push.
@@ -236,6 +331,33 @@ try {
     ok('  and says so when no trunk was given', /NO TRUNK GIVEN/.test(cliClean.out));
     ok('  and says so when no origin expectation was given',
         /NO ORIGIN EXPECTATION GIVEN/.test(cliClean.out));
+
+    // ---- 7b. THE SUMMARY LINE ITSELF, which is the deliverable ---------------
+    // A mutation that folded both counts back into one survived every assertion
+    // above: inspect() was still classifying correctly and the exit codes were
+    // still right, and nothing read the sentence a human acts on. The wording IS
+    // the fix, so it is asserted here, with both classes present in one run.
+    {
+        // `work` carries an unpushed commit from block 6b, so this run has a real
+        // verdict AND an axis it could not measure.
+        const both = run([work, '--trunk', 'origin/does-not-exist']);
+        ok('the summary counts NOT READY worktrees and unmeasured checks separately',
+            /worktree\(s\) NOT READY · \d+ check\(s\) on \d+ worktree\(s\) could not be run/.test(both.out),
+            JSON.stringify(both.out.split('\n')[0]));
+        ok('  and says the unmeasured ones are not a finding about the worktrees',
+            /NOT a finding about the worktree\(s\)/.test(both.out), JSON.stringify(both.out.split('\n')[0]));
+        ok('  and never describes an unmeasured axis as not ready',
+            !/\[not ready\]  TRUNK UNREADABLE/.test(both.out) && /\[unmeasured\] TRUNK UNREADABLE/.test(both.out),
+            JSON.stringify((both.out.match(/.*TRUNK UNREADABLE.*/) || [''])[0].slice(0, 90)));
+        ok('  and marks the real verdict as such on its own line',
+            /\[not ready\]  INHABITED/.test(both.out));
+
+        // The incident, through the CLI: a clean clone under a mistyped trunk.
+        const typoCli = run([path.join(TMP, 'fresh-clone'), '--trunk', 'origin/mian']);
+        ok('a mistyped trunk prints ZERO not-ready worktrees, not all of them',
+            /: 0 of \d+ worktree\(s\) NOT READY/.test(typoCli.out), JSON.stringify(typoCli.out.split('\n')[0]));
+        ok('  and exits 2 from the CLI too', typoCli.code === 2, 'code=' + typoCli.code);
+    }
 
     // ---- 8. the CLI contract an adversarial review found broken --------------
     // Every assertion here corresponds to a finding: each of these invocations

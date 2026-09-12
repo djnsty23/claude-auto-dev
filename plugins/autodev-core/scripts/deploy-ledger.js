@@ -13,13 +13,15 @@
 //
 // Three commands, and they are deliberately separate:
 //
-//   --since <ref>   list the commits and touched surfaces since a ref
-//   --write         create or refresh the ledger file, preserving ticks
-//   --verify        exit 1 if any surface has an unchecked box
+//   --since <ref>   set the previous deployed commit
+//   --candidate <ref>  freeze the checked candidate (defaults to current HEAD)
+//   --write         refresh the ledger, preserving checks only for the same base and candidate
+//   --verify        exit 1 for missing, invalid, unchecked or stale surface records
 //
 // It derives the surface list from the diff. It does NOT decide whether a check
 // passed: a human or a browser-driving agent fills the boxes, and --verify only
-// asks whether they are filled. A checker that both generates and satisfies its
+// checks their membership, shape and commit window, not whether they are true.
+// A checker that both generates and satisfies its
 // own checklist proves nothing, which is the failure mode this repo has spent a
 // lot of rounds on.
 //
@@ -43,7 +45,8 @@ const LEDGER = path.join(ROOT, 'DEPLOY-LEDGER.md');
 
 const git = (...args) => {
     try {
-        return execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', maxBuffer: 1 << 26 }).trim();
+        const output = execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', maxBuffer: 1 << 26 });
+        return args.includes('-z') ? output : output.trim();
     } catch {
         return null;
     }
@@ -74,6 +77,7 @@ function resolveSince(explicit) {
 // ------------------------------------------------------------- the surfaces
 
 const UI_EXT = /\.(tsx|jsx|vue|svelte|css|scss|sass|less|html|astro)$/i;
+const RUNTIME_EXT = /\.(?:[cm]?[jt]s|json)$/i;
 // A change here can move any screen, so narrowing it would be a false
 // all-clear. Named WIDE in the output for exactly that reason.
 const WIDE = /(^|\/)(tailwind\.config|globals?\.css|theme|tokens?|layout|_app|_document|providers?)\b/i;
@@ -93,11 +97,13 @@ function routeFor(file) {
     return r === '/' ? '/' : r.replace(/\/$/, '');
 }
 
-function surfaces(sinceRef) {
-    const raw = git('diff', '--name-only', `${sinceRef}..HEAD`);
+function surfaces(sinceRef, headRef) {
+    // NUL separation preserves names containing newlines so they can be reported
+    // as unsupported instead of disappearing behind Git's quoted-path display.
+    const raw = git('diff', '--name-only', '-z', `${sinceRef}..${headRef}`);
     if (raw === null) return null;
-    const files = raw.split('\n').filter(Boolean);
-    const ui = files.filter((f) => UI_EXT.test(f));
+    const files = raw.split('\0').filter(Boolean);
+    const ui = files.filter((f) => UI_EXT.test(f) || (RUNTIME_EXT.test(f) && WIDE.test(f)));
     const wide = ui.filter((f) => WIDE.test(f));
     const routed = new Map();
     for (const f of ui) {
@@ -115,22 +121,70 @@ function surfaces(sinceRef) {
 const ROW = (label, detail) =>
     `| ${label} | ${detail} | [ ] | [ ] | [ ] | [ ] | [ ] |`;
 
-function render(sinceRef, how, s, commits, previous) {
-    // Preserve ticks a human already made, keyed on the row label. A regenerate
-    // that silently unchecks everything trains people to regenerate less often,
-    // and a stale ledger is worse than a noisy one.
-    const kept = new Map();
-    for (const line of (previous || '').split('\n')) {
-        const m = line.match(/^\| (`[^`]+`|WIDE[^|]*|[^|]+?) \|[^|]*\|(.*)$/);
-        if (m && /\[[xX]\]/.test(m[2])) kept.set(m[1].trim(), line);
+function expectedRows(s) {
+    const rows = [];
+    if (s.wide.length) rows.push(['WIDE (every surface)', s.wide.map((f) => `\`${f}\``).join('<br>')]);
+    for (const [route, files] of [...s.routed].sort((a, b) => a[0].localeCompare(b[0]))) {
+        rows.push(['`' + route + '`', files.map((f) => `\`${f}\``).join('<br>')]);
     }
-    const row = (label, detail) => kept.get(label) || ROW(label, detail);
+    for (const file of s.unrouted) rows.push(['`' + file + '`', 'no route derived — check wherever it renders']);
+    return rows;
+}
+
+function ledgerRows(text) {
+    text = text.replace(/\r\n/g, '\n');
+    const start = text.indexOf('## Surfaces to check before this deploy is verified\n');
+    if (start < 0) return [];
+    const end = text.indexOf('\n## ', start + 1);
+    return text.slice(start, end < 0 ? undefined : end).split('\n')
+        .filter((line) => line.startsWith('|'))
+        .map((line) => line.split('|').slice(1, -1).map((cell) => cell.trim()));
+}
+
+function sameWindow(text, window) {
+    const records = [...text.matchAll(/^<!-- deploy-ledger-window: (.+) -->\r?$/gm)];
+    if (records.length !== 1) return false;
+    try {
+        const previous = JSON.parse(records[0][1]);
+        return previous.version === 1 && previous.base === window.base && previous.candidate === window.candidate;
+    } catch {
+        return false;
+    }
+}
+
+function rowProblems(text, s) {
+    const rows = ledgerRows(text);
+    const problems = [];
+    for (const [label, detail] of expectedRows(s)) {
+        const found = rows.filter((cells) => cells[0] === label);
+        if (!found.length) problems.push(`MISSING    ${label}`);
+        else if (found.length !== 1) problems.push(`DUPLICATE  ${label}`);
+        else if (found[0].length !== 7 || found[0][1] !== detail
+            || !found[0].slice(2).every((cell) => /^\[[xX]\]$/.test(cell))) {
+            problems.push(`INVALID    ${label}: expected changed files and five checked cells`);
+        }
+    }
+    return problems;
+}
+
+function render(sinceRef, how, s, commits, previous, window) {
+    // Names alone are not evidence identity. Preserve partial checks and metrics
+    // only while both resolved commits and the complete row shape stay the same.
+    if (!previous || !sameWindow(previous, window)) previous = '';
+    const kept = ledgerRows(previous);
+    const row = (label, detail) => {
+        const found = kept.filter((cells) => cells[0] === label);
+        if (found.length !== 1 || found[0].length !== 7 || found[0][1] !== detail
+            || !found[0].slice(2).every((cell) => /^\[[ xX]\]$/.test(cell))) return ROW(label, detail);
+        return `| ${label} | ${detail} | ${found[0].slice(2).join(' | ')} |`;
+    };
 
     const lines = [];
     lines.push('# Deploy ledger');
     lines.push('');
-    lines.push(`Generated from \`${sinceRef}..HEAD\` (${how}). Regenerate with`);
-    lines.push('`node plugins/autodev-core/scripts/deploy-ledger.js --write`; existing ticks are kept.');
+    lines.push(`<!-- deploy-ledger-window: ${JSON.stringify({ version: 1, ...window })} -->`);
+    lines.push(`Generated from \`${window.base}..${window.candidate}\` (${how}). Regenerate with`);
+    lines.push('`deploy-ledger.js --write --since <previous-deployed-commit> --candidate <checked-commit>`; checks are kept only for the same resolved base and candidate.');
     lines.push('');
     lines.push(`**${commits.length} commit(s)** touching **${s.files.length} file(s)**, of which `
         + `**${s.ui.length}** can change what a user sees.`);
@@ -142,15 +196,7 @@ function render(sinceRef, how, s, commits, previous) {
     lines.push('');
     lines.push('| surface | changed files | desktop | 390 | 414 | console clean | network clean |');
     lines.push('|---|---|---|---|---|---|---|');
-    if (s.wide.length) {
-        lines.push(row('WIDE (every surface)', s.wide.map((f) => `\`${f}\``).join('<br>')));
-    }
-    for (const [r, files] of [...s.routed].sort((a, b) => a[0].localeCompare(b[0]))) {
-        lines.push(row('`' + r + '`', files.map((f) => `\`${f}\``).join('<br>')));
-    }
-    for (const f of s.unrouted) {
-        lines.push(row('`' + f + '`', 'no route derived — check wherever it renders'));
-    }
+    for (const [label, detail] of expectedRows(s)) lines.push(row(label, detail));
     if (!s.ui.length) lines.push('| _none_ | no user-facing file changed in this window | n/a | n/a | n/a | n/a | n/a |');
     lines.push('');
     lines.push('## Metrics');
@@ -159,7 +205,8 @@ function render(sinceRef, how, s, commits, previous) {
     lines.push('before value and an after value, or write WAIVED and why. An empty section');
     lines.push('fails `--verify`.');
     lines.push('');
-    lines.push('- [ ] metrics recorded or waived:');
+    const metrics = previous.split('\n').find((line) => /^- \[[xX]\] metrics recorded or waived:[^\S\n]*\S/.test(line));
+    lines.push(metrics || '- [ ] metrics recorded or waived:');
     lines.push('');
     lines.push('## Commits in this window');
     lines.push('');
@@ -170,10 +217,11 @@ function render(sinceRef, how, s, commits, previous) {
 
 // ------------------------------------------------------------- the commands
 
-function population(s, sinceRef, how) {
-    console.log(`[population] ${sinceRef}..HEAD (${how}): ${s.files.length} file(s) changed, `
+function population(s, window, how, explicitCandidate, checkoutHead) {
+    console.log(`[population] ${window.base}..${window.candidate} (${how}): ${s.files.length} file(s) changed, `
         + `${s.ui.length} user-facing, ${s.routed.size} route(s) derived, `
         + `${s.wide.length} wide-effect, ${s.unrouted.length} without a route`);
+    console.log(`[window] candidate ${window.candidate} (${explicitCandidate ? 'explicit --candidate' : 'default HEAD'}); checkout HEAD ${checkoutHead}. Checks apply only to candidate ${window.candidate}.`);
     console.log('[scope] routes are derived by convention (app/, pages/, src/routes/); a project '
         + 'routing otherwise lists files without a route. A wide-effect file marks EVERY surface '
         + 'affected rather than guessing narrower. Metrics are never derived.');
@@ -183,6 +231,15 @@ function main() {
     const argv = process.argv.slice(2);
     const sinceIdx = argv.indexOf('--since');
     const explicit = sinceIdx >= 0 ? argv[sinceIdx + 1] : null;
+
+    const candidateIdx = argv.indexOf('--candidate');
+    const candidateRef = candidateIdx >= 0 ? argv[candidateIdx + 1] : 'HEAD';
+    if (candidateIdx >= 0 && (!candidateRef || candidateRef.startsWith('-')
+        || argv.filter((arg) => arg === '--candidate').length !== 1)) {
+        console.error('COULD NOT READ --candidate: provide exactly one commit/ref value.');
+        process.exitCode = 2;
+        return;
+    }
 
     if (argv.includes('--selftest')) return selftest();
 
@@ -199,12 +256,31 @@ function main() {
         process.exit(2);
     }
 
-    const s = surfaces(ref);
+    const checkoutHead = git('rev-parse', '--verify', 'HEAD^{commit}');
+    const window = {
+        base: git('rev-parse', '--verify', ref + '^{commit}'),
+        candidate: candidateIdx >= 0 ? git('rev-parse', '--verify', candidateRef + '^{commit}') : checkoutHead,
+    };
+    if (!window.base || !window.candidate) {
+        console.error('COULD NOT RESOLVE the base or candidate commit. No ledger verification is possible.');
+        process.exitCode = 2;
+        return;
+    }
+    const s = surfaces(window.base, window.candidate);
     if (!s) {
-        console.error(`COULD NOT DIFF ${ref}..HEAD. The probe is blind, not the tree clean.`);
+        console.error(`COULD NOT DIFF ${window.base}..${window.candidate}. The probe is blind, not the tree clean.`);
         process.exit(2);
     }
-    const commits = (git('log', '--oneline', `${ref}..HEAD`) || '').split('\n').filter(Boolean);
+    // Markdown delimiters/control characters cannot be represented by this
+    // ledger's simple table format. Refuse rather than emit a row verify can
+    // silently misparse. This does not prohibit those filenames in a project.
+    const unsupported = s.ui.filter((file) => /[|`\r\n\t]/.test(file));
+    if (unsupported.length) {
+        console.error(`COULD NOT CHECK unsupported ledger path(s): ${unsupported.map((file) => JSON.stringify(file)).join(', ')}`);
+        process.exitCode = 2;
+        return;
+    }
+    const commits = (git('log', '--oneline', `${window.base}..${window.candidate}`) || '').split('\n').filter(Boolean);
 
     if (argv.includes('--verify')) {
         if (!fs.existsSync(LEDGER)) {
@@ -213,25 +289,29 @@ function main() {
         }
         const text = fs.readFileSync(LEDGER, 'utf8');
         const unchecked = text.split('\n').filter((l) => /^\|/.test(l) && /\[ \]/.test(l));
-        const metrics = /- \[[xX]\] metrics recorded or waived:\s*\S/.test(text);
-        population(s, ref, how);
+        const metrics = /^- \[[xX]\] metrics recorded or waived:[^\S\n]*\S/m.test(text);
+        const problems = rowProblems(text, s);
+        if (!sameWindow(text, window)) problems.unshift('STALE      base/candidate provenance is missing or differs; re-run --write and record fresh checks');
+        population(s, window, how, candidateIdx >= 0, checkoutHead);
         console.log(`[verify] ${unchecked.length} row(s) with an unchecked box; `
-            + `metrics ${metrics ? 'recorded' : 'NOT recorded'}`);
-        if (unchecked.length || !metrics) {
+            + `metrics ${metrics ? 'recorded' : 'NOT recorded'}; ${problems.length} missing, invalid or stale record(s)`);
+        if (unchecked.length || !metrics || problems.length) {
             for (const l of unchecked) console.log('  UNCHECKED  ' + l.split('|')[1].trim());
             if (!metrics) console.log('  UNCHECKED  metrics');
-            process.exit(1);
+            for (const problem of problems) console.log('  ' + problem);
+            process.exitCode = 1;
+            return;
         }
         console.log('[verify] every surface in this window has been checked');
         return;
     }
 
-    population(s, ref, how);
+    population(s, window, how, candidateIdx >= 0, checkoutHead);
     if (argv.includes('--write')) {
         const previous = fs.existsSync(LEDGER) ? fs.readFileSync(LEDGER, 'utf8') : null;
-        fs.writeFileSync(LEDGER, render(ref, how, s, commits, previous), 'utf8');
+        fs.writeFileSync(LEDGER, render(ref, how, s, commits, previous, window), 'utf8');
         console.log(`[write] ${path.relative(ROOT, LEDGER)} updated`
-            + (previous ? ' (existing ticks preserved)' : ''));
+            + (previous ? sameWindow(previous, window) ? ' (same-window checks preserved)' : ' (changed or missing commit window; checks reset)' : ''));
         return;
     }
     for (const [r, files] of s.routed) console.log(`  ${r}  <- ${files.join(', ')}`);

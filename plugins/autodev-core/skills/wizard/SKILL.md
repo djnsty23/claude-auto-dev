@@ -27,12 +27,14 @@ You are blocked on a human when any of these is true:
 
 - The error names a **choice** ("none has been selected", "multiple accounts").
 - It names a **permission or grant** you cannot issue yourself.
-- It asks for a **credential**. You must never enter one anyway — see below.
+- It needs a **credential unavailable through the authorized configured secret
+  mechanism**. Reuse already configured access without exposing the value.
 - It requires a **physical or out-of-band act**: plug in a device, click a link
   in an email, approve a push notification, flip a setting in a console you have
   no API for.
-- The identical call has failed twice with byte-identical output. Two is the
-  signal; there is no information in a third.
+- A verified prerequisite requires the user rather than an available tool.
+  Two identical errors are a signal to diagnose, not proof of a human blocker:
+  malformed arguments or a code defect may still be yours to fix.
 
 Distinguish it from a hang or a flake. A frozen renderer, a timeout, a 502 — those
 are worth one retry. A decision is not.
@@ -52,7 +54,8 @@ transcript and does not know what you were doing:
    A link the user can click beats a description of where to find it.
 3. **Say what done looks like.** "The dropdown shows exactly one profile" is
    checkable. "Configure the browser" is not.
-4. **Say how long it takes.** A user deciding whether to do it now needs that.
+4. **Give a measured or clearly approximate duration when known.** Do not invent
+   a precise time merely to complete the template.
 5. **Flag anything irreversible** before the step, not after.
 
 ## Then say what happens next
@@ -95,10 +98,25 @@ are worth taking whole:
   destination. The value never enters the transcript, so this is strictly better
   than asking for it in chat, not merely permitted.
 
+Before generating the script, resolve the verified project, config and key name
+into `DOPPLER_PROJECT`, `DOPPLER_CONFIG` and `DOPPLER_KEY`. These are identifiers,
+not secret values; do not default to a production configuration. The following
+Bash fragment is for the throwaway script the user runs in their terminal:
+
 ```bash
-read -rsp "Paste the key from the page just opened: " VALUE; echo
-doppler secrets set MY_KEY="$VALUE" --project app-x --config prd >/dev/null
-echo "stored as MY_KEY; not printed here"
+: "${DOPPLER_PROJECT:?verified project required}"
+: "${DOPPLER_CONFIG:?verified config required}"
+: "${DOPPLER_KEY:?key name required}"
+read -rsp "Paste the key from the page just opened: " WIZARD_SECRET || exit 1
+printf '\n'
+if doppler secrets set "$DOPPLER_KEY=$WIZARD_SECRET" --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" >/dev/null; then
+  unset WIZARD_SECRET
+  printf 'Stored the selected key; value not printed.\n'
+else
+  unset WIZARD_SECRET
+  printf 'Secret was not stored; resolve the reported error.\n' >&2
+  exit 1
+fi
 ```
 
 Write it to the scratchpad, tell the user the one command to run, and delete it

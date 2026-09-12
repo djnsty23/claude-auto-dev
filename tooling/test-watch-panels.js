@@ -187,6 +187,8 @@ const BEACON_LINE = 'PANEL Beacon Lighthouse :: Ship it? [Yes] :: local_beacon';
  * @param {string[]} o.args      argv for the watcher
  * @param {object} o.env         extra environment
  */
+const prematureKills = [];
+
 async function run(o) {
     fs.writeFileSync(PAYLOAD, JSON.stringify(o.payload, null, 2));
     try { fs.unlinkSync(ARGVLOG); } catch { /* first run */ }
@@ -205,22 +207,64 @@ async function run(o) {
         },
     });
 
-    let out = '', err = '', closed = false;
+    let out = '', err = '', closed = false, exitCode = null, signal = null;
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
-    const closePromise = new Promise((res) => child.on('close', () => { closed = true; res(); }));
+    const closePromise = new Promise((res) => child.on('close', (code, sig) => { closed = true; exitCode = code; signal = sig; res(); }));
 
     // Wait for proof the scan ran, not for the absence of noise.
     const deadline = Date.now() + 20000;
     while (!closed && !fs.existsSync(ARGVLOG) && Date.now() < deadline) await sleep(20);
     const scanned = fs.existsSync(ARGVLOG);
-    if (!closed) { await sleep(250); child.kill(); }
+
+    /* A `--once` RUN EXITS ON ITS OWN, SO WAITING FOR THE ARGV LOG IS NOT WAITING
+       FOR THE RUN. The argv log is written by the planted stub when the watcher
+       SPAWNS it, which happens before the watcher has classified anything, written
+       a panel line, or set its own exit code. The old code then slept a flat 250ms
+       and killed the child — a guess about how long the rest of a one-shot run
+       takes, on a machine nobody controls.
+
+       `[measured 2026-09-12]` that guess lost twice on windows-latest, on two
+       different heads of the same PR, each time with the sibling run on the SAME
+       commit passing:
+         FAIL  string one-shot exits unavailable  (got null, expected 2)
+         FAIL  invalid row null does not consume the preceding valid panel
+               (got "", expected "PANEL Beacon Lighthouse :: Ship it? [Yes] :: ...")
+       `exitCode: null` is the tell and it names the mechanism exactly: null is not
+       an exit code the watcher can produce, it is what a KILLED child reports. The
+       assertions were reading a process this harness had shot, and the empty
+       stdout was the same event seen from the other side.
+
+       So for a run that is going to exit, wait for it to exit. `child.kill()` stays
+       for the streaming mode, which by design never exits on its own — a fixed
+       settle is the right instrument there, because proving that nothing more
+       arrives is the only thing a timeout can honestly do. */
+    const oneShot = (o.args || []).includes('--once');
+    let killed = false;
+    if (oneShot) {
+        const exitBy = Date.now() + 20000;
+        while (!closed && Date.now() < exitBy) await sleep(20);
+    }
+    if (!closed) { await sleep(250); child.kill(); killed = true; }
     await closePromise;
+
+    /* A one-shot that still had to be killed is an INFRASTRUCTURE event, and the
+       whole point of the block above is that it must never again arrive disguised
+       as a wrong exit code or a missing panel line. Naming it here costs one line
+       and turns the confusing failure back into the true one. */
+    if (oneShot && killed) {
+        console.error('infrastructure: a --once run did not exit within its budget and was '
+            + 'killed; exitCode/stdout below are from a SHOT process, not from the watcher '
+            + `(scanned=${scanned}, stdout=${JSON.stringify(out.slice(0, 120))})`);
+        prematureKills.push(JSON.stringify(o.args || []) + ' scanned=' + scanned);
+    }
 
     return {
         stdout: out,
         stderr: err,
+        exitCode, signal,
         scanned,
+        killed,
         argv: scanned ? fs.readFileSync(ARGVLOG, 'utf8') : null,
         lines: out.split('\n').filter(Boolean),
     };
@@ -502,10 +546,84 @@ async function run(o) {
             const rows = await run({ fleetDir: freshFleetDir(), payload: { rows: [BEACON()] } });
             eq('a { rows } envelope is accepted', rows.lines[0], BEACON_LINE);
 
-            const none = await run({ fleetDir: freshFleetDir(), payload: { population: { dirs: 0 } } });
-            eq('an envelope with no recognised session key is quiet rather than an error',
-                none.stdout, '');
-            eq('...and is not reported as a broken probe', none.stderr, '');
+        }
+
+        // --once exposes scan success to callers; periodic mode keeps its timer.
+        // Errors cannot update dedup state or hide a panel after recovery.
+        for (const [label, payload] of [
+            ['bare array', [BEACON()]], ['sessions', { sessions: [BEACON()] }],
+            ['rows', { rows: [BEACON()] }], ['sessions with metadata', { sessions: [BEACON()], population: { dirs: 1 } }],
+        ]) {
+            const r = await run({ fleetDir: freshFleetDir(), payload, args: ['--once'] });
+            eq(label + ' one-shot succeeds', r.exitCode, 0);
+            eq(label + ' one-shot reports the positive panel', r.stdout, BEACON_LINE + '\n');
+        }
+        for (const [label, payload] of [
+            ['empty array', []], ['empty sessions', { sessions: [] }],
+            ['empty rows', { rows: [] }], ['empty with metadata', { sessions: [], population: { dirs: 0 } }],
+        ]) {
+            const dir = freshFleetDir(), r = await run({ fleetDir: dir, payload, args: ['--once'] });
+            eq(label + ' one-shot succeeds quietly', r.exitCode, 0);
+            eq(label + ' remains quiet', r.stdout, '');
+            check(label + ' creates no dedup state', !fs.existsSync(stateFile(dir)), 'unexpected state write');
+        }
+        for (const [label, payload] of [
+            ['null', null], ['boolean', false], ['number', 0], ['string', 'sessions'],
+            ['unknown empty envelope', {}], ['metadata only', { population: { dirs: 0 } }],
+            ['unknown populated envelope', { records: [BEACON()] }],
+            ...[null, 0, false, '', {}].map(value => ['invalid sessions ' + JSON.stringify(value), { sessions: value }]),
+            ...[null, 0, false, '', {}].map(value => ['invalid rows ' + JSON.stringify(value), { rows: value }]),
+            ['invalid primary with valid fallback', { sessions: 0, rows: [BEACON()] }],
+            ['empty primary hides populated rows', { sessions: [], rows: [BEACON()] }],
+            ['populated primary with empty rows', { sessions: [BEACON()], rows: [] }],
+            ['two empty session keys', { sessions: [], rows: [] }],
+        ]) {
+            const dir = freshFleetDir();
+            fs.writeFileSync(stateFile(dir), JSON.stringify(['already-seen|T0']));
+            const before = fs.readFileSync(stateFile(dir), 'utf8');
+            const r = await run({ fleetDir: dir, payload, args: ['--once'] });
+            eq(label + ' one-shot exits unavailable', r.exitCode, 2);
+            eq(label + ' announces the envelope error', r.stdout, 'WATCHER-ERROR fleet-status returned unsupported session envelope\n');
+            eq(label + ' preserves exact dedup state', fs.readFileSync(stateFile(dir), 'utf8'), before);
+        }
+        {
+            const dir = freshFleetDir();
+            const r = await run({ fleetDir: dir, payload: { records: [BEACON()] } });
+            eq('periodic malformed envelope announces an error', r.stdout, 'WATCHER-ERROR fleet-status returned unsupported session envelope\n');
+            eq('periodic malformed envelope keeps the watcher alive', r.signal, 'SIGTERM');
+            check('periodic malformed envelope creates no dedup state', !fs.existsSync(stateFile(dir)), 'unexpected state write');
+            const recovered = await run({ fleetDir: dir, payload: { sessions: [BEACON()] }, args: ['--once'] });
+            eq('a valid scan after envelope failure still reports the panel', recovered.stdout, BEACON_LINE + '\n');
+            eq('a valid scan after envelope failure succeeds', recovered.exitCode, 0);
+        }
+        for (const mode of ['garbage', 'fail']) {
+            const r = await run({ fleetDir: freshFleetDir(), payload: { sessions: [BEACON()] }, mode, args: ['--once'] });
+            eq(mode + ' one-shot cannot imply a successful scan', r.exitCode, 2);
+        }
+
+        // Reject malformed rows before emitting any panel or modifying dedup.
+        for (const [label, row] of [
+            ...[null, 1, true, 'row', [], {}].map(value => ['invalid row ' + JSON.stringify(value), value]),
+            ['missing identity', { ...BEACON(), sessionId: undefined }],
+            ['empty identity', { ...BEACON(), sessionId: '' }],
+            ['missing state', { ...BEACON(), state: undefined }],
+            ['unknown state', { ...BEACON(), state: 'new-unknown' }],
+            ...['title', 'addressableId', 'lastTs'].map(key => ['invalid ' + key, { ...BEACON(), [key]: {} }]),
+            ['null question', { ...BEACON(), pending: { questions: [null] } }],
+            ['string question', { ...BEACON(), pending: { questions: ['broken'] } }],
+            ['object options', { ...BEACON(), pending: { questions: [{ options: {} }] } }],
+            ['null option', { ...BEACON(), pending: { questions: [{ options: [null] }] } }],
+            ['object ask time', { ...BEACON(), pending: { askedAt: {} } }],
+        ]) {
+            const dir = freshFleetDir();
+            fs.writeFileSync(stateFile(dir), JSON.stringify(['already-seen|T0']));
+            const before = fs.readFileSync(stateFile(dir), 'utf8');
+            const r = await run({ fleetDir: dir, payload: { sessions: [BEACON(), row] }, args: ['--once'] });
+            eq(label + ' one-shot exits unavailable', r.exitCode, 2);
+            eq(label + ' reports only the row error', r.stdout, 'WATCHER-ERROR fleet-status returned invalid session row 2\n');
+            eq(label + ' preserves dedup despite preceding valid row', fs.readFileSync(stateFile(dir), 'utf8'), before);
+            const recovered = await run({ fleetDir: dir, payload: [BEACON()], args: ['--once'] });
+            eq(label + ' does not consume the preceding valid panel', recovered.stdout, BEACON_LINE + '\n');
         }
 
         // -------------------------------------------------------------------
@@ -644,8 +762,19 @@ async function run(o) {
         fs.rmSync(fixture, { recursive: true, force: true });
     }
 
+    /* READ THE TALLY. A count nobody reads is how the premature kill stayed
+       invisible in the first place, and it would be absurd to add a second one
+       here. This is the ONLY assertion in the file about the harness rather than
+       about the watcher, and it is the one that keeps every other assertion
+       honest: a killed one-shot makes them read a process that was shot. */
+    eq('no --once run had to be killed (their exit codes and output are real)',
+        prematureKills.length ? prematureKills.join('; ') : 'none', 'none');
+
     console.log(`\n${pass} passed, ${fail} failed`);
-    process.exit(fail > 0 ? 1 : 0);
+    if (prematureKills.length) {
+        console.log('premature kills: ' + prematureKills.join('; '));
+    }
+    process.exitCode = fail > 0 ? 1 : 0;
 })().catch((e) => {
     console.error(e && e.stack || e);
     try { fs.rmSync(fixture, { recursive: true, force: true }); } catch { /* already gone */ }

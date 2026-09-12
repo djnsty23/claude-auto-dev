@@ -1,7 +1,7 @@
 ---
 name: memory-maintenance
-description: Audit and tidy project memory — deduplicate overlapping memories, repair the MEMORY.md index, drop dead links, and refresh CLAUDE.md against what the codebase actually looks like now. Designed to run unattended on a nightly schedule.
-when_to_use: "Invoked when the user says \"memory maintenance\", \"defrag memory\", \"dedup memory\", \"tidy memory\", \"clean up CLAUDE.md\", or when fired by a nightly routine."
+description: Audit and repair authorized project memory and instruction drift with verified project mapping, recoverable edits, and explicit unresolved contradictions.
+when_to_use: "Invoked when the user says \"memory maintenance\", \"defrag memory\", \"dedup memory\", \"tidy memory\", \"clean up CLAUDE.md\", or by a configured maintenance routine."
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 model: opus
 user-invocable: true
@@ -10,118 +10,115 @@ argument-hint: "[project path | --all | --dry-run]"
 
 # Memory Maintenance
 
-Memory files accumulate: two memories drift into saying the same thing, the
-index points at a file that was renamed, a `[[link]]` outlives its target, and
-`CLAUDE.md` slowly describes a codebase that no longer exists.
+Repair retrieval and stale factual claims while preserving unique knowledge,
+the user's instructions and current authorization. A similarity score is a
+lead to inspect, not permission to merge or delete.
 
-This finds all of that mechanically and fixes it with judgement.
+## Establish scope and read the audit
 
-## 1. Audit — always start here
+Use the supplied project path, otherwise the current project. `--all` expands
+to the projects covered by the user's request or still-valid maintenance
+mandate. Unattended execution does not enlarge that scope.
+
+Resolve the active configuration directory from `CLAUDE_CONFIG_DIR` or the
+current user's `.claude` directory. Verify that it is present and readable
+before interpreting an empty report. The audit can return `projects: []` with
+exit 0 even when the configuration directory is missing.
+
+The shipped audit reads multiple projects and has no project filter. For a
+request whose read scope is limited to one project, inspect its verified memory
+directory directly using the repair checks below; do not pass a project argument
+and assume the command becomes scoped. When cross-project inventory is within
+the existing scope, run:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/memory-audit.js"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/memory-audit.js" --json
 ```
 
-Read-only. Add `--all` to include projects with no recent activity, `--json` for
-machine output, `--stale-days=N` to change what counts as active (default 30).
+It audits recently active stores; `--all` includes inactive stores and
+`--stale-days=N` changes the activity window. A positional project argument does
+**not** restrict it. Filter the results to the authorized edit set. Confirm the
+storage-id-to-project mapping from a known project path or host metadata; the
+audit's decoded path is only a guess. Existence of the guessed directory alone
+does not establish identity. An inactive store omitted by the default scan is
+not an audited-clean store.
 
-It reports, per project: oversized index, duplicate `name:` slugs, near-duplicate
-bodies, dead index links, unindexed files, dangling `[[links]]`, missing
-frontmatter, and memory for projects that no longer exist on disk.
+The current mechanical audit reads only top-level Markdown files and compares
+index targets by basename. It can miss a malformed nested note and flag an
+existing nested target as dead. Enumerate approved nested Markdown records
+separately and resolve each index target by its exact relative path before
+editing; report that population separately from the tool's top-level count.
 
-**Paths come from `CLAUDE_CONFIG_DIR` or `$HOME`.** Nothing is hardcoded, so this
-works for any user on any machine.
+Report stores and files examined, excluded projects, detector errors and the
+findings. For an absence claim, confirm a known stored file is in the audited
+population. Missing/unreadable roots and failed commands are incomplete audits,
+not clean memory.
 
-## 2. Fix, in this order
+`--dry-run` performs read-only scope checks and audits and reports proposed
+repairs. Do not create recovery copies, change memory, refresh instructions or
+write a heartbeat from a dry run.
 
-**Never delete a memory to resolve a duplicate.** Merge, then remove the file
-that is now redundant — and only when its content is fully represented in the
-survivor. A deleted memory is unrecoverable and its loss is silent.
+## Make recoverable, owned repairs
 
-1. **Missing frontmatter** — add `name:` and `description:`. Safe, mechanical.
-2. **Dead index links** — remove the row, or restore the link if the file was
-   merely renamed (check git in the project first).
-3. **Unindexed files** — add a one-line pointer to `MEMORY.md`.
-4. **Dangling `[[links]]`** — a link to a memory that does not exist yet is not
-   an error; it marks something worth writing. Leave it unless the target was
-   deleted, in which case drop the link.
-5. **Near-duplicates** — read both. Keep the one with more specific, more recent
-   information; fold anything unique from the other into it; then delete the
-   loser and update the index. If the two genuinely disagree, **keep both and
-   say so in the report** — a contradiction is a signal, not a duplicate.
-6. **Oversized index** — `MEMORY.md` loads into context every session, so it is
-   capped at 200 lines / 25KB. Compress rows, never drop memories; if it is still
-   too long, the memories themselves are too granular and should be merged.
-7. **Project gone** — do not delete. Report it and let the user decide; a repo
-   may be temporarily moved or on another machine.
+Before editing, record the selected file paths and hashes and save private
+recovery copies outside the automatically loaded memory directory. Include an
+index copy and a mapping from originals to replacements. Use the configured
+private recovery location; never put memory content in a public repository.
+Re-read a file before replacing it; if another session changed it, reconcile
+against that new content rather than overwriting the peer's work.
 
-## 3. Refresh CLAUDE.md
+Apply only repairs supported by the underlying files:
 
-Use the checker rather than grepping by hand — it encodes eight precision rules
-learned by running naive versions against real repos:
+1. Add missing frontmatter from the file's actual meaning. Do not invent a
+   decision or authority while supplying metadata.
+2. Repair index links by resolving their exact relative targets, including
+   subdirectories. Remove a pointer only after establishing it is obsolete;
+   restore a renamed target's link when that is the actual cause.
+3. Add concise pointers for unindexed memories. A dangling `[[link]]` may mark
+   knowledge still to be written; do not remove it solely because it is absent.
+4. For overlapping memories, preserve unique conditions, evidence, dates and
+   superseded context in the survivor. Conflicting claims remain explicit until
+   current source evidence resolves them. Recency, filename and shared words
+   do not settle a contradiction.
+5. Only remove a redundant file after reading back the survivor and proving its
+   unique content and references are preserved. Keep its recovery copy and
+   recorded replacement until the approved retention period expires.
+6. Compress an oversized `MEMORY.md` by shortening index entries and linking to
+   details. The checker uses 200 lines / 25KB as thresholds; those are not evidence
+   that the memories themselves should be combined. Preserve unrelated domains.
+
+A missing or ambiguously mapped repository remains pending; do not delete its
+memory or edit the directory that happened to match a lossy decoded path.
+
+## Refresh factual instruction drift
+
+For verified in-scope repositories:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/claudemd-audit.js" <repo> [<repo>...]
 ```
 
-It skips what only looks stale: bare filenames used in prose, filename patterns
-like `qa-YYYY-MM-DD.md`, house shorthand for a path spelled in full elsewhere,
-files the doc itself describes as deleted, and files annotated local-only or
-gitignored. On three production repos a naive check reported 16 findings; this
-reports the 1 that was real.
+Treat its findings as candidates. Check the named path or command and the
+surrounding sentence against the current checkout. A deleted-file anecdote,
+generated file or command used on another documented platform may still be
+correct. Fix claims whose current meaning is disproved; preserve user policies
+and explicit exceptions. Do not rewrite preferences as “outdated” or move
+instructions into `.claude/project-rules.md` without verifying that the new
+location is both loaded and durable in this project.
 
-For each active project, check whether `CLAUDE.md` still matches reality:
+## Verify the repair and report
 
-- Do the paths, commands, and scripts it names still exist?
-- Does it describe a stack, directory, or workflow the repo has moved off?
-- Has it grown past the point of being read? Claude Code warns when it is long
-  relative to the context window, and long instructions are followed less
-  reliably than short ones.
+Re-run the relevant audit and resolve the exact index/link targets. Compare the
+original and resulting memory population, naming each intentional merge and
+any unresolved contradiction. Detector counts alone cannot prove preservation.
+Record what changed, the evidence, validation and the recovery location. If
+nothing needed repair, report the checked scope once; do not manufacture work.
 
-Fix what is provably stale — a named file that no longer exists, a command that
-is not in `package.json`. **Do not rewrite prose you cannot verify**, and do not
-"improve" wording; silent edits to a user's instructions are their own failure
-mode. If `.claude/project-rules.md` exists, prefer moving durable conventions
-there and keeping `CLAUDE.md` short.
-
-## 4. Report
-
-Say, per project: what was merged, what was repaired, what was left alone and
-why. If nothing needed doing, one line is the right length.
-
-**With `--dry-run`, do step 1 and report only. Change nothing.**
-
-## Running it nightly
-
-This is designed for unattended execution. Schedule it with `/schedule` (or a
-`CronCreate` in-session), pointing at this skill:
-
-```
-/schedule
-```
-
-Then create a routine that runs `/memory-maintenance --all` daily overnight.
-
-Two rules for the unattended run, because nobody is watching:
-
-- **Never delete on a contradiction.** Merging is only safe when one memory
-  strictly contains the other. Anything ambiguous gets reported, not resolved.
-- **Never touch a project whose repo you cannot see.** If the decoded project
-  path does not exist on disk, audit it and stop — the encoding of project
-  directories is lossy, and a wrong guess would edit the wrong project's memory.
-
-If the routine finds nothing to do — the normal case on a healthy setup — it
-should exit quietly rather than manufacturing work.
-
-**But quiet is not invisible: end every run, clean or not, by touching the
-heartbeat stamp** in the scheduled task's own directory:
-
-```bash
-date -u +%Y-%m-%dT%H:%M:%SZ > "$HOME/.claude/scheduled-tasks/<task-id>/.last-run"
-```
-
-Without it, a clean night and a dead schedule are indistinguishable — the log
-only records change, and `drift-audit` can otherwise judge liveness only by the
-SKILL.md's mtime, which a healthy task stops touching forever. The stamp is what
-`drift-audit` prefers; a non-daily task can declare its cadence by writing
-`{"cadence_days": 7}` instead of a bare timestamp.
+For a requested nightly routine, use the scheduler available on this host and
+update the existing matching task. Verify its project scope, cadence,
+invocation and durable result. Record attempt and outcome separately so a
+failed run cannot look successful merely because it touched a timestamp. Use
+the scheduler's actual state location and schema, not a guessed `<task-id>` or
+an unrelated host's scheduled-tasks directory. Keep unchanged successful runs
+quiet; report failures and actionable unresolved work according to the user's
+notification preference.

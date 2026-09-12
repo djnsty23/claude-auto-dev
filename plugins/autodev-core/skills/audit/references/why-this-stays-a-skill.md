@@ -1,8 +1,9 @@
 # Why `audit` stays an SOP-in-a-skill rather than a Workflow script
 
-`[measured 2026-08-25]` This was evaluated properly and the answer was the
-opposite of the expected one. Recording it so the question is not re-opened on
-intuition.
+`[measured 2026-08-25]` Historical decision and reported outcome counts follow.
+They are retained as evidence of that decision, not a current causal comparison
+or permission to skip verification. Revisit using new observations, not
+architecture preference.
 
 ## The question
 
@@ -28,11 +29,16 @@ than on how tidy its mechanism looks. Across two mature product repos, reading
 
 `deferred` is the load-bearing column. It means somebody looked at the story and
 decided not to do it, so it is the closest available proxy for a finding that was
-not worth having. **Audit findings are deferred 15x less often than hand-written
-work** (1.2% against 18.8%), on a population of 288 audit stories.
+not worth having. For **Project B only**, the recorded rates were 2/165 (1.21%) and 9/48
+(18.75%), a ratio of about 15.5. The 288 audit stories combine both projects and
+are not the denominator for that comparison. The table leaves two Project A
+audit stories, one Project A hand-written story, twelve Project B audit stories
+and thirty-nine Project B hand-written stories unclassified; do not infer their
+states.
 
-A missing verifier node should show up as noise that people decline to act on.
-It does not. The findings get done.
+Completion/defer status was written by the workflow being assessed. It does
+not independently establish that findings were real or fixes worked; low
+deferral can also reflect unquestioned acceptance or a different selection policy.
 
 ## What that does and does not establish
 
@@ -44,24 +50,24 @@ It does NOT prove the mechanism is optimal, and two limits are worth stating:
 - Project A's 11 `false` (9%) are failures, and some of those may be findings
   that turned out not to be actionable rather than fixes that broke.
 
-So the honest claim is bounded: on the evidence available, the output is
-actionable at a high rate, and the theoretical weaknesses above are not showing
-up as measurable harm.
+The bounded observation is that many stories were recorded as done. There is
+no independent behavioral sample or alternate implementation measurement here
+to establish defect accuracy, successful production outcomes or a causal benefit.
 
 ## The decision
 
-**Do not port `audit`.** Rewriting a mechanism that produces an 89-92%
-completion rate, to fix defects the outcome data does not show, is optimising
-something that is not broken. The cost is real, since a Workflow run spawns
-agents at up to six per wave, and the measured benefit is zero.
+The decision then was to retain the skill, not to rewrite it solely because a
+graph looked more rigorous. The data above did not measure a replacement’s
+cost or benefit. Retain the simplest mechanism that meets the current execution
+contract, and fix demonstrated failure modes without requiring a wholesale port.
 
 ## What WOULD justify revisiting
 
 Narrow and specific, so this is falsifiable rather than a permanent veto:
 
 1. **The deferred rate on audit stories rising above the hand-written rate.**
-   That would mean findings have started being noise, which is exactly what a
-   verifier node fixes. Re-measure from `prd.json` rather than from impression.
+   That would warrant inspecting a sample and the reasons for deferral; a
+   changed rate alone proves neither noise nor that a verifier node fixes it.
 2. **A dimension whose output is consumed by code**, not by a person. A schema
    contract earns its place the moment something downstream has to parse the
    finding, because free-form prose stops being adequate there.
@@ -79,9 +85,11 @@ The two mechanisms are not ranked. They answer different questions.
 skipped step is silent, where a downstream consumer parses the output, or where
 the fan-out width has a cost somebody is paying.
 
-**SOP-in-a-skill is adequate where a person reads the output and would notice a
-missing step.** `audit` is that case. Its product is a list a human triages, and
-a human triaging is itself the verifier the graph appears to lack.
+**Human triage is a verification step only when it actually occurs.** Brain’s
+unattended path cannot assume an absent operator catches missing steps. Before
+findings drive changes or completion, require the reproduction, control,
+acceptance evidence and actual gate checks named by the current audit and
+verification skills; do not grade the result solely from `passes` or a score.
 
 The failure mode to avoid is choosing on aesthetics. A graph looks more rigorous
 than prose, and looking rigorous is not the same as producing better findings.

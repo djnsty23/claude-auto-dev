@@ -238,7 +238,23 @@ function checkBrainRole(opts) {
 
     if (!sessions.readable) {
         fault('sessions-unreadable', 'could not read ' + sessionsDir + ', so no session can be shown live');
-        for (const k of ['session_id', 'peer_name']) {
+        /* ⚠️ `session_id` DOES NOT GO IN HERE, BECAUSE `unchecked` IS RENDERED AS
+           A LIST OF ADDRESSES TO TRY. Both consumers say "try that address
+           before you conclude there is nobody there", and `session_id` is not an
+           address in any registry: it is the CLI uuid the hooks compare against
+           their payload, and sending a reader to it is the 2026-09-04 defect
+           verbatim -- a peer got `Session not found` against it twice. That its
+           liveness could not be established is already reported, by the
+           `sessions-unreadable` fault one line up.
+
+           `[measured 2026-09-09]` it WAS in this list from 2026-09-08 until
+           today. The invariant is stated three times in these two files and the
+           branch that broke it was written in the same commit as one of the
+           statements, because the list looked like "fields we could not check"
+           at the point it is built and only becomes "addresses to try" where it
+           is rendered, two functions away. A list whose meaning is fixed by its
+           renderer needs the constraint at the push site, which is this comment. */
+        for (const k of ['peer_name']) {
             if (typeof role[k] === 'string' && role[k]) unchecked.push({ field: k, value: role[k], why: 'no readable sessions directory at ' + sessionsDir });
         }
     } else {
@@ -585,6 +601,41 @@ function selftest() {
             ok: !r.reach.usable.some((u) => u.field === 'session_id')
                 && !/Use .*session_id/.test(render(r)),
             detail: r.reach.usable.map((u) => u.field).join(','),
+        });
+    }
+
+    /* `session_id` IS NOT AN ADDRESS ON THE `unchecked` BRANCH EITHER, and the
+       case above did not cover it: it asserts the `Use ...` wording, which is
+       the DEGRADED text, while `unchecked` renders as "Try the unchecked
+       address". `[measured 2026-09-09]` `session_id` was in that list from the
+       day the branch was written, so the machine with no readable sessions dir
+       -- a desktop-only install, or one where the CLI has not written it yet --
+       was told to try the CLI uuid, which is the 2026-09-04 defect. One
+       invariant, two renderings, and the test followed the wording rather than
+       the property. */
+    {
+        const noSessions = path.join(root, 'no-such-sessions-dir');
+        const r = checkBrainRole({
+            roleFile: roleAt('unreadable-sessions', { session_id: 'selftest-live-cli', peer_name: 'selftest-live-peer', desktop_session_id: 'local_selftest-live-desktop' }),
+            sessionsDir: noSessions, store,
+        });
+        const text = render(r);
+        cases.push({
+            label: 'an unreadable sessions dir never offers `session_id` as an address to try',
+            ok: !r.reach.unchecked.some((u) => u.field === 'session_id')
+                && !r.reach.usable.some((u) => u.field === 'session_id')
+                && !/`session_id`/.test(text),
+            detail: 'unchecked=' + (r.reach.unchecked.map((u) => u.field).join(',') || '(none)'),
+        });
+        /* The control that stops the case above passing on emptiness: the same
+           read must still REACH the unchecked branch and still name `peer_name`,
+           or a mutant that empties `unchecked` altogether passes both. */
+        cases.push({
+            label: '  control: it still reaches that branch and still names `peer_name`',
+            ok: r.state === 'fault'
+                && r.reach.unchecked.some((u) => u.field === 'peer_name')
+                && /NO ADDRESS HERE WAS VERIFIED REACHABLE/.test(text),
+            detail: 'state=' + r.state + ' unchecked=' + (r.reach.unchecked.map((u) => u.field).join(',') || '(none)'),
         });
     }
 

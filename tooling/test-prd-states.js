@@ -17,6 +17,8 @@
 // Run: node tooling/test-prd-states.js
 
 const path = require('path');
+const fs = require('fs');
+const vm = require('vm');
 const S = require(path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'prd-states.js'));
 
 let passed = 0;
@@ -208,6 +210,86 @@ check('and includes needs-setup', S.VALID.includes('needs-setup'), S.VALID);
         check('storiesOf(' + JSON.stringify(junk) + ') returns an empty object rather than throwing',
             JSON.stringify(S.storiesOf(junk)) === '{}');
     }
+}
+
+{
+    // JSON keys are data, including __proto__. Assignment through the inherited
+    // setter used to hide this malformed story and let the plan claim complete.
+    const prd = JSON.parse('{"sprints":[{"stories":{"__proto__":null,"GOOD":{"passes":true}}}]}');
+    const stories = S.storiesOf(prd);
+    check('nested __proto__ remains an enumerable own story key',
+        Object.prototype.hasOwnProperty.call(stories, '__proto__') && Object.keys(stories).length === 2);
+    check('nested story keys do not alter the normal object prototype', Object.getPrototypeOf(stories) === Object.prototype);
+    const plan = S.workPlan(prd);
+    check('a malformed __proto__ story is visible and prevents false completion',
+        plan.invalid.some((s) => s.id === '__proto__') && plan.complete === false, plan);
+    const carried = JSON.parse('{"sprints":[{"stories":{"__proto__":{"passes":null}}},{"stories":{"__proto__":{"passes":true}}}]}');
+    check('CONTROL: later sprint still overrides an own __proto__ record',
+        S.storiesOf(carried).__proto__.passes === true && Object.keys(S.storiesOf(carried)).length === 1);
+}
+
+// The selector and the Stop hook must decide readiness from the SAME graph.
+// Otherwise an unmet human dependency has no executable story but blocks Stop
+// forever, while an earlier sprint's task disappears from auto's selector.
+check('workPlan is available to both the skill and Stop hook', typeof S.workPlan === 'function');
+if (typeof S.workPlan === 'function') {
+    const prd = { sprints: [
+        { stories: { EARLY: st(null), DONE: st(true) } },
+        { stories: {
+            READY: { passes: false, blockedBy: ['DONE'] },
+            HUMAN: { passes: 'needs-setup', blockedReason: 'account access' },
+            WAIT: { passes: null, blockedBy: ['HUMAN'] },
+            MISSING: { passes: null, blockedBy: ['ABSENT'] },
+            CYCLE_A: { passes: null, blockedBy: ['CYCLE_B'] },
+            CYCLE_B: { passes: null, blockedBy: ['CYCLE_A'] },
+            MALFORMED: { passes: null, blockedBy: 'DONE' },
+            UNKNOWN: st('future-state'),
+        } },
+    ] };
+    const before = JSON.stringify(prd);
+    const p = S.workPlan(prd);
+    check('ready work includes earlier sprints and dependency-ready failed retries',
+        JSON.stringify(p.ready.map(([id]) => id)) === JSON.stringify(['EARLY', 'READY']), p);
+    const reason = (id) => p.blocked.find((b) => b.id === id)?.reason || '';
+    check('human dependency is blocked and named', /HUMAN.*needs-setup/.test(reason('WAIT')), p);
+    check('missing dependency is surfaced by id', /missing.*ABSENT/i.test(reason('MISSING')), p);
+    check('both cycle members are surfaced', /cycle/i.test(reason('CYCLE_A')) && /cycle/i.test(reason('CYCLE_B')), p);
+    check('malformed dependency list is surfaced', /blockedBy/i.test(reason('MALFORMED')), p);
+    check('unknown passes state is surfaced', p.invalid.some((b) => b.id === 'UNKNOWN'), p);
+    check('work planning does not mutate story state', before === JSON.stringify(prd));
+    check('unresolved work cannot read complete', p.complete === false, p);
+    check('only done/deferred is complete', S.workPlan({ stories: { D: st(true), X: st('deferred') } }).complete);
+    check('needs-setup is remaining, not complete', !S.workPlan({ stories: { H: st('needs-setup') } }).complete);
+    check('an empty population is not completion', !S.workPlan({}).complete);
+    check('a malformed story is not executable or complete',
+        S.workPlan({ stories: { BAD: null } }).ready.length === 0 && !S.workPlan({ stories: { BAD: null } }).complete);
+    const pluginRoot = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
+    const skill = fs.readFileSync(path.join(pluginRoot, 'skills', 'auto', 'SKILL.md'), 'utf8');
+    const selector = skill.split('### Find Next Task')[1].match(/```javascript\n([\s\S]*?)```/)[1];
+    // The snippet reads CLAUDE_PLUGIN_ROOT, the same variable a host sets, so this
+    // executes the shipped text verbatim instead of a rewritten copy of it.
+    const env = { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot };
+    const selected = vm.runInNewContext(selector + '\nexecutable.map(([id]) => id)', { prd, require, process: { ...process, env } });
+    check('the actual auto skill selector agrees with Stop readiness across sprints',
+        JSON.stringify(selected) === JSON.stringify(p.ready.map(([id]) => id)), selected);
+    // CONTROL: the guard is not decoration. Unset the variable and the shipped
+    // snippet must refuse by name rather than resolve a path from an empty string.
+    let guarded = null;
+    try {
+        vm.runInNewContext(selector, { prd, require, process: { ...process, env: {} } });
+    } catch (e) { guarded = e.message; }
+    check('the skill snippet throws by name when CLAUDE_PLUGIN_ROOT is unset',
+        guarded && /CLAUDE_PLUGIN_ROOT/.test(guarded), guarded);
+    const overlapping = { stories: {
+        A: { passes: null, blockedBy: ['B', 'C'] },
+        B: { passes: null, blockedBy: ['A'] },
+        C: { passes: null, blockedBy: ['B'] },
+    } };
+    check('overlapping cycles identify every member, including a visited cross edge',
+        S.workPlan(overlapping).blocked.every((b) => /cycle/.test(b.reason)));
+    overlapping.stories.A.blockedBy = ['B'];
+    check('CONTROL: a downstream story outside the cycle is not labelled cyclic',
+        !/cycle/.test(S.workPlan(overlapping).blocked.find((b) => b.id === 'C').reason));
 }
 
 // -------------------------------------------------------------------- report

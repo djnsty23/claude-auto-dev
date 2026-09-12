@@ -1,6 +1,6 @@
 ---
 name: rule-windows
-description: "Windows-specific development rules: cmd /c wrappers for MCP, dev servers in an external terminal, path conventions, and the Supabase CLI firewall workaround. Load only when working on Windows."
+description: "Windows-specific development rules: host-aware command wrappers, supervised servers, environment inheritance, native exit status and path conventions. Load only when working on Windows."
 when_to_use: "Background rules that apply only on Windows hosts. Not user-invocable."
 user-invocable: false
 allowed-tools: Read, Grep, Glob
@@ -9,42 +9,45 @@ paths:
 ---
 
 ## MCP Servers
-- ALWAYS use `cmd /c` wrapper: `"command": "cmd", "args": ["/c", "npx", ...]`
+- For `.cmd` launchers such as an `npx` shim when the MCP host cannot execute
+  them directly, use `"command": "cmd", "args": ["/c", "npx", ...]`.
+  Native executables and hosts with their own shell adapter need no blanket wrapper.
 - Never use bash syntax directly in MCP configs
 
 ## Dev Server
-- **`preview_start` first**, with a `.claude/launch.json` entry. It owns the
-  server lifecycle, reuses an already-running server, and exposes the logs via
-  `preview_logs`. The `browser` skill holds the full loop.
-- Nothing to preview, or no `launch.json`? Then `Bash({ command: "npm run dev",
-  run_in_background: true })`. A backgrounded Bash command is detached and
-  survives across turns.
+- Use the current host's supervised server tool when available; inspect its
+  actual configuration/schema. Otherwise use a supported background process
+  with captured logs. Verify owner PID, cwd, port and candidate artifact; do not
+  assume detachment survives session shutdown.
 - Never `start cmd /k`. It opens a window no tool can read, so the server's own
   error output becomes invisible — a failed compile looks identical to a slow one.
-- Check the port first: `netstat -ano | findstr :3000`
+- Check the project's actual port and owning PID; do not assume port 3000 or
+  terminate an unrelated listener.
 
-Superseded 2026-08-17. This section used to forbid `npm run dev` outright on the
-grounds that it "gets killed on session end". That premise is now false twice
-over: `run_in_background` detaches the process, and `preview_start` supervises it
-outright. The rule was compensating for a limitation the harness no longer has.
+Historical correction, 2026-08-17: a particular host's background/preview
+facilities invalidated its old ban on starting dev servers. That observation
+does not establish persistence guarantees for another tool or session lifecycle.
 
 ## Paths
 - Use forward slashes in code: `src/lib/utils.ts`
 - Use backslashes only for Windows commands: `cd C:\Users\...`
 
 ## Environment Variables
-- System env vars available to all processes
-- Reference in .env.local: `${GOOGLE_CLIENT_ID}` or leave it to system
-- Check with: `echo %VARIABLE_NAME%` (cmd) or `$env:VARIABLE_NAME` (PowerShell)
+- Processes inherit an environment snapshot from their parent; changes do not
+  retroactively update every running process. `.env` interpolation is loader
+  specific, so verify the project's loader rather than assuming expansion.
+- Check presence of credentials without printing values. Use the established
+  secret provider and verify the consuming process receives the intended config.
+  See [PowerShell environment scope](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_environment_variables).
 
 ## Supabase CLI
-- `supabase db query --linked` triggers Windows Firewall prompts and times out — **never use it**
-- **Use REST API instead** — fully automatable, no firewall issues:
-  - Read: `curl.exe 'https://<ref>.supabase.co/rest/v1/<table>?select=*' -H 'apikey: <anon_key>' -H 'Authorization: Bearer <service_role_key>'`
-  - RPC/SQL: `curl.exe -X POST 'https://<ref>.supabase.co/rest/v1/rpc/<fn>' -H 'apikey: <anon_key>' -d '{}'`
-  - Schema: `curl.exe 'https://<ref>.supabase.co/rest/v1/' -H 'apikey: <anon_key>'` (lists tables)
-  - Write `curl.exe`, not `curl` — see the alias trap under Common Gotchas.
-- Keys come from env vars (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) or `.env.local`
+Load the current Supabase skill and inspect installed CLI help before choosing
+a database command. A historical timeout on one machine does not establish a
+Windows-wide firewall cause. Use the actual error, target and a read-only
+control to diagnose it. REST table/RPC access is not arbitrary SQL or exhaustive
+schema inspection, and privileged credentials cannot prove ordinary-user RLS.
+Use the least-privileged test actor appropriate to the claim, capture HTTP
+status and response semantics, and keep credentials out of rendered commands.
 
 ## Common Gotchas
 - **Always write `curl.exe`, never bare `curl`.** In Windows PowerShell 5.1
@@ -55,7 +58,8 @@ outright. The rule was compensating for a limitation the harness no longer has.
   alias and is the real binary in every shell.
 - `curl.exe` ships in `C:\Windows\System32`, so it is available in plain cmd
   too. The old rule here claimed the opposite.
-- Use `where` instead of `which` for finding executables
+- Use `where.exe` in cmd or `Get-Command` in PowerShell for executable lookup;
+  bare `where` can resolve to a PowerShell alias.
 - Line endings: ensure `.gitattributes` has `* text=auto`
 
 ## Writing PowerShell blocks in skills and docs
@@ -96,7 +100,7 @@ gotchas above cover:
 | Write | Instead of | Because |
 |---|---|---|
 | `curl.exe` with flags | bare `curl` | `curl` is an alias for `Invoke-WebRequest` in PS 5.1 |
-| `cmd1; cmd2` | `cmd1 && cmd2` | `&&` is not a PS 5.1 operator |
+| Check native `$LASTEXITCODE` before the next command | unconditional semicolon chaining | PS 5.1 lacks `&&`; `;` does not preserve fail-fast semantics |
 | backtick continuation | `\` continuation | `\` is not a line continuation in PowerShell |
 | `$env:VAR` | `%VAR%` / `$VAR` | cmd and POSIX syntax respectively |
 | `New-Item -Force` | `mkdir -p` | no `-p` on the PowerShell alias |

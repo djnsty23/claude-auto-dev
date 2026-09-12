@@ -57,7 +57,12 @@ try {
                     let stories = null;
                     for (const sp of sprints) {
                         if (!sp || !sp.stories || typeof sp.stories !== 'object') continue;
-                        stories = Object.assign(stories || {}, sp.stories);
+                        stories = stories || {};
+                        for (const [id, story] of Object.entries(sp.stories)) {
+                            // Match core's reader: __proto__ is an own JSON
+                            // story key, never a prototype mutation.
+                            Object.defineProperty(stories, id, { value: story, enumerable: true, writable: true, configurable: true });
+                        }
                     }
                     if (!stories) stories = (prd.stories && typeof prd.stories === 'object') ? prd.stories : {};
                     const entries = Object.entries(stories);
@@ -74,7 +79,34 @@ try {
                     // `needs-setup` story is blocked on a human, but the human is
                     // still on the hook for it, so a report that omits it says the
                     // project is finished while it is waiting on the operator.
-                    const pending = entries.filter(([, v]) => v.passes === null || v.passes === false || v.passes === undefined || v.passes === 'needs-setup');
+                    //
+                    // ONE list of the outstanding states, used for BOTH the count
+                    // and the breakdown, so the two cannot drift apart and a fifth
+                    // state cannot be counted without also being named.
+                    //
+                    // `[measured 2026-09-11]` the filter here was already right and
+                    // the LABEL was the defect: four outstanding stories in three
+                    // different states rendered as
+                    //   "4 tasks remaining: S1-002, S1-003, S1-005, S1-006"
+                    // — the word FAILED appeared nowhere, and nothing said one of
+                    // them was waiting on the operator. That is session-start.js's
+                    // documented defect one plugin over, and CLAUDE.md records it as
+                    // the costly one: the next session reads this line, picks up the
+                    // story blocked on an API key, and burns a turn every run.
+                    //
+                    // The TOTAL is unchanged — a human is on the hook for all four.
+                    // What changes is that a reader can tell which is which without
+                    // opening prd.json. The three predicates are disjoint, so the
+                    // groups partition the total rather than overlapping it.
+                    const OUTSTANDING = [
+                        ['pending', (v) => v.passes === null || v.passes === undefined],
+                        ['FAILED, retry', (v) => v.passes === false],
+                        ['BLOCKED ON SETUP, no agent can advance these', (v) => v.passes === 'needs-setup'],
+                    ];
+                    const pending = entries.filter(([, v]) => OUTSTANDING.some(([, match]) => match(v)));
+                    const groups = OUTSTANDING
+                        .map(([label, match]) => [label, pending.filter(([, v]) => match(v)).map(([k]) => k)])
+                        .filter(([, ids]) => ids.length > 0);
                     let completed = done.map(([k, v]) => `${k}: ${v.title}`).join('; ');
                     // COMPLETED WORK LEAVES prd.stories. archive-prd moves finished
                     // stories to .claude/archives/ and records only a running total
@@ -90,7 +122,8 @@ try {
                     }
                     if (completed) summary.completed = completed;
                     if (pending.length > 0) {
-                        summary.nextSteps = `${pending.length} tasks remaining: ${pending.map(([k]) => k).join(', ')}`;
+                        summary.nextSteps = `${pending.length} tasks remaining: `
+                            + groups.map(([label, ids]) => `${ids.length} ${label} (${ids.join(', ')})`).join('; ');
                     }
                 } catch { /* non-critical */ }
             }

@@ -1,6 +1,9 @@
 # Tooling Config Templates
 
-TypeScript / Biome / shadcn / git metadata — boilerplate used by both single-app and monorepo scaffolds. Load this during Step 3 of Create mode.
+Templates for the selected tooling in a new project. Load during Create Step 3.
+Preserve existing policy during onboarding. Validate templates against the installed
+versions; configuration syntax and defaults below are examples, not current API
+guarantees. Keep version choices in `version-defaults.md` and verify them at use.
 
 ## TypeScript — maximum strictness
 
@@ -21,9 +24,13 @@ Start from Next.js defaults, add these flags to every tsconfig:
 
 **Monorepo:** `tsconfig.base.json` at root with shared options (`target: ES2022`, `module: ESNext`, `moduleResolution: bundler`, `composite: true`). Per-package configs extend it. Root `tsconfig.json` is solution-style: `"files": []` with `"references"` only.
 
-**Version:** prefer TS 5.8. TS 6 (March 2026) is too fresh — ecosystem libraries still lagging.
+**Version:** use the verified project version; see `version-defaults.md` for its
+dated baseline. Do not override that choice from an older template note.
 
-## Biome — replaces ESLint + Prettier
+## Biome — when selected for this project
+
+Generate/update the schema and supported keys with the installed CLI, validate
+the result, and retain required checks when migrating an existing linter.
 
 ```json
 {
@@ -46,18 +53,17 @@ Start from Next.js defaults, add these flags to every tsconfig:
 }
 ```
 
-Exclude `**/*.css` — Biome cannot parse Tailwind v4 `@theme` syntax.
+Check CSS parsing with the installed tool and the project's actual Tailwind
+syntax. Exclude unsupported syntax only when reproduced, and preserve another
+applicable CSS check; do not permanently waive CSS validation from this template.
 
-## shadcn/ui v4
+## shadcn/ui when selected
 
-After `pnpm install`:
-
-```bash
-pnpm dlx shadcn@latest init --defaults --force
-pnpm dlx shadcn@latest add button input card badge --yes
-```
-
-In monorepos, run from the web package directory. shadcn v4 defaults: `base-nova` style, Base UI primitives, `oklch()` colors, Tailwind v4 CSS variables. No `tailwind.config.ts` needed.
+Use the installed or verified pinned component CLI and its current documented
+flags. Inspect existing component configuration first. Initialize only a new
+configuration and install the components the requested flow needs; do not force
+replacement of an existing design system. In a monorepo use the web package's
+working directory. Read back the generated theme/configuration and run its checks.
 
 ## .gitattributes (cross-platform essential)
 
@@ -93,13 +99,16 @@ pnpm-lock.yaml -diff
 supabase/.branches
 supabase/.temp
 .turbo/
-.claude/
 *.tsbuildinfo
 ```
 
+For tool-generated files, apply `rule-file-organization` to distinguish ephemeral
+state from durable queues, acceptance evidence and tracked PRD archives. A blanket
+`.claude/` rule can hide the only delivery evidence another session needs.
+
 ## .npmrc
 
-```ini
-strict-peer-dependencies=false
-auto-install-peers=true
-```
+Keep the project's existing peer-dependency policy. Do not globally suppress peer
+compatibility failures as routine scaffolding. If installation reports a conflict,
+reproduce it, choose compatible versions or document a narrowly justified existing
+exception, and verify the resulting dependency graph with the actual project checks.

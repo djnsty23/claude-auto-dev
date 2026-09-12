@@ -37,9 +37,28 @@
 // Usage:
 //   check-dispatch-readiness.js <repo> [--trunk <ref>] [--expect-origin <url>] [--json]
 //
-// Exit: 0 nothing to report · 1 at least one worktree not ready ·
-//       2 no population (not a git repo, or no worktrees, so this run
-//         vouches for nothing)
+// WHY A FINDING CARRIES A CLASS. Two different things end up in `findings` and
+// they must never share a count: a VERDICT about the worktree, which the reader
+// fixes by fixing the worktree, and an UNMEASURED axis, where this script could
+// not look at all. `TRUNK UNREADABLE` used to be counted among the verdicts and
+// reported as `N of M worktree(s) NOT READY`, so a mistyped or unfetched
+// `--trunk` made EVERY worktree read as defective — the cause was the
+// invocation, and the headline blamed the worktrees. That is the same failure
+// tooling/suite-verdict-summary.js was written for, one directory over: a
+// condition external to the subject presented as a static property of it, which
+// does not merely fail to inform, it directs work.
+//
+// The other three unmeasured axes used to VANISH, which is worse. An
+// unresolvable origin, an unreadable HEAD and an unavailable unpushed-commit
+// count each skipped their check and left no row, so the worktree read clean on
+// an axis nobody had examined — absent coverage reported as coverage. They are
+// findings now, classed UNMEASURED, and they are the reason the exit contract
+// below has a third outcome.
+//
+// Exit: 0 nothing to report · 1 at least one worktree NOT READY (a verdict) ·
+//       2 no population (not a git repo, or no worktrees), OR nothing but
+//         unmeasured axes — this run reached no verdict, so it vouches for
+//         nothing either way
 
 const { execFileSync } = require('child_process');
 const path = require('path');
@@ -118,6 +137,18 @@ function isAncestor(wt, a, b) {
     } catch { return false; }
 }
 
+// A finding is one of exactly two things, and the wording of every count below
+// depends on which. VERDICT: a property of this worktree — fix the worktree.
+// UNMEASURED: this script could not perform the check — fix the invocation, or
+// fetch, or re-run. Nothing here infers the class from a kind name or a detail
+// string; each producer states it, because a regex over prose is the same
+// mistake with an extra failure mode.
+const VERDICT = 'verdict';
+const UNMEASURED = 'unmeasured';
+
+const verdictsOf = (row) => row.findings.filter((f) => f.class === VERDICT);
+const unmeasuredOf = (row) => row.findings.filter((f) => f.class !== VERDICT);
+
 /**
  * @param {string} repo
  * @param {{trunk?:string, expectOrigin?:string}} opts
@@ -143,7 +174,17 @@ function inspect(repo, opts = {}) {
         const findings = [];
 
         if (wantOrigin && origin && origin !== wantOrigin) {
-            findings.push({ kind: 'WRONG REPO', detail: `origin is ${origin}` });
+            findings.push({ kind: 'WRONG REPO', class: VERDICT, detail: `origin is ${origin}` });
+        } else if (wantOrigin && !origin) {
+            // An expectation WAS given and the comparison could not be made. This
+            // branch did not exist: the check skipped and the row came back clean,
+            // so silence on the axis read as a pass on it.
+            findings.push({
+                kind: 'ORIGIN UNREADABLE',
+                class: UNMEASURED,
+                detail: 'an origin expectation was given but `git remote get-url origin` '
+                    + 'returned nothing here, so WRONG REPO could not be checked',
+            });
         }
 
         // A worktree is on the right base when the trunk is REACHABLE FROM its
@@ -153,11 +194,29 @@ function inspect(repo, opts = {}) {
         if (opts.trunk) {
             const trunkSha = git(wt, ['rev-parse', opts.trunk]);
             if (!trunkSha) {
-                findings.push({ kind: 'TRUNK UNREADABLE', detail: `cannot resolve ${opts.trunk} here` });
-            } else if (head && !isAncestor(wt, opts.trunk, 'HEAD')) {
+                // UNMEASURED, not a verdict. The commonest cause is the ref this
+                // run was given — a typo, or a clone that has never fetched it —
+                // and in that case every row carries this and not one of them is
+                // defective.
+                findings.push({
+                    kind: 'TRUNK UNREADABLE',
+                    class: UNMEASURED,
+                    detail: `cannot resolve ${opts.trunk} here, so WRONG BASE could not be checked`
+                        + ' — check the ref spelling and whether this clone has fetched it',
+                });
+            } else if (!head) {
+                // The trunk resolved and HEAD did not, so ancestry is unanswerable.
+                // Previously the `head &&` guard made this branch return silently.
+                findings.push({
+                    kind: 'HEAD UNREADABLE',
+                    class: UNMEASURED,
+                    detail: '`git rev-parse HEAD` returned nothing here, so WRONG BASE could not be checked',
+                });
+            } else if (!isAncestor(wt, opts.trunk, 'HEAD')) {
                 const behind = git(wt, ['rev-list', '--count', `HEAD..${opts.trunk}`]);
                 findings.push({
                     kind: 'WRONG BASE',
+                    class: VERDICT,
                     detail: `${opts.trunk} is not in this history` + (behind ? ` (${behind} commit(s) missing)` : ''),
                 });
             }
@@ -172,9 +231,22 @@ function inspect(repo, opts = {}) {
         // check late is what produces the false positive, not a defect in it.
         const unreachable = git(wt, ['rev-list', '--count', 'HEAD', '--not', '--remotes=origin']);
         const n = unreachable === null ? null : Number(unreachable);
-        if (n) {
+        if (!Number.isFinite(n)) {
+            // `if (n)` swallowed BOTH null and NaN, so a failed or unparseable
+            // rev-list left the worktree looking uninhabited rather than
+            // unexamined. This is the axis where a silent skip costs most: it is
+            // the one that catches a stranger's unpushed commits.
+            findings.push({
+                kind: 'UNPUSHED COUNT UNAVAILABLE',
+                class: UNMEASURED,
+                detail: '`git rev-list --count HEAD --not --remotes=origin` returned '
+                    + (unreachable === null ? 'nothing' : JSON.stringify(String(unreachable)))
+                    + ', so INHABITED could not be checked',
+            });
+        } else if (n) {
             findings.push({
                 kind: 'INHABITED',
+                class: VERDICT,
                 detail: `${n} commit(s) on no LOCAL origin ref — a finding only if this is BEFORE the session started; `
                     + 'afterwards it is that session\'s own work. Ancestry, not content: a squash leaves the same diffs upstream under new shas. '
                     + 'Computed against remote-tracking refs, which this script never fetches: a branch deleted upstream whose local tracking ref survives still reads as pushed',
@@ -195,7 +267,13 @@ function inspect(repo, opts = {}) {
  */
 function exitCodeFor(res) {
     if (!res || !res.ok) return 2;
-    return res.rows.some((r) => r.findings.length) ? 1 : 0;
+    if (res.rows.some((r) => verdictsOf(r).length)) return 1;
+    // No verdict, but an axis this run could not examine. Exit 2 is this repo's
+    // indeterminate convention and the only honest answer: 0 would claim the
+    // worktrees were checked and found ready, and 1 would blame them for a
+    // question nobody answered. Three of these four cases used to exit 0.
+    if (res.rows.some((r) => unmeasuredOf(r).length)) return 2;
+    return 0;
 }
 
 function report(repo, opts) {
@@ -205,11 +283,24 @@ function report(repo, opts) {
             + 'This run vouches for nothing.\n');
         return 2;
     }
-    const bad = res.rows.filter((r) => r.findings.length);
+    // SPLIT BY CLASS. One filter over `findings.length` was one number with two
+    // meanings, and it was printed under the word NOT READY.
+    const notReady = res.rows.filter((r) => verdictsOf(r).length);
+    const withUnmeasured = res.rows.filter((r) => unmeasuredOf(r).length);
+    // AXES, not rows: a worktree can be NOT READY on one axis and unexamined on
+    // another, and counting rows would let the verdict hide the gap. The headline
+    // counts worktrees because that is what a reader acts on; this counts checks
+    // that never ran, because that is what the reader cannot otherwise know.
+    const unmeasuredAxes = res.rows.reduce((n, r) => n + unmeasuredOf(r).length, 0);
+    const unexamined = res.rows.filter((r) => !verdictsOf(r).length && unmeasuredOf(r).length);
     const lines = [];
-    for (const r of bad) {
+    for (const r of [...notReady, ...unexamined]) {
         lines.push(`  ${r.name}  [${r.branch} @ ${r.head}]`);
-        for (const f of r.findings) lines.push(`      ${f.kind}: ${f.detail}`);
+        // The class is on the line, not inferable from the kind: a reader
+        // skimming for what to do next needs it beside what was found.
+        for (const f of r.findings) {
+            lines.push(`      ${f.class === VERDICT ? '[not ready]  ' : '[unmeasured] '}${f.kind}: ${f.detail}`);
+        }
     }
     // The population is printed on every run, clean or not: a bare verdict is
     // indistinguishable from a checker that found nothing to look at.
@@ -221,16 +312,26 @@ function report(repo, opts) {
         + (opts.trunk ? `, trunk ${opts.trunk}` : ', NO TRUNK GIVEN so no base check ran')
         + (opts.expectOrigin ? `, expecting origin ${opts.expectOrigin}`
             : ', NO ORIGIN EXPECTATION GIVEN so no repo check ran');
-    if (!bad.length) {
+    // Each clause carries its own count and its own noun. An unmeasured row is
+    // never described as not ready, and never folded into that number.
+    const unexaminedClause = unmeasuredAxes
+        ? ` · ${unmeasuredAxes} check(s) on ${withUnmeasured.length} worktree(s) could not be run`
+          + ' — indeterminate and re-runnable, NOT a finding about the worktree(s)'
+        : '';
+    if (!notReady.length && !unmeasuredAxes) {
         process.stdout.write(`dispatch-readiness: 0 of ${res.rows.length} worktree(s) need attention\n${pop}\n`);
         return 0;
     }
-    process.stdout.write(`dispatch-readiness: ${bad.length} of ${res.rows.length} worktree(s) NOT READY\n`
+    process.stdout.write(`dispatch-readiness: ${notReady.length} of ${res.rows.length} worktree(s) NOT READY`
+        + `${unexaminedClause}\n`
         + lines.join('\n') + `\n${pop}\n`);
-    return 1;
+    return exitCodeFor(res);
 }
 
-module.exports = { inspect, worktrees, originUrl, normaliseOrigin, exitCodeFor };
+module.exports = {
+    inspect, worktrees, originUrl, normaliseOrigin, exitCodeFor,
+    VERDICT, UNMEASURED, verdictsOf, unmeasuredOf,
+};
 
 const USAGE = 'usage: check-dispatch-readiness.js <repo> '
     + '[--trunk <ref>] [--expect-origin <url>] [--json]\n'
@@ -238,7 +339,8 @@ const USAGE = 'usage: check-dispatch-readiness.js <repo> '
     + '  --expect-origin  the repository these worktrees should belong to. Without it, no\n'
     + '                   repo check runs: linked worktrees share one config, so there is\n'
     + '                   nothing to compare a worktree origin against.\n'
-    + 'exit: 0 clean - 1 at least one worktree not ready - 2 no population\n';
+    + 'exit: 0 nothing to report - 1 at least one worktree NOT READY - 2 no population,\n'
+    + '      or nothing but axes this run could not measure, which is no verdict either way\n';
 
 /**
  * Positionals, skipping the VALUE of every value-taking flag rather than of

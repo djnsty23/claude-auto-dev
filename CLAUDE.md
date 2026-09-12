@@ -13,34 +13,36 @@ never ships.
 ## Commands
 
 ```bash
-npm run gate                 # THE GATE: eight steps chained with &&. Run this.
-npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 8.
+npm run gate                 # THE GATE: ten steps chained with &&. Run this.
+npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 10.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
 node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md; step 7 fails on drift
 node tooling/check-claude-md.js        # step 8: does THIS FILE still describe the tree?
+npm run check:coverage       # step 9: the suite again under coverage; red only ABOVE the measured floor
 ```
 
-**`npm test` is ONE EIGHTH of the gate, and every step it skips fails silently.**
+**`npm test` is ONE TENTH of the gate, and every step it skips fails silently.**
 `[measured 2026-08-30]` a session ran nine green `npm test` runs and never
 executed `check:suites`, so a newly added suite was reported green while
 `check-suites-can-fail.js` had it counted as NOT verified. The suite in question
 was the one gating pushes.
 
 Nothing about the first command hints at the rest, which is why `npm run gate`
-now exists: it chains all eight.
+now exists: it chains all ten.
 
 `[measured 2026-09-07]` **THE CHAIN IS `&&`, so a red first step means the other
-seven NEVER RAN.** The gate is
+nine NEVER RAN.** The gate is
 
 ```
 npm test && npm run check:suites && npm run check:probe-shapes
   && npm run check:population && npm run check:entrypoints
-  && npm run check:skill-tools && npm run check:agents-md
-  && npm run check:claude-md
+  && npm run check:skill-tools && npm run check:skill-plugin-root
+  && npm run check:agents-md
+  && npm run check:claude-md && npm run check:coverage
 ```
 
-The last two steps are the cheap ones, and they are last for the reason `&&`
+Steps eight and nine are the cheap ones, and they sit where they do for the reason `&&`
 makes unavoidable: a cheap step that goes red early hides every expensive step
 behind it, so nothing that matters is skipped when one of these is the one that
 fails. `check:agents-md` regenerates `AGENTS.md` from the `rule-*` skills to a
@@ -50,18 +52,24 @@ FILE against the tree — the gate chain above, the `passes` table, the populati
 counts, the branch-protection claim. **It is also the reason the numbers in this
 section can be trusted now.** Every one of them used to be a sentence that went
 stale in silence, and three did inside 48 hours; this very sentence pair is what
-the eighth step reads.
+the ninth step reads. The tenth, `check:coverage`, is the expensive one and the
+last: it runs every suite a second time under `NODE_V8_COVERAGE` and fails only
+when the count of plugin functions no suite enters rises above the floor dated
+in its source (`tooling/find-untested-functions.js`), so it sits behind the two
+cheap steps because a stale sentence in this file must not cost a second suite
+run to discover, and nothing sits behind it. It is a floor against regression,
+not a claim of quality; see "Four coverage questions" below.
 
 A session landing a rescued commit read the resulting exit 1 as "the gate is
 red", and was one step from describing the commit as gated when `check:suites` —
 the step that catches exactly the unverifiable-new-suite case above — had not
 executed at all. Its change ADDED a suite, so that was the one step it could not
-afford to skip. When the first step fails, run the remaining seven yourself; the
-chain's exit status is a verdict on one step, not on eight.
+afford to skip. When the first step fails, run the remaining nine yourself; the
+chain's exit status is a verdict on one step, not on ten.
 
 **And `npm run gate` is NOT "what CI runs"**, in both directions. CI adds a
 `node --check` parse loop over every `plugins/*/hooks/*.js` that the gate has no
-equivalent for, and the gate runs `check:probe-shapes`, which CI does not. Six
+equivalent for, and the gate runs `check:probe-shapes`, which CI does not. Seven
 of CI's steps are `if: matrix.os == 'ubuntu-latest'`, so a green local gate on
 macOS and a green CI run are not claims about the same set of checks.
 
@@ -86,6 +94,69 @@ IMPLEMENTATION DESCRIPTION rots the instant someone refactors, and both read as
 mechanism. The discriminator is whether the sentence names something a refactor
 can change: a tool, a file, a data structure, a code path. When it does, it is a
 dated claim whether or not it carries a date.
+
+⚠️ **"An exit 2 here is load; re-run it on a quiet machine" was wrong, and it
+was the advice in this file and in the project memory until 2026-09-10.** The
+measurement is in `docs/evidence-check-suites-budget-2026-09-10.md`; three runs
+over five hours, and the quietest was five times the slowest with five times the
+conflicts. Load is not the mechanism in either direction, and the refutation needs
+no theory — it is arithmetic over this repo's own constants. A suite that blows the
+child budget costs seconds through the sweep's exact invocation, so a timeout
+demands a blowup far beyond the largest slowdown `spawn-budget.js` will even admit
+(`CONTENTION_MAX`). Compare the two yourself rather than trusting this sentence:
+time the suite, then read the clamp.
+
+⚠️ **That holds per SUITE and fails at ONE call site, so read the conflict line
+before applying it.** `[measured 2026-09-11]` `test-all.js (runner canary run)
+did not run (ETIMEDOUT)` is the exception, and for it the paragraph above gives
+backwards advice. The arithmetic there assumes the child is one suite costing
+seconds; this child is `test-all.js`, which does **not** fail fast — it exits only
+after every suite has run (`tooling/test-all.js`, its final `process.exit`) — so
+the runner canary must fit the ENTIRE suite population inside the one child
+budget. 129 suites that day, against 900 s: ~1.3x is enough, not 45x. The control
+is what makes this stand rather than a second theory: the same commit, zero code
+change, exit 2 at 15-min load 28.8 with three peer sweeps live, then exit 0 in
+16m17s at load 15.7 with `0 NOT verified`. **So for THAT line, re-running quiet is
+the fix; for a seconds-long suite it still is not.** Rule your own change out
+first by timing the suite you touched — the change measured here added 0.7 s of
+the 900. Receipt:
+`~/claude-memory/evidence-2026-09-11-dispatch-readiness-class-split/`.
+
+And note which kind of sentence each of these is, by this file's own test two
+paragraphs up: the refutation above is arithmetic over a constant, and this
+qualifier names a CODE PATH — `test-all.js` not failing fast. Make that suite
+stop on first failure and this paragraph is stale the same day, with nothing to
+announce it.
+
+What was actually wrong is a shape worth recognising anywhere: **two timeout
+regimes, nested, with no relationship to each other, and the inner ceiling the
+larger one.** The sweep gave each suite a fixed budget while several suites could
+self-grant more than that through `runBudgeted` — one of them passing a
+`maxTimeout` equal to the whole outer budget, so a single widened retry could eat
+it alone. (`node tooling/check-suites-can-fail.js` and `tooling/spawn-budget.js`
+hold the live numbers; the doc above holds the ones measured that day.) Neither system
+could then report: the outer kill landed mid-retry, so the suite never printed the
+INDETERMINATE line it had computed, and the sweep, holding only `ETIMEDOUT`,
+recorded a conflict with no cause. The fix was not a bigger number — the budget is
+unchanged — it is that the parent now PUBLISHES its deadline and the inner policy
+clamps to it. **When a budget is enforced by a process other than the one spending
+it, the two have to know about each other, or the only reliable outcome is that
+nobody gets to say what happened.**
+
+Two corollaries that keep costing sessions. `os.loadavg()` is not a usable
+contention signal on this box — it read 12.37 at idle and 12.37 under 28 busy
+workers in the same ramp — so a load figure beside a timing proves nothing about
+whether the machine was contended. And a contention probe built from
+single-threaded work reads **1.00 until runnable threads exceed the core count**,
+so on 14 cores every load this gate actually runs at measures as idle.
+
+**And a child killed on timeout still carries everything it printed.** `spawnSync`
+returns its `stdout` and `stderr` populated, and the suites here print their
+assertions as they go, so the last lines name what was in flight. Nine timeouts
+across those three runs were reported as the bare string `ETIMEDOUT` with that
+evidence in hand and discarded, which is why five hours produced no diagnosis.
+Whatever you are writing that reports a result with no exit code: the budget is
+spent either way, so spend it on evidence.
 
 **And do not touch the tree WHILE it runs.** Clean at the start is not enough:
 `test-all.js` snapshots `git status` before the suites and compares after, so a
@@ -115,7 +186,7 @@ two wrong readings in the session that wrote this paragraph.
 ```bash
 node plugins/autodev-core/scripts/find-orphan-checks.js .   # scripts nobody runs
 npm run check:hooks       # wired hooks no suite drives (hard gate in validate)
-npm run check:functions   # functions never entered (~20s, suite under coverage)
+npm run check:functions   # functions never entered (a full suite run under coverage; --gate is step 9)
 npm run check:vacuity <subject.js> <suite.js>   # code no assertion depends on
 ```
 
@@ -313,23 +384,26 @@ you started work; in a shared clone it moves under you.
   shared history. Commit small and forward; never rewrite.
 - **Stage explicit paths, never `git add -A`** — the same concurrency sweeps
   another session's in-flight work into your commit.
-- **`process.exit()` after printing TRUNCATES, on macOS only.** node's
-  `process.stdout` is asynchronous when it is a PIPE on darwin, and synchronous
-  when it is a pipe on linux and win32; it is synchronous for a FILE and a TTY
-  everywhere. `process.exit()` does not drain a pending async write, so a script
-  that prints more than the 64KiB OS pipe buffer and then exits delivers exactly
-  65536 bytes — and exits 0, because the write never failed. 2026-09-07:
-  `rendered-layout-gate.js --json` did this with 84752 bytes of output, and its
-  suite had failed 2 of 282 on every mac in the project since the day it was
-  written while CI stayed green on `[ubuntu, windows]`.
-  Set `process.exitCode` and let the event loop drain; do not call
-  `process.exit()` on a path that has written to stdout.
-  **Three things hide it, and it used all three**: redirect to a file and the
-  write is synchronous so the output looks whole; run it on Linux CI and the
-  write is synchronous so CI is green; check the exit status and it is 0. Any
-  assertion here has to drive the subject through a PIPE and compare byte counts
-  against a FILE redirect — and assert the output EXCEEDS one buffer first, or
-  the comparison passes by construction on small fixtures.
+- **`process.exit()` can truncate pending output.** This is not macOS-only.
+  [Node's process I/O contract](https://nodejs.org/api/process.html#a-note-on-process-io)
+  makes stdout/stderr pipes asynchronous on POSIX, including Linux and macOS,
+  and synchronous on Windows. File output is synchronous on both; terminal
+  output is asynchronous on Windows and synchronous on POSIX. Passing Linux CI
+  does not establish that a pipe write was synchronous or completely drained.
+  The 2026-09-07 incident reported 65,536 of 84,752 bytes from
+  `rendered-layout-gate.js --json`, with exit 0. That observed byte boundary is
+  not a portable buffer-size guarantee.
+  `[measured 2026-09-09]` Node 24.19.0 on macOS, three variants each writing
+  1,048,576 bytes to a pipe and a file: immediate exit delivered 65,536 pipe
+  bytes; setting `process.exitCode` and waiting for the write callback each
+  delivered all 1,048,576. All six runs exited 0, and all three file redirects
+  were complete. Linux and Windows were not executed in this control.
+  Set `process.exitCode` and let the event loop drain. A callback for one write
+  is sufficient only if no other pending work needs to finish. Test the actual
+  subject through a pipe with output large enough to exercise backpressure,
+  compare exact content against an independently known payload, and use a file
+  redirect as a separate control. Exit 0 or a complete redirected file alone
+  does not prove that piped output survived.
 - **A pipe-vs-file byte check is a canary for ONE LARGE WRITE, and much weaker
   for a stream of small ones.** `[measured 2026-09-08]` across the 19 scripts
   that carried the truncation above: a `--json` branch emitting one 94KB

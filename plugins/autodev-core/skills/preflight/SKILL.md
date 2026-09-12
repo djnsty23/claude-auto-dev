@@ -11,29 +11,30 @@ argument-hint: "[init | add <class> | verify]"
 # Preflight
 
 A checklist a human runs sometimes is not a gate. This builds the executable
-one: `scripts/preflight.js`, run before every deploy and in CI, failing the
-build on the bug families this project has actually shipped.
+one: `scripts/preflight.js`, wired into the project’s actual local completion/
+release gate and existing CI when used, failing on relevant bug families.
 
-Prose rules do not move the number. Two of the repos this framework was measured
-against carry 526- and 593-line `CLAUDE.md` files and have the **worst**
-fix-per-feature ratios. Gates that fail a build are what changes outcomes.
+A rule’s presence does not prove it changes outcomes. Measure whether the
+actual gate rejects a reproduced defect while preserving a known-good control.
 
 ## `preflight init`
 
 1. **Find out what to gate.** Run `/learn-from-fixes` first. Gate the top two or
    three classes for *this* repo, not a generic list. If the user insists on
-   starting without that analysis, gate only `syntax`, `gates-ran` and
-   `workflow-valid` and say plainly that the rest is guesswork until there is
-   history to read.
+   starting without that analysis, start with applicable template checks and
+   known acceptance risks. Record missing history; a new repo can still have
+   concrete requirements worth testing.
 
-   Those three are the template's defaults because none of them has to know
-   anything about the repo. `workflow-valid` is the one worth a sentence: a
+   The template defaults are `syntax` (JavaScript parse checks), `gates-ran`
+   (wiring hints) and `workflow-valid` (a narrow workflow shape check). They
+   need project-specific applicability and behavioral controls. A
    workflow file GitHub refuses fails in **0 seconds, with no jobs and no log**,
    so nothing readable tells you it happened. Measured in one repo on
    2026-08-20 — a duplicate top-level `concurrency:` key left a workflow dead
    for three days while marking every open PR `UNSTABLE`, past sixty other
-   gates. It is a line scan rather than a parse on purpose: YAML parsers accept
-   duplicate keys and keep the last, so they call a rejected file valid.
+   gates. The template’s line scan targets that class; it is not a full workflow
+   validator. Some parser configurations accept duplicate keys, so verify that
+   the chosen validator rejects the actual malformed workflow.
 
 2. **Copy the template** to `scripts/preflight.js`:
 
@@ -41,16 +42,21 @@ fix-per-feature ratios. Gates that fail a build are what changes outcomes.
    cp "${CLAUDE_PLUGIN_ROOT}/templates/preflight.js" scripts/preflight.js
    ```
 
-3. **Wire it so it cannot be forgotten** — the template fails if you do not:
+3. **Wire it into the command that actually guards completion:**
 
    ```json
    { "scripts": { "preflight": "node scripts/preflight.js" } }
    ```
 
-   Add it to CI, and to the deploy ritual ahead of any build step.
+   Add it to the actual local completion/release command and existing CI if
+   applicable. Inspect what the copied template requires before claiming it is
+   wired; a package-script name alone does not show a consumer runs it.
 
-4. **Run it.** It should fail the first time, on `gates-ran`, until wiring is
-   done. That failure is the template proving itself.
+4. **Run it and its consumer.** Inspect failures and warnings. The template’s
+   `gates-ran` checks a script substring and can pass on `echo preflight`; absent
+   package/CI configuration can produce only a warning. Prove propagation by
+   making an actual check fail in an isolated fixture and running the real
+   completion/release command. Do not infer enforcement from this template alone.
 
 ## `preflight add <class>` — first, prove the gate does not already exist
 
@@ -68,15 +74,17 @@ fix-per-feature ratios. Gates that fail a build are what changes outcomes.
    to skip, and the skipping generalises to the gates that were right.
 
 A measurement of zero is a fine result: the gate becomes a regression guard.
-A measurement of sixty is a signal your rule is mis-specified, not that the
-project has sixty bugs.
+A measurement of sixty requires triage: it can reflect real debt, false
+positives or both. The count alone does not decide which.
 
 ### When the population is large: ratchet, don't flood
 
 A measurement in the hundreds does not mean "write a gate that fails 400 times".
-It means the codebase has a real class of debt and the gate has to be a
-**ratchet**: record today's violations as a baseline, fail only on **new** ones,
-and let the baseline shrink.
+After triage confirms real debt, a **ratchet** can prevent new violations
+without declaring the existing ones fixed: record today’s verified violations
+as a baseline, fail on **new** ones,
+and let the baseline shrink. Do not baseline an unresolved critical release
+risk merely to ship; keep its acceptance criterion and remediation visible.
 
 Measured example: `@typescript-eslint/no-floating-promises` on one repo returned
 **417 findings across 183 files**. As `error` it breaks the build immediately; as
@@ -132,10 +140,10 @@ Shapes that work, by class:
 |---|---|
 | Reachability / dead path | Parse the dispatch site; assert every handler is registered at the depth that actually runs |
 | Duplicated derivation | Assert only one module computes the value; every other reference imports it |
-| Cross-surface consistency | Assert the surfaces showing one value import the same function |
-| Cache / key scoping | Assert every cache key includes the account/tenant dimension |
+| Cross-surface consistency | Exercise the relevant surfaces on the same inputs; shared imports are a structural guard, not proof of equal output |
+| Cache / key scoping | Test account-scoped data across account changes; exempt intentionally global caches with evidence |
 | Copy / i18n drift | Hash the source string per key; fail when the source changed and a locale's hash did not |
-| Lifecycle | Assert each `addEventListener` / `setInterval` / `requestAnimationFrame` has a teardown in the same module |
+| Lifecycle | Exercise creation/disposal and verify no unintended live handlers/timers remain; document intentionally process-long resources |
 | Config targeting | Assert the env var or project id resolves to the environment the build targets |
 | **Gate satisfied by a comment** | Strip comments with a real lexer before the gate's own regex runs — see below |
 
@@ -163,22 +171,12 @@ bugs.** Most raw-source tests are correct — a check looking for `readFileSync`
 calls, or matching a version label, genuinely wants the literal text. A gate at
 that precision is one people learn to skip.
 
-Ship the narrow version instead: **name the security-critical checks and assert
-each one runs against a comment-stripped view.**
-
-```js
-// Not a scan of every regex — a ratchet over the checks that guard something.
-const LEXED = ['owner-exemption', 'img-consent', 'authz-order'];
-gate('gates-are-lexed', 'every security gate reads code, not prose', () => {
-    const src = fs.readFileSync(__filename, 'utf8');
-    const missing = LEXED.filter((id) => {
-        const body = sliceGate(src, id);          // the gate's own body
-        return !/decomment|codeOnly/.test(body);  // …must use the lexer
-    });
-    if (missing.length) fail(`these test raw source, so a comment satisfies them: ${missing}`);
-    else ok(`${LEXED.length} security gates read a lexed view`);
-});
-```
+For named security-critical checks, run the actual gate on controlled copies
+of its production input. Remove the executable guard while leaving line and
+block comments naming it; require failure for the intended reason. Preserve a
+valid control (including valid string-literal forms) and require it to pass.
+A regex checking whether the gate body mentions `decomment` or `codeOnly` is
+not evidence it uses a lexer: a comment can satisfy that regex too.
 
 Use a real lexer, not two regexes. `src.replace(/\/\*[^]*?\*\//g,'').replace(/\/\/.*$/gm,'')`
 is not a scanner: a `//` inside a string (every URL) eats the rest of the line,
@@ -210,7 +208,9 @@ Audit the gate file itself:
 - Does every gate still run? A gate whose target file was renamed reports
   "skipped", and in the template that is a hard failure — confirm none are.
 - Is every `KNOWN_RED` entry still red, and still tied to an open work item?
-- Is preflight still referenced by CI and by a package script?
+- Does the actual completion/release command execute preflight and preserve
+  its failure? Check existing CI wiring too when applicable. Run a controlled
+  failure through that consumer; matching a script name is not enough.
 
 ## The four laws
 

@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "id": "transport-replay-cannot-renew-send-budget",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Missing expected exception: delivery-already-issued\n    at fail (/private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/replay-send-budget/tooling/test-synthetic-runtime.js:11:36)\n    at /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/replay-send-budget/tooling/test-synthetic-runtime.js:39:243\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/replay-send-budget/tooling/test-synthetic-runtime.js:46:116"
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 1,
+    "population": 1,
+    "syntheticHelpers": 1,
+    "modelCalls": 0,
+    "remainingChildren": 0,
+    "remainingServers": 0,
+    "fixtureRemoved": true
+  }
+}
