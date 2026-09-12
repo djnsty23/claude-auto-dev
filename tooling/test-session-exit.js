@@ -402,6 +402,54 @@ try {
             body(after, 'Next steps'), '_Not written._');
         has('  and it reports what it kept', again.out, 'kept Goal, Failed attempts');
 
+        // A `##` heading the session writes is not this script's to drop.
+        // `[measured 2026-09-13]` by a peer review of the first version: a
+        // `## Retry idea` inside Failed attempts and a `## Notes` appended at the
+        // end were both deleted by a rerun that exited 0 and said it kept them.
+        fs.writeFileSync(doc, fs.readFileSync(doc, 'utf8')
+            .replace(/(## Failed attempts\n\n)/, '$1## Retry idea\n\nRETRY-IDEA-BODY\n\n')
+            + '\n## Notes\n\nNOTES-BODY\n');
+        const third = run(repo, []);
+        const t3 = fs.readFileSync(doc, 'utf8');
+        check('a rerun keeps a ## heading written INSIDE an authored field',
+            third.status === 0 && t3.indexOf('RETRY-IDEA-BODY') !== -1, 'status ' + third.status);
+        check('  and keeps it IN that field, not relocated to the end',
+            t3.indexOf('## Failed attempts') < t3.indexOf('## Retry idea')
+            && t3.indexOf('## Retry idea') < t3.indexOf('## Next steps'));
+        has('  and a ## section appended after the measured ones', t3, 'NOTES-BODY');
+        has('  and says it kept that section', third.out, 'kept 1 section(s) under headings of their own');
+        run(repo, []);
+        const t4 = fs.readFileSync(doc, 'utf8');
+        check('  and a further rerun neither loses nor duplicates either',
+            (t4.match(/^## Notes$/mg) || []).length === 1 && (t4.match(/^## Retry idea$/mg) || []).length === 1
+            && t4.indexOf('NOTES-BODY') !== -1 && t4.indexOf('RETRY-IDEA-BODY') !== -1);
+        has('  while the dead end written before them is still there', t4, DEAD_END);
+
+        // Our OWN layout grown by its carried fields is not a hand-written file.
+        // `[measured 2026-09-13]` same review: 27,926 bytes with a long Failed
+        // attempts was refused as "QUOTES this script's marker".
+        const LINE = '- tried a thing, failed because of a reason\n';
+        const grown = t4.replace(/(## Failed attempts\n\n)/, '$1' + LINE.repeat(700));
+        check('  (the grown file is past the size guard on bytes alone: ' + grown.length + ')',
+            grown.length > 25000);
+        fs.writeFileSync(doc, grown);
+        const g = run(repo, []);
+        check('our own file grown past 20 kB by a carried field reruns without --force',
+            g.status === 0, 'status ' + g.status + ' ' + g.err.slice(0, 160));
+        check('  and keeps every line of the grown field',
+            fs.readFileSync(doc, 'utf8').split(LINE).length - 1 === 700);
+
+        // The planted positive: the same file with the bulk where a rerun DROPS it.
+        const buried = fs.readFileSync(doc, 'utf8')
+            .replace(/(## Files in flight\n\n)/, '$1' + 'z'.repeat(30000) + '\n\n');
+        fs.writeFileSync(doc, buried);
+        const b = run(repo, []);
+        check('  but 30 kB written INSIDE a measured field is refused, a rerun would drop it',
+            b.status === 3, 'status ' + b.status);
+        check('  and is byte-identical afterwards', fs.readFileSync(doc, 'utf8') === buried);
+        has('  and the refusal describes our layout and where the text sits', b.err, 'own layout');
+        lacks('  and does not call it a hand-written file quoting the marker', b.err, 'QUOTES');
+
         // Authorship decides what is carried, as it decides what is overwritten.
         const foreign = newRepo('foreign-fields');
         fs.writeFileSync(path.join(foreign, 'RESUME.md'), '# notes\n\n## Failed attempts\n\nFOREIGN-BODY\n');

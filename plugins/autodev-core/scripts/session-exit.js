@@ -275,7 +275,7 @@ const readerFirst = ['## What a reader should do first', ''].concat(steps, [
 ]);
 
 function authored(title, carried) {
-    return ['## ' + title, '', carried[title] || AUTHORED[title], ''];
+    return ['## ' + title, '', (carried.fields || {})[title] || AUTHORED[title], ''];
 }
 
 /** The whole document, with `carried` authored bodies in place of their placeholders. */
@@ -289,7 +289,8 @@ function render(carried) {
         'recollection, and anything a command could not answer says so rather than',
         'rendering as empty. The other four cannot be read by any command: the session',
         'that ends writes them under their headings, and a rerun of this script keeps',
-        'what it wrote there. Anything written inside a measured field is regenerated.',
+        'what it wrote there and under any heading of its own. Text written inside a',
+        'measured field is regenerated.',
         '',
     ].concat(
         authored('Goal', carried),
@@ -299,16 +300,31 @@ function render(carried) {
         authored('Failed attempts', carried),
         authored('Next steps', carried),
         readerFirst,
+        [].concat(...(carried.extras || []).map((b) => [b, ''])),
     ).join('\n');
 }
 
+/** Headings this script rebuilds on every run. Text under them is not carried. */
+const MEASURED = ['Current state', 'Files in flight', 'What a reader should do first'];
+
 /**
- * The authored bodies of an existing RESUME.md, keyed by heading.
+ * What a rerun keeps from an existing RESUME.md: `fields`, the authored bodies
+ * keyed by heading; `extras`, whole sections under headings this script does
+ * not own; `keptBytes`, their combined size; `shaped`, whether the file is in
+ * this script's own layout.
  *
  * A RERUN MUST NOT ERASE WHAT A SESSION WROTE. The measured fields are rebuilt
  * on every run; without this, a session that recorded its failed attempts and
  * then refreshed the snapshot would lose exactly the dead ends the file exists
  * to carry, and nothing would say so.
+ *
+ * NOTHING UNDER A HEADING THIS SCRIPT DOES NOT OWN IS DROPPED. `[measured
+ * 2026-09-13]` by a peer review of the first version, which ended a field at
+ * the next `## ` and kept only the four authored names: a `## Retry idea`
+ * written inside Failed attempts and a `## Notes` appended at the end were both
+ * deleted by a rerun that exited 0 and printed "kept Failed attempts". So an
+ * unknown `##` heading stays inside the authored field it follows, and one that
+ * follows a measured field is carried as a section of its own, rendered last.
  *
  * Read only from a file carrying MARKER: these headings are a contract of our
  * own output, and a foreign file's `## Goal` is somebody else's structure. A
@@ -316,21 +332,40 @@ function render(carried) {
  * stays recognisably unwritten rather than being frozen as content.
  */
 function carriedFrom(file) {
+    const none = { fields: {}, extras: [], keptBytes: 0, shaped: false };
     let text;
-    try { text = fs.readFileSync(file, 'utf8'); } catch { return {}; }
-    if (text.indexOf(MARKER) === -1) return {};
-    const rows = text.split(/\r?\n/);
-    const out = {};
-    for (let i = 0; i < rows.length; i++) {
-        const m = rows[i].match(/^## (.+?)\s*$/);
-        if (!m || !Object.prototype.hasOwnProperty.call(AUTHORED, m[1]) || m[1] in out) continue;
-        let end = i + 1;
-        while (end < rows.length && !/^## /.test(rows[end])) end++;
-        const body = rows.slice(i + 1, end).join('\n').trim();
-        if (body && body !== AUTHORED[m[1]]) out[m[1]] = body;
-        i = end - 1;
+    try { text = fs.readFileSync(file, 'utf8'); } catch { return none; }
+    if (text.indexOf(MARKER) === -1) return none;
+    const bodies = {};
+    const extras = [];
+    // null: text a rerun regenerates. A string: the authored field being read.
+    // An array: an extra section being read, heading line included.
+    let owner = null;
+    for (const row of text.split(/\r?\n/)) {
+        const m = row.match(/^## (.+?)\s*$/);
+        if (m && Object.prototype.hasOwnProperty.call(AUTHORED, m[1]) && !(m[1] in bodies)) {
+            owner = m[1];
+            bodies[owner] = [];
+        } else if (m && MEASURED.indexOf(m[1]) !== -1) {
+            owner = null;
+        } else if (m && typeof owner !== 'string') {
+            owner = [row];
+            extras.push(owner);
+        } else if (typeof owner === 'string') {
+            bodies[owner].push(row);
+        } else if (owner) {
+            owner.push(row);
+        }
     }
-    return out;
+    const fields = {};
+    for (const t of Object.keys(bodies)) {
+        const body = bodies[t].join('\n').trim();
+        if (body && body !== AUTHORED[t]) fields[t] = body;
+    }
+    const blocks = extras.map((b) => b.join('\n').trim());
+    const keptBytes = Object.keys(fields).reduce((n, t) => n + fields[t].length, 0)
+        + blocks.reduce((n, b) => n + b.length, 0);
+    return { fields, extras: blocks, keptBytes, shaped: SHAPE.test(text) };
 }
 
 // The marker that says a RESUME.md is OURS and safe to replace.
@@ -347,11 +382,16 @@ function carriedFrom(file) {
 // tracking - overwrite what we wrote, never what a person wrote.
 const MARKER = 'Written by `session-exit.js`';
 
+// Our own LAYOUT, not merely our marker: the six-field intro at the very top.
+// Still a string a document could imitate, which is why it only changes WHAT
+// the guard sizes (the bytes a rerun would drop) and never grants a write alone.
+const SHAPE = /^# RESUME\r?\n\r?\nWritten by `session-exit\.js`\. Six fields/;
+
 // Anything we are about to write is a snapshot of a few kB. A foreign file much
 // larger than that is a document somebody maintains.
 const SUSPICIOUS_BYTES = 20000;
 
-function refuseToClobber(out, aboutToWrite) {
+function refuseToClobber(out, aboutToWrite, carry) {
     let existing;
     try { existing = fs.readFileSync(out, 'utf8'); } catch { return null; }   // absent: fine
 
@@ -371,8 +411,18 @@ function refuseToClobber(out, aboutToWrite) {
     // `[measured 2026-08-25]` the file destroyed in the third incident was
     // 458 KB and 6,132 lines against a 5 KB snapshot. Two orders of magnitude is
     // not a warning, it is a hard stop.
-    const huge = existing.length >= SUSPICIOUS_BYTES
-        && existing.length > (aboutToWrite || 0) * 4;
+    //
+    // OUR OWN LAYOUT IS SIZED BY WHAT A RERUN WOULD DROP. `[measured 2026-09-13]`
+    // by a peer review: once authored fields are carried, our own RESUME.md
+    // grows, and a 27,926-byte one with a long Failed attempts was refused as
+    // "QUOTES this script's marker". Nothing was lost, but the message
+    // misdescribed the file and sent the session to --force. For a file in our
+    // layout, the bytes at risk are the ones a rerun does NOT carry, so those
+    // are what is sized. Every other file is sized whole, as before.
+    const shaped = !!(carry && carry.shaped);
+    const measured = shaped ? Math.max(0, existing.length - carry.keptBytes) : existing.length;
+    const huge = measured >= SUSPICIOUS_BYTES
+        && measured > (aboutToWrite || 0) * 4;
 
     // THE MARKER IS A STRING A DOCUMENT CAN QUOTE, so it may only ever DOWNGRADE
     // a refusal, never grant permission. `[measured 2026-09-05]` this test used to
@@ -392,6 +442,15 @@ function refuseToClobber(out, aboutToWrite) {
     if (quoted && !huge) return null;     // ours, and not big enough to be a handoff
 
     if (!tracked && !huge) return null;   // small, foreign, untracked: replaceable
+
+    if (shaped) {
+        return 'REFUSING to overwrite ' + out + '\n'
+            + '  It is in this script\'s own layout, but ' + measured + ' bytes of it sit outside\n'
+            + '  the text a rerun keeps: before the first field, or inside Current state,\n'
+            + '  Files in flight or What a reader should do first, which a rerun regenerates.\n'
+            + '  Move that text under a field or a heading of its own, write elsewhere with\n'
+            + '  --out <path>, or --force if it can go.';
+    }
 
     const why = quoted
         ? 'It is ' + existing.length + ' bytes and QUOTES this script\'s marker'
@@ -424,7 +483,7 @@ if (has('--print')) {
     // would carry its own bulk forward, stop looking four times larger than
     // what replaces it, and be overwritten without a prompt. That is the
     // quoted-marker destruction route again, reopened by this feature.
-    const refusal = has('--force') ? null : refuseToClobber(target, render({}).length);
+    const refusal = has('--force') ? null : refuseToClobber(target, render({}).length, carried);
     if (refusal) { console.error(refusal); process.exit(3); }
     fs.writeFileSync(target, doc, 'utf8');
     console.log('wrote ' + target + ' (' + doc.length + ' bytes)');
@@ -433,10 +492,11 @@ if (has('--print')) {
         + (dirtyLines === null ? 'dirty UNKNOWN' : dirtyLines.length + ' dirty') + ', '
         + (prs === null ? 'PRs UNKNOWN' : prs.length + ' open PR(s)'));
     const names = Object.keys(AUTHORED);
-    const kept = names.filter((t) => carried[t]);
-    const missing = names.filter((t) => !carried[t]);
+    const kept = names.filter((t) => carried.fields[t]);
+    const missing = names.filter((t) => !carried.fields[t]);
     console.log('  authored: '
         + (kept.length ? 'kept ' + kept.join(', ') : 'none kept')
+        + (carried.extras.length ? '; kept ' + carried.extras.length + ' section(s) under headings of their own' : '')
         + (missing.length ? '; NOT WRITTEN, write these by hand: ' + missing.join(', ') : ''));
 }
 
