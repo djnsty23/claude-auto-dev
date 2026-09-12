@@ -37,6 +37,9 @@ const ADVISORY = [
     // #200's Stop note: names a lost workflow run and its resume command, as a
     // systemMessage with no decision key. It advises.
     'stop-workflow-wall-note.js',
+    // PreModelSwitch note: a systemMessage naming the forfeited cache and any
+    // dropped Fable 5.1 thinking blocks, never a permissionDecision. It advises.
+    'model-switch-note.js',
 ];
 // Hooks that guard, block, or keep state the sprint and the Brain depend on.
 const GUARDING = [

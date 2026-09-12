@@ -332,6 +332,10 @@ function checkHookWiring() {
     // context, carrying file_path, load_reason and file_content. Its exit code is
     // ignored by the harness, so a hook on it can observe and never block.
     'InstructionsLoaded',
+    // PreModelSwitch / PostModelSwitch fire around an explicit model switch
+    // (/model, the picker, SDK set_model); Post also fires on --resume and
+    // automatic changes. Listed in the 2.1.261 binary's hook-event enum.
+    'PreModelSwitch', 'PostModelSwitch',
   ]);
 
   for (const p of pluginDirs()) {
