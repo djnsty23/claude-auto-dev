@@ -581,8 +581,8 @@ const {
 const ME = 'S-1-5-21-1111-1000';
 const OTHER = 'S-1-5-21-2222-1001';
 const BIN = 'C:\\ab\\agent-browser-win32-x64.exe';
-const CFT = 'C:\\Users\\u\\.agent-browser\\browsers\\chrome-148\\chrome.exe';
-const PROFILE = (id) => `--user-data-dir=C:\\Users\\u\\AppData\\Local\\Temp\\agent-browser-chrome-${id}`;
+const CFT = 'D:\\ab-home\\.agent-browser\\browsers\\chrome-148\\chrome.exe';
+const PROFILE = (id) => `--user-data-dir=D:\\ab-home\\AppData\\Local\\Temp\\agent-browser-chrome-${id}`;
 // FILETIMEs are 18 digits. T(n) keeps creation order readable in the fixtures.
 const T = (n) => String(133900000000000000n + BigInt(n));
 const WROWS = (spec) => spec.map(([pid, ppid, created, sid, name, exe, command]) =>

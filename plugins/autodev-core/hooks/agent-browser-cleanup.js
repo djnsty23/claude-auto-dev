@@ -703,8 +703,11 @@ function restoreSnippingToolHotkey(deps = {}) {
 // removed: the error falls on the side of leaving a value alone.
 function selectRunValues(text, pattern = /agent-browser/i) {
     const names = [];
+    // Named, not inline: validate's spawn scan reads a bare `/.../.exec(` as a
+    // child_process exec, since only `name.exec(` is exempt.
+    const valueRow = /^ {4}(.+?) {4}(REG_[A-Z_]+) {4}(.*)$/;
     for (const line of String(text).split(/\r?\n/)) {
-        const m = /^ {4}(.+?) {4}(REG_[A-Z_]+) {4}(.*)$/.exec(line);
+        const m = valueRow.exec(line);
         if (m && /^REG_(EXPAND_)?SZ$/.test(m[2]) && pattern.test(m[3])) names.push(m[1]);
     }
     return names;
