@@ -153,6 +153,27 @@ function spoke(r) {
         check('the model line carries the exact depth', ctx.includes('402,578'), ctx.slice(0, 60));
         check('the model line names RESUME.md and the 300k line',
             ctx.includes('RESUME.md') && ctx.includes('300k'), ctx.slice(0, 120));
+        // The six RESUME.md fields, spelled HERE rather than read out of the hook,
+        // because this list is the contract: a hook that silently drops one must go
+        // red. session-exit.js renders the same six, pinned by test-session-exit.js.
+        const FIELDS = ['goal', 'current state', 'files in flight', 'changes made',
+            'failed attempts', 'next steps'];
+        const lower = ctx.toLowerCase();
+        for (const field of FIELDS) {
+            check('the model line names the RESUME.md field "' + field + '"',
+                lower.includes(field), ctx.slice(0, 400));
+        }
+        const at = FIELDS.map((f) => lower.indexOf(f));
+        check('  and names them in the order session-exit.js renders them',
+            at.every((v, i) => v !== -1 && (i === 0 || v > at[i - 1])), JSON.stringify(at));
+        // A failed attempt without its reason is a dead end the next session cannot
+        // judge: it cannot tell a real wall from a typo, so it tries again.
+        check('  failed attempts must carry why each failed',
+            /failed attempts, each with why it failed/.test(lower), ctx.slice(0, 400));
+        check('  changes made must carry the command that verified each',
+            /changes made, each with the command that verified it/.test(lower), ctx.slice(0, 400));
+        check('  and it names the script that fills the measured fields',
+            /session-exit\.js fills the measured fields/.test(ctx), ctx.slice(0, 400));
         check('hookEventName is Stop', j.hookSpecificOutput.hookEventName === 'Stop');
         check('no decision key: it cannot fight stop-auto-check', !('decision' in j), Object.keys(j).join(','));
         check('the operator line is short and carries the depth',
