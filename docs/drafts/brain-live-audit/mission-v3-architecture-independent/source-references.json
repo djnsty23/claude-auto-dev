@@ -1,0 +1,74 @@
+{
+  "plugins/autodev-core/scripts/mission-store.js": [
+    {
+      "needle": "function status",
+      "lines": [
+        151
+      ]
+    },
+    {
+      "needle": "function validFence",
+      "lines": [
+        165
+      ]
+    },
+    {
+      "needle": "const state=current",
+      "lines": [
+        270
+      ]
+    },
+    {
+      "needle": "if(command==='authorize-bootstrap')",
+      "lines": [
+        290
+      ]
+    },
+    {
+      "needle": "if(command==='register-executor')",
+      "lines": [
+        300
+      ]
+    },
+    {
+      "needle": "if (command === 'fail'",
+      "lines": [
+        199,
+        234
+      ]
+    },
+    {
+      "needle": "return { resultId: row.id",
+      "lines": [
+        257
+      ]
+    }
+  ],
+  "fixtures/synthetic-adapter.cjs": [
+    {
+      "needle": "async start",
+      "lines": [
+        34
+      ]
+    },
+    {
+      "needle": "const done=new Promise",
+      "lines": [
+        43
+      ]
+    },
+    {
+      "needle": "reconcile(f)",
+      "lines": [
+        39,
+        47
+      ]
+    },
+    {
+      "needle": "reviewReadiness(f)",
+      "lines": [
+        74
+      ]
+    }
+  ]
+}

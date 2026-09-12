@@ -16,30 +16,36 @@ tutorial on it.
 ## 1. Automated scan
 
 ```bash
-npx axe-core-cli http://localhost:3000
+npx --no-install axe "$TARGET_URL" --exit
 ```
 
-**Automated tooling catches roughly 30% of real issues.** Treat a clean axe run
-as the starting point, never as a pass.
+Resolve the project’s installed `@axe-core/cli` and its browser driver first;
+use an existing axe integration if that is what the project provides. Record
+the command, version, target build, routes/states, exit status and report.
+Missing tooling or a failed page load is an unexecuted check. A clean automated
+scan covers only its rules and scanned states; manual checks still apply.
 
 ## 2. Manual checks
 
-Drive the page with the `browser` skill and confirm, in this order — the first
-two are where this codebase actually fails:
+Use an available browser driver with its actual tool schema. Confirm these in
+the affected public and authenticated flows, including relevant error states:
 
 1. **Keyboard only.** Tab through the whole flow. Every interactive element is
-   reachable, in a sensible order, with a visible focus indicator. Dialogs trap
-   focus and restore it on close.
-2. **State changes are announced.** Loading, error, and success states reach a
-   live region — a spinner that only appears visually is invisible to a screen
-   reader.
+   reachable, in a sensible order, with a visible focus indicator. Modal dialogs trap
+   focus and restore it on close; nonmodal dialogs must not trap the user.
+2. **Status changes are accessible.** Verify relevant loading, error and success
+   notifications through suitable status semantics or focus management. Do not
+   claim an announcement was heard from a DOM inspection alone; if no screen
+   reader was exercised, record that manual coverage gap.
 3. Labels on every input; errors tied to their field.
 4. Contrast at 4.5:1 for body text, 3:1 for large text and UI boundaries.
-5. Landmarks and one `h1`, with no skipped heading levels.
+5. Meaningful landmarks and a heading hierarchy that describes the content.
 6. Images: meaningful ones have alt text, decorative ones have `alt=""`.
 
 `rule-design-system` and `standards` list the anti-patterns to flag on sight
-(`user-scalable=no`, `outline-none` with no `focus-visible`, `transition: all`).
+(`user-scalable=no`, `outline-none` with no visible focus replacement). Check
+reduced-motion behavior and effective hit areas; distinguish project touch-size
+targets from the WCAG criterion actually violated.
 
 ## 3. Report
 
@@ -54,21 +60,22 @@ Forms:                ✅ All inputs labeled
 ARIA:                 ✅ Live regions for loading states
 Semantic HTML:        ⚠️ Missing landmark roles
 
-Score: 78/100
+Coverage: [named routes, roles, states, automated/manual checks and gaps]
 Critical: 0 | High: 1 | Medium: 2 | Low: 1
 ```
 
 Each finding gets `file:line`, the WCAG criterion, and the fix. Say which checks
 were automated and which you performed manually — a reader cannot tell
-otherwise, and it changes how much the score is worth.
+otherwise. A severity or rating requires a stated rationale, not a raw violation count.
 
 ## Proving the run
 
-**Observable:** zero serious/critical axe violations across the routes scanned,
-and the number of routes is stated.
+**Observable:** the scanner executed across the named routes/states, findings
+were triaged against the applicable standard, and manual outcomes are recorded.
+`--exit` fails on any selected rule violation, not only serious/critical ones.
 
 ```bash
-npx axe-core-cli <url> --exit   # non-zero exit on any violation
+npx --no-install axe "$TARGET_URL" --exit   # non-zero on any selected rule violation
 ```
 
 A clean report is only meaningful next to the population it covers. "No issues

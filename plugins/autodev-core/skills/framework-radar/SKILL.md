@@ -10,6 +10,13 @@ argument-hint: "[days | YouTube URL]"
 
 # Framework Radar
 
+The shell examples resolve scripts through `${CLAUDE_PLUGIN_ROOT}`, which the
+host sets per loaded plugin — it is an environment variable, so it survives
+across separate shell invocations where a variable you assign does not. Do not
+substitute the target project's working directory. If it is unset the plugin is
+not loaded; fix that rather than hardcoding a path. Verify the named script
+exists under that root.
+
 Collect first, judge second, test third. The collector owns source retrieval,
 transcript storage, population counts and deduplication. This skill owns
 relevance, corroboration, controlled experiments and evidence-backed adoption.
@@ -119,6 +126,11 @@ hypothesis must be executed in this run.** Do not create a heading called
 "hypothesis" for an idea that cannot be tested now; keep it under `watch` with
 the missing prerequisite.
 
+If execution becomes unavailable after selection, retain the selected id,
+completed attempts, missing prerequisite and owner as pending. Do not relabel
+it `reject`/`no winner`, fabricate measurements or mark the manifest fully
+reviewed merely to make selected and verdict counts agree.
+
 Before seeing results, record:
 
 - Hypothesis and affected workflow.
@@ -140,7 +152,10 @@ nothing" is otherwise incomplete.
 
 Never experiment in the shared checkout. Fetch the remote, verify the exact
 default-branch commit, and create a dedicated worktree and `codex/radar-*`
-branch from that commit. Run A before editing. Run B and C on the same fixtures
+branch from that commit. Read open candidate branches/PRs and current authorized work too: a remote
+default is the stable baseline, but a capability may already exist in an
+unmerged candidate. Verify ancestry/content before proposing a duplicate.
+Run A before editing. Run B and C on the same fixtures
 and environment. Preserve raw commands, exit statuses, elapsed time and output
 paths in the report.
 
@@ -160,9 +175,12 @@ When B or C wins, implement only the winning variant in the isolated worktree
 and run its targeted verification plus the repository gate. Commit explicit
 paths. A scheduled run may push the winning experiment branch for review and
 open a PR only when its automation prompt explicitly grants standing
-authorization for that exact `codex/radar-*` branch. In an interactive run,
-obtain fresh push authorization from the user. No radar run may merge, deploy,
-tag, release or update installed plugins. When neither variant wins, leave no
+authorization for the selected experiment branch. In an interactive run, use
+the current request and still-valid publication grant; do not require a fresh
+approval for the same authorized action. This research workflow does not itself
+merge, deploy, tag, release or update installed plugins. If the user also
+authorized delivery, continue through `commit`/`ship` with the winning candidate
+and their verification/ownership requirements instead of ending at the report. When neither variant wins, leave no
 framework change or PR behind.
 
 Completion: the count of selected hypotheses equals the count with executed

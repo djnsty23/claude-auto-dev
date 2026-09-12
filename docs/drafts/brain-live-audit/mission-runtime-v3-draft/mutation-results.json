@@ -1,0 +1,155 @@
+{
+  "results": [
+    {
+      "name": "duplicate-registration",
+      "targetCase": "duplicate-helper-registration-allows-one-worker",
+      "predictedAssertion": "one execution despite duplicate live helper processes",
+      "matchedPredictedText": true,
+      "detected": true,
+      "actualError": "AssertionError [ERR_ASSERTION]: one execution despite duplicate live helper processes\n\n2 !== 1\n\n    at /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/duplicate-registration/tooling/test-synthetic-runtime.js:23:399\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/duplicate-registration/tooling/test-synthetic-runtime.js:46:116",
+      "control": {
+        "passed": 1,
+        "failed": 0,
+        "population": 1,
+        "syntheticHelpers": 1,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "mutationSummary": {
+        "passed": 0,
+        "failed": 1,
+        "population": 1,
+        "syntheticHelpers": 2,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "sourceSha256": "09eddd1a1d05a4efb3146f62c840b3aabfbc32aae42d24a5dde1caaacaa1322a"
+    },
+    {
+      "name": "unsafe-release",
+      "targetCase": "unknown-and-live-hold-until-owned-close-recovery",
+      "predictedAssertion": "unknown execution retains checkout",
+      "matchedPredictedText": true,
+      "detected": true,
+      "actualError": "AssertionError [ERR_ASSERTION]: Missing expected exception: unknown execution retains checkout\n    at fail (/private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/unsafe-release/tooling/test-synthetic-runtime.js:11:36)\n    at /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/unsafe-release/tooling/test-synthetic-runtime.js:25:288\n    at async /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/unsafe-release/tooling/test-synthetic-runtime.js:46:116",
+      "control": {
+        "passed": 1,
+        "failed": 0,
+        "population": 1,
+        "syntheticHelpers": 1,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "mutationSummary": {
+        "passed": 0,
+        "failed": 1,
+        "population": 1,
+        "syntheticHelpers": 1,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "sourceSha256": "a723a48385d9dd9d5d3228253e1e8b6d8c9d339128ded2a65e59b74214d45f4e"
+    },
+    {
+      "name": "wrong-ack",
+      "targetCase": "lost-and-wrong-ack-do-not-start-another-worker",
+      "predictedAssertion": "wrong receiver cannot clear pending delivery",
+      "matchedPredictedText": true,
+      "detected": true,
+      "actualError": "AssertionError [ERR_ASSERTION]: wrong receiver cannot clear pending delivery\n+ actual - expected\n\n+ 'acked'\n- 'ack-mismatch'\n      ^\n\n    at /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/wrong-ack/tooling/test-synthetic-runtime.js:28:238\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/wrong-ack/tooling/test-synthetic-runtime.js:46:116",
+      "control": {
+        "passed": 1,
+        "failed": 0,
+        "population": 1,
+        "syntheticHelpers": 1,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "mutationSummary": {
+        "passed": 0,
+        "failed": 1,
+        "population": 1,
+        "syntheticHelpers": 1,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "sourceSha256": "d52ca28e0a89fbe1e0f52238a3a8aadc8bd3ba82b3445251ca4e6228d6f83d81"
+    },
+    {
+      "name": "ignore-required-hook",
+      "targetCase": "required-hook-failure-refuses-existing-valid-artifact",
+      "predictedAssertion": "blocked required hook must prevent review readiness even with valid output",
+      "matchedPredictedText": true,
+      "detected": true,
+      "actualError": "AssertionError [ERR_ASSERTION]: blocked required hook must prevent review readiness even with valid output\n+ actual - expected\n\n+ 'review-ready'\n- 'execution-incomplete'\n\n    at /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/ignore-required-hook/tooling/test-synthetic-runtime.js:31:349\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/ignore-required-hook/tooling/test-synthetic-runtime.js:46:116",
+      "control": {
+        "passed": 1,
+        "failed": 0,
+        "population": 1,
+        "syntheticHelpers": 1,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "mutationSummary": {
+        "passed": 0,
+        "failed": 1,
+        "population": 1,
+        "syntheticHelpers": 2,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "sourceSha256": "8b2e0c436a70d49d49ac2908d3ecd041b11349ba42c00354fc111a8912c166d9"
+    },
+    {
+      "name": "replay-send-budget",
+      "targetCase": "transport-replay-cannot-renew-send-budget",
+      "predictedAssertion": "delivery-already-issued",
+      "matchedPredictedText": true,
+      "detected": true,
+      "actualError": "AssertionError [ERR_ASSERTION]: Missing expected exception: delivery-already-issued\n    at fail (/private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/replay-send-budget/tooling/test-synthetic-runtime.js:11:36)\n    at /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/replay-send-budget/tooling/test-synthetic-runtime.js:39:243\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async /private/var/folders/4p/78fpxlpx0rqf2h2y758wr6bh0000gn/T/mission-v2-mutants-ys9n_rpi/replay-send-budget/tooling/test-synthetic-runtime.js:46:116",
+      "control": {
+        "passed": 1,
+        "failed": 0,
+        "population": 1,
+        "syntheticHelpers": 1,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "mutationSummary": {
+        "passed": 0,
+        "failed": 1,
+        "population": 1,
+        "syntheticHelpers": 1,
+        "modelCalls": 0,
+        "remainingChildren": 0,
+        "remainingServers": 0,
+        "fixtureRemoved": true
+      },
+      "sourceSha256": "06d87c0221cee46150fe756d7d6a415cd7d834bbe7d35a5302be07ba32e71ed7"
+    }
+  ],
+  "summary": {
+    "detected": 5,
+    "population": 5,
+    "positiveControls": 5,
+    "fixtureRemoved": true
+  }
+}

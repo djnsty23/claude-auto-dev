@@ -84,7 +84,7 @@ const value = interpolate(frame, [0, 100], [0, 1], {
   easing: Easing.bezier(0.25, 0.1, 0.25, 1),
 });
 
-// Clamped (default extrapolateLeft/Right: 'clamp')
+// Explicitly clamp; the default extrapolation extends the input range
 const value = interpolate(frame, [0, 100], [0, 1], {
   extrapolateLeft: 'clamp',
   extrapolateRight: 'clamp',
@@ -130,8 +130,10 @@ Source: [remotion-dev/skills](https://github.com/remotion-dev/skills)
 
 ## Proving the run
 
-**Observable:** the composition renders end to end, and a still from the middle
-of the timeline exists and is not blank.
+**Observable:** the requested composition renders end to end with the expected
+frame count, duration, dimensions and playable media. Inspect representative
+scene boundaries and the final artifact, including audio/subtitles when present.
+A nonblank middle still is one control, not proof of the whole video.
 
 ```bash
 npx remotion still <CompositionId> out/frame.png --frame=<mid>
@@ -142,4 +144,6 @@ A composition that type-checks can still render black — a mistimed `Sequence`,
 an asset that 404s, a `useCurrentFrame` off by a factor of fps. Render a still
 from the middle rather than frame 0, which is often legitimately empty, and look
 at it. Report the frame count and duration actually produced, not the ones
-configured.
+configured. Verify output identity against the candidate composition and input
+assets. See [interpolate](https://www.remotion.dev/docs/interpolate) for current
+extrapolation behavior.

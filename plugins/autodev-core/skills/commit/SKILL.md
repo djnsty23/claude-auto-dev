@@ -10,18 +10,14 @@ argument-hint: "[type] [message]"
 
 # Commit Workflow
 
-> **Browser access.** Use the built-in browser tools. `mcp__Claude_Browser__*`
-> covers navigation, DOM reads (`read_page`), screenshots and `resize_window`;
-> reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
-> which `resize_window` alone does not guarantee. The `browser` skill and the
-> `agent-browser` steps were dropped in 8.79.0 — do not reach for that CLI here.
-> (The binary itself is still installed for kb-factory's JS-rendered crawls;
-> that is a separate consumer, not a fallback for page verification.)
+For UI verification, use the browser driver actually available in the current
+host and its exposed schema. Resolve that capability before promising a live
+check; another host's historical tool names are not an available API.
 
 ## Working Tree
-!`git status --short 2>/dev/null`
-!`git diff --stat HEAD 2>/dev/null | tail -5`
-!`git log --oneline -5 2>/dev/null`
+!`git status --short`
+!`git diff --stat HEAD`
+!`git log --oneline -5`
 
 ## Quick Commit
 
@@ -30,12 +26,17 @@ argument-hint: "[type] [message]"
 git status --short
 git diff --stat
 
-# 2. Stage specific files (prefer targeted adds over git add -A)
+# 2. Stage only the reviewed paths owned by this task
 git add src/components/new-feature.tsx src/lib/utils.ts
 
 # 3. Commit with conventional format
-git commit -m "feat: add playlist drag-drop reorder"
+git commit -F "$commit_message_file"
 ```
+
+Prepare `commit_message_file` with the exact conventional message before
+running the commit. A file preserves literal backticks and newlines. Inspect
+`git diff --cached` before committing so another session's staged work is not
+absorbed into this task.
 
 ## Evidence goes IN the commit
 
@@ -75,38 +76,26 @@ cannot state in a sentence is one you have not checked.
 - Body explains WHY, not WHAT
 - Include story ID when available: `feat(S13-001): add playlist UI`
 
-## Commit, then ask before pushing
+## Commit and publish within the current authorization
 
-```bash
-git add <files>
-git commit -m "feat: description"
-```
+Commit the reviewed task paths locally. Then follow the user's existing grant:
+a request to push or open a PR is authorization for that requested step and does
+not expire merely because it was given earlier. A commit-only request does not
+imply publication. If publication is not covered, prepare the concrete branch,
+validation and PR body before asking once for that missing authority.
 
-**Stop at the commit.** `rule-local-first/SKILL.md` holds that an ad-hoc
-`git push`, PR or merge needs the operator to say so in that turn, and that "it is
-ready to push" is a status line rather than a licence. Report the commit and ask.
-Once the answer is yes, in that turn:
-
-```bash
-git push origin HEAD
-```
+A push or merge that deploys production also follows `ship` eligibility and
+verification requirements before that action. Keep unapproved publication
+queued while continuing independent authorized work.
 
 ### When a git hook refuses the commit or the push
 
-A `commit-msg` or `pre-push` hook that exits non-zero is a gate, and
-`--no-verify` skips it. The PreToolUse guard asks before that flag runs, and
-its reason names the hook file and the script it runs. The question that decides
-whether skipping is right is not *is the gate red* but **is it red at the base
-branch too**, and it costs one detached worktree to answer:
-
-```bash
-git fetch -q origin
-BASE=$(mktemp -d)
-git worktree add -q --detach "$BASE" origin/main        # or the default branch
-( cd "$BASE" && node <the script the hook runs> ); echo "base exit $?"
-node <the same script>; echo "branch exit $?"
-git worktree remove --force "$BASE"
-```
+A failing commit/push hook remains a failed check. Identify the actual hook,
+command, project root and failure before diagnosing it. To compare with the base,
+use an isolated temporary worktree at the verified base SHA, run the same command
+with the same required environment, and retain both exit codes and diagnostics.
+Verify that scratch worktree contains only this probe's files before removing it.
+Do not switch refs or force-clean another worker's checkout.
 
 Compare the FAIL lines, not the exit codes: two reds with different lines are
 two different findings.
@@ -114,96 +103,69 @@ two different findings.
 | base | branch | verdict |
 |---|---|---|
 | green | red | the red is this change's; fix it, no bypass |
-| red | red, same lines | a trunk red; the bypass is correct and the RECORD is the deliverable |
+| red | red, same lines | inherited failure; record it and resolve the gate or an explicitly authorized exception |
 | red | red, more lines | both; fix the extra lines, then the rest is trunk's |
 
-Then, with the operator's yes in that turn, push with `--no-verify` and put one
-line in the commit or PR body naming the gate skipped, why it was red, and that
-it reproduces at the base. The PostToolUse note after the push asks for exactly
-this line. `[measured 2026-09-07]` four sessions bypassed a trunk-red pre-push in
-one night and every one was right; the bypass that could be told from a skipped
-gate afterwards was the one that wrote the line down.
+A matching base failure attributes the defect; it does not make the candidate
+verified or authorize bypass. Preserve any existing explicit exception covering
+this gate/action. If none exists, resolve the gate or present the concrete
+evidence for an exception. For an authorized bypass, name the skipped gate, its
+exact failure and the base reproduction in the commit or PR body. Historical
+base-red bypasses show why attribution must be recorded; they do not supply
+authority for the current action.
 
 ### Branch Strategy
 
-Check before branching:
-```bash
-# Solo project? (1 contributor, no branch protection)
-CONTRIBUTORS=$(git shortlog -sn --all 2>/dev/null | wc -l)
-HAS_REMOTE=$(git remote 2>/dev/null | head -1)
-```
+Read the current branch, worktree list and task ownership before changing refs.
+One git author can represent many concurrent agents, so contributor count does
+not prove the checkout is private. Use the project's branch/worktree convention
+and an isolated worktree when another session may be using the checkout. Never
+switch branches underneath another worker or take over its staged files.
 
-- **Solo project** (1 contributor or no remote): commit directly to main — branching adds ceremony with zero value.
-- **Team project** (2+ contributors or CI/branch protection): create a feature branch from main.
+## Post-Commit Verification
 
-```bash
-# Only branch for team projects
-if [ "$CONTRIBUTORS" -gt 1 ] && [ -n "$HAS_REMOTE" ]; then
-  BRANCH=$(git branch --show-current)
-  if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-    git checkout -b feat/[descriptive-name]
-  fi
-fi
-```
+Run the repository's actual required checks on the exact committed candidate.
+Preserve exit codes and full diagnostic output; piping a build to `tail` can
+return success while the build failed. Use a known dev-server URL from the
+running project's configuration for UI verification, and drive the affected
+flow rather than interpreting a responding port as acceptance.
 
-## Post-Commit Quick Check
-
-After every commit, run a 5-second sanity check:
-```bash
-npm run build 2>&1 | tail -3
-# If dev server running, check for console errors
-curl -s http://localhost:3000 > /dev/null 2>&1 && echo "server up - verify with navigate + read_page"
-```
-
-If errors found, fix immediately and amend the commit.
+If a check fails, attribute it against the base, fix owned failures, and make a
+new forward commit. Re-run affected checks and required final gates. A long
+check is not optional merely because a quick-check time budget elapsed.
 
 ## Full PR Flow (commit-push-pr)
 
-```bash
-# 1. Create branch if on main
-BRANCH=$(git branch --show-current)
-if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-  git checkout -b feat/[descriptive-name]
-fi
+1. Verify the assigned branch/worktree, base and changed paths. Commit only this
+   task's reviewed code, tests and durable evidence.
+2. Run the required checks against the candidate commit and current base. Re-run
+   integration checks after a rebase or changed base.
+3. Push/open the PR when covered by the current request or standing grant.
+   Apply `ship` first if that action deploys production.
+4. Read back the PR's actual title, head/base and contents before reporting it.
 
-# 2. Stage and commit
-git add <files>
-git commit -m "feat: add playlist UI with drag-drop"
+### PR Description
 
-# 3. Push -- ONLY once the operator has said so in this turn
-git push -u origin HEAD
-```
+Describe only the changes in this PR, using its actual diff and the affected
+story IDs from the shared `workPlan` population. A list of every completed PRD
+story falsely credits unrelated work and misses nested stories. Lead with the
+observable before/after behavior, then exact validation results and unresolved
+limits. A prospective checklist is not evidence that tests ran.
 
-### Auto-Generate PR Description from prd.json
-
-If prd.json exists and has completed stories, generate the PR body from them:
-```bash
-node -e "
-const p=require('./prd.json');
-const stories=p.stories||{};
-const done=Object.entries(stories).filter(([,s])=>s.passes===true);
-if(done.length){
-  console.log('## Changes');
-  done.forEach(([id,s])=>console.log('- **'+id+'**: '+s.title+(s.resolution?' ('+s.resolution+')':'')));
-  console.log('\n## Test Plan');
-  done.forEach(([id,s])=>console.log('- [ ] Verify '+s.title));
-}
-"
-```
-
-Use this output as the PR body:
-```bash
-gh pr create --title "[Sprint summary]" --body "[generated from prd.json]"
-```
+Write the body to a file and pass it with `gh pr create --body-file`; keep the
+literal newlines and avoid shell interpolation of commit/PR text.
 
 ## Safety Checks
 
-**Before committing (if ANY fail, fix before proceeding):**
-- [ ] `npm run typecheck` passes
-- [ ] `npm run build` passes
-- [ ] `npm test -- --watchAll=false --passWithNoTests` passes
+**Before committing:**
+- [ ] Run the applicable checks at the stage required by this repository. If its
+      gate requires a clean committed candidate, commit reviewed owned paths
+      first and run that gate before publication; do not create a circular
+      requirement that the same gate pass before the commit can exist.
+- [ ] Required tests executed a nonempty applicable population; an absent suite
+      is reported, not converted to green with a no-tests-success flag
 - [ ] No `.env` files staged — unstage if found
-- [ ] No `console.log` in staged files — remove if found
+- [ ] Logging is intentional and contains no secrets; preserve required CLI output
 - [ ] No hardcoded secrets — remove if found
 
 **Before pushing:**
@@ -211,22 +173,14 @@ gh pr create --title "[Sprint summary]" --body "[generated from prd.json]"
 - [ ] Branch is up-to-date with remote: `git fetch && git status`
 - [ ] Commit messages are clean
 
-If issues found: fix them, re-stage, re-run checks, THEN commit.
+Resolve findings in owned files, record forward commits and run the required
+checks at the repository's defined stage before publishing.
 
 ## Version Sync Check (claude-auto-dev repo only)
 
-When committing to this repo, check for stale version strings before staging:
-
-```bash
-# Read current version
-VERSION=$(cat VERSION 2>/dev/null)
-
-# Grep for previous version references (skip CHANGELOG.md - it's historical)
-grep -rn "4\.9\.4\|v4\.9" --include="*.md" --include="*.json" --include="*.ps1" --include="*.sh" . \
-  | grep -v CHANGELOG.md | grep -v node_modules | grep -v .git
-```
-
-If stale versions found: **fix them before committing.**
+When committing here, run the existing version validation against the actual
+manifests. Search matches in historical notes are not release metadata and must
+not be bulk-rewritten merely because they name an earlier version.
 
 In a repo that ships Claude Code plugins, the version lives in `VERSION`,
 `package.json`, `.claude-plugin/marketplace.json`, and every
@@ -238,26 +192,18 @@ The current version is: !`cat VERSION 2>/dev/null`
 
 ## Batch Commit (During Auto Mode)
 
-During `auto`, commit every 3 tasks:
-```bash
-git add -A -- ':!.env*' ':!*.pem' ':!*.key' ':!*.secret'
-git commit -m "feat: complete S9-1 through S9-3
+Commit completed, independently recoverable units at useful milestones. Stage
+explicit owned paths after reviewing the diff and index; a secret-extension
+exclusion does not make a blanket add safe from unrelated files or another
+session's changes. Write the exact conventional message to a file and use
+`git commit -F`.
 
-- S9-1: Playlist UI with drag-drop
-- S9-2: Song extend from timestamp
-- S9-3: Onboarding wizard"
-```
+Do not defer all progress recording to session end: a crash can arrive first.
 
-## Amend Last Commit
+## Correcting a commit
 
-Only if not pushed yet:
-```bash
-git add <missed-files>
-git commit --amend --no-edit
-```
-
-## Undo Last Commit (Keep Changes)
-
-```bash
-git reset --soft HEAD~1
-```
+Use a forward corrective commit. Local/unpushed does not prove exclusive
+ownership, so an amend or reset is not routine cleanup in a shared checkout.
+History rewriting requires an explicit request covering the exact owned ref
+and evidence that another worker's work will not be displaced. Preserve a
+recovery ref and use the repository's procedure for that exceptional operation.

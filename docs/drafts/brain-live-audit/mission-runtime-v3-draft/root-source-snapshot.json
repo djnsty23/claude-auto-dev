@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-09T01:51:04.012545+00:00",
+  "status": "Root snapshot; fixture-only prototype, not source adoption or full gate",
+  "files": {
+    "plugins/autodev-core/scripts/mission-store.js": "f81db7e3aa5225c849f25a6e37e67191f46d15ec89304b925fc8f862b4989ac3",
+    "fixtures/synthetic-worker.cjs": "1fc209d87aad1d695ace677985817370c301d37624734c59fea745f296ed2122",
+    "fixtures/synthetic-adapter.cjs": "702ad6393595ae98b92bcab851c6795e12f2c0d933ef95d8eee4b24015775744",
+    "tooling/test-hardening.cjs": "f7ee4251f130de9fa2f371693c7a38e553f71ab3cb63fe499e34d1756f27fa20",
+    "tooling/test-runtime-crashes.js": "b87b94ba72e00b9a5cf5c06fe9163d4755681cdc59838c203f7e33e5d2d5f737",
+    "tooling/test-mission-store.js": "ae4a591a8c095fe5727bcddc47e8de57ae22cbc8fdcd24eecf04ec843b902ba6",
+    "tooling/test-synthetic-runtime.js": "9074d64acbface31130e13ed6be3a3d5b756db6e7ff72ed2ec0cf7e0adc7a9a0",
+    "tooling/test-write-boundaries.cjs": "daefb2429e7f49493a3e0f30c21b33804dff8e0c480c5ae41e3be72cded46be3",
+    "tooling/test-runtime-boundaries.js": "8f6b3062130b2791530468ec4b2534e369b458f28fcb4bdff5d4f9172bddb00d"
+  },
+  "operationsManifestSha256": "b10766e6f4131f33961f3e4b856f46b9f4625988fea281280d688b5ea3a9da16",
+  "writeBoundaryRegression": "write-boundary-schema3.log: 5/5 passed; frozen-v2 baseline exits1, see write-boundary-before.log"
+}

@@ -657,6 +657,93 @@ if (tmp) {
     // restore, so nothing below reads an edited fixture
     fs.writeFileSync(path.join(tmp, 'RESUME.md'), FIXTURE, 'utf8');
 
+    // ---- BEHIND THE TRUNK IS NOT ABOUT TO SHIP ---------------------------
+    //
+    // The same content diff — a claim the working copy has and the trunk does not — has two
+    // opposite causes, and reporting both as "you are about to ship these" sends sessions to
+    // re-fix lines the trunk fixed weeks ago. Measured in a consuming repo 2026-09-11: the main checkout
+    // sat 361 commits BEHIND origin/main and 0 ahead, and two already-corrected RESUME.md claims
+    // were reported as unshipped work.
+    //
+    // Built as its OWN repository rather than by mutating `tmp`, because this needs HEAD and the
+    // trunk ref to point at different commits and the shared fixture deliberately has them equal.
+    let behindRepo = null;
+    try {
+        behindRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-staleness-behind-'));
+        git(['init', '-q'], behindRepo);
+        git(['config', 'user.email', 'suite@example.invalid'], behindRepo);
+        git(['config', 'user.name', 'suite'], behindRepo);
+        // c1 CARRIES the claim.
+        fs.writeFileSync(path.join(behindRepo, 'RESUME.md'), FIXTURE, 'utf8');
+        git(['add', 'RESUME.md'], behindRepo);
+        git(['commit', '-q', '-m', 'c1 with the claim'], behindRepo);
+        const c1 = git(['rev-parse', 'HEAD'], behindRepo).trim();
+        // c2 REMOVES it, and becomes the trunk.
+        fs.writeFileSync(path.join(behindRepo, 'RESUME.md'), FIXED, 'utf8');
+        git(['add', 'RESUME.md'], behindRepo);
+        git(['commit', '-q', '-m', 'c2 fixes it'], behindRepo);
+        const c2 = git(['rev-parse', 'HEAD'], behindRepo).trim();
+        git(['update-ref', 'refs/remotes/origin/main', c2], behindRepo);
+        // Check out c1: the tree is now BEHIND the trunk and CLEAN.
+        git(['checkout', '-q', c1], behindRepo);
+    } catch (e) {
+        check('the behind-the-trunk fixture could be built', false, String(e.message).slice(0, 200));
+        behindRepo = null;
+    }
+
+    if (behindRepo) {
+        const dirtyNow = git(['status', '--porcelain'], behindRepo).trim();
+        check('the behind fixture is CLEAN, so dirtiness cannot explain the result',
+            dirtyNow === '', JSON.stringify(dirtyNow));
+        check('  and it really is behind: 0 commits the trunk lacks',
+            git(['rev-list', '--count', 'HEAD', '--not', 'origin/main'], behindRepo).trim() === '0');
+
+        const behind = checkDocStaleness(behindRepo, { age: 7, max: 12, source: 'both' });
+        // Non-vacuity: if the claim is not picked up at all, everything below passes for the
+        // wrong reason — the same trap a downstream repo's census PRs were written to close.
+        const rows = (behind.localOnly || []).filter((f) => f.text.indexOf('the fix is unproven') !== -1);
+        check('the behind-tree claim IS detected, so this case is not vacuously green',
+            rows.length === 1, String((behind.localOnly || []).map((f) => f.text)));
+        check('  and it is classified stale-checkout, NOT local-only',
+            rows.length === 1 && rows[0].state === 'stale-checkout',
+            rows.length ? String(rows[0].state) : 'n/a');
+        check('  and the render REFUSES to call it about to ship',
+            !/about to ship/.test(render(behind)),
+            'a tree with nothing the trunk lacks cannot ship anything');
+        check('  and the render says it is behind, and that these are stale',
+            /BEHIND it/.test(render(behind)) && /STALE/.test(render(behind)),
+            render(behind));
+
+        // A dirty peer does not turn clean checkout history into new work.
+        fs.writeFileSync(path.join(behindRepo, 'CLAUDE.md'), '# Local\n`[measured 2026-01-02]` The rollout is still blocked on a DNS change.\n', 'utf8');
+        const mixed = checkDocStaleness(behindRepo, { age: 7, max: 12, source: 'both' });
+        check('mixed population includes both stale history and dirty local work',
+            mixed.localOnly.some((f) => f.state === 'stale-checkout')
+            && mixed.localOnly.some((f) => f.state === 'local-only'));
+        const mixedText = render(mixed);
+        check('mixed render distinguishes stale history from local work instead of calling both about to ship',
+            /stale-checkout/.test(mixedText) && /local-only/.test(mixedText)
+            && !/you are about to ship these/.test(mixedText), mixedText);
+        const capped = checkDocStaleness(behindRepo, { age: 7, max: 1, source: 'both' });
+        check('capped mixed report displays stale history without labeling it about to ship',
+            capped.localOnly.length === 1 && capped.localOnly[0].state === 'stale-checkout'
+            && !/about to ship/.test(render(capped)), render(capped));
+        fs.unlinkSync(path.join(behindRepo, 'CLAUDE.md'));
+
+        // CANARY, the other direction: dirty the SAME file in the SAME behind tree and the
+        // verdict must flip back, or the guard is keying on the tree and ignoring the document.
+        fs.writeFileSync(path.join(behindRepo, 'RESUME.md'), FIXTURE + '\n## Later\n`[measured 2026-01-02]` The rollout is still blocked on a DNS change.\n', 'utf8');
+        const dirtied = checkDocStaleness(behindRepo, { age: 7, max: 12, source: 'both' });
+        const dnsRow = (dirtied.localOnly || []).filter((f) => f.text.indexOf('DNS change') !== -1);
+        check('an UNCOMMITTED edit in the same behind tree is still about-to-ship',
+            dnsRow.length === 1 && dnsRow[0].state === 'local-only',
+            dnsRow.length ? String(dnsRow[0].state) : 'the DNS claim was not detected at all');
+        check('  so the guard keys on the DOCUMENT being dirty, not merely on the tree',
+            /about to ship/.test(render(dirtied)), render(dirtied));
+
+        fs.rmSync(behindRepo, { recursive: true, force: true });
+    }
+
     // ---- a repo with no trunk says so rather than reporting clean ---------
     let bare = null;
     try {

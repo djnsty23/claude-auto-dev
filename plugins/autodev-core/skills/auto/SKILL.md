@@ -21,7 +21,7 @@ Fully autonomous development. Works through all tasks without stopping until com
 
 ## Current State
 !`git status --short`
-!`node -e "try{const p=require('./prd.json');const sp=p.sprints?p.sprints[p.sprints.length-1]:p;const s=Object.values(sp.stories||p.stories||{});const name=sp.id||sp.name||p.sprint||'unknown';const n=f=>s.filter(f).length;const done=n(x=>x.passes===true);const pending=n(x=>x.passes===null||x.passes===undefined);const failed=n(x=>x.passes===false);const deferred=n(x=>x.passes==='deferred');const setup=n(x=>x.passes==='needs-setup');const other=s.length-done-pending-failed-deferred-setup;const arch=p.archived?(Number.isFinite(p.archived.totalCompleted)?' (+'+p.archived.totalCompleted+' archived)':' (archive present, count unreadable)'):'';console.log('Sprint:',name,'| Done:',done+arch,'| Pending:',pending,'| FAILED:',failed,'| Deferred:',deferred,'| Needs-setup:',setup,'| Total:',s.length,other?'| OTHER: '+other+' (unrecognised passes value)':'')}catch(e){console.log('No prd.json')}"`
+Read `prd.json` with the shared `workPlan` selector below. Report `plan.summary`, including blocked setup and unrecognised states, across all sprints.
 
 ## Entry Flow
 
@@ -87,63 +87,49 @@ When prd.json does not exist:
 
 ## Pre-flight (Smart)
 
-Before first task, run these checks. Use simple commands that won't trigger security filters:
+Before the first task, read the repo's guidance, package manifest and lockfile to
+identify its package manager and actual gate/build/test scripts. A generic npm
+command is not a substitute for the repo's own checks.
 
 ```bash
-# 1. Git status
 git status --short
-
-# 2. Dependencies fresh?
-# Compare timestamps — if package.json is newer than node_modules, run npm install
-ls -lt package.json node_modules/.package-lock.json 2>/dev/null | head -1
-```
-If package.json is newer or node_modules is missing, run `npm install`.
-
-```bash
-# 3. Detect test runner — read package.json with Read tool, check for vitest/jest/playwright in devDependencies
-# Use the detected runner for all test steps in this session
-
-# 4. Build check
-npm run build 2>&1 | tail -5
-
-# 5. Branch check
 git branch --show-current
 ```
-If on main/master, create a feature branch before making changes.
 
-```bash
-# 6. Worktree cleanup
-git worktree prune 2>/dev/null
-```
+Use an isolated worktree for shared-repo changes. Install dependencies with the
+detected manager's lockfile-preserving command when required; timestamps alone
+do not establish that an installation matches the lockfile.
 
-Skip individual checks if they take >10 seconds. Use Read tool to inspect package.json instead of `node -e` one-liners.
+Run the detected checks directly and capture their actual exit codes and output.
+Do not pipe a gate into `tail` or `head`, or suppress errors. A long check needs
+time or a supervised background run; exceeding ten seconds is not a reason to
+skip it. If a required script is absent, identify the appropriate project check
+or report that verification is unavailable before declaring readiness.
 
 ## Task Execution
 
 ### Find Next Task
 
+The planner is loaded from `CLAUDE_PLUGIN_ROOT`, which the host sets per loaded
+plugin; the snippet throws if it is unset rather than requiring a path built
+here. Use the shared planner below; do not copy its state or dependency
+predicates into the skill. The planner reads every sprint, reports
+missing/malformed/cyclic dependencies, and keeps blocked work visible.
+
 ```javascript
-// prd.json has two shapes:
-// Flat:   { stories: { "S1-001": {...} }, sprint: "sprint-1" }
-// Nested: { sprints: [{ id: "sprint-1", stories: { "S1-001": {...} } }] }
-const sp = prd.sprints ? prd.sprints[prd.sprints.length - 1] : prd;
-const stories = sp.stories || prd.stories || {};
-const storyEntries = Object.entries(stories);
-// 'deferred' is a decision NOT to do the work — it is not executable and
-// must not be picked up here. The Stop hook applies the same rule, and the two
-// disagreeing is what made auto loop on an already-finished sprint.
-const executable = storyEntries.filter(([id, s]) =>
-  // FIVE states, not four. `needs-setup` is written by step 6 below for work
-  // blocked on an API key or a console nobody has opened — an agent cannot
-  // conjure a credential, so selecting it re-attempts a blocked story every
-  // single run. [measured 2026-08-28] it was being swept back into the queue.
-  // undefined too: a story authored with no `passes` key is pending, not
-  // invisible. Dropping it here meant it was selected by nothing and (until
-  // the OTHER bucket) counted by nothing — gone, not late.
-  (s.passes === null || s.passes === undefined || s.passes === false) &&
-  (s.blockedBy || []).every(dep => stories[dep]?.passes === true)
-);
+if (!process.env.CLAUDE_PLUGIN_ROOT) throw new Error('CLAUDE_PLUGIN_ROOT is required');
+const { workPlan } = require(require('path').join(process.env.CLAUDE_PLUGIN_ROOT, 'scripts', 'prd-states.js'));
+const plan = workPlan(prd);
+const stories = plan.stories;
+const executable = plan.ready;
 ```
+
+If `executable` is empty and `plan.complete` is false, the sprint is incomplete.
+Read `plan.blocked` and `plan.invalid`; repair an incorrect dependency only from
+evidence, or report the external blocker and keep its state. Missing ids, cycles,
+unknown states, and zero stories must not be reported as completion. The Stop
+hook gives one reconciliation turn, then permits a bounded stop while retaining
+the unresolved reasons. It resumes blocking when dependency-ready work appears.
 
 ### Size-Gate Before Executing
 
@@ -165,8 +151,8 @@ Before starting a task, assess its scope:
 4. **Apply Generation Constraints** (see below) — before writing code
 5. Implement the solution
 6. **Self-Critique** — re-read your diff before running checks (see below)
-7. `npm run typecheck` — fix if fails
-8. `npm run build` — fix if fails
+7. Run the project's type/static checks — fix if they fail
+8. Run its detected build and required gate — fix failures before completion
 9. Self-Verification (see below)
 10. **Visual verification** — if the task touched UI, screenshot it at 390 and 414 through the browser tools. Do not skip this, and do not substitute reading the diff.
 11. **Test generation** — if the task created an API route, auth logic, or data mutation, write at least one test (see below)
@@ -186,6 +172,11 @@ When creating stories in prd.json, each story can carry a `verify: []` array and
 
 If no `verify` field exists, auto infers from the task type (UI → visual+a11y+design, API → api+security, etc.).
 
+Load core's `references/requirements.md` when reading acceptance or spec revisions.
+Use its canonical requirements reader; explicit acceptance overrides diagnostic
+notes. Reconcile stale `specRefs` before starting or completing affected work,
+and carry the frozen requirement snapshot into a fresh worker's brief.
+
 Before marking a task done, verify each acceptance criterion. "Does it compile?" is not acceptance — "does it behave correctly?" is.
 
 ### Context Loading (before writing any code)
@@ -204,11 +195,11 @@ Before marking a task done, verify each acceptance criterion. "Does it compile?"
 | Task Type | Verification |
 |-----------|--------------|
 | UX/UI (public pages) | `computer` screenshots (desktop + mobile) + `read_console_messages` |
-| UX/UI (admin/internal) | typecheck + build only |
-| Feature (UI) | Build passes + visual check if public UI changed + complete primary user flow once |
-| Edge Function / API | Deploy + `curl` with real params + verify 200 + response shape matches expected |
+| UX/UI (admin/internal) | Browser screenshots (desktop + mobile), console inspection, and complete the affected flow with the correct role |
+| Feature (UI) | Build passes + visual check for every changed UI + complete the primary user flow once + **runtime flow check** (below) when a criterion names what the user sees or gets |
+| Edge Function / API | Exercise the local/preview endpoint with real parameters; verify expected response, authorization and side effects. Production deploy follows `ship` + **runtime flow check** when a criterion names what the user sees after the call |
 | API Integration | Real request with real credentials + verify response contains expected data |
-| Bug fix | Reproduce, verify fixed, no new errors |
+| Bug fix | Reproduce, verify fixed, no new errors + **runtime flow check** with `observedBefore` taken from the reproduction |
 | Refactor | Typecheck + build + existing tests pass + no behavior change |
 | Auth / billing / RLS | Write or verify a test for the security-critical path |
 
@@ -256,6 +247,73 @@ say that is what you did, and do not describe it as visual verification.
 
 Analyze screenshots for: broken layout, missing content, visual regressions, design quality, dark mode correctness.
 Fix console errors or visual issues before marking task complete.
+
+### Runtime flow check
+
+A screenshot cannot tell a handler that ran from one nested where it never
+runs; both produce one green picture. `[measured 2026-08-16]` that is the
+common first-pass failure, 112 incomplete flows against 20 crashes in one
+repo (`docs/failure-evidence.md`). So when a story's acceptance criterion
+names something the user **sees or gets** — a row appears, a total matches
+on both surfaces that show it, a request leaves with the right shape — the
+story closes on an **assertion about state**, not on a picture. The `flow`
+verify tag (`references/verify-tags.md`) marks it; infer it from the
+criteria when the tag is absent.
+
+1. Start or find the dev server exactly as above.
+2. Drive the **primary flow the criterion describes** with the browser tools:
+   `navigate`, `find`, `form_input`, `computer`. For a bug fix, drive it
+   first on the pre-fix tree and record what you read as `observedBefore`.
+3. Read the outcome back, never eyeball it: `read_page` or `find` for a DOM
+   count or text, `read_network_requests` for a request and its shape,
+   `read_console_messages` for a log line or the error count, `javascript_tool`
+   for a value the page holds. Use a **fresh tab** per check: the console
+   buffer accumulates across navigations, and a tab left open across edits
+   logs Fast Refresh errors that a fresh load does not reproduce. Read the
+   error count once **before** the flow and record it as
+   `consoleErrorsBaseline`; two dev trees here carried errors on every load.
+   **While the Browser pane is hidden, `computer` clicks and key presses do
+   not reach the page** (`[measured 2026-09-08]` a keydown listener saw
+   nothing; `document.visibilityState` was `hidden`), while `navigate`,
+   `find`, `form_input` and `javascript_tool` work. Front the tab with
+   `tabs_select`, or dispatch the event from `javascript_tool`, and prove the
+   input arrived before reading the outcome, or the red you report is about
+   the probe.
+4. Write `.claude/evidence/<story>/flow.json` — `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/flow-evidence.js --template` prints the
+   shape — with the steps, the assertion (`subject`, `claim`, `expected`),
+   the `observed` value, screenshot paths, console error count, timestamp,
+   and `commit`: the 40-character sha `git rev-parse HEAD` prints when the
+   flow is driven, the tree the dev server was serving. The template fills it
+   from the cwd; confirm it is still HEAD if you committed between driving and
+   writing. Screenshot paths are **relative to the repository root**
+   (`.claude/evidence/<story>/after.png`), not to the record's directory.
+5. `node ${CLAUDE_PLUGIN_ROOT}/scripts/flow-evidence.js .claude/evidence/<story>/flow.json`.
+   Exit 0 is PASS. Exit 1 is the product failing its own criterion: fix,
+   re-drive, re-run. Exit 2 is the **record** being refused — no assertion,
+   a "looked fine" claim, a `visual` subject, no observed value, or a
+   `commit` that is missing, malformed, or not reachable from HEAD (the
+   record was measured on another revision; `--at <sha>` verifies against a
+   different commit) — and a refused record does not close a story. Commit the
+   record with the change, as `prove` does with its captures: its `commit`
+   is then the parent of the commit that carries it, which is what the
+   ancestry rule expects.
+
+**What it reaches, honestly.** `[measured 2026-09-08]` over 30 first-pass
+fixes in a live repo, 4 were catchable by driving the primary flow with a state
+assertion, 3 more only with specific data (a rate-limited account, a particular
+prompt), 23 not at all — copy, contrast, cron, admin-only routes, server-side
+counts. Replayed against the parent of three of those four fixes, the check
+went red on every parent and green on every fix. It costs about 50 s and
+three to five tool calls per story on a dev server the visual check already
+needs. Cheap insurance on the 4, not a gate on the 30
+(`docs/evidence-flow-verification-2026-09-08.md`).
+
+**The Stop hook does not enforce this, on purpose.** `stop-auto-check.js`
+blocks the end of a turn while pending stories remain; a block on a missing
+flow record would hold every turn in a repo with no dev server, no browser
+tools, or a criterion that names nothing user-visible. Enforcement is here, in
+the verification step, and the validator is what makes the record checkable.
 
 ### Self-Verification (after each task)
 
@@ -391,24 +449,31 @@ With 1M context, compaction is almost never needed. Do NOT suggest `/compact` un
 
 Be concise but don't sacrifice clarity for brevity.
 
-## Auto-Deploy (After Commit)
+## Deployment (After Commit)
 
-After committing completed tasks, check if changed files need deployment:
+Run the [ship workflow](../ship/SKILL.md) before any deployment, or any push or
+merge that triggers production. Its current eligibility, exact-commit gate,
+ledger and undo requirements apply here too. Existing user authorization
+persists; check what it covers instead of asking again. Resolve or escalate
+ineligible changes under that policy before a production mutation.
+
+Identify the commit currently deployed from the live platform, then inspect the
+entire undeployed range. Set `deployed_commit` to that verified SHA first:
 
 ```bash
-# Check what changed since last deploy/commit
-git diff --name-only HEAD~1
+git diff --name-only "$deployed_commit" HEAD
 ```
 
-| Changed Files | Deploy Action |
-|--------------|---------------|
-| `supabase/functions/*/index.ts` | Deploy changed edge functions (read deploy command from project CLAUDE.md) |
-| `supabase/migrations/*.sql` | Run `supabase db push` or apply migration |
-| `src/**` (Vercel/Next.js) | Push to trigger Vercel auto-deploy |
+Include shared function imports, migrations and configuration, not only entry
+files or the latest commit. If deployed identity cannot be established, report
+the unresolved baseline and resolve it before choosing deployment scope. Read
+the project's deploy configuration; do not infer production settings or relax
+authentication from an example command.
 
-For edge functions, read project-specific deploy config from CLAUDE.md (e.g., path to supabase binary, project ref, flags like `--no-verify-jwt`). If no config found, skip auto-deploy and note it in completion summary.
-
-After deploy, verify the deployment succeeded (check endpoint responds with 200).
+After an authorized deployment, verify the live version and affected behavior
+with the expected role, response data and side effects, and record the evidence
+in the deploy ledger. A successful HTTP status alone does not establish that the
+feature works or that the intended commit is running.
 
 ## Completion
 
@@ -428,11 +493,12 @@ Run `progress` to see full results.
 ## IDLE Detection (Smart Next Action)
 
 If no tasks to work on:
-1. Are all stories `passes: true`? (`deferred` and `needs-setup` do not block
-   completion — the first is a decision not to do it, the second is waiting on a
-   human, and neither is work an agent can advance)
-   - No: find blocked tasks and resolve blockers
-   - Yes: continue to step 2
+1. Re-read the shared plan. Does `plan.complete` hold?
+   - No: name `plan.blocked` and `plan.invalid`, repair a demonstrated graph
+     error, or report the blocker. `needs-setup` remains incomplete; a bounded
+     stop preserves it and is never a completed sprint.
+   - Yes: continue to step 2. Only done/deferred stories remain, with a nonempty
+     population and no unknown states.
 2. **Auto-transition sprint** (see below)
 3. Output completion summary
 4. Assess context to decide next action
@@ -450,12 +516,13 @@ When all pending tasks are done, auto handles the sprint lifecycle — but verif
 2. Log summary to .claude/sprint-history.md:
    "Sprint [N]: [done]/[total] tasks | [date] | [one-line summary of work]"
 
-3. Archive completed stories:
-   - Copy current prd.json to .claude/archives/prd-archive-sprint-[N].json
-   - Remove stories with passes: true from prd.json
-   - Keep stories with passes: null, false, "deferred", or "needs-setup"
-     (needs-setup was missing here, so archiving DELETED work that was waiting
-      on the operator — losing the record of what he still owed)
+3. Apply the archive-prd skill's split and durability checks:
+   - Preserve unresolved stories, passed QA records, and the full prerequisite
+     chain referenced by retained work; do not delete every passed record.
+   - Prove a tracked archive destination before writing, read back the archive,
+     and preserve every record by id and payload across archive plus active PRD.
+   - Keep dependency readiness intact and commit the archive and PRD together.
+     If any check fails, preserve the PRD and stop the transition.
 
 4. Decide whether to bump — show a one-line honesty summary first:
 
@@ -478,7 +545,7 @@ When all pending tasks are done, auto handles the sprint lifecycle — but verif
 
 | Signal | Action |
 |--------|--------|
-| Deferred tasks from previous sprint | Carry forward, start working |
+| Deferred tasks from previous sprint | Preserve the decision; reactivate only when the mandate explicitly changes |
 | Audit/brainstorm created new stories | Bump sprint, continue |
 | Dev server running + UI changes made | Run visual scan, fix issues found |
 | TODOs/FIXMEs in changed files | Create stories, fix them |

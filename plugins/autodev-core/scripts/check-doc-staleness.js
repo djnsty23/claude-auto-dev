@@ -577,6 +577,51 @@ function checkDocStaleness(cwd, opts) {
         catch (e) { return null; }
     };
 
+    /**
+     * Does the checked-out HEAD carry ANY commit the trunk does not?
+     *
+     * ⚠️ WITHOUT THIS, "you are about to ship these" IS ASSERTED ABOUT TREES THAT CANNOT SHIP
+     * ANYTHING. The local-only set is a pure content diff: a claim the working copy has and the
+     * trunk does not. That difference has two causes and they are opposites —
+     *   AHEAD   the tree carries new work, and the claim really is about to ship
+     *   BEHIND  the tree is an OLD checkout, and the claim is history the trunk already
+     *           superseded; nothing can ship from it because it has nothing the trunk lacks
+     * and the content diff alone cannot tell them apart. Measured 2026-09-11 in a consuming repo: the
+     * main checkout sat on a branch 361 commits BEHIND origin/main and 0 ahead (merge-base ==
+     * HEAD), so two RESUME.md claims the trunk had already fixed on 2026-09-07 were reported as
+     * unshipped work. Two sessions then spent effort re-fixing lines that were already correct.
+     *
+     * ⚠️ AHEAD-COUNT ALONE IS NOT THE DISCRIMINATOR, and the suite caught that draft. A tree
+     * LEVEL with the trunk (0 ahead) but carrying UNCOMMITTED edits is the original, legitimate
+     * "about to ship" case — that is precisely a session writing a claim it has not committed.
+     * So the question is per-document and has two parts:
+     *   the doc is DIRTY (working copy differs from HEAD)  -> genuinely local work, about to ship
+     *   the doc is CLEAN and the tree is BEHIND the trunk   -> the difference is HEAD vs trunk,
+     *                                                          i.e. an old checkout: stale
+     * Reachability is the question, never a branch-name or content comparison — the same
+     * distinction as `git rev-list <head> --not --remotes` for "is this work pushed".
+     * Fails OPEN: if git cannot answer, keep the old louder behaviour rather than silently
+     * dropping findings, and say the guard did not run.
+     */
+    /** Documents whose working copy differs from HEAD — genuinely uncommitted local work. */
+    const dirtyDocs = () => {
+        try {
+            const out = execFileSync('git', ['status', '--porcelain', '--'].concat(BOOT_DOCS),
+                { cwd, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+            return new Set(out.split('\n').filter(Boolean)
+                .map((l) => l.slice(3).trim()).filter(Boolean));
+        } catch (e) { return null; }
+    };
+
+    const aheadOfTrunk = () => {
+        try {
+            const out = execFileSync('git', ['rev-list', '--count', 'HEAD', '--not', trunk],
+                { cwd, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+            const n = Number(out);
+            return Number.isFinite(n) ? { known: true, ahead: n } : { known: false, ahead: null };
+        } catch (e) { return { known: false, ahead: null }; }
+    };
+
     // `worktree` grades the working copy alone and reports it as the population,
     // for a session that wants to check what it is ABOUT to commit.
     const base = source === 'worktree'
@@ -615,12 +660,22 @@ function checkDocStaleness(cwd, opts) {
     // is about to ship. Reported separately so it cannot be mistaken for a
     // trunk finding, which is the confusion this whole change exists to end.
     const localOnly = [];
+    const ahead = compared ? aheadOfTrunk() : { known: false, ahead: null };
+    const dirty = compared ? dirtyDocs() : null;
+    /* A CLEAN document in a tree that is BEHIND the trunk cannot ship anything: its difference
+       from the trunk is the trunk's own later work, i.e. history this checkout has not caught up
+       to. Classify it rather than drop it — a stale checkout is worth saying out loud, since it
+       is why the same claims keep being re-reported — but never print it as work about to land.
+       A DIRTY document is uncommitted work and stays "about to ship" however the tree sits. */
+    const behind = ahead.known && ahead.ahead === 0;
+    const stateFor = (f) => (behind && dirty && !dirty.has(f.doc) ? 'stale-checkout' : 'local-only');
     if (compared) {
         const atTrunk = new Set(base.findings.map(key));
         const atTrunkS = new Set(base.structural.map(key));
-        for (const f of compared.findings) if (!atTrunk.has(key(f))) { f.state = 'local-only'; localOnly.push(f); }
-        for (const f of compared.structural) if (!atTrunkS.has(key(f))) { f.state = 'local-only'; localOnly.push(f); }
+        for (const f of compared.findings) if (!atTrunk.has(key(f))) { f.state = stateFor(f); localOnly.push(f); }
+        for (const f of compared.structural) if (!atTrunkS.has(key(f))) { f.state = stateFor(f); localOnly.push(f); }
     }
+    const staleCheckout = localOnly.length > 0 && localOnly.every((f) => f.state === 'stale-checkout');
 
     const c = base.counts;
     const kin = kinDocs(cwd, trunk);
@@ -646,6 +701,9 @@ function checkDocStaleness(cwd, opts) {
             openStateAndDated: c.dated, olderThanAgeDays: base.findings.length,
             fixedLocallyNotMerged: fixedLocally,
             localOnly: localOnly.length,
+            staleCheckout,
+            aheadOfTrunkKnown: ahead.known,
+            aheadOfTrunk: ahead.ahead,
         },
         findings: base.findings.slice(0, max),
         structural: base.structural.slice(0, max),
@@ -748,8 +806,25 @@ function render(r) {
         }
     }
     if ((r.localOnly || []).length) {
-        out.push('    NOT AT THE TRUNK, only in the working copy (you are about to ship these):');
-        for (const f of r.localOnly) out.push('      ' + f.doc + ':' + f.line + '  ' + f.text);
+        /* The same content diff means opposite things depending on whether the checked-out tree
+           is ahead of the trunk or behind it, so the heading must say which was measured — and
+           must not say "about to ship" about a tree that has nothing to ship. */
+        const p = r.population || {};
+        const mixedStates = new Set(r.localOnly.map((f) => f.state)).size > 1;
+        if (mixedStates) {
+            out.push('    NOT AT THE TRUNK: mixed stale checkout history and local work; each row is classified below:');
+        } else if (r.localOnly.every((f) => f.state === 'stale-checkout')) {
+            out.push('    NOT AT THE TRUNK, and this checkout is BEHIND it (0 commits the trunk lacks)'
+                + ' — these are STALE, already superseded on the trunk, and nothing here can ship:');
+        } else if (p.aheadOfTrunkKnown === false) {
+            out.push('    NOT AT THE TRUNK, only in the working copy (could NOT determine whether this'
+                + ' checkout is ahead of the trunk, so this may be stale rather than unshipped):');
+        } else {
+            out.push('    NOT AT THE TRUNK, only in the working copy (you are about to ship these'
+                + (p.aheadOfTrunk ? ' — ' + p.aheadOfTrunk + ' commit(s) ahead of the trunk' : '') + '):');
+        }
+        for (const f of r.localOnly) out.push('      ' + (mixedStates ? '[' + f.state + '] ' : '')
+            + f.doc + ':' + f.line + '  ' + f.text);
     }
     return out.join('\n');
 }

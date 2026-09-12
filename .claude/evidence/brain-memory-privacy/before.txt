@@ -1,0 +1,7 @@
+Baseline source: e1b6aacde570ac4ab9ee44c8e1f3d86733410fab
+All probes used owned synthetic stores and real module/hook entrypoints.
+Writer/carrier comparison: semantic48pass20fail (68 assertions), carrier37pass3fail (40 assertions).
+Command: node tooling/test-session-carrier.js, expanded extraction suite on the first privacy draft
+57 passed, 11 failed (68 assertions). This draft still leaked protected text through basename and the knowledge area marker before DB redaction.
+Independent command: node .claude/reports/brain-live-audit/orchestration/privacy-independent.cjs
+Protected hook cases:3, leaks:3; public hook control:1, passed:1. Direct writer/carrier controls:6/6; serialization failure/recovery:3/3.

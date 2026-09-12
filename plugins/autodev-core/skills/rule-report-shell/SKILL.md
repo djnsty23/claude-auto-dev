@@ -28,9 +28,9 @@ near-black code well. Nothing in the page hints at it, and no repo checked had
 any scrollbar styling at all. Set `scrollbar-color` and `scrollbar-width` *and*
 the `::-webkit-scrollbar` block; browsers split across the two.
 
-**The `0fr` → `1fr` grid disclosure does not work inside a flex card.** This is
-the widely-published technique and it fails here for a reason that only shows up
-in the rendered box:
+**The tested `0fr` → `1fr` disclosure failed in this shell's flex-card layout.**
+The following measurements describe that specific configuration, not every
+grid/flex disclosure:
 
 | child `overflow` | expand | collapse |
 |---|---|---|
@@ -61,7 +61,7 @@ one arrives after the reader has moved on.
 inside it is the visible affordance, not the only target. Two handlers is how
 `data-open` and `max-height` drift out of sync.
 
-Three guards, all needed:
+Two guards in this template:
 
 ```js
 if (e.target.closest('.btn, .well, a')) return;      // never hijack a control
@@ -83,6 +83,13 @@ theme's ground.
 host's ground and the page inverts.
 
 ## Verify it, do not assume it
+
+Retain a native keyboard-operable disclosure button, keep `aria-expanded` in
+sync, and verify Enter/Space, focus, text selection and embedded controls after
+content changes. Test long content, zoom, both themes and reduced motion;
+recompute expanded height after asynchronous content changes as well as resize.
+Copying the shell is a starting point, not proof the resulting report works.
+
 
 Assert `innerWidth`/`innerHeight` in the same call that measures anything. A
 zero-height viewport reports a working disclosure as broken and an open card as

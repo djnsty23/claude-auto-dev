@@ -1,0 +1,54 @@
+{
+  "results": [
+    {
+      "id": "prepare-start-before-commit-kill-has-no-launch",
+      "passed": true
+    },
+    {
+      "id": "registration-after-commit-kill-never-replays-start-permission",
+      "passed": true
+    },
+    {
+      "id": "enqueue-before-commit-kill-does-not-claim-durability",
+      "passed": true
+    },
+    {
+      "id": "receive-after-commit-kill-is-durable-before-ack",
+      "passed": true
+    }
+  ],
+  "calls": [
+    {
+      "command": "prepare-start",
+      "point": "before-commit",
+      "signal": "SIGKILL",
+      "stdout": ""
+    },
+    {
+      "command": "register-executor",
+      "point": "after-commit-before-reply",
+      "signal": "SIGKILL",
+      "stdout": ""
+    },
+    {
+      "command": "enqueue-result",
+      "point": "before-commit",
+      "signal": "SIGKILL",
+      "stdout": ""
+    },
+    {
+      "command": "receive",
+      "point": "after-commit-before-reply",
+      "signal": "SIGKILL",
+      "stdout": ""
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "population": 4,
+    "actualSigkills": 4,
+    "remainingChildren": 0,
+    "fixtureRemoved": true
+  }
+}

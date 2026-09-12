@@ -10,23 +10,28 @@ argument-hint: "[status|S-ID|unarchive S-ID]"
 
 # PRD Archival System
 
-Archive completed stories to keep prd.json fast and small. Keep only last 3 sprints active.
+Archive eligible completed stories to keep prd.json small while retaining every
+unresolved story and every prerequisite that retained work still needs.
 
 ## "archive" Command
 
 ```
 1. Read prd.json
 2. Separate stories with isArchivable() from scripts/prd-states.js:
-   - ARCHIVE: isArchivable(story) === true  (passes===true, i.e. isDone)
+   - ARCHIVE: isArchivable(story) === true, excluding QA and prerequisite
+              records referenced by any story that will remain
    - KEEP:    everything else — null, false, "deferred", "needs-setup",
               a MISSING passes key, any unrecognised value, and type="qa"
-              (even passed QA stories stay, for re-testing)
-3. PROVE THE SPLIT BEFORE WRITING: archive-count + keep-count must equal the
-   before-count, and no story id may appear in both sets or in neither.
+              (even passed QA stories stay, for re-testing), and completed
+              prerequisites still referenced by retained stories
+3. PROVE THIS RUN'S SPLIT BEFORE WRITING: selected-active-to-archive count +
+   retained-active count must equal the pre-run active count. The two selected
+   id sets are disjoint and cover every pre-run active record. Preexisting
+   archive records are a separate population, never part of that equation.
    If the invariant fails, STOP — write nothing, report the ids that fell
    through. This runs BEFORE step 4, not after: a loss detected after the
    write is a loss.
-4. Create archive file: prd-archives/prd-archive-YYYY-MM.json (a TRACKED path)
+4. Create a unique tracked archive or merge an existing one without replacement
 5. Update main prd.json with summary
 6. Report: "Archived X stories, Y remain active" with both counts and the total
 ```
@@ -58,9 +63,7 @@ own comment block records it); route through it rather than re-deriving buckets.
     }
   },
 
-  "stories": [
-    // Only active/pending stories here
-  ]
+  "stories": {}
 }
 ```
 
@@ -71,9 +74,9 @@ own comment block records it); route through it rather than re-deriving buckets.
   "archivedAt": "2026-01-22T10:00:00Z",
   "project": "Project Name",
   "version": "1.3.2",
-  "stories": [
-    // Full story objects for reference
-  ]
+  "stories": {
+    "S1-001": { "id": "S1-001", "title": "Completed outcome", "passes": true }
+  }
 }
 ```
 
@@ -83,41 +86,61 @@ own comment block records it); route through it rather than re-deriving buckets.
 |-----------|--------|
 | 4+ total sprints | Auto-suggest archive |
 | prd.json > 500 lines | Suggest archive |
-| prd.json > 50KB | Force archive |
+| prd.json > 50KB | Archive eligible completed records; preserve all other work |
 | User says "archive" | Manual archive |
 | All stories complete | Archive and start fresh |
 
-Keep only the last 3 sprints in prd.json. Archive everything older.
+Sprint age selects history to inspect, not records to delete. Retain unresolved
+stories from every sprint. Remove an old sprint container only after all of its
+records were safely archived or explicitly carried forward.
 
 ## Archive Process
 
 ```
 0. PROVE THE DESTINATION IS DURABLE — BEFORE ANY WRITE
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/check-archive-path.js prd-archives/prd-archive-$(date +%Y-%m).json
-   Exit 1 means git would ignore the path: STOP and write nothing. Do not
+   Resolve this loaded plugin's scripts/check-archive-path.js, then run it
+   against the chosen archive path in the target project. Do not assume the
+   plugin-root environment variable exists in the shell.
+   Verify that the actual target is a git worktree and read the checker's
+   verdict and stderr, not its exit alone: it returns 0 with NO-REPO for an
+   unbacked local path. A missing/unreadable repo or unavailable check does not
+   establish durability; preserve the PRD until a real tracked destination is
+   verified. Exit 1 means git would ignore the path: stop and write nothing. Do not
    "fix" it with a .gitignore negation — a `!` rule cannot re-include a file
    whose parent directory is excluded, so it looks like an exception and grants
    nothing. Write somewhere outside the ignored tree instead.
 
 1. BACKUP
    mkdir -p prd-archives
-   cp prd.json prd-archives/prd-backup-$(date +%Y%m%d).json
+   Write a unique backup path; do not overwrite an earlier same-day snapshot
+   Inventory all preexisting archive ids and record payloads separately, with
+   their paths/hashes, before proposing a monthly merge or updating totals
 
 2. EXTRACT ARCHIVABLE
    Filter with isArchivable() from scripts/prd-states.js (and keep type="qa"
    regardless). KEEP everything it rejects: null, false, "deferred",
-   "needs-setup", a missing passes key, any unrecognised value.
+   "needs-setup", a missing passes key, any unrecognised value. Keep completed
+   prerequisites referenced by retained stories too; propagate that keep-set
+   through their blockedBy links until it stops growing. Run workPlan before
+   and after the proposed split: archiving must not make a ready story blocked
+   by a newly missing dependency. Preserve id-keyed records and all own keys.
 
 3. PROVE THE SPLIT — BEFORE ANY WRITE
-   archiveCount + keepCount === beforeCount, zero id overlap, zero ids in
-   neither set. On failure: stop, write nothing, name the ids that fell
-   through. (After the write this check can only report a loss, not prevent
-   one.)
+   Let A be this run's selected active records and K the retained active records.
+   A.size + K.size === preRunActive.size, with zero id overlap and unchanged
+   payloads across their union. Existing archives are not included in A.
+   On failure, write nothing and name the missing/conflicting records.
 
 4. CREATE ARCHIVE
-   Write to: prd-archives/prd-archive-YYYY-MM.json  (step 0 proved git keeps it)
-   If prd.json already has an "archived" section, this is a RE-archive:
-   append to files[] and ADD to totalCompleted — never overwrite it.
+   Write to a fresh uniquely named file under prd-archives/ (step 0 proved git
+   keeps it), or explicitly merge the existing monthly archive by story id.
+   Never replace an existing archive with only this run's records. Every prior
+   archive record must survive with the same payload. If an incoming id collides
+   with a different archived payload, report the conflict and preserve both
+   snapshots until its provenance is resolved; do not silently overwrite it.
+   On re-archive, preserve files[] without duplicates and compute totalCompleted
+   from distinct archived story ids, counting an already-present identical id
+   once. Read back the archive before changing the PRD.
 
 5. GENERATE SUMMARY
    Group stories by ID range (10 per group)
@@ -129,10 +152,17 @@ Keep only the last 3 sprints in prd.json. Archive everything older.
    Keep all QA stories (even passed ones for re-testing)
 
 7. VALIDATE
-   Ensure main prd.json < 1500 lines
-   Re-assert the step-3 invariant against the files as written
+   Report remaining size; a size target never permits dropping retained work
+   Re-assert the step-3 invariant using A and K against the written files.
+   Confirm every A record is archived with its original payload and every K
+   record remains active. Separately confirm every preexisting archive record
+   remains unchanged. A monthly archive's full count includes older records
+   and cannot substitute for A.size; equal totals alone cannot prove either
+   preservation property.
    Re-run step 0 against the archive AS WRITTEN, and confirm `git status`
-   actually shows it. Counting stories proves completeness, not durability.
+   actually shows it. Stage the archive and PRD together by explicit path and
+   commit together under the existing mandate. Counting stories proves
+   completeness, not durability.
 ```
 
 Note the shape this must survive: real projects store `stories` as an OBJECT
@@ -165,33 +195,33 @@ Claude:
 
 ## Token Optimization
 
-| State | Estimated Tokens |
-|-------|-----------------|
-| Full prd.json (70+ stories, 10 sprints) | ~25,000+ |
-| After archive (current sprint + 2) | ~3,000-5,000 |
-| With summary | +500 |
-| **Total Savings** | **~80%** |
-
-**Real example:** a long-running project can grow to 800+ rows / 10 sprints / ~20K tokens. After archiving to keep only the current sprint + 2 prior, prd.json drops to ~150 rows / ~3K tokens.
+Measure the actual before/after file size and story population. Archive eligibility
+and dependency preservation determine the split; a token budget or sprint count
+cannot override them. Report any required retained history even when the PRD
+remains larger than the preferred target.
 
 ## Proving the run
 
 Two properties, and they fail independently. Assert both.
 
-**Observable 1 — COMPLETENESS: no story is lost.** Stories in the archive plus
-stories left in prd.json equals the count before archiving.
+**Observable 1 — COMPLETENESS: no story is lost.** This run's selected active
+records A plus retained active records K exactly reconstruct the pre-run active
+PRD by id and payload. Read back every A record from the archive and K from the
+PRD. Separately preserve every preexisting archive record. Adding the entire
+monthly archive count to the retained active count double-counts old history.
 
-```bash
-node -e "const a=require('./prd.json');…"   # or just read both files and add up
-```
+Read both written files and compare the actual id sets and record payloads to
+the preserved pre-archive snapshot; counts alone can hide one lost/one duplicate
+record. Verify the dependency-ready set stayed intact too.
 
 Check the total before and after and state both numbers. A story dropped during
 the move looks exactly like a story that was never there.
 
-**Observable 2 — DURABILITY: the archive is a file git will keep.**
+**Observable 2 — DURABILITY: the archive is a file git will keep.** Resolve
+`archive_path` from the file actually written before running:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/check-archive-path.js <the archive you wrote>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-archive-path.js" "$archive_path"
 git status --short <the archive you wrote>     # it must appear
 ```
 

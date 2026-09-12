@@ -168,7 +168,7 @@ const LIVE = (() => {
     fs.writeFileSync(path.join(sessions, '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'brain-dead', name: 'brain-dead-peer' }));
     fs.writeFileSync(path.join(store, 'local_brain-desk.json'), JSON.stringify({ sessionId: 'local_brain-desk', cliSessionId: 'brain-1', isArchived: false }));
     fs.writeFileSync(path.join(store, 'local_brain-desk-old.json'), JSON.stringify({ sessionId: 'local_brain-desk-old', cliSessionId: 'brain-dead', isArchived: true, title: 'Old brain' }));
-    return { env: { AUTODEV_SESSIONS_DIR: sessions, CLAUDE_SESSION_STORE: path.join(root, 'store') } };
+    return { sessions, env: { AUTODEV_SESSIONS_DIR: sessions, CLAUDE_SESSION_STORE: path.join(root, 'store') } };
 })();
 
 {
@@ -245,8 +245,239 @@ const LIVE = (() => {
     commitIn(repo2, 'v2 delivered\n');
     const ok = spoke(run({ input: { session_id: 's5', cwd: repo2 }, roleFile: liveRole, stateFile: state2, env: LIVE.env }));
     check('  control: a live record in the same fixture is handed out as an address',
-        !!ok && /Message it before you go quiet: peer name `brain-peer`, desktop session id `local_brain-desk`/.test(ok.hookSpecificOutput.additionalContext),
+        !!ok && /Message it before you go quiet: desktop session id `local_brain-desk`, peer name `brain-peer`/.test(ok.hookSpecificOutput.additionalContext),
         ok ? ok.hookSpecificOutput.additionalContext.split('\n')[1] : 'silent');
+}
+
+// --- a PARTLY stale role file: the case that was wrong five times ------------
+/* `[measured 2026-09-08]` `peer_name` takes a fresh suffix on every restart --
+   one coordinator's went -c1 -> -d2 -> -ab -> -31 -> -a7 in a day -- while
+   `desktop_session_id` did not move. This hook read `state === 'fault'` and told
+   five sessions "nobody can be reached ... report to the operator instead",
+   while check-brain-role's own text on the SAME call said "PARTLY STALE AND
+   STILL REACHABLE. Use desktop session id ...". Every one of those sessions
+   reached the coordinator at that address anyway; a less suspicious one would
+   have woken a person for nothing, which is the failure this hook exists to
+   prevent.
+
+   All three states are driven here from FIXTURES rather than argued about: a
+   wholly live record (above), this one, and a wholly dead one (above). */
+{
+    const repo = makeRepo();
+    // Live session_id and a live desktop record; only the peer suffix decayed.
+    const role = writeRole({ session_id: 'brain-1', peer_name: 'brain-peer-a7', desktop_session_id: 'local_brain-desk', home_repos: ['C:/somewhere/coordinator'] });
+    const state = stateFilePath();
+
+    run({ input: { session_id: 's6', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    commitIn(repo, 'v2 delivered\n');
+    const fired = run({ input: { session_id: 's6', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    const j = spoke(fired);
+    const ctx = j ? j.hookSpecificOutput.additionalContext : '';
+
+    check('partly stale role: the hook speaks', !!j, fired.out.slice(0, 120));
+    check('  it hands out the address that RESOLVES',
+        /Message it before you go quiet: desktop session id `local_brain-desk`/.test(ctx), ctx.split('\n')[1]);
+    check('  it does NOT send the session to the operator',
+        !/operator/.test(ctx), ctx);
+    check('  it does NOT claim the record names no live coordinator',
+        !/DOES NOT NAME A LIVE COORDINATOR/.test(ctx) && !/Nobody can be reached/.test(ctx), ctx.split('\n')[0]);
+    check('  it names the stale FIELD, and as a field rather than an address',
+        /PART OF THE ROLE FILE IS STALE/.test(ctx) && /`peer_name` \(not the name of any live session\)/.test(ctx)
+        && /a field to re-stamp, not an address/.test(ctx), ctx.split('\n')[2]);
+    check('  it does not offer the decayed peer name as an address',
+        !/Message it before you go quiet[^\n]*brain-peer-a7/.test(ctx), ctx.split('\n')[1]);
+    check('  it still does NOT emit session_id as an address',
+        !/brain-1/.test(ctx), ctx);
+    check('  and never by cwd', !/by cwd/.test(ctx) && !/somewhere\/coordinator/.test(ctx));
+    check('  it does NOT block the turn', fired.status === 0 && !!j && !('decision' in j), 'exit=' + fired.status);
+
+    /* THE CONTROL THAT KEEPS THE ABOVE FROM BEING UNCONDITIONAL: the same
+       decayed peer name with a desktop record that is ALSO gone. Nothing
+       reaches, so the escalation is correct and must still happen. Without this
+       pair, a hook that never escalates passes the block above. */
+    const repo2 = makeRepo();
+    const state2 = stateFilePath();
+    const gone = writeRole({ session_id: 'brain-dead', peer_name: 'brain-peer-a7', desktop_session_id: 'local_brain-desk-old' });
+    run({ input: { session_id: 's7', cwd: repo2 }, roleFile: gone, stateFile: state2, env: LIVE.env });
+    commitIn(repo2, 'v2 delivered\n');
+    const dead = spoke(run({ input: { session_id: 's7', cwd: repo2 }, roleFile: gone, stateFile: state2, env: LIVE.env }));
+    const deadCtx = dead ? dead.hookSpecificOutput.additionalContext : '';
+    check('  control: when NOTHING resolves, the operator is still the answer',
+        /DOES NOT NAME A LIVE COORDINATOR/.test(deadCtx) && /Report to the operator instead/.test(deadCtx)
+        && !/PART OF THE ROLE FILE IS STALE/.test(deadCtx), deadCtx.split('\n')[1]);
+
+    /* ABSENT COVERAGE MUST NOT READ AS COVERAGE, in either direction. The same
+       partly-stale record with no readable desktop store: the desktop id may
+       well be alive and nothing read it, so this must NOT reach the degraded
+       branch (a green from a check that never ran), and must NOT claim nobody
+       can be reached either. */
+    const repo3 = makeRepo();
+    const state3 = stateFilePath();
+    run({ input: { session_id: 's8', cwd: repo3 }, roleFile: role, stateFile: state3, env: Object.assign({}, LIVE.env, { CLAUDE_SESSION_STORE: path.join(os.tmpdir(), 'sbr-no-such-store') }) });
+    commitIn(repo3, 'v2 delivered\n');
+    const unchecked = spoke(run({ input: { session_id: 's8', cwd: repo3 }, roleFile: role, stateFile: state3, env: Object.assign({}, LIVE.env, { CLAUDE_SESSION_STORE: path.join(os.tmpdir(), 'sbr-no-such-store') }) }));
+    const unCtx = unchecked ? unchecked.hookSpecificOutput.additionalContext : '';
+    check('  an UNCHECKED address does not reach the degraded branch',
+        !!unchecked && !/PART OF THE ROLE FILE IS STALE/.test(unCtx)
+        && !/Message it before you go quiet/.test(unCtx), unCtx.split('\n')[1]);
+    check('  and it is not called dead either: it says what went unchecked',
+        /`desktop_session_id` \(no readable desktop store/.test(unCtx)
+        && /could not be checked/.test(unCtx) && !/Nobody can be reached/.test(unCtx), unCtx.split('\n')[1]);
+
+    /* THE OTHER UNREADABLE REGISTRY, WHICH IS NOT THE SAME CASE. The pair above
+       loses the desktop STORE, so `unchecked` holds `desktop_session_id` -- a
+       real address, and "try it before concluding there is nobody there" is
+       sound advice about it. Lose the SESSIONS DIR instead and the same list
+       filled with `session_id`, which is not an address in any registry, under
+       the same sentence.
+
+       `[measured 2026-09-09]` it did exactly that from 2026-09-08 until today:
+       on a machine with no readable `~/.claude/sessions` -- a desktop-only
+       install, or one where the CLI has not written it yet -- a session was told
+       to try the CLI uuid, which is the 2026-09-04 defect that produced
+       `Session not found` twice. The store case above passed throughout,
+       because it happens to put an address in that list. One branch, two
+       registries, and only one of them was driven. */
+    const repo4 = makeRepo();
+    const state4 = stateFilePath();
+    const noSessions = Object.assign({}, LIVE.env, { AUTODEV_SESSIONS_DIR: path.join(os.tmpdir(), 'sbr-no-such-sessions-dir') });
+    run({ input: { session_id: 's9', cwd: repo4 }, roleFile: role, stateFile: state4, env: noSessions });
+    commitIn(repo4, 'v2 delivered\n');
+    const noSess = spoke(run({ input: { session_id: 's9', cwd: repo4 }, roleFile: role, stateFile: state4, env: noSessions }));
+    const nsCtx = noSess ? noSess.hookSpecificOutput.additionalContext : '';
+    check('  an unreadable SESSIONS dir never names `session_id` as an address to try',
+        !!noSess && !/`session_id`/.test(nsCtx) && !/brain-1/.test(nsCtx), nsCtx.split('\n')[1]);
+    /* The control, so the case above cannot pass by the hook going quiet or by
+       the branch never being entered: it must still reach the unchecked wording
+       and still name the field that IS an address. */
+    check('    control: it still reaches the unchecked branch and names `peer_name`',
+        /`peer_name` \(no readable sessions directory/.test(nsCtx)
+        && /could not be checked/.test(nsCtx) && !/Nobody can be reached/.test(nsCtx), nsCtx.split('\n')[1]);
+}
+
+// --- an address that resolves to a STRANGER ---------------------------------
+/* A COLLISION IS NOT A STALE FIELD. `session_id` dead, `peer_name` resolving to
+   a LIVE session that is somebody else: a name freed by an archived session can
+   be taken by another. "Nobody can be reached" is true here and insufficient —
+   it does not say that trying anyway lands on a stranger. The branch and this
+   fixture are ported from `fix/coordinator-reachable-by-either-address` @
+   62a42be0, which had both where this file had neither.
+
+   The stranger is a SECOND live pid, so it cannot coincide with the record by
+   construction. The parent process is alive for as long as this suite runs; if
+   it is not, that is asserted rather than passing a case that never ran. */
+{
+    const strangerPid = process.ppid;
+    check('fixture: a second live pid exists for the stranger case', (() => {
+        try { process.kill(strangerPid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); }
+    })(), 'ppid ' + strangerPid);
+    fs.writeFileSync(path.join(LIVE.sessions, strangerPid + '.json'),
+        JSON.stringify({ pid: strangerPid, sessionId: 'brain-stranger', name: 'brain-stranger-peer' }));
+
+    const repo = makeRepo();
+    const state = stateFilePath();
+    const role = writeRole({ session_id: 'brain-dead', peer_name: 'brain-stranger-peer', desktop_session_id: 'local_brain-desk-old' });
+    run({ input: { session_id: 's9', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+    commitIn(repo, 'v2 delivered\n');
+    const j = spoke(run({ input: { session_id: 's9', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env }));
+    const ctx = j ? j.hookSpecificOutput.additionalContext : '';
+
+    check('a name resolving to a STRANGER: the hook speaks', !!j, ctx.slice(0, 90));
+    check('  it says the address reaches somebody else, not merely that nobody answers',
+        /RESOLVES TO SOMEBODY ELSE/.test(ctx) && /Message NOBODY at that record/.test(ctx), ctx.split('\n')[0]);
+    check('  it does NOT offer the stranger name as an address',
+        !/Message it before you go quiet/.test(ctx) && !/PART OF THE ROLE FILE IS STALE/.test(ctx), ctx.split('\n')[1]);
+    check('  and a person is the right answer here, so it says so',
+        /Report to the operator/.test(ctx), ctx.split('\n')[1]);
+    check('  zero bytes on stderr, exit 0, turn not blocked', (() => {
+        const again = run({ input: { session_id: 's9b', cwd: repo }, roleFile: role, stateFile: state, env: LIVE.env });
+        return again.err.length === 0 && again.status === 0;
+    })());
+}
+
+// --- the hook and `--status` must not disagree about the same record ---------
+/* THE DEFECT WAS A DISAGREEMENT, so the regression test is an agreement test.
+   `[measured 2026-09-08]` `check-brain-role.js --status` said "PARTLY STALE AND
+   STILL REACHABLE. Use desktop session id ..." while the hook, reading the same
+   record through the same function in the same minute, said the record named no
+   live coordinator and to escalate. Every assertion above checks ONE of the two
+   surfaces; only this one checks that they still answer the same question the
+   same way, which is the property that actually broke.
+
+   Idea ported from `fix/coordinator-reachable-by-either-address` @ 62a42be0 —
+   the best assertion on either branch, and neither had it in this form. */
+{
+    const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-brain-role.js');
+    /* THE FIRST RUN OF THIS BLOCK FAILED, ON THE ASSERTION RATHER THAN THE
+       SUBJECT, and the distinction is worth keeping: `--status` prints its
+       advice block ONLY for a record with a fault, so on a healthy one it names
+       no address while the hook correctly hands out both. Comparing the two
+       texts as equal sets compares a diagnostic's silence with a router's
+       output, and would have failed a hook that was right.
+
+       The property that actually holds on every record is: THE ADDRESSES THE
+       HOOK OFFERS ARE THE ADDRESSES `--status` SHOWS AS LIVE. So read them from
+       whichever form that run produced -- the "Use X or Y" advice when a field
+       is stale, the "-> live" resolution lines when nothing is. `session_id` is
+       excluded from both sides by construction, which asserts the
+       never-print-session_id property from a second direction. */
+    const fromStatus = (roleFile) => {
+        const r = spawnSync(process.execPath, [SUBJECT, '--status', '--role', roleFile], {
+            encoding: 'utf8', env: Object.assign({}, process.env, LIVE.env),
+        });
+        const out = r.stdout || '';
+        const advice = (out.split('\n').find((l) => /PARTLY STALE AND STILL REACHABLE\. Use /.test(l)) || '');
+        const offers = advice
+            ? (advice.match(/`([^`]+)`/g) || [])
+            : out.split('\n')
+                .filter((l) => /^ {2}(peer_name|desktop_session_id) \S+ -> live/.test(l))
+                .map((l) => '`' + l.trim().split(' ')[1] + '`');
+        return {
+            offers: offers.sort().join(','),
+            sendsToPerson: /Nobody can be reached|Message nobody at this record/.test(out),
+        };
+    };
+    const fromHook = (roleFile) => {
+        const repo = makeRepo();
+        const st = stateFilePath();
+        run({ input: { session_id: 'agree-' + path.basename(path.dirname(roleFile)), cwd: repo }, roleFile, stateFile: st, env: LIVE.env });
+        commitIn(repo, 'v2 delivered\n');
+        const j = spoke(run({ input: { session_id: 'agree-' + path.basename(path.dirname(roleFile)), cwd: repo }, roleFile, stateFile: st, env: LIVE.env }));
+        const ctx = j ? j.hookSpecificOutput.additionalContext : '';
+        const line = (ctx.split('\n').find((l) => /^Message it before you go quiet/.test(l)) || '');
+        return {
+            offers: (line.match(/`([^`]+)`/g) || []).sort().join(','),
+            sendsToPerson: /Report to the operator|Message NOBODY/.test(ctx),
+            ctx,
+        };
+    };
+
+    const records = [
+        ['both live', { session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk' }],
+        ['peer decayed, desktop live', { session_id: 'brain-1', peer_name: 'brain-peer-a7', desktop_session_id: 'local_brain-desk' }],
+        ['peer live, desktop archived', { session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk-old' }],
+        ['nothing resolves', { session_id: 'brain-dead', peer_name: 'brain-peer-a7', desktop_session_id: 'local_brain-desk-old' }],
+    ];
+    for (const [label, rec] of records) {
+        const roleFile = writeRole(rec);
+        const s = fromStatus(roleFile);
+        const h = fromHook(roleFile);
+        check('hook and --status agree on "' + label + '": same addresses offered',
+            s.offers === h.offers, '--status=[' + s.offers + '] hook=[' + h.offers + ']');
+        check('  and agree on whether a person is the answer',
+            s.sendsToPerson === h.sendsToPerson,
+            '--status=' + s.sendsToPerson + ' hook=' + h.sendsToPerson);
+    }
+    /* The pair that makes the four above discriminating: the four records must
+       not all reduce to the same answer, or an agreement test passes on a hook
+       and a script that both say one thing always. */
+    const answers = records.map(([, rec]) => {
+        const f = writeRole(rec);
+        const s = fromStatus(f);
+        return s.offers + '|' + s.sendsToPerson;
+    });
+    check('control: the four records do not all reduce to one answer',
+        new Set(answers).size >= 3, new Set(answers).size + ' distinct of ' + answers.length);
 }
 
 // --- the throttle ----------------------------------------------------------
@@ -260,11 +491,39 @@ const LIVE = (() => {
     commitIn(repo, 'v2\n');
     const one = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     check('throttle: the first notice fires', !!spoke(one));
+    const notifiedSha = JSON.parse(fs.readFileSync(state, 'utf8')).s4.sha;
 
     commitIn(repo, 'v3\n');
     const two = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     check('throttle: a second commit inside the window is SUPPRESSED', silentOk(two),
         `out=${two.out.length}B`);
+
+    const waiting = JSON.parse(fs.readFileSync(state, 'utf8'));
+    const pendingSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    check('throttle: suppressed work does not advance the notified HEAD',
+        waiting.s4.sha === notifiedSha && pendingSha !== notifiedSha,
+        `stored=${waiting.s4.sha.slice(0, 8)} notified=${notifiedSha.slice(0, 8)} pending=${pendingSha.slice(0, 8)}`);
+    const stillWaiting = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
+    check('throttle: pending work stays quiet while the window is active', silentOk(stillWaiting),
+        `out=${stillWaiting.out.length}B err=${stillWaiting.err.length}B exit=${stillWaiting.status}`);
+
+    // Age only the notice timestamp. A new commit here would hide the defect:
+    // the final commit must be delivered when the cooldown ends without
+    // requiring the worker to create more work first.
+    const expired = JSON.parse(fs.readFileSync(state, 'utf8'));
+    expired.s4.reportedAt = Date.now() - 21 * 60 * 1000;
+    fs.writeFileSync(state, JSON.stringify(expired));
+    const released = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
+    const releasedContext = spoke(released);
+    check('throttle: the same final commit is reported after cooldown expires',
+        !!releasedContext && releasedContext.hookSpecificOutput.additionalContext.includes('HEAD ' + pendingSha.slice(0, 8))
+            && released.err.length === 0,
+        `out=${released.out.length}B err=${released.err.length}B exit=${released.status}`);
+    check('throttle: released work advances the notified HEAD',
+        JSON.parse(fs.readFileSync(state, 'utf8')).s4.sha === pendingSha);
+    const duplicate = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
+    check('throttle: the released commit is not reported twice', silentOk(duplicate),
+        `out=${duplicate.out.length}B err=${duplicate.err.length}B exit=${duplicate.status}`);
 
     commitIn(repo, 'v4\n');
     const three = run({
@@ -362,10 +621,20 @@ const LIVE = (() => {
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
-    + (pass + fail) + ' cases over 6 inert paths, the firing path against a LIVE role '
-    + 'record (own pid, nested fixture store), a STALE role record with a live control, '
-    + 'a 3-step throttle with a cooldown-0 control, a corrupt ledger, and the merged-to-trunk shape with an off-trunk control and a no-origin case. Every quiet '
-    + 'case asserts zero bytes on BOTH streams; the address line never offers cwd.');
+    + (pass + fail) + ' cases over 6 inert paths, all FOUR role-record outcomes driven '
+    + 'from fixtures (a wholly live record; a PARTLY stale one whose peer name decayed '
+    + 'while its desktop id resolves; a wholly dead one; and a name resolving to a '
+    + 'STRANGER, which is a different instruction from either), each beside the control '
+    + 'that flips it, plus BOTH unreadable-registry cases -- no desktop store, and no '
+    + 'sessions directory -- each proving an UNCHECKED address reaches neither the '
+    + 'degraded branch nor the dead one, and the sessions one proving `session_id` is '
+    + 'never named among the addresses to try, four records cross-checked for AGREEMENT '
+    + 'between the hook and `--status` with a control proving they do not all reduce to '
+    + 'one answer, a throttle with same-HEAD delivery after expiry, duplicate '
+    + 'suppression and a cooldown-0 control, a corrupt ledger, and the merged-to-trunk '
+    + 'shape with an off-trunk control and a no-origin case. Every quiet case asserts '
+    + 'zero bytes on BOTH streams; the address line never offers cwd and never carries '
+    + 'session_id.');
 if (fail) {
     console.log('failed: ' + failures.join('; '));
     process.exit(1);

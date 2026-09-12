@@ -128,13 +128,23 @@ function checkPrReady(prNumber, cwd) {
     if (pr.mergeStateStatus === 'UNSTABLE' && bad === 0 && pending === 0) {
         reasons.push('mergeStateStatus is UNSTABLE with no failing or pending check; usually the rollup artifact');
     }
-    if (good === 0 && skipped > 0) reasons.push('every check that ran was SKIPPED, so nothing was actually verified');
+    // A passing lint job says nothing about a skipped test job. This response
+    // contains no authoritative required-job set, so it cannot establish that
+    // a skip was optional. Even a same-name success can belong to another
+    // workflow; treating names as identities would make that a false pass too.
+    if (skipped > 0) {
+        const names = checks.filter(([, state]) => state === 'SKIPPED').map(([name]) => name);
+        reasons.push(skipped + ' check(s) were SKIPPED: ' + names.join(', ')
+            + '; their required/optional status is not established, so other successful checks cannot certify readiness');
+    }
     // An empty rollup looks identical to a clean one and is not. But it has two
     // causes with opposite meanings: every PR-firing workflow path-filtered the
     // change out (fine, nothing could ever go red), or a gate was due and never
     // started (the outage shape). Ask the workflow files at the trunk which.
     let pathFilter = null;
-    if (rollup.length === 0) {
+    // Artifacts are not checks. A rollup containing only artifacts has exactly
+    // the same missing evidence as an empty array and needs the same analysis.
+    if (checks.length === 0) {
         const files = Array.isArray(pr.files) ? pr.files.map((f) => f.path).filter(Boolean) : [];
         if (files.length && cwd) {
             try {

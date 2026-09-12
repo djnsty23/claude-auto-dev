@@ -11,13 +11,13 @@
 //   spawnSync(node, [hookPath], { input: JSON.stringify(event), env, cwd }).
 //
 // The hook resolves memory-db from ${CLAUDE_PLUGIN_ROOT}/scripts/, so a fake plugin
-// root is built in a temp dir with memory-db.js + semantic-search.js copied in, and
+// root is built in a temp dir with the actual scripts directory copied in, and
 // HOME is redirected too because memory-db puts the DB under HOME/.claude.
 // observation-classifier.js is DELIBERATELY NOT copied: without it the hook's
 // capture block is skipped, so the ONLY observations in the DB are the ones this
 // test seeds — which makes the injection/throttle/empty assertions deterministic.
 //
-// Run: node scripts/test-knowledge-injection.js  (exit 1 on any failure)
+// Run: node tooling/test-knowledge-injection.js  (exit 1 on any failure)
 
 const { spawnSync } = require('child_process');
 const fs = require('fs');
@@ -34,14 +34,16 @@ const TMP_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'knowinje
 process.env.HOME = TMP_HOME;
 process.env.USERPROFILE = TMP_HOME;
 
-// Install the pieces the hook needs into ~/.claude/scripts (NOT the classifier —
-// see header note: omitting it disables capture so seeded rows are the only rows).
+// Mirror script dependencies into the fake plugin. A hand-maintained file list
+// silently became incomplete when memory-db gained a shared redactor. Exclude
+// only the classifier deliberately: seeded rows remain the only observations.
 const PLUGIN_ROOT = path.join(TMP_HOME, "fake-plugin");
 const HOME_SCRIPTS = path.join(PLUGIN_ROOT, "scripts");
 fs.mkdirSync(HOME_SCRIPTS, { recursive: true });
-for (const f of ['memory-db.js', 'semantic-search.js', 'session-carrier.js']) {
-  fs.copyFileSync(path.join(REPO_SCRIPTS, f), path.join(HOME_SCRIPTS, f));
-}
+fs.cpSync(REPO_SCRIPTS, HOME_SCRIPTS, {
+  recursive: true,
+  filter: (source) => source !== path.join(REPO_SCRIPTS, 'observation-classifier.js')
+});
 
 // Require the (HOME-redirected) memory-db to seed the shared DB. It derives its
 // DB path from HOME at load time, so it points at the same file the hook opens.
@@ -149,9 +151,7 @@ if (!memDB.isAvailable()) {
     const CAP_PLUGIN_ROOT = path.join(CAP_HOME, "fake-plugin");
     const CAP_SCRIPTS = path.join(CAP_PLUGIN_ROOT, "scripts");
     fs.mkdirSync(CAP_SCRIPTS, { recursive: true });
-    for (const f of ['memory-db.js', 'semantic-search.js', 'observation-classifier.js', 'session-carrier.js']) {
-      fs.copyFileSync(path.join(REPO_SCRIPTS, f), path.join(CAP_SCRIPTS, f));
-    }
+    fs.cpSync(REPO_SCRIPTS, CAP_SCRIPTS, { recursive: true });
 
     // Seed src/auth knowledge into CAP_HOME's DB (memory-db binds DB_PATH from HOME
     // at load time, so temporarily point HOME at CAP_HOME while requiring/seeding).

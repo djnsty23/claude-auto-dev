@@ -10,6 +10,13 @@ argument-hint: "[days | YouTube URL]"
 
 # Marketing Radar
 
+The shell examples resolve scripts through `${CLAUDE_PLUGIN_ROOT}`, which the
+host sets per loaded plugin — it is an environment variable, so it survives
+across separate shell invocations where a variable you assign does not. Do not
+substitute the target project's working directory. If it is unset the plugin is
+not loaded; fix that rather than hardcoding a path. Verify the named script
+exists under that root.
+
 Collect first, separate claims from promotion, then test only what the available
 population can actually answer. Primary, research-method, trade/community and
 practitioner-audience evidence are separate populations. Platform narration,
@@ -120,6 +127,11 @@ Select at most three hypotheses. Every selected hypothesis must be executed in
 this run. Anything that cannot run now stays `watch`; do not disguise it as an
 experiment.
 
+If execution becomes unavailable after selection, retain the selected id,
+completed attempts, missing prerequisite and owner as pending. Do not relabel
+it `reject`/`no winner`, fabricate measurements or mark the manifest fully
+reviewed merely to make selected and verdict counts agree.
+
 Before results, preregister:
 
 - hypothesis and exact population or fixture;
@@ -156,7 +168,10 @@ Scheduled runs are read-only toward ad accounts, analytics properties, CRM,
 email systems, domains and product repositories. They may create local fixtures,
 draft artifacts and reports. They must not publish content, send messages,
 change tracking, upload audiences, alter campaigns or budgets, or start spend.
-Those actions require fresh explicit authorization and their own rollback plan.
+Those actions require explicit authority covering the actual system, action
+and effects, plus the applicable recovery plan. Preserve an existing grant; a
+new research cycle does not erase it. Carry separately authorized live work to
+the appropriate execution workflow after its prerequisites are satisfied.
 
 ### Verdict
 
@@ -166,8 +181,11 @@ targeted tests plus the repository gate.
 
 A scheduled run may push a winning `codex/marketing-radar-*` branch and open a
 review PR only when its automation prompt explicitly grants that exact standing
-authorization. Interactive runs require fresh push authorization. Never merge,
-deploy, tag, release, update installed plugins or mutate a live marketing system.
+authorization. Interactive runs use the current request and still-valid
+publication grant. This research workflow does not itself merge, deploy, tag,
+release, update installed plugins or mutate live marketing systems. If the user
+also authorized implementation/delivery, continue through the appropriate
+workflow with the measured winner rather than asking them to transport the plan.
 
 ### Record outcomes and adoption state
 

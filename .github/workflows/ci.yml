@@ -130,3 +130,16 @@ jobs:
       - name: CLAUDE.md still describes the tree
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:claude-md
+
+      # A FLOOR against coverage regression, not a quality claim. Runs every
+      # suite again under NODE_V8_COVERAGE (no dependency; c8 was costed and
+      # rejected in docs/evidence-coverage-gate-2026-09-08.md) and fails only
+      # when the count of plugin functions no suite enters, or of plugin files
+      # no suite loads, rises ABOVE what HEAD scored when the floor was measured.
+      # Coverage measures execution, not verification: a function entered every
+      # run while nothing asserts on it is green here. Linux only, like the steps
+      # above: the count is platform-sensitive (Windows-gated code is entered on
+      # one runner and not the other) and one measurement is the point.
+      - name: Coverage floor (never-entered plugin functions do not grow)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:coverage

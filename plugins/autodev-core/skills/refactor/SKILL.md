@@ -10,9 +10,15 @@ argument-hint: "[target file or pattern]"
 
 # Refactoring Patterns
 
-**Rule #1:** Tests pass before AND after. No behavior change.
+**Rule #1:** Preserve observable behavior. Establish relevant before/after
+checks using the project's actual commands; inherited failures and missing
+coverage stay explicit. Types/build success alone cannot prove no behavior change.
 
-## When to Refactor
+## When to investigate a refactor
+
+The following sizes are investigation leads, not violations or automatic edit
+orders. Preserve cohesive code. Require a concrete maintenance/runtime problem
+and compare the proposed boundary with leaving the code intact.
 
 | Signal | Refactoring |
 |--------|-------------|
@@ -182,8 +188,8 @@ After each step:
 
 After completion:
 - [ ] `npm run build` passes
-- [ ] App runs correctly
-- [ ] All existing functionality works
+- [ ] Relevant public entrypoints and user flows preserve their before behavior
+- [ ] Evidence identifies the tested commit, inputs, outputs and untested scope
 
 ## Integration
 

@@ -1,6 +1,6 @@
 ---
 name: doppler
-description: Manage environment variables with Doppler — auto-install CLI, login, link projects, wrap commands with `doppler run`. Replaces scattered .env files with a hub/spoke architecture.
+description: Configure or migrate a project’s environment variables with Doppler. Resolve the intended account and environment, preserve secret scope, and verify application access and recovery.
 when_to_use: "Invoked when the user says \"doppler\", \"setup doppler\", \"add doppler\", \"env to doppler\", \"migrate env\"."
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 model: opus
@@ -8,206 +8,84 @@ user-invocable: true
 argument-hint: "[setup|link|run|migrate|rotate]"
 ---
 
-# Doppler — Env Var Management
+# Doppler — environment management
 
-Centralize secrets across projects. Rotate once, propagates everywhere.
+Use the project's existing secret-management design. Shared references can
+reduce rotation work, but centralizing unrelated projects is an architectural
+choice with a wider failure scope, not an automatic cleanup.
 
-## When to use
+## Establish scope and capability
 
-- Project has `.env.local` / `.env.vercel` with 5+ secrets
-- Secrets are reused across multiple projects (API keys, OAuth creds)
-- Fresh Windows install — need to restore env vars fast
+Read `doppler.yaml`, the current mandate and the required environment. Resolve
+project/config explicitly; local setup must not silently select production.
+Check `doppler --version`, `doppler me` and relevant command help, retaining
+their real exit status. Do not pipe prerequisite commands into `head`.
 
-## Prereqs (auto-check before any action)
+Install a missing CLI using the approved platform package manager when setup is
+in scope. Use configured credentials or start the supported login flow; ask for
+a human consent step only when the actual flow requires it. Do not ask for
+secret values in chat.
 
-```bash
-# 1. CLI installed?
-doppler --version 2>&1 | head -1
-# If not: winget install doppler.doppler  (Windows)
-# OR: brew install dopplerhq/cli/doppler  (macOS)
+Project limits and plan capabilities change. Inspect the actual account/plan
+and current [Doppler documentation](https://docs.doppler.com/docs/cli) before
+claiming a quota or recommending consolidation. A remembered ten-project cap is
+not an instruction to delete resources.
 
-# 2. Logged in?
-doppler me 2>&1 | head -3
-# If "Doppler Error: you must provide a token" → run `doppler login` (browser flow, user does this)
+## Link or migrate the selected environment
 
-# 3. Inside a linked repo?
-test -f doppler.yaml && echo "linked: $(cat doppler.yaml | grep project | awk '{print $2}')" || echo "not linked"
-```
+1. Inventory required variable **names**, current sources and consumers without
+   printing values. Read the exact approved source file; do not select whichever
+   env file happens to appear first.
+2. Resolve whether the destination project/config already exists. Creation or
+   an upload follows the user's scope; preserve existing destination keys and
+   inspect overwrite consequences before the write.
+3. Use supported `doppler setup` or deliberate `doppler.yaml` configuration
+   for that verified project/config. Keep development and production distinct.
+4. Upload only the selected file/keys using the installed CLI's documented
+   command. Capture errors without exposing values; do not call a failed upload
+   a completed migration.
+5. Run the actual application/check through `doppler run -- <command>`.
+   Verify required names are present and the intended dependency authenticates.
+   A count of process environment variables is not proof Doppler injected the
+   right secrets; inherited variables alone can satisfy that count.
+6. Keep the previous ignored local source until the migration and recovery are
+   verified. Retire it only within the authorized scope.
 
-Do not proceed if any prereq fails. Tell the user exactly what to run.
+Commit `doppler.yaml` when it contains only intended shareable project/config
+metadata. Keep secret files ignored; example/template files contain names or
+safe placeholders only. Wrap commands once, preserving the child's exit status.
 
-## Architecture — hub/spoke on Developer plan
+## References and rotation
 
-**Free tier caps at 10 projects.** Plan for this — consolidate with branch configs.
+When sharing is actually intended, load
+[extract-to-hub.md](references/extract-to-hub.md) and check the current reference
+syntax against installed documentation before writing values. A string that
+looks like a reference is not proof it resolved.
 
-```
-Hubs (secrets live here):
-  ai-keys/prd       — shared LLM/API keys (Gemini, OpenAI, Anthropic, Perplexity, Resend)
-  accounts/prd      — shared passwords + gmail aliases
-  stripe            — dev config (test mode), prd config (live mode)
-  supabase          — 1 branch config per Supabase project: prd_<name>
+Rotate the exact selected credential, then verify each affected consumer and
+restart/redeploy behavior needed for it to receive the new value. A newly
+started `doppler run` and an already running service have different lifecycles.
+Preserve a recovery plan appropriate to the provider; do not revoke the old
+credential before proving the replacement when overlap is supported.
 
-Spokes (one Doppler project per app):
-  app-<name>/prd    — values are ${ref://hub.config.KEY} cross-project references
-```
+## Backups must be encrypted and restorable
 
-**Cross-project refs** (`${project.config.SECRET}`) work on Developer plan. Verified.
+A backup/export is separate from ordinary setup or rotation. Use the requested
+project/config scope; do not export every visible project's secrets.
 
-## Commands
+The former `tar -czf` recipe compressed plaintext env files. Compression is
+**not encryption**, and cloud storage does not turn that file into an encrypted
+backup. Do not reuse that recipe.
 
-### `doppler` or `setup doppler` (interactive)
+For an authorized backup, select an available encryption tool and verified
+recipient/key arrangement first. Keep plaintext in a private temporary location
+only as necessary, retain real command statuses, and produce the encrypted
+artifact before deleting inputs. Test decrypt/restore with synthetic secrets
+using the same format before exporting real ones. Verify the resulting archive
+can restore the intended layout without displaying values or overwriting live
+secrets. Store keys separately; clean temporary plaintext with an explicit
+owned-file list. Publish only the encrypted artifact to the intended destination.
 
-1. Run prereq checks above. Guide user to fix issues before continuing.
-2. If no `doppler.yaml` in current repo → link it:
-   ```bash
-   # Check if a project exists for this repo
-   PROJECT_NAME="app-$(basename $(pwd) | tr '[:upper:]' '[:lower:]' | tr '._' '--')"
-   doppler projects --json | python -c "import sys,json; names=[p['name'] for p in json.load(sys.stdin)]; print('exists' if '$PROJECT_NAME' in names else 'missing')"
-   ```
-3. If project missing, check the 10-project quota before creating:
-   ```bash
-   COUNT=$(doppler projects --json | python -c "import sys,json; print(len(json.load(sys.stdin)))")
-   # If COUNT >= 10: tell user they must delete a project or consolidate before proceeding
-   ```
-4. If space available, create the project:
-   ```bash
-   doppler projects create --name "$PROJECT_NAME" --description "App spoke"
-   ```
-5. Upload existing env values:
-   ```bash
-   # Find best file
-   for f in .env.local .env.vercel .env; do
-     [ -f "$f" ] && ENV_FILE="$f" && break
-   done
-   doppler secrets upload "$ENV_FILE" --project "$PROJECT_NAME" --config prd
-   ```
-6. Write `doppler.yaml`:
-   ```yaml
-   setup:
-     project: app-<name>
-     config: prd
-   ```
-7. Smoke test:
-   ```bash
-   doppler run -- node -e "console.log(Object.keys(process.env).filter(k => !k.startsWith('DOPPLER_')).length, 'vars injected')"
-   ```
-
-### `doppler migrate` (move secrets from .env to Doppler)
-
-For a repo that already has `doppler.yaml`:
-
-```bash
-ENV_FILE=$(for f in .env.local .env.vercel .env; do [ -f "$f" ] && echo "$f" && break; done)
-doppler secrets upload "$ENV_FILE" --project app-<name> --config prd
-# Verify
-doppler run -- printenv | grep -v '^DOPPLER_' | wc -l
-# If verified good, DO NOT delete the .env file yet — user decides
-```
-
-Never auto-delete `.env.local`. User confirms after testing.
-
-### `doppler rotate <KEY> <NEW_VALUE>`
-
-For a key in a hub:
-```bash
-doppler secrets set "<KEY>=<NEW_VALUE>" --project <hub-project> --config <config>
-```
-
-All spoke apps that use `${<hub>.<config>.<KEY>}` get the new value on next `doppler run`. No per-app edits.
-
-### `doppler run` wrapping
-
-If `doppler.yaml` exists in the current working directory:
-- Wrap all dev/build/test commands: `doppler run -- <cmd>`
-- Alternatively, add `doppler run --` prefix to npm scripts in `package.json`:
-  ```json
-  {
-    "scripts": {
-      "dev": "doppler run -- next dev",
-      "build": "doppler run -- next build",
-      "start": "doppler run -- next start"
-    }
-  }
-  ```
-
-Do not double-wrap if the script already starts with `doppler run`.
-
-## Extracting shared secrets to hubs
-
-When you find the same secret across 2+ apps, move it to a hub and replace with `${ref://...}` — load `references/extract-to-hub.md` for the exact commands (shared API keys → `ai-keys`, Supabase creds → `supabase.prd_<name>` branch configs, safety rules around shell-variable handling).
-
-## Install CLI (platform-aware)
-
-```bash
-case "$OSTYPE" in
-  msys*|cygwin*|win32*)
-    winget install doppler.doppler --accept-source-agreements --accept-package-agreements --silent
-    ;;
-  darwin*)
-    brew install dopplerhq/cli/doppler
-    ;;
-  linux*)
-    curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh | sh
-    ;;
-esac
-```
-
-After install, **new shells need the PATH update**. For Windows, the CLI lives at `$APPDATA\Local\Microsoft\WinGet\Packages\Doppler.doppler_*/doppler.exe` — may need full-path invocation in the same shell that ran winget.
-
-## Login flow
-
-```bash
-doppler login
-# Browser opens → authorize → paste code
-# Git Bash bug: use `winpty doppler login` on Windows if using Git Bash
-```
-
-**Claude cannot run `doppler login` autonomously** — browser OAuth requires the user. Always direct them to run it in their terminal.
-
-## Backup your Doppler structure
-
-Export all projects + secrets to encrypted JSON for disaster recovery:
-
-```bash
-mkdir -p ~/claude-backups/doppler-$(date +%Y-%m-%d)
-cd ~/claude-backups/doppler-$(date +%Y-%m-%d)
-doppler projects --json > projects.json
-for p in $(doppler projects --json | python -c "import sys,json; [print(p['id']) for p in json.load(sys.stdin)]"); do
-  for c in $(doppler configs --project "$p" --json | python -c "import sys,json; [print(x['name']) for x in json.load(sys.stdin)]"); do
-    doppler secrets download --project "$p" --config "$c" --format env --no-file > "${p}__${c}.env" 2>/dev/null
-  done
-done
-# Encrypt the backup
-tar -czf doppler-backup.tar.gz *.env projects.json
-rm *.env projects.json
-# Move tar.gz to your cloud drive (OneDrive/iCloud)
-```
-
-Only do this when rotating keys or before major changes. Doppler's own activity log handles most recovery needs.
-
-## Integration with auto-dev skills
-
-- `setup-project` — offers Doppler during onboard when `.env.local` has 3+ vars
-- `env-vars` — treats Doppler as the default pattern
-- `auto` — detects `doppler.yaml` and wraps dev/build/test commands automatically
-- `deploy` — uses `doppler secrets download --format docker --no-file` for CI/CD
-
-## Rules
-
-- **Never log secret values.** Use `--plain` only to pipe into `set`, never to echo/print.
-- **Cap at 10 projects** (Developer plan limit). Consolidate with branch configs when approaching the cap.
-- **Don't auto-delete .env.local** — always after user-verified `doppler run` smoke test.
-- **Commit `doppler.yaml`** — it's safe (project name + config only, no secrets).
-- **`.gitignore` all `.env*`** except `.env.example` and `.env.template`.
-- **Rotation flow uses refs** — update in hub, all spokes see the new value on next `doppler run`.
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| `doppler: command not found` | Install per platform (see above) + restart shell for PATH |
-| `you must provide a token` | `doppler login` (browser flow) |
-| `you must specify a project` | `doppler setup` in repo OR create `doppler.yaml` |
-| `your workplace has reached its limit of 10 projects` | Delete a project OR consolidate with branch configs |
-| Ref doesn't resolve | Check spelling: `${project.config.KEY}` exactly. Hub project must exist, config must exist, key must exist |
-| Values missing after `doppler run` | Check the app's config has that key: `doppler secrets --project app-X --config prd` |
+Report which configurations and checks were covered, backup identity and
+recovery location, without secret values. Unavailable credentials, failed
+uploads, untested restore and pending propagation remain named gaps.

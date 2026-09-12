@@ -20,14 +20,28 @@
 //
 // Every file is restored from git afterwards and the tree is verified clean.
 //
-// Usage: node tooling/check-suites-can-fail.js [--verbose]
+// Usage: node tooling/check-suites-can-fail.js [--verbose] [--all-subjects]
+//
+// --all-subjects stubs EVERY derived candidate rather than stopping at the first
+// one that proves the suite can fail. Same verdicts, more runs: it is there for
+// the reader who wants the complete kill set, and it is what this script did
+// unconditionally until 2026-09-10.
 
 const fs = require('fs');
 const path = require('path');
 const { spawnSync, execSync } = require('child_process');
+const sb = require('./spawn-budget.js');
+const ev = require('./subject-evidence.js');
+const sv = require('./suite-verdict-summary.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const VERBOSE = process.argv.includes('--verbose');
+// Stub EVERY candidate instead of stopping at the first one that proves the suite
+// can fail. The verdict is identical either way — asserted over every outcome
+// pattern in subject-evidence.js's selftest — so this exists for the reader who
+// wants the complete kill set rather than the one that decided it, and it is what
+// the sweep did unconditionally until 2026-09-10.
+const ALL_SUBJECTS = process.argv.includes('--all-subjects');
 
 // DERIVED, not declared. The first version of this file hand-listed which source
 // each suite tests, and got it wrong for three of twelve — twice producing a
@@ -143,102 +157,16 @@ const NOT_JAVASCRIPT = {
 };
 
 function deriveSubjects(suiteFile) {
-    const src = fs.readFileSync(suiteFile, 'utf8');
-    const found = new Set();
-
-    // The suite's OWN directory, relative to the repo, as a posix path. Rules 2b
-    // and 3b resolve against it, so they state a fact about where this file sits
-    // rather than matching on resemblance. Read from the path rather than
-    // hardcoded, so a suite that ever moves resolves correctly.
-    const suiteDir = path.relative(SWEEP_ROOT, path.dirname(suiteFile)).split(path.sep).join('/');
-
-    // 1. A slash-separated path literal inside the repo: 'plugins/…/foo.js'
-    //    The alternation is written out rather than assembled from a variable: a
-    //    RegExp built through a template literal loses `\w` and `\.` to escape
-    //    collapsing, and the result is a silent false-empty rather than an error.
-    //    That cost a wrong reading while measuring this very change.
-    for (const m of src.matchAll(/['"`]((?:\.\.\/)*(?:plugins|templates|tooling)\/[\w./-]+\.js)['"`]/g)) {
-        found.add(m[1].replace(/^(\.\.\/)+/, ''));
-    }
-    // 2. path.join / path.resolve segment lists: 'plugins', 'autodev-core', 'hooks', 'x.js'
-    for (const m of src.matchAll(/path\.(?:join|resolve)\(([^)]*)\)/g)) {
-        const call = m[1];
-        const parts = [...call.matchAll(/['"`]([\w.-]+)['"`]/g)].map((x) => x[1]);
-        if (!parts.length || !parts[parts.length - 1].endsWith('.js')) continue;
-        for (const top of ['plugins', 'tooling']) {
-            const i = parts.indexOf(top);
-            if (i >= 0) found.add(parts.slice(i).join('/'));
-        }
-        // 2b. __dirname-anchored with no '..' climb. The suite lives in
-        //     suiteDir, so path.resolve(__dirname, 'check-foo.js') IS
-        //     suiteDir/check-foo.js. A '..' among the segments means the call
-        //     leaves that directory and this reading does not hold, so it is
-        //     skipped and rules 1-3 handle it.
-        if (/\b__dirname\b/.test(call) && !/['"`]\.\.['"`]/.test(call)) {
-            found.add(suiteDir + '/' + parts.join('/'));
-        }
-    }
-    // 3. A bare require of a repo-relative module, with or without .js
-    for (const m of src.matchAll(/require\(['"`]((?:\.\.\/)+[\w./-]+)['"`]\)/g)) {
-        const p = m[1].replace(/^(\.\.\/)+/, '');
-        if (/^(plugins|templates|tooling)\//.test(p)) found.add(p.endsWith('.js') ? p : p + '.js');
-    }
-    // 3b. A './' require resolves against the suite's own directory, the same
-    //     fact as 2b. test-standing-order-wake.js names its subject exactly this
-    //     way — `require('./standing-order-wake.js')` — and derived nothing.
-    for (const m of src.matchAll(/require\(['"`]\.\/([\w./-]+)['"`]\)/g)) {
-        const p = m[1];
-        found.add(suiteDir + '/' + (p.endsWith('.js') ? p : p + '.js'));
-    }
-
-    // 4. A bare BASENAME, for suites that build the path in two steps:
-    //      const PLUGIN_ROOT = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
-    //      const HOOK        = path.join(PLUGIN_ROOT, 'hooks', 'stop-auto-check.js');
-    //    Rules 1-3 see neither half. Four of twelve suites are written this way,
-    //    and without this they derive nothing and get waved through as
-    //    NO-SUBJECT — the silent-skip failure this whole script is about.
-    //
-    //    Safe because it demands a UNIQUE match: a basename resolving to two
-    //    files under plugins/ is ambiguous and ignored rather than guessed.
-    //
-    //    The character class allows DOTS, and that is not cosmetic. It was
-    //    `[\w-]+\.js`, which cannot match a basename carrying a second dot, so
-    //    every `*.workflow.js`, `*.config.js` and `*.test.js` in the tree was
-    //    invisible to this rule. `[measured 2026-08-29]` that is exactly how
-    //    test-workflow-isolation.js came back NO-SUBJECT while naming
-    //    `heal-sweep.workflow.js` on one line — reported as a suite with nothing
-    //    to check, which is the silent-skip signature this rule exists to close,
-    //    reappearing inside the rule itself.
-    //    NOT widened to tooling/ when rules 1-3 were, on 2026-09-03. This is the
-    //    one rule that guesses — it infers a subject from a name that resembles
-    //    a file — and `[measured 2026-09-03]` widening its pool covered exactly
-    //    ONE extra suite, test-all.js, which is checked as the runner and never
-    //    consults its own subjects, while adding three more fuzzy matches
-    //    elsewhere. Zero gain for more guessing, so it stays scoped to plugins/.
-    for (const m of src.matchAll(/['"`]([\w.-]+\.js)['"`]/g)) {
-        const hits = allPluginFiles().filter((p) => path.basename(p) === m[1]);
-        if (hits.length === 1) found.add(hits[0]);
-    }
-
-    return [...found].filter((p) => fs.existsSync(path.join(SWEEP_ROOT, p)));
+    return [...derivedWithProvenance(suiteFile).keys()];
 }
 
-let _pluginFiles = null;
-function allPluginFiles() {
-    if (_pluginFiles) return _pluginFiles;
-    const out = [];
-    const walk = (dir) => {
-        for (const e of fs.readdirSync(path.join(SWEEP_ROOT, dir), { withFileTypes: true })) {
-            if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
-            const rel = dir + '/' + e.name;
-            if (e.isDirectory()) walk(rel);
-            else if (e.name.endsWith('.js')) out.push(rel);
-        }
-    };
-    for (const top of ['plugins']) {
-        if (fs.existsSync(path.join(SWEEP_ROOT, top))) walk(top);
-    }
-    return (_pluginFiles = out);
+// Derivation itself lives in subject-evidence.js, where a suite can reach it —
+// this file cannot be required (it resolves a HEAD and creates a worktree at load)
+// so nothing could ever test the rules in place. The Map it returns carries HOW
+// each candidate was found, read only by the ranking, which is a permutation and
+// never a filter.
+function derivedWithProvenance(suiteFile) {
+    return ev.deriveCandidates(suiteFile, SWEEP_ROOT);
 }
 
 // A stub that parses, does nothing, and exports nothing.
@@ -352,15 +280,24 @@ function removeOwn(rel) {
 // suite (Sol's round-9 blocker: a killed child satisfied `status !== 0` and
 // was scored as a successful canary), it is a failure OF THIS SWEEP, so it
 // poisons the run instead of feeding either branch.
+//
+// AND IT REPORTS WHAT THE CHILD WAS DOING. `[measured 2026-09-10]` a spawnSync
+// child killed on timeout comes back with stdout and stderr POPULATED, and this
+// function had all of it in hand at every timeout and printed the error code
+// alone. Three check:suites runs over five hours — 66 min, 83 min and 3h13m —
+// produced nine such conflicts and not one located cause between them, because
+// the evidence was thrown away nine times. Every suite here prints its
+// assertions as it goes, so the last lines name what was in flight.
 function completed(r, what) {
-    if (r.error) { conflict(`${what} did not run (${r.error.code || r.error.message})`); return false; }
-    if (r.signal) { conflict(`${what} was killed by ${r.signal} before completing`); return false; }
+    if (r.error) { conflict(`${what} did not run (${r.error.code || r.error.message}) — ${sb.lastWords(r)}`); return false; }
+    if (r.signal) { conflict(`${what} was killed by ${r.signal} before completing — ${sb.lastWords(r)}`); return false; }
     if (r.status === 2) {
         // Exit 2 is this repo's refusal/indeterminate convention (dirty-tree
         // guards, lock refusals, restoration failures). A child that REFUSED
         // is not a child that FAILED, and scoring it as a red canary would
         // verify nothing (Sol's round-10 blocker).
-        conflict(`${what} exited 2 — a refusal or indeterminate result, not a verdict`);
+        conflict(`${what} exited 2 — a refusal or indeterminate result, not a verdict`
+            + ` — ${sb.lastWords(r)}`);
         return false;
     }
     return true;
@@ -544,8 +481,39 @@ const suites = fs.readdirSync(SWEEP_TOOLING)
 // blew a 300s budget on a loaded machine. The generous budget is the fix;
 // the conflict detection stays as the backstop for a genuine hang. Suites
 // run FROM and IN the private worktree — nothing they touch is shared.
+//
+// ⚠️ THE GENEROUS BUDGET WAS NOT THE FIX, AND RAISING IT AGAIN IS NOT EITHER.
+// `[measured 2026-09-10]` the suites blowing this budget are not the heaviest
+// one: test-entrypoints costs 20s end to end through this exact invocation and
+// its whole stub cycle costs 66s, and test-fleet-stop-watch costs 20s. A timeout
+// here therefore needs a 45x blowup, and the largest slowdown this project's own
+// contention model will even admit is CONTENTION_MAX = 20 in spawn-budget.js,
+// measured at 1.00-1.38 on this 14-core box at the 1-min loads those runs ran at
+// (4.97-15). Load cannot produce 45x, in either direction — which is why the
+// quietest of three runs was the slowest and carried the most conflicts.
+//
+// WHAT WAS ACTUALLY WRONG was that this number and the budgets the suites grant
+// THEMSELVES were unrelated, and the inner ones were bigger: against the 15
+// minutes below, test-entrypoints can self-grant 69.2 min across its runBudgeted
+// call sites (73.5 min in execution), test-session-sweep 52, test-coordinator-
+// write-guard 47.3 and test-hook-execution-evidence 25. test-entrypoints' --json
+// call passes `maxTimeout: 900000`, the same number as this one, so a single
+// widened retry can eat the whole outer budget on its own.
+//
+// The damage is not slowness, it is that NOBODY GETS TO REPORT: the kill below
+// lands mid-retry, so the suite never reaches its own tally and never prints the
+// INDETERMINATE line spawn-budget.js exists to produce, and this sweep — holding
+// only ETIMEDOUT — records a conflict with no cause. So the budget is PUBLISHED
+// rather than merely enforced: spawn-budget.js clamps every budget it grants to
+// what remains of it, and the margin is the room a suite needs to print why it
+// could not measure. A suite that publishes nothing is unaffected.
+const RUN_BUDGET_MS = 900000;
+const REPORT_MARGIN_MS = 30000;
 const runSuite = (suite) => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
-    cwd: SWEEP_ROOT, encoding: 'utf8', timeout: 900000,
+    cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS,
+    env: Object.assign({}, process.env, {
+        [sb.DEADLINE_ENV]: String(Date.now() + RUN_BUDGET_MS - REPORT_MARGIN_MS),
+    }),
 });
 
 const rows = [];
@@ -561,17 +529,17 @@ const rows = [];
 // So: make one child suite fail, and assert the runner notices.
 function checkRunner(suite) {
     const victim = suites.find((s) => s !== suite && deriveSubjects(path.join(SWEEP_TOOLING, s)).length);
-    if (!victim) return { suite, status: 'NO-SUBJECT', note: 'no child suite to fail' };
+    if (!victim) return { suite, status: 'NO-SUBJECT', cause: sv.CAUSE.NO_SUBJECT, note: 'no child suite to fail' };
 
     const full = path.join(SWEEP_TOOLING, victim);
     const CANARY = '#!/usr/bin/env node\nconsole.log("canary");\nprocess.exit(1);\n';
     if (!installOwn('tooling/' + victim, full, CANARY)) {
-        return { suite, status: 'UNCHECKED', note: 'could not install the runner canary — see conflicts' };
+        return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'could not install the runner canary — see conflicts' };
     }
     try {
         const r = runSuite(suite);
         if (!completed(r, suite + ' (runner canary run)')) {
-            return { suite, status: 'UNCHECKED', note: 'canary run did not complete — indeterminate, not a verdict' };
+            return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'canary run did not complete — indeterminate, not a verdict' };
         }
         return r.status !== 0
             ? { suite, status: 'ok', note: `reports failure when ${victim} fails` }
@@ -591,23 +559,23 @@ function checkRunner(suite) {
 function checkValidator() {
     const suite = 'validate.js';
     const file = path.join(SWEEP_ROOT, 'VERSION');
-    if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', note: 'no VERSION file' };
+    if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', cause: sv.CAUSE.NO_SUBJECT, note: 'no VERSION file' };
 
     const run = () => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
-        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: 900000,
+        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS,
     });
     const base = run();
-    if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate' };
+    if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate' };
     if (base.status !== 0) return { suite, status: 'RED', note: 'already failing' };
 
     const CANARY = '0.0.0-canary\n';
     if (!installOwn('VERSION', file, CANARY)) {
-        return { suite, status: 'UNCHECKED', note: 'could not install the VERSION canary — see conflicts' };
+        return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'could not install the VERSION canary — see conflicts' };
     }
     try {
         const r = run();
         if (!completed(r, 'validate (VERSION canary run)')) {
-            return { suite, status: 'UNCHECKED', note: 'canary run did not complete — indeterminate, not a verdict' };
+            return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'canary run did not complete — indeterminate, not a verdict' };
         }
         return r.status !== 0
             ? { suite, status: 'ok', note: 'goes red on a version-sync break' }
@@ -642,6 +610,7 @@ for (const suite of suites) {
             rows.push({
                 suite,
                 status: 'UNCHECKED',
+                cause: sv.CAUSE.EXEMPTION_REFUSED,
                 note: 'declared NOT_JAVASCRIPT but its canary ' + exempt.canary
                     + (canaryExists ? ' is not among the suites run' : ' does not exist')
                     + ' — the exemption is REFUSED, so this suite is NOT verified.',
@@ -650,7 +619,15 @@ for (const suite of suites) {
         continue;
     }
 
-    const subjects = SUBJECT_OVERRIDES[suite] || deriveSubjects(path.join(SWEEP_TOOLING, suite));
+    // A hand-pinned SUBJECT_OVERRIDES list carries no provenance and keeps the
+    // order its author chose; a derived list is ranked most-likely-first. Ranking
+    // is a permutation, so the candidate SET — and therefore every reachable
+    // verdict — is the same either way.
+    const pinned = SUBJECT_OVERRIDES[suite];
+    const provenance = pinned ? null : derivedWithProvenance(path.join(SWEEP_TOOLING, suite));
+    const subjects = pinned
+        ? pinned.slice()
+        : ev.rankSubjects(suite, [...provenance.keys()], provenance);
     if (!subjects.length) {
         // Worded as a deficiency, and counted as a failure, because the previous
         // wording — "references no plugin source — nothing to stub" — read as a
@@ -661,6 +638,7 @@ for (const suite of suites) {
         rows.push({
             suite,
             status: 'UNCHECKED',
+            cause: sv.CAUSE.NO_SUBJECT,
             note: 'subject not derived — this suite is NOT verified. Name its subject where '
                 + 'derivation can read it (a full path literal, a __dirname-anchored '
                 + 'path.join/resolve, or a relative require), or add it to SUBJECT_OVERRIDES '
@@ -706,7 +684,7 @@ for (const suite of suites) {
     // must have actually RUN. A timed-out or signalled baseline is not a red.
     const base = runSuite(suite);
     if (!completed(base, suite + ' (baseline)')) {
-        rows.push({ suite, status: 'UNCHECKED', note: 'baseline did not complete — indeterminate, not a verdict' });
+        rows.push({ suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate, not a verdict' });
         continue;
     }
     if (base.status !== 0) {
@@ -725,18 +703,39 @@ for (const suite of suites) {
     //
     // The property under test is "this suite can fail", and one killed subject
     // proves it.
-    const killed = [];
-    let incomplete = false;
-    for (const rel of subjects) {
+    // ONE killed subject proves the property, so the traversal STOPS there —
+    // `[measured 2026-09-10]` the sweep was doing 350 suite process runs for 123
+    // suites, and test-fleet-overlap's real subject sat ninth of eleven behind
+    // eight fixture filenames it never reads. Stopping early changes no verdict
+    // (subject-evidence.js asserts that over every outcome pattern), and a suite
+    // that is genuinely VACUOUS still pays for every candidate, because proving a
+    // negative costs all of them.
+    const runStub = (rel) => {
         const full = path.join(SWEEP_ROOT, rel);
-        if (!installOwn(rel, full, STUB)) { incomplete = true; continue; }
+        if (!installOwn(rel, full, STUB)) return 'incomplete';
         try {
             const r = runSuite(suite);
-            if (!completed(r, suite + ' (with ' + rel + ' stubbed)')) incomplete = true;
-            else if (r.status !== 0) killed.push(rel);
+            if (!completed(r, suite + ' (with ' + rel + ' stubbed)')) return 'incomplete';
+            return r.status !== 0 ? 'killed' : 'green';
         } finally {
             removeOwn(rel);
         }
+    };
+    const killed = [];
+    let incomplete = false;
+    let tried = 0;
+    if (ALL_SUBJECTS) {
+        for (const rel of subjects) {
+            tried++;
+            const o = runStub(rel);
+            if (o === 'killed') killed.push(rel);
+            else if (o === 'incomplete') incomplete = true;
+        }
+    } else {
+        const found = ev.firstKiller(subjects, runStub);
+        tried = found.tried;
+        incomplete = found.incomplete;
+        if (found.killed) killed.push(found.killed);
     }
 
     // VACUOUS is an accusation, and it needs every stub run to have actually
@@ -748,9 +747,15 @@ for (const suite of suites) {
         // wearing the same row. A count cannot carry which one; an identity
         // list can, and this file's own history is of counts that agreed with
         // themselves.
-        ? { suite, status: 'ok', note: `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed: ${killed.join(', ')}` }
+        ? { suite, status: 'ok', note: ALL_SUBJECTS
+            ? `goes red when ${killed.length}/${subjects.length} subject(s) are stubbed: ${killed.join(', ')}`
+            // NOT "1/N are stubbed" — only `tried` of N were, and a note that
+            // implies the rest were checked and survived would be a claim this
+            // run never made.
+            : `goes red when ${killed[0]} is stubbed (candidate ${tried} of ${subjects.length}, `
+              + `evidence-ranked; --all-subjects for the full kill set)` }
         : (incomplete
-            ? { suite, status: 'UNCHECKED', note: 'stub run(s) did not complete — indeterminate, not a verdict' }
+            ? { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'stub run(s) did not complete — indeterminate, not a verdict' }
             : { suite, status: 'VACUOUS', note: `stays GREEN with all ${subjects.length} subject(s) stubbed out` }));
 
     } finally { cleanNewUntracked(); }
@@ -807,7 +812,7 @@ if (after) {
 }
 
 console.log('\nCan each suite fail?\n');
-let bad = 0;
+const sum = sv.summarise(rows);
 for (const r of rows) {
     // Anything that is not 'ok' means this script did not establish that the
     // suite can fail. There is no third category: a skip is an absence of
@@ -820,14 +825,25 @@ for (const r of rows) {
     // refused outright unless that canary is present and among the suites run.
     // Marked '~' rather than '✓' so it can never be skimmed as a pass.
     const mark = r.status === 'ok' ? '✓' : (r.status === 'NOT-JS' ? '~' : '✗');
-    if (r.status !== 'ok' && r.status !== 'NOT-JS') bad++;
     console.log(`  ${mark} ${r.suite.padEnd(30)} ${r.status.padEnd(9)} ${VERBOSE || r.status !== 'ok' ? r.note : ''}`);
 }
-const unchecked = rows.filter((r) => r.status === 'UNCHECKED' || r.status === 'NO-SUBJECT').length;
-const notJs = rows.filter((r) => r.status === 'NOT-JS').length;
-const verified = rows.length - bad - notJs;
-console.log(`\n${rows.length} suite(s) · ${verified} verified able to fail · ${bad} NOT verified` +
-            (unchecked ? ` (${unchecked} with no derivable subject)` : '') +
+// SPLIT BY CAUSE, in suite-verdict-summary.js, because one filter over both
+// statuses was one number with two meanings. Until 2026-09-10 this line said
+// `(N with no derivable subject)` over every UNCHECKED row, and MOST of the
+// producers above are the SWEEP failing to measure — a killed baseline, a canary
+// that could not be installed, a stub run that hit the budget. `[measured
+// 2026-09-10]` a sweep produced four such rows, all from baseline/canary
+// timeouts, all with subjects that derived perfectly well, and this line called
+// all four "with no derivable subject": a transient contention failure reported
+// as a static property of the suite, sending the reader to fix four suites that
+// had nothing wrong with them. That is the failure the comment above — about a
+// skip labelled reassuringly — exists to prevent, and a confident WRONG label is
+// the costlier half of it, because it does not merely fail to inform, it directs
+// work. Every RUN_INCOMPLETE row is accompanied by a conflict, so the run exits 2
+// INDETERMINATE below; the bug was never the exit code, it was the sentence.
+const notJs = sum.notJs;
+console.log(`\n${rows.length} suite(s) · ${sum.verified} verified able to fail · ${sum.bad} NOT verified` +
+            (sum.family ? ` (${sv.renderCauses(sum)})` : '') +
             (notJs ? ` · ${notJs} canaried elsewhere, not stubbable here` : '') +
             // "tree restored clean" was measured with gitW, in the PRIVATE sweep
             // worktree that is deleted moments later. It reads as reassurance
@@ -845,7 +861,16 @@ if (conflicts.length) {
     console.log('INDETERMINATE — ' + conflicts.length + ' mid-sweep conflict(s) detected:');
     for (const c of conflicts) console.log('  · ' + c);
     console.log('The verdicts above were measured on a tree that changed under this sweep.');
-    console.log('Re-run when the tree is quiet.\n');
+    // NOT "re-run when the machine is quiet". That was the advice here and in
+    // CLAUDE.md until 2026-09-10, and `[measured 2026-09-10]` the quietest of
+    // three runs was the slowest and carried the most conflicts: the suites that
+    // blow the budget cost 15-20 s through this exact invocation, so a timeout
+    // needs a 45x blowup and CONTENTION_MAX is 20. A reader acts on this line,
+    // so it names what to look at — the conflicts above now carry the child's
+    // own last output — rather than sending them to wait for an idle box.
+    console.log('Each conflict above names what the child was doing when it ended. A timeout');
+    console.log('is NOT evidence of load: see docs/evidence-check-suites-budget-2026-09-10.md.');
+    console.log('A moved source HEAD, however, IS a reason to re-run on a quiet tree.\n');
     process.exit(2);
 }
-process.exit(bad ? 1 : 0);
+process.exit(sum.bad ? 1 : 0);

@@ -291,6 +291,26 @@ try {
         eq('...as a percentage of all fixes, not of all commits', j.reworkPct, 89);
 
         // -------------------------------------------------------------------
+        // The date window. --since is handed to git; the fixture's frozen epoch
+        // makes an absolute cutoff deterministic. From 5h on: 10 non-merge
+        // commits minus the data commit (the merged side chore included), 2 features, 6 fixes.
+        // -------------------------------------------------------------------
+        {
+            const w = runJson([REPO, `--since=@${BASE + 5 * HOUR - 1}`]);
+            eq('--since narrows the population, exit 0', w.status, 0);
+            eq('...and the window is echoed in the output', (w.json || {}).since, `@${BASE + 5 * HOUR - 1}`);
+            eq('...commits before the cutoff are not read', (w.json || {}).commits, 10);
+            eq('...features before the cutoff are not read', (w.json || {}).feats, 2);
+            eq('...fixes before the cutoff are not read', (w.json || {}).fixes, 6);
+            const all = runJson([REPO, `--since=@${BASE - 1}`]);
+            eq('a cutoff before the first commit reads everything', (all.json || {}).commits, 15);
+            const bad = run([REPO, '--since=60.days; touch pwned']);
+            eq('a --since carrying shell metacharacters is refused', bad.status, 1);
+            check('...and the refusal names the flag', /--since/.test(bad.stderr), clip(bad.stderr));
+            check('...without reaching the shell', !fs.existsSync(path.join(REPO, 'pwned')), 'pwned exists');
+        }
+
+        // -------------------------------------------------------------------
         // The ranking. This is the output somebody acts on.
         // -------------------------------------------------------------------
         ranked = (j.classes || []).map((c) => `${c.name}=${c.count}`).join(', ');

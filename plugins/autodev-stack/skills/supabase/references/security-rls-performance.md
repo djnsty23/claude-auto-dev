@@ -15,19 +15,21 @@ Poorly written RLS policies can cause severe performance issues. Use subqueries 
 create policy orders_policy on orders
   using (auth.uid() = user_id);  -- auth.uid() called per row!
 
--- With 1M rows, auth.uid() is called 1M times
+-- Per-row work depends on the actual execution plan
 ```
 
 **Correct (wrap functions in SELECT):**
 
 ```sql
 create policy orders_policy on orders
-  using ((select auth.uid()) = user_id);  -- Called once, cached
+  using ((select auth.uid()) = user_id);  -- Inspect the actual plan
 
--- 100x+ faster on large tables
+-- Measure before/after on the actual policy set and representative data
 ```
 
-Use security definer functions for complex checks:
+Use a security-definer helper only when its ownership, schema, search path and
+execute grants are deliberately constrained. Review its privileged access and
+qualified column names; do not treat SECURITY DEFINER as a free optimization:
 
 ```sql
 -- Create helper function (runs as definer, bypasses RLS)
@@ -39,16 +41,17 @@ set search_path = ''
 as $$
   select exists (
     select 1 from public.team_members
-    where team_id = $1 and user_id = (select auth.uid())
+    where team_members.team_id = $1 and team_members.user_id = (select auth.uid())
   );
 $$;
 
--- Use in policy (indexed lookup, not per-row check)
+-- team_id depends on the outer row: SELECT does not make this statement-constant
 create policy team_orders_policy on orders
   using ((select is_team_member(team_id)));
 ```
 
-Always add indexes on columns used in RLS policies:
+Consider indexes on policy predicates using the actual plan and write/storage
+tradeoffs. A possible index to evaluate:
 
 ```sql
 create index orders_user_id_idx on orders (user_id);

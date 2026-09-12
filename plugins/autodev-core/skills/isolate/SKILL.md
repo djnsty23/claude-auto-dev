@@ -14,6 +14,13 @@ One tree per task. The failure this prevents has no error message: two agents in
 one working copy overwrite each other's edits, and git reports nothing, because
 from git's side the second write is just the current state of the file.
 
+## Resolve the remote default first
+
+Read `git ls-remote --symref origin HEAD`, fetch the corresponding branch and
+set `AUTODEV_BASE_REF` to its verified remote-tracking ref. Do not assume it is
+`origin/main`. If the remote is unavailable, use a verified local base appropriate
+to this task and name the freshness limit.
+
 ## Before creating anything, check nobody is already on it
 
 ```bash
@@ -31,8 +38,8 @@ is an ancestor of the default branch, and run a control so a uniform answer
 cannot pass as a finding:
 
 ```bash
-git merge-base --is-ancestor origin/<branch> origin/main   # exit 0 = already landed
-git merge-base --is-ancestor HEAD origin/main              # control, expect 1
+git merge-base --is-ancestor origin/<branch> "$AUTODEV_BASE_REF"   # exit 0 = already landed
+git merge-base --is-ancestor "$AUTODEV_BASE_REF" "$AUTODEV_BASE_REF"       # positive control, expect 0
 ```
 
 `[measured 2026-09-02]` a branch named `fix/always-on-without-a-trigger` was the
@@ -51,8 +58,8 @@ own tree, because that is where another session's finished-but-unpushed work
 sits:
 
 ```bash
-git -C <main-clone> rev-list --left-right --count origin/main...HEAD
-git -C <main-clone> log --oneline origin/main..HEAD
+git -C <main-clone> rev-list --left-right --count "$AUTODEV_BASE_REF...HEAD"
+git -C <main-clone> log --oneline "$AUTODEV_BASE_REF..HEAD"
 git -C <main-clone> status --porcelain
 ```
 
@@ -82,7 +89,7 @@ being actively worked while the message sat in a queue.
 
 ```bash
 git fetch origin
-git worktree add .claude/worktrees/<slug> -b <slug> origin/main
+git worktree add .claude/worktrees/<slug> -b <slug> "$AUTODEV_BASE_REF"
 ```
 
 Branch from the **remote** default branch, not from local `main`, which may be
@@ -93,11 +100,13 @@ say so, because `origin/main` does not contain them and the tree would silently
 start without what you are building on. One command decides it:
 
 ```bash
-git log --oneline origin/main..HEAD
+git log --oneline "$AUTODEV_BASE_REF..HEAD"
 ```
 
-Nothing printed means `origin/main` is safe. Anything printed is the list of
-commits you would have lost.
+These are candidate local dependencies, not automatic authority to include them.
+Read their scope and start from the exact needed commit only when this task
+builds on it. Otherwise use the fetched remote default and reconcile overlap.
+No local commits are lost merely by creating a different worktree.
 
 `.claude/worktrees/` is the convention because it is gitignored, so the trees
 never appear as untracked files in the parent clone.
@@ -107,19 +116,20 @@ never appear as untracked files in the parent clone.
 `git worktree add` copies the tracked tree and nothing else. Two things are
 missing and both fail in ways that look like a bug in your change:
 
-- **Gitignored env files.** Copy `.env.local` and siblings from the main clone.
-  Without them a dev server starts with zero env injected, the app never mounts,
-  and every browser check fails against a blank page.
+- **Required local configuration.** Identify the variables/files this task's
+  development target needs. Reuse the project's approved secret/config mechanism
+  or copy only the necessary same-project local files into the isolated tree.
+  Keep them ignored and do not print values. Do not import production targets
+  merely because a sibling env file exists. Missing configuration is a setup
+  gap, not evidence the implementation is broken.
 - **`node_modules`, but only if the repo has dependencies.** A worktree cut from
   an older base, or reusing the parent's install, surfaces import errors for
   dependencies added since. Count them before installing: a repo with zero deps
   needs no install, and running one anyway is a minute spent per worktree.
 
-Check both before concluding anything about the code:
-
-```bash
-ls -a .claude/worktrees/<slug> | grep -c '^\.env' || echo "0 env files, copy them"
-```
+Verify required local configuration through the application’s safe startup/check
+without printing values. An env-file count does not prove configuration is
+present or missing: the project may inject it through a secret manager.
 
 ## Never touch a tree you did not create
 
@@ -145,6 +155,9 @@ git worktree remove .claude/worktrees/<slug>
 git worktree list
 ```
 
-Only after the branch is merged or the work is abandoned. A stale worktree holds
+Only after the branch is merged or the work is deliberately abandoned, and
+required ignored evidence, reports and resume state have a surviving recovery
+path. Check untracked files as well as git status for tracked edits. A clean
+index does not mean the directory is disposable. A stale worktree holds
 a branch checked out, so the next session that tries to use that branch gets a
 refusal it has no context for.
