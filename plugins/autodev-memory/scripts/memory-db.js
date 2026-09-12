@@ -271,7 +271,7 @@ function renderKnowledgeBrief(result, area) {
 // (src/auth/login.js -> "src/auth", hooks/x.js -> "hooks"). It has no cwd to
 // anchor against, so callers MUST make the path project-relative first — the
 // capture pipeline stores ABSOLUTE source_files, and an unanchored absolute path
-// folds to leading filesystem segments like "Users/andy" instead of a real area.
+// folds to leading filesystem segments like "Users/<name>" instead of a real area.
 // Root-level files have no directory and yield '', which callers skip.
 function deriveArea(filePath) {
     if (!filePath) return '';

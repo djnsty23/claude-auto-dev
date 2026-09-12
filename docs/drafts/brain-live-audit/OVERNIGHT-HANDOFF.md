@@ -3,7 +3,7 @@
 Owned checkout: <audit-worktree>
 Branch: codex/brain-live-audit
 Latest local commit: c948221b2ce797e0da1a227a2c531689ab291bb2
-Main has remained at 9f9746f7907721921ce3d15fa5ae5020c0ebd227. No pushes, installs, live product changes or peer edits.
+Main has remained at 9f9746f7907721921ce3d15fa5ae5020c0ebd227. No pushes, installs, product repo changes or peer edits.
 
 ## First action on resume
 

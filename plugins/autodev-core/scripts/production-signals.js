@@ -3,7 +3,7 @@
 /**
  * production-signals.js — production signals become CANDIDATE stories.
  *
- * WHY THIS EXISTS. `[measured 2026-09-08]` across the live product's prd.json
+ * WHY THIS EXISTS. `[measured 2026-09-08]` across one production repo's prd.json
  * history, 121 stories were filed in the 90 days to 2026-09-08. 22 of them cite
  * a production observation at filing time; 0 came from Sentry, 0 from a monitor
  * alert, and every one of the 22 was a person reading a table or a dashboard by
@@ -66,18 +66,18 @@ const MAX_PAGES = 20;
  * DEFAULT THRESHOLDS — each one is a decision with a date and a measurement.
  *
  * min_count 5 / min_age_hours 24 for error groups. `[measured 2026-09-08]` on
- * the live product's server_errors table over 14 days: see the evidence doc
+ * that repo's server_errors table over 14 days: see the evidence doc
  * (docs/evidence-production-signals-2026-09-08.md) for the distribution that
  * chose these. 24 h of age exists because a deploy in progress produces a burst
  * of errors in its first minutes that is gone by the next run; a group that has
  * been present for a day is not a deploy. 5 events exists because a single
- * occurrence in two weeks is a flake by any reading, and the live product's own
- * critical-error gate (scripts/monitor-critical-errors.mjs there) uses 10 per
+ * occurrence in two weeks is a flake by any reading, and that repo's own
+ * critical-error gate uses 10 per
  * 30 minutes for its blocking threshold — this is a backlog proposal, so it is
  * deliberately looser on rate and stricter on persistence.
  *
  * Heartbeats: stale_hours 48. A cron the repo declares daily that has not
- * written its heartbeat in two days is dead, not late; the live product's own
+ * written its heartbeat in two days is dead, not late; that repo's own
  * freshness code uses 2.5x the declared interval, which for a daily job is 60 h.
  * 48 h is chosen because this collector does not read each job's interval — it
  * would have to parse a TypeScript registry to do so — and a coarse "two days
@@ -92,7 +92,7 @@ const MAX_PAGES = 20;
  * the first real run proposed 8 server-error groups; two of them were BURSTS —
  * 60 rows of "invalid input syntax for type json" inside 9 minutes on 2026-09-02,
  * and 5 rate-limit rows inside 45 minutes on 2026-08-30 — neither seen again.
- * A burst is an incident, and the live product's critical-error monitor owns
+ * A burst is an incident, and that repo's critical-error monitor owns
  * incidents at 10 rows per 30 minutes. A backlog story is for a CHRONIC defect,
  * so an error group must span at least a day between its first and last row.
  * Both bursts are held with that reason; the six chronic groups still propose.
@@ -125,9 +125,9 @@ const DEFAULT_THRESHOLDS = {
  * plaintext list in a public repo discloses which repos take unattended writes.
  * Add one with `node production-signals.js --digest owner/repo`.
  *
- * `[decided 2026-09-08]` exactly one entry: the QR product, which has no users.
- * The live product is NOT here and must not be added while it has users; its
- * candidates go through the proposal file and a person or the Brain moves them.
+ * `[decided 2026-09-08]` exactly one entry: one product repo with no users.
+ * A production repo with users is NOT here and must not be added while it has
+ * users; its candidates go through the proposal file and a person or the Brain moves them.
  */
 const APPLY_ALLOWLIST = [
   'ecc4d2aa88ccbbd22f98148c95d4d98c8f0a3b82a2cb5f043fb3a952bd8ecd9f',
@@ -399,7 +399,7 @@ function normaliseHeartbeats(source, rows, ctx) {
   const out = [];
   for (const row of rows) {
     const value = row[valCol];
-    // Read value->>'at' AND updated_at and take the later: the live product's
+    // Read value->>'at' AND updated_at and take the later: a production repo's
     // upsert quirk froze updated_at for 25 days on three rows, and its own
     // freshness code takes GREATEST of the two for the same reason.
     const fromValue = value && typeof value === 'object' ? Date.parse(value[atPath]) : NaN;

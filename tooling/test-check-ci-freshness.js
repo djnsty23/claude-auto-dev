@@ -3,7 +3,7 @@
 //
 // The subject exists because a green check is a claim about the merge that was
 // TESTED, and GitHub does not re-run a `pull_request` workflow when the BASE
-// moves. `[measured 2026-09-11 on qr]` all 12 open PRs were behind main, and
+// moves. `[measured 2026-09-11 on a product repo]` all 12 open PRs were behind main, and
 // merging each into current main locally changed the verdict three times.
 //
 // THREE THINGS THIS SUITE IS BUILT NOT TO DO, each from a failure in this fleet:
@@ -45,7 +45,7 @@ function check(label, ok, detail) {
 // arithmetic over them; nothing below asks the subject what these mean.
 // ---------------------------------------------------------------------------
 const TRUNK_TIP_AT = '2026-09-11T19:38:03Z';
-const STALE_RUN_AT = '2026-09-10T10:50:52Z';   // 33h BEFORE the tip: the qr shape
+const STALE_RUN_AT = '2026-09-10T10:50:52Z';   // 33h BEFORE the tip: the measured shape
 const FRESH_RUN_AT = '2026-09-11T20:07:51Z';   // ~30m after: past any recompute race
 const RACE_RUN_AT  = '2026-09-11T19:38:17Z';   // +14s: the one that was not evidence either
 const GRACE_SECONDS = 60;
@@ -294,7 +294,7 @@ check('CONTROL EXECUTED: and it produced a real verdict, not an empty result',
 }
 
 // #4 — a stacked PR's base is read explicitly, and no verdict about it is
-// allowed to read as a claim about the trunk. This is qr #94 and #106.
+// allowed to read as a claim about the trunk. This is the measured case.
 {
     const r = run(SUBJECT, {
         repo: REPO,

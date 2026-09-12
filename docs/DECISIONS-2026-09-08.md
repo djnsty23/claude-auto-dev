@@ -1,6 +1,6 @@
 # DECISIONS — 2026-09-08 — mutation-count reconciliation
 
-Operator AWAY (window to 2026-09-08T06:52:24Z, scope: qr and autodev only).
+Operator AWAY (window to 2026-09-08T06:52:24Z, scope: autodev and one product repo only).
 Both decisions below resolved under branch 2 of the away protocol — reversible
 and not covered by a standing rule — and are logged here rather than queued.
 

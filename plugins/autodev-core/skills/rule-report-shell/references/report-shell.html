@@ -251,11 +251,11 @@ td:first-child{color:var(--ink);}
 
   <header class="masthead">
     <div class="lockup">
-      <span class="brand">Ecommerce<em>Benchmark</em></span>
-      <span class="meta">Nexus v3 changelog &middot; Verified against EB code &middot; 2026-08-25</span>
+      <span class="brand">Report<em>Shell</em></span>
+      <span class="meta">Subject &middot; What it was verified against &middot; YYYY-MM-DD</span>
     </div>
-    <h1>One blocker, one question, and a score shift that would have landed silently</h1>
-    <p class="standfirst">Read against our own adapters, not the changelog alone. Three of my first-pass claims did not survive checking.</p>
+    <h1>The headline states the outcome, not the topic</h1>
+    <p class="standfirst">One sentence on what was read, what it was read against, and how many first-pass claims did not survive checking.</p>
   </header>
 
   <section>
@@ -264,17 +264,15 @@ td:first-child{color:var(--ink);}
 
       <article class="card is-blocker" data-open="false">
         <div class="card-head">
-          <div class="chips"><span class="chip blocker">Blocking</span><span class="chip mute">Before rollout</span></div>
-          <h3><code>not_measurable_google_only</code> is unrecognised</h3>
-          <p class="summary">An unknown warning code falls through to the renderer, which prints a <strong>real</strong> <code>medianDaysActive</code> on a prospect-facing audit.</p>
+          <div class="chips"><span class="chip blocker">Blocking</span><span class="chip mute">Before release</span></div>
+          <h3>A blocker names the defect in one line</h3>
+          <p class="summary">The summary says what breaks and for whom, with the <strong>one fact</strong> that makes it a blocker.</p>
         </div>
         <div class="reveal"><div class="reveal-inner"><ul class="detail">
-          <li>Our null-score handler checks the warning vocabulary; no match returns null and the guard block is skipped.</li>
-          <li>Execution continues into the per-metric renderer, which reads <code>rawValue</code>.</li>
-          <li>That is the one case where Nexus <strong>deliberately keeps</strong> a real value, so the fall-through renders it graded.</li>
-          <li>Partial cover exists by value heuristic: suppressed above 270 days Google-inclusive, 180 google-only.</li>
-          <li>A pinned test asserts the opposite case stays unsuppressed &mdash; google-only at a 128 day median keeps the metric.</li>
-          <li>So a store in that band gets a grade from us on data Nexus has marked unscoreable.</li>
+          <li>The trace starts where the input enters, e.g. <code>src/handler.ts:42</code>.</li>
+          <li>Each bullet is one step, in the order the code runs.</li>
+          <li>The last bullet states the consequence the summary promised.</li>
+          <li>Bullets fade in about 70ms apart. Keep a card under six.</li>
         </ul></div></div>
         <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">The trace</span><span class="lbl-less">Less</span></button>
       </article>
@@ -282,27 +280,27 @@ td:first-child{color:var(--ink);}
       <article class="card is-warn" data-open="false">
         <div class="card-head">
           <div class="chips"><span class="chip warn">Lower severity</span></div>
-          <h3><code>meta_fetch_under_delivered</code> is also unrecognised</h3>
-          <p class="summary">It nulls no score, so it cannot fabricate. We want it wired for the <strong>signal</strong>, not for safety.</p>
+          <h3>A warning costs precision, not correctness</h3>
+          <p class="summary">Say why it is worth fixing anyway, and what the reader <strong>loses</strong> by leaving it.</p>
         </div>
         <div class="reveal"><div class="reveal-inner"><ul class="detail">
-          <li>It marks <code>inputAdCount</code> as a lower bound rather than a count.</li>
-          <li>Same thread as the <code>creativesCount</code> cap we already handle.</li>
-          <li>Missing it costs precision, never correctness.</li>
+          <li>What the current behaviour reports.</li>
+          <li>What it would report once fixed.</li>
+          <li>Why nothing is wrong today.</li>
         </ul></div></div>
-        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Why wire it</span><span class="lbl-less">Less</span></button>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Why fix it</span><span class="lbl-less">Less</span></button>
       </article>
 
       <article class="card is-info" data-open="false">
         <div class="card-head">
           <div class="chips"><span class="chip info">Question, not a defect</span></div>
-          <h3>Is the <code>daysActive</code> widening scoped to <code>kingAds[]</code>?</h3>
-          <p class="summary">Safe there. But competitor-synthesis carries its own <code>daysActive</code>, and we render one <strong>raw</strong>.</p>
+          <h3>An open question gets its own card</h3>
+          <p class="summary">State the assumption the answer depends on, and which way it <strong>changes the verdict</strong>.</p>
         </div>
         <div class="reveal"><div class="reveal-inner"><ul class="detail">
-          <li>Our helper treats any non-finite value as unknown; a comment in it already anticipates v3.</li>
-          <li><code>evergreen[].daysActive</code> is rendered raw and sorted on, with no guard.</li>
-          <li>Safe only because the widening does not reach it &mdash; an assumption until they confirm.</li>
+          <li>Where the assumption is made.</li>
+          <li>What would be unsafe if it turned out false.</li>
+          <li>Who can answer it.</li>
         </ul></div></div>
         <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Detail</span><span class="lbl-less">Less</span></button>
       </article>
@@ -311,59 +309,44 @@ td:first-child{color:var(--ink);}
   </section>
 
   <section>
-    <div class="eyebrow">Every v3 change, against our code</div>
+    <div class="eyebrow">Every change, against the code</div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>V3 change</th><th>What we do today</th><th>Verdict</th></tr></thead>
+        <thead><tr><th>Change</th><th>What the code does today</th><th>Verdict</th></tr></thead>
         <tbody>
-          <tr><td><code>not_measurable_google_only</code></td><td>0 references. Unknown code falls through to the renderer, which reads the kept <code>rawValue</code>.</td><td class="verdict v-blocker">Blocker</td></tr>
-          <tr><td><code>meta_fetch_under_delivered</code></td><td>0 references. Nulls nothing; we lose the lower-bound signal.</td><td class="verdict v-warn">Wire it</td></tr>
-          <tr><td><code>kingAds[].daysActive</code> &rarr; nullable</td><td><code>kingAdsRuntimeDays()</code> returns unknown for any non-finite value.</td><td class="verdict v-safe">Safe</td></tr>
-          <tr><td><code>snapshot.version</code> &rarr; 3</td><td><code>MAX_KNOWN_SCHEMA</code> is 2. We accept, render, and log one warning per worker boot.</td><td class="verdict v-safe">Safe, then bump</td></tr>
-          <tr><td>Google-only returns <code>score: null</code></td><td>Changes our recompute input set <em>and</em> its composite; flips severity for more stores.</td><td class="verdict v-warn">Baseline first</td></tr>
+          <tr><td><code>change-one</code></td><td>The evidence, with a count or a line reference.</td><td class="verdict v-blocker">Blocker</td></tr>
+          <tr><td><code>change-two</code></td><td>Nothing breaks. A signal is lost.</td><td class="verdict v-warn">Wire it</td></tr>
+          <tr><td><code>change-three</code></td><td>Already handled, and where.</td><td class="verdict v-safe">Safe</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
   <section>
-    <div class="eyebrow">Claims I had wrong on the first pass <span class="count">3</span></div>
+    <div class="eyebrow">Claims I had wrong on the first pass <span class="count">2</span></div>
     <div class="grid">
       <article class="card" data-open="false">
         <div class="card-head">
           <div class="chips"><span class="chip mute">Corrected</span></div>
-          <h3>&ldquo;<code>objection</code> is the blocked ask unblocking&rdquo;</h3>
-          <p class="summary">Wrong surface. We <strong>already</strong> consume an <code>objection</code> dimension.</p>
+          <h3>&ldquo;The first-pass claim, quoted&rdquo;</h3>
+          <p class="summary">What was actually true, and the <strong>probe</strong> that showed it.</p>
         </div>
         <div class="reveal"><div class="reveal-inner"><ul class="detail">
-          <li>Ours lives in competitor synthesis and has done for months.</li>
-          <li>The v3 one is a <em>cohort-distribution</em> dimension &mdash; different payload, different surface.</li>
+          <li>What the first pass read.</li>
+          <li>What it missed, and why the miss looked like a pass.</li>
         </ul></div></div>
-        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">What it does</span><span class="lbl-less">Less</span></button>
+        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">What changed</span><span class="lbl-less">Less</span></button>
       </article>
       <article class="card" data-open="false">
         <div class="card-head">
           <div class="chips"><span class="chip mute">Corrected</span></div>
-          <h3>&ldquo;We are safe on <code>daysActive</code>&rdquo;</h3>
-          <p class="summary">True for <code>kingAds[]</code> &mdash; and I had grepped only <strong>two files</strong>.</p>
+          <h3>&ldquo;A second claim, quoted&rdquo;</h3>
+          <p class="summary">Name the population the first probe scanned, e.g. <strong>two files</strong>.</p>
         </div>
         <div class="reveal"><div class="reveal-inner"><ul class="detail">
-          <li><code>evergreen[].daysActive</code> is rendered raw and sorted on, with no guard.</li>
-          <li>Safe only because the widening does not reach it, which is an assumption.</li>
+          <li>The wider population, and what it turned up.</li>
         </ul></div></div>
         <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Where it stops</span><span class="lbl-less">Less</span></button>
-      </article>
-      <article class="card" data-open="false">
-        <div class="card-head">
-          <div class="chips"><span class="chip mute">Corrected</span></div>
-          <h3>&ldquo;v3 is B-20 being delivered&rdquo;</h3>
-          <p class="summary">The ID resolves, the story exists, and only the <strong>title</strong> disagrees.</p>
-        </div>
-        <div class="reveal"><div class="reveal-inner"><ul class="detail">
-          <li><code>creative.ts:3068</code> cites dev-handoff B-20 as the ask to null these server-side.</li>
-          <li>B-20 is a GA4 attribution story. The cite is stale, not wrong-by-fabrication.</li>
-        </ul></div></div>
-        <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Detail</span><span class="lbl-less">Less</span></button>
       </article>
     </div>
   </section>
@@ -373,50 +356,39 @@ td:first-child{color:var(--ink);}
     <div class="stack">
       <div class="copyblock card" data-open="false">
         <div class="card-head">
-          <h3>1 &middot; Reply to Valentin M.</h3>
-          <p class="summary">One blocker, one question, one thing to coordinate. Nothing asks him to change the release.</p>
+          <h3>1 &middot; Reply draft</h3>
+          <p class="summary">One blocker, one question. The draft is the detail, so it stays collapsed.</p>
         </div>
         <div class="reveal"><div class="reveal-inner">
-          <div class="well"><pre>## Verified against our code
+          <div class="well"><pre>## Verified against the code
 
 One blocker, one question, everything else clear.
 
-### BLOCKER: `not_measurable_google_only`
+### BLOCKER: `change-one`
 
-We do not recognise it, and our null-score handler falls
-through to the per-metric renderer when a code is unknown.
-Since that warning is the one case where you deliberately
-KEEP a real `rawValue`, the fall-through renders your real
-`medianDaysActive` as a graded finding.
+What breaks, for whom, and the smallest change
+that fixes it.
 
-We have a pinned test asserting the opposite case stays
-unsuppressed: **google-only at a 128 day median keeps the
-metric.** So a store in that band gets a grade from us on
-data you have marked unscoreable.
+### QUESTION: `change-three`
 
-One entry on our side and we ship it before you roll.</pre></div>
-          <div class="copyfoot"><button class="btn" type="button">Copy markdown</button><span class="hint">Paste into Slack or the ticket</span></div>
+The assumption we rely on, and what we do if
+it is false.</pre></div>
+          <div class="copyfoot"><button class="btn" type="button">Copy markdown</button><span class="hint">Paste into the ticket or the PR</span></div>
         </div></div>
         <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Show the draft</span><span class="lbl-less">Hide</span></button>
       </div>
 
       <div class="copyblock card" data-open="false">
         <div class="card-head">
-          <h3>2 &middot; Our work queue, in dependency order</h3>
-          <p class="summary">Seven items. Only <strong>1 and 2</strong> have a deadline, and both are ours alone.</p>
+          <h3>2 &middot; Work queue, in dependency order</h3>
+          <p class="summary">Say which items have a <strong>deadline</strong> and who owns each.</p>
         </div>
         <div class="reveal"><div class="reveal-inner">
-          <div class="well"><pre>## Nexus v3 — EB work queue
-
-| # | Work | Gate | Owner |
+          <div class="well"><pre>| # | Work | Gate | Owner |
 |---|---|---|---|
-| 1 | Add both warning codes to `resolveNullScoreReason` | Before rollout | EB |
-| 2 | Baseline composites so the v3 shift is measurable | Before rollout | EB |
-| 3 | Bump `MAX_KNOWN_SCHEMA` 2 → 3 | After validating | EB |
-| 4 | Update the limitation in `evalPrompts.ts:249` | When `objection` lands | EB |
-| 5 | Consume `platformIds.resolvedBy.first_match` | After rollout | EB |
-| 6 | Fix the stale `B-20` cite at `creative.ts:3068` | Anytime | EB |
-| 7 | Adopt a Nexus `tier` on batch paths | Blocked on Nexus | Nexus |</pre></div>
+| 1 | Fix change-one | Before release | us |
+| 2 | Wire change-two | After release | us |
+| 3 | Confirm the change-three assumption | Anytime | them |</pre></div>
           <div class="copyfoot"><button class="btn" type="button">Copy markdown</button><span class="hint">For the handoff or a ticket</span></div>
         </div></div>
         <button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Show the queue</span><span class="lbl-less">Hide</span></button>
@@ -425,11 +397,11 @@ One entry on our side and we ship it before you roll.</pre></div>
   </section>
 
   <section>
-    <p class="pullout"><strong>Worth saying to Vali directly:</strong> this changelog did its job. It announces before rollout, names the one non-additive change instead of burying it, and records the v2 failure retroactively so the omission is legible. The single blocker is a code string we now have months earlier than we would have found it by watching a render break &mdash; which is what happened with v2.</p>
+    <p class="pullout"><strong>A pullout carries one point the reader should act on.</strong> Use it at most once, and only when the point would otherwise be lost in a card.</p>
   </section>
 
   <footer class="sources">
-    Sources: <code>benchmark-partner-changelog.md</code> (v3, pending rollout), read against <code>src/lib/adapters/creative.ts</code>, <code>src/lib/vendors/nexus.ts</code> and the pinned tests in <code>creativeGuard.test.ts</code>. Line numbers against <code>origin/main</code> at <code>6df92d4b</code>. One figure is deliberately absent: our exposure count for google-only snapshots, because the probe returned an implausible 1,507 of 1,507 and its control failed on a domain known to hold data, so it was discarded rather than reported.
+    Sources: the files read, the commit they were read at (<code>origin/main</code> at <code>abc1234</code>), and any figure deliberately left out because its probe failed a control.
   </footer>
 
 </div>

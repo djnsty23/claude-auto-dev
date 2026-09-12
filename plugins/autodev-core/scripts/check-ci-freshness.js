@@ -4,14 +4,14 @@
  * check-ci-freshness.js — a green check is a claim about the merge that was
  * tested, not about the merge you are about to perform.
  *
- * WHY THIS EXISTS. `[measured 2026-09-11 ~19:50Z on qr, ~40 minutes of local
+ * WHY THIS EXISTS. `[measured 2026-09-11 ~19:50Z on a product repo, ~40 minutes of local
  * gate runs]` a `pull_request`-triggered workflow builds the MERGE ref — the
  * PR's head merged into its base — but GitHub only schedules it when the PR is
  * PUSHED. **It does not re-run when the BASE moves.** So a check run older than
  * the tip it would merge into tested a merge commit that no longer exists.
  * Nothing marks that stale. Nothing goes yellow. The board stays green.
  *
- * On qr that day all 12 open PRs were behind main and not one contained the
+ * On that repo that day all 12 open PRs were behind main and not one contained the
  * trunk tip. Merging each into current main locally and running the full gate
  * changed the verdict three times:
  *

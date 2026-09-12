@@ -95,7 +95,7 @@ The accent answers *what can I press*. There is a second, orthogonal thing colou
 can carry, and it is easy to miss because it never touches a control:
 **what state is the person in.**
 
-A consumer health app in this codebase's orbit does it properly. Its `<body>`
+One product app in this codebase's orbit does it properly. Its `<body>`
 carries a mood set at runtime, and the mood moves **hue and tempo together**:
 
 | mood | ambient hue | aurora period |

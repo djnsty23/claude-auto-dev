@@ -77,7 +77,7 @@ const AS_JSON = has('json');
 // Repos are named, never pathed. A queue file is shared and frequently lives in
 // a public tree, and an absolute path names whatever else the machine holds —
 // the same exposure that put private repo paths inside a public checkout on
-// 2026-08-29. `repo=qr` resolves here; `repo=/Users/someone/qr` never appears.
+// 2026-08-29. `repo=demo-app` resolves here; `repo=/Users/someone/demo-app` never appears.
 const REPO_ROOT = val('repo-root', null) || (() => {
     try { return require(path.join(__dirname, 'claude-paths.js')).codeDir(); }
     catch { return null; }
@@ -117,7 +117,7 @@ function parseQueue(text) {
     const items = [];
     let current = null;
 
-    // A `#` HEADING IS A SECTION, NOT AN ITEM. "## qr — the priority project"
+    // A `#` HEADING IS A SECTION, NOT AN ITEM. "## demo-app — the priority project"
     // carries no premise and never will, and counting every heading as an
     // uncheckable item buries the items that genuinely lack one under structural
     // noise — which defeats the purpose of reporting uncheckable at all. The
@@ -149,7 +149,7 @@ function parseQueue(text) {
     return items;
 }
 
-/** `repo=qr expect=absent match=billingPortal file=src/x.ts` -> object. */
+/** `repo=demo-app expect=absent match=billingPortal file=src/x.ts` -> object. */
 function parsePremise(spec, lineNo) {
     const out = { raw: spec.trim(), line: lineNo, error: null };
     // Values may be quoted, because a match string can contain spaces and very

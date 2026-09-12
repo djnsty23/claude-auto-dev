@@ -21,8 +21,8 @@ No titles, no branches, no paths, no panel text. That is not caution, it is two
 hard constraints:
 
 1. **`claude-auto-dev` is a PUBLIC repo**, and the house rule is to assume every
-   private repo eventually becomes public anyway. Session titles ("Retry Spotify
-   429 in convert-spotify-to-youtube"), branch names and panel questions are all
+   private repo eventually becomes public anyway. Session titles (which name the
+   task and often the repo), branch names and panel questions are all
    working context.
 2. **The fleet contains CLIENT work.** Client material never goes to personal
    GitHub. A session title is client-derived metadata just as surely as code is,

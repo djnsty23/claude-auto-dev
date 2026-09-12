@@ -269,9 +269,9 @@ const ONE_OFF = /(^|[-.])(migrate|import|export|backfill|seed|fix|push|resync|cr
 //
 //   repo                     assertions      manual bucket
 //   this repo                0 -> 0          0 -> 0
-//   Project A (B2B audit)    16 -> 5         94 -> 135
-//   Project B (health app)   5 -> 3          12 -> 15
-//   Project C (media app)    1 -> 0          11 -> 18
+//   Project A                16 -> 5         94 -> 135
+//   Project B                5 -> 3          12 -> 15
+//   Project C                1 -> 0          11 -> 18
 //
 // This is RECLASSIFICATION, not suppression: everything moved is still printed,
 // under the manual heading, by name. That is the difference between this and the

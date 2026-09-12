@@ -9,9 +9,9 @@
  *
  * But the BINARY is still installed at ~/AppData/Roaming/npm/agent-browser, and
  * it still has a live consumer that has nothing to do with this plugin:
- * kb-factory's `crawl_js.py` drives it to render JS-heavy documentation sites,
- * which is how the meta-ads and reddit-ads knowledge bases are refreshed. Both
- * of those skills correctly still name it.
+ * a separate documentation crawler drives it to render JS-heavy documentation
+ * sites, which is how two knowledge bases are refreshed. Both of their skills
+ * correctly still name it.
  *
  * So 8.79.0 removed the guidance and left the cause: a KB refresh can still
  * spawn the zombie Chromium and still steal the Win+Shift+S hotkey, with
@@ -36,7 +36,7 @@
  *      - Break the global Win+Shift+S (Snipping Tool) hotkey
  *      - Persist indefinitely until reboot or manual taskkill
  *    A real ~30 min Chrome / Snipping Tool / DWM lockup occurred 2026-04-28
- *    during a Project C testing session because of exactly this.
+ *    during a testing session in a product repo because of exactly this.
  *
  * 2. Bundled Chromium auto-registers itself for Windows startup.
  *    First launch silently writes an HKCU\...\Run entry so Chromium spawns
@@ -85,7 +85,7 @@ const isWin = process.platform === 'win32';
 // WHAT THIS HOOK CANNOT KNOW, stated plainly because the fix depends on it.
 // The obvious repair is "track the pids you spawned and kill only those". This
 // hook spawns none. Nothing under plugins/ launches agent-browser at all: the
-// live consumer is kb-factory's crawl_js.py, in another repo, in another
+// live consumer is a separate documentation crawler, in another repo, in another
 // process tree, usually in an earlier session that has already exited. The
 // hook is a janitor for processes it never created and has no registry of.
 // Ownership is therefore NOT DISCOVERABLE here, and any filter that claims to
@@ -310,7 +310,7 @@ function restoreSnippingToolHotkey() {
     //   Even after killZombies() removes the bundled Chromium binary, the
     //   running SnippingTool can be left in a state where Win+Shift+S no
     //   longer reaches it. Process cleanup is necessary but NOT sufficient
-    //   for hotkey state. Observed three times in Project C testing
+    //   for hotkey state. Observed three times in product-repo testing
     //   sessions: 2026-04-28 needed a reboot; 2026-04-29 morning needed a
     //   manual taskkill mid-session; 2026-04-29 afternoon repeated despite
     //   the agent-browser cleanup running at session start, confirming the

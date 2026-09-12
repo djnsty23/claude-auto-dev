@@ -139,7 +139,7 @@ const FIXTURE = [
     '',
 
     // ---- a SHIPPED section, whose rows age into false positives forever ----
-    '## v626 workout flow',
+    '## v412 checkout flow',
     '**Five fixes, LIVE+verified:**',
     '`[measured 2026-01-02]` the resume path is still broken on the older client.',
     '',
@@ -152,7 +152,7 @@ const FIXTURE = [
     // which had been verified half stale by hand. A suppression that removes a
     // TRUE finding is worse than the noise it tuned away.
     '## WHERE THINGS STAND',
-    '**Live `v1098 - sw674`** - TestFlight **build 1015** - debug APK green in CI',
+    '**Live `v2043 - sw310`** - beta **build 208** - debug APK green in CI',
     '`[measured 2026-01-02]` the store release is still blocked on a console account.',
     '',
 
@@ -176,13 +176,13 @@ const FIXTURE = [
 
     // ---- RULE 2: a PR handle a line CALLS OPEN ----------------------------
     //
-    // The regression case, verbatim from qr's trunk RESUME.md:32, over which
-    // the tool printed `nothing to re-check`. PR #47 had merged three days
+    // The regression case, modelled on a trunk RESUME.md line over which
+    // the tool printed `nothing to re-check`. That PR had merged three days
     // earlier. It matches no OPEN_STATE pattern and trips no suppressor: the
     // vocabulary simply never covered "a PR number with `open` next to it",
     // which is the commonest open-state claim these documents actually carry.
     '## The site v2 rebuild, as of 2026-09-04',
-    'on main (#44 to #46). Phases 6 and 7 are PR #47, open at f6d1e67, gate green',
+    'on main (#61 to #63). Phases 6 and 7 are PR #64, open at 3b7e0a9, gate green',
     // THE NEGATION. Same grammar as an open claim, opposite meaning.
     //
     // This line CARRIES A PR HANDLE on purpose. The first version named only a
@@ -205,7 +205,7 @@ const FIXTURE = [
     // rows. But a line marked PRE-EXISTING / NOT fixed is the author saying
     // THIS one survived the shipped work, and that outranks the section. The
     // parenthetical below is the shape that caused it: something else closed.
-    '## v916 retired the cart hash and redirects to Food (dead end closed)',
+    '## v318 retired the cart hash and redirects to Home (dead end closed)',
     // The sibling row must itself be an OPEN-STATE claim that this section
     // legitimately suppresses. The first version read 'the redirect is
     // verified and the old route is gone', which matches no OPEN_STATE
@@ -222,7 +222,7 @@ const FIXTURE = [
 // A SECOND BOOT DOCUMENT, scanned after RESUME.md, whose first claim sits under
 // NO heading of its own.
 //
-// RESUME.md ENDS inside `## v916 ... (dead end closed)`, which is a shipped
+// RESUME.md ENDS inside `## v318 ... (dead end closed)`, which is a shipped
 // section that legitimately suppresses its own rows. If `section` leaked from
 // one document into the next, this claim would inherit that suppression and
 // vanish - so asserting it IS reported grades the reset behaviourally. It
@@ -459,22 +459,22 @@ if (tmp) {
         strict.population.openStateAndDated === 8,
         'a zero with no denominator looks identical to a broken probe');
 
-    // ---- RULE 2: the qr false negative, which is a REGRESSION TEST --------
+    // ---- RULE 2: the PR-open false negative, a REGRESSION TEST --------
     //
-    // Not a synthetic case. This exact line stood on qr's trunk while the tool
+    // Modelled on a real case: a line of this shape stood on a trunk while the tool
     // printed `nothing to re-check` over the document containing it, and a
-    // coordinator ranked qr's docs clean on the strength of that run. PR #47
+    // coordinator ranked that repo's docs clean on the strength of that run. The PR
     // had merged three days earlier, and the sha named is not even its head.
     const handleFinds = (r.structural || []).filter((f) => f.kind === 'handle-open');
     const handleText = handleFinds.map((f) => f.text).join(' | ');
-    check('a line calling PR #47 open is REPORTED',
-        handleText.indexOf('PR #47') !== -1, handleText);
+    check('a line calling PR #64 open is REPORTED',
+        handleText.indexOf('PR #64') !== -1, handleText);
     check('  and it is reported with the handle, so it names its own probe',
-        handleFinds.some((f) => f.handle === 'PR #47'),
+        handleFinds.some((f) => f.handle === 'PR #64'),
         'the point of this rule is that one `gh pr view` settles each finding');
     check('  and the lexical path was structurally incapable of finding it',
         !OPEN_STATE.some((re) => re.test(
-            'on main (#44 to #46). Phases 6 and 7 are PR #47, open at f6d1e67, gate green')),
+            'on main (#61 to #63). Phases 6 and 7 are PR #64, open at 3b7e0a9, gate green')),
         'if a pattern ever covers it, this assertion is the one that says so');
     // Each of the three rows below must REACH its veto, or the assertion grades
     // nothing. The first two versions of this fixture did not, and mutation
@@ -525,7 +525,7 @@ if (tmp) {
 
     // ---- absence must not print as health ---------------------------------
     //
-    // The sentence the qr run ended on. A verdict with no basis attached says
+    // The sentence that product-repo run ended on. A verdict with no basis attached says
     // the same thing whether the corpus was read or was empty.
     // A GENUINELY CLEAN CORPUS, in its own repository. The main fixture cannot
     // serve here: `--age 99999` silences the lexical findings but NOT the

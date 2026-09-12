@@ -23,7 +23,7 @@ that survive into the backlog.
 
 ## Why this exists
 
-`[measured 2026-09-08]` in the live product's prd.json history, 121 stories were
+`[measured 2026-09-08]` in one production repo's prd.json history, 121 stories were
 filed in 90 days and 22 cite a production observation at filing. None came from
 Sentry or from a monitor alert; each was a person reading a table or a dashboard
 and typing. Nothing in this plugin read a production signal. The stage between

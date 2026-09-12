@@ -41,11 +41,11 @@ If no `verify` field exists, auto infers from the task type (UI → visual+a11y+
 ```json
 {
   "S13-003": {
-    "title": "Save a generated QR to the dashboard",
+    "title": "Save a shortened link to the dashboard",
     "verify": ["visual", "flow"],
     "acceptance": [
       "after Save, the dashboard lists one new row with the entered URL",
-      "the POST to /api/codes carries {url, label} and returns 201"
+      "the POST to /api/links carries {url, label} and returns 201"
     ],
     "passes": null
   }

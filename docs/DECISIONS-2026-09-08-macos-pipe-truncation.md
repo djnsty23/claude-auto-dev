@@ -9,7 +9,7 @@ a pending async write. The fix is `process.exitCode`, at the exit rather than at
 the emit, because the human-report branch shares that exit and shared the defect.
 
 Taken under the operator away window (until 2026-09-08T06:52Z), which authorises
-the recommended option on anything reversible, in qr and autodev, with a log.
+the recommended option on anything reversible, in autodev and one product repo, with a log.
 Merge authority stayed with the Brain. Nothing here merged anything.
 
 ## D1 — posted the #182 review (reversible)

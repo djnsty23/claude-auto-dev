@@ -1,14 +1,14 @@
 # Decisions — 2026-09-08, the quota-wall work (PR #200)
 
 Calls made without asking during the operator's away window (`AWAY.md`,
-scope qr and autodev). Session worktree `beautiful-ramanujan-918fa1`, branch
+scope autodev and one product repo). Session worktree `beautiful-ramanujan-918fa1`, branch
 `claude/beautiful-ramanujan-918fa1`, base `origin/main` 7b157a8.
 
 ## D1. Branch 1 — the merge of #200 is the Brain's, not this session's
 
 The closing panel recommended "review and merge #200" and the away hook said
 to take the recommended option. `AWAY.md` is the standing rule above it: *the
-Brain holds merge authority on qr and autodev; sessions still do not merge
+Brain holds merge authority on [one product repo] and autodev; sessions still do not merge
 their own PRs.* So this session did not merge. The PR, its gate output and the
 rebased `npm test` result were messaged to the Brain, which decides.
 

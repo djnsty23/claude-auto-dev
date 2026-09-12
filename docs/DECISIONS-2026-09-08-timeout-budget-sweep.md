@@ -1,7 +1,7 @@
 # DECISIONS — 2026-09-08 — the timeout-budget sweep (PR #197)
 
-Taken inside the operator's AWAY window (until 2026-09-08T16:33Z, scope qr and
-autodev). Branch 2 of the away protocol: reversible, not covered by a standing
+Taken inside the operator's AWAY window (until 2026-09-08T16:33Z, scope autodev
+and one product repo). Branch 2 of the away protocol: reversible, not covered by a standing
 order, so the recommended option was taken and logged here.
 
 ## D1. Report two module findings to #183 rather than fix them in #197

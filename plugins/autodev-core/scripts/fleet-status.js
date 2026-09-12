@@ -181,7 +181,7 @@ function readTranscript(file) {
 }
 
 /**
- * TODO(andy) - decide what "needs attention" MEANS.
+ * TODO(operator) - decide what "needs attention" MEANS.
  *
  * This is the judgement the whole interface is built around, and it is genuinely
  * yours: it decides what shows up red at the top of the board and what stays

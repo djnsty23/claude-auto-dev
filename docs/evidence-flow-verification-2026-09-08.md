@@ -7,12 +7,11 @@ driving the primary user flow in a real browser and asserting on state, per
 story, would have caught those failures, what the check costs, and how to tell
 in 30 days whether it moved the number.
 
-> The repos stay anonymised as in the earlier document. **Project A** is the
-> consumer health/fitness PWA, **Project C** the consumer media app. **Project D**
-> is a fourth repo, a consumer QR tool with no users yet, used here for the cost
-> measurement because it can carry a throwaway branch. Project B, the B2B
-> platform, was not re-measured: it is a client repo and this session did not
-> touch it.
+> The repos stay anonymised as bare labels, as in the earlier document.
+> **Project A** and **Project C** are two of the repos measured there.
+> **Project D** is a fourth repo, used here for the cost measurement because it
+> can carry a throwaway branch. Project B was not re-measured: this session did
+> not touch it.
 
 ## 1. The baseline, re-measured on today's history
 
@@ -66,38 +65,8 @@ Subjects and bodies read in full. The question for each: **would driving the
 primary user flow in a real browser after the feature commit, with an assertion
 about state, have caught it?**
 
-| # | fix | subject, shortened | catch? | why |
-|---|---|---|---|---|
-| 1 | 57a9c1e4 | recovery mail promised a free regeneration | no | copy inside an email; no browser flow renders it |
-| 2 | 88e993aa | phantom API call counted on exhausted retries | no | server-side telemetry count |
-| 3 | d57dd057 | four open defects, incl. a progress bar frozen at 25% for anonymous visitors and six raw anchors forcing full reloads | **yes** | drive the generator anonymous, assert the progress value moves; assert an internal link does not reload the document |
-| 4 | d37ab9d7 | artist lookup fan-out; a 429 read as "no such artist" | only with data | needs the upstream API to be rate-limiting during the run |
-| 5 | c1252e4d | body gradient cleared the page background below the fold | no | the viewport render is correct; only a full-page capture shows it, and that is a picture, not a state |
-| 6 | f7eb2a5a | monitor names stale functions from the closure map | no | operator tooling |
-| 7 | 41fafb6c | second provider's 429 cooldown never wired | only with data | needs a rate-limited account |
-| 8 | 140a54f1 | a short prompt containing "by" hard-failed as a strict song list | only with data | the flow's prompt must contain " by " plus strict wording |
-| 9 | 5c2dc3fe | refund copy promised more than the Terms | no | policy text |
-| 10 | 6eaf9671 | 21 cron handlers failed silently | no | cron |
-| 11 | 05fa726b | a fourth writer of model-written prose | no | cron output |
-| 12 | 64c31b70 | guard all three prose writers | no | same |
-| 13 | 41b188ef | 10 of 26 admin routes overflow at 375px | no | admin routes are not the primary flow (a `scrollWidth` assertion would catch it there) |
-| 14 | c4c4dfe8 | admin overflow, account menu could not scroll | no | admin |
-| 15 | de8a93b5 | white on solid tokens, 2.30:1 | no | contrast measurement |
-| 16 | 8132d0bc | green text with 2% contrast headroom | no | contrast |
-| 17 | 8a690f43 | raw colours tokenised, plus a gate | no | token hygiene |
-| 18 | 2d89aafd | e2e specs suppressed overlays with dead keys | no | test infrastructure |
-| 19 | fee8c41c | a tracking pixel never loaded because the tag manager's tag was paused | **yes** | after marketing consent, assert the pixel request fired |
-| 20 | 46cfff25 | share card overlapped its own text | no | image endpoint, off the flow |
-| 21 | 1613dd26 | brand marks on the track-link row | no | design |
-| 22 | d4b168ba | two YouTube players on the page at once | **yes** | with the console playing, tap a wall card; assert one iframe on the page |
-| 23 | bd1012e0 | Pro price contrast | no | contrast |
-| 24 | 33b4f1c6 | dimmed green tokens | no | contrast |
-| 25 | ce8b5d19 | drop-zone overlay contrast | no | contrast |
-| 26 | a8cb7a7a | bare text-primary used as text | no | contrast |
-| 27 | 596b4b28 | seven icon-only sites | no | contrast |
-| 28 | c499dd14 | 17 text-primary sites the gate cannot reach | no | contrast |
-| 29 | 5476ed8b | an "undefined means yes" audit default | no | admin column with no reader |
-| 30 | 67af0113 | analytics reported nothing after a route prop was added | **yes** | after navigation, assert the pageview beacon was queued |
+The per-commit table is withheld, because it named a private product's commits
+and features. Its totals:
 
 | verdict | count | share |
 |---|---|---|
@@ -157,9 +126,9 @@ added.
 Two rules came out of running it rather than designing it:
 
 - **A console-error rule that fails on any error fails every record in a repo
-  whose dev page carries errors before the flow starts.** Project D's Next dev
-  tree logs a CSP complaint about React's `eval` and a blocked analytics script
-  on every load; Project C's Vite tree logs blocked script fetches. The record
+  whose dev page carries errors before the flow starts.** Project D's dev
+  tree logs a CSP complaint and a blocked analytics script on every load;
+  Project C's dev tree logs blocked script fetches. The record
   may carry `consoleErrorsBaseline`, the count on the same page before the flow,
   and fails only on errors the flow added. The baseline is in the record, so a
   reviewer sees "2 before, 2 after".
@@ -177,8 +146,8 @@ nothing user-visible.
 
 ## 4. What it costs
 
-**One flow check on Project D's primary flow** (open the generator, enter an
-address, read back that one QR image rendered with the right alt text):
+**One flow check on Project D's primary flow** (enter a value on the main page,
+read back that one rendered element carries the expected attribute):
 
 | step | wall time |
 |---|---|
@@ -186,15 +155,15 @@ address, read back that one QR image rendered with the right alt text):
 | write the record and validate it | 0.08 s |
 
 **Five stories on a throwaway branch of Project D**, each a small change to the
-generator with a user-visible outcome, implemented and then flow-checked.
+main page with a user-visible outcome, implemented and then flow-checked.
 Stamps were written by shell before and after each arm.
 
 | story | implement + typecheck | flow check | flow check as share |
 |---|---|---|---|
-| C1 encoded destination shown under the code | 13 s | 34 s | 72% |
+| C1 entered value echoed under the output | 13 s | 34 s | 72% |
 | C2 Clear button empties the field | 2 s | 49 s | 97% |
 | C3 character count under the field | 2 s | 79 s | 98% |
-| C4 sample-link chip fills the field | 2 s | 29 s | 94% |
+| C4 sample chip fills the field | 2 s | 29 s | 94% |
 | C5 Escape clears the field | 2 s | 61 s | 97% |
 | **total** | 21 s | **252 s** | 92% |
 
@@ -220,23 +189,25 @@ defect present) and, as the control, the fix commit itself, served by the same
 dev server, driven with the same steps. A check that goes red on the parent and
 green on the fix has seen the defect; one that reads the same on both is blind.
 
-| fix | flow driven | assertion | parent of the fix | the fix |
-|---|---|---|---|---|
-| 67af0113 analytics reported nothing | open the generator route | a `pageview` for that route is in the analytics queue | **0 pageviews queued** | 2 queued, route and path both set |
-| d4b168ba two players at once | with the console holding a queue, tap a wall card's preview | exactly one YouTube iframe on the page, none inside the wall | **2 iframes, 1 inside the wall** | 1 iframe, 0 inside the wall |
-| d57dd057 raw anchors forced full reloads | on Terms, set a window marker, click "contact page" | the marker survives the navigation | **marker gone, document navigation** | marker present |
+Per-commit details are withheld for the same reason as in section 2.
+
+| replay | assertion | parent of the fix | the fix |
+|---|---|---|---|
+| 1, an analytics event never sent | a pageview for the route is in the analytics queue | **0 queued** | 2 queued, route and path both set |
+| 2, one embedded element rendered twice | exactly one instance on the page, none inside a list | **2 instances, 1 inside the list** | 1 instance, 0 inside the list |
+| 3, internal links forced full reloads | a window marker survives the navigation | **marker gone, document navigation** | marker present |
 
 **3 of 3.** Each parent fails the assertion the later fix describes, and each
 fix passes it.
 
 Bounds on that result, stated rather than left to the reader:
 
-- The console-playing precondition for d4b168ba has no anonymous entry point
-  short of a generation, which writes to production. The player's persisted
-  queue was seeded through localStorage in the shape the app itself writes, so
-  this row is "caught, with data", the same category as rows 4, 7 and 8 above.
-- d57dd057 carried four defects; the one replayed is the raw-anchor one, because
-  the progress-bar one needs a real generation. The row says what was replayed.
+- Replay 2's precondition has no anonymous entry point short of an action that
+  writes to production. The app's persisted state was seeded through
+  localStorage in the shape the app itself writes, so this row is "caught, with
+  data", the same category as the three data-dependent fixes in section 2.
+- Replay 3's commit carried four defects; the one replayed is the reload one,
+  because another needs a production write. The row says what was replayed.
 - In development the analytics script runs in debug mode and sends nothing, so
   the observable is the queue the script drains, not a network request. In
   production the same assertion is on `read_network_requests`.

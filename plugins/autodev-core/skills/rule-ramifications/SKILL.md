@@ -60,11 +60,11 @@ controllers. Two mounts must not stack two loops.
 
 **6. Units, references, and formats**
 What unit is this in, against what reference, in whose locale and timezone? A
-percentage needs a stated denominator — *"protein % showed 200%+ (EU 50g ref vs
-180g target)"* is what happens when it does not.
+percentage needs a stated denominator. *"storage used showed 240% (5 GB default
+ref vs 12 GB paid plan)"* is what happens when it does not.
 
 **7. Which environment/project/key does this actually target?**
-*"producthealth read the WRONG Supabase project"* typechecks perfectly.
+*"the status-check function read the WRONG Supabase project"* typechecks perfectly.
 
 **8. Is it reachable?**
 A handler nested inside another handler's block never runs. A route with no

@@ -51,7 +51,7 @@
  * Usage:
  *   node workflow-liveness.js --repo owner/name [--repo owner/name ...]
  *   node workflow-liveness.js --log monitor=C:/path/history.log=15
- *   node workflow-liveness.js --task SpotiviblyTypesDrift=1440
+ *   node workflow-liveness.js --task NightlyTypesDrift=1440
  *   node workflow-liveness.js --selftest
  */
 

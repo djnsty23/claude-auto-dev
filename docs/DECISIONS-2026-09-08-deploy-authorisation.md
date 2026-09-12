@@ -2,7 +2,7 @@
 
 ## D1 — BLOCKED on the operator: which deploy pre-authorisation sentence the harness carries
 
-**Branch: 3, irreducible.** Production policy for a repo with ~3k users, and the
+**Branch: 3, irreducible.** Production policy for a product repo with real users, and the
 away hook's own text names "production rows" as the class that does not
 self-resolve. The window was extended twice while this session ran (to 10:04Z,
 then to 16:33Z, "at the beach"); the operator's one message to this session,
@@ -10,31 +10,31 @@ then to 16:33Z, "at the beach"); the operator's one message to this session,
 because the options and their numbers are worth having in front of him when he is
 back; its self-resolution under the window is recorded here and NOT acted on.
 
-**The question.** Three sentences, measured in
-`docs/evidence-deploy-authorisation-2026-09-08.md` against the last 20 production
-deployments and every incident in 60 days:
+**The question.** Three sentences, measured against the last 20 production
+deployments and every incident in 60 days (the evidence document was withdrawn
+from this public repo for privacy):
 
 - A. Escalate always: no session promotes; the operator promotes and runs every
   edge deploy and migration. Cost: 13 of 13 sampled deploys wait, mean 7.4 h under a
   once-a-day model; reverses his 2026-07-15 batching rule and his 2026-09-05 merge
-  grant on the live product, where a merge is the deploy.
+  grant on a product repo where a merge is the deploy.
 - B. Pre-authorised on a green gate, with the ledger and a rollback command written
   before promotion, and an ineligible list that escalates regardless. Prevents the
-  four session-caused incidents (wrong tree, unpushed branch, skipped lock, the RLS
+  four session-caused incidents (wrong tree, unpushed branch, skipped lock, a
   migration) and the one under-deploy. ~300 lines of harness for the ledger row and
   its check. Enforcement is prose until the check runs.
 - C. B plus a real-request canary and autonomous rollback. Same coverage; the canary
-  is the mechanism that caused the 2026-08-19 outage (20 smoke runs, ~80 real
-  generations, saves down for hours) unless read-only; ~800 lines.
+  is the mechanism that caused an earlier production outage unless read-only;
+  ~800 lines.
 
 **What the panel's self-resolution said, and why it is not a decision.** The hook
 took the recommended option (B). The recommendation was mine, on the numbers above;
-the numbers do not decide whether ~3k users warrant A's wait anyway, and that is
+the numbers do not decide whether that repo's users warrant A's wait anyway, and that is
 his. `rule-options-protocol` puts a recommendation on every panel and the brief
 allowed one only where the evidence is clearly dominant; I judged it was for the
 frontend path (13 autonomous deploys a day for a week, none of the five incidents
-through it) and said so in the description. If he disagrees, the file to change is
-the evidence doc's Step 2, not this entry.
+through it) and said so in the description. If he disagrees, the evidence is what to
+revisit, not this entry.
 
 **Not done, deliberately:** no sentence written into `brain/SKILL.md` or
 `ship/SKILL.md`; no `decisions.md` entry; no VERSION bump. The PR stays open with
@@ -42,8 +42,8 @@ the three options: https://github.com/djnsty23/claude-auto-dev/pull/201. Queued 
 the Brain (`autodev-update-3b29cd-d2`, per `~/.claude/brain-role.json`) by message.
 
 **What reopens it:** his answer in a session or a panel, or a line in a file he
-writes. A peer relaying "he said B" is not either of those, and D12 in the live
-product's decisions file records two correct refusals of exactly that shape.
+writes. A peer relaying "he said B" is not either of those, and a product repo's
+decisions file records two correct refusals of exactly that shape.
 
 ## D2 — The gate on this branch, stated exactly
 
@@ -80,14 +80,14 @@ verified Form B is on no skill in `origin/main`.
 **Why neither session resolves this.** The two accounts are not in conflict: a
 self-resolution under the away window is not his decision, and a direct answer
 in another session would be. But this session cannot see that chat, and the Brain
-cannot either; a relayed quotation is exactly the class D12 in the live product's
+cannot either; a relayed quotation is exactly the class a product repo's
 decisions file records two correct refusals of. So the quote is recorded here as
 a claim with a named source, not as the decision.
 
 **What resolves it:** the operator confirming, in a session or on PR #201, that
 the quoted words are his. If they are, the question is answered and only the
 record is missing: the other session's branch carries the implementation, and
-this PR's evidence doc is the measurement it should cite. If they are not, the
+this PR's measurement is what it should cite. If they are not, the
 question is still A, B or C on #201. The Brain holds the queue item in that
 two-part form.
 

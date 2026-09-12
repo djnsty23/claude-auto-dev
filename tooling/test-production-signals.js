@@ -91,7 +91,7 @@ const CONFIG = {
   ],
   intervals: { 'weekly_*': 192 },
 };
-const PRD = { stories: { 'S16-AUD-001': { title: 'existing', passes: true }, 'S16-AUD-002': { title: 'pending', passes: null } } };
+const PRD = { stories: { 'S1-TEST-001': { title: 'existing', passes: true }, 'S1-TEST-002': { title: 'pending', passes: null } } };
 const LIVE_REMOTE = 'https://github.com/example-org/live-product.git';
 const ALLOWED_REMOTE = 'https://example.invalid/production-signals-apply-fixture.git';
 
@@ -148,8 +148,8 @@ console.log('control: a fresh signal IS proposed, once per issue, in story shape
   const json = readReportJson(dir);
   const ids = json.candidates.map((c) => c.id);
   check('12 events of one group produced ONE candidate, not twelve', json.candidates.filter((c) => c.source.id === 'research-tracks:TIMEOUT').length === 1, ids.join(','));
-  check('candidate ids take the prd.json prefix and a PROD lane', ids.every((id) => /^S16-PROD-\d{3}$/.test(id)), ids.join(','));
-  check('candidate ids are sequential from 001', ids.join(',') === 'S16-PROD-001,S16-PROD-002,S16-PROD-003,S16-PROD-004,S16-PROD-005,S16-PROD-006', ids.join(','));
+  check('candidate ids take the prd.json prefix and a PROD lane', ids.every((id) => /^S1-PROD-\d{3}$/.test(id)), ids.join(','));
+  check('candidate ids are sequential from 001', ids.join(',') === 'S1-PROD-001,S1-PROD-002,S1-PROD-003,S1-PROD-004,S1-PROD-005,S1-PROD-006', ids.join(','));
   check('every candidate is passes: null', json.candidates.every((c) => c.passes === null));
   check('summarise() reads them as pending, not as anything else', (() => { const s = prdStates.summarise(json.candidates); return s.pending === 6 && s.unrecognised === 0 && s.done === 0; })());
   check('acceptance names the signal going quiet', json.candidates.every((c) => c.acceptance.some((a) => /quiet|READY|heartbeat .* written/.test(a))));
@@ -159,7 +159,7 @@ console.log('control: a fresh signal IS proposed, once per issue, in story shape
   check('frozen updated_at does not make a fresh heartbeat look dead (GREATEST)', json.held.some((h) => h.id === 'frozen_updated_at_last_run' && /fresh/.test(h.reason)), JSON.stringify(json.held));
   check('failed PRODUCTION deploy proposed at count 1; failed PREVIEW is not a signal', json.candidates.some((c) => c.source.id === 'dpl_err' && c.priority === 1) && !json.candidates.concat(json.held).some((x) => (x.source ? x.source.id : x.id) === 'dpl_prev'));
   check('sentry issue with 37 events proposed; the 1-event issue held by min_count', json.candidates.some((c) => c.source.id === '4001') && json.held.some((h) => h.id === '4002' && /min_count/.test(h.reason)));
-  check('ledger records each proposal keyed by source:id with its story id', (() => { const l = readLedger(dir); return l.proposed['server-errors:research-tracks:TIMEOUT'] && l.proposed['server-errors:research-tracks:TIMEOUT'].story_id === 'S16-PROD-001' && l.runs.length === 1 && l.runs[0].candidates === 6; })());
+  check('ledger records each proposal keyed by source:id with its story id', (() => { const l = readLedger(dir); return l.proposed['server-errors:research-tracks:TIMEOUT'] && l.proposed['server-errors:research-tracks:TIMEOUT'].story_id === 'S1-PROD-001' && l.runs.length === 1 && l.runs[0].candidates === 6; })());
   check('the live repo\'s prd.json was NOT touched without --apply', JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'prd.json'), 'utf8'))) === JSON.stringify(PRD));
 
   console.log('thresholds hold back noise and say why');
@@ -233,17 +233,17 @@ console.log('re-proposal: only after a quiet spell, or a tenfold escalation');
   fs.mkdirSync(path.join(dir, '.claude', 'reports'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.claude', 'reports', 'production-signals-ledger.json'), JSON.stringify({
     schema: 1, runs: [], proposed: {
-      'server-errors:returned:X': { first_proposed: ago(24 * 90), last_seen: ago(24 * 80), count: 8, story_id: 'S16-PROD-001' },   // quiet 80 days, back -> regression
-      'server-errors:escalated:Y': { first_proposed: ago(24 * 20), last_seen: ago(24 * 5), count: 5, story_id: 'S16-PROD-002' },   // 5 -> 60 = 12x
-      'server-errors:steady:Z': { first_proposed: ago(24 * 20), last_seen: ago(24 * 5), count: 7, story_id: 'S16-PROD-003' },      // 7 -> 8, already proposed
+      'server-errors:returned:X': { first_proposed: ago(24 * 90), last_seen: ago(24 * 80), count: 8, story_id: 'S1-PROD-001' },   // quiet 80 days, back -> regression
+      'server-errors:escalated:Y': { first_proposed: ago(24 * 20), last_seen: ago(24 * 5), count: 5, story_id: 'S1-PROD-002' },   // 5 -> 60 = 12x
+      'server-errors:steady:Z': { first_proposed: ago(24 * 20), last_seen: ago(24 * 5), count: 7, story_id: 'S1-PROD-003' },      // 7 -> 8, already proposed
     },
   }));
   const r = run(dir);
   const json = readReportJson(dir);
-  check('a signal quiet for 30+ days that returned is re-proposed as a regression', json.candidates.some((c) => c.source.id === 'returned:X' && /regression of S16-PROD-001/.test(c.source.proposed_because)), JSON.stringify(json.candidates.map((c) => c.source.proposed_because)));
+  check('a signal quiet for 30+ days that returned is re-proposed as a regression', json.candidates.some((c) => c.source.id === 'returned:X' && /regression of S1-PROD-001/.test(c.source.proposed_because)), JSON.stringify(json.candidates.map((c) => c.source.proposed_because)));
   check('a tenfold escalation is re-proposed', json.candidates.some((c) => c.source.id === 'escalated:Y' && /escalated 5 → 60/.test(c.source.proposed_because)));
-  check('a steady already-proposed signal is held, naming its story', json.held.some((h) => h.id === 'steady:Z' && /already proposed .* as S16-PROD-003/.test(h.reason)), JSON.stringify(json.held));
-  check('new ids continue after the highest PROD id in the ledger', json.candidates.map((c) => c.id).sort().join(',') === 'S16-PROD-004,S16-PROD-005', json.candidates.map((c) => c.id).join(','));
+  check('a steady already-proposed signal is held, naming its story', json.held.some((h) => h.id === 'steady:Z' && /already proposed .* as S1-PROD-003/.test(h.reason)), JSON.stringify(json.held));
+  check('new ids continue after the highest PROD id in the ledger', json.candidates.map((c) => c.id).sort().join(',') === 'S1-PROD-004,S1-PROD-005', json.candidates.map((c) => c.id).join(','));
 }
 
 // ---------------------------------------------------------------------------
@@ -277,8 +277,8 @@ console.log('--apply refuses a live repo, applies to the allowlisted one');
   check('allowlisted repo: stdout reports the apply', /applied 6 stories into prd.json/.test(r2.out), r2.out);
   const prd = JSON.parse(fs.readFileSync(path.join(allowed, 'prd.json'), 'utf8'));
   const stories = prdStates.storiesOf(prd);
-  check('allowlisted repo: the six stories are in prd.json, pending', prdStates.summarise(stories).pending === 7 && stories['S16-PROD-001'] && stories['S16-PROD-001'].passes === null, Object.keys(stories).join(','));
-  check('allowlisted repo: existing stories untouched', stories['S16-AUD-001'].passes === true && stories['S16-AUD-002'].passes === null);
+  check('allowlisted repo: the six stories are in prd.json, pending', prdStates.summarise(stories).pending === 7 && stories['S1-PROD-001'] && stories['S1-PROD-001'].passes === null, Object.keys(stories).join(','));
+  check('allowlisted repo: existing stories untouched', stories['S1-TEST-001'].passes === true && stories['S1-TEST-002'].passes === null);
   check('allowlisted repo: applied prd.json carries no canary window', leaks(fs.readFileSync(path.join(allowed, 'prd.json'), 'utf8')) === null);
   check('allowlisted repo: ledger marks applied', Object.values(readLedger(allowed).proposed).every((p) => p.applied === true));
   const r3 = run(allowed, ['--apply']);

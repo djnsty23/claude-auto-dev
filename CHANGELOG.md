@@ -3749,7 +3749,7 @@ A workflow file GitHub REJECTS fails in 0 seconds with zero jobs and no log,
 because it is refused before a job is created or its triggers are even
 evaluated. Nothing readable tells you it happened.
 
-Measured in one product repo: `ios-simshots.yml` carried two top-level `concurrency:`
+Measured in one product repo: `ios-screenshots.yml` carried two top-level `concurrency:`
 blocks for three days — a second added with its cost rationale, the first not
 removed — and every push produced a 0s red that also held every open PR at
 `mergeStateStatus=UNSTABLE`. That repo has sixty gates and none of them read the
@@ -4046,9 +4046,9 @@ worse than drift) and a fourth pattern store next to the three that exist.
 `agent-browser-cleanup.js` and its suite are restored, and the SessionStart
 registration with them. Dropping the agent-browser *skills* was right — nothing in
 the plugin launches that CLI now. But the **binary is still installed**, and it has
-a live consumer with nothing to do with this plugin: kb-factory's `crawl_js.py`
-drives it to render JS-heavy documentation sites, which is how the `meta-ads-kb` and
-`reddit-ads-kb` corpora are refreshed. Both skills correctly still name it.
+a live consumer with nothing to do with this plugin: a separate documentation
+crawler drives it to render JS-heavy documentation sites, which is how two
+knowledge-base corpora are refreshed. Both of their skills correctly still name it.
 
 So 8.79.0 removed the guidance and left the cause. The hook exists for two Windows
 failure modes that come from the bundled Chromium outliving a session — zombie
@@ -4641,10 +4641,10 @@ Measured across three repos, with identical counting:
 | repo | before | after |
 |---|---|---|
 | this one | 7 orphaned assertions + 4 manual | **0 + 0** |
-| a media app | 1 + 11 | 1 + 11 *(no dynamic runner — correctly unchanged)* |
-| a health app | 37 + 14 | **9 + 9** |
+| Project C | 1 + 11 | 1 + 11 *(no dynamic runner — correctly unchanged)* |
+| Project B | 37 + 14 | **9 + 9** |
 
-The health app's drop is corroborated independently: its own preflight prints
+Project B's drop is corroborated independently: its own preflight prints
 *"74 harness scripts swept"*, and `harness-sweep.js` is what discovers them.
 
 ### The guard took three attempts, both early ones failing the same way
@@ -4843,10 +4843,8 @@ them a client deliverable — next to their per-repo defect rates. Nothing was
 secret, and that was never the point: **a team's defect rate is theirs to
 publish, and this tool had published it for them.**
 
-Now `Project A` / `B` / `C`. Every number and conclusion is unchanged, and each
-project's *shape* is kept, because it is load-bearing for reading the table — a
-consumer health app, a B2B audit platform and a consumer media app fail
-differently. `docs/failure-evidence.md` says so up front, and points readers at
+Now `Project A` / `B` / `C`. Every number and conclusion is unchanged.
+`docs/failure-evidence.md` says so up front, and points readers at
 `/learn-from-fixes` for their own numbers, which was always the point of the
 document.
 

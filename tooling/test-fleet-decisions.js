@@ -41,7 +41,7 @@ function run(cfg, argv) {
     });
 }
 
-const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', 'ai-pricing',
+const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'ai-pricing',
     '--decision', 'd', '--author', 'a'].concat(extra || []));
 
 // ------------------------------------------------------------- the refusals
@@ -69,7 +69,7 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     const cfg = freshCfg();
     check('first record succeeds', rec(cfg).status === 0);
 
-    const r = run(cfg, ['--record', '--repo', 'qr', '--subject', 'ai-pricing',
+    const r = run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'ai-pricing',
         '--decision', 'the opposite', '--author', 'other-session']);
     check('a SECOND author on the same subject is REFUSED', r.status === 3, 'status ' + r.status);
     check('and is shown the prior decision, not just told one exists',
@@ -86,7 +86,7 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     check('the same author may record again', rec(cfg).status === 0);
 
     // --force is the deliberate override, for a peer that agrees.
-    const f = run(cfg, ['--record', '--repo', 'qr', '--subject', 'ai-pricing',
+    const f = run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'ai-pricing',
         '--decision', 'agreeing', '--author', 'other-session', '--force']);
     check('--force lets a second author record deliberately', f.status === 0, f.stderr);
 }
@@ -105,11 +105,11 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     // Normalisation. A key that is easy to miss by punctuation detects nothing —
     // two sessions will never type the same casing.
     const cfg = freshCfg();
-    run(cfg, ['--record', '--repo', 'qr', '--subject', 'AI Pricing', '--decision', 'd', '--author', 'a']);
-    const r = run(cfg, ['--record', '--repo', 'qr', '--subject', 'ai-pricing',
+    run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'AI Pricing', '--decision', 'd', '--author', 'a']);
+    const r = run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'ai-pricing',
         '--decision', 'opposite', '--author', 'b']);
     check('"AI Pricing" and "ai-pricing" collide', r.status === 3, r.stderr);
-    const c = run(cfg, ['--check', '--repo', 'qr', '--subject', 'ai   pricing']);
+    const c = run(cfg, ['--check', '--repo', 'demo-app', '--subject', 'ai   pricing']);
     check('and --check normalises the same way', /1 prior decision/.test(c.stdout || ''), c.stdout);
 }
 
@@ -117,7 +117,7 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
 
 {
     const cfg = freshCfg();
-    const r = run(cfg, ['--check', '--repo', 'qr', '--subject', 'anything']);
+    const r = run(cfg, ['--check', '--repo', 'demo-app', '--subject', 'anything']);
     check('--check on an empty log exits 0', r.status === 0);
     check('--check says the absence is real, not an unread file',
         /real absence/.test(r.stdout || ''), r.stdout);
@@ -126,7 +126,7 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
 {
     const cfg = freshCfg();
     rec(cfg);
-    const r = run(cfg, ['--check', '--repo', 'qr', '--subject', 'something-else']);
+    const r = run(cfg, ['--check', '--repo', 'demo-app', '--subject', 'something-else']);
     // The honest caveat: this only knows what was RECORDED. Absence here is
     // weaker evidence than presence, and saying so stops a reader treating a
     // clean --check as proof nobody is working on it.
@@ -139,12 +139,12 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     // in a wall of entries. That surfacing IS the product.
     const cfg = freshCfg();
     rec(cfg);
-    run(cfg, ['--record', '--repo', 'qr', '--subject', 'ai-pricing', '--decision', 'z', '--author', 'b', '--force']);
-    run(cfg, ['--record', '--repo', 'qr', '--subject', 'quiet-topic', '--decision', 'q', '--author', 'a']);
+    run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'ai-pricing', '--decision', 'z', '--author', 'b', '--force']);
+    run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'quiet-topic', '--decision', 'q', '--author', 'a']);
     const r = run(cfg, ['--list']);
     check('--list flags subjects with more than one author',
         /decided by MORE THAN ONE session/.test(r.stdout || ''), r.stdout);
-    check('--list names the contested subject', /qr\/ai-pricing/.test(r.stdout || ''), r.stdout);
+    check('--list names the contested subject', /demo-app\/ai-pricing/.test(r.stdout || ''), r.stdout);
     check('--list does NOT flag the single-author subject as contested',
         !/quiet-topic\s+\(\d+ authors\)/.test(r.stdout || ''), r.stdout);
     check('--list prints the population it scanned', /population: 3/.test(r.stdout || ''), r.stdout);
@@ -157,12 +157,12 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     rec(cfg);
     const log = path.join(cfg, 'fleet', 'DECISIONS.jsonl');
     fs.appendFileSync(log, '{ torn write\n', 'utf8');
-    run(cfg, ['--record', '--repo', 'qr', '--subject', 'later', '--decision', 'l', '--author', 'a']);
+    run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'later', '--decision', 'l', '--author', 'a']);
     const r = run(cfg, ['--list']);
     check('a torn line is skipped and the rest still read',
         /population: 2/.test(r.stdout || ''), r.stdout);
     check('and the collision check still works past it',
-        run(cfg, ['--record', '--repo', 'qr', '--subject', 'ai-pricing',
+        run(cfg, ['--record', '--repo', 'demo-app', '--subject', 'ai-pricing',
             '--decision', 'x', '--author', 'zz']).status === 3);
 }
 
@@ -179,23 +179,23 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
 
 {
     const cfg = freshCfg();
-    const a = run(cfg, ['--next', '--repo', 'qr', '--author', 'session-a', '--floor', '23']);
+    const a = run(cfg, ['--next', '--repo', 'demo-app', '--author', 'session-a', '--floor', '23']);
     check('--next prints just the id on stdout, so it can be captured',
         a.stdout.trim() === 'D24', JSON.stringify(a.stdout));
     check('and exits 0', a.status === 0, a.stderr);
     // THE ASSERTION THIS EXISTS FOR: a different session must never get the same
     // number, without either of them fetching anything.
-    const b = run(cfg, ['--next', '--repo', 'qr', '--author', 'session-b']);
+    const b = run(cfg, ['--next', '--repo', 'demo-app', '--author', 'session-b']);
     check('a SECOND session gets the next number, not the same one',
         b.stdout.trim() === 'D25', JSON.stringify(b.stdout));
-    const c = run(cfg, ['--next', '--repo', 'qr', '--author', 'session-c']);
+    const c = run(cfg, ['--next', '--repo', 'demo-app', '--author', 'session-c']);
     check('and a third continues the sequence', c.stdout.trim() === 'D26', JSON.stringify(c.stdout));
 }
 
 {
     // Scoped per repo, or every project would share one counter.
     const cfg = freshCfg();
-    run(cfg, ['--next', '--repo', 'qr', '--author', 'a', '--floor', '40']);
+    run(cfg, ['--next', '--repo', 'demo-app', '--author', 'a', '--floor', '40']);
     const other = run(cfg, ['--next', '--repo', 'other', '--author', 'a']);
     check('a different repo has its own namespace', other.stdout.trim() === 'D1', other.stdout);
 }
@@ -204,27 +204,27 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     // The floor exists so the first reservation in a repo that already has 23
     // entries on disk does not restart at 1 and collide with all of them.
     const cfg = freshCfg();
-    const r = run(cfg, ['--next', '--repo', 'qr', '--author', 'a', '--floor', '99']);
+    const r = run(cfg, ['--next', '--repo', 'demo-app', '--author', 'a', '--floor', '99']);
     check('--floor lifts the first reservation above what is already on disk',
         r.stdout.trim() === 'D100', r.stdout);
     // ...and does NOT lower a sequence that has already passed it.
-    const r2 = run(cfg, ['--next', '--repo', 'qr', '--author', 'b', '--floor', '2']);
+    const r2 = run(cfg, ['--next', '--repo', 'demo-app', '--author', 'b', '--floor', '2']);
     check('a lower --floor cannot rewind the sequence', r2.stdout.trim() === 'D101', r2.stdout);
 }
 
 {
     const cfg = freshCfg();
-    const r = run(cfg, ['--next', '--repo', 'qr', '--author', 'a', '--prefix', 'ADR']);
+    const r = run(cfg, ['--next', '--repo', 'demo-app', '--author', 'a', '--prefix', 'ADR']);
     check('--prefix is honoured', r.stdout.trim() === 'ADR1', r.stdout);
     // Prefixes are separate namespaces: D and ADR must not share a counter.
-    const d = run(cfg, ['--next', '--repo', 'qr', '--author', 'a']);
+    const d = run(cfg, ['--next', '--repo', 'demo-app', '--author', 'a']);
     check('and a different prefix has its own counter', d.stdout.trim() === 'D1', d.stdout);
 }
 
 {
     const cfg = freshCfg();
     check('--next without --author is refused',
-        run(cfg, ['--next', '--repo', 'qr']).status === 2);
+        run(cfg, ['--next', '--repo', 'demo-app']).status === 2);
     check('--next without --repo is refused',
         run(cfg, ['--next', '--author', 'a']).status === 2);
 }
@@ -234,8 +234,8 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     // were stored separately it could be lost independently of the decisions,
     // which is the failure mode the sibling-record incident already demonstrated.
     const cfg = freshCfg();
-    run(cfg, ['--next', '--repo', 'qr', '--author', 'a', '--floor', '5']);
-    const l = run(cfg, ['--list', '--repo', 'qr']);
+    run(cfg, ['--next', '--repo', 'demo-app', '--author', 'a', '--floor', '5']);
+    const l = run(cfg, ['--list', '--repo', 'demo-app']);
     check('a reservation appears in --list', /reserved D6/.test(l.stdout || ''), l.stdout);
 }
 

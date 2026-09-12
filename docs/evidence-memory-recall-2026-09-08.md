@@ -92,14 +92,14 @@ looking for a conversation that had been captured the day before:
 
 ```
 node .../memory-db.js search "<first name>" "$HOME/Code/<P2>"
-node .../memory-db.js search "partner conversation" "$HOME/Code/<P2>"
+node .../memory-db.js search "<topic words>" "$HOME/Code/<P2>"
 ```
 
 Both returned `[]`. The CLI takes `search <project> <query>`; this call put the
 query in the project slot, so it searched a project called by a first name for
 a query that was a path. The skill's own example has the order right. Re-run
 the right way round against today's store, read-only: 3 rows match
-`partner`, all captured AFTER that query was made (18:45 the same day, and
+the topic word, all captured AFTER that query was made (18:45 the same day, and
 2026-09-07), and 0 match the name. So the empty answer was correct that
 afternoon, by accident, and the session read it as "nothing there" rather than
 "the search was wrong". That is the only recall in 21 days, and it is a
@@ -149,7 +149,7 @@ from the code or git in under a minute; **(ii)** derivable; **(iii)** noise.
 | 5 | decision | P2 | 2026-08-29 | `obs_mteb8nb7_a40e6517` | Decided on route.ts | ii | a Write to a route file, labelled a decision |
 | 6 | decision | P2 | 2026-08-29 | `obs_mteafxeq_91629c5e` | Decided on DECISIONS.md | ii | a Write to DECISIONS.md, labelled a decision |
 | 7 | bugfix | autodev | 2026-08-18 | `obs_msz4tacb_af3b0897` | Created fix_targets.py | iii | scratchpad file, labelled bugfix because the prompt said fix |
-| 8 | bugfix | P3 | 2026-08-28 | `obs_mtd7jf6u_18424ac2` | Fixed contrast-tinted-fill.spec.ts | ii | the commit carries this |
+| 8 | bugfix | P3 | 2026-08-28 | `obs_mtd7jf6u_18424ac2` | Fixed a Playwright spec (name withheld) | ii | the commit carries this |
 | 9 | bugfix | P3 | 2026-08-29 | `obs_mtedh2lq_05c5356e` | Fixed migration-ledger-drift.ts | ii | the commit carries this |
 | 10 | bugfix | P3 | 2026-08-29 | `obs_mtedmh3a_979fe37b` | Created no-ci-runs-the-unit-tests.md | ii | memory .md written; the file is the knowledge |
 | 11 | bugfix | autodev | 2026-08-18 | `obs_msz3sz9l_7464b743` | Created add_ledger.py | iii | scratchpad file |
@@ -163,7 +163,7 @@ from the code or git in under a minute; **(ii)** derivable; **(iii)** noise.
 | 19 | feature | P1 | 2026-08-19 | `obs_mszq5jez_c56722c5` | Created desk-b.mjs | iii | probe file under .claude/probe |
 | 20 | feature | autodev | 2026-08-18 | `obs_msz1clxt_5098e739` | Created EV-DESIGN-1-quotes.html | iii | scratchpad file |
 | 21 | feature | P2 | 2026-08-29 | `obs_mteag2am_da4d9a57` | Added plan-card.tsx | ii | the commit carries this |
-| 22 | feature | P2 | 2026-08-29 | `obs_mtef3ngi_1dde9acc` | Added qr-ci-does-not-run-the-gate.md | ii | memory .md written |
+| 22 | feature | P2 | 2026-08-29 | `obs_mtef3ngi_1dde9acc` | Added a memory .md (name withheld) | ii | memory .md written |
 | 23 | feature | autodev | 2026-08-18 | `obs_msz2u7un_111df38a` | Created HARNESS-AUDIT.md | ii | a P1 file recorded under autodev; git shows it |
 | 24 | feature | autodev | 2026-08-18 | `obs_msz1apiu_3e547ed5` | Created EV-SPEC-2-pillar.md | iii | scratchpad file |
 | 25 | feature | autodev | 2026-08-29 | `obs_mte8j2a5_ebad7aaf` | Created SESSION-PROMPTS.md | ii | a file outside any repo, no content recorded |
@@ -172,7 +172,7 @@ from the code or git in under a minute; **(ii)** derivable; **(iii)** noise.
 | 28 | change | P2 | 2026-08-29 | `obs_mted9rn6_48088a20` | Modified MEMORY.md | ii | an index edit |
 | 29 | change | autodev | 2026-08-28 | `obs_mtd26krr_97b1a72a` | Modified brain-panels.js | ii | the commit carries this |
 | 30 | change | autodev | 2026-08-18 | `obs_msyk8e17_27de1c82` | Git: S=/private/tmp/claude-501/... | iii | a truncated shell command echo |
-| 31 | change | P1 | 2026-08-18 | `obs_msyzfrkm_94198f0a` | Build/Deploy: npm run deploy -- "progression-shape-ladder" | iii | a deploy command echo, no outcome |
+| 31 | change | P1 | 2026-08-18 | `obs_msyzfrkm_94198f0a` | Build/Deploy: npm run deploy -- "<name withheld>" | iii | a deploy command echo, no outcome |
 | 32 | change | P1 | 2026-08-29 | `obs_mteed96k_38574207` | Git: git push origin sweep/anchor-batch-1:... | ii | a push; the remote shows it |
 | 33 | discovery | P2 | 2026-08-28 | `obs_mtd96py3_c81c7da9` | Ran: sed -n '155,170p' src/app/dashboard/page.tsx | iii | a sed echo |
 | 34 | discovery | autodev | 2026-08-29 | `obs_mtea0bcj_fa3a4510` | Ran: grep -rn '\[\${' plugins/autodev-core/scripts/*.js | iii | a grep echo |

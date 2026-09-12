@@ -129,7 +129,7 @@ screenshot cannot, and what it costs. `docs/evidence-flow-verification-2026-09-0
 carries the numbers; the decisions are these.
 
 **The ceiling was measured before anything was built, and it is small.** Of
-the 30 most recent rework fixes in the live consumer app, 4 were catchable by
+the 30 most recent rework fixes in one product repo, 4 were catchable by
 the primary flow with a state assertion, 3 more only with specific data, 23 not
 at all (copy, contrast, cron, admin routes, server-side counts). Built anyway,
 because the replay decides whether the 4 are real: three of those fixes were
@@ -214,7 +214,7 @@ on a fixture tree, in about a second.
 ## 2026-09-08: production signals become candidate stories, never direct writes on a live repo
 
 The stage between "production knows" and "the backlog knows" did not exist:
-`[measured 2026-09-08]` 22 of the 121 stories the live product filed in 90 days
+`[measured 2026-09-08]` 22 of the 121 stories one product repo filed in 90 days
 cite a production observation, 0 from Sentry, 0 from a monitor alert, every one
 typed by a person reading a table. `production-signals.js` plus the
 `production-radar` skill are the collector and the reader for that stage. Full
@@ -224,7 +224,7 @@ evidence in `docs/evidence-production-signals-2026-09-08.md`.
 `.claude/reports/production-candidates-<date>.md` in prd.json story shape with
 `passes: null` and the evidence query attached. `--apply` writes into prd.json
 only when the origin `owner/repo` sha256 is on a one-entry allowlist inside the
-script (the repo with no users); everything else is refused with the reason and
+script (a single product repo); everything else is refused with the reason and
 the proposal file is still written. Digests, not names, for the same reason the
 private-name denylist is stored that way.
 
@@ -238,7 +238,7 @@ tenfold count (an escalation).
 two bursts (60 rows in 9 minutes, 5 in 45) proposed as chronic defects. Two knobs
 now exist for those: a per-key `intervals` map for heartbeats and `min_span_hours`
 for error groups. The second run produced 7, of which 4 are real and 2 are
-regressions of stories the live backlog had closed.
+regressions of stories the product's backlog had closed.
 
 **No hook.** It reads live systems; it runs on demand. The suite asserts
 `hooks.json` never names it.
@@ -270,16 +270,16 @@ the rollback command is in the ledger before promotion; migrations touching
 grants, RLS or `SECURITY DEFINER`, billing, webhooks, entitlement, auth and live
 rows escalate regardless.
 
-**Why B**, measured in `docs/evidence-deploy-authorisation-2026-09-08.md`
-against the last 20 production deployments and every incident in 60 days across
-the three product repos: on the live product a merge to main is the deploy, and
-20 of 20 sampled builds were git-integration builds off a PR merge with 0 human
+**Why B**, measured against the last 20 production deployments and every
+incident in 60 days across three product repos (the evidence document was
+withdrawn from this public repo for privacy): in the most-deployed of them a
+merge to main is the deploy, and 20 of 20 sampled builds were git-integration builds off a PR merge with 0 human
 commands and 0 CLI; five deploy-caused incidents, four via a hand-run CLI path
 with no record of tree, branch, lock or gate, one an under-deploy. A (escalate
 always) would have made 13 of 13 sampled deploys wait a mean 7.4 h and reversed
 his 2026-07-15 batching rule and his 2026-09-05 merge grant; C (canary plus
-autonomous rollback) adds ~800 lines and the mechanism that caused the
-2026-08-19 outage. B is what already happens plus the record the four incidents
+autonomous rollback) adds ~800 lines and the mechanism that caused an
+earlier production outage. B is what already happens plus the record the four incidents
 lacked, ~300 lines for a ledger row and its check, neither built yet.
 
 **Provenance, because it took three tries.** The session's own panel was held

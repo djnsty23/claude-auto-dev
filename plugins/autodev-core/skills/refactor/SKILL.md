@@ -32,13 +32,13 @@ and compare the proposed boundary with leaving the code intact.
 ## Pattern: Split Large File
 
 ```
-Before: piapi.ts (1240 lines)
+Before: invoiceApi.ts (1240 lines)
 After:
-  piapi/
+  invoiceApi/
   ├── index.ts          (barrel export)
   ├── client.ts         (base client, auth)
-  ├── music.ts          (music generation)
-  ├── image.ts          (image generation)
+  ├── invoices.ts       (invoice creation)
+  ├── payments.ts       (payment capture)
   └── types.ts          (shared types)
 ```
 
@@ -51,39 +51,39 @@ After:
 
 ```typescript
 // index.ts - barrel export (no breaking changes)
-export { PiAPIClient } from './client'
-export { generateMusic, extendSong } from './music'
-export { generateImage } from './image'
-export type { MusicParams, ImageParams } from './types'
+export { InvoiceClient } from './client'
+export { createInvoice, voidInvoice } from './invoices'
+export { capturePayment } from './payments'
+export type { InvoiceParams, PaymentParams } from './types'
 ```
 
 ## Pattern: Extract Component
 
 ```tsx
 // Before: page.tsx (500 lines)
-export default function LibraryPage() {
+export default function InvoicesPage() {
   // 50 lines of filter logic
   // 30 lines of bulk actions
-  // 200 lines of song list
+  // 200 lines of invoice list
   // 100 lines of pagination
 }
 
 // After:
-// components/library/filter-bar.tsx
-// components/library/bulk-actions.tsx
-// components/library/song-list.tsx
-// components/library/pagination.tsx
+// components/invoices/filter-bar.tsx
+// components/invoices/bulk-actions.tsx
+// components/invoices/invoice-list.tsx
+// components/invoices/pagination.tsx
 
-export default function LibraryPage() {
+export default function InvoicesPage() {
   const [filters, setFilters] = useState(defaultFilters)
-  const songs = useSongs(filters)
+  const invoices = useInvoices(filters)
 
   return (
     <div>
       <FilterBar filters={filters} onChange={setFilters} />
       <BulkActions selected={selected} />
-      <SongList songs={songs} />
-      <Pagination total={songs.total} />
+      <InvoiceList invoices={invoices} />
+      <Pagination total={invoices.total} />
     </div>
   )
 }
@@ -99,28 +99,28 @@ export default function LibraryPage() {
 
 ```tsx
 // Before: logic mixed in component
-function SongPlayer() {
-  const [playing, setPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const audioRef = useRef<HTMLAudioElement>(null)
+function InvoiceTable() {
+  const [width, setWidth] = useState(0)
+  const [compact, setCompact] = useState(false)
+  const tableRef = useRef<HTMLTableElement>(null)
 
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio) return
-    const update = () => setProgress(audio.currentTime / audio.duration)
-    audio.addEventListener('timeupdate', update)
-    return () => audio.removeEventListener('timeupdate', update)
+    const table = tableRef.current
+    if (!table) return
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    observer.observe(table)
+    return () => observer.disconnect()
   }, [])
 
-  // ... 40 more lines of audio logic
+  // ... 40 more lines of column-collapse logic
 
-  return <div>...</div>
+  return <table ref={tableRef}>...</table>
 }
 
 // After: clean separation
-function SongPlayer() {
-  const { playing, progress, toggle, seek } = useAudioPlayer(songUrl)
-  return <div>...</div>
+function InvoiceTable() {
+  const { ref, compact, visibleColumns } = useResponsiveColumns(invoiceColumns)
+  return <table ref={ref}>...</table>
 }
 ```
 
@@ -154,9 +154,9 @@ function UserAvatar() {
 
 ```typescript
 // Before: 3 similar API calls
-async function fetchSongs() { /* 20 lines */ }
-async function fetchArtists() { /* 20 lines, same pattern */ }
-async function fetchAlbums() { /* 20 lines, same pattern */ }
+async function fetchInvoices() { /* 20 lines */ }
+async function fetchCustomers() { /* 20 lines, same pattern */ }
+async function fetchPayments() { /* 20 lines, same pattern */ }
 
 // After: generic fetcher
 async function fetchFromSupabase<T>(

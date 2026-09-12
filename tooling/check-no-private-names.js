@@ -100,14 +100,29 @@ const digest = (s) =>
 // is active. Re-sort after adding one.
 const DIGESTS = [
     '12fb5ca517035265',
+    '2b55d05001c74ced',
+    '3a20746021433d99',
     '3a437ea789246759',
+    '3dbfcadb7cf84bcd',
+    '44f170e1e9507eb7',
+    '5b4aabc12021b26b',
     '7c4cb7e522b20b38',
+    '7d0a0afc044b16e2',
+    '8223ce59884e3e28',
+    '8fcf7f71099cbeac',
     '935adb84abd3322e',
     '97a5e8ca41e11721',
+    '9b8cce346180ae1b',
+    '9c3589b1f53f727d',
     'a09c341cc3da5c56',
     'a877b9437d9736a4',
+    'a8d7b105d9dabd8c',
     'b10fb05467abe0a2',
+    'b8e1e557d1080093',
+    'bf0d749940547484',
     'c8b7aa8568bc0bfe',
+    'de5277960474b511',
+    'fa083857b02330d4',
 ];
 const DIGEST_SET = new Set(DIGESTS);
 
@@ -125,9 +140,15 @@ const ALLOW = new Set([]);
 // way the name is actually written. `Some Product`, `some-product` and
 // `SomeProduct` are one candidate here. Measured on this tree: the n-gram pass
 // found one genuine leak the word-boundary regex could not see.
+//
+// A camelCase boundary is split BEFORE lowercasing. Without it a name glued to
+// ordinary words (`SomeProductTypesDrift`) was one long token that no digest
+// could equal, so a denylisted name sat in a shipped script past a green gate
+// (2026-09-13). The n-gram join above still rebuilds `SomeProduct` from the
+// split halves, so splitting loses no candidate.
 const N = 3;
 function candidates(line) {
-    const toks = line.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const toks = line.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
     const out = [];
     for (let i = 0; i < toks.length; i++) {
         let joined = '';

@@ -29,6 +29,22 @@ const PROBE = path.join(ROOT, 'zz-private-names-probe.md');
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
 
+// ------------------------------------------------ camelCase compounds
+//
+// A denylisted name glued to ordinary words in camelCase was one token that no
+// digest could equal, so it passed the gate from a shipped script. The tokeniser
+// is asserted directly, with an invented word, so no real name enters this file.
+{
+    const { candidates } = require(CHECKER);
+    const c = candidates('--task XyzzyplughTypesDrift=1440');
+    check('a camelCase compound yields its leading word as a candidate',
+        c.includes('xyzzyplugh'), JSON.stringify(c));
+    check('  and still yields the whole glued form',
+        c.includes('xyzzyplughtypesdrift'), JSON.stringify(c));
+    check('  and an all-lowercase word is not split',
+        candidates('xyzzyplughtypesdrift').join() === 'xyzzyplughtypesdrift');
+}
+
 /**
  * Run the real gate over the real tree with one extra untracked file.
  * Untracked-but-not-ignored is deliberate: it is the window a new file passes

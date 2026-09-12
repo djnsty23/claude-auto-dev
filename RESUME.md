@@ -94,8 +94,8 @@ Written 2026-09-08 at the 300k context line. Session affectionate-antonelli-3baf
 - CI on 433f40e: `gh api repos/djnsty23/claude-auto-dev/commits/433f40e/check-runs` grouped by name — macos, ubuntu, windows
   each have a completed success.
 - Replay 3 of 3 (parent of fix red, fix green) and the 30-commit ceiling (4 yes / 3 with data / 23 no) are in the evidence doc.
-- The live product repo (Project C) was read-only throughout; replay worktrees removed; the QR repo's throwaway branch deleted;
-  Project A untouched.
+- The product repo used for the replays was read-only throughout and its replay worktrees were removed; the throwaway branch in a
+  second product repo was deleted; a third product repo was untouched.
 
 ## Not done, and why
 

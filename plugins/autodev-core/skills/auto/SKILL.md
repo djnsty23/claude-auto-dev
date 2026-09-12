@@ -14,7 +14,7 @@ user-invocable: true
 > reach for chrome-devtools `emulate` when a mobile *device* gate has to fire,
 > which `resize_window` alone does not guarantee. The `browser` skill and the
 > `agent-browser` steps were dropped in 8.79.0 — do not reach for that CLI here.
-> (The binary itself is still installed for kb-factory's JS-rendered crawls;
+> (The binary itself is still installed for a documentation crawler in another repo;
 > that is a separate consumer, not a fallback for page verification.)
 
 Fully autonomous development. Works through all tasks without stopping until complete.

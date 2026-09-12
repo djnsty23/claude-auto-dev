@@ -89,10 +89,10 @@ Measured across five repos, `node_modules` excluded:
 
 | repo | `.mcp.json` | `*.ps1` | `.claude` launch.json | `.github/workflows` |
 |---|---|---|---|---|
-| Project A (PWA, no TS) | 0 | 0 | 11 | 9 |
-| Project B (React/TS) | 0 | 0 | 0 | 3 |
-| Project C (React/TS) | 0 | 0 | 0 | 5 |
-| Project D (React/TS) | 0 | 28 | 4 | 7 |
+| Project A | 0 | 0 | 11 | 9 |
+| Project B | 0 | 0 | 0 | 3 |
+| Project C | 0 | 0 | 0 | 5 |
+| Project D | 0 | 28 | 4 | 7 |
 | autodev (this repo) | 0 | 2 | 1 | 1 |
 
 `find -name '*mcp.json'` also returns 0 everywhere, so this is not a hidden-file artifact.

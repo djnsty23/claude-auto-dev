@@ -345,7 +345,7 @@ HOW TO WORK:
 
 6. COMMIT in your worktree, conventional format, body explaining WHY the fix is
    correct rather than what changed. DO NOT PUSH and do not open a PR — pushing needs
-   Andy's explicit yes in the turn, and these repos deploy on push.
+   the operator's explicit yes in the turn, and these repos deploy on push.
 
 7. If a fix turns out NOT to be safe once you are inside the code, STOP and put it in
    skipped with the reason. Reporting "this is riskier than it looked" is a better

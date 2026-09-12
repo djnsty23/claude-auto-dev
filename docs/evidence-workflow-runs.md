@@ -144,14 +144,14 @@ contexts — enough to rebuild two full 405k main contexts from returns alone.
 
 | chars | run | payload opens with |
 |---|---|---|
-| 65,399 | `wf_0a2cd20e` | `{"handling_verdict":"THE CAR SATURATES ITS TYRES…` |
-| 48,813 | `wf_948c6e69` | `{"paths":[{"id":"coupon-redeem",…` |
-| 47,949 | `wf_948c6e69` | `{"paths":[{"id":"sub-checkout",…` |
-| 45,246 | `wf_948c6e69` | `{"paths":[{"id":"reconcile-coin-purchases",…` |
+| 65,399 | `wf_0a2cd20e` | `{…` (product content, withheld) |
+| 48,813 | `wf_948c6e69` | `{"paths":[{"id":…` (product path id withheld) |
+| 47,949 | `wf_948c6e69` | `{"paths":[{"id":…` (product path id withheld) |
+| 45,246 | `wf_948c6e69` | `{"paths":[{"id":…` (product path id withheld) |
 | 44,700 | `wf_1b4aecc9` | `{"population":"14 files read…` |
 | 44,567 | `wf_ab1e10ad` | `{"task":"Three mechanical CLOSEs…` |
 | 43,639 | `wf_1b4aecc9` | `{"population":"13 files read in full…` |
-| 40,131 | `wf_948c6e69` | `{"paths":[{"id":"pro-gen-coin-spend",…` |
+| 40,131 | `wf_948c6e69` | `{"paths":[{"id":…` (product path id withheld) |
 | 38,563 | `wf_d295d703` | `{"surface":"db-fn-body","reviewed":7,…` |
 | 37,697 | `wf_1b4aecc9` | `{"population":"19 files read or scanned…` |
 

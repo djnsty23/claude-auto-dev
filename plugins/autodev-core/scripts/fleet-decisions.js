@@ -27,10 +27,10 @@
  * The load-bearing verb is `--check`, not `--record`. A log everyone writes and
  * nobody reads reproduces the failure with better bookkeeping.
  *
- *   node fleet-decisions.js --check --repo qr --subject ai-pricing
- *   node fleet-decisions.js --record --repo qr --subject ai-pricing \
+ *   node fleet-decisions.js --check --repo demo-app --subject ai-pricing
+ *   node fleet-decisions.js --record --repo demo-app --subject ai-pricing \
  *        --decision "AI stays Pro-gated" --author "session-x" [--force]
- *   node fleet-decisions.js --list [--repo qr] [--subject ai-pricing] [--days 7]
+ *   node fleet-decisions.js --list [--repo demo-app] [--subject ai-pricing] [--days 7]
  */
 const fs = require('fs');
 const path = require('path');

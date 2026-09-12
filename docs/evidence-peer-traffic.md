@@ -61,7 +61,7 @@ What the transport does to a dispatch:
      stores as a `custom-title` record. 36 distinct titles seen; the most frequent
      three account for 174 of 348 deliveries. Zero messages had an empty `name`.
 3. **HTML-entity-encodes the body** — this is what `encoded="1"` announces. A real
-   delivered message shows `New Project &gt; Games &gt; Third Person`. Any `<`, `>`,
+   delivered message shows a menu path as `A &gt; B &gt; C`. Any `<`, `>`,
    `&` or quote in a dispatch arrives escaped.
 4. **Appends** a 105-word trust/permission footer, identical on all 278 shape-A
    deliveries (0 variants).
@@ -113,7 +113,7 @@ Control: message #8 carried a distinctive correction naming an absolute path out
 the recipient's scan root. It never produced a `user` record. Sixty seconds after the
 bulk `remove`, the recipient wrote:
 
-> `2026-08-24T22:41:58` — "48 passed. Now the survey's blind spot — the game session's
+> `2026-08-24T22:41:58` — "48 passed. Now the survey's blind spot — the [other] session's
 > work is on `<that exact path>`, which my survey **structurally cannot see** because
 > it scans one root. Second confirmation of the same class."
 

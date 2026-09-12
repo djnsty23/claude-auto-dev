@@ -129,7 +129,7 @@ function template(cwd = process.cwd()) {
         ],
         assertion: {
             subject: 'dom',
-            claim: 'exactly one QR image is rendered with a data: URL source',
+            claim: 'exactly one generated image is rendered with a data: URL source',
             expected: 1,
         },
         observed: null,

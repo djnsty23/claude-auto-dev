@@ -1,7 +1,7 @@
 # Decisions — 2026-09-08, AGENTS.md generator (PR #198)
 
 Reversible calls made without asking, per the away window (operator absent
-until 2026-09-08T16:33:45Z, scope qr and autodev). Session worktree
+until 2026-09-08T16:33:45Z, scope autodev and one product repo). Session worktree
 `gallant-kepler-6be55e`, branch `claude/gallant-kepler-6be55e`, base
 `origin/main` 99bb597.
 

@@ -18,9 +18,8 @@ dead/unreferenced pass, and three new measurements on the elision mechanism. It
 also **contradicts one prescription in the plan** — see D2 — and flags one
 premise of this sweep as unverified — see E3.
 
-Consumer repos are anonymised as Project A (vanilla JS + SQL, no TypeScript),
-Project B and Project C (both React + TypeScript + SQL), Project D. This file
-ships in a public repo.
+Consumer repos are anonymised as Project A, Project B, Project C and Project D.
+This file ships in a public repo.
 
 ---
 

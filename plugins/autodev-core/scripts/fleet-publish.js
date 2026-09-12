@@ -10,8 +10,8 @@
  * channel available is a git remote — and the obvious payload cannot go through
  * one, for two independent reasons:
  *
- *   1. claude-auto-dev is a PUBLIC repo. Session titles ("Retry Spotify 429 in
- *      convert-spotify-to-youtube"), branch names, project paths and panel
+ *   1. claude-auto-dev is a PUBLIC repo. Session titles ("Retry vendor 429 in
+ *      the import job"), branch names, project paths and panel
  *      question text are all working context, and rule 25 says assume every
  *      private repo becomes public anyway.
  *   2. The fleet includes CLIENT work. Client material never goes to personal

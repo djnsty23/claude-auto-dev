@@ -75,8 +75,7 @@ the tool declined these in silence while reporting "6 of 8 boot docs present",
 which reads as 75% coverage of a corpus it never measured.
 
 Eleven across the fleet, spread **0 / 0 / 3 / 5 / 3**. Not marginal: in one
-product a `PLAN-*.md` is named *inside* the RESUME.md the tool does read, as
-"the partner's brief".
+product a `PLAN-*.md` is named *inside* the RESUME.md the tool does read.
 
 **Named, not scanned.** Widening the scan is a separate decision with its own
 precision census; this tool is small because it reads about eight documents,
@@ -202,7 +201,7 @@ unchanged (`olderThanAgeDays`, `openStateAndDated`, `present`).
 ## Appendix — decisions taken while the operator was away
 
 The options panel at the end of this work was held: the operator had declared
-AWAY, scoping the window to **qr and autodev only**. Both questions resolved
+AWAY, scoping the window to **autodev and one product repo only**. Both questions resolved
 under **branch 2 — reversible and not covered by a standing order** — so the
 recommended option was taken and is logged here.
 

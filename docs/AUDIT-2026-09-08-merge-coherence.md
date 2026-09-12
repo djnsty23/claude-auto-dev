@@ -261,7 +261,7 @@ when it changed.
 
 > **Recommended:** `rule-local-first` gains a scoping sentence — the
 > ask-in-that-turn rule stands for client and product repos, and defers to
-> `MERGE-POLICY.md` for this repo and the other no-user internal repos it names.
+> `MERGE-POLICY.md` for this repo and the other internal repos it names.
 
 ### C2 — is a CI result evidence? The sharpest of the three
 
@@ -304,7 +304,7 @@ caught #191.
 
 `docs/DECISIONS-2026-09-08-quota-wall.md:11`, landed in #200 the same day:
 
-> "the Brain holds merge authority on qr and autodev; **sessions still do not merge
+> "the Brain holds merge authority on [one product repo] and autodev; **sessions still do not merge
 > their own PRs**."
 
 Against `MERGE-POLICY.md`: *a session may merge its own PR.*

@@ -4,14 +4,9 @@ Measured 2026-08-16 across three production repos built with this framework.
 Every rule in `rule-ramifications` traces to a number here.
 
 > **The repos are anonymised; the numbers are not.** They are private codebases,
-> one of them a client deliverable, and a per-repo defect rate is that team's to
-> publish or not — it is not this tool's to advertise. What is kept is the shape
-> of each product, because it is load-bearing for reading the table: a consumer
-> health app, a B2B audit platform and a consumer media app fail differently.
->
-> - **Project A** — consumer health/fitness PWA, single-tenant plus invited users
-> - **Project B** — B2B audit platform, multi-tenant, heavy vendor integration
-> - **Project C** — consumer media app, third-party API at its core
+> and a per-repo defect rate is that team's to publish or not. It is not this
+> tool's to advertise. They are labelled Project A, Project B and Project C, with
+> no further description.
 >
 > Run `/learn-from-fixes` in your own repo to get this table for your code. That
 > is the point of the document — not these three.
@@ -22,8 +17,8 @@ A `fix` commit that touches a file a `feat` or `refactor` commit changed in the
 previous three days is not maintenance — it is the feature having shipped
 broken. Commit subjects and bodies were then clustered by stated root cause.
 
-App-data commits (habit check-offs, meal logs) were excluded from Project A;
-they are not engineering work.
+Commits that record app data rather than change code were excluded from
+Project A; they are not engineering work.
 
 ### Two passes, and they do not agree
 
@@ -39,8 +34,8 @@ does not reproduce, and the gap is not small.
 They disagree on the **top class**, not just the magnitude: the read pass ranks
 ordering first for Project A, the tool ranks unhandled-state first.
 
-Both are doing something real. A commit body says *"the phone home raced boot and
-lost"*; its subject says `fix(now): first-paint`. The regex sees the subject. So
+Both are doing something real. A commit body names a race between two startup
+steps; its subject names only the symptom. The regex sees the subject. So
 treat them as different instruments:
 
 - **Mechanical and trustworthy** — the fix:feature ratio, the 3-day rework
@@ -96,29 +91,29 @@ a handler nested where it never runs, four surfaces disagreeing about one
 number, a cache key missing the account dimension, or a locale still holding a
 translation of the previous sentence.
 
-## Representative commits
+## Representative fixes
 
-**Duplicated derivation**
-`fix(fuel): single-source day fuel totals so Fuel/Plate/Label/Glance never disagree`
+The commit subjects are withheld because they name private product features.
+What each class looked like:
 
-**Cache/key scoping — a real data leak**
-`fix(auth-cache): payload cache key must include the account — a warm lambda served one admin's prefs to another`
+**Duplicated derivation**: several surfaces each computed the same daily total,
+and they disagreed.
 
-**Reachability**
-`[action-reach] action "x" is checked ONLY at brace-depth 3, never at the dispatch depth of 1 — it is nested inside another handler, so the outer action check is false for every one of its requests and it can NEVER run.`
+**Cache/key scoping**: a cache key did not include the account.
 
-**Units and references**
-`fix: protein % showed 200%+ on The Label (EU 50g ref vs 180g target)`
+**Reachability**: a handler nested inside another handler, so its check was
+false for every request and it could never run.
 
-**Lifecycle**
-`fix(replica): one render loop, ever — stacked rAF loops multiplied the spin`
+**Units and references**: a percentage computed against the wrong reference
+value, so it showed over 200%.
 
-**Copy drift, and why a filler tool does not fix it**
-`because i18n-fill only fills MISSING keys` — an in-place English edit leaves
-every locale holding a translation of the old sentence, with nothing failing.
+**Lifecycle**: a second render loop started without the first being stopped.
 
-**Config targeting**
-`fix(usage): producthealth read the WRONG Supabase project`
+**Copy drift, and why a filler tool does not fix it**: the locale filler only
+fills missing keys, so an in-place English edit leaves every locale holding a
+translation of the old sentence, with nothing failing.
+
+**Config targeting**: a usage report read the wrong database project.
 
 ## Two findings about gates themselves
 
@@ -127,11 +122,10 @@ every locale holding a translation of the old sentence, with nothing failing.
 (2.00 and 1.71). Project A's is 55 lines, at 0.94. Rules that are read but not
 enforced do not change the outcome.
 
-**2. A gate nobody runs is not a gate.** Project A's own preflight file records it:
-
-> "THE OTHER 60 GATES, which nothing ran. … A sweep found five red, two of which
-> had been failing since 2026-07-22 … The only thing in the repo that objected
-> was a harness nobody ran, and it objected for eight days."
+**2. A gate nobody runs is not a gate.** Project A's own preflight file records
+that most of its gates were run by nothing, that a sweep found several of them
+red, two failing for weeks, and that the only objection came from a harness
+nobody ran.
 
 The same defect existed in this framework: `tooling/test-all.js` passed a
 malformed argument list, so every suite launched a bare `node` with no script

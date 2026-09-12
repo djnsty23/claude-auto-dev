@@ -17,7 +17,7 @@
  * The cheap mechanical question nobody asked: **does the brief's premise still
  * hold on the branch being assigned?**
  *
- *   node check-assignment.js --repo ~/Code/qr \
+ *   node check-assignment.js --repo ~/Code/demo-app \
  *     --branch claude/some-branch \
  *     --files src/lib/plans.ts,src/components/plan-card.tsx \
  *     --expect priceUsd

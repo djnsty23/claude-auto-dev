@@ -48,7 +48,7 @@ skipped nothing.
 
 `[measured 2026-09-08]` `git log --all -i --grep=no-verify`: autodev 4 hits that are 2
 messages each seen twice (branch commit and squash merge), one the recorded D7 bypass and
-one prose; qr 0 hits against controls of 28 for "verify" and 171 for "fix". A population
+one prose; a product repo 0 hits against controls of 28 for "verify" and 171 for "fix". A population
 of one, already compliant, is not a gate's subject.
 
 ## D6. Live-fired in a throwaway repo, taken under branch 2 of the away rules

@@ -155,7 +155,7 @@ const DATE_RE = /\b(20\d\d)-(\d\d)-(\d\d)\b/;
  *
  * `[measured 2026-09-05]` the instance: one product's RESUME.md was flagged at
  * 54 days on the phrase `not done`, under a dated heading whose lead read
- * `**v626 - Train workout-flow (5 fixes, FLEET agent, LIVE+verified):**`. The
+ * `**v412 - Checkout flow (5 fixes, FLEET agent, LIVE+verified):**`. The
  * section is a shipped-work record; nothing in it is a live claim.
  *
  * Keyed on the SHIPPED MARKER rather than on the heading's date, deliberately.
@@ -168,8 +168,8 @@ const DATE_RE = /\b(20\d\d)-(\d\d)-(\d\d)\b/;
  * fleet, it suppressed a genuine finding:
  *
  *     ## WHERE THINGS STAND - 2026-07-31
- *     **Live `v1098 · sw674`** · iOS TestFlight **build 1015** · ...
- *     (release still blocked on Andy: Play Console + Firebase - see below).
+ *     **Live `v2043 · sw310`** · beta **build 208** · ...
+ *     (release still blocked on the owner: store console + signing key - see below).
  *
  * The only token matching was `Live`, from a DEPLOYMENT VERSION MARKER in a
  * status header. That header is the opposite of a shipped-work record: it is
@@ -325,10 +325,10 @@ const SELF_RESOLVED =
  *
  * `[measured 2026-09-07]` one product's `RESUME.md:32`, on the trunk, read:
  *
- *     Phases 6 and 7 are PR #47, open at f6d1e67, gate green
+ *     Phases 6 and 7 are PR #64, open at 3b7e0a9, gate green
  *
- * `gh pr view 47` -> MERGED three days earlier, and the head sha is not the
- * one named: f6d1e67 is a branch tip from four minutes before it. The tool
+ * `gh pr view 64` -> MERGED three days earlier, and the head sha is not the
+ * one named: 3b7e0a9 is a branch tip from four minutes before it. The tool
  * reported `nothing to re-check` over that document, and a coordinator ranked
  * the repo's documents clean on the strength of that run.
  *
@@ -352,7 +352,7 @@ const SELF_RESOLVED =
  * is pending**`, which is the shape that says the opposite. Restricted to
  * `open`/`unmerged`, with the negation veto below, it matches 3 lines:
  *
- *     product A  RESUME.md:32         PR #47   -> MERGED, 3 days earlier
+ *     product A  RESUME.md:32         PR #64   -> MERGED, 3 days earlier
  *     product B  RESUME.md:166        PR #610  -> MERGED, 9 days earlier
  *     product B  PUBLISH-QUEUE.md:367 PR #507  -> MERGED, 15 days earlier
  *
@@ -715,7 +715,7 @@ function checkDocStaleness(cwd, opts) {
 /**
  * ABSENCE MUST NOT PRINT AS HEALTH.
  *
- * `[measured 2026-09-07]` the run this rewrite exists for, on qr:
+ * `[measured 2026-09-07]` the run this rewrite exists for, on one product repo:
  *
  *     population: 6 of 8 boot docs present, 3307 lines considered, 3 suppressed
  *     nothing to re-check
@@ -727,7 +727,7 @@ function checkDocStaleness(cwd, opts) {
  *     lines, so 872 were skipped by the length filter. A reader cannot tell
  *     that from the output, and a clean corpus and a half-read one print the
  *     same sentence.
- *  2. The corpus itself is larger than the eight names. qr carries five KIN
+ *  2. The corpus itself is larger than the eight names. that repo carries five KIN
  *     documents the tool declined in silence, one of which - PLAN-SITE-V2.md -
  *     the scanned RESUME.md names as the partner's brief.
  *  3. `nothing to re-check` is a VERDICT with no basis attached. It is the
@@ -879,7 +879,7 @@ function selftest() {
     const inSection = 'AUTO_CRITIC recalibration (blocked on scores not persisting since 07-30);';
     const resolvedLine = 'The row above used to say MERGEABLE and blocked on reverting a depth effect;';
     const stillOpen = '> **Still open:** 953 dead census keys (prune PER NAMESPACE, never bulk).';
-    const ownerBlocked = '(release still blocked on Andy: Play Console + Firebase - see the note below).';
+    const ownerBlocked = '(release still blocked on the owner: store console + signing key - see the note below).';
 
     t('a deliberate NOT-fixed line is suppressed',
         OPEN_STATE.some((re) => re.test(decidedLine)) && DECIDED.test(decidedLine),
@@ -916,17 +916,17 @@ function selftest() {
 
     // ---- RULE 2: a PR handle a line calls OPEN ----------------------------
     //
-    // The verbatim line the tool returned `nothing to re-check` over. PR #47
-    // merged 2026-09-04T07:28:48Z; the sha named is not even the head.
-    const QR = 'on main (#44 to #46). Phases 6 and 7 are PR #47, open at f6d1e67, gate green';
+    // The shape of the line the tool returned `nothing to re-check` over. The PR
+    // had already merged; the sha named is not even the head.
+    const PR_OPEN_LINE = 'on main (#61 to #63). Phases 6 and 7 are PR #64, open at 3b7e0a9, gate green';
     const openOn = (l) => HANDLE_OPEN_HANDLE.test(l) && HANDLE_OPEN_ASSERT.test(l)
         && !HANDLE_OPEN_NEGATED.test(l) && !SELF_RESOLVED.test(l);
-    t('the qr false negative matches the handle-open rule', openOn(QR), QR);
+    t('the PR-open false negative matches the handle-open rule', openOn(PR_OPEN_LINE), PR_OPEN_LINE);
     t('  and it matches NONE of the lexical open-state patterns',
-        !OPEN_STATE.some((re) => re.test(QR)),
+        !OPEN_STATE.some((re) => re.test(PR_OPEN_LINE)),
         'the standing hypothesis was a suppressor ate it; the vocabulary never saw it');
     t('  and no suppressor was involved either',
-        !CONDITIONAL.test(QR) && !DECIDED.test(QR) && !RESOLVED.test(QR));
+        !CONDITIONAL.test(PR_OPEN_LINE) && !DECIDED.test(PR_OPEN_LINE) && !RESOLVED.test(PR_OPEN_LINE));
     t('"PR #610 is open and unmerged" matches',
         openOn('Nothing unpushed. **PR #610 is open and unmerged.** The cron in it does not run'));
     t('a pull URL row saying Still open matches',
