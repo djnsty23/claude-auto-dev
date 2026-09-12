@@ -45,16 +45,60 @@ const LIMIT = 3;
 const TOOL = 'mcp__ccd_session_mgmt__send_message';
 
 /**
- * Prior sends to `target` within the window, newest first.
+ * Prior DELIVERED sends to `target` within the window, newest first.
  * Returns null when the transcript cannot be read, which is NOT the same as
  * zero and must not be reported as a clean budget.
+ *
+ * `[measured 2026-09-09]` This counted `tool_use` blocks, and a call this hook
+ * REFUSED is still a `tool_use` block in the transcript. Two consequences, both
+ * seen the same night:
+ *
+ *   1. The budget became unrecoverable. Once blocked, the refusal itself
+ *      occupied a slot, so every retry raised the count it was measured
+ *      against. A coordinator that hit the limit could not send to that session
+ *      again for the rest of the window even after waiting -- the only exits
+ *      were OVERRIDE-BUDGET or the env switch. A budget you cannot get back
+ *      under is not a budget, it is a ban, and it trains the override.
+ *   2. It was off by one. The in-flight call is already in the transcript when
+ *      PreToolUse runs, so it counted ITSELF as a prior send and refused the
+ *      THIRD message while reporting it as "number 4". The header said "the
+ *      limit is 3" over a list of two.
+ *
+ * Both come from one substitution: an ATTEMPT is not a SEND. The docstring said
+ * "prior sends" the whole time; only the code disagreed.
+ *
+ * A refused call is identified by a `tool_result` carrying `is_error: true` and
+ * the `tool_use_id` -- that is the shape a PreToolUse denial leaves. Results
+ * always follow their call in the file, so one pass collects both and the
+ * filtering happens at the end.
+ *
+ * The in-flight call is excluded by id: `selfUseId` comes from the PreToolUse
+ * payload's `tool_use_id`, and a call is never its own precedent.
+ *
+ * WHY ABSENCE OF A RESULT DOES NOT EXEMPT A CALL, though it would have been the
+ * tidier rule. "Count it only if it returned without an error" excludes the
+ * in-flight call for free and needs no id. It was written that way first and
+ * then withdrawn: if results were ever absent from the transcript this hook
+ * reads -- lagging, written elsewhere, a shape change -- then NOTHING would
+ * count, the budget would never fire, and it would look exactly like a
+ * coordinator that stayed within it. That is the failure this repo keeps
+ * finding: a check that is green because it cannot fail. The existing fixtures
+ * in the suite are themselves result-free, which is how close it came.
+ *
+ * So the default is to COUNT, and only a positive refusal signal
+ * (`is_error: true` against the call's id) removes one. The residual defect is
+ * bounded and visible: if `tool_use_id` is ever missing from the payload, the
+ * in-flight call counts itself and the budget refuses the third message instead
+ * of the fourth -- which is exactly today's behaviour, so no regression, and it
+ * errs toward enforcing.
  */
-function priorSends(transcriptPath, target, nowMs) {
+function priorSends(transcriptPath, target, nowMs, selfUseId) {
     let raw;
     try { raw = fs.readFileSync(transcriptPath, 'utf8'); } catch { return null; }
 
     const cutoff = nowMs - WINDOW_MIN * 60 * 1000;
-    const hits = [];
+    const candidates = [];
+    const refused = new Set();
     let scanned = 0;
 
     for (const line of raw.split('\n')) {
@@ -65,16 +109,38 @@ function priorSends(transcriptPath, target, nowMs) {
         if (!Array.isArray(content)) continue;
 
         const t = Date.parse(row.timestamp || '');
-        if (!Number.isFinite(t) || t < cutoff) continue;
+        if (!Number.isFinite(t)) continue;
 
         for (const block of content) {
-            if (!block || block.type !== 'tool_use' || block.name !== TOOL) continue;
+            if (!block) continue;
+
+            // A refusal can be recorded outside the window while its call sits
+            // inside it, so results are collected without the cutoff test.
+            if (block.type === 'tool_result' && block.is_error === true && block.tool_use_id) {
+                refused.add(block.tool_use_id);
+                continue;
+            }
+
+            if (t < cutoff) continue;
+            if (block.type !== 'tool_use' || block.name !== TOOL) continue;
             scanned++;
             const to = block.input && block.input.session_id;
             if (to !== target) continue;
-            hits.push({ at: t, chars: String((block.input && block.input.message) || '').length });
+            candidates.push({
+                at: t,
+                id: block.id,
+                chars: String((block.input && block.input.message) || '').length,
+            });
         }
     }
+
+    // A call is not its own precedent, and a call this hook refused was never
+    // received by anyone. Everything else counts, including a call whose result
+    // is missing -- see the note above on why absence must not exempt.
+    const hits = candidates.filter(
+        (c) => (c.id === undefined || c.id !== selfUseId) && !refused.has(c.id),
+    );
+
     hits.sort((a, b) => b.at - a.at);
     return { hits, scanned };
 }
@@ -103,7 +169,7 @@ function main(rawPayload) {
     if (!transcript) return 0;
 
     const now = Date.now();
-    const result = priorSends(transcript, target, now);
+    const result = priorSends(transcript, target, now, payload.tool_use_id || payload.toolUseId);
     if (result === null) return 0;   // unreadable is not zero; fail open
 
     const { hits, scanned } = result;
