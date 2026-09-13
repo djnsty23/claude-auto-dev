@@ -134,6 +134,8 @@ if (argv.includes('--help') || argv.includes('-h')) {
         '--gate: exit 1 only ABOVE this platform\'s measured floor (npm run check:coverage);\n' +
         '        exit 2 on a platform with no measured floor.\n' +
         '--platform P: grade against P\'s floor instead of this host\'s (printed in the verdict).\n' +
+        '--refused FILE: report FILE\'s never-called functions apart and do not grade them (repeatable,\n' +
+        '        for fixtures; the host platform\'s REFUSED_BY_DESIGN table applies without it).\n' +
         '--max-untested / --max-never-loaded: explicit ceilings; a malformed value exits 2.\n' +
         '--root DIR: measure DIR (needs DIR/tooling/test-all.js and DIR/plugins/).\n' +
         'Exit 2 = no verdict: the suite went red, or an argument was malformed.');
@@ -177,6 +179,49 @@ const asJson = argv.includes('--json');
 const FLOORS = {
     darwin: { untested: 40, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa' },
     linux: { untested: 40, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa' },
+    // `[measured 2026-09-13]` on Windows 11 at 84e0a75: 1061 named functions, 93
+    // never called, of which 57 are REFUSED_BY_DESIGN below and 36 are graded
+    // (the linux buckets plus four POSIX-gated single functions), 1 never loaded.
+    win32: { untested: 36, neverLoaded: 1, measured: '2026-09-13 at 84e0a75' },
+};
+
+// CODE A PLATFORM REFUSES BY DESIGN, reported as its own population rather than
+// folded into that platform's floor. `[measured 2026-09-13]` the mission runtime
+// added 57 named functions across four files in three days (stories B05 to B08),
+// and every one is never entered on win32 because mission-store.js
+// sqliteRuntime() refuses with runtime-unavailable when process.getuid is
+// missing. A win32 floor that COUNTED them would go red on Windows for every
+// mission change, while linux, where the same suites run their POSIX+SQLite
+// cases, grades those functions properly. Re-measuring the win32 floor on each
+// of those PRs is the "regression wearing a config edit" the paragraph above
+// warns about, repeated until nobody reads the number.
+//
+// So when this repo is measured on the listed platform, and only while the
+// stated precondition holds on the host, never-called functions in these files
+// are printed as a separate count per file and not graded. Everything else stays
+// in the count, including the four platform-gated FUNCTIONS in other files
+// (prd-requirements validateSnapshot, agent-browser-cleanup's ps branch): those
+// are single functions that do not grow with a runtime under construction.
+//
+// Two guards keep this from becoming a place to hide code. A listed file that
+// does not exist, was never loaded, or has NO never-called function on this run
+// is a stale listing and NO VERDICT (exit 2): the refusal it names did not
+// happen here. And the entries are whole files in this table, each with its
+// reason, so widening the list is a reviewed edit here and never a flag in
+// package.json. `--refused FILE` exists for the fixture suite and is printed in
+// every verdict it affects.
+const REFUSED_BY_DESIGN = {
+    win32: {
+        precondition: 'process.getuid is not a function',
+        holds: () => typeof process.getuid !== 'function',
+        reason: 'mission-store.js refuses with runtime-unavailable without POSIX ownership checks; linux and darwin grade it',
+        files: [
+            'plugins/autodev-core/scripts/mission-deliver.js',
+            'plugins/autodev-core/scripts/mission-dispatch.js',
+            'plugins/autodev-core/scripts/mission-store.js',
+            'plugins/autodev-core/scripts/mission-supervisor.js',
+        ],
+    },
 };
 
 // A flag that takes a value. A missing or malformed value is exit 2 (no
@@ -255,6 +300,22 @@ const SOURCE_BY_BASENAME = (() => {
     for (const d of dupes) map.delete(d);
     return map;
 })();
+
+// The refused-by-design set for this run: the HOST platform's table entry, when
+// this repo is the tree measured (a --root fixture has none of its files), the
+// platform graded is the host's (a --platform override does not borrow another
+// platform's exclusions) and the precondition holds; plus any --refused FILE.
+const refusedFiles = new Map();   // posix-style plugin-relative path -> reason
+const hostRefused = REFUSED_BY_DESIGN[process.platform];
+const refusedPrecondition = hostRefused && rootArg === undefined && platform === process.platform && hostRefused.holds()
+    ? hostRefused.precondition : null;
+if (refusedPrecondition) for (const f of hostRefused.files) refusedFiles.set(f, hostRefused.reason);
+for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== '--refused') continue;
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith('--')) { console.error('--refused needs a plugin-relative file path'); process.exit(2); }
+    refusedFiles.set(v.split('\\').join('/'), 'named with --refused');
+}
 
 // --- 1. run the suite with coverage on -------------------------------------
 const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodev-cov-'));
@@ -361,6 +422,22 @@ const all = [...seen.values()];
 const dead = all.filter((f) => f.count === 0).sort((a, b) =>
     a.file.localeCompare(b.file) || a.name.localeCompare(b.name));
 
+// Split the never-called list into what this run grades and what the platform
+// refuses by design. `dead` keeps its meaning wherever it is reported (every
+// function never entered); only the gate comparison reads `graded`.
+const posix = (rel) => rel.split(path.sep).join('/');
+const refusedDead = dead.filter((d) => refusedFiles.has(posix(d.file)));
+const graded = dead.filter((d) => !refusedFiles.has(posix(d.file)));
+const refusedByFile = [...refusedFiles.keys()].sort().map((file) => ({
+    file,
+    reason: refusedFiles.get(file),
+    exists: [...ALL_SOURCES].some((s) => posix(s) === file),
+    loaded: [...filesWithCoverage].some((s) => posix(s) === file),
+    neverCalled: refusedDead.filter((d) => posix(d.file) === file).length,
+}));
+// A listing that describes a refusal which did not happen on this run.
+const staleRefused = refusedByFile.filter((r) => !r.exists || !r.loaded || r.neverCalled === 0);
+
 // --- 3. report --------------------------------------------------------------
 // process.exitCode, never process.exit(), after anything was written to stdout:
 // stdout to a PIPE is asynchronous on darwin and exit() drops the unflushed tail
@@ -370,7 +447,7 @@ const dead = all.filter((f) => f.count === 0).sort((a, b) =>
 // set once at the end.
 function report() {
 // The gate verdict, computed once for both renderers. Bare mode ignores it.
-const overUntested = maxUntested !== null && dead.length > maxUntested;
+const overUntested = maxUntested !== null && graded.length > maxUntested;
 const overNeverLoaded = maxNeverLoaded !== null && neverLoaded.length > maxNeverLoaded;
 // THE POPULATION FLOOR (rule-gate-integrity §2, found by the second review of
 // this gate, 2026-09-08): a census that read NO plugin files, or read files and
@@ -384,11 +461,19 @@ const emptyCensus = ALL_SOURCES.size === 0
     : (all.length === 0
         ? `read ${ALL_SOURCES.size} plugin file(s) but saw no named function in any loaded one, so nothing was measured`
         : null);
+const staleVerdict = staleRefused.length
+    ? 'stale refused-by-design listing: ' + staleRefused.map((r) => `${r.file} (${!r.exists ? 'no such file' : !r.loaded ? 'never loaded' : 'no never-called function'})`).join(', ')
+    : null;
 
+const refusedByDesign = refusedFiles.size ? {
+    platform: process.platform, precondition: refusedPrecondition,
+    count: refusedDead.length, files: refusedByFile,
+} : null;
 const gate = gating ? {
     maxUntested, maxNeverLoaded, overUntested, overNeverLoaded,
     platform,
     floorMeasured: gateMode && FLOOR ? FLOOR.measured : null,
+    graded: graded.length,
 } : null;
 
 if (asJson) {
@@ -406,6 +491,8 @@ if (asJson) {
         functionsSeen: all.length,
         executed: all.length - dead.length,
         untested: dead,
+        refusedByDesign,
+        staleRefused: staleVerdict,
     }, null, 2));
     // F6 (codex audit 2026-08-30): the JSON verdict follows the same policy as
     // the text renderer. A red suite means the measurement is untrustworthy and
@@ -413,6 +500,7 @@ if (asJson) {
     // loaded ZERO plugin files reported an empty census as success.
     if (run.status !== 0) return 2;
     if (emptyCensus) return 2;
+    if (staleVerdict) return 2;
     return gating ? ((overUntested || overNeverLoaded) ? 1 : 0) : (dead.length ? 1 : 0);
 }
 
@@ -440,6 +528,14 @@ if (emptyCensus) {
     return 2;
 }
 
+if (staleVerdict) {
+    console.error('\n[coverage] NO VERDICT: ' + staleVerdict + '.');
+    console.error('A file excluded because this platform refuses it must exist, load, and leave at least one');
+    console.error('function unentered, or the refusal it names did not happen here. Correct or remove the');
+    console.error('entry in REFUSED_BY_DESIGN (tooling/find-untested-functions.js). This is exit 2, not a pass.');
+    return 2;
+}
+
 console.log(`\n${ALL_SOURCES.size} source file(s) in plugins/ · ${filesWithCoverage.size} executed · ${neverLoaded.length} NEVER LOADED · ${loadedNoNamed.length} ran but declare no named function`);
 console.log(`${all.length} named function(s) IN THE LOADED FILES · ${all.length - dead.length} executed · ${dead.length} NEVER CALLED\n`);
 
@@ -460,26 +556,34 @@ if (loadedNoNamed.length) {
         + ' this check rather than untested by it.' + `\n`);
 }
 
+if (refusedByDesign) {
+    console.log(`  REFUSED BY DESIGN on ${process.platform}${refusedPrecondition ? ` (${refusedPrecondition})` : ''}: ${refusedDead.length} never-called function(s), NOT graded here:`);
+    for (const r of refusedByFile) console.log(`      ~ ${r.file}: ${r.neverCalled} (${r.reason})`);
+    console.log('');
+}
+
 if (gating) {
     const cap = (n) => (n === null ? 'no ceiling' : `ceiling ${n}`);
-    console.log(`[coverage] ${dead.length} never-called function(s) vs ${cap(maxUntested)} · ${neverLoaded.length} never-loaded file(s) vs ${cap(maxNeverLoaded)}`
+    console.log(`[coverage] ${graded.length} never-called function(s) vs ${cap(maxUntested)}`
+        + (refusedDead.length ? ` (+${refusedDead.length} refused by design, not graded)` : '')
+        + ` · ${neverLoaded.length} never-loaded file(s) vs ${cap(maxNeverLoaded)}`
         + (gateMode && FLOOR ? ` · ${platform} floor measured ${FLOOR.measured}` : ''));
     if (overUntested || overNeverLoaded) {
         if (overUntested) {
             let lastFile = '';
-            for (const d of dead) {
+            for (const d of graded) {
                 if (d.file !== lastFile) { console.log(`  ${d.file}`); lastFile = d.file; }
                 console.log(`      ✗ ${d.name}()`);
             }
         }
-        console.log(`\n[coverage] FAIL: ${overUntested ? `${dead.length} never-called function(s) exceeds the ceiling of ${maxUntested}` : ''}`
+        console.log(`\n[coverage] FAIL: ${overUntested ? `${graded.length} never-called function(s) exceeds the ceiling of ${maxUntested}` : ''}`
             + (overUntested && overNeverLoaded ? '; ' : '')
             + `${overNeverLoaded ? `${neverLoaded.length} never-loaded file(s) exceeds the ceiling of ${maxNeverLoaded}` : ''}.`);
         console.log(`Measured on ${platform}. This change added plugin code that no suite enters on this`);
         console.log('platform. Drive it from a suite (a subprocess run counts; NODE_V8_COVERAGE follows');
-        console.log('children). Code that cannot run here by design (a POSIX-only runtime on win32) is');
-        console.log(`the floor moving: re-measure on a green run and update FLOORS.${platform} in`);
-        console.log('tooling/find-untested-functions.js with the new date and commit in the same edit.');
+        console.log('children). A whole file this platform refuses by design belongs in REFUSED_BY_DESIGN');
+        console.log('with its reason; anything else that moved the floor is re-measured on a green run and');
+        console.log(`written to FLOORS.${platform} in tooling/find-untested-functions.js with the new date and commit.`);
         return 1;
     }
     console.log('[coverage] at or below the floor. This is a floor against regression, not a claim of');
