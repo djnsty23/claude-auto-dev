@@ -507,14 +507,24 @@ const suites = fs.readdirSync(SWEEP_TOOLING)
 // rather than merely enforced: spawn-budget.js clamps every budget it grants to
 // what remains of it, and the margin is the room a suite needs to print why it
 // could not measure. A suite that publishes nothing is unaffected.
-const RUN_BUDGET_MS = 900000;
+// The numbers, and the reason there are now two of them, live in
+// spawn-budget.js beside the measurements that set them — so they can be
+// asserted by RUNNING sweepBudgetFor() rather than by grepping this file for a
+// constant name. checkValidator below keeps the per-suite budget deliberately:
+// its child is validate.js at ~4s, not the runner.
+const RUN_BUDGET_MS = sb.SWEEP_SUITE_BUDGET_MS;
 const REPORT_MARGIN_MS = 30000;
-const runSuite = (suite) => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
-    cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS,
-    env: Object.assign({}, process.env, {
-        [sb.DEADLINE_ENV]: String(Date.now() + RUN_BUDGET_MS - REPORT_MARGIN_MS),
-    }),
-});
+const runSuite = (suite) => {
+    // checkRunner's child is the WHOLE of test-all.js — ~40x a single suite, and
+    // measured at 827-890s against the 900s every suite used to share.
+    const budget = sb.sweepBudgetFor(suite);
+    return spawnSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
+        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: budget,
+        env: Object.assign({}, process.env, {
+            [sb.DEADLINE_ENV]: String(Date.now() + budget - REPORT_MARGIN_MS),
+        }),
+    });
+};
 
 const rows = [];
 
