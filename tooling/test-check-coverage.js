@@ -44,7 +44,7 @@ const run = (args, timeout = 60000) => spawnSync(process.execPath, [CHECK, ...ar
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-fx-'));
 process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ } });
 let n = 0;
-function fixture({ runnerCalls, extraFile = false, runnerFails = false, runnerKilled = false, runnerChatty = false, emptyPlugins = false }) {
+function fixture({ runnerCalls, extraFile = false, secondLib = false, runnerFails = false, runnerKilled = false, runnerChatty = false, emptyPlugins = false }) {
     const root = path.join(TMP, 'fx' + (++n));
     const scripts = path.join(root, 'plugins', 'fx', 'scripts');
     fs.mkdirSync(scripts, { recursive: true });
@@ -57,10 +57,17 @@ function fixture({ runnerCalls, extraFile = false, runnerFails = false, runnerKi
         fs.writeFileSync(path.join(scripts, 'fixture-census-orphan.js'),
             'function orphanFunction() { return 3; }\nmodule.exports = { orphanFunction };\n');
     }
+    // `secondLib` is a second LOADED file whose one function nothing calls, so a
+    // case can refuse the first file and still see the second graded.
+    if (secondLib) {
+        fs.writeFileSync(path.join(scripts, 'fixture-census-second.js'),
+            'function secondNeverEntered() { return 4; }\nmodule.exports = { secondNeverEntered };\n');
+    }
     const marker = path.join(root, 'runner-ran.marker');
     fs.writeFileSync(path.join(root, 'tooling', 'test-all.js'),
         `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n` +
         (emptyPlugins ? '' : "const lib = require('../plugins/fx/scripts/fixture-census-lib.js');\n") +
+        (secondLib ? "require('../plugins/fx/scripts/fixture-census-second.js');\n" : '') +
         runnerCalls.map((f) => `lib.${f}();\n`).join('') +
         (runnerChatty ? "process.stdout.write('x'.repeat(2 * 1024 * 1024) + '\\n');\n" : '') +
         (runnerKilled
@@ -284,6 +291,60 @@ if (process.platform !== 'win32') {
     const refused = hr.status === 2 && new RegExp('no coverage floor has been measured for ' + process.platform + '\\.').test(hr.stderr);
     check(`without --platform the host's floor is used (${process.platform}): graded under it, or refused naming it`,
         !hr.error && (graded || refused), detail(hr));
+}
+
+// --- 7c. code a platform refuses by design is its own population, never a silent pass ----
+// `[measured 2026-09-13]` the mission runtime's 57 functions are never entered on
+// win32 because the store refuses without process.getuid, and a floor that counted
+// them would go red on Windows for every mission change. They are reported apart
+// and not graded, and a listing whose refusal did not happen is NO VERDICT.
+// Fixtures name the file with --refused; the host table never applies to --root.
+{
+    const LIB = 'plugins/fx/scripts/fixture-census-lib.js';
+    const fx = fixture({ runnerCalls: ['enteredByTheRunner'] });
+    const r = run(['--root', fx.root, '--max-untested', '0', '--refused', LIB]);
+    check('a refused file\'s never-called function is not graded: exit 0 under a ceiling of 0',
+        r.status === 0 && !r.error, detail(r));
+    check('  and it is printed as its own population, with the count beside the graded one',
+        /REFUSED BY DESIGN/.test(r.stdout) && /fixture-census-lib\.js: 1 \(named with --refused\)/.test(r.stdout)
+            && /0 never-called function\(s\) vs ceiling 0 \(\+1 refused by design, not graded\)/.test(r.stdout), detail(r));
+    check('  and the census still counts it as never called', /1 NEVER CALLED/.test(r.stdout), detail(r));
+    const j = run(['--root', fx.root, '--max-untested', '0', '--refused', LIB, '--json']);
+    let payload = null;
+    try { payload = JSON.parse(j.stdout); } catch { /* asserted below */ }
+    check('  --json: exit 0, gate.graded 0, refusedByDesign.count 1, untested still lists the function',
+        j.status === 0 && payload && payload.gate && payload.gate.graded === 0
+            && payload.refusedByDesign && payload.refusedByDesign.count === 1
+            && payload.untested.length === 1 && payload.staleRefused === null, detail(j));
+    const plain = run(['--root', fx.root, '--max-untested', '0', '--json']);
+    let pp = null;
+    try { pp = JSON.parse(plain.stdout); } catch { /* asserted below */ }
+    check('control: without --refused the same tree exits 1, and a --root run carries no host exclusions',
+        plain.status === 1 && pp && pp.refusedByDesign === null && pp.gate.graded === 1, detail(plain));
+
+    // Refusing one file must not hide a never-called function in another.
+    const two = fixture({ runnerCalls: ['enteredByTheRunner'], secondLib: true });
+    const t = run(['--root', two.root, '--max-untested', '0', '--refused', LIB]);
+    check('a never-called function in a file NOT refused is still graded: exit 1, named',
+        t.status === 1 && !t.error && /✗ secondNeverEntered\(\)/.test(t.stdout) && !/✗ neverEnteredByAnything\(\)/.test(t.stdout), detail(t));
+
+    // Stale listings: the refusal they describe did not happen on this run.
+    for (const [label, opts, file, why] of [
+        ['a refused file that does not exist', { runnerCalls: ['enteredByTheRunner'] }, 'plugins/fx/scripts/no-such-file.js', 'no such file'],
+        ['a refused file that was never loaded', { runnerCalls: ['enteredByTheRunner'], extraFile: true }, 'plugins/fx/scripts/fixture-census-orphan.js', 'never loaded'],
+        ['a refused file whose functions were all entered', { runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'] }, LIB, 'no never-called function'],
+    ]) {
+        const s = fixture(opts);
+        const sr = run(['--root', s.root, '--max-untested', '5', '--max-never-loaded', '5', '--refused', file]);
+        check(`${label} is a stale listing: exit 2 (no verdict), naming why`,
+            sr.status === 2 && !sr.error && /NO VERDICT: stale refused-by-design listing/.test(sr.stderr)
+                && sr.stderr.includes(why), detail(sr));
+    }
+
+    const m = fixture({ runnerCalls: ['enteredByTheRunner'] });
+    const mr = run(['--root', m.root, '--max-untested', '0', '--refused'], 15000);
+    check('a --refused with no path exits 2 and does not run the suite',
+        mr.status === 2 && !mr.error && /--refused needs a plugin-relative file path/.test(mr.stderr) && !ranRunner(m), detail(mr));
 }
 
 // --- 8. HEAD, on request only (see the header for why) --------------------------------
