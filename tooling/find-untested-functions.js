@@ -52,7 +52,7 @@
 // the gate ran it and the count could grow without anything going red. --gate
 // turns it into a FLOOR AGAINST REGRESSION: it fails only when a change pushes
 // the never-called or never-loaded count ABOVE what HEAD scored the day the
-// floor was measured (FLOOR below). It is not a claim of quality. COVERAGE
+// floor was measured (FLOORS below, one per platform). It is not a claim of quality. COVERAGE
 // MEASURES EXECUTION, NOT VERIFICATION, exactly as the paragraph above says: a
 // function can be entered every run while nothing asserts anything about it,
 // and this gate is green for that function. It answers one question only:
@@ -107,7 +107,7 @@
 // A tool like this has a floor above zero. Read the list; do not chase it.
 //
 // `[measured 2026-09-08]` the floor is 40 (37 at b8eae1f, 39 at f870b15, 40 at
-// fcfb8fa; see FLOOR below), not 2, and the "11 -> 2" above is a
+// fcfb8fa on macOS; see FLOORS below), not 2, and the "11 -> 2" above is a
 // dated story about the tree as it was then, kept because the reading method is
 // the point. The 37 are read one by one in docs/evidence-coverage-gate-2026-09-08.md:
 // seven live in long-running watchers a suite kills or runs one-shot (V8 writes
@@ -128,10 +128,12 @@ const argv = process.argv.slice(2);
 // probe for what this does got a sweep instead; check-entrypoints.js gates it.
 if (argv.includes('--help') || argv.includes('-h')) {
     console.log('usage: node tooling/find-untested-functions.js [--json] [--gate]\n' +
-        '         [--max-untested N] [--max-never-loaded M] [--root DIR]\n' +
+        '         [--max-untested N] [--max-never-loaded M] [--root DIR] [--platform P]\n' +
         'Runs every suite under coverage and lists plugin functions never entered.\n' +
         'Bare: exit 1 if anything is never entered (informational).\n' +
-        '--gate: exit 1 only ABOVE the measured floor (npm run check:coverage).\n' +
+        '--gate: exit 1 only ABOVE this platform\'s measured floor (npm run check:coverage);\n' +
+        '        exit 2 on a platform with no measured floor.\n' +
+        '--platform P: grade against P\'s floor instead of this host\'s (printed in the verdict).\n' +
         '--max-untested / --max-never-loaded: explicit ceilings; a malformed value exits 2.\n' +
         '--root DIR: measure DIR (needs DIR/tooling/test-all.js and DIR/plugins/).\n' +
         'Exit 2 = no verdict: the suite went red, or an argument was malformed.');
@@ -156,7 +158,26 @@ const asJson = argv.includes('--json');
 // docs/decisions.md; raising one is a regression wearing a config edit, so the
 // run that needs it should be looked at first. Whoever changes either re-measures
 // on a green run and replaces the date and commit above in the same edit.
-const FLOOR = { untested: 40, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa' };
+//
+// ONE FLOOR PER PLATFORM, because the census is platform-sensitive and a floor
+// measured on one host is not a claim about another. `[measured 2026-09-13]` on
+// Windows 11 at b9d0d56 the suite was green and this gate exited 1 at 94 against
+// the 40 above, on a markdown-only PR, while ubuntu-latest CI scored 37 on the
+// same commit. 61 of the 94 are code that cannot run on win32 by design: the
+// mission runtime (mission-store.js refuses without process.getuid, and its
+// eight suites run one case there and skip the rest) and agent-browser-cleanup's
+// `ps` branch. The single floor read that as "this change added plugin code no
+// suite enters" and sent a session to blame main for a platform. Reading in
+// docs/evidence-coverage-floor-per-platform-2026-09-13.md.
+//
+// The 40 was measured on macOS; linux shares it because ubuntu-latest scored the
+// same 37 as the Mac at b8eae1f (CI run 34209762305) and 37 at b9d0d56 (run
+// 34673906530). A platform with no entry here is NO VERDICT (exit 2) before the
+// suite runs, never a pass and never a regression: it has no floor to exceed.
+const FLOORS = {
+    darwin: { untested: 40, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa' },
+    linux: { untested: 40, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa' },
+};
 
 // A flag that takes a value. A missing or malformed value is exit 2 (no
 // verdict), which is deliberately distinct from exit 1 (a coverage regression):
@@ -175,8 +196,28 @@ function ceilingOf(flag) {
     return Number(v);
 }
 const gateMode = argv.includes('--gate');
-const maxUntested = ceilingOf('--max-untested') ?? (gateMode ? FLOOR.untested : null);
-const maxNeverLoaded = ceilingOf('--max-never-loaded') ?? (gateMode ? FLOOR.neverLoaded : null);
+// --platform grades against another platform's floor. It exists so a suite can
+// reach the unmeasured-platform refusal from any host; the platform used is
+// printed in every gate verdict, so an override cannot pass for this host.
+const platformArg = valueOf('--platform');
+if (platformArg === null || (platformArg !== undefined && !/^[a-z0-9]+$/.test(platformArg))) {
+    console.error(`--platform needs a platform name such as linux, darwin or win32, got ${platformArg === null ? 'nothing' : JSON.stringify(platformArg)}`);
+    process.exit(2);
+}
+const platform = platformArg ?? process.platform;
+const explicitUntested = ceilingOf('--max-untested');
+const explicitNeverLoaded = ceilingOf('--max-never-loaded');
+const FLOOR = FLOORS[platform] || null;
+if (gateMode && !FLOOR && (explicitUntested === null || explicitNeverLoaded === null)) {
+    console.error(`[coverage] NO VERDICT: no coverage floor has been measured for ${platform}.`);
+    console.error('The census is platform-sensitive (code gated to one platform is never entered on');
+    console.error(`another), so a floor from ${Object.keys(FLOORS).join(' or ')} says nothing about ${platform}. Measure one`);
+    console.error('on a green run and add it to FLOORS in tooling/find-untested-functions.js, or pass');
+    console.error('--max-untested and --max-never-loaded explicitly. The suite was not run.');
+    process.exit(2);
+}
+const maxUntested = explicitUntested ?? (gateMode ? FLOOR.untested : null);
+const maxNeverLoaded = explicitNeverLoaded ?? (gateMode ? FLOOR.neverLoaded : null);
 const gating = maxUntested !== null || maxNeverLoaded !== null;
 
 // --root measures another tree: a fixture tree in a suite, or a scratch copy.
@@ -346,7 +387,8 @@ const emptyCensus = ALL_SOURCES.size === 0
 
 const gate = gating ? {
     maxUntested, maxNeverLoaded, overUntested, overNeverLoaded,
-    floorMeasured: gateMode ? FLOOR.measured : null,
+    platform,
+    floorMeasured: gateMode && FLOOR ? FLOOR.measured : null,
 } : null;
 
 if (asJson) {
@@ -421,7 +463,7 @@ if (loadedNoNamed.length) {
 if (gating) {
     const cap = (n) => (n === null ? 'no ceiling' : `ceiling ${n}`);
     console.log(`[coverage] ${dead.length} never-called function(s) vs ${cap(maxUntested)} · ${neverLoaded.length} never-loaded file(s) vs ${cap(maxNeverLoaded)}`
-        + (gateMode ? ` · floor measured ${FLOOR.measured}` : ''));
+        + (gateMode && FLOOR ? ` · ${platform} floor measured ${FLOOR.measured}` : ''));
     if (overUntested || overNeverLoaded) {
         if (overUntested) {
             let lastFile = '';
@@ -433,9 +475,10 @@ if (gating) {
         console.log(`\n[coverage] FAIL: ${overUntested ? `${dead.length} never-called function(s) exceeds the ceiling of ${maxUntested}` : ''}`
             + (overUntested && overNeverLoaded ? '; ' : '')
             + `${overNeverLoaded ? `${neverLoaded.length} never-loaded file(s) exceeds the ceiling of ${maxNeverLoaded}` : ''}.`);
-        console.log('This change added plugin code that no suite enters. Drive it from a suite (a');
-        console.log('subprocess run counts; NODE_V8_COVERAGE follows children). If the floor itself');
-        console.log('moved for a reason, re-measure on a green run and update FLOOR in');
+        console.log(`Measured on ${platform}. This change added plugin code that no suite enters on this`);
+        console.log('platform. Drive it from a suite (a subprocess run counts; NODE_V8_COVERAGE follows');
+        console.log('children). Code that cannot run here by design (a POSIX-only runtime on win32) is');
+        console.log(`the floor moving: re-measure on a green run and update FLOORS.${platform} in`);
         console.log('tooling/find-untested-functions.js with the new date and commit in the same edit.');
         return 1;
     }
