@@ -724,6 +724,66 @@ expectSilentAllow('a Bash call with no command is passed through untouched',
 }
 
 // ---------------------------------------------------------------------------
+// F4. GIT BASH DRIVE PATHS: `/c/Users/...`.
+//
+//     `[measured 2026-09-13]` plugin 8.168.0: `cd /c/Users/<u>/<home-repo> &&
+//     git worktree add ... && cd .claude/worktrees/<wt> && git merge` was
+//     BLOCKED from the coordinator's own home repo. path.resolve on win32 reads
+//     `/c/...` as root-relative on the base drive and produced `C:\c\Users\...`,
+//     so a home write looked foreign. The `~/` spelling was allowed.
+//
+//     win32 only: on POSIX `/c/x` IS an absolute path named that, so these
+//     cases cannot fail there and must not claim to pass.
+//
+//     The foreign cases are CONTROLS, not regressions: `C:\c\...` is outside
+//     every home as well, so they blocked before the fix too. They pin that the
+//     translation did not open the guard while closing the false block.
+// ---------------------------------------------------------------------------
+if (process.platform === 'win32') {
+    const msys = (p) => p.replace(/^([A-Za-z]):[\\/]/, (_, d) => `/${d.toLowerCase()}/`).split('\\').join('/');
+    const HOME_MSYS = msys(HOME_REPO);
+    const OTHER_MSYS = msys(OTHER_REPO);
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+
+    // The observed shape: absolute MSYS cd into home, then a relative cd deeper.
+    expectSilentAllow('`cd /c/.../harness && cd wt && git merge` is allowed (the 2026-09-13 false block)',
+        run({ payload: bash(`cd ${HOME_MSYS} && cd .claude/worktrees/wt && git merge topic`, { cwd: OTHER_REPO }) }));
+    expectSilentAllow('`git -C /c/.../harness commit` is allowed',
+        run({ payload: bash(`git -C ${HOME_MSYS} commit -m "x"`, { cwd: OTHER_REPO }) }));
+    expectSilentAllow('`git -C "/c/.../harness" commit` (quoted) is allowed',
+        run({ payload: bash(`git -C "${HOME_MSYS}" commit -m "x"`, { cwd: OTHER_REPO }) }));
+    expectSilentAllow('uppercase `/C/.../harness` is allowed',
+        run({ payload: bash(`cd ${HOME_MSYS.replace(/^\/./, (m) => m.toUpperCase())} && git commit -m "x"`, { cwd: OTHER_REPO }) }));
+
+    expectBlock('`cd /c/.../product && git commit` from the home repo blocks',
+        run({ payload: bash(`cd ${OTHER_MSYS} && git commit -m "x"`, { cwd: HOME_REPO }) }),
+        /git commit/);
+    expectBlock('`git -C /c/.../product push` from the home repo blocks',
+        run({ payload: bash(`git -C ${OTHER_MSYS} push origin HEAD`, { cwd: HOME_REPO }) }),
+        /git push/);
+
+    // The config side: a role file written from Git Bash.
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_MSYS] });
+    expectSilentAllow('home_repos declared as `/c/.../harness` permits its own repo',
+        run({ payload: bash('git commit -m "x"', { cwd: HOME_REPO }) }));
+    expectBlock('home_repos declared as `/c/.../harness` still blocks a foreign repo',
+        run({ payload: bash('git commit -m "x"', { cwd: OTHER_REPO }) }),
+        /git commit/);
+
+    // Over-translation: a multi-letter root segment is a directory, not a drive.
+    // `/cwg` would become `C:/wg` under a pattern without the lookahead.
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+    {
+        const res = run({ payload: bash('cd /cwg-not-a-drive && git commit -m "x"', { cwd: HOME_REPO }) });
+        const ok = res.exit === 2 && /\\cwg-not-a-drive/i.test(res.stderr) && !/C:[\\/]wg-not-a-drive/i.test(res.stderr);
+        check('`/cwg-not-a-drive` is a root directory, not drive C', ok,
+            `exit ${res.exit}, stderr ${JSON.stringify(res.stderr.slice(0, 140))}`);
+    }
+} else {
+    console.log('SKIP  Git Bash /c/ drive-path cases — win32 only, and they are NOT covered here');
+}
+
+// ---------------------------------------------------------------------------
 // G. THE MUTATION TEST. One input, two arms, and the ONLY difference is whether
 //    the role file exists on disk. A gate nobody has watched fire is a
 //    hypothesis; this is the watching.
