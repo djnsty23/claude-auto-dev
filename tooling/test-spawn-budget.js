@@ -299,6 +299,103 @@ function check(label, ok, detail) {
         sb.lastWords({ stdout: '', stderr: '' }));
 }
 
+// --- lastWords: STDERR IS NOT THE TAIL OF STDOUT ---
+//
+// Every fixture above writes stderr LAST, so concatenating the two pipes
+// happened to produce the right order and the bug was unreachable from them.
+// This is the case they could not express: stderr written FIRST, stdout after
+// it, then a hang. The old implementation reported the chronologically first
+// line as the child's last output.
+//
+// Real spawned child, not a synthetic object: the ordering only exists when
+// something actually writes in that order.
+{
+    const r = spawnSync(process.execPath,
+        ['-e', 'process.stderr.write("WARN-WRITTEN-FIRST\\n");'
+             + 'process.stdout.write("STDOUT-EARLIER\\n");'
+             + 'process.stdout.write("STDOUT-TRUE-TAIL\\n");'
+             + 'setInterval(function(){},1000)'],
+        { encoding: 'utf8', timeout: 1200 });
+    const lw = sb.lastWords(r);
+
+    check('the child really did time out with both streams written, or this proves nothing',
+        !!r.error && r.error.code === 'ETIMEDOUT'
+            && (r.stdout || '').includes('STDOUT-TRUE-TAIL')
+            && (r.stderr || '').includes('WARN-WRITTEN-FIRST'),
+        `${r.error && r.error.code} stdout=${JSON.stringify(r.stdout)} stderr=${JSON.stringify(r.stderr)}`);
+
+    // The assertion that goes red on the old implementation: its output was
+    // `last output: "STDOUT-EARLIER | STDOUT-TRUE-TAIL | WARN-WRITTEN-FIRST"`,
+    // so the stdout tail it presented ended with a stderr line.
+    const stdoutLabel = /last stdout: "([^"]*)"/.exec(lw);
+    check('stdout\'s reported tail is stdout\'s ACTUAL tail, not a stderr line appended to it',
+        !!stdoutLabel && stdoutLabel[1].endsWith('STDOUT-TRUE-TAIL'),
+        lw);
+    check('  and the stderr line is attributed to stderr rather than presented as last',
+        !!stdoutLabel && !stdoutLabel[1].includes('WARN-WRITTEN-FIRST')
+            && /last stderr: "[^"]*WARN-WRITTEN-FIRST/.test(lw),
+        lw);
+
+    // CONTROL, with provenance independent of the function: the literals below
+    // are written here by hand, not derived from anything lastWords computes,
+    // so weakening the function cannot weaken this case in the same motion.
+    const planted = sb.lastWords({ stdout: 'A-OUT\n', stderr: 'B-ERR\n' });
+    check('  CONTROL: with both streams present, each is reported under its own label',
+        /last stdout: "A-OUT"/.test(planted) && /last stderr: "B-ERR"/.test(planted),
+        planted);
+    check('  CONTROL: a stderr-only child still reports its stderr, so the split did not drop it',
+        /last stderr: "ONLY-ERR"/.test(sb.lastWords({ stdout: '', stderr: 'ONLY-ERR\n' })),
+        sb.lastWords({ stdout: '', stderr: 'ONLY-ERR\n' }));
+    check('  CONTROL: a stdout-only child is not given an empty stderr label',
+        !/last stderr/.test(sb.lastWords({ stdout: 'ONLY-OUT\n', stderr: '' })),
+        sb.lastWords({ stdout: 'ONLY-OUT\n', stderr: '' }));
+    check('  and the two-stream line is still bounded, so the second label cannot flood it',
+        sb.lastWords({ stdout: 'x'.repeat(50000), stderr: 'y'.repeat(50000) }, 200).length < 500,
+        String(sb.lastWords({ stdout: 'x'.repeat(50000), stderr: 'y'.repeat(50000) }, 200).length));
+}
+
+// --- the sweep's two budgets: one number cannot serve two sizes of child ---
+//
+// check-suites-can-fail.js spawns a child per suite, and at checkRunner a child
+// that is the WHOLE of test-all.js. They shared 900000 ms. Measured runtimes of
+// that runner: 890s (2026-09-11) and 827s (2026-09-12) — so the budget was 1.1%
+// above its own subject at worst, and the canary timed out on ordinary variation.
+//
+// Asserted by RUNNING sweepBudgetFor, not by grepping the sweep for a constant.
+{
+    const runner = sb.sweepBudgetFor('test-all.js');
+    const perSuite = sb.sweepBudgetFor('test-pre-tool-filter.js');
+
+    check('the whole-runner child gets a bigger budget than a single-suite child',
+        runner > perSuite, `runner=${runner} perSuite=${perSuite}`);
+
+    // Provenance independent of the module: 890000 and 900000 are written here by
+    // hand. Deriving the floor from SWEEP_MEASURED_RUNNER_MS alone would let a
+    // future edit lower the measurement and this assertion in one motion.
+    check('  and it clears the worst MEASURED runner runtime with real headroom, not 1.1%',
+        runner >= 2 * 890000, `runner=${runner} vs 2x890000=${2 * 890000}`);
+    check('  and the recorded measurement still matches the one that sized it',
+        sb.SWEEP_MEASURED_RUNNER_MS === 890000, String(sb.SWEEP_MEASURED_RUNNER_MS));
+
+    // CONTROL: this must not become a blanket raise. The per-suite budget is the
+    // number CLAUDE.md argues at length must NOT go up, and it has not.
+    check('  CONTROL: the per-suite budget is unchanged at 900000, so this is not a blanket raise',
+        perSuite === 900000, String(perSuite));
+    check('  CONTROL: an unknown suite name gets the per-suite budget, not the runner one',
+        sb.sweepBudgetFor('test-does-not-exist.js') === 900000,
+        String(sb.sweepBudgetFor('test-does-not-exist.js')));
+
+    // WIRING: the policy is worth nothing if the sweep still spawns on a literal.
+    // Same shape as test-subject-evidence.js's wiring check, and the same
+    // limitation — it reads source. The assertions above run the real function;
+    // this one only proves the sweep asks it.
+    const sweepSrc = fs.readFileSync(path.join(__dirname, 'check-suites-can-fail.js'), 'utf8');
+    check('  the sweep derives its budget from sweepBudgetFor rather than a literal',
+        /sb\.sweepBudgetFor\(suite\)/.test(sweepSrc), 'check-suites-can-fail.js does not call sweepBudgetFor');
+    check('  and no longer hardcodes the 900000 literal it used to share',
+        !/=\s*900000/.test(sweepSrc), 'a bare 900000 is still assigned in the sweep');
+}
+
 console.log(`\n${sb.tally(pass, fail, process.exitCode === 2 ? 1 : 0)}`);
 console.log(`subject: tooling/spawn-budget.js; its own --selftest is spawned here so the exit `
     + `code is asserted, the retry is proven by a child that is slow exactly once, and the `
