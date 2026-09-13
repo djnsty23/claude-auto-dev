@@ -216,12 +216,15 @@ if (process.platform !== 'win32') {
 // "No output never differs from no output." Exit 2, the same class as a red
 // runner; never 0, never 1.
 {
+    // --platform linux on every --gate call from here on: the floors are per
+    // platform, and these cases are about the census, not about which host
+    // happens to run them.
     const fx = fixture({ runnerCalls: [], emptyPlugins: true });
-    const r = run(['--root', fx.root, '--gate']);
+    const r = run(['--root', fx.root, '--gate', '--platform', 'linux']);
     check('a plugins/ directory with no source files is NO VERDICT: exit 2, not a clean floor',
         r.status === 2 && !r.error && /nothing was measured/.test(r.stderr) && /NO VERDICT/.test(r.stderr), detail(r));
     check('  control: the runner ran and passed, so the suite is not what refused', ranRunner(fx), fx.marker);
-    const j = run(['--root', fx.root, '--gate', '--json']);
+    const j = run(['--root', fx.root, '--gate', '--platform', 'linux', '--json']);
     let payload = null;
     try { payload = JSON.parse(j.stdout); } catch { /* asserted below */ }
     check('  --json: exit 2, suitePassed true, emptyCensus names the reason, sourceFiles 0',
@@ -231,16 +234,56 @@ if (process.platform !== 'win32') {
     check('  bare mode refuses the same census rather than printing "every function is entered"',
         bare.status === 2 && !bare.error && !/Every named function/.test(bare.stdout), detail(bare));
     const ok = fixture({ runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'] });
-    const g = run(['--root', ok.root, '--gate']);
+    const g = run(['--root', ok.root, '--gate', '--platform', 'linux']);
     check('  control: the two-function fixture under --gate still exits 0', g.status === 0 && !g.error && /2 named function\(s\)/.test(g.stdout), detail(g));
 }
 
-// --- 7. --gate carries a dated floor ---------------------------------------------------
+// --- 7. --gate carries a dated floor, and names the platform it belongs to ---------------
 {
     const fx = fixture({ runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'] });
-    const r = run(['--root', fx.root, '--gate']);
-    check('--gate prints the floor with a date and a commit',
-        r.status === 0 && !r.error && /floor measured \d{4}-\d{2}-\d{2} at [0-9a-f]{7,}/.test(r.stdout), detail(r));
+    const r = run(['--root', fx.root, '--gate', '--platform', 'linux']);
+    check('--gate prints the floor with its platform, a date and a commit',
+        r.status === 0 && !r.error && /linux floor measured \d{4}-\d{2}-\d{2} at [0-9a-f]{7,}/.test(r.stdout), detail(r));
+}
+
+// --- 7b. a platform with no measured floor is NO VERDICT, and the host picks the floor ---
+// `[measured 2026-09-13]` on Windows the suite was green and --gate exited 1 at 94
+// against a floor of 40 measured on macOS: 61 of the 94 cannot run on win32 by
+// design. One floor for every host read a platform difference as "this change
+// added plugin code no suite enters". A floor is a claim about the platform it was
+// measured on, so an unmeasured platform refuses (exit 2) before the suite runs.
+{
+    const fx = fixture({ runnerCalls: ['enteredByTheRunner'] });
+    const r = run(['--root', fx.root, '--gate', '--platform', 'plan9'], 15000);
+    check('--gate on a platform with no measured floor exits 2 (no verdict), naming the platform',
+        r.status === 2 && !r.error && /NO VERDICT: no coverage floor has been measured for plan9/.test(r.stderr), detail(r));
+    check('  and did not run the suite', !ranRunner(fx), fx.marker);
+
+    // Explicit ceilings need no floor, so the same platform grades normally.
+    const ex = fixture({ runnerCalls: ['enteredByTheRunner'] });
+    const e = run(['--root', ex.root, '--gate', '--platform', 'plan9', '--max-untested', '0', '--max-never-loaded', '0']);
+    check('control: the same unmeasured platform with both ceilings explicit still grades (exit 1 on the dead function)',
+        e.status === 1 && !e.error && /✗ neverEnteredByAnything\(\)/.test(e.stdout) && ranRunner(ex), detail(e));
+
+    for (const bad of [[], ['Linux!']]) {
+        const b = fixture({ runnerCalls: ['enteredByTheRunner'] });
+        const m = run(['--root', b.root, '--gate', '--platform', ...bad], 15000);
+        check(`a malformed --platform (${bad.length ? JSON.stringify(bad[0]) : 'missing'}) exits 2 and does not run the suite`,
+            m.status === 2 && !m.error && /--platform needs a platform name/.test(m.stderr) && !ranRunner(b), detail(m));
+    }
+
+    // With no --platform the HOST's platform chooses the floor. Either it has one
+    // and the verdict names it, or it has none and the refusal names it; a gate
+    // that graded every host against one platform's floor passes neither branch
+    // on any host but that one.
+    const h = fixture({ runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'] });
+    const hr = run(['--root', h.root, '--gate', '--json']);
+    let hp = null;
+    try { hp = JSON.parse(hr.stdout); } catch { /* the refusal branch prints no JSON */ }
+    const graded = hr.status === 0 && hp && hp.gate && hp.gate.platform === process.platform && typeof hp.gate.floorMeasured === 'string';
+    const refused = hr.status === 2 && new RegExp('no coverage floor has been measured for ' + process.platform + '\\.').test(hr.stderr);
+    check(`without --platform the host's floor is used (${process.platform}): graded under it, or refused naming it`,
+        !hr.error && (graded || refused), detail(hr));
 }
 
 // --- 8. HEAD, on request only (see the header for why) --------------------------------
