@@ -47,15 +47,19 @@
 // --verify --promotion EXIT CODES, each a different instruction to the reader:
 //   0  the record is complete for this candidate. Zero bytes on stdout and
 //      stderr, because this runs in a `&&` chain and text on the pass path is
-//      skimmed, never read.
+//      skimmed, never read. The one exception is --pre-merge, whose pass prints
+//      one [pre-merge] line, because it is a verdict about an unmerged commit.
 //   1  a precondition is unmet and the message names it: a surface unchecked,
 //      a surface row missing, duplicated or malformed, the ledger's recorded
 //      window stale against the base/candidate pair, metrics missing, a
-//      promotion field empty or wrong, or the commit not on the default branch.
+//      promotion field empty or wrong, a gate that is not this repo's gate
+//      script or did not run on the candidate, the commit not on the default
+//      branch, or under --pre-merge a candidate that lacks the base tip.
 //      All of these are yours to fix; re-run after.
 //   2  blind: not a repo, no deploy ref, no ledger, an unreadable --candidate,
 //      an unresolvable base or candidate, a path this ledger's table cannot
-//      represent, no resolvable default branch, or the project has not marked
+//      represent, no resolvable default branch or --onto, no package.json or no
+//      gate/preflight script at the candidate, or the project has not marked
 //      its deploy-sensitive paths. Nothing was decided.
 //   3  INELIGIBLE: the window touches something on the ineligible list. No
 //      amount of filling fixes this; it needs the operator's yes in that turn.
@@ -333,7 +337,14 @@ const stripSqlComments = (line) => line.replace(/--.*$/, '');
 const SCHEMA_DROP = SQL_RULES[0].re;
 
 // Every reason this window is ineligible. Empty array = eligible.
-function ineligibility(sinceRef, files, marking) {
+//
+// The SQL diff reads `since..candidate`, the same window as every other diff.
+// It read `since..HEAD` until 2026-09-13, so with --candidate the six rules
+// judged whatever was checked out: a candidate carrying DROP TABLE passed from a
+// checkout that lacked it, and a clean candidate was refused for SQL only the
+// checkout carried. `[measured]` in the #208 review, and pinned both ways by the
+// F3 cases in tooling/test-deploy-ledger.js.
+function ineligibility(sinceRef, candidate, files, marking) {
     const hits = [];
     const matchers = marking.globs.map((g) => ({ g, re: globToRegExp(g) }));
     for (const f of files) {
@@ -341,7 +352,7 @@ function ineligibility(sinceRef, files, marking) {
             if (re.test(f)) { hits.push({ kind: 'path', file: f, why: `matches deploy-sensitive \`${g}\` (${marking.source})` }); break; }
         }
     }
-    const diff = git('diff', '--unified=0', `${sinceRef}..HEAD`, '--', '*.sql', '**/*.sql');
+    const diff = git('diff', '--unified=0', `${sinceRef}..${candidate}`, '--', '*.sql', '**/*.sql');
     if (diff) {
         let file = null;
         for (const line of diff.split('\n')) {
@@ -385,7 +396,34 @@ const gitOk = (...args) => {
 
 // ------------------------------------------------------- the promotion record
 
-const FIELDS = ['commit', 'gate', 'gate exit', 'gate tail', 'evidence', 'rollback', 'authorised'];
+const FIELDS = ['commit', 'gate', 'gate commit', 'gate exit', 'gate tail', 'evidence', 'rollback', 'authorised'];
+
+// ------------------------------------------------------- the gate binding
+//
+// Every field but `commit` is typed by hand, so without a binding the record
+// could name any gate, run on any commit. Two things are now checked against
+// the repository rather than the prose: `gate commit` must be the candidate,
+// and `gate` must invoke exactly the repo's own gate script as package.json
+// defines it AT THE CANDIDATE. A subset such as `gate:ci`, which in one product
+// repo skips every browser spec, is refused by name while `gate` exists.
+//
+// This binds what was WRITTEN to the candidate and the repo. It cannot prove
+// the gate ran; the exit and the tail are still pasted by whoever ran it.
+const GATE_SCRIPT_NAMES = ['gate', 'preflight'];
+
+function gateScriptName(scripts) {
+    if (!scripts || typeof scripts !== 'object') return null;
+    return GATE_SCRIPT_NAMES.find((n) => typeof scripts[n] === 'string') || null;
+}
+
+// null when the field invokes `expected`; otherwise the reason it does not.
+function gateNameProblem(gateField, expected, at) {
+    const m = String(gateField).trim().match(/^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(\S+)$/);
+    if (!m) return `"${gateField}" runs no package script; the gate defined at ${at} is \`npm run ${expected}\``;
+    if (m[1] === expected) return null;
+    const variant = m[1].startsWith(expected + ':') ? `; "${m[1]}" is a variant of "${expected}", and a variant is not the gate` : '';
+    return `"${gateField}" runs "${m[1]}", not the gate script "${expected}" defined at ${at}${variant}`;
+}
 const STATED = /\[stated \d{4}-\d{2}-\d{2}\]/;
 const PLACEHOLDER = /<[^>]+>|\[[^\]]*\]|\bTODO\b|\bTBD\b/i;
 
@@ -405,7 +443,7 @@ function parseRecord(text) {
     if (start < 0) return { rec, present: false };
     for (let i = start + 1; i < lines.length; i++) {
         if (/^##\s/.test(lines[i])) break;
-        const m = lines[i].match(/^- (commit|gate exit|gate tail|gate|evidence|rollback|authori[sz]ed):\s*(.*)$/i);
+        const m = lines[i].match(/^- (commit|gate commit|gate exit|gate tail|gate|evidence|rollback|authori[sz]ed):\s*(.*)$/i);
         if (!m) continue;
         const key = m[1].toLowerCase().replace('authorized', 'authorised');
         if (key === 'gate tail') {
@@ -433,6 +471,12 @@ function validateRecord(rec, ctx = {}) {
         problems.push({ field: 'commit', why: `STALE: the ledger names ${commit.slice(0, 7)}, HEAD is ${ctx.head.slice(0, 7)}. Re-run --write and re-verify` });
     }
     if (!rec.gate) problems.push({ field: 'gate', why: 'missing: name the gate command you ran (e.g. npm run gate)' });
+    const gateCommit = (rec['gate commit'] || '').toLowerCase();
+    const target = (ctx.head || commit || '').toLowerCase();
+    if (!/^[0-9a-f]{7,40}$/.test(gateCommit)) problems.push({ field: 'gate commit', why: 'missing: the sha of the commit the gate ran on' });
+    else if (/^[0-9a-f]{7,40}$/.test(target) && !(target.startsWith(gateCommit) || gateCommit.startsWith(target))) {
+        problems.push({ field: 'gate commit', why: `the gate ran on ${gateCommit.slice(0, 7)}, the candidate is ${target.slice(0, 7)}. Run the gate on the candidate` });
+    }
     if (rec['gate exit'] === '') problems.push({ field: 'gate exit', why: 'missing' });
     else if (rec['gate exit'] !== '0') problems.push({ field: 'gate exit', why: `"${rec['gate exit']}" is not 0: the gate was not green` });
     if (!rec['gate tail'].split('\n').some((l) => l.trim())) problems.push({ field: 'gate tail', why: 'missing: paste the last 20 lines of the gate run inside the fence' });
@@ -580,6 +624,7 @@ function render(sinceRef, how, s, commits, previous, window, head) {
     // suite produced a ledger that regenerated itself stale.
     lines.push(`- commit: ${head || ''}`);
     lines.push(`- gate: ${keep('gate', '')}`);
+    lines.push(`- gate commit: ${keep('gate commit', '')}`);
     lines.push(`- gate exit: ${keep('gate exit', '')}`);
     lines.push('- gate tail:');
     lines.push('');
@@ -620,6 +665,9 @@ function usage() {
         '  --verify                 the surface record: 0 checked / 1 incomplete / 2 blind',
         '  --verify --promotion     also the promotion record: 0 complete / 1 incomplete / 2 blind / 3 ineligible',
         '  --verify --promotion --verbose   same, but print the population on the pass path too',
+        '  --verify --promotion --pre-merge [--onto <ref>]',
+        '                           before a merge that deploys: the candidate must CONTAIN the base tip',
+        '                           (default branch unless --onto), instead of being on it',
         '  --selftest               prove the derivations and the record validator can fire',
         '',
         'Deploy-sensitive paths come from the project CLAUDE.md, under a heading containing',
@@ -627,9 +675,9 @@ function usage() {
     ].join('\n'));
 }
 
-// The whole verification, shared by --verify and --record. Returns
-// { code, lines } and prints nothing itself, so --verify can be silent on 0.
-function verify(ref, how, s, headFull, window) {
+// The whole promotion verification. Returns { code, lines } and prints nothing
+// itself, so --verify --promotion can be silent on 0.
+function verify(ref, how, s, headFull, window, opts = {}) {
     const out = [];
     if (!fs.existsSync(LEDGER)) {
         return { code: 2, err: ['COULD NOT VERIFY: no DEPLOY-LEDGER.md. Run --write first.'] };
@@ -650,7 +698,7 @@ function verify(ref, how, s, headFull, window) {
             ],
         };
     }
-    const hits = ineligibility(ref, s.files, marking);
+    const hits = ineligibility(ref, headFull, s.files, marking);
     if (hits.length) {
         out.push(`[ineligible] ${hits.length} reason(s) this window is ineligible `
             + `(${marking.globs.length} deploy-sensitive glob(s) from ${marking.source}, ${s.files.length} file(s) in the window):`);
@@ -658,12 +706,39 @@ function verify(ref, how, s, headFull, window) {
         out.push('Promotion of this window needs the operator\'s yes in that turn. No field fixes this.');
         return { code: 3, lines: out };
     }
+    // The gate script is read from the CANDIDATE's package.json, never the
+    // working tree's: a checkout can define a gate the candidate does not.
+    const at = headFull.slice(0, 7);
+    const pkgRaw = git('show', `${headFull}:package.json`);
+    if (pkgRaw === null) {
+        return { code: 2, err: [`COULD NOT VERIFY: no package.json at ${at}, so the recorded gate cannot be checked against the repo's own gate script.`] };
+    }
+    let scripts;
+    try {
+        scripts = JSON.parse(pkgRaw).scripts;
+    } catch {
+        return { code: 2, err: [`COULD NOT VERIFY: package.json at ${at} does not parse, so the repo's gate script cannot be read.`] };
+    }
+    const expectedGate = gateScriptName(scripts);
+    if (!expectedGate) {
+        return {
+            code: 2, err: [
+                `COULD NOT VERIFY: no "gate" or "preflight" script in package.json at ${at}.`,
+                'A recorded gate is only checkable against a gate the repo defines, so nothing was decided.',
+            ],
+        };
+    }
+
     const text = fs.readFileSync(LEDGER, 'utf8');
     const unchecked = text.split('\n').filter((l) => /^\|/.test(l) && /\[ \]/.test(l));
     const metrics = /^- \[[xX]\] metrics recorded or waived:[^\S\n]*\S/m.test(text);
     const { rec, present } = parseRecord(text);
     const problems = present ? validateRecord(rec, { head: headFull, root: ROOT })
         : [{ field: 'promotion record', why: 'section missing: re-run --write' }];
+    if (present && rec.gate) {
+        const why = gateNameProblem(rec.gate, expectedGate, at);
+        if (why) problems.push({ field: 'gate', why });
+    }
 
     // An unchecked-box scan alone passes on a ledger that simply lacks the row:
     // a surface nobody listed has no `[ ]` to find. These ask the complementary
@@ -678,20 +753,42 @@ function verify(ref, how, s, headFull, window) {
     // "that commit is on the default branch". Remediable by landing the branch,
     // so it is exit 1 beside the fields rather than exit 3: nothing here needs
     // the operator, it needs the commit to be somewhere everyone can see.
-    const db = defaultBranch();
+    //
+    // PRE-MERGE. On a repo where the merge to the default branch IS the deploy,
+    // containment can only hold after the act it is meant to precede, so the
+    // check was red before the merge and green only after it. --pre-merge asks
+    // the question that CAN be answered first: does the candidate contain the
+    // current tip of the branch it merges onto? If it does, the merge produces
+    // the candidate's tree, which is the tree the gate ran on. The tip is the
+    // LOCAL ref, and the pass line says so, because a stale ref reads current.
+    const db = opts.onto ? { ref: opts.onto, how: 'given with --onto' } : defaultBranch();
     if (!db) {
         return {
             code: 2, err: [
                 'COULD NOT VERIFY: no default branch resolvable (no origin/HEAD, no origin/main, origin/master, main or master).',
                 'The rule requires the promoted commit to be ON the default branch, and that cannot be checked here.',
-                'Set it with: git remote set-head origin -a',
+                'Set it with: git remote set-head origin -a, or name the base with --pre-merge --onto <ref>',
             ],
         };
     }
-    if (!gitOk('merge-base', '--is-ancestor', headFull, db.ref)) {
+    let premerge = null;
+    if (opts.preMerge) {
+        const tip = git('rev-parse', '--verify', db.ref + '^{commit}');
+        if (!tip) {
+            return { code: 2, err: [`COULD NOT VERIFY: --onto "${db.ref}" does not resolve to a commit. Nothing was decided.`] };
+        }
+        premerge = { ref: db.ref, how: db.how, tip };
+        if (!gitOk('merge-base', '--is-ancestor', tip, headFull)) {
+            problems.push({
+                field: 'merge base',
+                why: `${at} does not contain ${db.ref} at ${tip.slice(0, 7)}: the merge would produce a tree the gate never ran on. `
+                    + `Bring the branch up to date with ${db.ref}, re-run the gate on the new candidate, and re-verify`,
+            });
+        }
+    } else if (!gitOk('merge-base', '--is-ancestor', headFull, db.ref)) {
         problems.push({
             field: 'default branch',
-            why: `${headFull.slice(0, 7)} is not on ${db.ref} (${db.how}). Land it there before promoting`,
+            why: `${at} is not on ${db.ref} (${db.how}). Land it there first, or, where the merge itself deploys, verify before it with --pre-merge`,
         });
     }
 
@@ -705,7 +802,7 @@ function verify(ref, how, s, headFull, window) {
         for (const p of problems) out.push(`  MISSING    ${p.field}: ${p.why}`);
         return { code: 1, lines: out };
     }
-    return { code: 0, lines: [], marking, rec, db };
+    return { code: 0, lines: [], marking, rec, db, premerge };
 }
 
 function main() {
@@ -725,6 +822,16 @@ function main() {
     }
 
     if (argv.includes('--selftest')) return selftest();
+
+    const ontoIdx = argv.indexOf('--onto');
+    const onto = ontoIdx >= 0 ? argv[ontoIdx + 1] : null;
+    if (ontoIdx >= 0 && (!onto || onto.startsWith('-'))) {
+        console.error('COULD NOT READ --onto: provide the ref the candidate will merge onto.');
+        process.exitCode = 2;
+        return;
+    }
+    // --onto names a merge base, so it only means anything before a merge.
+    const preMerge = argv.includes('--pre-merge') || ontoIdx >= 0;
 
     if (!git('rev-parse', '--git-dir')) {
         console.error('COULD NOT READ: not a git repository. The probe is blind, not the deploy clean.');
@@ -773,7 +880,7 @@ function main() {
     const headFull = window.candidate.toLowerCase();
 
     if (argv.includes('--verify') && argv.includes('--promotion')) {
-        const v = verify(ref, how, s, headFull, window);
+        const v = verify(ref, how, s, headFull, window, { preMerge, onto });
         if (v.code === 2) {
             for (const l of v.err) console.error(l);
             process.exitCode = 2;
@@ -788,10 +895,18 @@ function main() {
         if (argv.includes('--verbose')) {
             population(s, window, how, candidateIdx >= 0, checkoutHead);
             console.log(`[verify] eligible (${v.marking.globs.length} deploy-sensitive glob(s) + ${SQL_RULES.length} SQL rule(s), 0 hits), `
-                + `on ${v.db.ref}, every surface checked and recorded for this window, every promotion field present. `
+                + `${v.premerge ? `contains ${v.premerge.ref}` : `on ${v.db.ref}`}, every surface checked and recorded for this window, every promotion field present. `
                 + `The promotion record for ${headFull.slice(0, 7)} is complete; that is not itself permission to promote.`);
         }
-        return;   // exit 0 with zero bytes: the chain reads the code, not the text
+        // A pre-merge pass is NOT silent. It is a different verdict from the
+        // default one, about a commit that is not on the base yet, and a reader
+        // who cannot tell the two apart will treat it as the post-merge answer.
+        if (v.premerge) {
+            console.log(`[pre-merge] ${headFull.slice(0, 7)} contains ${v.premerge.ref} at ${v.premerge.tip.slice(0, 7)} `
+                + `(${v.premerge.how}; the local ref, so fetch first). Verified BEFORE the merge: the candidate is not `
+                + `required to be on ${v.premerge.ref} yet, and a base that moves after this line needs a fresh gate and verify.`);
+        }
+        return;   // default mode: exit 0 with zero bytes, the chain reads the code, not the text
     }
 
     if (argv.includes('--verify')) {
@@ -930,7 +1045,7 @@ function selftest() {
     // render(), so a change to render() cannot weaken these in the same motion.
     const complete = [
         '## Promotion record', '',
-        '- commit: 0123abc', '- gate: npm run gate', '- gate exit: 0', '- gate tail:', '', '```text', 'ALL 61 SUITES PASSED', '```', '',
+        '- commit: 0123abc', '- gate: npm run gate', '- gate commit: 0123abc', '- gate exit: 0', '- gate tail:', '', '```text', 'ALL 61 SUITES PASSED', '```', '',
         '- evidence: .claude/evidence/x', '- rollback: vercel rollback', '- authorised: [stated 2026-09-08] Form B, green gate with the ledger', '',
     ].join('\n');
     const okRec = parseRecord(complete);
@@ -949,10 +1064,32 @@ function selftest() {
     const empty = parseRecord('# Deploy ledger\n\n## Promotion record\n\n- commit: \n- gate: \n- gate exit: \n- gate tail:\n\n```text\n```\n\n- evidence: \n- rollback: \n- authorised: \n').rec;
     check('an empty record reports every field', validateRecord(empty).length === FIELDS.length, `${validateRecord(empty).length} of ${FIELDS.length}`);
     check('no section is not present', parseRecord('# Deploy ledger\n').present === false, '');
+    const otherGate = parseRecord(complete.replace('- gate commit: 0123abc', '- gate commit: fedcba9')).rec;
+    check('a gate commit that is not the record commit is a problem',
+        validateRecord(otherGate).some((p) => p.field === 'gate commit' && /fedcba9.*0123abc/.test(p.why)), '');
+
+    // The gate binding, against names written by hand.
+    check('gateScriptName prefers gate', gateScriptName({ gate: 'a', 'gate:ci': 'b', preflight: 'c' }) === 'gate', '');
+    check('gateScriptName falls back to preflight', gateScriptName({ preflight: 'c', test: 'd' }) === 'preflight', '');
+    check('gateScriptName is null with neither', gateScriptName({ test: 'd' }) === null && gateScriptName(undefined) === null, '');
+    const gateNames = [
+        ['npm run gate', 'gate', null],
+        ['pnpm gate', 'gate', null],
+        ['bun run preflight', 'preflight', null],
+        ['npm run gate:ci', 'gate', /variant of "gate"/],
+        ['npm test', 'gate', /runs "test", not the gate script "gate"/],
+        ['echo ok', 'gate', /runs no package script/],
+        ['npm run gate && echo', 'gate', /runs no package script/],
+    ];
+    for (const [field, expected, want] of gateNames) {
+        const got = gateNameProblem(field, expected, '0123abc');
+        check(`gate "${field}" against "${expected}" -> ${want ? 'refused' : 'accepted'}`,
+            want ? want.test(got || '') : got === null, `got ${got}`);
+    }
 
     console.log(`[selftest] ${total} case(s) run, ${total - failed} passed, ${failed} failed`);
     process.exitCode = failed ? 1 : 0;
 }
 
 if (require.main === module) main();
-else module.exports = { routeFor, WIDE, globToRegExp, sensitiveGlobsFrom, SCHEMA_DROP, SQL_RULES, stripSqlComments, parseRecord, validateRecord, FIELDS };
+else module.exports = { routeFor, WIDE, globToRegExp, sensitiveGlobsFrom, SCHEMA_DROP, SQL_RULES, stripSqlComments, parseRecord, validateRecord, FIELDS, gateScriptName, gateNameProblem };

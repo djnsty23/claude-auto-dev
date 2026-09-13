@@ -1,0 +1,106 @@
+# before: tooling/test-deploy-ledger.js with the F1/F2/F3 cases, against deploy-ledger.js at 6916e00 (defects intact)
+# 2026-09-13T09:20:15Z node v24.15.0 6916e00 tree:  M tooling/test-deploy-ledger.js ?? .claude/.typecheck-pending ?? .claude/evidence/deploy-ledger-f1-f3/ 
+  PASS  derives the two routes and the wide file
+  PASS  counts only user-facing files, not lib/helper.ts
+  PASS  writes a ledger with a row per surface
+  PASS  writes a promotion record with the commit derived and every other field empty
+  PASS  unmarked project: exit 2, not 1 and not 0
+  PASS  unmarked project: names the heading to add and the `none` escape
+  PASS  stale ledger: exit 1 naming STALE with both shas
+  PASS  incomplete: exit 1
+  PASS  incomplete: names unchecked surfaces and metrics
+  PASS  incomplete: names the empty field "gate"
+  PASS  incomplete: names the empty field "gate exit"
+  PASS  incomplete: names the empty field "gate tail"
+  PASS  incomplete: names the empty field "evidence"
+  PASS  incomplete: names the empty field "rollback"
+  PASS  incomplete: names the empty field "authorised"
+  PASS  incomplete: does NOT name the commit, which --write derived and HEAD has not moved
+  PASS  complete: exit 0
+  PASS  complete: ZERO BYTES on stdout
+  PASS  complete: ZERO BYTES on stderr
+  PASS  complete --verbose: exit 0 and says the record is complete, with the population
+  PASS  missing after.* fails on the evidence field
+  PASS  a red gate fails on the gate exit field
+  PASS  a placeholder rollback fails on the rollback field
+  PASS  an authorisation without [stated date] fails on the authorised field
+  PASS  restored: passes again
+  PASS  preserves ticks, metrics and filled fields across a rewrite
+  PASS  rewrite still verifies
+  PASS  ineligible by path: exit 3
+  PASS  ineligible by path: names the file and the glob and its source
+  PASS  ineligible by path: says no field fixes it
+  PASS  ineligible by path: prints the population it judged
+  PASS  a --write for a new window starts blank and says so
+  PASS  additive DDL and a "truncated" comment are NOT ineligible (exit 1 for the unfilled record, not 3)
+  PASS  ineligible by schema-drop: exit 3, naming the rule, the file and the statement
+  PASS  ineligible by rename: exit 3, naming the rule, the file and the statement
+  PASS  ineligible by grant: exit 3, naming the rule, the file and the statement
+  PASS  ineligible by rls: exit 3, naming the rule, the file and the statement
+  PASS  ineligible by security-definer: exit 3, naming the rule, the file and the statement
+  PASS  ineligible by live-rows: exit 3, naming the rule, the file and the statement
+  PASS  a policy DROP followed by its own CREATE is still ineligible (the recreate is where RLS mistakes hide)
+  PASS  a commit not on the default branch is refused (exit 1) and the message names the branch
+  PASS  back on the default branch, containment is no longer reported
+  PASS  an ineligible window stays ineligible on re-run
+  PASS  refuses when the last deploy cannot be determined
+  PASS  --help prints usage and exits 0
+  PASS  WIDE discovery includes runtime config/data before filtering by UI extension
+  PASS  WIDE positive control is CSS; ordinary helper and Markdown remain excluded
+  PASS  WIDE-only change cannot be rendered as no user-facing changes
+  PASS  properly checked WIDE-only ledger can pass
+  PASS  complete two-route ledger passes positive control
+  PASS  valid checks survive ordinary CRLF Markdown editing
+  PASS  deleting one expected route fails and names the missing route
+  PASS  deleting every expected route cannot become empty success
+  PASS  partial cells cannot satisfy a route despite no literal unchecked box
+  PASS  duplicate checked route rows are rejected
+  PASS  checked row with wrong changed-file details cannot substitute for expected row
+  PASS  same-window regeneration preserves valid route evidence and metrics
+  PASS  plain --verify ignores the promotion record (Step 5b contract unchanged)
+  PASS  the control: --promotion on the same ledger names the blanked fields
+  PASS  verification refuses a ledger generated for another base even with the same route set
+  PASS  base change resets route checks and metrics
+  PASS  equivalent base refs preserve same-window evidence by resolved SHA
+  PASS  same-base new-HEAD verification rejects stale ticks before regeneration
+  PASS  same-base new-HEAD regeneration resets route checks and metrics
+  PASS  new candidate passes only after recording fresh checks
+  PASS  legacy or removed provenance is unresolved, not a verified current window
+  PASS  legacy ledger regeneration resets unsupported inherited claims
+  win32: odd-named docs fixture is "docs/with`tick.md" (NTFS refuses |)
+  PASS  genuine zero-surface docs-only population can still pass with recorded metrics
+  PASS  and the same pass without --verbose is silent, so the chain reads the code
+  PASS  leading-space path retains its exact identity instead of becoming an app route
+  PASS  leading-space surface can pass after its actual row is checked
+  win32: 3 of 4 unrepresentable-path cases not run: NTFS cannot hold | \n or \t in a filename
+  PASS  unsupported Markdown/control path is reported instead of producing an ambiguous ledger: "app/with`tick/page.tsx"
+  PASS  explicit candidate accepts fresh valid evidence
+  PASS  ledger is actually tracked in a later evidence commit
+  PASS  default HEAD verification still rejects evidence from the earlier candidate after archival
+  PASS  tracked archival commit does not invalidate explicit frozen-candidate verification
+  PASS  explicit historical verdict prints candidate and current checkout separately
+  PASS  regenerating archived frozen-candidate evidence is byte-stable
+  PASS  old candidate remains verifiable as explicitly historical after later source edits
+  PASS  requesting the newer candidate does not inherit old candidate checks
+  PASS  default HEAD cannot turn historical candidate success into current-source success
+  PASS  malformed candidate option refuses: ["--candidate"]
+  PASS  malformed candidate option refuses: ["--candidate","--verify"]
+  PASS  malformed candidate option refuses: ["--candidate","not-a-real-ref"]
+  PASS  malformed candidate option refuses: ["--candidate","614a4069a5db18a29d50e28750663215ff563584","--candidate","e1a068a4763696689ff14fae6a043d9e4d7adb73"]
+  PASS  F3 precondition: the drop is in base..candidate and absent from base..HEAD
+  FAIL  F3: a DROP TABLE carried only by the candidate is ineligible from a checkout that lacks it  -> status=1 [population] da60f40e082e8ab2c59e6d8822ec0c6c8f03b2f6..373bf1035adb1a39f91a359d568855b74f5f0a5d (given on the command line): 1 file(s) changed, 0 user-facing, 0 route(s) derived, 0 wide-effect, 0 without a route | [window] candidate 373bf1035adb1a39f91a359d568855b74f5f0a5d (explicit --candidate); checkout HEAD da60f40e082e8ab2c59e6d8822ec0c6c8f03b2f6. Checks apply only to candidate 373bf1035adb1a39f91a359d568855b74f5f0a5d. | [scope] routes are derived by convention (app/, pages/, src/routes/); a project routing otherwise lists files without a route. A wide-effect file marks EVERY surface affected rather than guessing narrower. Metrics are never derived. | [verify] 0 row(s) with an unchecked box; metrics recorded; 0 missing, invalid or stale surface record(s); 1 promotion field(s) missing or wrong
+  FAIL  F3 control: a drop only on the checkout is not charged to a clean candidate  -> status=3 [population] da60f40e082e8ab2c59e6d8822ec0c6c8f03b2f6..f83dac7d6c3bae1d756249d128ac38762c9fafd1 (given on the command line): 1 file(s) changed, 1 user-facing, 1 route(s) derived, 0 wide-effect, 0 without a route | [window] candidate f83dac7d6c3bae1d756249d128ac38762c9fafd1 (explicit --candidate); checkout HEAD 7d86ec636a554b9db0e707f7222e2829e4e8bf24. Checks apply only to candidate f83dac7d6c3bae1d756249d128ac38762c9fafd1. | [scope] routes are derived by convention (app/, pages/, src/routes/); a project routing otherwise lists files without a route. A wide-effect file marks EVERY surface affected rather than guessing narrower. Metrics are never derived. | [ineligible] 1 reason(s) this window is ineligible (0 deploy-sensitive glob(s) from CLAUDE.md, 1 file(s) in the window):
+  PASS  F2 positive control: npm run gate, bound to the candidate, passes
+  FAIL  F2 precondition: the ledger carries a gate commit naming the candidate  -> Read only by `--verify --promotion`, which exits 1 while a field below is empty | or wrong, 3 while the window touches a deploy-sensitive path or SQL rule, and 0 | with no output when the record is complete for this candidate. Exit 0 is a | record check, not permission to promote. Fill every field by hand; only the
+  FAIL  F2: gate:ci is refused while package.json at the candidate defines gate  -> status=0
+  FAIL  F2: a gate field that runs no package script is refused  -> status=0
+  FAIL  F2: a record with no gate commit is refused  -> status=0
+  FAIL  F2: a gate that ran on another commit is refused, naming both  -> status=0
+  FAIL  F2: the gate script is read at the candidate SHA, not the working tree (exit 2, blind)  -> status=0
+  PASS  F1 control: without --pre-merge a branch candidate is still refused as not on main
+  FAIL  F1: --pre-merge passes a candidate that contains the tip of main, and says it is pre-merge  -> status=1 [population] 093cfe2768318fa2368266cb0022934c1f61784d..ea0a677e59391ad170ff2d771781496b68344454 (given on the command line): 1 file(s) changed, 1 user-facing, 1 route(s) derived, 0 wide-effect, 0 without a route | [window] candidate ea0a677e59391ad170ff2d771781496b68344454 (default HEAD); checkout HEAD ea0a677e59391ad170ff2d771781496b68344454. Checks apply only to candidate ea0a677e59391ad170ff2d771781496b68344454. | [scope] routes are derived by convention (app/, pages/, src/routes/); a project routing otherwise lists files without a route. A wide-effect file marks EVERY surface affected rather than guessing narrower. Metrics are never derived. | [verify] 0 row(s) with an unchecked box; metrics recorded; 0 missing, invalid or stale surface record(s); 1 promotion field(s) missing or wrong
+  FAIL  F1: --onto names the base explicitly  -> status=1 [population] 093cfe2768318fa2368266cb0022934c1f61784d..ea0a677e59391ad170ff2d771781496b68344454 (given on the command line): 1 file(s) changed, 1 user-facing, 1 route(s) derived, 0 wide-effect, 0 without a route | [window] candidate ea0a677e59391ad170ff2d771781496b68344454 (default HEAD); checkout HEAD ea0a677e59391ad170ff2d771781496b68344454. Checks apply only to candidate ea0a677e59391ad170ff2d771781496b68344454. | [scope] routes are derived by convention (app/, pages/, src/routes/); a project routing otherwise lists files without a route. A wide-effect file marks EVERY surface affected rather than guessing narrower. Metrics are never derived. | [verify] 0 row(s) with an unchecked box; metrics recorded; 0 missing, invalid or stale surface record(s); 1 promotion field(s) missing or wrong
+  FAIL  F1: --pre-merge refuses a candidate that does not contain the current tip of main  -> status=1 [population] 093cfe2768318fa2368266cb0022934c1f61784d..ea0a677e59391ad170ff2d771781496b68344454 (given on the command line): 1 file(s) changed, 1 user-facing, 1 route(s) derived, 0 wide-effect, 0 without a route | [window] candidate ea0a677e59391ad170ff2d771781496b68344454 (default HEAD); checkout HEAD ea0a677e59391ad170ff2d771781496b68344454. Checks apply only to candidate ea0a677e59391ad170ff2d771781496b68344454. | [scope] routes are derived by convention (app/, pages/, src/routes/); a project routing otherwise lists files without a route. A wide-effect file marks EVERY surface affected rather than guessing narrower. Metrics are never derived. | [verify] 0 row(s) with an unchecked box; metrics recorded; 0 missing, invalid or stale surface record(s); 1 promotion field(s) missing or wrong
+  FAIL  F1: an unresolvable --onto is blind (exit 2), not a pass  -> status=1 [population] 093cfe2768318fa2368266cb0022934c1f61784d..ea0a677e59391ad170ff2d771781496b68344454 (given on the command line): 1 file(s) changed, 1 user-facing, 1 route(s) derived, 0 wide-effect, 0 without a route | [window] candidate ea0a677e59391ad170ff2d771781496b68344454 (default HEAD); checkout HEAD ea0a677e59391ad170ff2d771781496b68344454. Checks apply only to candidate ea0a677e59391ad170ff2d771781496b68344454. | [scope] routes are derived by convention (app/, pages/, src/routes/); a project routing otherwise lists files without a route. A wide-effect file marks EVERY surface affected rather than guessing narrower. Metrics are never derived. | [verify] 0 row(s) with an unchecked box; metrics recorded; 0 missing, invalid or stale surface record(s); 1 promotion field(s) missing or wrong
+[control] 100 assertion(s), 88 passed, 12 failed
+# exit=1

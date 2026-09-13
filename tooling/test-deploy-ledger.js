@@ -50,6 +50,18 @@ const check = (label, ok, detail) => {
     console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : '  -> ' + String(detail).trim().split('\n').slice(0, 4).join(' | ')}`);
 };
 
+// The gate commit is the one field a fill cannot hard-code: it must name the
+// candidate, so it is copied from the commit line the script derived. A literal
+// override replaces it, for the cases that plant a wrong one.
+function bindGateCommit(text, override) {
+    const derived = (text.match(/^- commit: ([0-9a-f]*)\r?$/m) || [])[1] || '';
+    return text.replace(/^- gate commit: .*$/m, '- gate commit: ' + (override === undefined ? derived : override));
+}
+
+// The gate script every fixture's package.json declares. `gate:ci` is there so
+// a fixture can name a real, runnable subset of the gate and be refused.
+const PACKAGE_JSON = JSON.stringify({ scripts: { gate: 'npm test && npm run lint', 'gate:ci': 'npm test', test: 'node -e 0' } }, null, 2) + '\n';
+
 // Fills every promotion field in the ledger on disk with values that validate.
 // Written by hand here, not derived from the script, so the two cannot drift
 // together. `commit` is left as the script wrote it: that is the field under test
@@ -62,6 +74,7 @@ function fillRecord(overrides = {}) {
     }, overrides);
     for (const [k, val] of Object.entries(v)) text = text.replace(new RegExp(`^- ${k}: .*$`, 'm'), `- ${k}: ${val}`);
     text = text.replace('- gate tail:\n\n```text\n```', '- gate tail:\n\n```text\nvalidate: 19 PASS / 0 FAIL\nALL 61 SUITES PASSED\n```');
+    text = bindGateCommit(text, overrides['gate commit']);
     text = text.replace(/\[ \]/g, '[x]').replace(
         '- [x] metrics recorded or waived:',
         '- [x] metrics recorded or waived: WAIVED, no user-visible metric moves'
@@ -109,6 +122,7 @@ try {
     // ---- mark it, through an @-import, the way one real repo is laid out ----
     w('CLAUDE.md', '@AGENTS.md\n');
     w('AGENTS.md', '# Project\n\n## Deploy-sensitive paths\n\n- `supabase/migrations/**`\n- `src/billing/**`\n\n## Next heading\n\n- `not/a/glob`\n');
+    w('package.json', PACKAGE_JSON);
     git('add', '-A'); git('commit', '-qm', 'mark sensitive paths');
 
     // ---- STALE: HEAD moved after --write, the ledger still names the old commit ----
@@ -312,7 +326,7 @@ function fixture(body) {
         })) text = text.replace(new RegExp(`^- ${k}: .*$`, 'm'), `- ${k}: ${val}`);
         text = text.replace('- gate tail:\n\n```text\n```',
             '- gate tail:\n\n```text\nvalidate: 19 PASS / 0 FAIL\nALL 61 SUITES PASSED\n```');
-        save(text);
+        save(bindGateCommit(text));
     };
     try {
         // -b main so defaultBranch() resolves: the rule requires the promoted
@@ -325,9 +339,10 @@ function fixture(body) {
         // is the honest answer for a synthetic fixture), and the evidence field
         // must name a directory holding a before/after pair.
         write('CLAUDE.md', '# Fixture\n\n## Deploy-sensitive paths\n\n- none\n');
+        write('package.json', PACKAGE_JSON);
         write('.claude/evidence/promo/before.txt', 'fixture before\n');
         write('.claude/evidence/promo/after.txt', 'fixture after\n');
-        const base = commit(['README.md', 'CLAUDE.md'], 'base');
+        const base = commit(['README.md', 'CLAUDE.md', 'package.json'], 'base');
         body({ g, write, commit, cli, read, save, tick, base });
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -480,6 +495,118 @@ fixture(({ g, write, commit, cli, read, tick, base }) => {
         v = cli('--since', base, ...args);
         check('malformed candidate option refuses: ' + JSON.stringify(args), v.status === 2 && /candidate/i.test(v.out), v.out);
     }
+});
+
+// ---- F3: the SQL rules must read the CANDIDATE, not the checkout ----
+// [measured 2026-09-13, #208 review P1] a candidate carrying DROP TABLE verified
+// with no ineligible line from a checkout that lacked it, because the SQL diff
+// ran over since..HEAD while every other diff used the candidate. Both
+// directions are planted: SQL only on the candidate must be found, and SQL only
+// on the checkout must not be charged to a clean candidate.
+fixture(({ g, write, commit, cli, tick, base }) => {
+    g('checkout', '-q', '-b', 'candidate-branch');
+    write('db/001.sql', 'DROP TABLE users;\n');
+    const dropping = commit(['db/001.sql'], 'candidate drops a table');
+    g('checkout', '-q', 'main');
+    check('F3 precondition: the drop is in base..candidate and absent from base..HEAD',
+        g('diff', '--name-only', `${base}..${dropping}`) === 'db/001.sql' && g('diff', '--name-only', `${base}..HEAD`) === '',
+        'fixture did not separate checkout from candidate');
+    cli('--since', base, '--candidate', dropping, '--write'); tick();
+    let v = cli('--since', base, '--candidate', dropping, '--verify', '--promotion');
+    check('F3: a DROP TABLE carried only by the candidate is ineligible from a checkout that lacks it',
+        v.status === 3 && /INELIGIBLE\s+db\/001\.sql\s+schema-drop:/.test(v.out), 'status=' + v.status + ' ' + v.out);
+
+    // The reverse. main gains a drop; the candidate branched before it and is clean.
+    g('checkout', '-q', '-b', 'clean-candidate', base);
+    write('app/page.tsx', 'clean\n');
+    const clean = commit(['app/page.tsx'], 'clean candidate');
+    g('checkout', '-q', 'main');
+    write('db/002.sql', 'DROP TABLE orders;\n');
+    commit(['db/002.sql'], 'checkout-only drop');
+    cli('--since', base, '--candidate', clean, '--write'); tick();
+    v = cli('--since', base, '--candidate', clean, '--verify', '--promotion');
+    check('F3 control: a drop only on the checkout is not charged to a clean candidate',
+        v.status !== 3 && !/INELIGIBLE/.test(v.out), 'status=' + v.status + ' ' + v.out);
+});
+
+// ---- F2: the gate record must be about THIS candidate and THIS repo's gate ----
+// The review: the record accepted any gate name, the string 0 and any tail, and
+// nothing tied it to the candidate or to package.json. A loop that ran gate:ci,
+// or nothing, could write three lines and pass.
+fixture(({ g, write, commit, cli, read, save, tick, base }) => {
+    write('app/page.tsx', 'home\n');
+    const candidate = commit(['app/page.tsx'], 'candidate');
+    cli('--since', base, '--write'); tick();
+    const valid = read();
+    const field = (text, k, val) => text.replace(new RegExp(`^- ${k}: .*$`, 'm'), `- ${k}: ${val}`);
+    let v = cli('--since', base, '--verify', '--promotion');
+    check('F2 positive control: npm run gate, bound to the candidate, passes', v.status === 0 && v.out === '', 'status=' + v.status + ' ' + v.out);
+    check('F2 precondition: the ledger carries a gate commit naming the candidate',
+        new RegExp(`^- gate commit: ${candidate}\\r?$`, 'm').test(valid), valid.split('## Promotion record')[1]);
+
+    save(field(valid, 'gate', 'npm run gate:ci'));
+    v = cli('--since', base, '--verify', '--promotion');
+    check('F2: gate:ci is refused while package.json at the candidate defines gate',
+        v.status === 1 && /MISSING\s+gate: .*"gate:ci".*variant of "gate"/.test(v.out), 'status=' + v.status + ' ' + v.out);
+
+    save(field(valid, 'gate', 'echo ok'));
+    v = cli('--since', base, '--verify', '--promotion');
+    check('F2: a gate field that runs no package script is refused',
+        v.status === 1 && /MISSING\s+gate: "echo ok"/.test(v.out), 'status=' + v.status + ' ' + v.out);
+
+    save(field(valid, 'gate commit', ''));
+    v = cli('--since', base, '--verify', '--promotion');
+    check('F2: a record with no gate commit is refused', v.status === 1 && /MISSING\s+gate commit:/.test(v.out), 'status=' + v.status + ' ' + v.out);
+
+    save(field(valid, 'gate commit', base));
+    v = cli('--since', base, '--verify', '--promotion');
+    check('F2: a gate that ran on another commit is refused, naming both',
+        v.status === 1 && new RegExp(`MISSING\\s+gate commit: .*${base.slice(0, 7)}.*${candidate.slice(0, 7)}`).test(v.out),
+        'status=' + v.status + ' ' + v.out);
+
+    // The script name is read from package.json AT THE CANDIDATE. The working
+    // tree keeps a gate script; the committed candidate does not.
+    save(valid);
+    write('package.json', JSON.stringify({ scripts: { test: 'node -e 0' } }, null, 2) + '\n');
+    const noGate = commit(['package.json'], 'candidate drops its gate script');
+    write('package.json', PACKAGE_JSON);
+    cli('--since', base, '--write'); tick();
+    v = cli('--since', base, '--verify', '--promotion');
+    check('F2: the gate script is read at the candidate SHA, not the working tree (exit 2, blind)',
+        v.status === 2 && new RegExp(`no "gate" or "preflight" script.*${noGate.slice(0, 7)}`).test(v.out), 'status=' + v.status + ' ' + v.out);
+});
+
+// ---- F1: a deploy-on-merge repo must be verifiable BEFORE the merge ----
+// Containment in the default branch can only hold after the merge, and on a
+// repo where the merge is the deploy that made a pre-merge pass impossible.
+// --pre-merge instead requires the candidate to contain the tip it merges onto,
+// so the tree the gate ran on is the tree the merge produces.
+fixture(({ g, write, commit, cli, tick, base }) => {
+    g('checkout', '-q', '-b', 'feature');
+    write('app/page.tsx', 'feature\n');
+    commit(['app/page.tsx'], 'feature work');
+    cli('--since', base, '--write'); tick();
+    let v = cli('--since', base, '--verify', '--promotion');
+    check('F1 control: without --pre-merge a branch candidate is still refused as not on main',
+        v.status === 1 && /MISSING\s+default branch: .*is not on main/.test(v.out), 'status=' + v.status + ' ' + v.out);
+    v = cli('--since', base, '--verify', '--promotion', '--pre-merge');
+    check('F1: --pre-merge passes a candidate that contains the tip of main, and says it is pre-merge',
+        v.status === 0 && /\[pre-merge\]/.test(v.out) && /main/.test(v.out) && /before the merge/i.test(v.out),
+        'status=' + v.status + ' ' + v.out);
+    v = cli('--since', base, '--verify', '--promotion', '--pre-merge', '--onto', 'main');
+    check('F1: --onto names the base explicitly', v.status === 0 && /\[pre-merge\].*main/.test(v.out), 'status=' + v.status + ' ' + v.out);
+
+    // main moves on. The merge would now produce a tree nobody gated.
+    g('checkout', '-q', 'main');
+    write('README.md', 'main moved\n');
+    const moved = commit(['README.md'], 'main moves');
+    g('checkout', '-q', 'feature');
+    v = cli('--since', base, '--verify', '--promotion', '--pre-merge');
+    check('F1: --pre-merge refuses a candidate that does not contain the current tip of main',
+        v.status === 1 && new RegExp(`MISSING\\s+merge base: .*does not contain main at ${moved.slice(0, 7)}`).test(v.out),
+        'status=' + v.status + ' ' + v.out);
+    v = cli('--since', base, '--verify', '--promotion', '--pre-merge', '--onto', 'no-such-ref');
+    check('F1: an unresolvable --onto is blind (exit 2), not a pass', v.status === 2 && /--onto/.test(v.out), 'status=' + v.status + ' ' + v.out);
 });
 
 console.log(`[control] ${assertions} assertion(s), ${assertions - failed} passed, ${failed} failed`);
