@@ -519,6 +519,57 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     check('a non-repo directory writes nothing to stderr', rp.stderr === '');
 }
 
+// ---- Session pile ----
+// A planted store, never the operator's real one: SESSION_SWEEP_STORE is set on
+// every run below. The population is built so each filter has a record it must
+// reject: archived, another repo, and a stale mtime.
+{
+    const STORE = path.join(TMP, 'pile-store', 'ws', 'sub');
+    fs.mkdirSync(STORE, { recursive: true });
+    const OTHER = path.join(TMP, 'other-repo');
+    let n = 0;
+    const plant = (extra, ageDays = 0) => {
+        const rec = { sessionId: `local_pile-${n++}`, isArchived: false, originCwd: PROJ, cwd: PROJ, ...extra };
+        const f = path.join(STORE, `${rec.sessionId}.json`);
+        fs.writeFileSync(f, JSON.stringify(rec), 'utf8');
+        if (ageDays) { const t = new Date(Date.now() - ageDays * 86400000); fs.utimesSync(f, t, t); }
+    };
+    for (let i = 0; i < 6; i++) plant({});
+    plant({ cliSessionId: 'me-pile' });                    // 7th live record: the caller itself
+    for (let i = 0; i < 3; i++) plant({ isArchived: true });
+    for (let i = 0; i < 5; i++) plant({ originCwd: OTHER, cwd: OTHER });
+    for (let i = 0; i < 2; i++) plant({}, 30);              // live but untouched for 30 days
+
+    const pile = (id, extraEnv) => {
+        const res = spawnSync(process.execPath, [HOOK], {
+            input: JSON.stringify({ cwd: PROJ, session_id: id, hook_event_name: 'SessionStart' }),
+            encoding: 'utf8', cwd: PROJ,
+            env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP,
+                SESSION_SWEEP_STORE: path.join(TMP, 'pile-store'), AUTODEV_SESSION_PILE_MAX: '', ...extraEnv },
+        });
+        return { res, ctx: parse(res)?.hookSpecificOutput?.additionalContext || '' };
+    };
+
+    const a = pile('someone-else');
+    check('pile: above the threshold, the line names the count and threshold',
+        /Session pile: 7 other live sessions/.test(a.ctx) && a.ctx.includes('(threshold 6)'));
+    const b = pile('me-pile');
+    check('pile: the calling session is not counted, so 6 is silent at threshold 6',
+        !b.ctx.includes('Session pile') && b.res.status === 0);
+    const c = pile('someone-else', { AUTODEV_SESSION_PILE_MAX: '10' });
+    check('pile: the threshold is read from AUTODEV_SESSION_PILE_MAX (control)', !c.ctx.includes('Session pile'));
+    const d = pile('someone-else', { SESSION_SWEEP_STORE: path.join(TMP, 'no-such-store') });
+    check('pile: an unreadable store says nothing and exits 0',
+        !d.ctx.includes('Session pile') && d.res.status === 0 && d.res.stderr === '');
+
+    const { countLivePile } = require(path.join(PLUGIN_ROOT, 'scripts', 'session-pile.js'));
+    const direct = countLivePile(PROJ, { store: path.join(TMP, 'pile-store') });
+    check('pile: archived, other-repo and stale records are all excluded (7 of 17 scanned)',
+        direct && direct.count === 7 && direct.scanned === 17);
+    check('pile: an unreadable store is null, not zero',
+        countLivePile(PROJ, { store: path.join(TMP, 'no-such-store') }) === null);
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);

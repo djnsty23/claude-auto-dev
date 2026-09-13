@@ -363,6 +363,39 @@ try {
         }
     } catch { /* not a git repo, git unavailable, or an unparseable worktree list */ }
 
+    // ---- Session pile ----
+    //
+    // [measured 2026-09-13] 35 live Desktop sessions, 24 of them reading as
+    // active on the same day, and the operator named the pile as the main
+    // harness problem. The cheapest fix is at the door: say how deep the pile
+    // already is before this session adds to it. Silent at or under the
+    // threshold, so a normal start costs zero added bytes.
+    //
+    // Counted against the MAIN checkout root, because every worktree session
+    // records the repo it was started from as originCwd.
+    try {
+        const max = Number.parseInt(process.env.AUTODEV_SESSION_PILE_MAX || '6', 10);
+        if (Number.isFinite(max) && max >= 0) {
+            let repoRoot = cwd;
+            try {
+                const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+                    cwd, timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+                }).toString().trim();
+                if (path.basename(common) === '.git') repoRoot = path.dirname(common);
+            } catch { /* not a git repo: the cwd is the only root there is */ }
+
+            const { countLivePile } = require(path.join(PLUGIN_ROOT, 'scripts', 'session-pile.js'));
+            const pile = countLivePile(repoRoot, { excludeCliSessionId: payload.session_id });
+            if (pile && pile.count > max) {
+                context.push(
+                    `Session pile: ${pile.count} other live sessions were started from this repo in the last 14 days `
+                    + `(threshold ${max}). Before opening more parallel work, the sessions skill lists which are `
+                    + 'DONE or MERGED and safe to archive, and a drained session can settle itself.',
+                );
+            }
+        }
+    } catch { /* pile count is advisory; the banner must survive it */ }
+
     // ---- Standing fleet brief ----
     //
     // A coordinating session publishes one with fleet-brief.js; every session
