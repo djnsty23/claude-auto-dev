@@ -614,6 +614,22 @@ check('the subject consults the NATIVE realpath, which is the only resolver that
 check('  and it still consults the JS resolver too, which is the one that follows a symlink',
     /fs\.realpathSync\s*\(/.test(fs.readFileSync(SUBJECT, 'utf8')));
 
+// -- the --selftest entry point ------------------------------------------------
+//
+// `[measured 2026-09-13]` selftest() was the one plugin function #218 added that
+// no suite entered on any platform, so check:coverage counted it as never called
+// (docs/evidence-coverage-floor-per-platform-2026-09-13.md). It drives the pure
+// layer with planted evidence, so it is the same assertion on every host. Spawned
+// rather than required: it is reached only through the CLI dispatch.
+{
+    const r = spawnSync(process.execPath, [SUBJECT, '--selftest'], { encoding: 'utf8', timeout: 60000 });
+    const passes = (r.stdout.match(/^PASS {2}/gm) || []).length;
+    const fails = (r.stdout.match(/^FAIL {2}/gm) || []).length;
+    check('--selftest exits 0 with its PASS lines and no FAIL line',
+        r.status === 0 && !r.error && passes >= 5 && fails === 0,
+        `status=${r.status} error=${r.error ? r.error.message : 'none'} passes=${passes} fails=${fails}\n${(r.stdout + r.stderr).slice(-600)}`);
+}
+
 // -- the repo's own macOS truncation trap ------------------------------------
 //
 // `process.exit()` after writing to stdout delivers exactly 65536 bytes through
