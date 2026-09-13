@@ -421,6 +421,20 @@ function cleanup() {
 }
 
 if (require.main === module) {
+    // --help must return before cleanup(). On Windows that call is five child
+    // processes (wmic, taskkill x3, PowerShell x2) and measured 8-10 s with ~190
+    // node processes live, which blew the entrypoint checker's 10 s budget. It
+    // also KILLS things: a request for usage text used to close Snipping Tool.
+    if (process.argv.includes('--help') || process.argv.includes('-h')) {
+        console.log('agent-browser-cleanup.js: SessionStart hook.\n'
+            + 'Windows: kills zombie agent-browser Chromium (tree), crashpad_handler,\n'
+            + 'SnippingTool and ScreenClippingHost; removes the HKCU Run autostart entry;\n'
+            + 'patches agent-browser Chromium profiles to stop re-registering.\n'
+            + 'macOS/Linux: reaps abandoned agent-browser processes by pid, never by pattern.\n'
+            + 'Manual use: node "${CLAUDE_PLUGIN_ROOT}/hooks/agent-browser-cleanup.js"\n'
+            + 'Never blocks a session; every path exits 0; silence is zero bytes.');
+        process.exit(0);
+    }
     cleanup();
     process.exit(0);
 }

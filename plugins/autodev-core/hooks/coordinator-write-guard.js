@@ -241,11 +241,33 @@ function expandHome(raw) {
 }
 
 /**
- * Unwrap, expand a home prefix, then resolve. Every path this guard derives
- * from a command string goes through here, so a new prefix is handled at one
- * site rather than at the six that previously called `path.resolve` directly.
+ * Git Bash spells drive C as `/c`. `path.resolve` on win32 reads `/c/Users/me`
+ * as ROOT-RELATIVE on the base path's drive, so it produces `C:\c\Users\me`.
+ * `[measured 2026-09-13]` plugin 8.168.0: `cd /c/Users/<u>/<home-repo> && ...
+ * && git merge` was BLOCKED from the coordinator's own home repo, with a
+ * message naming `C:\c\Users\...`, while the `~/` spelling of the same command
+ * was allowed. Third arrival of the backslash and `~` defect family: a path
+ * the shell understands, which Node resolves to a different directory.
+ *
+ * win32 only. On POSIX `/c/x` is an ordinary absolute path and must stay one.
+ * A single letter followed by `/` or the end of the token, so `/cache` and
+ * `/tmp` are untouched.
  */
-const resolveArg = (base, raw) => path.resolve(base, expandHome(unwrap(raw)));
+const MSYS_DRIVE = /^\/([A-Za-z])(?=$|\/)/;
+function msysDrive(raw) {
+    if (process.platform !== 'win32') return raw;
+    return raw.replace(MSYS_DRIVE, (_, d) => `${d.toUpperCase()}:/`);
+}
+
+/** Every spelling this guard translates into a path Node resolves the same way the shell does. */
+const nativePath = (raw) => msysDrive(expandHome(raw));
+
+/**
+ * Unwrap, translate, then resolve. Every path this guard derives from a
+ * command string goes through here, so a new prefix is handled at one site
+ * rather than at the six that previously called `path.resolve` directly.
+ */
+const resolveArg = (base, raw) => path.resolve(base, nativePath(unwrap(raw)));
 
 /**
  * Split into command-position segments.
@@ -486,7 +508,7 @@ try {
         .concat(Array.isArray(role.home_repos) ? role.home_repos : [])
         .concat(typeof role.home_repo === 'string' ? [role.home_repo] : [])
         .filter((h) => typeof h === 'string' && h.length)
-        .map(expandHome);
+        .map(nativePath);
     if (!homes.length) {
         process.stderr.write(`coordinator-write-guard: ${rolePath} declares no home_repo/home_repos, `
             + `so every directory would count as foreign; not guarding rather than blocking everything.\n`);

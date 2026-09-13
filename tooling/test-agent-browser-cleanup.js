@@ -598,6 +598,45 @@ if (process.platform !== 'win32') {
     check('  and says nothing on stderr either', (r.stderr || '') === '');
 }
 
+// --help does no work. Every process tool the hook reaches for is shadowed on
+// PATH by a shim that records its own name, so "no work" is an observable file
+// rather than an inference from a fast clock. The no-argument run through the
+// same shims is the known positive: without it, a shim the shell never resolves
+// would make the --help assertion pass for free.
+{
+    const sb = sandbox();
+    const bin = path.join(sb.home, 'shim-bin');
+    const log = path.join(sb.home, 'shim-calls.log');
+    fs.mkdirSync(bin, { recursive: true });
+    for (const tool of ['ps', 'taskkill', 'wmic', 'powershell']) {
+        if (process.platform === 'win32') {
+            fs.writeFileSync(path.join(bin, tool + '.cmd'), `@echo ${tool}>>"${log}"\r\n@exit /b 1\r\n`);
+        } else {
+            const p = path.join(bin, tool);
+            fs.writeFileSync(p, `#!/bin/sh\necho ${tool} >> '${log}'\nexit 1\n`);
+            fs.chmodSync(p, 0o755);
+        }
+    }
+    const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+    const env = {
+        ...process.env, HOME: sb.home, USERPROFILE: sb.home, LOCALAPPDATA: sb.localAppData,
+        [pathKey]: bin + path.delimiter + (process.env[pathKey] || ''),
+    };
+    const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\s+/) : []);
+
+    for (const flag of ['--help', '-h']) {
+        const started = Date.now();
+        const h = spawnSync(process.execPath, [HOOK, flag], { encoding: 'utf8', env, input: '', timeout: 10000 });
+        const ms = Date.now() - started;
+        check(`${flag}: exits 0 with usage text (${ms}ms)`, h.status === 0 && /SessionStart hook/.test(h.stdout || ''));
+        check(`  and spawns no process tool (calls: ${calls().join(',') || 'none'})`, calls().length === 0);
+    }
+
+    const r = spawnSync(process.execPath, [HOOK], { encoding: 'utf8', env, input: '', timeout: 60000 });
+    check(`known positive: a no-argument run reaches the shims (calls: ${calls().join(',') || 'none'})`,
+        r.status === 0 && calls().length > 0);
+}
+
 // The Windows-only paths must be inert elsewhere, or a macOS session start would
 // shell out to taskkill on every launch.
 if (process.platform !== 'win32') {
