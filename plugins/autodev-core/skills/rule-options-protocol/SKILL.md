@@ -43,6 +43,17 @@ after making the result concrete and reviewable. Silence is not approval.
 For optional preferences, use a stated reasonable assumption if no answer arrives
 and the host permits continuing. Keep independent work moving.
 
+## A drained session offers to settle
+
+A panel that ends every turn makes a finished session look identical to a
+blocked one in any session list. When the selection is fully delivered and
+nothing is queued, make the tail option **Settle this session** instead of a
+bare stop, where the host can archive a session. On pick, run the `sessions`
+skill's `--self` check and archive only when it reports `"settle": true`;
+otherwise name its blockers. Give the final report before archiving, because
+archiving ends the conversation. Never mark it `(Recommended)`: ending the
+session stays the user's call.
+
 ## Match the current host
 
 Claude Code may expose `AskUserQuestion`; other hosts expose different question
