@@ -20,10 +20,10 @@
 // Every quiet path is zero bytes on both streams: no pending list, no
 // package.json, no scripts, or a green run. Always exits 0.
 //
-// hooks_profile=minimal (plugin userConfig, reaching hooks as
-// CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE) skips this hook: it advises, it never
+// The `typecheck` switch (plugin userConfig, reaching hooks as
+// CLAUDE_PLUGIN_OPTION_TYPECHECK="false") skips this hook: it advises, it never
 // guards. tooling/test-hooks-profile.js holds the list of hooks that may.
-if (/^minimal$/i.test(process.env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE || process.env.CLAUDE_PLUGIN_OPTION_hooks_profile || '')) process.exit(0);
+if (process.env.CLAUDE_PLUGIN_OPTION_TYPECHECK === 'false') process.exit(0);
 
 const fs = require('fs');
 const path = require('path');

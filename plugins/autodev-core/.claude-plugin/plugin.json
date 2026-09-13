@@ -17,11 +17,47 @@
     "qa"
   ],
   "userConfig": {
-    "hooks_profile": {
-      "type": "string",
-      "title": "autodev hook profile",
-      "description": "full (default) runs every hook. minimal keeps the hooks that guard or block (write filter, coordinator guard, panel and peer budgets, sprint stop check, brain report, compaction bookkeeping) and skips the advisory ones (typecheck, telemetry, context nudge, inbox notify, image scan, instructions ledger). Any other value reads as full.",
-      "default": "full"
+    "typecheck": {
+      "type": "boolean",
+      "title": "autodev: typecheck after edits",
+      "description": "Record edited TypeScript files and run the project's typecheck when the turn ends. Off skips both halves.",
+      "default": true
+    },
+    "telemetry": {
+      "type": "boolean",
+      "title": "autodev: tool telemetry",
+      "description": "Write per-tool timing reports under .claude/reports/.",
+      "default": true
+    },
+    "context_nudge": {
+      "type": "boolean",
+      "title": "autodev: context depth nudge",
+      "description": "Suggest a fresh session once the context grows past the cost line.",
+      "default": true
+    },
+    "inbox_notify": {
+      "type": "boolean",
+      "title": "autodev: peer inbox notice",
+      "description": "Mention waiting messages from other sessions.",
+      "default": true
+    },
+    "image_scan": {
+      "type": "boolean",
+      "title": "autodev: prompt image scan",
+      "description": "Check images pasted into a prompt before they reach the model.",
+      "default": true
+    },
+    "instructions_ledger": {
+      "type": "boolean",
+      "title": "autodev: instructions ledger",
+      "description": "Log which instruction files loaded into each session.",
+      "default": true
+    },
+    "workflow_wall_note": {
+      "type": "boolean",
+      "title": "autodev: lost workflow note",
+      "description": "When a turn ends, name a workflow run that was cut off and the command that resumes it.",
+      "default": true
     }
   }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// hooks_profile=minimal (plugin userConfig, reaching hooks as CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE)
+// The `inbox_notify` switch (plugin userConfig, CLAUDE_PLUGIN_OPTION_INBOX_NOTIFY="false")
 // skips this hook: it advises, it never guards. tooling/test-hooks-profile.js holds the list.
-if (/^minimal$/i.test(process.env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE || process.env.CLAUDE_PLUGIN_OPTION_hooks_profile || '')) process.exit(0);
+if (process.env.CLAUDE_PLUGIN_OPTION_INBOX_NOTIFY === 'false') process.exit(0);
 
 // UserPromptSubmit hook — tell Claude when something new landed in the inbox.
 //
