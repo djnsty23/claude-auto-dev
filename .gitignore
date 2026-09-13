@@ -24,8 +24,16 @@ handoff-*.md
 # Session analytics
 ledger.json
 
-# Auto mode flag (session-specific)
+# Auto mode flags (session-specific). auto-exit is written by the auto skill and
+# auto-idle-triggered by stop-auto-check.js; both are removed by that hook.
 .claude/auto-active
+.claude/auto-exit
+.claude/auto-idle-triggered
+
+# Pending typecheck list: post-tool-typecheck.js appends one ABSOLUTE path per
+# edited file and stop-typecheck.js consumes it. Unignored, validate reads it as
+# a home-path leak and goes red for as long as a session is editing here.
+.claude/.typecheck-pending
 
 # Session carriers and verbatim user prompts (autodev-memory). The directory
 # also writes its own .gitignore, so this line is belt-and-braces.
