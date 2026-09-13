@@ -128,16 +128,16 @@ const silent = (r) => r.status === 0 && r.stdout === '' && r.stderr === '';
 
 // ---------------------------------------------------------------- profile
 
-// hooks_profile=minimal switches this hook off. The control is the same edit
-// without the profile, in a fresh project, so the case cannot pass on a hook
-// that records nothing at all.
+// The `typecheck` switch set to false turns this hook off. The control is the
+// same edit with the switch on, in a fresh project, so the case cannot pass on
+// a hook that records nothing at all.
 {
     const off = project();
-    const r = run(off, { file_path: 'src/app.ts' }, { env: { CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE: 'minimal' } });
-    check('hooks_profile=minimal records nothing', silent(r) && pending(off) === null);
+    const r = run(off, { file_path: 'src/app.ts' }, { env: { CLAUDE_PLUGIN_OPTION_TYPECHECK: 'false' } });
+    check('typecheck=false records nothing', silent(r) && pending(off) === null);
     const on = project();
-    run(on, { file_path: 'src/app.ts' }, { env: { CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE: 'full' } });
-    check('  control: hooks_profile=full records', pending(on) !== null);
+    run(on, { file_path: 'src/app.ts' }, { env: { CLAUDE_PLUGIN_OPTION_TYPECHECK: 'true' } });
+    check('  control: typecheck=true records', pending(on) !== null);
 }
 
 // ---------------------------------------------------------------- report

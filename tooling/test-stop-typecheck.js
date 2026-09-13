@@ -196,10 +196,10 @@ const PASSING = 'node -e "process.exit(0)"';
 
 {
     const dir = project({ scripts: { typecheck: FAILING }, pending: ['src/app.ts'] });
-    const r = run(dir, { env: { CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE: 'minimal' } });
-    check('hooks_profile=minimal: silent', silent(r));
+    const r = run(dir, { env: { CLAUDE_PLUGIN_OPTION_TYPECHECK: 'false' } });
+    check('typecheck=false: silent', silent(r));
     const on = project({ scripts: { typecheck: FAILING }, pending: ['src/app.ts'] });
-    check('  control: hooks_profile=full blocks', blocked(run(on, { env: { CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE: 'full' } })));
+    check('  control: typecheck=true blocks', blocked(run(on, { env: { CLAUDE_PLUGIN_OPTION_TYPECHECK: 'true' } })));
 }
 
 // ---------------------------------------------------------------- report

@@ -1,19 +1,20 @@
 #!/usr/bin/env node
-// Tests for autodev-core's hook profile: plugin userConfig `hooks_profile`.
+// Tests for autodev-core's advisory hook switches: plugin userConfig booleans.
 //
 // Ported from ECC's hook profiles on 2026-09-07
-// (docs/evidence-ecc-comparison-2026-09-07.md), as one boolean-shaped choice
-// rather than three tiers: `minimal` keeps every hook that guards or blocks
-// and skips every hook that only advises. Claude Code hands a plugin's
-// userConfig to its hooks as CLAUDE_PLUGIN_OPTION_<KEY> (read out of the
-// shipping binary, 2.1.233: "they become CLAUDE_PLUGIN_OPTION_<KEY> env vars
-// in hooks"), which is the only plumbing this needs.
+// (docs/evidence-ecc-comparison-2026-09-07.md) as one string, `hooks_profile`.
+// Replaced 2026-09-13 by one boolean per advisory hook, because a boolean is
+// the only userConfig type the Config tab renders as a fixed choice: the field
+// schema is strict and has no enum (read out of the 2.1.270 binary, which also
+// shows the env contract: key upper-cased, value `String(v)`, so off arrives
+// as CLAUDE_PLUGIN_OPTION_<KEY>="false").
 //
-// The property this suite exists for is the SPLIT. A guard that honoured the
-// profile would be a guard the model can switch off by asking the user for a
+// The property this suite exists for is the SPLIT. A guard that honoured a
+// switch would be a guard the model can switch off by asking the user for a
 // setting, so the two lists below are exhaustive over hooks.json: every wired
-// hook is in exactly one, the advisory ones carry the guard line, and the
-// guarding ones must NOT. A new hook fails here until it is classified.
+// hook is in exactly one, each advisory hook reads its own switch, and the
+// guarding ones read no plugin option at all. A new hook fails here until it
+// is classified.
 //
 // Run: node tooling/test-hooks-profile.js
 
@@ -25,19 +26,25 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'autodev-core');
 const HOOKS = path.join(PLUGIN, 'hooks');
-const GUARD = 'CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE';
+const OPTION = 'CLAUDE_PLUGIN_OPTION_';
+const envKey = (key) => OPTION + key.replace(/[^A-Za-z0-9_]/g, '_').toUpperCase();
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
 
-// Hooks that only advise: under `minimal` they exit before reading stdin.
-const ADVISORY = [
-    'post-tool-typecheck.js', 'stop-typecheck.js', 'telemetry.js', 'context-depth-nudge.js',
-    'inbox-notify.js', 'user-prompt-image-scan.js', 'instructions-loaded.js',
+// Hooks that only advise, each with the userConfig key that switches it off.
+const ADVISORY = {
+    'post-tool-typecheck.js': 'typecheck',
+    'stop-typecheck.js': 'typecheck',
+    'telemetry.js': 'telemetry',
+    'context-depth-nudge.js': 'context_nudge',
+    'inbox-notify.js': 'inbox_notify',
+    'user-prompt-image-scan.js': 'image_scan',
+    'instructions-loaded.js': 'instructions_ledger',
     // #200's Stop note: names a lost workflow run and its resume command, as a
     // systemMessage with no decision key. It advises.
-    'stop-workflow-wall-note.js',
-];
+    'stop-workflow-wall-note.js': 'workflow_wall_note',
+};
 // Hooks that guard, block, or keep state the sprint and the Brain depend on.
 const GUARDING = [
     'pre-tool-filter.js', 'coordinator-write-guard.js', 'panel-recommendation.js', 'peer-message-budget.js',
@@ -49,10 +56,15 @@ const GUARDING = [
 
 {
     const manifest = JSON.parse(fs.readFileSync(path.join(PLUGIN, '.claude-plugin', 'plugin.json'), 'utf8'));
-    const cfg = manifest.userConfig && manifest.userConfig.hooks_profile;
-    check('plugin.json declares userConfig.hooks_profile', !!cfg);
-    check('  as a string defaulting to full', cfg && cfg.type === 'string' && cfg.default === 'full');
-    check('  and its description names minimal', cfg && /minimal/.test(cfg.description || ''));
+    const cfg = manifest.userConfig || {};
+    const keys = [...new Set(Object.values(ADVISORY))];
+    check('plugin.json no longer declares the free-text hooks_profile', !('hooks_profile' in cfg));
+    check('  and declares exactly one switch per advisory key', JSON.stringify(Object.keys(cfg).sort()) === JSON.stringify(keys.sort()), Object.keys(cfg));
+    for (const k of keys) {
+        const f = cfg[k];
+        check(`  ${k} is a boolean defaulting to on, with a title and description`,
+            !!f && f.type === 'boolean' && f.default === true && !!f.title && !!f.description, f);
+    }
 }
 
 // ---------------------------------------------------------------- the split
@@ -66,47 +78,47 @@ const GUARDING = [
             if (a) wired.add(path.basename(a));
         }
     }
-    const classified = new Set([...ADVISORY, ...GUARDING]);
+    const classified = new Set([...Object.keys(ADVISORY), ...GUARDING]);
     const unclassified = [...wired].filter((w) => !classified.has(w));
     const stale = [...classified].filter((c) => !wired.has(c));
     check('every wired hook is classified advisory or guarding', unclassified.length === 0, unclassified);
     check('  and nothing in the lists has been unwired', stale.length === 0, stale);
-    check('  and no hook is in both lists', ADVISORY.every((a) => !GUARDING.includes(a)));
+    check('  and no hook is in both lists', Object.keys(ADVISORY).every((a) => !GUARDING.includes(a)));
 
-    for (const f of ADVISORY) {
+    for (const [f, key] of Object.entries(ADVISORY)) {
         const src = fs.readFileSync(path.join(HOOKS, f), 'utf8');
-        check(`${f} honours the profile`, src.includes(GUARD));
+        const read = [...new Set(src.match(/CLAUDE_PLUGIN_OPTION_[A-Z0-9_]+/g) || [])];
+        check(`${f} reads its own switch and no other`, read.length === 1 && read[0] === envKey(key), read);
     }
     for (const f of GUARDING) {
         const src = fs.readFileSync(path.join(HOOKS, f), 'utf8');
-        check(`${f} does NOT honour it (a guard the model could switch off is no guard)`, !src.includes(GUARD));
+        check(`${f} reads no plugin option (a guard the model could switch off is no guard)`, !src.includes(OPTION));
     }
 }
 
 // The guard must sit where a `'use strict'` directive still counts: a
 // statement inserted above the directive turns it into a no-op expression.
 {
-    for (const f of ADVISORY) {
+    for (const [f, key] of Object.entries(ADVISORY)) {
         const lines = fs.readFileSync(path.join(HOOKS, f), 'utf8').split('\n');
         const strict = lines.findIndex((l) => /^\s*['"]use strict['"];?\s*$/.test(l));
-        const guard = lines.findIndex((l) => l.includes(GUARD) && /process\.exit\(0\)/.test(l));
-        if (strict >= 0) check(`${f}: the guard sits below 'use strict'`, guard > strict, { strict, guard });
+        const guard = lines.findIndex((l) => l.includes(envKey(key)) && /process\.exit\(0\)/.test(l));
+        check(`${f}: the switch exits before any work`, guard >= 0, { guard });
+        if (strict >= 0) check(`${f}: the switch sits below 'use strict'`, guard > strict, { strict, guard });
     }
 }
 
 // ---------------------------------------------------------------- behaviour
 
 // Two advisory hooks with an observable side effect, each with a control run
-// under `full` in a fresh directory, so neither case can pass on a hook that
-// does nothing at all.
+// in a fresh directory, so neither case can pass on a hook that does nothing.
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'profile-test-')));
 let n = 0;
 const fresh = () => { const d = path.join(TMP, 'd' + ++n); fs.mkdirSync(d, { recursive: true }); return d; };
-function runHook(file, dir, payload, profile) {
+function runHook(file, dir, payload, options) {
     const env = { ...process.env, CLAUDE_PROJECT_DIR: dir };
-    delete env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE;
-    delete env.CLAUDE_PLUGIN_OPTION_hooks_profile;
-    if (profile !== undefined) env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE = profile;
+    for (const k of Object.keys(env)) if (k.startsWith(OPTION)) delete env[k];
+    for (const [k, v] of Object.entries(options || {})) env[envKey(k)] = v;
     const r = spawnSync(process.execPath, [path.join(HOOKS, file)], {
         input: JSON.stringify(payload), encoding: 'utf8', cwd: dir, env,
     });
@@ -122,43 +134,28 @@ const silent = (r) => r.status === 0 && r.stdout === '' && r.stderr === '';
     const reports = (dir) => {
         try { return fs.readdirSync(path.join(dir, '.claude', 'reports')).filter((f) => f.startsWith('telemetry-')); } catch { return []; }
     };
-    const off = fresh();
-    const r = runHook('telemetry.js', off, payload(off), 'minimal');
-    check('telemetry under minimal writes no report', silent(r) && reports(off).length === 0);
-    const on = fresh();
-    runHook('telemetry.js', on, payload(on), 'full');
-    check('  control: telemetry under full writes one', reports(on).length === 1, reports(on));
-    const upper = fresh();
-    const u = runHook('telemetry.js', upper, payload(upper), 'MINIMAL');
-    check('  the value is case-insensitive', silent(u) && reports(upper).length === 0);
-    const other = fresh();
-    runHook('telemetry.js', other, payload(other), 'strict');
-    check('  and any other value reads as full', reports(other).length === 1);
+    const writes = (options) => { const d = fresh(); const r = runHook('telemetry.js', d, payload(d), options); return { r, count: reports(d).length }; };
+
+    const off = writes({ telemetry: 'false' });
+    check('telemetry=false writes no report', silent(off.r) && off.count === 0);
+    check('  control: telemetry=true writes one', writes({ telemetry: 'true' }).count === 1);
+    check('  and an unset switch reads as on', writes({}).count === 1);
+    // Per-key, not global: switching a DIFFERENT hook off must not silence this one.
+    check('  and another hook\'s switch does not reach it', writes({ context_nudge: 'false', typecheck: 'false' }).count === 1);
+    // Only the exact value the host sends for off counts; anything else runs.
+    check('  and a value the host never sends reads as on', writes({ telemetry: 'no' }).count === 1);
 }
 
 {
     const payload = { hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'src/app.ts' } };
     const pendingIn = (dir) => fs.existsSync(path.join(dir, '.claude', '.typecheck-pending'));
-    const off = fresh();
-    fs.writeFileSync(path.join(off, 'package.json'), '{"name":"p","scripts":{}}');
-    const r = runHook('post-tool-typecheck.js', off, payload, 'minimal');
-    check('post-tool-typecheck under minimal records nothing', silent(r) && !pendingIn(off));
-    const on = fresh();
-    fs.writeFileSync(path.join(on, 'package.json'), '{"name":"p","scripts":{}}');
-    runHook('post-tool-typecheck.js', on, payload, undefined);
-    check('  control: with no profile set it records', pendingIn(on));
-}
-
-// The lowercase key variant, in case the host does not upper-case the key.
-{
-    const dir = fresh();
-    fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"p","scripts":{}}');
-    const env = { ...process.env, CLAUDE_PLUGIN_OPTION_hooks_profile: 'minimal' };
-    delete env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE;
-    const r = spawnSync(process.execPath, [path.join(HOOKS, 'post-tool-typecheck.js')], {
-        input: JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: 'src/app.ts' } }), encoding: 'utf8', cwd: dir, env,
-    });
-    check('the lowercase env key is honoured too', r.status === 0 && r.stdout === '' && !fs.existsSync(path.join(dir, '.claude', '.typecheck-pending')));
+    const project = () => { const d = fresh(); fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","scripts":{}}'); return d; };
+    const off = project();
+    const r = runHook('post-tool-typecheck.js', off, payload, { typecheck: 'false' });
+    check('post-tool-typecheck with typecheck=false records nothing', silent(r) && !pendingIn(off));
+    const on = project();
+    runHook('post-tool-typecheck.js', on, payload, {});
+    check('  control: with no switch set it records', pendingIn(on));
 }
 
 // ---------------------------------------------------------------- report
