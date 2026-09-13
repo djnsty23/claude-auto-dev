@@ -152,7 +152,9 @@ destructive consequences exceed that request. Preserve ongoing work.
 The app archives a session when its PR closes, but only for a PR it bound.
 `bind_pr` binds the CALLING session, so a sweep cannot bind for another one.
 For each unbound OPEN row, send the owning session one line with
-`send_message`: "Bind your PR: call bind_pr with <url>." An unbound MERGED or
+`send_message`: "Bind your PR: call bind_pr with <url>." Skip a row marked
+`already bound to "<title>"`: another session holds that binding, and its close
+already archives that session. An unbound MERGED or
 CLOSED PR needs no binding; its row already reads MERGED and follows Step 3.
 
 ## Settle this session (self)

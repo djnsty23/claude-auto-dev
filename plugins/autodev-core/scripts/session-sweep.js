@@ -350,16 +350,38 @@ function refreshPrStates(sessions) {
  * branch is skipped too, because the repo root's branch is not the session's.
  */
 const TRUNKS = new Set(['main', 'master', 'trunk', 'develop', 'HEAD']);
-function unboundPrsFor(s, byHead) {
+//
+// `boundElsewhere` maps "repo#number" to the title of another live session that
+// binds that PR. [measured 2026-09-13] nvision#10 was reported unbound for the
+// session on its branch while "Take the CV editor live" already bound it, and a
+// bind request sent on that report would have doubled the binding. The PR still
+// counts toward this session's verdict; only the advice changes.
+function unboundPrsFor(s, byHead, boundElsewhere = new Map()) {
   if (!s.worktreePath && !s.branch) return [];
   const slug = repoSlugOf(s);
   const branch = liveBranch(s);
   if (!slug || !branch || TRUNKS.has(branch)) return [];
   const found = (byHead.get(slug) && byHead.get(slug).get(branch)) || [];
-  const bound = new Set((s.prs || []).map((p) => `${String(p.repo || '').toLowerCase()}#${p.prNumber}`));
+  const keyOf = (repo, n) => `${String(repo || '').toLowerCase()}#${n}`;
+  const bound = new Set((s.prs || []).map((p) => keyOf(p.repo, p.prNumber)));
   return found
-    .filter((pr) => !bound.has(`${slug.toLowerCase()}#${pr.number}`))
-    .map((pr) => ({ prNumber: pr.number, repo: slug, url: pr.url || null, state: String(pr.state).toUpperCase() }));
+    .filter((pr) => !bound.has(keyOf(slug, pr.number)))
+    .map((pr) => ({
+      prNumber: pr.number, repo: slug, url: pr.url || null, state: String(pr.state).toUpperCase(),
+      boundTo: boundElsewhere.get(keyOf(slug, pr.number)) || null,
+    }));
+}
+
+// Every live binding, keyed "repo#number" -> the binding session's title.
+function bindingsOf(sessions) {
+  const map = new Map();
+  for (const s of sessions) {
+    for (const p of s.prs || []) {
+      const k = `${String(p.repo || '').toLowerCase()}#${p.prNumber}`;
+      if (!map.has(k)) map.set(k, s.title || s.sessionId);
+    }
+  }
+  return map;
 }
 
 /**
@@ -706,8 +728,9 @@ function archiveOrphaned(rows) {
 }
 
 const FINISHED = new Set(['MERGED', 'STALE', 'DONE']);
+const bindings = bindingsOf(live);
 const rows = live.map((s) => {
-  const unbound = unboundPrsFor(s, byHead);
+  const unbound = unboundPrsFor(s, byHead, bindings);
   const c = classify(s, prStates, unbound);
   const finished = FINISHED.has(c.state);
   const thirdParty = finished ? isThirdParty(s) : false;
@@ -828,7 +851,8 @@ const unboundRows = rows.filter((r) => r.unbound.length);
 console.log(`\nPRs NOT BOUND to the session whose branch they came from: ${unboundRows.length}`);
 for (const r of unboundRows) {
   for (const p of r.unbound) {
-    console.log(`  - ${r.s.title} — #${p.prNumber} ${p.state}${p.url ? ' ' + p.url : ''}  (${r.s.sessionId})`);
+    const where = p.boundTo ? `  [already bound to "${p.boundTo}", do not re-bind]` : '';
+    console.log(`  - ${r.s.title} — #${p.prNumber} ${p.state}${p.url ? ' ' + p.url : ''}  (${r.s.sessionId})${where}`);
   }
 }
 console.log(`\nSAFE TO ARCHIVE: ${safe.length}`);

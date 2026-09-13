@@ -428,6 +428,12 @@ function checkDoneUnboundAndSelf() {
   check('unbound: the open PR is reported by number', nums(by('unbound-open')), '7');
   check('unbound: a merged unbound PR settles the session', by('unbound-merged').state, 'MERGED');
   check('unbound: an already-bound PR is not re-reported', nums(by('bound-open')), '');
+  // bound-open binds #7, so unbound-open's report must say so, or a bind request
+  // sent from it would double the binding.
+  check('unbound: a PR bound by another session names that session',
+    ((by('unbound-open').unboundPrs || [])[0] || {}).boundTo, 'bound-open');
+  check('unbound: a PR nobody binds carries no boundTo',
+    ((by('unbound-merged').unboundPrs || [])[0] || {}).boundTo, null);
   check('unbound: a trunk branch claims no PR', nums(by('on-trunk')), '');
 
   // ---- --self
