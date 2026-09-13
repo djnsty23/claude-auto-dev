@@ -385,6 +385,100 @@ function checkLiveTranscriptBlocks() {
   check('cold transcript: carries no risk label', cold && cold.risk, null);
 }
 
+// DONE, unbound PRs, and --self. The PR list comes from SESSION_SWEEP_PR_FIXTURE,
+// so gh is never called and no real PR can reach a verdict here.
+//
+// The safety claim under test is the unbound-open case: an open PR the app never
+// bound must keep its session OUT of DONE. [measured 2026-09-13] three live
+// sessions owned open PRs that their records did not carry.
+function checkDoneUnboundAndSelf() {
+  const slug = 'github.com/origin';   // what repoSlugOf reads off BARE's path
+  const fixtureFile = path.join(ROOT, 'pr-fixture.json');
+  fs.writeFileSync(fixtureFile, JSON.stringify({ [slug]: [
+    { number: 7, state: 'OPEN', headRefName: 'feat-open', url: 'https://github.com/o/r/pull/7' },
+    { number: 8, state: 'MERGED', headRefName: 'feat-merged', url: 'https://github.com/o/r/pull/8' },
+    { number: 9, state: 'OPEN', headRefName: 'main', url: 'https://github.com/o/r/pull/9' },
+  ] }), 'utf8');
+  const env = { SESSION_SWEEP_PR_FIXTURE: fixtureFile };
+  const H = 60 * 60000;
+  const rec = (id, extra) => ({
+    sessionId: `local_${id}`, title: id, cwd: MAIN, originCwd: MAIN,
+    isArchived: false, createdAt: Date.now() - 2 * 86400000, ...extra,
+  });
+
+  const rows = sweepWith([
+    rec('done-cold', { branch: 'nothing-open', lastActivityAt: Date.now() - 5 * H }),
+    rec('done-warm', { branch: 'nothing-open', lastActivityAt: Date.now() - 30 * 60000 }),
+    rec('sched-cold', { branch: 'nothing-open', scheduledTaskId: 'suite', lastActivityAt: Date.now() - 5 * H }),
+    rec('unbound-open', { branch: 'feat-open', lastActivityAt: Date.now() - 5 * H }),
+    rec('unbound-merged', { branch: 'feat-merged', lastActivityAt: Date.now() - 5 * H }),
+    rec('bound-open', { branch: 'feat-open', lastActivityAt: Date.now() - 5 * H,
+      prs: [{ prNumber: 7, repo: slug, state: 'OPEN' }] }),
+    rec('on-trunk', { branch: 'main', lastActivityAt: Date.now() - 5 * H }),
+  ], 'done', env);
+  const by = (id) => rows.find((r) => r.sessionId === `local_${id}`) || {};
+  const nums = (r) => (r.unboundPrs || []).map((p) => p.prNumber).join(',');
+
+  check('done: population read', rows.length, 7);
+  check('done: cold PR-less session is DONE', by('done-cold').state, 'DONE');
+  check('done: DONE with nothing on disk is SAFE', by('done-cold').safe, true);
+  check('done: the warm control stays ACTIVE', by('done-warm').state, 'ACTIVE');
+  check('done: a scheduled session keeps its own clock', by('sched-cold').state, 'ACTIVE');
+  check('unbound: an open PR on the branch keeps it out of DONE', by('unbound-open').state, 'PR-OPEN');
+  check('unbound: the open PR is reported by number', nums(by('unbound-open')), '7');
+  check('unbound: a merged unbound PR settles the session', by('unbound-merged').state, 'MERGED');
+  check('unbound: an already-bound PR is not re-reported', nums(by('bound-open')), '');
+  check('unbound: a trunk branch claims no PR', nums(by('on-trunk')), '');
+
+  // ---- --self
+  // The clean case carries a FRESH transcript on purpose: it is the caller's own
+  // and must not block, while every other guard still must.
+  const cfg = path.join(ROOT, 'self-config');
+  const plantFresh = (wt) => {
+    const d = path.join(cfg, 'projects', wt.replace(/[/.:\\\\]/g, '-'));
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 't.jsonl'), '{}\n', 'utf8');
+  };
+  const clean = makeWorktree('self-clean', 'case-self-clean');
+  sh('git push -q -u origin case-self-clean', clean);
+  plantFresh(clean);
+  const dirty = makeWorktree('self-dirty', 'case-self-dirty');
+  sh('git push -q -u origin case-self-dirty', dirty);
+  fs.writeFileSync(path.join(dirty, 'wip.txt'), 'uncommitted\n');
+  const withPr = makeWorktree('self-pr', 'feat-open');
+  sh('git push -q -u origin feat-open', withPr);
+  const nobody = path.join(ROOT, 'self-nobody');
+  fs.mkdirSync(nobody, { recursive: true });
+
+  const selfStore = path.join(ROOT, 'store-self');
+  const selfDir = path.join(selfStore, 'live-ws', 'sub');
+  fs.mkdirSync(selfDir, { recursive: true });
+  for (const [id, wt] of [['self-clean', clean], ['self-dirty', dirty], ['self-pr', withPr]]) {
+    const r = rec(id, { cwd: wt, worktreePath: wt, lastActivityAt: Date.now() });
+    fs.writeFileSync(path.join(selfDir, `${r.sessionId}.json`), JSON.stringify(r), 'utf8');
+  }
+  const selfRun = (cwd) => {
+    const r = spawnSync(process.execPath, [SCRIPT, '--self'], {
+      cwd, encoding: 'utf8',
+      env: { ...process.env, SESSION_SWEEP_STORE: selfStore, SESSION_SWEEP_OWNER: '', CLAUDE_CONFIG_DIR: cfg, ...env },
+    });
+    try { return JSON.parse(r.stdout); }
+    catch { failures.push(`--self in ${cwd}: unparseable\n${(r.stdout || r.stderr || '').slice(0, 300)}`); return { blockers: [] }; }
+  };
+
+  const a = selfRun(clean);
+  check('self: a clean pushed session may settle', a.settle, true);
+  check('self: its own fresh transcript does not block', (a.blockers || []).join(), '');
+  const b = selfRun(dirty);
+  check('self: a dirty worktree may not settle', b.settle, false);
+  check('self: the dirty blocker is named', (b.blockers || []).some((x) => /^dirty\(1 file\)$/.test(x)), true);
+  const c = selfRun(withPr);
+  check('self: an unbound open PR blocks by number', (c.blockers || []).includes('pr-unsettled(#7)'), true);
+  const d = selfRun(nobody);
+  check('self: a cwd with no record fails closed', (d.blockers || []).join(), 'no-session-for-cwd');
+  check('self: and does not settle', d.settle, false);
+}
+
 function run() {
   setup();
   buildCases();
@@ -394,13 +488,16 @@ function run() {
   checkPlatformDefaultPath();
   checkSharedWorktreeBlocks();
   checkLiveTranscriptBlocks();
+  checkDoneUnboundAndSelf();
 
   // Two extra records for the ephemeral clock: same 5-day idle, differing only
   // by whether a schedule launched them. Derived from the same age so the pair
   // cannot drift apart and quietly stop testing the distinction.
   const EPH_AGE = 5;
   cases.push({ id: 'sched-stale', wt: null, scheduledTaskId: 'suite-task', ageDays: EPH_AGE, expectState: 'STALE' });
-  cases.push({ id: 'hand-active', wt: null, ageDays: EPH_AGE, expectState: 'ACTIVE' });
+  // Hand-started and PR-less at 5d is DONE since the DONE verdict landed: it was
+  // ACTIVE only because the one clock for PR-less work was 14 days.
+  cases.push({ id: 'hand-active', wt: null, ageDays: EPH_AGE, expectState: 'DONE' });
 
   // A settled PR bypasses the idle clock, so "merged" alone would call a session
   // finished while its author is still in it — measured on two real sessions

@@ -155,6 +155,11 @@ limits. A prospective checklist is not evidence that tests ran.
 Write the body to a file and pass it with `gh pr create --body-file`; keep the
 literal newlines and avoid shell interpolation of commit/PR text.
 
+Where the host binds PRs to sessions (Claude Desktop's `mcp__ccd_pr__get_status`),
+check the new PR is bound to this session and call `bind_pr` with its URL if not.
+An unbound PR never triggers auto-archive on close, so the session outlives its
+work in the sidebar.
+
 ## Safety Checks
 
 **Before committing:**
