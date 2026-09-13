@@ -331,6 +331,154 @@ try {
         has('  and says the steps were derived', r2.out, 'derived from what is actually in');
     }
 
+    // ---- the six fields, and the dead ends a rerun must not erase -----------
+    //
+    // A handoff that carries only progress sends the next session back into
+    // every approach the last one already found to fail. The field list is
+    // spelled HERE rather than read out of the subject, because the list is the
+    // contract: hooks/context-depth-nudge.js names the same six, pinned by
+    // test-context-depth-nudge.js, so dropping one from either subject goes red.
+    {
+        const FIELDS = ['Goal', 'Current state', 'Files in flight', 'Changes made',
+            'Failed attempts', 'Next steps'];
+        const repo = newRepo('fields');
+        const r = run(repo, ['--print']);
+        const at = FIELDS.map((f) => {
+            const m = new RegExp('^## ' + f + '$', 'm').exec(r.out);
+            return m ? m.index : -1;
+        });
+        FIELDS.forEach((f, i) => check('the document carries the field "## ' + f + '"',
+            at[i] !== -1, r.out.slice(0, 300)));
+        check('  in the one order the nudge names them',
+            at.every((v, i) => v !== -1 && (i === 0 || v > at[i - 1])), JSON.stringify(at));
+
+        const body = (text, title) => (text.split('\n## ' + title + '\n')[1] || '').split('\n## ')[0];
+        const failed = body(r.out, 'Failed attempts');
+        has('an unwritten failed-attempts field SAYS so rather than rendering empty', failed, '_Not written._');
+        has('  and asks for the reason each attempt failed', failed, 'the reason it failed');
+        has('  and asks for "None", so an empty field cannot mean nothing failed', failed, 'Write "None"');
+        has('changes made asks for the command that verified each change',
+            body(r.out, 'Changes made'), 'the command that verified it');
+
+        // The measured blocks keep their names as `###` inside their field, which
+        // is what check-doc-staleness.js keys its generated-status rule on.
+        const idx = (s) => r.out.indexOf(s);
+        check('Unpushed commits sits under Current state',
+            idx('## Current state') < idx('### Unpushed commits')
+            && idx('### Unpushed commits') < idx('## Files in flight'));
+        check('  and so does the generated stamp that dates it',
+            idx('## Current state') < idx('| generated |') && idx('| generated |') < idx('## Files in flight'));
+        check('Uncommitted changes sits under Files in flight',
+            idx('## Files in flight') < idx('### Uncommitted changes')
+            && idx('### Uncommitted changes') < idx('## Changes made'));
+
+        // A rerun keeps what a session wrote and regenerates what it measured.
+        const doc = path.join(repo, 'RESUME.md');
+        const w = run(repo, []);
+        check('a first write succeeds', w.status === 0, 'status ' + w.status);
+        has('  and names every authored field still to write', w.out,
+            'NOT WRITTEN, write these by hand: Goal, Changes made, Failed attempts, Next steps');
+
+        const DEAD_END = 'Retrying the push with a longer timeout: the remote rejects the ref, it is not slow.';
+        const text = fs.readFileSync(doc, 'utf8')
+            .replace(/(## Goal\n\n)[^\n]*\n/, '$1Ship the six-field handoff.\n')
+            .replace(/(## Failed attempts\n\n)[^\n]*\n/, '$1- ' + DEAD_END + '\n\n'
+                + '### Mocking the clock\n\nFailed: the subject captured Date.now at import.\n');
+        check('  (the fixture edit landed, so the checks below are about the rerun)',
+            text.indexOf(DEAD_END) !== -1 && text.indexOf('Ship the six-field') !== -1);
+        fs.writeFileSync(doc, text);
+        fs.writeFileSync(path.join(repo, 'in-flight.txt'), 'mid-edit\n');
+
+        const again = run(repo, []);
+        const after = fs.readFileSync(doc, 'utf8');
+        check('a rerun over our own output succeeds', again.status === 0, 'status ' + again.status);
+        has('  and KEEPS a written failed attempt', after, DEAD_END);
+        has('  including a ### subsection written inside it', after, 'captured Date.now at import');
+        has('  and keeps a written goal', after, 'Ship the six-field handoff.');
+        has('  while the measured field is regenerated', body(after, 'Files in flight'), 'in-flight.txt');
+        check('  and no field is duplicated',
+            (after.match(/^## Failed attempts$/mg) || []).length === 1, after.slice(0, 200));
+        has('  an unwritten field stays unwritten rather than frozen as content',
+            body(after, 'Next steps'), '_Not written._');
+        has('  and it reports what it kept', again.out, 'kept Goal, Failed attempts');
+
+        // A `##` heading the session writes is not this script's to drop.
+        // `[measured 2026-09-13]` by a peer review of the first version: a
+        // `## Retry idea` inside Failed attempts and a `## Notes` appended at the
+        // end were both deleted by a rerun that exited 0 and said it kept them.
+        fs.writeFileSync(doc, fs.readFileSync(doc, 'utf8')
+            .replace(/(## Failed attempts\n\n)/, '$1## Retry idea\n\nRETRY-IDEA-BODY\n\n')
+            + '\n## Notes\n\nNOTES-BODY\n');
+        const third = run(repo, []);
+        const t3 = fs.readFileSync(doc, 'utf8');
+        check('a rerun keeps a ## heading written INSIDE an authored field',
+            third.status === 0 && t3.indexOf('RETRY-IDEA-BODY') !== -1, 'status ' + third.status);
+        check('  and keeps it IN that field, not relocated to the end',
+            t3.indexOf('## Failed attempts') < t3.indexOf('## Retry idea')
+            && t3.indexOf('## Retry idea') < t3.indexOf('## Next steps'));
+        has('  and a ## section appended after the measured ones', t3, 'NOTES-BODY');
+        has('  and says it kept that section', third.out, 'kept 1 section(s) under headings of their own');
+        run(repo, []);
+        const t4 = fs.readFileSync(doc, 'utf8');
+        check('  and a further rerun neither loses nor duplicates either',
+            (t4.match(/^## Notes$/mg) || []).length === 1 && (t4.match(/^## Retry idea$/mg) || []).length === 1
+            && t4.indexOf('NOTES-BODY') !== -1 && t4.indexOf('RETRY-IDEA-BODY') !== -1);
+        has('  while the dead end written before them is still there', t4, DEAD_END);
+
+        // Our OWN layout grown by its carried fields is not a hand-written file.
+        // `[measured 2026-09-13]` same review: 27,926 bytes with a long Failed
+        // attempts was refused as "QUOTES this script's marker".
+        const LINE = '- tried a thing, failed because of a reason\n';
+        const grown = t4.replace(/(## Failed attempts\n\n)/, '$1' + LINE.repeat(700));
+        check('  (the grown file is past the size guard on bytes alone: ' + grown.length + ')',
+            grown.length > 25000);
+        fs.writeFileSync(doc, grown);
+        const g = run(repo, []);
+        check('our own file grown past 20 kB by a carried field reruns without --force',
+            g.status === 0, 'status ' + g.status + ' ' + g.err.slice(0, 160));
+        check('  and keeps every line of the grown field',
+            fs.readFileSync(doc, 'utf8').split(LINE).length - 1 === 700);
+
+        // The planted positive: the same file with the bulk where a rerun DROPS it.
+        const buried = fs.readFileSync(doc, 'utf8')
+            .replace(/(## Files in flight\n\n)/, '$1' + 'z'.repeat(30000) + '\n\n');
+        fs.writeFileSync(doc, buried);
+        const b = run(repo, []);
+        check('  but 30 kB written INSIDE a measured field is refused, a rerun would drop it',
+            b.status === 3, 'status ' + b.status);
+        check('  and is byte-identical afterwards', fs.readFileSync(doc, 'utf8') === buried);
+        has('  and the refusal describes our layout and where the text sits', b.err, 'own layout');
+        lacks('  and does not call it a hand-written file quoting the marker', b.err, 'QUOTES');
+
+        // Authorship decides what is carried, as it decides what is overwritten.
+        const foreign = newRepo('foreign-fields');
+        fs.writeFileSync(path.join(foreign, 'RESUME.md'), '# notes\n\n## Failed attempts\n\nFOREIGN-BODY\n');
+        const fr = run(foreign, []);
+        check('a small foreign RESUME.md is still replaced', fr.status === 0, 'status ' + fr.status);
+        lacks('  and its same-named heading is NOT adopted, since it lacks our marker',
+            fs.readFileSync(path.join(foreign, 'RESUME.md'), 'utf8'), 'FOREIGN-BODY');
+
+        // Carrying must not inflate the output the clobber guard compares against.
+        // Sized against the carried document, a large hand-written file that quotes
+        // the marker AND has an authored-shaped heading would carry its own bulk,
+        // stop looking four times larger, and be overwritten without a prompt.
+        const marker = (fs.readFileSync(SUBJECT, 'utf8').match(/^const MARKER = '([^']+)';/m) || [])[1];
+        check('the suite can read MARKER for the inflation case', !!marker);
+        if (marker) {
+            const big = newRepo('carry-cannot-inflate');
+            const bdoc = path.join(big, 'RESUME.md');
+            const original = 'Hand-written. The string ' + marker + ' is quoted only to explain it.\n\n'
+                + '## Next steps\n\n' + 'y'.repeat(60000) + '\n';
+            fs.writeFileSync(bdoc, original);
+            git(big, ['add', 'RESUME.md']);
+            git(big, ['commit', '-qm', 'a handoff with an authored-shaped heading']);
+            const br = run(big, []);
+            check('a LARGE marker-quoting file with an authored heading is still refused',
+                br.status === 3, 'status ' + br.status);
+            check('  and is byte-identical afterwards', fs.readFileSync(bdoc, 'utf8') === original);
+        }
+    }
+
     // ---- --help MUST NOT WRITE ----------------------------------------------
     //
     // `[measured 2026-09-02]` it did. The flag was unrecognised and fell through
