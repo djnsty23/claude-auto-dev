@@ -43,6 +43,11 @@ const GUARDING = [
     'pre-tool-filter.js', 'coordinator-write-guard.js', 'panel-recommendation.js', 'peer-message-budget.js',
     'stop-auto-check.js', 'stop-brain-report.js', 'stop-failure-note.js', 'session-start.js',
     'agent-browser-cleanup.js', 'pre-compact.js', 'post-compact.js',
+    // #214's checkpoint: it does not advise, it ACTS — stages the at-risk paths, commits,
+    // pushes, and writes the fleet-intent record the Brain reads. `minimal` exists to cut
+    // chatter; a reader who set it to be talked to less must not thereby lose the rescue
+    // that runs when their session is about to die. It guards.
+    'usage-checkpoint.js',
 ];
 
 // ---------------------------------------------------------------- manifest
