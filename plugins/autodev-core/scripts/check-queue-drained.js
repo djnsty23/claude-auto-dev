@@ -25,7 +25,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const STOP_RE = /^stop here/i;
+// "Settle this session" is the drained-queue tail when the session can archive
+// itself (rule-options-protocol). It is a decision to end, never queued work.
+const STOP_RE = /^(stop here|settle\b)/i;
 const RECOMMENDED_RE = /\s*\(recommended\)\s*$/i;
 
 const clean = (l) => String(l).replace(RECOMMENDED_RE, '').trim();
@@ -161,7 +163,7 @@ function report(source, out = console.log, stateFile = null) {
             out('        Advisory: this check cannot tell delivered from undelivered. Report against the list.');
         }
     } else {
-        out('[queue] most recent panel selected only "stop here" - queue is drained.');
+        out('[queue] most recent panel selected only "stop here" or "settle" - queue is drained.');
     }
     return r;
 }
@@ -232,6 +234,11 @@ function selftest() {
     // 3. "Stop here" is a decision, not work.
     const stop = analyse(fixture([[[COMMA, 'Stop here'], ['Stop here']]]));
     check('"Stop here" is never counted as an item', stop.actionable === 0, `got ${stop.actionable}`);
+    const settle = analyse(fixture([[[COMMA, 'Settle this session'], ['Settle this session']]]));
+    check('"Settle this session" is never counted as an item', settle.actionable === 0, `got ${settle.actionable}`);
+    // The control: `settle\b` must not swallow real work that starts with the word.
+    const settleWork = analyse(fixture([[['Settlement report export'], ['Settlement report export']]]));
+    check('a label merely starting "Settlement" is still work', settleWork.actionable === 1, `got ${settleWork.actionable}`);
 
     // 4. An empty transcript must be distinguishable from a finding.
     const empty = analyse([]);

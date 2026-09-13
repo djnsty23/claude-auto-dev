@@ -16,6 +16,8 @@
  *   node session-sweep.js --stale-days 14  # override staleness threshold
  *   node session-sweep.js --write-resume   # also write resume stubs for SAFE rows
  *   node session-sweep.js --json           # machine-readable output
+ *   node session-sweep.js --done-minutes N # cold floor for PR-less DONE (default 240)
+ *   node session-sweep.js --self           # may the session in THIS cwd settle? (JSON)
  */
 
 if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
@@ -148,6 +150,22 @@ const WRITE_RESUME = flag('--write-resume');
 // the app no longer tracks. It still never touches a git worktree.
 const ARCHIVE_ORPHANED = flag('--archive-orphaned');
 
+// DONE: no PR at all, not scheduled, and cold for this long. The pile it exists
+// for is same-day: [measured 2026-09-13] 24 of 35 live records read ACTIVE at 0d,
+// because the only clock for PR-less work was STALE_DAYS. The default equals
+// LIVE_MINUTES on purpose: a DONE row still has to clear the live-transcript
+// guard, so a shorter floor would only produce rows that can never be SAFE.
+const DONE_MINUTES = (() => {
+  const raw = parseFloat(opt('--done-minutes', String(LIVE_MINUTES)));
+  // NaN would make `>=` false for every row and hide DONE silently. Fall back.
+  return Number.isFinite(raw) && raw >= 0 ? raw : LIVE_MINUTES;
+})();
+const SELF = flag('--self');
+// Test seam, like SESSION_SWEEP_STORE: a JSON map of "owner/repo" -> PR list in
+// `gh pr list --json number,state,headRefName,url` shape. When set, gh is never
+// called, so a suite cannot reach the network or read the operator's real PRs.
+const PR_FIXTURE = process.env.SESSION_SWEEP_PR_FIXTURE || null;
+
 function loadDenylist() {
   try {
     return fs.readFileSync(DENYLIST_FILE, 'utf8')
@@ -251,28 +269,116 @@ function git(cwd, args) {
  * both strands finished sessions and, worse, can call a reopened PR merged.
  *
  * So refresh it. One `gh pr list` per repo, not one call per PR.
- * Returns Map<"repo#number", STATE>. On any failure the map stays empty and
- * callers fall back to the cached value, which is degraded but not wrong-by-
- * default — an unknown state is never promoted to MERGED.
+ * Returns { states: Map<"repo#number", STATE>, byHead: Map<repo, Map<head, pr[]>> }.
+ * On any failure a repo stays absent and callers fall back to the cached value,
+ * which is degraded but not wrong-by-default — an unknown state is never
+ * promoted to MERGED.
+ *
+ * Repos come from each session's worktree remote as well as from its bound PRs.
+ * [measured 2026-09-13] 19 of 28 live sessions had NO bound PR, and three of them
+ * owned an open PR on their own branch (#254, #10, #253). The app's
+ * auto-archive-on-close cannot fire for a PR it never bound, and a sweep that
+ * reads only bound PRs could call such a session DONE while its PR is open.
  */
+const slugCache = new Map();
+function repoSlugOf(s) {
+  const dir = [s.worktreePath, s.originCwd, s.cwd].find((d) => d && fs.existsSync(d));
+  if (!dir) return null;
+  if (slugCache.has(dir)) return slugCache.get(dir);
+  // Backslashes first: a remote cloned from a Windows path spells its segments
+  // with `\`, and the owner/repo match below reads only `/`.
+  const url = (git(dir, ['remote', 'get-url', 'origin']) || '').replace(/\\/g, '/');
+  // Each half must start alphanumeric: the slug becomes a gh argument, and a
+  // leading dash there is read as a flag (same reasoning as worktreeRisk).
+  const m = url.match(/([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*?)(?:\.git)?\/?$/);
+  const slug = m ? `${m[1]}/${m[2]}` : null;
+  slugCache.set(dir, slug);
+  return slug;
+}
+
+function liveBranch(s) {
+  const wt = s.worktreePath && fs.existsSync(s.worktreePath) ? s.worktreePath : null;
+  return (wt && git(wt, ['rev-parse', '--abbrev-ref', 'HEAD'])) || s.branch || null;
+}
+
 function refreshPrStates(sessions) {
-  const map = new Map();
+  const states = new Map();
+  const byHead = new Map();
   const repos = new Set();
   for (const s of sessions) {
     for (const pr of s.prs || []) if (pr.repo) repos.add(pr.repo);
+    const slug = repoSlugOf(s);
+    if (slug) repos.add(slug);
+  }
+  let fixture = null;
+  if (PR_FIXTURE) {
+    try { fixture = JSON.parse(fs.readFileSync(PR_FIXTURE, 'utf8')); } catch { fixture = {}; }
   }
   for (const repo of repos) {
-    try {
-      const raw = execFileSync(
-        'gh',
-        ['pr', 'list', '--repo', repo, '--state', 'all', '--limit', '300', '--json', 'number,state'],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 60000 }
-      );
-      for (const pr of JSON.parse(raw)) {
-        map.set(`${repo}#${pr.number}`, String(pr.state).toUpperCase());
+    let list = null;
+    if (fixture) {
+      list = Array.isArray(fixture[repo]) ? fixture[repo] : null;
+    } else {
+      try {
+        list = JSON.parse(execFileSync(
+          'gh',
+          ['pr', 'list', '--repo', repo, '--state', 'all', '--limit', '300', '--json', 'number,state,headRefName,url'],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 60000 }
+        ));
+      } catch {
+        // Network/auth failure: leave this repo unrefreshed rather than guessing.
       }
-    } catch {
-      // Network/auth failure: leave this repo unrefreshed rather than guessing.
+    }
+    if (!Array.isArray(list)) continue;
+    const heads = new Map();
+    for (const pr of list) {
+      states.set(`${repo}#${pr.number}`, String(pr.state).toUpperCase());
+      if (!pr.headRefName) continue;
+      if (!heads.has(pr.headRefName)) heads.set(pr.headRefName, []);
+      heads.get(pr.headRefName).push(pr);
+    }
+    byHead.set(repo, heads);
+  }
+  return { states, byHead };
+}
+
+/**
+ * PRs whose head is this session's branch but which the session record does not
+ * carry. Trunk names are skipped: a session sitting on `main` did not author
+ * every PR that happens to be headed there, and claiming them would hand one
+ * session another's open PR. A session with neither a worktree nor a recorded
+ * branch is skipped too, because the repo root's branch is not the session's.
+ */
+const TRUNKS = new Set(['main', 'master', 'trunk', 'develop', 'HEAD']);
+//
+// `boundElsewhere` maps "repo#number" to the title of another live session that
+// binds that PR. [measured 2026-09-13] nvision#10 was reported unbound for the
+// session on its branch while "Take the CV editor live" already bound it, and a
+// bind request sent on that report would have doubled the binding. The PR still
+// counts toward this session's verdict; only the advice changes.
+function unboundPrsFor(s, byHead, boundElsewhere = new Map()) {
+  if (!s.worktreePath && !s.branch) return [];
+  const slug = repoSlugOf(s);
+  const branch = liveBranch(s);
+  if (!slug || !branch || TRUNKS.has(branch)) return [];
+  const found = (byHead.get(slug) && byHead.get(slug).get(branch)) || [];
+  const keyOf = (repo, n) => `${String(repo || '').toLowerCase()}#${n}`;
+  const bound = new Set((s.prs || []).map((p) => keyOf(p.repo, p.prNumber)));
+  return found
+    .filter((pr) => !bound.has(keyOf(slug, pr.number)))
+    .map((pr) => ({
+      prNumber: pr.number, repo: slug, url: pr.url || null, state: String(pr.state).toUpperCase(),
+      boundTo: boundElsewhere.get(keyOf(slug, pr.number)) || null,
+    }));
+}
+
+// Every live binding, keyed "repo#number" -> the binding session's title.
+function bindingsOf(sessions) {
+  const map = new Map();
+  for (const s of sessions) {
+    for (const p of s.prs || []) {
+      const k = `${String(p.repo || '').toLowerCase()}#${p.prNumber}`;
+      if (!map.has(k)) map.set(k, s.title || s.sessionId);
     }
   }
   return map;
@@ -369,13 +475,15 @@ function transcriptFreshMinutes(wt) {
   return (Date.now() - newest) / 60000;
 }
 
-function worktreeRisk(s, all) {
+function worktreeRisk(s, all, opts = {}) {
   // Both of these are about OTHER sessions and hold whether or not the worktree
   // still exists on disk, so they come before the existence check below.
   const shared = all ? sharedWorktree(s, all) : null;
   if (shared) return shared;
 
-  const fresh = transcriptFreshMinutes(sessionDir(s));
+  // --self skips the transcript guard and nothing else: the fresh transcript it
+  // would find is the caller's own, written by the turn asking the question.
+  const fresh = opts.self ? null : transcriptFreshMinutes(sessionDir(s));
   if (fresh !== null && fresh < LIVE_MINUTES) {
     return `live-transcript(${Math.round(fresh)}m ago)`;
   }
@@ -482,9 +590,11 @@ function worktreeRisk(s, all) {
 const now = Date.now();
 const DAY = 86400000;
 
-function classify(s, prStates) {
+function classify(s, prStates, unbound = []) {
   const ageDays = (now - (s.lastActivityAt || s.createdAt || now)) / DAY;
-  const prs = Array.isArray(s.prs) ? s.prs : [];
+  // Unbound PRs count exactly like bound ones. An open PR the app never bound is
+  // still open work, and must keep its session out of DONE.
+  const prs = [...(Array.isArray(s.prs) ? s.prs : []), ...unbound];
   // A session the app itself launched from a schedule. Structural, not a title
   // regex: 261 records carry `scheduledTaskId` (e.g. "coordinator-pulse"), and a
   // regex over titles would both miss renamed tasks and catch hand-started work
@@ -520,6 +630,12 @@ function classify(s, prStates) {
     why = ephemeral
       ? `scheduled task "${s.scheduledTaskId}", idle ${Math.floor(ageDays)}d`
       : `no activity ${Math.floor(ageDays)}d`;
+  } else if (!prs.length && !ephemeral && idleMinutes >= DONE_MINUTES) {
+    // No PR of any state, so a PR with an unknown state can never land here.
+    // Cold is the whole claim: a DONE row still needs a clean, pushed worktree
+    // and no live transcript before it is SAFE, like every other verdict.
+    state = 'DONE';
+    why = `no PR, idle ${idleMinutes >= 120 ? Math.round(idleMinutes / 60) + 'h' : Math.round(idleMinutes) + 'm'}`;
   } else {
     state = 'ACTIVE';
     why = `active ${Math.floor(ageDays)}d ago`;
@@ -574,7 +690,7 @@ const all = collectSessions();
 const live = all.filter((s) => !s.isArchived);
 const { current: currentWorkspace, orphaned: orphanedWorkspaces } = detectWorkspaces(all);
 
-const prStates = refreshPrStates(live);
+const { states: prStates, byHead } = refreshPrStates(live);
 
 /**
  * Mark SAFE records archived by editing the store, for orphaned workspaces only.
@@ -611,18 +727,61 @@ function archiveOrphaned(rows) {
   return { done, skipped };
 }
 
+const FINISHED = new Set(['MERGED', 'STALE', 'DONE']);
+const bindings = bindingsOf(live);
 const rows = live.map((s) => {
-  const c = classify(s, prStates);
-  const finished = c.state === 'MERGED' || c.state === 'STALE';
+  const unbound = unboundPrsFor(s, byHead, bindings);
+  const c = classify(s, prStates, unbound);
+  const finished = FINISHED.has(c.state);
   const thirdParty = finished ? isThirdParty(s) : false;
   const risk = finished ? worktreeRisk(s, all) : null;
   // The app has its own opt-out. Honour it rather than inventing a second one.
   const exempt = s.autoArchiveExempt === true;
   return {
-    s, c, risk, thirdParty, exempt,
+    s, c, risk, thirdParty, exempt, unbound,
     safe: finished && !thirdParty && !exempt && risk === null,
   };
 });
+
+/**
+ * --self: may the session working in this cwd archive itself right now?
+ *
+ * The idle clocks do not apply, because the caller is by definition active; the
+ * question is only whether archiving would lose anything. Fails CLOSED: no
+ * matching record, or more than one, is a blocker rather than a guess, and a PR
+ * in any state other than MERGED or CLOSED blocks, including an unknown one.
+ * Always exits 0 with JSON; `settle` is the verdict.
+ */
+if (SELF) {
+  const norm = (p) => {
+    let r;
+    try { r = fs.realpathSync.native(p); } catch { r = path.resolve(p); }
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  };
+  const here = norm(process.cwd());
+  const mine = rows.filter((r) => [r.s.worktreePath, r.s.cwd].some((d) => d && norm(d) === here));
+  const blockers = [];
+  let row = null;
+  if (mine.length === 0) blockers.push('no-session-for-cwd');
+  else if (mine.length > 1) blockers.push(`ambiguous(${mine.length} sessions share this cwd)`);
+  else {
+    row = mine[0];
+    const stateOf = (p) => prStates.get(`${p.repo}#${p.prNumber}`) || String(p.state || p.prState || '').toUpperCase();
+    const unsettled = row.c.prs.filter((p) => !['MERGED', 'CLOSED'].includes(stateOf(p)));
+    if (unsettled.length) blockers.push(`pr-unsettled(${unsettled.map((p) => '#' + p.prNumber).join(', ')})`);
+    if (row.exempt) blockers.push('autoArchiveExempt');
+    const risk = worktreeRisk(row.s, all, { self: true });
+    if (risk) blockers.push(risk);
+  }
+  console.log(JSON.stringify({
+    sessionId: row ? row.s.sessionId : null,
+    title: row ? row.s.title : null,
+    settle: blockers.length === 0,
+    blockers,
+    unboundPrs: row ? row.unbound : [],
+  }, null, 2));
+  process.exit(0);
+}
 
 if (AS_JSON) {
   console.log(JSON.stringify(rows.map((r) => ({
@@ -638,6 +797,7 @@ if (AS_JSON) {
     exempt: r.exempt,
     risk: r.risk,
     safe: r.safe,
+    unboundPrs: r.unbound,
   })), null, 2));
   process.exit(0);
 }
@@ -651,7 +811,7 @@ console.log(`PR states refreshed live: ${prStates.size} (0 means gh was unavaila
 console.log(`Staleness threshold: ${STALE_DAYS}d for hand-started work, ${EPHEMERAL_DAYS}d for scheduled tasks`);
 console.log(`Live workspace: ${currentWorkspace || '(undetermined)'} — ${orphanedWorkspaces.size} orphaned workspace(s) alongside it\n`);
 
-const order = { MERGED: 0, STALE: 1, 'PR-OPEN': 2, ACTIVE: 3 };
+const order = { MERGED: 0, DONE: 1, STALE: 2, 'PR-OPEN': 3, ACTIVE: 4 };
 rows.sort((a, b) => (order[a.c.state] - order[b.c.state]) || (b.c.ageDays - a.c.ageDays));
 
 const pad = (v, n) => String(v == null ? '' : v).slice(0, n).padEnd(n);
@@ -669,7 +829,7 @@ for (const r of rows) {
 }
 
 const safe = rows.filter((r) => r.safe);
-const finished = rows.filter((r) => !r.safe && (r.c.state === 'MERGED' || r.c.state === 'STALE'));
+const finished = rows.filter((r) => !r.safe && FINISHED.has(r.c.state));
 
 // Two very different things were sharing one list, and the permanent one drowns
 // the urgent one. `blocked` means WORK EXISTS IN EXACTLY ONE PLACE — act on it.
@@ -680,8 +840,20 @@ const blocked = finished.filter((r) => !r.thirdParty && !r.exempt);
 const excluded = finished.filter((r) => r.thirdParty || r.exempt);
 
 console.log('\n--- SUMMARY ---');
-for (const st of ['MERGED', 'STALE', 'PR-OPEN', 'ACTIVE']) {
+for (const st of ['MERGED', 'DONE', 'STALE', 'PR-OPEN', 'ACTIVE']) {
   console.log(`${st.padEnd(9)} ${rows.filter((r) => r.c.state === st).length}`);
+}
+
+// A PR the app never bound cannot trigger its auto-archive-on-close. bind_pr
+// binds only the CALLING session, so the fix happens in the owning session;
+// for a PR already settled there is nothing to bind and its row reads MERGED.
+const unboundRows = rows.filter((r) => r.unbound.length);
+console.log(`\nPRs NOT BOUND to the session whose branch they came from: ${unboundRows.length}`);
+for (const r of unboundRows) {
+  for (const p of r.unbound) {
+    const where = p.boundTo ? `  [already bound to "${p.boundTo}", do not re-bind]` : '';
+    console.log(`  - ${r.s.title} — #${p.prNumber} ${p.state}${p.url ? ' ' + p.url : ''}  (${r.s.sessionId})${where}`);
+  }
 }
 console.log(`\nSAFE TO ARCHIVE: ${safe.length}`);
 console.log(`BLOCKED — work exists in exactly one place, act on these: ${blocked.length}`);

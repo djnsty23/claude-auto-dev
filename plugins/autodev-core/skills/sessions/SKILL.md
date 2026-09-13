@@ -2,7 +2,7 @@
 name: sessions
 description: Sweep Claude Code Desktop sessions — classify which are finished, check their worktrees are safe to discard, write resume stubs, and archive the safe ones. Use for "archive finished sessions", "session cleanup", "how many sessions do I have open".
 when_to_use: "Invoked when the user says \"sessions\", \"archive sessions\", or asks to clean up finished sessions."
-allowed-tools: Bash, Read, Write, mcp__ccd_session_mgmt__archive_session
+allowed-tools: Bash, Read, Write, mcp__ccd_session_mgmt__archive_session, mcp__ccd_session_mgmt__send_message
 model: haiku
 user-invocable: true
 ---
@@ -32,6 +32,7 @@ Verdicts:
 | verdict | meaning |
 |---|---|
 | `MERGED` | every PR settled (merged or closed) — finished |
+| `DONE` | no PR of any state, hand-started, cold past `--done-minutes` (default 240) |
 | `STALE` | no PR, and idle past its threshold |
 | `PR-OPEN` | at least one PR still open — **not** finished |
 | `ACTIVE` | recent activity — leave alone |
@@ -59,6 +60,16 @@ Three thresholds, because "finished" and "cold" are different questions:
   sat unarchivable at 1-9h idle, and not one record in the population fell
   between 4h and 24h — so the extra eleven hours bought no discrimination, only
   false ACTIVEs. `--merged-min-hours` is still accepted as the retired spelling.
+
+- **`--done-minutes` (default 240)** is the same-day clock for PR-less work.
+  Before it, a triage or audit session with no PR waited 14 days to become
+  STALE, so the sidebar held every one of them. It defaults to the
+  live-transcript window because a DONE row still has to clear that guard.
+
+PRs are matched to sessions by **branch** as well as by the app's binding. A
+PR whose head is the session's branch but which the record does not carry is
+listed under "PRs NOT BOUND", and it counts toward the verdict: an unbound open
+PR makes the row PR-OPEN, never DONE. Trunk branches claim nothing.
 
 Detection is structural (`scheduledTaskId`), never a title regex. A regex would
 miss renamed tasks and catch hand-started work that happens to be called
@@ -135,6 +146,34 @@ it delivered. Never archive a row the script did not mark SAFE, or self unless a
 Show the concrete list and count. An explicit request to archive the safe,
 finished set authorizes that scoped action; ask only if the proposed set or
 destructive consequences exceed that request. Preserve ongoing work.
+
+## Unbound open PRs: fix the binding in the owning session
+
+The app archives a session when its PR closes, but only for a PR it bound.
+`bind_pr` binds the CALLING session, so a sweep cannot bind for another one.
+For each unbound OPEN row, send the owning session one line with
+`send_message`: "Bind your PR: call bind_pr with <url>." Skip a row marked
+`already bound to "<title>"`: another session holds that binding, and its close
+already archives that session. An unbound MERGED or
+CLOSED PR needs no binding; its row already reads MERGED and follows Step 3.
+
+## Settle this session (self)
+
+A session whose work is delivered should leave the sidebar itself rather than
+wait for a sweep:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/session-sweep.js" --self
+```
+
+It prints JSON for the record whose worktree or cwd is the current directory.
+Call `archive_session` with `self` only when `"settle": true`. Otherwise report
+the `blockers` by name (`dirty(N)`, `unpushed(N)`, `pr-unsettled(#N)`,
+`no-session-for-cwd`, `ambiguous(...)`) and stop. The idle clocks and the
+live-transcript guard do not apply, since the fresh transcript is the caller's
+own; every other guard does. Archiving ends the conversation, so give the final
+report first. Offer it as the panel's tail option, never as the recommendation,
+per `rule-options-protocol`.
 
 ## Do NOT then start a session per archived item
 
