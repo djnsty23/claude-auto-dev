@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// hooks_profile=minimal (plugin userConfig, reaching hooks as CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE)
+// The `telemetry` switch (plugin userConfig, CLAUDE_PLUGIN_OPTION_TELEMETRY="false")
 // skips this hook: it advises, it never guards. tooling/test-hooks-profile.js holds the list.
-if (/^minimal$/i.test(process.env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE || process.env.CLAUDE_PLUGIN_OPTION_hooks_profile || '')) process.exit(0);
+if (process.env.CLAUDE_PLUGIN_OPTION_TELEMETRY === 'false') process.exit(0);
 
 // PostToolUse hook — lightweight local telemetry.
 //
@@ -141,7 +141,7 @@ try {
     // Gated on the same substring test the guard uses, so the recogniser is
     // required on well under 1% of calls and this hook still does not print
     // on the ordinary one. Only on a call that did not fail: a refused push
-    // skipped nothing. Under hooks_profile=minimal this rider goes with the
+    // skipped nothing. With the telemetry switch off this rider goes with the
     // rest of this hook, which is the advisory half by design.
     try {
         const cmd = (toolInput && typeof toolInput.command === 'string') ? toolInput.command : '';
