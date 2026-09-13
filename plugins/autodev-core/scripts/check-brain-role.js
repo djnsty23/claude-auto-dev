@@ -181,9 +181,12 @@ function emptyReach() {
  *                   unusable:Array<{field:string, code:string, why:string}>,
  *                   unchecked:Array<{field:string, value:string, why:string}>,
  *                   collision:boolean},
- *            population:{sessionsDir:string, sessionFiles:number, livePids:number, deadPids:number,
- *                        sessionsReadable:boolean, store:string|null, storeReadable:boolean,
+ *            population:{scanned:boolean, unreadWhy:string|null,
+ *                        sessionsDir:string, sessionFiles:number, livePids:number, deadPids:number,
+ *                        sessionsReadable:boolean|null, store:string|null, storeReadable:boolean|null,
  *                        storeRecords:number, storeArchived:number}}}
+ *            (`scanned:false` means neither registry was opened, and both readable
+ *             flags are then `null`, never `false`: not looking is not failing.)
  */
 function checkBrainRole(opts) {
     const o = opts || {};
@@ -219,12 +222,12 @@ function checkBrainRole(opts) {
     let role = o.role || null;
     if (!role) {
         if (!fs.existsSync(roleFile)) {
-            return { state: 'absent', roleFile, role: null, faults, lines: ['no role file at ' + roleFile + ': no coordinator has claimed this machine'], reach, population: emptyPopulation(sessionsDir, store) };
+            return { state: 'absent', roleFile, role: null, faults, lines: ['no role file at ' + roleFile + ': no coordinator has claimed this machine'], reach, population: unreadPopulation(sessionsDir, store, 'no role file to check against') };
         }
         role = readJSON(roleFile);
         if (!role || typeof role !== 'object') {
             fault('unreadable', roleFile + ' is present and did not parse as a JSON object');
-            return finish('fault');
+            return finish('fault', 'the role file did not parse, so there is nothing to check against');
         }
     }
 
@@ -407,13 +410,17 @@ function checkBrainRole(opts) {
     return finish(faults.length === 0 ? 'ok'
         : (reach.usable.length && !reach.collision ? 'degraded' : 'fault'));
 
-    function finish(state) {
+    function finish(state, unreadWhy) {
+        // Both registries are read together or not at all, so `sessions` being
+        // null is the whole answer to "did this call look".
+        if (!sessions) return { state, roleFile, role, faults, lines, addresses, reach, population: unreadPopulation(sessionsDir, store, unreadWhy || 'the registries were not read') };
         return {
             state, roleFile, role, faults, lines, addresses, reach,
             population: {
-                sessionsDir, sessionFiles: sessions ? sessions.files : 0,
-                livePids: sessions ? sessions.live.length : 0, deadPids: sessions ? sessions.dead : 0,
-                sessionsReadable: !!(sessions && sessions.readable),
+                scanned: true, unreadWhy: null,
+                sessionsDir, sessionFiles: sessions.files,
+                livePids: sessions.live.length, deadPids: sessions.dead,
+                sessionsReadable: !!sessions.readable,
                 store: store || null, storeReadable: !!found.readable,
                 storeRecords: found.records, storeArchived: found.archived,
             },
@@ -421,15 +428,22 @@ function checkBrainRole(opts) {
     }
 }
 
-function emptyPopulation(sessionsDir, store) {
-    return { sessionsDir, sessionFiles: 0, livePids: 0, deadPids: 0, sessionsReadable: false, store: store || null, storeReadable: false, storeRecords: 0, storeArchived: 0 };
+/* A POPULATION NOBODY READ IS NOT AN EMPTY ONE. `[measured 2026-09-13]` this
+   was `emptyPopulation`, with both readable flags `false`, and render() prints
+   `false` as "(UNREADABLE)" and "NOT FOUND". So with no role file, and with
+   directories that existed and were readable, the census said the scan had
+   failed when no scan had been attempted. The readable flags are `null` here,
+   the third value, and render() branches on `scanned` before it reaches them. */
+function unreadPopulation(sessionsDir, store, why) {
+    return { scanned: false, unreadWhy: why, sessionsDir, sessionFiles: 0, livePids: 0, deadPids: 0, sessionsReadable: null, store: store || null, storeReadable: null, storeRecords: 0, storeArchived: 0 };
 }
 
 function render(r) {
     const p = r.population;
     const out = [];
     out.push('brain-role: ' + r.state.toUpperCase() + '  (read ' + r.roleFile + ')');
-    out.push('population: ' + p.sessionFiles + ' session file(s) under ' + p.sessionsDir + (p.sessionsReadable ? '' : ' (UNREADABLE)')
+    if (!p.scanned) out.push('population: not read (' + p.unreadWhy + '); sessions dir ' + p.sessionsDir + ' and desktop store ' + (p.store || '(none located)') + ' were not opened');
+    else out.push('population: ' + p.sessionFiles + ' session file(s) under ' + p.sessionsDir + (p.sessionsReadable ? '' : ' (UNREADABLE)')
         + ', ' + p.livePids + ' with a live pid, ' + p.deadPids + ' dead; desktop store '
         + (p.storeReadable ? p.storeRecords + ' record(s), ' + p.storeArchived + ' archived, at ' + p.store : 'NOT FOUND' + (p.store ? ' at ' + p.store : '')));
     for (const l of r.lines) out.push('  ' + l);
@@ -549,6 +563,38 @@ function selftest() {
     {
         const p = roleAt('garbage', null); fs.writeFileSync(p, '{ not json');
         expect('an unparseable role file is a fault, not silence', checkBrainRole({ roleFile: p, sessionsDir, store }), 'fault', ['unreadable']);
+    }
+
+    /* A REGISTRY THIS CALL NEVER OPENED IS NOT AN UNREADABLE ONE. Both early
+       returns -- no role file, and a role file that did not parse -- leave
+       before either registry is read, while `sessionsDir` and `store` here
+       both exist and are readable. `[measured 2026-09-13]` the census printed
+       "(UNREADABLE)" and "NOT FOUND" for exactly this, on a real machine. */
+    {
+        const garbage = roleAt('garbage-render', null); fs.writeFileSync(garbage, '{ not json');
+        for (const [label, r] of [['absent', run('absent-render', null)],
+            ['unparseable', checkBrainRole({ roleFile: garbage, sessionsDir, store })]]) {
+            const text = render(r);
+            cases.push({
+                label: 'role file ' + label + ': no registry is read, and it says "not read", never UNREADABLE or NOT FOUND',
+                ok: r.population.scanned === false && r.population.sessionsReadable === null
+                    && r.population.storeReadable === null
+                    && /population: not read \(/.test(text) && !/UNREADABLE|NOT FOUND/.test(text),
+                detail: text.split('\n')[1],
+            });
+        }
+        /* The control that stops the case above passing on a renderer that has
+           lost the words: a sessions dir that really is missing must still print
+           UNREADABLE, and a store that really is missing must still print NOT
+           FOUND, from the same render(). */
+        const r = checkBrainRole({ roleFile: roleAt('really-missing', { session_id: 'selftest-live-cli', peer_name: 'selftest-live-peer', desktop_session_id: 'local_selftest-live-desktop' }),
+            sessionsDir: path.join(root, 'no-such-sessions'), store: path.join(root, 'no-such-store') });
+        const text = render(r);
+        cases.push({
+            label: '  control: registries that were opened and are missing still print UNREADABLE and NOT FOUND',
+            ok: r.population.scanned === true && /\(UNREADABLE\)/.test(text) && /NOT FOUND/.test(text) && !/not read \(/.test(text),
+            detail: text.split('\n')[1],
+        });
     }
     expect('a store that cannot be found is NOT CHECKED, not a pass and not a fault',
         checkBrainRole({ roleFile: roleAt('nostore', { session_id: 'selftest-live-cli', peer_name: 'selftest-live-peer', desktop_session_id: 'local_selftest-live-desktop' }), sessionsDir, store: null }), 'ok', []);
