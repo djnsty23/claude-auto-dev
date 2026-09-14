@@ -2,7 +2,7 @@
 name: brain
 description: Drive an authorized product mission from idea through implementation, independent review and live verification. Use when asked to run the fleet, replace manual coordination, or resume Brain.
 when_to_use: "Invoked when the user says \"brain\", \"restart the brain\", \"you are the brain\", \"take over the fleet\", or delegates a product mission from idea to delivery."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Agent, Workflow, AskUserQuestion, SendMessage, Monitor, mcp__ccd_session_mgmt__send_message, mcp__ccd_session_mgmt__list_sessions, mcp__ccd_session_mgmt__get_session, mcp__ccd_session_mgmt__archive_session, mcp__ccd_session__spawn_task, mcp__ccd_session__dismiss_task
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Agent, Workflow, AskUserQuestion, SendMessage, Monitor, mcp__ccd_session_mgmt__send_message, mcp__ccd_session_mgmt__list_sessions, mcp__ccd_session_mgmt__get_session, mcp__ccd_session_mgmt__archive_session, mcp__ccd_session__spawn_task, mcp__ccd_session__dismiss_task, mcp__scheduled-tasks__create_scheduled_task, mcp__scheduled-tasks__run_scheduled_task, mcp__scheduled-tasks__list_task_runs, mcp__scheduled-tasks__delete_scheduled_task
 model: opus
 user-invocable: true
 argument-hint: "[mission or resume]"
@@ -128,6 +128,17 @@ Choose a channel that actually starts work:
   available transport. Keep them `awaiting-start` until started. A chip needing
   a click cannot satisfy unattended dispatch. If no autonomous channel exists,
   name that limitation instead of assuming execution or generating more chips.
+- Start a separate unattended session, where the desktop scheduler exists, with
+  `scripts/unattended-worker.js`. Its `brief` refuses a slug already claimed and
+  prints `create_scheduled_task` arguments whose prompt opens with `git worktree
+  add`, because the run opens in the coordinator's shared origin checkout. Call
+  `mcp__scheduled-tasks__create_scheduled_task` with them (no schedule), then
+  `mcp__scheduled-tasks__run_scheduled_task`, then `record` the returned session
+  id. Deleting the task archives its session, so run `settle` with the run's
+  status from `mcp__scheduled-tasks__list_task_runs`; call
+  `mcp__scheduled-tasks__delete_scheduled_task` only when it answers
+  `deleteSafe: true`, then `deleted`. A `started` record is a session id, not
+  proof that STEP 0 passed: read the session's events.
 
 Every brief stands alone: mission, acceptance, exact refs, evidence, ownership,
 permitted actions, actual verification commands, artifact path and return
