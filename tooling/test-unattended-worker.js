@@ -74,6 +74,10 @@ try {
     const help = cli(['--help']);
     check('--help exits 0 with usage', help.status === 0 && help.stdout.startsWith('Usage:'), help.stdout.slice(0, 80));
     check('--help creates no default ledger under HOME', !fs.existsSync(path.join(home, '.claude')));
+    const dflt = cli(['status']);
+    const expectedDefault = path.join(home, '.claude', 'autodev', 'unattended-workers.json');
+    check('without --ledger, status reads the ledger under HOME', dflt.json && dflt.json.ok && dflt.json.value.ledger.toLowerCase() === expectedDefault.toLowerCase(), dflt.stdout.slice(0, 200));
+    check('an absent default ledger reads as zero records, and status writes nothing', dflt.json && dflt.json.value.recordsRead === 0 && !fs.existsSync(expectedDefault));
 
     // =======================================================================
     // 2. The composed prompt: STEP 0 first, the brief after, the return last.
