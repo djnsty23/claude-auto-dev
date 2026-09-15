@@ -123,6 +123,21 @@ const mk = (...a) => { const d = tree(...a); trees.push(d); return d; };
     check('an unclassified step is listed as DEFERRED', /DEFERRED\s+check:brand-new/.test(r.out), r.out);
 }
 
+// -- 6b. check:skill-plugin-root is in the fast tier --------------------------
+// Measured 0.2 s on 2026-09-15 and added by hand. Pinned to a literal name here,
+// not to FAST, so shrinking the allowlist cannot shrink this check with it.
+{
+    // check:agents-md keeps the run past the "no fast steps" early exit, which
+    // prints no DEFERRED lines and would pass the negative assertion vacuously.
+    const d = mk('npm test && npm run check:agents-md && npm run check:skill-plugin-root',
+        { 'check:agents-md': 'node -e "process.exit(0)"',
+          'check:skill-plugin-root': 'node -e "process.exit(0)"' });
+    const r = run(d);
+    check('the fixture reaches the partition (a DEFERRED line is printed)', /DEFERRED\s+test\b/.test(r.out), r.out);
+    check('check:skill-plugin-root runs in the fast tier', /PASS\s+check:skill-plugin-root/.test(r.out), r.out);
+    check('check:skill-plugin-root is not deferred', !/DEFERRED\s+check:skill-plugin-root/.test(r.out), r.out);
+}
+
 // -- 7. No authority is indeterminate, not an empty pass ----------------------
 // "0 of 0 passed" is this repo's canonical false green.
 {
