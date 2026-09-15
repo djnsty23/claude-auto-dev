@@ -27,8 +27,10 @@
 // things about the mock, and a suite that hit the real GitHub would go green or
 // red according to someone else's merge queue.
 
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-branch-landed.js');
 const { classify, present, isLanded, VERDICTS } = require(SUBJECT);
 
@@ -159,6 +161,86 @@ check('  and reports how many assertions it ran', /selftest assertion\(s\) passe
 const bogus = run(['refs/heads/definitely-not-a-branch-here', '--repo', path.join(__dirname, '..'), '--trunk', 'HEAD']);
 check('an unresolvable branch exits 3 (could not tell), not 0', bogus.status === 3, bogus.status);
 check('  and says so rather than printing an all-clear', /UNKNOWN/.test(bogus.stdout), bogus.stdout.slice(0, 200));
+
+// ---- the pipe delivers every byte -------------------------------------------
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits therefore hands its caller exactly 65536 bytes under exit
+// status 0 — the shape rendered-layout-gate.js shipped with until 2026-09-07.
+// This tool is the one a session runs over EVERY unmerged head before deleting
+// branches, so a truncated answer here is a branch nobody can account for.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+//
+// THE FIXTURE IS SHAPED FOR SPAWN COUNT. Every branch costs two git
+// invocations, so the rows are made wide as well as numerous: 280 refs with
+// 80-character names, all pointing at trunk's own tip so gatherEvidence
+// short-circuits on ancestry after two calls instead of running the content
+// comparison.
+//
+// 80 RATHER THAN 200, AND THE CEILING IS NOT THE ONE THIS COMMENT FIRST NAMED.
+// It said 200 was near the limit because a ref approaching 255 bytes fails on
+// darwin. The real ceiling is Windows: the loose ref is written as
+// <tmp>/.git/refs/remotes/origin/<name>.lock, and at 200 characters that whole
+// path passed MAX_PATH and `git update-ref --stdin` died with "Filename too
+// long" — a CI-only crash, green on both POSIX legs. A row here carries no
+// filesystem path (branch, tip, verdict, reason, pr), so the byte count is
+// portable and only the ref FILE path was ever at risk.
+{
+    const PIPE_BUF = 64 * 1024;
+    const bigRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'cbl-pipe-'));
+    const g = (a, opts) => execFileSync('git', a, Object.assign({ cwd: bigRepo, encoding: 'utf8', stdio: 'pipe' }, opts || {}));
+    g(['init', '-q', '-b', 'main']);
+    g(['config', 'user.email', 't@t']);
+    g(['config', 'user.name', 'T']);
+    fs.writeFileSync(path.join(bigRepo, 'seed.txt'), 'seed\n');
+    g(['add', '.']);
+    g(['commit', '-qm', 'seed']);
+    const tip = g(['rev-parse', 'HEAD']).trim();
+    let refs = 'create refs/remotes/origin/main ' + tip + '\n';
+    for (let i = 0; i < 280; i++) {
+        refs += 'create refs/remotes/origin/feature-' + 'y'.repeat(80) + '-' + String(i).padStart(4, '0')
+            + ' ' + tip + '\n';
+    }
+    g(['update-ref', '--stdin'], { input: refs });
+
+    const viaFileBytes = (args) => {
+        const out = path.join(bigRepo, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'] });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const jsonArgs = ['--repo', bigRepo, '--json'];
+    const jsonPipe = spawnSync(process.execPath, [SUBJECT].concat(jsonArgs),
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const jsonPipeBytes = Buffer.byteLength(jsonPipe.stdout || '', 'utf8');
+    const jsonFileBytes = viaFileBytes(jsonArgs);
+
+    check('--json over many branches exceeds one pipe buffer, so the next check is not vacuous',
+        jsonFileBytes > PIPE_BUF, JSON.stringify({ bytes: jsonFileBytes, buffer: PIPE_BUF }));
+    check('  and through a PIPE it delivers every byte it writes to a FILE',
+        jsonPipeBytes === jsonFileBytes, JSON.stringify({ pipe: jsonPipeBytes, file: jsonFileBytes }));
+    check('  and the piped JSON still parses at that size, under exit 0',
+        (() => { try { return JSON.parse(jsonPipe.stdout).rows.length === 280 && jsonPipe.status === 0; } catch { return false; } })(),
+        'exit ' + jsonPipe.status + ', tail ' + JSON.stringify((jsonPipe.stdout || '').slice(-40)));
+
+    // NO SECOND PAIR FOR THE HUMAN TABLE, deliberately. present() lists only the
+    // rows that are NOT landed and counts the rest, so on this fixture — where
+    // every ref is an ancestor of trunk — it renders 63 bytes however many
+    // branches there are, and a byte-count equality on 63 bytes asserts nothing.
+    // Driving it wide would mean 200 UNLANDED branches, which is the full
+    // content-comparison path: several more git invocations each, on a fixture
+    // that already costs this suite five seconds a run. The drain being asserted
+    // is a property of the RUNNER, which both forms exit through, so the --json
+    // pair above covers the table as well.
+    fs.rmSync(bigRepo, { recursive: true, force: true });
+}
 
 // ---- summary ---------------------------------------------------------------
 console.log('');

@@ -234,5 +234,104 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
     }
 }
 
+// ---- the pipe delivers every byte ------------------------------------------
+//
+// THE FIRST CASE HERE THAT DRIVES THE SUBJECT AS A SUBPROCESS. Everything above
+// reads the source or calls the exported helpers, which cannot see the CLI's
+// exit at all — and the exit is where this defect lives.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under exit status 0 — the
+// shape rendered-layout-gate.js shipped with until 2026-09-07. --json here
+// carries one entry per rollup check, so it grows with the PR's check matrix.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+//
+// gh is STUBBED on PATH. A live gh would make these byte counts depend on
+// somebody else's check matrix, which is the thing this file's header already
+// refuses for the classification cases.
+//
+// AND THAT STUB CANNOT EXIST ON WINDOWS, so this block is skipped there — out
+// loud, because a silent skip is indistinguishable from a pass. An
+// extensionless `gh` carrying a shebang is not executable on Windows at all:
+// PATH lookup goes through PATHEXT, and there is no shebang. A `gh.cmd` is not
+// a drop-in either — node refuses to spawn .cmd/.bat when `shell` is false,
+// which is exactly how the subject spawns gh, and correctly so, since that is
+// the injection-safe form. Stubbing it there would mean weakening the subject
+// to suit its test.
+//
+// The cost of the skip is small and worth naming: the defect being guarded is
+// darwin-only (a pipe is asynchronous there and synchronous on linux and
+// win32), so the platform where it can actually bite still runs this, and so
+// does ubuntu.
+if (process.platform === 'win32') {
+    console.log('SKIP  the pipe-delivers-every-byte block — no stub `gh` is possible on win32 '
+        + '(no shebang, and node will not spawn a .cmd without shell:true). '
+        + 'The defect it guards is darwin-only; macOS and ubuntu both run it.');
+} else {
+    const os = require('os');
+    const { spawnSync } = require('child_process');
+    const PIPE_BUF = 64 * 1024;
+    const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-pr-ready.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-ready-pipe-'));
+    const bin = path.join(tmp, 'bin');
+    fs.mkdirSync(bin);
+    const rollup = [];
+    for (let i = 0; i < 300; i++) {
+        rollup.push({
+            name: 'a-fairly-long-check-name-as-workflows-really-name-them / job-' + i,
+            status: 'COMPLETED',
+            conclusion: 'SUCCESS',
+        });
+    }
+    fs.writeFileSync(path.join(bin, 'gh'),
+        '#!/bin/sh\ncat <<' + String.fromCharCode(39) + 'JSON' + String.fromCharCode(39) + '\n'
+        + JSON.stringify({
+            number: 1, state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE',
+            mergeStateStatus: 'CLEAN', statusCheckRollup: rollup,
+            baseRefName: 'main', headRefName: 'claude/x', files: [{ path: 'a.js' }],
+        }) + '\nJSON\n');
+    fs.chmodSync(path.join(bin, 'gh'), 0o755);
+    const env = Object.assign({}, process.env, { PATH: bin + path.delimiter + process.env.PATH });
+
+    const viaFileBytes = (args) => {
+        const out = path.join(tmp, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, [SUBJECT].concat(args), { stdio: ['ignore', fd, 'ignore'], env });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const piped = spawnSync(process.execPath, [SUBJECT, '1', '--json'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+    const fileBytes = viaFileBytes(['1', '--json']);
+
+    check('--json over a large check rollup exceeds one pipe buffer, so the next check is not vacuous',
+        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+    check('--json through a PIPE delivers every byte it writes to a FILE',
+        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+    check('the piped JSON still parses at that size, under the READY exit 0',
+        (() => { try { return JSON.parse(piped.stdout).checks.length === 300 && piped.status === 0; } catch { return false; } })(),
+        'exit ' + piped.status + ', tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
+
+    // The rendered report shares the exit path, so it shares the defect — but
+    // BE CLEAR WHAT THIS LINE CATCHES, which is not this defect. It renders
+    // 23471 bytes on this fixture, well under one buffer, so it stays GREEN
+    // under the mutation that takes the two --json checks red. It states the
+    // equality; the --json pair is what proves the drain.
+    const rendered = spawnSync(process.execPath, [SUBJECT, '1'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    check('the rendered report through a PIPE also delivers every byte',
+        Buffer.byteLength(rendered.stdout || '', 'utf8') === viaFileBytes(['1']),
+        Buffer.byteLength(rendered.stdout || '', 'utf8'));
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

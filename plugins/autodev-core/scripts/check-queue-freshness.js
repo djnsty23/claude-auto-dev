@@ -83,17 +83,6 @@ const REPO_ROOT = val('repo-root', null) || (() => {
     catch { return null; }
 })();
 
-if (!QUEUE) {
-    console.error('REFUSING: --queue <file> is required.');
-    console.error('  usage: check-queue-freshness.js --queue <path> [--repo-root <dir>]');
-    console.error('         [--no-fetch] [--json]');
-    process.exit(2);
-}
-if (!fs.existsSync(QUEUE)) {
-    console.error(`COULD NOT CHECK: no queue file at ${QUEUE} — this is NOT "the queue is fresh".`);
-    process.exit(2);
-}
-
 function git(repo, args) {
     try {
         return execFileSync('git', ['-C', repo].concat(args),
@@ -318,102 +307,136 @@ function evaluate(p) {
 
 // ---------------------------------------------------------------- run
 
-const items = parseQueue(fs.readFileSync(QUEUE, 'utf8'));
-const results = [];
-for (const item of items) {
-    if (!item.premises.length) {
-        results.push({ item, verdict: 'UNCHECKABLE', why: 'no PREMISE: line', matches: [] });
-        continue;
+// The two refusals below were top-level guards above the function definitions
+// until 2026-09-08. They moved here with everything else that can exit: no path
+// in this process may call process.exit(), because on darwin a pipe is an async
+// stream and exiting discards whatever has not drained. See the foot of the file.
+function main() {
+    if (!QUEUE) {
+        console.error('REFUSING: --queue <file> is required.');
+        console.error('  usage: check-queue-freshness.js --queue <path> [--repo-root <dir>]');
+        console.error('         [--no-fetch] [--json]');
+        return 2;
     }
-    for (const p of item.premises) results.push(Object.assign({ item }, evaluate(p)));
-}
-
-const stale = results.filter((r) => r.verdict === 'STALE');
-const missing = results.filter((r) => r.verdict === 'MISSING-FILE');
-const unchk = results.filter((r) => r.verdict === 'UNCHECKABLE');
-const review = results.filter((r) => r.verdict === 'REVIEW');
-const fresh = results.filter((r) => r.verdict === 'FRESH');
-const checked = stale.length + missing.length + fresh.length + review.length;
-
-if (AS_JSON) {
-    console.log(JSON.stringify({
-        queue: QUEUE,
-        fetched: !NO_FETCH,
-        population: {
-            items: items.length,
-            premises: results.length,
-            checked,
-            stale: stale.length,
-            missingFile: missing.length,
-            review: review.length,
-            fresh: fresh.length,
-            uncheckable: unchk.length,
-        },
-        results: results.map((r) => ({
-            item: r.item.label,
-            line: r.item.line,
-            verdict: r.verdict,
-            why: r.why,
-            premise: r.premise ? r.premise.raw : null,
-            matches: r.matches,
-        })),
-    }, null, 2));
-} else {
-    console.log(`QUEUE FRESHNESS  ${QUEUE}`);
-    console.log(`  ${items.length} item(s), ${results.length} premise(s), `
-        + `${checked} checked against origin/HEAD` + (NO_FETCH ? '  [--no-fetch: NOT re-fetched]' : ''));
-    if (results.some((r) => r.fetchFailed)) {
-        console.log('  WARNING: a fetch failed. Verdicts below may be taken from a stale remote.');
+    if (!fs.existsSync(QUEUE)) {
+        console.error(`COULD NOT CHECK: no queue file at ${QUEUE} — this is NOT "the queue is fresh".`);
+        return 2;
     }
-    console.log('');
 
-    for (const group of [
-        ['STALE — the queue is describing work that appears done', stale],
-        ['MISSING-FILE — the path the item names is gone', missing],
-        ['REVIEW — present only inside comments, which is what a finished item leaves behind', review],
-        ['UNCHECKABLE — reported, never counted as fresh', unchk],
-        ['FRESH — the premise still holds', fresh],
-    ]) {
-        const [title, rows] = group;
-        if (!rows.length) continue;
-        console.log(`  ${title}: ${rows.length}`);
-        for (const r of rows) {
-            console.log(`    [line ${r.item.line}] ${r.item.label}`);
-            console.log(`        ${r.verdict}: ${r.why}`);
-            // THE LINES, not just the verdict. A comment naming what it replaced
-            // is the cheapest evidence there is, and only a reader can tell that
-            // from live code.
-            for (const m of r.matches.slice(0, 6)) console.log(`          ${m}`);
-            if (r.matches.length > 6) console.log(`          ...and ${r.matches.length - 6} more`);
-            if (r.matches.length) {
-                console.log('          (a match inside a COMMENT still counts as present —');
-                console.log('           read the lines before trusting the verdict)');
-            }
+    const items = parseQueue(fs.readFileSync(QUEUE, 'utf8'));
+    const results = [];
+    for (const item of items) {
+        if (!item.premises.length) {
+            results.push({ item, verdict: 'UNCHECKABLE', why: 'no PREMISE: line', matches: [] });
+            continue;
+        }
+        for (const p of item.premises) results.push(Object.assign({ item }, evaluate(p)));
+    }
+
+    const stale = results.filter((r) => r.verdict === 'STALE');
+    const missing = results.filter((r) => r.verdict === 'MISSING-FILE');
+    const unchk = results.filter((r) => r.verdict === 'UNCHECKABLE');
+    const review = results.filter((r) => r.verdict === 'REVIEW');
+    const fresh = results.filter((r) => r.verdict === 'FRESH');
+    const checked = stale.length + missing.length + fresh.length + review.length;
+
+    if (AS_JSON) {
+        console.log(JSON.stringify({
+            queue: QUEUE,
+            fetched: !NO_FETCH,
+            population: {
+                items: items.length,
+                premises: results.length,
+                checked,
+                stale: stale.length,
+                missingFile: missing.length,
+                review: review.length,
+                fresh: fresh.length,
+                uncheckable: unchk.length,
+            },
+            results: results.map((r) => ({
+                item: r.item.label,
+                line: r.item.line,
+                verdict: r.verdict,
+                why: r.why,
+                premise: r.premise ? r.premise.raw : null,
+                matches: r.matches,
+            })),
+        }, null, 2));
+    } else {
+        console.log(`QUEUE FRESHNESS  ${QUEUE}`);
+        console.log(`  ${items.length} item(s), ${results.length} premise(s), `
+            + `${checked} checked against origin/HEAD` + (NO_FETCH ? '  [--no-fetch: NOT re-fetched]' : ''));
+        if (results.some((r) => r.fetchFailed)) {
+            console.log('  WARNING: a fetch failed. Verdicts below may be taken from a stale remote.');
         }
         console.log('');
+
+        for (const group of [
+            ['STALE — the queue is describing work that appears done', stale],
+            ['MISSING-FILE — the path the item names is gone', missing],
+            ['REVIEW — present only inside comments, which is what a finished item leaves behind', review],
+            ['UNCHECKABLE — reported, never counted as fresh', unchk],
+            ['FRESH — the premise still holds', fresh],
+        ]) {
+            const [title, rows] = group;
+            if (!rows.length) continue;
+            console.log(`  ${title}: ${rows.length}`);
+            for (const r of rows) {
+                console.log(`    [line ${r.item.line}] ${r.item.label}`);
+                console.log(`        ${r.verdict}: ${r.why}`);
+                // THE LINES, not just the verdict. A comment naming what it replaced
+                // is the cheapest evidence there is, and only a reader can tell that
+                // from live code.
+                for (const m of r.matches.slice(0, 6)) console.log(`          ${m}`);
+                if (r.matches.length > 6) console.log(`          ...and ${r.matches.length - 6} more`);
+                if (r.matches.length) {
+                    console.log('          (a match inside a COMMENT still counts as present —');
+                    console.log('           read the lines before trusting the verdict)');
+                }
+            }
+            console.log('');
+        }
+
+        // The summary never says "clear" without naming what went unchecked in the
+        // same breath. That collapse is the failure this tool is about.
+        if (!checked) {
+            console.log('COULD NOT CHECK: 0 premises were evaluated. This is NOT "the queue is fresh".');
+            console.log(`  ${unchk.length} item(s)/premise(s) carried nothing checkable. Add a line like:`);
+            console.log('    PREMISE: repo=<name> expect=absent match="someSymbol" file=src/x.ts');
+        } else if (stale.length || missing.length) {
+            console.log(`LIKELY STALE: ${stale.length} premise(s) falsified, ${missing.length} missing file(s), `
+                + `out of ${checked} checked — and ${unchk.length} that could not be checked at all.`);
+            console.log('  Re-read those items on the trunk before assigning any of them.');
+            if (review.length) {
+                console.log(`  ${review.length} more matched ONLY inside comments — read those too; on the real`);
+                console.log('  queue this was built for, that was the shape of 3 of the 4 finished items.');
+            }
+        } else {
+            console.log(`NO PREMISE FALSIFIED: ${fresh.length} of ${checked} checked still hold`
+                + (review.length ? `, ${review.length} matched only inside COMMENTS and want a human` : '')
+                + ` — and ${unchk.length} could NOT be checked, which is not the same as fine.`);
+        }
     }
 
-    // The summary never says "clear" without naming what went unchecked in the
-    // same breath. That collapse is the failure this tool is about.
-    if (!checked) {
-        console.log('COULD NOT CHECK: 0 premises were evaluated. This is NOT "the queue is fresh".');
-        console.log(`  ${unchk.length} item(s)/premise(s) carried nothing checkable. Add a line like:`);
-        console.log('    PREMISE: repo=<name> expect=absent match="someSymbol" file=src/x.ts');
-    } else if (stale.length || missing.length) {
-        console.log(`LIKELY STALE: ${stale.length} premise(s) falsified, ${missing.length} missing file(s), `
-            + `out of ${checked} checked — and ${unchk.length} that could not be checked at all.`);
-        console.log('  Re-read those items on the trunk before assigning any of them.');
-        if (review.length) {
-            console.log(`  ${review.length} more matched ONLY inside comments — read those too; on the real`);
-            console.log('  queue this was built for, that was the shape of 3 of the 4 finished items.');
-        }
-    } else {
-        console.log(`NO PREMISE FALSIFIED: ${fresh.length} of ${checked} checked still hold`
-            + (review.length ? `, ${review.length} matched only inside COMMENTS and want a human` : '')
-            + ` — and ${unchk.length} could NOT be checked, which is not the same as fine.`);
-    }
+    if (stale.length || missing.length) return 3;
+    if (!checked) return 2;
+    return 0;
 }
 
-if (stale.length || missing.length) process.exit(3);
-if (!checked) process.exit(2);
-process.exit(0);
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();

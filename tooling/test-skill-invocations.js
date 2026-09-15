@@ -160,6 +160,82 @@ check('the report names both channels', /MODEL chose/.test(human.stdout || '') &
 check('the report says this is reachability, not quality',
   /REACHABILITY number, not a quality one/.test(human.stdout || ''));
 
+// ---------------------------------------------------------------------------
+// N. the pipe delivers every byte
+// ---------------------------------------------------------------------------
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A script that prints past the 64KiB OS pipe
+// buffer and then exits hands its caller exactly 65536 bytes under an exit
+// status that says nothing failed. `--json` here carries the whole `never`
+// list, which is one entry per user-invocable skill, so it grows with the
+// skill library.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte
+// count must equal the same run redirected to a FILE, where the write is
+// synchronous on every platform.
+{
+  const PIPE_BUF = 64 * 1024;
+  const bigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'skillinv-big-'));
+  const bigPlugins = path.join(bigRoot, 'plugins');
+  for (let i = 0; i < 1400; i++) {
+    const n = 'fixture-skill-with-a-realistically-long-name-' + String(i).padStart(5, '0');
+    const d = path.join(bigPlugins, 'fixture-core', 'skills', n);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'SKILL.md'),
+      ['---', 'name: ' + n, 'description: fixture', '---', '', '# ' + n].join('\n'), 'utf8');
+  }
+  const argvFor = (extra) => [SCRIPT, '--dir', projects, '--plugins', bigPlugins].concat(extra);
+
+  const viaFileBytes = (extra) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skillinv-file-'));
+    const out = path.join(dir, 'out');
+    const fd = fs.openSync(out, 'w');
+    spawnSync(process.execPath, argvFor(extra), { stdio: ['ignore', fd, 'ignore'] });
+    fs.closeSync(fd);
+    const n = fs.statSync(out).size;
+    fs.rmSync(dir, { recursive: true, force: true });
+    return n;
+  };
+
+  const jsonPipe = spawnSync(process.execPath, argvFor(['--json']),
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const jsonPipeBytes = Buffer.byteLength(jsonPipe.stdout, 'utf8');
+  const jsonFileBytes = viaFileBytes(['--json']);
+
+  check('--json over a large skill library exceeds one pipe buffer, so the next check is not vacuous',
+    jsonFileBytes > PIPE_BUF, JSON.stringify({ bytes: jsonFileBytes, buffer: PIPE_BUF }));
+  check('  and through a PIPE it delivers every byte it writes to a FILE',
+    jsonPipeBytes === jsonFileBytes, JSON.stringify({ pipe: jsonPipeBytes, file: jsonFileBytes }));
+  let bigParsed = null;
+  try { bigParsed = JSON.parse(jsonPipe.stdout); } catch { /* reported */ }
+  check('  and the piped JSON still parses at that size', bigParsed !== null,
+    jsonPipe.stdout.slice(-60));
+  check('  under the same exit status a short run gets, so truncation cannot read as success',
+    jsonPipe.status === 1, 'exit ' + jsonPipe.status);
+
+  // The human report shares the exit path, so it shares the defect — but BE
+  // CLEAR WHAT THIS PAIR CATCHES, because measurement says it is less than the
+  // pair above. Restoring process.exit(main()) takes the --json checks RED and
+  // leaves these two GREEN: the report is built from hundreds of small
+  // console.log calls, each of which drains opportunistically while the parent
+  // reads, so little or nothing is still pending at the exit. The single 70KB
+  // JSON write is what strands bytes. Keep these for the equality they state;
+  // do not read them as cover for this defect.
+  const reportPipe = spawnSync(process.execPath, argvFor([]),
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const reportPipeBytes = Buffer.byteLength(reportPipe.stdout, 'utf8');
+  const reportFileBytes = viaFileBytes([]);
+  check('  the human report exceeds one pipe buffer too', reportFileBytes > PIPE_BUF,
+    JSON.stringify({ bytes: reportFileBytes, buffer: PIPE_BUF }));
+  check('  and it also delivers every byte through a PIPE',
+    reportPipeBytes === reportFileBytes,
+    JSON.stringify({ pipe: reportPipeBytes, file: reportFileBytes }));
+
+  fs.rmSync(bigRoot, { recursive: true, force: true });
+}
+
 console.log('');
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

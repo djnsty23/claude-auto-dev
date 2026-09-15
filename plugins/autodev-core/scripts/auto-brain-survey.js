@@ -22,11 +22,11 @@
  *   node auto-brain-survey.js --root <dir>     survey every git repo under dir
  *   node auto-brain-survey.js --json           machine-readable
  */
-if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
-    // Print this file's own header block. A probe asking what this script is
-    // must never cause it to DO what this script does: several entry points
-    // here reach the network, and one made 21 registry calls from a --help
-    // probe before this branch existed.
+// Print this file's own header block. A probe asking what this script is must
+// never cause it to DO what this script does: several entry points here reach
+// the network, and one made 21 registry calls from a --help probe before this
+// branch existed. main() calls this FIRST, before discover() or survey().
+function help() {
     const lines = require('fs').readFileSync(__filename, 'utf8').split('\n');
     const head = [];
     for (const line of lines.slice(1)) {
@@ -35,7 +35,6 @@ if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
         else break;
     }
     console.log(head.join('\n').trim());
-    process.exit(0);
 }
 
 const fs = require('fs');
@@ -202,98 +201,124 @@ function survey(name, dir) {
     return r;
 }
 
-// No root means nothing was scanned, which is not the same as scanning and
-// finding nothing. Say so and exit non-zero rather than printing a survey of
-// zero repos that reads exactly like a tidy machine.
-if (!ROOT) {
-    console.error('COULD NOT SURVEY: no code directory found — this is NOT "0 repos".');
-    console.error('  tried AUTODEV_CODE_DIR, ~/Code, ~/code, ~/Downloads/code, ~/Projects, ~/src');
-    console.error('  Pass --root <dir>, or set AUTODEV_CODE_DIR.');
-    process.exit(2);
-}
+function main() {
+    // --help still runs before discover() and survey(), so it still reaches no
+    // network. It now runs AFTER the module-level ROOT lookup and the client-list
+    // read, which are fs.existsSync and a try//catch JSON read; both degrade to
+    // null rather than throwing, so --help cannot fail on a machine where they do.
+    if (has('--help') || has('-h')) { help(); return 0; }
 
-const list = discover(ROOT);
-const results = list.map(([n, d]) => survey(n, d));
+    // No root means nothing was scanned, which is not the same as scanning and
+    // finding nothing. Say so and exit non-zero rather than printing a survey of
+    // zero repos that reads exactly like a tidy machine.
+    if (!ROOT) {
+        console.error('COULD NOT SURVEY: no code directory found — this is NOT "0 repos".');
+        console.error('  tried AUTODEV_CODE_DIR, ~/Code, ~/code, ~/Downloads/code, ~/Projects, ~/src');
+        console.error('  Pass --root <dir>, or set AUTODEV_CODE_DIR.');
+        return 2;
+    }
 
-if (has('--json')) {
-    console.log(JSON.stringify({ root: ROOT, scanned: list.length, repos: results }, null, 2));
-    process.exit(0);
-}
+    const list = discover(ROOT);
+    const results = list.map(([n, d]) => survey(n, d));
 
-console.log('\nAUTO-BRAIN SURVEY');
-console.log('  root: ' + ROOT);
-console.log('  population: ' + list.length + ' git repo(s) found UNDER THAT ROOT');
-console.log('  Everything below is READ from git and gh. Nothing here knows what a');
-console.log('  session is doing — join on cwd AND branch, then ASK about the rest.');
-console.log('');
-console.log('  !! THIS SCAN IS ONE DIRECTORY DEEP UNDER ONE ROOT, AND A SESSION MAY');
-console.log('     BE WORKING SOMEWHERE IT CANNOT SEE. [measured 2026-08-25] a session');
-console.log('     whose cwd was a repo listed below does all of its work in a project');
-console.log('     on a DIFFERENT DRIVE. Briefing it from this output described the');
-console.log('     wrong repo entirely — right facts, wrong subject.');
-console.log('     A repo absent here is not a repo nobody is working in. Ask each');
-console.log('     session which project it is actually in before briefing it, and');
-console.log('     pass --root to cover another tree.\n');
+    if (has('--json')) {
+        console.log(JSON.stringify({ root: ROOT, scanned: list.length, repos: results }, null, 2));
+        return 0;
+    }
 
-for (const r of results) {
-    console.log('### ' + r.name + (r.isClient ? '   [CLIENT — ' + (r.clientWhy || 'unknown signal') + ']' : ''));
-    console.log('  branch ' + r.branch + '   trunk ' + (r.trunk || 'COULD NOT CHECK'));
-    if (r.trunkStale) {
-        console.log('  !! THE CACHED origin/HEAD IN THIS CLONE IS STALE: it says ' + r.trunkCached);
-        console.log('     the remote says ' + r.trunkRemote + '. refs/remotes/origin/HEAD is');
-        console.log('     written at clone time and NEVER updated by fetch, so any tool');
-        console.log('     reading it here has been getting the wrong trunk. The numbers');
-        console.log('     below use the REMOTE value and are correct; other tools may not.');
-        console.log('     Fix the clone with:  git -C "' + r.dir + '" remote set-head origin -a');
-    }
-    if (r.trunkFromCache) {
-        console.log('  !! trunk is the CACHED origin/HEAD, NOT confirmed against the remote');
-        console.log('     (git ls-remote could not answer). It may be stale. Treat every');
-        console.log('     ahead/behind number below as unverified rather than as measured.');
-    }
-    if (r.trunkIsUnusual) {
-        console.log('  !! trunk is NOT main/master. Comparing against origin/main here');
-        console.log('     inverts verdicts rather than merely dating them.');
-    }
-    const pos = [];
-    if (r.ahead !== null && r.ahead !== undefined) pos.push(r.ahead + ' ahead');
-    if (r.behind !== null && r.behind !== undefined) pos.push(r.behind + ' behind');
-    console.log('  ' + (pos.join(', ') || 'position COULD NOT CHECK')
-        + '   dirty ' + (r.dirty === null ? 'COULD NOT CHECK' : r.dirty)
-        + '   worktrees ' + (r.worktrees === null ? 'COULD NOT CHECK' : r.worktrees));
-    if (r.trunkTip) console.log('  trunk tip: ' + r.trunkTip.slice(0, 96));
-    console.log('  gate: ' + (r.gates === null ? 'package.json UNPARSEABLE'
-        : r.notNode ? 'not a node project — no gate to run'
-        : (r.gates.length ? r.gates.join(', ') : 'package.json names NONE')));
-    if (r.prs === null) console.log('  open PRs: COULD NOT CHECK — ' + (r.prsWhy || 'gh did not answer'));
-    else console.log('  open PRs: ' + r.prs.length
-        + (r.prs.length ? ' -> ' + r.prs.map((p) => '#' + p.number + ' ' + p.title.slice(0, 44)).join(' | ') : ''));
-    const docs = Object.keys(r.docs);
-    if (docs.length) {
-        console.log('  docs: ' + docs.map((d) => d + ' (' + r.docs[d].bytes + 'b, ' + r.docs[d].modified + ')').join(', '));
-        if (r.docs['RESUME.md'] && r.docs['RESUME.md'].bytes > 20000) {
-            console.log('  !! RESUME.md is large and probably hand-written. Do not let a');
-            console.log('     generator overwrite it — session-exit.js refuses, others may not.');
-        }
-    }
+    console.log('\nAUTO-BRAIN SURVEY');
+    console.log('  root: ' + ROOT);
+    console.log('  population: ' + list.length + ' git repo(s) found UNDER THAT ROOT');
+    console.log('  Everything below is READ from git and gh. Nothing here knows what a');
+    console.log('  session is doing — join on cwd AND branch, then ASK about the rest.');
     console.log('');
+    console.log('  !! THIS SCAN IS ONE DIRECTORY DEEP UNDER ONE ROOT, AND A SESSION MAY');
+    console.log('     BE WORKING SOMEWHERE IT CANNOT SEE. [measured 2026-08-25] a session');
+    console.log('     whose cwd was a repo listed below does all of its work in a project');
+    console.log('     on a DIFFERENT DRIVE. Briefing it from this output described the');
+    console.log('     wrong repo entirely — right facts, wrong subject.');
+    console.log('     A repo absent here is not a repo nobody is working in. Ask each');
+    console.log('     session which project it is actually in before briefing it, and');
+    console.log('     pass --root to cover another tree.\n');
+
+    for (const r of results) {
+        console.log('### ' + r.name + (r.isClient ? '   [CLIENT — ' + (r.clientWhy || 'unknown signal') + ']' : ''));
+        console.log('  branch ' + r.branch + '   trunk ' + (r.trunk || 'COULD NOT CHECK'));
+        if (r.trunkStale) {
+            console.log('  !! THE CACHED origin/HEAD IN THIS CLONE IS STALE: it says ' + r.trunkCached);
+            console.log('     the remote says ' + r.trunkRemote + '. refs/remotes/origin/HEAD is');
+            console.log('     written at clone time and NEVER updated by fetch, so any tool');
+            console.log('     reading it here has been getting the wrong trunk. The numbers');
+            console.log('     below use the REMOTE value and are correct; other tools may not.');
+            console.log('     Fix the clone with:  git -C "' + r.dir + '" remote set-head origin -a');
+        }
+        if (r.trunkFromCache) {
+            console.log('  !! trunk is the CACHED origin/HEAD, NOT confirmed against the remote');
+            console.log('     (git ls-remote could not answer). It may be stale. Treat every');
+            console.log('     ahead/behind number below as unverified rather than as measured.');
+        }
+        if (r.trunkIsUnusual) {
+            console.log('  !! trunk is NOT main/master. Comparing against origin/main here');
+            console.log('     inverts verdicts rather than merely dating them.');
+        }
+        const pos = [];
+        if (r.ahead !== null && r.ahead !== undefined) pos.push(r.ahead + ' ahead');
+        if (r.behind !== null && r.behind !== undefined) pos.push(r.behind + ' behind');
+        console.log('  ' + (pos.join(', ') || 'position COULD NOT CHECK')
+            + '   dirty ' + (r.dirty === null ? 'COULD NOT CHECK' : r.dirty)
+            + '   worktrees ' + (r.worktrees === null ? 'COULD NOT CHECK' : r.worktrees));
+        if (r.trunkTip) console.log('  trunk tip: ' + r.trunkTip.slice(0, 96));
+        console.log('  gate: ' + (r.gates === null ? 'package.json UNPARSEABLE'
+            : r.notNode ? 'not a node project — no gate to run'
+            : (r.gates.length ? r.gates.join(', ') : 'package.json names NONE')));
+        if (r.prs === null) console.log('  open PRs: COULD NOT CHECK — ' + (r.prsWhy || 'gh did not answer'));
+        else console.log('  open PRs: ' + r.prs.length
+            + (r.prs.length ? ' -> ' + r.prs.map((p) => '#' + p.number + ' ' + p.title.slice(0, 44)).join(' | ') : ''));
+        const docs = Object.keys(r.docs);
+        if (docs.length) {
+            console.log('  docs: ' + docs.map((d) => d + ' (' + r.docs[d].bytes + 'b, ' + r.docs[d].modified + ')').join(', '));
+            if (r.docs['RESUME.md'] && r.docs['RESUME.md'].bytes > 20000) {
+                console.log('  !! RESUME.md is large and probably hand-written. Do not let a');
+                console.log('     generator overwrite it — session-exit.js refuses, others may not.');
+            }
+        }
+        console.log('');
+    }
+
+    const clients = results.filter((r) => r.isClient).map((r) => r.name);
+    const stale = results.filter((r) => typeof r.behind === 'number' && r.behind > 50).map((r) => r.name + ' (' + r.behind + ')');
+    const noGate = results.filter((r) => r.gates && r.gates.length === 0 && !r.notNode).map((r) => r.name);
+
+    console.log('SUMMARY');
+    console.log('  client repos (never push to a personal remote): ' + (clients.join(', ') || 'none'));
+    // Print the POPULATION the client check ran against, not just its result. An
+    // empty client list and an unreadable config produce the same zero matches, and
+    // only one of those is safe to act on: without this line a survey that failed to
+    // read the list looks exactly like a machine that has no client work on it.
+    console.log('  client list: ' + (clientListFound
+        ? clientNames.length + ' name(s) from ~/.claude/brain-brief.json, plus any bitbucket remote'
+        : 'NOT FOUND in ~/.claude/brain-brief.json — falling back to the bitbucket remote alone, which CANNOT see client work on a personal GitHub remote'));
+    console.log('  more than 50 behind trunk: ' + (stale.join(', ') || 'none'));
+    console.log('  node projects naming no gate script: ' + (noGate.join(', ') || 'none'));
+    console.log('  repos where gh could not answer: '
+        + (results.filter((r) => r.prs === null).map((r) => r.name).join(', ') || 'none'));
+    console.log('');
+    return 0;
 }
 
-const clients = results.filter((r) => r.isClient).map((r) => r.name);
-const stale = results.filter((r) => typeof r.behind === 'number' && r.behind > 50).map((r) => r.name + ' (' + r.behind + ')');
-const noGate = results.filter((r) => r.gates && r.gates.length === 0 && !r.notNode).map((r) => r.name);
-
-console.log('SUMMARY');
-console.log('  client repos (never push to a personal remote): ' + (clients.join(', ') || 'none'));
-// Print the POPULATION the client check ran against, not just its result. An
-// empty client list and an unreadable config produce the same zero matches, and
-// only one of those is safe to act on: without this line a survey that failed to
-// read the list looks exactly like a machine that has no client work on it.
-console.log('  client list: ' + (clientListFound
-    ? clientNames.length + ' name(s) from ~/.claude/brain-brief.json, plus any bitbucket remote'
-    : 'NOT FOUND in ~/.claude/brain-brief.json — falling back to the bitbucket remote alone, which CANNOT see client work on a personal GitHub remote'));
-console.log('  more than 50 behind trunk: ' + (stale.join(', ') || 'none'));
-console.log('  node projects naming no gate script: ' + (noGate.join(', ') || 'none'));
-console.log('  repos where gh could not answer: '
-    + (results.filter((r) => r.prs === null).map((r) => r.name).join(', ') || 'none'));
-console.log('');
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();

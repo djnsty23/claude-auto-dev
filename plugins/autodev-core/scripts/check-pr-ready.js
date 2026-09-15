@@ -210,21 +210,38 @@ function selftest() {
 
 module.exports = { checkPrReady, present, render };
 
-if (require.main === module) {
+function main() {
     const argv = process.argv.slice(2);
-    if (argv.includes('--selftest')) process.exit(selftest() ? 0 : 1);
+    if (argv.includes('--selftest')) return selftest() ? 0 : 1;
     if (argv.includes('--help') || argv.length === 0) {
         console.log('check-pr-ready.js <pr-number> [--repo <path>] [--json]\n'
             + 'Answers whether a PR is safe to merge, treating an unrecognised state as NOT ready.\n'
             + 'Exit 0 ready, 2 not ready, 3 could not tell.');
-        process.exit(0);
+        return 0;
     }
     const num = argv.find((a) => /^\d+$/.test(a));
     const ri = argv.indexOf('--repo');
     const cwd = ri !== -1 ? argv[ri + 1] : process.cwd();
-    if (!num) { console.error('need a PR number'); process.exit(3); }
+    if (!num) { console.error('need a PR number'); return 3; }
     const r = checkPrReady(num, cwd);
     if (argv.includes('--json')) console.log(JSON.stringify(r, null, 2));
     else console.log(render(r));
-    process.exit(r.verdict === 'READY' ? 0 : r.verdict === 'NOT_READY' ? 2 : 3);
+    return r.verdict === 'READY' ? 0 : r.verdict === 'NOT_READY' ? 2 : 3;
 }
+
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+if (require.main === module) process.exitCode = main();

@@ -272,10 +272,20 @@ function gatherEvidence(branch, trunk, cwd, slug) {
     return ev;
 }
 
+// Thrown instead of calling process.exit() from inside a helper. No path in this
+// process may exit: process.exit() discards whatever has not yet drained from an
+// async stdio stream, and on darwin a pipe IS async — see the note on the runner
+// at the foot of this file. A sentinel return would only be checked where a
+// caller remembered to check it; an exception carrying its own status is checked
+// once, in the runner.
+class Bail extends Error {
+    constructor(code) { super('bail'); this.code = code; }
+}
+
 function selftest() {
     const t = require('assert');
     let n = 0;
-    const ck = (label, cond) => { n++; if (!cond) { console.error('SELFTEST FAIL  ' + label); process.exit(1); } };
+    const ck = (label, cond) => { n++; if (!cond) { console.error('SELFTEST FAIL  ' + label); throw new Bail(1); } };
 
     // The three ancestry traps must NOT produce a LANDED verdict on their own,
     // and must NOT produce UNLANDED either where content says otherwise.
@@ -336,9 +346,27 @@ function main(argv) {
     return 0;
 }
 
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
 if (require.main === module) {
     let code = 3;
     try { code = main(process.argv); }
-    catch (err) { console.error('check-branch-landed: ' + (err && err.message)); code = 3; }
-    process.exit(code);
+    catch (err) {
+        if (err instanceof Bail) code = err.code;
+        else { console.error('check-branch-landed: ' + (err && err.message)); code = 3; }
+    }
+    process.exitCode = code;
 }
