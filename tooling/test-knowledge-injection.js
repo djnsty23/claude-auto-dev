@@ -350,6 +350,13 @@ if (!memDB.isAvailable()) {
         cases.push(['a Bash tool event does not crash capture', bash.status === 0]);
         cases.push(['  and reports no capture error',
             !/\[Memory\] capture error/.test(bash.stderr || '')]);
+        // Since 2026-09-08 a Bash event is not an observation at all, and it has
+        // no file_path to derive an area from, so the hook has nothing to say.
+        // A hook with nothing to say emits ZERO bytes — on BOTH streams, asserted
+        // separately, because a mutant that prints to one stream has survived a
+        // suite that checked only the other.
+        cases.push(['  and emits zero bytes on stdout', (bash.stdout || '') === '']);
+        cases.push(['  and emits zero bytes on stderr', (bash.stderr || '') === '']);
 
         const read = spawnSync(process.execPath, [HOOK], {
             input: JSON.stringify({
@@ -365,6 +372,12 @@ if (!memDB.isAvailable()) {
         cases.push(['  and reports no capture error',
             !/\[Memory\] capture error/.test(read.stderr || '')]);
         cases.push(['a trivial Bash event is handled too', bashTrivial.status === 0]);
+        cases.push(['  and it too emits zero bytes on stdout', (bashTrivial.stdout || '') === '']);
+        cases.push(['  and zero bytes on stderr', (bashTrivial.stderr || '') === '']);
+        // A Read carries a file_path, so the area brief may legitimately print to
+        // stderr on the first touch of an area; stdout must still be empty, since
+        // anything there lands in the model's context.
+        cases.push(['a Read tool event emits zero bytes on stdout', (read.stdout || '') === '']);
     }
 
     // ---- line 160 CANNOT be reached from here, and here is why ----

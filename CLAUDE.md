@@ -315,9 +315,12 @@ cannot work — if core needs a file, core ships it.
 **That sentence carried four counts until 2026-09-08, and three of them were
 wrong.** It was written on 2026-08-17 as "43 skills, 4 agents, 7 hook events"
 for core and "4 hook events" for memory, and all four were exact that day.
-`[measured 2026-09-08]` core has **59 skills, 5 agents and 10 hook events**;
-memory's 4 is still right, and it is right because nobody has added a memory
-hook, not because anything checks.
+`[measured 2026-09-08]` core has **59 skills, 5 agents and 10 hook events**.
+Memory's count was 4 that morning and 3 by the evening: the UserPromptSubmit
+prompt-capture hook went with the memory-recall measurement
+(`docs/evidence-memory-recall-2026-09-08.md`), which is the sentence's point
+made twice in one day. memory's 3 is still right, and it is right because
+nobody has added a memory hook since, not because anything checks.
 
 The drift is not carelessness, it is the shape of the sentence. Of the 526
 commits since it was written, 18 added a skill to core and 14 touched core's

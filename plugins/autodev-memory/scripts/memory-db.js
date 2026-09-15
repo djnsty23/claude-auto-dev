@@ -175,6 +175,17 @@ function isDuplicate(db, hash, projectPath, sourceFiles, windowSeconds = 30) {
     }
 }
 
+function isRepeatInSession(db, sessionId, type, title, sourceFiles) {
+    try {
+        const row = db
+            .prepare('SELECT 1 AS hit FROM observations WHERE session_id = ? AND type = ? AND title = ? AND source_files = ? LIMIT 1')
+            .get(sessionId, type, title, sourceFiles);
+        return !!row;
+    } catch {
+        return false;
+    }
+}
+
 // --- Knowledge briefs (roadmap §3.2 "domain brains") ---
 // Distill accumulated observations for a code AREA into a focused brief.
 // The "area" is a path prefix / directory / fragment (e.g. "src/auth").
@@ -443,6 +454,23 @@ const api = {
             // Only repeated payloads in the same project and source context are duplicates.
             const files = stringifyPrivate(sourceFiles || []);
             if (isDuplicate(db, hash, projectPath, files)) return null;
+
+            // Dedup, second rule: one `change` row per (session, title, source
+            // files). The hash rule above misses an edit repeated with different
+            // content — the same file edited seven times in one session produced
+            // seven identical `Modified x.test.ts` titles, and 1,785 of 6,072
+            // rows were such repeats when this was measured on 2026-09-08. A
+            // second edit of a file within one session tells a reader nothing
+            // the first did not.
+            //
+            // Scoped to what capture writes. Type and source files stay in the
+            // key because a title is not an identity: the same title stored
+            // deliberately as a decision and as a bugfix is two facts
+            // (test-knowledge.js), a basename can name two files, and two
+            // decisions under one title with different concepts are a conflict
+            // a reader must see (test-memory-knowledge-conflicts.js).
+            if (sessionId && type === 'change'
+                && isRepeatInSession(db, sessionId, type, stripPrivate(title), files)) return null;
 
             const id = genId('obs');
             const stmt = db.prepare(`
@@ -834,6 +862,27 @@ if (require.main === module) {
     _strictErrors = true;
     _cliReadOnly = ['stats', 'recent', 'search', 'semantic', 'timeline',
         'sessions', 'decisions', 'bugs', 'knowledge', 'dashboard'].includes(cmd);
+
+    // The query commands take `<projectPath> <query>`. The only genuine query
+    // of the store in 21 days of transcripts (2026-08-28, see
+    // docs/evidence-memory-recall-2026-09-08.md) passed them the other way
+    // round, searched a project named by the query for a query that was a
+    // path, got `[]` twice, and read that as "nothing there". A swap is
+    // unmistakable when the second argument is an absolute directory and the
+    // first is not, so refuse it out loud rather than answer a question nobody
+    // asked. Relative names are left alone: a query can legitimately match a
+    // directory name in the cwd, and an absent project path is a legitimate
+    // way to ask about a project that has since been deleted.
+    const QUERY_COMMANDS = new Set(['search', 'semantic', 'timeline', 'knowledge']);
+    const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+    if (QUERY_COMMANDS.has(cmd) && args[1] && args[2]
+        && path.isAbsolute(args[2]) && isDir(args[2]) && !isDir(args[1])) {
+        process.stderr.write(
+            `memory-db.js ${cmd}: arguments look swapped — "${args[2]}" is a directory and "${args[1]}" is not.\n` +
+            `Usage: node memory-db.js ${cmd} <projectPath> <query>\n`
+        );
+        process.exit(1);
+    }
 
     try {
     switch (cmd) {
