@@ -464,6 +464,73 @@ function runFull(cfg, extra = []) {
         (out.match(/\[settings\]/g) || []).length === 1);
 }
 
+// The pipe delivers every byte.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under a status that says
+// nothing failed — the shape rendered-layout-gate.js shipped with until
+// 2026-09-07. --json here carries every finding, so it grows with the config it
+// audits.
+//
+// THIS SUITE RATHER THAN test-drift-audit.js, which grades the prd half: that
+// one is spawn-bound on git fixtures and says so in its own header, while a
+// settings.json full of allow rules produces one finding per rule for the cost
+// of a single file write. Same subject, same exit, a fraction of the seconds.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+{
+    const PIPE_BUF = 64 * 1024;
+    const allow = [];
+    for (let i = 0; i < 300; i++) {
+        allow.push('Bash(eval * # a-fairly-long-rule-comment-' + String(i).padStart(4, '0') + ')');
+    }
+    const cfg = config({ 'settings.json': { permissions: { allow, deny: ['Bash(rm *)'] } } });
+    const env = {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: cfg,
+        HOME: path.join(TMP, 'home'),
+        USERPROFILE: path.join(TMP, 'home'),
+    };
+    const viaFileBytes = (extra) => {
+        const out = path.join(TMP, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, [AUDIT, ...extra], { stdio: ['ignore', fd, 'ignore'], env });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const piped = spawnSync(process.execPath, [AUDIT, '--json'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+    const fileBytes = viaFileBytes(['--json']);
+    let parsed = null;
+    try { parsed = JSON.parse(piped.stdout); } catch { /* stays null */ }
+
+    check('--json over many findings exceeds one pipe buffer, so the next check is not vacuous ('
+        + fileBytes + ' bytes)', fileBytes > PIPE_BUF);
+    check('--json through a PIPE delivers every byte it writes to a FILE (pipe '
+        + pipeBytes + ', file ' + fileBytes + ')', pipeBytes === fileBytes);
+    check('  and the piped JSON still parses at that size, under the fail exit 1',
+        parsed !== null && Array.isArray(parsed.findings) && parsed.findings.length === 300
+        && piped.status === 1);
+
+    // The human report shares the exit path, so it shares the defect. BE CLEAR
+    // WHAT THIS LINE CATCHES: it is a stream of small console.log calls, which
+    // drain opportunistically while the parent reads, so it strands far less at
+    // the exit than the single JSON write — measurably so on the sibling suites,
+    // where the equivalent line stays green under the mutation even above the
+    // buffer. It states the equality; it is not cover for this defect.
+    const reportPipe = spawnSync(process.execPath, [AUDIT],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    check('  the human report through a PIPE also delivers every byte',
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === viaFileBytes([]));
+}
+
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
