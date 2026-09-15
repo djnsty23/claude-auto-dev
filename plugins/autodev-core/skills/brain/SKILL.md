@@ -182,6 +182,12 @@ audit pass and queue independent new scope. Repeated identical observations add
 no evidence. A score is not a completion condition. Set `passes: true` only when
 the story's acceptance evidence exists; subjective realness does not replace it.
 
+Before merging, read `ccd_pr get_status self`. When `auto_archive_on_close` is
+true and a PR is bound, the merge archives this session and removes its
+worktree. Move the worktree off the PR branch, `unbind_pr`, confirm `bound:
+false`, then merge with `--match-head-commit` pinned to the head CI ran on. The
+switch is readable; do not infer it from archived session records.
+
 ## 5. Release and verify the live result
 
 Load `commit` and `ship` under current authorization. Determine the action that
