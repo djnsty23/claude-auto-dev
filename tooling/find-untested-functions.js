@@ -440,8 +440,8 @@ const staleRefused = refusedByFile.filter((r) => !r.exists || !r.loaded || r.nev
 
 // --- 3. report --------------------------------------------------------------
 // process.exitCode, never process.exit(), after anything was written to stdout:
-// stdout to a PIPE is asynchronous on darwin and exit() drops the unflushed tail
-// past 64 KiB (CLAUDE.md, "process.exit() after printing TRUNCATES"). The gate's
+// stdout to a PIPE is asynchronous on POSIX (Linux and darwin) and exit() drops
+// the unflushed tail (65536 bytes survived on darwin) (CLAUDE.md, "process.exit() after printing TRUNCATES"). The gate's
 // own output is ~2 KB today; the second review named this as latent, and the
 // change is one wrapper. Every early exit below is a return, and the code is
 // set once at the end.

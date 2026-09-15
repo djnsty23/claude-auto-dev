@@ -332,7 +332,7 @@ function main(argv) {
 }
 
 if (require.main === module) {
-    // exitCode, not exit(): on darwin a piped stdout is asynchronous and
+    // exitCode, not exit(): on POSIX (Linux and darwin) a piped stdout is asynchronous and
     // process.exit() truncates it (CLAUDE.md).
     process.exitCode = main(process.argv.slice(2));
 }

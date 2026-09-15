@@ -434,9 +434,10 @@ function main() {
 
 // process.exit() TRUNCATES output, and only on some platforms.
 //
-// node's process.stdout is asynchronous when it is a PIPE on macOS, and
-// synchronous when it is a pipe on Linux or Windows; it is synchronous for a
-// FILE and for a TTY everywhere. process.exit() terminates without draining a
+// node's process.stdout is asynchronous when it is a PIPE on POSIX, Linux and
+// macOS alike, and synchronous when it is a pipe on Windows; it is synchronous
+// for a FILE everywhere, and for a TTY on POSIX but not on Windows (Node's
+// "A note on process I/O"). process.exit() terminates without draining a
 // pending async write, so on macOS a piped run of this gate delivered only the
 // 64KiB the OS pipe buffer had absorbed - `--json` over the 20 committed
 // snapshots is ~84KB, so it arrived as 65536 bytes of invalid JSON under exit
@@ -449,7 +450,8 @@ function main() {
 //
 // The three ways this hides from you, all of which it used:
 //   - redirect to a file and the write is synchronous, so it looks complete
-//   - run it on Linux CI and the write is synchronous, so CI is green
+//   - run it on Linux CI and CI is green, which does not show the pipe write
+//     was synchronous or drained - a Linux pipe is asynchronous too
 //   - read the exit status and it is 0, because the write never failed
 // Whoever pipes this next gets the truncation and no signal that they did.
 if (require.main === module) {

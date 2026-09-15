@@ -1056,7 +1056,7 @@ function selftest() {
         if (!ok) { failed++; console.log('        ' + String(detail).replace(/\n/g, '\n        ')); }
     }
     console.log(`population: ${cases.length} assertions run, ${cases.length - failed} passed`);
-    // Never process.exit() after printing: on darwin a pipe write is async and
+    // Never process.exit() after printing: on POSIX, darwin and Linux alike, a pipe write is async and
     // exit() truncates it. CLAUDE.md documents the 65536-byte instance.
     process.exitCode = failed ? 1 : 0;
 }
