@@ -55,16 +55,15 @@ function makeRepo() {
 }
 
 /** Run the hook. Returns { status, out, err, spoke, context }. */
-function fire({ cwd, dir, sessionId = 's-1', stdin, state, cooldown, profile, profileKey } = {}) {
+function fire({ cwd, dir, sessionId = 's-1', stdin, state, cooldown, options } = {}) {
     const env = Object.assign({}, process.env, {
         AUTODEV_FLEET_INTENT_DIR: dir,
         AUTODEV_INTENT_NUDGE_STATE: state,
     });
-    // The inherited environment must not decide this: a session running the suite under
-    // `minimal` would otherwise silence every firing case and read as 35 passes.
-    delete env.CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE;
-    delete env.CLAUDE_PLUGIN_OPTION_hooks_profile;
-    if (profile !== undefined) env[profileKey || 'CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE'] = profile;
+    // The inherited environment must not decide this: a session running the suite with
+    // the switch off would otherwise silence every firing case and read as 35 passes.
+    for (const k of Object.keys(env)) if (k.startsWith('CLAUDE_PLUGIN_OPTION_')) delete env[k];
+    Object.assign(env, options || {});
     if (cooldown !== undefined) env.AUTODEV_INTENT_COOLDOWN_MIN = String(cooldown);
     const payload = stdin !== undefined ? stdin : JSON.stringify({ session_id: sessionId, cwd });
     const r = spawnSync(process.execPath, [HOOK], { encoding: 'utf8', input: payload, env, timeout: 30000 });
@@ -276,15 +275,16 @@ function quiet(r) { return r.out.length === 0 && r.err.length === 0; }
     fs.rmSync(root, { recursive: true, force: true });
 }
 
-// --- the hooks_profile split ------------------------------------------------
+// --- the intent_record switch -----------------------------------------------
 /* This hook is classified ADVISORY in tooling/test-hooks-profile.js, which checks
    only that the guard STRING is present and sits below 'use strict'. A string is
-   not a behaviour: a guard whose regex never matched, or that sat after the stdin
-   read, would pass there and do nothing here. These cases drive the real hook.
+   not a behaviour: a guard whose comparison never matched, or that sat after the
+   stdin read, would pass there and do nothing here. These cases drive the real hook.
 
    Every one carries a CONTROL in the same directory, because the assertion is
-   "silent under minimal" and an empty run is exactly what a broken setup also
-   produces. The control is the same fire() with no profile, and it must SPEAK. */
+   "silent when switched off" and an empty run is exactly what a broken setup also
+   produces. The control is the same fire() with no switch set, and it must SPEAK. */
+const OFF = { CLAUDE_PLUGIN_OPTION_INTENT_RECORD: 'false' };
 {
     const { root, main } = makeRepo();
     const dir = path.join(root, 'records');
@@ -300,14 +300,14 @@ function quiet(r) { return r.out.length === 0 && r.err.length === 0; }
     const run = (opts) => fire(Object.assign({ cwd: wt, dir, state: path.join(root, 's' + (++n) + '.json') }, opts));
 
     /* POSITION, which no behavioural case above can reach. A guard moved below the
-       stdin read is still SILENT under minimal and still touches no record, so every
+       stdin read is still SILENT when off and still touches no record, so every
        assertion here passes while the hook has already required fleet-intent.js and
        stat'd the record directory. Verified by mutation: moving the line below the
        stdin read leaves all nine cases green. The property is that the guard runs
        before any work, so it is checked where it is observable — in the source. */
     {
         const lines = fs.readFileSync(HOOK, 'utf8').split('\n');
-        const gi = lines.findIndex((l) => l.includes('CLAUDE_PLUGIN_OPTION_HOOKS_PROFILE')
+        const gi = lines.findIndex((l) => l.includes('CLAUDE_PLUGIN_OPTION_INTENT_RECORD')
             && /process\.exit\(0\)/.test(l));
         let inBlock = false;
         const executable = [];
@@ -324,35 +324,33 @@ function quiet(r) { return r.out.length === 0 && r.err.length === 0; }
     }
 
     let ctl = run({});
-    check('control: this setup SPEAKS with no profile set', ctl.spoke && ctl.status === 0,
+    check('control: this setup SPEAKS with no switch set', ctl.spoke && ctl.status === 0,
         'exit=' + ctl.status + ' out=' + ctl.out.length + 'B');
 
-    let r = run({ profile: 'minimal' });
-    check('SILENT under hooks_profile=minimal — zero bytes on stdout AND stderr',
+    let r = run({ options: OFF });
+    check('SILENT with intent_record=false — zero bytes on stdout AND stderr',
         quiet(r) && r.status === 0,
         'exit=' + r.status + ' out=' + r.out.length + 'B err=' + r.err.length + 'B');
 
-    r = run({ profile: 'MINIMAL' });
-    check('  and the value is matched case-insensitively', quiet(r) && r.status === 0, 'exit=' + r.status);
+    r = run({ options: { CLAUDE_PLUGIN_OPTION_INTENT_RECORD: 'true' } });
+    check('SPEAKS with intent_record=true', r.spoke && r.status === 0, 'exit=' + r.status);
 
-    r = run({ profile: 'minimal', profileKey: 'CLAUDE_PLUGIN_OPTION_hooks_profile' });
-    check('  and the lowercase env key is honoured too', quiet(r) && r.status === 0, 'exit=' + r.status);
+    /* Per-key, not global: switching every OTHER advisory hook off must not reach this one. */
+    r = run({ options: { CLAUDE_PLUGIN_OPTION_WORKFLOW_WALL_NOTE: 'false', CLAUDE_PLUGIN_OPTION_TYPECHECK: 'false' } });
+    check('  and another hook\'s switch does not silence it', r.spoke && r.status === 0, 'exit=' + r.status);
 
-    r = run({ profile: 'full' });
-    check('SPEAKS under hooks_profile=full', r.spoke && r.status === 0, 'exit=' + r.status);
-
-    /* An unrecognised value must read as FULL, not as minimal. A guard that
-       silenced the hook on anything it did not recognise would turn a typo into
-       a silent uninstall, and silence is the one outcome nothing reports. */
-    r = run({ profile: 'mimimal' });
-    check('a TYPO in the value reads as full rather than silencing the hook', r.spoke,
+    /* Only the exact value the host sends for off counts. A guard that silenced the
+       hook on anything else would turn a stray value into a silent uninstall, and
+       silence is the one outcome nothing reports. */
+    r = run({ options: { CLAUDE_PLUGIN_OPTION_INTENT_RECORD: 'no' } });
+    check('a value the host never sends reads as on rather than silencing the hook', r.spoke,
         'exit=' + r.status + ' out=' + r.out.length + 'B');
 
-    /* The guard sits above the stdin read, so a minimal run must not consume the
+    /* The guard sits above the stdin read, so an off run must not consume the
        payload or touch the record directory either. */
     const before = fs.readdirSync(dir).length;
-    r = run({ profile: 'minimal' });
-    check('a minimal run leaves the record directory untouched',
+    r = run({ options: OFF });
+    check('an off run leaves the record directory untouched',
         quiet(r) && fs.readdirSync(dir).length === before, 'files=' + fs.readdirSync(dir).length);
 
     /* And it must be silent on a path that would otherwise WRITE — the observed
@@ -362,11 +360,11 @@ function quiet(r) { return r.out.length === 0 && r.err.length === 0; }
         claim: { brief: 'B', current_step: 'C', next_step: 'N', verify: 'npm run gate', state: 'working' },
         observed: intent.observe(wt), dir });
     const stamped = intent.readRecord(intent.repoName(wt), 'claude/feature', dir).record;
-    r = fire({ cwd: wt, dir, state: state2, profile: 'minimal' });
+    r = fire({ cwd: wt, dir, state: state2, options: OFF });
     const after = intent.readRecord(intent.repoName(wt), 'claude/feature', dir).record;
-    check('a minimal run does not even refresh the observed facts',
+    check('an off run does not even refresh the observed facts',
         quiet(r) && JSON.stringify(after.observed) === JSON.stringify(stamped.observed), 'exit=' + r.status);
-    check('  control: the same run with no profile DOES refresh them',
+    check('  control: the same run with no switch set DOES refresh them',
         (() => { fire({ cwd: wt, dir, state: path.join(root, 'ctl2.json') });
                  const c = intent.readRecord(intent.repoName(wt), 'claude/feature', dir).record;
                  return c.observed && c.observed.at !== stamped.observed.at; })());
@@ -388,7 +386,7 @@ console.log('subject: plugins/autodev-core/hooks/stop-intent-record.js; ' + (pas
     + 'firing reasons, the throttle and the new-reason escape from it, and the three things the '
     + 'hook must never do to a record — write a claim, move updated_at, or bring one into '
     + 'existence. Four failure injections assert it never holds a turn, and a block of cases drives '
-    + 'the hooks_profile=minimal guard for real — each behavioural one against a control that '
+    + 'the intent_record=false switch for real — each behavioural one against a control that '
     + 'SPEAKS, because an empty run is also what a broken setup produces, plus one positional '
     + 'case for the property no behavioural one can reach: the guard runs before any work.');
 if (fail) {
