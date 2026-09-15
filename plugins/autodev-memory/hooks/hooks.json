@@ -13,18 +13,6 @@
         ]
       }
     ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/memory-prompt-capture.js"],
-            "timeout": 3
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
         "hooks": [
