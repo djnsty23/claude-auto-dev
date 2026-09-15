@@ -7,19 +7,54 @@
 // when `auto` works through stories nobody can tell are finished. Every rule
 // here exists to make that specific failure loud at generation time.
 //
-// Usage: node check-spec-output.js [prd.json] [schema.sql]
+// A SECOND FAILURE, added 2026-09-08: a plan that names an external service and
+// plans no human step for it. `[measured 2026-09-07]` a greenfield run's
+// SPEC.md said "Supabase holds the members ... Vercel serves the page" and its
+// prd.json had zero stories about either. This check passed it. `auto` then hit
+// the missing project on its first story, hand-edited `passes: "needs-setup"`
+// into prd.json, and wrote the handback into a log file. With `--spec SPEC.md`
+// the same plan fails here, at generation time, naming the two services.
+//
+// HOW THE SPEC RULE IS SHAPED, and why the lexicon below is not the verdict.
+// `[measured 2026-09-08]` the lexicon run over that SPEC.md and eight README /
+// CLAUDE.md files hit 49 times; read one by one, 35 were services the product
+// actually integrates and 14 were mentions — "no Google OAuth", "Slack-style
+// preview", "refs purged", "considered later". A gate that FAILED on every
+// mention would be wrong one time in three and would be learned around. So:
+//
+//   - SPEC.md carries a `## External services` section, written by `spec`,
+//     listing each service that needs an account, a key, a domain or a payment
+//     method — or the single word "none". THAT LIST is the verdict: every item
+//     must have a setup story that names it.
+//   - The lexicon guards the one failure the list cannot: the section missing
+//     altogether while the prose names services. That is the greenfield case,
+//     and it fails with the candidates listed for the author to confirm.
+//   - A lexicon hit outside the section, when the section exists, is a NOTE.
+//     The author saw the section and did not list it; the gate says so once.
+//
+// Usage: node check-spec-output.js [--existing] [prd.json] [schema.sql] [--spec SPEC.md]
+// Exit 1 on any violation.
 // Exit 1 on any violation.
 
 const fs = require('fs');
 const path = require('path');
 
-const { dependencyProblems, VALID, storiesOf } = require('./prd-states.js');
+const { dependencyProblems, VALID, NEEDS_SETUP, storiesOf } = require('./prd-states.js');
 const { readRequirements } = require('./prd-requirements.js');
 const args = process.argv.slice(2);
-if (args.includes('--help') || args.includes('-h')) { console.log('Usage: node check-spec-output.js [--existing] [prd.json] [schema.sql]'); process.exit(0); }
+if (args.includes('--help') || args.includes('-h')) { console.log('Usage: node check-spec-output.js [--existing] [prd.json] [schema.sql] [--spec SPEC.md]'); process.exit(0); }
+// `--spec SPEC.md` may sit anywhere; remove the flag and its value before the
+// positional check so it never eats (or is mistaken for) prd.json or schema.sql.
+let specPath = null;
+const specIdx = args.indexOf('--spec');
+if (specIdx >= 0) {
+  specPath = args[specIdx + 1];
+  if (!specPath || specPath.startsWith('--')) { console.error('check-spec-output: --spec needs a SPEC.md path'); process.exit(1); }
+  args.splice(specIdx, 2);
+}
 const existing = args[0] === '--existing';
 if (existing) args.shift();
-if (args.length > 2 || args.some(arg => arg.startsWith('--'))) { console.error('check-spec-output: usage: [--existing] [prd.json] [schema.sql]'); process.exit(1); }
+if (args.length > 2 || args.some(arg => arg.startsWith('--'))) { console.error('check-spec-output: usage: [--existing] [prd.json] [schema.sql] [--spec SPEC.md]'); process.exit(1); }
 const prdPath = args[0] || 'prd.json';
 const sqlPath = args[1] || null;
 
@@ -35,6 +70,122 @@ const GENERIC = [
   /^(error handling|state management|routing|styling|polish|cleanup|refactor)$/i,
   /^(mvp|v1|phase \d+|milestone \d+)/i,
 ];
+
+// `setup` is the type of a story whose whole content is a human act: create the
+// account, buy the domain, flip the console toggle. It is born `needs-setup`
+// and is the only type allowed to be.
+const TYPES = new Set(['fix', 'feature', 'refactor', 'qa', 'perf', 'setup']);
+
+// External services a SPEC.md can name, each of which implies an account, a key,
+// a domain, a payment method or an approval that no agent can produce.
+//
+// DELIBERATELY UNAMBIGUOUS NAMES ONLY. "render", "segment", "neon" and "resend"
+// are English words and were left out; a false positive here fails a spec that
+// planned nothing wrong, and a gate that cries wolf is one people learn to
+// skip. Each entry is a word-boundary regex, case-insensitive. Measured against
+// one real SPEC.md and four repos' README/CLAUDE.md before shipping — see
+// docs/evidence-needs-setup-2026-09-08.md for the hit list and what each was.
+const SERVICES = [
+  ['Supabase', /\bsupabase\b/i],
+  ['Vercel', /\bvercel\b/i],
+  ['Netlify', /\bnetlify\b/i],
+  ['Cloudflare', /\bcloudflare\b/i],
+  ['Firebase', /\bfirebase\b/i],
+  ['Stripe', /\bstripe\b/i],
+  ['Paddle', /\bpaddle\b/i],
+  ['Lemon Squeezy', /\blemon ?squeezy\b/i],
+  ['PayPal', /\bpaypal\b/i],
+  ['SendGrid', /\bsendgrid\b/i],
+  ['Postmark', /\bpostmark\b/i],
+  ['Mailgun', /\bmailgun\b/i],
+  ['Twilio', /\btwilio\b/i],
+  ['OpenAI', /\bopenai\b/i],
+  ['Anthropic', /\banthropic\b/i],
+  ['Gemini', /\bgemini\b/i],
+  ['Clerk', /\bclerk\b/i],
+  ['Auth0', /\bauth0\b/i],
+  ['Google OAuth', /\bgoogle (oauth|sign[- ]?in|login)\b/i],
+  ['Sign in with Apple', /\b(sign[- ]?in with apple|apple sign[- ]?in)\b/i],
+  ['GitHub OAuth', /\bgithub (oauth|sign[- ]?in|login|app)\b/i],
+  ['App Store', /\bapp store\b/i],
+  ['Play Store', /\b(play store|google play)\b/i],
+  ['TestFlight', /\btestflight\b/i],
+  ['Sentry', /\bsentry\b/i],
+  ['PostHog', /\bposthog\b/i],
+  ['Plausible', /\bplausible\.io\b|\bplausible analytics\b/i],
+  ['Mixpanel', /\bmixpanel\b/i],
+  ['Google Analytics', /\bgoogle analytics\b|\bga4\b/i],
+  ['Doppler', /\bdoppler\b/i],
+  ['Upstash', /\bupstash\b/i],
+  ['PlanetScale', /\bplanetscale\b/i],
+  ['Railway', /\brailway\b/i],
+  ['Fly.io', /\bfly\.io\b/i],
+  ['Heroku', /\bheroku\b/i],
+  ['AWS', /\baws\b|\bamazon web services\b/i],
+  ['Algolia', /\balgolia\b/i],
+  ['Pinecone', /\bpinecone\b/i],
+  ['Spotify API', /\bspotify (api|developer|oauth)\b/i],
+  ['HubSpot', /\bhubspot\b/i],
+  ['Slack', /\bslack\b/i],
+  ['Discord', /\bdiscord\b/i],
+  ['Mapbox', /\bmapbox\b/i],
+  ['Google Maps', /\bgoogle maps\b/i],
+  ['Expo EAS', /\bexpo\b|\beas build\b/i],
+  ['custom domain', /\bcustom domain\b|\bdns\b|\bregistrar\b/i],
+];
+
+/** The body of the first heading matching `re`, up to the next heading. */
+function sectionBody(text, re) {
+  const m = new RegExp('^(#{1,6})\\s*' + re + '[^\\n]*\\n([\\s\\S]*?)(?=^#{1,6}\\s|(?![\\s\\S]))', 'im').exec(text);
+  return m ? { body: m[2], index: m.index, length: m[0].length } : null;
+}
+
+/**
+ * What a SPEC.md says about external services, in three parts:
+ *
+ *   declared  the items under `## External services` (empty if it says "none")
+ *   hasSection  whether that section exists at all
+ *   candidates  lexicon hits in the prose OUTSIDE Non-goals and OUTSIDE the
+ *               section itself — what the author may have forgotten to list
+ *   excused   lexicon hits found only under Non-goals: a service the spec
+ *             decided against ("Posting to Slack (webhook or bot)")
+ *
+ * A declared item is one bullet line. Its NAME is the text before the first
+ * " — ", " - ", ":" or "(", so
+ *   "- Supabase — a project, its URL and anon key (https://supabase.com/dashboard)"
+ * declares "Supabase".
+ */
+function findServices(specText) {
+  const text = String(specText || '');
+  const ng = sectionBody(text, 'non[- ]goals?\\b');
+  const sec = sectionBody(text, 'external services?\\b');
+  const cut = (t, part) => (part ? t.slice(0, part.index) + t.slice(part.index + part.length) : t);
+  let rest = cut(text, sec);
+  // Recompute Non-goals on the text with the section removed, so offsets hold.
+  const ng2 = sectionBody(rest, 'non[- ]goals?\\b');
+  rest = cut(rest, ng2);
+  const nonGoals = ng ? ng.body : '';
+
+  const declared = [];
+  if (sec) {
+    for (const line of sec.body.split('\n')) {
+      const m = /^\s*[-*+]\s+(.+?)\s*$/.exec(line);
+      if (!m) continue;
+      const name = m[1].split(/\s+[—–-]\s+|:|\(/)[0].replace(/[*_`]/g, '').trim();
+      if (name && !/^none\b/i.test(name)) declared.push(name);
+    }
+  }
+  const candidates = [];
+  const excused = [];
+  for (const [name, re] of SERVICES) {
+    // "Slack-style", "Stripe-like": a comparison, not an integration.
+    const rest2 = rest.replace(new RegExp(re.source + '-(style|like|ish)\\b', 'gi'), '');
+    if (re.test(rest2)) {
+      if (!declared.some((d) => re.test(d))) candidates.push(name);
+    } else if (re.test(nonGoals)) excused.push(name);
+  }
+  return { hasSection: !!sec, declared, candidates, excused };
+}
 
 if (!fs.existsSync(prdPath)) { console.error(`check-spec-output: no ${prdPath}`); process.exit(1); }
 
@@ -76,8 +227,8 @@ if (existing) entries = Object.entries(storiesOf(prd));
 
 if (!entries.length) { console.error('check-spec-output: zero stories — a spec that plans nothing is not a spec'); process.exit(1); }
 
-const TYPES = new Set(['fix', 'feature', 'refactor', 'qa', 'perf']);
 const seen = new Set();
+const setupStories = [];
 
 for (const [key, s] of entries) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) {
@@ -97,9 +248,29 @@ for (const [key, s] of entries) {
     if (title.split(/\s+/).length < 3) note(id, `"${title}" is too short to be a capability`);
   }
 
-  // passes must be null: a freshly planned story cannot already be done, and
-  // `false`/`"deferred"` are decisions nobody has made yet.
-  if (!existing && s.passes !== null) note(id, `passes is ${JSON.stringify(s.passes)}; a newly planned story must be null`);
+  // passes must be null — a freshly planned story cannot already be done, and
+  // `false`/`"deferred"` are decisions nobody has made yet — EXCEPT a setup
+  // story, which is born blocked on a person and says so. The two are tied:
+  // a needs-setup story that is not type setup is a planned story pretending
+  // to be blocked, and a setup story that is null is a human act an agent
+  // would pick up and fail at. With --existing a setup story may have moved on
+  // (cleared, verified, closed), so only a story still needs-setup must carry
+  // its handback.
+  const isSetup = s.type === 'setup';
+  if (isSetup) setupStories.push([id, s]);
+  if (!existing) {
+    if (isSetup) {
+      if (s.passes !== NEEDS_SETUP) note(id, `type is "setup" but passes is ${JSON.stringify(s.passes)}; a setup story is born "needs-setup"`);
+    } else if (s.passes !== null) {
+      note(id, `passes is ${JSON.stringify(s.passes)}; a newly planned story must be null`
+        + (s.passes === NEEDS_SETUP ? ' (or type "setup" if this is a human step)' : ''));
+    }
+  }
+  if (isSetup && (!existing || s.passes === NEEDS_SETUP)) {
+    const reason = typeof s.blockedReason === 'string' ? s.blockedReason.trim() : '';
+    if (!reason) note(id, 'a setup story needs blockedReason: what is needed and the exact console URL or path');
+    else if (!/https?:\/\/\S+/.test(reason)) note(id, `blockedReason has no URL — say exactly where the person goes (got: "${reason.slice(0, 60)}")`);
+  }
   if (existing && s.passes !== undefined && !VALID.includes(s.passes)) note(id, `unrecognised passes state ${JSON.stringify(s.passes)}`);
   if (!TYPES.has(s.type)) note(id, `type ${JSON.stringify(s.type)} is not one of ${[...TYPES].join(', ')}`);
   if (!Number.isInteger(s.priority) || s.priority < 0 || s.priority > 3) note(id, `priority ${JSON.stringify(s.priority)} is not 0-3`);
@@ -120,6 +291,52 @@ for (const [key, s] of entries) {
   }
 }
 for (const problem of dependencyProblems(prd)) note(problem.id, problem.reason);
+
+// The SPEC's own `## External services` list is the verdict: every declared
+// item needs a setup story that names it back, in its title, acceptance,
+// notes or blockedReason — so "Create the Supabase project" covers a spec that
+// declares "Supabase". The lexicon only catches the section being absent.
+const out = [];
+let services = null;
+if (specPath) {
+  let specText;
+  try { specText = fs.readFileSync(specPath, 'utf8'); }
+  catch { console.error(`check-spec-output: no ${specPath}`); process.exit(1); }
+  services = findServices(specText);
+  const text = (value) => typeof value === 'string' ? value : '';
+  const haystack = setupStories.map(([, s]) => [
+    text(s.title), text(s.notes), text(s.blockedReason),
+    ...(Array.isArray(s.acceptance) ? s.acceptance.map((a) => typeof a === 'string' ? a : text(a && a.description)) : []),
+  ].join('\n'));
+  const mentions = (name) => {
+    const known = SERVICES.find(([n]) => n.toLowerCase() === name.toLowerCase());
+    const re = known ? known[1] : new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    return haystack.some((h) => re.test(h));
+  };
+  const specName = path.basename(specPath);
+  if (!services.hasSection) {
+    if (services.candidates.length) {
+      note('spec', `${specName} has no "## External services" section and names ${services.candidates.join(', ')} — list each one that needs an account, a key, a domain or a payment method (or write "none"), and give each a setup story`);
+    } else {
+      note('spec', `${specName} has no "## External services" section — add it, even if it says "none"`);
+    }
+  } else {
+    for (const name of services.declared) {
+      if (!mentions(name)) {
+        note('spec', `${specName} declares ${name} under External services and no setup story (type "setup", passes "needs-setup") mentions it — who creates the account, and where?`);
+      }
+    }
+    for (const name of services.candidates) {
+      out.push(`note: ${specName} also names ${name} outside External services; if it needs an account, declare it there`);
+    }
+  }
+  // A setup story with no dependents is legal (a legal page, a store listing)
+  // but worth a line: a human step nothing waits on is easy to forget.
+  for (const [id] of setupStories) {
+    const dependents = entries.filter(([, s]) => s && Array.isArray(s.blockedBy) && s.blockedBy.includes(id)).length;
+    if (!dependents) out.push(`note: setup story ${id} has no dependents — nothing is blockedBy it, so make sure that is true`);
+  }
+}
 
 // This is a structural check of a NEW PostgreSQL schema, not proof that SQL
 // executes or policies implement the intended access model. Comments and
@@ -274,7 +491,16 @@ if (sqlPath) {
 
 // Print the population, so "no problems" is distinguishable from "read nothing".
 console.log(`check-spec-output: ${entries.length} stories in ${path.basename(prdPath)}`
-  + (sqlPath ? `, ${tables} tables in ${path.basename(sqlPath)} (${rlsOn} with RLS)` : ', no schema given'));
+  + (setupStories.length ? ` (${setupStories.length} setup, blocked on you)` : '')
+  + (sqlPath ? `, ${tables} tables in ${path.basename(sqlPath)} (${rlsOn} with RLS)` : ', no schema given')
+  + (services
+    ? `, ${path.basename(specPath)} declares ${services.declared.length} external service(s)`
+      + (services.declared.length ? ` (${services.declared.join(', ')})` : '')
+      + (!services.hasSection ? ' [no External services section]' : '')
+      + (services.candidates.length ? `, prose also names ${services.candidates.join(', ')}` : '')
+      + (services.excused.length ? `, under Non-goals: ${services.excused.join(', ')}` : '')
+    : ', no SPEC.md given'));
+for (const l of out) console.log(l);
 
 if (problems.length) {
   console.error(`\n${problems.length} problem(s):`);
@@ -282,4 +508,5 @@ if (problems.length) {
   process.exit(1);
 }
 console.log('plan structure checks passed' + (tables ? '; RLS and policy declarations found for each table' : '; schema not checked')
+  + (services ? '; every declared external service has a setup story' : '')
   + '. Acceptance behavior and database access still require execution.');
