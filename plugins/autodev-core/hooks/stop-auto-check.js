@@ -281,6 +281,17 @@ try {
         : `[Auto-Dev] Sprint incomplete; no dependency-ready work. ${unresolved.length} unresolved: ` + details
           + '. Reconcile the dependency graph or report the blocker; preserve unfinished story states.';
 
+    // Blocked on the OPERATOR, named. The unresolved list above carries each
+    // needs-setup story among every other blocker, truncated at 12; this line
+    // is the one that says WHO the remaining work is waiting on. It is not work
+    // the agent can move (the turn still ends after one reconciliation turn),
+    // but it is work for a person, and this is where they meet it. The id list
+    // is bounded like `details`, so a large blocked population stays valid JSON.
+    const { needsSetup } = require(path.join(__dirname, '..', 'scripts', 'prd-states.js'));
+    const blockedIds = Object.entries(plan.stories).filter(([, s]) => needsSetup(s)).map(([id]) => id);
+    const blockedIdList = blockedIds.slice(0, 12).join(', ') + (blockedIds.length > 12 ? `, +${blockedIds.length - 12} more` : '');
+    const blockedNote = blockedIds.length ? ` Blocked on you: ${blockedIds.length} (${blockedIdList}).` : '';
+
     // Give one reconciliation/next-action turn. An unresolved dependency is not
     // an invitation to retry it forever, and approving Stop is not completion.
     if (fs.existsSync(idleMarker)) {
@@ -293,10 +304,13 @@ try {
     }
 
     fs.writeFileSync(idleMarker, new Date().toISOString());
-    process.stderr.write(status + '\n');
+    process.stderr.write(status + blockedNote + '\n');
     block(
         status +
         (deferred ? `. ${deferred} story(ies) deferred; do not treat them as outstanding work.` : '') +
+        (blockedIds.length
+            ? `. ${blockedIds.length} story(ies) blocked on the operator (${blockedIdList}) — needs-setup, not actionable by an agent; tell the user what each one is waiting for (blockedReason) rather than retrying it.`
+            : '') +
         (skipped.length ? ' Reconcile skipped stories or explicitly defer them rather than leaving them to age.' : '')
     );
 } catch (err) {
