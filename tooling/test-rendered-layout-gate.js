@@ -585,12 +585,14 @@ for (const p of PAGES) {
 
 // ------------------------------------------------ the pipe delivers every byte
 //
-// node's process.stdout is ASYNCHRONOUS when it is a pipe on macOS, and
-// synchronous when it is a pipe on Linux or Windows. A process.exit() therefore
-// discarded whatever had not drained: `--json` here is ~84KB, the OS pipe buffer
-// holds 64KiB, and a piped run delivered 65536 bytes of invalid JSON under exit
-// status 0. Both assertions above failed on macOS from the day they were
-// written, and passed on the CI matrix, which is [ubuntu, windows].
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on POSIX, Linux and
+// macOS alike, and synchronous when it is a pipe on Windows. A process.exit()
+// therefore discarded whatever had not drained: `--json` here is ~84KB, and a
+// piped run on macOS delivered 65536 bytes of invalid JSON under exit status 0
+// (that byte boundary is what was observed, not a portable buffer size). Both
+// assertions above failed on macOS from the day they were written, and passed
+// on the CI matrix, which is [ubuntu, windows] - a green Linux leg does not
+// establish that its pipe write was synchronous or drained.
 //
 // PARSING IS NOT THE ASSERTION FOR THIS. `--json parses` catches truncation
 // only for as long as the fixture set happens to exceed the buffer, and it
