@@ -283,11 +283,18 @@ const REAL_WELD = '7,480 rows removed with a verified backup first.## 2026-09-08
     run(fx, '--write');
     const viaFile = fs.readFileSync(fx.out);
     check('the pipe fixture EXCEEDS one 64 KiB buffer', viaFile.length > 65536, `${viaFile.length} bytes`);
-    const piped = spawnSync('/bin/sh', ['-c',
-        `node ${JSON.stringify(SUBJECT)} --dir ${JSON.stringify(fx.dir)} --out ${JSON.stringify(fx.out)} --print | cat`],
+    // No shell. spawnSync's stdout IS a pipe, and on darwin it shows the same
+    // 65536-byte truncation as `| cat` when the subject calls process.exit().
+    // This used to spawn '/bin/sh', which does not exist on Windows: the spawn
+    // failed with ENOENT, stdout came back undefined, and "0 piped" read as a
+    // truncation finding against a subject that never ran. So the spawn itself
+    // is asserted before any byte count is read, and zero bytes is not "not 65536".
+    const piped = spawnSync(process.execPath, [SUBJECT, '--dir', fx.dir, '--out', fx.out, '--print'],
         { encoding: 'buffer', maxBuffer: 1 << 26 });
+    check('the --print child actually ran and exited 0', !piped.error && piped.status === 0,
+        piped.error ? `spawn error ${piped.error.code}` : `exit ${piped.status}`);
     const pipedOut = piped.stdout || Buffer.alloc(0);
-    check('--print through a pipe is not truncated at 65536 bytes', pipedOut.length !== 65536, `${pipedOut.length} bytes`);
+    check('--print through a pipe is not truncated at 65536 bytes', pipedOut.length > 65536, `${pipedOut.length} bytes`);
     check('--print through a pipe delivers the whole document', pipedOut.equals(viaFile), `${pipedOut.length} piped vs ${viaFile.length} written`);
 }
 
