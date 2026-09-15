@@ -134,7 +134,6 @@ try {
         // Clear only THIS session's carrier — other sessions on the same
         // project keep theirs.
         carrier.clear(cwd, harnessSessionId);
-        carrier.clearPrompt(cwd, harnessSessionId);
 
         // Truncate the shared WAL. It is never deleted while any peer session
         // holds a connection, so without this it only ever grows. Whether or

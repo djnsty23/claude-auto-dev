@@ -28,6 +28,26 @@ Confirm the intended store and installed script. Updated CLI query commands
 open an existing database read-only and validate its schema; they never create
 an empty database or migrate it. SQLite may still use WAL coordination files.
 
+## What capture records
+
+The PostToolUse hook records one observation per Write or Edit of a file inside
+the project, typed `change`, titled `Created <file>` or `Modified <file>`, with
+the edit itself as the concept, one row per file per session. It records
+nothing for Bash, Read, Grep or Glob, and nothing for writes outside the project
+or under a scratchpad, probe or memory directory. `[measured 2026-09-08]` the
+previous capture recorded most commands as `Ran: …` discoveries and took the
+type from a keyword in the prompt; 90 % of the store was command echoes and
+nothing read it back (`docs/evidence-memory-recall-2026-09-08.md`).
+
+So `decisions` and `bugs` return only rows written before that date or saved
+deliberately through the API; capture no longer guesses those types, and an
+empty result there says nothing about whether work happened.
+
+The query commands take `<projectPath> <query>` in that order. The CLI refuses
+the two swapped (an absolute directory in the query slot, a non-directory in
+the project slot) with exit 1 and a message, because the one real query in the
+transcripts made exactly that mistake and read `[]` as "nothing there".
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/memory-db.js" stats "$(pwd)"
 ```
