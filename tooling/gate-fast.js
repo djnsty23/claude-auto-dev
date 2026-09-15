@@ -2,33 +2,20 @@
 /**
  * gate-fast.js - the gate's cheap half, and an honest account of what it skipped.
  *
- * WHY. `[measured 2026-09-08, this machine, load 4.2 rising to 12.5]` the seven
- * steps of `npm run gate`, timed INDEPENDENTLY on a clean tree:
+ * WHY. The gate's cost is concentrated in the steps that make a full pass over
+ * the suites (`npm test`, `check:suites`, `check:coverage`); every other step
+ * costs seconds. `[measured 2026-09-15 at d07c421, 14 cores, load 2.3-5.7]`
+ * those three were 99.43% of a 48.9 min run, and this script end to end was
+ * 16.6 s (n=3). On 2026-09-08 the same shape read "two steps, 99.46%, 11.1 s",
+ * before check:coverage joined the chain. The figures move; re-time before
+ * quoting one. CLAUDE.md carries the per-step table.
  *
- *     npm test               323.7 s   20.00%
- *     check:suites          1286.2 s   79.46%
- *     check:probe-shapes       0.1 s    0.01%
- *     check:population         0.4 s    0.02%
- *     check:entrypoints        7.8 s    0.48%
- *     check:skill-tools        0.3 s    0.02%
- *     check:agents-md          0.2 s    0.01%
- *                           -------
- *                           1618.7 s = 27.0 min
+ * The merge bar requires the FULL gate after every rebase. This makes the
+ * iterations before that cheap; it does not replace the last one.
  *
- * Two steps are 99.46% of it. The other five are 8.8 SECONDS TOGETHER. The merge
- * bar requires a re-run AFTER every rebase and docs/decisions.md is newest-first,
- * so roughly half the open queue rebases on every merge to main; that product,
- * not any single step, is the fleet's dominant cost. This runs that half.
- *
- * 8.8 s is the SUM of those step times, not the cost of a run: each step is
- * spawned through `npm run`, which adds ~0.3 s apiece. `[measured 2026-09-08,
- * load 5.9, 14 cores]` end to end this script is 11.1 s (n=3) against 27 min.
- *
- * `check:entrypoints` was the one worth measuring rather than assuming: it
- * probes ~118 scripts with `--help` under a 10 s budget each, so its worst case
- * is minutes and a cost model that guessed would have put it in the wrong tier.
- * Measured, it was 7.8 s at load 4.2 and 9.5 s at load 5.9 - nearly the whole
- * of this tier either way, and the only step in it whose cost tracks the load.
+ * `check:entrypoints` is most of this tier: it probes every tooling script with
+ * `--help` under a 10 s budget each, so its worst case is minutes and its cost
+ * grows with the script count (7.8 s on 2026-09-08, 12.7 s on 2026-09-15).
  *
  * WHAT IT IS NOT. It is NOT the gate and it never reports as though it were.
  * `npm run gate` still means every step, unchanged; a session running that from
@@ -103,25 +90,24 @@ function gateStepNames(root) {
 }
 
 /**
- * The steps measured cheap enough to re-run after every rebase.
+ * The steps measured cheap enough to re-run while iterating.
  *
  * An ALLOWLIST, so a step added to the chain lands in the slow tier by default.
  * The opposite default would put an unmeasured step into the tier whose entire
- * claim is that it costs seconds.
+ * claim is that it costs seconds. `check:skill-plugin-root` is the live example:
+ * it joined the chain after this list was written and is DEFERRED here, though
+ * it measured 0.2 s on 2026-09-15. Adding it is a one-line, measured decision.
  *
- * `check:claude-md` is here ahead of the step itself: PR #210 adds it to the
- * chain, and it measures 2.1 s (selftest plus run). A name that is not in
- * `scripts.gate` costs nothing here - this is a membership test against
- * whatever the chain actually contains - so classifying it now means #210 lands
- * into the correct tier instead of silently into the slow one.
+ * Membership is tested against whatever `scripts.gate` actually contains, so a
+ * name listed here but absent from the chain costs nothing.
  */
-const FAST = new Set([
-    'check:probe-shapes',   // 0.1 s
-    'check:population',     // 0.4 s
-    'check:entrypoints',    // 7.8 s
+const FAST = new Set([          // [measured 2026-09-15, load 4.6-5.4]
+    'check:probe-shapes',   // 0.2 s
+    'check:population',     // 0.6 s
+    'check:entrypoints',    // 12.7 s
     'check:skill-tools',    // 0.3 s
     'check:agents-md',      // 0.2 s
-    'check:claude-md',      // 2.1 s - enters the chain with #210
+    'check:claude-md',      // 2.6 s
 ]);
 
 // ---------------------------------------------------------------------------

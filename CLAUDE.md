@@ -205,39 +205,42 @@ two wrong readings in the session that wrote this paragraph.
 
 ### The fast tier: `npm run gate:fast`
 
-`[measured 2026-09-08, this machine, load 4.2 rising to 12.5]` the seven steps
-timed INDEPENDENTLY on a clean tree, each exit code captured to a FILE because
-`$?` after a pipe is the pipe's:
+`[measured 2026-09-15 at d07c421, this machine, 14 cores, load 2.3 rising to
+5.7]` every step of the chain timed INDEPENDENTLY on a clean tree, each exit
+code captured to a FILE because `$?` after a pipe is the pipe's:
 
 | step | seconds | share |
 |---|---|---|
-| `npm test` | 323.7 | 20.00% |
-| `check:suites` | 1286.2 | 79.46% |
-| `check:probe-shapes` | 0.1 | 0.01% |
-| `check:population` | 0.4 | 0.02% |
-| `check:entrypoints` | 7.8 | 0.48% |
-| `check:skill-tools` | 0.3 | 0.02% |
+| `npm test` | 665.4 | 22.66% |
+| `check:suites` | 1510.6 | 51.45% |
+| `check:probe-shapes` | 0.2 | 0.01% |
+| `check:population` | 0.6 | 0.02% |
+| `check:entrypoints` | 12.7 | 0.43% |
+| `check:skill-tools` | 0.3 | 0.01% |
+| `check:skill-plugin-root` | 0.2 | 0.01% |
 | `check:agents-md` | 0.2 | 0.01% |
-| **total** | **1618.7 (27.0 min)** | |
+| `check:claude-md` | 2.6 | 0.09% |
+| `check:coverage` | 743.4 | 25.32% |
+| **total** | **2936.2 (48.9 min)** | |
 
-**Two steps are 99.46% of it. The other five are 8.8 SECONDS TOGETHER.** So
-`gate:fast` runs the cheap ones, and `npm run gate` still runs everything. The
-bar wants a re-run after every rebase and `docs/decisions.md` is newest-first, so
-roughly half the open queue rebases on every merge to main — that product, not
-any single step, is the fleet's dominant cost.
+**Three steps are 99.43% of it — each one a full pass over the suites — and the
+rest are seconds together.** So `gate:fast` runs the cheap ones, and
+`npm run gate` still runs everything. The shape is what the split rests on, and
+the figures are not: this table said TWO steps and 99.46% on 2026-09-08, before
+`check:coverage` joined the chain, and nothing announced the change. Re-time
+before quoting a share.
 
-That 8.8 s is the SUM OF STEP TIMES, not what a re-run costs: `gate:fast` spawns
-each step through `npm run`, which adds ~0.3 s apiece. `[measured 2026-09-08,
-load 5.9, 14 cores]` end to end the tier is 11.1 s (n=3) against 27 minutes —
-`check:entrypoints` alone was 9.47 s as two direct `node` calls and 9.75 s
-through `npm run`, n=3 interleaved. Both figures move with the load; the ratio
-does not.
+`[measured 2026-09-15, load 3.3]` end to end the tier is 16.6 s (n=3, 16.9 /
+16.6 / 16.6) against 49 minutes. `gate:fast` spawns each step through
+`npm run`, ~0.3 s apiece, so that is more than the sum of the step times.
+`check:entrypoints` is most of it: it probes every script under `tooling/` with
+`--help` under a 10 s budget each, so its worst case is minutes and its cost
+grows with the script count — 7.8 s on 2026-09-08, 12.7 s here at a lower load.
 
-`check:entrypoints` was the one worth measuring rather than assuming: it probes
-~118 scripts with `--help` under a 10 s budget each, so its worst case is
-minutes, and a cost model that guessed would have put it in the wrong tier.
-Measured, it was 7.8 s at load 4.2 and 9.5 s at load 5.9 — nearly the whole of
-this tier either way, and the only step in it whose cost tracks the load.
+**`gate:fast` does not satisfy the merge bar.** The bar is the full gate AFTER
+any rebase, and the tier makes the iterations before that cheap; it does not
+replace the last one. Its exit 0 means "the steps it ran are clean", so never
+chain it into a push or a merge as though it were the gate.
 
 **`gate:fast` IS NOT THE GATE, and it says so on every run — including a clean
 one.** It prints what it ran, what it DEFERRED, and a summary line counting the
