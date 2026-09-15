@@ -109,6 +109,36 @@ for (const cmd of JSON_COMMANDS) {
         r.status !== 0 || /usage|unknown|commands/i.test((r.stdout || '') + (r.stderr || '')));
 }
 
+// --- swapped `<projectPath> <query>` is refused, not answered.
+//
+// The one genuine query of the store in 21 days of transcripts passed the
+// query first and the project second, got `[]` twice, and was read as "nothing
+// there". A swap is unmistakable when the second argument is an absolute
+// directory and the first is not. The controls pin the rule's edges: the right
+// order still answers, a project path that no longer exists still answers, and
+// a query that happens to name a RELATIVE directory in the cwd still answers.
+{
+    for (const cmd of ['search', 'semantic', 'timeline', 'knowledge']) {
+        const r = cli(cmd, 'partner conversation', PROJ);
+        check(`${cmd}: swapped arguments exit 1`, r.status === 1);
+        check(`  and say so on stderr`, /swapped/.test(r.stderr || ''));
+        check(`  and print nothing on stdout`, (r.stdout || '') === '');
+    }
+    const right = cli('search', PROJ, 'partner conversation');
+    check('control: the right order exits 0', right.status === 0);
+    check('  and prints JSON', (() => { try { JSON.parse(right.stdout); return true; } catch { return false; } })());
+
+    const gone = cli('search', path.join(HOME, 'deleted-project'), 'partner conversation');
+    check('control: a project path that does not exist still answers', gone.status === 0);
+
+    fs.mkdirSync(path.join(PROJ, 'docsdir'), { recursive: true });
+    const relative = cli('search', path.join(HOME, 'deleted-project'), 'docsdir');
+    check('control: a query naming a relative directory is not treated as swapped', relative.status === 0);
+
+    const notQuery = cli('recent', 'not-a-dir', PROJ);
+    check('control: a non-query command is not subject to the rule', notQuery.status === 0);
+}
+
 // --- the argument DEFAULTS, which explicit args never exercise.
 //
 // Every case above passes a project path and a query, so `args[1] ||
