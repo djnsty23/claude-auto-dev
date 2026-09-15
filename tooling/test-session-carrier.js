@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Tests for autodev-memory's cross-process session state.
 //
-// This covers the three mechanisms that previously failed silently:
+// This covers the mechanisms that previously failed silently:
 //   1. The session id carrier — was an env var that died with its process, then
 //      a single per-project file that concurrent sessions clobbered.
-//   2. The prompt carrier — the classifier's `userPrompt` argument was read from
-//      AUTO_DEV_LAST_PROMPT, which nothing set, so every observation fell back
-//      to a generic type and concept.
-//   3. memory-prompt-capture.js and memory-session-start.js, which had no tests.
+//   2. memory-session-start.js, which had no tests.
+//   3. The `.prompt` sibling a pre-2026-09-08 build wrote beside each session
+//      id (verbatim user text): the hook and the carrier functions are gone,
+//      and clear() must still remove a stale one.
 //
 // Run: node tooling/test-session-carrier.js
 
@@ -56,14 +56,27 @@ const dirIgnore = path.join(PROJ, '.claude', 'memory-sessions', '.gitignore');
 check('carrier dir self-ignores on creation', fs.existsSync(dirIgnore));
 check('self-ignore excludes everything', fs.readFileSync(dirIgnore, 'utf8').includes('\n*'));
 
-// Prompt carrier
-carrier.writePrompt(PROJ, 'harness-B', 'fix the login redirect bug');
-check('prompt round-trips', carrier.readPrompt(PROJ, 'harness-B') === 'fix the login redirect bug');
-check('prompt is per-session', carrier.readPrompt(PROJ, 'harness-Z') === '');
-carrier.clearPrompt(PROJ, 'harness-B');
-check('prompt clears', carrier.readPrompt(PROJ, 'harness-B') === '');
+// The prompt carrier is gone (2026-09-08), and so is the hook that wrote it.
+// The module must not quietly keep exporting either half, or a caller would
+// write verbatim prompts to disk that nothing reads and nothing clears.
+check('writePrompt is no longer exported', typeof carrier.writePrompt === 'undefined');
+check('readPrompt is no longer exported', typeof carrier.readPrompt === 'undefined');
+check('the prompt-capture hook file is gone',
+    !fs.existsSync(path.join(PLUGIN_SRC, 'hooks', 'memory-prompt-capture.js')));
+check('and hooks.json no longer registers a UserPromptSubmit hook',
+    !('UserPromptSubmit' in (JSON.parse(fs.readFileSync(path.join(PLUGIN_SRC, 'hooks', 'hooks.json'), 'utf8')).hooks || {})));
 
-// ------------------------------------------------- memory-prompt-capture.js
+// A `.prompt` sibling left by an older build still holds verbatim user text.
+// clear() removes it with the session id; the control plants one and reads
+// it back first, so a clear() that ignores the sibling is what fails here.
+{
+    carrier.write(PROJ, 'harness-old', 'ses_old');
+    const stale = carrier.carrierPath(PROJ, 'harness-old') + '.prompt';
+    fs.writeFileSync(stale, 'something the user typed last week');
+    check('control: the stale .prompt sibling exists before clear()', fs.existsSync(stale));
+    carrier.clear(PROJ, 'harness-old');
+    check('clear() removes a stale .prompt sibling from an older build', !fs.existsSync(stale));
+}
 
 function runHook(hookFile, payload, env = {}) {
     return spawnSync(process.execPath, [path.join(PLUGIN_SRC, 'hooks', hookFile)], {
@@ -73,61 +86,7 @@ function runHook(hookFile, payload, env = {}) {
         env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC, ...env },
     });
 }
-
-// No carrier for this session → nothing recorded. Writing prompts to disk that
-// nothing will read is pure cost.
-let r = runHook('memory-prompt-capture.js', {
-    prompt: 'no session here', cwd: PROJ, session_id: 'harness-none',
-});
-check('prompt capture exits 0 with no session', r.status === 0);
-check('prompt capture writes nothing without a carrier', carrier.readPrompt(PROJ, 'harness-none') === '');
-
-// With a live carrier the prompt is recorded.
-carrier.write(PROJ, 'harness-C', 'ses_ccc');
-r = runHook('memory-prompt-capture.js', {
-    prompt: 'refactor the auth middleware', cwd: PROJ, session_id: 'harness-C',
-});
-check('prompt capture exits 0', r.status === 0);
-check('prompt capture records the prompt', carrier.readPrompt(PROJ, 'harness-C') === 'refactor the auth middleware');
-check('prompt capture emits nothing on stdout', (r.stdout || '') === '');
-
-// <private> content is redacted before it ever touches disk.
-runHook('memory-prompt-capture.js', {
-    prompt: 'deploy with <private>sk_live_abc123</private> please',
-    cwd: PROJ,
-    session_id: 'harness-C',
-});
-const stored = carrier.readPrompt(PROJ, 'harness-C');
-check('private blocks are redacted', !stored.includes('sk_live_abc123') && stored.includes('[REDACTED]'));
-
-
-// Exercise the real hook before its carrier write; DB redaction alone cannot
-// protect a prompt that already leaked into the on-disk carrier.
-for (const [label, prompt, expected] of [
-    ['unclosed', 'PUBLIC<private>CARRIER_UNCLOSED', 'PUBLIC[REDACTED]'],
-    ['nested', 'LEFT<private>CARRIER_OUTER<private>CARRIER_INNER</private>CARRIER_TAIL</private>RIGHT', 'LEFT[REDACTED]RIGHT'],
-    ['uppercase', 'LEFT<PRIVATE>CARRIER_UPPER</PRIVATE>RIGHT', 'LEFT[REDACTED]RIGHT'],
-    ['multiple', 'A<private>CARRIER_ONE</private>B<private>CARRIER_TWO</private>C', 'A[REDACTED]B[REDACTED]C'],
-    ['public-control', 'PUBLIC<privateer>TAIL', 'PUBLIC<privateer>TAIL'],
-]) {
-    const hook = runHook('memory-prompt-capture.js', { prompt, cwd: PROJ, session_id: 'harness-C' });
-    check(`prompt privacy ${label}: hook exits silently`, hook.status === 0 && hook.stdout === '');
-    check(`prompt privacy ${label}: persists the exact redacted/public boundary`,
-        carrier.readPrompt(PROJ, 'harness-C') === expected);
-}
-// Restore the prior control before the existing no-op assertion below.
-runHook('memory-prompt-capture.js', { prompt: 'deploy with <private>sk_live_abc123</private> please', cwd: PROJ, session_id: 'harness-C' });
-
-// An empty prompt is a no-op, not an overwrite.
-runHook('memory-prompt-capture.js', { prompt: '', cwd: PROJ, session_id: 'harness-C' });
-check('empty prompt does not clobber the stored one', carrier.readPrompt(PROJ, 'harness-C') === stored);
-
-// Malformed stdin must never break a turn.
-r = spawnSync(process.execPath, [path.join(PLUGIN_SRC, 'hooks', 'memory-prompt-capture.js')], {
-    input: 'not json', encoding: 'utf8', cwd: PROJ,
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC },
-});
-check('malformed stdin → exit 0', r.status === 0);
+let r;
 
 // -------------------------------------------------- memory-session-start.js
 
@@ -253,37 +212,52 @@ if (memDB.isAvailable()) {
         try { return db.prepare('SELECT title,concept,source_files,raw_data FROM observations WHERE session_id=? ORDER BY rowid').all(sessionId); }
         finally { db.close(); }
     };
-    const prompt = 'Please implement the public fixture.';
-    privacyHook('memory-prompt-capture.js', {prompt});
+    // Since 2026-09-08 capture records only Write/Edit of a project file, typed
+    // `change`, with the edit (never the prompt) as the concept. The recording
+    // fixtures below carry the privacy cases onto that contract; the Bash/Grep/
+    // Read fixtures after them assert the other tools store nothing and say
+    // nothing, private markers included.
     const fixtures = [
-        ['public', 'Write', {file_path:path.join(privacyProj,'public-area','public-control.ts')}, '', 'Created public-control.ts', prompt.toLowerCase(), [], false],
-        ['write-unclosed', 'Write', {file_path:path.join(privacyProj,'<private>PRIVATE_DIR','WRITE_FILENAME_SECRET.ts')}, '', 'Created [REDACTED]', prompt.toLowerCase(), ['PRIVATE_DIR','WRITE_FILENAME_SECRET'], true],
-        ['edit-nested', 'Edit', {file_path:path.join(privacyProj,'<private>OUTER_DIR','<private>INNER_DIR</private>','EDIT_FILENAME_SECRET.ts')}, '', 'Added [REDACTED]', prompt.toLowerCase(), ['OUTER_DIR','INNER_DIR','EDIT_FILENAME_SECRET'], true],
+        ['public', 'Write', {file_path:path.join(privacyProj,'public-area','public-control.ts')}, '', 'Created public-control.ts', 'New file: public-area/public-control.ts', [], false],
+        ['write-unclosed', 'Write', {file_path:path.join(privacyProj,'<private>PRIVATE_DIR','WRITE_FILENAME_SECRET.ts')}, '', 'Created [REDACTED]', 'New file: [REDACTED]', ['PRIVATE_DIR','WRITE_FILENAME_SECRET'], true],
+        ['edit-nested', 'Edit', {file_path:path.join(privacyProj,'<private>OUTER_DIR','<private>INNER_DIR</private>','EDIT_FILENAME_SECRET.ts')}, '', 'Modified [REDACTED]', 'Edited [REDACTED]', ['OUTER_DIR','INNER_DIR','EDIT_FILENAME_SECRET'], true],
         // Built with '/' on purpose, not path.join: on Windows path.join rewrites the
         // '/' inside '</PRIVATE>' to '\', the tag never closes, and the filename this
         // case expects to survive is redacted with it. [measured 2026-09-09] the
         // Windows CI leg failed exactly this case and no other closed-tag case.
         // A Windows path with '/' separators is valid input; the subject is the tag.
-        ['read-uppercase', 'Read', {file_path:privacyProj+'/<PRIVATE>UPPER_DIR</PRIVATE>/public-read.ts'}, '', 'Read public-read.ts', 'Investigated: '+privacyProj+'/[REDACTED]/public-read.ts', ['UPPER_DIR'], true],
-        ['command-before-classification', 'Bash', {command:'inspect_custom_action <private>deploy COMMAND_SECRET'+ 'x'.repeat(200) +'</private> PUBLIC_TAIL'}, 'VISIBLE_RESULT', 'Ran: inspect_custom_action [REDACTED] PUBLIC_TAIL', 'VISIBLE_RESULT', ['COMMAND_SECRET'], true],
-        ['grep-before-clip', 'Grep', {pattern:'P<private>GREP_SECRET'+'x'.repeat(100)+'</private>PUBLIC_TAIL'}, '', 'Searched for "P[REDACTED]PUBLIC_TAIL"', 'Code search in project', ['GREP_SECRET'], true],
-        ['result-before-clip', 'Bash', {command:'custom_long_result_command'}, 'A<private>RESULT_SECRET'+'x'.repeat(600)+'</private>PUBLIC_TAIL', 'Ran: custom_long_result_command', 'A[REDACTED]PUBLIC_TAIL', ['RESULT_SECRET'], true],
-        ['structured-result-before-encoding', 'Bash', {command:'custom_structured_result_command'}, {note:'A<private>JSON_SECRET"\\\n'+'x'.repeat(600)+'</private>PUBLIC_TAIL',after:'PUBLIC_SIBLING'}, 'Ran: custom_structured_result_command', '{"note":"A[REDACTED]PUBLIC_TAIL","after":"PUBLIC_SIBLING"}', ['JSON_SECRET'], true],
+        ['write-uppercase', 'Write', {file_path:privacyProj+'/<PRIVATE>UPPER_DIR</PRIVATE>/public-read.ts'}, '', 'Created public-read.ts', 'New file: [REDACTED]/public-read.ts', ['UPPER_DIR'], true],
+        ['edit-strings-before-clip', 'Edit', {file_path:path.join(privacyProj,'public-area','edited.ts'), old_string:'A<private>OLD_SECRET'+'x'.repeat(100)+'</private>OLD_TAIL', new_string:'B<private>NEW_SECRET'+'x'.repeat(100)+'</private>NEW_TAIL'}, 'A<private>RESULT_SECRET</private>', 'Modified edited.ts', 'A[REDACTED]OLD_TAIL → B[REDACTED]NEW_TAIL', ['OLD_SECRET','NEW_SECRET','RESULT_SECRET'], true],
     ];
     for (const [label,tool,input,result,title,concept,secrets,redacted] of fixtures) {
         const before=readRows().length;
         const hook=privacyHook('memory-capture.js',{tool_name:tool,tool_input:input,tool_response:result});
         const rows=readRows(), row=rows.at(-1);
         check(`extraction ${label}: actual PostToolUse persists a row`, hook.status===0 && rows.length===before+1);
-        check(`extraction ${label}: title and public concept survive`, !!row && row.title===title && row.concept===concept);
+        check(`extraction ${label}: title and edit-derived concept survive`, !!row && row.title===title && row.concept===concept);
+        check(`extraction ${label}: nothing on stdout`, hook.stdout === '');
         const decoded= row ? [row.title,row.concept,...JSON.parse(row.source_files || '[]'),row.raw_data && JSON.parse(row.raw_data)].join('\n') : '';
         check(`extraction ${label}: protected text absent with positive redaction control`, !!row && secrets.every(s=>!decoded.includes(s)) && (!redacted || decoded.includes('[REDACTED]')));
+    }
+    for (const [label,tool,input,result] of [
+        ['read-uppercase', 'Read', {file_path:privacyProj+'/<PRIVATE>UPPER_DIR</PRIVATE>/public-read.ts'}, ''],
+        ['command-with-private', 'Bash', {command:'inspect_custom_action <private>deploy COMMAND_SECRET'+ 'x'.repeat(200) +'</private> PUBLIC_TAIL'}, 'VISIBLE_RESULT'],
+        ['grep-with-private', 'Grep', {pattern:'P<private>GREP_SECRET'+'x'.repeat(100)+'</private>PUBLIC_TAIL'}, ''],
+        ['long-private-result', 'Bash', {command:'custom_long_result_command'}, 'A<private>RESULT_SECRET'+'x'.repeat(600)+'</private>PUBLIC_TAIL'],
+        ['structured-private-result', 'Bash', {command:'custom_structured_result_command'}, {note:'A<private>JSON_SECRET"\\\n'+'x'.repeat(600)+'</private>PUBLIC_TAIL',after:'PUBLIC_SIBLING'}],
+    ]) {
+        const before=readRows().length;
+        const hook=privacyHook('memory-capture.js',{tool_name:tool,tool_input:input,tool_response:result});
+        check(`extraction ${label}: ${tool} stores no row`, hook.status===0 && readRows().length===before);
+        check(`extraction ${label}: and emits zero bytes on both streams`, hook.stdout==='' && hook.stderr==='');
     }
     const throttle=fs.readFileSync(path.join(privacyProj,'.claude','knowledge-surfaced'),'utf8');
     check('extraction privacy: private paths skip area lookup while a real public area survives', throttle.includes('privacy-extraction\tpublic-area') && !/PRIVATE_DIR|OUTER_DIR|INNER_DIR|UPPER_DIR|REDACTED/.test(throttle));
     const { classifyObservation } = require(path.join(PLUGIN_SRC,'scripts','observation-classifier.js'));
     const direct=classifyObservation('Write',{file_path:'PUBLIC.ts'},'', '<private>FIX PROMPT_SECRET'+'X'.repeat(240)+'</private> PUBLIC_REQUEST');
-    check('extraction privacy: direct classifier redacts before lowercase, type detection and truncation', direct.type==='feature' && direct.concept==='[redacted] public_request');
+    check('extraction privacy: a legacy prompt argument shapes neither type nor concept', direct.type==='change' && direct.concept==='New file: PUBLIC.ts' && !JSON.stringify(direct).includes('PROMPT_SECRET'));
+    const named=classifyObservation('Write',{file_path:'dir/<private>NAME_SECRET.ts'},'',undefined);
+    check('extraction privacy: direct classifier redacts before basename', named.title==='Created [REDACTED]' && !JSON.stringify(named).includes('NAME_SECRET'));
     const edit=classifyObservation('Edit',{file_path:'PUBLIC.ts',old_string:'A<private>OLD_SECRET'+'x'.repeat(100)+'</private>OLD_TAIL',new_string:'B<private>NEW_SECRET'+'x'.repeat(100)+'</private>NEW_TAIL'},'','');
     check('extraction privacy: edit fallback redacts before shortening both strings', edit.concept==='A[REDACTED]OLD_TAIL → B[REDACTED]NEW_TAIL');
 }
