@@ -247,6 +247,135 @@ try {
             client.indexOf('COULD NOT CHECK') !== -1,
             'clientproj neither flagged unverified nor COULD NOT CHECK');
     }
+
+    // ------------------------------------------- the pipe delivers every byte
+    //
+    // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+    // synchronous when it is a pipe on linux/win32, and process.exit() does not
+    // drain a pending async write. A run that prints past the 64KiB OS pipe
+    // buffer and then exits therefore hands its caller exactly 65536 bytes under
+    // exit status 0 — the shape rendered-layout-gate.js shipped with until
+    // 2026-09-07. This survey's --json grows with the number of repos under the
+    // root and with the PRs gh reports for each, so it is reachable on a real
+    // machine, not only here.
+    //
+    // TWO ASSERTIONS, and the first is what stops the second passing by
+    // construction: the output must EXCEED one pipe buffer, and the piped byte
+    // count must equal the same run redirected to a FILE, where the write is
+    // synchronous on every platform.
+    //
+    // The fixture is built for BYTES PER SECOND, because every repo here costs a
+    // clone plus eight git invocations and this suite runs inside `npm test`. A
+    // stub `gh` on PATH returns 20 PRs per repo, so TEN repos clear the buffer.
+    // Driven by repo count alone it takes ~45, and the wall-clock goes up by a
+    // minute.
+    //
+    // THE WIDTH COMES FROM THE PR TEXT, NOT FROM THE DIRECTORY NAMES. It used to
+    // come from 200-character repo directories, and `git clone` died on Windows
+    // with "Filename too long" — a CI-only crash, green on both POSIX legs. A
+    // path is the one dimension that is not portable, so the bytes now come from
+    // the stub's own titles and branch names, which are identical everywhere.
+    //
+    // AND THE STUB CANNOT EXIST ON WINDOWS, so this block is skipped there, out
+    // loud: an extensionless `gh` with a shebang is not executable on win32, and
+    // a .cmd is not a drop-in because node will not spawn one with shell:false —
+    // which is how the subject spawns gh, and correctly, that being the
+    // injection-safe form. The defect being guarded is darwin-only, so the
+    // platform where it bites still runs this, and so does ubuntu.
+    if (process.platform === 'win32') {
+        console.log('SKIP  the pipe-delivers-every-byte block — no stub `gh` is possible on win32 '
+            + '(no shebang, and node will not spawn a .cmd without shell:true). '
+            + 'The defect it guards is darwin-only; macOS and ubuntu both run it.');
+    } else {
+        const PIPE_BUF = 64 * 1024;
+        const bigTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-brain-big-'));
+        const bin = path.join(bigTmp, 'bin');
+        fs.mkdirSync(bin);
+        const fakePrs = [];
+        for (let i = 0; i < 20; i++) {
+            // Long strings rather than long paths: this is where the bytes come
+            // from now, and a string is the same length on every platform.
+            fakePrs.push({
+                number: 1000 + i,
+                title: 'a fixture pull request title at the long end of what people really write, '
+                    + 'describing the change, the reason for it, the surface it touches and the '
+                    + 'verification it carried, written out at the length a careful author uses '
+                    + 'when the title is the only thing most readers see, number ' + i,
+                headRefName: 'claude/a-long-but-entirely-ordinary-generated-branch-name-'
+                    + 'that-a-tool-produced-from-the-issue-title-' + i,
+            });
+        }
+        // Stubbed rather than real: this block is about byte counts, and a live
+        // `gh` would make the size depend on someone else's open PRs.
+        fs.writeFileSync(path.join(bin, 'gh'),
+            '#!/bin/sh\ncat <<' + String.fromCharCode(39) + 'JSON' + String.fromCharCode(39) + '\n'
+            + JSON.stringify(fakePrs) + '\nJSON\n');
+        fs.chmodSync(path.join(bin, 'gh'), 0o755);
+
+        // The origin path contains "github", which is what isGitHub tests, so the
+        // survey asks gh — and gh is the stub above.
+        const bare = path.join(bigTmp, 'github-origin.git');
+        execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare], { stdio: 'pipe' });
+        const seed = path.join(bigTmp, 'seed');
+        fs.mkdirSync(seed);
+        git(seed, ['init', '-q', '-b', 'main']);
+        git(seed, ['config', 'user.email', 't@t']);
+        git(seed, ['config', 'user.name', 'T']);
+        fs.writeFileSync(path.join(seed, 'seed.txt'), 'seed\n');
+        git(seed, ['add', '.']);
+        git(seed, ['commit', '-qm', 'seed']);
+        git(seed, ['remote', 'add', 'origin', bare]);
+        git(seed, ['push', '-q', 'origin', 'main']);
+
+        const scan = path.join(bigTmp, 'scan');
+        fs.mkdirSync(scan);
+        for (let i = 0; i < 10; i++) {
+            const dir = path.join(scan, 'repo-' + String(i).padStart(4, '0'));
+            execFileSync('git', ['clone', '-q', bare, dir], { stdio: 'pipe' });
+            for (const f of ['RESUME.md', 'PUBLISH-QUEUE.md', 'DECISIONS.md', 'prd.json', 'TASKS.md', 'CLAUDE.md']) {
+                fs.writeFileSync(path.join(dir, f), f === 'prd.json' ? '{}' : 'x');
+            }
+        }
+        const env = Object.assign({}, process.env, { PATH: bin + path.delimiter + process.env.PATH });
+        const argv = (extra) => [SUBJECT, '--root', scan].concat(extra);
+
+        const viaFileBytes = (extra) => {
+            const out = path.join(bigTmp, 'out');
+            const fd = fs.openSync(out, 'w');
+            spawnSync(process.execPath, argv(extra), { stdio: ['ignore', fd, 'ignore'], env });
+            fs.closeSync(fd);
+            return fs.statSync(out).size;
+        };
+
+        const jsonPipe = spawnSync(process.execPath, argv(['--json']),
+            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+        const jsonPipeBytes = Buffer.byteLength(jsonPipe.stdout, 'utf8');
+        const jsonFileBytes = viaFileBytes(['--json']);
+
+        check('--json over a large root exceeds one pipe buffer, so the next check is not vacuous',
+            jsonFileBytes > PIPE_BUF, JSON.stringify({ bytes: jsonFileBytes, buffer: PIPE_BUF }));
+        check('  and through a PIPE it delivers every byte it writes to a FILE',
+            jsonPipeBytes === jsonFileBytes, JSON.stringify({ pipe: jsonPipeBytes, file: jsonFileBytes }));
+        let bigParsed = null;
+        try { bigParsed = JSON.parse(jsonPipe.stdout); } catch { /* reported */ }
+        check('  and the piped JSON still parses at that size', bigParsed !== null,
+            jsonPipe.stdout.slice(-60));
+        check('  under exit status 0, so a truncated run cannot read as a success',
+            jsonPipe.status === 0, 'exit ' + jsonPipe.status);
+
+        // The human report shares the exit path, so it shares the defect. BE
+        // CLEAR WHAT THIS PAIR CATCHES: the report is built from hundreds of
+        // small console.log calls, which drain opportunistically while the
+        // parent reads, so it strands far less at the exit than the single
+        // JSON write above does. It states an equality; it is not cover.
+        const reportPipe = spawnSync(process.execPath, argv([]),
+            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+        check('  the human report through a PIPE also delivers every byte',
+            Buffer.byteLength(reportPipe.stdout, 'utf8') === viaFileBytes([]),
+            Buffer.byteLength(reportPipe.stdout, 'utf8'));
+
+        fs.rmSync(bigTmp, { recursive: true, force: true });
+    }
 } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
 }

@@ -614,51 +614,70 @@ for (const repo of found) {
     if (!seen || (isMain && !seen.isMain)) canonical.set(key, { repo, isMain });
 }
 for (const { repo } of canonical.values()) auditPrd(repo);
-census.push('prd: ' + prdAudited + ' repo(s) with a prd.json, ' + prdSkipped + ' without, from ' +
-    canonical.size + ' distinct repo(s)');
+function main() {
+    census.push('prd: ' + prdAudited + ' repo(s) with a prd.json, ' + prdSkipped + ' without, from ' +
+        canonical.size + ' distinct repo(s)');
 
-// The blind check belongs ABOVE every exit, not only above the human one. It
-// was added below this line, so `--json` on a missing config dir returned
-// `{"findings": []}` and exit 0 -- a machine-readable all-clear from a probe
-// that had read nothing, which is worse than the human path it was fixing
-// because a caller parses it without a person ever seeing it.
-if (!fs.existsSync(CONFIG)) {
-    const blind = { configDir: CONFIG, error: 'config dir does not exist', probeBlind: true, findings: null };
-    if (asJson) { console.log(JSON.stringify(blind, null, 2)); process.exit(1); }
-    console.log('\n  COULD NOT AUDIT: ' + CONFIG + ' does not exist.');
-    console.log('  The probe is blind, not the population clean.\n');
-    process.exit(1);
+    // The blind check belongs ABOVE every exit, not only above the human one. It
+    // was added below this line, so `--json` on a missing config dir returned
+    // `{"findings": []}` and exit 0 -- a machine-readable all-clear from a probe
+    // that had read nothing, which is worse than the human path it was fixing
+    // because a caller parses it without a person ever seeing it.
+    if (!fs.existsSync(CONFIG)) {
+        const blind = { configDir: CONFIG, error: 'config dir does not exist', probeBlind: true, findings: null };
+        if (asJson) { console.log(JSON.stringify(blind, null, 2)); return 1; }
+        console.log('\n  COULD NOT AUDIT: ' + CONFIG + ' does not exist.');
+        console.log('  The probe is blind, not the population clean.\n');
+        return 1;
+    }
+
+    if (asJson) { console.log(JSON.stringify({ configDir: CONFIG, findings }, null, 2)); return findings.some((f) => f.severity === 'fail') ? 1 : 0; }
+
+    const order = { fail: 0, warn: 1, info: 2 };
+    findings.sort((a, b) => order[a.severity] - order[b.severity]);
+
+    console.log(`\nDrift audit — ${CONFIG}\n`);
+    for (const line of census) console.log('  ' + line);
+    console.log('');
+    // The blind check is above, before the --json exit. Two notes kept here
+    // because both were paid for:
+    //
+    // The guard is on whether the config dir could be READ, not on how many repos
+    // it held. A config-only audit legitimately finds zero repos, and keying on the
+    // repo count failed 27 of 53 assertions in test-drift-audit-config.js by
+    // calling those runs blind. A provenance check asserts the input WAS READ; it
+    // never asserts what the value looks like.
+    //
+    // And it sits above every exit rather than above the human one. Placed here it
+    // left `--json` returning an empty clean result from a probe that had read
+    // nothing, which is worse than the bug it fixed: a caller parses that without
+    // a person ever seeing it.
+    if (!findings.length) { console.log('  no drift found in the population above\n'); return 0; }
+
+    let lastArea = '';
+    for (const f of findings) {
+        if (f.area !== lastArea) { console.log(`  [${f.area}]`); lastArea = f.area; }
+        const tag = f.severity === 'fail' ? '✗' : f.severity === 'warn' ? '⚠' : '·';
+        console.log(`    ${tag} ${f.detail}`);
+        console.log(`      fix: ${f.fix}`);
+    }
+    console.log(`\n${findings.length} finding(s). Nothing was modified.\n`);
+    return findings.some((f) => f.severity === 'fail') ? 1 : 0;
 }
 
-if (asJson) { console.log(JSON.stringify({ configDir: CONFIG, findings }, null, 2)); process.exit(findings.some((f) => f.severity === 'fail') ? 1 : 0); }
-
-const order = { fail: 0, warn: 1, info: 2 };
-findings.sort((a, b) => order[a.severity] - order[b.severity]);
-
-console.log(`\nDrift audit — ${CONFIG}\n`);
-for (const line of census) console.log('  ' + line);
-console.log('');
-// The blind check is above, before the --json exit. Two notes kept here
-// because both were paid for:
+// process.exit() TRUNCATES output, and only on some platforms.
 //
-// The guard is on whether the config dir could be READ, not on how many repos
-// it held. A config-only audit legitimately finds zero repos, and keying on the
-// repo count failed 27 of 53 assertions in test-drift-audit-config.js by
-// calling those runs blind. A provenance check asserts the input WAS READ; it
-// never asserts what the value looks like.
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
 //
-// And it sits above every exit rather than above the human one. Placed here it
-// left `--json` returning an empty clean result from a probe that had read
-// nothing, which is worse than the bug it fixed: a caller parses that without
-// a person ever seeing it.
-if (!findings.length) { console.log('  no drift found in the population above\n'); process.exit(0); }
-
-let lastArea = '';
-for (const f of findings) {
-    if (f.area !== lastArea) { console.log(`  [${f.area}]`); lastArea = f.area; }
-    const tag = f.severity === 'fail' ? '✗' : f.severity === 'warn' ? '⚠' : '·';
-    console.log(`    ${tag} ${f.detail}`);
-    console.log(`      fix: ${f.fix}`);
-}
-console.log(`\n${findings.length} finding(s). Nothing was modified.\n`);
-process.exit(findings.some((f) => f.severity === 'fail') ? 1 : 0);
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();

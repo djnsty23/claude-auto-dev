@@ -421,6 +421,68 @@ advance(app, {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The pipe delivers every byte.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
+// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// drain a pending async write. A run that prints past the 64KiB OS pipe buffer
+// and then exits hands its caller exactly 65536 bytes under a status that says
+// nothing failed — the shape rendered-layout-gate.js shipped with until
+// 2026-09-07. --json here carries one row per premise, so it grows with the
+// queue, and a queue is exactly the kind of file that only ever gets longer.
+//
+// TWO ASSERTIONS, and the first is what stops the second passing by
+// construction: the output must EXCEED one pipe buffer, and the piped byte count
+// must equal the same run redirected to a FILE, where the write is synchronous
+// on every platform.
+{
+    const PIPE_BUF = 64 * 1024;
+    // 400 items carrying no PREMISE: line, which is the UNCHECKABLE path and
+    // costs no git at all — plus the beacon, so the run still ends on the
+    // ordinary exit rather than on the 0-premises refusal.
+    const body = ['## Items', '**Beacon** ' + BEACON];
+    for (let i = 0; i < 400; i++) {
+        body.push('**Item ' + i + ' · a queue entry with a realistically long human label '
+            + 'describing the work someone wrote down at the time, number ' + i + '**');
+    }
+    const bigQueue = path.join(fixture, 'Q-big.md');
+    fs.writeFileSync(bigQueue, body.join('\n'));
+    const argv = (extra) => [SUBJECT, '--queue', bigQueue, '--repo-root', CODE, '--no-fetch'].concat(extra);
+
+    const viaFileBytes = (extra) => {
+        const out = path.join(fixture, 'via-file.out');
+        const fd = fs.openSync(out, 'w');
+        spawnSync(process.execPath, argv(extra), { stdio: ['ignore', fd, 'ignore'] });
+        fs.closeSync(fd);
+        return fs.statSync(out).size;
+    };
+    const piped = spawnSync(process.execPath, argv(['--json']),
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
+    const fileBytes = viaFileBytes(['--json']);
+
+    check('--json over a long queue exceeds one pipe buffer, so the next check is not vacuous',
+        fileBytes > PIPE_BUF, JSON.stringify({ bytes: fileBytes, buffer: PIPE_BUF }));
+    check('--json through a PIPE delivers every byte it writes to a FILE',
+        pipeBytes === fileBytes, JSON.stringify({ pipe: pipeBytes, file: fileBytes }));
+    check('the piped JSON still parses at that size',
+        (() => { try { return JSON.parse(piped.stdout).results.length === 401; } catch { return false; } })(),
+        'tail ' + JSON.stringify((piped.stdout || '').slice(-40)));
+
+    // The human report shares the exit path, so it shares the defect. BE CLEAR
+    // WHAT THIS LINE CATCHES: it is a stream of small console.log calls, which
+    // drain opportunistically while the parent reads, so it strands far less at
+    // the exit than the single JSON write — measurably so on the sibling suites,
+    // where the equivalent line stays green under the mutation even above the
+    // buffer. It states the equality; it is not cover for this defect.
+    const reportPipe = spawnSync(process.execPath, argv([]),
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    check('the human report through a PIPE also delivers every byte',
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === viaFileBytes([]),
+        Buffer.byteLength(reportPipe.stdout || '', 'utf8'));
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 const total = passed + failures.length;

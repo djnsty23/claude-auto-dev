@@ -392,96 +392,115 @@ const stuck = [...bySession.entries()]
         .map(([id, n]) => ({ session: sess, class: id, count: n })))
     .sort((a, b) => b.count - a.count);
 
-if (AS_JSON) {
-    console.log(JSON.stringify({ window_days: DAYS, population: stats, classes: ranked, stuck }, null, 2));
-    process.exit(0);
-}
+function main() {
+    if (AS_JSON) {
+        console.log(JSON.stringify({ window_days: DAYS, population: stats, classes: ranked, stuck }, null, 2));
+        return 0;
+    }
 
-// Population FIRST. A ranked list with no denominator is indistinguishable from
-// a probe that returned nothing — print what was scanned, per rule-gate-integrity.
-console.log(`session-pattern scan — last ${DAYS} day(s), root ${ROOT}`);
-// The registry of sessions is machine-local, so this reads THIS box only.
-// Saying "fleet" while covering one of two machines is the same error as
-// quoting a 7-day average as current state: the number is real and it
-// describes something narrower than the word attached to it.
-console.log(`scope: this machine only (${os.hostname()}) — sessions on other machines are invisible from here`);
-console.log(`population: ${stats.filesInWindow} of ${stats.filesSeen} transcripts touched in window, `
-    + `${stats.lines} lines read (${stats.linesBeforeWindow} older than the window, skipped),`);
-console.log(`            ${stats.toolResults} tool results IN WINDOW, ${stats.errors} errored`
-    + `${stats.toolResults ? ` (${((stats.errors / stats.toolResults) * 100).toFixed(1)}%)` : ''}\n`);
-console.log(`            ${stats.timed} of those errors could be priced in wall clock (tool_use to tool_result, permission waits included)`);
+    // Population FIRST. A ranked list with no denominator is indistinguishable from
+    // a probe that returned nothing — print what was scanned, per rule-gate-integrity.
+    console.log(`session-pattern scan — last ${DAYS} day(s), root ${ROOT}`);
+    // The registry of sessions is machine-local, so this reads THIS box only.
+    // Saying "fleet" while covering one of two machines is the same error as
+    // quoting a 7-day average as current state: the number is real and it
+    // describes something narrower than the word attached to it.
+    console.log(`scope: this machine only (${os.hostname()}) — sessions on other machines are invisible from here`);
+    console.log(`population: ${stats.filesInWindow} of ${stats.filesSeen} transcripts touched in window, `
+        + `${stats.lines} lines read (${stats.linesBeforeWindow} older than the window, skipped),`);
+    console.log(`            ${stats.toolResults} tool results IN WINDOW, ${stats.errors} errored`
+        + `${stats.toolResults ? ` (${((stats.errors / stats.toolResults) * 100).toFixed(1)}%)` : ''}\n`);
+    console.log(`            ${stats.timed} of those errors could be priced in wall clock (tool_use to tool_result, permission waits included)`);
 
-if (stats.filesSeen === 0) {
-    console.log('PROBE BLIND — no transcripts found at all. Wrong --root, or this is not the machine that ran them.');
-    process.exit(2);
-}
-if (stats.errors === 0) {
-    console.log(`No errored tool calls in the window. (${stats.toolResults} tool results were scanned, so the probe could see.)`);
-    process.exit(0);
-}
+    if (stats.filesSeen === 0) {
+        console.log('PROBE BLIND — no transcripts found at all. Wrong --root, or this is not the machine that ran them.');
+        return 2;
+    }
+    if (stats.errors === 0) {
+        console.log(`No errored tool calls in the window. (${stats.toolResults} tool results were scanned, so the probe could see.)`);
+        return 0;
+    }
 
-const pad = (s, n) => String(s).padEnd(n);
-console.log('ranked by SESSIONS AFFECTED (breadth), not gross hits');
-console.log(pad('class', 32) + pad('sessions', 10) + pad('hits', 7) + pad('of errs', 9) + 'concentration');
-console.log('-'.repeat(82));
-for (const r of ranked) {
-    const share = ((r.count / stats.errors) * 100).toFixed(1) + '%';
-    const conc = r.top_session_share >= 0.5
-        ? `${(r.top_session_share * 100).toFixed(0)}% from ONE session`
-        : '';
-    console.log(pad(r.id, 32) + pad(r.sessions, 10) + pad(r.count, 7) + pad(share, 9) + conc);
-}
-
-if (!NO_EXAMPLES) {
-    console.log('\nwhat to change:');
+    const pad = (s, n) => String(s).padEnd(n);
+    console.log('ranked by SESSIONS AFFECTED (breadth), not gross hits');
+    console.log(pad('class', 32) + pad('sessions', 10) + pad('hits', 7) + pad('of errs', 9) + 'concentration');
+    console.log('-'.repeat(82));
     for (const r of ranked) {
-        if (!r.fix) continue;
-        console.log(`\n  ${r.id} — ${r.sessions} session(s), ${r.count} hit(s)`);
-        console.log(`    fix: ${r.fix}`);
-        for (const ex of r.examples.slice(0, 2)) console.log(`    saw: ${ex}`);
+        const share = ((r.count / stats.errors) * 100).toFixed(1) + '%';
+        const conc = r.top_session_share >= 0.5
+            ? `${(r.top_session_share * 100).toFixed(0)}% from ONE session`
+            : '';
+        console.log(pad(r.id, 32) + pad(r.sessions, 10) + pad(r.count, 7) + pad(share, 9) + conc);
     }
-    const un = ranked.find((r) => r.id === 'unclassified');
-    if (un) {
-        console.log(`\n  unclassified — ${un.sessions} session(s), ${un.count} hit(s)`);
-        console.log('    These are the classes the taxonomy does not know yet. Read them and');
-        console.log('    add a CLASSES entry, or the ranking silently under-counts what you hit.');
-        for (const ex of un.examples) console.log(`    saw: ${ex}`);
+
+    if (!NO_EXAMPLES) {
+        console.log('\nwhat to change:');
+        for (const r of ranked) {
+            if (!r.fix) continue;
+            console.log(`\n  ${r.id} — ${r.sessions} session(s), ${r.count} hit(s)`);
+            console.log(`    fix: ${r.fix}`);
+            for (const ex of r.examples.slice(0, 2)) console.log(`    saw: ${ex}`);
+        }
+        const un = ranked.find((r) => r.id === 'unclassified');
+        if (un) {
+            console.log(`\n  unclassified — ${un.sessions} session(s), ${un.count} hit(s)`);
+            console.log('    These are the classes the taxonomy does not know yet. Read them and');
+            console.log('    add a CLASSES entry, or the ranking silently under-counts what you hit.');
+            for (const ex of un.examples) console.log(`    saw: ${ex}`);
+        }
     }
+
+    // Cost view. Breadth answers 'how many sessions trip on this'; this answers
+    // 'how long were they stuck', and the two disagree. The most expensive class
+    // measured on this machine cost two hours across two hits, which any
+    // frequency ranking buries.
+    if (args.includes('--by-cost')) {
+        const byCost = [...ranked].filter((r) => r.timed > 0).sort((a, b) => b.total_min - a.total_min);
+        console.log('');
+        console.log('ranked by WALL-CLOCK COST (includes permission waits; NOT execution time)');
+        console.log(pad('class', 32) + pad('total min', 11) + pad('median s', 10) + 'timed/hits');
+        console.log('-'.repeat(70));
+        for (const r of byCost) {
+            console.log(pad(r.id, 32) + pad(r.total_min, 11) + pad(r.median_s, 10) + r.timed + '/' + r.count);
+        }
+        console.log('');
+        console.log('Median, not mean: one call left pending overnight would own a mean.');
+    }
+
+    if (args.includes('--by-day')) {
+        const days = [...byDay.keys()].filter((d) => d !== 'undated').sort();
+        const top = ranked.filter((r) => r.id !== 'unclassified').slice(0, 6).map((r) => r.id);
+        console.log('\nper-day counts — did a harness change actually move the class it targeted?');
+        console.log(pad('day', 12) + pad('total', 7) + top.map((t) => pad(t.slice(0, 13), 15)).join(''));
+        for (const d of days) {
+            const m = byDay.get(d);
+            console.log(pad(d, 12) + pad(m.get('__total') || 0, 7) + top.map((t) => pad(m.get(t) || 0, 15)).join(''));
+        }
+        console.log('\nRead a fall here as evidence only if you can name the change that caused it,');
+        console.log('and check the total: a class can drop because the fleet went quiet that day.');
+    }
+
+    if (stuck.length) {
+        console.log('\nsessions that got STUCK (same class 3+ times in one session):');
+        for (const s of stuck.slice(0, 12)) console.log(`  ${pad(s.count + 'x', 5)} ${pad(s.class, 26)} ${s.session}`);
+    }
+
+    return 0;
 }
 
-// Cost view. Breadth answers 'how many sessions trip on this'; this answers
-// 'how long were they stuck', and the two disagree. The most expensive class
-// measured on this machine cost two hours across two hits, which any
-// frequency ranking buries.
-if (args.includes('--by-cost')) {
-    const byCost = [...ranked].filter((r) => r.timed > 0).sort((a, b) => b.total_min - a.total_min);
-    console.log('');
-    console.log('ranked by WALL-CLOCK COST (includes permission waits; NOT execution time)');
-    console.log(pad('class', 32) + pad('total min', 11) + pad('median s', 10) + 'timed/hits');
-    console.log('-'.repeat(70));
-    for (const r of byCost) {
-        console.log(pad(r.id, 32) + pad(r.total_min, 11) + pad(r.median_s, 10) + r.timed + '/' + r.count);
-    }
-    console.log('');
-    console.log('Median, not mean: one call left pending overnight would own a mean.');
-}
-
-if (args.includes('--by-day')) {
-    const days = [...byDay.keys()].filter((d) => d !== 'undated').sort();
-    const top = ranked.filter((r) => r.id !== 'unclassified').slice(0, 6).map((r) => r.id);
-    console.log('\nper-day counts — did a harness change actually move the class it targeted?');
-    console.log(pad('day', 12) + pad('total', 7) + top.map((t) => pad(t.slice(0, 13), 15)).join(''));
-    for (const d of days) {
-        const m = byDay.get(d);
-        console.log(pad(d, 12) + pad(m.get('__total') || 0, 7) + top.map((t) => pad(m.get(t) || 0, 15)).join(''));
-    }
-    console.log('\nRead a fall here as evidence only if you can name the change that caused it,');
-    console.log('and check the total: a class can drop because the fleet went quiet that day.');
-}
-
-if (stuck.length) {
-    console.log('\nsessions that got STUCK (same class 3+ times in one session):');
-    for (const s of stuck.slice(0, 12)) console.log(`  ${pad(s.count + 'x', 5)} ${pad(s.class, 26)} ${s.session}`);
-}
-
-process.exit(0);
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
+// synchronous when it is a pipe on linux and win32; it is synchronous for a
+// FILE and a TTY everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, Linux CI is synchronous so CI is green, and the status is 0.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();
