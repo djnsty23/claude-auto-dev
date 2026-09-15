@@ -94,9 +94,10 @@ function gateStepNames(root) {
  *
  * An ALLOWLIST, so a step added to the chain lands in the slow tier by default.
  * The opposite default would put an unmeasured step into the tier whose entire
- * claim is that it costs seconds. `check:skill-plugin-root` is the live example:
- * it joined the chain after this list was written and is DEFERRED here, though
- * it measured 0.2 s on 2026-09-15. Adding it is a one-line, measured decision.
+ * claim is that it costs seconds. `check:skill-plugin-root` was the live example:
+ * it joined the chain after this list was written and stayed DEFERRED until it
+ * was measured (0.2 s on 2026-09-15) and added by hand. That is the intended
+ * path for every new step: measured first, listed second.
  *
  * Membership is tested against whatever `scripts.gate` actually contains, so a
  * name listed here but absent from the chain costs nothing.
@@ -106,6 +107,7 @@ const FAST = new Set([          // [measured 2026-09-15, load 4.6-5.4]
     'check:population',     // 0.6 s
     'check:entrypoints',    // 12.7 s
     'check:skill-tools',    // 0.3 s
+    'check:skill-plugin-root', // 0.2 s
     'check:agents-md',      // 0.2 s
     'check:claude-md',      // 2.6 s
 ]);
