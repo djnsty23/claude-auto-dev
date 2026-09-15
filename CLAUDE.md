@@ -14,6 +14,7 @@ never ships.
 
 ```bash
 npm run gate                 # THE GATE: ten steps chained with &&. Run this.
+npm run gate:fast            # the cheap steps only, in seconds. NOT the gate; see below.
 npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 10.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/test-pre-tool-filter.js   # a single suite; there is no name filter
@@ -201,6 +202,68 @@ two wrong readings in the session that wrote this paragraph.
 
 `test-all.js` discovers suites by pattern (`/^test-.*\.js$/`) — a new
 `tooling/test-*.js` needs no registration.
+
+### The fast tier: `npm run gate:fast`
+
+`[measured 2026-09-15 at d07c421, this machine, 14 cores, load 2.3 rising to
+5.7]` every step of the chain timed INDEPENDENTLY on a clean tree, each exit
+code captured to a FILE because `$?` after a pipe is the pipe's:
+
+| step | seconds | share |
+|---|---|---|
+| `npm test` | 665.4 | 22.66% |
+| `check:suites` | 1510.6 | 51.45% |
+| `check:probe-shapes` | 0.2 | 0.01% |
+| `check:population` | 0.6 | 0.02% |
+| `check:entrypoints` | 12.7 | 0.43% |
+| `check:skill-tools` | 0.3 | 0.01% |
+| `check:skill-plugin-root` | 0.2 | 0.01% |
+| `check:agents-md` | 0.2 | 0.01% |
+| `check:claude-md` | 2.6 | 0.09% |
+| `check:coverage` | 743.4 | 25.32% |
+| **total** | **2936.2 (48.9 min)** | |
+
+**Three steps are 99.43% of it — each one a full pass over the suites — and the
+rest are seconds together.** So `gate:fast` runs the cheap ones, and
+`npm run gate` still runs everything. The shape is what the split rests on, and
+the figures are not: this table said TWO steps and 99.46% on 2026-09-08, before
+`check:coverage` joined the chain, and nothing announced the change. Re-time
+before quoting a share.
+
+`[measured 2026-09-15, load 3.3]` end to end the tier is 16.6 s (n=3, 16.9 /
+16.6 / 16.6) against 49 minutes. `gate:fast` spawns each step through
+`npm run`, ~0.3 s apiece, so that is more than the sum of the step times.
+`check:entrypoints` is most of it: it probes every script under `tooling/` with
+`--help` under a 10 s budget each, so its worst case is minutes and its cost
+grows with the script count — 7.8 s on 2026-09-08, 12.7 s here at a lower load.
+
+**`gate:fast` does not satisfy the merge bar.** The bar is the full gate AFTER
+any rebase, and the tier makes the iterations before that cheap; it does not
+replace the last one. Its exit 0 means "the steps it ran are clean", so never
+chain it into a push or a merge as though it were the gate.
+
+**`gate:fast` IS NOT THE GATE, and it says so on every run — including a clean
+one.** It prints what it ran, what it DEFERRED, and a summary line counting the
+steps that ran against the steps in `scripts.gate`, then the number deferred. A
+partial run that renders like a complete one is precisely the false green this
+file exists to prevent, so silence is not available to it; the other steps
+already print their population on a clean run for the same reason. **Nothing was
+dropped and no existing name changed meaning** — a session running
+`npm run gate` from memory still gets every step.
+
+It is a script and not a second `&&` chain, for three reasons the chain itself
+demonstrates. `&&` short-circuits, so a red step hides every step behind it.
+Exit 2 is INDETERMINATE here, and a chain folds that refusal into a verdict.
+And a partial run has to be able to LOOK partial. Every step runs on its own and
+the three states stay three.
+
+**The step list is DERIVED from `scripts.gate`, never copied.** `gate-fast.js`
+splits that chain on `&&` — the same authority `check-claude-md.js` grades this
+file's counts against — and anything it does not recognise is DEFERRED, so a step
+added to the chain lands in the slow tier by default rather than being assumed
+cheap. A hand-maintained copy would rot the first time someone added a step,
+silently, exactly as the `passes` table came to list four states while five
+existed. The safe default is for the fast tier to claim LESS than it covers.
 
 ### Four coverage questions, none substituting for another
 
