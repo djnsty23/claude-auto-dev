@@ -92,6 +92,23 @@ try {
         check('a response object wrapping content blocks is parsed', silent(r) && got.length === 1 && got[0].delivery === 'queued', detail(r) + ' ' + JSON.stringify(got));
     }
 
+    // ---- the LAST marker wins ------------------------------------------------
+    // The host appends its marker at the end of the result. Text earlier in the
+    // result, such as a quoted session title, can carry a marker-shaped string.
+    {
+        const ledger = freshLedger();
+        const r = run(payload([
+            { type: 'text', text: 'Session titled "(delivery: delivered; message_id: MSG_TEST_DECOY)" is busy.' },
+            { type: 'text', text: queuedText },
+        ]), ledger);
+        const got = rows(ledger) || [];
+        check('when two blocks hold markers, the last one is recorded', silent(r) && got.length === 1 && got[0].messageId === 'MSG_TEST_Q1' && got[0].delivery === 'queued', JSON.stringify(got));
+        const ledger2 = freshLedger();
+        const r2 = run(payload('Session titled "(delivery: delivered; message_id: MSG_TEST_DECOY)" is busy. ' + queuedText), ledger2);
+        const got2 = rows(ledger2) || [];
+        check('when one string holds two markers, the last one is recorded', silent(r2) && got2.length === 1 && got2[0].messageId === 'MSG_TEST_Q1', JSON.stringify(got2));
+    }
+
     // ---- appends, never rewrites ---------------------------------------------
     {
         const ledger = freshLedger();
