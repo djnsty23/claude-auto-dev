@@ -1,5 +1,36 @@
 # Changelog
 
+## [8.169.0]
+
+### Fixes that sat on main unreleased for five days
+
+Everything below merged between 2026-09-12 and 2026-09-15 while VERSION stayed
+at 8.168.0. The plugin cache is keyed on the version number, so no installed
+session received any of it. [measured 2026-09-16] the installed 8.168.0
+coordinator-write-guard.js has no msysDrive; main's does.
+
+- coordinator-write-guard: read a Git Bash `/c/...` path as drive C instead of
+  `C:c...`, which blocked the coordinator from its own home repo.
+- One on/off switch per advisory hook, replacing hooks_profile (#255).
+- session-start warns when a repo already carries a pile of live sessions;
+  session-sweep says when an unbound PR is already bound elsewhere; sessions
+  settle finished work the day it finishes.
+- unattended-worker.js starts a worker with no click, in its own worktree (#260).
+- deploy-ledger binds the promotion record to the candidate (F1 to F3) behind
+  `--verify --promotion`.
+- check-coverage grades win32 with refused code reported apart (#253).
+- brain-role, session-exit, hook-evidence (#247), watch-panels (#248),
+  doc-staleness and agent-browser-cleanup (#259) fixes.
+- resume handoffs carry dead ends, not only progress.
+
+### Gate and docs
+
+- `npm run gate:fast` runs the cheap steps independently and never reports
+  itself as the gate (#213); check:skill-plugin-root joins it (#263).
+- docs/decisions becomes a directory per decision, with a lint for welded
+  entries (#211).
+- Brain skill notes (#261, #262) and the pipe-asynchrony correction (#264).
+
 ## [8.168.0]
 
 ### Requirements survive the planning and worker handoffs
