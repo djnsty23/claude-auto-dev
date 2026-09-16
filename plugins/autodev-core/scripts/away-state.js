@@ -138,7 +138,7 @@ module.exports = { readAwayState, DEFAULT_FILE, UNTIL_LINE };
 // A module that can also be RUN, because a state nobody can print is a state
 // nobody can debug, and check-entrypoints probes every scripts/*.js with --help.
 
-if (require.main === module) {
+function main() {
     const argv = process.argv.slice(2);
     const val = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
 
@@ -147,14 +147,14 @@ if (require.main === module) {
             + 'Reads the declared AWAY state. Four states: active (self-resolve),\n'
             + 'expired / absent / malformed (the operator can be asked).\n'
             + 'File: $AUTODEV_AWAY_FILE, else ~/claude-memory/AWAY.md');
-        process.exit(0);
+        return 0;
     }
 
     const s = readAwayState({ file: val('--file') });
 
     if (argv.includes('--json')) {
         console.log(JSON.stringify(s, null, 2));
-        process.exit(0);
+        return 0;
     }
 
     // Population beside the verdict: WHICH file was read, so a reader can tell
@@ -165,5 +165,23 @@ if (require.main === module) {
     if (s.reason) console.log(`  reason: ${s.reason}`);
     console.log(`  panels: ${s.canAsk ? 'the operator can be asked' : 'SELF-RESOLVE — take the recommended option and log it'}`);
     if (s.words) console.log(`  operator's words: ${s.words.split('\n')[0].slice(0, 100)}`);
-    process.exit(0);
+    return 0;
 }
+
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on POSIX (Linux and
+// macOS alike) and synchronous when it is a pipe on win32; it is synchronous
+// for a FILE everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, the status is 0 so CI stays green (a Linux pipe is asynchronous too,
+// so CI is exposed and cannot see it), and nothing compares byte counts.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+if (require.main === module) process.exitCode = main();
