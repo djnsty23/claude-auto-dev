@@ -249,6 +249,32 @@ your handoff file, then verify it has claimed `~/.claude/brain-role.json` before
 you go quiet. Handover is a remedy for CONTEXT DEPTH — it is not the answer to the
 next paragraph, and filing it as both is how that outage was first misdiagnosed.
 
+**A self-clear does not shed context. Only a fresh session or a compaction
+does.** `[measured 2026-09-16]` One interactive Brain (claude-opus-5, bypass
+permissions) issued the session-management self-clear (`clear_session` with
+`session_id: "self"`) eight times between 364k and 557k tokens of context. The
+first call was refused because a user message was queued behind the turn; the
+other seven answered that the conversation would be cleared when the turn
+ended. After each accepted clear the process restarted (new pid, SessionStart
+hooks re-ran, `peer_name` reset to the session title), the session id stayed
+the same, and the next turn read the whole transcript again: 364,478 tokens
+after the first clear, 557,606 after the last, never fewer than before. The
+only drop in that session was the harness's own automatic compaction, at
+967,210 tokens down to 29,546, after which the queue survived only as far as
+the compaction summary carried it. Measured by summing `input_tokens`,
+`cache_read_input_tokens` and `cache_creation_input_tokens` per assistant turn
+in the session's transcript under `~/.claude/projects/`; re-measure the same
+way after a harness change before trusting a different result.
+
+So at the context line, do not reach for `mcp__ccd_session_mgmt__clear_session`
+expecting relief. Write and mirror the handoff, re-point its START HERE, get
+the successor started as a NEW session (a fresh session in the repo that types
+`brain`), verify it has claimed `~/.claude/brain-role.json`, then go quiet. If
+the clear is issued anyway, re-stamp `peer_name` in the role record afterwards,
+because `check-brain-role.js --json` reads `degraded` (dead peer) until then,
+and issue it only when nothing is inbound: a queued user message, peer message
+or task notification drops it.
+
 **With an empty inbox, DRIVE. Fan the work out to background agents from this
 session.** Reporting and waiting for an inbound peer message is not coordination;
 it makes the coordinator idle exactly when its sessions go quiet to run long
