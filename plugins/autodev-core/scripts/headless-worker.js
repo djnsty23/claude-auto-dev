@@ -35,8 +35,9 @@
  * FAKE BINARY CONVENTION. A `--claude-bin` ending in `.js` is run through the
  * current node executable (`process.execPath <file> ...`), so a suite can stand
  * in a script for the real binary without a shell or a shebang. Anything else
- * is spawned as given, with no shell. On Windows that means a `.cmd` shim is
- * not found by name; point `--claude-bin` at the `.exe`.
+ * is spawned as given, with no shell. On Windows a bare name is first resolved
+ * to an `.exe` on PATH or to the npm shim's executable (see resolveClaudeBin);
+ * a `.cmd` shim itself is never spawned.
  *
  * Usage:
  *   node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>
@@ -219,6 +220,32 @@ function buildArgv({ claudeBin, prompt, model, permissionMode }) {
         '--permission-mode', permissionMode, '--output-format', 'stream-json', '--verbose'];
 }
 
+/**
+ * A bare binary name on Windows. spawn() without a shell resolves PATH for
+ * `.exe` only, and the npm global install puts a `claude.cmd` shim on PATH
+ * whose real executable sits beside it under `node_modules`. `[measured
+ * 2026-09-16]` `--claude-bin claude` on such a machine logged
+ * CLAUDE_SPAWN_ERROR=ENOENT while the `.exe` two directories down ran fine.
+ * So a bare name is resolved here: `<dir>/<name>.exe` on any PATH entry, then
+ * the npm shim layout `<dir>/node_modules/@anthropic-ai/claude-code/bin/<name>.exe`
+ * next to a `<dir>/<name>.cmd`. Anything with a separator or an extension, and
+ * every other platform, comes back unchanged; an unresolved name still spawns
+ * as given and surfaces in the log as before.
+ */
+function resolveClaudeBin(name, { platform = process.platform, pathEnv = process.env.PATH || process.env.Path || '', exists = fs.existsSync } = {}) {
+    if (platform !== 'win32') return name;
+    if (!name || /[\\/]/.test(name) || path.extname(name)) return name;
+    for (const dir of pathEnv.split(path.delimiter).filter(Boolean)) {
+        const exe = path.join(dir, name + '.exe');
+        if (exists(exe)) return exe;
+        const shim = path.join(dir, name + '.cmd');
+        if (!exists(shim)) continue;
+        const npmExe = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', name + '.exe');
+        if (exists(npmExe)) return npmExe;
+    }
+    return name;
+}
+
 /** The executable and arguments spawn() receives for an argv whose head may be a .js file. */
 function spawnPlan(argv) {
     if (/\.js$/i.test(argv[0])) return { command: process.execPath, args: argv.slice() };
@@ -261,7 +288,7 @@ function startOptions(opts) {
         model: opts.model || null,
         permissionMode: opts['permission-mode'] || 'default',
         cwd: opts.cwd ? path.resolve(opts.cwd) : process.cwd(),
-        claudeBin: opts['claude-bin'] || 'claude',
+        claudeBin: resolveClaudeBin(opts['claude-bin'] || 'claude'),
         ledger: path.resolve(opts.ledger || defaultLedger()),
     };
 }
@@ -522,6 +549,6 @@ if (require.main === module) {
 
 module.exports = {
     HEADLESS_NOTE, PROMPT_MAX, CODE_RE, SCRUBBED_ENV, RETENTION_MS,
-    parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, exitCodeOf, parseResult,
+    parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, run,
 };

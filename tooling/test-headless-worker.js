@@ -528,6 +528,34 @@ try {
         check('19. a settle (a locked write) prunes the 8-day-old settled record and keeps the 6-day-old one',
             r.exit === 0 && codes.join(',') === ['T19', 'YOUNG6'].join(','), `exit ${r.exit}, records ${codes.join(',')}`);
     }
+
+    // ------------------------------------------------------------ 20. a bare name on Windows
+    // spawn() without a shell finds only .exe on PATH, and the npm global install
+    // puts a .cmd shim there. Pure over an injected exists(), so it runs on every
+    // platform and never spawns.
+    {
+        const { resolveClaudeBin } = require(SCRIPT);
+        const exeDir = path.join(ROOT, 'bin exe');
+        const shimDir = path.join(ROOT, 'npm shim');
+        const bareDir = path.join(ROOT, 'nothing here');
+        const present = new Set([
+            path.join(exeDir, 'claude.exe'),
+            path.join(shimDir, 'claude.cmd'),
+            path.join(shimDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
+        ]);
+        const exists = (p) => present.has(p);
+        const win = (pathEnv) => resolveClaudeBin('claude', { platform: 'win32', pathEnv, exists });
+        check('20. a bare name resolves to <dir>/claude.exe when a PATH entry has it', win([bareDir, exeDir].join(path.delimiter)) === path.join(exeDir, 'claude.exe'), win([bareDir, exeDir].join(path.delimiter)));
+        check('20. a PATH entry holding only the npm claude.cmd shim resolves to the .exe under its node_modules',
+            win([bareDir, shimDir].join(path.delimiter)) === path.join(shimDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'), win([bareDir, shimDir].join(path.delimiter)));
+        check('20. the first PATH entry that resolves wins', win([shimDir, exeDir].join(path.delimiter)) === path.join(shimDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'));
+        check('20. no candidate on PATH leaves the bare name unchanged, so the spawn error still reaches the log', win(bareDir) === 'claude', win(bareDir));
+        const withSep = path.join(exeDir, 'claude');
+        check('20. a name with a separator or an extension is never rewritten',
+            resolveClaudeBin(withSep, { platform: 'win32', pathEnv: exeDir, exists }) === withSep
+            && resolveClaudeBin('claude.cmd', { platform: 'win32', pathEnv: shimDir, exists }) === 'claude.cmd');
+        check('20. on a non-Windows platform the name passes through untouched', resolveClaudeBin('claude', { platform: 'linux', pathEnv: exeDir, exists }) === 'claude');
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -541,7 +569,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 19 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 20 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
