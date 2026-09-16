@@ -56,6 +56,12 @@ const GUARDING = [
     // Keeps the ledger peer-queue-check.js reads. A ledger with gaps would report
     // a lost message as never sent, so it has no switch either.
     'peer-send-ledger.js',
+    // Refuses backgrounding in a headless worker, whose process exits with the
+    // turn. A switch would let the model background past the rule.
+    'headless-guard.js',
+    // Keeps the cross-account session registry fleet-registry.js reads. A switch
+    // would make a session invisible to the account dispatching it.
+    'session-register.js',
 ];
 
 // ---------------------------------------------------------------- manifest
