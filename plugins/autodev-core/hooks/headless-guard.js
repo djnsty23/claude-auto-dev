@@ -95,7 +95,9 @@ function hasBackgroundAmp(cmd) {
             continue;
         }
         if (c === '<' && cmd[i + 1] === '<') {
-            const m = /^<<-?[ \t]*(?:'([^']+)'|"([^"]+)"|([^\s;&|<>()'"\\]+))/.exec(cmd.slice(i));
+            // String.prototype.match, not the RegExp method of the same name as
+            // child_process's: validate's windowsHide sweep reads that token as a spawn.
+            const m = cmd.slice(i).match(/^<<-?[ \t]*(?:'([^']+)'|"([^"]+)"|([^\s;&|<>()'"\\]+))/);
             if (m) { heredocs.push(m[1] || m[2] || m[3]); i += m[0].length; continue; }
             i += 2;
             continue;
