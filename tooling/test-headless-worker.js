@@ -1,0 +1,471 @@
+#!/usr/bin/env node
+'use strict';
+// Tests for plugins/autodev-core/scripts/headless-worker.js, the dispatcher of
+// a `claude -p` worker that outlives its caller.
+// Run: node tooling/test-headless-worker.js
+// Exit 0 all green, 1 on a red assertion, 2 when a child produced no verdict.
+//
+// EVERY CASE IS A SUBPROCESS RUN OF THE REAL SCRIPT, driven through
+// spawn-budget's runBudgeted so a timeout is INDETERMINATE and never a red
+// claim about the script. The script itself is required once, for its exported
+// constants, and that load runs nothing.
+//
+// THE FAKE BINARY. `--claude-bin` names a `.js` file, which the script runs
+// through process.execPath (its header states the convention). The fake prints
+// one line to stdout and one to stderr, dumps its sorted env KEYS, its argv,
+// optionally writes a report file, and exits with the code in FAKE_EXIT. It
+// carries a hard self-exit timer so a defect can never leave a worker alive.
+//
+// THE POLL HAS THREE ENDINGS, NOT TWO. A `start` returns before the worker
+// runs, so the suite polls the log. It stops on the CLAUDE_EXIT line (the
+// answer), OR when the supervisor pid is dead with no such line (a verdict:
+// the supervisor exited without writing it, which is exactly what planted
+// defect PD1 does), OR at the budget with the supervisor still alive
+// (INDETERMINATE: the machine did not finish, the code is not on trial). The
+// second ending is what lets PD1 go RED rather than time out; the third is
+// what keeps a slow box from being reported as a bug.
+//
+// EVERY SUPERVISOR PID IS KILLED BY PID in the finally block, never by
+// pattern: a pattern kill matches every peer's run of the same command line.
+//
+// Every temp root has a SPACE in its name and every file is utf8 with \n.
+
+const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const SCRIPT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'headless-worker.js');
+const { HEADLESS_NOTE, PROMPT_MAX } = require(SCRIPT);
+
+const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'hw test-'));
+const HOME = path.join(ROOT, 'home');
+const FAKE = path.join(ROOT, 'fake claude.js');
+const PROMPT = path.join(ROOT, 'prompt.md');
+const DEFAULT_LEDGER = path.join(HOME, '.claude', 'autodev', 'headless-workers.json');
+const POLL_MS = 20000;
+
+const write = (file, text) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text.replace(/\r\n/g, '\n'), 'utf8');
+};
+const read = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return null; } };
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+fs.mkdirSync(HOME, { recursive: true });
+write(PROMPT, 'Read the brief in brief.md and do what it says.\n');
+write(FAKE, [
+    "'use strict';",
+    'setTimeout(() => process.exit(98), 15000);',
+    "const fs = require('fs');",
+    "process.stdout.write('FAKE-STDOUT-LINE\\n');",
+    "process.stderr.write('FAKE-STDERR-LINE\\n');",
+    "process.stdout.write('ENVKEYS=' + JSON.stringify(Object.keys(process.env).sort()) + '\\n');",
+    "process.stdout.write('ARGV=' + JSON.stringify(process.argv.slice(2)) + '\\n');",
+    "if (process.env.FAKE_REPORT) fs.writeFileSync(process.env.FAKE_REPORT, process.env.FAKE_REPORT_TEXT || '', 'utf8');",
+    'process.exit(Number(process.env.FAKE_EXIT || 0));',
+].join('\n') + '\n');
+
+let pass = 0;
+let fail = 0;
+let infra = 0;
+const failures = [];
+const indeterminate = [];
+const supervisors = [];
+
+function check(label, ok, detail) {
+    if (ok) pass++;
+    else { fail++; failures.push(label); }
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
+}
+
+function indeterminateCase(label, why) {
+    infra++;
+    indeterminate.push(`${label} (${why})`);
+    console.error(`infrastructure: ${label} produced no verdict (${why})`);
+}
+
+/** The script as a subprocess. HOME is pinned under ROOT so the default ledger is never the real one. */
+function hw(args, env = {}) {
+    const r = runBudgeted(process.execPath, [SCRIPT, ...args], {
+        encoding: 'utf8',
+        cwd: ROOT,
+        env: { ...process.env, HOME, USERPROFILE: HOME, ...env },
+        timeout: 20000,
+        maxTimeout: 300000,
+    });
+    if (classify(r) === 'infrastructure') indeterminateCase('hw ' + args.slice(0, 2).join(' '), reason(r));
+    let json = null;
+    try { json = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { /* not every subcommand prints JSON */ }
+    return { exit: r.status, stdout: r.stdout || '', stderr: r.stderr || '', json, verdict: classify(r) === 'verdict' };
+}
+
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+
+/** Start a worker through the fake and remember its supervisor for cleanup. */
+function startFake(code, { exit = 0, report = null, reportText = '', extraArgs = [], env = {} } = {}) {
+    const log = path.join(ROOT, code, 'worker.log');
+    const ledger = path.join(ROOT, code, 'ledger.json');
+    const res = hw(['start', '--code', code, '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, ...extraArgs], {
+        FAKE_EXIT: String(exit), ...(report ? { FAKE_REPORT: report, FAKE_REPORT_TEXT: reportText } : {}), ...env,
+    });
+    const pid = res.json && res.json.ok ? res.json.value.supervisorPid : null;
+    if (pid) supervisors.push(pid);
+    return { res, log, ledger, pid, report: report || log.replace(/\.log$/, '.report.md') };
+}
+
+/**
+ * Wait for the run to END. Returns { ending, text } where ending is
+ * 'exit-line' | 'supervisor-dead' | 'timeout'. Only the third is not a verdict.
+ */
+function waitForEnd(log, pid) {
+    const deadline = Date.now() + POLL_MS;
+    for (;;) {
+        let text = read(log);
+        if (text !== null && /^CLAUDE_EXIT=-?\d+\s*$/m.test(text)) return { ending: 'exit-line', text };
+        if (!pidAlive(pid)) {
+            sleep(200);
+            text = read(log);
+            if (text !== null && /^CLAUDE_EXIT=-?\d+\s*$/m.test(text)) return { ending: 'exit-line', text };
+            return { ending: 'supervisor-dead', text: text === null ? '' : text };
+        }
+        if (Date.now() > deadline) return { ending: 'timeout', text: text === null ? '' : text };
+        sleep(100);
+    }
+}
+
+/** Run a fake to completion; a timeout is INDETERMINATE and ends the case with null. */
+function completeFake(label, code, opts) {
+    const started = startFake(code, opts);
+    if (!started.pid) {
+        check(`${label}: start returned a supervisor pid`, false, started.stdout.slice(0, 200));
+        return null;
+    }
+    const end = waitForEnd(started.log, started.pid);
+    if (end.ending === 'timeout') {
+        indeterminateCase(`${label}: the worker did not end within ${POLL_MS} ms`, 'supervisor still alive at the budget');
+        return null;
+    }
+    return { ...started, ...end };
+}
+
+const lastExitLine = (text) => { const m = String(text).match(/CLAUDE_EXIT=(-?\d+)\s*$/); return m ? Number(m[1]) : null; };
+const envKeysOf = (text) => { const m = String(text).match(/^ENVKEYS=(\[.*\])$/m); return m ? JSON.parse(m[1]) : null; };
+
+function synthRun(code, { logText, reportText, pid = 1 }) {
+    const dir = path.join(ROOT, 'synth ' + code + ' ' + Math.random().toString(36).slice(2, 8));
+    const log = path.join(dir, 'w.log');
+    const report = path.join(dir, 'w.report.md');
+    const ledger = path.join(dir, 'ledger.json');
+    if (logText !== null && logText !== undefined) write(log, logText);
+    if (reportText !== null && reportText !== undefined) write(report, reportText);
+    write(ledger, JSON.stringify({ version: 1, records: [{ code, pid, startedAt: '2026-01-01T00:00:00.000Z', log, report, promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' }] }, null, 2) + '\n');
+    return { ledger, log, report };
+}
+
+try {
+    // 18. The whole cycle sits under a directory whose name carries a space.
+    check('18. the temp root carries a space, so every path below exercises quoting', /\s/.test(ROOT) && FAKE.includes(' '), ROOT);
+
+    // 1. --help: instant, no side effect.
+    {
+        const t0 = Date.now();
+        const res = hw(['--help']);
+        const ms = Date.now() - t0;
+        check('1. --help exits 0 within 2 s and prints usage', res.exit === 0 && ms < 2000 && /Usage: node headless-worker\.js start/.test(res.stdout), `exit ${res.exit}, ${ms} ms`);
+        const bare = hw([]);
+        check('1. no subcommand prints usage and exits 0', bare.exit === 0 && /Usage:/.test(bare.stdout), `exit ${bare.exit}`);
+        check('1. afterwards the default ledger path does not exist', !fs.existsSync(DEFAULT_LEDGER) && !fs.existsSync(path.dirname(DEFAULT_LEDGER)), DEFAULT_LEDGER);
+        check('1. and the temp root holds only the fixtures', fs.readdirSync(ROOT).sort().join(',') === ['fake claude.js', 'home', 'prompt.md'].join(','), fs.readdirSync(ROOT).join(','));
+    }
+
+    // 2 and 3. start --dry-run.
+    {
+        const dir = path.join(ROOT, 'dry run');
+        const log = path.join(dir, 'w.log');
+        const ledger = path.join(dir, 'ledger.json');
+        const res = hw(['start', '--code', 'DRY', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run', '--model', 'a-model-id'],
+            { CANARY_VALUE_FOR_THE_SUITE: 'canary-value-must-not-print', CLAUDECODE: '1' });
+        const v = res.json && res.json.ok ? res.json.value : null;
+        const argv = v ? v.argv : [];
+        const promptArg = argv[argv.indexOf('-p') + 1] || '';
+        check('2. dry-run exits 0 with ok:true', res.exit === 0 && !!v, res.stdout.slice(0, 200));
+        check('2. argv carries -p, the prompt text, --permission-mode, --output-format stream-json and --verbose',
+            argv.includes('-p') && promptArg.includes('Read the brief in brief.md')
+            && argv[argv.indexOf('--permission-mode') + 1] === 'default'
+            && argv[argv.indexOf('--output-format') + 1] === 'stream-json' && argv.includes('--verbose'),
+            JSON.stringify(argv).slice(0, 200));
+        check('2. --model given puts --model <id> in argv', argv[argv.indexOf('--model') + 1] === 'a-model-id');
+        check('2. env KEYS name AUTODEV_HEADLESS and AUTODEV_WORKER_CODE, and CLAUDECODE is on the deleted list',
+            !!v && v.envSet.includes('AUTODEV_HEADLESS') && v.envSet.includes('AUTODEV_WORKER_CODE') && v.envDeleted.includes('CLAUDECODE'),
+            v ? JSON.stringify([v.envSet, v.envDeleted]) : '');
+        check('2. no env VALUE reaches the output', !res.stdout.includes('canary-value-must-not-print'));
+        check('2. afterwards no log, no ledger, no report and no directory exist', !fs.existsSync(dir) && !fs.existsSync(ledger) && !fs.existsSync(DEFAULT_LEDGER), dir);
+        check('3. the HEADLESS_NOTE sentence is appended to the prompt argument',
+            promptArg.endsWith(HEADLESS_NOTE + '\n') && /FOREGROUND/.test(HEADLESS_NOTE), promptArg.slice(-80));
+        const noModel = hw(['start', '--code', 'DRY', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
+        check('2. --model unset means no --model flag at all', noModel.json && !noModel.json.value.argv.includes('--model'));
+        const badCode = hw(['start', '--code', 'bad code!', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
+        check('a code outside the pattern is refused with code usage', badCode.exit === 1 && badCode.json && badCode.json.error.code === 'usage', badCode.stdout.slice(0, 120));
+    }
+
+    // 4, 7, 8 (omitted), 9, 13: one real run through the fake, exit 0, with a planted report.
+    const t4 = completeFake('4', 'T4', { exit: 0, report: path.join(ROOT, 'T4', 'worker.report.md'), reportText: 'work notes\nRESULT T4 done: the fake finished its brief.\n', env: { CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CONFIG_DIR: path.join(ROOT, 'inherited config') } });
+    if (t4) {
+        check('4. the log ends with CLAUDE_EXIT=0', t4.ending === 'exit-line' && lastExitLine(t4.text) === 0, `${t4.ending}; tail ${JSON.stringify(t4.text.slice(-40))}`);
+        check('4. the log carries the stdout line and the stderr line', t4.text.includes('FAKE-STDOUT-LINE') && t4.text.includes('FAKE-STDERR-LINE'));
+        check('4. start returned before the worker ended (the record says running, the supervisor pid is numeric)',
+            t4.res.json.value.record.state === 'running' && Number.isInteger(t4.pid));
+        const keys = envKeysOf(t4.text) || [];
+        check('7. CLAUDECODE and CLAUDE_CODE_ENTRYPOINT are ABSENT from the child env although the parent set them',
+            keys.length > 0 && !keys.includes('CLAUDECODE') && !keys.includes('CLAUDE_CODE_ENTRYPOINT'), `${keys.length} keys`);
+        check('7. AUTODEV_HEADLESS and AUTODEV_WORKER_CODE are present in the child env',
+            keys.includes('AUTODEV_HEADLESS') && keys.includes('AUTODEV_WORKER_CODE'));
+        check('8. --config-dir omitted: CLAUDE_CONFIG_DIR is absent from the child env although the parent carried one', !keys.includes('CLAUDE_CONFIG_DIR'));
+        const argvLine = (t4.text.match(/^ARGV=(\[.*\])$/m) || [])[1];
+        const argv = argvLine ? JSON.parse(argvLine) : [];
+        check('4. the fake received the argv the script builds, through a real spawn',
+            argv[0] === '-p' && argv[1].includes(HEADLESS_NOTE) && argv.includes('stream-json') && argv.includes('--verbose'), argvLine ? argvLine.slice(0, 80) : 'no ARGV line');
+        check('4. the ledger record carries the supervisor pid and the fields of the contract',
+            ['code', 'pid', 'startedAt', 'log', 'report', 'promptFile', 'configDir', 'model', 'permissionMode', 'state'].every((k) => k in t4.res.json.value.record)
+            && t4.res.json.value.record.pid === t4.pid && t4.res.json.value.record.permissionMode === 'default');
+
+        // 13. status --json after the run.
+        const st = hw(['status', '--ledger', t4.ledger, '--json']);
+        const rec = st.json && st.json.ok ? st.json.value.records.find((r) => r.code === 'T4') : null;
+        check('13. status --json reports process exited, exit 0, result done, the sentence, unsettled',
+            !!rec && rec.process === 'exited' && rec.exit === 0 && rec.result === 'done' && rec.settled === false
+            && rec.sentence === 'the fake finished its brief.' && rec.reportExists === true, JSON.stringify(rec));
+        check('13. status --json exits 0 and names the ledger and count in its population line',
+            st.exit === 0 && st.json.value.population.includes(t4.ledger) && /1 record/.test(st.json.value.population), st.json ? st.json.value.population : '');
+        const human = hw(['status', '--ledger', t4.ledger]);
+        check('13. status without --json prints both axes on one line per record',
+            human.exit === 0 && /T4 pid=\d+ process=exited exit=0 result=done settled=false/.test(human.stdout), human.stdout.slice(0, 160));
+
+        // 9. settle.
+        const settled = hw(['settle', '--code', 'T4', '--ledger', t4.ledger]);
+        const sv = settled.json && settled.json.ok ? settled.json.value : null;
+        check('9. settle returns ok, state done, the sentence and exit 0',
+            settled.exit === 0 && !!sv && sv.state === 'done' && sv.sentence === 'the fake finished its brief.' && sv.exit === 0 && typeof sv.settledAt === 'string', settled.stdout.slice(0, 200));
+        const after = JSON.parse(read(t4.ledger));
+        check('9. the record is marked settled in the ledger', after.records[0].state === 'settled' && after.records[0].result === 'done');
+        const again = hw(['settle', '--code', 'T4', '--ledger', t4.ledger]);
+        check('9. a second settle finds no unsettled record', again.exit === 1 && again.json.error.code === 'unknown-code');
+        const st2 = hw(['status', '--ledger', t4.ledger, '--json']);
+        check('13. after settle, status shows settled true while process and result are unchanged',
+            st2.json.value.records[0].settled === true && st2.json.value.records[0].process === 'exited' && st2.json.value.records[0].result === 'done');
+
+        // 10. settle with the exit line stripped from THAT run's log, and the control on the real log.
+        const stripped = t4.text.replace(/\nCLAUDE_EXIT=-?\d+\s*$/, '\n');
+        check('10. control: the stripped log really lacks the exit line while the real one has it',
+            !/CLAUDE_EXIT=/.test(stripped) && /CLAUDE_EXIT=0/.test(t4.text));
+        const s10 = synthRun('T4', { logText: stripped, reportText: read(t4.report) });
+        const notExited = hw(['settle', '--code', 'T4', '--ledger', s10.ledger]);
+        check('10. settle while the log has no CLAUDE_EXIT exits 1 with code not-exited',
+            notExited.exit === 1 && notExited.json && notExited.json.error.code === 'not-exited', notExited.stdout.slice(0, 160));
+        const s10b = synthRun('T4', { logText: t4.text, reportText: read(t4.report) });
+        const ok10 = hw(['settle', '--code', 'T4', '--ledger', s10b.ledger]);
+        check('10. control: the same report settles once the log from the real run, with its exit line, is used',
+            ok10.exit === 0 && ok10.json && ok10.json.ok && ok10.json.value.exit === 0, ok10.stdout.slice(0, 160));
+    }
+
+    // 5. exit code 7.
+    const t5 = completeFake('5', 'T5', { exit: 7 });
+    if (t5) {
+        check('5. the log ends with CLAUDE_EXIT=7', t5.ending === 'exit-line' && lastExitLine(t5.text) === 7, `${t5.ending}; tail ${JSON.stringify(t5.text.slice(-40))}`);
+        check('5. the report file does not exist when the fake wrote none, and status says result none',
+            !fs.existsSync(t5.report) && hw(['status', '--ledger', t5.ledger, '--json']).json.value.records[0].result === 'none');
+    }
+
+    // 6. a binary that does not exist.
+    {
+        // startFake pins --claude-bin to the fake; this case needs a missing one, so it is driven directly.
+        const missing = path.join(ROOT, 'no such dir', 'no-such-claude.exe');
+        const log = path.join(ROOT, 'T6', 'worker.log');
+        const ledger = path.join(ROOT, 'T6', 'ledger.json');
+        const res = hw(['start', '--code', 'T6', '--prompt-file', PROMPT, '--log', log, '--claude-bin', missing, '--ledger', ledger]);
+        const pid = res.json && res.json.ok ? res.json.value.supervisorPid : null;
+        if (pid) supervisors.push(pid);
+        if (!pid) check('6. start with a missing binary still returns a supervisor pid', false, res.stdout.slice(0, 200));
+        else {
+            const end = waitForEnd(log, pid);
+            if (end.ending === 'timeout') indeterminateCase('6. the supervisor did not end', 'still alive at the budget');
+            else {
+                check('6. the log ends with CLAUDE_SPAWN_ERROR= then CLAUDE_EXIT=-1, so a poller is never stranded',
+                    /CLAUDE_SPAWN_ERROR=\w+\nCLAUDE_EXIT=-1\s*$/.test(end.text), `${end.ending}; ${JSON.stringify(end.text.slice(-60))}`);
+                const st = hw(['status', '--ledger', ledger, '--json']);
+                check('6. status reads it as process exited with exit -1', st.json.value.records[0].process === 'exited' && st.json.value.records[0].exit === -1);
+            }
+        }
+    }
+
+    // 8. --config-dir given: present in the child, basename only in the ledger.
+    {
+        const cfg = path.join(ROOT, 'config dirs', 'worker-config');
+        fs.mkdirSync(cfg, { recursive: true });
+        const t8 = completeFake('8', 'T8', { extraArgs: ['--config-dir', cfg] });
+        if (t8) {
+            const keys = envKeysOf(t8.text) || [];
+            check('8. --config-dir given: CLAUDE_CONFIG_DIR is present in the child env', keys.includes('CLAUDE_CONFIG_DIR'));
+            const rec = JSON.parse(read(t8.ledger)).records[0];
+            check('8. the ledger records only the basename of the config dir', rec.configDir === 'worker-config' && !rec.configDir.includes(path.sep), rec.configDir);
+        }
+    }
+
+    // 11. a report with no RESULT line.
+    {
+        const s = synthRun('T11', { logText: 'noise\nCLAUDE_EXIT=0\n', reportText: 'notes only, no result line\n' });
+        const r = hw(['settle', '--code', 'T11', '--ledger', s.ledger]);
+        check('11. settle with a report that has no RESULT line exits 1 with code no-result', r.exit === 1 && r.json && r.json.error.code === 'no-result', r.stdout.slice(0, 160));
+        const s2 = synthRun('T11', { logText: 'CLAUDE_EXIT=0\n', reportText: null });
+        const r2 = hw(['settle', '--code', 'T11', '--ledger', s2.ledger]);
+        check('11. settle with no report file at all is also no-result', r2.exit === 1 && r2.json && r2.json.error.code === 'no-result');
+    }
+
+    // 12. RESULT parsing.
+    {
+        const cases = [
+            ['stopped', 'RESULT T12 stopped: blocked on a login.\n', 'stopped', 'blocked on a login.'],
+            ['failed', 'RESULT T12 failed: the gate went red.\n', 'failed', 'the gate went red.'],
+            ['last wins', 'RESULT T12 failed: first attempt.\nmore notes\nRESULT T12 done: second attempt landed.\n', 'done', 'second attempt landed.'],
+        ];
+        for (const [label, text, state, sentence] of cases) {
+            const s = synthRun('T12', { logText: 'CLAUDE_EXIT=0\n', reportText: 'header\n' + text });
+            const r = hw(['settle', '--code', 'T12', '--ledger', s.ledger]);
+            check(`12. RESULT ${label} parses`, r.exit === 0 && r.json && r.json.ok && r.json.value.state === state && r.json.value.sentence === sentence, r.stdout.slice(0, 160));
+        }
+        const other = synthRun('T12', { logText: 'CLAUDE_EXIT=0\n', reportText: 'RESULT T12-OTHER done: a different worker.\nRESULT OTHER done: another one.\n' });
+        const r = hw(['settle', '--code', 'T12', '--ledger', other.ledger]);
+        check('12. known negative: a RESULT line naming a DIFFERENT code is ignored, so settle refuses no-result',
+            r.exit === 1 && r.json && r.json.error.code === 'no-result', r.stdout.slice(0, 160));
+        const noSentence = synthRun('T12', { logText: 'CLAUDE_EXIT=0\n', reportText: 'RESULT T12 done:\n' });
+        const r3 = hw(['settle', '--code', 'T12', '--ledger', noSentence.ledger]);
+        check('12. a RESULT line with no sentence does not parse', r3.exit === 1 && r3.json && r3.json.error.code === 'no-result');
+    }
+
+    // 13. liveness: synthetic records and the classifier.
+    {
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const deadPid = dead.pid;
+        const dir = path.join(ROOT, 'liveness');
+        const ledger = path.join(dir, 'ledger.json');
+        const mk = (code, pid) => ({ code, pid, startedAt: '2026-01-01T00:00:00.000Z', log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' });
+        write(ledger, JSON.stringify({ version: 1, records: [mk('ALIVE', process.pid), mk('DEAD', deadPid)] }, null, 2) + '\n');
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const byCode = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('13. a record whose pid is this suite reports process running', byCode.ALIVE && byCode.ALIVE.process === 'running' && byCode.ALIVE.exit === null, JSON.stringify(byCode.ALIVE));
+        check('13. a record whose pid came from an exited child reports process unknown (no exit line, pid gone)',
+            classify(dead) === 'verdict' && byCode.DEAD && byCode.DEAD.process === 'unknown', JSON.stringify(byCode.DEAD));
+        check('13. both report result none with no report file', byCode.ALIVE && byCode.ALIVE.result === 'none' && byCode.DEAD.result === 'none');
+        const one = hw(['status', '--ledger', ledger, '--code', 'DEAD', '--json']);
+        check('13. status --code narrows to that code and says so in the population line',
+            one.json && one.json.value.records.length === 1 && /2 record\(s\), 1 for DEAD/.test(one.json.value.population), one.json ? one.json.value.population : '');
+        const self = hw(['selftest']);
+        const c = self.json && self.json.ok ? self.json.value.cases : {};
+        check('13. the classifier reads ESRCH as dead and EPERM as ALIVE', self.exit === 0 && c.ESRCH === 'dead' && c.EPERM === 'alive' && c.esrch === 'dead' && c.eperm === 'alive', JSON.stringify(c));
+    }
+
+    // 14. status over a missing ledger and over an empty one.
+    {
+        const missing = hw(['status', '--ledger', path.join(ROOT, 'absent', 'ledger.json')]);
+        check('14. status over a missing ledger prints could not read and exits 0', missing.exit === 0 && /^could not read /.test(missing.stdout) && !/0 record/.test(missing.stdout), missing.stdout.slice(0, 120));
+        const emptyLedger = path.join(ROOT, 'empty', 'ledger.json');
+        write(emptyLedger, '{"version":1,"records":[]}\n');
+        const empty = hw(['status', '--ledger', emptyLedger]);
+        check('14. status over an empty ledger prints a 0-record population line and exits 0', empty.exit === 0 && /: 0 record\(s\)/.test(empty.stdout) && !/could not read/.test(empty.stdout), empty.stdout.slice(0, 120));
+        check('14. the two outputs differ', missing.stdout !== empty.stdout);
+        const garbage = path.join(ROOT, 'garbage', 'ledger.json');
+        write(garbage, '{not json\n');
+        const g = hw(['status', '--ledger', garbage, '--json']);
+        check('14. an unparseable ledger is could not read, never 0 records', g.exit === 0 && g.json && g.json.value.readable === false && /could not read/.test(g.json.value.population));
+    }
+
+    // 15. a prompt over the cap.
+    {
+        const long = path.join(ROOT, 'long', 'prompt.md');
+        write(long, 'x'.repeat(PROMPT_MAX + 1) + '\n');
+        const log = path.join(ROOT, 'long', 'w.log');
+        const ledger = path.join(ROOT, 'long', 'ledger.json');
+        const r = hw(['start', '--code', 'T15', '--prompt-file', long, '--log', log, '--claude-bin', FAKE, '--ledger', ledger]);
+        check('15. a prompt of 8001 characters exits 1 with code prompt-too-long', r.exit === 1 && r.json && r.json.error.code === 'prompt-too-long' && /pointer prompt/.test(r.json.error.message), r.stdout.slice(0, 160));
+        check('15. nothing was spawned: no log and no ledger record', !fs.existsSync(log) && !fs.existsSync(ledger));
+    }
+
+    // 16. the same code twice while unsettled.
+    {
+        const first = startFake('T16', { exit: 0 });
+        check('16. the first start is accepted', first.res.exit === 0 && !!first.pid);
+        const second = hw(['start', '--code', 'T16', '--prompt-file', PROMPT, '--log', first.log, '--claude-bin', FAKE, '--ledger', first.ledger]);
+        check('16. the second start with the same unsettled code exits 1 with code-active', second.exit === 1 && second.json && second.json.error.code === 'code-active', second.stdout.slice(0, 160));
+        check('16. the ledger still holds exactly one T16 record', JSON.parse(read(first.ledger)).records.filter((r) => r.code === 'T16').length === 1);
+        if (first.pid) waitForEnd(first.log, first.pid);
+    }
+
+    // 17. ten rapid starts: tmp+rename, never a truncating write.
+    {
+        const dir = path.join(ROOT, 'ten rapid');
+        const ledger = path.join(dir, 'ledger.json');
+        const ident = (file) => { try { const s = fs.statSync(file, { bigint: true }); return `${s.dev}:${s.ino}`; } catch { return null; } };
+        let ok = true;
+        let identityChanged = 0;
+        let inoUnsupported = false;
+        const details = [];
+        const runs = [];
+        for (let i = 0; i < 10; i++) {
+            const before = ident(ledger);
+            const code = `RAPID-${i}`;
+            const r = hw(['start', '--code', code, '--prompt-file', PROMPT, '--log', path.join(dir, code + '.log'), '--claude-bin', FAKE, '--ledger', ledger]);
+            const pid = r.json && r.json.ok ? r.json.value.supervisorPid : null;
+            if (pid) { supervisors.push(pid); runs.push({ log: path.join(dir, code + '.log'), pid }); }
+            const after = ident(ledger);
+            if (after && /:0$/.test(after)) inoUnsupported = true;
+            if (before !== after) identityChanged++;
+            let count = -1;
+            try { count = JSON.parse(read(ledger)).records.length; } catch { count = -1; }
+            const tmpLeft = fs.existsSync(ledger + '.tmp');
+            const lockLeft = fs.existsSync(ledger + '.lock');
+            if (r.exit !== 0 || tmpLeft || lockLeft || count !== i + 1) { ok = false; details.push(`#${i}: exit ${r.exit} tmp ${tmpLeft} lock ${lockLeft} count ${count}`); }
+        }
+        check('17. after each of ten rapid starts no .tmp and no .lock remain and the ledger parses with the expected count', ok, details.join(' | ') || `10 starts, ${JSON.parse(read(ledger)).records.length} records`);
+        if (inoUnsupported) indeterminateCase('17. the ledger file was REPLACED on every write', 'this filesystem reports inode 0, so file identity cannot be observed');
+        else check('17. the ledger file was REPLACED on every write (its identity changed), never truncated in place', identityChanged === 10, `${identityChanged} of 10 writes changed the file identity`);
+        for (const run of runs) waitForEnd(run.log, run.pid);
+
+        // The lock itself. A FRESH lock held by another writer makes a start
+        // wait its budget and refuse, writing nothing; a STALE one (its holder
+        // died) is removed and the write proceeds.
+        const lock = ledger + '.lock';
+        const before = read(ledger);
+        write(lock, '');
+        const t0 = Date.now();
+        const held = hw(['start', '--code', 'LOCKED', '--prompt-file', PROMPT, '--log', path.join(dir, 'locked.log'), '--claude-bin', FAKE, '--ledger', ledger]);
+        const waited = Date.now() - t0;
+        if (held.json && held.json.ok) supervisors.push(held.json.value.supervisorPid);
+        check('17. a fresh lock held by another writer makes start wait and refuse with ledger-locked, and the ledger is untouched',
+            held.exit === 1 && held.json && held.json.error.code === 'ledger-locked' && waited >= 4000 && read(ledger) === before && fs.existsSync(lock),
+            `exit ${held.exit} after ${waited} ms, ${held.stdout.slice(0, 80)}`);
+        const stale = new Date(Date.now() - 10 * 60 * 1000);
+        fs.utimesSync(lock, stale, stale);
+        const freed = hw(['start', '--code', 'STALE', '--prompt-file', PROMPT, '--log', path.join(dir, 'stale.log'), '--claude-bin', FAKE, '--ledger', ledger]);
+        const stalePid = freed.json && freed.json.ok ? freed.json.value.supervisorPid : null;
+        if (stalePid) supervisors.push(stalePid);
+        check('17. a stale lock is removed and the start proceeds, leaving no lock behind',
+            freed.exit === 0 && !!stalePid && !fs.existsSync(lock) && JSON.parse(read(ledger)).records.some((r) => r.code === 'STALE'),
+            `exit ${freed.exit}, lock left ${fs.existsSync(lock)}`);
+        if (stalePid) waitForEnd(path.join(dir, 'stale.log'), stalePid);
+    }
+} finally {
+    // Kill by pid, never by pattern; a dead pid is the expected answer here.
+    let killed = 0;
+    for (const pid of supervisors) { try { process.kill(pid); killed++; } catch { /* already gone */ } }
+    sleep(300);
+    try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* a handle may still be closing; leave it to the OS temp cleanup */ }
+    console.log(`\ncleanup: ${supervisors.length} supervisor pid(s) tracked, ${killed} still alive at the end and killed by pid`);
+}
+
+console.log(`\n${tally(pass, fail, infra)}`);
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 18 numbered cases; `
+    + 'every worker ran through a fake binary under a temp root whose name carries a space.');
+if (fail) console.log(`failed: ${failures.join(' | ')}`);
+if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+process.exitCode = exitCode(fail, infra);
