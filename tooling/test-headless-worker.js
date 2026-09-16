@@ -393,17 +393,21 @@ try {
         const deadPid = dead.pid;
         const dir = path.join(ROOT, 'liveness');
         const ledger = path.join(dir, 'ledger.json');
-        const mk = (code, pid) => ({ code, pid, startedAt: '2026-01-01T00:00:00.000Z', log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' });
-        write(ledger, JSON.stringify({ version: 1, records: [mk('ALIVE', process.pid), mk('DEAD', deadPid)] }, null, 2) + '\n');
+        // startedAt is NOW for the live records: a record started before this boot is unknown whatever its pid says.
+        const boot = Date.now() - os.uptime() * 1000;
+        const mk = (code, pid, startedAt = new Date().toISOString()) => ({ code, pid, startedAt, log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' });
+        write(ledger, JSON.stringify({ version: 1, records: [mk('ALIVE', process.pid), mk('DEAD', deadPid), mk('PREBOOT', process.pid, new Date(boot - 3600 * 1000).toISOString())] }, null, 2) + '\n');
         const st = hw(['status', '--ledger', ledger, '--json']);
         const byCode = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
         check('13. a record whose pid is this suite reports process running', byCode.ALIVE && byCode.ALIVE.process === 'running' && byCode.ALIVE.exit === null, JSON.stringify(byCode.ALIVE));
         check('13. a record whose pid came from an exited child reports process unknown (no exit line, pid gone)',
             classify(dead) === 'verdict' && byCode.DEAD && byCode.DEAD.process === 'unknown', JSON.stringify(byCode.DEAD));
-        check('13. both report result none with no report file', byCode.ALIVE && byCode.ALIVE.result === 'none' && byCode.DEAD.result === 'none');
+        check('13. a record started an hour BEFORE this boot reports process unknown although its pid (this suite) is alive',
+            byCode.PREBOOT && byCode.PREBOOT.process === 'unknown' && byCode.ALIVE && byCode.ALIVE.process === 'running', JSON.stringify(byCode.PREBOOT));
+        check('13. all report result none with no report file', byCode.ALIVE && byCode.ALIVE.result === 'none' && byCode.DEAD.result === 'none' && byCode.PREBOOT.result === 'none');
         const one = hw(['status', '--ledger', ledger, '--code', 'DEAD', '--json']);
         check('13. status --code narrows to that code and says so in the population line',
-            one.json && one.json.value.records.length === 1 && /2 record\(s\), 1 for DEAD/.test(one.json.value.population), one.json ? one.json.value.population : '');
+            one.json && one.json.value.records.length === 1 && /3 record\(s\), 1 for DEAD/.test(one.json.value.population), one.json ? one.json.value.population : '');
         const self = hw(['selftest']);
         const c = self.json && self.json.ok ? self.json.value.cases : {};
         check('13. the classifier reads ESRCH as dead and EPERM as ALIVE', self.exit === 0 && c.ESRCH === 'dead' && c.EPERM === 'alive' && c.esrch === 'dead' && c.eperm === 'alive', JSON.stringify(c));
@@ -506,6 +510,24 @@ try {
             `exit ${freed.exit}, lock left ${fs.existsSync(lock)}`);
         if (stalePid) waitForEnd(path.join(dir, 'stale.log'), stalePid);
     }
+
+    // 19. Retention: a locked write prunes settled records older than 7 days and keeps younger ones.
+    {
+        const dir = path.join(ROOT, 'retention');
+        const ledger = path.join(dir, 'ledger.json');
+        const day = 24 * 3600 * 1000;
+        const settledRec = (code, ageMs) => ({ code, pid: 1, startedAt: new Date(Date.now() - ageMs - 60000).toISOString(), log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'settled', result: 'done', sentence: 'old.', exit: 0, settledAt: new Date(Date.now() - ageMs).toISOString() });
+        const live = { code: 'T19', pid: 1, startedAt: new Date().toISOString(), log: path.join(dir, 'T19.log'), report: path.join(dir, 'T19.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' };
+        write(live.log, 'CLAUDE_EXIT=0\n');
+        write(live.report, 'RESULT T19 done: settled to trigger a write.\n');
+        write(ledger, JSON.stringify({ version: 1, records: [settledRec('OLD8', 8 * day), settledRec('YOUNG6', 6 * day), live] }, null, 2) + '\n');
+        const before = hw(['status', '--ledger', ledger, '--json']);
+        check('19. control: before any write the ledger reads all three records', before.json && before.json.value.recordsRead === 3, before.json ? String(before.json.value.recordsRead) : '');
+        const r = hw(['settle', '--code', 'T19', '--ledger', ledger]);
+        const codes = JSON.parse(read(ledger)).records.map((x) => x.code).sort();
+        check('19. a settle (a locked write) prunes the 8-day-old settled record and keeps the 6-day-old one',
+            r.exit === 0 && codes.join(',') === ['T19', 'YOUNG6'].join(','), `exit ${r.exit}, records ${codes.join(',')}`);
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -519,7 +541,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 18 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 19 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);

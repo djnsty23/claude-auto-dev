@@ -68,6 +68,7 @@ const USAGE = [
     'start: spawn a detached supervisor that runs `claude -p` and appends CLAUDE_EXIT=<code> to the log.',
     '       The caller may exit at once; the result is the report file plus that exit line.',
     'status: two axes per record, process (running|exited|unknown) and result (none|done|stopped|failed|unparseable).',
+    '        A record started before this boot is unknown whatever its pid says; settled records leave after 7 days.',
     'settle: read the last RESULT <CODE> line of the report and mark the record settled.',
     'Not unattended-worker.js: that one composes scheduled-task calls and starts nothing.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'headless-workers.json')}`,
@@ -79,6 +80,7 @@ const RESULT_STATES = ['done', 'stopped', 'failed'];
 const SCRUBBED_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'];
 const LOCK_STALE_MS = 60 * 1000;
 const LOCK_WAIT_MS = 5000;
+const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const EXIT_LINE_RE = /^CLAUDE_EXIT=(-?\d+)\s*$/m;
 
 const HEADLESS_NOTE = 'HEADLESS: this process exits the moment the turn ends, so run every gate and long '
@@ -154,7 +156,24 @@ function writeLedgerFile(file, ledger) {
     fs.renameSync(tmp, file);
 }
 
-/** Lock, read, apply `fn(ledger)`, write, unlock. Returns what `fn` returned. */
+/**
+ * Drop settled records older than RETENTION_MS, by their settledAt (or
+ * startedAt for a hand-written one). Only settled records go: an unsettled
+ * record is a claim about a worker somebody has not read yet, whatever its
+ * age. Returns how many were removed. Runs inside every locked write, so the
+ * ledger is pruned by the traffic that grows it and never by a reader.
+ */
+function pruneSettled(ledger, nowMs) {
+    const before = ledger.records.length;
+    ledger.records = ledger.records.filter((r) => {
+        if (r.state !== 'settled') return true;
+        const t = Date.parse(r.settledAt || r.startedAt || '');
+        return !Number.isFinite(t) || nowMs - t <= RETENTION_MS;
+    });
+    return before - ledger.records.length;
+}
+
+/** Lock, read, prune, apply `fn(ledger)`, write, unlock. Returns what `fn` returned. */
 function withLedger(file, fn) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const lock = file + '.lock';
@@ -169,6 +188,7 @@ function withLedger(file, fn) {
     }
     try {
         const ledger = readLedger(file);
+        pruneSettled(ledger, Date.now());
         const value = fn(ledger);
         writeLedgerFile(file, ledger);
         return value;
@@ -376,12 +396,23 @@ function readText(file) {
     try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
 }
 
-/** Two axes for one record: how the process stands, and what the report says. */
-function recordStatus(rec) {
+/** Epoch ms of the current boot, the test fleet-registry.js uses. A record started before it cannot be running. */
+function bootAt() { return Date.now() - os.uptime() * 1000; }
+
+/**
+ * Two axes for one record: how the process stands, and what the report says.
+ * A record whose startedAt precedes this boot is `unknown` whatever the pid
+ * says: a pid is reused after a reboot, and a supervisor the reboot killed
+ * never wrote its exit line, so the pid alone would report a stranger's
+ * process as this worker, running, forever.
+ */
+function recordStatus(rec, boot = bootAt()) {
     const logText = readText(rec.log);
     const exit = logText === null ? null : exitCodeOf(logText);
+    const started = Date.parse(rec.startedAt || '');
     let processState;
     if (exit !== null) processState = 'exited';
+    else if (Number.isFinite(boot) && Number.isFinite(started) && started < boot) processState = 'unknown';
     else processState = pidLiveness(rec.pid) === 'alive' ? 'running' : 'unknown';
     const reportText = readText(rec.report);
     let result = 'none';
@@ -408,7 +439,8 @@ function status(opts) {
     } catch (e) {
         return { ledger: file, readable: false, population: `could not read ${file}: ${e.message}`, records: [] };
     }
-    const records = ledger.records.filter((r) => !opts.code || r.code === opts.code).map(recordStatus);
+    const boot = bootAt();
+    const records = ledger.records.filter((r) => !opts.code || r.code === opts.code).map((r) => recordStatus(r, boot));
     const population = `${file}: ${ledger.records.length} record(s)${opts.code ? `, ${records.length} for ${opts.code}` : ''}`;
     return { ledger: file, readable: true, recordsRead: ledger.records.length, population, records };
 }
@@ -489,7 +521,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-    HEADLESS_NOTE, PROMPT_MAX, CODE_RE, SCRUBBED_ENV,
+    HEADLESS_NOTE, PROMPT_MAX, CODE_RE, SCRUBBED_ENV, RETENTION_MS,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, exitCodeOf, parseResult,
-    livenessFromError, pidLiveness, recordStatus, run,
+    livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, run,
 };
