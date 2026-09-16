@@ -23,7 +23,18 @@
 // `${AUTODEV_PEER_LEDGER || ~/.claude/autodev/peer-sends.jsonl}`:
 //   { at, target, messageId, delivery, sha256, probe }
 // `probe` is the first 80 characters of the message with whitespace collapsed.
-// When the file passes 1 MB, lines older than 7 days are pruned.
+//
+// PRUNING. The append always happens. Then, when the file passes 1 MB, lines
+// older than 7 days and unparseable lines are dropped. When what is left still
+// passes 4 MB, the oldest lines go too, until it fits in 1 MB. The file is
+// rewritten only when at least one line is dropped, so a busy week of recent
+// sends costs a read per send and never a rewrite.
+// The rewrite holds `<ledger>.lock`, created with the exclusive flag. A second
+// session that finds the lock skips its prune, not its append. A lock older than
+// a minute belongs to a pruner that died and is removed. Appends never take the
+// lock, so any bytes appended between the read and the rename are copied onto
+// the new file just before the rename. That shrinks the window in which a
+// concurrent append can be lost to the gap between that copy and the rename.
 //
 // SILENT AND FAIL-OPEN, ALWAYS. It emits zero bytes on every path and exits 0
 // on every error. A bookkeeping hook must never cost the sender a turn.
@@ -36,7 +47,9 @@ const path = require('path');
 const TOOL = 'mcp__ccd_session_mgmt__send_message';
 const PROBE_CHARS = 80;
 const PRUNE_BYTES = 1024 * 1024;
+const HARD_BYTES = 4 * 1024 * 1024;
 const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+const LOCK_STALE_MS = 60 * 1000;
 const DELIVERY_RE = /\(delivery:\s*([A-Za-z_-]+);\s*message_id:\s*([^\s;)]+)\s*\)/g;
 
 function ledgerPath() {
@@ -68,21 +81,80 @@ function probeOf(message) {
     return String(message).replace(/\s+/g, ' ').trim().slice(0, PROBE_CHARS);
 }
 
-/** Drop lines older than KEEP_MS once the ledger passes PRUNE_BYTES. */
-function pruneIfLarge(file, nowMs) {
-    const size = fs.statSync(file).size;
-    if (size <= PRUNE_BYTES) return;
-    const kept = [];
-    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-        if (!line) continue;
-        let row;
-        try { row = JSON.parse(line); } catch { continue; }
-        const t = Date.parse(row && row.at);
-        if (Number.isFinite(t) && nowMs - t <= KEEP_MS) kept.push(line);
+/**
+ * The open lock descriptor, or null when another prune holds a lock younger
+ * than LOCK_STALE_MS. A stale lock is removed and the create is tried once more.
+ */
+function acquireLock(lock, nowMs) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try { return fs.openSync(lock, 'wx'); } catch (e) {
+            if (!e || e.code !== 'EEXIST') return null;
+        }
+        let ageMs;
+        try { ageMs = nowMs - fs.statSync(lock).mtimeMs; } catch { continue; }
+        if (ageMs <= LOCK_STALE_MS) return null;
+        try { fs.unlinkSync(lock); } catch { return null; }
     }
+    return null;
+}
+
+/** The bytes of `file` from `start` to `end`. */
+function readRange(file, start, end) {
+    const fd = fs.openSync(file, 'r');
+    try {
+        const buf = Buffer.alloc(end - start);
+        const n = fs.readSync(fd, buf, 0, buf.length, start);
+        return buf.subarray(0, n);
+    } finally { fs.closeSync(fd); }
+}
+
+/**
+ * Once the ledger passes PRUNE_BYTES, drop lines older than KEEP_MS and lines
+ * that do not parse. When the rest still passes HARD_BYTES, drop the oldest
+ * until it fits in PRUNE_BYTES. Rewrite only when something was dropped.
+ */
+function pruneIfLarge(file, nowMs) {
+    if (fs.statSync(file).size <= PRUNE_BYTES) return;
+    const lock = file + '.lock';
+    const lockFd = acquireLock(lock, nowMs);
+    if (lockFd === null) return;
     const tmp = file + '.' + process.pid + '.tmp';
-    fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
-    fs.renameSync(tmp, file);
+    try {
+        const buf = fs.readFileSync(file);
+        // Whole lines only. A line still being appended is carried over below.
+        const end = buf.lastIndexOf(0x0a) + 1;
+        let kept = [];
+        let keptBytes = 0;
+        let dropped = 0;
+        for (const line of buf.toString('utf8', 0, end).split('\n')) {
+            if (!line) continue;
+            let row;
+            try { row = JSON.parse(line); } catch { dropped++; continue; }
+            const t = Date.parse(row && row.at);
+            if (Number.isFinite(t) && nowMs - t <= KEEP_MS) {
+                kept.push(line);
+                keptBytes += Buffer.byteLength(line, 'utf8') + 1;
+            } else dropped++;
+        }
+        if (keptBytes > HARD_BYTES) {
+            let first = 0;
+            while (first < kept.length && keptBytes > PRUNE_BYTES) {
+                keptBytes -= Buffer.byteLength(kept[first], 'utf8') + 1;
+                first++;
+            }
+            dropped += first;
+            kept = kept.slice(first);
+        }
+        if (!dropped) return;
+        fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
+        const size = fs.statSync(file).size;
+        if (size > end) fs.appendFileSync(tmp, readRange(file, end, size));
+        fs.renameSync(tmp, file);
+    } finally {
+        try { fs.closeSync(lockFd); } catch { /* already closed */ }
+        try { fs.unlinkSync(lock); } catch { /* already gone */ }
+        try { fs.unlinkSync(tmp); } catch { /* renamed, or never written */ }
+    }
 }
 
 function main(rawPayload) {
@@ -122,4 +194,4 @@ if (require.main === module) {
     process.stdin.on('error', () => { process.exitCode = 0; });
 }
 
-module.exports = { parseDelivery, probeOf, TOOL, PROBE_CHARS, KEEP_MS, PRUNE_BYTES };
+module.exports = { parseDelivery, probeOf, TOOL, PROBE_CHARS, KEEP_MS, PRUNE_BYTES, HARD_BYTES, LOCK_STALE_MS };

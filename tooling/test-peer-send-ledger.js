@@ -171,6 +171,118 @@ try {
         const got = rows(ledger) || [];
         check('CONTROL: under 1 MB, old lines are left alone', silent(r) && got.length === 2 && got[0].messageId === 'OLD_SMALL', JSON.stringify(got.map((g) => g.messageId)));
     }
+
+    // ---- pruning rewrites only when it drops something, under a lock ----------
+    // A ledger past 1 MB of recent lines used to be rewritten and renamed on
+    // every send, and a line another session appended between the read and the
+    // rename was lost. These cases fail against that prune.
+    const recentLedger = (count, pad) => {
+        const ledger = freshLedger();
+        fs.mkdirSync(path.dirname(ledger), { recursive: true });
+        const recent = new Date(Date.now() - 60 * 1000).toISOString();
+        const lines = [];
+        for (let i = 0; i < count; i++) lines.push(JSON.stringify({ at: recent, target: 'local_RECENT', messageId: 'R_' + i, delivery: 'queued', sha256: '', probe: pad }));
+        fs.writeFileSync(ledger, lines.join('\n') + '\n', 'utf8');
+        return ledger;
+    };
+    const oldLedger = () => {
+        const ledger = freshLedger();
+        fs.mkdirSync(path.dirname(ledger), { recursive: true });
+        const old = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
+        const lines = [];
+        for (let i = 0; i < 1100; i++) lines.push(JSON.stringify({ at: old, target: 'local_OLD', messageId: 'OLD_' + i, delivery: 'queued', sha256: '', probe: 'x'.repeat(900) }));
+        fs.writeFileSync(ledger, lines.join('\n') + '\n', 'utf8');
+        return ledger;
+    };
+    {
+        const ledger = recentLedger(1100, 'y'.repeat(900));
+        const link = path.join(TMP, 'hardlink-' + n + '.jsonl');
+        let linked = true;
+        try { fs.linkSync(ledger, link); } catch { linked = false; }
+        check('fixture: a hard link to the ledger can be made, so a rewrite is observable', linked);
+        const r = run(payload(queuedText), ledger);
+        const got = rows(ledger) || [];
+        check('past 1 MB with nothing to drop, every line is kept and the send appended', silent(r) && got.length === 1101 && got[1100].messageId === 'MSG_TEST_Q1', detail(r) + ' ' + got.length + ' rows');
+        // The hook appends before it prunes, so the link sees the send either
+        // way. What a rewrite breaks is the link itself: after a rename the
+        // ledger path names a new file, and a line written through the link
+        // no longer shows up there.
+        if (linked) fs.appendFileSync(link, JSON.stringify({ at: new Date().toISOString(), target: 'local_LINK', messageId: 'MSG_TEST_VIA_LINK', delivery: 'queued', sha256: '', probe: 'p' }) + '\n', 'utf8');
+        const after = rows(ledger) || [];
+        check('  and the file is appended in place, not rewritten (the ledger and a hard link are still one file)', linked && after.length === 1102 && after[1101].messageId === 'MSG_TEST_VIA_LINK', after.length + ' rows, last ' + (after.length ? after[after.length - 1].messageId : '(none)'));
+    }
+    {
+        const ledger = oldLedger();
+        const lock = ledger + '.lock';
+        fs.writeFileSync(lock, '', 'utf8');
+        const r = run(payload(queuedText), ledger);
+        const got = rows(ledger) || [];
+        check('a fresh lock held by another prune skips this prune: the old lines stay', silent(r) && got.length === 1101 && got[0].messageId === 'OLD_0', detail(r) + ' ' + got.length + ' rows');
+        check('  but not the append: the send is still recorded', got.length > 0 && got[got.length - 1].messageId === 'MSG_TEST_Q1', JSON.stringify(got.slice(-1)));
+        check('  and the lock is left for the session that owns it', fs.existsSync(lock));
+    }
+    {
+        const ledger = oldLedger();
+        const lock = ledger + '.lock';
+        fs.writeFileSync(lock, '', 'utf8');
+        const stale = new Date(Date.now() - 2 * 60 * 1000);
+        fs.utimesSync(lock, stale, stale);
+        const r = run(payload(queuedText), ledger);
+        const got = rows(ledger) || [];
+        check('a lock older than a minute is stale: it is removed and the prune runs', silent(r) && got.length === 1 && got[0].messageId === 'MSG_TEST_Q1' && !fs.existsSync(lock),
+            detail(r) + ' ' + got.length + ' rows, lock ' + (fs.existsSync(lock) ? 'present' : 'gone'));
+    }
+    {
+        const ledger = recentLedger(4500, 'z'.repeat(1000));
+        const sizeBefore = fs.statSync(ledger).size;
+        check('fixture: the recent-only ledger starts above 4 MB', sizeBefore > 4 * 1024 * 1024, String(sizeBefore));
+        const r = run(payload(queuedText), ledger);
+        const got = rows(ledger) || [];
+        const size = fs.statSync(ledger).size;
+        check('past 4 MB of recent lines, the ledger is cut back to fit in 1 MB', silent(r) && size <= 1024 * 1024 && got.length > 0, detail(r) + ' size ' + size);
+        const ids = got.map((g) => g.messageId);
+        const firstIndex = Number(String(ids[0]).slice(2));
+        const contiguous = ids.slice(0, -1).every((id, k) => id === 'R_' + (firstIndex + k)) && ids[ids.length - 2] === 'R_4499';
+        check('  the newest lines are the ones kept, in order, ending with the new send', firstIndex > 0 && contiguous && ids[ids.length - 1] === 'MSG_TEST_Q1', ids.slice(0, 2).join(',') + ' ... ' + ids.slice(-2).join(','));
+        check('  and the lock is released', !fs.existsSync(ledger + '.lock'), fs.readdirSync(path.dirname(ledger)).join(','));
+    }
+    {
+        // Another session appends while this prune is between its read and its
+        // rename. The preload does that append right after the new file is
+        // written, which is the moment the old prune lost it.
+        const ledger = oldLedger();
+        const preload = path.join(TMP, 'concurrent-append.js');
+        const lockSeen = path.join(TMP, 'lock-seen-' + n + '.txt');
+        fs.writeFileSync(preload, [
+            "'use strict';",
+            "const fs = require('fs');",
+            'const realWrite = fs.writeFileSync;',
+            'let appended = false;',
+            'fs.writeFileSync = function (file, ...rest) {',
+            '    const out = realWrite.call(fs, file, ...rest);',
+            '    const ledger = process.env.AUTODEV_PEER_LEDGER;',
+            "    if (!appended && typeof file === 'string' && file.endsWith('.tmp')) {",
+            '        appended = true;',
+            "        realWrite.call(fs, process.env.TEST_LOCK_SEEN, fs.existsSync(ledger + '.lock') ? 'held' : 'absent', 'utf8');",
+            "        fs.appendFileSync(ledger, process.env.TEST_CONCURRENT_LINE + '\\n', 'utf8');",
+            '    }',
+            '    return out;',
+            '};',
+        ].join('\n') + '\n', 'utf8');
+        const concurrent = JSON.stringify({ at: new Date().toISOString(), target: 'local_OTHER', messageId: 'MSG_TEST_CONCURRENT', delivery: 'queued', sha256: '', probe: 'appended by another session' });
+        const r = spawnSync(process.execPath, ['-r', preload, HOOK], {
+            input: JSON.stringify(payload(queuedText)),
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, { AUTODEV_PEER_LEDGER: ledger, TEST_CONCURRENT_LINE: concurrent, TEST_LOCK_SEEN: lockSeen }),
+        });
+        const res = { code: r.status, out: r.stdout || '', err: r.stderr || '' };
+        const got = rows(ledger) || [];
+        const seen = fs.existsSync(lockSeen) ? fs.readFileSync(lockSeen, 'utf8') : '(the prune never wrote a new file)';
+        check('fixture: the concurrent append fired during the prune', fs.existsSync(lockSeen), seen);
+        check('a line appended by another session during the prune survives the rename', silent(res) && got.some((g) => g.messageId === 'MSG_TEST_CONCURRENT'), detail(res) + ' ' + JSON.stringify(got.map((g) => g.messageId)));
+        check('  the prune still dropped the old lines and kept the send', got.every((g) => g.target !== 'local_OLD') && got.some((g) => g.messageId === 'MSG_TEST_Q1'), JSON.stringify(got.map((g) => g.messageId)));
+        check('  the rewrite ran while holding the lock', seen === 'held', seen);
+    }
 } finally {
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ }
 }
