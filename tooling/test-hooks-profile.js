@@ -50,6 +50,9 @@ const GUARDING = [
     'pre-tool-filter.js', 'coordinator-write-guard.js', 'panel-recommendation.js', 'peer-message-budget.js',
     'stop-auto-check.js', 'stop-brain-report.js', 'stop-failure-note.js', 'session-start.js',
     'agent-browser-cleanup.js', 'pre-compact.js', 'post-compact.js',
+    // Refuses shared database writes that break the user's own schema. A switch
+    // the model could flip would let it write past the rule it just broke.
+    'artifact-write-guard.js',
 ];
 
 // ---------------------------------------------------------------- manifest

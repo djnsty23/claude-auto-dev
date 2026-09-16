@@ -80,6 +80,17 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "ArtifactData",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/artifact-write-guard.js"],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
