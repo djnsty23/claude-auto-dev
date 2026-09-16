@@ -123,12 +123,38 @@ expectDeny('4. env armed, command ends in a single &',
     run({ payload: bash({ command: 'npm run gate > log 2>&1 &' }), headless: '1' }));
 expectDeny('4b. env armed, trailing & followed by whitespace',
     run({ payload: bash({ command: 'sleep 5 &   \n' }), headless: '1' }));
+// 4c-4f. A `&` that is not the last character backgrounds just the same. The
+// first two are the shapes the old trailing-only rule let through.
+expectDeny('4c. env armed, `npm run gate > log 2>&1 & echo started`: the & before a following command',
+    run({ payload: bash({ command: 'npm run gate > log 2>&1 & echo started' }), headless: '1' }));
+expectDeny('4d. env armed, `(npm run gate &)`: the & inside a subshell',
+    run({ payload: bash({ command: '(npm run gate &)' }), headless: '1' }));
+expectDeny('4e. env armed, `sleep 5&`: the & glued to its command',
+    run({ payload: bash({ command: 'sleep 5&' }), headless: '1' }));
+expectDeny('4f. env armed, a heredoc whose OPENER line ends in &: the body is skipped, the opener is not',
+    run({ payload: bash({ command: 'cat <<EOF &\nbody\nEOF\n' }), headless: '1' }));
 
-// 5-7. Commands that end in something other than a lone `&`.
+// 5-7. A `&` that is part of an operator, or quoted, or escaped, or in a heredoc body, backgrounds nothing.
 expectSilentAllow('5. env armed, `a && b`: silent allow',
     run({ payload: bash({ command: 'a && b' }), headless: '1' }));
+expectSilentAllow('5b. env armed, `cmd 2>&1`: silent allow',
+    run({ payload: bash({ command: 'cmd 2>&1' }), headless: '1' }));
+expectSilentAllow('5c. env armed, `cmd >&2`: silent allow',
+    run({ payload: bash({ command: 'cmd >&2' }), headless: '1' }));
+expectSilentAllow('5d. env armed, `cmd &> log`: silent allow',
+    run({ payload: bash({ command: 'cmd &> log' }), headless: '1' }));
+expectSilentAllow('5e. env armed, `cmd <&0`: silent allow',
+    run({ payload: bash({ command: 'cmd <&0' }), headless: '1' }));
 expectSilentAllow('6. env armed, `echo "done &"` ends in a quote: silent allow',
     run({ payload: bash({ command: 'echo "done &"' }), headless: '1' }));
+expectSilentAllow('6b. env armed, `echo "a & b"`: a & inside double quotes: silent allow',
+    run({ payload: bash({ command: 'echo "a & b"' }), headless: '1' }));
+expectSilentAllow("6c. env armed, `echo 'a & b'`: a & inside single quotes: silent allow",
+    run({ payload: bash({ command: "echo 'a & b'" }), headless: '1' }));
+expectSilentAllow('6d. env armed, `echo a \\& b`: a backslash-escaped &: silent allow',
+    run({ payload: bash({ command: 'echo a \\& b' }), headless: '1' }));
+expectSilentAllow('6e. env armed, a & inside a heredoc BODY, with a command after the terminator: silent allow',
+    run({ payload: bash({ command: "cat > f <<'EOF'\nfoo & bar\nEOF\necho done\n" }), headless: '1' }));
 expectSilentAllow('7. env armed, an ordinary command: silent allow',
     run({ payload: bash({ command: 'git log --oneline -5' }), headless: '1' }));
 

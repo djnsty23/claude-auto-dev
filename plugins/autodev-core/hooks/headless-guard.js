@@ -38,12 +38,17 @@
 // future Claude Code release starts scrubbing the child env, this hook goes
 // quiet rather than loud: re-run that probe before trusting a green.
 //
-// THE `&` RULE, NARROWED. Right-trim the command and deny when the last
-// character is `&` and the one before it is not `&`. That is the whole rule.
-// It is quote-safe by construction: `echo "done &"` ends in a quote, not an
-// ampersand, and `a && b` ends in `b`. There is no heuristic for a `&` inside
-// quotes because none is needed for the trailing case, and a false deny here
-// is acceptable where a false allow is not.
+// THE `&` RULE. Deny any `&` that is outside single quotes, double quotes, a
+// backslash escape and a heredoc body, and is not part of `&&`, `>&`, `<&` or
+// `&>` (so `2>&1`, `>&2`, `<&0` and `&> log` pass). That catches a trailing
+// `&`, a `&` before a following command (`npm run gate > log 2>&1 & echo
+// started`), a `&` inside a subshell (`(npm run gate &)`) and one glued to
+// its command (`sleep 5&`). The rule used to be "the last character is a
+// lone `&`", and the first two shapes went through it. The scan is one pass
+// over the string and no parser: a `#` comment is not stripped, backticks and
+// `$(...)` are scanned like the text around them, and a heredoc whose word
+// is not a plain token has its body scanned as ordinary text. Each of those
+// can only produce a false DENY, which is the acceptable direction here.
 //
 // TWO PreToolUse HOOKS SIT ON MATCHER Bash. coordinator-write-guard.js exits 2
 // to block, or exits 0 with a `permissionDecision: ask` JSON object on ITS
@@ -70,6 +75,56 @@ const REASON = 'This session runs headless: the process exits the moment the tur
     + 'Run it in the FOREGROUND with the Bash timeout at its maximum (600000 ms), '
     + 'splitting the work into more than one call if it does not fit.';
 
+/**
+ * Does the command carry a `&` that backgrounds something? One pass: quoted
+ * segments, backslash escapes and heredoc bodies are skipped, and a bare `&`
+ * counts unless its neighbours make it `&&`, `>&`, `<&` or `&>`.
+ */
+function hasBackgroundAmp(cmd) {
+    const n = cmd.length;
+    const heredocs = [];
+    let i = 0;
+    while (i < n) {
+        const c = cmd[i];
+        if (c === '\\') { i += 2; continue; }
+        if (c === "'") { const j = cmd.indexOf("'", i + 1); i = j < 0 ? n : j + 1; continue; }
+        if (c === '"') {
+            i++;
+            while (i < n && cmd[i] !== '"') i += cmd[i] === '\\' ? 2 : 1;
+            i++;
+            continue;
+        }
+        if (c === '<' && cmd[i + 1] === '<') {
+            const m = /^<<-?[ \t]*(?:'([^']+)'|"([^"]+)"|([^\s;&|<>()'"\\]+))/.exec(cmd.slice(i));
+            if (m) { heredocs.push(m[1] || m[2] || m[3]); i += m[0].length; continue; }
+            i += 2;
+            continue;
+        }
+        if (c === '\n' && heredocs.length) {
+            // Skip each pending body up to its terminator line; an unterminated one runs to the end.
+            let j = i + 1;
+            for (const word of heredocs.splice(0)) {
+                while (j < n) {
+                    const end = cmd.indexOf('\n', j);
+                    const line = cmd.slice(j, end < 0 ? n : end);
+                    j = end < 0 ? n : end + 1;
+                    if (line.replace(/^\t+/, '').replace(/\r$/, '') === word) break;
+                }
+            }
+            i = j;
+            continue;
+        }
+        if (c === '&') {
+            const prev = cmd[i - 1];
+            const next = cmd[i + 1];
+            const glued = prev === '&' || prev === '>' || prev === '<' || next === '&' || next === '>';
+            if (!glued) return true;
+        }
+        i++;
+    }
+    return false;
+}
+
 try {
     const fs = require('fs');
     let data;
@@ -83,15 +138,10 @@ try {
 
     const input = data.tool_input;
     const backgrounded = !!input && typeof input === 'object' && input.run_in_background === true;
-    let trailingAmp = false;
-    if (input && typeof input === 'object' && typeof input.command === 'string') {
-        const cmd = input.command.replace(/\s+$/, '');
-        trailingAmp = cmd.length > 0
-            && cmd[cmd.length - 1] === '&'
-            && cmd[cmd.length - 2] !== '&';
-    }
+    const backgroundAmp = !!input && typeof input === 'object' && typeof input.command === 'string'
+        && hasBackgroundAmp(input.command);
 
-    if (backgrounded || trailingAmp) {
+    if (backgrounded || backgroundAmp) {
         process.stdout.write(JSON.stringify({
             hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
