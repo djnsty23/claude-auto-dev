@@ -58,6 +58,12 @@
       "title": "autodev: lost workflow note",
       "description": "When a turn ends, name a workflow run that was cut off and the command that resumes it.",
       "default": true
+    },
+    "intent_record": {
+      "type": "boolean",
+      "title": "autodev: fleet intent nudge",
+      "description": "When a turn ends on a branch with work, ask for a fleet-intent claim and refresh the record's observed facts.",
+      "default": true
     }
   }
 }
