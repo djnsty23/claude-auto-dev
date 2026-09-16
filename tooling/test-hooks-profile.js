@@ -53,6 +53,9 @@ const GUARDING = [
     // Refuses shared database writes that break the user's own schema. A switch
     // the model could flip would let it write past the rule it just broke.
     'artifact-write-guard.js',
+    // Keeps the ledger peer-queue-check.js reads. A ledger with gaps would report
+    // a lost message as never sent, so it has no switch either.
+    'peer-send-ledger.js',
 ];
 
 // ---------------------------------------------------------------- manifest
