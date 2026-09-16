@@ -27,6 +27,10 @@
 //
 // EVERY SUPERVISOR PID IS KILLED BY PID in the finally block, never by
 // pattern: a pattern kill matches every peer's run of the same command line.
+// Pids come from what `start` printed AND from a scan of every log under
+// ROOT (the fake prints its parent pid), so a supervisor spawned behind a
+// refusal, which start never prints, is still tracked and the cleanup count
+// is right.
 //
 // Every temp root has a SPACE in its name and every file is utf8 with \n.
 
@@ -62,6 +66,7 @@ write(FAKE, [
     "process.stderr.write('FAKE-STDERR-LINE\\n');",
     "process.stdout.write('ENVKEYS=' + JSON.stringify(Object.keys(process.env).sort()) + '\\n');",
     "process.stdout.write('ARGV=' + JSON.stringify(process.argv.slice(2)) + '\\n');",
+    "process.stdout.write('PPID=' + process.ppid + '\\n');",
     "if (process.env.FAKE_REPORT) fs.writeFileSync(process.env.FAKE_REPORT, process.env.FAKE_REPORT_TEXT || '', 'utf8');",
     'process.exit(Number(process.env.FAKE_EXIT || 0));',
 ].join('\n') + '\n');
@@ -147,6 +152,40 @@ function completeFake(label, code, opts) {
         return null;
     }
     return { ...started, ...end };
+}
+
+/**
+ * Poll for `ms` and report whether the log ever appeared. A refused start
+ * must spawn nothing, and the supervisor opens its log within its first
+ * few hundred milliseconds, so a log that shows up during the poll is a
+ * worker running behind a refusal.
+ */
+function logStaysAbsent(log, ms) {
+    const deadline = Date.now() + ms;
+    const t0 = Date.now();
+    for (;;) {
+        if (fs.existsSync(log)) return { absent: false, afterMs: Date.now() - t0 };
+        if (Date.now() > deadline) return { absent: true, afterMs: null };
+        sleep(100);
+    }
+}
+
+/**
+ * Every supervisor pid the logs under ROOT name, tracked unconditionally: the
+ * fake prints its parent pid, which is the supervisor, so a supervisor that a
+ * refused start spawned anyway is found here and killed in the finally block
+ * even though start never printed it.
+ */
+function trackSupervisorsFromLogs(dir) {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) { trackSupervisorsFromLogs(full); continue; }
+        if (!/\.log$/.test(e.name)) continue;
+        const m = (read(full) || '').match(/^PPID=(\d+)$/m);
+        if (m && !supervisors.includes(Number(m[1]))) supervisors.push(Number(m[1]));
+    }
 }
 
 const lastExitLine = (text) => { const m = String(text).match(/CLAUDE_EXIT=(-?\d+)\s*$/); return m ? Number(m[1]) : null; };
@@ -395,9 +434,13 @@ try {
     {
         const first = startFake('T16', { exit: 0 });
         check('16. the first start is accepted', first.res.exit === 0 && !!first.pid);
-        const second = hw(['start', '--code', 'T16', '--prompt-file', PROMPT, '--log', first.log, '--claude-bin', FAKE, '--ledger', first.ledger]);
+        const secondLog = path.join(ROOT, 'T16', 'second.log');
+        const second = hw(['start', '--code', 'T16', '--prompt-file', PROMPT, '--log', secondLog, '--claude-bin', FAKE, '--ledger', first.ledger]);
         check('16. the second start with the same unsettled code exits 1 with code-active', second.exit === 1 && second.json && second.json.error.code === 'code-active', second.stdout.slice(0, 160));
         check('16. the ledger still holds exactly one T16 record', JSON.parse(read(first.ledger)).records.filter((r) => r.code === 'T16').length === 1);
+        const absent16 = logStaysAbsent(secondLog, 2000);
+        check('16. the refused start spawned nothing: its log does not exist and stays absent for 2 s',
+            absent16.absent, absent16.absent ? '' : `the log appeared ${absent16.afterMs} ms after the refusal, so a worker runs untracked`);
         if (first.pid) waitForEnd(first.log, first.pid);
     }
 
@@ -438,12 +481,16 @@ try {
         const before = read(ledger);
         write(lock, '');
         const t0 = Date.now();
-        const held = hw(['start', '--code', 'LOCKED', '--prompt-file', PROMPT, '--log', path.join(dir, 'locked.log'), '--claude-bin', FAKE, '--ledger', ledger]);
+        const lockedLog = path.join(dir, 'locked.log');
+        const held = hw(['start', '--code', 'LOCKED', '--prompt-file', PROMPT, '--log', lockedLog, '--claude-bin', FAKE, '--ledger', ledger]);
         const waited = Date.now() - t0;
         if (held.json && held.json.ok) supervisors.push(held.json.value.supervisorPid);
         check('17. a fresh lock held by another writer makes start wait and refuse with ledger-locked, and the ledger is untouched',
             held.exit === 1 && held.json && held.json.error.code === 'ledger-locked' && waited >= 4000 && read(ledger) === before && fs.existsSync(lock),
             `exit ${held.exit} after ${waited} ms, ${held.stdout.slice(0, 80)}`);
+        const absentLocked = logStaysAbsent(lockedLog, 2000);
+        check('17. the refused start spawned nothing: its log does not exist and stays absent for 2 s',
+            absentLocked.absent, absentLocked.absent ? '' : `the log appeared ${absentLocked.afterMs} ms after the refusal, so a worker runs untracked`);
         const stale = new Date(Date.now() - 10 * 60 * 1000);
         fs.utimesSync(lock, stale, stale);
         const freed = hw(['start', '--code', 'STALE', '--prompt-file', PROMPT, '--log', path.join(dir, 'stale.log'), '--claude-bin', FAKE, '--ledger', ledger]);
@@ -456,6 +503,9 @@ try {
     }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
+    // The logs are scanned first so a supervisor that start never printed
+    // (one spawned behind a refusal) is tracked and killed too.
+    trackSupervisorsFromLogs(ROOT);
     let killed = 0;
     for (const pid of supervisors) { try { process.kill(pid); killed++; } catch { /* already gone */ } }
     sleep(300);

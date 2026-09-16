@@ -263,25 +263,39 @@ function start(opts) {
             log: o.log, report: o.report, ledger: o.ledger, cwd: o.cwd, spawned: false,
         };
     }
-    const existing = readLedger(o.ledger);
-    if (existing.records.some((r) => r.code === o.code && isUnsettled(r))) {
-        fault('code-active', `${o.code} has an unsettled record in ${o.ledger}; settle it or pick another code`);
-    }
-    const child = spawn(process.execPath, [__filename, 'supervise', ...supervisorFlags(o)],
-        { detached: true, stdio: 'ignore', windowsHide: true, env: plan.env });
-    child.on('error', () => { /* the supervisor could not be spawned; the ledger below still names its pid */ });
-    child.unref();
+    // RESERVE, THEN SPAWN, THEN FILL IN. The code is reserved inside the lock
+    // before anything is spawned, so a refusal (ledger-locked, or a code that
+    // gained an unsettled record meanwhile) exits 1 with NO process running.
+    // The order used to be spawn first and write second, and a refusal in the
+    // write left a real worker running that no ledger named.
     const record = {
-        code: o.code, pid: child.pid, startedAt: new Date().toISOString(),
+        code: o.code, pid: null, startedAt: new Date().toISOString(),
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
-        model: o.model, permissionMode: o.permissionMode, state: 'running',
+        model: o.model, permissionMode: o.permissionMode, state: 'starting',
     };
+    const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;
     withLedger(o.ledger, (ledger) => {
         if (ledger.records.some((r) => r.code === o.code && isUnsettled(r))) {
-            fault('code-active', `${o.code} gained an unsettled record in ${o.ledger} while this start ran`);
+            fault('code-active', `${o.code} has an unsettled record in ${o.ledger}; settle it or pick another code`);
         }
         ledger.records.push(record);
+    });
+    let child;
+    try {
+        child = spawn(process.execPath, [__filename, 'supervise', ...supervisorFlags(o)],
+            { detached: true, stdio: 'ignore', windowsHide: true, env: plan.env });
+    } catch (e) {
+        withLedger(o.ledger, (ledger) => { ledger.records = ledger.records.filter((r) => !isReservation(r)); });
+        fault('spawn-failed', `could not spawn the supervisor: ${e.code || e.message}`);
+    }
+    child.on('error', () => { /* the supervisor could not be started; the record keeps whatever pid spawn assigned */ });
+    child.unref();
+    Object.assign(record, { pid: child.pid || null, state: 'running' });
+    withLedger(o.ledger, (ledger) => {
+        const rec = ledger.records.find(isReservation);
+        if (rec) Object.assign(rec, { pid: record.pid, state: 'running' });
+        else ledger.records.push(record);
     });
     return { ledger: o.ledger, record, supervisorPid: child.pid, spawned: true };
 }
