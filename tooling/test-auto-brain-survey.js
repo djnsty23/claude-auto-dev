@@ -250,8 +250,8 @@ try {
 
     // ------------------------------------------- the pipe delivers every byte
     //
-    // node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
-    // synchronous when it is a pipe on linux/win32, and process.exit() does not
+    // node's process.stdout is ASYNCHRONOUS when it is a pipe on POSIX (Linux and
+    // macOS alike; only win32 is synchronous), and process.exit() does not
     // drain a pending async write. A run that prints past the 64KiB OS pipe
     // buffer and then exits therefore hands its caller exactly 65536 bytes under
     // exit status 0 — the shape rendered-layout-gate.js shipped with until
@@ -280,12 +280,12 @@ try {
     // loud: an extensionless `gh` with a shebang is not executable on win32, and
     // a .cmd is not a drop-in because node will not spawn one with shell:false —
     // which is how the subject spawns gh, and correctly, that being the
-    // injection-safe form. The defect being guarded is darwin-only, so the
-    // platform where it bites still runs this, and so does ubuntu.
+    // injection-safe form. The defect being guarded bites on POSIX pipes, so
+    // both platforms where it can bite, macOS and ubuntu, still run this.
     if (process.platform === 'win32') {
         console.log('SKIP  the pipe-delivers-every-byte block — no stub `gh` is possible on win32 '
             + '(no shebang, and node will not spawn a .cmd without shell:true). '
-            + 'The defect it guards is darwin-only; macOS and ubuntu both run it.');
+            + 'The defect it guards bites on POSIX pipes; macOS and ubuntu both run it.');
     } else {
         const PIPE_BUF = 64 * 1024;
         const bigTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-brain-big-'));

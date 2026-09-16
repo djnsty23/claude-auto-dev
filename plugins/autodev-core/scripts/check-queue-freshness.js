@@ -309,7 +309,7 @@ function evaluate(p) {
 
 // The two refusals below were top-level guards above the function definitions
 // until 2026-09-08. They moved here with everything else that can exit: no path
-// in this process may call process.exit(), because on darwin a pipe is an async
+// in this process may call process.exit(), because on POSIX a pipe is an async
 // stream and exiting discards whatever has not drained. See the foot of the file.
 function main() {
     if (!QUEUE) {
@@ -426,14 +426,15 @@ function main() {
 
 // process.exit() TRUNCATES output, and only on some platforms.
 //
-// node's process.stdout is ASYNCHRONOUS when it is a PIPE on darwin, and
-// synchronous when it is a pipe on linux and win32; it is synchronous for a
-// FILE and a TTY everywhere. process.exit() terminates without draining a
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on POSIX (Linux and
+// macOS alike) and synchronous when it is a pipe on win32; it is synchronous
+// for a FILE everywhere. process.exit() terminates without draining a
 // pending async write, so a run that prints more than the 64KiB OS pipe buffer
 // and then exits delivers exactly 65536 bytes — under exit status 0, because
 // the write never failed. A silent wrong answer, not a visible failure. The
 // three things that hide it: a file redirect is synchronous so the output looks
-// whole, Linux CI is synchronous so CI is green, and the status is 0.
+// whole, the status is 0 so CI stays green (a Linux pipe is asynchronous too,
+// so CI is exposed and cannot see it), and nothing compares byte counts.
 //
 // Setting process.exitCode instead lets the event loop drain the stream and
 // exit on its own with the same status. Nothing here holds the loop open.

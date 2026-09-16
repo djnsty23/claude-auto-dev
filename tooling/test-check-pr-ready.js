@@ -240,8 +240,8 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
 // reads the source or calls the exported helpers, which cannot see the CLI's
 // exit at all — and the exit is where this defect lives.
 //
-// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
-// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on POSIX (Linux and
+// macOS alike; only win32 is synchronous), and process.exit() does not
 // drain a pending async write. A run that prints past the 64KiB OS pipe buffer
 // and then exits hands its caller exactly 65536 bytes under exit status 0 — the
 // shape rendered-layout-gate.js shipped with until 2026-09-07. --json here
@@ -265,14 +265,14 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
 // the injection-safe form. Stubbing it there would mean weakening the subject
 // to suit its test.
 //
-// The cost of the skip is small and worth naming: the defect being guarded is
-// darwin-only (a pipe is asynchronous there and synchronous on linux and
-// win32), so the platform where it can actually bite still runs this, and so
-// does ubuntu.
+// The cost of the skip is small and worth naming: the defect being guarded
+// bites on POSIX (a pipe is asynchronous on Linux and macOS alike, synchronous
+// only on win32), so both platforms where it can actually bite still run
+// this.
 if (process.platform === 'win32') {
     console.log('SKIP  the pipe-delivers-every-byte block — no stub `gh` is possible on win32 '
         + '(no shebang, and node will not spawn a .cmd without shell:true). '
-        + 'The defect it guards is darwin-only; macOS and ubuntu both run it.');
+        + 'The defect it guards bites on POSIX pipes; macOS and ubuntu both run it.');
 } else {
     const os = require('os');
     const { spawnSync } = require('child_process');
