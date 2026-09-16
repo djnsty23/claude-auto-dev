@@ -49,7 +49,7 @@
 //   batch        each entry by its own op
 //   delete       refused only when the collection says noDelete
 //   str_replace  refused when the target field has an enum or is a timestamp,
-//                because a text splice cannot be validated; use update
+//                because a text splice cannot be validated. Use update.
 //   get, list, query   never inspected
 // A `file_path` in place of `data` is read and parsed. When it cannot be read,
 // the call passes, because the tool fails on it by itself.
