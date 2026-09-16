@@ -118,7 +118,7 @@ try {
         const r = run(w, []);
         check('a plugin commit 48 h old after the bump: exit 1', r.code === 1, detail(r));
         check('  the reason counts it and names the limit', /RED: 1 plugin commit\(s\) older than 24 h/.test(r.out), detail(r));
-        check('  the stale commit is listed by subject', /48 h old "fix\(demo\): the fix nobody released"/.test(r.out), detail(r));
+        check('  the stale commit is listed by subject', /48(\.\d)? h old "fix\(demo\): the fix nobody released"/.test(r.out), detail(r));
         check('  and the population still prints on a red run', population(r) && /oldest 48(\.\d)? h/.test(r.out), detail(r));
         const wide = run(w, ['--max-age-hours', '72']);
         check('  CONTROL: the same repo with --max-age-hours 72 is green', wide.code === 0, detail(wide));
@@ -165,6 +165,64 @@ try {
         push(w);
         const r = run(w, []);
         check('old commits that touch only docs/ stay green', r.code === 0 && /since the bump: 0 \(limit 24 h\)/.test(r.out), detail(r));
+    }
+
+    // ---- indeterminate: a shallow clone -----------------------------------------
+    // Depth 1 holds only the tip, and git reports that tip as the commit that
+    // added VERSION. Read as the bump, it made the lag 0 and the run green
+    // while a 48 h old plugin fix sat unreleased.
+    {
+        const w = makeRepo('6.0.0', 100);
+        tagAndPush(w, 'v6.0.0');
+        pluginCommit(w, 'fix(demo): unreleased for two days', 48);
+        push(w);
+        const full = run(w, []);
+        check('CONTROL: the complete clone of a 48 h old plugin commit is red', full.code === 1 && /history: complete/.test(full.out), detail(full));
+        const remoteUrl = require('url').pathToFileURL(path.join(path.dirname(w), 'remote.git')).href;
+        const shallowDir = path.join(path.dirname(w), 'shallow');
+        git(path.dirname(w), ['clone', '--quiet', '--depth', '1', '--branch', 'main', remoteUrl, shallowDir]);
+        git(shallowDir, ['config', 'core.hooksPath', NO_HOOKS]);
+        const isShallow = git(shallowDir, ['rev-parse', '--is-shallow-repository']).trim();
+        check('fixture: the depth 1 clone is shallow', isShallow === 'true', isShallow);
+        const r = run(shallowDir, []);
+        check('a shallow clone exits 2, never green', r.code === 2 && /verdict: INDETERMINATE/.test(r.out), detail(r));
+        check('  the reason names the shallow clone and the unshallow fetch', /INDETERMINATE: this clone is shallow/.test(r.out) && /git fetch --unshallow/.test(r.out), detail(r));
+        check('  and the population still prints, with the history marked incomplete', population(r) && /history: shallow clone, incomplete/.test(r.out), detail(r));
+        const j = run(shallowDir, ['--json']);
+        check('  --json carries shallow true and verdict indeterminate', !!j.json && j.json.shallow === true && j.json.verdict === 'indeterminate' && j.code === 2, j.out.slice(0, 300));
+    }
+
+    // ---- a --no-ff merge is dated by the merge ----------------------------------
+    // The branch commit is 72 h old, but it reached main an hour ago. Read over
+    // the whole graph it looked like a fix sitting unreleased for three days.
+    {
+        const w = makeRepo('7.0.0', 200);
+        tagAndPush(w, 'v7.0.0');
+        git(w, ['checkout', '--quiet', '-b', 'feature']);
+        pluginCommit(w, 'fix(demo): written on a branch three days ago', 72);
+        git(w, ['checkout', '--quiet', 'main']);
+        docsCommit(w, 'docs: main moved on', 5);
+        const date = '@' + (nowS - HOUR) + ' +0000';
+        git(w, ['merge', '--quiet', '--no-ff', '-m', 'merge(demo): land the branch', 'feature'], { GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date });
+        push(w);
+        const r = run(w, []);
+        check('a 72 h old branch commit merged with --no-ff an hour ago is green', r.code === 0 && /since the bump: 1, oldest 1(\.\d)? h/.test(r.out), detail(r));
+        const j = run(w, ['--max-age-hours', '0', '--json']);
+        const stale = (j.json && j.json.stale) || [];
+        check('  the one plugin commit counted is the merge, by its subject', stale.length === 1 && stale[0].subject === 'merge(demo): land the branch', JSON.stringify(stale));
+    }
+    {
+        const w = makeRepo('8.0.0', 200);
+        tagAndPush(w, 'v8.0.0');
+        git(w, ['checkout', '--quiet', '-b', 'feature']);
+        pluginCommit(w, 'fix(demo): branch work', 72);
+        git(w, ['checkout', '--quiet', 'main']);
+        docsCommit(w, 'docs: main moved on', 60);
+        const date = '@' + (nowS - 48 * HOUR) + ' +0000';
+        git(w, ['merge', '--quiet', '--no-ff', '-m', 'merge(demo): landed two days ago', 'feature'], { GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date });
+        push(w);
+        const r = run(w, []);
+        check('  CONTROL: the same merge landed 48 h ago is red, and names the merge', r.code === 1 && /48(\.\d)? h old "merge\(demo\): landed two days ago"/.test(r.out), detail(r));
     }
 
     // ---- indeterminate: git failures ---------------------------------------------

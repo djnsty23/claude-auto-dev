@@ -9,19 +9,26 @@
  * session kept running the old hooks, and nothing measured the gap. The version
  * that finally shipped was not tagged either.
  *
- * WHAT IT MEASURES, on one ref (default origin/main, read locally, so fetch
- * first):
+ * WHAT IT MEASURES, on the first-parent history of one ref (default
+ * origin/main, read locally, so fetch first):
  *   - the last commit that changed VERSION, the bump
  *   - every later commit that touches plugins/
  *   - RED when any of those has a committer date older than --max-age-hours
  *   - RED when the tag v<VERSION at the ref> is missing, locally and on the
  *     remote
+ * First parent, so a --no-ff merge of old branch commits counts once, dated
+ * by the merge, which is when the fix reached the ref. A fast-forward or a
+ * rebase carries no such record, so those commits keep their own committer
+ * dates.
  *
- * Exit 0 green, 1 red, 2 indeterminate. Any git failure is a 2. When the remote
- * cannot be listed and the tag is not present locally, that is a 2 as well,
- * never a pass and never a "missing tag". 2 wins over 1, and every finding
- * still prints. The population prints on every run: the bump commit, how many
- * plugin commits followed it, the oldest one's age, and where the tag was found.
+ * Exit 0 green, 1 red, 2 indeterminate. Any git failure is a 2. A shallow clone
+ * is a 2: its oldest commit looks like the one that added VERSION, so the bump
+ * would be misread and the lag would read 0. When the remote cannot be listed
+ * and the tag is not present locally, that is a 2 as well, never a pass and
+ * never a "missing tag". 2 wins over 1, and every finding still prints. The
+ * population prints on every run: whether the history is complete, the bump
+ * commit, how many plugin commits followed it, the oldest one's age, and where
+ * the tag was found.
  *
  * NOT IN THE GATE, on purpose. A red here says the repo is due a release, which
  * is not a fact about the pull request being gated. It runs as
@@ -35,7 +42,7 @@ const USAGE = 'usage: node tooling/check-release-lag.js [--ref <ref>] [--max-age
     + '  --max-age-hours  the oldest an unreleased plugin commit may be (default 24)\n'
     + '  --remote         where to look for the tag (default origin)\n'
     + '  --json           print one JSON object\n'
-    + 'Exit 0 green, 1 red, 2 indeterminate (any git failure).';
+    + 'Exit 0 green, 1 red, 2 indeterminate (any git failure, or a shallow clone).';
 
 function parseArgs(argv) {
     const opts = { ref: 'origin/main', maxAgeHours: 24, remote: 'origin', json: false };
@@ -66,7 +73,7 @@ function git(args, timeoutMs) {
 /** The report for one run. Never throws for a git failure: that is exit 2. */
 function measure(opts, nowMs) {
     const report = {
-        ref: opts.ref, remote: opts.remote, maxAgeHours: opts.maxAgeHours, version: null, bump: null,
+        ref: opts.ref, remote: opts.remote, maxAgeHours: opts.maxAgeHours, shallow: null, version: null, bump: null,
         pluginCommitsSince: null, oldestAgeHours: null, stale: [],
         tag: { name: null, local: null, remote: null, remoteError: null },
         verdict: null, reasons: [], errors: [],
@@ -79,7 +86,19 @@ function measure(opts, nowMs) {
     const ref = git(['rev-parse', '--verify', '--quiet', opts.ref + '^{commit}']);
     if (!ref.ok) { report.errors.push('could not resolve ' + opts.ref + (ref.err ? ': ' + ref.err : '')); return finish(); }
 
-    const bump = git(['log', '-1', '--format=%H%x09%ct%x09%s', opts.ref, '--', 'VERSION']);
+    const shallow = git(['rev-parse', '--is-shallow-repository']);
+    const shallowOut = shallow.out.trim();
+    if (!shallow.ok || (shallowOut !== 'true' && shallowOut !== 'false')) {
+        report.errors.push('could not tell whether this clone is shallow' + (shallow.ok ? ': git printed ' + JSON.stringify(shallowOut.slice(0, 60)) : shallow.err ? ': ' + shallow.err : ''));
+        return finish();
+    }
+    report.shallow = shallowOut === 'true';
+    if (report.shallow) {
+        report.errors.push('this clone is shallow, so the oldest commit it holds would read as the VERSION bump and the lag as 0. Run git fetch --unshallow, then re-run');
+        return finish();
+    }
+
+    const bump = git(['log', '-1', '--first-parent', '--format=%H%x09%ct%x09%s', opts.ref, '--', 'VERSION']);
     if (!bump.ok || !bump.out.trim()) {
         report.errors.push(bump.ok ? 'no commit on ' + opts.ref + ' changed VERSION' : 'git log for VERSION failed: ' + bump.err);
         return finish();
@@ -91,7 +110,7 @@ function measure(opts, nowMs) {
     if (!version.ok || !version.out.trim()) { report.errors.push('could not read VERSION at ' + opts.ref + (version.err ? ': ' + version.err : '')); return finish(); }
     report.version = version.out.trim();
 
-    const since = git(['log', '--format=%H%x09%ct%x09%s', sha + '..' + opts.ref, '--', 'plugins/']);
+    const since = git(['log', '--first-parent', '--format=%H%x09%ct%x09%s', sha + '..' + opts.ref, '--', 'plugins/']);
     if (!since.ok) { report.errors.push('git log for plugins/ failed: ' + since.err); return finish(); }
     const commits = since.out.split('\n').filter(Boolean).map((line) => {
         const [h, t, ...s] = line.split('\t');
@@ -125,6 +144,7 @@ function measure(opts, nowMs) {
 function render(result) {
     const r = result.report;
     const lines = ['check-release-lag: ref ' + r.ref + ', VERSION ' + (r.version || '(unread)')];
+    lines.push('  history: ' + (r.shallow === null ? '(not checked)' : r.shallow ? 'shallow clone, incomplete' : 'complete'));
     lines.push('  bump commit: ' + (r.bump ? r.bump.sha.slice(0, 7) + ' ' + r.bump.committedAt + ' "' + r.bump.subject + '"' : '(not found)'));
     lines.push('  plugin commits since the bump: ' + (r.pluginCommitsSince === null ? '(not measured)' : r.pluginCommitsSince)
         + (r.oldestAgeHours === null ? '' : ', oldest ' + r.oldestAgeHours + ' h') + ' (limit ' + r.maxAgeHours + ' h)');
