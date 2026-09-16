@@ -282,6 +282,28 @@ try {
         const missing = run({ action: 'set', url: URL_FOR(ID), collection: 'tasks', doc_id: 'f3', file_path: path.join(TMP, 'does-not-exist.json') });
         check('  an unreadable file_path passes (the tool fails on it itself)', silent(missing), detail(missing));
     }
+
+    // ---- a leading byte order mark ---------------------------------------------
+    // Windows PowerShell 5.1 saves UTF-8 with a BOM, and JSON.parse throws on
+    // U+FEFF. Before the fix a schema saved that way failed open, which turned
+    // the guard off in silence, and a file_path document with one passed unread.
+    {
+        const BOM = '\uFEFF';
+        const bomId = 'ART_TEST_BOM';
+        const bomSchema = path.join(SCHEMAS, bomId + '.json');
+        fs.writeFileSync(bomSchema, BOM + fs.readFileSync(SCHEMA_FILE, 'utf8'), 'utf8');
+        const head = fs.readFileSync(bomSchema).subarray(0, 3).toString('hex');
+        check('fixture: the BOM schema starts with the bytes ef bb bf', head === 'efbbbf', head);
+        const r = run({ action: 'update', url: URL_FOR(bomId), collection: 'tasks', doc_id: 'm1', data: { status: 'finished', updatedAt: iso(0) } });
+        check('a schema saved with a BOM still guards: an enum violation is DENIED', r.denied && /status: "finished" is not one of/.test(r.reason), detail(r));
+        const ok = run({ action: 'update', url: URL_FOR(bomId), collection: 'tasks', doc_id: 'm1', data: { status: 'done', updatedAt: iso(0) } });
+        check('  CONTROL: a valid write against the BOM schema is silent', silent(ok), detail(ok));
+
+        const bomDoc = path.join(TMP, 'bom-doc.json');
+        fs.writeFileSync(bomDoc, BOM + JSON.stringify({ title: 't', status: 'wrong', updatedAt: iso(0) }), 'utf8');
+        const doc = run({ action: 'set', url: URL_FOR(ID), collection: 'tasks', doc_id: 'm2', file_path: bomDoc });
+        check('a file_path document saved with a BOM is validated: DENIED', doc.denied && /tasks\/m2: status: "wrong"/.test(doc.reason), detail(doc));
+    }
 } finally {
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ }
 }

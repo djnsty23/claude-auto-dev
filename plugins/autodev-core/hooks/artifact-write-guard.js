@@ -52,7 +52,8 @@
 //                because a text splice cannot be validated; use update
 //   get, list, query   never inspected
 // A `file_path` in place of `data` is read and parsed. When it cannot be read,
-// the call passes, because the tool fails on it by itself.
+// the call passes, because the tool fails on it by itself. A leading byte order
+// mark is dropped before parsing, in the schema and in a file_path document.
 //
 // IT FAILS OPEN. This ships installed in other people's sessions, so a defect
 // here would persist until they reinstall. A corrupt schema, an unexpected
@@ -72,6 +73,16 @@ const TYPES = new Set(['string', 'boolean', 'number', 'timestamp', 'object', 'ar
 
 function isPlainObject(v) {
     return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * JSON.parse of a file's text after dropping one leading byte order mark.
+ * Windows PowerShell 5.1 writes UTF-8 with a BOM, readFileSync keeps it as
+ * U+FEFF, and JSON.parse throws on it. For the schema that throw failed open,
+ * so a schema saved that way turned the guard off with no sign at all.
+ */
+function parseJsonFile(text) {
+    return JSON.parse(text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text);
 }
 
 /** The last non-empty path segment of the artifact URL, or null. */
@@ -231,7 +242,7 @@ function writeData(entry) {
     if (isPlainObject(entry.data)) return entry.data;
     if (typeof entry.file_path === 'string' && entry.file_path) {
         try {
-            const parsed = JSON.parse(fs.readFileSync(entry.file_path, 'utf8'));
+            const parsed = parseJsonFile(fs.readFileSync(entry.file_path, 'utf8'));
             return isPlainObject(parsed) ? parsed : null;
         } catch { return null; }
     }
@@ -287,7 +298,7 @@ function evaluate(payload, nowMs) {
     const schemaPath = schemaPathFor(id);
     let raw;
     try { raw = fs.readFileSync(schemaPath, 'utf8'); } catch { return null; }
-    const schema = JSON.parse(raw);   // a corrupt schema throws, and main fails open
+    const schema = parseJsonFile(raw);   // a corrupt schema throws, and main fails open
     if (!isPlainObject(schema) || !isPlainObject(schema.collections)) return null;
 
     const groups = [];
