@@ -78,6 +78,12 @@
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/coordinator-write-guard.js"],
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/headless-guard.js"],
+            "timeout": 5
           }
         ]
       },
