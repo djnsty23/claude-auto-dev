@@ -194,8 +194,8 @@ check('the tool writes nothing into the tree it reads', before === after);
 
 // ---- the pipe delivers every byte ----
 //
-// node's process.stdout is ASYNCHRONOUS when it is a pipe on darwin and
-// synchronous when it is a pipe on linux/win32, and process.exit() does not
+// node's process.stdout is ASYNCHRONOUS when it is a pipe on POSIX (Linux and
+// macOS alike; only win32 is synchronous), and process.exit() does not
 // drain a pending async write. A script that prints past the 64KiB OS pipe
 // buffer and then exits therefore hands its caller exactly 65536 bytes under
 // exit status 0 — the shape rendered-layout-gate.js shipped with until
