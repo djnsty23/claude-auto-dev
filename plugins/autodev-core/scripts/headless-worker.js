@@ -227,12 +227,16 @@ function buildEnv(base, { code, configDir }) {
 function startOptions(opts) {
     const code = requireCode(opts);
     if (!opts.log) fault('usage', '--log is required');
+    // Checked before path.resolve: resolving an empty string yields the cwd,
+    // which exists and is a directory, so the omission used to surface as an
+    // EISDIR read reported under code internal instead of usage.
+    if (!opts['prompt-file']) fault('usage', '--prompt-file is required');
     const log = path.resolve(opts.log);
     return {
         code,
         log,
         report: path.resolve(opts.report || defaultReport(log)),
-        promptFile: path.resolve(opts['prompt-file'] || ''),
+        promptFile: path.resolve(opts['prompt-file']),
         configDir: opts['config-dir'] ? path.resolve(opts['config-dir']) : null,
         model: opts.model || null,
         permissionMode: opts['permission-mode'] || 'default',

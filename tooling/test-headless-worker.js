@@ -246,6 +246,11 @@ try {
         check('2. --model unset means no --model flag at all', noModel.json && !noModel.json.value.argv.includes('--model'));
         const badCode = hw(['start', '--code', 'bad code!', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
         check('a code outside the pattern is refused with code usage', badCode.exit === 1 && badCode.json && badCode.json.error.code === 'usage', badCode.stdout.slice(0, 120));
+        // --prompt-file omitted: resolving '' is the cwd, a directory, so this used to read as an EISDIR under code internal.
+        const noPrompt = hw(['start', '--code', 'NOPROMPT', '--log', log, '--claude-bin', FAKE, '--ledger', ledger]);
+        check('2. --prompt-file omitted is refused with code usage naming the flag, not internal',
+            noPrompt.exit === 1 && noPrompt.json && noPrompt.json.error.code === 'usage' && /--prompt-file/.test(noPrompt.json.error.message), noPrompt.stdout.slice(0, 160));
+        check('2. and it spawned nothing: no log, no ledger', !fs.existsSync(log) && !fs.existsSync(ledger));
     }
 
     // 4, 7, 8 (omitted), 9, 13: one real run through the fake, exit 0, with a planted report.
