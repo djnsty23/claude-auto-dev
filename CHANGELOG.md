@@ -1,5 +1,48 @@
 # Changelog
 
+## [8.170.0]
+
+### Guards for unattended, cross-account operation (#270)
+
+- artifact-write-guard refuses a shared-database write that breaks the schema
+  the user keeps privately for that artifact: unknown fields, values the page
+  cannot render, timestamps ahead of the clock. No schema for the id, no change.
+- peer-send-ledger records every queued peer send, and peer-queue-check reads
+  each target's own transcript to say whether the message was processed,
+  stalled or lost. A stalled message is never resent.
+- check-release-lag (`npm run check:release-lag`) goes red when plugin commits
+  sit on main unreleased past 24 hours, or when the tag for the VERSION at the
+  ref is missing. Not in the gate, on purpose.
+- headless-worker.js dispatches a `claude -p` worker under a supervisor that
+  outlives the caller, with a ledger that refuses a duplicate dispatch;
+  headless-guard refuses backgrounded commands inside such a worker.
+- session-register and fleet-registry keep one registry of live sessions across
+  both accounts, keyed on HOME rather than the config dir.
+- Five suites pin `CLAUDE_CONFIG_DIR` to their fake home, so the gate runs from
+  a second CLI account without unsetting the variable first.
+
+### Sprint and fleet
+
+- `needs-setup` gets a writer: `spec` emits a setup manifest, `prd-mark-needs-setup.js`
+  marks a story on handback, and `status` and the Stop hook name who is waited
+  on (#194).
+- fleet-intent records what a session was in the middle of, keyed by repo and
+  branch, so a session that dies at a wall leaves its intention behind and not
+  only its commits (#215).
+
+### Fixes
+
+- unattended-worker: a ledger record that never ran is retired (#265), and the
+  composed prompt carries a per-command cd guard (#266).
+- session-sweep: gitignored local-only files no longer block an archive (#267).
+- redact: a CLI flag that carries its credential inline (`--token <value>`,
+  `--password=<value>`) is redacted like every other secret (#269).
+
+### Docs
+
+- Brain skill: a self-clear does not shed context, only a fresh session or a
+  compaction does, measured eight times in one session (#268).
+
 ## [8.169.0]
 
 ### Fixes that sat on main unreleased for five days
