@@ -48,6 +48,9 @@ cases.push(['rank: empty docs → []', rank('hello', [], 5).length === 0]);
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'semtest-home-'));
 process.env.HOME = TMP_HOME;
 process.env.USERPROFILE = TMP_HOME;
+// A second-account session carries CLAUDE_CONFIG_DIR; the hooks under test
+// honour it over HOME, so the fake home must own it too.
+process.env.CLAUDE_CONFIG_DIR = path.join(TMP_HOME, '.claude');
 
 const memDB = require('../plugins/autodev-memory/scripts/memory-db');
 
