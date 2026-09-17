@@ -36,7 +36,7 @@ function run(payload, cwd = PROJ) {
         input: JSON.stringify(payload),
         encoding: 'utf8',
         cwd,
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP },
+        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP, CLAUDE_CONFIG_DIR: path.join(TMP, '.claude') },
     });
 }
 
@@ -193,7 +193,7 @@ check('no MEMORY.md writing remains in the source', !HOOK_CODE.includes('MEMORY.
 // 7. Malformed stdin must never block a session from starting.
 r = spawnSync(process.execPath, [HOOK], {
     input: 'not json', encoding: 'utf8', cwd: PROJ,
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP },
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP, CLAUDE_CONFIG_DIR: path.join(TMP, '.claude') },
 });
 check('malformed stdin → exit 0', r.status === 0);
 check('malformed stdin → still valid JSON out', parse(r) !== null);
@@ -544,7 +544,7 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
         const res = spawnSync(process.execPath, [HOOK], {
             input: JSON.stringify({ cwd: PROJ, session_id: id, hook_event_name: 'SessionStart' }),
             encoding: 'utf8', cwd: PROJ,
-            env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP,
+            env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP, CLAUDE_CONFIG_DIR: path.join(TMP, '.claude'),
                 SESSION_SWEEP_STORE: path.join(TMP, 'pile-store'), AUTODEV_SESSION_PILE_MAX: '', ...extraEnv },
         });
         return { res, ctx: parse(res)?.hookSpecificOutput?.additionalContext || '' };

@@ -61,6 +61,27 @@ Short and load-bearing. Sections, in this order:
    makes the scope real; a spec without it will grow to fill the sprint.
 5. **Done means** — the observable that ends v1. Not "it works" — "a signed-in
    user can log a habit for today and see a streak count that survives a reload."
+6. **External services** — every account, credential, domain, payment method,
+   legal page, store listing or third-party approval the product implies. One
+   bullet per item, the service name first, then what is needed and the exact
+   console URL:
+
+   ```
+   ## External services
+
+   - Supabase — a project, its URL and anon key (https://supabase.com/dashboard)
+   - Vercel — a project linked to the repo, with the two Supabase variables set (https://vercel.com/new)
+   - Stripe — an account, a webhook endpoint and its signing secret (https://dashboard.stripe.com/register)
+   ```
+
+   Or the single word `none`. This section is read mechanically: `check-spec-output`
+   requires it, and every item in it becomes a setup story in step 4. The prose
+   above it will name services in passing ("Supabase holds the members") and
+   the checker cross-reads them; a service named in the prose and missing here
+   is a note, but a missing section is a failure, because that is the case that
+   shipped: `[measured 2026-09-07]` a greenfield spec named Supabase and Vercel
+   and planned no human step for either, and `auto` discovered the missing
+   project on its first story.
 
 ## Step 3 — The data model first
 
@@ -110,10 +131,49 @@ and put later work in later sprints using the same container shape. Do not mix
 root-level stories with sprint-level stories: runtime readers prefer the latter
 and can hide the former. Keep every story id unique across the fresh spec.
 
+### Setup stories: the human steps, as stories, on day one
+
+Every item under **External services** becomes a story too, and it is the only
+kind of story that is born blocked:
+
+```json
+"S1-000": {
+  "id": "S1-000",
+  "title": "Create the Supabase project and put its URL and anon key in Vercel",
+  "priority": 0,
+  "passes": "needs-setup",
+  "realness": null,
+  "type": "setup",
+  "category": "setup",
+  "acceptance": [
+    { "id": "env-listed", "description": "The Vercel project lists NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY" },
+    { "id": "home-renders", "description": "A deploy renders the home page rather than the setup notice" }
+  ],
+  "blockedReason": "Create a project at https://supabase.com/dashboard (about 5 minutes), apply supabase/migrations/0001_init.sql in the SQL editor, then paste the project URL and anon key into the Vercel project's environment variables.",
+  "resolution": ""
+}
+```
+
+- `type: "setup"` and `passes: "needs-setup"` go together; the checker rejects
+  one without the other.
+- `acceptance` is still the outcome list — the observable an AGENT verifies
+  once the person says it is done. `blockedReason` is what the person does and
+  where, with the URL; it is the handback, and `wizard`'s rules for a handback
+  apply to it (atomic, exact target, how long).
+- **Every story that cannot run without it lists it in `blockedBy`.** That is
+  what makes `auto` wait for the person instead of failing the sign-in story
+  against a project that does not exist. Sign-in depends on the Supabase
+  project; the payment flow depends on the Stripe account; the "no config"
+  notice story depends on nothing.
+
+The operator sees these under "Blocked on you" in `status` from the first run,
+which is the point: the accounts get created while the agent builds the parts
+that do not need them, instead of being discovered one at a time.
+
 ## Step 5 — Verify before handing over
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/check-spec-output.js" prd.json supabase/migrations/0001_init.sql
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-spec-output.js" prd.json supabase/migrations/0001_init.sql --spec SPEC.md
 ```
 
 Resolve the installed scripts directory from this skill when the plugin-root
@@ -132,6 +192,11 @@ database to verify SQL and the actual access model. A policy declaration does
 not prove ownership, operation coverage or grants. Verify authorized and denied
 access with real queries before calling the data layer complete.
 
+With `--spec SPEC.md` it also rejects a SPEC.md with no **External services**
+section, a declared service with no setup story naming it, a setup story that is
+not born `needs-setup`, and a setup story whose `blockedReason` has no URL. A
+service it rejects as unplanned is one `auto` would have hit on its first story.
+
 Read each rejection: wording heuristics can reject concrete criteria too.
 Clarify the observable instead of inferring that the feature is impossible.
 
@@ -139,14 +204,16 @@ Then report:
 
 ```
 Spec: <name>
-  SPEC.md         — core loop, N assumptions, M non-goals
+  SPEC.md         — core loop, N assumptions, M non-goals, E external services
   0001_init.sql   — T tables, RLS/policy declarations checked; runtime pending
   prd.json        — S stories in sprint 1, K held back
+  Blocked on you  — E setup stories (ids): one line each, what and where
 
 Assumptions I made without asking: <list>
 
 Next: continue to setup-project and auto when implementation was requested;
-otherwise hand over the spec and its assumptions.
+otherwise hand over the spec and its assumptions. The setup stories can be done
+while auto builds the rest.
 ```
 
 Surfacing the assumptions in the handover is the cheap half of this skill. The

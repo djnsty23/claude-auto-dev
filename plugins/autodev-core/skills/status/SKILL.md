@@ -17,6 +17,10 @@ Read the target project's PRD with the shared `workPlan(prd)` documented in
 `core`. Report every sprint's records, not just the latest one or a file header.
 Keep the current sprint and archived totals as separately labelled views.
 Distinguish a missing file from unreadable/invalid data; neither is a clean queue.
+For the "Blocked on you" line, run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/prd-mark-needs-setup.js" --list` from the
+project root: it reads every sprint and prints each needs-setup story with its
+`blockedReason` and `blockedAt`.
 
 ## Process
 
@@ -34,6 +38,7 @@ Distinguish a missing file from unreadable/invalid data; neither is a clean queu
 Done: [N] | Pending: [N] | Failed: [N] | Deferred: [N]
 Needs setup: [N] | Unrecognised: [N] | Total: [N]
 Ready now: [N] | Dependency blocked: [N] | Invalid: [N]
+Blocked on you: [N] ([ids]) — one line per story: id, what it waits for (blockedReason), since when (blockedAt)
 Next: [id, title] | Active owner: [verified identity or unknown]
 Unresolved: [ids and specific blockers]
 ```
@@ -45,3 +50,12 @@ for the complete story population. Confirm the reported next story is present
 in `plan.ready`. An empty population or no ready work with unresolved records
 is not completion. Scores, native task-list emptiness and a green build do not
 replace these checks. State the population and inaccessible data explicitly.
+When `needsSetup` is nonzero, "Blocked on you" is printed as its own line with
+ids, and its count equals `needsSetup`.
+
+"Blocked on you" is a separate line from Pending on purpose. `[measured
+2026-09-08]` six of the ten pending stories in one client repo were waiting on
+a person — a pipeline variable, a partner's API, a decision — and had sat as
+`passes: null` for up to 122 days, because the count that said "10 pending"
+told nobody that an agent could advance only four of them. A needs-setup story
+is remaining work for the operator and not for the agent; the line says who.

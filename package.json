@@ -26,6 +26,7 @@
     "check:liveness": "node plugins/autodev-core/scripts/workflow-liveness.js --selftest",
     "check:skills": "node plugins/autodev-core/scripts/analyze-skill-invocations.js --selftest",
     "check:versions": "node tooling/check-version-drift.js",
+    "check:release-lag": "node tooling/check-release-lag.js",
     "check:functions": "node tooling/find-untested-functions.js",
     "check:coverage": "node tooling/find-untested-functions.js --gate",
     "check:drift": "node tooling/find-record-drift.js",

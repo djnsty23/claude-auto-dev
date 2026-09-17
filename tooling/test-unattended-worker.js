@@ -90,6 +90,7 @@ try {
     check('worktree add precedes the brief body, which precedes the return line', iAdd > 0 && iAdd < iBody && iBody < iReturn, [iAdd, iBody, iReturn].join(','));
     check('prompt names the return address', prompt.includes('report to coordinator-a1'), 'coordinator-a1');
     check('prompt contains no backslash (a shell reads it as an escape)', !prompt.includes('\\'));
+    check('prompt tells the worker every later command starts with cd into the worktree', /Every later shell command starts with `cd "[^"]+" && `/.test(prompt), prompt.slice(0, 400));
     check('create_scheduled_task arguments carry no schedule', ok.json && !('cronExpression' in ok.json.value.createScheduledTask) && !('fireAt' in ok.json.value.createScheduledTask));
     check('task id defaults to worker-<slug>', ok.json && ok.json.value.createScheduledTask.taskId === 'worker-logo-guide');
     check('brief records the task as composed', ok.json && ok.json.value.record.state === 'composed');
@@ -118,6 +119,27 @@ try {
         const assertLine = fence[1].split('\n').find((l) => l.startsWith('test '));
         const neg = spawnSync(bash, ['-c', assertLine], { cwd: repo, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
         check('STEP 0 assertion fails outside the worktree', neg.status !== 0 && /STEP 0 FAILED/.test(neg.stdout), neg.status + ' ' + neg.stdout);
+
+        // The shell's cwd does not survive between a worker's Bash calls: the
+        // host resets it to the checkout the session opened in. [measured
+        // 2026-09-16] "Shell cwd was reset" four times in one unattended run,
+        // so the single `cd` in STEP 0 covers one call and nothing after it.
+        // The prompt must carry a prefix the worker puts in front of EVERY
+        // command. Run that prefix from the shared checkout, which is where a
+        // reset lands, and assert it ends inside the worktree. The control runs
+        // the same probe unguarded and must read the shared checkout, otherwise
+        // the guarded run proves nothing about a reset.
+        const guard = (prompt.match(/starts with `(cd "[^"]+" && )`/) || [])[1];
+        check('prompt carries a per-command cd guard', !!guard, prompt.slice(0, 400));
+        if (guard) {
+            const probe = 'echo "TOP=$(git rev-parse --show-toplevel)"';
+            const topOf = (res) => ((res.stdout.match(/TOP=(.*)/) || [])[1] || '').trim().toLowerCase();
+            const shared = repo.replace(/\\/g, '/').toLowerCase();
+            const reset = spawnSync(bash, ['-c', probe], { cwd: repo, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+            check('control: after a cwd reset an unguarded command reads the shared checkout', topOf(reset) === shared, topOf(reset) + ' vs ' + shared);
+            const guarded = spawnSync(bash, ['-c', guard + probe], { cwd: repo, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+            check('the guard puts a reset shell back inside the worktree', guarded.status === 0 && topOf(guarded) === expected.toLowerCase(), guarded.status + ' ' + topOf(guarded) + ' vs ' + expected.toLowerCase());
+        }
     }
 
     // =======================================================================
@@ -187,10 +209,41 @@ try {
     check('an unparseable ledger is refused, not treated as empty', code(cli(['status', '--ledger', path.join(scratch, 'bad.json')])) === 'ledger-unreadable');
 
     // =======================================================================
+    // 6b. A record that never ran. `deleted` needs `settled`, and `settle`
+    //     refuses `composed`, so a task that was composed and then never
+    //     created, or created and never run, had no way out: its slug and task
+    //     id stayed claimed for ever. [measured 2026-09-16] a real ledger
+    //     record sat `composed` after the coordinator decided not to run it,
+    //     and `deleted` exited 1 on it. `retire` is the exit, and only for a
+    //     record with no run behind it: a started record has a session to settle.
+    // =======================================================================
+    const never = cli(['brief', '--slug', 'never-ran', ...base]);
+    check('control: a never-run record is composed', never.json && never.json.ok && never.json.value.record.state === 'composed', never.stdout.slice(0, 200));
+    check('deleted still refuses a composed record', code(cli(['deleted', '--task-id', 'worker-never-ran', '--ledger', ledger])) === 'bad-state');
+    check('settle still refuses a composed record', (cli(['settle', '--task-id', 'worker-never-ran', '--run-status', 'failed', '--report-read', '--ledger', ledger]).json || { value: {} }).value.decision.deleteSafe === false);
+    const retired = cli(['retire', '--task-id', 'worker-never-ran', '--reason', 'task never created', '--ledger', ledger]);
+    check('retire moves a composed record to retired', retired.json && retired.json.ok && retired.json.value.record.state === 'retired', retired.stdout.slice(0, 200));
+    check('retire records the reason and the time', retired.json && retired.json.ok && retired.json.value.record.reason === 'task never created' && typeof retired.json.value.record.retiredAt === 'string');
+    check('retire twice is refused', code(cli(['retire', '--task-id', 'worker-never-ran', '--ledger', ledger])) === 'bad-state');
+    const settleRetired = cli(['settle', '--task-id', 'worker-never-ran', '--run-status', 'succeeded', '--report-read', '--ledger', ledger]);
+    check('settle refuses a retired record', settleRetired.json && settleRetired.json.ok && settleRetired.json.value.decision.deleteSafe === false && settleRetired.json.value.record.state === 'retired', settleRetired.stdout.slice(0, 200));
+    const stRetired = cli(['status', '--ledger', ledger]);
+    check('status counts retired records', stRetired.json && stRetired.json.value.counts.retired === 1, stRetired.json && JSON.stringify(stRetired.json.value.counts));
+    const slugFreed = cli(['brief', '--slug', 'never-ran', '--task-id', 'worker-never-ran-b', ...base]);
+    check('a retired record frees its slug', slugFreed.status === 0, slugFreed.stdout.slice(0, 200));
+    check('a retired record frees its task id', cli(['brief', '--slug', 'never-ran-again', '--task-id', 'worker-never-ran', ...base]).status === 0);
+    check('record accepts the re-briefed task', cli(['record', '--task-id', 'worker-never-ran-b', '--session', sid, '--ledger', ledger]).status === 0);
+    check('retire refuses a started record, which has a session to settle', code(cli(['retire', '--task-id', 'worker-never-ran-b', '--ledger', ledger])) === 'bad-state');
+    check('retire on an unknown task id is refused', code(cli(['retire', '--task-id', 'nope', '--ledger', ledger])) === 'unknown-task');
+    check('retire without a task id is refused', code(cli(['retire', '--ledger', ledger])) === 'usage');
+    check('retire defaults the reason when none is given', (cli(['retire', '--task-id', 'worker-never-ran', '--ledger', ledger]).json || { value: { record: {} } }).value.record.reason === 'never ran');
+
+    // =======================================================================
     // 7. Pure layer.
     // =======================================================================
     const p = composePrompt({ repo: 'C:\\r', worktree: 'C:\\r\\.claude\\worktrees\\s', branch: 'claude/s', base: 'origin/main', taskId: 't', returnTo: 'x', body: 'BODY' });
     check('composePrompt converts Windows separators', p.includes('"C:/r/.claude/worktrees/s"') && !p.includes('\\'));
+    check('composePrompt puts the worktree path in the per-command guard', p.includes('`cd "C:/r/.claude/worktrees/s" && `'));
     check('decideSettle rejects an unknown run status', (() => { try { decideSettle({ state: 'started' }, 'done', true); return false; } catch (e) { return e.publicCode === 'usage'; } })());
     check('decideSettle refuses a deleted record', decideSettle({ state: 'deleted' }, 'succeeded', true).deleteSafe === false);
     check('parseArgs refuses a repeated flag', (() => { try { parseArgs(['--slug', 'a', '--slug', 'b']); return false; } catch (e) { return e.publicCode === 'usage'; } })());

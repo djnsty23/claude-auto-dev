@@ -25,13 +25,20 @@
  *           worktree path, the local branch, the origin branch nor an active
  *           ledger record already claims the slug. It then composes the task
  *           prompt with STEP 0 first: fetch, `git worktree add`, cd, and an
- *           assertion that the session is inside that worktree. The brief body
- *           follows, then a return instruction. Output: the arguments for
+ *           assertion that the session is inside that worktree, then the
+ *           per-command `cd` prefix every later command starts with. The brief
+ *           body follows, then a return instruction. Output: the arguments for
  *           `create_scheduled_task`. Records the task as `composed`.
  *   record  after `run_scheduled_task`, stores the run's session id (`started`).
  *   settle  decides whether `delete_scheduled_task` is safe: never while the run
  *           is `running`, and never before the coordinator has read the result.
  *   deleted records that the task was deleted (`deleted`).
+ *   retire  closes a record that never ran (`retired`). Only a `composed` record
+ *           qualifies: `settle` refuses one and `deleted` needs `settled`, so
+ *           without this a task composed and then never run kept its slug and
+ *           task id claimed for ever. [measured 2026-09-16] a real record sat
+ *           `composed` after the coordinator chose not to run it. A started
+ *           record has a session behind it and must go through settle.
  *   status  prints every ledger record and how many were read.
  *
  * WHAT IT IS NOT. It starts nothing, deletes nothing and verifies no result.
@@ -43,6 +50,7 @@
  *   node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]
  *   node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed [--report-read] [--ledger <file>]
  *   node unattended-worker.js deleted --task-id <id> [--ledger <file>]
+ *   node unattended-worker.js retire --task-id <id> [--reason <text>] [--ledger <file>]
  *   node unattended-worker.js status [--task-id <id>] [--ledger <file>]
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  */
@@ -57,11 +65,13 @@ const USAGE = [
     '       node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]',
     '       node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed [--report-read] [--ledger <file>]',
     '       node unattended-worker.js deleted --task-id <id> [--ledger <file>]',
+    '       node unattended-worker.js retire --task-id <id> [--reason <text>] [--ledger <file>]',
     '       node unattended-worker.js status [--task-id <id>] [--ledger <file>]',
     'brief: refuse a slug already claimed (worktree path, local branch, origin branch, active ledger record),',
     '       then print create_scheduled_task arguments whose prompt opens with git worktree add.',
     'settle: delete_scheduled_task archives the run session, so it is safe only once the run has ended',
     '       AND its result was read (--report-read).',
+    'retire: close a composed record whose task never ran, freeing its slug and task id.',
     'Starts nothing and deletes nothing: the coordinator makes the scheduled-tasks calls.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'unattended-workers.json')}`,
 ].join('\n') + '\n';
@@ -76,7 +86,7 @@ function fault(code, message) { const e = new Error(message || code); e.publicCo
 function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'report-read'];
-    const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status'];
+    const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -133,6 +143,14 @@ function findRecord(ledger, taskId) {
 /**
  * The prompt a scheduled run receives. STEP 0 comes first because the run opens
  * in a shared checkout, and every later instruction assumes the worktree exists.
+ *
+ * The `cd` in STEP 0 holds for that one shell call and no longer. The host
+ * resets the Bash working directory to the checkout the session opened in
+ * between calls ([measured 2026-09-16] "Shell cwd was reset" four times in one
+ * unattended run), so a worker that trusted STEP 0 ran its next `git commit` in
+ * the shared main tree. Hence the per-command prefix below: every later command
+ * starts with `cd "<worktree>" && `, and the worker re-reads the toplevel in the
+ * same command before a commit, push or merge.
  */
 function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body }) {
     const r = slashes(repo), w = slashes(worktree);
@@ -145,6 +163,7 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body })
         `test "$(git rev-parse --show-toplevel)" = "${w}" || { echo "STEP 0 FAILED: not inside ${w}"; exit 1; }`,
         '```',
         `Work ONLY inside ${w}, on branch ${branch}. Do not edit, commit, check out or stash in the checkout this session opened in.`,
+        `Every later shell command starts with \`cd "${w}" && \`: the shell's working directory is reset to the checkout this session opened in between commands, so a bare command after STEP 0 runs in the shared checkout. Before any commit, push or merge, print \`git rev-parse --show-toplevel\` in the same command and check it says ${w}.`,
         `If STEP 0 fails, do no other work: report the failing command and its output to ${returnTo} with SendMessage, then stop.`,
         '',
         body.trim(),
@@ -160,6 +179,7 @@ function decideSettle(record, runStatus, reportRead) {
     if (!RUN_STATUSES.includes(runStatus)) fault('usage', `--run-status must be one of ${RUN_STATUSES.join(', ')}`);
     if (record.state === 'composed') return { deleteSafe: false, reason: 'no run recorded: run_scheduled_task, then record its session id' };
     if (record.state === 'deleted') return { deleteSafe: false, reason: 'already deleted' };
+    if (record.state === 'retired') return { deleteSafe: false, reason: 'retired before it ran: there is no run to settle' };
     if (runStatus === 'running') return { deleteSafe: false, reason: 'the run is still going, and deleting the task archives its session' };
     if (!reportRead) return { deleteSafe: false, reason: `the run ${runStatus} but its result was not read: read list_events for ${record.sessionId}, then pass --report-read` };
     return { deleteSafe: true, reason: `the run ${runStatus} and its result was read` };
@@ -250,6 +270,13 @@ function run(argv) {
         return mutate(opts, (rec) => {
             if (rec.state !== 'settled') fault('bad-state', `task ${rec.taskId} is ${rec.state}; settle it before deleting`);
             Object.assign(rec, { state: 'deleted', deletedAt: new Date().toISOString() });
+            return {};
+        });
+    }
+    if (cmd === 'retire') {
+        return mutate(opts, (rec) => {
+            if (rec.state !== 'composed') fault('bad-state', `task ${rec.taskId} is ${rec.state}; retire is only for a record with no run behind it`);
+            Object.assign(rec, { state: 'retired', retiredAt: new Date().toISOString(), reason: opts.reason || 'never ran' });
             return {};
         });
     }

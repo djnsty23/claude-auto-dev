@@ -186,7 +186,11 @@ Before merging, read `ccd_pr get_status self`. When `auto_archive_on_close` is
 true and a PR is bound, the merge archives this session and removes its
 worktree. Move the worktree off the PR branch, `unbind_pr`, confirm `bound:
 false`, then merge with `--match-head-commit` pinned to the head CI ran on. The
-switch is readable; do not infer it from archived session records.
+switch is readable; do not infer it from archived session records. Before that,
+run `session-sweep.js --self`: a `local-only(...)` blocker names the gitignored
+files (an `.env.local`, for one) that go with the worktree when it is removed,
+and they have to be copied out first. `[measured 2026-09-16]` a merge with the
+switch on took a worktree whose `.env.local` held a key no other checkout had.
 
 ## 5. Release and verify the live result
 
