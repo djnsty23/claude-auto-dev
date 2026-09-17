@@ -25,8 +25,9 @@
  *           worktree path, the local branch, the origin branch nor an active
  *           ledger record already claims the slug. It then composes the task
  *           prompt with STEP 0 first: fetch, `git worktree add`, cd, and an
- *           assertion that the session is inside that worktree. The brief body
- *           follows, then a return instruction. Output: the arguments for
+ *           assertion that the session is inside that worktree, then the
+ *           per-command `cd` prefix every later command starts with. The brief
+ *           body follows, then a return instruction. Output: the arguments for
  *           `create_scheduled_task`. Records the task as `composed`.
  *   record  after `run_scheduled_task`, stores the run's session id (`started`).
  *   settle  decides whether `delete_scheduled_task` is safe: never while the run
@@ -142,6 +143,14 @@ function findRecord(ledger, taskId) {
 /**
  * The prompt a scheduled run receives. STEP 0 comes first because the run opens
  * in a shared checkout, and every later instruction assumes the worktree exists.
+ *
+ * The `cd` in STEP 0 holds for that one shell call and no longer. The host
+ * resets the Bash working directory to the checkout the session opened in
+ * between calls ([measured 2026-09-16] "Shell cwd was reset" four times in one
+ * unattended run), so a worker that trusted STEP 0 ran its next `git commit` in
+ * the shared main tree. Hence the per-command prefix below: every later command
+ * starts with `cd "<worktree>" && `, and the worker re-reads the toplevel in the
+ * same command before a commit, push or merge.
  */
 function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body }) {
     const r = slashes(repo), w = slashes(worktree);
@@ -154,6 +163,7 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body })
         `test "$(git rev-parse --show-toplevel)" = "${w}" || { echo "STEP 0 FAILED: not inside ${w}"; exit 1; }`,
         '```',
         `Work ONLY inside ${w}, on branch ${branch}. Do not edit, commit, check out or stash in the checkout this session opened in.`,
+        `Every later shell command starts with \`cd "${w}" && \`: the shell's working directory is reset to the checkout this session opened in between commands, so a bare command after STEP 0 runs in the shared checkout. Before any commit, push or merge, print \`git rev-parse --show-toplevel\` in the same command and check it says ${w}.`,
         `If STEP 0 fails, do no other work: report the failing command and its output to ${returnTo} with SendMessage, then stop.`,
         '',
         body.trim(),
