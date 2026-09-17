@@ -134,7 +134,7 @@ check('malformed stdin → exit 0', r.status === 0);
 const SS_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'carrier-home-')));
 r = runHook('memory-session-start.js',
     { cwd: PROJ, session_id: 'harness-D', hook_event_name: 'SessionStart' },
-    { HOME: SS_HOME, USERPROFILE: SS_HOME });
+    { HOME: SS_HOME, USERPROFILE: SS_HOME, CLAUDE_CONFIG_DIR: path.join(SS_HOME, '.claude') });
 
 check('session start exits 0', r.status === 0);
 
@@ -243,7 +243,7 @@ if (memDB.isAvailable()) {
     fs.writeFileSync(preload, `const Module=require('module'),path=require('path');const original=Module._load;Module._load=function(name,parent){if(name==='path'&&parent&&parent.filename===${JSON.stringify(dbModule)})return {...path,join:(...p)=>p.length===2&&p[1]==='.claude'?path.join(${JSON.stringify(privacyStore)},'.claude'):path.join(...p)};return original.apply(this,arguments)};`);
     const privacyHook = (name, payload) => spawnSync(process.execPath, ['-r', preload, path.join(PLUGIN_SRC, 'hooks', name)], {
         cwd: privacyProj, input: JSON.stringify({cwd: privacyProj, session_id: 'privacy-extraction', ...payload}),
-        encoding: 'utf8', env: {...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC},
+        encoding: 'utf8', env: {...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC, CLAUDE_CONFIG_DIR: path.join(privacyStore, '.claude')},
     });
     const start = privacyHook('memory-session-start.js', {hook_event_name:'SessionStart'});
     const sessionId = carrier.read(privacyProj, 'privacy-extraction');

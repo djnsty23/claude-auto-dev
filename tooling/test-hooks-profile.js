@@ -54,6 +54,18 @@ const GUARDING = [
     'pre-tool-filter.js', 'coordinator-write-guard.js', 'panel-recommendation.js', 'peer-message-budget.js',
     'stop-auto-check.js', 'stop-brain-report.js', 'stop-failure-note.js', 'session-start.js',
     'agent-browser-cleanup.js', 'pre-compact.js', 'post-compact.js',
+    // Refuses shared database writes that break the user's own schema. A switch
+    // the model could flip would let it write past the rule it just broke.
+    'artifact-write-guard.js',
+    // Keeps the ledger peer-queue-check.js reads. A ledger with gaps would report
+    // a lost message as never sent, so it has no switch either.
+    'peer-send-ledger.js',
+    // Refuses backgrounding in a headless worker, whose process exits with the
+    // turn. A switch would let the model background past the rule.
+    'headless-guard.js',
+    // Keeps the cross-account session registry fleet-registry.js reads. A switch
+    // would make a session invisible to the account dispatching it.
+    'session-register.js',
 ];
 
 // ---------------------------------------------------------------- manifest

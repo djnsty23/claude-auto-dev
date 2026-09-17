@@ -43,7 +43,7 @@ function run(dir, sessionId) {
         input: JSON.stringify({ cwd: dir, session_id: sessionId, hook_event_name: 'SessionEnd' }),
         encoding: 'utf8',
         cwd: dir,
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC, HOME, USERPROFILE: HOME },
+        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC, HOME, USERPROFILE: HOME, CLAUDE_CONFIG_DIR: path.join(HOME, '.claude') },
     });
 }
 
@@ -63,7 +63,7 @@ function run(dir, sessionId) {
     const dir = project();
     const r = spawnSync(process.execPath, [HOOK], {
         input: 'not json', encoding: 'utf8', cwd: dir,
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC, HOME, USERPROFILE: HOME },
+        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_SRC, HOME, USERPROFILE: HOME, CLAUDE_CONFIG_DIR: path.join(HOME, '.claude') },
     });
     check('malformed stdin: exits 0', r.status === 0);
     check('  and stays silent', (r.stdout || '') === '');
@@ -123,9 +123,12 @@ function run(dir, sessionId) {
     // memory-db reads HOME at module load, so it is loaded with HOME pointed at
     // the fixture and then dropped from the cache again.
     const withHome = (fn) => {
-        const prev = process.env.HOME, prevU = process.env.USERPROFILE;
-        process.env.HOME = HOME; process.env.USERPROFILE = HOME;
-        try { return fn(); } finally { process.env.HOME = prev; process.env.USERPROFILE = prevU; }
+        const prev = process.env.HOME, prevU = process.env.USERPROFILE, prevC = process.env.CLAUDE_CONFIG_DIR;
+        process.env.HOME = HOME; process.env.USERPROFILE = HOME; process.env.CLAUDE_CONFIG_DIR = path.join(HOME, '.claude');
+        try { return fn(); } finally {
+            process.env.HOME = prev; process.env.USERPROFILE = prevU;
+            if (prevC === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prevC;
+        }
     };
     const loadDb = () => {
         const p = require.resolve(path.join(PLUGIN_SRC, 'scripts', 'memory-db.js'));
