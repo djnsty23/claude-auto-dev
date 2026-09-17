@@ -60,7 +60,11 @@ build/
 *.vacuity-backup
 
 # Generated reports. rules/file-organization.md gives these 7-day retention and
-# they are never tracked (0 files under .claude/ are). They are ignored because
+# they are never tracked. (Other paths under .claude/ ARE tracked, deliberately --
+# see "partial tracking under .claude/ is deliberate" below. This parenthetical
+# used to read "0 files under .claude/ are" and was false: `git ls-files .claude/`
+# answers it, and a count in a comment is right only on the day it is typed.)
+# They are ignored because
 # this repo is PUBLIC and a generated report quotes whatever it swept -- one here
 # named a CLIENT project 8 times, which check-no-private-names caught in the
 # working tree. Ignoring the directory closes the exposure rather than hiding it:
@@ -126,3 +130,18 @@ build/
 # Function-hooks API declarations, written per install by tooling/extract-plugin-types.js
 # (or /plugin-types in a session). Vendor text, marked early access; never committed.
 .claude/types/
+
+# 6. Ad-hoc screenshot and handoff directories. Both were untracked-but-unignored
+#    on 2026-09-18, found as a `+91 -0` Create-PR prompt in the desktop UI rather
+#    than by a checker: `check-no-private-names.js` read them and stayed clean,
+#    because neither happened to carry a name or an absolute path THAT DAY. The
+#    exposure is prospective, which is why the rule is the directory and not the
+#    contents. `.claude/screenshots/` has been ignored since line 7 and
+#    `eb11-shots` is the same thing under an ad-hoc name, so the gap is that this
+#    list is per-path: a session inventing a new directory gets no protection
+#    from the rule covering its twin. 7.0 MB of product PNGs and a session
+#    handoff that quotes whatever the session was doing, in a PUBLIC repo.
+#    file-organization.md already gives handoffs 7-day retention, so both were
+#    meant to be transient and nothing enforced it.
+.claude/eb11-shots/
+.claude/handoffs/
