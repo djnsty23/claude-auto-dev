@@ -22,6 +22,7 @@ Fully autonomous development. Works through all tasks without stopping until com
 ## Current State
 !`git status --short`
 Read `prd.json` with the shared `workPlan` selector below. Report `plan.summary`, including blocked setup and unrecognised states, across all sprints.
+When any story is `needs-setup`, print `Blocked on you: N (ids)` as its own line, from `prd-mark-needs-setup.js --list` (see **Handback**); never select those stories.
 
 ## Entry Flow
 
@@ -122,6 +123,9 @@ const { workPlan } = require(require('path').join(process.env.CLAUDE_PLUGIN_ROOT
 const plan = workPlan(prd);
 const stories = plan.stories;
 const executable = plan.ready;
+// A story whose blockedBy names a needs-setup story is in plan.blocked, not
+// plan.ready, so a dependent of "create the Supabase project" waits for the
+// person rather than failing against the missing key every run.
 ```
 
 If `executable` is empty and `plan.complete` is false, the sprint is incomplete.
@@ -388,7 +392,7 @@ On failure:
 2. Retry 1: Different approach
 4. Retry 2: Simplest possible implementation
 5. Still fails: set `passes: false`, continue to next task
-6. If failure is due to missing external setup (API keys, services, infrastructure): set `passes: "needs-setup"` with `blockedReason` explaining what's needed. This distinguishes "can't do yet" from "tried and failed."
+6. If the failure is missing external setup (an API key, a service, a console, a decision only a person can take): this is not a retry case at all — it is a handback. Do the three steps under **Handback** below, in this turn. That marks the story `needs-setup` through the script, which distinguishes "can't do yet" from "tried and failed."
 
 Do not retry a third time. Do not spend more than 10 minutes on retries for a single task.
 
@@ -415,6 +419,58 @@ Common patterns to recognize:
 | Font declared but not loaded | Add `next/font` import in layout.tsx |
 | `hsl(var(--x))` double-wrap | Remove outer `hsl()` when CSS var already contains it |
 | Stock shadcn tokens | Read project's globals.css, use actual brand colors |
+
+## Handback: a story blocked on a person
+
+The moment `wizard` fires for a story — an error names a choice, a permission,
+a credential, a console nobody has opened, a decision of taste, a client — do
+these three things in the SAME turn, before touching anything else:
+
+1. **Mark the story, with the handback as the reason.** Never hand-edit the
+   JSON for this:
+
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/prd-mark-needs-setup.js" S1-004 "Needs a Stripe account: https://dashboard.stripe.com/register (about 5 minutes), then STRIPE_SECRET_KEY in Doppler app/prd. Done when 'doppler secrets get STRIPE_SECRET_KEY --plain | wc -c' prints more than 1."
+   ```
+
+   `passes` becomes `"needs-setup"`, `blockedReason` carries the text,
+   `blockedAt` the date, and `acceptance` and `notes` are untouched.
+   It refuses an unknown id, a `true` story, a `deferred` story and an empty
+   reason, and a second identical call is a no-op — so calling it from a loop
+   is safe.
+
+2. **Write the handback into the chat** in the shape `wizard` gives: numbered
+   atomic steps, the exact URL or settings path, what done looks like, how long
+   it takes, what you will do when they confirm.
+
+3. **Move to the next ready story.** The selector above skips `needs-setup`
+   and anything `blockedBy` it; the Stop hook does not count it as remaining
+   work; `status` prints it under "Blocked on you". Nothing retries it.
+
+**When the operator says it is done:**
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/prd-mark-needs-setup.js" S1-004 --clear
+```
+
+`passes` returns to `null` and the story is yours again: verify the observable
+in its `acceptance` (the key resolves, the env var lists, the page renders), then
+close it as usual. A `type: "setup"` story from `spec` closes `true` once that
+observable holds, and its dependents become ready then — not when the person
+says "done", because the agent verifying is the half that catches a key pasted
+into the wrong environment.
+
+**Why a script and a same-turn rule, measured.** `[measured 2026-09-07]` on
+the trunk of three product repos, `needs-setup` had been written 0, 0 and 1
+times against 45, 7 and 23 writes of `deferred`, while six of one client
+repo's ten pending stories were waiting on a person — a pipeline variable, a
+partner's API, a design decision — and had sat as `passes: null` for up to 122
+days. Prose has told sessions to write the state since it was invented; the
+one session that did (a greenfield run, 2026-09-07) put the handback in a log
+file and pointed the story at it. `wizard` was written after a session retried
+a browser error that named the remedy for 2 h 10 m; its handback goes to the
+chat, which is gone when the session ends. The story is what `status`, `auto`
+and the Stop hook read, so the story is where the handback lives.
 
 ## Commit Cadence
 
@@ -477,7 +533,10 @@ feature works or that the intended commit is running.
 
 ## Completion
 
-When all stories have `passes === true`:
+When `plan.complete` holds (a nonempty population of only `true` and `deferred`
+stories), print the summary below. A `needs-setup` story keeps the sprint
+incomplete — see IDLE Detection — but still gets its "Blocked on you" line in
+whatever you report when the run stops:
 
 ```
 All [N] tasks complete.
@@ -486,6 +545,10 @@ Summary:
 - [X] features implemented
 - [X] bugs fixed
 - [X] improvements made
+
+Blocked on you: [K] ([ids]) — one line each: what it waits for, since when.
+(Omit the line when K is 0. Print it from `prd-mark-needs-setup.js --list`,
+ which reads blockedReason and blockedAt, rather than from memory.)
 
 Run `progress` to see full results.
 ```

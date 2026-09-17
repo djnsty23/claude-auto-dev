@@ -74,9 +74,12 @@ dispatch; update the outcome as it changes rather than waiting for session end.
 |-------|--------|
 | `passes` | `null` (pending), `true` (done), `false` (failed), `"deferred"` (decided against), `"needs-setup"` (blocked on a human — an API key, a vendor, a console) |
 | `realness` | 0-100 (optional, see below). `null` = not rated yet |
-| `type` | fix, feature, refactor, qa, perf |
+| `type` | fix, feature, refactor, qa, perf, setup (a human act: create the account, buy the domain — born `needs-setup`, see `spec`) |
 | `priority` | 0=critical, 1=high, 2=medium, 3=low |
 | `resolution` | HOW it was fixed (learning) |
+| `blockedBy` | optional array of story ids. A story is ready only when every one of them is `true`; `workPlan(prd).ready` is the reader `auto` and the Stop hook share, and `workPlan(prd).blocked` names what each other story waits on. Point dependents at a setup story so they wait for the person, not retry against the missing key. |
+| `blockedReason` | `needs-setup` only: what is needed, the exact console URL or path, what done looks like. Written by `scripts/prd-mark-needs-setup.js`, never by hand; `acceptance` and `notes` are left untouched. |
+| `blockedAt` | `needs-setup` only: the date it was marked, so `status` can say how long it has waited. |
 
 ### Requirements and revisions
 
