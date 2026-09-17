@@ -1,7 +1,7 @@
 ---
 name: seo
-description: SEO audit: verify metadata, structured data, crawlability and AI-crawler access against a pre-launch checklist, and validate the JSON-LD actually parses.
-when_to_use: "Invoked when the user says \"seo\", \"meta tags\", \"open graph\", \"structured data\", \"json-ld\", \"sitemap\", \"llms.txt\", \"ai search\", \"geo\", \"aeo\", or asks why pages are not ranking, not being cited by AI assistants, or not previewing correctly."
+description: "Audit a page or a site for search and AI-answer visibility: metadata and Open Graph tags in the SERVED html, JSON-LD that actually parses, canonical, sitemap and robots correctness, and which AI crawlers are allowed to read or to cite the site."
+when_to_use: "Use when asked to look at robots.txt, meta or OG tags, JSON-LD or structured data, a sitemap, hreflang or llms.txt. Use when asked whether ChatGPT, Claude or Google AI can find, read or cite a site, when a page is not ranking, not indexed or not previewing correctly, and on the words seo, geo, aeo or ai search."
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 model: opus
 user-invocable: true
@@ -46,7 +46,7 @@ can see it. A missing/failing fetch is a gap, not an empty clean scan.
 - [ ] Internal links between related pages
 - [ ] Core Web Vitals inside budget (see the `perf` skill). Responsiveness is INP,
       which replaced FID in 2024, so a budget naming FID is measuring a retired metric
-- [ ] AI crawler access matches the intent, checked per crawler (section 5)
+- [ ] AI crawler access matches the intent, checked per crawler (section 4)
 - [ ] HTTPS everywhere, mobile-responsive
 
 **E-commerce, if applicable:** Product schema on product pages, BreadcrumbList

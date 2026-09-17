@@ -1,7 +1,7 @@
 ---
 name: security
-description: "Pre-deploy security check for changed attack paths: source and migration secrets, Supabase access policies, and cloud key hygiene. Reports reproduced findings and checks that could not run."
-when_to_use: "Invoked when the user says \"security\", \"security scan\", \"security audit\", or before a deploy that touches auth, data, or secrets."
+description: "Find the security defect in code before it ships: secrets in source or migrations, Supabase RLS and access policies, session and sign-out scope, a user id taken from a request body or header instead of the verified session, and unvalidated external input."
+when_to_use: "Use when reviewing or being asked whether code is correct where that code touches auth, sessions, sign-out, permissions, payments, personal data, secrets or a database policy. Use before a deploy that touches any of those, and on the words security, security scan or security audit."
 allowed-tools: Bash, Read, Grep, Glob, Task
 model: opus
 user-invocable: true
