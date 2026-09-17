@@ -79,7 +79,10 @@ function setup() {
   sh('git config user.email suite@example.com', MAIN);
   sh('git config user.name Suite', MAIN);
   fs.writeFileSync(path.join(MAIN, 'README.md'), 'base\n');
-  sh('git add README.md', MAIN);
+  // The ignore list is part of the base so the local-only cases below can plant
+  // a real gitignored file: one a session would lose, one a build regenerates.
+  fs.writeFileSync(path.join(MAIN, '.gitignore'), '.env.local\nnode_modules/\n.next/\n.claude/\n');
+  sh('git add README.md .gitignore', MAIN);
   sh('git commit -q -m base', MAIN);
   sh('git push -q -u origin main', MAIN);
   sh('git remote set-head origin main', MAIN);
@@ -136,6 +139,51 @@ function buildCases() {
     const wt = makeWorktree('orphan', 'case-orphan');
     commitIn(wt, 'b.txt', 'exists nowhere else');
     cases.push({ id: 'orphan', wt, expectRisk: (r) => /^orphan-commits\(1\)$/.test(r), expectSafe: false });
+  }
+
+  // 4b. Clean, pushed, and holding a gitignored file that exists nowhere else.
+  //     `git status --porcelain` is silent about it, so the sweep read this
+  //     worktree as SAFE and the archive that followed deleted the only copy.
+  //     [measured 2026-09-16] a session's `.env.local`, holding a service key
+  //     no other checkout had, went with its worktree when its PR merged and
+  //     the app auto-archived the session. Nothing about the sweep had fired.
+  {
+    const wt = makeWorktree('local-only', 'case-local-only');
+    sh('git push -q -u origin case-local-only', wt);
+    fs.writeFileSync(path.join(wt, '.env.local'), 'SECRET=only-here\n');
+    cases.push({ id: 'local-only', wt, expectRisk: (r) => /^local-only\(1 file: \.env\.local\)$/.test(r), expectSafe: false });
+  }
+
+  // 4c. The control for 4b: ignored files a build, an install or the harness
+  //     itself writes back must NOT block, or every worktree that ever ran
+  //     `npm install` is stuck for good. One of each, and the build dir sits
+  //     under a package directory, because a root-anchored pattern missed
+  //     `site/.next/` on a real worktree.
+  {
+    const wt = makeWorktree('ignored-regenerable', 'case-ignored-regen');
+    sh('git push -q -u origin case-ignored-regen', wt);
+    fs.mkdirSync(path.join(wt, 'node_modules', 'left-pad'), { recursive: true });
+    fs.writeFileSync(path.join(wt, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1;\n');
+    fs.mkdirSync(path.join(wt, 'site', '.next'), { recursive: true });
+    fs.writeFileSync(path.join(wt, 'site', '.next', 'trace'), 'build output\n');
+    fs.mkdirSync(path.join(wt, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(wt, '.claude', 'knowledge-surfaced'), 'sid\tarea\n');
+    fs.writeFileSync(path.join(wt, '.claude', 'COMMIT_MSG_v0001.txt'), 'scratch\n');
+    cases.push({ id: 'ignored-regenerable', wt, expectRisk: null, expectSafe: true });
+  }
+
+  // 4d. A report under `.claude/` is NOT harness scratch: it is the session's
+  //     only copy of what it found, and the label must name the FILE so the
+  //     reader can copy it out. The fixture ignores `.claude/` wholesale, so
+  //     `git status` prints one directory entry and the sweep has to open it;
+  //     the harness state file beside the report must not be named.
+  {
+    const wt = makeWorktree('local-only-report', 'case-local-only-report');
+    sh('git push -q -u origin case-local-only-report', wt);
+    fs.mkdirSync(path.join(wt, '.claude', 'reports'), { recursive: true });
+    fs.writeFileSync(path.join(wt, '.claude', 'reports', 'audit.md'), 'findings\n');
+    fs.writeFileSync(path.join(wt, '.claude', 'knowledge-surfaced'), 'sid\tarea\n');
+    cases.push({ id: 'local-only-report', wt, expectRisk: (r) => /^local-only\(1 file: \.claude\/reports\/audit\.md\)$/.test(r), expectSafe: false });
   }
 
   // 5. Branch never pushed but carrying NOTHING extra. Must NOT block: this is
@@ -453,13 +501,19 @@ function checkDoneUnboundAndSelf() {
   fs.writeFileSync(path.join(dirty, 'wip.txt'), 'uncommitted\n');
   const withPr = makeWorktree('self-pr', 'feat-open');
   sh('git push -q -u origin feat-open', withPr);
+  // --self is the question a session asks right before archive_session, which
+  // is the call that deletes the worktree, so the local-only guard has to
+  // answer here too and name the file the session must copy out first.
+  const localOnly = makeWorktree('self-local-only', 'case-self-local-only');
+  sh('git push -q -u origin case-self-local-only', localOnly);
+  fs.writeFileSync(path.join(localOnly, '.env.local'), 'SECRET=only-here\n');
   const nobody = path.join(ROOT, 'self-nobody');
   fs.mkdirSync(nobody, { recursive: true });
 
   const selfStore = path.join(ROOT, 'store-self');
   const selfDir = path.join(selfStore, 'live-ws', 'sub');
   fs.mkdirSync(selfDir, { recursive: true });
-  for (const [id, wt] of [['self-clean', clean], ['self-dirty', dirty], ['self-pr', withPr]]) {
+  for (const [id, wt] of [['self-clean', clean], ['self-dirty', dirty], ['self-pr', withPr], ['self-local-only', localOnly]]) {
     const r = rec(id, { cwd: wt, worktreePath: wt, lastActivityAt: Date.now() });
     fs.writeFileSync(path.join(selfDir, `${r.sessionId}.json`), JSON.stringify(r), 'utf8');
   }
@@ -480,6 +534,9 @@ function checkDoneUnboundAndSelf() {
   check('self: the dirty blocker is named', (b.blockers || []).some((x) => /^dirty\(1 file\)$/.test(x)), true);
   const c = selfRun(withPr);
   check('self: an unbound open PR blocks by number', (c.blockers || []).includes('pr-unsettled(#7)'), true);
+  const e = selfRun(localOnly);
+  check('self: a gitignored local-only file may not settle', e.settle, false);
+  check('self: the local-only blocker names the file', (e.blockers || []).some((x) => /^local-only\(1 file: \.env\.local\)$/.test(x)), true);
   const d = selfRun(nobody);
   check('self: a cwd with no record fails closed', (d.blockers || []).join(), 'no-session-for-cwd');
   check('self: and does not settle', d.settle, false);

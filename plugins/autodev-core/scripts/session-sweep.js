@@ -65,6 +65,34 @@ const STORE = process.env.SESSION_SWEEP_STORE || path.join(
 // never in this repo — this one is public. One substring per line, '#' comments.
 const DENYLIST_FILE = path.join(process.env.USERPROFILE || process.env.HOME || '', '.claude', 'session-sweep-denylist.txt');
 
+// Gitignored paths a build, an install or this harness writes back. Anything
+// ignored and NOT on this list exists only in that worktree, and
+// archive_session deletes it with the worktree. Matched against the path
+// `git status --ignored` prints, which ends in '/' for a directory and may sit
+// under a package directory (`site/.next/`). Keep this list narrow: a miss here
+// is clutter (a worktree kept a little longer), a false entry is loss.
+//
+// The harness entries are its own throttle, flag and scratch files, rewritten
+// on the next run. `.claude/reports/`, `.claude/archives/`, `.claude/handoffs/`
+// and the rest of `.claude/` are deliberately NOT here: a report or a prd
+// archive in a worktree is the only copy, and naming it is the point.
+// [measured 2026-09-16] over 30 live session records, the unfiltered list
+// flagged five, three of them for hundreds of `.claude/COMMIT_MSG_v*.txt`
+// scratch files beside the one `.claude/archives/` that was the real finding.
+const REGENERABLE = [
+  /(^|\/)node_modules\//, /(^|\/)\.next\//, /(^|\/)dist\//, /(^|\/)build\//, /^out\//,
+  /(^|\/)coverage\//, /(^|\/)\.turbo\//, /(^|\/)\.vercel\//, /(^|\/)\.cache\//,
+  /(^|\/)__pycache__\//, /\.pyc$/, /(^|\/)\.pytest_cache\//, /(^|\/)\.venv\//,
+  /(^|\/)target\//, /(^|\/)\.parcel-cache\//, /(^|\/)playwright-report\//,
+  /(^|\/)test-results\//, /(^|\/)tsconfig\.tsbuildinfo$/, /(^|\/)next-env\.d\.ts$/,
+  /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/,
+  /^\.claude\/memory-sessions\//, /^\.claude\/\.claude\//, /^\.claude\/types\//,
+  /^\.claude\/knowledge-surfaced$/, /^\.claude\/panel-deny\.json$/,
+  /^\.claude\/settings\.local\.json$/, /^\.claude\/pre-compact-state\.json$/,
+  /^\.claude\/auto-(active|exit|idle-triggered)$/, /^\.claude\/\.typecheck-pending$/,
+  /^\.claude\/memory-session-id$/, /^\.claude\/commit-msg\.txt$/, /^\.claude\/COMMIT_MSG_[^/]*\.txt$/,
+];
+
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);
 
@@ -497,6 +525,41 @@ function worktreeRisk(s, all, opts = {}) {
   if (status.length > 0) {
     const n = status.split('\n').filter(Boolean).length;
     return `dirty(${n} file${n === 1 ? '' : 's'})`;
+  }
+
+  // Gitignored files go with the worktree too, and `status --porcelain` is
+  // silent about them by design. [measured 2026-09-16] a session's `.env.local`
+  // held a service key no other checkout had; its PR merged, the app
+  // auto-archived the session, and the worktree removal took the only copy.
+  // The sweep had nothing to say, because every check above was green.
+  //
+  // Traditional mode lists a fully ignored directory once (`node_modules/`)
+  // rather than every file in it, so this stays cheap on a real worktree. The
+  // regenerable list is the one `safe-cleanup` uses for the same question:
+  // anything a build or install writes back is clutter, not loss.
+  const ignored = git(wt, ['status', '--porcelain', '--ignored=traditional']);
+  if (ignored === null) return 'git-unreadable';
+  const entries = ignored.split('\n').filter((l) => l.startsWith('!! ')).map((l) => l.slice(3).replace(/^"|"$/g, ''));
+  const regenerable = (p) => REGENERABLE.some((re) => re.test(p));
+  const localOnly = [];
+  for (const entry of entries) {
+    if (regenerable(entry)) continue;
+    if (!entry.endsWith('/')) { localOnly.push(entry); continue; }
+    // A fully ignored directory prints once, so a repo that ignores `.claude/`
+    // wholesale shows nothing of what is inside. Open it: one holding only
+    // harness state must not block, and one holding a report must name it.
+    // Only directories that are not regenerable get opened, so `node_modules/`
+    // is never enumerated.
+    const inside = git(wt, ['ls-files', '--others', '--ignored', '--exclude-standard', '--', entry]);
+    if (inside === null) return 'git-unreadable';
+    const files = inside.split('\n').filter(Boolean).map((f) => f.replace(/^"|"$/g, ''));
+    if (!files.length) localOnly.push(entry);
+    for (const f of files) if (!regenerable(f)) localOnly.push(f);
+  }
+  if (localOnly.length > 0) {
+    const n = localOnly.length;
+    const named = localOnly.slice(0, 3).join(', ') + (n > 3 ? ', ...' : '');
+    return `local-only(${n} file${n === 1 ? '' : 's'}: ${named})`;
   }
 
   // Use the LIVE checked-out branch, never the one recorded in session metadata.
