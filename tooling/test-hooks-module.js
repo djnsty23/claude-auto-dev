@@ -130,6 +130,10 @@ const OTHER_REPO = { root: '/srv/project-b', remote: 'git@github.com:someone/pro
         ['an already-redacted token', 'run with [REDACTED:anthropic-key#3] set'],
         ['a short assignment', 'API_KEY=short'],
         ['prose with the word token', 'the token budget for this turn is 8000 tokens'],
+        ['a flag carrying an env reference', 'vercel deploy --prod --token $VERCEL_TOKEN --yes'],
+        ['a flag whose name only starts with the secret word', '--tokenizer cl100k_base_v2 --token-budget 800000000000'],
+        ['a plural flag', 'doppler secrets --project app-example --config prd'],
+        ['a flag with a short value', '--password abc123'],
     ];
     let clean = 0;
     for (const [name, text] of negatives) {

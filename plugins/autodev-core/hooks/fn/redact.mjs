@@ -165,6 +165,20 @@ export const PATTERNS = [
         sample: () => 'SUPABASE_SERVICE_ROLE_KEY=' + 'P'.repeat(32),
     },
     {
+        // A CLI flag that carries the credential inline: `--token <value>`,
+        // `--password=<value>`, `--api-key <value>`. A process listing prints
+        // the whole command line of every process on the machine, so a deploy
+        // started with an inline token shows it to every session that lists
+        // processes. The flag name has to END at the secret word (`--tokenizer`
+        // and `--token-budget` are not flags that carry one), and an env
+        // reference or placeholder after it is left alone like everywhere else.
+        name: 'cli-flag-secret',
+        re: /((?<![A-Za-z0-9_-])--?(?:token|access[-_]?token|auth[-_]?token|api[-_]?key|secret|password|passwd|pwd)(?:=|\s+)["']?)([^\s"']{12,})/gi,
+        group: 2,
+        keep: (value) => isPlaceholderValue(value),
+        sample: () => 'vercel deploy --prod --yes --token ' + 'R'.repeat(24),
+    },
+    {
         // A table row as `doppler secrets` and `doppler secrets delete` print
         // one: `│ NAME │ value │`. The 2026-09-02 leak was exactly this shape.
         name: 'named-table-row',
