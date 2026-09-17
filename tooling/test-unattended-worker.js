@@ -187,6 +187,36 @@ try {
     check('an unparseable ledger is refused, not treated as empty', code(cli(['status', '--ledger', path.join(scratch, 'bad.json')])) === 'ledger-unreadable');
 
     // =======================================================================
+    // 6b. A record that never ran. `deleted` needs `settled`, and `settle`
+    //     refuses `composed`, so a task that was composed and then never
+    //     created, or created and never run, had no way out: its slug and task
+    //     id stayed claimed for ever. [measured 2026-09-16] a real ledger
+    //     record sat `composed` after the coordinator decided not to run it,
+    //     and `deleted` exited 1 on it. `retire` is the exit, and only for a
+    //     record with no run behind it: a started record has a session to settle.
+    // =======================================================================
+    const never = cli(['brief', '--slug', 'never-ran', ...base]);
+    check('control: a never-run record is composed', never.json && never.json.ok && never.json.value.record.state === 'composed', never.stdout.slice(0, 200));
+    check('deleted still refuses a composed record', code(cli(['deleted', '--task-id', 'worker-never-ran', '--ledger', ledger])) === 'bad-state');
+    check('settle still refuses a composed record', (cli(['settle', '--task-id', 'worker-never-ran', '--run-status', 'failed', '--report-read', '--ledger', ledger]).json || { value: {} }).value.decision.deleteSafe === false);
+    const retired = cli(['retire', '--task-id', 'worker-never-ran', '--reason', 'task never created', '--ledger', ledger]);
+    check('retire moves a composed record to retired', retired.json && retired.json.ok && retired.json.value.record.state === 'retired', retired.stdout.slice(0, 200));
+    check('retire records the reason and the time', retired.json && retired.json.ok && retired.json.value.record.reason === 'task never created' && typeof retired.json.value.record.retiredAt === 'string');
+    check('retire twice is refused', code(cli(['retire', '--task-id', 'worker-never-ran', '--ledger', ledger])) === 'bad-state');
+    const settleRetired = cli(['settle', '--task-id', 'worker-never-ran', '--run-status', 'succeeded', '--report-read', '--ledger', ledger]);
+    check('settle refuses a retired record', settleRetired.json && settleRetired.json.ok && settleRetired.json.value.decision.deleteSafe === false && settleRetired.json.value.record.state === 'retired', settleRetired.stdout.slice(0, 200));
+    const stRetired = cli(['status', '--ledger', ledger]);
+    check('status counts retired records', stRetired.json && stRetired.json.value.counts.retired === 1, stRetired.json && JSON.stringify(stRetired.json.value.counts));
+    const slugFreed = cli(['brief', '--slug', 'never-ran', '--task-id', 'worker-never-ran-b', ...base]);
+    check('a retired record frees its slug', slugFreed.status === 0, slugFreed.stdout.slice(0, 200));
+    check('a retired record frees its task id', cli(['brief', '--slug', 'never-ran-again', '--task-id', 'worker-never-ran', ...base]).status === 0);
+    check('record accepts the re-briefed task', cli(['record', '--task-id', 'worker-never-ran-b', '--session', sid, '--ledger', ledger]).status === 0);
+    check('retire refuses a started record, which has a session to settle', code(cli(['retire', '--task-id', 'worker-never-ran-b', '--ledger', ledger])) === 'bad-state');
+    check('retire on an unknown task id is refused', code(cli(['retire', '--task-id', 'nope', '--ledger', ledger])) === 'unknown-task');
+    check('retire without a task id is refused', code(cli(['retire', '--ledger', ledger])) === 'usage');
+    check('retire defaults the reason when none is given', (cli(['retire', '--task-id', 'worker-never-ran', '--ledger', ledger]).json || { value: { record: {} } }).value.record.reason === 'never ran');
+
+    // =======================================================================
     // 7. Pure layer.
     // =======================================================================
     const p = composePrompt({ repo: 'C:\\r', worktree: 'C:\\r\\.claude\\worktrees\\s', branch: 'claude/s', base: 'origin/main', taskId: 't', returnTo: 'x', body: 'BODY' });
