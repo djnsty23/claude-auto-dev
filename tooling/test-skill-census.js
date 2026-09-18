@@ -72,14 +72,37 @@ try {
 
     // ------------------------------------------------- the two blindness modes
     //
-    // MUTANT 1: the invocation field is renamed. Every count must collapse to
-    // zero AND the script must say the probe is broken rather than reporting a
+    // MUTANT 1: the invocation field is renamed. The model channel must collapse
+    // to zero AND the script must say the probe is broken rather than reporting a
     // corpus finding. Exit 2, distinct from the exit 0 of a working run.
+    //
+    // DRIVEN BY A FIXTURE, NOT BY THIS MACHINE. The first version pointed the
+    // mutant at the real transcript corpus with `--days 2`, and the guard needs
+    // the surviving channel to carry at least LOPSIDED_MIN hits before it will
+    // call an asymmetry broken. `[measured 2026-09-18]` that window held 19 typed
+    // invocations against a threshold of 20, so the assertion passed when it was
+    // written and failed 50 minutes later with nothing changed: the window had
+    // slid. A suite whose verdict depends on how many slash commands somebody
+    // typed this morning is a clock, not a test.
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'census-lopsided-'));
+    const typedLine = '{"timestamp":"2026-09-17T09:00:00.000Z","text":'
+        + '"<command-name>/design</command-name>"}';
+    fs.writeFileSync(path.join(fixture, 'f.jsonl'),
+        new Array(25).fill(typedLine).join('\n')
+            + '\n{"timestamp":"2026-09-17T09:30:00.000Z","tool":{"skill":"autodev-core:design"}}\n',
+        'utf8');
+
+    const healthy = run(SUBJECT, ['--dir', fixture, '--days', '3650']);
+    check('the fixture is lopsided ENOUGH to arm the guard, and clean before mutation',
+        healthy.status === 0 && /25 typed/.test(healthy.stdout),
+        'status=' + healthy.status + ' ' + healthy.stdout.slice(0, 300));
+
     const blindHits = withMutant(
         'const model = /"skill"\\s*:\\s*"([a-zA-Z0-9:_-]+)"/g;',
         'const model = /"skiII"\\s*:\\s*"([a-zA-Z0-9:_-]+)"/g;',
-        (f) => run(f, ['--days', '2']),
+        (f) => run(f, ['--dir', fixture, '--days', '3650']),
     );
+    fs.rmSync(fixture, { recursive: true, force: true });
     check('renaming the invocation field makes the probe declare itself BROKEN',
         blindHits.status === 2 || /PROBE BROKEN/.test(blindHits.stderr + blindHits.stdout),
         'status=' + blindHits.status + ' stderr=' + blindHits.stderr.slice(0, 200));
