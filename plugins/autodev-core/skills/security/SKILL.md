@@ -1,7 +1,7 @@
 ---
 name: security
-description: "Find the security defect in code before it ships: secrets in source or migrations, Supabase RLS and access policies, session and sign-out scope, a user id taken from a request body or header instead of the verified session, and unvalidated external input."
-when_to_use: "Use when reviewing or being asked whether code is correct where that code touches auth, sessions, sign-out, permissions, payments, personal data, secrets or a database policy. Use before a deploy that touches any of those, and on the words security, security scan or security audit."
+description: "Find the security defect in code before it ships: secrets in source or in schema files, Supabase RLS and access policies, session and sign-out scope, a user id read from the payload or a header instead of the verified session, and unvalidated external input."
+when_to_use: "Use when reviewing or being asked whether code is correct where that code touches auth, sessions, sign-out, permissions, payments, personal data, secrets or an access policy. Use before a deploy that touches any of those, and on the words security, security scan or security audit."
 allowed-tools: Bash, Read, Grep, Glob, Task
 model: opus
 user-invocable: true
