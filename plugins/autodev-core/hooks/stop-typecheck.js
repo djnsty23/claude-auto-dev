@@ -41,11 +41,38 @@ function trimmed(output, limit) {
     return lines.slice(0, limit).join('\n') + `\n... and ${lines.length - limit} more lines`;
 }
 
+// 25 s each, so typecheck and lint back to back fit one 60 s hook budget.
+const RUN_TIMEOUT_MS = 25000;
+
+/**
+ * Run a check quietly. Returns null when it passed, otherwise
+ * `{ timedOut, out }`.
+ *
+ * A TIMEOUT IS NOT A FAILURE, and conflating the two produced a false red that
+ * fired on the first edit of a session and passed on every edit after.
+ *
+ * execSync SIGTERMs the child when the budget runs out and then throws with
+ * whatever was buffered. For `npm run <script>` that buffer is the two banner
+ * lines npm prints before the tool underneath has produced anything:
+ *
+ *     > proj@0.1.0 lint
+ *     > eslint
+ *
+ * The previous version returned that banner, and both callers treated any
+ * non-empty string as a failure. So the hook blocked with
+ * `[LINT FAILED] Fix these before finishing:` above output containing no error.
+ *
+ * Measured 2026-09-20 in a Next app: COLD eslint over the tree exceeded 25 s,
+ * warm took 13 s. Cold is exactly the state of the first edit of a session, so
+ * the bug reads as flakiness rather than as a bug.
+ *
+ * `e.status` is null and `e.signal` is 'SIGTERM' on a timeout kill, so status
+ * alone cannot separate the two cases. Check killed/signal first.
+ */
 function runQuiet(cmd) {
     try {
         execSync(cmd, {
-            // 25 s each, so typecheck and lint back to back fit one 60 s hook budget.
-            timeout: 25000,
+            timeout: RUN_TIMEOUT_MS,
             stdio: ['ignore', 'pipe', 'pipe'],
             // execSync routes through cmd.exe on Windows and would flash a console
             // window under the desktop app without this (reported 2026-08-17).
@@ -53,8 +80,12 @@ function runQuiet(cmd) {
         });
         return null;
     } catch (e) {
+        if (e.killed || e.signal || e.code === 'ETIMEDOUT') return { timedOut: true, out: '' };
         const out = (e.stdout ? e.stdout.toString() : '') + (e.stderr ? e.stderr.toString() : '');
-        return out.trim() ? out : `(exit ${e.status === undefined ? 'unknown' : e.status}, no output)`;
+        return {
+            timedOut: false,
+            out: out.trim() ? out : `(exit ${e.status === undefined ? 'unknown' : e.status}, no output)`,
+        };
     }
 }
 
@@ -81,9 +112,14 @@ try {
                fs.existsSync('bun.lockb') ? 'bun' : 'npm';
 
     const findings = [];
+    // A check that ran out of budget is INCONCLUSIVE, not passing and not
+    // failing. It never blocks, because blocking on it is the bug above, and it
+    // is never silent either, because a check nobody ran must not read as green.
+    const skipped = [];
     if (scripts.typecheck) {
-        const out = runQuiet(`${pm} run typecheck`);
-        if (out) findings.push('[TYPECHECK FAILED] Fix these errors before finishing:\n' + trimmed(out, TYPECHECK_LINES));
+        const r = runQuiet(`${pm} run typecheck`);
+        if (r && r.timedOut) skipped.push('typecheck');
+        else if (r) findings.push('[TYPECHECK FAILED] Fix these errors before finishing:\n' + trimmed(r.out, TYPECHECK_LINES));
     }
 
     // Biome preferred, ESLint fallback, nothing when neither is configured:
@@ -96,11 +132,21 @@ try {
     else if (hasBiome) lintCmd = 'npx biome check .';
     else if (hasEslint) lintCmd = `${pm} run lint || npx eslint .`;
     if (lintCmd) {
-        const out = runQuiet(lintCmd);
-        if (out) findings.push('[LINT FAILED] Fix these before finishing:\n' + trimmed(out, LINT_LINES));
+        const r = runQuiet(lintCmd);
+        if (r && r.timedOut) skipped.push('lint');
+        else if (r) findings.push('[LINT FAILED] Fix these before finishing:\n' + trimmed(r.out, LINT_LINES));
     }
 
-    if (findings.length === 0) process.exit(0);
+    if (findings.length === 0) {
+        if (skipped.length) {
+            console.log(JSON.stringify({
+                systemMessage:
+                    `[Typecheck] ${skipped.join(' and ')} did not finish within ` +
+                    `${RUN_TIMEOUT_MS / 1000}s and was not checked. Run it yourself before claiming green.`,
+            }));
+        }
+        process.exit(0);
+    }
 
     const edited = `${files.length} file(s) edited this response: ${files.map((f) => path.basename(f)).join(', ')}`;
     const reason = findings.join('\n\n') + '\n\n' + edited;
