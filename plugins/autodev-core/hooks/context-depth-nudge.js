@@ -196,10 +196,14 @@ const forModel = 'CONTEXT DEPTH IS ' + depth.toLocaleString('en-US') + ' TOKENS,
     + 'changes made, each with the command that verified it; failed attempts, each with '
     + 'why it failed, so the next session does not try them again; next steps. '
     + path.join(__dirname, '..', 'scripts', 'session-exit.js') + ' fills the measured '
-    + 'fields and keeps what you write in the others. Say so to whoever is coordinating, '
-    + 'and stop. Do not start a new piece of work at this depth.';
+    + 'fields and keeps what you write in the others. Then call spawn_task for a '
+    + 'continuation chip BEFORE you go quiet: a fresh worktree does not contain the '
+    + 'gitignored handoff, so its prompt names RESUME.md by ABSOLUTE path, repeats the '
+    + 'first move and the traps inline, and ends with this same rule so the chain '
+    + 'continues. Say so to whoever is coordinating, and stop. Do not start a new piece '
+    + 'of work at this depth.';
 const forOperator = 'Context depth ' + k(depth) + ' tokens, past the ' + k(threshold)
-    + ' restart line (rule 14c). Let this step finish, then start a fresh session.';
+    + ' restart line (rule 14c). This step finishes, then a continuation chip is spawned.';
 
 console.log(JSON.stringify({
     systemMessage: forOperator,
