@@ -1,0 +1,104 @@
+# AFTER: tooling/test-check-suites-can-fail.js against the changed sweep
+# code revision: 3ce459cc647eacbf447e20f42ef8c6b3d0814f99 plus the uncommitted change this evidence is committed with
+# command: node tooling/test-check-suites-can-fail.js    exit: 0
+# taken: 2026-09-21T22:50:48Z, win32, node v24.15.0
+
+PASS  control: the fixture is its own committed, clean repository
+PASS  control: validate.js is verified able to fail
+PASS  control: the planted green suite is verified able to fail
+PASS  control: the summary counts both rows as verified
+PASS  control: the sweep exits 0
+PASS  control: no child output is printed, not even the red a stubbed subject provokes
+PASS  red: the fixture is its own committed, clean repository
+PASS  red: the suite row is exactly the RED row it always was
+PASS  red: the validate.js row is exactly the RED row it always was
+PASS  red: the summary still counts both REDs as not verified
+PASS  red: the sweep exits 1, a finding, not 2
+PASS  red: no mid-sweep conflict was raised by reporting the evidence
+PASS  red: the suite's exit status is reported
+PASS  red: validate.js's exit status is reported
+PASS  red: the last stdout lines and every stderr line of both children reach the output
+PASS  red: stdout is bounded to its last 40 lines
+PASS  red: one 20,000-character line is clipped rather than printed whole
+PASS  red: the green suite in the same run prints nothing extra
+
+18 passed, 0 failed
+
+# What the sweep itself printed on the RED fixture (stdout, then stderr, as the suite captures them).
+# In a terminal the [RED] blocks appear on stderr at the moment each baseline fails, before the table.
+
+=== SWEEP OUTPUT, RED FIXTURE, exit 1
+
+Can each suite fail?
+
+  ✗ validate.js                    RED       already failing
+  ✓ test-planted-green.js          ok        
+  ✗ test-planted-red.js            RED       already failing — fix it before trusting this result
+
+3 suite(s) · 1 verified able to fail · 2 NOT verified · sweep worktree clean, source tree refs unmoved
+
+
+  [RED] validate (baseline) exited 1. Its own last output, so this red can be read from this run:
+    stdout: nothing written
+    stderr, 2 line(s):
+      | V-RED-ERR-1.
+      | V-RED-ERR-2.
+  [RED] test-planted-red.js (baseline) exited 3. Its own last output, so this red can be read from this run:
+    stdout, last 40 of 50 line(s):
+      | R-OUT-011.
+      | R-OUT-012.
+      | R-OUT-013.
+      | R-OUT-014.
+      | R-OUT-015.
+      | R-OUT-016.
+      | R-OUT-017.
+      | R-OUT-018.
+      | R-OUT-019.
+      | R-OUT-020.
+      | R-OUT-021.
+      | R-OUT-022.
+      | R-OUT-023.
+      | R-OUT-024.
+      | R-OUT-025.
+      | R-OUT-026.
+      | R-OUT-027.
+      | R-OUT-028.
+      | R-OUT-029.
+      | R-OUT-030.
+      | R-OUT-031.
+      | R-OUT-032.
+      | R-OUT-033.
+      | R-OUT-034.
+      | R-OUT-035.
+      | R-OUT-036.
+      | R-OUT-037.
+      | R-OUT-038.
+      | R-OUT-039.
+      | R-OUT-040.
+      | R-OUT-041.
+      | R-OUT-042.
+      | R-OUT-043.
+      | R-OUT-044.
+      | R-OUT-045.
+      | R-OUT-046.
+      | R-OUT-047.
+      | R-OUT-048.
+      | R-OUT-049.
+      | R-OUT-050.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    stderr, 3 line(s):
+      | R-ERR-1.
+      | R-ERR-2.
+      | R-ERR-3.
+
+=== END
+
+# Mutations of the changed sweep, each run once, and the assertions that went red (predicted before running).
+# M1 drop the call in the suite loop      -> red: the suite's exit status is reported; red: the last stdout lines ... reach the output
+# M2 drop the call in checkValidator      -> red: validate.js's exit status is reported; red: the last stdout lines ... reach the output
+# M3 RED_TAIL_LINES 40 -> 1000             -> red: stdout is bounded to its last 40 lines
+# M4 RED_LINE_CHARS 400 -> Infinity        -> red: one 20,000-character line is clipped rather than printed whole
+# M5 also report stub-killed runs         -> control: no child output is printed ...; red: the green suite ... prints nothing extra
+# M6 raise the evidence as a conflict()   -> red: the sweep exits 1, a finding, not 2; red: no mid-sweep conflict was raised ...
+# M7 report stdout only                  -> red: the last stdout lines and every stderr line ... reach the output
+# M0 check:suites' own STUB on the sweep  -> exit 1, 10 of 18 assertions red
+# Every mutation turned red exactly its predicted assertions and no others. Unmutated: 18 passed, 0 failed.
