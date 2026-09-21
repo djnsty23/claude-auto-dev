@@ -105,9 +105,9 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 136,636 | 21 of 21 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 21,766 | 21 of 21 |
-| B′ same, but dated LINES instead of paragraphs | 14,828 | 1 of 21 |
+| A  full body | 136,855 | 21 of 21 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 21,985 | 21 of 21 |
+| B′ same, but dated LINES instead of paragraphs | 15,047 | 1 of 21 |
 | C  description only | 7,069 | 0 of 21 |
 
 ### rule-ab-testing
@@ -413,7 +413,10 @@ Full text: `plugins/autodev-core/skills/rule-thumb-first/SKILL.md`
 What counts as done for each kind of change: the required verification per task type, and the cross-cutting checks that apply to every task. Load before marking any task complete.
 
 A task is not done because the code was written. It is done when the check for
-its type has passed.
+its type has passed. When a Bash command may have edited tracked files
+indirectly and the changed paths matter, run `git diff --name-only -- <scoped path>`
+after it; Bash stdout and edit-diff metadata may not show those paths to the
+agent.
 
 | Task | Required before done |
 |------|----------------------|

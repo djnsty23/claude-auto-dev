@@ -11,7 +11,10 @@ paths:
 # Verification Rules
 
 A task is not done because the code was written. It is done when the check for
-its type has passed.
+its type has passed. When a Bash command may have edited tracked files
+indirectly and the changed paths matter, run `git diff --name-only -- <scoped path>`
+after it; Bash stdout and edit-diff metadata may not show those paths to the
+agent.
 
 > **Type/build checks alone miss behavior that runs but is wrong.** Across
 > 3,127 fix commits in three production repos, runtime crashes were a small
