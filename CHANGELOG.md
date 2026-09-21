@@ -1,5 +1,15 @@
 # Changelog
 
+## [8.171.0]
+
+### A session at the context line spawns its own continuation (Andy, 2026-09-21)
+
+- context-depth-nudge now orders a `spawn_task` continuation chip before it says
+  stop. The chip's prompt names RESUME.md by absolute path, because a fresh
+  worktree does not contain the gitignored handoff, repeats the first move and
+  the traps inline, and ends with the same rule so the chain continues. Four new
+  checks pin the order; the old text turns exactly those four red.
+
 ## [8.170.0]
 
 ### Guards for unattended, cross-account operation (#270)
