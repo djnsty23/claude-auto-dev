@@ -18,6 +18,10 @@ The old rule excluded all creator replies, same-author repeats and several ordin
 
 The collector now marks any partial source as an incomplete run. The findings JSON, Markdown and HTML expose exact source-health counts and failure reasons. A legacy manifest without source rows shows that detail is unavailable.
 
+## Windows gate gap
+
+The full repository gate exposed a separate harness issue: the skill PRD command probe selected Windows `bash.exe`, which launched WSL without Node, then hit `EPERM` deleting its temporary fixture. On Windows the probe now executes the exact JavaScript payload of supported `node -e` commands with the current Node binary and refuses unknown command shapes. Cleanup retries bounded transient file locks. The gate's self-test and the real command probe both passed after this repair. This is execution coverage for the harness, not evidence for any marketing claim.
+
 ## Reuse in a future marketing stack
 
 Retain the harness contracts: source ID and canonical URL, publication and collection times, authority and category, source status and error, raw item count, claim-cluster ID, transcript kind, comment lane and exclusion reason, and an experiment verdict tied to a dated business-outcome denominator. Keep popularity and comment sentiment separate from qualified leads, incremental sales and contribution margin. Source candidates remain proposals until provenance and outcome checks pass.
