@@ -83,15 +83,50 @@ async function unit() {
   ].map((row, index) => subject.normalizeComment(row, 'fixture', index));
   const filtered = subject.filterCommentFeedback(commentFixture);
   check('comment filter removes only independently pinned high-confidence patterns',
-    filtered.retained.length === 5 && filtered.excluded.length === 6
+    filtered.retained.length === 6 && filtered.excluded.length === 5
       && filtered.reasons['off-platform-promotion'] === 1
       && filtered.reasons['engagement-manipulation'] === 1
       && filtered.reasons['multi-author-duplicate'] === 3
-      && filtered.reasons['creator-response'] === 1);
+      && filtered.retained.some((row) => row.id === 'creator-1'));
   check('short ordinary praise is retained rather than guessed to be a bot',
     filtered.retained.filter((row) => row.text === 'Great video').length === 3);
   check('ordinary discussion of an off-platform channel is not mislabeled as promotion',
     filtered.retained.some((row) => row.id === 'real-2'));
+
+  const strictCases = [
+    ['creator-help', 'The report is under Analytics; use the date selector first.', true, false],
+    ['creator-resource', 'Download the worksheet at https://example.com/worksheet', true, false],
+    ['creator-promo', 'Book a FREE tracking audit at https://example.com/audit', true, true],
+    ['engagement', 'Subscribe for subscribe and check out my channel', false, true],
+    ['contact-bait', 'Contact me on Telegram for guaranteed results', false, true],
+    ...['exact-a', 'exact-b', 'exact-c'].map((id) =>
+      [id, 'Amazing guaranteed system that changed my financial life forever', false, true]),
+    ['near-a', 'The tracking setup made sense; the attribution caveat was useful.', false, false],
+    ['near-b', 'The tracking setup made sense, the attribution caveat was useful.', false, false],
+    ['near-c', 'The tracking setup made sense: the attribution caveat was useful.', false, false],
+    ['repeat-a', 'Please explain how to choose a longer attribution window.', false, false],
+    ['repeat-b', 'Please explain how to choose a longer attribution window.', false, false],
+    ['finance-discussion', 'My investment expert disagrees with that payback rule.', false, false],
+    ['whatsapp-discussion', 'Our leads go to a WhatsApp business account, so tracking differs.', false, false],
+    ...['praise-a', 'praise-b', 'praise-c'].map((id) => [id, 'Great video', false, false]),
+  ];
+  const strictComments = strictCases.map(([id, text, creator], index) =>
+    subject.normalizeComment({
+      id, text, author_id: id.startsWith('repeat') ? 'same-author' : id, author_is_uploader: creator,
+    }, 'fixture', index));
+  const strictFiltered = subject.filterCommentFeedback(strictComments);
+  const excludedIds = new Set(strictFiltered.excluded.map((row) => row.id));
+  check('conservative filter matches all 18 labeled edge cases',
+    strictCases.every(([id, , , shouldExclude]) => excludedIds.has(id) === shouldExclude)
+      && strictFiltered.retained.length === 12 && strictFiltered.excluded.length === 6);
+  check('creator promotion, contact bait, engagement manipulation and exact repeats have separate counts',
+    strictFiltered.reasons['creator-promotion'] === 1
+      && strictFiltered.reasons['off-platform-promotion'] === 1
+      && strictFiltered.reasons['engagement-manipulation'] === 1
+      && strictFiltered.reasons['multi-author-duplicate'] === 3);
+  check('same-author repeats and near-exact discussion remain available for theme review',
+    ['near-a', 'near-b', 'near-c', 'repeat-a', 'repeat-b', 'finance-discussion']
+      .every((id) => strictFiltered.retained.some((row) => row.id === id)));
 
   const apiCalls = [];
   const apiComments = await subject.discoverCommentsWithApi('MARKETVID01', 'test-key', 20, async (url) => {
@@ -198,6 +233,7 @@ function endToEnd() {
     { id: 'comment-2', text: 'Can you show the server-side version?', author_id: 'viewer-2', lane: 'recent' },
     { id: 'comment-3', text: 'Contact me on Telegram for guaranteed profit.', author_id: 'spam-1', lane: 'recent' },
     { id: 'comment-4', text: 'The template is linked above.', author_id: 'creator', author_is_uploader: true, lane: 'top' },
+    { id: 'comment-5', text: 'Book a free audit at https://example.com/audit', author_id: 'creator', author_is_uploader: true, lane: 'recent' },
   ]));
 
   const result = spawnSync(process.execPath, [SCRIPT,
@@ -214,7 +250,7 @@ function endToEnd() {
   check('manifest records the profile and cross-footed population',
     manifest.run.profile === 'marketing-fixture' && manifest.population.official_items_seen === 1
       && manifest.population.youtube_videos_seen === 2 && manifest.population.items_requiring_review === 3
-      && manifest.population.comments_fetched === 4 && manifest.population.comments_retained === 2
+      && manifest.population.comments_fetched === 5 && manifest.population.comments_retained === 3
       && manifest.population.comments_excluded === 2
       && manifest.population.sources_by_authority_configured.primary === 1
       && manifest.population.sources_by_authority_configured['practitioner-audience'] === 1
@@ -222,9 +258,10 @@ function endToEnd() {
   const commentVideo = manifest.items.find((item) => item.id === 'MARKETVID01');
   check('manifest points to an anonymized, cross-footed local comment sample',
     commentVideo.comments.status === 'ok' && fs.existsSync(commentVideo.comments.path)
-      && commentVideo.comments.distinct_retained_authors === 2
+      && commentVideo.comments.distinct_retained_authors === 3
       && commentVideo.comments.exclusion_reasons['off-platform-promotion'] === 1
-      && commentVideo.comments.exclusion_reasons['creator-response'] === 1);
+      && commentVideo.comments.exclusion_reasons['creator-promotion'] === 1
+      && commentVideo.comments.filter_version === 2);
   check('profile terms control balanced video ranking in the real CLI',
     manifest.ranking_variants.balanced[0] === 'MARKETVID01');
   const reviewed = spawnSync(process.execPath, [SCRIPT, '--mark-reviewed', expectedOutput], {
@@ -233,6 +270,20 @@ function endToEnd() {
   check('mark-reviewed follows the manifest state directory without another flag',
     reviewed.status === 0 && fs.existsSync(path.join(stateDir, 'last-reviewed.json')),
     reviewed.stderr || reviewed.stdout);
+  const partialOutput = path.join(runDir, '.claude', 'reports', 'partial-marketing-manifest.json');
+  const partialRun = spawnSync(process.execPath, [SCRIPT,
+    '--config', configFile, '--fixture-dir', fixture, '--state-dir', stateDir,
+    '--days', '14', '--max-videos', '5', '--max-transcripts', '1',
+    '--max-comment-videos', '2', '--output', partialOutput], {
+    cwd: runDir, encoding: 'utf8', env: Object.assign({}, process.env, { YOUTUBE_API_KEY: '' }),
+  });
+  const partialManifest = fs.existsSync(partialOutput) ? read(partialOutput) : null;
+  check('unavailable comment sample makes the exact manifest incomplete',
+    partialRun.status === 0 && partialManifest
+      && partialManifest.population.sources_partial === 1
+      && partialManifest.run.complete === false
+      && partialManifest.sources.find((source) => source.id === 'youtube').status === 'partial',
+    partialRun.stderr || partialRun.stdout);
 }
 
 (async () => {

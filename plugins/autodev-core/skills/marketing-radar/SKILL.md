@@ -49,8 +49,10 @@ unknown. Never copy a full transcript into a report or repository.
 When `comments.status` is `ok`, read the recorded local comments path. It contains
 top and recent samples with author identifiers pseudonymized. Report fetched,
 retained, excluded and distinct-author populations plus every exclusion reason.
-The filter removes only high-confidence repetitive, engagement-manipulation and
-off-platform promotional patterns. Call these `excluded bot/spam-like comments`,
+The filter removes only high-confidence creator promotion, engagement manipulation,
+explicit off-platform contact bait and exact text repeated by three distinct authors.
+Ordinary creator help, same-author repeats and discussion of messaging channels stay
+available for review. Call the exclusions `excluded bot/spam-like comments`,
 not verified bots: public metadata cannot establish that every retained account
 is human or every excluded account is automated.
 
@@ -68,7 +70,9 @@ Read the adjacent `marketing-radar-findings-latest.html` dashboard before
 selecting claims. It clusters repeated coverage into underlying claims and keeps
 the independent-source count separate. Its source utility score is a shrunk
 history of executed outcomes, not proof, reach or popularity; keep untested
-sources eligible for exploration.
+sources eligible for exploration. Read Source Health there too: failed or partial
+sources and zero-yield sources are separate populations. A partial source means the
+run is incomplete even if every other source succeeded.
 
 ## 2. Build the claim ledger
 
