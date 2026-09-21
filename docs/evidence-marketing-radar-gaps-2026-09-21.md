@@ -20,7 +20,7 @@ The collector now marks any partial source as an incomplete run. The findings JS
 
 ## Windows gate gap
 
-The full repository gate exposed a separate harness issue: the skill PRD command probe selected Windows `bash.exe`, which launched WSL without Node, then hit `EPERM` deleting its temporary fixture. On Windows the probe now executes the exact JavaScript payload of supported `node -e` commands with the current Node binary and refuses unknown command shapes. Cleanup retries bounded transient file locks. The gate's self-test and the real command probe both passed after this repair. This is execution coverage for the harness, not evidence for any marketing claim.
+The full repository gate exposed two Windows harness issues. The skill PRD command probe selected Windows `bash.exe`, which launched WSL without Node, then hit `EPERM` deleting its temporary fixture. On Windows the probe now executes the exact JavaScript payload of supported `node -e` commands with the current Node binary and refuses unknown command shapes. Cleanup retries bounded transient file locks. The hook fixture also called `sh` from PATH although Git for Windows kept its working `sh.exe` outside PATH; it now resolves that shell from `git --exec-path`. The PRD probe's self-test and real command probe passed after repair. These are execution-coverage fixes, not evidence for any marketing claim.
 
 ## Reuse in a future marketing stack
 

@@ -22,6 +22,17 @@ const ROOT = path.resolve(__dirname, '..');
 const COMMIT_MSG = path.join(ROOT, 'tooling', 'githooks', 'commit-msg');
 const PRE_PUSH = path.join(ROOT, 'tooling', 'githooks', 'pre-push');
 const CHECKER = path.join(ROOT, 'tooling', 'check-no-private-names.js');
+const SH = (() => {
+    if (process.platform !== 'win32') return 'sh';
+    // `sh` may be absent from PATH even when Git for Windows runs these hooks.
+    // Resolve the shell from the same Git installation used by this fixture.
+    const gitRoot = path.resolve(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), '..', '..', '..');
+    for (const relative of ['bin/sh.exe', 'usr/bin/sh.exe']) {
+        const candidate = path.join(gitRoot, relative);
+        if (fs.existsSync(candidate)) return candidate;
+    }
+    throw new Error('Git for Windows sh.exe was not found beside git --exec-path');
+})();
 
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'githooks-test-')));
 const cases = [];
@@ -59,7 +70,7 @@ fs.writeFileSync(
 function runCommitMsg(body, cwd = sentinelRepo) {
     const f = path.join(TMP, 'msg-' + Math.abs(body.length * 31 + body.charCodeAt(0)) + '.txt');
     fs.writeFileSync(f, body);
-    return spawnSync('sh', [COMMIT_MSG, f], { cwd, encoding: 'utf8' }).status;
+    return spawnSync(SH, [COMMIT_MSG, f], { cwd, encoding: 'utf8' }).status;
 }
 
 check('both hooks exist and are executable', [COMMIT_MSG, PRE_PUSH].every((f) => {
