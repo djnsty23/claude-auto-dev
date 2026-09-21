@@ -1,7 +1,7 @@
 ---
 name: commit
-description: Standardized git commit, push, and PR creation workflow.
-when_to_use: "Invoked when the user says \"commit\", \"push\", \"commit-push-pr\"."
+description: "Commit, push and open a pull request to this repo standard: a conventional subject, a body saying why the change is needed, the message passed by file rather than inline, no co-author trailer, explicit paths staged rather than everything, and the gate run before the push."
+when_to_use: "Use for any commit, push or pull request, including a single staged file or a one-line change, and whenever asked to write a commit message, and on the words commit, push or commit-push-pr."
 allowed-tools: Bash, Read, Glob, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
