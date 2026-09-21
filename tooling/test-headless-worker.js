@@ -457,21 +457,41 @@ try {
     {
         const dir = path.join(ROOT, 'ten rapid');
         const ledger = path.join(dir, 'ledger.json');
+        const pin = ledger + '.pin';
         const ident = (file) => { try { const s = fs.statSync(file, { bigint: true }); return `${s.dev}:${s.ino}`; } catch { return null; } };
         let ok = true;
         let identityChanged = 0;
         let inoUnsupported = false;
+        let pinUnsupported = null;
         const details = [];
         const runs = [];
         for (let i = 0; i < 10; i++) {
+            // PIN THE OLD FILE BEFORE THE START, or the comparison below reads
+            // a reused inode number as "not replaced". A start writes the
+            // ledger twice (reserve, then fill in the pid), and each write
+            // renames a fresh .tmp over it. The first rename frees the old
+            // inode, and ext4 hands a just-freed number to the next file it
+            // creates, so the second .tmp can be born with the number the
+            // ledger started with. [measured 2026-09-21] every ubuntu CI run
+            // from 94a32b3 to 43cfd21 failed here, 9 of 10 (once 8), while
+            // windows and macos passed on the same commits. A second hard link
+            // keeps the old inode allocated, so its number cannot come back
+            // while we compare. A truncating write is still caught: it writes
+            // through the very inode the pin holds, so the two stay equal.
             const before = ident(ledger);
+            let pinned = false;
+            if (before) {
+                try { fs.linkSync(ledger, pin); pinned = true; } catch (e) { pinUnsupported = e.code || e.message; }
+            }
             const code = `RAPID-${i}`;
             const r = hw(['start', '--code', code, '--prompt-file', PROMPT, '--log', path.join(dir, code + '.log'), '--claude-bin', FAKE, '--ledger', ledger]);
             const pid = r.json && r.json.ok ? r.json.value.supervisorPid : null;
             if (pid) { supervisors.push(pid); runs.push({ log: path.join(dir, code + '.log'), pid }); }
             const after = ident(ledger);
+            const old = pinned ? ident(pin) : before;
+            if (pinned) fs.unlinkSync(pin);
             if (after && /:0$/.test(after)) inoUnsupported = true;
-            if (before !== after) identityChanged++;
+            if (old !== after) identityChanged++;
             let count = -1;
             try { count = JSON.parse(read(ledger)).records.length; } catch { count = -1; }
             const tmpLeft = fs.existsSync(ledger + '.tmp');
@@ -480,6 +500,7 @@ try {
         }
         check('17. after each of ten rapid starts no .tmp and no .lock remain and the ledger parses with the expected count', ok, details.join(' | ') || `10 starts, ${JSON.parse(read(ledger)).records.length} records`);
         if (inoUnsupported) indeterminateCase('17. the ledger file was REPLACED on every write', 'this filesystem reports inode 0, so file identity cannot be observed');
+        else if (pinUnsupported) indeterminateCase('17. the ledger file was REPLACED on every write', `a hard link to pin the old inode failed (${pinUnsupported}), and without one a reused inode number reads as no change`);
         else check('17. the ledger file was REPLACED on every write (its identity changed), never truncated in place', identityChanged === 10, `${identityChanged} of 10 writes changed the file identity`);
         for (const run of runs) waitForEnd(run.log, run.pid);
 
