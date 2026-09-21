@@ -174,6 +174,19 @@ function spoke(r) {
             /changes made, each with the command that verified it/.test(lower), ctx.slice(0, 400));
         check('  and it names the script that fills the measured fields',
             /session-exit\.js fills the measured fields/.test(ctx), ctx.slice(0, 400));
+        // [stated 2026-09-21] Andy: a session that stops at the line spawns its own
+        // continuation chip. The hook is the enforcement point, so a hook that only
+        // says "stop" is obeyed over the rule and the chain breaks.
+        const chipAt = ctx.indexOf('spawn_task');
+        const stopAt = ctx.indexOf('and stop');
+        check('the model line orders a spawn_task continuation chip',
+            chipAt !== -1, ctx.slice(0, 400));
+        check('  before it says stop', chipAt !== -1 && stopAt !== -1 && chipAt < stopAt,
+            JSON.stringify({ chipAt, stopAt }));
+        check('  naming the handoff by ABSOLUTE path, since a fresh worktree lacks it',
+            /RESUME\.md by ABSOLUTE path/.test(ctx), ctx.slice(0, 600));
+        check('  and ending with the rule so the chain continues',
+            /ends with this same rule/.test(ctx), ctx.slice(0, 600));
         check('hookEventName is Stop', j.hookSpecificOutput.hookEventName === 'Stop');
         check('no decision key: it cannot fight stop-auto-check', !('decision' in j), Object.keys(j).join(','));
         check('the operator line is short and carries the depth',
