@@ -102,7 +102,7 @@ try {
     try {
         data = JSON.parse(input);
     } catch {
-        const m = /"tool_name"\s*:\s*"([A-Za-z]+)"/.exec(input);
+        const m = input.match(/"tool_name"\s*:\s*"([A-Za-z]+)"/);
         failTool = m ? m[1] : '';
         if (failOpen()) process.exit(0);
         // Can't parse input and it may be a write — block to be safe (fail-closed)

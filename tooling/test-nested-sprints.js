@@ -87,8 +87,10 @@ const STORIES = {
     check('nested shape: does NOT approve a stop with 4 stories still actionable',
         second.decision?.decision === 'block');
 
+    // The hook claims the plain flag by renaming it to auto-active.<session_id>
+    // (scripts/auto-flag.js), so "auto mode still on" is the keyed file.
     check('nested shape: does NOT terminate auto mode while work remains',
-        fs.existsSync(path.join(dir, '.claude', 'auto-active')));
+        fs.existsSync(path.join(dir, '.claude', 'auto-active.sess')));
 }
 
 // ---- The count the hook SHOULD have produced, from the shared predicate. ----
