@@ -88,7 +88,18 @@ try {
     const iStep0 = prompt.indexOf('STEP 0'), iAdd = prompt.indexOf('worktree add'), iBody = prompt.indexOf('MISSION. Add a guide.'), iReturn = prompt.indexOf('WHEN DONE OR BLOCKED');
     check('prompt opens with STEP 0', iStep0 === 0, iStep0);
     check('worktree add precedes the brief body, which precedes the return line', iAdd > 0 && iAdd < iBody && iBody < iReturn, [iAdd, iBody, iReturn].join(','));
-    check('prompt names the return address', prompt.includes('report to coordinator-a1'), 'coordinator-a1');
+    check('prompt names the return address', prompt.includes('for coordinator-a1'), 'coordinator-a1');
+    // An unattended run has no SendMessage, so a prompt that told it to send
+    // one left a STEP 0 failure and every final report with nowhere to go.
+    const reportHome = path.join(home, '.claude', 'autodev', 'reports', 'worker-logo-guide', 'REPORT.md').replace(/\\/g, '/');
+    check('STEP 0 failure writes to the report file, not SendMessage',
+        /If STEP 0 fails[^\n]*write the failing command and its output to ([^,]+), then stop/.test(prompt)
+        && prompt.toLowerCase().includes(`output to ${reportHome.toLowerCase()}, then stop`), prompt.slice(0, 1200));
+    check('prompt never tells the run to use SendMessage', !/with SendMessage|send one report/i.test(prompt), (prompt.match(/.*SendMessage.*/g) || []).join(' | '));
+    check('the done line names the report file and the RESULT line shape',
+        prompt.toLowerCase().includes(`write one report to ${reportHome.toLowerCase()}`) && prompt.includes('RESULT logo-guide done|stopped|failed: <one line>'));
+    check('brief records the report path', ok.json && ok.json.value.record.report
+        && ok.json.value.record.report.replace(/\\/g, '/').toLowerCase() === reportHome.toLowerCase(), ok.json && ok.json.value.record.report);
     check('prompt contains no backslash (a shell reads it as an escape)', !prompt.includes('\\'));
     check('prompt tells the worker every later command starts with cd into the worktree', /Every later shell command starts with `cd "[^"]+" && `/.test(prompt), prompt.slice(0, 400));
     // [measured 2026-09-22] briefs that named no location put 12 worktrees and
