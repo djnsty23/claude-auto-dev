@@ -42,6 +42,31 @@ fallback turns a halt into slower progress. Drop the key if you would rather a
 sprint stop than continue on a different model, which is a reasonable preference
 when the work is cost-sensitive rather than time-sensitive.
 
+## `autoCompactWindow`
+
+The file sets `"autoCompactWindow": 320000`, another top-level key to merge on
+its own. It moves the auto-compaction window to 320k tokens, and compaction
+fires near the top of it. `CLAUDE_CODE_AUTO_COMPACT_WINDOW` does the same from
+the environment (see the [env var reference](https://code.claude.com/docs/en/env-vars.md)).
+
+The number is chosen against `autodev-core`'s context-depth Stop hook, whose
+soft line defaults to 250k (`AUTODEV_CONTEXT_SOFT_LINE`). At the soft line the
+hook holds the Stop once and tells the session to finish its unit of work and
+write its handoff with `session-exit.js`. Compaction cannot choose its moment,
+so without that line it can land mid-edit with nothing saved. The 70k between
+the two is room to finish the unit, and the session start after compaction
+points the session back at the handoff. With no window set, the hook orders a
+continuation chip instead, which needs a person to click it.
+
+Keep the window above the soft line, or compaction arrives before the handoff
+is written. Drop the key to keep the harness default.
+
+`[inferred 2026-09-22]` compaction at the configured window is documented but was
+not observed in a headless `-p` probe. Measure the Desktop app before relying on
+the exact point: sum `input_tokens`, `cache_read_input_tokens` and
+`cache_creation_input_tokens` per assistant row in the session transcript and
+find the drop.
+
 ## What changed from the pre-8.0 template
 
 The old `--full` install wrote a permission block straight into your global

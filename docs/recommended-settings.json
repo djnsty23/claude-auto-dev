@@ -95,5 +95,6 @@
   "thinkingEnabled": true,
   "fallbackModel": [
     "sonnet"
-  ]
+  ],
+  "autoCompactWindow": 320000
 }

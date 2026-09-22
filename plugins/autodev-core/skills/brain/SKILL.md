@@ -242,18 +242,34 @@ monitoring only after an authorized monitor is installed and verified.
 Both halves of this section's ending assume something above you. Neither is true
 in this seat, and each cost a measured outage on 2026-09-11.
 
-**Approaching the context limit, spawn a successor and hand over. Do not stop.**
-The instruction elsewhere in this workflow — finish the step, write the handoff,
-tell whoever is coordinating, and stop — is a no-op when the Brain IS the
-coordinator: there is nobody to tell and nobody to resume the work. A Brain that
-announces stopping without spawning a replacement leaves the fleet uncoordinated
-for as long as it takes a person to notice. One announced stopping about six
-times between 300k and 706k and never handed over, so its sessions kept working
-with no successor to integrate what they finished. Spawn the successor while you
-still have the context to brief it, hand it your address, your role record and
-your handoff file, then verify it has claimed `~/.claude/brain-role.json` before
-you go quiet. Handover is a remedy for CONTEXT DEPTH — it is not the answer to the
+**Approaching the context limit, compact in place. Do not stop, and do not spawn
+a successor.** The instruction elsewhere in this workflow (finish the step, write
+the handoff, tell whoever is coordinating, and stop) is a no-op when the Brain IS
+the coordinator: there is nobody to tell and nobody to resume the work. One Brain
+announced stopping about six times between 300k and 706k and never handed over,
+so its sessions kept working with nothing to integrate what they finished. The
+fix that followed was a successor spawned as a chip, and a chip needs a person to
+click it. `[measured 2026-09-22]` 23 Brains in 27 hours meant 22 hand-overs, each one
+waiting on a click.
+
+So the Brain keeps its seat and sheds the context instead. With an auto-compact
+window configured (`autoCompactWindow` in settings, recommended 320k in
+`docs/recommended-settings.json`), the context-depth Stop hook holds your Stop
+once at the 250k soft line. When it does, finish the unit you are in, refresh the
+handoff with `session-exit.js --out` at the path the hook names, re-point its
+START HERE, and end the turn. Compaction lands after the state is on disk, and
+the SessionStart that follows it names the handoff and the fleet ledger
+(`unattended-worker.js status`) to re-read. Keep your address and your role
+record: the session id survives a compaction, so `~/.claude/brain-role.json`
+stays claimed. Compaction is a remedy for CONTEXT DEPTH, not the answer to the
 next paragraph, and filing it as both is how that outage was first misdiagnosed.
+
+`[inferred 2026-09-22]` compaction at the configured window is documented and
+was not observed in a headless `-p` probe. Until a Desktop session is measured
+compacting there, check the depth after the handoff turn. If it keeps climbing
+past the window, the hook's reason falls back to a continuation chip, and that
+chip is the successor path: brief it with the handoff by absolute path, then
+verify it has claimed `~/.claude/brain-role.json` before you go quiet.
 
 **A self-clear does not shed context. Only a fresh session or a compaction
 does.** `[measured 2026-09-16]` One interactive Brain (claude-opus-5, bypass
@@ -273,13 +289,28 @@ in the session's transcript under `~/.claude/projects/`; re-measure the same
 way after a harness change before trusting a different result.
 
 So at the context line, do not reach for `mcp__ccd_session_mgmt__clear_session`
-expecting relief. Write and mirror the handoff, re-point its START HERE, get
-the successor started as a NEW session (a fresh session in the repo that types
-`brain`), verify it has claimed `~/.claude/brain-role.json`, then go quiet. If
-the clear is issued anyway, re-stamp `peer_name` in the role record afterwards,
-because `check-brain-role.js --json` reads `degraded` (dead peer) until then,
-and issue it only when nothing is inbound: a queued user message, peer message
-or task notification drops it.
+expecting relief. Write and mirror the handoff, re-point its START HERE, and let
+the compaction above shed the context. If the clear is issued anyway, re-stamp
+`peer_name` in the role record afterwards, because `check-brain-role.js --json`
+reads `degraded` (dead peer) until then, and issue it only when nothing is
+inbound: a queued user message, peer message or task notification drops it.
+
+**Dispatch workers with no click through `scripts/unattended-worker.js`.**
+`mcp__scheduled-tasks__run_scheduled_task` called from this interactive session
+starts a Desktop session in seconds and asks nobody (`[measured 2026-09-22]`
+4.3 s). The dispatch steps are the unattended bullet in "Choose a channel that
+actually starts work" above. Brief the worker knowing what that session cannot
+do:
+
+- It is unattended. No one answers a panel, and it runs on its brief alone.
+- It cannot receive `mcp__ccd_session_mgmt__send_message`, so a mid-run
+  correction never arrives. Put everything in the brief, and name a report file
+  as its return channel.
+- It cannot be cleared from outside, and it cannot call `run_scheduled_task`
+  itself, so a worker never dispatches a worker. Fan-out stays with you.
+- It starts in your origin checkout, and the tool takes no cwd. The STEP 0 that
+  `brief` writes (`git worktree add`, then `cd` on every command) is the only
+  thing keeping it out of the shared tree.
 
 **With an empty inbox, DRIVE. Fan the work out to background agents from this
 session.** Reporting and waiting for an inbound peer message is not coordination;
@@ -290,8 +321,9 @@ message to arrive first: rebasing stale PRs, sequencing a stack, re-measuring a
 board whose base has moved, chasing a blocked session. **A task chip is not this
 mechanism**: step 3 already rules a chip out for unattended dispatch, and an
 empty inbox overnight is that case exactly — one raised then sits unclicked
-until morning. Background agents started from your own session run without
-anyone clicking, and you keep coordinating while they do. A self-scheduled wake
+until morning. Background agents started from your own session, and unattended
+workers started with `unattended-worker.js`, run without anyone clicking, and
+you keep coordinating while they do. A self-scheduled wake
 is not it either: waking to an empty inbox and reporting again repeats the
 failure on a timer.
 
