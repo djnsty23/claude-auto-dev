@@ -111,12 +111,17 @@ function staleStories(ids, cwd) {
     } catch { return none; }
 }
 
+// Keyed on the SESSION, not the directory: scripts/auto-flag.js says why.
+const autoFlags = require(path.join(__dirname, '..', 'scripts', 'auto-flag.js'));
+
 try {
     // The project Claude is working in, not the shell that spawned the hook.
     let cwd = process.cwd();
+    let sid = 'no-session';
     try {
         const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
         if (payload && payload.cwd) cwd = payload.cwd;
+        sid = autoFlags.sidOf(payload);
 
         // Computed BEFORE any approve()/block() below, since most turns exit at
         // the first one. Wrapped separately: a queue note must never be the
@@ -162,9 +167,10 @@ try {
         } catch { /* a heartbeat must never strand a turn */ }
     } catch { /* no or malformed payload — fall back to process.cwd() */ }
 
-    const autoFlag = path.join(cwd, '.claude', 'auto-active');
-    const exitFlag = path.join(cwd, '.claude', 'auto-exit');
-    const idleMarker = path.join(cwd, '.claude', 'auto-idle-triggered');
+    // A plain flag still on disk (written through Bash, or before the
+    // PostToolUse claim existed) becomes this session's now.
+    autoFlags.claim(cwd, sid);
+    const { active: autoFlag, exit: exitFlag, idle: idleMarker } = autoFlags.pathsFor(cwd, sid);
     const prdPath = path.join(cwd, 'prd.json');
 
     // Stale flag cleanup (>2 hours old = crashed session)

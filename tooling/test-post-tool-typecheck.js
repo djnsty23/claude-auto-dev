@@ -140,6 +140,40 @@ const silent = (r) => r.status === 0 && r.stdout === '' && r.stderr === '';
     check('  control: typecheck=true records', pending(on) !== null);
 }
 
+// ------------------------------------------------ F16: claiming the auto flag
+//
+// The model writes .claude/auto-active; this hook renames it to this session's
+// key inside the same tool call, so a peer's Stop in the same directory can
+// never see it first. It runs even with typecheck switched off.
+{
+    const claimRun = (dir, file, env) => spawnSync(process.execPath, [HOOK], {
+        input: JSON.stringify({
+            tool_name: 'Write', hook_event_name: 'PostToolUse', session_id: 'sess-w', cwd: dir,
+            tool_input: { file_path: path.join(dir, '.claude', file), content: '{}' },
+        }),
+        encoding: 'utf8', cwd: dir, env: { ...process.env, ...env },
+    });
+    for (const [label, env] of [['typecheck on', {}], ['typecheck=false', { CLAUDE_PLUGIN_OPTION_TYPECHECK: 'false' }]]) {
+        const dir = project();
+        fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+        fs.writeFileSync(path.join(dir, '.claude', 'auto-active'), '{}');
+        const r = claimRun(dir, 'auto-active', env);
+        check(`F16 (${label}): a written auto-active is claimed for the writing session`,
+            fs.existsSync(path.join(dir, '.claude', 'auto-active.sess-w'))
+            && !fs.existsSync(path.join(dir, '.claude', 'auto-active')));
+        check(`  and the claim is silent`, r.status === 0 && (r.stdout || '') === '' && (r.stderr || '') === '');
+    }
+    const dir = project();
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', 'auto-exit'), '');
+    claimRun(dir, 'auto-exit', {});
+    check('F16: a written auto-exit is claimed too', fs.existsSync(path.join(dir, '.claude', 'auto-exit.sess-w')));
+    // Control: any other file under .claude is left exactly where it is.
+    fs.writeFileSync(path.join(dir, '.claude', 'notes'), 'x');
+    claimRun(dir, 'notes', {});
+    check('  control: an unrelated .claude file is not renamed', fs.existsSync(path.join(dir, '.claude', 'notes')));
+}
+
 // ---------------------------------------------------------------- report
 
 let pass = 0, fail = 0;

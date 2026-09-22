@@ -54,7 +54,12 @@ function main() {
     // record worth keeping. A failed turn in an ordinary session is noise; a
     // failed turn with auto-active on disk is a stalled sprint.
     let autoActive = false;
-    try { autoActive = fs.existsSync(path.join(cwd, '.claude', 'auto-active')); } catch { /* unreadable */ }
+    // THIS session's flag (scripts/auto-flag.js), or a plain one not yet claimed.
+    try {
+        const autoFlags = require(path.join(__dirname, '..', 'scripts', 'auto-flag.js'));
+        autoActive = autoFlags.isActive(cwd, autoFlags.sidOf(data))
+            || fs.existsSync(path.join(cwd, '.claude', 'auto-active'));
+    } catch { /* unreadable */ }
 
     const ts = new Date().toISOString();
     const record = {

@@ -100,7 +100,10 @@ process.stdin.on('end', () => {
         // Use payload.cwd (the project Claude is working in), not process.cwd()
         // which reflects the shell that spawned the hook.
         const projectCwd = (payload && payload.cwd) || process.cwd();
-        const autoActive = fs.existsSync(path.join(projectCwd, '.claude', 'auto-active'));
+        // THIS session's flag (scripts/auto-flag.js), or a plain one not yet claimed.
+        const autoFlags = require(path.join(__dirname, '..', 'scripts', 'auto-flag.js'));
+        const autoActive = autoFlags.isActive(projectCwd, autoFlags.sidOf(payload))
+            || fs.existsSync(path.join(projectCwd, '.claude', 'auto-active'));
 
         const suffix = imageCount > 1 ? 's' : '';
         const lead = imageCount > 1
