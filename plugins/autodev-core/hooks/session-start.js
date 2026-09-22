@@ -99,6 +99,33 @@ function readPayload() {
     }
 }
 
+/**
+ * The handoff a compacted session should re-read, or null. Candidates are
+ * `.claude/handoffs/*.md` and `RESUME.md` in the cwd. This session's own
+ * `RESUME-<first 8 of its id>.md`, the name context-depth-nudge.js gives it,
+ * wins over a newer file from another session in the same directory.
+ */
+function newestHandoff(dir, sessionId) {
+    const found = [];
+    const add = (file) => {
+        try {
+            const st = fs.statSync(file);
+            if (st.isFile()) found.push({ file, mtimeMs: st.mtimeMs });
+        } catch { /* absent */ }
+    };
+    const handoffs = path.join(dir, '.claude', 'handoffs');
+    let names = [];
+    try { names = fs.readdirSync(handoffs); } catch { /* no handoff directory */ }
+    for (const name of names) if (name.endsWith('.md')) add(path.join(handoffs, name));
+    add(path.join(dir, 'RESUME.md'));
+    if (found.length === 0) return null;
+    if (typeof sessionId === 'string' && sessionId) {
+        const own = found.find((h) => path.basename(h.file) === `RESUME-${sessionId.slice(0, 8)}.md`);
+        if (own) return own;
+    }
+    return found.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+}
+
 const payload = readPayload();
 const cwd = payload.cwd || process.cwd();
 
@@ -425,6 +452,33 @@ try {
             );
         }
     } catch { /* no brief, unreadable, or the script is absent — all mean "say nothing" */ }
+
+    // ---- After a compaction: point back at the handoff ----
+    //
+    // context-depth-nudge.js holds the Stop at the soft line so the session
+    // writes its handoff before auto-compaction lands. The compacted session
+    // keeps only a summary, so it has to be told the handoff exists. This is
+    // the delivered channel for that: post-compact.js prints plain stdout,
+    // which never reaches the model, while SessionStart with source "compact"
+    // carries additionalContext. No handoff on disk adds nothing.
+    //
+    // Only the PATH goes into the context, never the file's contents, and the
+    // path is flattened like any other value read from the working directory.
+    if (payload.source === 'compact') {
+        try {
+            const handoff = newestHandoff(cwd, payload.session_id);
+            if (handoff) {
+                const ageMin = Math.max(0, Math.round((Date.now() - handoff.mtimeMs) / 60000));
+                context.push(
+                    `Context was just compacted. Before continuing, re-read the handoff at `
+                    + `${stripUntrusted(handoff.file).slice(0, 300)} (written ${ageMin} min ago) and `
+                    + 'the fleet ledger (`node "' + path.join(PLUGIN_ROOT, 'scripts', 'unattended-worker.js')
+                    + '" status`). The summary above is lossy, and the handoff records the failed '
+                    + 'attempts and next steps it drops. Continue from its next steps.',
+                );
+            }
+        } catch { /* a handoff we cannot find is a handoff we do not mention */ }
+    }
 
     // NOTE: two things used to happen here and no longer do.
     //
