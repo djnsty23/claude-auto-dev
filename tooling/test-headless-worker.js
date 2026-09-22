@@ -703,6 +703,93 @@ try {
         check('23. the placement note precedes the headless note, which still ends the prompt',
             promptArg.indexOf('PLACEMENT:') > 0 && promptArg.indexOf('PLACEMENT:') < promptArg.indexOf(HEADLESS_NOTE) && promptArg.endsWith(HEADLESS_NOTE + '\n'));
     }
+    // ------------------------------------------------------------ 24. settle --lost
+    // `[measured 2026-09-22]` four records on one machine could never settle:
+    // a reboot killed their supervisors, so no log had a CLAUDE_EXIT line and
+    // plain settle refused not-exited forever. --lost settles such a record as
+    // result lost, and ONLY when it is provably not running.
+    {
+        const dir = path.join(ROOT, 'T24');
+        const ledger = path.join(dir, 'ledger.json');
+        const boot = Date.now() - os.uptime() * 1000;
+        const preBoot = new Date(boot - 3600 * 1000).toISOString();
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const deadPid = dead.pid;
+        const mk = (code, pid, startedAt, { logText = 'stream noise, no exit line\n', reportText = null, state = 'running', extra = {} } = {}) => {
+            const rec = { code, pid, startedAt, log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state, ...extra };
+            if (logText !== null) write(rec.log, logText);
+            if (reportText !== null) write(rec.report, reportText);
+            return rec;
+        };
+        const now = new Date().toISOString();
+        const records = [
+            mk('PREDEAD', deadPid, preBoot),
+            mk('PREALIVE', process.pid, preBoot),
+            mk('PREREPORT', deadPid, preBoot, { reportText: 'notes\nRESULT PREREPORT stopped: blocked before the reboot.\n' }),
+            mk('POSTALIVE', process.pid, now),
+            mk('POSTDEAD', deadPid, now),
+            mk('POSTNOPID', null, now, { state: 'starting' }),
+            mk('EXITED', deadPid, preBoot, { logText: 'noise\nCLAUDE_EXIT=0\n', reportText: 'RESULT EXITED done: it finished.\n' }),
+            mk('OLDLOST', deadPid, new Date(Date.now() - 9 * 24 * 3600 * 1000).toISOString(), { state: 'settled', extra: { result: 'lost', reason: 'old', settledAt: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString() } }),
+        ];
+        write(ledger, JSON.stringify({ version: 1, records }, null, 2) + '\n');
+        const recOf = (code) => JSON.parse(read(ledger)).records.find((r) => r.code === code) || null;
+        check('24. control: the dead pid came from an exited child and the pre-boot stamp precedes this boot',
+            classify(dead) === 'verdict' && Number.isInteger(deadPid) && Date.parse(preBoot) < boot, `pid ${deadPid}, boot ${new Date(boot).toISOString()}`);
+        const plain = hw(['settle', '--code', 'PREDEAD', '--ledger', ledger]);
+        check('24. control: plain settle on a pre-boot record with no exit line still refuses not-exited and names --lost',
+            plain.exit === 1 && plain.json && plain.json.error.code === 'not-exited' && /settle --lost/.test(plain.json.error.message), plain.stdout.slice(0, 200));
+
+        const pre = hw(['settle', '--code', 'PREDEAD', '--lost', '--ledger', ledger]);
+        const pv = pre.json && pre.json.ok ? pre.json.value : null;
+        const preRec = recOf('PREDEAD');
+        check('24. settle --lost settles a pre-boot record with no exit line as state lost, naming the boot in its reason',
+            pre.exit === 0 && !!pv && pv.state === 'lost' && /before this boot/.test(pv.reason) && pv.exit === null && typeof pv.settledAt === 'string', pre.stdout.slice(0, 200));
+        check('24. the ledger records it as settled with result lost, a reason and settledAt, never done, stopped or failed',
+            !!preRec && preRec.state === 'settled' && preRec.result === 'lost' && typeof preRec.reason === 'string' && typeof preRec.settledAt === 'string', JSON.stringify(preRec).slice(0, 200));
+        const preAlive = hw(['settle', '--code', 'PREALIVE', '--lost', '--ledger', ledger]);
+        check('24. a pre-boot record settles --lost even when its pid is alive now, because a pid from before the boot names a stranger',
+            preAlive.exit === 0 && preAlive.json && preAlive.json.ok && preAlive.json.value.state === 'lost', preAlive.stdout.slice(0, 200));
+        const preReport = hw(['settle', '--code', 'PREREPORT', '--lost', '--ledger', ledger]);
+        const prRec = recOf('PREREPORT');
+        check('24. a lost record whose report has a RESULT line keeps its sentence and the report state, and is still result lost',
+            preReport.exit === 0 && !!prRec && prRec.result === 'lost' && prRec.sentence === 'blocked before the reboot.' && prRec.reportResult === 'stopped', JSON.stringify(prRec).slice(0, 240));
+
+        const postAlive = hw(['settle', '--code', 'POSTALIVE', '--lost', '--ledger', ledger]);
+        check('24. settle --lost REFUSES a record started after this boot whose pid is alive, with not-lost, and leaves it unsettled',
+            postAlive.exit === 1 && postAlive.json && !postAlive.json.ok && postAlive.json.error.code === 'not-lost' && recOf('POSTALIVE').state === 'running', postAlive.stdout.slice(0, 200));
+        const postNoPid = hw(['settle', '--code', 'POSTNOPID', '--lost', '--ledger', ledger]);
+        check('24. settle --lost refuses a post-boot record whose pid was never recorded, since nothing proves it stopped',
+            postNoPid.exit === 1 && postNoPid.json && !postNoPid.json.ok && postNoPid.json.error.code === 'not-lost' && recOf('POSTNOPID').state === 'starting', postNoPid.stdout.slice(0, 200));
+        const postDead = hw(['settle', '--code', 'POSTDEAD', '--lost', '--ledger', ledger]);
+        check('24. settle --lost settles a post-boot record whose pid is dead, naming the dead pid in its reason',
+            postDead.exit === 0 && postDead.json && postDead.json.ok && postDead.json.value.state === 'lost' && postDead.json.value.reason.includes(`pid ${deadPid} is dead`), postDead.stdout.slice(0, 200));
+
+        const exited = hw(['settle', '--code', 'EXITED', '--lost', '--ledger', ledger]);
+        check('24. settle --lost refuses a record that HAS an exit line, so an ended worker is never filed as lost',
+            exited.exit === 1 && exited.json && !exited.json.ok && exited.json.error.code === 'not-lost' && /without --lost/.test(exited.json.error.message) && recOf('EXITED').state === 'running', exited.stdout.slice(0, 200));
+        const exitedPlain = hw(['settle', '--code', 'EXITED', '--ledger', ledger]);
+        check('24. and plain settle still takes that record down the existing path, as done',
+            exitedPlain.exit === 0 && exitedPlain.json && exitedPlain.json.ok && exitedPlain.json.value.state === 'done' && recOf('EXITED').result === 'done', exitedPlain.stdout.slice(0, 200));
+
+        const unknown = hw(['settle', '--code', 'NOSUCH', '--lost', '--ledger', ledger]);
+        check('24. settle --lost on an unknown code refuses with unknown-code', unknown.exit === 1 && unknown.json && !unknown.json.ok && unknown.json.error.code === 'unknown-code', unknown.stdout.slice(0, 200));
+        const again = hw(['settle', '--code', 'PREDEAD', '--lost', '--ledger', ledger]);
+        check('24. a second settle --lost finds no unsettled record', again.exit === 1 && again.json && !again.json.ok && again.json.error.code === 'unknown-code');
+        check('24. a lost record settled 8 days ago is pruned by a locked write like any settled one', recOf('OLDLOST') === null);
+
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const byCode = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('24. status --json reports a lost record as settled true, settledAs lost, with its reason',
+            !!byCode.PREDEAD && byCode.PREDEAD.settled === true && byCode.PREDEAD.settledAs === 'lost' && /before this boot/.test(byCode.PREDEAD.lostReason || ''), JSON.stringify(byCode.PREDEAD || null).slice(0, 240));
+        check('24. status keeps the other results distinct: EXITED settledAs done, POSTALIVE unsettled with settledAs null',
+            !!byCode.EXITED && byCode.EXITED.settledAs === 'done' && byCode.EXITED.lostReason === null && !!byCode.POSTALIVE && byCode.POSTALIVE.settled === false && byCode.POSTALIVE.settledAs === null);
+        const human = hw(['status', '--ledger', ledger]).stdout;
+        check('24. status without --json names a lost record as settledAs=lost with its reason',
+            /PREDEAD pid=\d+ process=unknown exit=- result=none settled=true settledAs=lost \(started .* before this boot/.test(human) && !/EXITED[^\n]*settledAs=lost/.test(human), human.slice(0, 400));
+        const usage = hw(['--help']).stdout;
+        check('24. the usage text lists settle --lost and says when it refuses', usage.includes('settle --code <CODE> [--lost]') && /settle --lost: [\s\S]*Refused unless/.test(usage));
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -716,7 +803,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 23 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 24 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);

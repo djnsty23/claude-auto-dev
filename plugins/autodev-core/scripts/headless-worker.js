@@ -46,7 +46,7 @@
  *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
- *   node headless-worker.js settle --code <CODE> [--ledger <file>] [--json]
+ *   node headless-worker.js settle --code <CODE> [--lost] [--ledger <file>] [--json]
  *   node headless-worker.js selftest
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  *
@@ -65,7 +65,7 @@ const USAGE = [
     '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
-    '       node headless-worker.js settle --code <CODE> [--ledger <file>] [--json]',
+    '       node headless-worker.js settle --code <CODE> [--lost] [--ledger <file>] [--json]',
     '       node headless-worker.js selftest',
     'start: spawn a detached supervisor that runs `claude -p` and appends CLAUDE_EXIT=<code> to the log.',
     '       The caller may exit at once; the result is the report file plus that exit line.',
@@ -75,6 +75,9 @@ const USAGE = [
     'status: two axes per record, process (running|exited|unknown) and result (none|done|stopped|failed|unparseable).',
     '        A record started before this boot is unknown whatever its pid says; settled records leave after 7 days.',
     'settle: read the last RESULT <CODE> line of the report and mark the record settled.',
+    'settle --lost: settle a record whose supervisor died without an exit line, as result lost. Refused unless',
+    '        the record started before this boot, or its pid is dead with no exit line. A record with an exit line',
+    '        takes plain settle. A lost record is its own result, never done, stopped or failed.',
     'Not unattended-worker.js: that one composes scheduled-task calls and starts nothing.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'headless-workers.json')}`,
 ].join('\n') + '\n';
@@ -82,6 +85,10 @@ const USAGE = [
 const CODE_RE = /^[A-Za-z0-9][A-Za-z0-9-]{1,23}$/;
 const PROMPT_MAX = 8000;
 const RESULT_STATES = ['done', 'stopped', 'failed'];
+// What a SETTLED record's `result` field can hold: a RESULT line's state, or
+// `lost` for a record settled by `settle --lost`. Kept apart from RESULT_STATES
+// on purpose: `lost` is never parsed from a report, so a worker cannot claim it.
+const SETTLED_RESULTS = [...RESULT_STATES, 'lost'];
 const SCRUBBED_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'];
 const LOCK_STALE_MS = 60 * 1000;
 const LOCK_WAIT_MS = 5000;
@@ -113,7 +120,7 @@ function fault(code, message) { const e = new Error(message || code); e.publicCo
 
 function parseArgs(argv) {
     const out = { _: [] };
-    const flags = ['help', 'dry-run', 'json'];
+    const flags = ['help', 'dry-run', 'json', 'lost'];
     const known = ['_', ...flags, 'code', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
         'permission-mode', 'cwd', 'claude-bin', 'ledger'];
     for (let i = 0; i < argv.length; i++) {
@@ -517,9 +524,16 @@ function recordStatus(rec, boot = bootAt()) {
         result = parsed ? parsed.state : 'unparseable';
         sentence = parsed ? parsed.sentence : null;
     }
+    // The settled axis says HOW the record was settled, read from the ledger,
+    // because `result` above is the report's word and a lost record's report
+    // usually has none. A settled value outside SETTLED_RESULTS surfaces as
+    // itself rather than being folded into a known one.
+    const settled = rec.state === 'settled';
+    const settledAs = settled ? (SETTLED_RESULTS.includes(rec.result) ? rec.result : `unrecognised:${rec.result}`) : null;
     return {
         code: rec.code, pid: rec.pid, startedAt: rec.startedAt, process: processState, exit,
-        result, sentence, reportExists: reportText !== null, settled: rec.state === 'settled',
+        result, sentence, reportExists: reportText !== null, settled, settledAs,
+        lostReason: settledAs === 'lost' ? (rec.reason || null) : null,
         log: rec.log, report: rec.report,
     };
 }
@@ -544,12 +558,33 @@ function statusLines(value) {
     const lines = [value.population];
     for (const r of value.records) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
-            + `result=${r.result} settled=${r.settled}${r.sentence ? ` : ${r.sentence}` : ''}`);
+            + `result=${r.result} settled=${r.settled}${r.settledAs === 'lost' ? ` settledAs=lost (${r.lostReason})` : ''}`
+            + `${r.sentence ? ` : ${r.sentence}` : ''}`);
     }
     return lines.join('\n') + '\n';
 }
 
 // ---------------------------------------------------------------- settle
+/**
+ * Why a record with no exit line is provably not running, or null when it is
+ * not provable. Two proofs, in order. A record started before this boot: the
+ * reboot killed its supervisor, and its pid may now name a stranger, so the pid
+ * is not consulted. A record started after this boot whose pid is dead: the
+ * supervisor is gone without writing its line. Anything else, including an
+ * alive pid and a pid that was never recorded, is not proof. The pid is the
+ * SUPERVISOR's, so a claude child that outlived a killed supervisor is not
+ * seen by the second proof. The first proof is the one that covers a reboot.
+ */
+function lostReason(rec, boot, liveness = pidLiveness) {
+    const started = Date.parse(rec.startedAt || '');
+    if (Number.isFinite(boot) && Number.isFinite(started) && started < boot) {
+        return `started ${rec.startedAt}, before this boot at ${new Date(boot).toISOString()}, and the log has no exit line`;
+    }
+    if (!Number.isInteger(rec.pid) || rec.pid <= 0) return null;
+    if (liveness(rec.pid) === 'dead') return `pid ${rec.pid} is dead and the log has no exit line`;
+    return null;
+}
+
 function settle(opts) {
     const code = requireCode(opts);
     const file = path.resolve(opts.ledger || defaultLedger());
@@ -558,7 +593,11 @@ function settle(opts) {
         if (!rec) fault('unknown-code', `no unsettled record for ${code} in ${file}`);
         const logText = readText(rec.log);
         const exit = logText === null ? null : exitCodeOf(logText);
-        if (exit === null) fault('not-exited', `${rec.log} has no CLAUDE_EXIT line yet; the worker is running or its supervisor never wrote one`);
+        if (opts.lost) return settleLost(rec, code, exit);
+        if (exit === null) {
+            fault('not-exited', `${rec.log} has no CLAUDE_EXIT line yet, so the worker is running or its supervisor never wrote one. `
+                + 'A supervisor killed by a reboot or a kill never writes it, and settle --lost settles such a record once it is provably not running');
+        }
         const reportText = readText(rec.report);
         const parsed = reportText === null ? null : parseResult(reportText, code);
         if (!parsed) {
@@ -570,6 +609,25 @@ function settle(opts) {
         Object.assign(rec, { state: 'settled', result: parsed.state, sentence: parsed.sentence, exit, settledAt });
         return { code, state: parsed.state, sentence: parsed.sentence, exit, report: rec.report, settledAt };
     });
+}
+
+/** `settle --lost` inside the ledger lock. Mutates `rec` only when the record is provably not running. */
+function settleLost(rec, code, exit) {
+    if (exit !== null) fault('not-lost', `${rec.log} has CLAUDE_EXIT=${exit}, so the worker ended and was not lost. Settle it without --lost`);
+    const reason = lostReason(rec, bootAt());
+    if (!reason) {
+        fault('not-lost', `${code} has no exit line but is not provably stopped: it started after this boot and pid ${rec.pid} `
+            + `${Number.isInteger(rec.pid) && rec.pid > 0 ? 'is alive' : 'was never recorded'}. Wait for its exit line`);
+    }
+    // A report that did get written keeps its sentence, so what the worker said is not lost with it.
+    const reportText = readText(rec.report);
+    const parsed = reportText === null ? null : parseResult(reportText, code);
+    const settledAt = new Date().toISOString();
+    Object.assign(rec, {
+        state: 'settled', result: 'lost', reason, sentence: parsed ? parsed.sentence : null,
+        reportResult: parsed ? parsed.state : null, exit: null, settledAt,
+    });
+    return { code, state: 'lost', reason, sentence: rec.sentence, reportResult: rec.reportResult, exit: null, report: rec.report, settledAt };
 }
 
 /** The liveness classifier over the shapes a real kill(pid, 0) can return. */
@@ -616,7 +674,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-    HEADLESS_NOTE, PROMPT_MAX, CODE_RE, placementNote, SCRUBBED_ENV, RETENTION_MS,
+    HEADLESS_NOTE, PROMPT_MAX, CODE_RE, placementNote, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
-    livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, run,
+    livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
 };
