@@ -79,6 +79,8 @@ const USAGE = [
     'settle --lost: settle a record whose supervisor died without an exit line, as result lost. Refused unless',
     '        the record started before this boot, or its pid is dead with no exit line. A record with an exit line',
     '        takes plain settle. A lost record is its own result, never done, stopped or failed.',
+    'ask:    a worker asks by writing <report dir>/<CODE>/ask.json and keeps working. status shows ask=open',
+    '        until answer.json lands beside it. No worker exits to ask.',
     'Not unattended-worker.js: that one composes scheduled-task calls and starts nothing.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'headless-workers.json')}`,
 ].join('\n') + '\n';
@@ -115,6 +117,26 @@ function placementNote(scratchDir) {
         + '(`git -C <repo> worktree add .claude/worktrees/<name> -b <branch> origin/main`), never beside the repo '
         + 'and never in the directory that holds the checkouts. A bare clone is scratch too. Logs, diffs, exit '
         + `files and every other scratch output go under ${scratchDir.replace(/\\/g, '/')}, never in a checkout's parent directory.`;
+}
+
+// `[measured 2026-09-22]` workers asked by exiting ("write the question into
+// the report and stop"), so every question cost a relaunch and the context the
+// worker had built. A launcher with a non-exiting ask.json/answer.json channel
+// answered 11 of 11 questions without one. This is that channel: the files sit
+// in the worker's scratch directory, which the placement note already names,
+// and `status` reports an open question until answer.json lands.
+function askFiles(scratchDir) {
+    return { ask: path.join(scratchDir, 'ask.json'), answer: path.join(scratchDir, 'answer.json') };
+}
+
+function askNote(scratchDir) {
+    const f = askFiles(scratchDir);
+    const slash = (p) => p.replace(/\\/g, '/');
+    return `ASKING: never exit to ask. When a decision needs a person, write ${slash(f.ask)} as JSON `
+        + '{"question","header","asked","blocks","options":[{"label","detail"}]}, the option you would take first and marked (Recommended). '
+        + `Keep working on everything that does not depend on it, and read ${slash(f.answer)} ({"label","note"}) between steps. `
+        + 'Only when nothing independent is left, record the open question in the report and end with RESULT <CODE> stopped. '
+        + 'Never guess the answer and never read silence as approval.';
 }
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
@@ -232,7 +254,7 @@ function isUnsettled(rec) { return rec.state !== 'settled'; }
 
 // ---------------------------------------------------------------- the child
 function composePrompt(text, scratchDir) {
-    const placement = scratchDir ? placementNote(scratchDir) + '\n\n' : '';
+    const placement = scratchDir ? placementNote(scratchDir) + '\n\n' + askNote(scratchDir) + '\n\n' : '';
     return text.replace(/\s+$/, '') + '\n\n' + placement + HEADLESS_NOTE + '\n';
 }
 
@@ -399,7 +421,7 @@ function start(opts) {
         code: o.code, pid: null, startedAt: new Date().toISOString(),
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
-        model: o.model, effort: o.effort, permissionMode: o.permissionMode, state: 'starting',
+        model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, state: 'starting',
     };
     const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;
     withLedger(o.ledger, (ledger) => {
@@ -535,8 +557,24 @@ function recordStatus(rec, boot = bootAt()) {
         code: rec.code, pid: rec.pid, startedAt: rec.startedAt, process: processState, exit,
         result, sentence, reportExists: reportText !== null, settled, settledAs,
         lostReason: settledAs === 'lost' ? (rec.reason || null) : null,
-        log: rec.log, report: rec.report,
+        log: rec.log, report: rec.report, cwd: rec.cwd || null, ...askState(rec),
     };
+}
+
+/**
+ * The question channel for one record: `open` while ask.json exists without
+ * answer.json, `answered` once both do, `none` otherwise. An ask.json that does
+ * not parse is still a question somebody asked (`unreadable`), never silence.
+ */
+function askState(rec) {
+    if (!rec.report || !rec.code) return { ask: 'none', question: null, askFile: null, answerFile: null };
+    const f = askFiles(scratchDirFor({ report: rec.report, code: rec.code }));
+    const askText = readText(f.ask);
+    if (askText === null) return { ask: 'none', question: null, askFile: f.ask, answerFile: f.answer };
+    let question = null;
+    try { question = String(JSON.parse(askText).question || '') || null; } catch { question = null; }
+    const answered = readText(f.answer) !== null;
+    return { ask: answered ? 'answered' : (question === null ? 'unreadable' : 'open'), question, askFile: f.ask, answerFile: f.answer };
 }
 
 function status(opts) {
@@ -560,7 +598,7 @@ function statusLines(value) {
     for (const r of value.records) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
             + `result=${r.result} settled=${r.settled}${r.settledAs === 'lost' ? ` settledAs=lost (${r.lostReason})` : ''}`
-            + `${r.sentence ? ` : ${r.sentence}` : ''}`);
+            + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
     }
     return lines.join('\n') + '\n';
 }
@@ -676,6 +714,7 @@ if (require.main === module) {
 
 module.exports = {
     HEADLESS_NOTE, PROMPT_MAX, CODE_RE, placementNote, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
+    askFiles, askNote, askState, scratchDirFor, readLedger, settle, start,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
 };
