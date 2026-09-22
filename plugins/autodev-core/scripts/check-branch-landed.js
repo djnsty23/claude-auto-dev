@@ -37,10 +37,27 @@
  *      landed as a squash and never continued past its merge.
  *      Looked up BY COMMIT SHA (`repos/{r}/commits/{sha}/pulls`), not by title
  *      search, so trap 4 cannot occur.
- *   c. Otherwise compare FILES. If every path the branch touches has an
- *      identical blob on the trunk, the content is there under other SHAs.
- *   d. Otherwise read the SHAPE of the diff. A branch that would mostly DELETE
- *      from the trunk is BEHIND it, and "landing" it is a revert.
+ *   c. Otherwise compare FILES. If every path the branch's OWN commits touch
+ *      (`git diff --name-only <merge-base> <tip>`) has an identical blob on the
+ *      trunk, the content is there under other SHAs.
+ *   d. Otherwise read the SHAPE of the branch's OWN contribution,
+ *      `git diff --numstat <merge-base> <tip>`. If its own commits mostly
+ *      DELETE, landing it removes trunk content: BEHIND, a revert. The name is
+ *      historical and kept because consumers parse it.
+ *      A path the branch touched that the trunk ALSO changed since the fork is
+ *      named in the reason as a conflict risk. It never decides a verdict.
+ *
+ * WHY (d) READS FROM THE MERGE BASE AND NOT FROM THE TRUNK. It read two dots,
+ * `<trunk> <tip>`, until 2026-09-22. Once the trunk moves on after the fork,
+ * that diff is dominated by the trunk's own newer work, which the branch lacks
+ * and which reads as DELETIONS from the branch's side. `[measured 2026-09-22]`
+ * 13 of 13 open PRs in two product repos read BEHIND that way, while a blob
+ * comparison of each PR's own files found none of them on the trunk and 12 of
+ * 13 merging clean. A merge is three-way: the trunk's newer work survives it,
+ * so it is not the branch's to revert. What remains BEHIND is a branch whose
+ * own commits mostly delete, which this cannot tell from a deliberate removal:
+ * read one before closing it. A branch with no merge base with the trunk now
+ * has no contribution to read, so it falls to UNKNOWN rather than a verdict.
  *
  * WHICH WAY IT FAILS, DELIBERATELY. Two errors are possible and they are not
  * symmetric. Reporting landed work as UNLANDED wastes a session. Reporting
@@ -90,9 +107,13 @@ const VERDICTS = {
  *                                or the ask FAILED. An empty array means asked
  *                                and answered "none", which is still not
  *                                evidence of not-landed.
- *   files            array|null  [{path, trunkBlob, branchBlob}] - null means
- *                                could not read. trunkBlob null = absent there.
- *   added, deleted   number|null line counts the branch would contribute
+ *   files            array|null  [{path, trunkBlob, branchBlob, baseBlob}] - the
+ *                                paths the branch's own commits touch. null means
+ *                                could not read. A null blob = absent at that
+ *                                ref. baseBlob is the merge base's; undefined
+ *                                means not measured, and names no conflict.
+ *   added, deleted   number|null line counts of the branch's OWN contribution,
+ *                                merge base to tip, never trunk to tip
  */
 function classify(evidence) {
     const e = evidence || {};
@@ -145,26 +166,44 @@ function classify(evidence) {
         }
     }
 
-    // (d) shape. Mostly deletions means the trunk moved on without this branch.
+    // (d) shape of the branch's OWN contribution. The trunk's movement since the
+    // fork is not in these numbers, so mostly deletions means its own commits
+    // remove content, not that the trunk moved on without it.
     if (typeof e.added === 'number' && typeof e.deleted === 'number' && (e.added + e.deleted) > 0) {
+        const own = 'its own commits since the fork contribute +' + e.added + ' / -' + e.deleted;
+        const risk = conflictNote(trunkAlsoChanged(e.files));
         if (e.deleted > e.added) {
             return {
                 verdict: VERDICTS.BEHIND,
-                reason: 'would contribute +' + e.added + ' / -' + e.deleted
-                      + ' against the trunk - mostly deletions, so it is behind rather than '
-                      + 'ahead and landing it is a revert',
+                reason: own + ' - mostly deletions, so landing it is a revert of trunk content '
+                      + '(or a deliberate removal: read it before closing)' + risk,
             };
         }
-        return {
-            verdict: VERDICTS.UNLANDED,
-            reason: 'would contribute +' + e.added + ' / -' + e.deleted + ' against the trunk',
-        };
+        return { verdict: VERDICTS.UNLANDED, reason: own + risk };
     }
 
     return {
         verdict: VERDICTS.UNKNOWN,
-        reason: 'no merged PR carries this tip and the diff against the trunk could not be read',
+        reason: 'no merged PR carries this tip, and its own diff since the fork could not be read '
+              + 'or counted no text lines',
     };
+}
+
+// Paths the branch touched that the trunk ALSO changed since the fork, and not
+// to the branch's own content. That is a merge-conflict risk: a merge will ask
+// someone to reconcile the two, and neither side is a revert of the other.
+// A path with no measured baseBlob is skipped rather than guessed at.
+function trunkAlsoChanged(files) {
+    if (!Array.isArray(files)) return [];
+    return files.filter((f) => f && f.baseBlob !== undefined
+        && f.trunkBlob !== f.baseBlob && f.trunkBlob !== f.branchBlob).map((f) => f.path);
+}
+
+function conflictNote(paths) {
+    if (!paths.length) return '';
+    const shown = paths.slice(0, 5).join(', ');
+    return '. ' + paths.length + ' path(s) the trunk also changed since the fork, a conflict risk '
+         + 'rather than a revert: ' + shown + (paths.length > 5 ? ' (+' + (paths.length - 5) + ' more)' : '');
 }
 
 function shortSha(s) { return typeof s === 'string' && s.length > 8 ? s.slice(0, 8) : String(s == null ? '?' : s); }
@@ -248,26 +287,37 @@ function gatherEvidence(branch, trunk, cwd, slug) {
         }
     }
 
+    // Both (c) and (d) read the branch's OWN contribution, merge base to tip.
+    // With no merge base there is no contribution to read, and the verdict is
+    // UNKNOWN: the trunk-to-tip diff it used to fall back on is the trunk's
+    // movement as much as the branch's work.
     const base = git(['merge-base', trunk, branch], cwd);
     if (base.ok) {
-        const names = git(['diff', '--name-only', base.out, branch], cwd);
+        const names = git(['diff', '--name-only', base.out, tip], cwd);
         if (names.ok && names.out) {
+            // --verify, because bare `rev-parse <ref>:<path>` on a path ABSENT at
+            // that ref exits 0 and ECHOES the argument when the path holds a glob
+            // character (`app/[id]/page.tsx`): git reads it as a pathspec. The
+            // echo then passed for a blob, and every new route file read as
+            // changed on the trunk. `[measured 2026-09-22]`
+            const blob = (ref, p) => git(['rev-parse', '--verify', '-q', ref + ':' + p], cwd).out || null;
             ev.files = names.out.split(/\r?\n/).filter(Boolean).map((p) => ({
                 path: p,
-                trunkBlob: git(['rev-parse', trunk + ':' + p], cwd).out || null,
-                branchBlob: git(['rev-parse', branch + ':' + p], cwd).out || null,
+                trunkBlob: blob(trunk, p),
+                branchBlob: blob(tip, p),
+                baseBlob: blob(base.out, p),
             }));
         }
-    }
 
-    const num = git(['diff', '--numstat', trunk, branch], cwd);
-    if (num.ok) {
-        let added = 0, deleted = 0;
-        for (const line of num.out.split(/\r?\n/)) {
-            const m = line.match(/^(\d+)\t(\d+)\t/);
-            if (m) { added += Number(m[1]); deleted += Number(m[2]); }
+        const num = git(['diff', '--numstat', base.out, tip], cwd);
+        if (num.ok) {
+            let added = 0, deleted = 0;
+            for (const line of num.out.split(/\r?\n/)) {
+                const m = line.match(/^(\d+)\t(\d+)\t/);
+                if (m) { added += Number(m[1]); deleted += Number(m[2]); }
+            }
+            ev.added = added; ev.deleted = deleted;
         }
-        ev.added = added; ev.deleted = deleted;
     }
     return ev;
 }
@@ -301,6 +351,10 @@ function selftest() {
         classify({ tip: 'a', mergedPRs: [{ number: 1, headRefOid: 'zz', mergeCommitIsAncestor: true }], added: 5, deleted: 0 }).verdict === VERDICTS.UNLANDED);
     ck('mostly deletions is BEHIND, not UNLANDED',
         classify({ tip: 'a', added: 676, deleted: 14725 }).verdict === VERDICTS.BEHIND);
+    ck('a path the trunk also changed is named as a conflict, and the branch stays UNLANDED',
+        (() => { const r = classify({ tip: 'a', added: 5, deleted: 0,
+            files: [{ path: 'x', baseBlob: 'o', trunkBlob: 't', branchBlob: 'b' }] });
+            return r.verdict === VERDICTS.UNLANDED && /conflict risk/.test(r.reason); })());
     ck('unmeasurable is UNKNOWN, never landed',
         classify({ tip: 'a' }).verdict === VERDICTS.UNKNOWN);
     ck('ancestry proves landed',

@@ -108,6 +108,34 @@ check('a genuinely additive branch IS reported UNLANDED',
 check('  control: BEHIND and UNLANDED are distinguishable at all',
     v({ tip: 'aaa', added: 900, deleted: 12 }) !== v({ tip: 'aaa', added: 12, deleted: 900 }));
 
+// ---- conflict risk: named in the reason, never folded into a verdict ---------
+//
+// A path the branch touched that the trunk ALSO changed since the fork will need
+// reconciling at merge. Neither side reverts the other, so it must not tip an
+// additive branch into BEHIND, and it must be visible to whoever lands it.
+const both = [{ path: 'a.js', baseBlob: 'b0', trunkBlob: 'b1', branchBlob: 'b2' }];
+const bothReason = classify({ tip: 'aaa', files: both, added: 5, deleted: 0 }).reason;
+check('a path the trunk ALSO changed leaves an additive branch UNLANDED',
+    v({ tip: 'aaa', files: both, added: 5, deleted: 0 }) === VERDICTS.UNLANDED);
+check('  and the reason names it as a conflict risk', /conflict risk.*\ba\.js\b/.test(bothReason), bothReason);
+check('  and a BEHIND reason names it too',
+    /conflict risk.*\ba\.js\b/.test(classify({ tip: 'aaa', files: both, added: 1, deleted: 9 }).reason));
+check('a path the trunk left at its merge-base blob is not a conflict',
+    !/conflict/.test(classify({ tip: 'aaa', added: 5, deleted: 0,
+        files: [{ path: 'a.js', baseBlob: 'b0', trunkBlob: 'b0', branchBlob: 'b2' }] }).reason));
+check('a path both sides changed to the SAME blob is not a conflict',
+    !/conflict/.test(classify({ tip: 'aaa', added: 5, deleted: 0, files: [
+        { path: 'a.js', baseBlob: 'b0', trunkBlob: 'b2', branchBlob: 'b2' },
+        { path: 'n.js', baseBlob: null, trunkBlob: null, branchBlob: 'c' }] }).reason));
+check('evidence with no baseBlob names no conflict rather than guessing',
+    !/conflict/.test(classify({ tip: 'aaa', added: 5, deleted: 0,
+        files: [{ path: 'a.js', trunkBlob: 'b1', branchBlob: 'b2' }] }).reason));
+{
+    const many = Array.from({ length: 7 }, (_, i) => ({ path: 'p' + i, baseBlob: 'o', trunkBlob: 't' + i, branchBlob: 'b' + i }));
+    const r = classify({ tip: 'aaa', files: many, added: 5, deleted: 0 }).reason;
+    check('seven conflict paths print five and count the rest', /7 path\(s\)/.test(r) && /\(\+2 more\)/.test(r) && !/\bp5\b/.test(r), r);
+}
+
 // ---- content: one differing file is enough to refuse LANDED-CONTENT ---------
 check('a file absent from the trunk blocks LANDED-CONTENT',
     v({ tip: 'aaa', mergedPRs: [], added: 5, deleted: 0,
@@ -240,6 +268,121 @@ check('  and says so rather than printing an all-clear', /UNKNOWN/.test(bogus.st
     // is a property of the RUNNER, which both forms exit through, so the --json
     // pair above covers the table as well.
     fs.rmSync(bigRepo, { recursive: true, force: true });
+}
+
+// ---- a MOVING TRUNK is not a revert: score the branch's OWN contribution ----
+//
+// THE FAILURE THIS REPRODUCES. `[measured 2026-09-22]` step (d) read the SHAPE
+// of `git diff --numstat <trunk> <tip>`, two dots. Once the trunk moves on after
+// the fork, that diff is dominated by the trunk's own newer work, which the
+// branch lacks and which therefore reads as DELETIONS from the branch's side.
+// 13 of 13 open PRs in two product repos read BEHIND ("landing it is a revert"),
+// while a blob comparison of each PR's own files found none of them on the
+// trunk and 12 of 13 merging clean. A merge is three-way, so the trunk's newer
+// work survives it. BEHIND feeds branch deletion and PR closing, so that false
+// verdict can close unlanded work as a revert.
+//
+// DRIVEN THROUGH THE CLI AGAINST A REAL REPO, because the defect lived in
+// gatherEvidence and not in classify(): the pure function scores whatever
+// numbers it is handed, and every planted case above was already right.
+//
+// Five branches fork from one seed, then the trunk moves on by more lines than
+// any of them adds. Two are the subject, two are controls that must NOT move,
+// and the last guards the probe itself:
+//   additive  one small new file                       -> UNLANDED (was BEHIND)
+//   overlap   edits a.txt, which the trunk rewrites     -> UNLANDED, a.txt named
+//   revert    its OWN commit deletes b.txt from trunk   -> BEHIND, before and after
+//   landed    its one file is byte-identical on trunk   -> LANDED-CONTENT, (c)'s path set
+//   bracket   adds o/[token]/page.tsx, absent on trunk  -> UNLANDED, and NO conflict named
+//
+// THE BRACKET BRANCH IS A PROBE-SHAPE TRAP, found on the first real run of this
+// fix. `git rev-parse <ref>:<path>` on a path ABSENT at that ref exits 128 for a
+// plain path, but exits 0 and ECHOES the argument when the path holds a glob
+// character, because git then reads it as a pathspec. The echo was taken as a
+// blob, so every new Next.js route file read as changed on the trunk: 7 of 10
+// real branches named the same five `[id]` and `[token]` files as conflicts.
+{
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cbl-moving-'));
+    const g = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: 'pipe' }).trim();
+    const put = (p, text) => fs.writeFileSync(path.join(repo, p), text);
+    const lines = (tag, n) => Array.from({ length: n }, (_, i) => tag + ' ' + i).join('\n') + '\n';
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 't@t');
+    g('config', 'user.name', 'T');
+    g('config', 'core.autocrlf', 'false');
+    put('a.txt', lines('a', 20));
+    put('b.txt', lines('b', 20));
+    g('add', 'a.txt', 'b.txt');
+    g('commit', '-qm', 'seed');
+    const seed = g('rev-parse', 'HEAD');
+
+    g('checkout', '-qb', 'additive', seed);
+    put('feature.txt', lines('f', 3));
+    g('add', 'feature.txt');
+    g('commit', '-qm', 'additive');
+
+    g('checkout', '-qb', 'overlap', seed);
+    put('a.txt', lines('a', 20).replace('a 3\n', 'a three\n'));
+    put('x.txt', lines('x', 2));
+    g('add', 'a.txt', 'x.txt');
+    g('commit', '-qm', 'overlap');
+
+    g('checkout', '-qb', 'revert', seed);
+    g('rm', '-q', 'b.txt');
+    put('y.txt', 'one line\n');
+    g('add', 'y.txt');
+    g('commit', '-qm', 'revert');
+
+    g('checkout', '-qb', 'landed', seed);
+    put('z.txt', lines('z', 5));
+    g('add', 'z.txt');
+    g('commit', '-qm', 'landed');
+
+    // The trunk moves on: two new files and a rewrite, 105 lines against the 3
+    // the additive branch adds, and z.txt arrives under a different commit.
+    g('checkout', '-qb', 'bracket', seed);
+    fs.mkdirSync(path.join(repo, 'o', '[token]'), { recursive: true });
+    put('o/[token]/page.tsx', lines('p', 2));
+    g('add', 'o/[token]/page.tsx');
+    g('commit', '-qm', 'bracket');
+
+    g('checkout', '-q', 'main');
+    put('c.txt', lines('c', 40));
+    put('d.txt', lines('d', 40));
+    put('a.txt', lines('A', 25));
+    put('z.txt', lines('z', 5));
+    g('add', 'a.txt', 'c.txt', 'd.txt', 'z.txt');
+    g('commit', '-qm', 'the trunk moves on');
+
+    const res = run(['additive', 'overlap', 'revert', 'landed', 'bracket', '--repo', repo, '--trunk', 'main', '--json']);
+    let byBranch = {};
+    try { for (const r of JSON.parse(res.stdout).rows) byBranch[r.branch] = r; } catch { byBranch = {}; }
+    const row = (b) => byBranch[b] || { verdict: 'MISSING', reason: String(res.stdout).slice(0, 200) };
+    const show = (b) => row(b).verdict + ': ' + row(b).reason;
+
+    check('the moving-trunk fixture classified all five branches',
+        Object.keys(byBranch).length === 5, 'exit ' + res.status + ', ' + String(res.stderr).slice(0, 200));
+    check('an additive branch behind a moving trunk is UNLANDED, not BEHIND',
+        row('additive').verdict === VERDICTS.UNLANDED, show('additive'));
+    check('  and its reason counts only its own +3 / -0',
+        /\+3 \/ -0\b/.test(row('additive').reason), show('additive'));
+    check('  and the run exits 2, because unlanded work is present',
+        res.status === 2, res.status);
+    check('a branch editing a path the trunk also rewrote is UNLANDED, not BEHIND',
+        row('overlap').verdict === VERDICTS.UNLANDED, show('overlap'));
+    check('  and the reason names that path as a conflict risk',
+        /conflict/.test(row('overlap').reason) && /\ba\.txt\b/.test(row('overlap').reason), show('overlap'));
+    check('  control: a branch whose paths the trunk never touched names no conflict',
+        !/conflict/.test(row('additive').reason), show('additive'));
+    check('a branch whose OWN commits delete trunk content still reads BEHIND',
+        row('revert').verdict === VERDICTS.BEHIND, show('revert'));
+    check('a branch whose one file is byte-identical on the moved trunk is LANDED-CONTENT',
+        row('landed').verdict === VERDICTS.LANDED_CONTENT, show('landed'));
+    check('a new file whose path holds [brackets] is UNLANDED',
+        row('bracket').verdict === VERDICTS.UNLANDED, show('bracket'));
+    check('  and names no conflict: an absent path is not a changed one',
+        !/conflict/.test(row('bracket').reason), show('bracket'));
+    fs.rmSync(repo, { recursive: true, force: true });
 }
 
 // ---- summary ---------------------------------------------------------------
