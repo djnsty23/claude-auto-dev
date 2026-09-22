@@ -1,0 +1,27 @@
+# BEFORE, headless-worker.js at 43cfd21d399a85b48d2684fe4a2086aaf95929fd, tree 1 dirty paths, 2026-09-21T18:15:56Z
+# every temp-root path below is written <TMP>; the probe ran under the OS temp directory
+# launcher cwd for every call: <TMP>/launcher-cwd (a directory with no config dirs in it); HOME/USERPROFILE=<TMP>/home
+
+## 1. relative --config-dir .claude-b, --dry-run (a .claude-b exists under HOME, not under the launcher cwd)
+{"ok":true,"value":{"dryRun":true,"code":"BW12A","argv":["<TMP>/fake.js","-p","Do nothing.\n\nHEADLESS: this process exits the moment the turn ends, so run every gate and long command in the FOREGROUND with the Bash timeout at its maximum, background nothing, and do not end the turn until the report file is complete and carries its RESULT line.\n","--permission-mode","default","--output-format","stream-json","--verbose"],"command":"C:\\Program Files\\nodejs\\node.exe","envSet":["AUTODEV_HEADLESS","AUTODEV_WORKER_CODE","CLAUDE_CONFIG_DIR"],"envDeleted":["CLAUDECODE","CLAUDE_CODE_ENTRYPOINT"],"envScrubList":["CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_SSE_PORT"],"log":"<TMP>\\a\\w.log","report":"<TMP>\\a\\w.report.md","ledger":"<TMP>\\a\\ledger.json","cwd":"<TMP>\\launcher-cwd","spawned":false}}
+exit=0
+
+## 2. relative --config-dir .claude-b, real start through a fake binary
+{"ok":true,"value":{"ledger":"<TMP>\\b\\ledger.json","record":{"code":"BW12B","pid":50100,"startedAt":"2026-09-21T18:15:57.121Z","log":"<TMP>\\b\\w.log","report":"<TMP>\\b\\w.report.md","promptFile":"<TMP>\\prompt.md","configDir":".claude-b","model":null,"permissionMode":"default","state":"running"},"supervisorPid":50100,"spawned":true}}
+exit=0
+ledger records after start: BW12B:.claude-b
+child saw CLAUDE_CONFIG_DIR: CFG=<TMP>\launcher-cwd\.claude-b
+resolved dir exists: no
+
+## 3. absolute --config-dir that does not exist, real start
+{"ok":true,"value":{"ledger":"<TMP>\\c\\ledger.json","record":{"code":"BW12C","pid":50008,"startedAt":"2026-09-21T18:16:00.310Z","log":"<TMP>\\c\\w.log","report":"<TMP>\\c\\w.report.md","promptFile":"<TMP>\\prompt.md","configDir":"no such config","model":null,"permissionMode":"default","state":"running"},"supervisorPid":50008,"spawned":true}}
+exit=0
+ledger records after start: 1
+log tail: CLAUDE_EXIT=0
+
+## 4. --config-dir ~/.claude-b, --dry-run (tilde passed literally, as a PowerShell or quoted caller would)
+envSet=["AUTODEV_HEADLESS","AUTODEV_WORKER_CODE","CLAUDE_CONFIG_DIR"] (the resolved dir is not in the dry-run output at all)
+
+## 5. --effort high
+{"ok":false,"error":{"code":"usage","message":"unknown flag --effort"}}
+exit=1

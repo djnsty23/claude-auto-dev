@@ -1,0 +1,63 @@
+# Planted defects: each applied to the fixed subject, the suite run, then the fixed file restored and its sha re-checked.
+# fixed subject sha1 prefix 3ab9a99852ba; suite: node tooling/test-headless-worker.js
+P1-revert-config-dir: planted 2 edit(s)
+
+## P1-revert-config-dir: suite exit 1
+FAIL  21. a missing absolute --config-dir exits 1 with config-dir-missing, one line naming the resolved path and saying it does not exist
+FAIL  21. and it recorded nothing and spawned nothing: no ledger, and the log stays absent for 2 s
+FAIL  21. a bare relative name is refused with config-dir-relative, naming the ~/ spelling and the home path it would mean
+FAIL  21. and it recorded nothing and spawned nothing
+FAIL  21. ~/<name> expands to the home directory, not the launcher cwd
+FAIL  21. a lone ~ is the home directory itself
+FAIL  21. ~/<name> that does not exist is refused naming the expanded home path
+FAIL  21. a --config-dir that is a file is refused with config-dir-unusable, not a directory
+FAIL  21. --dry-run refuses a missing --config-dir too, so the preview matches the real start
+86 passed, 9 failed
+TypeError lines: 0
+restored sha matches: yes
+P1a-no-existence-check: planted 1 edit(s)
+
+## P1a-no-existence-check: suite exit 1
+FAIL  21. a missing absolute --config-dir exits 1 with config-dir-missing, one line naming the resolved path and saying it does not exist
+FAIL  21. and it recorded nothing and spawned nothing: no ledger, and the log stays absent for 2 s
+FAIL  21. ~/<name> that does not exist is refused naming the expanded home path
+FAIL  21. a --config-dir that is a file is refused with config-dir-unusable, not a directory
+FAIL  21. --dry-run refuses a missing --config-dir too, so the preview matches the real start
+90 passed, 5 failed
+TypeError lines: 0
+restored sha matches: yes
+P1b-cwd-resolution: planted 1 edit(s)
+
+## P1b-cwd-resolution: suite exit 1
+FAIL  21. a bare relative name is refused with config-dir-relative, naming the ~/ spelling and the home path it would mean
+FAIL  21. ~/<name> expands to the home directory, not the launcher cwd
+FAIL  21. a lone ~ is the home directory itself
+FAIL  21. ~/<name> that does not exist is refused naming the expanded home path
+91 passed, 4 failed
+TypeError lines: 0
+restored sha matches: yes
+P2-revert-effort-flag: planted 1 edit(s)
+
+## P2-revert-effort-flag: suite exit 1
+FAIL  22. every level claude --help lists is accepted and lands in argv as --effort <level>
+FAIL  22. --effort extreme is refused with code usage, naming the accepted levels
+FAIL  22. --effort HIGH is refused with code usage, naming the accepted levels
+FAIL  22: start returned a supervisor pid
+90 passed, 4 failed
+TypeError lines: 0
+restored sha matches: yes
+P2c-supervisor-drops-effort: planted 1 edit(s)
+
+## P2c-supervisor-drops-effort: suite exit 1
+FAIL  22. the fake received --effort max through the supervisor, so the supervisor carried the flag
+94 passed, 1 failed
+TypeError lines: 0
+restored sha matches: yes
+P2d-argv-drops-effort: planted 1 edit(s)
+
+## P2d-argv-drops-effort: suite exit 1
+FAIL  22. every level claude --help lists is accepted and lands in argv as --effort <level>
+FAIL  22. the fake received --effort max through the supervisor, so the supervisor carried the flag
+93 passed, 2 failed
+TypeError lines: 0
+restored sha matches: yes

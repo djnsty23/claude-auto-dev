@@ -30,7 +30,8 @@
  * invocation that worked on one machine when this was written. The suite proves
  * this script builds that argv and drives it through a FAKE binary; it cannot
  * prove the real CLI accepts those flags. Verify once by hand with a trivial
- * prompt before relying on it, and again after a CLI upgrade.
+ * prompt before relying on it, and again after a CLI upgrade. `--effort` and
+ * its values were read from `claude --help` on 2.1.278 (see EFFORT_LEVELS).
  *
  * FAKE BINARY CONVENTION. A `--claude-bin` ending in `.js` is run through the
  * current node executable (`process.execPath <file> ...`), so a suite can stand
@@ -41,8 +42,8 @@
  *
  * Usage:
  *   node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>
- *        [--report <file>] [--config-dir <dir>] [--model <id>] [--permission-mode <mode>]
- *        [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]
+ *        [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]
+ *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
  *   node headless-worker.js settle --code <CODE> [--ledger <file>] [--json]
@@ -60,14 +61,17 @@ const { spawn } = require('node:child_process');
 
 const USAGE = [
     'Usage: node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>',
-    '            [--report <file>] [--config-dir <dir>] [--model <id>] [--permission-mode <mode>]',
-    '            [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]',
+    '            [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]',
+    '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
     '       node headless-worker.js settle --code <CODE> [--ledger <file>] [--json]',
     '       node headless-worker.js selftest',
     'start: spawn a detached supervisor that runs `claude -p` and appends CLAUDE_EXIT=<code> to the log.',
     '       The caller may exit at once; the result is the report file plus that exit line.',
+    '       --config-dir is an absolute path, ~ or ~/<name>. A bare relative name is refused, and so is',
+    '       a directory that does not exist, before anything is spawned or recorded.',
+    '       --effort is one of low|medium|high|xhigh|max, passed to claude as --effort <level>; omitted, argv has no --effort.',
     'status: two axes per record, process (running|exited|unknown) and result (none|done|stopped|failed|unparseable).',
     '        A record started before this boot is unknown whatever its pid says; settled records leave after 7 days.',
     'settle: read the last RESULT <CODE> line of the report and mark the record settled.',
@@ -83,6 +87,10 @@ const LOCK_STALE_MS = 60 * 1000;
 const LOCK_WAIT_MS = 5000;
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const EXIT_LINE_RE = /^CLAUDE_EXIT=(-?\d+)\s*$/m;
+// `[measured 2026-09-21]` claude 2.1.278 `--help`: "--effort <level>  Effort
+// level for the current session (low, medium, high, xhigh, max)". A value
+// outside this list is refused here, before a worker dies on it after spawning.
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 const HEADLESS_NOTE = 'HEADLESS: this process exits the moment the turn ends, so run every gate and long '
     + 'command in the FOREGROUND with the Bash timeout at its maximum, background nothing, and do not end '
@@ -93,7 +101,7 @@ function fault(code, message) { const e = new Error(message || code); e.publicCo
 function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'dry-run', 'json'];
-    const known = ['_', ...flags, 'code', 'prompt-file', 'log', 'report', 'config-dir', 'model',
+    const known = ['_', ...flags, 'code', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
         'permission-mode', 'cwd', 'claude-bin', 'ledger'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
@@ -215,9 +223,46 @@ function readPrompt(file) {
     return prompt;
 }
 
-function buildArgv({ claudeBin, prompt, model, permissionMode }) {
-    return [claudeBin, '-p', prompt, ...(model ? ['--model', model] : []),
+function buildArgv({ claudeBin, prompt, model, effort, permissionMode }) {
+    return [claudeBin, '-p', prompt, ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []),
         '--permission-mode', permissionMode, '--output-format', 'stream-json', '--verbose'];
+}
+
+function requireEffort(value) {
+    if (!EFFORT_LEVELS.includes(value)) fault('usage', `--effort must be one of ${EFFORT_LEVELS.join(', ')}, the levels claude --help lists; got ${value}`);
+    return value;
+}
+
+/**
+ * --config-dir picks the ACCOUNT a worker runs as, so its meaning must not
+ * depend on where the launcher stands. `~` and `~/...` expand to the home
+ * directory and an absolute path is taken as given. A bare relative name is
+ * refused: `[measured 2026-09-21]` `--config-dir .claude-b` resolved against
+ * the launcher's cwd, named a directory that did not exist, and the worker
+ * died in 1 s with "Not logged in". Three bases were plausible for that name
+ * (the launcher's cwd, --cwd, home), and a guessed account is worse than a
+ * refusal that prints the spelling that works.
+ */
+function resolveConfigDir(raw) {
+    const tilde = /^~(?:[\\/](.*))?$/.exec(raw);
+    if (tilde) return path.resolve(homeDir(), tilde[1] || '');
+    if (path.isAbsolute(raw)) return path.resolve(raw);
+    fault('config-dir-relative', `--config-dir ${raw} is relative, so its meaning would depend on the launcher's cwd; `
+        + `pass ~/${raw} for ${path.join(homeDir(), raw)}, or an absolute path`);
+}
+
+/**
+ * Called by `start` only, dry run included, so the preview refuses what the
+ * real start would. Never by the supervisor: its stdio is ignored, so a throw
+ * there would end it with no CLAUDE_EXIT line for a poller to read.
+ */
+function requireConfigDirExists(dir) {
+    let st;
+    try { st = fs.statSync(dir); } catch (e) {
+        if (e.code === 'ENOENT' || e.code === 'ENOTDIR') fault('config-dir-missing', `--config-dir resolved to ${dir}, which does not exist, so a worker started there has no login`);
+        fault('config-dir-unusable', `--config-dir resolved to ${dir}, which could not be read (${e.code || e.message})`);
+    }
+    if (!st.isDirectory()) fault('config-dir-unusable', `--config-dir resolved to ${dir}, which is not a directory`);
 }
 
 /**
@@ -284,8 +329,9 @@ function startOptions(opts) {
         log,
         report: path.resolve(opts.report || defaultReport(log)),
         promptFile: path.resolve(opts['prompt-file']),
-        configDir: opts['config-dir'] ? path.resolve(opts['config-dir']) : null,
+        configDir: opts['config-dir'] ? resolveConfigDir(opts['config-dir']) : null,
         model: opts.model || null,
+        effort: opts.effort ? requireEffort(opts.effort) : null,
         permissionMode: opts['permission-mode'] || 'default',
         cwd: opts.cwd ? path.resolve(opts.cwd) : process.cwd(),
         claudeBin: resolveClaudeBin(opts['claude-bin'] || 'claude'),
@@ -298,19 +344,22 @@ function supervisorFlags(o) {
     const flags = ['--code', o.code, '--log', o.log, '--prompt-file', o.promptFile,
         '--permission-mode', o.permissionMode, '--cwd', o.cwd, '--claude-bin', o.claudeBin];
     if (o.model) flags.push('--model', o.model);
+    if (o.effort) flags.push('--effort', o.effort);
     if (o.configDir) flags.push('--config-dir', o.configDir);
     return flags;
 }
 
 function start(opts) {
     const o = startOptions(opts);
+    if (o.configDir) requireConfigDirExists(o.configDir);
     const prompt = readPrompt(o.promptFile);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, permissionMode: o.permissionMode });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     if (opts['dry-run']) {
         return {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
+            configDir: o.configDir, effort: o.effort,
             log: o.log, report: o.report, ledger: o.ledger, cwd: o.cwd, spawned: false,
         };
     }
@@ -323,7 +372,7 @@ function start(opts) {
         code: o.code, pid: null, startedAt: new Date().toISOString(),
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
-        model: o.model, permissionMode: o.permissionMode, state: 'starting',
+        model: o.model, effort: o.effort, permissionMode: o.permissionMode, state: 'starting',
     };
     const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;
     withLedger(o.ledger, (ledger) => {
@@ -360,7 +409,7 @@ function start(opts) {
 function supervise(opts) {
     const o = startOptions(opts);
     const prompt = readPrompt(o.promptFile);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, permissionMode: o.permissionMode });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
     const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     const plan = spawnPlan(argv);
     fs.mkdirSync(path.dirname(o.log), { recursive: true });
