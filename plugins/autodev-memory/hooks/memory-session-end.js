@@ -135,6 +135,11 @@ try {
         // project keep theirs.
         carrier.clear(cwd, harnessSessionId);
         carrier.clearPrompt(cwd, harnessSessionId);
+
+        // Truncate the shared WAL. It is never deleted while any peer session
+        // holds a connection, so without this it only ever grows. Whether or
+        // not THIS session had a memory session: the WAL is everyone's.
+        if (memDB.isAvailable()) memDB.checkpoint();
     }
 } catch (err) {
     // Memory close is non-critical — never interfere with session teardown.

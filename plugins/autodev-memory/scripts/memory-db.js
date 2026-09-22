@@ -11,6 +11,8 @@ const { configDir } = require('./config-dir');
 
 const DB_DIR = path.resolve(configDir());
 const DB_PATH = path.join(DB_DIR, 'auto-dev-memory.db');
+const BUSY_TIMEOUT_MS = 2000;
+const JOURNAL_SIZE_LIMIT = 32 * 1024 * 1024;
 
 let _db = null;
 let _available = null;
@@ -101,6 +103,7 @@ function getDB() {
         let db;
         try {
             db = new DatabaseSync(DB_PATH, { readOnly: true });
+            db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
             // Schema reads do not create tables, migrate, or change journal mode.
             db.prepare('SELECT id, project_path, start_time, end_time, user_request, investigated, learned, completed, next_steps, total_observations, total_tokens FROM sessions LIMIT 0').all();
             db.prepare('SELECT id, session_id, project_path, type, title, concept, source_files, token_cost, timestamp, content_hash, raw_data FROM observations LIMIT 0').all();
@@ -118,8 +121,17 @@ function getDB() {
     }
 
     _db = new DatabaseSync(DB_PATH);
+    // FIRST, before anything that can take a lock. Every session on the machine
+    // writes this one file, and the default busy_timeout is 0: a write that met
+    // a peer's lock failed at once, the circuit breaker swallowed it, and the
+    // observation was lost. 2 s covers any single hook write and still fits a
+    // hook budget. tooling/test-memory-db-contention.js holds the lock and times it.
+    _db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     _db.exec('PRAGMA journal_mode = WAL');
     _db.exec('PRAGMA wal_autocheckpoint = 1000');
+    // A WAL only shrinks when it resets, and then only to this limit. Without
+    // one, a file grown by a long session stays at its peak size for good.
+    _db.exec(`PRAGMA journal_size_limit = ${JOURNAL_SIZE_LIMIT}`);
     _db.exec(SCHEMA);
 
     // FTS setup (may fail on some builds — non-critical)
@@ -807,6 +819,33 @@ const api = {
                 totalObservations: observations.count,
                 byType
             };
+        });
+    },
+
+    // Connection settings, for diagnostics and the contention suite.
+    pragmas() {
+        return withCircuitBreaker(() => {
+            const db = getDB();
+            if (!db) return null;
+            const one = (name) => Object.values(db.prepare(`PRAGMA ${name}`).get() || {})[0];
+            return {
+                busy_timeout: one('busy_timeout'),
+                journal_size_limit: one('journal_size_limit'),
+                journal_mode: one('journal_mode'),
+            };
+        });
+    },
+
+    // Fold the WAL into the main file and cut it to 0 bytes. Run at SessionEnd:
+    // while any peer session holds a connection, the WAL is never deleted, and
+    // autocheckpoint alone copies pages back without shrinking the file.
+    // Returns { busy, log, checkpointed }; busy 1 means a reader blocked it,
+    // which is harmless and simply leaves the WAL for the next session end.
+    checkpoint() {
+        return withCircuitBreaker(() => {
+            const db = getDB();
+            if (!db) return null;
+            return db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() || null;
         });
     },
 
