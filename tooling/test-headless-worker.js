@@ -143,7 +143,7 @@ function waitForEnd(log, pid) {
 function completeFake(label, code, opts) {
     const started = startFake(code, opts);
     if (!started.pid) {
-        check(`${label}: start returned a supervisor pid`, false, started.stdout.slice(0, 200));
+        check(`${label}: start returned a supervisor pid`, false, started.res.stdout.slice(0, 200));
         return null;
     }
     const end = waitForEnd(started.log, started.pid);
@@ -577,6 +577,112 @@ try {
             && resolveClaudeBin('claude.cmd', { platform: 'win32', pathEnv: shimDir, exists }) === 'claude.cmd');
         check('20. on a non-Windows platform the name passes through untouched', resolveClaudeBin('claude', { platform: 'linux', pathEnv: exeDir, exists }) === 'claude');
     }
+
+    // ------------------------------------------------------------ 21. --config-dir must name a directory that exists
+    // `[measured 2026-09-21]` `--config-dir .claude-b` resolved against the
+    // launcher's cwd, named nothing, and the worker died in 1 s with "Not
+    // logged in". hw() runs with cwd ROOT and HOME pinned under ROOT, so a name
+    // that exists under HOME and not under ROOT tells the two bases apart.
+    {
+        const dir = path.join(ROOT, 'T21');
+        const name = 'cfg-b';
+        fs.mkdirSync(path.join(HOME, name), { recursive: true });
+        check('21. control: the name exists as a directory under HOME and not under the launcher cwd',
+            fs.statSync(path.join(HOME, name)).isDirectory() && !fs.existsSync(path.join(ROOT, name)));
+        const tryStart = (code, cfg, extra = []) => {
+            const log = path.join(dir, code + '.log');
+            const ledger = path.join(dir, code + '-ledger.json');
+            const r = hw(['start', '--code', code, '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--config-dir', cfg, ...extra]);
+            if (r.json && r.json.ok && r.json.value.supervisorPid) supervisors.push(r.json.value.supervisorPid);
+            return { r, log, ledger, err: r.json && !r.json.ok ? r.json.error : { code: null, message: '' } };
+        };
+
+        const missing = path.join(ROOT, 'no such config');
+        const m = tryStart('T21M', missing);
+        check('21. a missing absolute --config-dir exits 1 with config-dir-missing, one line naming the resolved path and saying it does not exist',
+            m.r.exit === 1 && m.err.code === 'config-dir-missing' && m.err.message.includes(missing)
+            && /does not exist/.test(m.err.message) && !/\n/.test(m.err.message), m.r.stdout.slice(0, 200));
+        const absentM = logStaysAbsent(m.log, 2000);
+        check('21. and it recorded nothing and spawned nothing: no ledger, and the log stays absent for 2 s',
+            !fs.existsSync(m.ledger) && absentM.absent, absentM.absent ? '' : `the log appeared ${absentM.afterMs} ms after the refusal`);
+
+        const rel = tryStart('T21R', name);
+        check('21. a bare relative name is refused with config-dir-relative, naming the ~/ spelling and the home path it would mean',
+            rel.r.exit === 1 && rel.err.code === 'config-dir-relative' && rel.err.message.includes(`~/${name}`)
+            && rel.err.message.includes(path.join(HOME, name)), rel.r.stdout.slice(0, 200));
+        check('21. and it recorded nothing and spawned nothing', !fs.existsSync(rel.ledger) && !fs.existsSync(rel.log));
+
+        const tilde = tryStart('T21T', `~/${name}`, ['--dry-run']);
+        check('21. ~/<name> expands to the home directory, not the launcher cwd',
+            tilde.r.exit === 0 && tilde.r.json.value.configDir === path.join(HOME, name) && tilde.r.json.value.envSet.includes('CLAUDE_CONFIG_DIR'),
+            tilde.r.json && tilde.r.json.ok ? tilde.r.json.value.configDir : tilde.r.stdout.slice(0, 200));
+        const bare = tryStart('T21H', '~', ['--dry-run']);
+        check('21. a lone ~ is the home directory itself', bare.r.exit === 0 && bare.r.json.value.configDir === HOME,
+            bare.r.json && bare.r.json.ok ? bare.r.json.value.configDir : bare.r.stdout.slice(0, 200));
+
+        const tildeMissing = tryStart('T21N', '~/no-such-cfg');
+        check('21. ~/<name> that does not exist is refused naming the expanded home path',
+            tildeMissing.r.exit === 1 && tildeMissing.err.code === 'config-dir-missing' && tildeMissing.err.message.includes(path.join(HOME, 'no-such-cfg'))
+            && !fs.existsSync(tildeMissing.ledger), tildeMissing.r.stdout.slice(0, 200));
+
+        const file = path.join(dir, 'a file not a dir');
+        write(file, 'x\n');
+        const f = tryStart('T21F', file);
+        check('21. a --config-dir that is a file is refused with config-dir-unusable, not a directory',
+            f.r.exit === 1 && f.err.code === 'config-dir-unusable' && /not a directory/.test(f.err.message) && !fs.existsSync(f.ledger), f.r.stdout.slice(0, 200));
+
+        const dryMissing = tryStart('T21D', missing, ['--dry-run']);
+        check('21. --dry-run refuses a missing --config-dir too, so the preview matches the real start',
+            dryMissing.r.exit === 1 && dryMissing.err.code === 'config-dir-missing', dryMissing.r.stdout.slice(0, 200));
+    }
+
+    // ------------------------------------------------------------ 22. --effort reaches claude, the supervisor and the ledger
+    // The levels are the ones `claude --help` printed on 2.1.278 (2026-09-21),
+    // written here as a literal rather than read from the script, so narrowing
+    // the script's list turns this red instead of shrinking with it.
+    {
+        const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+        const dir = path.join(ROOT, 'T22');
+        const log = path.join(dir, 'dry.log');
+        const ledger = path.join(dir, 'dry-ledger.json');
+        const dry = (extra) => hw(['start', '--code', 'T22', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run', ...extra]);
+        const wrong = LEVELS.filter((lvl) => {
+            const r = dry(['--effort', lvl]);
+            const argv = r.json && r.json.ok ? r.json.value.argv : [];
+            return !(r.exit === 0 && argv[argv.indexOf('--effort') + 1] === lvl && argv.filter((a) => a === '--effort').length === 1 && r.json.value.effort === lvl);
+        });
+        check('22. every level claude --help lists is accepted and lands in argv as --effort <level>', wrong.length === 0, wrong.length ? `wrong: ${wrong.join(',')}` : `${LEVELS.length} of ${LEVELS.length}`);
+
+        const none = dry([]);
+        const noneArgv = none.json && none.json.ok ? none.json.value.argv : [];
+        check('22. --effort omitted leaves argv exactly as it was before the flag existed',
+            JSON.stringify([noneArgv[0], noneArgv[1], ...noneArgv.slice(3)]) === JSON.stringify([FAKE, '-p', '--permission-mode', 'default', '--output-format', 'stream-json', '--verbose'])
+            && none.json.value.effort === null, JSON.stringify([noneArgv[0], noneArgv[1], ...noneArgv.slice(3)]));
+
+        for (const bad of ['extreme', 'HIGH']) {
+            const r = dry(['--effort', bad]);
+            check(`22. --effort ${bad} is refused with code usage, naming the accepted levels`,
+                r.exit === 1 && r.json && r.json.error.code === 'usage' && r.json.error.message.includes('low, medium, high, xhigh, max'), r.stdout.slice(0, 200));
+        }
+        check('22. the refusals and dry runs recorded and spawned nothing', !fs.existsSync(dir));
+
+        const t22 = completeFake('22', 'T22R', { extraArgs: ['--effort', 'max'] });
+        if (t22) {
+            const argvLine = (t22.text.match(/^ARGV=(\[.*\])$/m) || [])[1];
+            const argv = argvLine ? JSON.parse(argvLine) : [];
+            check('22. the fake received --effort max through the supervisor, so the supervisor carried the flag',
+                argv[argv.indexOf('--effort') + 1] === 'max', argvLine ? argvLine.slice(-120) : 'no ARGV line');
+            const rec = JSON.parse(read(t22.ledger)).records[0];
+            check('22. the ledger record carries effort max', rec.effort === 'max' && t22.res.json.value.record.effort === 'max', JSON.stringify(rec.effort));
+            // The last real run in the file: let its supervisor finish exiting so
+            // the cleanup line counts only supervisors a defect left behind.
+            const until = Date.now() + 5000;
+            while (pidAlive(t22.pid) && Date.now() < until) sleep(50);
+        }
+        if (t5) check('22. a record started without --effort carries effort null', JSON.parse(read(t5.ledger)).records[0].effort === null);
+        const usage = hw(['--help']).stdout;
+        check('22. the usage text lists --effort <level> and its five levels', usage.includes('[--effort <level>]') && usage.includes('low|medium|high|xhigh|max'));
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -590,7 +696,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 20 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 22 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
