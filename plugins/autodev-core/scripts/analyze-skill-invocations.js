@@ -357,17 +357,37 @@ function selftest() {
     return fail ? 1 : 0;
 }
 
-if (flag('--selftest')) process.exit(selftest());
+function main() {
+    if (flag('--selftest')) return selftest();
 
-const result = analyse({
-    days: Number(opt('--days', '7')) || 7,
-    dir: opt('--dir', path.join(HOME, '.claude', 'projects')),
-    pluginsDir: opt('--plugins', path.join(__dirname, '..', '..')),
-    budget: Number(opt('--max-files', '4000')) || 4000,
-});
+    const result = analyse({
+        days: Number(opt('--days', '7')) || 7,
+        dir: opt('--dir', path.join(HOME, '.claude', 'projects')),
+        pluginsDir: opt('--plugins', path.join(__dirname, '..', '..')),
+        budget: Number(opt('--max-files', '4000')) || 4000,
+    });
 
-if (flag('--json')) {
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(result.total === 0 ? 2 : (result.never.length ? 1 : 0));
+    if (flag('--json')) {
+        console.log(JSON.stringify(result, null, 2));
+        return result.total === 0 ? 2 : (result.never.length ? 1 : 0);
+    }
+    return report(result);
 }
-process.exit(report(result));
+
+// process.exit() TRUNCATES output, and only on some platforms.
+//
+// node's process.stdout is ASYNCHRONOUS when it is a PIPE on POSIX (Linux and
+// macOS alike) and synchronous when it is a pipe on win32; it is synchronous
+// for a FILE everywhere. process.exit() terminates without draining a
+// pending async write, so a run that prints more than the 64KiB OS pipe buffer
+// and then exits delivers exactly 65536 bytes — under exit status 0, because
+// the write never failed. A silent wrong answer, not a visible failure. The
+// three things that hide it: a file redirect is synchronous so the output looks
+// whole, the status is 0 so CI stays green (a Linux pipe is asynchronous too,
+// so CI is exposed and cannot see it), and nothing compares byte counts.
+//
+// Setting process.exitCode instead lets the event loop drain the stream and
+// exit on its own with the same status. Nothing here holds the loop open.
+// See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
+// conventions that have actually cost something.
+process.exitCode = main();
