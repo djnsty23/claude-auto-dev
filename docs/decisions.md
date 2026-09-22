@@ -3,6 +3,41 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-22: a second Claude profile keeps its own state, the fleet registry included
+
+A user can run a second, fully separate profile by pointing CLAUDE_CONFIG_DIR at
+a directory other than `~/.claude`. Before this change 56 path sites under
+`plugins/*/hooks` and `plugins/*/scripts` joined `<home>/.claude` or
+`<home>/claude-memory` by hand, so a session on the second profile read the
+first profile's `brain-role.json` (and was blocked by its coordinator guard),
+consulted its artifact schemas, and wrote its nudge ledgers, peer-send ledger,
+heartbeats and registry records.
+
+**One resolver per plugin.** `claude-paths.js` gains `configDir()`,
+`isDefaultConfigDir()` and `fleetMemoryDir()`, and every such site now asks it.
+autodev-memory cannot require a core file, because `CLAUDE_PLUGIN_ROOT` resolves
+per plugin, so it ships a copy as `scripts/config-dir.js`.
+`tooling/test-config-dir-isolation.js` asks both copies the same questions and
+fails when the answers differ.
+
+**Fleet paths outside the config dir follow the profile too.** Under a
+non-default profile, `fleetMemoryDir()` is `<config dir>/claude-memory`, not
+`~/claude-memory`. That directory does not exist until the profile opts in, so
+every hook that treats absence as "no fleet" goes quiet instead of reading the
+other profile's fleet. Explicit overrides (`AUTODEV_FLEET_INTENT_DIR`,
+`AUTODEV_AWAY_FILE`, `AUTODEV_FLEET_PUBLISH_DIR`, `AUTODEV_FLEET_DIR`) still win.
+
+**This reverses one deliberate design.** `session-register.js` used to key its
+registry on HOME so that every account's sessions landed in one directory. The
+default is now `<config dir>/fleet`, per profile, because a registry shared by
+default is exactly the cross-profile write the second profile must not make.
+Two profiles that want one registry set `AUTODEV_FLEET_DIR` to the same
+directory on both, which was already the documented way to split or join it.
+
+With CLAUDE_CONFIG_DIR unset, or set to `<home>/.claude` itself, every path
+resolves as before. The suite's controls hold that side: each case runs again
+with the variable unset and must reach the default profile.
+
 ## 2026-09-10: the sweep ORDERS spurious subject candidates rather than dropping them
 
 `check-suites-can-fail.js` was doing 348 suite process runs for 124 graded
