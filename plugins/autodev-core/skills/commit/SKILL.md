@@ -92,7 +92,7 @@ queued while continuing independent authorized work.
 
 A failing commit/push hook remains a failed check. Identify the actual hook,
 command, project root and failure before diagnosing it. To compare with the base,
-use an isolated temporary worktree at the verified base SHA, run the same command
+use an isolated temporary worktree under `<repo>/.claude/worktrees/` at the verified base SHA, run the same command
 with the same required environment, and retain both exit codes and diagnostics.
 Verify that scratch worktree contains only this probe's files before removing it.
 Do not switch refs or force-clean another worker's checkout.

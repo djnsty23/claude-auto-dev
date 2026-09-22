@@ -113,7 +113,9 @@ before a second dispatch.
 Choose a channel that actually starts work:
 
 - Use available native agents or workflows for bounded work in this mission.
-  Assign an isolated worktree and verify the worker's actual cwd, origin and
+  Assign an isolated worktree at `<repo>/.claude/worktrees/<name>`, and name that
+  path in the brief: a brief that says only "a new worktree" gets one beside the
+  repo. Verify the worker's actual cwd, origin and
   base before edits. Agents may inherit the parent's directory. For a worker
   that is a local Node script, `scripts/mission-dispatch.js start` is that
   boundary: it forks the worker in the contract root with no shell, waits for

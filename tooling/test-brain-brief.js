@@ -402,6 +402,9 @@ function runBrief(opts) {
     env.HOME = opts.home;
     env.APPDATA = path.join(opts.home, 'AppData');
     env.AUTODEV_FLEET_DIR = path.join(opts.home, '.claude', 'fleet');
+    // Pinned, never inherited: an operator's own AUTODEV_CODE_DIR would make
+    // section 5 survey this machine's real checkouts.
+    env.AUTODEV_CODE_DIR = opts.codeDir || '';
     const r = spawnSync(process.execPath, [opts.subject || SUBJECT, ...(opts.args || [])], {
         cwd: opts.cwd, env, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
     });
@@ -655,6 +658,27 @@ try {
     hasText('B: counts zero open PRs against a queried repo', b3,
         '1 queried successfully, 0 COULD NOT BE CHECKED, 0 open PR(s) found');
     lacksText('B: a real zero is not dressed up as a blind spot', b3, 'Nothing was asked.');
+
+    // Section 5 with no code root: the repo probe still counts, and the root
+    // probe is a named blind spot rather than a clean zero.
+    const b5 = section(B.stdout, '5. PLACEMENT');
+    hasText('B: placement counts the one repo and its one worktree', b5,
+        'population: 1 repo(s) listed 1 worktree(s): 1 main, 0 under .claude/worktrees');
+    hasText('B: no code root is COULD NOT CHECK, not a clean root', b5, 'COULD NOT CHECK - code root');
+
+    // The same run pointed at a code root holding one loose file.
+    const codeP = path.join(os.tmpdir(), 'brain-brief-code-' + process.pid);
+    fs.mkdirSync(codeP, { recursive: true });
+    fs.writeFileSync(path.join(codeP, 'worker-gate.log'), 'x\n');
+    const P = runBrief({
+        home: homeB, cwd: workB, path: WITH_GH, codeDir: codeP,
+        args: ['--no-overlap', '--days', '5', '--repo', CLEAN_REPO],
+    });
+    const p5 = section(P.stdout, '5. PLACEMENT');
+    hasText('P: the code root is scanned and its entries counted', p5, 'entries (1 file)');
+    hasText('P: a loose file in the code root is reported as a stray', p5, 'worker-gate.log');
+    lacksText('B: without that file there is no stray line', b5, 'stray(s) in the code root');
+    fs.rmSync(codeP, { recursive: true, force: true });
 
     const b4 = section(B.stdout, '4. UNCOMMITTED AND UNPUSHED');
     hasText('B: a clean worktree is a read zero, not an unread one', b4,
