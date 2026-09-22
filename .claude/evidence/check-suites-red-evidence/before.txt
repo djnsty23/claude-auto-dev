@@ -1,0 +1,46 @@
+# BEFORE: tooling/test-check-suites-can-fail.js against the unfixed sweep
+# code revision: 3ce459cc647eacbf447e20f42ef8c6b3d0814f99 (origin/main), new suite uncommitted, sweep unmodified
+# command: node tooling/test-check-suites-can-fail.js    exit: 1
+# taken: 2026-09-21T22:47:35Z, win32, node v24.15.0
+
+PASS  control: the fixture is its own committed, clean repository
+PASS  control: validate.js is verified able to fail
+PASS  control: the planted green suite is verified able to fail
+PASS  control: the summary counts both rows as verified
+PASS  control: the sweep exits 0
+PASS  control: no child output is printed, not even the red a stubbed subject provokes
+PASS  red: the fixture is its own committed, clean repository
+PASS  red: the suite row is exactly the RED row it always was
+PASS  red: the validate.js row is exactly the RED row it always was
+PASS  red: the summary still counts both REDs as not verified
+PASS  red: the sweep exits 1, a finding, not 2
+PASS  red: no mid-sweep conflict was raised by reporting the evidence
+FAIL  red: the suite's exit status is reported  (
+Can each suite fail?
+
+  ✗ validate.js                    RED       already failing
+  ✓ test-planted-green.js          ok        
+  ✗ test-planted-red.js            RED       already failing — fix it before trusting this result
+
+3 suite(s) · 1 verified able to fail · 2 NOT verified · sweep worktree clean, source tree refs unmoved
+
+
+)
+FAIL  red: validate.js's exit status is reported  (
+Can each suite fail?
+
+  ✗ validate.js                    RED       already failing
+  ✓ test-planted-green.js          ok        
+  ✗ test-planted-red.js            RED       already failing — fix it before trusting this result
+
+3 suite(s) · 1 verified able to fail · 2 NOT verified · sweep worktree clean, source tree refs unmoved
+
+
+)
+FAIL  red: the last stdout lines and every stderr line of both children reach the output  (missing: R-OUT-011., R-OUT-049., R-OUT-050., R-ERR-1., R-ERR-2., R-ERR-3., V-RED-ERR-1., V-RED-ERR-2.)
+PASS  red: stdout is bounded to its last 40 lines
+PASS  red: one 20,000-character line is clipped rather than printed whole
+PASS  red: the green suite in the same run prints nothing extra
+
+15 passed, 3 failed
+Failed: red: the suite's exit status is reported | red: validate.js's exit status is reported | red: the last stdout lines and every stderr line of both children reach the output

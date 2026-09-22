@@ -1,0 +1,33 @@
+# AFTER, headless-worker.js on base 43cfd21 plus the uncommitted fix (diff sha 28e81716c8e4), 2026-09-21T18:23:18Z
+# every temp-root path below is written <TMP>; the probe ran under the OS temp directory
+# launcher cwd for every call: <TMP>/launcher-cwd (no config dirs in it); HOME/USERPROFILE=<TMP>/home, which holds .claude-b
+
+## 1. relative --config-dir .claude-b, --dry-run
+{"ok":false,"error":{"code":"config-dir-relative","message":"--config-dir .claude-b is relative, so its meaning would depend on the launcher's cwd; pass ~/.claude-b for <TMP>\\home\\.claude-b, or an absolute path"}}
+exit=1
+
+## 2. relative --config-dir .claude-b, real start through a fake binary
+{"ok":false,"error":{"code":"config-dir-relative","message":"--config-dir .claude-b is relative, so its meaning would depend on the launcher's cwd; pass ~/.claude-b for <TMP>\\home\\.claude-b, or an absolute path"}}
+exit=1
+ledger exists: no; log exists: no
+
+## 3. absolute --config-dir that does not exist, real start
+{"ok":false,"error":{"code":"config-dir-missing","message":"--config-dir resolved to <TMP>\\no such config, which does not exist, so a worker started there has no login"}}
+exit=1
+ledger exists: no; log exists: no
+
+## 4. --config-dir ~/.claude-b (tilde passed literally), real start through the fake
+{"ok":true,"value":{"ledger":"<TMP>\\d\\ledger.json","record":{"code":"BW12D","pid":43872,"startedAt":"2026-09-21T18:23:24.719Z","log":"<TMP>\\d\\w.log","report":"<TMP>\\d\\w.report.md","promptFile":"<TMP>\\prompt.md","configDir":".claude-b","model":null,"effort":"high","permissionMode":"default","state":"running"},"supervisorPid":43872,"spawned":true}}
+exit=0
+child saw CLAUDE_CONFIG_DIR: CFG=<TMP>\home\.claude-b
+child argv tail: "--effort","high","--permission-mode","default","--output-format","stream-json","--verbose"]
+ledger record: {"code":"BW12D","configDir":".claude-b","effort":"high","state":"running"}
+log tail: CLAUDE_EXIT=0
+
+## 5. --effort high, --dry-run
+argv tail=["--effort","high","--permission-mode","default","--output-format","stream-json","--verbose"] effort=high
+exit=0
+
+## 6. --effort extreme
+{"ok":false,"error":{"code":"usage","message":"--effort must be one of low, medium, high, xhigh, max, the levels claude --help lists; got extreme"}}
+exit=1
