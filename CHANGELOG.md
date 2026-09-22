@@ -1,5 +1,47 @@
 # Changelog
 
+## [8.172.0]
+
+### Compact in place at a natural break, with no click (#285)
+
+- context-depth-nudge blocks the Stop once per 50k band past a soft line
+  (`AUTODEV_CONTEXT_SOFT_LINE`, default 250,000): finish the unit, refresh the
+  handoff with `session-exit.js --out .claude/handoffs/RESUME-<id8>.md`, end the
+  turn. When an auto-compact window is configured it orders no chip, because
+  compaction follows. The chip stays the fallback with no window set. The block
+  is silent while `stop_hook_active` is set and records its band before it
+  speaks, so it cannot loop. State is one file per session, renamed into place.
+- session-start points back at the handoff after a compaction: on source
+  `compact` it names the newest handoff for the cwd, the session's own
+  `RESUME-<id8>.md` first, and never injects the file's contents.
+- Brain skill: at the soft line, keep the seat and shed the context instead of
+  spawning a successor. `docs/recommended-settings.json` recommends
+  `autoCompactWindow` 320000.
+
+### Fixes
+
+- placement: briefs, headless-worker and unattended-worker name where
+  worktrees and scratch files go, and `worktree-placement.js` (brain-brief
+  section 5) finds the ones that went elsewhere (#282).
+- check-branch-landed scores the branch's own contribution from the merge base,
+  so an additive PR on a moved trunk no longer reads BEHIND (#281).
+- marketing-radar reports its coverage gaps, and radar-learning keeps useful
+  comments (#278).
+- 19 scripts no longer truncate `--json` at 64 KiB through a pipe: they set
+  `process.exitCode` instead of calling `process.exit()` (#204).
+- check-suites prints a RED baseline child's exit status and output tail (#279).
+- headless-worker refuses a relative, missing or unusable `--config-dir`, and
+  passes `--effort` through (#276).
+- seo skill: per-token AI-crawler checks and Search Console reads (#271).
+
+### Tests and docs
+
+- artifact-write-guard suite matches batch entries by doc path, not a substring
+  a temp directory name can contain (#280).
+- headless-worker suite pins the old ledger inode so ext4 inode reuse cannot
+  read as no replace (#275).
+- rule-verification: confirm indirect Bash edits with a scoped `git diff` (#277).
+
 ## [8.171.0]
 
 ### A session at the context line spawns its own continuation (Andy, 2026-09-21)
