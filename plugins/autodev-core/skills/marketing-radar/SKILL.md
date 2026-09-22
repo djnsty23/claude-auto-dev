@@ -166,7 +166,11 @@ performance outcome needed to call it a winner.
 ### Safety and isolation
 
 Use a dedicated worktree and `codex/marketing-radar-*` branch for framework
-changes. Preserve raw commands, exit codes, elapsed time and evidence paths.
+changes, created INSIDE the repo:
+`git -C <repo> worktree add .claude/worktrees/marketing-radar-<topic> -b codex/marketing-radar-<topic> origin/main`.
+Never place it beside the checkout. Logs, diffs and exit files go in the session
+scratchpad or `~/.claude/autodev/reports/<run>/`, never in the directory that
+holds the checkouts. Preserve raw commands, exit codes, elapsed time and evidence paths.
 
 Scheduled runs are read-only toward ad accounts, analytics properties, CRM,
 email systems, domains and product repositories. They may create local fixtures,

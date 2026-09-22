@@ -152,7 +152,12 @@ nothing" is otherwise incomplete.
 
 Never experiment in the shared checkout. Fetch the remote, verify the exact
 default-branch commit, and create a dedicated worktree and `codex/radar-*`
-branch from that commit. Read open candidate branches/PRs and current authorized work too: a remote
+branch from that commit INSIDE the repo:
+`git -C <repo> worktree add .claude/worktrees/radar-<topic> -b codex/radar-<topic> <sha>`.
+Never place it beside the checkout, where it becomes a stray in the directory
+holding every other repo. Logs, diffs and exit files go in the session
+scratchpad or `~/.claude/autodev/reports/<run>/`, never in that directory
+either. Read open candidate branches/PRs and current authorized work too: a remote
 default is the stable baseline, but a capability may already exist in an
 unmerged candidate. Verify ancestry/content before proposing a duplicate.
 Run A before editing. Run B and C on the same fixtures

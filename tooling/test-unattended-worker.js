@@ -91,6 +91,11 @@ try {
     check('prompt names the return address', prompt.includes('report to coordinator-a1'), 'coordinator-a1');
     check('prompt contains no backslash (a shell reads it as an escape)', !prompt.includes('\\'));
     check('prompt tells the worker every later command starts with cd into the worktree', /Every later shell command starts with `cd "[^"]+" && `/.test(prompt), prompt.slice(0, 400));
+    // [measured 2026-09-22] briefs that named no location put 12 worktrees and
+    // 37 scratch files in the directory holding the checkouts.
+    const scratchHome = path.join(home, '.claude', 'autodev', 'reports', 'worker-logo-guide').replace(/\\/g, '/');
+    check('prompt pins any further worktree under <repo>/.claude/worktrees/', prompt.includes(repo.replace(/\\/g, '/') + '/.claude/worktrees/<name>, never beside the repo'), prompt.slice(0, 900));
+    check('prompt names the scratch home under HOME/.claude/autodev/reports/<task id>', prompt.toLowerCase().includes(scratchHome.toLowerCase()), scratchHome);
     check('create_scheduled_task arguments carry no schedule', ok.json && !('cronExpression' in ok.json.value.createScheduledTask) && !('fireAt' in ok.json.value.createScheduledTask));
     check('task id defaults to worker-<slug>', ok.json && ok.json.value.createScheduledTask.taskId === 'worker-logo-guide');
     check('brief records the task as composed', ok.json && ok.json.value.record.state === 'composed');

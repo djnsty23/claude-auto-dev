@@ -683,6 +683,26 @@ try {
         const usage = hw(['--help']).stdout;
         check('22. the usage text lists --effort <level> and its five levels', usage.includes('[--effort <level>]') && usage.includes('low|medium|high|xhigh|max'));
     }
+
+    // ------------------------------------------------------------ 23. the prompt names WHERE a worktree and scratch output go
+    // `[measured 2026-09-22]` a brief that said "a new worktree" and `> f.log`
+    // left the location to the worker, which put 12 worktrees and 37 scratch
+    // files in the directory holding the checkouts. The scratch dir is derived
+    // from --report, so the assertion uses a report path the log cannot imply.
+    {
+        const dir = path.join(ROOT, 'T23');
+        const report = path.join(ROOT, 'T23 reports', 'T23.report.md');
+        const r = hw(['start', '--code', 'T23', '--prompt-file', PROMPT, '--log', path.join(dir, 'T23.log'), '--report', report,
+            '--claude-bin', FAKE, '--ledger', path.join(dir, 'ledger.json'), '--dry-run']);
+        const v = r.json && r.json.ok ? r.json.value : null;
+        const promptArg = v ? v.argv[v.argv.indexOf('-p') + 1] : '';
+        const scratch = path.join(ROOT, 'T23 reports', 'T23');
+        check('23. dry-run reports the scratch dir as <report dir>/<code>', !!v && v.scratchDir === scratch, v ? v.scratchDir : r.stdout.slice(0, 200));
+        check('23. the prompt pins a worktree to <repo>/.claude/worktrees/<name>', promptArg.includes('<repo>/.claude/worktrees/<name>'), promptArg.slice(-400));
+        check('23. the prompt names that scratch dir, in forward slashes', promptArg.includes(scratch.replace(/\\/g, '/')), promptArg.slice(-400));
+        check('23. the placement note precedes the headless note, which still ends the prompt',
+            promptArg.indexOf('PLACEMENT:') > 0 && promptArg.indexOf('PLACEMENT:') < promptArg.indexOf(HEADLESS_NOTE) && promptArg.endsWith(HEADLESS_NOTE + '\n'));
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -696,7 +716,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 22 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 23 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);

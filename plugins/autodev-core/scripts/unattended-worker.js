@@ -152,7 +152,7 @@ function findRecord(ledger, taskId) {
  * starts with `cd "<worktree>" && `, and the worker re-reads the toplevel in the
  * same command before a commit, push or merge.
  */
-function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body }) {
+function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body, scratch }) {
     const r = slashes(repo), w = slashes(worktree);
     return [
         'STEP 0. Do this before anything else. This session opened in a checkout other sessions share.',
@@ -165,6 +165,7 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body })
         `Work ONLY inside ${w}, on branch ${branch}. Do not edit, commit, check out or stash in the checkout this session opened in.`,
         `Every later shell command starts with \`cd "${w}" && \`: the shell's working directory is reset to the checkout this session opened in between commands, so a bare command after STEP 0 runs in the shared checkout. Before any commit, push or merge, print \`git rev-parse --show-toplevel\` in the same command and check it says ${w}.`,
         `If STEP 0 fails, do no other work: report the failing command and its output to ${returnTo} with SendMessage, then stop.`,
+        `Any further worktree goes at ${r}/.claude/worktrees/<name>, never beside the repo.${scratch ? ` Logs, diffs, exit files and other scratch output go under ${slashes(scratch)}, never in the directory that holds the checkouts.` : ''}`,
         '',
         body.trim(),
         '',
@@ -220,7 +221,10 @@ function brief(opts) {
     if (active.some((r) => sameDir(r.repo, repo) && r.slug === opts.slug)) fault('ledger-collision', `slug ${opts.slug} is active for ${repo}`);
 
     const returnTo = opts.return;
-    const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, body });
+    // [measured 2026-09-22] a worker told only "a new worktree" and `> f.log`
+    // put both in the directory holding the checkouts. Name the scratch home.
+    const scratch = path.join(os.homedir(), '.claude', 'autodev', 'reports', taskId);
+    const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, body, scratch });
     const record = {
         taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, state: 'composed',
         composedAt: new Date().toISOString(),

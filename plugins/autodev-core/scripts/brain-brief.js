@@ -1176,6 +1176,31 @@ async function sectionWork(repos) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * WHERE the worktrees are, which section 4 never asks. `[measured 2026-09-22]`
+ * twelve worker worktrees and 37 scratch files sat in the directory holding the
+ * checkouts, all clean and pushed, so section 4 had nothing to say about any of
+ * them. The code root comes from claude-paths, the same resolver brain-panels
+ * uses; the repo set is this survey's plus every repo found in that root.
+ */
+function sectionPlacement(repos) {
+    say(THIN);
+    say('5. PLACEMENT - worktrees outside <repo>/.claude/worktrees/, and strays in the code root');
+    say(THIN);
+    let placement, codeDir;
+    try {
+        placement = require(path.join(SCRIPTS, 'worktree-placement.js'));
+        codeDir = require(path.join(SCRIPTS, 'claude-paths.js')).codeDir();
+    } catch (e) {
+        cantCheck('worktree placement', 'could not load worktree-placement.js: ' + (e && e.message ? e.message : String(e)));
+        say('');
+        return;
+    }
+    const r = placement.survey({ repos: repos.map((x) => x.root), codeRoot: codeDir });
+    for (const line of placement.render(r, { limit: 40 })) say(line);
+    say('');
+}
+
 async function main() {
     const started = Date.now();
 
@@ -1278,6 +1303,7 @@ async function main() {
 
     await sectionPRs(disco.repos);
     await sectionWork(disco.repos);
+    sectionPlacement(disco.repos);
 
     say(RULE);
     say('generated in ' + ((Date.now() - started) / 1000).toFixed(1) + 's');

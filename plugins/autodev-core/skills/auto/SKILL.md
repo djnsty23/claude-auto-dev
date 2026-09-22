@@ -97,7 +97,8 @@ git status --short
 git branch --show-current
 ```
 
-Use an isolated worktree for shared-repo changes. Install dependencies with the
+Use an isolated worktree at `<repo>/.claude/worktrees/<name>`, never beside the
+repo, for shared-repo changes. Install dependencies with the
 detected manager's lockfile-preserving command when required; timestamps alone
 do not establish that an installation matches the lockfile.
 

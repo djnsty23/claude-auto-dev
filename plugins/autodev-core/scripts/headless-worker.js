@@ -96,6 +96,19 @@ const HEADLESS_NOTE = 'HEADLESS: this process exits the moment the turn ends, so
     + 'command in the FOREGROUND with the Bash timeout at its maximum, background nothing, and do not end '
     + 'the turn until the report file is complete and carries its RESULT line.';
 
+// `[measured 2026-09-22]` briefs said "a new worktree" and `cmd > f.log` without
+// saying WHERE, so workers resolved both against whatever directory they stood
+// in: 12 worktrees landed as siblings in the directory holding the checkouts
+// (`../<repo>-<topic>`, `<code root>/<topic>`), and one worker wrote 37
+// log, diff and exit files straight into it. A location the prompt does not
+// name is a location the worker invents, so every prompt names both.
+function placementNote(scratchDir) {
+    return 'PLACEMENT: a git worktree goes INSIDE its repo, at <repo>/.claude/worktrees/<name> '
+        + '(`git -C <repo> worktree add .claude/worktrees/<name> -b <branch> origin/main`), never beside the repo '
+        + 'and never in the directory that holds the checkouts. A bare clone is scratch too. Logs, diffs, exit '
+        + `files and every other scratch output go under ${scratchDir.replace(/\\/g, '/')}, never in a checkout's parent directory.`;
+}
+
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
 function parseArgs(argv) {
@@ -210,14 +223,20 @@ function withLedger(file, fn) {
 function isUnsettled(rec) { return rec.state !== 'settled'; }
 
 // ---------------------------------------------------------------- the child
-function composePrompt(text) { return text.replace(/\s+$/, '') + '\n\n' + HEADLESS_NOTE + '\n'; }
+function composePrompt(text, scratchDir) {
+    const placement = scratchDir ? placementNote(scratchDir) + '\n\n' : '';
+    return text.replace(/\s+$/, '') + '\n\n' + placement + HEADLESS_NOTE + '\n';
+}
 
-function readPrompt(file) {
+/** Where a worker's scratch output belongs: a directory named for its code, beside its report. */
+function scratchDirFor(o) { return path.join(path.dirname(o.report), o.code); }
+
+function readPrompt(file, scratchDir) {
     if (!file) fault('usage', '--prompt-file is required');
     if (!fs.existsSync(file)) fault('prompt-missing', `${file} does not exist`);
-    const prompt = composePrompt(fs.readFileSync(file, 'utf8'));
+    const prompt = composePrompt(fs.readFileSync(file, 'utf8'), scratchDir);
     if (prompt.length > PROMPT_MAX) {
-        fault('prompt-too-long', `the prompt is ${prompt.length} characters after the headless note and the cap is ${PROMPT_MAX}: `
+        fault('prompt-too-long', `the prompt is ${prompt.length} characters after the placement and headless notes and the cap is ${PROMPT_MAX}: `
             + 'it travels in argv, so write a short pointer prompt that names a file to read');
     }
     return prompt;
@@ -352,7 +371,7 @@ function supervisorFlags(o) {
 function start(opts) {
     const o = startOptions(opts);
     if (o.configDir) requireConfigDirExists(o.configDir);
-    const prompt = readPrompt(o.promptFile);
+    const prompt = readPrompt(o.promptFile, scratchDirFor(o));
     const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     if (opts['dry-run']) {
@@ -360,7 +379,7 @@ function start(opts) {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
             configDir: o.configDir, effort: o.effort,
-            log: o.log, report: o.report, ledger: o.ledger, cwd: o.cwd, spawned: false,
+            log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
         };
     }
     // RESERVE, THEN SPAWN, THEN FILL IN. The code is reserved inside the lock
@@ -408,7 +427,7 @@ function start(opts) {
  */
 function supervise(opts) {
     const o = startOptions(opts);
-    const prompt = readPrompt(o.promptFile);
+    const prompt = readPrompt(o.promptFile, scratchDirFor(o));
     const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
     const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     const plan = spawnPlan(argv);
@@ -597,7 +616,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-    HEADLESS_NOTE, PROMPT_MAX, CODE_RE, SCRUBBED_ENV, RETENTION_MS,
+    HEADLESS_NOTE, PROMPT_MAX, CODE_RE, placementNote, SCRUBBED_ENV, RETENTION_MS,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, run,
 };

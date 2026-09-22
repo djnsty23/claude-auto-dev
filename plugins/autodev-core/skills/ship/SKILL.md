@@ -400,7 +400,8 @@ which is honest rather than wrong — the row still has to be checked.
 
 Execute the recovery procedure recorded for this deployment and platform. Read
 back the recovered version and repeat its critical live checks. For a function
-rollback needing old source, create an isolated worktree at the verified previous
+rollback needing old source, create an isolated worktree under
+`<repo>/.claude/worktrees/` at the verified previous
 commit and deploy only the intended affected functions from there. Do not check
 old files into a worker's active checkout or overwrite its uncommitted changes.
 
