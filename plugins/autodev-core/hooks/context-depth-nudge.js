@@ -3,37 +3,42 @@
 // skips this hook: it advises, it never guards. tooling/test-hooks-profile.js holds the list.
 if (process.env.CLAUDE_PLUGIN_OPTION_CONTEXT_NUDGE === 'false') process.exit(0);
 
-// Stop hook — says, once, when a session has grown past the restart line.
+// Stop hook: past the SOFT line, holds the turn open ONCE per band so the
+// session saves its state at a natural break, before compaction lands.
 //
 // THE RULE IT ENFORCES. Context depth is the bill: measured over 19,419
 // requests in one weekly quota window, 77% of weighted cost was cache READ, the
 // average main-thread request re-read 405k tokens to emit 1,063, and the second
 // half of a session cost 1.44x the first half for the same turn count. The rule
-// that came out of it says: past ~300k, finish the step, write RESUME.md, and
-// start fresh. Modelled saving 29% at a 300k reset, 46% at 200k.
+// that came out of it says: past ~300k, finish the step, write the handoff, and
+// shed the context.
 //
-// Until 2026-09-05 nothing in this plugin enforced that. The rule lived in
-// prose, and prose does not fire. This hook is the mechanical half. The shape
-// was borrowed from the one idea worth taking out of an evaluation of a much
-// larger harness (docs/decisions.md, 2026-09-05), whose context monitor guessed
-// depth from transcript BYTES. This one reads the TRUE figure: every assistant
-// row in a Claude Code transcript carries `message.usage`, and
-// input + cache_read + cache_creation on the latest one is the context that
-// call was billed for.
+// HOW THE CONTEXT IS SHED. Until 8.171.0 the only way was a continuation chip
+// (spawn_task), and a chip needs a person to click it. The harness can instead
+// compact in place: `autoCompactWindow` in settings, or
+// CLAUDE_CODE_AUTO_COMPACT_WINDOW, sets the window and compaction fires near the
+// top of it. What compaction cannot do is choose its moment, so it can land
+// mid-edit with nothing saved. This hook supplies the moment. At the soft line
+// (default 250k, below a recommended 320k window) it blocks the Stop once, with
+// a reason telling the model to finish the unit it is in, refresh its handoff
+// with session-exit.js, and end the turn. Compaction then lands after the state
+// is on disk, and session-start.js points the compacted session back at it.
 //
-// WHY STOP, AND WHY IT NEVER BLOCKS. Stop fires once per turn, not once per
-// tool call, so the transcript is read once per turn from its tail. A Stop hook
-// can hold a turn open; this one must not, because it ships installed and the
-// thing it would hold a turn for is a nudge. It emits `additionalContext` (the
-// field the model reads at the start of its next turn) and `systemMessage` (the
-// line the operator sees), and no `decision`, so it cannot fight
-// stop-auto-check's approve/block. Every path exits 0.
+// When no window is configured, compaction is not coming, so the reason falls
+// back to the continuation chip. When one is configured but the depth is
+// already at or past it, compaction evidently did not fire, and the chip text
+// is used for the same reason.
 //
-// WHY IT SPEAKS ONCE PER STEP. A hook that speaks every turn is a hook that gets
-// ignored; the same repo's own Stop hooks say so and throttle. This one speaks
-// when a session first crosses the line, then again per further STEP (default
-// 100k), and is silent in between. The ledger is per session_id so two
-// sessions in one home directory do not share a memory.
+// WHY A BLOCK CANNOT LOOP. A blocked Stop makes the model take another turn and
+// then Stop again, with stop_hook_active set. This hook is silent whenever that
+// flag is set, and it records the band BEFORE it speaks: a state it cannot
+// write, or a state file it cannot parse, means silence rather than a block,
+// because a block it cannot remember is a block every turn.
+//
+// STATE IS ONE FILE PER SESSION, written to a temp name and renamed. The
+// previous single shared ledger was a read-modify-write on one JSON file, and
+// concurrent Stops in two sessions wiped each other's entries. Falling below
+// the line (a compaction) deletes the file, so the next climb speaks again.
 //
 // SILENT MEANS ZERO BYTES on both streams. A hook with nothing to say emits
 // nothing, and the suite asserts that against every quiet path.
@@ -42,22 +47,28 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const THRESHOLD_DEFAULT = 300_000;
-const STEP_DEFAULT = 100_000;
+const SOFT_LINE_DEFAULT = 250_000;
+const BAND_DEFAULT = 50_000;
 const CHUNK = 256 * 1024;        // bytes read per backward step
 const MAX_SCAN = 16 * 1024 * 1024; // give up past this much tail; a row can be big
-const LEDGER_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+const STATE_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log('context-depth-nudge.js — Stop hook.\n'
         + 'Reads the latest assistant row\'s usage from transcript_path and, once per\n'
-        + 'step past the restart line, tells the model to finish the step and write\n'
-        + 'RESUME.md, and tells the operator to start a fresh session.\n'
-        + 'Line:     $AUTODEV_CONTEXT_NUDGE_TOKENS, default ' + THRESHOLD_DEFAULT + ' (rule 14c).\n'
-        + 'Step:     $AUTODEV_CONTEXT_NUDGE_STEP, default ' + STEP_DEFAULT + '.\n'
-        + 'Ledger:   $AUTODEV_CONTEXT_NUDGE_STATE, else ~/.claude/context-nudge-state.json.\n'
+        + 'band past the soft line, blocks the Stop with a reason: finish the unit,\n'
+        + 'refresh the handoff with session-exit.js --out, then end the turn.\n'
+        + 'With an auto-compact window configured, compaction follows. Without one,\n'
+        + 'the reason orders a continuation chip instead.\n'
+        + 'Line:     $AUTODEV_CONTEXT_SOFT_LINE, default ' + SOFT_LINE_DEFAULT
+        + ' ($AUTODEV_CONTEXT_NUDGE_TOKENS is read when it is unset).\n'
+        + 'Band:     $AUTODEV_CONTEXT_NUDGE_STEP, default ' + BAND_DEFAULT + '.\n'
+        + 'Window:   $CLAUDE_CODE_AUTO_COMPACT_WINDOW, else autoCompactWindow (or env.\n'
+        + '          CLAUDE_CODE_AUTO_COMPACT_WINDOW) in the local, project or user settings.\n'
+        + 'State:    one file per session in $AUTODEV_CONTEXT_NUDGE_STATE_DIR, else\n'
+        + '          ~/.claude/autodev/context-nudge/, written with a temp file and a rename.\n'
         + 'Disable:  AUTODEV_CONTEXT_NUDGE=off.\n'
-        + 'Never blocks a turn; every path exits 0; silence is zero bytes.');
+        + 'Silent while stop_hook_active is set; every path exits 0; silence is zero bytes.');
     process.exit(0);
 }
 
@@ -71,18 +82,101 @@ function positiveInt(raw, fallback) {
     return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
-function ledgerPath() {
-    return process.env.AUTODEV_CONTEXT_NUDGE_STATE
-        || path.join(os.homedir(), '.claude', 'context-nudge-state.json');
+function configDir() {
+    return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }
 
-function readJson(p) {
+function stateDir() {
+    return process.env.AUTODEV_CONTEXT_NUDGE_STATE_DIR
+        || path.join(configDir(), 'autodev', 'context-nudge');
+}
+
+/** A session id as a file name: anything outside [A-Za-z0-9_-] becomes _. */
+function stateFile(id) {
+    return path.join(stateDir(), id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120) + '.json');
+}
+
+/**
+ * The per-session state: { kind: 'absent' } when there is no file,
+ * { kind: 'ok', value } when it parses to an object, and { kind: 'bad' } when it
+ * exists and does not. 'bad' is kept apart from 'absent' because the two call
+ * for opposite actions: an absent file may be written, a bad one must not be.
+ */
+function readState(p) {
+    let text;
+    try {
+        text = fs.readFileSync(p, 'utf8');
+    } catch (e) {
+        return e && e.code === 'ENOENT' ? { kind: 'absent' } : { kind: 'bad' };
+    }
+    try {
+        const v = JSON.parse(text);
+        return v && typeof v === 'object' ? { kind: 'ok', value: v } : { kind: 'bad' };
+    } catch {
+        return { kind: 'bad' };
+    }
+}
+
+/** Writes via a temp name and a rename, so a reader never sees half a file. True on success. */
+function writeState(p, entry) {
+    const tmp = p + '.' + process.pid + '.tmp';
+    try {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(tmp, JSON.stringify(entry) + '\n');
+        fs.renameSync(tmp, p);
+    } catch {
+        try { fs.unlinkSync(tmp); } catch { /* never created */ }
+        return false;
+    }
+    pruneState(path.dirname(p), p);
+    return true;
+}
+
+/** Deletes other sessions' state files older than a week. Best effort. */
+function pruneState(dir, keep) {
+    try {
+        const cutoff = Date.now() - STATE_MAX_AGE_MS;
+        for (const name of fs.readdirSync(dir)) {
+            const f = path.join(dir, name);
+            if (f === keep || !name.endsWith('.json')) continue;
+            try { if (fs.statSync(f).mtimeMs < cutoff) fs.unlinkSync(f); } catch { /* raced */ }
+        }
+    } catch { /* a directory we cannot list costs stale files, nothing more */ }
+}
+
+function readJsonObject(p) {
     try {
         const v = JSON.parse(fs.readFileSync(p, 'utf8'));
         return v && typeof v === 'object' ? v : null;
     } catch {
         return null;
     }
+}
+
+/**
+ * The configured auto-compact window in tokens, or null. The environment wins,
+ * then local, project and user settings in that order, each read for both
+ * `autoCompactWindow` and an `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` entry.
+ */
+function autoCompactWindow(cwd) {
+    const fromEnv = positiveInt(process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, null);
+    if (fromEnv) return fromEnv;
+    const files = [];
+    if (cwd) {
+        files.push(path.join(cwd, '.claude', 'settings.local.json'));
+        files.push(path.join(cwd, '.claude', 'settings.json'));
+    }
+    files.push(path.join(configDir(), 'settings.json'));
+    for (const f of files) {
+        const s = readJsonObject(f);
+        if (!s) continue;
+        const direct = positiveInt(s.autoCompactWindow, null);
+        if (direct) return direct;
+        const viaEnv = s.env && typeof s.env === 'object'
+            ? positiveInt(s.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, null) : null;
+        if (viaEnv) return viaEnv;
+    }
+    return null;
 }
 
 /**
@@ -163,70 +257,80 @@ if (disabled === 'off' || disabled === '0' || disabled === 'false') silent();
 const payload = readPayload();
 if (!payload || typeof payload !== 'object') silent();
 
+// The block this hook issued last turn is what set this flag. Speaking again
+// here is the loop.
+if (payload.stop_hook_active === true) silent();
+
 const sessionId = typeof payload.session_id === 'string' && payload.session_id ? payload.session_id : null;
 const transcriptPath = typeof payload.transcript_path === 'string' && payload.transcript_path ? payload.transcript_path : null;
 if (!sessionId || !transcriptPath) silent();
+const cwd = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
 
-const threshold = positiveInt(process.env.AUTODEV_CONTEXT_NUDGE_TOKENS, THRESHOLD_DEFAULT);
-const step = positiveInt(process.env.AUTODEV_CONTEXT_NUDGE_STEP, STEP_DEFAULT);
+const softLine = positiveInt(process.env.AUTODEV_CONTEXT_SOFT_LINE,
+    positiveInt(process.env.AUTODEV_CONTEXT_NUDGE_TOKENS, SOFT_LINE_DEFAULT));
+const band = positiveInt(process.env.AUTODEV_CONTEXT_NUDGE_STEP, BAND_DEFAULT);
 
 const depth = latestContextDepth(transcriptPath);
-if (depth == null || depth < threshold) silent();
+if (depth == null) silent();
 
-// 0 at the line, 1 one step past it, and so on. Speaks when this rises.
-const bucket = Math.floor((depth - threshold) / step);
+const statePath = stateFile(sessionId);
+if (depth < softLine) {
+    // Below the line, usually after a compaction: forget the bands spoken in the
+    // last climb so the next one speaks again.
+    try { fs.unlinkSync(statePath); } catch { /* nothing recorded */ }
+    silent();
+}
 
-const ledger = readJson(ledgerPath()) || {};
-const prior = ledger[sessionId];
-if (prior && Number.isInteger(prior.bucket) && prior.bucket >= bucket) silent();
+// 0 in the first band past the line, 1 in the next, and so on.
+const bucket = Math.floor((depth - softLine) / band);
 
-writeLedger(ledger, sessionId, { bucket, depth, at: Date.now() });
+const state = readState(statePath);
+if (state.kind === 'bad') silent();
+if (state.kind === 'ok' && Number.isInteger(state.value.bucket) && state.value.bucket >= bucket) silent();
+
+if (!writeState(statePath, { bucket, depth, at: Date.now() })) silent();
 
 const k = (n) => Math.round(n / 1000) + 'k';
-// THE SIX RESUME.md FIELDS, in the order session-exit.js renders them. Failed
+const window = autoCompactWindow(cwd);
+const compactionFollows = window != null && depth < window;
+const handoff = path.join(cwd, '.claude', 'handoffs', 'RESUME-' + sessionId.slice(0, 8) + '.md');
+const sessionExit = path.join(__dirname, '..', 'scripts', 'session-exit.js');
+
+// THE SIX RESUME FIELDS, in the order session-exit.js renders them. Failed
 // attempts is the one a progress-only handoff drops, and it is the one that
 // costs most to lose: a session that does not know an approach already failed
 // tries it again. tooling/test-context-depth-nudge.js spells all six, so
 // removing one here goes red.
-const forModel = 'CONTEXT DEPTH IS ' + depth.toLocaleString('en-US') + ' TOKENS, PAST THE '
-    + k(threshold) + ' RESTART LINE. Rule 14c: 77% of cost is cache reads and every turn '
-    + 're-reads this whole conversation, so a session past this line costs more per turn '
-    + 'than it did at the start and clusters wrong diagnoses. Finish the CURRENT step, '
-    + 'then write RESUME.md with six fields: goal; current state; files in flight; '
-    + 'changes made, each with the command that verified it; failed attempts, each with '
-    + 'why it failed, so the next session does not try them again; next steps. '
-    + path.join(__dirname, '..', 'scripts', 'session-exit.js') + ' fills the measured '
-    + 'fields and keeps what you write in the others. Then call spawn_task for a '
-    + 'continuation chip BEFORE you go quiet: a fresh worktree does not contain the '
-    + 'gitignored handoff, so its prompt names RESUME.md by ABSOLUTE path, repeats the '
-    + 'first move and the traps inline, and ends with this same rule so the chain '
-    + 'continues. Say so to whoever is coordinating, and stop. Do not start a new piece '
-    + 'of work at this depth.';
-const forOperator = 'Context depth ' + k(depth) + ' tokens, past the ' + k(threshold)
-    + ' restart line (rule 14c). This step finishes, then a continuation chip is spawned.';
+const save = 'Finish the unit of work you are in and do not start a new one. Then refresh '
+    + 'the handoff: node "' + sessionExit + '" --out "' + handoff + '" (a path git '
+    + 'ignores: check with git check-ignore, and add .claude/handoffs/ to .gitignore if '
+    + 'it is not). session-exit.js fills the measured fields and keeps what you write in '
+    + 'the others. The six fields are: goal; current state; files in flight; changes '
+    + 'made, each with the command that verified it; failed attempts, each with why it '
+    + 'failed, so the next session does not try them again; next steps.';
+let forModel = 'CONTEXT DEPTH IS ' + depth.toLocaleString('en-US') + ' TOKENS, PAST THE '
+    + k(softLine) + ' SOFT LINE. Every turn re-reads this whole conversation, so the '
+    + 'context is about to be shed. ' + save + ' ';
+let forOperator = 'Context depth ' + k(depth) + ' tokens, past the ' + k(softLine) + ' soft line. ';
+if (compactionFollows) {
+    forModel += 'Then end the turn. Auto-compaction is configured at a ' + k(window)
+        + ' window, so it follows at this break, and the session start after it points '
+        + 'you back at the handoff. Do not spawn a continuation chip.';
+    forOperator += 'Saving the handoff before auto-compaction (' + k(window) + ' window).';
+} else {
+    forModel += (window != null
+        ? 'The ' + k(window) + ' auto-compact window is already exceeded, so compaction is not coming. '
+        : 'No auto-compact window is configured, so compaction is not coming. ')
+        + 'Call spawn_task for a continuation chip BEFORE you go quiet: a fresh worktree '
+        + 'does not contain the gitignored handoff, so its prompt names the handoff by '
+        + 'ABSOLUTE path, repeats the first move and the traps inline, and ends with this '
+        + 'same rule so the chain continues. Say so to whoever is coordinating, and end the turn.';
+    forOperator += 'Saving the handoff, then a continuation chip.';
+}
 
 console.log(JSON.stringify({
+    decision: 'block',
+    reason: forModel,
     systemMessage: forOperator,
-    hookSpecificOutput: {
-        hookEventName: 'Stop',
-        additionalContext: forModel,
-    },
 }));
 process.exit(0);
-
-function writeLedger(all, id, entry) {
-    try {
-        all[id] = entry;
-        const cutoff = Date.now() - LEDGER_MAX_AGE_MS;
-        for (const key of Object.keys(all)) {
-            const e = all[key];
-            if (!e || typeof e !== 'object' || !(Number(e.at) > cutoff)) delete all[key];
-        }
-        all[id] = entry;
-        const p = ledgerPath();
-        fs.mkdirSync(path.dirname(p), { recursive: true });
-        fs.writeFileSync(p, JSON.stringify(all, null, 2) + '\n');
-    } catch {
-        /* a ledger we cannot write costs a repeated nudge, never a broken turn */
-    }
-}
