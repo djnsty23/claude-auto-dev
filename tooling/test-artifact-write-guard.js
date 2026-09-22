@@ -207,7 +207,9 @@ try {
             ],
         });
         check('a batch with one bad entry is DENIED', r.denied, detail(r));
-        check('  the reason names only the bad entry', /tasks\/b2: status: "lost"/.test(r.reason) && !/b1|b3/.test(r.reason), r.reason);
+        // Match the entries by collection/doc_id. A bare /b1|b3/ also matched the random mkdtemp suffix inside the
+        // schema path this reason ends with (measured: "artifact-guard-s4b1aX"), so the case failed at random.
+        check('  the reason names only the bad entry', /tasks\/b2: status: "lost"/.test(r.reason) && !/tasks\/b1\b|untracked\/b3\b/.test(r.reason), r.reason);
         const two = run({
             action: 'batch', url: URL_FOR(ID), writes: [
                 { op: 'update', collection: 'tasks', doc_id: 'b4', data: { status: 'lost', updatedAt: iso(0) } },
