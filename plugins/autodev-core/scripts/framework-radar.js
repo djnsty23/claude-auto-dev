@@ -608,43 +608,40 @@ function normalizeComment(raw, lane = 'unknown', index = 0) {
 }
 
 function commentFingerprint(text) {
-  return String(text || '').toLowerCase()
-    .replace(/https?:\/\/\S+|www\.\S+/g, '<url>')
-    .replace(/[^\p{L}\p{N}<>' ]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return String(text || '').trim().replace(/\s+/g, ' ');
+}
+
+function creatorPromotion(text) {
+  const hasLink = /https?:\/\/|www\.|\blink in (?:the )?(?:bio|description|comments)\b/i.test(text);
+  const hasCallToAction = /\b(?:book|schedule|sign up|register|subscribe|buy|order|purchase|join|free audit|free trial|discount|coupon|consultation|contact me|dm me)\b/i.test(text);
+  return hasLink && hasCallToAction;
 }
 
 function filterCommentFeedback(comments) {
   const normalized = comments.filter(Boolean);
   const byText = new Map();
-  const byAuthorText = new Map();
   for (const comment of normalized) {
     const fingerprint = commentFingerprint(comment.text);
     if (!fingerprint) continue;
     if (!byText.has(fingerprint)) byText.set(fingerprint, new Set());
     byText.get(fingerprint).add(comment.author_key);
-    const authorKey = `${comment.author_key}:${fingerprint}`;
-    byAuthorText.set(authorKey, (byAuthorText.get(authorKey) || 0) + 1);
   }
 
   const retained = [];
   const excluded = [];
   const reasons = {};
   for (const comment of normalized) {
-    const text = comment.text.toLowerCase();
-    const fingerprint = commentFingerprint(comment.text);
+    const text = comment.text;
+    const fingerprint = commentFingerprint(text);
     let reason = null;
     if (!fingerprint) reason = 'empty';
-    else if (comment.is_creator) reason = 'creator-response';
+    else if (comment.is_creator && creatorPromotion(text)) reason = 'creator-promotion';
     else if (/(?:sub(?:scribe)?\s*(?:4|for)\s*sub|check out my channel|subscribe to my channel|like\s*(?:4|for)\s*like)/i.test(text)) {
       reason = 'engagement-manipulation';
-    } else if (/(?:t\.me\/|wa\.me\/|(?:contact|text|message|reach|dm)\s+(?:me|him|her|them|us|on)?[^.\n]{0,50}(?:whats\s*app|telegram)|(?:whats\s*app|telegram)[^.\n]{0,40}(?:\+\d{6,}|@[a-z0-9_]{4,})|investment\s+expert|crypto\s+recovery|forex\s+mentor)/i.test(text)) {
+    } else if (/(?:t\.me\/|wa\.me\/|(?:contact|text|message|reach|dm)\s+(?:me|him|her|them|us)\b[^.\n]{0,80}(?:whats\s*app|telegram|https?:\/\/|www\.|@[a-z0-9_]{4,}|\+\d{6,})|(?:whats\s*app|telegram)\b[^.\n]{0,40}(?:\+\d{6,}|@[a-z0-9_]{4,}))/i.test(text)) {
       reason = 'off-platform-promotion';
     } else if (fingerprint.length >= 30 && (byText.get(fingerprint) || new Set()).size >= 3) {
       reason = 'multi-author-duplicate';
-    } else if (fingerprint.length >= 15 && (byAuthorText.get(`${comment.author_key}:${fingerprint}`) || 0) >= 2) {
-      reason = 'same-author-duplicate';
     }
     if (reason) {
       reasons[reason] = (reasons[reason] || 0) + 1;
@@ -723,8 +720,8 @@ async function extractComments(video, fixtureDir, stateDir, discoveryProvider, m
       provider: result.provider,
       sample_lanes: result.lanes,
       filter: {
-        version: 1,
-        rule: 'exclude only high-confidence repetitive, engagement-manipulation or off-platform promotional patterns',
+        version: 2,
+        rule: 'exclude only high-confidence creator promotion, engagement manipulation, explicit off-platform contact bait, and independently repeated exact text',
         limitation: 'public metadata cannot prove whether every retained account is human or every excluded account is automated',
       },
       population: {
@@ -751,7 +748,7 @@ async function extractComments(video, fixtureDir, stateDir, discoveryProvider, m
       excluded: filtered.excluded.length,
       distinct_retained_authors: payload.population.distinct_retained_authors,
       exclusion_reasons: filtered.reasons,
-      filter_version: 1,
+      filter_version: 2,
       content_hash: hash(stable),
       path: destination,
     };
@@ -938,7 +935,7 @@ async function collect() {
       days: options.days,
       repository: process.cwd(),
       state_dir: stateDir,
-      complete: failed === 0,
+      complete: failed === 0 && partial === 0,
     },
     population: {
       sources_configured: statuses.length,

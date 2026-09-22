@@ -96,16 +96,16 @@ function skillFiles() {
   return found;
 }
 
-// Resolved once. '/bin/sh' does not exist on Windows, and execFileSync reports
-// a failure to SPAWN with status null - which the consumer below read as
-// "exits non-zero on a VALID prd.json". A missing interpreter and a failing
-// program are opposite facts and must never render the same. [measured
-// 2026-08-29] every auto-executed command on a Windows machine reported
-// `__EXITED__ null`, and five healthy skills were named broken.
+// Windows bash.exe may launch WSL, where this checkout has no node binary.
+// Windows cmd.exe also rewrites nested -e quotes. Run the exact JavaScript
+// payload with this Node binary there; refuse command shapes we cannot parse.
+// POSIX keeps executing the full command through an available shell.
 const SHELL = (() => {
-  for (const candidate of ['/bin/sh', 'sh', 'bash']) {
+  if (process.platform === 'win32') return { bin: process.execPath, args: [] };
+  const candidates = ['/bin/sh', 'sh', 'bash'].map((bin) => ({ bin, args: ['-c'] }));
+  for (const candidate of candidates) {
     try {
-      execFileSync(candidate, ['-c', 'exit 0'], { stdio: 'ignore', timeout: 5000 });
+      execFileSync(candidate.bin, [...candidate.args, 'exit 0'], { stdio: 'ignore', timeout: 5000 });
       return candidate;
     } catch { /* try the next candidate */ }
   }
@@ -115,9 +115,11 @@ const SHELL = (() => {
 function runIn(dir, command) {
   // Worded as a deficiency, not a category: a suite that cannot run its
   // subject has NOT verified it and must not read as a pass.
-  if (!SHELL) return '__NOSHELL__ no POSIX shell found (/bin/sh, sh, bash)';
+  if (!SHELL) return '__NOSHELL__ no usable command shell found';
+  const windowsCode = process.platform === 'win32' ? /^node -e "([\s\S]*)"$/.exec(command) : null;
+  if (process.platform === 'win32' && !windowsCode) return '__NOSPAWN__ unsupported Windows command form';
   try {
-    return execFileSync(SHELL, ['-c', command], {
+    return execFileSync(SHELL.bin, process.platform === 'win32' ? ['-e', windowsCode[1]] : [...SHELL.args, command], {
       cwd: dir, encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'],
       // The consumer project and the loaded plugin are different directories.
       // Supply the actual scanned plugin root, never resolve it from fixture cwd.
@@ -233,9 +235,9 @@ for (const { plugin, skill, file } of skills) {
   }
 }
 
-fs.rmSync(tmp, { recursive: true, force: true });
+fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 
-console.log(`shell: ${SHELL || 'NONE FOUND - every command is unverified'}`);
+console.log(`shell: ${SHELL ? SHELL.bin : 'NONE FOUND - every command is unverified'}`);
 console.log(`population: ${skills.length} SKILL.md scanned, ${commandsFound} inline command(s) found, ` +
             `${prdCommands} of them read prd.json`);
 

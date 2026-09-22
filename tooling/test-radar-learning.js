@@ -200,6 +200,34 @@ function hypothesisMeasurements() {
   check('legacy manifests use official item population instead of showing undefined',
     subject.reportData(legacyManifest, subject.createLedger(), '2026-09-01T00:00:00.000Z').population.source_items_seen === 4);
 
+  const sourceManifest = clone(manifest);
+  sourceManifest.sources = [
+    { id: 'vendor', authority: 'primary', category: 'sdk', status: 'ok', count: 2 },
+    { id: 'quiet', authority: 'research-method', category: 'research', status: 'ok', count: 0 },
+    { id: 'blocked', authority: 'trade-community', category: 'search', status: 'error', count: 0,
+      error: 'blocked returned HTTP 403' },
+  ];
+  sourceManifest.population.sources_configured = 3;
+  sourceManifest.population.sources_succeeded = 2;
+  sourceManifest.population.sources_failed = 1;
+  const sourceData = subject.reportData(sourceManifest, subject.createLedger(), '2026-09-01T00:00:00.000Z');
+  const sourceMarkdown = subject.renderMarkdown(sourceData);
+  const sourceHtml = subject.renderHtml(sourceData);
+  check('source health keeps exact failed lane and zero-yield population in JSON',
+    sourceData.source_health.configured === 3 && sourceData.source_health.succeeded === 2
+      && sourceData.source_health.failed === 1
+      && sourceData.source_health.zero_yield.join(',') === 'quiet'
+      && sourceData.source_health.issues[0].id === 'blocked'
+      && sourceData.source_health.issues[0].error === 'blocked returned HTTP 403');
+  check('Markdown and HTML surface the same actionable source failure',
+    /blocked returned HTTP 403/.test(sourceMarkdown)
+      && /blocked returned HTTP 403/.test(sourceHtml)
+      && /2 succeeded, 0 partial, 1 failed/.test(sourceMarkdown)
+      && /2 succeeded, 0 partial, 1 failed/.test(sourceHtml));
+  check('legacy findings say per-source details are unavailable',
+    /Per-source status details are unavailable/.test(subject.renderMarkdown(
+      subject.reportData(manifest, subject.createLedger(), '2026-09-01T00:00:00.000Z'))));
+
   const frameworkSkill = fs.readFileSync(FRAMEWORK_SKILL, 'utf8');
   const marketingSkill = fs.readFileSync(MARKETING_SKILL, 'utf8');
   const packageJson = JSON.parse(fs.readFileSync(PACKAGE, 'utf8'));

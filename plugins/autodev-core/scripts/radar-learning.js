@@ -302,6 +302,38 @@ function markdownEscape(input) {
   return cleanText(input).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }
 
+function sourceHealth(manifest) {
+  const sources = Array.isArray(manifest.sources) ? manifest.sources : null;
+  const population = manifest.population || {};
+  if (!sources) {
+    return {
+      details_available: false,
+      configured: Number(population.sources_configured || 0),
+      succeeded: Number(population.sources_succeeded || 0),
+      partial: Number(population.sources_partial || 0),
+      failed: Number(population.sources_failed || 0),
+      zero_yield: [],
+      issues: [],
+    };
+  }
+  return {
+    details_available: true,
+    configured: sources.length,
+    succeeded: sources.filter((row) => row.status === 'ok').length,
+    partial: sources.filter((row) => row.status === 'partial').length,
+    failed: sources.filter((row) => row.status === 'error').length,
+    zero_yield: sources.filter((row) => row.status === 'ok' && row.count === 0).map((row) => row.id),
+    issues: sources.filter((row) => row.status !== 'ok').map((row) => ({
+      id: row.id,
+      authority: row.authority,
+      category: row.category,
+      status: row.status,
+      count: row.count,
+      error: row.error || null,
+    })),
+  };
+}
+
 function reportData(manifest, ledger, nowIso) {
   const selectedProfile = manifest.run.profile || 'framework-radar';
   const population = Object.assign({}, manifest.population, {
@@ -321,6 +353,7 @@ function reportData(manifest, ledger, nowIso) {
     profile: selectedProfile,
     run: manifest.run,
     population,
+    source_health: sourceHealth(manifest),
     claims: clusters,
     source_scorecard: rankSources(ledger.sources),
     experiments,
@@ -347,6 +380,20 @@ function renderMarkdown(data) {
     '## Claim clusters', '',
     '| Claim | Items | Independent sources | Authorities |', '|---|---:|---:|---|',
   ];
+  const health = data.source_health;
+  lines.splice(lines.indexOf('## Claim clusters'), 0,
+    '## Source health', '',
+    `- ${health.succeeded} succeeded, ${health.partial} partial, ${health.failed} failed of ${health.configured} configured source(s).`,
+    `- ${health.zero_yield.length} successful source(s) returned zero in-window items.`,
+    health.zero_yield.length ? `- Zero-yield source IDs: ${health.zero_yield.map(markdownEscape).join(', ')}.` : '',
+    health.details_available ? '' : 'Per-source status details are unavailable in this legacy manifest.', '');
+  if (health.issues.length) {
+    const at = lines.indexOf('## Claim clusters');
+    lines.splice(at, 0, '| Source | Authority | Category | Status | Detail |',
+      '|---|---|---|---|---|',
+      ...health.issues.map((issue) =>
+        `| ${markdownEscape(issue.id)} | ${markdownEscape(issue.authority)} | ${markdownEscape(issue.category)} | ${markdownEscape(issue.status)} | ${markdownEscape(issue.error || '')} |`), '');
+  }
   for (const claim of data.claims) lines.push(`| ${markdownEscape(claim.title)} | ${claim.item_count} | ${claim.independent_sources} | ${claim.authorities.join(', ')} |`);
   lines.push('', '## Source outcome scorecard', '', '| Source | Tests | Wins | Posterior win rate | Utility |', '|---|---:|---:|---:|---:|');
   if (!data.source_scorecard.length) lines.push('| No measured outcomes yet | 0 | 0 | n/a | 50.00 |');
@@ -384,14 +431,23 @@ function renderHtml(data) {
   const rows = data.source_scorecard.length ? data.source_scorecard.map((source) => `<tr><td>${escapeHtml(source.source_id)}</td><td>${source.tested}</td><td>${source.wins}</td><td>${(source.posterior_win_rate * 100).toFixed(1)}%</td><td class="verdict v-safe">${source.utility_score.toFixed(2)}</td></tr>`).join('') : '<tr><td>No measured outcomes yet</td><td>0</td><td>0</td><td>n/a</td><td>50.00</td></tr>';
   const experimentCards = data.experiments.length ? data.experiments.map((experiment) => `<article class="card ${experiment.verdict === 'reject' ? 'is-warn' : ''}" data-open="false"><div class="card-head"><div class="chips"><span class="chip ${experiment.verdict.startsWith('adopt') ? 'safe' : 'warn'}">${escapeHtml(experiment.verdict)}</span></div><h3>${escapeHtml(experiment.claim)}</h3><p class="summary">Tested ${escapeHtml(experiment.tested_at)}</p></div><div class="reveal"><div class="reveal-inner"><ul class="detail"><li>A: ${escapeHtml(experiment.variants.a.measurement)}</li><li>B: ${escapeHtml(experiment.variants.b.measurement)}</li><li>C: ${escapeHtml(experiment.variants.c.measurement)}</li><li>Evidence: ${escapeHtml(experiment.evidence.join(', '))}</li></ul></div></div><button class="more" type="button" aria-expanded="false"><span class="caret"></span><span class="lbl-more">Measurements</span><span class="lbl-less">Less</span></button></article>`).join('') : '<p class="pullout">No executed verdicts have been recorded for this profile yet.</p>';
   const stale = data.lifecycle.filter((entry) => entry.effective_status === 'stale').length;
+  const health = data.source_health;
+  const issueRows = health.issues.map((issue) =>
+    `<tr><td>${escapeHtml(issue.id)}</td><td>${escapeHtml(issue.authority || '')}</td><td>${escapeHtml(issue.category || '')}</td><td class="verdict v-warn">${escapeHtml(issue.status)}</td><td>${escapeHtml(issue.error || '')}</td></tr>`).join('');
+  const healthDetails = health.details_available
+    ? (issueRows
+      ? `<div class="tablewrap"><table><thead><tr><th>Source</th><th>Authority</th><th>Category</th><th>Status</th><th>Detail</th></tr></thead><tbody>${issueRows}</tbody></table></div>`
+      : '<p class="pullout">Every configured source completed.</p>')
+    : '<p class="pullout">Per-source status details are unavailable in this legacy manifest.</p>';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%233ddc84'/%3E%3Cpath d='M9 16h14M16 9v14' stroke='%230d0f0e' stroke-width='3'/%3E%3C/svg%3E"><title>${escapeHtml(data.profile)} findings</title><style>
 :root{--ground:#0d0f0e;--surface:#161a18;--raise:#1b201d;--well:#121614;--line:#252b28;--line-soft:#1e2421;--ink:#e9ede9;--ink-dim:#96a19b;--ink-faint:#69736e;--accent:#3ddc84;--warn:#f0b429;--safe:#3ddc84;--info:#7aa2f7;--scroll-track:#141816;--scroll-thumb:#333c37;--scroll-thumb-hi:#465149;--r:11px;--ease:cubic-bezier(.22,.61,.36,1)}
 @media(prefers-color-scheme:light){:root{--ground:#fbfcfb;--surface:#fff;--raise:#f4f6f4;--well:#f2f5f3;--line:#e0e5e1;--line-soft:#ecefec;--ink:#121614;--ink-dim:#5a635e;--ink-faint:#858d88;--accent:#12894c;--warn:#a86a05;--safe:#12894c;--info:#3554a5;--scroll-track:#eceeec;--scroll-thumb:#c3c9c5;--scroll-thumb-hi:#a8b0aa}}
 *{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) var(--scroll-track)}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:var(--scroll-track)}::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:999px;border:2px solid var(--scroll-track)}
 body{margin:0;background:var(--ground);color:var(--ink);font:400 16px/1.62 system-ui,sans-serif;padding:0 24px 100px}.page{max-width:1040px;margin:auto}.masthead{padding:56px 0 38px;border-bottom:1px solid var(--line)}.meta,.eyebrow{font:600 11px/1 ui-monospace,monospace;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint)}h1{font-size:clamp(30px,4.5vw,49px);line-height:1.07;max-width:20ch;margin:18px 0}.standfirst{color:var(--ink-dim);max-width:68ch}.page>section{margin-top:68px}.eyebrow{display:flex;gap:14px;align-items:center;margin-bottom:22px}.eyebrow:after{content:"";height:1px;background:var(--line);flex:1}.count{color:var(--accent)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:16px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;cursor:pointer}.card:hover{background:var(--raise)}.card-head{padding:20px 22px;display:flex;flex-direction:column;gap:11px}.chips{display:flex;gap:7px;flex-wrap:wrap}.chip{font:600 10px/1 ui-monospace,monospace;text-transform:uppercase;padding:5px 9px;border:1px solid var(--line);border-radius:999px;color:var(--ink-dim)}.chip.safe{color:var(--safe)}.chip.warn{color:var(--warn)}.chip.info{color:var(--info)}.card h3{margin:0;font-size:16.5px}.summary{margin:0;color:var(--ink-dim);font-size:14.5px}.reveal{max-height:0;overflow:hidden;transition:max-height .42s var(--ease)}.detail{margin:0;padding:0 22px 20px;list-style:none}.detail li{margin-top:10px;color:var(--ink-dim);font-size:14px}.more{margin:0 22px 18px;align-self:flex-start;border:0;background:none;color:var(--accent);font-weight:700;cursor:pointer}.lbl-less{display:none}.card[data-open=true] .lbl-more{display:none}.card[data-open=true] .lbl-less{display:inline}
-.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r)}table{border-collapse:collapse;width:100%;min-width:640px}th,td{text-align:left;padding:13px 18px;border-bottom:1px solid var(--line-soft)}th{background:var(--raise);font:600 10px/1 ui-monospace,monospace;text-transform:uppercase;color:var(--ink-faint)}td{color:var(--ink-dim)}td:first-child{color:var(--ink)}.verdict{font:600 12px ui-monospace,monospace}.v-safe{color:var(--safe)}.pullout{border-left:2px solid var(--accent);padding-left:21px;color:var(--ink-dim)}.sources{margin-top:68px;padding-top:22px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:12.5px}@media(max-width:640px){body{padding:0 17px 76px}.masthead{padding-top:36px}.page>section{margin-top:52px}}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r)}table{border-collapse:collapse;width:100%;min-width:640px}th,td{text-align:left;padding:13px 18px;border-bottom:1px solid var(--line-soft)}th{background:var(--raise);font:600 10px/1 ui-monospace,monospace;text-transform:uppercase;color:var(--ink-faint)}td{color:var(--ink-dim)}td:first-child{color:var(--ink)}.verdict{font:600 12px ui-monospace,monospace}.v-safe{color:var(--safe)}.v-warn{color:var(--warn)}.pullout{border-left:2px solid var(--accent);padding-left:21px;color:var(--ink-dim)}.sources{margin-top:68px;padding-top:22px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:12.5px}@media(max-width:640px){body{padding:0 17px 76px}.masthead{padding-top:36px}.page>section{margin-top:52px}}
 </style></head><body><div class="page"><header class="masthead"><div class="meta">${escapeHtml(data.profile)} &middot; ${escapeHtml(data.generated_at)}</div><h1>What the radar found, tested, and learned</h1><p class="standfirst">${data.claims.length} underlying claims from ${data.population.source_items_seen} source items and ${data.population.youtube_videos_seen} videos. ${data.experiments.length} recorded experiments. ${stale} stale defaults.</p></header>
+<section><div class="eyebrow">Source health <span class="count">${health.configured}</span></div><p class="summary">${health.succeeded} succeeded, ${health.partial} partial, ${health.failed} failed. ${health.zero_yield.length} successful source(s) returned zero in-window items.</p>${health.zero_yield.length ? `<p class="summary">Zero-yield IDs: ${escapeHtml(health.zero_yield.join(', '))}</p>` : ''}${healthDetails}</section>
 <section><div class="eyebrow">Underlying claims <span class="count">${data.claims.length}</span></div><div class="grid">${cards || '<p class="pullout">No claims were collected.</p>'}</div></section>
 <section><div class="eyebrow">Source outcome scorecard <span class="count">${data.source_scorecard.length}</span></div><div class="tablewrap"><table><thead><tr><th>Source</th><th>Tests</th><th>Wins</th><th>Posterior win rate</th><th>Utility</th></tr></thead><tbody>${rows}</tbody></table></div></section>
 <section><div class="eyebrow">Executed experiments <span class="count">${data.experiments.length}</span></div><div class="grid">${experimentCards}</div></section>
