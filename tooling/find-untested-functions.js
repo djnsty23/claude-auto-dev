@@ -333,7 +333,9 @@ const logFd = fs.openSync(runnerLog, 'w');
 const run = spawnSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js')], {
     cwd: ROOT,
     stdio: ['ignore', logFd, logFd],
-    env: { ...process.env, NODE_V8_COVERAGE: covDir },
+    // CLAUDE_CONFIG_DIR is dropped for the reason test-all.js gives: a suite
+    // faking HOME would otherwise still resolve the operator's real profile.
+    env: (({ CLAUDE_CONFIG_DIR, ...rest }) => ({ ...rest, NODE_V8_COVERAGE: covDir }))(process.env),
 });
 fs.closeSync(logFd);
 const runnerOut = fs.readFileSync(runnerLog, 'utf8');
