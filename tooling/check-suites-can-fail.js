@@ -303,6 +303,36 @@ function completed(r, what) {
     return true;
 }
 
+// A RED BASELINE REPORTS WHAT THE CHILD SAID, for the reason completed() does.
+// `[measured 2026-09-21]` a full gate on PR #276 went red here with
+// `test-artifact-write-guard.js RED already failing`, although that suite had
+// passed in step 1 of the same run and passed three of three sweeps at the same
+// head afterwards. This script held the failing child's stdout and stderr and
+// printed neither, so the one run that failed is the one run nobody can read.
+//
+// It changes no verdict: the row, the summary and the exit code are exactly what
+// they were. It prints the child's exit status and the tail of each stream, per
+// stream because two pipes are not one stream (see lastWords in spawn-budget.js),
+// and bounded by lines AND by line length, because a suite can print thousands of
+// lines and one of them can be a JSON dump. The tail is where the child stopped.
+const RED_TAIL_LINES = 40;
+const RED_LINE_CHARS = 400;
+function reportRedBaseline(what, r) {
+    console.error(`  [RED] ${what} exited ${r.status}. Its own last output, so this red can be read from this run:`);
+    for (const [name, text] of [['stdout', r.stdout], ['stderr', r.stderr]]) {
+        const lines = String(text || '').split(/\r?\n/);
+        while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+        if (!lines.length) { console.error(`    ${name}: nothing written`); continue; }
+        const tail = lines.slice(-RED_TAIL_LINES);
+        console.error(`    ${name}, ${tail.length < lines.length ? `last ${tail.length} of ${lines.length}` : lines.length} line(s):`);
+        for (const l of tail) {
+            console.error('      | ' + (l.length > RED_LINE_CHARS
+                ? l.slice(0, RED_LINE_CHARS) + ` … (${l.length - RED_LINE_CHARS} more chars)`
+                : l));
+        }
+    }
+}
+
 // git() runs in the SOURCE tree (the dirty check, worktree management);
 // gitW() runs in the private sweep worktree (every scan below).
 const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
@@ -576,7 +606,10 @@ function checkValidator() {
     });
     const base = run();
     if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate' };
-    if (base.status !== 0) return { suite, status: 'RED', note: 'already failing' };
+    if (base.status !== 0) {
+        reportRedBaseline('validate (baseline)', base);
+        return { suite, status: 'RED', note: 'already failing' };
+    }
 
     const CANARY = '0.0.0-canary\n';
     if (!installOwn('VERSION', file, CANARY)) {
@@ -698,6 +731,7 @@ for (const suite of suites) {
         continue;
     }
     if (base.status !== 0) {
+        reportRedBaseline(suite + ' (baseline)', base);
         rows.push({ suite, status: 'RED', note: 'already failing — fix it before trusting this result' });
         continue;
     }
