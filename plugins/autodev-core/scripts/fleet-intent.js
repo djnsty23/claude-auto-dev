@@ -65,7 +65,8 @@
  * whoever next occupied the worktree, two of them client sessions. `session_id`
  * is stored as PROVENANCE — it says who made the claim — and is never the key.
  *
- * ── WHERE. ~/claude-memory/fleet-intent/<repo>--<branch>.json, one file per
+ * ── WHERE. ~/claude-memory/fleet-intent/<repo>--<branch>.json (under a
+ * non-default profile, <CLAUDE_CONFIG_DIR>/claude-memory/fleet-intent), one file per
  * record so two sessions writing at once cannot lose each other's work. On this
  * machine that directory is not a git repo, so nothing here publishes anywhere;
  * a caller that syncs it must decide for itself whether a `brief` naming client
@@ -381,7 +382,8 @@ function help() {
     console.log('node fleet-intent.js --list [--json]    every record, most doubtful first');
     console.log('node fleet-intent.js --selftest');
     console.log('\nstates: ' + STATES.join(' | ') + '  (anything else is reported as unrecognised)');
-    console.log('dir:    $AUTODEV_FLEET_INTENT_DIR, else ~/claude-memory/fleet-intent');
+    console.log('dir:    $AUTODEV_FLEET_INTENT_DIR, else ~/claude-memory/fleet-intent, or');
+    console.log('        <CLAUDE_CONFIG_DIR>/claude-memory/fleet-intent under a non-default profile');
 }
 
 function describe(record, ass, collision) {

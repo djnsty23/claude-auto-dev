@@ -51,7 +51,8 @@
  * THE INTENT RECORD - OWNED ELSEWHERE, CONSUMED HERE
  * ---------------------------------------------------------------------------
  *
- * `~/claude-memory/fleet-intent/<repo>--<branch>.json`, `/` in the branch
+ * `~/claude-memory/fleet-intent/<repo>--<branch>.json` (under a non-default
+ * profile, `<CLAUDE_CONFIG_DIR>/claude-memory/fleet-intent/`), `/` in the branch
  * written as `-`:
  *
  *   { repo, branch, session_id, brief, current_step, next_step,
@@ -366,8 +367,10 @@ const USAGE = [
     'fleet-redispatch.js - at a session-limit reset boundary, rank the fleet work',
     'that is genuinely incomplete. It PROPOSES; it never spawns anything.',
     '',
-    '  --intent-dir <path>        default ~/claude-memory/fleet-intent',
-    '  --stamp-file <path>        default ~/.claude/fleet-redispatch-last-run',
+    '  --intent-dir <path>        default ~/claude-memory/fleet-intent, or',
+    '                             <CLAUDE_CONFIG_DIR>/claude-memory/fleet-intent under a',
+    '                             non-default profile',
+    '  --stamp-file <path>        default <config dir>/fleet-redispatch-last-run',
     '  --all                      classify every record, ignoring the boundary gate',
     '  --boundaries               report the reset boundaries read, and stop',
     '  --no-run-verify            classify without executing any record\'s verify',
