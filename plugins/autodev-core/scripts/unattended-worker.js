@@ -223,7 +223,7 @@ function brief(opts) {
     const returnTo = opts.return;
     // [measured 2026-09-22] a worker told only "a new worktree" and `> f.log`
     // put both in the directory holding the checkouts. Name the scratch home.
-    const scratch = path.join(os.homedir(), '.claude', 'autodev', 'reports', taskId);
+    const scratch = path.join(claudePaths.configDir(), 'autodev', 'reports', taskId);
     const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, body, scratch });
     const record = {
         taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, state: 'composed',
