@@ -485,6 +485,9 @@ if (has('--print')) {
     // quoted-marker destruction route again, reopened by this feature.
     const refusal = has('--force') ? null : refuseToClobber(target, render({}).length, carried);
     if (refusal) { console.error(refusal); process.exit(3); }
+    // context-depth-nudge.js names a handoff under .claude/handoffs/, which a
+    // repo may not have yet.
+    fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, doc, 'utf8');
     console.log('wrote ' + target + ' (' + doc.length + ' bytes)');
     console.log('  measured: '
