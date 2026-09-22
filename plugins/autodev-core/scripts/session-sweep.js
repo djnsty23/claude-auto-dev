@@ -47,6 +47,7 @@ function helpHeader() {
 
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const { execFileSync } = require('child_process');
 
 // SESSION_SWEEP_STORE exists so the suite can drive a synthetic population
@@ -72,7 +73,7 @@ const STORE = process.env.SESSION_SWEEP_STORE || path.join(
 
 // Repos whose work must never be swept automatically are named in a LOCAL file,
 // never in this repo — this one is public. One substring per line, '#' comments.
-const DENYLIST_FILE = path.join(process.env.USERPROFILE || process.env.HOME || '', '.claude', 'session-sweep-denylist.txt');
+const DENYLIST_FILE = path.join(claudePaths.configDir(), 'session-sweep-denylist.txt');
 
 // Gitignored paths a build, an install or this harness writes back. Anything
 // ignored and NOT on this list exists only in that worktree, and
@@ -476,8 +477,7 @@ function sharedWorktree(s, all) {
  */
 function transcriptFreshMinutes(wt) {
   if (!wt) return null;
-  const home = process.env.CLAUDE_CONFIG_DIR
-    || path.join(process.env.HOME || process.env.USERPROFILE || '', '.claude');
+  const home = claudePaths.configDir();
   // The slug replaces the path separator, the dot, AND on Windows the
   // backslash and the drive colon. [measured 2026-08-29] a Windows path such
   // as `D:\\proj\\repo` was returned UNCHANGED under the old /[/.]/, because

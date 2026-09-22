@@ -38,11 +38,11 @@
 //   node away-state.js --help
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const DEFAULT_FILE = () => process.env.AUTODEV_AWAY_FILE
-    || path.join(os.homedir(), 'claude-memory', 'AWAY.md');
+    || path.join(claudePaths.fleetMemoryDir(), 'AWAY.md');
 
 // `until:` on its own line, anywhere in the file. Deliberately lenient about
 // surrounding prose, because the file also carries the operator's words

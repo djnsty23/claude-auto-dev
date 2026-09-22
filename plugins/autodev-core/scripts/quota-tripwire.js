@@ -62,10 +62,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const os = require('os');
 const { spawnSync } = require('child_process');
 
-const HOME = process.env.USERPROFILE || process.env.HOME || os.homedir();
 const TZ = 'Europe/Bucharest';
 
 // ---------------------------------------------------------------- args ----
@@ -92,7 +92,7 @@ const OPTS = {
   cooldownMinutes: num('cooldown-minutes', 30),
   diagRepeatMinutes: num('diag-repeat-minutes', 60),
   ceiling: num('ceiling', null),
-  statePath: val('state', path.join(HOME, '.claude', 'quota-tripwire-state.json')),
+  statePath: val('state', path.join(claudePaths.configDir(), 'quota-tripwire-state.json')),
   // The SHIPPED sibling first. This defaulted to ~/.claude/scripts/quota-burn.js,
   // a path outside every plugin: [measured 2026-08-28] it existed on no machine
   // and in no repo, so --status read FAILED code=source-missing and the tripwire
@@ -104,7 +104,7 @@ const OPTS = {
   sourcePath: val('source', process.env.QUOTA_BURN_JS || (() => {
     const shipped = path.join(__dirname, 'quota-burn.js');
     if (fs.existsSync(shipped)) return shipped;
-    return path.join(HOME, '.claude', 'scripts', 'quota-burn.js');
+    return path.join(claudePaths.configDir(), 'scripts', 'quota-burn.js');
   })()),
   verbose: has('verbose'),
 };

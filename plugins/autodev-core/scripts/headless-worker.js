@@ -57,6 +57,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudePaths = require('./claude-paths.js');
 const { spawn } = require('node:child_process');
 
 const USAGE = [
@@ -140,7 +141,7 @@ function parseArgs(argv) {
 }
 
 function homeDir() { return process.env.USERPROFILE || process.env.HOME || os.homedir(); }
-function defaultLedger() { return path.join(homeDir(), '.claude', 'autodev', 'headless-workers.json'); }
+function defaultLedger() { return path.join(claudePaths.configDir(), 'autodev', 'headless-workers.json'); }
 function defaultReport(log) { return log.replace(/\.[^./\\]+$/, '') + '.report.md'; }
 
 function requireCode(opts) {

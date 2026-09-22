@@ -92,6 +92,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+// A broken install is quiet, never loud: no helper, no opinion.
+let configDir;
+try { ({ configDir } = require('../scripts/claude-paths.js')); } catch { process.exit(0); }
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log('usage: coordinator-write-guard.js  (PreToolUse hook on Bash; reads hook JSON on stdin)\n'
@@ -111,7 +114,7 @@ const BLOCKED_SUBCOMMANDS = new Set(['commit', 'push', 'merge', 'rebase']);
 /** The role file this run consults. Env first so the suite can point it at a fixture. */
 function roleFilePath() {
     return process.env.AUTODEV_BRAIN_ROLE_FILE
-        || path.join(os.homedir(), '.claude', 'brain-role.json');
+        || path.join(configDir(), 'brain-role.json');
 }
 
 /**

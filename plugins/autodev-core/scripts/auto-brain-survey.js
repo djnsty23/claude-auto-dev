@@ -39,13 +39,13 @@ function help() {
 
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const { execFileSync } = require('child_process');
 
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
 const val = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 
-const HOME = process.env.USERPROFILE || process.env.HOME || '';
 // The default was `~/Downloads/code`, one machine's layout. Elsewhere the survey
 // silently covered nothing. Resolve instead, and keep --root as the override.
 // See claude-paths.js for the two other scripts that made the same mistake.
@@ -67,7 +67,7 @@ const ROOT = ROOT_RAW ? path.resolve(ROOT_RAW) : null;
 let clientNames = [];
 let clientListFound = false;
 try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(HOME, '.claude', 'brain-brief.json'), 'utf8'));
+    const cfg = JSON.parse(fs.readFileSync(path.join(claudePaths.configDir(), 'brain-brief.json'), 'utf8'));
     if (Array.isArray(cfg.clients)) {
         clientNames = cfg.clients.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim().toLowerCase());
         clientListFound = true;

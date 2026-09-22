@@ -22,12 +22,67 @@
  * A caller that receives null must say COULD NOT READ - never render it as a zero.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
 
 function isDir(p) {
     try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+/*
+ * THE ACTIVE PROFILE. Claude Code keeps one profile per config dir: the
+ * default `~/.claude`, or whatever CLAUDE_CONFIG_DIR names. A second profile
+ * (a work account next to a personal one) is a second config dir under the
+ * same home. Every hook and script that means "this profile's state" asks
+ * configDir(); none joins `<home>/.claude` itself, because a hand-joined path
+ * is the personal profile's state whichever profile is running. That is how a
+ * work-profile session came to read the personal brain-role.json and write
+ * the personal nudge ledgers.
+ *
+ * autodev-memory cannot require this file (CLAUDE_PLUGIN_ROOT resolves per
+ * plugin), so it ships a copy at plugins/autodev-memory/scripts/config-dir.js.
+ * tooling/test-config-dir-isolation.js holds the two to the same answers.
+ *
+ * Read at CALL time, not require time, so a suite can move the env between
+ * calls, and every function takes an optional env for callers that inject
+ * one. The home order is this module's HOME convention, then os.homedir():
+ * on a real machine all three agree, and in a suite either variable works.
+ */
+function homeDir(env = process.env) {
+    return env.USERPROFILE || env.HOME || os.homedir();
+}
+
+/** CLAUDE_CONFIG_DIR when set and non-empty, else `<home>/.claude`. */
+function configDir(env = process.env) {
+    const v = env.CLAUDE_CONFIG_DIR;
+    return v ? v : path.join(homeDir(env), '.claude');
+}
+
+/** True when the active profile is the default one: CLAUDE_CONFIG_DIR unset,
+ *  empty, or naming `<home>/.claude` itself. */
+function isDefaultConfigDir(env = process.env) {
+    const v = env.CLAUDE_CONFIG_DIR;
+    if (!v) return true;
+    const a = path.resolve(v);
+    const b = path.resolve(homeDir(env), '.claude');
+    return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+/**
+ * The fleet's shared memory checkout, `~/claude-memory` by default. It sits
+ * OUTSIDE the config dir, so configDir() alone would leave it shared by every
+ * profile. Under a non-default profile it moves to `<configDir>/claude-memory`,
+ * which does not exist until that profile opts in, so every reader that treats
+ * absence as "no fleet" goes quiet instead of reading the personal one. Each
+ * caller's own env override (AUTODEV_FLEET_INTENT_DIR, AUTODEV_AWAY_FILE, ...)
+ * still wins: that is how two profiles share a fleet on purpose.
+ */
+function fleetMemoryDir(env = process.env) {
+    return isDefaultConfigDir(env)
+        ? path.join(homeDir(env), 'claude-memory')
+        : path.join(configDir(env), 'claude-memory');
 }
 
 /**
@@ -93,4 +148,4 @@ function codeDir() {
     return null;
 }
 
-module.exports = { sessionStore, codeDir, HOME };
+module.exports = { sessionStore, codeDir, HOME, homeDir, configDir, isDefaultConfigDir, fleetMemoryDir };

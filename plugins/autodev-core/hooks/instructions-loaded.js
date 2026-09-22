@@ -44,7 +44,7 @@ const MAX_LINES = 4000;
 function main() {
     const fs = require('fs');
     const path = require('path');
-    const os = require('os');
+    const { configDir } = require('../scripts/claude-paths.js');
 
     let raw = '';
     try { raw = fs.readFileSync(0, 'utf8'); } catch { return; }
@@ -56,8 +56,7 @@ function main() {
     const filePath = input && input.file_path;
     if (!filePath || typeof filePath !== 'string') return;
 
-    const home = process.env.CLAUDE_CONFIG_DIR
-        || path.join(os.homedir(), '.claude');
+    const home = configDir();
     const dir = path.join(home, 'logs');
     const log = path.join(dir, 'instructions-loaded.jsonl');
 

@@ -86,14 +86,14 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const { spawnSync } = require('child_process');
 
-const HOME = process.env.USERPROFILE || process.env.HOME || os.homedir();
 
 /** Where records live. Overridable so a suite never touches the real fleet. */
 function recordDir() {
     return process.env.AUTODEV_FLEET_INTENT_DIR
-        || path.join(HOME, 'claude-memory', 'fleet-intent');
+        || path.join(claudePaths.fleetMemoryDir(), 'fleet-intent');
 }
 
 /**

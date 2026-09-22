@@ -60,8 +60,8 @@
 // platform), CLAUDE_CONFIG_DIR (default ~/.claude) for the transcripts.
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_AGE_MS = 7 * DAY_MS;
@@ -77,11 +77,11 @@ const USAGE = 'usage: node plugins/autodev-core/scripts/peer-queue-check.js [--m
     + 'Exit 0 nothing lost, 1 something lost, 2 could not read the ledger, store or transcripts.';
 
 function ledgerPath() {
-    return process.env.AUTODEV_PEER_LEDGER || path.join(os.homedir(), '.claude', 'autodev', 'peer-sends.jsonl');
+    return process.env.AUTODEV_PEER_LEDGER || path.join(claudePaths.configDir(), 'autodev', 'peer-sends.jsonl');
 }
 
 function projectsDir() {
-    return path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
+    return path.join(claudePaths.configDir(), 'projects');
 }
 
 /** The desktop session store directory, or null when it cannot be found. */

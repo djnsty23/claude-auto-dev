@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { configDir } = require('./config-dir');
 const { execSync } = require('child_process');
 
 const args = process.argv.slice(2);
@@ -23,8 +24,7 @@ const asJson = args.includes('--json');
 const includeAll = args.includes('--all');
 const staleDays = Number((args.find((a) => a.startsWith('--stale-days=')) || '').split('=')[1]) || 30;
 
-const HOME = process.env.HOME || process.env.USERPROFILE;
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+const CONFIG_DIR = configDir();
 const PROJECTS = path.join(CONFIG_DIR, 'projects');
 
 // MEMORY.md is loaded into context every session. Claude Code warns past these.

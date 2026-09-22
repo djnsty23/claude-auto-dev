@@ -51,8 +51,8 @@
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const SYNTHETIC_NEEDLE = '"model":"<synthetic>"';
 const INTERRUPT_NEEDLE = '[Request interrupted by user';
@@ -62,8 +62,7 @@ const IN_FLIGHT_MS = 5 * 60 * 1000;
 /** Where the per-project session directories live. */
 function projectsDir(env = process.env) {
     if (env.AUTODEV_CLAUDE_PROJECTS) return env.AUTODEV_CLAUDE_PROJECTS;
-    if (env.CLAUDE_CONFIG_DIR) return path.join(env.CLAUDE_CONFIG_DIR, 'projects');
-    return path.join(os.homedir(), '.claude', 'projects');
+    return path.join(claudePaths.configDir(env), 'projects');
 }
 
 function isDir(p) {

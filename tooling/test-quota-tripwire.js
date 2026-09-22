@@ -168,6 +168,9 @@ const FIXHOME = path.join(fixture, 'home');
 const NO_SIBLING = path.join(fixture, 'no-sibling', 'quota-tripwire.js');
 fs.mkdirSync(path.dirname(NO_SIBLING), { recursive: true });
 fs.copyFileSync(SUBJECT, NO_SIBLING);
+// The config-dir resolver travels with the copy: the sibling this stages as
+// absent is quota-burn.js, not the path helper.
+fs.copyFileSync(path.join(path.dirname(SUBJECT), 'claude-paths.js'), path.join(path.dirname(NO_SIBLING), 'claude-paths.js'));
 
 const MIN = 60000;
 // A fixed instant, so every projected timestamp in an expected string is a

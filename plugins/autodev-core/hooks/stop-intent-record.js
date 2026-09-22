@@ -43,8 +43,10 @@ if (process.env.CLAUDE_PLUGIN_OPTION_INTENT_RECORD === 'false') process.exit(0);
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+// A broken install is quiet, never loud: no helper, no opinion.
+let configDir;
+try { ({ configDir } = require('../scripts/claude-paths.js')); } catch { process.exit(0); }
 
 const COOLDOWN_MIN_DEFAULT = 45;
 
@@ -53,9 +55,10 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         + 'Refreshes the observed facts on this repo+branch\'s fleet-intent record, and\n'
         + 'asks for a claim when the record is missing or the tree has moved past it.\n'
         + 'Never writes a claim; never moves updated_at; never blocks a turn.\n'
-        + 'Inert unless $AUTODEV_FLEET_INTENT_DIR (else ~/claude-memory/fleet-intent) exists.\n'
+        + 'Inert unless $AUTODEV_FLEET_INTENT_DIR (else ~/claude-memory/fleet-intent, or\n'
+        + '<CLAUDE_CONFIG_DIR>/claude-memory/fleet-intent under a non-default profile) exists.\n'
         + 'Throttle: $AUTODEV_INTENT_COOLDOWN_MIN, default ' + COOLDOWN_MIN_DEFAULT + ' minutes.\n'
-        + 'State:    $AUTODEV_INTENT_NUDGE_STATE, else ~/.claude/intent-nudge-state.json.');
+        + 'State:    $AUTODEV_INTENT_NUDGE_STATE, else <config dir>/intent-nudge-state.json.');
     process.exit(0);
 }
 
@@ -66,7 +69,7 @@ function silent() {
 
 function statePath() {
     return process.env.AUTODEV_INTENT_NUDGE_STATE
-        || path.join(os.homedir(), '.claude', 'intent-nudge-state.json');
+        || path.join(configDir(), 'intent-nudge-state.json');
 }
 
 let intent = null;

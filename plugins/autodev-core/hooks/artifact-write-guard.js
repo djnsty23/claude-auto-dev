@@ -62,8 +62,10 @@
 // the harness shows to the writer so it can fix the call and retry.
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+// A broken install is quiet, never loud: no helper, no opinion.
+let configDir;
+try { ({ configDir } = require('../scripts/claude-paths.js')); } catch { process.exit(0); }
 
 const TOOL = 'ArtifactData';
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -97,7 +99,7 @@ function artifactId(url) {
 
 function schemaPathFor(id) {
     const dir = process.env.AUTODEV_ARTIFACT_SCHEMA_DIR
-        || path.join(os.homedir(), '.claude', 'autodev', 'artifact-schemas');
+        || path.join(configDir(), 'autodev', 'artifact-schemas');
     return path.join(dir, id + '.json');
 }
 

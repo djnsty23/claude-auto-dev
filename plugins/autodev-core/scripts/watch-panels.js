@@ -13,6 +13,7 @@
  */
 const { execFileSync } = require('child_process');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 // fleet-status.js is a SIBLING in this plugin. Resolving it through
 // process.env.USERPROFILE + 'claude-auto-dev' meant the INSTALLED plugin ran one
@@ -65,7 +66,7 @@ const fs = require('fs');
 // State lives with the other fleet artifacts, not beside the script: the script
 // now ships inside a VERSION-KEYED plugin cache path, so __dirname changes on
 // every release and the dedup memory would reset each time.
-const FLEET_DIR = process.env.AUTODEV_FLEET_DIR || path.join(process.env.USERPROFILE || process.env.HOME, '.claude', 'fleet');
+const FLEET_DIR = process.env.AUTODEV_FLEET_DIR || path.join(claudePaths.configDir(), 'fleet');
 const STATE = path.join(FLEET_DIR, 'watch-panels-seen.json');
 
 function loadSeen() {

@@ -44,8 +44,10 @@ if (process.env.CLAUDE_PLUGIN_OPTION_CONTEXT_NUDGE === 'false') process.exit(0);
 // nothing, and the suite asserts that against every quiet path.
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+// A broken install is quiet, never loud: no helper, no opinion.
+let configDir;
+try { ({ configDir } = require('../scripts/claude-paths.js')); } catch { process.exit(0); }
 
 const SOFT_LINE_DEFAULT = 250_000;
 const BAND_DEFAULT = 50_000;
@@ -80,10 +82,6 @@ function silent() {
 function positiveInt(raw, fallback) {
     const n = Number.parseInt(String(raw == null ? '' : raw), 10);
     return Number.isInteger(n) && n > 0 ? n : fallback;
-}
-
-function configDir() {
-    return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }
 
 function stateDir() {

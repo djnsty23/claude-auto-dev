@@ -55,8 +55,8 @@
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
+const claudePaths = require('./claude-paths.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
@@ -117,7 +117,7 @@ function git(repo, args) {
     return { status: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
 }
 
-function defaultLedger() { return path.join(os.homedir(), '.claude', 'autodev', 'unattended-workers.json'); }
+function defaultLedger() { return path.join(claudePaths.configDir(), 'autodev', 'unattended-workers.json'); }
 
 function readLedger(file) {
     if (!fs.existsSync(file)) return { version: 1, records: [] };

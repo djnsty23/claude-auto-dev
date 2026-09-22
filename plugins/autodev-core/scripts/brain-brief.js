@@ -66,13 +66,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const os = require('os');
 const { execFile } = require('child_process');
 
-const HOME = process.env.USERPROFILE || process.env.HOME || os.homedir();
 const SCRIPTS = __dirname;
-const CONFIG_PATH = path.join(HOME, '.claude', 'brain-brief.json');
-const MEMORY_DIR = path.join(HOME, 'claude-memory');
+const CONFIG_PATH = path.join(claudePaths.configDir(), 'brain-brief.json');
+const MEMORY_DIR = claudePaths.fleetMemoryDir();
 
 // A handoff older than this cannot be trusted about anything that moves.
 const HANDOFF_TRUST_HOURS = 4;

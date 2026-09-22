@@ -233,8 +233,7 @@ try {
     // not block on DNS). Zero added bytes when clean.
     if (version !== '?') {
         try {
-            const cfgDir = process.env.CLAUDE_CONFIG_DIR
-                || path.join(process.env.HOME || process.env.USERPROFILE || '', '.claude');
+            const cfgDir = require(path.join(PLUGIN_ROOT, 'scripts', 'claude-paths.js')).configDir();
             const marketsDir = path.join(cfgDir, 'plugins', 'marketplaces');
             const selfName = JSON.parse(
                 fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')

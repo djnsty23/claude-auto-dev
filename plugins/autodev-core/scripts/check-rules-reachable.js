@@ -55,12 +55,12 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const claudePaths = require('./claude-paths.js');
 
 const has = (f) => process.argv.indexOf(f) !== -1;
 
 function logPath() {
-    const home = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+    const home = claudePaths.configDir();
     return path.join(home, 'logs', 'instructions-loaded.jsonl');
 }
 

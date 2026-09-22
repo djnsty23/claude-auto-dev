@@ -27,6 +27,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const args = process.argv.slice(2);
 const flag = (name, dflt) => {
@@ -42,7 +43,7 @@ const AS_JSON = args.includes('--json');
 const NO_EXAMPLES = args.includes('--no-examples');
 const MIN = Number(flag('min', 1)) || 1;
 const PROJECT = flag('project', '');
-const ROOT = flag('root', path.join(os.homedir(), '.claude', 'projects'));
+const ROOT = flag('root', path.join(claudePaths.configDir(), 'projects'));
 
 // ---------------------------------------------------------------------------
 // The classes. Every pattern here was read off real transcripts on this machine

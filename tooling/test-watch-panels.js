@@ -115,6 +115,8 @@ const ARGVLOG = path.join(fixture, 'argv.json');
 
 fs.mkdirSync(STUB_SCRIPTS, { recursive: true });
 fs.copyFileSync(SUBJECT, path.join(STUB_SCRIPTS, 'watch-panels.js'));
+// The subject resolves its config dir through this sibling, so it travels too.
+fs.copyFileSync(path.join(path.dirname(SUBJECT), 'claude-paths.js'), path.join(STUB_SCRIPTS, 'claude-paths.js'));
 const PLANTED = path.join(STUB_SCRIPTS, 'watch-panels.js');
 
 // The stub records WHICH question the watcher asked before it does anything

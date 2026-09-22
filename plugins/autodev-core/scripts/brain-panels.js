@@ -109,9 +109,21 @@ const CODE = resolveCodeDir();
 
 // brain-brief.json already names the repos under management for the fleet
 // survey. Reuse it rather than adding a second source that can disagree with it.
-const BRIEF_CONFIG = path.join(HOME, '.claude', 'brain-brief.json');
+// The config dir degrades the same way, and for the same reason: scenario 15
+// runs a lone copy with no siblings, and this script must still reach its own
+// refusals. The fallback is claude-paths.configDir()'s rule, for a broken
+// install only.
+function resolveConfigDir() {
+    try {
+        return require(path.join(__dirname, 'claude-paths.js')).configDir();
+    } catch {
+        return process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+    }
+}
+const CONFIG_DIR = resolveConfigDir();
+const BRIEF_CONFIG = path.join(CONFIG_DIR, 'brain-brief.json');
 
-const MARKER = path.join(HOME, '.claude', 'brain-panels-marker.json');
+const MARKER = path.join(CONFIG_DIR, 'brain-panels-marker.json');
 const TOOL = 'AskUserQuestion';
 
 // The coordinator's own repo. Never denied: the panel is how it reaches the

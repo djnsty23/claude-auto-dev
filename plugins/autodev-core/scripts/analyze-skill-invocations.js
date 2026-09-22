@@ -50,6 +50,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const args = process.argv.slice(2);
 const flag = (name) => args.indexOf(name) >= 0;
@@ -58,7 +59,6 @@ const opt = (name, dflt) => {
     return i >= 0 && args[i + 1] ? args[i + 1] : dflt;
 };
 
-const HOME = process.env.USERPROFILE || process.env.HOME || '';
 
 /**
  * Pull skill invocations out of one transcript's raw text.
@@ -362,7 +362,7 @@ function main() {
 
     const result = analyse({
         days: Number(opt('--days', '7')) || 7,
-        dir: opt('--dir', path.join(HOME, '.claude', 'projects')),
+        dir: opt('--dir', path.join(claudePaths.configDir(), 'projects')),
         pluginsDir: opt('--plugins', path.join(__dirname, '..', '..')),
         budget: Number(opt('--max-files', '4000')) || 4000,
     });
