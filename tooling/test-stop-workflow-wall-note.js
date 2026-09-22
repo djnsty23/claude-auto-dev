@@ -140,7 +140,7 @@ const wallAgents = [
     check('and is silent again after that', silentOk(fire({ input: { session_id: 'sess-hit', transcript_path: f.transcriptPath }, ledger })));
 
     // Ledger content is what throttles, and it is per session and run.
-    const led = JSON.parse(fs.readFileSync(ledger, 'utf8'));
+    const led = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'keyed-ledger.js')).readAll(ledger);
     check('ledger keyed by session and run id', Object.keys(led).length === 1 && Object.keys(led)[0] === 'sess-hit:wf_eeee0000-005', JSON.stringify(led));
 }
 

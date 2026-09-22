@@ -17,6 +17,7 @@ const os = require('os');
 const path = require('path');
 
 const HOOK = path.join(__dirname, '..', 'plugins', 'autodev-core', 'hooks', 'stop-brain-report.js');
+const LEDGER = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'keyed-ledger.js'));
 
 let pass = 0;
 let fail = 0;
@@ -143,7 +144,7 @@ function spoke(r) {
     check('first sighting records a baseline and stays quiet', silentOk(first),
         `out=${first.out.length}B`);
 
-    const recorded = JSON.parse(fs.readFileSync(state, 'utf8'));
+    const recorded = LEDGER.readAll(state);
     check('  and the baseline was actually written', !!(recorded.s2 && recorded.s2.sha),
         'sha=' + (recorded.s2 && String(recorded.s2.sha).slice(0, 8)));
 
@@ -491,14 +492,14 @@ const LIVE = (() => {
     commitIn(repo, 'v2\n');
     const one = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     check('throttle: the first notice fires', !!spoke(one));
-    const notifiedSha = JSON.parse(fs.readFileSync(state, 'utf8')).s4.sha;
+    const notifiedSha = LEDGER.readAll(state).s4.sha;
 
     commitIn(repo, 'v3\n');
     const two = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     check('throttle: a second commit inside the window is SUPPRESSED', silentOk(two),
         `out=${two.out.length}B`);
 
-    const waiting = JSON.parse(fs.readFileSync(state, 'utf8'));
+    const waiting = LEDGER.readAll(state);
     const pendingSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
     check('throttle: suppressed work does not advance the notified HEAD',
         waiting.s4.sha === notifiedSha && pendingSha !== notifiedSha,
@@ -510,9 +511,9 @@ const LIVE = (() => {
     // Age only the notice timestamp. A new commit here would hide the defect:
     // the final commit must be delivered when the cooldown ends without
     // requiring the worker to create more work first.
-    const expired = JSON.parse(fs.readFileSync(state, 'utf8'));
+    const expired = LEDGER.readAll(state);
     expired.s4.reportedAt = Date.now() - 21 * 60 * 1000;
-    fs.writeFileSync(state, JSON.stringify(expired));
+    LEDGER.write(state, 's4', expired.s4);
     const released = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     const releasedContext = spoke(released);
     check('throttle: the same final commit is reported after cooldown expires',
@@ -520,7 +521,7 @@ const LIVE = (() => {
             && released.err.length === 0,
         `out=${released.out.length}B err=${released.err.length}B exit=${released.status}`);
     check('throttle: released work advances the notified HEAD',
-        JSON.parse(fs.readFileSync(state, 'utf8')).s4.sha === pendingSha);
+        LEDGER.readAll(state).s4.sha === pendingSha);
     const duplicate = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     check('throttle: the released commit is not reported twice', silentOk(duplicate),
         `out=${duplicate.out.length}B err=${duplicate.err.length}B exit=${duplicate.status}`);

@@ -70,15 +70,6 @@ function ledgerPath() {
         || path.join(configDir(), 'workflow-wall-state.json');
 }
 
-function readJson(p) {
-    try {
-        const v = JSON.parse(fs.readFileSync(p, 'utf8'));
-        return v && typeof v === 'object' ? v : null;
-    } catch {
-        return null;
-    }
-}
-
 function readPayload() {
     try {
         if (process.stdin.isTTY) return null;
@@ -103,20 +94,11 @@ function dirStamp(dir) {
     }
 }
 
-function writeLedger(all, key, entry) {
-    try {
-        const cutoff = Date.now() - LEDGER_MAX_AGE_MS;
-        for (const k of Object.keys(all)) {
-            const e = all[k];
-            if (!e || typeof e !== 'object' || !(Number(e.at) > cutoff)) delete all[k];
-        }
-        all[key] = entry;
-        const p = ledgerPath();
-        fs.mkdirSync(path.dirname(p), { recursive: true });
-        fs.writeFileSync(p, JSON.stringify(all, null, 2) + '\n');
-    } catch {
-        /* a ledger we cannot write costs a repeated note, never a broken turn */
-    }
+/* ONE FILE PER KEY under <ledger>.d/, tmp plus rename (keyed-ledger.js): a
+   shared JSON rewritten by concurrent Stops kept only the last writer. A ledger
+   we cannot write costs a repeated note, never a broken turn. */
+function writeLedger(ledger, key, entry) {
+    ledger.write(ledgerPath(), key, entry, { maxAgeMs: LEDGER_MAX_AGE_MS });
 }
 
 function main() {
@@ -144,8 +126,15 @@ function main() {
     // journal and agent files have not moved since, is the same run. Twelve
     // stats instead of tens of megabytes on every later turn of that session.
     const key = sessionId + ':' + latest.id;
-    const ledger = readJson(ledgerPath()) || {};
-    const prior = ledger[key];
+    let ledger;
+    try {
+        ledger = require(path.join(__dirname, '..', 'scripts', 'keyed-ledger.js'));
+    } catch {
+        silent();
+    }
+    const stored = ledger.read(ledgerPath(), key);
+    if (stored.state === 'corrupt') silent();      // never write over bytes we could not read
+    const prior = stored.state === 'ok' ? stored.entry : null;
     const stamp = dirStamp(latest.dir);
     if (prior && stamp && prior.stamp === stamp) silent();
 

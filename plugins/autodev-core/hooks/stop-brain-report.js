@@ -51,7 +51,8 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         + 'since its last report. Reads the same role file as coordinator-write-guard:\n'
         + '$AUTODEV_BRAIN_ROLE_FILE, else ~/.claude/brain-role.json. Absent = inert.\n'
         + 'Throttle: $AUTODEV_BRAIN_REPORT_COOLDOWN_MIN, default ' + COOLDOWN_MIN_DEFAULT + ' minutes.\n'
-        + 'State:    $AUTODEV_BRAIN_REPORT_STATE, else ~/.claude/brain-report-state.json.\n'
+        + 'State:    $AUTODEV_BRAIN_REPORT_STATE, else ~/.claude/brain-report-state.json,\n'
+        + '          one file per session under <that path>.d/.\n'
         + 'Never blocks a turn; every path exits 0.');
     process.exit(0);
 }
@@ -187,8 +188,19 @@ const cwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd
 const sha = headSha(cwd);
 if (!sha) silent();                                // not a git repo: no delivery evidence available
 
-const state = readJson(statePath()) || {};
-const prior = state[sessionId] && typeof state[sessionId] === 'object' ? state[sessionId] : null;
+/* ONE FILE PER SESSION, not one shared JSON. `[measured 2026-09-22]` 20
+   concurrent Stops on a 200-entry shared ledger left 1 of 220: read-modify-write
+   loses every other writer, and a reader catching the file mid-write parsed
+   nothing and wrote `{}` back. keyed-ledger.js holds the reasoning. */
+let ledger;
+try {
+    ledger = require(path.join(__dirname, '..', 'scripts', 'keyed-ledger.js'));
+} catch {
+    silent();                                      // a broken install must be quiet, not loud
+}
+const stored = ledger.read(statePath(), sessionId);
+if (stored.state === 'corrupt') silent();          // never write over bytes we could not read
+const prior = stored.state === 'ok' ? stored.entry : null;
 
 const now = Date.now();
 const cooldownMin = Number(process.env.AUTODEV_BRAIN_REPORT_COOLDOWN_MIN);
@@ -201,7 +213,7 @@ const cooldownMs = (Number.isFinite(cooldownMin) && cooldownMin >= 0
 // session the moment a coordinator starts, which is a thundering herd rather
 // than a signal. Record the baseline and stay quiet.
 if (!prior || typeof prior.sha !== 'string') {
-    writeState(state, sessionId, { sha, at: now, reportedAt: null });
+    writeState(sessionId, { sha, at: now, reportedAt: null });
     silent();
 }
 
@@ -214,14 +226,14 @@ if (lastNotice && now - lastNotice < cooldownMs) {
     // Suppression is not delivery. Retain the last notified HEAD so the final
     // commit can trigger a notice on a later Stop after the window expires,
     // even when the worker has made no further commits.
-    writeState(state, sessionId, { sha: prior.sha, at: now, reportedAt: lastNotice });
+    writeState(sessionId, { sha: prior.sha, at: now, reportedAt: lastNotice });
     silent();
 }
 
 const branch = branchName(cwd);
 const ahead = aheadOfUpstream(cwd);
 const published = publishedOnTrunk(cwd);
-writeState(state, sessionId, { sha, at: now, reportedAt: now });
+writeState(sessionId, { sha, at: now, reportedAt: now });
 
 /* BOTH FACTS WHEN THEY DISAGREE, rather than replacing one with the other.
    A branch-local count of 3 on work that is already on the trunk is not noise
@@ -391,18 +403,8 @@ console.log(JSON.stringify({
 }));
 process.exit(0);
 
-function writeState(all, id, entry) {
-    try {
-        all[id] = entry;
-        // Keep the ledger from growing without bound: drop entries older than 30 days.
-        const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
-        for (const k of Object.keys(all)) {
-            if (all[k] && Number(all[k].at) && Number(all[k].at) < cutoff) delete all[k];
-        }
-        const p = statePath();
-        fs.mkdirSync(path.dirname(p), { recursive: true });
-        fs.writeFileSync(p, JSON.stringify(all, null, 2) + '\n');
-    } catch {
-        /* a ledger we cannot write costs a duplicate notice, never a broken turn */
-    }
+function writeState(id, entry) {
+    // Entries older than 30 days are pruned by mtime inside write(). A ledger we
+    // cannot write costs a duplicate notice, never a broken turn.
+    ledger.write(statePath(), id, entry);
 }

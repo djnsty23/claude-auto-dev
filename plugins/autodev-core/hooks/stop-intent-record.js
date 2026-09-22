@@ -172,9 +172,18 @@ const cooldownMs = (Number.isFinite(cooldownMin) && cooldownMin >= 0
     ? cooldownMin
     : COOLDOWN_MIN_DEFAULT) * 60 * 1000;
 
-let state = {};
-try { state = JSON.parse(fs.readFileSync(statePath(), 'utf8')) || {}; } catch { state = {}; }
-const prior = state[key] && typeof state[key] === 'object' ? state[key] : null;
+/* ONE FILE PER KEY, not one shared JSON, for the reason keyed-ledger.js gives:
+   concurrent Stops doing read-modify-write on one file lose every writer but
+   the last, and a parse failure used to become `{}` written back over all. */
+let ledger;
+try {
+    ledger = require(path.join(__dirname, '..', 'scripts', 'keyed-ledger.js'));
+} catch {
+    silent();
+}
+const stored = ledger.read(statePath(), key);
+if (stored.state === 'corrupt') silent();          // never write over bytes we could not read
+const prior = stored.state === 'ok' ? stored.entry : null;
 
 /* THE SAME REASON IS THROTTLED; A NEW ONE IS NOT. A record that went from
    "missing" to "the tree has moved" has changed in a way the reader must hear
@@ -182,17 +191,9 @@ const prior = state[key] && typeof state[key] === 'object' ? state[key] : null;
    moment the record started lying. */
 if (prior && prior.reason === reason && Number(prior.at) && now - Number(prior.at) < cooldownMs) silent();
 
-try {
-    state[key] = { reason, at: now };
-    const cutoff = now - 30 * 24 * 3600 * 1000;
-    for (const k of Object.keys(state)) {
-        if (state[k] && Number(state[k].at) && Number(state[k].at) < cutoff) delete state[k];
-    }
-    fs.mkdirSync(path.dirname(statePath()), { recursive: true });
-    fs.writeFileSync(statePath(), JSON.stringify(state, null, 2) + '\n');
-} catch {
-    /* a ledger we cannot write costs a duplicate nudge, never a broken turn */
-}
+// Pruned at 30 days by mtime inside write(). A ledger we cannot write costs a
+// duplicate nudge, never a broken turn.
+ledger.write(statePath(), key, { reason, at: now });
 
 const CMD = 'node ${CLAUDE_PLUGIN_ROOT}/scripts/fleet-intent.js --set';
 const SHAPE = '  --brief "what you were sent to do" --current "what you are doing now"\n'
