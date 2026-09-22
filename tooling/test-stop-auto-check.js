@@ -513,10 +513,15 @@ function runWithCfg(dir, cfg) {
     check('nudge: names the next actionable story', (decision?.systemMessage || '').includes('S1-002'));
     check('nudge: says the word that pulls it', /`auto`/.test(decision?.systemMessage || ''));
     check('nudge: counts how many are actionable', /1 actionable story\b/.test(decision?.systemMessage || ''));
+    // F12: systemMessage is operator-only. The nudge is for the model, so it
+    // must ALSO ride Stop additionalContext, or no session ever reads it.
+    check('nudge: reaches the MODEL via Stop additionalContext', decision?.hookSpecificOutput?.hookEventName === 'Stop'
+        && (decision.hookSpecificOutput.additionalContext || '').includes('S1-002'));
 
     d = project({ prd: SPRINT_DONE });
     ({ decision } = run(d));
     check('nudge: all done → approve with NO systemMessage', decision?.decision === 'approve' && decision.systemMessage === undefined);
+    check('nudge: all done → no additionalContext either', decision?.hookSpecificOutput === undefined);
 
     d = project({ prd: { stories: { 'S1-001': { title: 'a', passes: true }, 'S1-002': { title: 'b', passes: 'deferred' } } } });
     ({ decision } = run(d));
@@ -561,6 +566,7 @@ for (const [label, prd, expected] of [
     check(label + ': never claims complete', !/Sprint complete/.test(initial?.reason || ''));
     const final = run(dir).decision;
     check(label + ': bounded stop retains unresolved explanation', final?.decision === 'approve' && expected.test(final.systemMessage || ''));
+    check(label + ': and the model is told too', expected.test(final?.hookSpecificOutput?.additionalContext || ''));
     check(label + ': prd state preserved', JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'prd.json'), 'utf8'))) === JSON.stringify(prd));
 }
 {

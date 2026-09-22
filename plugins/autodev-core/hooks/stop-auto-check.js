@@ -36,8 +36,17 @@ const path = require('path');
 // check that speaks every turn is one that gets ignored.
 let carryNote = null;
 
+// The note is FOR THE MODEL: it names work to pick up. `systemMessage` reaches
+// only the operator's screen, so until 2026-09-23 no session ever read the
+// nudge it was written for. It now also rides where the model reads: the
+// reason on a block, Stop `additionalContext` on an approve. The operator copy
+// stays, so what the operator sees did not change.
 function decide(o) {
-    if (carryNote) o.systemMessage = carryNote;
+    if (carryNote) {
+        o.systemMessage = carryNote;
+        if (o.decision === 'block') o.reason = o.reason + '\n\n' + carryNote;
+        else o.hookSpecificOutput = { hookEventName: 'Stop', additionalContext: carryNote };
+    }
     console.log(JSON.stringify(o));
     process.exit(0);
 }

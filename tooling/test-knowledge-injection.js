@@ -51,6 +51,20 @@ const memDB = require(path.join(HOME_SCRIPTS, 'memory-db.js'));
 
 const cases = [];
 
+// The brief is for the MODEL. A PostToolUse hook reaches the model through
+// stdout JSON `hookSpecificOutput.additionalContext`; stderr on exit 0 reaches
+// only the transcript view, so a brief there was never read by anyone who could
+// act on it. This suite asserted stderr until 2026-09-23, grading the dead channel.
+function ctx(r) {
+  try {
+    const j = JSON.parse(r.stdout || '');
+    const h = j && j.hookSpecificOutput;
+    return h && h.hookEventName === 'PostToolUse' && typeof h.additionalContext === 'string' ? h.additionalContext : '';
+  } catch {
+    return '';
+  }
+}
+
 if (!memDB.isAvailable()) {
   console.log('[skip] node:sqlite unavailable — skipping knowledge auto-injection tests');
 } else {
@@ -102,9 +116,11 @@ if (!memDB.isAvailable()) {
   const r1 = edit('src/auth/login.js');
   cases.push(['first edit exits 0', r1.status === 0]);
   cases.push(['first edit emits the domain-knowledge header for src/auth',
-    /\[Memory\] Domain knowledge for src\/auth \(3 notes\):/.test(r1.stderr || '')]);
+    /\[Memory\] Domain knowledge for src\/auth \(3 notes\):/.test(ctx(r1))]);
   cases.push(['injection surfaces a seeded item (JWT decision)',
-    (r1.stderr || '').includes('chose JWT for sessions')]);
+    ctx(r1).includes('chose JWT for sessions')]);
+  cases.push(['the brief is not written to stderr, the channel the model never sees',
+    !/Domain knowledge/.test(r1.stderr || '')]);
   cases.push(['throttle state file records the (session, area) marker',
     fs.existsSync(surfacedFile) &&
     fs.readFileSync(surfacedFile, 'utf8').split('\n').includes(`${SESSION}\tsrc/auth`)]);
@@ -113,13 +129,13 @@ if (!memDB.isAvailable()) {
   const r2 = edit('src/auth/logout.js');
   cases.push(['second edit exits 0', r2.status === 0]);
   cases.push(['second edit in same area/session does NOT re-emit (throttle works)',
-    !/Domain knowledge for src\/auth/.test(r2.stderr || '')]);
+    !/Domain knowledge for src\/auth/.test(ctx(r2))]);
 
   // 3) Edit in an area with NO accumulated knowledge → emits nothing, no crash.
   const r3 = edit('src/billing/invoice.js');
   cases.push(['edit in empty area exits 0', r3.status === 0]);
   cases.push(['edit in area with no knowledge emits no domain-knowledge line',
-    !/Domain knowledge/.test(r3.stderr || '')]);
+    !/Domain knowledge/.test(ctx(r3))]);
   cases.push(['empty area is still recorded as surfaced (no recompute next edit)',
     fs.readFileSync(surfacedFile, 'utf8').split('\n').includes(`${SESSION}\tsrc/billing`)]);
 
@@ -127,7 +143,7 @@ if (!memDB.isAvailable()) {
   const r4 = edit('README.md');
   cases.push(['root-level file edit exits 0', r4.status === 0]);
   cases.push(['root-level file edit emits no domain-knowledge line',
-    !/Domain knowledge/.test(r4.stderr || '')]);
+    !/Domain knowledge/.test(ctx(r4))]);
 
   // 5) A DIFFERENT session sees the same area fresh (throttle is session-scoped).
   const r5 = spawnSync(process.execPath, [HOOK], {
@@ -137,7 +153,7 @@ if (!memDB.isAvailable()) {
     env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP_HOME, USERPROFILE: TMP_HOME }
   });
   cases.push(['new session re-surfaces the same area (session-scoped throttle)',
-    /Domain knowledge for src\/auth/.test(r5.stderr || '')]);
+    /Domain knowledge for src\/auth/.test(ctx(r5))]);
 
   // 6) CAPTURE-ACTIVE: unlike the rest of this suite, KEEP observation-classifier.js
   //    installed so the hook's capture block runs BEFORE injection (as in production).
@@ -191,7 +207,7 @@ if (!memDB.isAvailable()) {
       env: { ...process.env, CLAUDE_PLUGIN_ROOT: CAP_PLUGIN_ROOT, HOME: CAP_HOME, USERPROFILE: CAP_HOME }
     });
 
-    const capErr = capRun.stderr || '';
+    const capErr = ctx(capRun);
     const headerCount = (capErr.match(/Domain knowledge for src\/auth/g) || []).length;
 
     // The assertion this block was missing: capture must actually WRITE.
@@ -322,7 +338,7 @@ if (!memDB.isAvailable()) {
         process.env.HOME = prevH2; process.env.USERPROFILE = prevU2;
 
         const gr = runCapture(path.join(CAP_PROJ, 'src/billing/ledger.js'), 'sess-groups');
-        const gerr = gr.stderr || '';
+        const gerr = ctx(gr);
         cases.push(['brief includes GOTCHAS, not only decisions', /GOTCHA_MARKER/.test(gerr)]);
         cases.push(['brief includes BUGFIXES', /BUGFIX_MARKER/.test(gerr)]);
         cases.push(['brief includes CHANGES', /CHANGE_MARKER/.test(gerr)]);
