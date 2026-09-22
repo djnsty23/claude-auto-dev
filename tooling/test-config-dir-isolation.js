@@ -205,11 +205,13 @@ try {
                 usage: { input_tokens: 32, cache_creation_input_tokens: 814, cache_read_input_tokens: depth - 846, output_tokens: 12 } } }),
         ].join('\n') + '\n');
         const payload = { session_id: 's-cdn', transcript_path: tx };
-        isolationCase('context-depth-nudge ledger', {
+        // One state file per session since #285, under <config dir>/autodev/context-nudge.
+        const nudgeState = (cfg) => path.join(cfg, 'autodev', 'context-nudge', 's-cdn.json');
+        isolationCase('context-depth-nudge state', {
             work: () => run(hook(CORE, 'context-depth-nudge.js'), payload, 'work'),
-            workOk: (r) => ({ ok: r.status === 0 && exists(path.join(WORK, 'context-nudge-state.json')), detail: said(r) }),
+            workOk: (r) => ({ ok: r.status === 0 && exists(nudgeState(WORK)), detail: said(r) }),
             control: () => { const r = run(hook(CORE, 'context-depth-nudge.js'), payload, 'default');
-                return { ok: exists(path.join(DEFAULT_CFG, 'context-nudge-state.json')), detail: said(r) }; },
+                return { ok: exists(nudgeState(DEFAULT_CFG)), detail: said(r) }; },
         });
     }
     {
