@@ -11,11 +11,16 @@
 // stderr, which a Stop hook's exit 0 never puts in front of the model, and ECC
 // also reformats the files, which this repo's hooks do not do to a user's tree.
 //
-// ONE RETRY, NEVER A LOOP. The block makes the model continue; its next Stop
-// arrives with `stop_hook_active: true`. If the check still fails then, this
-// hook reports to the operator as a `systemMessage` (no decision key, so it
-// cannot hold the turn) and lets the stop through. A type error the model
-// cannot fix in one attempt is the operator's to see, not a reason to spin.
+// ONE RETRY, NEVER A LOOP. A block writes a per-session marker; the next Stop
+// consumes it, and if the check still fails then, this hook reports to the
+// operator as a `systemMessage` (no decision key, so it cannot hold the turn)
+// and lets the stop through. A type error the model cannot fix in one attempt
+// is the operator's to see, not a reason to spin.
+//
+// NOT `stop_hook_active`. That bit says SOME Stop hook blocked the previous
+// stop, and stop-auto-check blocks on every auto turn, so reading it as "this
+// is my retry" meant a first failure during auto never blocked at all. The
+// marker says what the bit cannot: that THIS hook blocked, for THIS session.
 //
 // Every quiet path is zero bytes on both streams: no pending list, no
 // package.json, no scripts, or a green run. Always exits 0.
@@ -93,6 +98,14 @@ try {
     let data = {};
     try { data = JSON.parse(fs.readFileSync(0, 'utf8')) || {}; } catch { data = {}; }
 
+    // Consumed on every Stop, before any early exit: a retry turn that edited
+    // nothing ends the episode, so a later failure is a first failure again.
+    const sid = typeof data.session_id === 'string' && data.session_id
+        ? data.session_id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80) : 'no-session';
+    const marker = path.join(process.cwd(), '.claude', '.typecheck-retry-' + sid);
+    let isRetry = false;
+    try { fs.unlinkSync(marker); isRetry = true; } catch { /* no block outstanding */ }
+
     const pending = path.join(process.cwd(), '.claude', '.typecheck-pending');
     let raw;
     try { raw = fs.readFileSync(pending, 'utf8'); } catch { process.exit(0); }
@@ -150,7 +163,13 @@ try {
 
     const edited = `${files.length} file(s) edited this response: ${files.map((f) => path.basename(f)).join(', ')}`;
     const reason = findings.join('\n\n') + '\n\n' + edited;
-    if (data.stop_hook_active) {
+    // A marker we cannot write would make every Stop a first failure, which is
+    // the loop this rule exists to prevent. Then the shared bit is the fallback.
+    let markerOk = true;
+    if (!isRetry) {
+        try { fs.writeFileSync(marker, String(Date.now())); } catch { markerOk = false; }
+    }
+    if (isRetry || (!markerOk && data.stop_hook_active)) {
         const first = findings.map((f) => f.split('\n')[0]).join(' · ');
         console.log(JSON.stringify({
             systemMessage: `[Typecheck] still failing after the retry, not blocking again: ${first}`,
