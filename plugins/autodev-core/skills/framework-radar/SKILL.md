@@ -151,9 +151,10 @@ nothing" is otherwise incomplete.
 ### Isolation
 
 Never experiment in the shared checkout. Fetch the remote, verify the exact
-default-branch commit, and create a dedicated worktree and `codex/radar-*`
-branch from that commit INSIDE the repo:
-`git -C <repo> worktree add .claude/worktrees/radar-<topic> -b codex/radar-<topic> <sha>`.
+default-branch commit, and create a dedicated worktree and `<agent>/radar-*`
+branch from that commit INSIDE the repo. `<agent>` is `claude` when running
+under Claude Code and `codex` under Codex:
+`git -C <repo> worktree add .claude/worktrees/radar-<topic> -b <agent>/radar-<topic> <sha>`.
 Never place it beside the checkout, where it becomes a stray in the directory
 holding every other repo. Logs, diffs and exit files go in the session
 scratchpad or `~/.claude/autodev/reports/<run>/`, never in that directory

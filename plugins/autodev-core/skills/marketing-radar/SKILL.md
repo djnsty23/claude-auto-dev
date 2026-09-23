@@ -165,9 +165,10 @@ performance outcome needed to call it a winner.
 
 ### Safety and isolation
 
-Use a dedicated worktree and `codex/marketing-radar-*` branch for framework
-changes, created INSIDE the repo:
-`git -C <repo> worktree add .claude/worktrees/marketing-radar-<topic> -b codex/marketing-radar-<topic> origin/main`.
+Use a dedicated worktree and `<agent>/marketing-radar-*` branch for framework
+changes, created INSIDE the repo. `<agent>` is `claude` when running under
+Claude Code and `codex` under Codex:
+`git -C <repo> worktree add .claude/worktrees/marketing-radar-<topic> -b <agent>/marketing-radar-<topic> origin/main`.
 Never place it beside the checkout. Logs, diffs and exit files go in the session
 scratchpad or `~/.claude/autodev/reports/<run>/`, never in the directory that
 holds the checkouts. Preserve raw commands, exit codes, elapsed time and evidence paths.
@@ -187,7 +188,7 @@ Record A/B/C measurements and choose `adopt B`, `adopt C`, `no winner` or
 `reject`. When a workflow variant wins, implement only that variant and run its
 targeted tests plus the repository gate.
 
-A scheduled run may push a winning `codex/marketing-radar-*` branch and open a
+A scheduled run may push a winning `<agent>/marketing-radar-*` branch and open a
 review PR only when its automation prompt explicitly grants that exact standing
 authorization. Interactive runs use the current request and still-valid
 publication grant. This research workflow does not itself merge, deploy, tag,
