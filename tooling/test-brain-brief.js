@@ -190,7 +190,7 @@ buildRepo(STALE_REPO, true);
 function briefWithFailingOverlap() {
     const dir = path.join(ROOT, 'subject-overlap-fails');
     fs.mkdirSync(dir, { recursive: true });
-    for (const f of ['brain-brief.js', 'fleet-status.js', 'fleet-heartbeat.js']) {
+    for (const f of ['brain-brief.js', 'fleet-status.js', 'fleet-heartbeat.js', 'claude-paths.js']) {
         fs.copyFileSync(path.join(SCRIPT_DIR, f), path.join(dir, f));
     }
     fs.writeFileSync(path.join(dir, 'fleet-overlap.js'), [

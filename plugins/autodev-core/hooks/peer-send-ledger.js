@@ -41,8 +41,10 @@
 
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+// A broken install is quiet, never loud: no helper, no opinion.
+let configDir;
+try { ({ configDir } = require('../scripts/claude-paths.js')); } catch { process.exit(0); }
 
 const TOOL = 'mcp__ccd_session_mgmt__send_message';
 const PROBE_CHARS = 80;
@@ -54,7 +56,7 @@ const DELIVERY_RE = /\(delivery:\s*([A-Za-z_-]+);\s*message_id:\s*([^\s;)]+)\s*\
 
 function ledgerPath() {
     return process.env.AUTODEV_PEER_LEDGER
-        || path.join(os.homedir(), '.claude', 'autodev', 'peer-sends.jsonl');
+        || path.join(configDir(), 'autodev', 'peer-sends.jsonl');
 }
 
 /**

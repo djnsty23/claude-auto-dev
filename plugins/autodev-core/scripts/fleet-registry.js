@@ -5,8 +5,9 @@
  *
  * Reads the records session-register.js writes on SessionStart and SessionEnd
  * at <fleetDir>/sessions/<uuid>.json. The peer list a session sees is scoped
- * to its own CLAUDE_CONFIG_DIR; this table is not, because every account's
- * hook writes into the one directory keyed on HOME. See the header of
+ * to its own CLAUDE_CONFIG_DIR, and so is this table by default: fleetDir is
+ * <config dir>/fleet. Profiles that set AUTODEV_FLEET_DIR to one shared
+ * directory get one cross-account table. See the header of
  * plugins/autodev-core/hooks/session-register.js for what the registry is
  * NOT (heartbeats are fleet-heartbeat.js, transcript-derived status is
  * fleet-status.js and session-pile.js).
@@ -41,6 +42,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
 
@@ -194,7 +196,7 @@ function main(argv) {
     if (opts.help) return usage();
     if (opts.selftest) return selftest();
     if (opts.command !== 'list') return usage();
-    const fleetDir = opts.fleetDir || process.env.AUTODEV_FLEET_DIR || path.join(HOME, '.claude', 'fleet');
+    const fleetDir = opts.fleetDir || process.env.AUTODEV_FLEET_DIR || path.join(claudePaths.configDir(), 'fleet');
     console.log(render(readRegistry(fleetDir), opts, Date.now(), bootAt()));
     process.exitCode = 0;
 }

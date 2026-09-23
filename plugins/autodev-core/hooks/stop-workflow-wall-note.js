@@ -41,8 +41,10 @@ if (process.env.CLAUDE_PLUGIN_OPTION_WORKFLOW_WALL_NOTE === 'false') process.exi
 
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+// A broken install is quiet, never loud: no helper, no opinion.
+let configDir;
+try { ({ configDir } = require('../scripts/claude-paths.js')); } catch { process.exit(0); }
 
 const LEDGER_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 
@@ -65,7 +67,7 @@ function silent() {
 
 function ledgerPath() {
     return process.env.AUTODEV_WORKFLOW_WALL_STATE
-        || path.join(os.homedir(), '.claude', 'workflow-wall-state.json');
+        || path.join(configDir(), 'workflow-wall-state.json');
 }
 
 function readJson(p) {

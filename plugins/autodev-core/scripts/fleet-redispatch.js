@@ -51,7 +51,8 @@
  * THE INTENT RECORD - OWNED ELSEWHERE, CONSUMED HERE
  * ---------------------------------------------------------------------------
  *
- * `~/claude-memory/fleet-intent/<repo>--<branch>.json`, `/` in the branch
+ * `~/claude-memory/fleet-intent/<repo>--<branch>.json` (under a non-default
+ * profile, `<CLAUDE_CONFIG_DIR>/claude-memory/fleet-intent/`), `/` in the branch
  * written as `-`:
  *
  *   { repo, branch, session_id, brief, current_step, next_step,
@@ -107,7 +108,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
-const { sessionStore, codeDir, HOME } = require('./claude-paths.js');
+const { sessionStore, codeDir, HOME, configDir, fleetMemoryDir } = require('./claude-paths.js');
 
 // ---------------------------------------------------------------------------
 // PURE LAYER. No I/O below this line until the CLI section, so the suite can
@@ -355,8 +356,8 @@ const opt = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[
 const JSON_OUT = has('json');
 const RUN_VERIFY = !has('no-run-verify');
 const ALL = has('all');
-const INTENT_DIR = opt('intent-dir', path.join(HOME, 'claude-memory', 'fleet-intent'));
-const STAMP = opt('stamp-file', path.join(HOME, '.claude', 'fleet-redispatch-last-run'));
+const INTENT_DIR = opt('intent-dir', path.join(fleetMemoryDir(), 'fleet-intent'));
+const STAMP = opt('stamp-file', path.join(configDir(), 'fleet-redispatch-last-run'));
 const LIVE_FLOOR_MS = parseInt(opt('live-minutes', '30'), 10) * 60000;
 const LOOKBACK_DAYS = parseInt(opt('lookback-days', '7'), 10);
 const VERIFY_TIMEOUT_MS = parseInt(opt('verify-timeout-seconds', '300'), 10) * 1000;
@@ -366,8 +367,10 @@ const USAGE = [
     'fleet-redispatch.js - at a session-limit reset boundary, rank the fleet work',
     'that is genuinely incomplete. It PROPOSES; it never spawns anything.',
     '',
-    '  --intent-dir <path>        default ~/claude-memory/fleet-intent',
-    '  --stamp-file <path>        default ~/.claude/fleet-redispatch-last-run',
+    '  --intent-dir <path>        default ~/claude-memory/fleet-intent, or',
+    '                             <CLAUDE_CONFIG_DIR>/claude-memory/fleet-intent under a',
+    '                             non-default profile',
+    '  --stamp-file <path>        default <config dir>/fleet-redispatch-last-run',
     '  --all                      classify every record, ignoring the boundary gate',
     '  --boundaries               report the reset boundaries read, and stop',
     '  --no-run-verify            classify without executing any record\'s verify',
@@ -390,7 +393,7 @@ if (require.main === module) {
 }
 
 function claudeProjects() {
-    const cfg = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+    const cfg = configDir();
     return path.join(cfg, 'projects');
 }
 

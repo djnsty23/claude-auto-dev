@@ -79,8 +79,7 @@ function nextStoryNudge(prdPath) {
 function staleStories(ids, cwd) {
     const none = { skipped: [], cacheAge: null };
     try {
-        const config = process.env.CLAUDE_CONFIG_DIR
-            || path.join(process.env.HOME || process.env.USERPROFILE || '', '.claude');
+        const config = require(path.join(__dirname, '..', 'scripts', 'claude-paths.js')).configDir();
         const file = path.join(config, 'autodev', 'prd-story-ages.json');
         const all = JSON.parse(fs.readFileSync(file, 'utf8'));
         // Match on the real path — a repo reached through a symlink is the same

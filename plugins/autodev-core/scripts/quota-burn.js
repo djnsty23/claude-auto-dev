@@ -25,13 +25,13 @@
  */
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const argv = process.argv.slice(2);
 const has = (n) => argv.includes('--' + n);
 const val = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 
-const HOME = process.env.USERPROFILE || process.env.HOME || '';
-const CFG = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+const CFG = claudePaths.configDir();
 const PROJECTS = path.join(CFG, 'projects');
 
 // Published per-MTok rates. Cache multipliers are applied to the INPUT rate:

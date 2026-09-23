@@ -26,6 +26,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
@@ -34,8 +35,7 @@ const has = (f) => args.includes(f);
 const AS_JSON = has('--json');
 const QUIET = has('--quiet');
 
-const HOME = process.env.USERPROFILE || process.env.HOME || '';
-const CFG = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+const CFG = claudePaths.configDir();
 const MANIFEST = path.join(CFG, 'plugins', 'installed_plugins.json');
 const MARKETS = path.join(CFG, 'plugins', 'marketplaces');
 

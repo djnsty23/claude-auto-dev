@@ -93,12 +93,12 @@
 
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const os = require('os');
 const crypto = require('crypto');
 const readline = require('readline');
 
-const HOME = process.env.USERPROFILE || process.env.HOME;
-const ROOT = path.join(HOME, '.claude', 'projects');
+const ROOT = path.join(claudePaths.configDir(), 'projects');
 
 // REUSE, not re-implementation: fleet-status.js already solves the transcript
 // <-> desktop-session join (cliSessionId -> local_<uuid> -> title, cwd) and

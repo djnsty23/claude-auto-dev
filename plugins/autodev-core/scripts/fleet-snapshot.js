@@ -26,8 +26,8 @@
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const { execFileSync } = require('child_process');
 
 const SCRIPTS = __dirname;
@@ -56,7 +56,7 @@ function trunkOf(cwd) {
 
 /** Transcripts written in the last 24 h whose project dir is inside `repo`. */
 function transcriptsFor(repo) {
-    const root = path.join(os.homedir(), '.claude', 'projects');
+    const root = path.join(claudePaths.configDir(), 'projects');
     const slug = repo.replace(/[:\\/]/g, '-').replace(/^-/, '');
     const out = [];
     let dirs = [];
@@ -145,9 +145,9 @@ function repoFacts(repoPath) {
 }
 
 function gather() {
-    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'brain-brief.json'), 'utf8'));
+    const cfg = JSON.parse(fs.readFileSync(path.join(claudePaths.configDir(), 'brain-brief.json'), 'utf8'));
     let away = null;
-    try { away = (fs.readFileSync(path.join(os.homedir(), 'claude-memory', 'AWAY.md'), 'utf8').match(/until:\s*(\S+)/) || [])[1] || null; } catch (e) { away = null; }
+    try { away = (fs.readFileSync(path.join(claudePaths.fleetMemoryDir(), 'AWAY.md'), 'utf8').match(/until:\s*(\S+)/) || [])[1] || null; } catch (e) { away = null; }
     return { measuredAt: new Date().toISOString(), repos: (cfg.repos || []).map(repoFacts), clientReposExcluded: (cfg.clients || []).length, away };
 }
 

@@ -37,11 +37,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const { execFileSync } = require('child_process');
 const { scanFleet } = require(path.join(__dirname, 'fleet-status.js'));
 
-const HOME = process.env.USERPROFILE || process.env.HOME;
-const DIR = process.env.AUTODEV_FLEET_PUBLISH_DIR || path.join(HOME, 'claude-memory', 'fleet');
+const DIR = process.env.AUTODEV_FLEET_PUBLISH_DIR || path.join(claudePaths.fleetMemoryDir(), 'fleet');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);

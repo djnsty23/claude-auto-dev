@@ -22,6 +22,21 @@ const self = path.basename(__filename);
 // Extra flags to pass to each child node process (none needed on Node 22+).
 const CHILD_FLAGS = [];
 
+// A SUITE NEVER INHERITS THE OPERATOR'S PROFILE. claude-paths.configDir() reads
+// CLAUDE_CONFIG_DIR before HOME, so a suite that fakes HOME and spreads
+// process.env into its child still points that child at the REAL config dir
+// when the shell running the gate has one set (a second Claude profile does).
+// [measured 2026-09-23] with it set, test-brain-panels and test-fleet-notify go
+// red, and test-brain-panels writes a marker into the operator's config dir. A
+// suite that needs a config dir sets its own. check-suites-can-fail.js and
+// find-untested-functions.js strip the same name from the children they spawn.
+const LEAKY_ENV = ['CLAUDE_CONFIG_DIR'];
+const suiteEnv = () => {
+  const env = { ...process.env };
+  for (const k of LEAKY_ENV) delete env[k];
+  return env;
+};
+
 const suites = fs
   .readdirSync(scriptsDir)
   .filter((f) => /^test-.*\.js$/.test(f) && f !== self)
@@ -108,6 +123,7 @@ function run(label, args) {
   const res = spawnSync(process.execPath, args, {
     stdio: 'inherit',
     cwd: repoRoot,
+    env: suiteEnv(),
   });
   // spawnSync returns non-null `signal` if the child was killed, or a numeric
   // `status`.

@@ -38,11 +38,11 @@
 //   node away-state.js --help
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const DEFAULT_FILE = () => process.env.AUTODEV_AWAY_FILE
-    || path.join(os.homedir(), 'claude-memory', 'AWAY.md');
+    || path.join(claudePaths.fleetMemoryDir(), 'AWAY.md');
 
 // `until:` on its own line, anywhere in the file. Deliberately lenient about
 // surrounding prose, because the file also carries the operator's words
@@ -146,7 +146,8 @@ function main() {
         console.log('usage: away-state.js [--status|--json] [--file <path>]\n'
             + 'Reads the declared AWAY state. Four states: active (self-resolve),\n'
             + 'expired / absent / malformed (the operator can be asked).\n'
-            + 'File: $AUTODEV_AWAY_FILE, else ~/claude-memory/AWAY.md');
+            + 'File: $AUTODEV_AWAY_FILE, else ~/claude-memory/AWAY.md, or\n'
+            + '<CLAUDE_CONFIG_DIR>/claude-memory/AWAY.md under a non-default profile.');
         return 0;
     }
 

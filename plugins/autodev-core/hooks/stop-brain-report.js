@@ -37,8 +37,10 @@
 // it reports is worth holding a turn for. Every path exits 0.
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+// A broken install is quiet, never loud: no helper, no opinion.
+let configDir;
+try { ({ configDir } = require('../scripts/claude-paths.js')); } catch { process.exit(0); }
 const { spawnSync } = require('child_process');
 
 const COOLDOWN_MIN_DEFAULT = 20;
@@ -61,12 +63,12 @@ function silent() {
 
 function roleFilePath() {
     return process.env.AUTODEV_BRAIN_ROLE_FILE
-        || path.join(os.homedir(), '.claude', 'brain-role.json');
+        || path.join(configDir(), 'brain-role.json');
 }
 
 function statePath() {
     return process.env.AUTODEV_BRAIN_REPORT_STATE
-        || path.join(os.homedir(), '.claude', 'brain-report-state.json');
+        || path.join(configDir(), 'brain-report-state.json');
 }
 
 function readJson(p) {

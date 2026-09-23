@@ -27,15 +27,15 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const { execFile, execFileSync } = require('child_process');
 const { scanFleet } = require(path.join(__dirname, 'fleet-status.js'));
 
-const HOME = process.env.USERPROFILE || process.env.HOME;
 // Overridable so the dedup test can exercise real state writes without touching
 // the live file. The dedup is the load-bearing behaviour here, so it has to be
 // testable against a real read/write cycle rather than mocked away.
 const STATE = process.env.AUTODEV_FLEET_STATE
-    || path.join(HOME, '.claude', 'fleet', '.notified.json');
+    || path.join(claudePaths.configDir(), 'fleet', '.notified.json');
 const TOAST = path.join(__dirname, 'toast.ps1');
 
 const argv = process.argv.slice(2);

@@ -52,6 +52,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const RECOMMENDED_RE = /\s*\(recommended\)\s*$/i;
 const isRecommended = (l) => RECOMMENDED_RE.test(String(l).trim());
@@ -182,7 +183,7 @@ function analyse(panels, sourceName) {
 }
 
 function transcripts(days) {
-    const root = path.join(process.env.USERPROFILE || process.env.HOME || '', '.claude', 'projects');
+    const root = path.join(claudePaths.configDir(), 'projects');
     const found = [];
     let dirs = [];
     try { dirs = fs.readdirSync(root, { withFileTypes: true }); } catch { return found; }

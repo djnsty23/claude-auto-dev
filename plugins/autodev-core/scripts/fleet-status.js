@@ -31,9 +31,9 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
-const HOME = process.env.USERPROFILE || process.env.HOME;
-const ROOT = path.join(HOME, '.claude', 'projects');
+const ROOT = path.join(claudePaths.configDir(), 'projects');
 
 // The desktop app keeps its own session records, in a DIFFERENT id space from
 // the transcripts. A transcript is named for its cliSessionId; the id that

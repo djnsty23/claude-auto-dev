@@ -23,13 +23,14 @@
  *   Liveness comes from the pid, not from counting turns.
  *
  * WHERE. <fleetDir>/sessions/<session_id>.json, with
- *   fleetDir = AUTODEV_FLEET_DIR || <home>/.claude/fleet
- * the same convention as fleet-heartbeat.js and watch-panels.js. The registry
- * is cross-account only because that default is keyed on HOME and not on
- * CLAUDE_CONFIG_DIR: two config dirs under one home resolve to one directory.
- * Setting AUTODEV_FLEET_DIR on one account and not the other splits the
- * registry silently, and each half then reports the other's sessions as
- * absent. The sessions/ subdirectory sits safely beside the heartbeats:
+ *   fleetDir = AUTODEV_FLEET_DIR || <config dir>/fleet
+ * the same convention as fleet-heartbeat.js and watch-panels.js, where the
+ * config dir is claude-paths.configDir(). The default is PER PROFILE: a
+ * second profile under its own CLAUDE_CONFIG_DIR must never write into the
+ * first one's config dir, so it keeps its own registry. The registry becomes
+ * cross-account only when BOTH profiles set AUTODEV_FLEET_DIR to one shared
+ * directory. Setting it on one account and not the other splits the registry
+ * silently, and each half then reports the other's sessions as absent. The sessions/ subdirectory sits safely beside the heartbeats:
  * fleet-heartbeat.js isHeartbeatFile() requires a name ending in .json, so a
  * directory is neither read as a heartbeat nor pruned as a stale one.
  *
@@ -57,8 +58,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const HOME = process.env.USERPROFILE || process.env.HOME || '';
-const FLEET_DIR = process.env.AUTODEV_FLEET_DIR || path.join(HOME, '.claude', 'fleet');
+let claudePaths;
+try { claudePaths = require('../scripts/claude-paths.js'); } catch { process.exit(0); }
+
+const FLEET_DIR = process.env.AUTODEV_FLEET_DIR || path.join(claudePaths.configDir(), 'fleet');
 const DIR = path.join(FLEET_DIR, 'sessions');
 const RETAIN_DAYS = 7;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

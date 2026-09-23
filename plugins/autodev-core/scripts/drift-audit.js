@@ -13,11 +13,12 @@
 
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 const { execSync, execFileSync } = require('child_process');
 
 const asJson = process.argv.includes('--json');
 const HOME = process.env.HOME || process.env.USERPROFILE;
-const CONFIG = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+const CONFIG = claudePaths.configDir();
 
 const findings = [];
 const add = (area, severity, detail, fix) => findings.push({ area, severity, detail, fix });

@@ -24,6 +24,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 // "Settle this session" is the drained-queue tail when the session can archive
 // itself (rule-options-protocol). It is a decision to end, never queued work.
@@ -408,8 +409,7 @@ if (require.main === module) {
         const i = argv.indexOf('--root');
         const root = (i !== -1 && argv[i + 1])
             ? argv[i + 1]
-            : path.join(process.env.CLAUDE_CONFIG_DIR
-                || path.join(process.env.USERPROFILE || process.env.HOME || '', '.claude'), 'projects');
+            : path.join(claudePaths.configDir(), 'projects');
         sweep(root);
         process.exit(0);
     }

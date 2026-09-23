@@ -544,13 +544,21 @@ const suites = fs.readdirSync(SWEEP_TOOLING)
 // its child is validate.js at ~4s, not the runner.
 const RUN_BUDGET_MS = sb.SWEEP_SUITE_BUDGET_MS;
 const REPORT_MARGIN_MS = 30000;
+// The operator's profile never reaches a suite: a suite that fakes HOME still
+// resolves CLAUDE_CONFIG_DIR first, so an inherited one points it at the real
+// config dir. test-all.js carries the measurement and strips the same name.
+const suiteEnv = (extra) => {
+    const env = Object.assign({}, process.env, extra);
+    delete env.CLAUDE_CONFIG_DIR;
+    return env;
+};
 const runSuite = (suite) => {
     // checkRunner's child is the WHOLE of test-all.js — ~40x a single suite, and
     // measured at 827-890s against the 900s every suite used to share.
     const budget = sb.sweepBudgetFor(suite);
     return spawnSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
         cwd: SWEEP_ROOT, encoding: 'utf8', timeout: budget,
-        env: Object.assign({}, process.env, {
+        env: suiteEnv({
             [sb.DEADLINE_ENV]: String(Date.now() + budget - REPORT_MARGIN_MS),
         }),
     });
@@ -602,7 +610,7 @@ function checkValidator() {
     if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', cause: sv.CAUSE.NO_SUBJECT, note: 'no VERSION file' };
 
     const run = () => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
-        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS,
+        cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS, env: suiteEnv({}),
     });
     const base = run();
     if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate' };

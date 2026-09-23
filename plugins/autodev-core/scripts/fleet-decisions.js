@@ -34,13 +34,13 @@
  */
 const fs = require('fs');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
 const val = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 
-const HOME = process.env.USERPROFILE || process.env.HOME || '';
-const CFG = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+const CFG = claudePaths.configDir();
 const LOG = path.join(CFG, 'fleet', 'DECISIONS.jsonl');
 
 // One transaction covers read/check/append. Atomic append alone cannot stop two

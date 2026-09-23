@@ -89,8 +89,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const claudePaths = require('./claude-paths.js');
 
-const HOME = process.env.USERPROFILE || process.env.HOME || os.homedir();
 const REQUIRED = ['session_id', 'peer_name', 'desktop_session_id'];
 const STORE_DEPTH = 4;
 
@@ -99,11 +99,11 @@ function readJSON(p) {
 }
 
 function defaultRoleFile() {
-    return process.env.AUTODEV_BRAIN_ROLE_FILE || path.join(HOME, '.claude', 'brain-role.json');
+    return process.env.AUTODEV_BRAIN_ROLE_FILE || path.join(claudePaths.configDir(), 'brain-role.json');
 }
 
 function defaultSessionsDir() {
-    return process.env.AUTODEV_SESSIONS_DIR || path.join(HOME, '.claude', 'sessions');
+    return process.env.AUTODEV_SESSIONS_DIR || path.join(claudePaths.configDir(), 'sessions');
 }
 
 function defaultStore() {

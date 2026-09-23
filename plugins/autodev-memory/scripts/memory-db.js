@@ -7,10 +7,9 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 const { stripPrivate, stringifyPrivate } = require('./private-redaction');
+const { configDir } = require('./config-dir');
 
-const HOME = process.env.HOME || process.env.USERPROFILE;
-const DB_DIR = process.env.CLAUDE_CONFIG_DIR
-    ? path.resolve(process.env.CLAUDE_CONFIG_DIR) : path.join(HOME, '.claude');
+const DB_DIR = path.resolve(configDir());
 const DB_PATH = path.join(DB_DIR, 'auto-dev-memory.db');
 
 let _db = null;
