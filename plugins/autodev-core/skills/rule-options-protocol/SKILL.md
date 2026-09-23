@@ -1,6 +1,6 @@
 ---
 name: rule-options-protocol
-description: "How to end a turn: a clickable AskUserQuestion panel of vetted, complementary options with a recommendation in every block."
+description: "How a decision panel looks when one is shown: a clickable AskUserQuestion panel of vetted, complementary options with a recommendation in every block. Whether to show one is the operator's decision policy."
 when_to_use: "Before ending a turn that asks the user for direction."
 user-invocable: true
 allowed-tools: Read, Grep, Glob
@@ -11,6 +11,12 @@ allowed-tools: Read, Grep, Glob
 A decision panel gathers direction after delivering substantive work. It is not
 a permission reset or a reason to stop work the user already authorized. Follow
 the user's current preferences and the host's actual question-tool schema.
+
+**Whether to show a panel is not this skill's call.** When the operator has a
+decision policy (a user-level rule that sorts choices into decide, report and
+ask), it wins: a turn that ended in work the policy lets the agent decide ends
+with a one-line status, not a panel. This skill governs how a panel looks once
+one is warranted.
 
 ## Offer work with distinct outcomes
 
@@ -60,8 +66,8 @@ Claude Code may expose `AskUserQuestion`; other hosts expose different question
 tools, or none. Use the available mechanism and its real limits. Do not call a
 Plan-only tool from another mode or pretend a text list is a clickable panel.
 
-Under the standing menu preference, end substantive completed work with the
-panel. Skip it for a pure factual answer with no useful next step, or when every
+Under a standing menu preference and no decision policy that says otherwise,
+end substantive completed work with the panel. Skip it for a pure factual answer with no useful next step, or when every
 path is blocked on an external action already named. Never invent “reopen” or a
 one-option panel to satisfy a ritual.
 

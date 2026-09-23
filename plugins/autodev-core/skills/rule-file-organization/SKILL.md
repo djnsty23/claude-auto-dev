@@ -15,6 +15,12 @@ paths:
 Generated artifacts need a known home and recovery path. Use the project's
 established layout; classify by purpose before choosing an ignore rule.
 
+**One policy.** A user-level or project file-organization rule wins over the
+defaults below. Where it keeps a repository root to manifests and source, put
+PRD archives under `docs/prd-archives/` instead: `check-archive-path.js` asks git
+whether a path is kept, not what it is called, so any tracked path passes. The
+table is the fallback for a project with no such rule.
+
 | Type | Default path | Recovery / retention |
 |---|---|---|
 | Raw reports, temporary backups, handoffs | `.claude/reports/`, `.claude/archives/`, `.claude/handoffs/` | Local; append reports and retain while work depends on them |
