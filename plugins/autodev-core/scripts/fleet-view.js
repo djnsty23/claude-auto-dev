@@ -33,7 +33,7 @@
  * so another origin can neither read the token nor rebind a name onto it.
  *
  * Usage:
- *   node fleet-view.js [serve] [--port 8766] [--hours 48] [--takeover-script <file>] [--no-launch]
+ *   node fleet-view.js [serve] [--port 8766] [--hours 48] [--takeover-script <file>] [--no-launch] [--until-stdin-closes]
  *   node fleet-view.js list [--json] [--hours 48]
  *   node fleet-view.js --selftest
  *   node fleet-view.js --help
@@ -48,11 +48,12 @@ const { spawn, spawnSync } = require('node:child_process');
 const HW = require('./headless-worker.js');
 
 const USAGE = [
-    'Usage: node fleet-view.js [serve] [--port 8766] [--hours 48] [--takeover-script <file>] [--no-launch]',
+    'Usage: node fleet-view.js [serve] [--port 8766] [--hours 48] [--takeover-script <file>] [--no-launch] [--until-stdin-closes]',
     '       node fleet-view.js list [--json] [--hours 48]',
     '       node fleet-view.js --selftest',
     'serve: one page on http://127.0.0.1:<port>/ merging every worker ledger and both desktop stores.',
     '       POST /action needs the per-start token the page carries. --port 0 picks a free port.',
+    '       --until-stdin-closes: exit cleanly when stdin closes, for a parent that owns the pipe.',
     'list:  the same merge on stdout: a population line per source, then one line per row.',
     'A row shows when it is live, asking, or touched in the last --hours. Every source prints its',
     'population and a COULD-NOT-READ row when unreadable.',
@@ -74,7 +75,7 @@ function fault(code, message) { const e = new Error(message || code); e.publicCo
 
 function parseArgs(argv) {
     const out = { _: [] };
-    const flags = ['help', 'json', 'selftest', 'no-launch'];
+    const flags = ['help', 'json', 'selftest', 'no-launch', 'until-stdin-closes'];
     const known = [...flags, 'port', 'hours', 'home', 'appdata', 'mission-store', 'events', 'claude-bin', 'takeover-script'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
@@ -655,7 +656,7 @@ function tokenMatches(given, token) {
     return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function serve(s, port) {
+function serve(s, port, { untilStdinCloses = false } = {}) {
     const token = crypto.randomBytes(24).toString('hex');
     const server = http.createServer(async (req, res) => {
         const send = (status, type, body, extra = {}) => { res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', ...extra }); res.end(body); };
@@ -693,6 +694,17 @@ function serve(s, port) {
     server.listen(port, '127.0.0.1', () => {
         process.stdout.write(`fleet-view listening on http://127.0.0.1:${server.address().port}/ (POST needs the page token, events go to ${s.events})\n`);
     });
+    // A parent that owns the pipe ends the server by closing it, and the exit is
+    // a normal one. A kill on Windows is TerminateProcess, so V8 writes no coverage
+    // dump: the suite's kill left every request path reading as never called
+    // (check:coverage 44 against a ceiling of 36, 2026-09-24). Opt-in, because a
+    // server started with stdin ignored would see end-of-file at once and exit.
+    if (untilStdinCloses) {
+        const stop = () => { server.close(); server.closeAllConnections(); };
+        process.stdin.on('end', stop);
+        process.stdin.on('error', stop);
+        process.stdin.resume();
+    }
     return server;
 }
 
@@ -714,6 +726,10 @@ function selftest() {
     t('win32 identity refuses another code', !processMatches(1, want, 'win32', fakeCmd('node hw.js supervise --code B-X10 --cwd "C:\\w t"')).ok);
     t('win32 identity refuses a missing process', !processMatches(1, want, 'win32', fakeCmd('')).ok);
     t('an unknown platform is never a match', !processMatches(1, want, 'aix', fakeCmd('x')).ok);
+    const dcwd = path.resolve('fv-selftest-cwd');
+    const dwant = { cwd: dcwd, code: 'B-X1' };
+    t('darwin identity reads the lsof cwd', processMatches(1, dwant, 'darwin', fakeCmd(`p1\nfcwd\nn${dcwd}\n`)).ok);
+    t('darwin identity refuses another cwd', !processMatches(1, dwant, 'darwin', fakeCmd(`p1\nn${dcwd}-other\n`)).ok);
     t('age reads minutes, hours and days', age(Date.now() - 5 * 60000) === '5m' && age(Date.now() - 3 * 3600000) === '3h' && age(Date.now() - 3 * 86400000) === '3d');
     const failed = cases.filter((c) => !c.ok).map((c) => c.name);
     if (failed.length) fault('selftest-failed', failed.join(' | '));
@@ -734,7 +750,7 @@ function main(argv) {
     if (cmd === 'serve') {
         const port = opts.port === undefined ? DEFAULT_PORT : Number(opts.port);
         if (!Number.isInteger(port) || port < 0 || port > 65535) fault('usage', '--port must be 0-65535');
-        serve(s, port);
+        serve(s, port, { untilStdinCloses: !!opts['until-stdin-closes'] });
         return;
     }
     fault('usage', `unknown command ${cmd}`);

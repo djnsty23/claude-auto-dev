@@ -136,7 +136,9 @@ function request(port, method, urlPath, { body = null, host = `127.0.0.1:${port}
 
 function startServer(extra = []) {
     return new Promise((resolve) => {
-        const child = spawn(process.execPath, [SCRIPT, 'serve', '--port', '0', '--claude-bin', FAKE, ...extra], { cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, LOCALAPPDATA }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        // stdin is a pipe the suite closes at the end, so the server exits normally
+        // and V8 writes its coverage dump. A kill writes none on Windows.
+        const child = spawn(process.execPath, [SCRIPT, 'serve', '--port', '0', '--claude-bin', FAKE, '--until-stdin-closes', ...extra], { cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, LOCALAPPDATA }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
         pids.push(child.pid);
         let out = ''; let err = '';
         // Three outcomes, kept apart. A listening line is a port. The subject EXITING
@@ -298,7 +300,15 @@ async function main() {
         check('4. stop kills the matching worker by pid', /stopped pid/.test(decodeURIComponent(stop.headers.location || '')) && gone, decodeURIComponent(stop.headers.location || ''));
     }
     check('4. the server wrote nothing to stderr', srv.err === '', srv.err);
-    srv.child.kill();
+    const exited = new Promise((resolve) => {
+        if (srv.child.exitCode !== null) resolve({ code: srv.child.exitCode, signal: null });
+        else srv.child.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    srv.child.stdin.end();
+    const end = await Promise.race([exited, sleep(15000).then(() => null)]);
+    check('4. serve exits 0 when its stdin closes (a normal exit writes coverage, a kill does not)',
+        !!end && end.code === 0 && end.signal === null, JSON.stringify(end));
+    if (!end) srv.child.kill();
 }
 
 main().catch((e) => { fail++; failures.push(`crash: ${e.stack}`); console.log(`FAIL  the suite crashed: ${e.stack}`); }).finally(() => {
