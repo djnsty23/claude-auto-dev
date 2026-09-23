@@ -110,6 +110,7 @@ const FAST = new Set([          // [measured 2026-09-15, load 4.6-5.4]
     'check:skill-plugin-root', // 0.2 s
     'check:agents-md',      // 0.2 s
     'check:claude-md',      // 2.6 s
+    'check:hook-parse',     // 1.8 s [measured 2026-09-24, two full gates running]
 ]);
 
 // ---------------------------------------------------------------------------
