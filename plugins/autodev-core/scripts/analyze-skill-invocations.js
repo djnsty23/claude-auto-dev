@@ -21,10 +21,11 @@
  *    that caught a first version reading only one of them and reporting a
  *    tenfold-too-low answer with total confidence.
  *
- * 2. The `skill` field records auto-loaded `rule-*` skills alongside real
- *    invocations. A `rule-*` hit is a paths glob firing, not a person or a model
- *    choosing, so counting them together inflates the figure with exactly the
- *    skills that need no reaching for. They are reported separately.
+ * 2. `rule-*` skills (`user-invocable: false`) are reported separately from the
+ *    ones a person can type. This used to say a `rule-*` hit was a paths glob
+ *    firing. `[measured 2026-09-23]` it is not: every one of 29 in 30 days was
+ *    a Skill tool call the model chose, and a `paths:` glob loads nothing. The
+ *    split stays because the two populations answer different questions.
  *
  * 3. A total of zero is a claim about this probe, not about the world. If either
  *    field name ever changes, every count silently becomes zero and the report
@@ -70,9 +71,27 @@ const opt = (name, dflt) => {
  */
 function skillsInText(text) {
     const out = [];
+    const seen = new Set();
     const re = /"skill"\s*:\s*"([a-zA-Z0-9:_-]+)"/g;
     let m;
-    while ((m = re.exec(text)) !== null) out.push(m[1]);
+    while ((m = re.exec(text)) !== null) {
+        // ONE CALL IS RECORDED TWICE. `[measured 2026-09-23]` the assistant
+        // record carries the tool_use input and, on the same line, a
+        // `wireToolInputs` map echoing it under the same `toolu_` id. Over seven
+        // days a bare count read 557 where a JSON parse of the Skill tool_use
+        // blocks found 283; older transcripts lack the echo, so the inflation
+        // is not a constant factor you could divide out. The id sits just
+        // before either copy, so it keys the dedupe, and after it the count
+        // equals the parse (283 of 283 at 7 days, 507 of 507 at 30). A match
+        // with no id nearby is counted as before rather than dropped.
+        const ids = text.slice(Math.max(0, m.index - 240), m.index).match(/toolu_[A-Za-z0-9]+/g);
+        if (ids) {
+            const key = ids[ids.length - 1] + ' ' + m[1];
+            if (seen.has(key)) continue;
+            seen.add(key);
+        }
+        out.push(m[1]);
+    }
     return out;
 }
 
@@ -230,7 +249,7 @@ function report(r) {
     console.log('population: ' + r.transcripts + ' transcript(s) in the last ' + r.days +
         'd, ' + r.megabytes + ' MB read, ' + r.unreadable + ' unreadable');
     console.log('inventory:  ' + r.invocable + ' user-invocable skill(s), ' + r.autoOnly +
-        ' auto-loaded rule-* skill(s)');
+        ' rule-* skill(s) that are not user-invocable');
     console.log('');
 
     // A zero TOTAL is a claim about the reader, not about the world.
@@ -246,7 +265,7 @@ function report(r) {
     console.log('');
     console.log('  MODEL chose (Skill tool), ' + r.distinct + ' distinct:');
     console.log('    ' + String(r.mine).padStart(5) + '  this plugin, user-invocable');
-    console.log('    ' + String(r.auto).padStart(5) + '  this plugin, auto-loaded rule-* (a glob fired, nobody chose)');
+    console.log('    ' + String(r.auto).padStart(5) + '  this plugin, rule-* (not user-invocable, the model chose it)');
     console.log('    ' + String(r.foreign).padStart(5) + '  outside this plugin (built-ins, knowledge bases)');
     for (const [name, n] of r.top) console.log('      ' + String(n).padStart(4) + '  ' + name);
     console.log('');
@@ -298,6 +317,18 @@ function selftest() {
     t('reads a plugin-prefixed name', got.indexOf('autodev-core:rule-diagnosis') >= 0);
     t('survives a line that is not valid JSON', got.indexOf('phase') >= 0);
     t('finds nothing in text with no skill field', skillsInText('{"a":1}').length === 0);
+
+    // The echo that doubled every count: the same call under the same id in
+    // the tool_use block and in wireToolInputs. Two DIFFERENT ids must both
+    // count, or a dedupe keyed too loosely would pass this case by dropping all.
+    const echoed = [
+        '{"content":[{"type":"tool_use","id":"toolu_01AbC","name":"Skill","input":{"skill":"brain"}}],' +
+            '"wireToolInputs":{"toolu_01AbC":{"skill":"brain"}}}',
+        '{"content":[{"type":"tool_use","id":"toolu_02XyZ","name":"Skill","input":{"skill":"brain"}}],' +
+            '"wireToolInputs":{"toolu_02XyZ":{"skill":"brain"}}}',
+    ].join(String.fromCharCode(10));
+    const dedup = skillsInText(echoed);
+    t('counts a call echoed in wireToolInputs once', dedup.length === 2, JSON.stringify(dedup));
 
     t('bareName strips a plugin prefix', bareName('autodev-core:rule-diagnosis') === 'rule-diagnosis');
     t('bareName leaves an unprefixed name alone', bareName('lessons') === 'lessons');
