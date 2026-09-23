@@ -128,6 +128,11 @@ const SUBJECT_OVERRIDES = {
         'plugins/autodev-core/hooks/fn/sprint-status.mjs',
         'plugins/autodev-core/scripts/prd-states.js',
     ],
+
+    // An ES module CLI (.mjs), vendored into other projects as one file, so
+    // derivation cannot yield it. The CJS stub throws at import, which the
+    // suite turns into exit 1, and its CLI half exits non-zero the same way.
+    'test-text-hygiene.js': ['plugins/autodev-core/scripts/text-hygiene.mjs'],
 };
 
 /**
