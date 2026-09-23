@@ -119,6 +119,9 @@ function changes(before, after) {
     return out;
 }
 const exists = (p) => { try { fs.statSync(p); return true; } catch { return false; } };
+// A keyed ledger (scripts/keyed-ledger.js) stores <file>.d/<sha1(key)>.json and never <file>
+// itself, so a probe for the bare file reads a working write as absent and a leak as clean.
+const ledgerAt = (p) => exists(p) || (() => { try { return fs.readdirSync(p + '.d').some((n) => n.endsWith('.json')); } catch { return false; } })();
 
 /**
  * One isolation case. `work` runs the hook under the work profile and returns
@@ -275,18 +278,18 @@ try {
         const payload = { session_id: 'WORKER-1', cwd: repo, hook_event_name: 'Stop' };
         isolationCase('stop-brain-report (default profile\'s brain-role.json)', {
             work: () => run(hook(CORE, 'stop-brain-report.js'), payload, 'work'),
-            workOk: (r) => ({ ok: silentOk(r) && !exists(path.join(WORK, 'brain-report-state.json')), detail: said(r) }),
+            workOk: (r) => ({ ok: silentOk(r) && !ledgerAt(path.join(WORK, 'brain-report-state.json')), detail: said(r) }),
             control: () => { const r = run(hook(CORE, 'stop-brain-report.js'), payload, 'default');
-                return { ok: exists(path.join(DEFAULT_CFG, 'brain-report-state.json')), detail: said(r) }; },
+                return { ok: ledgerAt(path.join(DEFAULT_CFG, 'brain-report-state.json')), detail: said(r) }; },
         });
 
         const intent = { session_id: 'WORKER-2', cwd: repo, hook_event_name: 'Stop' };
         const noCooldown = { AUTODEV_INTENT_COOLDOWN_MIN: '0' };
         isolationCase('stop-intent-record (default profile\'s ~/claude-memory/fleet-intent)', {
             work: () => run(hook(CORE, 'stop-intent-record.js'), intent, 'work', noCooldown),
-            workOk: (r) => ({ ok: silentOk(r) && !exists(path.join(WORK, 'intent-nudge-state.json')), detail: said(r) }),
+            workOk: (r) => ({ ok: silentOk(r) && !ledgerAt(path.join(WORK, 'intent-nudge-state.json')), detail: said(r) }),
             control: () => { const r = run(hook(CORE, 'stop-intent-record.js'), intent, 'default', noCooldown);
-                return { ok: r.status === 0 && r.out.length > 0 && exists(path.join(DEFAULT_CFG, 'intent-nudge-state.json')), detail: said(r) }; },
+                return { ok: r.status === 0 && r.out.length > 0 && ledgerAt(path.join(DEFAULT_CFG, 'intent-nudge-state.json')), detail: said(r) }; },
         });
         // CLAUDE_CONFIG_DIR naming <home>/.claude IS the default profile, so the
         // fleet stays armed: the second profile's rule must not catch the first.
