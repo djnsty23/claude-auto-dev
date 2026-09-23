@@ -14,7 +14,7 @@ paths:
 
 # Code Standards
 
-This skill is auto-loaded on the JavaScript and TypeScript paths above, so it stays short on purpose. It
+This skill targets the JavaScript and TypeScript paths above. The `paths:` glob does not load it on its own, so load it explicitly. It stays short on purpose, and it
 holds only the **decisions this project made** — not general React or
 accessibility advice, which you already have.
 

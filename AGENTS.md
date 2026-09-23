@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 136,855 | 21 of 21 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 21,985 | 21 of 21 |
-| B′ same, but dated LINES instead of paragraphs | 15,047 | 1 of 21 |
-| C  description only | 7,069 | 0 of 21 |
+| A  full body | 137,857 | 22 of 22 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,226 | 22 of 22 |
+| B′ same, but dated LINES instead of paragraphs | 15,123 | 1 of 22 |
+| C  description only | 7,069 | 0 of 22 |
 
 ### rule-ab-testing
 
@@ -460,6 +460,11 @@ A skill library has two failure modes and only one of them is discussed. The
 discussed one is a missing skill. The other is **fifty skills and no order**,
 where the model picks by description similarity and the pick is a lottery. This
 file is the order. It adds no capability; it decides what fires when.
+
+Merged on 2026-09-23 from the retired `phase` skill, which listed the same
+skills by phase and was never reached in 30 days. Every name on an `Existing:`
+line must be a real skill, and `tooling/validate.js` fails the build when one is
+not.
 
 **Never terminate on a score.** A number that a loop optimises toward stops
 

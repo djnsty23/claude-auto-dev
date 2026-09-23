@@ -64,13 +64,13 @@ try {
 
     // MUTATION 1: a cleared pair that stops being cleared must go red.
     const unTriaged = withMutant(
-        { from: "['grilling|rule-diagnosis',", to: "['grilling|rule-diagnosis-REMOVED'," },
+        { from: "['framework-radar|marketing-radar',", to: "['framework-radar|marketing-radar-REMOVED'," },
         (f) => run(f),
     );
     check('un-triaging a cleared pair makes it FAIL',
         unTriaged.status === 1, `status=${unTriaged.status}`);
     check('  and the pair is reported as NEW, not silently counted',
-        /NEW\s+grilling\s+<->\s+rule-diagnosis/.test(unTriaged.stdout),
+        /NEW\s+framework-radar\s+<->\s+marketing-radar/.test(unTriaged.stdout),
         unTriaged.stdout.slice(0, 400));
 
     // MUTATION 2: an entry naming a skill that does not exist must go red,

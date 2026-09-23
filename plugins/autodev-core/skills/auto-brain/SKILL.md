@@ -36,5 +36,6 @@ Confirm role and return-address validity before workers rely on the coordinator.
 Report meaningful completions, failures and required user actions according to
 the user's notification preferences.
 
-Read [historical notes](references/history-2026-09-09.md) only to investigate an
-earlier incident. They are not an alternative operating procedure.
+Historical notes are not shipped with the plugin. They live in the autodev
+repository at `docs/history-auto-brain-2026-09-09.md`, for investigating an earlier
+incident only. They are not an alternative operating procedure.

@@ -16,9 +16,10 @@ boundary. Completion means the promised behavior was observed in the intended
 environment and its evidence recorded. Plans, workers and green builds are
 intermediate results.
 
-This is the active procedure. Read [historical notes](references/history-2026-09-09.md)
-only when investigating a specific earlier incident. Their quoted permissions,
-tool availability and superseded instructions are not current policy.
+This is the active procedure. Historical notes are not shipped with the plugin.
+They live in the autodev repository at `docs/history-brain-2026-09-09.md`, for
+investigating a specific earlier incident only. Their quoted permissions, tool
+availability and superseded instructions are not current policy.
 
 ## 1. Establish scope and capabilities
 

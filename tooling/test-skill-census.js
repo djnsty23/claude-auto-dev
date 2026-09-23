@@ -176,8 +176,8 @@ try {
         rowOf('a11y') && rowOf('a11y').slots === 0 && rowOf('a11y').listedIn === 1,
         JSON.stringify(rowOf('a11y') && { slots: rowOf('a11y').slots, listedIn: rowOf('a11y').listedIn }));
     check('a skill in neither the listing nor the transcript stays at zero',
-        rowOf('grilling') && rowOf('grilling').model === 0 && rowOf('grilling').slots === 0,
-        JSON.stringify(rowOf('grilling') && { model: rowOf('grilling').model, slots: rowOf('grilling').slots }));
+        rowOf('refactor') && rowOf('refactor').model === 0 && rowOf('refactor').slots === 0,
+        JSON.stringify(rowOf('refactor') && { model: rowOf('refactor').model, slots: rowOf('refactor').slots }));
 
     // A corpus with no transcripts at all: PROBE BROKEN, not "nothing fires".
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'census-empty-'));
