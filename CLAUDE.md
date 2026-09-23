@@ -315,7 +315,7 @@ cannot work — if core needs a file, core ships it.
 **That sentence carried four counts until 2026-09-08, and three of them were
 wrong.** It was written on 2026-08-17 as "43 skills, 4 agents, 7 hook events"
 for core and "4 hook events" for memory, and all four were exact that day.
-`[measured 2026-09-17]` core has **59 skills, 5 agents and 11 hook events**;
+`[measured 2026-09-23]` core has **57 skills, 4 agents and 11 hook events**;
 memory's 4 is still right, and it is right because nobody has added a memory
 hook, not because anything checks.
 
@@ -339,18 +339,20 @@ tree — which is the reason the prose must not make claims the tree can falsify
 ### Skills are the unit of behaviour
 
 `plugins/<plugin>/skills/<name>/SKILL.md`, frontmatter-driven. User-invocable ones
-take their command name from the directory. **A `rule-*` skill is auto-loaded only
-if its own frontmatter says so** — `user-invocable: false` *and* a `paths:` glob
-matching a file the session actually reads. The prefix guarantees neither: some
-`rule-*` skills are ordinary invocable skills, and some carry globs that nothing in
-this repo matches. Both are silently ABSENT rather than always-on, and an absent rule
-looks exactly like a rule nobody needed — the lesson `rule-gate-integrity` draws
-about vetoes, turned on the rule library itself. So **load `rule-diagnosis`,
+take their command name from the directory. **No `rule-*` skill is auto-loaded, and
+a `paths:` glob loads nothing.** This paragraph said until 2026-09-23 that
+`user-invocable: false` plus a matching `paths:` glob auto-loaded a rule skill.
+`[measured 2026-09-23]` over 30 days of transcripts, every recorded load of a
+`rule-*` skill (29 of them) was a Skill tool call the model chose, and none was
+triggered by a file read. The frontmatter only hides the skill from the slash menu.
+So a rule skill is present only when something reaches for it, and an absent rule
+looks exactly like a rule nobody needed: the lesson `rule-gate-integrity` draws
+about vetoes, turned on the rule library itself. **Load `rule-diagnosis`,
 `rule-ab-testing` and `rule-gate-integrity` explicitly** before proposing a cause, a
-detector or a gate; `[measured 2026-09-08]` only the last of the three auto-loads
-here. `head -12 plugins/autodev-core/skills/rule-*/SKILL.md` answers which is which,
-and it is correct every day — a count in this file would not be. Long
-reference material goes in `references/` beside the skill so it loads on demand.
+detector or a gate. `node plugins/autodev-core/scripts/analyze-skill-invocations.js
+--days 30` shows which rule skills were reached, and it is correct every day, while a
+count in this file would not be. Long reference material goes in `references/`
+beside the skill so it loads on demand.
 
 ### The prd.json sprint system
 

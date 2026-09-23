@@ -41,7 +41,8 @@ anything.
 ## 2. Build: the work itself
 
 No skill owns this step. The repo's own conventions do, plus whichever rule
-skills the paths you touch pull in.
+skills apply to the paths you touch. Load those explicitly: a `paths:` glob in a
+skill's frontmatter loads nothing on its own.
 
 **Ends when** the change compiles and the thing you set out to change behaves
 differently. Not when it is correct. That is step 3's job, and merging the two
@@ -100,6 +101,31 @@ claim about a diff rather than about the code's behaviour. "Loop until it says
 Skip it, and say you did, when the change is small, reversible, and covered by a
 gate you have mutation-tested. Most changes are. The step exists so that the
 ones that are not get a read, rather than every change getting a ritual.
+
+## Which skills sit at each step
+
+Merged on 2026-09-23 from the retired `phase` skill, which listed the same
+skills by phase and was never reached in 30 days. Every name on an `Existing:`
+line must be a real skill, and `tooling/validate.js` fails the build when one is
+not.
+
+Before building, to settle what to build:
+Existing: `spec`, `brainstorm`, `framework-radar`, `wizard`, `setup-project`
+
+Before any UI change:
+Existing: `design`, `artifact-design`, `a11y`, `rule-design-system`, `rule-thumb-first`
+
+Step 2, build:
+Existing: `auto`, `refactor`, `migrate`, `iterate`, `heal`
+
+Step 3, prove:
+Existing: `prove`, `test`, `preflight`, `review`, `show-your-work`, `rule-verification`, `rule-gate-integrity`
+
+Step 4, ship:
+Existing: `ship`, `commit`, `preflight`, `rule-local-first`
+
+Outside the spine, looking for what is wrong:
+Existing: `audit`, `scan`, `security`, `heal`, `perf`, `seo`, `learn-from-fixes`
 
 ## What the spine is not
 
