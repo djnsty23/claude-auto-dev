@@ -556,6 +556,8 @@ function doAction(s, action, key, fields) {
         if (rec.configDir) args.push('--config-dir', path.isAbsolute(rec.configDir) ? rec.configDir : path.join(s.home, rec.configDir));
         if (rec.model) args.push('--model', rec.model);
         if (rec.effort) args.push('--effort', rec.effort);
+        // A record started with --dev ran a checkout on purpose, and its relaunch runs the same code.
+        if (rec.dev === true) args.push('--dev');
         if (s.claudeBin) args.push('--claude-bin', s.claudeBin);
         const v = hwCli(args);
         return { row, detail: `started ${code} (supervisor pid ${v.supervisorPid})`, newCode: code };

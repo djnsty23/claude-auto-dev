@@ -90,9 +90,14 @@ function indeterminateCase(label, why) {
     console.error(`infrastructure: ${label} produced no verdict (${why})`);
 }
 
-/** The script as a subprocess. HOME is pinned under ROOT so the default ledger is never the real one. */
-function hw(args, env = {}) {
-    const r = runBudgeted(process.execPath, [SCRIPT, ...args], {
+/**
+ * The script as a subprocess. HOME is pinned under ROOT so the default ledger is never the real one.
+ * `start` gets --dev, because the suite runs the checkout on purpose. Case 26 drives the refusal
+ * without it, and an installed copy through `script`.
+ */
+function hw(args, env = {}, { dev = true, script = SCRIPT } = {}) {
+    const argv = args[0] === 'start' && dev ? [...args, '--dev'] : args;
+    const r = runBudgeted(process.execPath, [script, ...argv], {
         encoding: 'utf8',
         cwd: ROOT,
         env: { ...process.env, HOME, USERPROFILE: HOME, ...env },
@@ -830,6 +835,84 @@ try {
         const rec = (JSON.parse(read(real.ledger) || '{"records":[]}').records || [])[0] || {};
         check('25. a started record carries the cwd the worker ran in', typeof rec.cwd === 'string' && path.resolve(rec.cwd) === path.resolve(ROOT), rec.cwd);
     }
+
+    // 26. Workers run installed code. `[measured 2026-09-23]` after an install,
+    // 11 of 12 workers ran this script from a worktree, and no record said so.
+    {
+        const dir = path.join(ROOT, 'T26');
+        const ledger = path.join(dir, 'ledger.json');
+        const log = path.join(dir, 'T26.log');
+        const base = ['start', '--code', 'T26', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger];
+        const refused = hw(base, {}, { dev: false });
+        check('26. start from a checkout without --dev exits 1 with code not-installed and names --dev',
+            refused.exit === 1 && !!refused.json && !refused.json.ok && refused.json.error.code === 'not-installed' && refused.json.error.message.includes('--dev'), refused.stdout.slice(0, 200));
+        check('26. the refusal records nothing and spawns nothing', !fs.existsSync(ledger) && read(log) === null);
+        const dryRefused = hw([...base, '--dry-run'], {}, { dev: false });
+        check('26. the dry run refuses what the real start would', dryRefused.exit === 1 && !!dryRefused.json && !dryRefused.json.ok && dryRefused.json.error.code === 'not-installed');
+
+        const repoVersion = JSON.parse(read(path.join(path.dirname(SCRIPT), '..', '.claude-plugin', 'plugin.json'))).version;
+        const dry = hw([...base, '--dry-run']);
+        const dv = dry.json && dry.json.ok ? dry.json.value : {};
+        check('26. a --dev dry run names the checkout script, its version, installed=false and dev=true',
+            dv.installed === false && dv.dev === true && dv.version === repoVersion && path.resolve(dv.script || '.') === SCRIPT, JSON.stringify({ installed: dv.installed, dev: dv.dev, version: dv.version }));
+
+        // An installed copy: the same two files under <config>/plugins/cache/<marketplace>/autodev-core/<version>.
+        const inst = path.join(ROOT, 'cfg', 'plugins', 'cache', 'autodev', 'autodev-core', '9.9.9');
+        write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '9.9.9' }));
+        fs.mkdirSync(path.join(inst, 'scripts'), { recursive: true });
+        for (const f of ['headless-worker.js', 'claude-paths.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
+        const installed = hw([...base, '--dry-run'], {}, { dev: false, script: path.join(inst, 'scripts', 'headless-worker.js') });
+        const iv = installed.json && installed.json.ok ? installed.json.value : {};
+        check('26. the installed copy starts without --dev and names version 9.9.9',
+            installed.exit === 0 && iv.installed === true && iv.dev === false && iv.version === '9.9.9', installed.stdout.slice(0, 200));
+
+        const real = startFake('T26B');
+        if (real.pid) waitForEnd(real.log, real.pid);
+        const rec = (JSON.parse(read(real.ledger) || '{"records":[]}').records || [])[0] || {};
+        check('26. a started record names the version and script that ran, and dev',
+            rec.version === repoVersion && path.resolve(rec.script || '.') === SCRIPT && rec.dev === true, JSON.stringify({ version: rec.version, dev: rec.dev }));
+        const st = hw(['status', '--ledger', real.ledger]);
+        check('26. the status line names the version and (dev)', st.stdout.includes(`version=${repoVersion}(dev)`), st.stdout.slice(0, 240));
+    }
+
+    // 27. The ledger code travels into the prompt verbatim. `[measured 2026-09-23]`
+    // reports ended `RESULT DESIGN done:` for the ledger code W2-DESIGN, because the
+    // prompt said `RESULT <CODE>` and the worker picked a code of its own.
+    {
+        const dir = path.join(ROOT, 'T27');
+        const report = path.join(dir, 'W2-DESIGN.report.md');
+        const r = hw(['start', '--code', 'W2-DESIGN', '--prompt-file', PROMPT, '--log', path.join(dir, 'W2-DESIGN.log'), '--report', report,
+            '--claude-bin', FAKE, '--ledger', path.join(dir, 'dry.json'), '--dry-run']);
+        const v = r.json && r.json.ok ? r.json.value : null;
+        const promptArg = v ? v.argv[v.argv.indexOf('-p') + 1] : '';
+        check('27. the prompt names the report and its RESULT line with the exact ledger code',
+            promptArg.includes('RESULT W2-DESIGN done|stopped|failed: <one sentence>') && promptArg.includes(report.replace(/\\/g, '/')), promptArg.slice(-1400));
+        check('27. no placeholder code is left, and the ask note ends RESULT W2-DESIGN stopped',
+            !/<CODE>/.test(promptArg) && promptArg.includes('RESULT W2-DESIGN stopped'));
+        const denied = ['Production Deploy', 'Secret-Store Writes', 'Production Reads', 'Modify Shared Resources'];
+        check('27. the prompt names the four classifier-denied action classes and a Release window, before the HEADLESS note',
+            denied.every((c) => promptArg.includes(c)) && promptArg.indexOf('Release window') > 0
+            && promptArg.indexOf('Release window') < promptArg.indexOf(HEADLESS_NOTE) && promptArg.endsWith(HEADLESS_NOTE + '\n'));
+        check('27. the prompt still fits under PROMPT_MAX', promptArg.length < PROMPT_MAX, String(promptArg.length));
+    }
+
+    // 28. A RESULT line for another code is reported as that, not as a bare unparseable.
+    {
+        const s = synthRun('W2-DESIGN', { logText: 'CLAUDE_EXIT=0\n', reportText: 'notes\nRESULT DESIGN done: the design landed.\n' });
+        const st = hw(['status', '--ledger', s.ledger, '--json']);
+        const rec = st.json && st.json.ok ? st.json.value.records[0] : {};
+        check('28. status keeps result unparseable and names the code it found',
+            rec.result === 'unparseable' && rec.resultCodeFound === 'DESIGN', JSON.stringify(rec).slice(0, 200));
+        check('28. the human status line says RESULT line found for a different code',
+            /result=unparseable \(RESULT line found for a different code: DESIGN\)/.test(hw(['status', '--ledger', s.ledger]).stdout));
+        const r = hw(['settle', '--code', 'W2-DESIGN', '--ledger', s.ledger]);
+        check('28. settle refuses no-result and names the other code', r.exit === 1 && !!r.json && !r.json.ok && r.json.error.code === 'no-result'
+            && /RESULT line found for a different code/.test(r.json.error.message) && r.json.error.message.includes('RESULT DESIGN'), r.stdout.slice(0, 260));
+        const plain = synthRun('W2-PLAIN', { logText: 'CLAUDE_EXIT=0\n', reportText: 'no result line here\n' });
+        const p = hw(['status', '--ledger', plain.ledger, '--json']);
+        const prec = p.json && p.json.ok ? p.json.value.records[0] : {};
+        check('28. a report with no RESULT line at all names no other code', prec.result === 'unparseable' && prec.resultCodeFound === null);
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -843,7 +926,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 25 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 28 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);

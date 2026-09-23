@@ -43,7 +43,7 @@
  * Usage:
  *   node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>
  *        [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]
- *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]
+ *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
  *   node headless-worker.js settle --code <CODE> [--lost] [--ledger <file>] [--json]
@@ -63,7 +63,7 @@ const { spawn } = require('node:child_process');
 const USAGE = [
     'Usage: node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>',
     '            [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]',
-    '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]',
+    '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
     '       node headless-worker.js settle --code <CODE> [--lost] [--ledger <file>] [--json]',
@@ -73,7 +73,10 @@ const USAGE = [
     '       --config-dir is an absolute path, ~ or ~/<name>. A bare relative name is refused, and so is',
     '       a directory that does not exist, before anything is spawned or recorded.',
     '       --effort is one of low|medium|high|xhigh|max, passed to claude as --effort <level>; omitted, argv has no --effort.',
+    '       start refuses a script outside a plugin cache, because a worker started from a checkout runs code no',
+    '       release shipped. --dev runs the checkout on purpose. Every record names the version and script that ran.',
     'status: two axes per record, process (running|exited|unknown) and result (none|done|stopped|failed|unparseable).',
+    '        An unparseable report whose RESULT line names another code says so: RESULT line found for a different code.',
     '        A record started before this boot is unknown whatever its pid says; settled records leave after 7 days.',
     'settle: read the last RESULT <CODE> line of the report and mark the record settled.',
     'settle --lost: settle a record whose supervisor died without an exit line, as result lost. Refused unless',
@@ -106,6 +109,15 @@ const HEADLESS_NOTE = 'HEADLESS: this process exits the moment the turn ends, so
     + 'command in the FOREGROUND with the Bash timeout at its maximum, background nothing, and do not end '
     + 'the turn until the report file is complete and carries its RESULT line.';
 
+// `[measured 2026-09-23]` in one fleet's worker transcripts the auto-mode
+// permission classifier refused four action classes: Production Deploy (19),
+// Secret-Store Writes (9), Production Reads (8) and Modify Shared Resources (3).
+// A worker that met one exited, and its relaunch met it again. Named up front,
+// each becomes one line for a person to run in the next release window.
+const DENIED_NOTE = 'DENIED UP FRONT: expect the permission classifier to refuse Production Deploy, Secret-Store Writes, '
+    + 'Production Reads and Modify Shared Resources in this run. Do not attempt them and do not stop on them: list each one '
+    + 'you need under a "Release window" heading in the report, with the exact command, and carry on with the rest.';
+
 // `[measured 2026-09-22]` briefs said "a new worktree" and `cmd > f.log` without
 // saying WHERE, so workers resolved both against whatever directory they stood
 // in: 12 worktrees landed as siblings in the directory holding the checkouts
@@ -129,21 +141,47 @@ function askFiles(scratchDir) {
     return { ask: path.join(scratchDir, 'ask.json'), answer: path.join(scratchDir, 'answer.json') };
 }
 
-function askNote(scratchDir) {
+function askNote(scratchDir, code = path.basename(scratchDir)) {
     const f = askFiles(scratchDir);
     const slash = (p) => p.replace(/\\/g, '/');
     return `ASKING: never exit to ask. When a decision needs a person, write ${slash(f.ask)} as JSON `
         + '{"question","header","asked","blocks","options":[{"label","detail"}]}, the option you would take first and marked (Recommended). '
         + `Keep working on everything that does not depend on it, and read ${slash(f.answer)} ({"label","note"}) between steps. `
-        + 'Only when nothing independent is left, record the open question in the report and end with RESULT <CODE> stopped. '
+        + `Only when nothing independent is left, record the open question in the report and end with RESULT ${code} stopped. `
         + 'Never guess the answer and never read silence as approval.';
+}
+
+// `[measured 2026-09-23]` reports ended `RESULT DESIGN done:` while the ledger
+// code was `W2-DESIGN`, and the same for SWEEP: the prompt said `RESULT <CODE>`
+// and each worker filled in a code of its own. parseResult anchors on the exact
+// code, so both records read unparseable and could not be settled. The prompt
+// now carries the ledger code verbatim.
+function resultNote(code, report) {
+    return `RESULT: the last line of ${report.replace(/\\/g, '/')} is \`RESULT ${code} done|stopped|failed: <one sentence>\`, `
+        + `with the code exactly ${code}. Any other spelling of it reads as unparseable, and the run cannot be settled.`;
+}
+
+// `[measured 2026-09-23]` after an install, 11 of 12 workers ran this script
+// from a worktree rather than the installed plugin: the launching session
+// called the checkout it stood in. They ran code no release shipped, and no
+// record said so. So start refuses a script outside a plugin cache unless
+// --dev says that is intended, and every record names the version that ran.
+function scriptPlacement(file = __filename) {
+    const script = path.resolve(file);
+    const installed = /\/plugins\/cache\//i.test(script.replace(/\\/g, '/'));
+    let version = null;
+    try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(script), '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+        version = typeof manifest.version === 'string' && manifest.version ? manifest.version : null;
+    } catch { version = null; }
+    return { script, installed, version };
 }
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
 function parseArgs(argv) {
     const out = { _: [] };
-    const flags = ['help', 'dry-run', 'json', 'lost'];
+    const flags = ['help', 'dry-run', 'json', 'lost', 'dev'];
     const known = ['_', ...flags, 'code', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
         'permission-mode', 'cwd', 'claude-bin', 'ledger'];
     for (let i = 0; i < argv.length; i++) {
@@ -253,18 +291,21 @@ function withLedger(file, fn) {
 function isUnsettled(rec) { return rec.state !== 'settled'; }
 
 // ---------------------------------------------------------------- the child
-function composePrompt(text, scratchDir) {
-    const placement = scratchDir ? placementNote(scratchDir) + '\n\n' + askNote(scratchDir) + '\n\n' : '';
-    return text.replace(/\s+$/, '') + '\n\n' + placement + HEADLESS_NOTE + '\n';
+function composePrompt(text, scratchDir, { code = null, report = null } = {}) {
+    const notes = [];
+    if (scratchDir) notes.push(placementNote(scratchDir), askNote(scratchDir, code || path.basename(scratchDir)));
+    if (code && report) notes.push(resultNote(code, report));
+    notes.push(DENIED_NOTE, HEADLESS_NOTE);
+    return text.replace(/\s+$/, '') + '\n\n' + notes.join('\n\n') + '\n';
 }
 
 /** Where a worker's scratch output belongs: a directory named for its code, beside its report. */
 function scratchDirFor(o) { return path.join(path.dirname(o.report), o.code); }
 
-function readPrompt(file, scratchDir) {
+function readPrompt(file, scratchDir, o = {}) {
     if (!file) fault('usage', '--prompt-file is required');
     if (!fs.existsSync(file)) fault('prompt-missing', `${file} does not exist`);
-    const prompt = composePrompt(fs.readFileSync(file, 'utf8'), scratchDir);
+    const prompt = composePrompt(fs.readFileSync(file, 'utf8'), scratchDir, { code: o.code, report: o.report });
     if (prompt.length > PROMPT_MAX) {
         fault('prompt-too-long', `the prompt is ${prompt.length} characters after the placement and headless notes and the cap is ${PROMPT_MAX}: `
             + 'it travels in argv, so write a short pointer prompt that names a file to read');
@@ -385,6 +426,7 @@ function startOptions(opts) {
         cwd: opts.cwd ? path.resolve(opts.cwd) : process.cwd(),
         claudeBin: resolveClaudeBin(opts['claude-bin'] || 'claude'),
         ledger: path.resolve(opts.ledger || defaultLedger()),
+        dev: opts.dev === true,
     };
 }
 
@@ -400,8 +442,13 @@ function supervisorFlags(o) {
 
 function start(opts) {
     const o = startOptions(opts);
+    const placement = scriptPlacement();
+    if (!placement.installed && !o.dev) {
+        fault('not-installed', `${placement.script} is not inside a plugin cache, so a worker started from it runs code no release shipped. `
+            + 'Run the installed copy under <config dir>/plugins/cache/, or pass --dev to run this checkout on purpose');
+    }
     if (o.configDir) requireConfigDirExists(o.configDir);
-    const prompt = readPrompt(o.promptFile, scratchDirFor(o));
+    const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
     const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     if (opts['dry-run']) {
@@ -409,6 +456,7 @@ function start(opts) {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
             configDir: o.configDir, effort: o.effort,
+            script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev,
             log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
         };
     }
@@ -421,6 +469,7 @@ function start(opts) {
         code: o.code, pid: null, startedAt: new Date().toISOString(),
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
+        version: placement.version, script: placement.script, dev: !placement.installed,
         model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, state: 'starting',
     };
     const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;
@@ -457,7 +506,7 @@ function start(opts) {
  */
 function supervise(opts) {
     const o = startOptions(opts);
-    const prompt = readPrompt(o.promptFile, scratchDirFor(o));
+    const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
     const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
     const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     const plan = spawnPlan(argv);
@@ -517,6 +566,14 @@ function parseResult(reportText, code) {
     return last;
 }
 
+/** The code on the last well-formed RESULT line that names a DIFFERENT code, or null. */
+function otherResultCode(reportText, code) {
+    const re = new RegExp(`^RESULT\\s+(\\S+)\\s+(?:${RESULT_STATES.join('|')}):`, 'gm');
+    let last = null;
+    for (const m of String(reportText).matchAll(re)) if (m[1] !== code) last = m[1];
+    return last;
+}
+
 function readText(file) {
     try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
 }
@@ -542,10 +599,12 @@ function recordStatus(rec, boot = bootAt()) {
     const reportText = readText(rec.report);
     let result = 'none';
     let sentence = null;
+    let resultCodeFound = null;
     if (reportText !== null) {
         const parsed = parseResult(reportText, rec.code);
         result = parsed ? parsed.state : 'unparseable';
         sentence = parsed ? parsed.sentence : null;
+        resultCodeFound = parsed ? null : otherResultCode(reportText, rec.code);
     }
     // The settled axis says HOW the record was settled, read from the ledger,
     // because `result` above is the report's word and a lost record's report
@@ -555,7 +614,8 @@ function recordStatus(rec, boot = bootAt()) {
     const settledAs = settled ? (SETTLED_RESULTS.includes(rec.result) ? rec.result : `unrecognised:${rec.result}`) : null;
     return {
         code: rec.code, pid: rec.pid, startedAt: rec.startedAt, process: processState, exit,
-        result, sentence, reportExists: reportText !== null, settled, settledAs,
+        result, sentence, resultCodeFound, reportExists: reportText !== null, settled, settledAs,
+        version: rec.version || null, dev: rec.dev === true,
         lostReason: settledAs === 'lost' ? (rec.reason || null) : null,
         log: rec.log, report: rec.report, cwd: rec.cwd || null, ...askState(rec),
     };
@@ -597,8 +657,8 @@ function statusLines(value) {
     const lines = [value.population];
     for (const r of value.records) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
-            + `result=${r.result} settled=${r.settled}${r.settledAs === 'lost' ? ` settledAs=lost (${r.lostReason})` : ''}`
-            + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
+            + `result=${r.result}${r.resultCodeFound ? ` (RESULT line found for a different code: ${r.resultCodeFound})` : ''} settled=${r.settled}${r.settledAs === 'lost' ? ` settledAs=lost (${r.lostReason})` : ''}`
+            + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''} version=${r.version || '-'}${r.dev ? '(dev)' : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
     }
     return lines.join('\n') + '\n';
 }
@@ -640,9 +700,13 @@ function settle(opts) {
         const reportText = readText(rec.report);
         const parsed = reportText === null ? null : parseResult(reportText, code);
         if (!parsed) {
+            const other = reportText === null ? null : otherResultCode(reportText, code);
             fault('no-result', reportText === null
                 ? `${rec.report} does not exist`
-                : `${rec.report} has no line matching RESULT ${code} done|stopped|failed: <sentence>`);
+                : other
+                    ? `RESULT line found for a different code: ${rec.report} ends RESULT ${other}, and this record's code is ${code}. `
+                        + `Correct that line to RESULT ${code} done|stopped|failed: <sentence>, then settle again`
+                    : `${rec.report} has no line matching RESULT ${code} done|stopped|failed: <sentence>`);
         }
         const settledAt = new Date().toISOString();
         Object.assign(rec, { state: 'settled', result: parsed.state, sentence: parsed.sentence, exit, settledAt });
@@ -713,7 +777,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-    HEADLESS_NOTE, PROMPT_MAX, CODE_RE, placementNote, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
+    HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     askFiles, askNote, askState, scratchDirFor, readLedger, settle, start,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
