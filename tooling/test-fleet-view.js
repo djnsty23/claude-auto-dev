@@ -28,6 +28,7 @@ const HW_SCRIPT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scri
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'fv test-'));
 const HOME = path.join(ROOT, 'home');
 const APPDATA = path.join(ROOT, 'app data');
+const LOCALAPPDATA = path.join(ROOT, 'local app data');
 const AUTODEV = path.join(HOME, '.claude', 'autodev');
 const FAKE = path.join(ROOT, 'fake claude.js');
 const ACCT = '11111111-2222-3333-4444-555555555555';
@@ -52,7 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
 
 function fv(args, env = {}) {
-    const r = runBudgeted(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, ...env }, timeout: 30000, maxTimeout: 120000 });
+    const r = runBudgeted(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, LOCALAPPDATA, ...env }, timeout: 30000, maxTimeout: 120000 });
     if (classify(r) === 'infrastructure') indeterminateCase('fv ' + args.slice(0, 2).join(' '), reason(r));
     let json = null;
     try { json = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { /* human output */ }
@@ -200,6 +201,16 @@ async function main() {
     const noApp = fv(['list', '--json', '--appdata', path.join(ROOT, 'no such dir')]).json;
     check('3. an unreadable desktop store renders COULD-NOT-READ for sessions and routines',
         !!noApp && ['desktop-sessions', 'desktop-routines'].every((n) => noApp.rows.some((r) => r.source === n && r.process === 'COULD-NOT-READ')));
+    // The MSIX Desktop package: outside the app, %APPDATA%/Claude is empty and the real store sits
+    // under %LOCALAPPDATA%/Packages/Claude_<id>/LocalCache/Roaming. Without --appdata that copy is read.
+    const pkgRoot = path.join(ROOT, 'pkg local');
+    const pkgDesk = path.join(pkgRoot, 'Packages', 'Claude_test123', 'LocalCache', 'Roaming', 'Claude', 'claude-code-sessions', ACCT, ORG);
+    writeJson(path.join(pkgDesk, 'local_pkg.json'), { sessionId: 'local_pkg', cwd: ROOT, title: 'Package session', isArchived: false, lastActivityAt: NOW - H });
+    fs.mkdirSync(path.join(ROOT, 'empty app data'), { recursive: true });
+    const pkg = fv(['list', '--json'], { APPDATA: path.join(ROOT, 'empty app data'), LOCALAPPDATA: pkgRoot }).json;
+    check('3. without --appdata, an empty %APPDATA% falls back to the MSIX package copy of the desktop store',
+        !!pkg && pkg.rows.some((r) => r.code === 'Package session') && !pkg.rows.some((r) => r.source === 'desktop-sessions' && r.process === 'COULD-NOT-READ'),
+        JSON.stringify(((pkg && pkg.rows) || []).filter((r) => /desktop/.test(r.source || '')).slice(0, 3)));
 
     // ------------------------------------------------------------ 4. the server
     const srv = await startServer(['--takeover-script', path.join(ROOT, 'takeover.ps1'), '--no-launch']);

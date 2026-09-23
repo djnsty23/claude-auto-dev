@@ -56,7 +56,8 @@ const USAGE = [
     'list:  the same merge on stdout: a population line per source, then one line per row.',
     'A row shows when it is live, asking, or touched in the last --hours. Every source prints its',
     'population and a COULD-NOT-READ row when unreadable.',
-    'Flags: --home <dir> (default the user home), --appdata <dir> (default %APPDATA%),',
+    'Flags: --home <dir> (default the user home), --appdata <dir> (default %APPDATA%, else the MSIX',
+    '       package copy under %LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming),',
     '       --mission-store <dir> (the mission store has no default location),',
     '       --events <file> (default ~/.claude/autodev/fleet-events.jsonl), --claude-bin <path> (relaunch),',
     '       --takeover-script <file> (a .ps1 taking -Code and -Log), --no-launch (record takeover, open nothing).',
@@ -90,6 +91,24 @@ function parseArgs(argv) {
     return out;
 }
 
+// The Desktop app ships as an MSIX package on Windows. Its own child processes see %APPDATA%/Claude
+// through a virtualized view, while a process started from outside the package (Task Scheduler, a
+// plain terminal) sees only the package's real copy under
+// %LOCALAPPDATA%/Packages/Claude_<id>/LocalCache/Roaming. Measured 2026-09-23: a scheduled reader got
+// ENOENT on %APPDATA%/Claude for 129 passes while a shell inside the app listed the same path.
+function desktopAppdata(env, home) {
+    const direct = env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    if (fs.existsSync(path.join(direct, 'Claude', 'claude-code-sessions'))) return direct;
+    const pkgs = path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Packages');
+    let names = [];
+    try { names = fs.readdirSync(pkgs).filter((n) => /^Claude_/.test(n)).sort(); } catch { /* no Packages dir: keep the direct path */ }
+    for (const n of names) {
+        const roaming = path.join(pkgs, n, 'LocalCache', 'Roaming');
+        if (fs.existsSync(path.join(roaming, 'Claude', 'claude-code-sessions'))) return roaming;
+    }
+    return direct;
+}
+
 function settings(opts) {
     const home = path.resolve(opts.home || process.env.USERPROFILE || process.env.HOME || os.homedir());
     const hours = opts.hours === undefined ? DEFAULT_HOURS : Number(opts.hours);
@@ -97,7 +116,7 @@ function settings(opts) {
     const autodev = path.join(home, '.claude', 'autodev');
     return {
         home, hours, autodev,
-        appdata: path.resolve(opts.appdata || process.env.APPDATA || path.join(home, 'AppData', 'Roaming')),
+        appdata: path.resolve(opts.appdata || desktopAppdata(process.env, home)),
         missionStore: opts['mission-store'] ? path.resolve(opts['mission-store']) : null,
         events: path.resolve(opts.events || path.join(autodev, 'fleet-events.jsonl')),
         claudeBin: opts['claude-bin'] || null,
