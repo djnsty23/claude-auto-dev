@@ -211,6 +211,20 @@ check('control: the committed runner is restored with valid syntax',
         && !restoredSyntax.error,
     detail(restoredSyntax));
 
+// A red run KEEPS its runner log and names it (2026-09-24). The mutant printed a
+// known line, so the kept file has to hold that line: a path to an empty or a
+// foreign file would pass a bare existence check.
+const kept = payload?.runnerLog;
+let keptText = null;
+try { keptText = kept ? fs.readFileSync(kept, 'utf8') : null; } catch { /* reported below */ }
+check('a red run keeps its runner log and names it in the JSON',
+    typeof kept === 'string' && keptText !== null && keptText.includes('intentional F6 baseline failure'),
+    `runnerLog=${JSON.stringify(kept)} readable=${keptText !== null}`);
+// Remove only what this run provoked: the named file's own mkdtemp directory.
+if (kept && path.basename(path.dirname(kept)).startsWith('autodev-cov-log-')) {
+    try { fs.rmSync(path.dirname(kept), { recursive: true, force: true }); } catch { /* left in tmp */ }
+}
+
 let pass = 0;
 let fail = 0;
 for (const [label, ok, why] of cases) {

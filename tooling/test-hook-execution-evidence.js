@@ -433,6 +433,9 @@ if (target && mutatedCheck) {
 }
 
 let failedSuiteCheck = null;
+// A line only the forced-red suite prints, so the checker's report can be
+// graded on carrying the REASON a producer failed and not only its exit code.
+const plantedFail = 'planted-red-' + crypto.randomBytes(4).toString('hex');
 if (target && targetSuite && original) {
     const coverageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-red-coverage-'));
     const targetHook = path.join(SANDBOX, 'plugins', target.plugin, 'hooks', target.name);
@@ -444,6 +447,7 @@ if (target && targetSuite && original) {
         const exitWrapper = [
             'const acceptanceExit = process.exit.bind(process);',
             'process.exitCode = 1;',
+            `console.log('FAIL  ${plantedFail} (forced by test-hook-execution-evidence)');`,
             'process.exit = (code) => acceptanceExit(code === 0 ? 1 : code);',
         ].join('\n');
         const redSrc = insertAfterShebang(original, exitWrapper);
@@ -482,6 +486,13 @@ if (target && failedSuiteCheck) {
         failedSuiteCheck.result.status === 2 && failedSuiteCheck.result.signal === null
             && !failedSuiteCheck.result.error,
         detail(failedSuiteCheck.result));
+    // `[measured 2026-09-24]` a gate log read "exited 1" and nothing else, and
+    // the suite then passed ten standalone runs, so the reason was gone for good.
+    const entry = (failedSuiteCheck.json?.failedSuites || [])
+        .find((s) => s.startsWith(path.basename(targetSuite) + ' '));
+    check('a failed candidate carries its own FAIL line, not only its exit code',
+        !!entry && entry.includes(plantedFail),
+        `entry=${JSON.stringify(entry)}`);
 }
 
 let pass = 0;

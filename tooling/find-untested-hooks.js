@@ -46,7 +46,7 @@ if (typeof __sb.runBudgeted !== 'function') {
         + 'candidate suites, so it measured nothing. Indeterminate, not a proven gap.');
     process.exit(2);
 }
-const { runBudgeted } = __sb;
+const { runBudgeted, lastWords } = __sb;
 const { fileURLToPath } = require('url');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -162,6 +162,23 @@ const hookByPath = new Map(wired.map((h) => [fold(h.file), h]));
 const executedBy = new Map();   // hook name -> Set of suite names whose RUN loaded it
 const failedSuites = [];
 
+// WHY a producer failed, not only that it did. `[measured 2026-09-24]` a merge
+// gate went INDETERMINATE on `test-stop-ledger-race.js exited 1` and nothing
+// more: the suite's own FAIL line was in the result this loop held, and it was
+// dropped. The same suite then passed ten standalone runs, so the one red that
+// mattered could not be read after the fact. Suites print their assertions as
+// they go, so a FAIL line is the reason. A child that printed none (a crash, a
+// refusal) is described by its last words instead.
+const FAIL_LINE = /^\s*(FAIL\b|not ok\b|\[FAIL\])/;
+const whyFailed = (r) => {
+    const fails = String((r && r.stdout) || '').split('\n')
+        .filter((l) => FAIL_LINE.test(l)).slice(0, 3)
+        .map((l) => { const t = l.trim(); return t.length > 160 ? t.slice(0, 157) + '...' : t; });
+    return fails.length
+        ? 'its FAIL line(s): ' + JSON.stringify(fails.join(' | '))
+        : (typeof lastWords === 'function' ? lastWords(r, 300) : 'it printed no FAIL line');
+};
+
 if (!referencedOnly) {
     for (const [suiteName] of referenced) {
         const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hookcov-'));
@@ -194,7 +211,8 @@ if (!referencedOnly) {
                 // "discarded" nothing would show the hook covered.
                 failedSuites.push(suiteName + ' exited '
                     + (r.error ? String(r.error.code || r.error.message) : r.status)
-                    + ' - coverage from this run is DISCARDED, result is indeterminate');
+                    + ' - coverage from this run is DISCARDED, result is indeterminate'
+                    + ' · ' + whyFailed(r));
                 continue;
             }
             let dumps = [];
