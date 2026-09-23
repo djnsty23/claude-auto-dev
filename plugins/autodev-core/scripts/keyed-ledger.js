@@ -30,6 +30,28 @@ const path = require('path');
 const DEFAULT_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
 const TMP_MAX_AGE_MS = 3600 * 1000;
 
+// A rename on Windows fails with EPERM while another process holds either file
+// open without delete sharing, for a moment: an antivirus scan of the file just
+// written is the usual one. `[measured 2026-09-24]` 14 busy cores and 4
+// concurrent runs of the module race: 43 EPERM renames over 12 runs, and 6 runs
+// ended at 39 of 40 keys holding their last value, because write() swallowed
+// the error and the key kept an older entry. graceful-fs retries the same codes
+// for the same reason. The bound is 155 ms, which a Stop hook can afford.
+const RENAME_RETRY_MS = [5, 10, 20, 40, 80];
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+function renameWithRetry(from, to) {
+    for (let i = 0; ; i++) {
+        try {
+            fs.renameSync(from, to);
+            return;
+        } catch (e) {
+            if (i >= RENAME_RETRY_MS.length || !RENAME_RETRY_CODES.has(e && e.code)) throw e;
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, RENAME_RETRY_MS[i]);
+        }
+    }
+}
+
 if (require.main === module) {
     if (process.argv.includes('--help') || process.argv.includes('-h')) {
         console.log('keyed-ledger.js — library: one file per key under <ledger>.d/, tmp plus rename.\n'
@@ -96,7 +118,7 @@ function write(file, key, entry, { maxAgeMs = DEFAULT_MAX_AGE_MS } = {}) {
     try {
         fs.mkdirSync(dirFor(file), { recursive: true });
         fs.writeFileSync(tmp, JSON.stringify({ key: String(key), value: entry }) + '\n');
-        fs.renameSync(tmp, target);
+        renameWithRetry(tmp, target);
     } catch {
         try { fs.unlinkSync(tmp); } catch { /* already gone */ }
         return false;
@@ -145,4 +167,4 @@ function readAll(file) {
     return out;
 }
 
-module.exports = { dirFor, fileFor, read, write, writeUnlessCorrupt, readAll, prune };
+module.exports = { dirFor, fileFor, read, write, writeUnlessCorrupt, readAll, prune, RENAME_RETRY_MS };

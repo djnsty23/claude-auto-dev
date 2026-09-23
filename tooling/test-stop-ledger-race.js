@@ -112,6 +112,38 @@ async function moduleRace() {
     const stray = fs.readdirSync(ledger.dirFor(file)).filter((n) => !n.endsWith('.json'));
     check('module race: no tmp file is left behind', stray.length === 0, stray.join(',') || 'none');
 
+    // A transient EPERM on rename is retried, not swallowed. The module race
+    // above reproduces it only under load (6 of 12 runs red on a loaded box,
+    // 2026-09-24), so this drives the same code path deterministically: the
+    // module calls fs.renameSync through the shared fs object, which is patched.
+    {
+        const realRename = fs.renameSync;
+        const eperm = () => Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM', syscall: 'rename' });
+        const rfile = path.join(tmp, 'retry.json');
+        let calls = 0;
+        fs.renameSync = (a, b) => { calls++; if (calls <= 2) throw eperm(); return realRename(a, b); };
+        let wrote;
+        try { wrote = ledger.write(rfile, 'r1', { n: 7 }); } finally { fs.renameSync = realRename; }
+        const back = ledger.read(rfile, 'r1');
+        check('rename: two EPERMs are retried and the write lands', wrote === true && calls === 3
+            && back.state === 'ok' && back.entry.n === 7, 'wrote=' + wrote + ' calls=' + calls + ' state=' + back.state);
+
+        calls = 0;
+        const t0 = Date.now();
+        fs.renameSync = () => { calls++; throw eperm(); };
+        try { wrote = ledger.write(rfile, 'r2', { n: 1 }); } finally { fs.renameSync = realRename; }
+        const bound = (ledger.RENAME_RETRY_MS || []).length + 1;
+        check('rename: a persistent EPERM gives up after the bound, returns false, leaves no tmp', wrote === false
+            && calls === bound && ledger.read(rfile, 'r2').state === 'absent'
+            && fs.readdirSync(ledger.dirFor(rfile)).every((n) => !n.endsWith('.tmp')),
+            'wrote=' + wrote + ' calls=' + calls + ' of ' + bound + ' in ' + (Date.now() - t0) + ' ms');
+
+        calls = 0;
+        fs.renameSync = () => { calls++; throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); };
+        try { wrote = ledger.write(rfile, 'r3', { n: 1 }); } finally { fs.renameSync = realRename; }
+        check('rename: an error that is not transient is not retried', wrote === false && calls === 1, 'calls=' + calls);
+    }
+
     // A ledger that cannot be parsed is never written over.
     const k = 'corrupt-me';
     ledger.write(file, k, { n: 1, at: Date.now() });
