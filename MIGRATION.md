@@ -55,7 +55,7 @@ exist — the rules ship as auto-loading skills now.
 ## 4. Install the plugins
 
 ```
-/plugin marketplace add djnsty23/claude-auto-dev
+/plugin marketplace add djnsty23/claude-auto-dev@release
 ```
 
 ```

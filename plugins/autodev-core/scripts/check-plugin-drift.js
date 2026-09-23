@@ -20,15 +20,21 @@
  * never two: MATCHES, DRIFTED (with the files named), or COULD NOT CHECK (with
  * the reason). An unreadable anchor is not a pass.
  *
+ * The marketplace clone is shallow and moves on every update, so the recorded
+ * commit is usually not in it. That commit is then fetched by sha into a
+ * private bare repo under the temp dir (see anchorRepo). The clone itself is
+ * never written.
+ *
  *   node check-plugin-drift.js            human output, exit 1 on drift
  *   node check-plugin-drift.js --json     machine-readable
  *   node check-plugin-drift.js --quiet    print only when something is wrong
  */
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const claudePaths = require('./claude-paths.js');
 const crypto = require('crypto');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
@@ -42,6 +48,8 @@ const MARKETS = path.join(CFG, 'plugins', 'marketplaces');
 // Files that legitimately differ or are not part of the published tree.
 const IGNORE = new Set(['.DS_Store', '.orphaned_at']);
 const IGNORE_DIRS = new Set(['node_modules', '.git']);
+// A fetch of one commit at depth 1. Past this the check says COULD NOT CHECK.
+const FETCH_TIMEOUT_MS = 60000;
 
 function sha1(buf) {
     return crypto.createHash('sha1').update(buf).digest('hex');
@@ -91,6 +99,47 @@ function treeAt(repo, sha, prefix) {
     return map;
 }
 
+/**
+ * A repository that holds `sha`, or the reason there is none.
+ *
+ * The marketplace clone comes first. Claude Code clones a marketplace at depth
+ * 1 and moves it to the new HEAD on every update, so once main has moved past
+ * a release the commit an install recorded is no longer in it.
+ * `[measured 2026-09-24]` all three autodev plugins read COULD NOT CHECK on one
+ * machine for that reason alone, which left this check blind to exactly the
+ * drift it exists for. So the commit is fetched by sha, at depth 1, into a bare
+ * repo of our own under the temp dir, keyed on the remote URL and reused on
+ * the next run. GitHub serves a fetch by sha. The marketplace clone is never
+ * written: Claude Code owns it, and a changed shallow boundary there is its
+ * problem to discover, not ours to cause.
+ */
+function anchorRepo(clone, sha) {
+    const has = (repo) => git(repo, ['cat-file', '-e', `${sha}^{commit}`]) !== null;
+    if (has(clone)) return { repo: clone, fetched: false };
+    const remote = git(clone, ['remote', 'get-url', 'origin']);
+    const url = remote === null ? '' : remote.toString('utf8').trim();
+    if (!url) return { reason: 'the clone has no origin to fetch it from' };
+    // A URL can carry credentials in its userinfo. Keep them out of any reason.
+    const shown = url.replace(/\/\/[^/@]*@/, '//');
+    const dir = path.join(os.tmpdir(), 'autodev-plugin-drift', sha1(Buffer.from(url)).slice(0, 16));
+    try { fs.mkdirSync(path.dirname(dir), { recursive: true }); } catch { /* the init below reports it */ }
+    if (!fs.existsSync(path.join(dir, 'HEAD')) && git(path.dirname(dir), ['init', '-q', '--bare', dir]) === null) {
+        return { reason: `a private repo for the fetch could not be created at ${dir}` };
+    }
+    if (!has(dir)) {
+        const r = spawnSync('git', ['-C', dir, 'fetch', '-q', '--depth', '1', '--no-tags', url, sha], {
+            encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: FETCH_TIMEOUT_MS, windowsHide: true,
+            // A check must fail, never wait on a credential prompt nobody can answer.
+            env: Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0' }),
+        });
+        if (r.status !== 0 || !has(dir)) {
+            const why = (r.error && r.error.code) || String(r.stderr || '').trim().split(/\r?\n/).pop() || `exit ${r.status}`;
+            return { reason: `fetching it from ${shown} failed (${why.replace(url, shown)})` };
+        }
+    }
+    return { repo: dir, fetched: true };
+}
+
 function gitBlobSha(buf) {
     return sha1(Buffer.concat([Buffer.from(`blob ${buf.length}\0`), buf]));
 }
@@ -128,14 +177,16 @@ function checkPlugin(key, entry) {
         res.reason = `no marketplace clone at ${clone}`;
         return res;
     }
-    if (git(clone, ['cat-file', '-e', `${entry.gitCommitSha}^{commit}`]) === null) {
+    const anchor = anchorRepo(clone, entry.gitCommitSha);
+    if (!anchor.repo) {
         res.status = 'COULD NOT CHECK';
-        res.reason = `commit ${entry.gitCommitSha.slice(0, 12)} is not in the clone — it may have been pruned, or the clone is behind. Run: claude plugin marketplace update ${market}`;
+        res.reason = `commit ${entry.gitCommitSha.slice(0, 12)} is not in the clone, and ${anchor.reason}. Run: claude plugin marketplace update ${market}`;
         return res;
     }
+    res.anchor = anchor.fetched ? 'fetched' : 'clone';
 
     const prefix = `plugins/${name}`;
-    const tree = treeAt(clone, entry.gitCommitSha, prefix);
+    const tree = treeAt(anchor.repo, entry.gitCommitSha, prefix);
     if (!tree || !tree.size) {
         res.status = 'COULD NOT CHECK';
         res.reason = `no files under ${prefix} at that commit`;
@@ -199,7 +250,7 @@ function main() {
     }
 
     for (const r of drifted) {
-        console.log(`DRIFTED  ${r.plugin} v${r.version} vs ${String(r.sha).slice(0, 12)}`);
+        console.log(`DRIFTED  ${r.plugin} v${r.version} vs ${String(r.sha).slice(0, 12)}${r.anchor === 'fetched' ? ' (fetched: the marketplace clone no longer holds it)' : ''}`);
         console.log(`  ${r.installPath}`);
         for (const f of r.differing.slice(0, 20)) console.log(`    differs: ${f}`);
         if (r.differing.length > 20) console.log(`    ...and ${r.differing.length - 20} more differing`);
@@ -217,7 +268,7 @@ function main() {
 
     if (!QUIET && matched.length) {
         for (const r of matched) {
-            console.log(`MATCHES  ${r.plugin} v${r.version} — ${r.scanned} file(s) identical to ${String(r.sha).slice(0, 12)}`);
+            console.log(`MATCHES  ${r.plugin} v${r.version} — ${r.scanned} file(s) identical to ${String(r.sha).slice(0, 12)}${r.anchor === 'fetched' ? ' (fetched: the marketplace clone no longer holds it)' : ''}`);
         }
     }
 

@@ -19,6 +19,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync, execFileSync } = require('child_process');
+const { pathToFileURL } = require('url');
 
 const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-plugin-drift.js');
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-drift-'));
@@ -38,6 +39,11 @@ const CFG = path.join(ROOT, 'config');
 const CLONE = path.join(CFG, 'plugins', 'marketplaces', MARKET);
 const CACHE = path.join(CFG, 'plugins', 'cache', MARKET, PLUGIN, VERSION);
 const MANIFEST = path.join(CFG, 'plugins', 'installed_plugins.json');
+// The subject fetches a missing commit into a repo under the temp dir. Point
+// the child's temp dir inside the fixture, so no run leaves anything outside it.
+const CHILD_TMP = path.join(ROOT, 'tmp');
+fs.mkdirSync(CHILD_TMP, { recursive: true });
+const CHILD_ENV = Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: CFG, TEMP: CHILD_TMP, TMP: CHILD_TMP, TMPDIR: CHILD_TMP });
 
 const FILES = {
     'scripts/a.js': 'console.log("a");\n',
@@ -85,7 +91,7 @@ function resetCache() {
 function run(extraArgs) {
     const r = spawnSync(process.execPath, [SUBJECT, '--json'].concat(extraArgs || []), {
         encoding: 'utf8',
-        env: Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: CFG }),
+        env: CHILD_ENV,
     });
     let json = null;
     try { json = JSON.parse(r.stdout); } catch { /* left null on purpose */ }
@@ -158,6 +164,98 @@ resetCache();
         one && one.extra.includes('scripts/local-note.txt'), one && one.extra);
 }
 
+// ------------------------------- 2b. a shallow clone that has moved on
+//
+// Claude Code clones a marketplace at depth 1 and moves it on every update, so
+// the commit an install recorded is usually NOT in the clone. [measured
+// 2026-09-24] all three autodev plugins read COULD NOT CHECK on one machine for
+// that reason alone. The fixture is the real shape: a release commit, main one
+// commit past it, and a depth-1 clone of main. The control is the install that
+// holds main's bytes under the release's sha, which is what an install from a
+// moved main looks like. It must read DRIFTED, not COULD NOT CHECK.
+{
+    const ORIGIN = path.join(ROOT, 'origin');
+    fs.mkdirSync(ORIGIN, { recursive: true });
+    git(['init', '-q', '-b', 'main'], ORIGIN);
+    git(['config', 'user.email', 'suite@example.invalid'], ORIGIN);
+    git(['config', 'user.name', 'suite'], ORIGIN);
+    // GitHub serves a fetch by sha. A local repo refuses one unless told to.
+    git(['config', 'uploadpack.allowAnySHA1InWant', 'true'], ORIGIN);
+    writeAll(path.join(ORIGIN, 'plugins', PLUGIN), FILES);
+    git(['add', '-A'], ORIGIN);
+    git(['commit', '-q', '-m', 'release'], ORIGIN);
+    const RELEASE = git(['rev-parse', 'HEAD'], ORIGIN).trim();
+    const MAIN_A = 'console.log("main moved on");\n';
+    fs.writeFileSync(path.join(ORIGIN, 'plugins', PLUGIN, 'scripts/a.js'), MAIN_A, 'utf8');
+    git(['commit', '-q', '-am', 'main moves on'], ORIGIN);
+
+    const SMKT = 'shallowmkt';
+    const SCLONE = path.join(CFG, 'plugins', 'marketplaces', SMKT);
+    const SCACHE = path.join(CFG, 'plugins', 'cache', SMKT, PLUGIN, VERSION);
+    // file:// and not a bare path: git ignores --depth on a local path clone.
+    execFileSync('git', ['clone', '-q', '--depth', '1', pathToFileURL(ORIGIN).href, SCLONE], { stdio: 'ignore' });
+    const lacksRelease = () => spawnSync('git', ['-C', SCLONE, 'cat-file', '-e', RELEASE + '^{commit}']).status !== 0;
+    check('the fixture clone is shallow and lacks the recorded commit, so the cases below are not vacuous',
+        git(['rev-parse', '--is-shallow-repository'], SCLONE).trim() === 'true' && lacksRelease());
+
+    const shallowManifest = (sha) => fs.writeFileSync(MANIFEST, JSON.stringify({
+        plugins: { [`${PLUGIN}@${SMKT}`]: [{ version: VERSION, gitCommitSha: sha, installPath: SCACHE, scope: 'user' }] },
+    }, null, 2));
+    const shallowCache = (overrides) => {
+        fs.rmSync(SCACHE, { recursive: true, force: true });
+        fs.mkdirSync(SCACHE, { recursive: true });
+        writeAll(SCACHE, Object.assign({}, FILES, overrides || {}));
+    };
+
+    shallowManifest(RELEASE);
+    shallowCache();
+    {
+        const { r, one } = run();
+        check('shallow clone, release bytes: MATCHES, not COULD NOT CHECK', one && one.status === 'MATCHES', r.stdout + r.stderr);
+        check('shallow clone: says the anchor was fetched', one && one.anchor === 'fetched', one && one.anchor);
+        check('shallow clone, release bytes: exits 0', r.status === 0, 'status ' + r.status);
+    }
+    shallowCache({ 'scripts/a.js': MAIN_A });
+    {
+        const { r, one } = run();
+        check('THE CONTROL: main\'s bytes under the release sha are DRIFTED', one && one.status === 'DRIFTED', r.stdout + r.stderr);
+        check('the control names the file main changed', one && Array.isArray(one.differing) && one.differing.length === 1 && one.differing[0] === 'scripts/a.js', one && JSON.stringify(one.differing));
+        check('the control exits 1', r.status === 1, 'status ' + r.status);
+    }
+    check('the marketplace clone was never written: still shallow, still without the release commit',
+        git(['rev-parse', '--is-shallow-repository'], SCLONE).trim() === 'true' && lacksRelease());
+
+    // The origin goes away under the same URL. The release commit was fetched
+    // once, so it is reused. A commit never fetched cannot be, and says why.
+    fs.renameSync(ORIGIN, ORIGIN + '-gone');
+    shallowCache();
+    {
+        const { one } = run();
+        check('a commit fetched once is reused when the origin is unreachable',
+            one && one.status === 'MATCHES' && one.anchor === 'fetched', one && (one.reason || one.status));
+    }
+    shallowManifest('1'.repeat(40));
+    {
+        const { r, one } = run();
+        check('an unfetchable commit is COULD NOT CHECK', one && one.status === 'COULD NOT CHECK', r.stdout + r.stderr);
+        check('and the reason says the fetch failed and names the fix command',
+            one && /fetching it from .* failed/.test(one.reason || '') && /marketplace update/.test(one.reason || ''), one && one.reason);
+        check('an unfetchable commit exits 0: unknown is not confirmed drift', r.status === 0, 'status ' + r.status);
+    }
+    // A remote URL can carry a credential in its userinfo. The reason names the
+    // host so a reader can act, and never repeats the credential. Port 9 refuses
+    // at once, so this costs no network wait.
+    const PLANTED = 'p'.repeat(16);
+    git(['remote', 'set-url', 'origin', `https://suite-user:${PLANTED}@127.0.0.1:9/none.git`], SCLONE);
+    {
+        const { r, one } = run();
+        check('a credential in the remote URL never reaches the reason',
+            one && one.status === 'COULD NOT CHECK' && /127\.0\.0\.1/.test(one.reason || '') && !String(r.stdout).includes(PLANTED),
+            one && one.reason);
+    }
+    writeManifest();
+}
+
 // ------------------------------------- 3. the three-outcome discipline
 //
 // Each of these is a COULD NOT CHECK. None may render as a pass: "I compared and
@@ -202,7 +300,7 @@ resetCache();
     fs.mkdirSync(emptyCfg, { recursive: true });
     const r = spawnSync(process.execPath, [SUBJECT], {
         encoding: 'utf8',
-        env: Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: emptyCfg }),
+        env: Object.assign({}, CHILD_ENV, { CLAUDE_CONFIG_DIR: emptyCfg }),
     });
     check('no manifest: exits 2', r.status === 2, 'status ' + r.status);
     check('no manifest: says it is NOT "no drift"', /NOT "no drift"/.test(r.stderr || ''), r.stderr);
@@ -241,7 +339,7 @@ resetCache();
     }
     fs.writeFileSync(MANIFEST, JSON.stringify({ plugins: many }, null, 2));
 
-    const env = Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: CFG });
+    const env = CHILD_ENV;
     const viaFileBytes = (args) => {
         const out = path.join(ROOT, 'via-file.out');
         const fd = fs.openSync(out, 'w');
@@ -285,4 +383,4 @@ if (failures.length) {
     for (const f of failures) console.error('  x ' + f);
     process.exit(1);
 }
-console.log(`plugin-drift: ${passed}/${total} passed — content drift, extras, and all three COULD-NOT-CHECK routes`);
+console.log(`plugin-drift: ${passed}/${total} passed — content drift, extras, a shallow clone that moved on, and every COULD-NOT-CHECK route`);

@@ -57,3 +57,6 @@ console.log('\nNext:');
 console.log(`  1. Add a ## [${version}] section to CHANGELOG.md`);
 console.log('  2. node tooling/validate.js');
 console.log(`  3. git tag v${version}`);
+// Installs pin to the release branch (README), so moving it is what ships the
+// version. A plain push, never forced: the branch only ever moves forward.
+console.log(`  4. once the tagged commit is on main: git push origin v${version} v${version}^{commit}:refs/heads/release`);

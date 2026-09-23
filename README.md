@@ -16,7 +16,7 @@ it; there is no install script and nothing is copied into `~/.claude`.
 In Claude Code — the desktop app, the CLI, or an IDE session:
 
 ```
-/plugin marketplace add djnsty23/claude-auto-dev
+/plugin marketplace add djnsty23/claude-auto-dev@release
 ```
 
 ```
@@ -24,6 +24,14 @@ In Claude Code — the desktop app, the CLI, or an IDE session:
 ```
 
 That is the whole install. Then say `brainstorm`.
+
+`@release` pins the install to the last release. Without it the marketplace
+follows `main`, which carries unreleased commits under the last version
+number, so two installs of "the same version" can run different code.
+Already installed without it? In `~/.claude/settings.json`, add
+`"ref": "release"` to the `source` of `extraKnownMarketplaces.autodev`, then
+run the `marketplace add` line above. Your plugins stay installed. Running
+the add line alone is refused while settings declare a different source.
 
 Two optional add-ons:
 
