@@ -54,7 +54,7 @@ function isAnonJwt(value) {
 
 /** A value the named patterns leave alone: an env reference, a template slot,
  *  a mask, an example, or a key that is public by design. */
-function isPlaceholderValue(value) {
+export function isPlaceholderValue(value) {
     return NOT_A_SECRET_RE.test(value) || isAnonJwt(value);
 }
 
@@ -66,6 +66,15 @@ function isPlaceholderValue(value) {
  * and a repeated letter so no realistic-looking credential ever sits in
  * source, where a later scanner would report it.
  */
+/**
+ * A CLI flag whose value is a credential. The name has to END at the secret
+ * word, so `--tokenizer`, `--token-budget` and `--password-stdin` are not it. Shared with
+ * bash-rules.mjs, whose argv-credential deny refuses the same flags before a
+ * command runs: one pattern, so the two can never disagree about what a
+ * credential flag is.
+ */
+export const CREDENTIAL_FLAG = String.raw`(?<![A-Za-z0-9_-])--?(?:token|access[-_]?token|auth[-_]?token|api[-_]?key|secret|password|passwd|pwd)`;
+
 export const PATTERNS = [
     {
         name: 'google-refresh-token',
@@ -173,7 +182,7 @@ export const PATTERNS = [
         // and `--token-budget` are not flags that carry one), and an env
         // reference or placeholder after it is left alone like everywhere else.
         name: 'cli-flag-secret',
-        re: /((?<![A-Za-z0-9_-])--?(?:token|access[-_]?token|auth[-_]?token|api[-_]?key|secret|password|passwd|pwd)(?:=|\s+)["']?)([^\s"']{12,})/gi,
+        re: new RegExp('(' + CREDENTIAL_FLAG + String.raw`(?:=|\s+)["']?)([^\s"']{12,})`, 'gi'),
         group: 2,
         keep: (value) => isPlaceholderValue(value),
         sample: () => 'vercel deploy --prod --yes --token ' + 'R'.repeat(24),
