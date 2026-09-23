@@ -136,10 +136,15 @@ function request(port, method, urlPath, { body = null, host = `127.0.0.1:${port}
 
 function startServer(extra = []) {
     return new Promise((resolve) => {
-        const child = spawn(process.execPath, [SCRIPT, 'serve', '--port', '0', '--claude-bin', FAKE, ...extra], { cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        const child = spawn(process.execPath, [SCRIPT, 'serve', '--port', '0', '--claude-bin', FAKE, ...extra], { cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, LOCALAPPDATA }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
         pids.push(child.pid);
         let out = ''; let err = '';
-        const timer = setTimeout(() => resolve({ child, port: null, out, err }), 20000);
+        // Three outcomes, kept apart. A listening line is a port. The subject EXITING
+        // first is a verdict about the subject (a stub, a crash). Only a live process
+        // that stays silent for 20 s, or a spawn that fails, is infrastructure.
+        const timer = setTimeout(() => resolve({ child, port: null, exited: null, out, err }), 20000);
+        child.on('error', (e) => { clearTimeout(timer); resolve({ child, port: null, exited: null, out, err: err + String(e && e.message) }); });
+        child.on('exit', (code, signal) => { clearTimeout(timer); resolve({ child, port: null, exited: { code, signal }, out, err }); });
         child.stdout.on('data', (c) => { out += c; const m = /listening on http:\/\/127\.0\.0\.1:(\d+)\//.exec(out); if (m) { clearTimeout(timer); resolve({ child, port: Number(m[1]), out, get err() { return err; } }); } });
         child.stderr.on('data', (c) => { err += c; });
     });
@@ -214,6 +219,7 @@ async function main() {
 
     // ------------------------------------------------------------ 4. the server
     const srv = await startServer(['--takeover-script', path.join(ROOT, 'takeover.ps1'), '--no-launch']);
+    if (!srv.port && srv.exited) { check('4. serve stays up and prints its listening line', false, `exited ${srv.exited.code === null ? srv.exited.signal : srv.exited.code} before listening: ${srv.out} ${srv.err}`); return; }
     if (!srv.port) { indeterminateCase('4. server start', `no listening line within 20 s: ${srv.out} ${srv.err}`); return; }
     const port = srv.port;
     const page = await request(port, 'GET', '/');
