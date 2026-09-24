@@ -578,17 +578,63 @@ if (require.main === module) {
                 t('  and the attempt reports the CLAMPED budget it ran under, not the one asked for',
                     near.budgetMs <= 1200, `budgetMs=${near.budgetMs}`);
 
-                // A deadline already in the past must still spawn. Returning a
-                // zero-length budget would trade this module's failure mode for
-                // a different one — a child that never ran, reported as a child
-                // that did not finish.
+                // A deadline already in the past must still spawn, under the
+                // floor and nothing else. `[measured 2026-09-24, node 24.15.0]`
+                // the budgets a broken clamp would hand spawnSync are not a
+                // zero-length spawn: `timeout: 0` means NO timeout (a 3 s child
+                // ran its full 3 s and exited 3), a negative one throws
+                // ERR_OUT_OF_RANGE, and 1 ms kills the child in ~10 ms. So "the
+                // child answered" alone cannot tell the floor from an unbounded
+                // budget, and every shape below also grades budgetMs.
+                //
+                // THE ANSWER IS NOT GUARANTEED, THE FLOOR IS. `[measured
+                // 2026-09-24]` this used to demand status 3 from `node -e` inside
+                // the 1000 ms floor. It held in 42 kept gate and coverage logs,
+                // then went red in the 8.175.0 gate as `status=null ETIMEDOUT`:
+                // a child that costs ~48 ms idle had not started in 1000 ms. That
+                // is a load spike, and the module did exactly the right thing
+                // under it. So two shapes are accepted, and both prove the clamp
+                // reached spawnSync: the child answered with its own exit status,
+                // or our timer killed it AT the floor. A retry at the same floor
+                // is variant D in the header, 0/4 under load.
                 process.env[DEADLINE_ENV] = String(Date.now() - 5000);
                 t('a deadline already blown clamps to the floor rather than to zero',
                     clampToDeadline(60000) === DEADLINE_FLOOR_MS, String(clampToDeadline(60000)));
+                const underBlownDeadline = (r, spent) => {
+                    if (r.budgetMs !== DEADLINE_FLOOR_MS) return null;
+                    if (!r.error && !r.signal && r.status === 3) return 'answered';
+                    // Our own SIGTERM timeout, per the kill contract, after the
+                    // wall time the floor promised. The time is measured here,
+                    // not read back from the module, so a budgetMs that lies
+                    // about what spawnSync was given still goes red.
+                    if (timedOut(r) && classify(r, 'kill') === 'verdict' && r.pid > 0
+                        && spent >= DEADLINE_FLOOR_MS * 0.9) return 'killed at the floor';
+                    return null;
+                };
+                let started = Date.now();
                 const past = runBudgeted(NODE, ['-e', 'process.exit(3)'],
                     { encoding: 'utf8', timeout: 60000, retryOnTimeout: false });
-                t('  and a fast child under a blown deadline still runs and still answers',
-                    past.status === 3, `status=${past.status} ${reason(past)}`);
+                const pastShape = underBlownDeadline(past, Date.now() - started);
+                t('  and a fast child under a blown deadline is still spawned, under exactly the floor, '
+                    + 'and either answers with its own exit status or is killed by our timer at the floor'
+                    + (pastShape ? ` (this run: ${pastShape})` : ''),
+                    pastShape !== null,
+                    `status=${past.status} ${reason(past)} budgetMs=${past.budgetMs} pid=${past.pid}`);
+                // The control for the second shape, on every run and not only
+                // under load: a child that cannot answer inside the floor. It
+                // makes the fallback a graded path rather than one first
+                // exercised during a spike, and it is the end-to-end form of
+                // "not zero": under `timeout: 0` this child runs its 5 s and
+                // exits 3.
+                started = Date.now();
+                const slowPast = runBudgeted(NODE, ['-e', 'setTimeout(function () { process.exit(3); }, 5000)'],
+                    { encoding: 'utf8', timeout: 60000, retryOnTimeout: false });
+                const slowSpent = Date.now() - started;
+                t('  control: a child that would answer only after 5s is killed AT the floor, never '
+                    + 'left to run unbounded',
+                    underBlownDeadline(slowPast, slowSpent) === 'killed at the floor',
+                    `status=${slowPast.status} ${reason(slowPast)} budgetMs=${slowPast.budgetMs} `
+                    + `spent=${slowSpent}ms`);
 
                 // The clamp must only ever NARROW. This is the assertion the
                 // first draft lacked, and its absence cost five reds.
