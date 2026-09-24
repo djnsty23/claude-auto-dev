@@ -30,6 +30,8 @@ fs.mkdirSync(PROJ, { recursive: true });
 
 const cases = [];
 const check = (label, ok) => cases.push([label, ok]);
+// Checks that await, run in order before the results print.
+const later = [];
 
 function run(payload, cwd = PROJ) {
     return spawnSync(process.execPath, [HOOK], {
@@ -540,9 +542,9 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     for (let i = 0; i < 5; i++) plant({ originCwd: OTHER, cwd: OTHER });
     for (let i = 0; i < 2; i++) plant({}, 30);              // live but untouched for 30 days
 
-    const pile = (id, extraEnv) => {
+    const pile = (id, extraEnv, extraPayload) => {
         const res = spawnSync(process.execPath, [HOOK], {
-            input: JSON.stringify({ cwd: PROJ, session_id: id, hook_event_name: 'SessionStart' }),
+            input: JSON.stringify({ cwd: PROJ, session_id: id, hook_event_name: 'SessionStart', ...extraPayload }),
             encoding: 'utf8', cwd: PROJ,
             env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP, CLAUDE_CONFIG_DIR: path.join(TMP, '.claude'),
                 SESSION_SWEEP_STORE: path.join(TMP, 'pile-store'), AUTODEV_SESSION_PILE_MAX: '', ...extraEnv },
@@ -568,15 +570,76 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
         direct && direct.count === 7 && direct.scanned === 17);
     check('pile: an unreadable store is null, not zero',
         countLivePile(PROJ, { store: path.join(TMP, 'no-such-store') }) === null);
+
+    // The hook counts after the sections below it have run, into a slot held
+    // at this point, so its line still comes before the compaction pointer.
+    fs.writeFileSync(path.join(PROJ, 'RESUME.md'), '# resume\n', 'utf8');
+    const e = pile('someone-else', {}, { source: 'compact' });
+    fs.rmSync(path.join(PROJ, 'RESUME.md'), { force: true });
+    const at = (s) => e.ctx.indexOf(s);
+    check('pile: the line keeps its place, before the compaction pointer',
+        at('Session pile: 7') >= 0 && at('Context was just compacted') > at('Session pile: 7'));
+
+    // [measured 2026-09-24] 31 live records were pretty-printed, and a head
+    // pattern with no whitespace sent each one to a full parse.
+    const { countLivePileAsync, parseHead } = require(path.join(PLUGIN_ROOT, 'scripts', 'session-pile.js'));
+    const ph = parseHead(JSON.stringify({ isArchived: false, cwd: PROJ, cliSessionId: 'c-1' }, null, 2));
+    check('pile: the head patterns allow whitespace around the colon',
+        !!ph && ph.isArchived === false && ph.cwd === PROJ && ph.cliSessionId === 'c-1');
+    const PRETTY = path.join(TMP, 'pile-pretty', 'ws');
+    fs.mkdirSync(PRETTY, { recursive: true });
+    const put = (name, rec, space) => fs.writeFileSync(path.join(PRETTY, `${name}.json`), JSON.stringify(rec, null, space), 'utf8');
+    put('local_pretty', { sessionId: 'local_pretty', isArchived: false, originCwd: PROJ }, 2);
+    // Fields past the head: only a full parse answers these two.
+    put('local_deep', { sessionId: 'local_deep', pad: 'x'.repeat(9000), isArchived: false, originCwd: PROJ });
+    put('local_deeparch', { sessionId: 'local_deeparch', pad: 'x'.repeat(9000), isArchived: true, originCwd: PROJ });
+    const pretty = countLivePile(PROJ, { store: path.join(TMP, 'pile-pretty') });
+    check('pile: a pretty-printed record is read from its head, and only records with their fields past it are parsed in full',
+        !!pretty && pretty.count === 2 && pretty.scanned === 3 && pretty.fullParses === 2);
+
+    // The hook uses the async count, and the sync one is its reference.
+    later.push(async () => {
+        const same = (a, s) => !!a && !!s && a.count === s.count && a.scanned === s.scanned && a.fullParses === s.fullParses;
+        for (const store of [path.join(TMP, 'pile-store'), path.join(TMP, 'pile-pretty')]) {
+            const s = countLivePile(PROJ, { store, excludeCliSessionId: 'me-pile' });
+            const got = [];
+            for (const parallel of [1, 3, undefined]) got.push(await countLivePileAsync(PROJ, { store, excludeCliSessionId: 'me-pile', parallel }));
+            check(`pile: the async count equals the sync one at widths 1, 3 and the default (${path.basename(store)}: ${s && s.count})`,
+                got.every((a) => same(a, s)));
+        }
+        check('pile: the async count of an unreadable store is null too',
+            (await countLivePileAsync(PROJ, { store: path.join(TMP, 'no-such-store') })) === null);
+
+        // One open handle per record would meet a 256-descriptor limit as
+        // EMFILE, which the per-record catch turns into a silent undercount.
+        const realOpen = fs.promises.open;
+        let open = 0;
+        let peak = 0;
+        fs.promises.open = async (...args) => {
+            const fh = await realOpen.apply(fs.promises, args);
+            peak = Math.max(peak, ++open);
+            const close = fh.close.bind(fh);
+            fh.close = () => { open--; return close(); };
+            return fh;
+        };
+        let bounded;
+        try { bounded = await countLivePileAsync(PROJ, { store: path.join(TMP, 'pile-store'), parallel: 3 }); } finally { fs.promises.open = realOpen; }
+        check(`pile: the async count holds at most \`parallel\` records open at once (peak ${peak} of 3)`,
+            !!bounded && bounded.count === 7 && peak >= 1 && peak <= 3);
+    });
 }
 
-let pass = 0, fail = 0;
-for (const [label, ok] of cases) {
-    console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
-    ok ? pass++ : fail++;
-}
-console.log(`\n${pass} passed, ${fail} failed`);
+(async () => {
+    for (const fn of later) await fn();
 
-try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
+    let pass = 0, fail = 0;
+    for (const [label, ok] of cases) {
+        console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
+        ok ? pass++ : fail++;
+    }
+    console.log(`\n${pass} passed, ${fail} failed`);
 
-process.exit(fail > 0 ? 1 : 0);
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
+
+    process.exit(fail > 0 ? 1 : 0);
+})();

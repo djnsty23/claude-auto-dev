@@ -131,6 +131,11 @@ const cwd = payload.cwd || process.cwd();
 
 const context = [];
 let banner = '';
+// A context slot held for a line an async read has not answered yet. A slot
+// still holding it when the output is written is dropped, so no read can add
+// a line of its own absence.
+const PENDING = Symbol('pending');
+let pending = null;
 
 try {
     // ---- Version (single source of truth: our own plugin.json) ----
@@ -410,15 +415,18 @@ try {
                 if (path.basename(common) === '.git') repoRoot = path.dirname(common);
             } catch { /* not a git repo: the cwd is the only root there is */ }
 
-            const { countLivePile } = require(path.join(PLUGIN_ROOT, 'scripts', 'session-pile.js'));
-            const pile = countLivePile(repoRoot, { excludeCliSessionId: payload.session_id });
-            if (pile && pile.count > max) {
-                context.push(
-                    `Session pile: ${pile.count} other live sessions were started from this repo in the last 14 days `
-                    + `(threshold ${max}). Before opening more parallel work, the sessions skill lists which are `
-                    + 'DONE or MERGED and safe to archive, and a drained session can settle itself.',
-                );
-            }
+            // [measured 2026-09-24] the sync count was 419-471 ms on a 1,222-record
+            // store and the async one 125-157 ms. The line keeps its place in the
+            // context: the slot is taken now and filled before the output is written.
+            const { countLivePileAsync } = require(path.join(PLUGIN_ROOT, 'scripts', 'session-pile.js'));
+            const slot = context.push(PENDING) - 1;
+            pending = countLivePileAsync(repoRoot, { excludeCliSessionId: payload.session_id }).then((pile) => {
+                if (pile && pile.count > max) {
+                    context[slot] = `Session pile: ${pile.count} other live sessions were started from this repo in the last 14 days `
+                        + `(threshold ${max}). Before opening more parallel work, the sessions skill lists which are `
+                        + 'DONE or MERGED and safe to archive, and a drained session can settle itself.';
+                }
+            });
         }
     } catch { /* pile count is advisory; the banner must survive it */ }
 
@@ -494,17 +502,20 @@ try {
     process.stderr.write(`session-start error: ${err.message}\n`);
 }
 
-const out = {
-    systemMessage: `[${banner}]`,
-};
-if (context.length > 0) {
-    out.hookSpecificOutput = {
-        hookEventName: 'SessionStart',
-        additionalContext: context.join('\n'),
+Promise.resolve(pending).catch(() => { /* the pile count is advisory */ }).then(() => {
+    const lines = context.filter((l) => l !== PENDING);
+    const out = {
+        systemMessage: `[${banner}]`,
     };
-}
+    if (lines.length > 0) {
+        out.hookSpecificOutput = {
+            hookEventName: 'SessionStart',
+            additionalContext: lines.join('\n'),
+        };
+    }
 
-process.stdout.write(JSON.stringify(out));
+    process.stdout.write(JSON.stringify(out));
 
-// Always exit 0 — SessionStart hooks inform, never block
-process.exit(0);
+    // Always exit 0 — SessionStart hooks inform, never block
+    process.exit(0);
+});
