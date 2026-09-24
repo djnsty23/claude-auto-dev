@@ -67,6 +67,45 @@ the exact point: sum `input_tokens`, `cache_read_input_tokens` and
 `cache_creation_input_tokens` per assistant row in the session transcript and
 find the drop.
 
+## Fleet View in the Browser pane: `.claude/launch.json`
+
+`plugins/autodev-core/scripts/fleet-view.js` serves one local page listing every
+worker from every ledger (the `runs/` launcher, `headless-worker.js`,
+`unattended-worker.js`, a background runner, the mission store) and the desktop
+app's session and routine stores for every account folder on disk, not only the
+signed-in one. Each row offers the actions that apply to it: Answer, Settle,
+Relaunch, Take over and Stop. Every action is appended to
+`~/.claude/autodev/fleet-events.jsonl`.
+
+To open it in the desktop app's Browser pane with `preview_start`, add this
+entry to the project's `.claude/launch.json` and start it by name:
+
+```json
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fleet-view",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["plugins/autodev-core/scripts/fleet-view.js", "serve", "--port", "8766"],
+      "port": 8766
+    }
+  ]
+}
+```
+
+Outside this repo, point `runtimeArgs` at the installed plugin's copy of the
+script. Add `"--takeover-script", "<absolute path to a .ps1>"` to enable Take
+over. The script receives `-Code <code> -Log <worker log>` and opens in a new
+console window. Take over exists only on Windows. `--mission-store <dir>` adds
+the mission store, which has no default location and needs a POSIX host.
+
+The server binds 127.0.0.1 only and refuses any Host header that is not
+loopback. Every POST must carry the random token the page was rendered with, so
+another origin can neither read the token nor act on the page. A source that
+cannot be read renders a COULD-NOT-READ row with the reason, never an empty
+table. `node fleet-view.js list` prints the same merge on stdout.
+
 ## What changed from the pre-8.0 template
 
 The old `--full` install wrote a permission block straight into your global

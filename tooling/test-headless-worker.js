@@ -790,6 +790,46 @@ try {
         const usage = hw(['--help']).stdout;
         check('24. the usage text lists settle --lost and says when it refuses', usage.includes('settle --code <CODE> [--lost]') && /settle --lost: [\s\S]*Refused unless/.test(usage));
     }
+
+    // ------------------------------------------------------------ 25. a worker asks by file and keeps working
+    // `[measured 2026-09-22]` workers asked by exiting, so every question cost a
+    // relaunch. The prompt must name ask.json and answer.json in the scratch
+    // dir and forbid exiting to ask, and status must show the question as open
+    // until answer.json lands, including when ask.json does not parse.
+    {
+        const dir = path.join(ROOT, 'T25');
+        const report = path.join(dir, 'T25.report.md');
+        const r = hw(['start', '--code', 'T25', '--prompt-file', PROMPT, '--log', path.join(dir, 'T25.log'), '--report', report,
+            '--claude-bin', FAKE, '--ledger', path.join(dir, 'dry.json'), '--dry-run']);
+        const v = r.json && r.json.ok ? r.json.value : null;
+        const promptArg = v ? v.argv[v.argv.indexOf('-p') + 1] : '';
+        const askFile = path.join(dir, 'T25', 'ask.json');
+        const answerFile = path.join(dir, 'T25', 'answer.json');
+        check('25. the prompt names ask.json and answer.json in the scratch dir',
+            promptArg.includes(askFile.replace(/\\/g, '/')) && promptArg.includes(answerFile.replace(/\\/g, '/')), promptArg.slice(-900));
+        check('25. the prompt forbids exiting to ask and says to keep working', /never exit to ask/.test(promptArg) && /Keep working on everything that does not depend on it/.test(promptArg));
+        check('25. the prompt still fits under PROMPT_MAX with every note', promptArg.length < PROMPT_MAX, String(promptArg.length));
+
+        const ledger = path.join(dir, 'ledger.json');
+        write(ledger, JSON.stringify({ version: 1, records: [{ code: 'T25', pid: 0, startedAt: new Date().toISOString(), log: path.join(dir, 'T25.log'), report, state: 'running' }] }));
+        const ask = () => { const s = hw(['status', '--ledger', ledger, '--json']); return s.json && s.json.ok ? s.json.value.records[0] : {}; };
+        const none = ask();
+        check('25. no ask.json reads as ask none', none.ask === 'none' && none.askFile === askFile, JSON.stringify(none).slice(0, 200));
+        write(askFile, JSON.stringify({ question: 'Seeded data or production?', options: [{ label: 'Seeded (Recommended)' }] }));
+        const open = ask();
+        check('25. ask.json without answer.json reads as open, with the question', open.ask === 'open' && open.question === 'Seeded data or production?', JSON.stringify(open).slice(0, 200));
+        check('25. the human status line shows ask=open', /ask=open/.test(hw(['status', '--ledger', ledger]).stdout));
+        write(answerFile, JSON.stringify({ label: 'Seeded (Recommended)' }));
+        check('25. answer.json beside it reads as answered', ask().ask === 'answered');
+        fs.rmSync(answerFile);
+        write(askFile, '{ not json');
+        check('25. an ask.json that does not parse is unreadable, never none', ask().ask === 'unreadable');
+
+        const real = startFake('T25B');
+        if (real.pid) waitForEnd(real.log, real.pid);
+        const rec = (JSON.parse(read(real.ledger) || '{"records":[]}').records || [])[0] || {};
+        check('25. a started record carries the cwd the worker ran in', typeof rec.cwd === 'string' && path.resolve(rec.cwd) === path.resolve(ROOT), rec.cwd);
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -803,7 +843,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 24 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 25 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);

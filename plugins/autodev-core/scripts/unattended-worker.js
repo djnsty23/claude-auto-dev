@@ -46,6 +46,7 @@
  *
  * Usage:
  *   node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address>
+ *        [--report <file>]   (default ~/.claude/autodev/reports/<task id>/REPORT.md)
  *        [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]
  *   node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]
  *   node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed [--report-read] [--ledger <file>]
@@ -56,12 +57,13 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const claudePaths = require('./claude-paths.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
 const USAGE = [
-    'Usage: node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address> [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]',
+    'Usage: node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address> [--report <file>] [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]',
     '       node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]',
     '       node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed [--report-read] [--ledger <file>]',
     '       node unattended-worker.js deleted --task-id <id> [--ledger <file>]',
@@ -86,7 +88,7 @@ function fault(code, message) { const e = new Error(message || code); e.publicCo
 function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'report-read'];
-    const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason'];
+    const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -152,8 +154,10 @@ function findRecord(ledger, taskId) {
  * starts with `cd "<worktree>" && `, and the worker re-reads the toplevel in the
  * same command before a commit, push or merge.
  */
-function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body, scratch }) {
+function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug, body, scratch }) {
     const r = slashes(repo), w = slashes(worktree);
+    const rep = slashes(report || path.join(scratch || os.tmpdir(), 'REPORT.md'));
+    const code = slug || taskId;
     return [
         'STEP 0. Do this before anything else. This session opened in a checkout other sessions share.',
         '```bash',
@@ -164,12 +168,12 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, body, s
         '```',
         `Work ONLY inside ${w}, on branch ${branch}. Do not edit, commit, check out or stash in the checkout this session opened in.`,
         `Every later shell command starts with \`cd "${w}" && \`: the shell's working directory is reset to the checkout this session opened in between commands, so a bare command after STEP 0 runs in the shared checkout. Before any commit, push or merge, print \`git rev-parse --show-toplevel\` in the same command and check it says ${w}.`,
-        `If STEP 0 fails, do no other work: report the failing command and its output to ${returnTo} with SendMessage, then stop.`,
+        `If STEP 0 fails, do no other work: write the failing command and its output to ${rep}, then stop. An unattended run cannot use SendMessage.`,
         `Any further worktree goes at ${r}/.claude/worktrees/<name>, never beside the repo.${scratch ? ` Logs, diffs, exit files and other scratch output go under ${slashes(scratch)}, never in the directory that holds the checkouts.` : ''}`,
         '',
         body.trim(),
         '',
-        `WHEN DONE OR BLOCKED, send one report to ${returnTo} with SendMessage: the commits, each verification command with what it printed, and what remains.`,
+        `WHEN DONE OR BLOCKED, write one report to ${rep} for ${returnTo}: the commits, each verification command with what it printed, and what remains. Its LAST line is exactly \`RESULT ${code} done|stopped|failed: <one line>\`. An unattended run cannot use SendMessage, so the file is the only return channel.`,
         `Do not delete scheduled task ${taskId}. Deleting it archives this session; the coordinator deletes it after reading your report.`,
         '',
     ].join('\n');
@@ -224,9 +228,10 @@ function brief(opts) {
     // [measured 2026-09-22] a worker told only "a new worktree" and `> f.log`
     // put both in the directory holding the checkouts. Name the scratch home.
     const scratch = path.join(claudePaths.configDir(), 'autodev', 'reports', taskId);
-    const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, body, scratch });
+    const report = opts.report ? path.resolve(opts.report) : path.join(scratch, 'REPORT.md');
+    const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug: opts.slug, body, scratch });
     const record = {
-        taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, state: 'composed',
+        taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed',
         composedAt: new Date().toISOString(),
         promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
     };
