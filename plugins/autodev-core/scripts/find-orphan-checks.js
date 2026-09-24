@@ -32,6 +32,16 @@ const args = process.argv.slice(2);
 const REPO = path.resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
 const asJson = args.includes('--json');
 const showAll = args.includes('--all');
+// `--help` is not a path, so without this line it fell through to a full scan
+// of the cwd. `[measured 2026-09-24]` that scan took 3.0 to 4.7 s idle and
+// 10.03 s under a gate's load, where check:entrypoints killed it at its 10 s
+// budget and turned a release gate red.
+const wantsHelp = args.includes('--help') || args.includes('-h');
+const USAGE = 'Usage: node find-orphan-checks.js [repo] [--json] [--all]\n'
+    + '  Lists scripts that assert something and are reachable from no runner.\n'
+    + '  --json  machine-readable output\n'
+    + '  --all   also list non-assertion scripts (one-off migrations etc.)\n'
+    + 'Exit 1 when an orphan check is found, 0 when none is.\n';
 
 const SCRIPT_DIRS = ['scripts', 'tools', 'bin', 'tooling'];
 const CODE_EXT = /\.(mjs|cjs|js|ts|tsx)$/;
@@ -372,4 +382,5 @@ function main() {
 // exit on its own with the same status. Nothing here holds the loop open.
 // See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
 // conventions that have actually cost something.
-process.exitCode = main();
+if (wantsHelp) process.stdout.write(USAGE);
+else process.exitCode = main();
