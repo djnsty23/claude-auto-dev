@@ -82,6 +82,7 @@
  */
 
 const cp = require('child_process');
+const fs = require('fs');
 
 // The spin below costs this many ms on an idle Apple M4 Pro (node 24.19.0,
 // median of 5: 125,125,126,126,132). It is a FAST-MACHINE FLOOR, not a
@@ -284,6 +285,73 @@ function lastWords(r, maxBytes) {
 }
 
 /**
+ * Run a child whose claim needs it KILLED AFTER IT WROTE, and hand back an
+ * attempt for grading only once the child has proved it wrote first.
+ *
+ * WHY. A spawnSync timeout counts from the spawn, and node's startup is bounded
+ * by nothing a suite controls. `[measured 2026-09-24]` a child with a 48 ms idle
+ * median had not started within 1000 ms during the 8.175.0 gate's check:coverage
+ * step. A child that writes and then hangs until a sub-second kill is therefore
+ * a race against startup: past a ~20x spike the kill lands first, the child has
+ * written nothing, and "a killed child keeps its output" goes red on a module
+ * that kept everything there was. No budget closes that race. Raising one only
+ * moves the size of spike it takes.
+ *
+ * So the child PROVES the order instead of the budget promising it: it writes
+ * its output, then writes `readyFile`, then hangs. The proof is a FILE because it
+ * must not travel through the pipes being graded. A spawnSync that dropped a
+ * killed child's output would drop a pipe-borne proof with it, and the defect
+ * would read as a stall.
+ *
+ * An attempt killed AT its budget without the file never reached its first
+ * write. It says nothing about the claim, so it is not graded, and the next rung
+ * runs four times longer. The first rung is the call site's own budget, so a
+ * healthy run costs exactly what it did. Every other attempt is graded, including
+ * one that ENDED EARLY without the file: a child that exited, or was killed
+ * before its budget, is a verdict about the fixture or the kill, and re-running
+ * it would hide either.
+ *
+ * attempt(ms)  one run under a kill budget of ms; returns its spawnSync result
+ * readyFile    written by the child after its output and before it hangs; this
+ *              function deletes it before every rung and after the last
+ * baseMs       the call site's budget; the rungs are 1x, 4x and 16x of it
+ *
+ * Returns { r, verdict, ready, rungs, trail }. r is the last attempt. verdict is
+ * false only when EVERY rung was killed before the child wrote, which the caller
+ * reports as indeterminate, never as red. rungs lists each attempt as
+ * { budgetMs, wallMs, ready, stalled }, and trail is the same list as one line.
+ */
+const WRITE_RUNGS = [1, 4, 16];
+
+function untilWrittenBeforeKill(attempt, readyFile, baseMs) {
+    const rungs = [];
+    let r = null;
+    let verdict = false;
+    try {
+        for (const k of WRITE_RUNGS) {
+            fs.rmSync(readyFile, { force: true });
+            const started = Date.now();
+            r = attempt(baseMs * k);
+            const wallMs = Date.now() - started;
+            const ready = fs.existsSync(readyFile);
+            // Graded against the budget the attempt RAN under, which a parent
+            // deadline can narrow (runBudgeted reports it), and a wall time
+            // measured here rather than read back from the module.
+            const ranUnder = typeof r.budgetMs === 'number' ? r.budgetMs : baseMs * k;
+            const stalled = !ready && timedOut(r) && wallMs >= ranUnder * 0.9;
+            rungs.push({ budgetMs: ranUnder, wallMs, ready, stalled });
+            if (!stalled) { verdict = true; break; }
+        }
+    } finally {
+        fs.rmSync(readyFile, { force: true });
+    }
+    const trail = rungs.map((x) => `${x.budgetMs}ms rung: `
+        + (x.ready ? 'wrote, then was killed' : x.stalled ? 'killed before it wrote' : 'ended without writing')
+        + ` after ${x.wallMs}ms`).join(' -> ');
+    return { r, verdict, ready: rungs.length > 0 && rungs[rungs.length - 1].ready, rungs, trail };
+}
+
+/**
  * spawnSync with the C3 budget policy.
  *
  * opts.timeout      base budget in ms (required; there is no default worth one)
@@ -411,7 +479,7 @@ function sweepBudgetFor(suite) {
 
 module.exports = {
     contentionFactor, timedOut, classify, reason, runBudgeted, tally, exitCode,
-    lastWords, deadlineRemaining, clampToDeadline,
+    lastWords, untilWrittenBeforeKill, deadlineRemaining, clampToDeadline,
     SPIN_FLOOR_MS, CONTENTION_MAX, DEADLINE_ENV, DEADLINE_FLOOR_MS,
     sweepBudgetFor, SWEEP_SUITE_BUDGET_MS, SWEEP_RUNNER_BUDGET_MS, SWEEP_MEASURED_RUNNER_MS,
 };
@@ -434,6 +502,8 @@ if (require.main === module) {
         const cases = [];
         const t = (label, ok, detail) => cases.push([label, ok, detail]);
         const NODE = process.execPath;
+        const os = require('os');
+        const path = require('path');
 
         const clean = runBudgeted(NODE, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 30000 });
         t('a clean child is a verdict', classify(clean) === 'verdict', classify(clean));
@@ -659,16 +729,37 @@ if (require.main === module) {
 
         // lastWords: the evidence a killed child leaves behind, which the caller
         // reporting ETIMEDOUT currently throws away.
+        //
+        // Both children below must be killed AFTER they write, which a 900 ms kill
+        // cannot promise under a startup spike, so each runs through
+        // untilWrittenBeforeKill and is graded only on an attempt whose own ready
+        // file proves the order. `[measured 2026-09-24]` with a 1500 ms startup
+        // stall emulated on one child at a time, the three assertions graded on
+        // these children went red at 9e1b215. They now pass on the 3600 ms rung,
+        // and an attempt the kill beat is re-run rather than graded.
         {
-            const noisy = runBudgeted(NODE,
-                ['-e', 'console.log("PASS  first");console.log("PASS  second");'
-                     + 'console.error("working on third");setInterval(function(){},1000)'],
-                { encoding: 'utf8', timeout: 900, retryOnTimeout: false });
-            t('a killed child still carries the output it managed to write',
+            const ready = path.join(os.tmpdir(), `sb-selftest-ready-${process.pid}`);
+            const env = Object.assign({}, process.env, { SB_READY_FILE: ready });
+            const WRITTEN_THEN_HANG = 'require("fs").writeFileSync(process.env.SB_READY_FILE,"1");'
+                + 'setInterval(function(){},1000)';
+            const killedAfter = (script, baseMs, extraEnv) => untilWrittenBeforeKill(
+                (ms) => runBudgeted(NODE, ['-e', script + WRITTEN_THEN_HANG],
+                    { encoding: 'utf8', timeout: ms, retryOnTimeout: false, env: Object.assign({}, env, extraEnv) }),
+                ready, baseMs);
+            // An assertion about a child that never reached its first write on
+            // any rung is undecided, not red.
+            const tw = (run, label, ok, detail) => (run.verdict
+                ? t(label, ok, `${detail} [${run.trail}]`)
+                : t(label, null, run.trail));
+
+            const noisyRun = killedAfter('console.log("PASS  first");console.log("PASS  second");'
+                + 'console.error("working on third");', 900);
+            const noisy = noisyRun.r;
+            tw(noisyRun, 'a killed child still carries the output it managed to write',
                 timedOut(noisy) && (noisy.stdout || '').includes('PASS  first'),
                 `${reason(noisy)} stdout=${JSON.stringify((noisy.stdout || '').slice(0, 60))}`);
             const lw = lastWords(noisy);
-            t('  and lastWords names the work that was in flight when it died',
+            tw(noisyRun, '  and lastWords names the work that was in flight when it died',
                 lw.includes('PASS  second') && lw.includes('working on third'), lw);
             t('  and it is bounded, so a chatty child cannot flood the conflict line',
                 lastWords({ stdout: 'x'.repeat(50000) }, 200).length < 400,
@@ -683,13 +774,41 @@ if (require.main === module) {
             // The fixture above writes stderr LAST, which is why concatenating the
             // two pipes looked correct for as long as it did. This one writes it
             // FIRST: the stderr line must not be presented as the tail of stdout.
-            const ordered = runBudgeted(NODE,
-                ['-e', 'process.stderr.write("WARN-FIRST\\n");'
-                     + 'process.stdout.write("OUT-LAST\\n");setInterval(function(){},1000)'],
-                { encoding: 'utf8', timeout: 900, retryOnTimeout: false });
-            const ow = lastWords(ordered);
-            t('  and a stderr line written FIRST is attributed to stderr, not reported as the last stdout',
+            const orderedRun = killedAfter('process.stderr.write("WARN-FIRST\\n");'
+                + 'process.stdout.write("OUT-LAST\\n");', 900);
+            const ow = lastWords(orderedRun.r);
+            tw(orderedRun, '  and a stderr line written FIRST is attributed to stderr, not reported as the last stdout',
                 /last stdout: "[^"]*OUT-LAST"/.test(ow) && /last stderr: "[^"]*WARN-FIRST/.test(ow), ow);
+
+            // CONTROL for the path a spike takes, on every run and not only under
+            // load: this child's first attempt sleeps through its whole budget
+            // BEFORE writing anything, which is what a startup stall looks like
+            // from here. It must be re-run on a longer rung and never graded, and
+            // the rung that is graded must hold the output. Without this, the
+            // re-run branch would first execute during a real spike.
+            //
+            // Decided whenever the last attempt's stdout holds the output, which
+            // is read here and not from the helper's own `ready`: a helper that
+            // stopped grading at all would otherwise turn this control
+            // indeterminate rather than red.
+            const stallOnce = path.join(os.tmpdir(), `sb-selftest-stall-once-${process.pid}`);
+            fs.writeFileSync(stallOnce, '1');
+            let ctl;
+            try {
+                ctl = killedAfter('try{require("fs").unlinkSync(process.env.SB_STALL_ONCE);'
+                    + 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,5000)}catch(e){}'
+                    + 'console.log("CONTROL-OUT");', 250, { SB_STALL_ONCE: stallOnce });
+            } finally {
+                fs.rmSync(stallOnce, { force: true });
+            }
+            const ctlWrote = (ctl.r.stdout || '').includes('CONTROL-OUT');
+            t('  control: an attempt killed before its child wrote anything is re-run on a longer budget '
+                + 'and never graded, and the graded rung holds the output',
+                ctl.verdict || ctlWrote
+                    ? ctl.verdict && ctl.rungs.length >= 2 && ctl.rungs[0].stalled && ctl.ready
+                        && timedOut(ctl.r) && ctlWrote
+                    : null,
+                ctl.trail);
         }
 
         let bad = false;
@@ -701,13 +820,17 @@ if (require.main === module) {
         catch { capBad = true; }
         t('a maxTimeout below the base budget is refused, not silently narrowing it', capBad);
 
-        let p = 0, fl = 0;
+        // Three outcomes, like every caller of this module: `ok === null` is a
+        // case this run could not decide, which exits 2 and is never a red.
+        let p = 0, fl = 0, und = 0;
         for (const [label, ok, detail] of cases) {
-            console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : '  (' + detail + ')'}`);
-            ok ? p++ : fl++;
+            const word = ok === null ? 'INDETERMINATE' : ok ? 'PASS' : 'FAIL';
+            console.log(`${word}  ${label}${ok || !detail ? '' : '  (' + detail + ')'}`);
+            if (ok === null) und++; else if (ok) p++; else fl++;
         }
-        console.log(`\npopulation: ${cases.length} assertions run, ${p} passed, ${fl} failed`);
-        process.exit(fl ? 1 : 0);
+        console.log(`\npopulation: ${cases.length} assertions run, ${p} passed, ${fl} failed`
+            + (und ? `, ${und} indeterminate` : ''));
+        process.exit(exitCode(fl, und));
     }
     console.log('usage: node tooling/spawn-budget.js [--selftest|--probe]');
     console.log('  A library for suites that spawn their subject: a base budget, and on a');

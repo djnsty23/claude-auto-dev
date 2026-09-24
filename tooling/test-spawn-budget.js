@@ -32,11 +32,34 @@ const TOOLING = __dirname;
 const SUBJECT = path.join(TOOLING, 'spawn-budget.js');
 const sb = require('./spawn-budget.js');
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, undecidedCount = 0;
 const failures = [];
 function check(label, ok, detail) {
     if (ok) pass++; else { fail++; failures.push(label); }
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : '  (' + detail + ')'}`);
+}
+// A case this run could not decide, because the child it needed never reached
+// its first statement. Counted as infrastructure: exit 2, never a red.
+function undecided(label, detail) {
+    undecidedCount++;
+    console.log(`INDETERMINATE  ${label}  (${detail})`);
+}
+// An assertion on a child run through sb.untilWrittenBeforeKill: graded only
+// when some rung got the child to its first write before the kill.
+function checkWritten(run, label, ok, detail) {
+    if (!run.verdict) { undecided(label, run.trail); return; }
+    check(label, ok, `${detail} [${run.trail}]`);
+}
+// The selftest has the same three outcomes. Exit 2 with no FAIL line is a case
+// it could not decide, reported as such rather than as a red.
+function checkSelftest(label, r, detail) {
+    const out = r.stdout || '';
+    const fails = out.split('\n').filter((l) => l.startsWith('FAIL'));
+    if (r.status === 2 && fails.length === 0 && /, \d+ indeterminate/.test(out)) {
+        undecided(label, out.split('\n').filter((l) => l.startsWith('INDETERMINATE')).join(' | '));
+        return;
+    }
+    check(label, r.status === 0, detail + (fails.length ? ' -> ' + fails.join(' | ') : ''));
 }
 
 // --- the CLI contract, which only a subprocess can see ----------------------
@@ -45,10 +68,8 @@ function check(label, ok, detail) {
     // NOTE the selftest pins AUTODEV_SPAWN_BUDGET_DEADLINE on itself in both
     // directions, so it is correct whether or not a parent published one.
     const childFails = (st.stdout || '').split('\n').filter((l) => l.startsWith('FAIL'));
-    check("the module's own --selftest is RUN here, so it is not a check nobody executes",
-        st.status === 0,
-        `status=${st.status} signal=${st.signal}`
-        + (childFails.length ? ' -> ' + childFails.join(' | ') : ''));
+    checkSelftest("the module's own --selftest is RUN here, so it is not a check nobody executes",
+        st, `status=${st.status} signal=${st.signal}`);
     const m = /population: (\d+) assertions run, (\d+) passed, (\d+) failed/.exec(st.stdout || '');
     check('  and it reports the population it ran, not a bare verdict', !!m,
         JSON.stringify((st.stdout || '').slice(-200)));
@@ -68,10 +89,8 @@ function check(label, ok, detail) {
             encoding: 'utf8', timeout: 300000,
             env: { ...process.env, AUTODEV_SPAWN_BUDGET_FACTOR: pin },
         });
-        const fails = (r.stdout || '').split('\n').filter((l) => l.startsWith('FAIL'));
-        check(`  and it passes with the contention factor pinned at ${pin}, not only at whatever `
-            + 'this machine happens to measure', r.status === 0,
-            `status=${r.status}` + (fails.length ? ' -> ' + fails.join(' | ') : ''));
+        checkSelftest(`  and it passes with the contention factor pinned at ${pin}, not only at whatever `
+            + 'this machine happens to measure', r, `status=${r.status}`);
     }
     // The floor is the case that actually bit: an idle fast machine returns
     // exactly 1, and a strict `>` against the base is false there.
@@ -93,10 +112,8 @@ function check(label, ok, detail) {
         env: Object.assign({}, process.env,
             { [sb.DEADLINE_ENV]: String(Date.now() + 870000) }),
     });
-    const dFails = (withDeadline.stdout || '').split('\n').filter((l) => l.startsWith('FAIL'));
-    check('  and the SAME selftest passes with a parent deadline published, the way the '
-        + 'sweep runs every suite', withDeadline.status === 0,
-        `status=${withDeadline.status}` + (dFails.length ? ' -> ' + dFails.join(' | ') : ''));
+    checkSelftest('  and the SAME selftest passes with a parent deadline published, the way the '
+        + 'sweep runs every suite', withDeadline, `status=${withDeadline.status}`);
     const dm = /population: (\d+) assertions run/.exec(withDeadline.stdout || '');
     check('    over the same population, so the deadline did not silently skip cases',
         !!dm && !!m && dm[1] === m[1], `${dm && dm[1]} vs ${m && m[1]}`);
@@ -120,42 +137,122 @@ function check(label, ok, detail) {
 // --- the retry actually re-runs the child, and a widened budget can win ------
 // On an idle machine the contention factor is ~1, so a child that is slow every
 // time cannot be rescued by any budget and would prove nothing about the retry.
-// This child is slow ONCE: it counts its own runs and returns immediately from
-// the second onwards. So a pass here means the retry re-executed the child,
-// which is the half of variant C3 that variant A does not have.
+// This child is slow ONCE: it hangs on the first attempt and returns at once on
+// the second. So a pass here means the retry re-executed the child, which is
+// the half of variant C3 that variant A does not have.
+//
+// WHO NUMBERS THE ATTEMPT. The first draft let the child count its own runs in
+// a marker file, which made "which attempt is this" depend on the child
+// reaching its first statement. `[measured 2026-09-24]` with node startup held
+// back 1500 ms (a NODE_OPTIONS --require shim matching this child only), the
+// first attempt was killed before it counted, the retry then counted itself as
+// run 1 and hung, and the suite went red on a correct module: "infrastructure
+// status=null", "runs=0". So the PARENT numbers the attempts now, through a spy
+// on child_process.spawnSync that writes the number to a file before each spawn
+// and records the budget, wall time and pid of each. A late start can no longer
+// renumber anything.
+//
+// That leaves one legitimate second shape. The first attempt can be killed
+// before it logs, and the log then reads "2" alone. It is accepted only when
+// the spy saw that first attempt spawned under the 700 ms base and running to
+// its kill, so an attempt that ENDED early without logging is still graded. The stall control below takes
+// that path deterministically on every run, so it is never untested code.
+//
+// THE RETRY'S BUDGET IS NOT THE CLAIM HERE. It is sized by the contention
+// factor, which the selftest covers pinned at 1, 8 and 20. Pinned here at
+// CONTENTION_MAX, so the retry gets 14 s instead of whatever the box measures,
+// and only a stall past that is left undecided rather than red.
 {
+    const cp = require('child_process');
     const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sb-suite-'));
+    const realSpawnSync = cp.spawnSync;
+    const pinnedBefore = process.env.AUTODEV_SPAWN_BUDGET_FACTOR;
     try {
-        const marker = path.join(dir, 'runs');
+        const attemptFile = path.join(dir, 'attempt');
+        const log = path.join(dir, 'log');
         const child = path.join(dir, 'slow-once.js');
-        // It TALLIES its runs rather than dropping a boolean marker. The first
-        // draft used a boolean, and mutating the retry away left it passing —
-        // the child still ran once and still wrote the flag, so an assertion
-        // labelled "executed twice" was decided by "executed at all".
+        // It LOGS every attempt that reached its first statement rather than
+        // dropping a boolean marker. The first draft used a boolean, and
+        // mutating the retry away left it passing: the child still ran once and
+        // still wrote the flag, so an assertion labelled "executed twice" was
+        // decided by "executed at all".
         fs.writeFileSync(child, `const fs=require('fs');\n`
-            + `const M=${JSON.stringify(marker)};\n`
-            + `const n=(fs.existsSync(M)?Number(fs.readFileSync(M,'utf8')):0)+1;\n`
-            + `fs.writeFileSync(M,String(n));\n`
-            + `if (n>1) process.exit(0);\n`
+            + `const k=fs.readFileSync(${JSON.stringify(attemptFile)},'utf8');\n`
+            + `if (process.env.SB_STALL_FIRST && k==='1') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,5000);\n`
+            + `fs.appendFileSync(${JSON.stringify(log)},k+'\\n');\n`
+            + `if (k!=='1') process.exit(0);\n`
             + `setInterval(function(){}, 1000);\n`);
 
-        const r = sb.runBudgeted(process.execPath, [child], { encoding: 'utf8', timeout: 700 });
-        check('a child that blows the base budget is re-run', r.attempts === 2, `attempts=${r.attempts}`);
-        check('  and the second run is what produces the verdict',
-            sb.classify(r) === 'verdict' && r.status === 0, `${sb.classify(r)} status=${r.status}`);
-        const runs = fs.existsSync(marker) ? Number(fs.readFileSync(marker, 'utf8')) : 0;
-        check('  and the child itself counted exactly two executions', runs === 2, `runs=${runs}`);
+        let spawns = [];
+        cp.spawnSync = function spy(command, args, opts) {
+            fs.writeFileSync(attemptFile, String(spawns.length + 1));
+            const started = Date.now();
+            const res = realSpawnSync.apply(this, arguments);
+            spawns.push({ budgetMs: opts && opts.timeout, wallMs: Date.now() - started, pid: res.pid });
+            return res;
+        };
+        process.env.AUTODEV_SPAWN_BUDGET_FACTOR = String(sb.CONTENTION_MAX);
+        const attempt = (extraEnv, retryOnTimeout) => {
+            spawns = [];
+            fs.rmSync(log, { force: true });
+            const r = sb.runBudgeted(process.execPath, [child], {
+                encoding: 'utf8', timeout: 700, retryOnTimeout,
+                env: Object.assign({}, process.env, extraEnv),
+            });
+            const logged = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').join(',') : '';
+            const killedAtBudget = (s) => !!s && s.wallMs >= 0.9 * s.budgetMs;
+            // The first attempt ran out the BASE budget, not merely whatever
+            // budget it was given: a module that spawned it under 1 ms would
+            // otherwise leave "2" alone and pass as a stall.
+            const firstRanOutBase = spawns.length > 0 && spawns[0].budgetMs === sb.clampToDeadline(700)
+                && killedAtBudget(spawns[0]);
+            const trail = spawns.map((s, i) => `attempt ${i + 1}: ${s.wallMs}ms of ${s.budgetMs}ms`).join(', ')
+                + ` | logged "${logged}"`;
+            return { r, logged, spawns: spawns.slice(), killedAtBudget, firstRanOutBase, trail };
+        };
+
+        const a = attempt({}, undefined);
+        // Undecided only when the RETRY never reached its first statement
+        // before its 14 s kill. Every other outcome is graded.
+        const retryStalled = a.spawns.length === 2 && sb.timedOut(a.r)
+            && !a.logged.split(',').includes('2') && a.killedAtBudget(a.spawns[1]);
+        const grade = retryStalled ? (label) => undecided(label, a.trail) : check;
+        grade('a child that blows the base budget is re-run', a.r.attempts === 2,
+            `attempts=${a.r.attempts} | ${a.trail}`);
+        grade('  and spawnSync was really called twice, counted by the spy and not by the module',
+            a.spawns.length === 2, a.trail);
+        grade('  and the second run is what produces the verdict',
+            sb.classify(a.r) === 'verdict' && a.r.status === 0 && a.spawns.length === 2
+                && a.r.pid === a.spawns[1].pid,
+            `${sb.classify(a.r)} status=${a.r.status} | ${a.trail}`);
+        grade('  and the child itself logged both executions, or only the second when the spy saw '
+            + 'the first run out its budget',
+            a.logged === '1,2' || (a.logged === '2' && a.firstRanOutBase), a.trail);
+
+        // CONTROL for the second shape: the first attempt is held past its
+        // budget on purpose, so it is killed before it logs. The retry must
+        // still be graded, on "2" alone, with the spy's wall time as the reason.
+        const s = attempt({ SB_STALL_FIRST: '1' }, undefined);
+        const sStalled = s.spawns.length === 2 && sb.timedOut(s.r)
+            && !s.logged.includes('2') && s.killedAtBudget(s.spawns[1]);
+        (sStalled ? (label) => undecided(label, s.trail) : check)(
+            '  control: a first attempt killed before it logged leaves "2" alone, and the retry '
+            + 'still produces the verdict',
+            s.logged === '2' && s.spawns.length === 2 && s.firstRanOutBase
+                && sb.classify(s.r) === 'verdict' && s.r.status === 0 && s.r.pid === s.spawns[1].pid,
+            `${sb.classify(s.r)} status=${s.r.status} | ${s.trail}`);
 
         // The control that makes the case above mean something: the same child,
         // with retry off, is infrastructure. Without this, "attempts===2" could
         // pass on a module that always ran twice and never classified anything.
-        fs.rmSync(marker, { force: true });
-        const noRetry = sb.runBudgeted(process.execPath, [child],
-            { encoding: 'utf8', timeout: 700, retryOnTimeout: false });
+        const n = attempt({}, false);
         check('  control: with the retry off the identical child is infrastructure, never a pass',
-            noRetry.attempts === 1 && sb.classify(noRetry) === 'infrastructure',
-            `attempts=${noRetry.attempts} ${sb.classify(noRetry)}`);
+            n.r.attempts === 1 && n.spawns.length === 1 && sb.classify(n.r) === 'infrastructure',
+            `attempts=${n.r.attempts} ${sb.classify(n.r)} | ${n.trail}`);
     } finally {
+        cp.spawnSync = realSpawnSync;
+        if (pinnedBefore === undefined) delete process.env.AUTODEV_SPAWN_BUDGET_FACTOR;
+        else process.env.AUTODEV_SPAWN_BUDGET_FACTOR = pinnedBefore;
         try { fs.rmSync(dir, { recursive: true, force: true }); }
         catch (e) { console.error('suite fixture cleanup FAILED (' + (e.code || e.message) + ') — left at ' + dir); process.exitCode = 2; }
     }
@@ -283,15 +380,32 @@ function check(label, ok, detail) {
 }
 
 // --- lastWords: the evidence a killed child leaves, which callers discarded ---
+//
+// Both real-child cases below need the child to WRITE before the kill, and a
+// spawnSync timeout counts from the spawn, so node's startup races it.
+// `[measured 2026-09-24]` a 48 ms idle child did not start within 1000 ms during
+// a gate, and with startup held back 1500 ms by a shim both cases went red on a
+// correct module ("ETIMEDOUT stdout=\"\""). So each child proves it wrote by
+// creating a file AFTER its output, on a channel other than the pipes under
+// test, and sb.untilWrittenBeforeKill re-runs only an attempt that was killed at
+// its budget without that file, on 4x and then 16x. The first rung is the old
+// 1200 ms, so a healthy run costs the same. An attempt that ended early is
+// graded. A child that never starts on any rung is INDETERMINATE, never red.
+const os = require('os');
+const writtenThenHang = 'require("fs").writeFileSync(process.env.SB_READY_FILE,"1");setInterval(function(){},1000)';
+const killedAfterWriting = (script, tag) => {
+    const ready = path.join(os.tmpdir(), `sb-ready-${process.pid}-${tag}`);
+    return sb.untilWrittenBeforeKill((ms) => spawnSync(process.execPath, ['-e', script + writtenThenHang],
+        { encoding: 'utf8', timeout: ms, env: Object.assign({}, process.env, { SB_READY_FILE: ready }) }),
+    ready, 1200);
+};
 {
-    const r = spawnSync(process.execPath,
-        ['-e', 'console.log("PASS  assertion one");console.log("PASS  assertion two");'
-             + 'setInterval(function(){},1000)'],
-        { encoding: 'utf8', timeout: 1200 });
-    check('a timed-out child still carries its output, so there is evidence to report',
+    const run = killedAfterWriting('console.log("PASS  assertion one");console.log("PASS  assertion two");', 'lw');
+    const r = run.r;
+    checkWritten(run, 'a timed-out child still carries its output, so there is evidence to report',
         !!r.error && r.error.code === 'ETIMEDOUT' && (r.stdout || '').includes('assertion one'),
         `${r.error && r.error.code} stdout=${JSON.stringify((r.stdout || '').slice(0, 80))}`);
-    check('  and lastWords turns it into one bounded line naming what was in flight',
+    checkWritten(run, '  and lastWords turns it into one bounded line naming what was in flight',
         sb.lastWords(r).includes('assertion two') && sb.lastWords(r).length < 600,
         sb.lastWords(r));
     check('  CONTROL: a silent child is reported as silent, not as the previous child\'s output',
@@ -310,15 +424,13 @@ function check(label, ok, detail) {
 // Real spawned child, not a synthetic object: the ordering only exists when
 // something actually writes in that order.
 {
-    const r = spawnSync(process.execPath,
-        ['-e', 'process.stderr.write("WARN-WRITTEN-FIRST\\n");'
+    const run = killedAfterWriting('process.stderr.write("WARN-WRITTEN-FIRST\\n");'
              + 'process.stdout.write("STDOUT-EARLIER\\n");'
-             + 'process.stdout.write("STDOUT-TRUE-TAIL\\n");'
-             + 'setInterval(function(){},1000)'],
-        { encoding: 'utf8', timeout: 1200 });
+             + 'process.stdout.write("STDOUT-TRUE-TAIL\\n");', 'order');
+    const r = run.r;
     const lw = sb.lastWords(r);
 
-    check('the child really did time out with both streams written, or this proves nothing',
+    checkWritten(run, 'the child really did time out with both streams written, or this proves nothing',
         !!r.error && r.error.code === 'ETIMEDOUT'
             && (r.stdout || '').includes('STDOUT-TRUE-TAIL')
             && (r.stderr || '').includes('WARN-WRITTEN-FIRST'),
@@ -328,10 +440,10 @@ function check(label, ok, detail) {
     // `last output: "STDOUT-EARLIER | STDOUT-TRUE-TAIL | WARN-WRITTEN-FIRST"`,
     // so the stdout tail it presented ended with a stderr line.
     const stdoutLabel = /last stdout: "([^"]*)"/.exec(lw);
-    check('stdout\'s reported tail is stdout\'s ACTUAL tail, not a stderr line appended to it',
+    checkWritten(run, 'stdout\'s reported tail is stdout\'s ACTUAL tail, not a stderr line appended to it',
         !!stdoutLabel && stdoutLabel[1].endsWith('STDOUT-TRUE-TAIL'),
         lw);
-    check('  and the stderr line is attributed to stderr rather than presented as last',
+    checkWritten(run, '  and the stderr line is attributed to stderr rather than presented as last',
         !!stdoutLabel && !stdoutLabel[1].includes('WARN-WRITTEN-FIRST')
             && /last stderr: "[^"]*WARN-WRITTEN-FIRST/.test(lw),
         lw);
@@ -396,9 +508,10 @@ function check(label, ok, detail) {
         !/=\s*900000/.test(sweepSrc), 'a bare 900000 is still assigned in the sweep');
 }
 
-console.log(`\n${sb.tally(pass, fail, process.exitCode === 2 ? 1 : 0)}`);
+const infra = undecidedCount + (process.exitCode === 2 ? 1 : 0);
+console.log(`\n${sb.tally(pass, fail, infra)}`);
 console.log(`subject: tooling/spawn-budget.js; its own --selftest is spawned here so the exit `
     + `code is asserted, the retry is proven by a child that is slow exactly once, and the `
     + `tally/exit agreement is decided by comparing the pair over all 27 combinations.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
-process.exit(sb.exitCode(fail, process.exitCode === 2 ? 1 : 0));
+process.exit(sb.exitCode(fail, infra));
