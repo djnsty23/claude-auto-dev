@@ -223,6 +223,28 @@ function clampToDeadline(ms) {
 }
 
 /**
+ * What empty streams mean depends on how the child ended, and the result says
+ * which. lastWords() below said "wrote nothing before it was killed" for every
+ * empty result. `[measured 2026-09-24]` a planted ENOENT reached a gate log
+ * through find-untested-hooks.js as `exited ENOENT ... · the child wrote nothing
+ * before it was killed`: a child that never started, reported as one that ran
+ * and was killed. A plain `process.exit(3)` with no output read the same way.
+ *
+ * Only fields spawnSync already sets are read. Every caller prints the error
+ * code or the status beside this line, so it is not repeated here.
+ *   killed         our timeout fired (ETIMEDOUT), or a signal ended it
+ *   never started  an error with no signal and no pid (spawnSync reports pid 0)
+ *   exited         a numeric status
+ * A result carrying none of those claims nothing about how the child ended.
+ */
+function silence(r) {
+    if (timedOut(r) || (r && r.signal)) return 'the child wrote nothing before it was killed';
+    if (r && r.error && !(r.pid > 0)) return 'the child never started, so it wrote nothing';
+    if (r && typeof r.status === 'number') return 'the child exited and wrote nothing';
+    return 'the child wrote nothing';
+}
+
+/**
  * The child's own account of itself, for the caller that has to report a result
  * carrying no exit code.
  *
@@ -277,7 +299,7 @@ function lastWords(r, maxBytes) {
         : cap;
     const out = tailOf(r && r.stdout, share);
     const err = tailOf(r && r.stderr, share);
-    if (!out && !err) return 'the child wrote nothing before it was killed';
+    if (!out && !err) return silence(r);
     const parts = [];
     if (out) parts.push('last stdout: ' + JSON.stringify(out));
     if (err) parts.push('last stderr: ' + JSON.stringify(err));
@@ -764,12 +786,41 @@ if (require.main === module) {
             t('  and it is bounded, so a chatty child cannot flood the conflict line',
                 lastWords({ stdout: 'x'.repeat(50000) }, 200).length < 400,
                 String(lastWords({ stdout: 'x'.repeat(50000) }, 200).length));
-            t('  and a child that wrote nothing says so rather than returning an empty string',
-                lastWords({ stdout: '', stderr: '' }) === 'the child wrote nothing before it was killed',
+            // A SILENT child is described by how it ended, because "killed" is a
+            // claim and three other endings leave the same empty streams. The
+            // first three endings are REAL spawnSync results. The rest are
+            // literal: one carries no fields at all, and a signal kill with no
+            // timeout or an error from a child that did start cannot be
+            // produced the same way on every platform.
+            const KILLED = 'the child wrote nothing before it was killed';
+            const quiet = cp.spawnSync(NODE, ['-e', HANG], { encoding: 'utf8', timeout: 1 });
+            t('  and a child our timeout killed before it wrote anything says it was killed',
+                timedOut(quiet) && lastWords(quiet) === KILLED,
+                `${reason(quiet)} pid=${quiet.pid} -> ${lastWords(quiet)}`);
+            const missing = cp.spawnSync(NODE + '.missing', ['-e', '0'], { encoding: 'utf8' });
+            t('  and a child that NEVER STARTED says so, not that it was killed',
+                !!missing.error && missing.error.code === 'ENOENT' && !(missing.pid > 0)
+                    && lastWords(missing) === 'the child never started, so it wrote nothing',
+                `${reason(missing)} pid=${missing.pid} -> ${lastWords(missing)}`);
+            const exited = cp.spawnSync(NODE, ['-e', 'process.exit(3)'], { encoding: 'utf8' });
+            t('  and a child that EXITED without writing says it exited, not that it was killed',
+                exited.status === 3 && lastWords(exited) === 'the child exited and wrote nothing',
+                `${reason(exited)} -> ${lastWords(exited)}`);
+            t('  and a signal with no timeout is still a kill, so the signal half of that branch is live',
+                lastWords({ stdout: '', stderr: '', signal: 'SIGKILL', status: null, pid: 4242 }) === KILLED,
+                lastWords({ stdout: '', stderr: '', signal: 'SIGKILL', status: null, pid: 4242 }));
+            t('  and an error from a child that HAS a pid is not called never-started, so the pid '
+                + 'half of that branch is live',
+                lastWords({ stdout: '', stderr: '', error: { code: 'EPIPE' }, signal: null, status: null, pid: 4242 })
+                    === 'the child wrote nothing',
+                lastWords({ stdout: '', stderr: '', error: { code: 'EPIPE' }, signal: null, status: null, pid: 4242 }));
+            t('  and a result carrying no ending at all claims none, rather than defaulting to "killed"',
+                lastWords({ stdout: '', stderr: '' }) === 'the child wrote nothing',
                 lastWords({ stdout: '', stderr: '' }));
-            t('  control: a child that DID write is not reported as silent, so the line '
-                + 'above is not passing on a function that says "nothing" to everything',
-                lastWords({ stdout: 'something\n' }) !== 'the child wrote nothing before it was killed',
+            t('  control: a child that DID write is not reported as silent, so the lines '
+                + 'above are not passing on a function that says "nothing" to everything',
+                !/wrote nothing/.test(lastWords({ stdout: 'something\n' }))
+                    && !/wrote nothing/.test(lastWords({ stdout: 'something\n', status: 3, pid: 4242 })),
                 lastWords({ stdout: 'something\n' }));
             // The fixture above writes stderr LAST, which is why concatenating the
             // two pipes looked correct for as long as it did. This one writes it
