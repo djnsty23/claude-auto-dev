@@ -1,5 +1,71 @@
 # Changelog
 
+## [8.173.0]
+
+### Every worker on one local page (#290)
+
+- `fleet-view.js` merges runs/, headless-worker, unattended-worker, bg-runner,
+  the mission store and the Desktop session stores of every account folder into
+  one table. Each source prints its population, and an unreadable one renders
+  COULD-NOT-READ instead of an empty row set. `serve` binds 127.0.0.1, refuses a
+  non-loopback Host and needs a per-start token on every POST. Its actions are
+  answer, settle, relaunch, take over, and stop by pid after an identity match.
+- It reads the Desktop store from the MSIX package copy
+  (`%LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming`) when `%APPDATA%/Claude`
+  is empty, which is what a process outside the app sees.
+- headless-worker: a worker asks through `ask.json` and `answer.json` and keeps
+  working instead of exiting. `status` shows `ask=open` until the answer lands.
+- unattended-worker: STEP 0 failures and the final report go to a file
+  (`--report`), because an unattended run cannot message anyone.
+
+### Hooks that cost less and fail safer (#291)
+
+- Concurrent Stops no longer wipe the shared throttle ledgers: each key is its
+  own file under `<ledger>.d/`. A rename that Windows refuses under load
+  (EPERM, EACCES, EBUSY) is retried five times over 155 ms instead of dropping
+  the write.
+- stop-typecheck backs off on its own per-session marker, not
+  `stop_hook_active`.
+- Model-directed notes reach the model, not only the operator.
+- agent-browser-cleanup sweeps only when agent-browser is live, and never
+  touches crashpad.
+- autodev-memory waits for a peer's lock, caps the WAL and truncates it at
+  SessionEnd.
+- The auto-mode flag is keyed on the session, not the directory.
+- pre-tool-filter fails open for Read, and its skip patterns anchor to path
+  segments.
+
+### A cleaner for model-written copy (#288)
+
+- `scripts/text-hygiene.mjs` removes zero-width characters, bidi controls,
+  Unicode tag characters and variation-selector runs, normalises odd spaces,
+  em dashes, the ellipsis character, curly quotes and Romanian cedilla letters,
+  and decodes any tag-character payload so a caller sees what was hidden. It
+  flags stock AI phrases without rewriting them. Code blocks, inline code, HTML,
+  URLs and front matter are left alone, except for bidi and tag characters.
+  One dependency-free ES module with a CLI: `--check` exits 1 when anything
+  would change, for a pre-publish gate.
+
+### Skills (#287)
+
+- analyze-skill-invocations counts a Skill call once, not once per recorded
+  copy of the same `toolu_` id, which had doubled every count.
+- `phase`, `grilling` and the `architect` agent are retired as duplicates of
+  `rule-workflow-spine`, the `plan-reviewer` agent and the built-in Plan agent.
+- CLAUDE.md and the spine no longer claim a `paths:` glob auto-loads a rule
+  skill: 30 days of transcripts show every load was a Skill call.
+- brain and auto-brain history moved out of the shipped plugin into `docs/`.
+
+### Fixes
+
+- framework-radar and marketing-radar use an `<agent>/` branch prefix,
+  resolved to `claude` under Claude Code, instead of a hardcoded `codex/` (#289).
+- A second Claude profile (`CLAUDE_CONFIG_DIR` other than `~/.claude`) keeps its
+  own state: 56 sites now resolve the config dir through `claude-paths.js`
+  (#283).
+- headless-worker `settle --lost` settles a record whose supervisor died with no
+  exit line, and refuses unless the record is provably not running (#284).
+
 ## [8.172.0]
 
 ### Compact in place at a natural break, with no click (#285)
