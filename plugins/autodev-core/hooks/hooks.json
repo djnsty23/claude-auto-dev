@@ -61,7 +61,8 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/panel-recommendation.js"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/panel-recommendation.js"],
+            "timeout": 5
           }
         ]
       },
