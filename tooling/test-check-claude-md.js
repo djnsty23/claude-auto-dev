@@ -170,12 +170,19 @@ try {
             /the literal gate chain/],
         ['a row of the passes table', /\| `"needs-setup"` \|[^\n]*\n/, '',
             /missing from the table: "needs-setup"/],
-        ['the autodev-core skill count', /core has \*\*(\d+) skills/, 'core has **999 skills',
-            /autodev-core skills/],
         // `\s+`, not a space: the real file wraps between the count and "of CI's".
         ['the CI ubuntu-gated step count', /(\w+)\s+of CI's steps are/, "Nineteen of CI's steps are",
             /CI steps gated to ubuntu-latest/],
     ];
+
+    // The population counts are gone from the real file on purpose: they went
+    // stale in silence three times in 48 hours, and the file itself says not to
+    // put them back. D2 and D3 still grade a count sentence if one returns, and
+    // the fixture selftest keeps them honest. This asserts the absence, so a
+    // count re-added to the real file fails here rather than rotting unread.
+    check('the real CLAUDE.md states no core population count (removed 2026-09-24)',
+        !/core has \*\*\d+ skills/.test(pristine) && !/memory's \d+ is still right/.test(pristine),
+        'a "core has **N skills" or "memory\'s N is still right" sentence is back');
 
     for (const [label, find, replace, wantFinding] of mutations) {
         const mutated = pristine.replace(find, replace);

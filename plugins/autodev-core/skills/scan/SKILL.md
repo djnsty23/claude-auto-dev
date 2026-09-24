@@ -76,7 +76,9 @@ For each priority page:
 3. Read the DOM/accessibility tree — check meaningful headings, image alternatives,
    and that no interactive element is unlabelled.
 4. `computer` with `action: "screenshot"` for the desktop view.
-5. `resize_window` with `preset: "mobile"`, reload, screenshot again.
+5. `resize_window` to 390 x 844 and then 414 x 896, reloading and taking a
+   screenshot at each. `preset: "mobile"` is 375 wide, narrower than either
+   phone width `auto` verifies at (step 10).
 6. `resize_window` back to `preset: "desktop"` before the next page.
 
 Store durable before/after proof according to `prove` and

@@ -634,10 +634,11 @@ function defaultBranch(root) {
 // FAMILY D — the population counts, and the plugins named.
 // Authority: the tree.
 //
-// CLAUDE.md says "do not put the numbers back", and then carries four of them
-// in a `[measured 2026-09-08]` sentence. That is fine — a dated measurement is
-// a legitimate thing to write down. What was not fine is that falsifying it
-// emitted nothing. This is the emitter.
+// CLAUDE.md says "do not put the numbers back", and until 2026-09-24 it
+// carried four of them in a dated sentence. That sentence is gone, and
+// test-check-claude-md.js asserts it stays gone. D2 and D3 remain so that a
+// count which does come back is graded instead of rotting unread: falsifying a
+// count emits nothing on its own, and this is the emitter.
 //
 // The same paragraph QUOTES the 2026-08-17 counts ("43 skills, 4 agents, 7 hook
 // events") as the ones that went stale. Those must never be graded, which is

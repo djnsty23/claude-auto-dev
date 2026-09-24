@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 137,857 | 22 of 22 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,226 | 22 of 22 |
-| B′ same, but dated LINES instead of paragraphs | 15,123 | 1 of 22 |
-| C  description only | 7,069 | 0 of 22 |
+| A  full body | 138,685 | 22 of 22 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,308 | 22 of 22 |
+| B′ same, but dated LINES instead of paragraphs | 15,205 | 1 of 22 |
+| C  description only | 7,151 | 0 of 22 |
 
 ### rule-ab-testing
 
@@ -326,7 +326,7 @@ Full text: `plugins/autodev-core/skills/rule-local-first/SKILL.md`
 
 **paths:** none — applies to any work; load it by name (user-invocable)
 
-How to end a turn: a clickable AskUserQuestion panel of vetted, complementary options with a recommendation in every block.
+How a decision panel looks when one is shown: a clickable AskUserQuestion panel of vetted, complementary options with a recommendation in every block. Whether to show one is the operator's decision policy.
 
 A decision panel gathers direction after delivering substantive work. It is not
 a permission reset or a reason to stop work the user already authorized. Follow

@@ -326,7 +326,10 @@ until morning. Background agents started from your own session, and unattended
 workers started with `unattended-worker.js`, run without anyone clicking, and
 you keep coordinating while they do. A self-scheduled wake
 is not it either: waking to an empty inbox and reporting again repeats the
-failure on a timer.
+failure on a timer. The one exception is polling a board: a dynamic `/loop`
+that wakes every 300 to 1800 s, reads the board and dispatches what it finds
+is a poll, not a driver. The work it finds still runs in background agents or
+unattended workers.
 
 For a stalled item record the hypothesis, last meaningful evidence and next
 experiment. Continue independent stories and keep failed work unresolved. At
