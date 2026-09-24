@@ -136,7 +136,10 @@ if (!memDB.isAvailable()) {
   cases.push(['edit in empty area exits 0', r3.status === 0]);
   cases.push(['edit in area with no knowledge emits no domain-knowledge line',
     !/Domain knowledge/.test(ctx(r3))]);
+  // existsSync first, as above: a hook that wrote nothing must fail this line,
+  // not throw out of the suite before any later assertion can report.
   cases.push(['empty area is still recorded as surfaced (no recompute next edit)',
+    fs.existsSync(surfacedFile) &&
     fs.readFileSync(surfacedFile, 'utf8').split('\n').includes(`${SESSION}\tsrc/billing`)]);
 
   // 4) A root-level file (no area) is skipped entirely — no injection, no crash.
@@ -159,9 +162,9 @@ if (!memDB.isAvailable()) {
   //    installed so the hook's capture block runs BEFORE injection (as in production).
   //    Uses its own temp HOME/DB so it can't perturb the deterministic cases above.
   //    With capture live the exact note count is nondeterministic, so we assert the
-  //    invariants that must always hold: exit 0, no crash, at most ONE injection
-  //    header for the area (capture→inject ordering doesn't double-handle), and the
-  //    throttle marker written exactly once.
+  //    invariants that must always hold: exit 0, no capture error, exactly ONE
+  //    injection header for the area (capture→inject ordering doesn't double-handle),
+  //    and the throttle marker written exactly once.
   {
     const CAP_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'knowinject-cap-')));
     const CAP_PLUGIN_ROOT = path.join(CAP_HOME, "fake-plugin");
@@ -207,8 +210,25 @@ if (!memDB.isAvailable()) {
       env: { ...process.env, CLAUDE_PLUGIN_ROOT: CAP_PLUGIN_ROOT, HOME: CAP_HOME, USERPROFILE: CAP_HOME }
     });
 
-    const capErr = ctx(capRun);
-    const headerCount = (capErr.match(/Domain knowledge for src\/auth/g) || []).length;
+    const capBrief = ctx(capRun);
+    const capStderr = String(capRun.stderr || '');
+    const headerCount = (capBrief.match(/Domain knowledge for src\/auth/g) || []).length;
+    const capMarkers = (() => {
+      const sf = path.join(CAP_PROJ, '.claude', 'knowledge-surfaced');
+      if (!fs.existsSync(sf)) return 0;
+      return fs.readFileSync(sf, 'utf8').split('\n').filter((l) => l === `${CAP_SESSION}\tsrc/auth`).length;
+    })();
+
+    // WHY the run failed, printed on each failing capture-active line and nowhere
+    // on a pass. `[measured 2026-09-24]` a gate carried three of these FAIL lines
+    // and nothing else: the hook catches every JS error and prints it, so a
+    // non-zero status with no stderr means the child did no observable work, and
+    // spawn failure, a kill and a native death before the first write all read
+    // the same without the fields below. Status, signal and error come first so
+    // they survive find-untested-hooks.js, which keeps 160 chars of a FAIL line.
+    const capWhy = `[hook run: status=${capRun.status} signal=${capRun.signal} `
+      + `error=${capRun.error ? (capRun.error.code || capRun.error.message) : 'none'} `
+      + `stderr tail=${JSON.stringify(capStderr.slice(-300))}]`;
 
     // The assertion this block was missing: capture must actually WRITE.
     //
@@ -228,19 +248,22 @@ if (!memDB.isAvailable()) {
         finally { process.env.HOME = prevH; process.env.USERPROFILE = prevProfile ?? prevP; }
     })();
     cases.push(['capture-active: an observation was actually recorded',
-        !!capStatsAfter && capStatsAfter.totalObservations > 1]);
+        !!capStatsAfter && capStatsAfter.totalObservations > 1, capWhy]);
 
-    cases.push(['capture-active: hook exits 0 with capture block running', capRun.status === 0]);
-    cases.push(['capture-active: no hook crash / uncaught error',
-      !/post-tool-typecheck error:/.test(capErr) && !/\[Memory\] capture error:/.test(capErr)]);
-    cases.push(['capture-active: at most one injection header for the area (no double-handle)',
-      headerCount <= 1]);
-    cases.push(['capture-active: throttle marker recorded exactly once for (session, area)', (() => {
-      const sf = path.join(CAP_PROJ, '.claude', 'knowledge-surfaced');
-      if (!fs.existsSync(sf)) return false;
-      const lines = fs.readFileSync(sf, 'utf8').split('\n').filter(Boolean);
-      return lines.filter((l) => l === `${CAP_SESSION}\tsrc/auth`).length === 1;
-    })()]);
+    cases.push(['capture-active: hook exits 0 with capture block running', capRun.status === 0, capWhy]);
+    // Both of the next two used to pass on EMPTY output, so a hook that never ran
+    // satisfied them. "No crash" also read the wrong stream: #291 moved the brief
+    // to stdout and pointed this check at the brief, while both of the hook's
+    // catch blocks write to stderr. It now credits nothing unless the hook ran
+    // far enough to write its throttle marker, which is its last act.
+    cases.push(['capture-active: hook ran to its marker write with no capture error',
+      capRun.status === 0 && capMarkers > 0 && !/\[Memory\] capture (hook )?error:/.test(capStderr), capWhy]);
+    // The seeded bcrypt decision guarantees a brief, so zero headers is a failure
+    // too: it is what a silent hook and a brief on the wrong channel both look like.
+    cases.push(['capture-active: exactly one injection header for the area',
+      headerCount === 1, capWhy]);
+    cases.push(['capture-active: throttle marker recorded exactly once for (session, area)',
+      capMarkers === 1, capWhy]);
 
     // ---- the AREA ladder, and the throttle file it writes ----
     //
@@ -443,8 +466,8 @@ if (!memDB.isAvailable()) {
 
 // --- Report ---
 let pass = 0, fail = 0;
-cases.forEach(([label, ok]) => {
-  console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
+cases.forEach(([label, ok, why]) => {
+  console.log((ok ? 'PASS' : 'FAIL') + '  ' + label + (!ok && why ? ' ' + why : ''));
   ok ? pass++ : fail++;
 });
 console.log(`\n${pass} passed, ${fail} failed`);
