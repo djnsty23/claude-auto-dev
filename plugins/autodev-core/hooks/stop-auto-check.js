@@ -34,21 +34,86 @@ const path = require('path');
 // panels, which is proof it was re-offered. The advisory queue print stays on
 // the commit path. A Stop hook fires far more often than a commit does, and a
 // check that speaks every turn is one that gets ignored.
-let carryNote = null;
+//
+// Each note is `{ key, text }`. A keyed note reaches the model once per session
+// (see forModel); a null key goes every time, for a note whose own path is
+// already bounded.
+const carry = [];
+// This session's ledger of keyed notes the model has been handed. Set once the
+// cwd and session are known; while null, no keyed note reaches the model.
+let notesLedger = null;
 
 // The note is FOR THE MODEL: it names work to pick up. `systemMessage` reaches
 // only the operator's screen, so until 2026-09-23 no session ever read the
 // nudge it was written for. It now also rides where the model reads: the
 // reason on a block, Stop `additionalContext` on an approve. The operator copy
-// stays, so what the operator sees did not change.
+// stays on every stop, so what the operator sees did not change.
 function decide(o) {
-    if (carryNote) {
-        o.systemMessage = carryNote;
-        if (o.decision === 'block') o.reason = o.reason + '\n\n' + carryNote;
-        else o.hookSpecificOutput = { hookEventName: 'Stop', additionalContext: carryNote };
+    if (carry.length) {
+        const text = carry.map((c) => c.text).join('\n');
+        o.systemMessage = text;
+        if (o.decision === 'block') o.reason = o.reason + '\n\n' + text;
+        else {
+            const fresh = forModel(carry);
+            if (fresh.length) o.hookSpecificOutput = { hookEventName: 'Stop', additionalContext: fresh.join('\n') };
+        }
     }
     console.log(JSON.stringify(o));
     process.exit(0);
+}
+
+// ONE WAKE PER NOTE PER SESSION. Stop `additionalContext` is not a quiet
+// channel: the harness continues the conversation so the model can act on it
+// (hooks reference, "Add context for Claude"). `systemMessage` is display only
+// and starts nothing. So a note sent on EVERY approve is a loop: the model
+// answers in one line, the turn ends, this hook fires again with the same note.
+// `[measured 2026-09-24]` a session outside auto, waiting on a background task
+// in a repo with 9 actionable stories, spent about 40 full model calls on
+// one-line "Waiting on run N" turns that way.
+//
+// A ledger that cannot be read or written sends no keyed note to the model:
+// a missed nudge costs one line, a missed guard costs a model call per stop.
+const LEDGER_MAX_AGE_MS = 7 * 86400000;
+
+function forModel(notes) {
+    const unkeyed = notes.filter((n) => n.key === null).map((n) => n.text);
+    let sent = null;
+    if (notesLedger) {
+        try {
+            sent = JSON.parse(fs.readFileSync(notesLedger, 'utf8'));
+            if (!Array.isArray(sent)) sent = null;
+        } catch (e) { sent = e && e.code === 'ENOENT' ? [] : null; }
+    }
+    if (!sent) return unkeyed;
+
+    const crypto = require('crypto');
+    const out = [];
+    const added = [];
+    for (const n of notes) {
+        if (n.key === null) { out.push(n.text); continue; }
+        const h = crypto.createHash('sha256').update(n.key).digest('hex').slice(0, 16);
+        if (sent.includes(h) || added.includes(h)) continue;
+        added.push(h);
+        out.push(n.text);
+    }
+    if (!added.length) return out;
+    try {
+        fs.mkdirSync(path.dirname(notesLedger), { recursive: true });
+        fs.writeFileSync(notesLedger, JSON.stringify(sent.concat(added)));
+    } catch { return unkeyed; }
+    // One ledger per session, so they accumulate. Sweep old ones once, on the
+    // session's first write.
+    if (!sent.length) {
+        try {
+            const dir = path.dirname(notesLedger);
+            for (const name of fs.readdirSync(dir)) {
+                if (!name.startsWith('stop-notes.')) continue;
+                const p = path.join(dir, name);
+                if (p !== notesLedger && Date.now() - fs.statSync(p).mtimeMs > LEDGER_MAX_AGE_MS) fs.unlinkSync(p);
+            }
+        } catch { /* a sweep must never strand a turn */ }
+    }
+    return out;
 }
 
 function approve() {
@@ -151,9 +216,12 @@ try {
                     //
                     // The ask is unchanged and is the useful half - a session that says
                     // where each item stands resolves the ambiguity the hook cannot.
-                    carryNote = `[queue] ${r.carried.length} selected item(s) were offered again in a later panel: `
+                    const note = `[queue] ${r.carried.length} selected item(s) were offered again in a later panel: `
                         + `${items}. That is a re-offer, not proof of non-delivery - this hook `
                         + `reads panels, not work. Say where each one stands before the turn ends.`;
+                    // Keyed on the text: the same re-offer wakes the model once,
+                    // and a later panel that changes the finding is a new note.
+                    carry.push({ key: 'queue:' + note, text: note });
                 }
             }
         } catch { /* a queue note must never strand a turn */ }
@@ -170,7 +238,8 @@ try {
     // A plain flag still on disk (written through Bash, or before the
     // PostToolUse claim existed) becomes this session's now.
     autoFlags.claim(cwd, sid);
-    const { active: autoFlag, exit: exitFlag, idle: idleMarker } = autoFlags.pathsFor(cwd, sid);
+    const { active: autoFlag, exit: exitFlag, idle: idleMarker, notes } = autoFlags.pathsFor(cwd, sid);
+    notesLedger = notes;
     const prdPath = path.join(cwd, 'prd.json');
 
     // Stale flag cleanup (>2 hours old = crashed session)
@@ -206,9 +275,12 @@ try {
     // This is that something: one line, only when there is a story, never a
     // block. A session that reads it runs `auto` and pulls; one that does not
     // has lost nothing it had before.
+    //
+    // The model gets it ONCE per session, whatever the count says by then (see
+    // forModel). Later stops still show it to the operator.
     if (!fs.existsSync(autoFlag)) {
         const nudge = nextStoryNudge(prdPath);
-        if (nudge) carryNote = carryNote ? carryNote + '\n' + nudge : nudge;
+        if (nudge) carry.push({ key: 'nudge', text: nudge });
         approve();
     }
 
@@ -312,7 +384,8 @@ try {
         for (const f of [idleMarker, autoFlag]) {
             try { fs.unlinkSync(f); } catch { /* already gone */ }
         }
-        if (!plan.complete) carryNote = carryNote ? carryNote + '\n' + status : status;
+        // Unkeyed: the idle marker already bounds this path to one approve.
+        if (!plan.complete) carry.push({ key: null, text: status });
         process.stderr.write('[Auto-Dev] IDLE detection already ran. Allowing stop.\n');
         approve();
     }
