@@ -1155,6 +1155,57 @@ try {
         const prec = p.json && p.json.ok ? p.json.value.records[0] : {};
         check('28. a report with no RESULT line at all names no other code', prec.result === 'unparseable' && prec.resultCodeFound === null);
     }
+    // 29. A supervisor pid that another image holds, within this boot. `[measured 2026-09-24]`
+    // pid 62756 had been reused by msedgewebview2.exe, kill(pid, 0) answered alive,
+    // and the ledger kept the worker as running. Pure over injected lookups first,
+    // then through the CLI and the real lookup.
+    {
+        const { pidImage, supervisorLiveness, isSupervisorImage, lostReason, recordStatus } = require(SCRIPT);
+        const out = (stdout, status = 0) => () => ({ status, stdout });
+        check('29. pidImage reads the image from a tasklist CSV row for that pid',
+            pidImage(62756, out('"msedgewebview2.exe","62756","Console","1","45,000 K"\r\n'), 'win32') === 'msedgewebview2.exe');
+        check('29. pidImage answers null for no match, a row for another pid, a failed run and a non-pid',
+            pidImage(62756, out('INFO: No tasks are running which match the specified criteria.\r\n'), 'win32') === null
+            && pidImage(62756, out('"node.exe","6275","Console","1","1 K"\r\n'), 'win32') === null
+            && pidImage(62756, out('', 1), 'win32') === null
+            && pidImage(0, out('"node.exe","0"\r\n'), 'win32') === null);
+        check('29. pidImage reads a posix ps comm path as its basename', pidImage(5, out('/usr/local/bin/node\n'), 'linux') === 'node');
+        const rec = { pid: process.pid, supervisorImage: 'node.exe' };
+        check('29. another image is reused, the supervisor image and an unreadable one stay alive',
+            supervisorLiveness(rec, { image: () => 'msedgewebview2.exe' }) === 'reused'
+            && supervisorLiveness(rec, { image: () => 'node.exe' }) === 'alive'
+            && supervisorLiveness(rec, { image: () => null }) === 'alive');
+        check('29. a record written before supervisorImage existed expects node',
+            isSupervisorImage({}, 'node.exe') && isSupervisorImage({}, 'node') && !isSupervisorImage({}, 'msedgewebview2.exe'));
+        const boot = Date.now() - os.uptime() * 1000;
+        const now = { ...rec, code: 'REUSED', startedAt: new Date().toISOString(), log: path.join(ROOT, 'no-such.log'), report: path.join(ROOT, 'no-such.report.md') };
+        const why = lostReason(now, boot, () => 'alive', () => 'msedgewebview2.exe');
+        check('29. lostReason proves a reused pid lost and names both images', /is now msedgewebview2\.exe, not the supervisor \(node\.exe\)/.test(why || ''), why);
+        check('29. lostReason under the supervisor image is not proof', lostReason(now, boot, () => 'alive', () => 'node.exe') === null);
+        check('29. recordStatus reads a reused pid as process unknown', recordStatus(now, boot, () => 'msedgewebview2.exe').process === 'unknown');
+
+        // This suite's own pid, recorded as if its supervisor had been another image.
+        const dir = path.join(ROOT, 'reused');
+        const ledger = path.join(dir, 'ledger.json');
+        const own = path.basename(process.execPath).toLowerCase();
+        const mk = (code, supervisorImage) => ({ code, pid: process.pid, supervisorImage, startedAt: new Date().toISOString(), log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' });
+        write(ledger, JSON.stringify({ version: 1, records: [mk('STRANGER', 'claude-supervisor.exe'), mk('OWNIMAGE', own)] }, null, 2) + '\n');
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const byCode = Object.fromEntries((st.json && st.json.ok ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('29. status: a live pid under another image is unknown, and the control under its own image is running',
+            !!byCode.STRANGER && byCode.STRANGER.process === 'unknown' && !!byCode.OWNIMAGE && byCode.OWNIMAGE.process === 'running',
+            JSON.stringify([byCode.STRANGER && byCode.STRANGER.process, byCode.OWNIMAGE && byCode.OWNIMAGE.process]));
+        const lost = hw(['settle', '--code', 'STRANGER', '--lost', '--ledger', ledger]);
+        check('29. settle --lost settles the reused pid and names the image that holds it',
+            lost.exit === 0 && !!lost.json && lost.json.ok && lost.json.value.state === 'lost'
+            && lost.json.value.reason.includes(`is now ${own}, not the supervisor (claude-supervisor.exe)`), lost.stdout.slice(0, 240));
+        const ctl = hw(['settle', '--code', 'OWNIMAGE', '--lost', '--ledger', ledger]);
+        check('29. control: settle --lost still refuses a pid its own image holds',
+            ctl.exit === 1 && !!ctl.json && !ctl.json.ok && ctl.json.error.code === 'not-lost', ctl.stdout.slice(0, 200));
+        const self = hw(['selftest']);
+        check('29. selftest reads its own image', self.exit === 0 && !!self.json && self.json.ok && self.json.value.cases.ownImage === own,
+            JSON.stringify(self.json && self.json.value && self.json.value.cases));
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -1168,7 +1219,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 28 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 29 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);

@@ -58,7 +58,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const claudePaths = require('./claude-paths.js');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const USAGE = [
     'Usage: node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>',
@@ -540,7 +540,7 @@ function start(opts) {
     // The order used to be spawn first and write second, and a refusal in the
     // write left a real worker running that no ledger named.
     const record = {
-        code: o.code, pid: null, startedAt: new Date().toISOString(),
+        code: o.code, pid: null, supervisorImage: path.basename(process.execPath).toLowerCase(), startedAt: new Date().toISOString(),
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
         version: placement.version, script: placement.script, dev: !placement.installed,
@@ -639,6 +639,49 @@ function pidLiveness(pid, probe) {
     try { (probe || process.kill)(pid, 0); return 'alive'; } catch (e) { return livenessFromError(e); }
 }
 
+/**
+ * The image holding a pid, lowercased and without a directory, or null when it
+ * cannot be read. `[measured 2026-09-24]` a supervisor pid, 62756, had died and
+ * been reused by msedgewebview2.exe within the same boot, so kill(pid, 0)
+ * answered alive and the ledger kept the worker as running.
+ */
+function pidImage(pid, run = spawnSync, platform = process.platform) {
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    try {
+        if (platform === 'win32') {
+            const r = run('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+            if (!r || r.status !== 0) return null;
+            const m = String(r.stdout).match(/^"([^"]+)","(\d+)"/m);
+            return m && Number(m[2]) === pid ? m[1].toLowerCase() : null;
+        }
+        const r = run('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8', timeout: 5000 });
+        if (!r || r.status !== 0) return null;
+        const t = String(r.stdout).trim();
+        return t ? path.basename(t).toLowerCase() : null;
+    } catch {
+        return null;
+    }
+}
+
+/** The image a record's supervisor was started as. A record written before the field existed ran node. */
+function isSupervisorImage(rec, seen) {
+    const want = String((rec && rec.supervisorImage) || '').toLowerCase();
+    return want ? seen === want : /^node(?:\.exe)?$/.test(seen);
+}
+
+/**
+ * `alive`, `dead` or `reused` for a record's supervisor pid. `reused` is a pid
+ * that answers kill(pid, 0) while another image holds it. An image that cannot
+ * be read leaves the answer `alive`: not knowing is not proof the supervisor
+ * is gone.
+ */
+function supervisorLiveness(rec, { probe, image = pidImage } = {}) {
+    const l = pidLiveness(rec.pid, probe);
+    if (l !== 'alive') return l;
+    const seen = image(rec.pid);
+    return seen && !isSupervisorImage(rec, seen) ? 'reused' : 'alive';
+}
+
 /** The LAST `RESULT <code> <state>: <sentence>` line for this exact code, or null. */
 function parseResult(reportText, code) {
     const re = new RegExp(`^RESULT\\s+${code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(${RESULT_STATES.join('|')}):\\s*(.+)$`, 'gm');
@@ -667,16 +710,17 @@ function bootAt() { return Date.now() - os.uptime() * 1000; }
  * A record whose startedAt precedes this boot is `unknown` whatever the pid
  * says: a pid is reused after a reboot, and a supervisor the reboot killed
  * never wrote its exit line, so the pid alone would report a stranger's
- * process as this worker, running, forever.
+ * process as this worker, running, forever. Within this boot, a pid that
+ * another image now holds is `unknown` for the same reason.
  */
-function recordStatus(rec, boot = bootAt()) {
+function recordStatus(rec, boot = bootAt(), image = pidImage) {
     const logText = readText(rec.log);
     const exit = logText === null ? null : exitCodeOf(logText);
     const started = Date.parse(rec.startedAt || '');
     let processState;
     if (exit !== null) processState = 'exited';
     else if (Number.isFinite(boot) && Number.isFinite(started) && started < boot) processState = 'unknown';
-    else processState = pidLiveness(rec.pid) === 'alive' ? 'running' : 'unknown';
+    else processState = supervisorLiveness(rec, { image }) === 'alive' ? 'running' : 'unknown';
     const reportText = readText(rec.report);
     let result = 'none';
     let sentence = null;
@@ -752,21 +796,27 @@ function statusLines(value) {
 // ---------------------------------------------------------------- settle
 /**
  * Why a record with no exit line is provably not running, or null when it is
- * not provable. Two proofs, in order. A record started before this boot: the
+ * not provable. Three proofs, in order. A record started before this boot: the
  * reboot killed its supervisor, and its pid may now name a stranger, so the pid
  * is not consulted. A record started after this boot whose pid is dead: the
- * supervisor is gone without writing its line. Anything else, including an
- * alive pid and a pid that was never recorded, is not proof. The pid is the
+ * supervisor is gone without writing its line. A pid that another image now
+ * holds: the supervisor is gone and its pid was reused. Anything else, including
+ * an alive pid whose image cannot be read and a pid that was never recorded, is
+ * not proof. The pid is the
  * SUPERVISOR's, so a claude child that outlived a killed supervisor is not
  * seen by the second proof. The first proof is the one that covers a reboot.
  */
-function lostReason(rec, boot, liveness = pidLiveness) {
+function lostReason(rec, boot, liveness = pidLiveness, image = pidImage) {
     const started = Date.parse(rec.startedAt || '');
     if (Number.isFinite(boot) && Number.isFinite(started) && started < boot) {
         return `started ${rec.startedAt}, before this boot at ${new Date(boot).toISOString()}, and the log has no exit line`;
     }
     if (!Number.isInteger(rec.pid) || rec.pid <= 0) return null;
     if (liveness(rec.pid) === 'dead') return `pid ${rec.pid} is dead and the log has no exit line`;
+    const seen = image(rec.pid);
+    if (seen && !isSupervisorImage(rec, seen)) {
+        return `pid ${rec.pid} is now ${seen}, not the supervisor (${rec.supervisorImage || 'node'}), and the log has no exit line`;
+    }
     return null;
 }
 
@@ -841,7 +891,7 @@ function settleUnreported(rec, code, exit) {
     const boot = bootAt();
     const started = Date.parse(rec.startedAt || '');
     const thisBoot = !(Number.isFinite(boot) && Number.isFinite(started) && started < boot);
-    if (thisBoot && pidLiveness(rec.pid) === 'alive') {
+    if (thisBoot && supervisorLiveness(rec) === 'alive') {
         fault('still-running', `${rec.log} has an exit line, but the supervisor pid ${rec.pid} is alive, so that line can belong to an `
             + 'earlier run appended to the same log. Settle once the supervisor has ended');
     }
@@ -875,9 +925,11 @@ function selftest() {
         eperm: pidLiveness(process.pid, () => { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; }),
         esrch: pidLiveness(process.pid, () => { const e = new Error('ESRCH'); e.code = 'ESRCH'; throw e; }),
         notAPid: pidLiveness(0),
+        ownImage: pidImage(process.pid),
     };
     const ok = cases.noError === 'alive' && cases.ESRCH === 'dead' && cases.EPERM === 'alive'
-        && cases.ownPid === 'alive' && cases.eperm === 'alive' && cases.esrch === 'dead' && cases.notAPid === 'dead';
+        && cases.ownPid === 'alive' && cases.eperm === 'alive' && cases.esrch === 'dead' && cases.notAPid === 'dead'
+        && (cases.ownImage === null ? process.platform !== 'win32' : isSupervisorImage({ supervisorImage: path.basename(process.execPath) }, cases.ownImage));
     if (!ok) fault('selftest-failed', JSON.stringify(cases));
     return { selftest: 'pass', cases };
 }
@@ -912,5 +964,5 @@ module.exports = {
     HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     askFiles, askNote, askState, scratchDirFor, readLedger, settle, start,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
-    livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
+    livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
 };
