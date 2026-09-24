@@ -150,11 +150,11 @@ function runAsk(home, job, q) {
  * tells one to do when nothing independent is left. Its ask.json lives in the
  * scratch dir named by its code, beside its report.
  */
-function headlessAsk(home, code, q) {
+function headlessAsk(home, code, q, startedAt = minutesAgo(5)) {
     const wdir = path.join(home, 'workers');
     fs.mkdirSync(path.join(wdir, code), { recursive: true });
     const rec = {
-        code, pid: 0, startedAt: minutesAgo(5), cwd: '/fixture/project', state: 'running',
+        code, pid: 0, startedAt, cwd: '/fixture/project', state: 'running',
         log: path.join(wdir, code + '.jsonl'), report: path.join(wdir, code + '.report.md'), promptFile: path.join(wdir, code + '.md'),
     };
     fs.writeFileSync(rec.promptFile, `# ${code} brief\n`, 'utf8');
@@ -514,6 +514,31 @@ function run() {
     const k4 = drive(hAsk, 'count');
     check('a worker that rewrites its ask notifies again, with the new question',
         firedIn(k4) === 1 && (toastsIn(k4)[0] || {}).body === 'Which base, now that main moved?', summarise(k4));
+
+    // =====================================================================
+    console.log('\n=== a rerun at the same code is one ask, owned by the newest run ===');
+    // =====================================================================
+    // Every record at one code shares one scratch directory, so the rerun's
+    // ask.json is also what the earlier record there reads. [measured 2026-09-24]
+    // the live ledger held 15 codes with more than one record, one of them three.
+    const hRerun = makeHome('rerun');
+    headlessAsk(hRerun, 'W-RE', { question: 'First run?' }, minutesAgo(90));
+    const reAskFile = headlessAsk(hRerun, 'W-RE', { question: 'Which base, on the rerun?' }, minutesAgo(5));
+    const re1 = drive(hRerun, 'count');
+    check('two records sharing one ask.json fire ONE toast and count ONE ask',
+        firedIn(re1) === 1 && (popIn(re1) || {}).asking === 1
+        && (toastsIn(re1)[0] || {}).body === 'Which base, on the rerun?', summarise(re1));
+    const rePage = spawnSync(process.execPath,
+        [VIEW, 'list', '--json', '--home', hRerun, '--appdata', path.join(hRerun, 'appdata')],
+        { encoding: 'utf8', env: envFor(hRerun), windowsHide: true });
+    let reRows = null;
+    try { reRows = JSON.parse(rePage.stdout).rows.filter((r) => r.code === 'W-RE'); } catch { /* stays null */ }
+    const newest = (reRows || []).map((r) => r.key).sort().pop();
+    const asking = (reRows || []).filter((r) => r.question);
+    check('the page shows the question on the newest run only, never on the one before it',
+        Array.isArray(reRows) && reRows.length === 2 && asking.length === 1
+        && asking[0].askFile === reAskFile && asking[0].key === newest,
+        `rows=${JSON.stringify((reRows || []).map((r) => ({ key: r.key, q: !!r.question, actions: r.actions })))}`);
 
     // =====================================================================
     console.log('\n=== panels and asks share one summary threshold ===');
