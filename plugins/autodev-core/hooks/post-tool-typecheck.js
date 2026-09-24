@@ -22,18 +22,34 @@
 // The `typecheck` switch (plugin userConfig, reaching hooks as
 // CLAUDE_PLUGIN_OPTION_TYPECHECK="false") skips this hook: it advises, it never
 // guards. tooling/test-hooks-profile.js holds the list of hooks that may.
-if (process.env.CLAUDE_PLUGIN_OPTION_TYPECHECK === 'false') process.exit(0);
+//
+// ONE UNRELATED DUTY rides here because this is the only core hook already on
+// Write: claiming an auto-mode flag the model just wrote. It runs BEFORE the
+// typecheck switch, because it is not typecheck's to disable. See
+// scripts/auto-flag.js for why the flag is keyed per session and why the claim
+// must happen inside the same tool call rather than at the next Stop.
 
 const fs = require('fs');
 const path = require('path');
 
+let data;
 try {
-    let data;
-    try {
-        data = JSON.parse(fs.readFileSync(0, 'utf8'));
-    } catch {
-        process.exit(0);
+    data = JSON.parse(fs.readFileSync(0, 'utf8'));
+} catch {
+    process.exit(0);
+}
+
+try {
+    const fp = data && data.tool_input && data.tool_input.file_path;
+    const autoFlags = require(path.join(__dirname, '..', 'scripts', 'auto-flag.js'));
+    if (autoFlags.isFlagPath(fp)) {
+        autoFlags.claim(path.dirname(path.dirname(path.resolve(data.cwd || process.cwd(), fp))), autoFlags.sidOf(data));
     }
+} catch { /* the Stop hook claims anything left over */ }
+
+if (process.env.CLAUDE_PLUGIN_OPTION_TYPECHECK === 'false') process.exit(0);
+
+try {
     const toolInput = (data && data.tool_input) || {};
     const paths = [];
     if (typeof toolInput.file_path === 'string') paths.push(toolInput.file_path);

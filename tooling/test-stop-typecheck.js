@@ -172,16 +172,49 @@ const PASSING = 'node -e "process.exit(0)"';
 
 // ---------------------------------------------------------------- one retry
 
-// The block makes the model continue; its next Stop carries stop_hook_active.
-// A check that STILL fails then is reported to the operator and let through,
-// or a type error the model cannot fix would hold the turn forever.
+// The block makes the model continue. A check that STILL fails on the next Stop
+// is reported to the operator and let through, or a type error the model cannot
+// fix would hold the turn forever. "This is the retry" is THIS hook's own
+// per-session marker, not `stop_hook_active`: that bit is shared by every Stop
+// hook, and stop-auto-check sets it on every auto turn, so reading it meant a
+// FIRST failure during auto never blocked at all.
+const repend = (dir) => fs.writeFileSync(path.join(dir, '.claude', '.typecheck-pending'), path.join(dir, 'src/app.ts') + '\n');
+{
+    const dir = project({ scripts: { typecheck: FAILING }, pending: ['src/app.ts'] });
+    check('the first failure blocks', blocked(run(dir)));
+    repend(dir);
+    const r = run(dir, { stopHookActive: true });
+    check('the retry after our own block does not block again', r.status === 0 && r.json && r.json.decision === undefined);
+    check('  but the operator is told', !!r.json && typeof r.json.systemMessage === 'string' && /still failing/.test(r.json.systemMessage));
+    check('  in one line, not the whole error dump', !!r.json && !/TYPE_ERROR_MARKER/.test(r.json.systemMessage));
+    check('  and the list is consumed', consumed(dir));
+    repend(dir);
+    check('  and the episode is over: the next failure blocks again', blocked(run(dir)));
+}
+
+// F11: another hook's block sets stop_hook_active. That is not our retry.
 {
     const dir = project({ scripts: { typecheck: FAILING }, pending: ['src/app.ts'] });
     const r = run(dir, { stopHookActive: true });
-    check('a failure under stop_hook_active does not block again', r.status === 0 && r.json && r.json.decision === undefined);
-    check('  but the operator is told', typeof r.json.systemMessage === 'string' && /still failing/.test(r.json.systemMessage));
-    check('  in one line, not the whole error dump', !/TYPE_ERROR_MARKER/.test(r.json.systemMessage));
-    check('  and the list is consumed', consumed(dir));
+    check('a FIRST failure under stop_hook_active (set by auto) still blocks', blocked(r));
+}
+
+// The marker is per session: a peer's block in the same directory is not ours.
+{
+    const dir = project({ scripts: { typecheck: FAILING }, pending: ['src/app.ts'] });
+    const payload = (sid) => JSON.stringify({ hook_event_name: 'Stop', session_id: sid, cwd: dir, stop_hook_active: false });
+    check('session A blocks', blocked(run(dir, { input: payload('sess-a') })));
+    repend(dir);
+    check('session B, same directory, first failure: still blocks', blocked(run(dir, { input: payload('sess-b') })));
+}
+
+// A retry turn that edited nothing ends the episode, so a later failure blocks.
+{
+    const dir = project({ scripts: { typecheck: FAILING }, pending: ['src/app.ts'] });
+    check('blocks once', blocked(run(dir)));
+    check('a retry Stop with nothing pending is silent', silent(run(dir, { stopHookActive: true })));
+    repend(dir);
+    check('  and the next failure blocks rather than reading as a retry', blocked(run(dir)));
 }
 
 // Malformed stdin must not lose the check: the pending list is the evidence,

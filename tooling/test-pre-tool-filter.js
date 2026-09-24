@@ -65,6 +65,21 @@ const cases = [
   ['Read node_modules blocked', 'Read', { file_path: 'node_modules/react/index.js' }, 2],
   ['Read package-lock blocked', 'Read', { file_path: 'package-lock.json' }, 2],
   ['Read source file allowed', 'Read', { file_path: 'src/app.tsx' }, 0],
+
+  // Skip patterns match whole PATH SEGMENTS. Unanchored, each of these
+  // ordinary source files was refused on Read.
+  ['Read src/rebuild/ is source, not build output', 'Read', { file_path: '/p/src/rebuild/index.js' }, 0],
+  ['Read prebuild/ is not build/', 'Read', { file_path: '/p/prebuild/step.js' }, 0],
+  ['Read redist/ is not dist/', 'Read', { file_path: '/p/redist/README.md' }, 0],
+  ['Read test-coverage/ is not coverage/', 'Read', { file_path: '/p/test-coverage/plan.md' }, 0],
+  ['Read node_modules_notes.md is not node_modules', 'Read', { file_path: '/p/docs/node_modules_notes.md' }, 0],
+  ['Read package-lock.json.md is not the lockfile', 'Read', { file_path: '/p/docs/package-lock.json.md' }, 0],
+  // Controls: the anchored forms still skip the real thing, at any depth and
+  // with either separator.
+  ['Read nested node_modules still skipped', 'Read', { file_path: '/p/a/node_modules/x/index.js' }, 2],
+  ['Read Windows dist\\ still skipped', 'Read', { file_path: 'C:\\p\\dist\\bundle.js' }, 2],
+  ['Read build/ at the root still skipped', 'Read', { file_path: 'build/out.js' }, 2],
+  ['Read nested package-lock.json still skipped', 'Read', { file_path: '/p/web/package-lock.json' }, 2],
 ];
 
 // ---------------------------------------------------------------------------
@@ -354,6 +369,35 @@ for (const [label, tool, input, expected] of cases) {
   const ok = r.status === 2;
   if (ok) pass++; else fail++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  unparseable input fails CLOSED  (got ${r.status}, expected 2)`);
+}
+
+// ...but only where a protected WRITE could be behind it. A payload that is
+// recognisably a Read fails OPEN: refusing a read protects nothing, and failing
+// closed there blocked every Read in the session whenever the input was bad.
+// The Write twin of the same truncation must stay closed.
+{
+  const cut = (tool) => JSON.stringify({ tool_name: tool, tool_input: { file_path: '/p/src/a.js' } }).slice(0, -3);
+  for (const [tool, expected] of [['Read', 0], ['Write', 2], ['Edit', 2]]) {
+    const r = spawnSync('node', [HOOK], { input: cut(tool), encoding: 'utf8' });
+    const ok = r.status === expected;
+    if (ok) pass++; else fail++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  truncated ${tool} payload: exit ${expected}  (got ${r.status})`);
+  }
+}
+
+// An internal error after parsing: open for Read, closed for Write. A
+// file_path that is not a string makes path.basename throw in the write branch;
+// the Read twin carries the same bad value.
+{
+  for (const [tool, expected] of [['Read', 0], ['Write', 2]]) {
+    const r = spawnSync('node', [HOOK], {
+      input: JSON.stringify({ tool_name: tool, tool_input: { file_path: { not: 'a string' }, content: 'x' } }),
+      encoding: 'utf8',
+    });
+    const ok = r.status === expected;
+    if (ok) pass++; else fail++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  malformed file_path on ${tool}: exit ${expected}  (got ${r.status})`);
+  }
 }
 
 // Lint/format config protection, ported from ECC on 2026-09-07. Asserted on

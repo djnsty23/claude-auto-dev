@@ -49,6 +49,8 @@ Content: {"started":"<current ISO timestamp>","sprint":"<current sprint>"}
 
 This flag tells the Stop hook to block Claude from stopping. Claude keeps working as long as this flag exists.
 
+The hooks rename it at once to `.claude/auto-active.<session id>`, so it holds only THIS session. A peer session in the same directory is never held by it, and a peer's `auto-exit` never ends it. Do not look for the plain name afterwards: it is gone by design.
+
 On exit (user says "done", or nothing left), **do not `rm` the flag** — Bash ops on `.claude/` trigger a sensitive-file permission prompt even under bypass. Instead, simply stop working. The Stop hook owns the flag lifecycle:
 
 - Stale flags (>2h old) are auto-cleaned
@@ -642,7 +644,7 @@ What's next?
 4. Done for now
 ```
 
-Keep `.claude/auto-active` flag while asking. Only delete it if user picks "Done for now".
+Keep the auto flag while asking. If the user picks "Done for now", write `.claude/auto-exit` with the Write tool; the Stop hook removes this session's flag.
 
 ## Quick Reference
 

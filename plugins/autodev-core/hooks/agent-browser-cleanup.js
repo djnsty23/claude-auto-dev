@@ -282,12 +282,11 @@ function killZombies() {
                 stdio: 'ignore',
                 windowsHide: true,
             });
-            // Also sweep crashpad_handler children orphaned by Chromium —
-            // they don't always show up under the parent's tree.
-            execSync('taskkill /F /IM "crashpad_handler.exe"', {
-                stdio: 'ignore',
-                windowsHide: true,
-            });
+            // No crashpad_handler sweep. It was `taskkill /F /IM
+            // crashpad_handler.exe`, machine-wide, which killed the crash
+            // reporter of every Chromium and Electron app on the box (Chrome,
+            // VS Code, Slack, the Claude desktop app) at every session start.
+            // The /T tree kill above already takes agent-browser's own.
         } else {
             // Enumerate, filter, kill by pid. The POSIX reaping section above
             // says why no pattern is ever handed to a killer here.
@@ -411,25 +410,59 @@ function disableAutostartPreferences() {
     }
 }
 
+const WIN_BINARY = 'agent-browser-win32-x64.exe';
+
+/**
+ * Is an agent-browser binary running right now? Windows only.
+ *
+ * Every session start used to run the whole sweep (wmic or PowerShell, three
+ * taskkills, a registry delete, a profile walk) on a machine where agent-browser
+ * had not run in weeks. One tasklist answers whether any of it has work to do.
+ *
+ * A tasklist that fails answers "unknown", and unknown is NOT live: the sweep
+ * kills things, so it runs on positive evidence only. The cost of that
+ * direction is small and self-correcting. An autostart entry left by a browser
+ * that already exited starts Chromium at the next boot, and that session sees
+ * it live and cleans up.
+ */
+function agentBrowserLive() {
+    try {
+        const out = execSync(`tasklist /FI "IMAGENAME eq ${WIN_BINARY}" /NH /FO CSV`, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            windowsHide: true,
+        });
+        return String(out).toLowerCase().includes(WIN_BINARY);
+    } catch {
+        return false;
+    }
+}
+
 function cleanup() {
-    killZombies();
     if (isWin) {
-        removeWindowsAutostartRegistry();
-        disableAutostartPreferences();
+        if (agentBrowserLive()) {
+            killZombies();
+            removeWindowsAutostartRegistry();
+            disableAutostartPreferences();
+        }
+        // Unconditional, and deliberately so: the hotkey can stay broken after
+        // the browser that broke it is gone (see restoreSnippingToolHotkey).
         restoreSnippingToolHotkey();
+    } else {
+        killZombies();
     }
 }
 
 if (require.main === module) {
-    // --help must return before cleanup(). On Windows that call is five child
+    // --help must return before cleanup(). On Windows that call was five child
     // processes (wmic, taskkill x3, PowerShell x2) and measured 8-10 s with ~190
     // node processes live, which blew the entrypoint checker's 10 s budget. It
     // also KILLS things: a request for usage text used to close Snipping Tool.
     if (process.argv.includes('--help') || process.argv.includes('-h')) {
         console.log('agent-browser-cleanup.js: SessionStart hook.\n'
-            + 'Windows: kills zombie agent-browser Chromium (tree), crashpad_handler,\n'
-            + 'SnippingTool and ScreenClippingHost; removes the HKCU Run autostart entry;\n'
-            + 'patches agent-browser Chromium profiles to stop re-registering.\n'
+            + 'Windows: only while an agent-browser process is live, kills it (tree),\n'
+            + 'removes the HKCU Run autostart entry and patches its Chromium profiles.\n'
+            + 'Always resets SnippingTool and ScreenClippingHost (the Win+Shift+S hotkey).\n'
             + 'macOS/Linux: reaps abandoned agent-browser processes by pid, never by pattern.\n'
             + 'Manual use: node "${CLAUDE_PLUGIN_ROOT}/hooks/agent-browser-cleanup.js"\n'
             + 'Never blocks a session; every path exits 0; silence is zero bytes.');
@@ -442,6 +475,7 @@ if (require.main === module) {
 module.exports = {
     cleanup,
     killZombies,
+    agentBrowserLive,
     // POSIX reaping, exported so the decision can be tested apart from the
     // killing. classifyProcesses is the whole filter and is pure.
     AGENT_BROWSER_BINARY,

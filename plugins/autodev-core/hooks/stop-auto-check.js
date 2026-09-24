@@ -36,8 +36,17 @@ const path = require('path');
 // check that speaks every turn is one that gets ignored.
 let carryNote = null;
 
+// The note is FOR THE MODEL: it names work to pick up. `systemMessage` reaches
+// only the operator's screen, so until 2026-09-23 no session ever read the
+// nudge it was written for. It now also rides where the model reads: the
+// reason on a block, Stop `additionalContext` on an approve. The operator copy
+// stays, so what the operator sees did not change.
 function decide(o) {
-    if (carryNote) o.systemMessage = carryNote;
+    if (carryNote) {
+        o.systemMessage = carryNote;
+        if (o.decision === 'block') o.reason = o.reason + '\n\n' + carryNote;
+        else o.hookSpecificOutput = { hookEventName: 'Stop', additionalContext: carryNote };
+    }
     console.log(JSON.stringify(o));
     process.exit(0);
 }
@@ -102,12 +111,17 @@ function staleStories(ids, cwd) {
     } catch { return none; }
 }
 
+// Keyed on the SESSION, not the directory: scripts/auto-flag.js says why.
+const autoFlags = require(path.join(__dirname, '..', 'scripts', 'auto-flag.js'));
+
 try {
     // The project Claude is working in, not the shell that spawned the hook.
     let cwd = process.cwd();
+    let sid = 'no-session';
     try {
         const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
         if (payload && payload.cwd) cwd = payload.cwd;
+        sid = autoFlags.sidOf(payload);
 
         // Computed BEFORE any approve()/block() below, since most turns exit at
         // the first one. Wrapped separately: a queue note must never be the
@@ -153,9 +167,10 @@ try {
         } catch { /* a heartbeat must never strand a turn */ }
     } catch { /* no or malformed payload — fall back to process.cwd() */ }
 
-    const autoFlag = path.join(cwd, '.claude', 'auto-active');
-    const exitFlag = path.join(cwd, '.claude', 'auto-exit');
-    const idleMarker = path.join(cwd, '.claude', 'auto-idle-triggered');
+    // A plain flag still on disk (written through Bash, or before the
+    // PostToolUse claim existed) becomes this session's now.
+    autoFlags.claim(cwd, sid);
+    const { active: autoFlag, exit: exitFlag, idle: idleMarker } = autoFlags.pathsFor(cwd, sid);
     const prdPath = path.join(cwd, 'prd.json');
 
     // Stale flag cleanup (>2 hours old = crashed session)

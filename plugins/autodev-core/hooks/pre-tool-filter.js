@@ -52,18 +52,31 @@ const PROTECTED_FILE_PATTERNS = [
     /[/\\]\.claude[/\\]plugins[/\\]/,
 ];
 
+// Anchored to whole PATH SEGMENTS. Unanchored, `build/` matched `src/rebuild/`
+// and `prebuild/`, `dist/` matched `redist/`, `coverage/` matched
+// `test-coverage/`, and `node_modules` matched `node_modules_notes.md`: ordinary
+// source files a session was refused on Read.
 const SKIP_READ_PATTERNS = [
-    /node_modules/,
-    /dist[/\\]/,
-    /build[/\\]/,
-    /\.git[/\\]/,
-    /package-lock\.json/,
-    /yarn\.lock/,
-    /pnpm-lock\.yaml/,
-    /\.next[/\\]/,
-    /coverage[/\\]/,
-    /\.turbo[/\\]/,
+    /(?:^|[/\\])node_modules(?:[/\\]|$)/,
+    /(?:^|[/\\])dist[/\\]/,
+    /(?:^|[/\\])build[/\\]/,
+    /(?:^|[/\\])\.git[/\\]/,
+    /(?:^|[/\\])package-lock\.json$/,
+    /(?:^|[/\\])yarn\.lock$/,
+    /(?:^|[/\\])pnpm-lock\.yaml$/,
+    /(?:^|[/\\])\.next[/\\]/,
+    /(?:^|[/\\])coverage[/\\]/,
+    /(?:^|[/\\])\.turbo[/\\]/,
 ];
+
+// Which way to fail. Closed protects the write rules above; a Read has nothing
+// for a refusal to protect, so failing closed there only cost the session its
+// reads. When the payload does not parse, the raw text is sniffed for the tool
+// name, and anything that is not recognisably a Read stays closed.
+let failTool = '';
+function failOpen() {
+    return failTool === 'Read';
+}
 
 // Basenames, lowercase: matched case-insensitively because on the default
 // macOS and Windows filesystems `.ESLINTRC.JS` is the same inode as
@@ -89,12 +102,16 @@ try {
     try {
         data = JSON.parse(input);
     } catch {
-        // Can't parse input — block to be safe (fail-closed)
+        const m = input.match(/"tool_name"\s*:\s*"([A-Za-z]+)"/);
+        failTool = m ? m[1] : '';
+        if (failOpen()) process.exit(0);
+        // Can't parse input and it may be a write — block to be safe (fail-closed)
         process.stderr.write('pre-tool-filter: failed to parse hook input, blocking operation\n');
         process.exit(2);
     }
 
     const toolName = data.tool_name || '';
+    failTool = toolName;
     const toolInput = data.tool_input || {};
 
     // Write/Edit protection - prevent Claude from modifying security-critical files
@@ -308,7 +325,8 @@ try {
     // Allow operation
     process.exit(0);
 } catch (err) {
-    // Hook should never crash - fail closed on error
+    // Hook should never crash. Open for a Read, closed for anything else.
+    if (failOpen()) process.exit(0);
     process.stderr.write(`pre-tool-filter error (blocking): ${err.message}\n`);
     process.exit(2);
 }

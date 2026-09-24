@@ -197,6 +197,10 @@ function runStop(transcriptPath) {
     check('the decision survives untouched', !!r.parsed && r.parsed.decision === 'approve', `decision=${r.parsed && r.parsed.decision}`);
     check('systemMessage names the carried item', !!r.parsed && String(r.parsed.systemMessage || '').includes(CARRIED), `systemMessage=${JSON.stringify(r.parsed && r.parsed.systemMessage)}`);
     check('systemMessage carries no decision of its own', !!r.parsed && !('reason' in r.parsed), 'a reason field appeared on an approve');
+    check('the carried item also reaches the model (Stop additionalContext)', !!r.parsed && !!r.parsed.hookSpecificOutput
+        && r.parsed.hookSpecificOutput.hookEventName === 'Stop'
+        && String(r.parsed.hookSpecificOutput.additionalContext || '').includes(CARRIED),
+        `hookSpecificOutput=${JSON.stringify(r.parsed && r.parsed.hookSpecificOutput)}`);
 }
 
 {

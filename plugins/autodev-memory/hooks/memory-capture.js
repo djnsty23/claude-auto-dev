@@ -164,7 +164,16 @@ try {
                                 if (r.concept) line += `: ${trunc(r.concept)}`;
                                 out.push(line.length > 140 ? line.slice(0, 137) + '...' : line);
                             }
-                            process.stderr.write(out.join('\n') + '\n');
+                            // The brief is for the MODEL, so it goes where the model
+                            // reads: stdout JSON additionalContext. It went to stderr
+                            // until 2026-09-23, which on exit 0 reaches only the
+                            // transcript view, so no brief was ever acted on.
+                            process.stdout.write(JSON.stringify({
+                                hookSpecificOutput: {
+                                    hookEventName: 'PostToolUse',
+                                    additionalContext: out.join('\n'),
+                                },
+                            }) + '\n');
                         }
                         // Record the area as surfaced ONLY when knowledge() returned a
                         // real result object. A real empty result (total === 0) is still

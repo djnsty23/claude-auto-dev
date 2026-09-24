@@ -637,6 +637,57 @@ if (process.platform !== 'win32') {
         r.status === 0 && calls().length > 0);
 }
 
+// F14. On Windows the sweep ran in full at EVERY session start, including a
+// machine-wide `taskkill /F /IM crashpad_handler.exe` that killed the crash
+// reporter of every Chromium and Electron app on the box. Now: one tasklist,
+// and the killing runs only when it reports a live agent-browser binary. The
+// Snipping Tool reset stays unconditional. Shims log their full argument line,
+// and a tasklist shim decides "live", so both branches run with nothing real
+// killed except by the shims' absence (they shadow every tool the hook uses).
+if (process.platform === 'win32') {
+    const runWith = (live) => {
+        const sb = sandbox();
+        const bin = path.join(sb.home, 'shim-bin');
+        const log = path.join(sb.home, 'shim-calls.log');
+        fs.mkdirSync(bin, { recursive: true });
+        // Exit 0, so every call SUCCEEDS and the code after it runs. With exit 1
+        // the tree kill threw, and a crashpad sweep behind it was never reached,
+        // so the crashpad assertion passed against the old hook for free.
+        for (const tool of ['taskkill', 'wmic', 'powershell', 'reg']) {
+            fs.writeFileSync(path.join(bin, tool + '.cmd'), `@>>"${log}" echo ${tool} %*\r\n@exit /b 0\r\n`);
+        }
+        const listing = live
+            ? '@echo "agent-browser-win32-x64.exe","4242","Console","1","90,000 K"\r\n'
+            : '@echo INFO: No tasks are running which match the specified criteria.\r\n';
+        fs.writeFileSync(path.join(bin, 'tasklist.cmd'), `@>>"${log}" echo tasklist %*\r\n${listing}@exit /b 0\r\n`);
+        const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+        const env = {
+            ...process.env, HOME: sb.home, USERPROFILE: sb.home, LOCALAPPDATA: sb.localAppData,
+            [pathKey]: bin + path.delimiter + (process.env[pathKey] || ''),
+        };
+        const r = spawnSync(process.execPath, [HOOK], { encoding: 'utf8', env, input: '', timeout: 60000 });
+        const lines = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean) : [];
+        return { r, lines };
+    };
+
+    const idle = runWith(false);
+    const idleTools = idle.lines.map((l) => l.split(' ')[0]);
+    check(`no live agent-browser: asks tasklist once (calls: ${idle.lines.join(' | ')})`,
+        idleTools.filter((t) => t === 'tasklist').length === 1);
+    check('  and kills no browser, sweeps no CLI, touches no registry',
+        !idle.lines.some((l) => /agent-browser|^wmic|^powershell|^reg /i.test(l.replace(/^tasklist.*/, ''))));
+    check('  and still resets the Snipping Tool hotkey',
+        idle.lines.some((l) => /taskkill.*SnippingTool\.exe/i.test(l)));
+    check('  and exits 0 silently', idle.r.status === 0 && (idle.r.stdout || '') === '' && (idle.r.stderr || '') === '');
+
+    const live = runWith(true);
+    check(`live agent-browser: the tree kill runs (tools: ${live.lines.map((l) => l.split(' ')[0]).join(',')})`,
+        live.lines.some((l) => /taskkill.*\/T.*agent-browser-win32-x64\.exe/i.test(l)));
+    check('  and the Snipping Tool reset runs too', live.lines.some((l) => /taskkill.*SnippingTool\.exe/i.test(l)));
+    check('  and crashpad_handler is never killed machine-wide',
+        ![...idle.lines, ...live.lines].some((l) => /crashpad_handler/i.test(l)));
+}
+
 // The Windows-only paths must be inert elsewhere, or a macOS session start would
 // shell out to taskkill on every launch.
 if (process.platform !== 'win32') {

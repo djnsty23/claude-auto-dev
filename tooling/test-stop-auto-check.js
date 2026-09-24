@@ -35,7 +35,7 @@ function project({ auto = false, exit = false, idle = false, prd = undefined, au
         }
     }
     if (exit) fs.writeFileSync(path.join(dir, '.claude', 'auto-exit'), '');
-    if (idle) fs.writeFileSync(path.join(dir, '.claude', 'auto-idle-triggered'), 'x');
+    if (idle) fs.writeFileSync(path.join(dir, '.claude', 'auto-idle-triggered.sess'), 'x');
     if (prd !== undefined) {
         fs.writeFileSync(path.join(dir, 'prd.json'), typeof prd === 'string' ? prd : JSON.stringify(prd));
     }
@@ -54,7 +54,12 @@ function run(dir, payload = {}) {
     return { r, decision };
 }
 
-const exists = (dir, f) => fs.existsSync(path.join(dir, '.claude', f));
+// A flag is present under its plain name OR claimed under any session key
+// (auto-flag.js renames it to <name>.<session>). Checking the plain name alone
+// would read a claimed flag as cleared, and every 'cleared' assertion would pass.
+const exists = (dir, f) => {
+    try { return fs.readdirSync(path.join(dir, '.claude')).some((n) => n === f || n.startsWith(f + '.')); } catch { return false; }
+};
 
 const SPRINT_PENDING = { stories: { 'S1-001': { title: 'a', passes: true }, 'S1-002': { title: 'b', passes: null } } };
 const SPRINT_DONE = { stories: { 'S1-001': { title: 'a', passes: true } } };
@@ -513,10 +518,15 @@ function runWithCfg(dir, cfg) {
     check('nudge: names the next actionable story', (decision?.systemMessage || '').includes('S1-002'));
     check('nudge: says the word that pulls it', /`auto`/.test(decision?.systemMessage || ''));
     check('nudge: counts how many are actionable', /1 actionable story\b/.test(decision?.systemMessage || ''));
+    // F12: systemMessage is operator-only. The nudge is for the model, so it
+    // must ALSO ride Stop additionalContext, or no session ever reads it.
+    check('nudge: reaches the MODEL via Stop additionalContext', decision?.hookSpecificOutput?.hookEventName === 'Stop'
+        && (decision.hookSpecificOutput.additionalContext || '').includes('S1-002'));
 
     d = project({ prd: SPRINT_DONE });
     ({ decision } = run(d));
     check('nudge: all done → approve with NO systemMessage', decision?.decision === 'approve' && decision.systemMessage === undefined);
+    check('nudge: all done → no additionalContext either', decision?.hookSpecificOutput === undefined);
 
     d = project({ prd: { stories: { 'S1-001': { title: 'a', passes: true }, 'S1-002': { title: 'b', passes: 'deferred' } } } });
     ({ decision } = run(d));
@@ -561,6 +571,7 @@ for (const [label, prd, expected] of [
     check(label + ': never claims complete', !/Sprint complete/.test(initial?.reason || ''));
     const final = run(dir).decision;
     check(label + ': bounded stop retains unresolved explanation', final?.decision === 'approve' && expected.test(final.systemMessage || ''));
+    check(label + ': and the model is told too', expected.test(final?.hookSpecificOutput?.additionalContext || ''));
     check(label + ': prd state preserved', JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'prd.json'), 'utf8'))) === JSON.stringify(prd));
 }
 {
@@ -573,7 +584,7 @@ for (const [label, prd, expected] of [
     check('CONTROL: earlier sprint root is next, dependent is not counted ready',
         /1 tasks remaining.*Next: EARLY/.test(decision?.reason || ''));
     // Reconciliation marker must not eat a later finish transition.
-    fs.writeFileSync(path.join(dir, '.claude', 'auto-idle-triggered'), 'old reconciliation');
+    fs.writeFileSync(path.join(dir, '.claude', 'auto-idle-triggered.sess'), 'old reconciliation');
     run(dir);
     check('ready work resets the prior idle marker', !exists(dir, 'auto-idle-triggered'));
 }
@@ -585,6 +596,27 @@ for (const [label, prd, expected] of [
     check('large blocked population keeps valid bounded hook JSON with the population',
         decision?.decision === 'block' && /100 unresolved/.test(decision.reason)
         && /88 more/.test(decision.reason) && Buffer.byteLength(r.stdout) < 6000);
+}
+
+// ------------------------------------------- F16: the flag belongs to a session
+//
+// The flag was keyed on the directory, so two sessions in one checkout shared
+// it: a peer that never ran `auto` was held at every Stop by the other's
+// sprint, and a peer's auto-exit ended the other's sprint.
+{
+    const dir = project({ auto: true, prd: SPRINT_PENDING });
+    const a = run(dir, { session_id: 'sess-a' }).decision;
+    check('F16: the session whose Stop sees the flag first owns it (blocks)', a?.decision === 'block');
+    check('F16: it is stored under that session key', fs.existsSync(path.join(dir, '.claude', 'auto-active.sess-a')));
+    const b = run(dir, { session_id: 'sess-b' }).decision;
+    check('F16: a PEER in the same directory is not held by it (approves)', b?.decision === 'approve');
+    check('F16: and the owner is still held on its next Stop', run(dir, { session_id: 'sess-a' }).decision?.decision === 'block');
+
+    // A peer's exit signal ends the PEER's auto, never the owner's.
+    fs.writeFileSync(path.join(dir, '.claude', 'auto-exit.sess-b'), '');
+    run(dir, { session_id: 'sess-b' });
+    check('F16: a peer\'s auto-exit leaves the owner\'s flag alone', fs.existsSync(path.join(dir, '.claude', 'auto-active.sess-a')));
+    check('F16: and the owner keeps blocking', run(dir, { session_id: 'sess-a' }).decision?.decision === 'block');
 }
 
 // ---------------------------------------------------------------- report
