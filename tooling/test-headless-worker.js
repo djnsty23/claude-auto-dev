@@ -944,6 +944,100 @@ try {
             after.exit === 0 && after.json && after.json.ok && after.json.value.state === 'done' && recOf('MOVED').result === 'done' && recOf('MOVED').sentence === 'PR 96 green.', after.stdout.slice(0, 200));
     }
 
+    // ------------------------------------------------------------ 24d. a rerun at the same code
+    // `[measured 2026-09-24]` reruns of ACCESS-ALL and BLOG appended to their
+    // first runs' logs and found their first runs' reports, so status said
+    // "exited, stopped" while they worked, and a cap that counted reports let
+    // three workers run against a limit of one. start now moves the earlier
+    // run's files aside, and settle refuses a report older than its run.
+    {
+        const code = 'RERUN';
+        const dir = path.join(ROOT, code);
+        const log = path.join(dir, 'worker.log');
+        const ledger = path.join(dir, 'ledger.json');
+        const report = path.join(dir, 'worker.report.md');
+        const scratch = path.join(dir, code);
+        const scratchReport = path.join(scratch, 'worker.report.md');
+        const askF = path.join(scratch, 'ask.json');
+        const answerF = path.join(scratch, 'answer.json');
+        const old = new Date(Date.now() - 3600 * 1000);
+        write(log, 'first run noise\nCLAUDE_EXIT=0\n');
+        write(report, 'RESULT RERUN stopped: the first run hit a full disk.\n');
+        write(scratchReport, 'RESULT RERUN done: a stale scratch copy.\n');
+        write(askF, JSON.stringify({ question: 'an old question?' }));
+        write(answerF, JSON.stringify({ answer: 'an old answer' }));
+        for (const p of [log, report, scratchReport, askF, answerF]) fs.utimesSync(p, old, old);
+        const prev = { code, pid: 1, startedAt: new Date(old.getTime() - 600000).toISOString(), log, report, promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'settled', result: 'stopped', sentence: 'the first run hit a full disk.', exit: 0, settledAt: old.toISOString() };
+        write(ledger, JSON.stringify({ version: 1, records: [prev] }, null, 2) + '\n');
+
+        const dry = hw(['start', '--code', code, '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
+        const would = dry.json && dry.json.ok ? dry.json.value.wouldMoveAside : null;
+        check('24d. dry-run names the five files an earlier run left, and moves none of them',
+            Array.isArray(would) && would.length === 5 && [log, report, scratchReport, askF, answerF].every((p) => would.includes(path.resolve(p)) && fs.existsSync(p)), JSON.stringify(would));
+
+        const started = startFake(code, { exit: 0 });
+        const end = started.pid ? waitForEnd(log, started.pid) : { ending: 'no-pid', text: '' };
+        if (end.ending === 'timeout') indeterminateCase('24d', 'the fake did not finish inside the poll budget');
+        else {
+            const text = end.text;
+            const recs = JSON.parse(read(ledger)).records.filter((r) => r.code === code);
+            const oldRec = recs.find((r) => r.state === 'settled') || null;
+            const newRec = recs.find((r) => r.state !== 'settled') || null;
+            const aside = fs.readdirSync(dir).filter((n) => /^worker\.prev-\d{8}T\d{9}Z\.(log|report\.md)$/.test(n) || /^worker\.report\.prev-/.test(n));
+            check('24d. the rerun writes a fresh log: one exit line, none of the first run in it',
+                end.ending === 'exit-line' && (text.match(/^CLAUDE_EXIT=/gm) || []).length === 1 && !text.includes('first run noise'), text.slice(0, 300));
+            check('24d. the first run\'s log and report sit beside it under a .prev-<start stamp> name, contents intact',
+                !!oldRec && oldRec.log !== log && /first run noise/.test(read(oldRec.log) || '') && oldRec.report !== report && /first run hit a full disk/.test(read(oldRec.report) || ''),
+                JSON.stringify({ aside, oldLog: oldRec && oldRec.log, oldReport: oldRec && oldRec.report }));
+            check('24d. the settled record follows its files, and the new record lists all five it moved',
+                !!newRec && Array.isArray(newRec.movedAside) && newRec.movedAside.length === 5 && newRec.movedAside.includes(oldRec.log) && newRec.movedAside.includes(oldRec.report)
+                    && newRec.log === log && newRec.report === report, JSON.stringify(newRec).slice(0, 300));
+            check('24d. the scratch copy and the ask channel moved too, so nothing of the first run is where the rerun looks',
+                !fs.existsSync(report) && !fs.existsSync(scratchReport) && !fs.existsSync(askF) && !fs.existsSync(answerF));
+            const st = hw(['status', '--ledger', ledger, '--json']);
+            const row = st.json ? st.json.value.records.find((r) => r.code === code && !r.settled) : null;
+            check('24d. status reads the rerun as result none with no question, never the first run\'s stopped',
+                !!row && row.result === 'none' && row.ask === 'none' && row.misplacedReport === null && row.process === 'exited', JSON.stringify(row).slice(0, 300));
+            const oldRow = st.json ? st.json.value.records.find((r) => r.code === code && r.settled) : null;
+            check('24d. and the first run still reads as itself from the moved files', !!oldRow && oldRow.settledAs === 'stopped' && oldRow.result === 'stopped', JSON.stringify(oldRow).slice(0, 240));
+            const un = hw(['settle', '--code', code, '--unreported', '--ledger', ledger]);
+            check('24d. the rerun that left no report settles --unreported, as itself',
+                un.exit === 0 && un.json && un.json.ok && un.json.value.state === 'unreported' && /does not exist/.test(un.json.value.reason), un.stdout.slice(0, 240));
+        }
+
+        // Records an older supervisor already appended to: the guard is in settle.
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const adir = path.join(ROOT, 'T24d');
+        const aledger = path.join(adir, 'ledger.json');
+        const now = new Date().toISOString();
+        const mk = (c, pid, { reportText = null, scratchText = null } = {}) => {
+            const rec = { code: c, pid, startedAt: now, log: path.join(adir, c + '.log'), report: path.join(adir, c + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' };
+            write(rec.log, 'first run\nCLAUDE_EXIT=0\nsecond run, still working\n');
+            if (reportText !== null) { write(rec.report, reportText); fs.utimesSync(rec.report, old, old); }
+            if (scratchText !== null) { const p = path.join(adir, c, c + '.report.md'); write(p, scratchText); fs.utimesSync(p, old, old); }
+            return rec;
+        };
+        write(aledger, JSON.stringify({ version: 1, records: [
+            mk('APPENDED', dead.pid, { reportText: 'RESULT APPENDED stopped: from the first run.\n' }),
+            mk('LIVEAPPEND', process.pid),
+            mk('OLDSCRATCH', dead.pid, { scratchText: 'RESULT OLDSCRATCH done: from the first run.\n' }),
+        ] }, null, 2) + '\n');
+        const arec = (c) => JSON.parse(read(aledger)).records.find((r) => r.code === c) || null;
+        const ast = hw(['status', '--ledger', aledger, '--json']);
+        const aby = Object.fromEntries((ast.json ? ast.json.value.records : []).map((r) => [r.code, r]));
+        check('24d. status reads a report older than its run as result stale, with its sentence withheld',
+            !!aby.APPENDED && aby.APPENDED.result === 'stale' && aby.APPENDED.reportStale === true && aby.APPENDED.sentence === null, JSON.stringify(aby.APPENDED || null).slice(0, 240));
+        const aplain = hw(['settle', '--code', 'APPENDED', '--ledger', aledger]);
+        check('24d. plain settle refuses a report older than its run with stale-report, and leaves the record running',
+            aplain.exit === 1 && aplain.json && aplain.json.error.code === 'stale-report' && /earlier run/.test(aplain.json.error.message) && arec('APPENDED').state === 'running', aplain.stdout.slice(0, 240));
+        const aun = hw(['settle', '--code', 'APPENDED', '--unreported', '--ledger', aledger]);
+        check('24d. settle --unreported refuses it too', aun.exit === 1 && aun.json && aun.json.error.code === 'stale-report' && arec('APPENDED').state === 'running', aun.stdout.slice(0, 200));
+        const live = hw(['settle', '--code', 'LIVEAPPEND', '--unreported', '--ledger', aledger]);
+        check('24d. settle --unreported refuses while the supervisor pid is alive, since the exit line can be an earlier run\'s',
+            live.exit === 1 && live.json && live.json.error.code === 'still-running' && arec('LIVEAPPEND').state === 'running', live.stdout.slice(0, 240));
+        check('24d. a scratch copy older than the run is not a misplaced report', !!aby.OLDSCRATCH && aby.OLDSCRATCH.misplacedReport === null && aby.OLDSCRATCH.result === 'none');
+    }
+
     // ------------------------------------------------------------ 25. a worker asks by file and keeps working
     // `[measured 2026-09-22]` workers asked by exiting, so every question cost a
     // relaunch. The prompt must name ask.json and answer.json in the scratch

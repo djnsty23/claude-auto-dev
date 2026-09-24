@@ -319,12 +319,60 @@ function misplacedReport(rec) {
     const alt = path.join(scratchDirFor(rec), path.basename(rec.report));
     if (path.resolve(alt) === path.resolve(rec.report)) return null;
     const text = readText(alt);
-    return text !== null && parseResult(text, rec.code) ? alt : null;
+    if (text === null || writtenBefore(alt, rec.startedAt)) return null;
+    return parseResult(text, rec.code) ? alt : null;
 }
 
 function misplacedHint(moved, rec) {
     return `${moved} has a RESULT ${rec.code} line: the worker wrote its report into its scratch dir. `
         + `Move that file to ${rec.report}, then settle again`;
+}
+
+/** True when the file was last written more than a second before the run started: it belongs to an earlier run. */
+function writtenBefore(file, startedAt) {
+    const t = Date.parse(startedAt || '');
+    if (!Number.isFinite(t)) return false;
+    try { return fs.statSync(file).mtimeMs < t - 1000; } catch { return false; }
+}
+
+function staleHint(rec) {
+    let at = 'earlier';
+    try { at = new Date(fs.statSync(rec.report).mtimeMs).toISOString(); } catch { /* gone since the check */ }
+    return `${rec.report} was last written at ${at}, before this run started at ${rec.startedAt}, so its RESULT line `
+        + 'belongs to an earlier run of the same code. Wait for this run to write its own report, or move the old one aside and settle again';
+}
+
+// `[measured 2026-09-24]` a rerun at the same code appended to the previous
+// run's log and found its report. ACCESS-ALL and BLOG read "exited, stopped"
+// from their first runs while the reruns worked, a cap that counted reports
+// let three workers run against a limit of one, and a plain settle would have
+// filed each live worker under the previous run's result. So start moves the
+// previous run's files aside before it spawns, and the settled records that
+// named them follow the files.
+/** The files an earlier run of this code left where the new run will write, in a fixed order. */
+function priorRunFiles(o) {
+    const scratch = scratchDirFor(o);
+    const ask = askFiles(scratch);
+    const all = [o.log, o.report, path.join(scratch, path.basename(o.report)), ask.ask, ask.answer].map((p) => path.resolve(p));
+    return all.filter((p, i) => all.indexOf(p) === i && fs.existsSync(p));
+}
+
+function asideName(file, stamp) {
+    const ext = path.extname(file);
+    return path.join(path.dirname(file), `${path.basename(file, ext)}.prev-${stamp}${ext}`);
+}
+
+/** Rename each file aside, all or none: a failure puts back what already moved and refuses the start. */
+function moveAside(files, stamp) {
+    const moved = [];
+    try {
+        for (const from of files) { const to = asideName(from, stamp); fs.renameSync(from, to); moved.push({ from, to }); }
+    } catch (e) {
+        for (const m of moved.reverse()) { try { fs.renameSync(m.to, m.from); } catch { /* reported below */ } }
+        fault('move-aside-failed', `could not move an earlier run's files aside before starting (${e.code || e.message}). `
+            + `Nothing was started. Files: ${files.join(', ')}`);
+    }
+    return moved;
 }
 
 function readPrompt(file, scratchDir, o = {}) {
@@ -483,6 +531,7 @@ function start(opts) {
             configDir: o.configDir, effort: o.effort,
             script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev,
             log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
+            wouldMoveAside: priorRunFiles(o),
         };
     }
     // RESERVE, THEN SPAWN, THEN FILL IN. The code is reserved inside the lock
@@ -502,6 +551,13 @@ function start(opts) {
         if (ledger.records.some((r) => r.code === o.code && isUnsettled(r))) {
             fault('code-active', `${o.code} has an unsettled record in ${o.ledger}; settle it or pick another code`);
         }
+        const moved = moveAside(priorRunFiles(o), record.startedAt.replace(/[-:.]/g, ''));
+        const to = new Map(moved.map((m) => [m.from, m.to]));
+        for (const r of ledger.records) {
+            if (r.code !== o.code) continue;
+            for (const k of ['log', 'report']) if (r[k] && to.has(path.resolve(r[k]))) r[k] = to.get(path.resolve(r[k]));
+        }
+        if (moved.length) record.movedAside = moved.map((m) => m.to);
         ledger.records.push(record);
     });
     let child;
@@ -625,13 +681,15 @@ function recordStatus(rec, boot = bootAt()) {
     let result = 'none';
     let sentence = null;
     let resultCodeFound = null;
-    if (reportText !== null) {
+    const reportStale = reportText !== null && writtenBefore(rec.report, rec.startedAt);
+    if (reportStale) result = 'stale';
+    else if (reportText !== null) {
         const parsed = parseResult(reportText, rec.code);
         result = parsed ? parsed.state : 'unparseable';
         sentence = parsed ? parsed.sentence : null;
         resultCodeFound = parsed ? null : otherResultCode(reportText, rec.code);
     }
-    const misplaced = result === 'none' || (result === 'unparseable' && !resultCodeFound) ? misplacedReport(rec) : null;
+    const misplaced = result === 'none' || result === 'stale' || (result === 'unparseable' && !resultCodeFound) ? misplacedReport(rec) : null;
     // The settled axis says HOW the record was settled, read from the ledger,
     // because `result` above is the report's word and a lost record's report
     // usually has none. A settled value outside SETTLED_RESULTS surfaces as
@@ -640,7 +698,7 @@ function recordStatus(rec, boot = bootAt()) {
     const settledAs = settled ? (SETTLED_RESULTS.includes(rec.result) ? rec.result : `unrecognised:${rec.result}`) : null;
     return {
         code: rec.code, pid: rec.pid, startedAt: rec.startedAt, process: processState, exit,
-        result, sentence, resultCodeFound, reportExists: reportText !== null, misplacedReport: misplaced, settled, settledAs,
+        result, sentence, resultCodeFound, reportExists: reportText !== null, reportStale, misplacedReport: misplaced, settled, settledAs,
         version: rec.version || null, dev: rec.dev === true,
         lostReason: settledAs === 'lost' ? (rec.reason || null) : null,
         settleReason: settledAs === 'lost' || settledAs === 'unreported' ? (rec.reason || null) : null,
@@ -728,6 +786,7 @@ function settle(opts) {
                 + 'A supervisor killed by a reboot or a kill never writes it, and settle --lost settles such a record once it is provably not running');
         }
         const reportText = readText(rec.report);
+        if (reportText !== null && writtenBefore(rec.report, rec.startedAt)) fault('stale-report', staleHint(rec));
         const parsed = reportText === null ? null : parseResult(reportText, code);
         if (!parsed) {
             const other = reportText === null ? null : otherResultCode(reportText, code);
@@ -779,7 +838,15 @@ function settleUnreported(rec, code, exit) {
         fault('not-exited', `${rec.log} has no CLAUDE_EXIT line, so the worker has not provably ended. `
             + 'settle --lost settles a record whose supervisor died without one');
     }
+    const boot = bootAt();
+    const started = Date.parse(rec.startedAt || '');
+    const thisBoot = !(Number.isFinite(boot) && Number.isFinite(started) && started < boot);
+    if (thisBoot && pidLiveness(rec.pid) === 'alive') {
+        fault('still-running', `${rec.log} has an exit line, but the supervisor pid ${rec.pid} is alive, so that line can belong to an `
+            + 'earlier run appended to the same log. Settle once the supervisor has ended');
+    }
     const reportText = readText(rec.report);
+    if (reportText !== null && writtenBefore(rec.report, rec.startedAt)) fault('stale-report', staleHint(rec));
     if (reportText !== null && parseResult(reportText, code)) {
         fault('has-result', `${rec.report} has a RESULT ${code} line. Settle it without --unreported`);
     }
