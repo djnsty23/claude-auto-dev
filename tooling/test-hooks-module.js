@@ -244,6 +244,45 @@ const OTHER_REPO = { root: '/srv/project-b', remote: 'git@github.com:someone/pro
     }
     console.log(`  population: ${allowCases.length} allow shapes, ${allows} untouched`);
 
+    // argv-credential: unscoped, so every case runs OUTSIDE the repo. The planted
+    // positives are the shapes the 30-day scan found, and the environment form
+    // the reason recommends is the negative that must pass.
+    const argvDeny = [
+        'npx vercel deploy --prod --yes --scope team-x --token $VERCEL_TOKEN',
+        'VERCEL_ORG_ID=team_x npx vercel inspect https://x.vercel.app --token=$(doppler secrets get VERCEL_TOKEN --plain)',
+        'vercel env ls --token "$T"',
+        'gh api user --token ${GH_TOKEN}',
+        'timeout 60 vercel whoami --token `cat token.txt`',
+        'some-cli --api-key ' + 'k'.repeat(24),
+        'psql --password=$env:PGPASS',
+        'cd app && npx vercel deploy --token $T | tail -3',
+    ];
+    for (const cmd of argvDeny) {
+        const d = rules.decideBash({ command: cmd, cwd: posix, repo: OTHER_REPO });
+        check(`argv-credential denies outside the repo: ${cmd.slice(0, 60)}`, !!d.deny && d.rule === 'argv-credential' && d.deny.includes('VERCEL_TOKEN='), JSON.stringify(d).slice(0, 160));
+    }
+    const argvAllow = [
+        'VERCEL_TOKEN="$(doppler secrets get VERCEL_TOKEN --plain)" vercel deploy --prod',
+        'vercel deploy --prod --yes --scope team-x',
+        'grep -rn -- "--token" memory',
+        'vercel deploy --token <your-token>',
+        'node tokenize.js --tokenizer $TOK --token-budget 5000',
+        'docker login --password-stdin -u me',
+        'some-cli --token --environment-file .env',
+        'some-cli --token short',
+        'cat <<EOF\nuse --token $VERCEL_TOKEN never\nEOF',
+    ];
+    for (const cmd of argvAllow) {
+        const d = rules.decideBash({ command: cmd, cwd: posix, repo: OTHER_REPO });
+        check(`argv-credential allows: ${cmd.split('\n')[0].slice(0, 60)}`, !d.deny && d.command === cmd, JSON.stringify(d).slice(0, 160));
+    }
+    console.log(`  population: ${argvDeny.length} argv-credential positives, ${argvAllow.length} negatives`);
+    // One pattern: the deny and the redaction read the same flag source.
+    const cliFlag = redact.PATTERNS.find((p) => p.name === 'cli-flag-secret');
+    check('redact cli-flag-secret is built from CREDENTIAL_FLAG, and its source is unchanged', !!cliFlag
+        && cliFlag.re.source.includes(redact.CREDENTIAL_FLAG)
+        && cliFlag.re.source === String.raw`((?<![A-Za-z0-9_-])--?(?:token|access[-_]?token|auth[-_]?token|api[-_]?key|secret|password|passwd|pwd)(?:=|\s+)["']?)([^\s"']{12,})`, cliFlag ? cliFlag.re.source : 'missing');
+
     const dop = rules.decideBash({ command: 'doppler secrets delete OLD_KEY --project app-x --config prd --yes | tail -3', cwd: posix, repo: OTHER_REPO });
     check('doppler delete gains --silent inside its own segment', dop.command === 'doppler secrets delete --silent OLD_KEY --project app-x --config prd --yes | tail -3' && dop.rules.includes('doppler-silent'), dop.command);
     const dop2 = rules.decideBash({ command: 'doppler secrets set K=v --silent --project p --config prd', cwd: posix, repo: OTHER_REPO });
