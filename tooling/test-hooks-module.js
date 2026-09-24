@@ -308,6 +308,78 @@ const OTHER_REPO = { root: '/srv/project-b', remote: 'git@github.com:someone/pro
         const d = rules.decideBash({ command: cmd, cwd, repo: OTHER_REPO });
         check(`${name} is untouched`, !d.deny && d.command === cmd && d.rules.length === 0, JSON.stringify(d).slice(0, 160));
     }
+    // worktree-placement: unscoped, so every case is another repository. The
+    // positives are the shapes the 30-day scan refused, rebuilt under a fake
+    // home: a sibling beside the repo, a literal cd first, a -C, a quoted path
+    // with a space, a `~/` cd. Each refusal must name the placed path, and the
+    // command it hands back must itself pass. The negatives are the placed
+    // forms, what the text cannot state, and text that only mentions the command.
+    const WT_ROOT = 'C:\\Users\\me\\code\\app';
+    const WT_REPO = { root: WT_ROOT, remote: 'git@github.com:someone/app.git', internal: false, name: null };
+    const WT_CWD = 'C:\\Users\\me\\code\\app\\.claude\\worktrees\\a';
+    const CODE_ROOT = 'C:\\Users\\me\\code';
+    const POSIX_REPO = { root: '/home/me/code/app', remote: null, internal: false, name: null };
+    const wtDeny = [
+        // [name, command, cwd, repo, the placed path the refusal must name]
+        ['a sibling from the repo root', 'git worktree add ../app-wt-polish -b claude/polish origin/main', WT_ROOT, WT_REPO, 'C:/Users/me/code/app/.claude/worktrees/app-wt-polish'],
+        ['a sibling by absolute path from a worktree cwd', 'git worktree add C:/Users/me/code/app-deploy HEAD', WT_CWD, WT_REPO, 'C:/Users/me/code/app/.claude/worktrees/app-deploy'],
+        ['inside the repo but outside .claude/worktrees', 'git worktree add wt/x -b x', WT_ROOT, WT_REPO, 'C:/Users/me/code/app/.claude/worktrees/x'],
+        ['an MSYS cd first, from the code root with no repo', 'cd /c/Users/me/code/app && git worktree add ../x', CODE_ROOT, null, 'C:/Users/me/code/app/.claude/worktrees/x'],
+        ['a quoted -C and a quoted path with a space', 'git -C "C:/Users/me/code/app" worktree add "C:/Users/me/code/app wt" 2>&1 | tail -2', CODE_ROOT, null, 'C:/Users/me/code/app/.claude/worktrees/app wt'],
+        ['a ~/ cd, then an absolute sibling on the next line', 'cd ~/code/app\ngit worktree add -b fix/x "C:/Users/me/code/.wt-x" origin/main', WT_CWD, WT_REPO, 'C:/Users/me/code/app/.claude/worktrees/.wt-x'],
+        ['a ~/ on both -C and the path', 'git -C ~/code/app worktree add ~/code/app-wt -b b', WT_CWD, WT_REPO, 'C:/Users/me/code/app/.claude/worktrees/app-wt'],
+        ['git.exe behind an env prefix, on posix', 'GIT_TRACE=0 git.exe worktree add ../b', '/home/me/code/app', POSIX_REPO, '/home/me/code/app/.claude/worktrees/b'],
+        ['a redirection before the path', 'git worktree add 2>/dev/null ../app-wt4 -b b', WT_ROOT, WT_REPO, 'C:/Users/me/code/app/.claude/worktrees/app-wt4'],
+    ];
+    let wtDenied = 0;
+    for (const [name, cmd, cwd, repo, placed] of wtDeny) {
+        const d = rules.decideBash({ command: cmd, cwd, repo });
+        const ok = !!d.deny && d.rule === 'worktree-placement' && d.deny.includes(placed);
+        if (ok) wtDenied++;
+        check(`worktree-placement denies ${name}`, ok, JSON.stringify(d).slice(0, 260));
+        const named = d.deny ? (d.deny.match(/`([^`]+)`$/) || [])[1] : undefined;
+        const again = named ? rules.decideBash({ command: named, cwd, repo }) : null;
+        check('  ...and the command it names passes', !!again && again.rule !== 'worktree-placement' && !again.deny, named);
+    }
+    const quoted = rules.decideBash({ command: wtDeny[4][1], cwd: CODE_ROOT, repo: null });
+    check('the named command drops the redirection and quotes the path with a space',
+        String(quoted.deny).endsWith('`git -C C:/Users/me/code/app worktree add "C:/Users/me/code/app/.claude/worktrees/app wt"`'), quoted.deny);
+
+    const split = rules.decideBash({ command: 'git worktree add ../app-wt3 -b b 2> err.txt', cwd: WT_ROOT, repo: WT_REPO });
+    check('a separated redirection loses its target in the named command',
+        String(split.deny).endsWith('`git -C C:/Users/me/code/app worktree add C:/Users/me/code/app/.claude/worktrees/app-wt3 -b b`'), split.deny);
+
+    const wtAllow = [
+        ['the placed form', 'git worktree add .claude/worktrees/polish -b claude/polish origin/main', WT_ROOT, WT_REPO],
+        ['../x from a worktree cwd, which lands in .claude/worktrees', 'git worktree add ../b -b b', WT_CWD, WT_REPO],
+        ['a -C with an absolute placed path', 'git -C /c/Users/me/code/app worktree add /c/Users/me/code/app/.claude/worktrees/y -b y', CODE_ROOT, null],
+        ['a path from a variable', 'git worktree add "$W" -b b', WT_ROOT, WT_REPO],
+        ['a path from a command substitution', 'git worktree add $(mktemp -d)/x HEAD', WT_ROOT, WT_REPO],
+        ['a temp dir on posix', 'git worktree add /tmp/export-x HEAD', '/home/me/code/app', POSIX_REPO],
+        ['a temp dir on Windows', 'git worktree add C:/Users/me/AppData/Local/Temp/gate-x HEAD', WT_ROOT, WT_REPO],
+        ['an MSYS /tmp on Windows, which Git Bash maps elsewhere', 'git worktree add /tmp/x HEAD', WT_ROOT, WT_REPO],
+        ['a cd nobody can read stops the check', 'cd "$REPO" && git worktree add ../x', CODE_ROOT, null],
+        ['~user is another home', 'cd ~other/code/app && git worktree add ../x', WT_CWD, WT_REPO],
+        ['~/ with no home in the cwd', 'cd ~/code/app && git worktree add ../x', 'D:\\work\\app', { root: 'D:\\work\\app', remote: null }],
+        ['no repo, no cd, no -C: nothing to measure against', 'git worktree add ../x', CODE_ROOT, null],
+        ['--git-dir is not read', 'git --git-dir=/c/x/.git worktree add ../y', WT_ROOT, WT_REPO],
+        ['an unbalanced quote fails open', 'git worktree add "../x', WT_ROOT, WT_REPO],
+        ['worktree list', 'git worktree list', WT_ROOT, WT_REPO],
+        ['a grep for the command', 'grep -n "git worktree add ../x" notes.md', WT_ROOT, WT_REPO],
+        ['the command in a heredoc body', 'cat <<EOF\ngit worktree add ../x\nEOF', WT_ROOT, WT_REPO],
+    ];
+    let wtAllowed = 0;
+    for (const [name, cmd, cwd, repo] of wtAllow) {
+        const d = rules.decideBash({ command: cmd, cwd, repo });
+        const ok = !d.deny && d.command === cmd;
+        if (ok) wtAllowed++;
+        check(`worktree-placement allows ${name}`, ok, JSON.stringify(d).slice(0, 200));
+    }
+    console.log(`  population: ${wtDeny.length} worktree-placement positives, ${wtDenied} denied, ${wtAllow.length} negatives, ${wtAllowed} untouched`);
+    // A context without the fields decideBash adds still fails open.
+    check('misplacedWorktree with an empty context answers null', rules.misplacedWorktree('git worktree add ../x', {}) === null);
+    check('shellWords returns null on an unbalanced quote', rules.shellWords('git worktree add "x') === null);
+
     // No rewrite may change a command's first token (the permission prefix).
     const rewriteRules = rules.RULES.filter((r) => r.kind === 'rewrite');
     console.log(`  population: ${rules.RULES.length} rules, ${rewriteRules.length} rewrite(s), ${rules.RULES.length - rewriteRules.length} deny(s)`);
@@ -346,6 +418,13 @@ const OTHER_REPO = { root: '/srv/project-b', remote: 'git@github.com:someone/pro
         const r = await tc($any, { tool: 'Bash', tool_use_id: 't7', command: 'doppler secrets delete OLD --project p --config prd --yes' }, async (e2) => { ranWith = e2.command; return { ref: 3, result: { stdout: '', stderr: '', interrupted: false, isImage: false }, text: '' }; });
         check('hook hands next the rewritten command', ranWith === 'doppler secrets delete --silent OLD --project p --config prd --yes', ranWith);
         check('a rewrite keeps core\'s ref and adds one context note', r.ref === 3 && Array.isArray(r.context) && r.context.length === 1 && /--silent/.test(r.context[0]), JSON.stringify(r));
+
+        const { $: $wt, log: wtLog } = fakeDollar({ cwd: WT_ROOT, repo: WT_REPO });
+        let wtNext = false;
+        const wd = await tc($wt, { tool: 'Bash', tool_use_id: 't8', command: 'git worktree add ../app-wt -b b' }, async () => { wtNext = true; return { ref: 4, result: {} }; });
+        check('hook denies a sibling worktree without calling next, naming the placed command',
+            !wtNext && typeof wd.deny === 'string' && wd.deny.includes('`git -C C:/Users/me/code/app worktree add C:/Users/me/code/app/.claude/worktrees/app-wt -b b`'), JSON.stringify(wd).slice(0, 260));
+        check('the worktree deny is logged by rule id only', wtLog.some((l) => /denied a Bash call \(worktree-placement\)/.test(l)), wtLog.join(' | '));
     }
 
     // --- 5. attribution --------------------------------------------------------
