@@ -13,16 +13,23 @@
  *   replace  renameSync(tmp, P) or copyFileSync(src, P) after a read of P
  *   consume  unlinkSync(P) after a read of P, which deletes what arrived since
  *
- * A read is readFileSync(P) or a call to a local helper that reads its own first
- * parameter, and a write is the same for the write calls, so
- * `const s = readState(p); ...; writeState(p, s)` pairs. P is compared after
- * resolving plain identifiers through their declarations and assignments in
- * scope, so `const p = ledgerPath()` matches `readJson(ledgerPath())`.
+ * A read is readFileSync(P) or a call to a local helper that reads P, and a
+ * write is the same for the write calls. A helper counts when P is its own first
+ * parameter, so `const s = readState(p); ...; writeState(p, s)` pairs, or when P
+ * is FIXED: built only from module-level names and globals, like `ledgerPath()`
+ * or a top-level STATE, so `loadSeen()` and `saveSeen(s)` pair with no path at
+ * the call site. P is compared after resolving plain identifiers through their
+ * declarations and assignments in scope, so `const p = ledgerPath()` matches
+ * `readJson(ledgerPath())`.
  *
- * Within one function the read must come first. Across functions the path must
- * be FIXED: built only from module-level names and globals, like `ledgerPath()`.
- * That is the 8.171.0 context-depth-nudge shape, where the top level read the
- * shared ledger and a writeLedger() function wrote it back.
+ * Within one function the read must come first. That covers the 8.171.0
+ * context-depth-nudge shape, where the top level read the shared ledger and
+ * called a writeLedger() that wrote it back. Across functions the path must be
+ * fixed and the read's value must outlive its call: held in a module-scope name
+ * that the write's arguments name. watch-panels.js loads its seen-set once at
+ * the top level, and a timer's scan() saves it. Without that data flow every
+ * reader helper's body pairs with every writer helper's body: 12 new `--all`
+ * findings against 1, one of them in a hook `[measured 2026-09-24]`.
  *
  * ACCEPTED lists the findings a reader has judged safe, each with its reason.
  * An entry that no longer matches a finding fails the run, so the list cannot
@@ -67,6 +74,8 @@ const ACCEPTED = [
         why: 'The caller keys it by a hash of the transcript path, so one session owns each file. Losing it costs one full reprint.' },
     { file: 'plugins/autodev-core/scripts/fleet-intent.js', kind: 'rewrite', path: "recordPath('r', 'claude/x', tmp)",
         why: 'The --selftest writes a temp dir it created.' },
+    { file: 'plugins/autodev-core/scripts/watch-panels.js', kind: 'rewrite', path: "path.join(FLEET_DIR, 'watch-panels-seen.json')",
+        why: 'Two watchers sharing the seen-set overwrite each other, and a lost id only re-reports a panel already reported. The set only suppresses, so a loss is a duplicate ping, never a missed one.' },
 ];
 const PRIVATE_TOKEN = /(sid|sessionid|session_id|pid|uuid|runid|agentid)$|^(sid|key|id|sessionid|session_id)/i;
 const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 'return', 'typeof', 'function']);
@@ -280,9 +289,66 @@ function directCalls(text) {
         const name = m[1];
         const target = name === 'renameSync' || name === 'copyFileSync' ? args[1] : args[0];
         if (!target || target === '0') continue;
-        calls.push({ at: m.index, arg: target, op: name === 'readFileSync' ? 'read' : KIND[name], via: name });
+        calls.push({ at: m.index, arg: target, args, op: name === 'readFileSync' ? 'read' : KIND[name], via: name });
     }
     return calls;
+}
+
+/** Brace depth at every index, skipping strings: 0 is the module's own scope. */
+function braceDepths(text) {
+    const depth = new Int32Array(text.length + 1);
+    let d = 0;
+    let quote = null;
+    for (let i = 0; i < text.length; i++) {
+        depth[i] = d;
+        const c = text[i];
+        if (quote) { if (c === '\\') { depth[++i] = d; continue; } if (c === quote) quote = null; continue; }
+        if (c === '\'' || c === '"' || c === '`') { quote = c; continue; }
+        if (c === '{') d++;
+        else if (c === '}') d = Math.max(0, d - 1);
+    }
+    depth[text.length] = d;
+    return depth;
+}
+
+/**
+ * True when a function around `at` rebinds `name`: as a parameter, or by its own
+ * declaration. Then `name` there is not the module-scope binding.
+ */
+function shadowed(text, spans, name, at) {
+    const decl = new RegExp(`\\b(?:const|let|var|function)\\s+${name.replace(/\$/g, '\\$')}(?![\\w$])`, 'g');
+    for (const s of spans) {
+        if (!(s.start < at && at < s.end)) continue;
+        if (s.params.includes(name)) return true;
+        let d;
+        decl.lastIndex = s.start;
+        while ((d = decl.exec(text)) && d.index < s.end) if (innermost(spans, d.index) === s) return true;
+    }
+    return false;
+}
+
+/**
+ * The module-scope name that holds the value of the read at `at`, or null: a
+ * name declared outside every block whose declaration, or an assignment to it
+ * from any function that does not rebind it, has the read inside its value.
+ * `const seen = loadSeen()` at the top level, or `state = readState()` inside
+ * main() for a top-level `let state`.
+ */
+function heldIn(text, spans, depths, at) {
+    const names = new Set();
+    const decl = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g;
+    let m;
+    while ((m = decl.exec(text))) if (depths[m.index] === 0) names.add(m[1]);
+    for (const n of names) {
+        const re = new RegExp(`(\\b(?:const|let|var)\\s+|(?<![\\w$.]))${n.replace(/\$/g, '\\$')}\\s*=(?![=>])\\s*`, 'g');
+        while ((m = re.exec(text))) {
+            const start = m.index + m[0].length;
+            if (start > at) break;
+            if (m[1] ? depths[m.index] !== 0 : shadowed(text, spans, n, m.index)) continue;
+            if (at < start + exprFrom(text, start).length) return n;
+        }
+    }
+    return null;
 }
 
 /** Every `if` and `else` block as { start, end }. */
@@ -341,10 +407,10 @@ function scanText(src, file) {
         let m;
         while ((m = re.exec(text))) {
             if (/function\s*$/.test(text.slice(Math.max(0, m.index - 12), m.index))) continue;
-            const first = argsAt(text, m.index + m[0].length - 1)[0];
+            const args = argsAt(text, m.index + m[0].length - 1);
             for (const { op, fixed } of ops) {
-                const arg = fixed || first;
-                if (arg) calls.push({ at: m.index, arg, op, via: name, helper: true });
+                const arg = fixed || args[0];
+                if (arg) calls.push({ at: m.index, arg, args, op, via: name, helper: true });
             }
         }
     }
@@ -366,6 +432,19 @@ function scanText(src, file) {
         return !exitsAtEnd(b) && !elseOf(b, w);
     });
 
+    // Across functions, a read pairs with a write in another function when the
+    // path is FIXED and the read's value outlives its call: it is held in a
+    // module-scope name, and the write's arguments name it. watch-panels.js
+    // loads its seen-set once at the top level and a timer's scan() saves it,
+    // so every save writes back a copy read when the process started.
+    const depths = braceDepths(text);
+    const holds = (r, w) => {
+        const n = heldIn(text, spans, depths, r.at);
+        if (!n || shadowed(text, spans, n, w.at)) return false;
+        const named = new RegExp(`(?<![\\w$.])${n.replace(/\$/g, '\\$')}(?![\\w$])`);
+        return w.args.some((a) => named.test(a.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, ' ')));
+    };
+
     const findings = [];
     const reported = new Set();
     for (const w of calls) {
@@ -375,7 +454,9 @@ function scanText(src, file) {
         if (isPrivate(wChain)) continue;
         const wKeys = new Set(wChain.map(norm));
         const read = calls.find((r) => r.op === 'read' && r.at < w.at && innermost(spans, r.at) === fn && reaches(r, w)
-            && resolve(text, spans, r.arg, r.at).some((e) => wKeys.has(norm(e))));
+            && resolve(text, spans, r.arg, r.at).some((e) => wKeys.has(norm(e))))
+            || (fn && calls.find((r) => r.op === 'read' && innermost(spans, r.at) !== fn && holds(r, w)
+                && resolve(text, spans, r.arg, r.at).some((e) => wKeys.has(norm(e)) && isFixed(text, spans, e))));
         if (!read) continue;
         const line = lineOf(text, w.at);
         const id = `${line}|${w.op}`;
