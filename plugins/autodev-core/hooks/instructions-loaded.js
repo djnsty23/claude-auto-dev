@@ -30,8 +30,18 @@
  *   can break a session is worse than no logger, and this one runs at the
  *   earliest possible moment, before the user can react to anything going wrong.
  *
- * The log is append-only JSONL, one line per load, capped by line count rather
- * than by age so a machine left idle for a month does not lose its history.
+ * The log is append-only JSONL, one line per load, capped by size rather than by
+ * age so a machine left idle for a month does not lose its history.
+ *
+ * ROTATED, NEVER REWRITTEN. Every session appends to this one file. The cap used
+ * to be a trim in place: read every line, keep the last 4,000, write them back.
+ * A row another session appended between that read and that write was lost, and
+ * past 4,000 lines every load re-read and rewrote the whole file. Now the load
+ * that finds the log past ROTATE_BYTES renames it to a segment with a unique
+ * name, and the next append starts a fresh file. A rename moves every byte, so
+ * nothing written before it is lost, and two sessions rotating at once make two
+ * segments rather than one overwriting the other. check-rules-reachable.js reads
+ * the segments before the live log.
  */
 'use strict';
 // The `instructions_ledger` switch (plugin userConfig, CLAUDE_PLUGIN_OPTION_INSTRUCTIONS_LEDGER="false")
@@ -39,7 +49,27 @@
 if (process.env.CLAUDE_PLUGIN_OPTION_INSTRUCTIONS_LEDGER === 'false') process.exit(0);
 
 
-const MAX_LINES = 4000;
+// A live log past this is rotated. Segments are kept newest first until they
+// reach KEEP_BYTES, so the history on disk stays between about one and two caps.
+const ROTATE_BYTES = 600 * 1024;
+const KEEP_BYTES = 600 * 1024;
+// check-rules-reachable.js reads the same pattern. test-instructions-loaded.js
+// drives both, so a rename on one side fails there.
+const SEGMENT = /^instructions-loaded\.\d{13}-\d+\.jsonl$/;
+
+function rotate(fs, path, dir, log) {
+    const { size } = fs.statSync(log);
+    if (size < ROTATE_BYTES) return;
+    const seg = path.join(dir, `instructions-loaded.${String(Date.now()).padStart(13, '0')}-${process.pid}.jsonl`);
+    fs.renameSync(log, seg);
+    let kept = 0;
+    const segs = fs.readdirSync(dir).filter((n) => SEGMENT.test(n)).sort().reverse();
+    for (const n of segs) {
+        const p = path.join(dir, n);
+        if (kept >= KEEP_BYTES) { try { fs.unlinkSync(p); } catch { /* another load pruned it */ } continue; }
+        try { kept += fs.statSync(p).size; } catch { /* pruned meanwhile */ }
+    }
+}
 
 function main() {
     const fs = require('fs');
@@ -82,15 +112,8 @@ function main() {
         fs.appendFileSync(log, JSON.stringify(row) + '\n', 'utf8');
     } catch { return; }
 
-    // Trim opportunistically and cheaply. Reading the whole file on every load
-    // would make a large log quadratic, so only look when it is plausibly big.
-    try {
-        const { size } = fs.statSync(log);
-        if (size < 600 * 1024) return;
-        const lines = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean);
-        if (lines.length <= MAX_LINES) return;
-        fs.writeFileSync(log, lines.slice(-MAX_LINES).join('\n') + '\n', 'utf8');
-    } catch { /* a log that cannot be trimmed is still a usable log */ }
+    // One stat per load. The log is read only by the check, never here.
+    try { rotate(fs, path, dir, log); } catch { /* a log that cannot be rotated is still a usable log */ }
 }
 
 try { main(); } catch { /* never fail a turn over telemetry */ }

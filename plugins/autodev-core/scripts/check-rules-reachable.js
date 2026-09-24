@@ -99,15 +99,29 @@ function onDisk(repo) {
     return out;
 }
 
+// The hook rotates a full log into segments named for when they were cut, so
+// sorting by name is oldest first. hooks/instructions-loaded.js holds the writer.
+const SEGMENT = /^instructions-loaded\.\d{13}-\d+\.jsonl$/;
+
+/** Rows from the rotated segments, oldest first, then the live log. Null when there are none of either. */
 function readLog(file) {
-    let raw;
-    try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
-    const rows = [];
-    for (const line of raw.split('\n')) {
-        if (!line.trim()) continue;
-        try { rows.push(JSON.parse(line)); } catch { /* a torn line is not a finding */ }
+    const dir = path.dirname(file);
+    let segs = [];
+    if (path.basename(file) === 'instructions-loaded.jsonl') {
+        try { segs = fs.readdirSync(dir).filter((n) => SEGMENT.test(n)).sort().map((n) => path.join(dir, n)); } catch { segs = []; }
     }
-    return rows;
+    let seen = false;
+    const rows = [];
+    for (const f of segs.concat(file)) {
+        let raw;
+        try { raw = fs.readFileSync(f, 'utf8'); } catch { continue; }
+        seen = true;
+        for (const line of raw.split('\n')) {
+            if (!line.trim()) continue;
+            try { rows.push(JSON.parse(line)); } catch { /* a torn line is not a finding */ }
+        }
+    }
+    return seen ? rows : null;
 }
 
 // Case-folding is a property of the FILESYSTEM, not of this script (Sol's
