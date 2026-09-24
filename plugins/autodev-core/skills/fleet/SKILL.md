@@ -49,6 +49,12 @@ node "$CLAUDE_PLUGIN_ROOT/scripts/fleet-notify.js" --watch 120
 Fires once per panel, not per scan. `--dry` prints what would fire without
 notifying; `--test` sends one sample toast.
 
+It also fires once per open worker ask: an `ask.json` under `runs/` or beside a
+headless worker's report, read through `fleet-view.js`'s own `openAsks()`, so
+the toast and the fleet-view page list the same asks. A rewritten ask fires
+again. The 15-minute wait below does not apply to asks: nobody is in a headless
+worker's conversation to answer one quickly.
+
 To run it permanently, `install-fleet-notify-task.ps1` registers a scheduled task
 (every 2 min, interactive, hidden). Check it is doing the WORK, not merely
 launching — Task Scheduler's "Last Result: 0" only means the launcher started:
