@@ -147,6 +147,82 @@ writeState(file, s);
     check('fires: a reader helper and a writer helper on one path', f.length === 1 && f[0].via === 'readState -> writeState', f[0] && f[0].via);
 }
 
+// The watch-panels.js shape: helpers that take no path and touch a fixed one,
+// the set loaded once at the top level and saved from a function a timer runs.
+// The read and the write sit in different functions, so the value read at
+// startup is what every later save writes back over another watcher's set.
+const WATCH = (savePath) => PRE + `
+const STATE = path.join(CFG, 'fleet', 'seen.json');
+const OTHER = path.join(CFG, 'fleet', 'other.json');
+function loadSeen() {
+    try { return new Set(JSON.parse(fs.readFileSync(STATE, 'utf8'))); } catch { return new Set(); }
+}
+function saveSeen(set) {
+    try { fs.writeFileSync(${savePath}, JSON.stringify([...set].slice(-500))); } catch {}
+}
+const seen = loadSeen();
+function scan() {
+    seen.add(String(Date.now()));
+    saveSeen(seen);
+}
+setInterval(scan, 1000);
+`;
+
+{
+    const f = scan(WATCH('STATE'));
+    check('fires: zero-parameter helpers on a fixed path, loaded at the top level and saved from a timer (watch-panels)',
+        f.length === 1 && f[0].kind === 'rewrite' && f[0].fn === 'scan' && f[0].via === 'loadSeen -> saveSeen',
+        JSON.stringify(f.map((x) => `${x.fn} ${x.via}`)));
+}
+
+{
+    // Control derived from the case above: the same helpers, the save aimed at a
+    // second fixed path. Nothing read is written back to where it came from.
+    const f = scan(WATCH('OTHER'));
+    check('  control: the same helpers on two different fixed paths are quiet', f.length === 0, JSON.stringify(f));
+}
+
+{
+    // inbox-watch.js: the top level reads the set into `seen`, while claim()
+    // writes a fresh listing through writeSeen(seen), whose `seen` is its own
+    // parameter. The held value never reaches a write.
+    const f = scan(PRE + `
+const STATE = path.join(CFG, 'inbox-seen.json');
+function readSeen() { try { return JSON.parse(fs.readFileSync(STATE, 'utf8')); } catch { return {}; } }
+function writeSeen(seen) { fs.writeFileSync(STATE, JSON.stringify(seen)); }
+function check() { const seen = readSeen(); return seen.claimed || []; }
+function claim(files) { writeSeen({ claimed: files }); }
+const seen = readSeen();
+console.log(seen, check());
+`);
+    check('quiet: a fixed path read in one function and written fresh in another (inbox-watch)', f.length === 0, JSON.stringify(f));
+}
+
+{
+    // Across functions the path must be fixed. Here the held value does reach
+    // the write, and both paths read path.join(dir, 'seen.json'), but each `dir`
+    // is its own function's parameter: this copies directory a into b.
+    const f = scan(PRE + `
+let seen = [];
+function load(dir) { seen = JSON.parse(fs.readFileSync(path.join(dir, 'seen.json'), 'utf8')); }
+function save(dir) { fs.writeFileSync(path.join(dir, 'seen.json'), JSON.stringify(seen)); }
+load(path.join(CFG, 'a'));
+save(path.join(CFG, 'b'));
+`);
+    check('quiet: the same path text built from each function\'s own parameter', f.length === 0, JSON.stringify(f));
+}
+
+{
+    // The real file, so the ACCEPTED entry is exercised by a finding the
+    // detector produces rather than by a planted copy of it.
+    const file = 'plugins/autodev-core/scripts/watch-panels.js';
+    const f = rmw.scanText(fs.readFileSync(path.join(ROOT, file), 'utf8'), file);
+    const v = rmw.judge(f, [file]);
+    check('fires on the current watch-panels.js, and its ACCEPTED entry covers it',
+        f.some((x) => x.fn === 'scan' && x.via === 'loadSeen -> saveSeen') && v.open.length === 0 && v.stale.length === 0,
+        f.map((x) => `:${x.line} ${x.kind} ${x.via}`).join(', '));
+}
+
 // The shipped files themselves, where history is present. A shallow clone
 // lacks the commits, and that is reported as not run, never as a pass.
 {
