@@ -64,6 +64,7 @@ const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'script
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-notify-'));
 const DRIVER = path.join(ROOT, 'drive-notify.js');
 const VIEW = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'fleet-view.js');
+const HW = require(path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'headless-worker.js'));
 
 let passed = 0;
 let failed = 0;
@@ -539,6 +540,48 @@ function run() {
         Array.isArray(reRows) && reRows.length === 2 && asking.length === 1
         && asking[0].askFile === reAskFile && asking[0].key === newest,
         `rows=${JSON.stringify((reRows || []).map((r) => ({ key: r.key, q: !!r.question, actions: r.actions })))}`);
+
+    // =====================================================================
+    console.log('\n=== an ask a rerun moved aside neither toasts nor counts ===');
+    // =====================================================================
+    // headless-worker start renames the previous run's files, ask.json among
+    // them, before the rerun spawns. This drives that shipped move, not a copy
+    // of its naming, and then asks whether the renamed ask is still read.
+    const hAside = makeHome('aside');
+    const oldAsk = headlessAsk(hAside, 'W-MV', { question: 'Old question?' }, minutesAgo(90));
+    const mv1 = drive(hAside, 'count');
+    check('before the rerun, the first run\'s ask toasts once',
+        firedIn(mv1) === 1 && (toastsIn(mv1)[0] || {}).body === 'Old question?', summarise(mv1));
+    const ledgerFile = path.join(autodev(hAside), 'headless-workers.json');
+    const mvLedger = readJson(ledgerFile);
+    const prior = mvLedger.records[0];
+    const rerunAt = new Date().toISOString();
+    const moved = HW.moveAside(HW.priorRunFiles({ log: prior.log, report: prior.report, code: 'W-MV' }), rerunAt.replace(/[-:.]/g, ''));
+    const to = new Map(moved.map((m) => [m.from, m.to]));
+    for (const k of ['log', 'report']) if (to.has(path.resolve(prior[k]))) prior[k] = to.get(path.resolve(prior[k]));
+    mvLedger.records.push({ ...prior, startedAt: rerunAt, log: path.join(hAside, 'workers', 'W-MV.jsonl'), report: path.join(hAside, 'workers', 'W-MV.report.md') });
+    fs.writeFileSync(ledgerFile, JSON.stringify(mvLedger) + '\n', 'utf8');
+    const asideAsk = (moved.find((m) => m.from === path.resolve(oldAsk)) || {}).to;
+    check('the rerun moved the old ask aside, and the renamed file is still on disk',
+        !!asideAsk && fs.existsSync(asideAsk) && !fs.existsSync(oldAsk), `moved=${JSON.stringify(moved.map((m) => path.basename(m.to)))}`);
+    const mv2 = drive(hAside, 'count');
+    const mvState = readJson(stateFile(hAside)) || {};
+    check('the renamed ask neither toasts nor counts, and its key is pruned',
+        firedIn(mv2) === 0 && (popIn(mv2) || {}).asking === 0 && !Object.keys(mvState).some((k) => k.startsWith('ask:')),
+        `${summarise(mv2)} state=${JSON.stringify(mvState)}`);
+    let mvRows = null;
+    try {
+        mvRows = JSON.parse(spawnSync(process.execPath,
+            [VIEW, 'list', '--json', '--home', hAside, '--appdata', path.join(hAside, 'appdata')],
+            { encoding: 'utf8', env: envFor(hAside), windowsHide: true }).stdout).rows.filter((r) => r.code === 'W-MV');
+    } catch { /* stays null */ }
+    check('the page shows no question on either run once the old ask is moved aside',
+        Array.isArray(mvRows) && mvRows.length === 2 && mvRows.every((r) => !r.question),
+        `rows=${JSON.stringify((mvRows || []).map((r) => ({ key: r.key, q: r.question })))}`);
+    fs.writeFileSync(oldAsk, JSON.stringify({ question: 'New question?' }) + '\n', 'utf8');
+    const mv3 = drive(hAside, 'count');
+    check('the rerun\'s own ask, at the same path, toasts with its own question',
+        firedIn(mv3) === 1 && (toastsIn(mv3)[0] || {}).body === 'New question?', summarise(mv3));
 
     // =====================================================================
     console.log('\n=== panels and asks share one summary threshold ===');
