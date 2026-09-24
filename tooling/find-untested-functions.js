@@ -339,7 +339,15 @@ const run = spawnSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js
 });
 fs.closeSync(logFd);
 const runnerOut = fs.readFileSync(runnerLog, 'utf8');
-fs.rmSync(logDir, { recursive: true, force: true });
+// A red or killed run KEEPS its log. The summary below names the failed suite
+// and the last twelve lines, and the failing assertion is almost never in
+// either: it sits above the summary, in the suite's own block. Deleting the
+// file left a reader holding a name and no reason, and the only way to learn
+// the reason was to re-run a census that costs a full suite pass. A green run
+// has nothing to explain, so its log is removed as before.
+const runGreen = run.status === 0 && !run.signal;
+if (runGreen) fs.rmSync(logDir, { recursive: true, force: true });
+const keptLog = runGreen ? null : runnerLog;
 
 // WHICH suites failed, when the run is red. The runner prints a summary block
 // of `PASS  <label>` / `FAIL  <label>` lines; before this the exit-2 path said
@@ -484,6 +492,7 @@ if (asJson) {
         failedSuites,
         runnerSignal: run.signal || null,
         runnerOutputBytes: Buffer.byteLength(runnerOut),
+        runnerLog: keptLog,
         emptyCensus,
         gate,
         sourceFiles: ALL_SOURCES.size,
@@ -519,6 +528,7 @@ if (run.status !== 0) {
     } else if (failedSuites.length) console.error('Failed suite(s): ' + failedSuites.join(', '));
     else console.error('The runner printed no FAIL line; its last lines were:\n' + runnerTail);
     console.error(`(runner output: ${Buffer.byteLength(runnerOut)} bytes, read from a file, no buffer ceiling)`);
+    console.error('The full runner log is kept at ' + keptLog + ' (every assertion from every suite, not only the tail).');
     console.error('');
     return 2;
 }

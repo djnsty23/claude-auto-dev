@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "node tooling/test-all.js",
-    "gate": "npm test && npm run check:suites && npm run check:probe-shapes && npm run check:population && npm run check:entrypoints && npm run check:skill-tools && npm run check:skill-plugin-root && npm run check:agents-md && npm run check:decisions && npm run check:claude-md && npm run check:coverage",
+    "gate": "npm test && npm run check:suites && npm run check:probe-shapes && npm run check:population && npm run check:entrypoints && npm run check:skill-tools && npm run check:skill-plugin-root && npm run check:agents-md && npm run check:decisions && npm run check:claude-md && npm run check:hook-parse && npm run check:coverage",
     "gate:fast": "node tooling/gate-fast.js",
     "validate": "node tooling/validate.js",
     "bump": "node tooling/bump.js",
@@ -63,6 +63,7 @@
     "check:collisions": "node tooling/check-skill-collisions.js --selftest && node tooling/check-skill-collisions.js",
     "check:agents-md": "node tooling/generate-agents-md.js --check",
     "check:claude-md": "node tooling/check-claude-md.js --selftest && node tooling/check-claude-md.js",
+    "check:hook-parse": "node tooling/check-hook-parse.js",
     "check:skill-plugin-root": "node tooling/check-skill-plugin-root.js",
     "check:decisions": "node tooling/generate-decisions.js --lint",
     "check:decisions-drift": "node tooling/generate-decisions.js --check"

@@ -408,6 +408,24 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
 }
 
 
+// --help prints usage and scans nothing. Run from INSIDE a repo holding an
+// orphan, because a --help that falls through scans the cwd: the control
+// run without it finds the orphan there.
+{
+    const dir = repo({
+        'package.json': JSON.stringify({ name: 'r', scripts: { test: 'vitest run' } }),
+        'scripts/lonely-help-check.mjs': ASSERTS,
+    });
+    const control = spawnSync(process.execPath, [TOOL], { cwd: dir, encoding: 'utf8' });
+    check('control: run with no argument from inside the repo scans it and finds the orphan',
+        control.status === 1 && /lonely-help-check/.test(control.stdout));
+    for (const flag of ['--help', '-h']) {
+        const h = spawnSync(process.execPath, [TOOL, flag], { cwd: dir, encoding: 'utf8' });
+        check(`${flag} prints usage and scans nothing: exit 0, Usage on stdout, no orphan named`,
+            h.status === 0 && /^Usage: node find-orphan-checks\.js/.test(h.stdout) && !/lonely-help-check/.test(h.stdout));
+    }
+}
+
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
