@@ -225,6 +225,35 @@ const repend = (dir) => fs.writeFileSync(path.join(dir, '.claude', '.typecheck-p
     check('malformed stdin still runs the check and blocks', blocked(r));
 }
 
+// ---------------------------------------------------------------- a peer's edit mid-consume
+//
+// The pending list is per directory, so every session in one checkout appends
+// to it. A Stop that read the list and then deleted it also deleted any path a
+// peer's PostToolUse appended in between, and that edit was never checked. The
+// preload appends the peer's path right after the hook's own read, every run.
+{
+    const race = require('./race-interleave.js');
+    const PRELOAD = race.preloadPath();
+    const dir = project({ pending: ['src/app.ts'] });
+    const shared = path.join(dir, '.claude', '.typecheck-pending');
+    const record = path.join(TMP, 'planted-' + n + '.txt');
+    const peer = path.join(dir, 'src', 'peer.ts');
+    const r = spawnSync(process.execPath, ['--require', PRELOAD, HOOK], {
+        input: JSON.stringify({ hook_event_name: 'Stop', session_id: 'x', cwd: dir, stop_hook_active: false }),
+        encoding: 'utf8', cwd: dir,
+        env: { ...process.env, RACE_SPEC: race.spec([{ op: 'readFileSync', basename: '.typecheck-pending', prefix: true,
+            appendTo: shared, text: peer + '\n', times: 1 }], record) },
+    });
+    const left = fs.existsSync(shared) ? fs.readFileSync(shared, 'utf8').split('\n') : [];
+    check('race: the Stop is silent (no package.json, so it only consumes)', r.status === 0 && !r.stdout && !r.stderr);
+    check('race: the probe planted one peer edit', race.planted(record).length === 1);
+    check('race: the peer edit appended mid-consume is still pending for the next Stop', left.includes(peer));
+    check('race: this Stop consumed its own list', !left.includes(path.join(dir, 'src', 'app.ts')));
+    check('race: no claim file is left behind',
+        fs.readdirSync(path.join(dir, '.claude')).filter((f) => f.startsWith('.typecheck-pending.')).length === 0);
+    try { fs.rmSync(path.dirname(PRELOAD), { recursive: true, force: true }); } catch { /* tmp */ }
+}
+
 // ---------------------------------------------------------------- profile
 
 {
