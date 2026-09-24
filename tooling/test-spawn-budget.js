@@ -413,6 +413,32 @@ const killedAfterWriting = (script, tag) => {
         sb.lastWords({ stdout: '', stderr: '' }));
 }
 
+// --- lastWords: A CHILD THAT NEVER STARTED WAS NOT KILLED ---
+//
+// `[measured 2026-09-24]` a planted ENOENT reached a gate log through
+// find-untested-hooks.js as "the child wrote nothing before it was killed".
+// Real spawns, and the expected words are written here by hand rather than
+// read from the module, so the selftest and this case cannot weaken together.
+{
+    const missing = spawnSync(process.execPath + '.missing', ['-e', '0'], { encoding: 'utf8' });
+    check('a spawn of a missing executable really never started, or this proves nothing',
+        !!missing.error && missing.error.code === 'ENOENT' && !(missing.pid > 0)
+            && missing.status === null && missing.signal === null,
+        `error=${missing.error && missing.error.code} pid=${missing.pid} status=${missing.status} signal=${missing.signal}`);
+    check('  and lastWords says it never started, and never that it was killed',
+        /never started/.test(sb.lastWords(missing)) && !/killed/.test(sb.lastWords(missing)),
+        sb.lastWords(missing));
+    const exited = spawnSync(process.execPath, ['-e', 'process.exit(3)'], { encoding: 'utf8' });
+    check('  and a silent child that exited 3 is reported as exited, not killed',
+        exited.status === 3 && /exited/.test(sb.lastWords(exited)) && !/killed/.test(sb.lastWords(exited)),
+        `status=${exited.status} -> ${sb.lastWords(exited)}`);
+    const killed = spawnSync(process.execPath, ['-e', 'setInterval(function(){},1000)'],
+        { encoding: 'utf8', timeout: 1 });
+    check('  CONTROL: a silent child a 1 ms timeout killed is still reported as killed',
+        !!killed.error && killed.error.code === 'ETIMEDOUT' && /killed/.test(sb.lastWords(killed)),
+        `${killed.error && killed.error.code} pid=${killed.pid} -> ${sb.lastWords(killed)}`);
+}
+
 // --- lastWords: STDERR IS NOT THE TAIL OF STDOUT ---
 //
 // Every fixture above writes stderr LAST, so concatenating the two pipes
