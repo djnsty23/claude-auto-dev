@@ -236,6 +236,69 @@ check('the report says this is reachability, not quality',
   fs.rmSync(bigRoot, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// the default inventory, run from where the script actually lives
+// ---------------------------------------------------------------------------
+// Every run above passes --plugins, so the default was never exercised, and
+// the default is what an installed copy uses. `[measured 2026-09-24]` on
+// 8.173.0 it read cache/autodev/autodev-core/, whose children are every cached
+// VERSION, and listed 184 never-fired skills of which 159 were repeats.
+{
+  const place = (scriptsDir) => {
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    for (const f of ['analyze-skill-invocations.js', 'claude-paths.js']) {
+      fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(scriptsDir, f));
+    }
+    return path.join(scriptsDir, 'analyze-skill-invocations.js');
+  };
+  const put = (pluginRoot, name, version, skills) => {
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ name, version }), 'utf8');
+    for (const sk of skills) {
+      const d = path.join(pluginRoot, 'skills', sk);
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'SKILL.md'), '---\nname: ' + sk + '\ndescription: fixture\n---\n', 'utf8');
+    }
+  };
+  const inventory = (script) => {
+    const r = spawnSync(process.execPath, [script, '--dir', projects, '--json'], { encoding: 'utf8' });
+    try { return JSON.parse(r.stdout); } catch { return { parseError: (r.stdout || '') + (r.stderr || '') }; }
+  };
+
+  // Installed: two plugins, each cached at an old and the current version. The
+  // old core version still carries a skill the current one retired.
+  const market = path.join(root, 'cache', 'fixture-market');
+  put(path.join(market, 'fixture-core', '1.0.0'), 'fixture-core', '1.0.0', ['kept', 'retired']);
+  put(path.join(market, 'fixture-core', '2.0.0'), 'fixture-core', '2.0.0', ['kept']);
+  put(path.join(market, 'fixture-mem', '1.0.0'), 'fixture-mem', '1.0.0', ['mem']);
+  put(path.join(market, 'fixture-mem', '2.0.0'), 'fixture-mem', '2.0.0', ['mem']);
+  const inst = inventory(place(path.join(market, 'fixture-core', '2.0.0', 'scripts')));
+  check('installed: the default inventory is each plugin at THIS version, once',
+    inst.invocable === 2 && JSON.stringify(inst.never) === JSON.stringify(['kept', 'mem']),
+    JSON.stringify({ invocable: inst.invocable, never: inst.never, err: inst.parseError }));
+  check('installed: a skill only an older cached version carries is not inventoried',
+    Array.isArray(inst.never) && !inst.never.includes('retired'), JSON.stringify(inst.never));
+  check('installed: the output names the layout it read and how many plugin roots',
+    inst.inventoryLayout === 'installed' && inst.pluginRoots === 2,
+    JSON.stringify({ layout: inst.inventoryLayout, roots: inst.pluginRoots }));
+
+  // Repo: plugins/<p>/ with no version level. The same script, the same default.
+  const repoPlugins = path.join(root, 'repo', 'plugins');
+  put(path.join(repoPlugins, 'fixture-core'), 'fixture-core', '2.0.0', ['kept']);
+  put(path.join(repoPlugins, 'fixture-mem'), 'fixture-mem', '2.0.0', ['mem']);
+  const repo = inventory(place(path.join(repoPlugins, 'fixture-core', 'scripts')));
+  check('repo: the default inventory is every plugin under plugins/',
+    repo.invocable === 2 && repo.inventoryLayout === 'repo' && repo.pluginRoots === 2,
+    JSON.stringify({ invocable: repo.invocable, layout: repo.inventoryLayout, roots: repo.pluginRoots }));
+
+  // No plugin roots is COULD NOT CHECK, never an inventory of zero that reads clean.
+  const emptyPlugins = path.join(root, 'no-plugins');
+  fs.mkdirSync(emptyPlugins, { recursive: true });
+  const none = spawnSync(process.execPath, [SCRIPT, '--dir', projects, '--plugins', emptyPlugins], { encoding: 'utf8' });
+  check('no plugin roots exits 2 and says COULD NOT CHECK',
+    none.status === 2 && /COULD NOT CHECK/.test(none.stdout || ''), 'exit ' + none.status + ' ' + (none.stdout || '').slice(0, 120));
+}
+
 console.log('');
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

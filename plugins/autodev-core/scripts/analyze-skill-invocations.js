@@ -148,16 +148,50 @@ function walkJsonl(dir, sinceMs, budget) {
     return found;
 }
 
-/** Read every SKILL.md under plugins/, split by whether a user can type it. */
-function readSkillInventory(pluginsDir) {
+/**
+ * The plugin roots to inventory. `--plugins <dir>` means every child of <dir>
+ * is a plugin. So does the default in the repo, where this script sits in
+ * plugins/<p>/scripts/ and ../.. is plugins/. INSTALLED it sits in
+ * cache/<marketplace>/<p>/<version>/scripts/, where ../.. is <p>/ and its
+ * children are every cached VERSION of one plugin. `[measured 2026-09-24]` on
+ * 8.173.0 with 24 cached versions that listed 184 never-fired skills, 159 of
+ * them repeats, and kept retired skills in the inventory.
+ *
+ * The installed layout is told apart by its plugin directory carrying the
+ * manifest's name, which plugins/ never does. Its roots are each plugin in
+ * the marketplace at the version directory this script runs from: bump.js
+ * writes one version into every plugin, so the siblings share it.
+ */
+function pluginRoots(explicitDir, scriptsDir) {
+    const children = (d) => fs.readdirSync(d, { withFileTypes: true })
+        .filter((e) => e.isDirectory()).map((e) => path.join(d, e.name));
+    if (explicitDir) return { layout: 'given', roots: children(explicitDir) };
+    const own = path.join(scriptsDir, '..');
+    let manifest = null;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(own, '.claude-plugin', 'plugin.json'), 'utf8')); }
+    catch (e) { manifest = null; }
+    const installed = !!manifest && !!manifest.name && path.basename(path.dirname(own)) === manifest.name;
+    if (!installed) return { layout: 'repo', roots: children(path.join(own, '..')) };
+    const version = path.basename(own);
+    return {
+        layout: 'installed',
+        roots: children(path.dirname(path.dirname(own))).map((p) => path.join(p, version)).filter((p) => fs.existsSync(p)),
+    };
+}
+
+/** Read every SKILL.md under each plugin root, split by whether a user can type it. */
+function readSkillInventory(explicitDir, scriptsDir) {
     const invocable = [];
     const autoOnly = [];
-    let plugins = [];
-    try { plugins = fs.readdirSync(pluginsDir, { withFileTypes: true }).filter((e) => e.isDirectory()); }
+    let found;
+    try { found = pluginRoots(explicitDir, scriptsDir); }
     catch (e) { return { invocable: invocable, autoOnly: autoOnly, error: e.message }; }
+    if (!found.roots.length) {
+        return { invocable: invocable, autoOnly: autoOnly, error: 'no plugin roots found in the ' + found.layout + ' layout' };
+    }
 
-    for (const p of plugins) {
-        const skillsDir = path.join(pluginsDir, p.name, 'skills');
+    for (const root of found.roots) {
+        const skillsDir = path.join(root, 'skills');
         let names = [];
         try { names = fs.readdirSync(skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); }
         catch (e) { continue; }
@@ -172,7 +206,7 @@ function readSkillInventory(pluginsDir) {
             (/^user-invocable:\s*false/m.test(fm) ? autoOnly : invocable).push(n);
         }
     }
-    return { invocable: invocable, autoOnly: autoOnly };
+    return { invocable: invocable, autoOnly: autoOnly, layout: found.layout, roots: found.roots.length };
 }
 
 function analyse(o) {
@@ -190,7 +224,7 @@ function analyse(o) {
         for (const c of commandsInText(text)) cmdCounts.set(c, (cmdCounts.get(c) || 0) + 1);
     }
 
-    const inv = readSkillInventory(o.pluginsDir);
+    const inv = readSkillInventory(o.pluginsDir, o.scriptsDir || __dirname);
     const invSet = new Set(inv.invocable);
     const autoSet = new Set(inv.autoOnly);
 
@@ -236,6 +270,8 @@ function analyse(o) {
         top: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10),
         topTyped: [...cmdCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10),
         inventoryError: inv.error || null,
+        inventoryLayout: inv.layout || null,
+        pluginRoots: inv.roots || 0,
     };
 }
 
@@ -249,7 +285,8 @@ function report(r) {
     console.log('population: ' + r.transcripts + ' transcript(s) in the last ' + r.days +
         'd, ' + r.megabytes + ' MB read, ' + r.unreadable + ' unreadable');
     console.log('inventory:  ' + r.invocable + ' user-invocable skill(s), ' + r.autoOnly +
-        ' rule-* skill(s) that are not user-invocable');
+        ' rule-* skill(s) that are not user-invocable' +
+        (r.inventoryLayout ? ', from ' + r.pluginRoots + ' plugin root(s) in the ' + r.inventoryLayout + ' layout' : ''));
     console.log('');
 
     // A zero TOTAL is a claim about the reader, not about the world.
@@ -394,7 +431,7 @@ function main() {
     const result = analyse({
         days: Number(opt('--days', '7')) || 7,
         dir: opt('--dir', path.join(claudePaths.configDir(), 'projects')),
-        pluginsDir: opt('--plugins', path.join(__dirname, '..', '..')),
+        pluginsDir: opt('--plugins', null),
         budget: Number(opt('--max-files', '4000')) || 4000,
     });
 
