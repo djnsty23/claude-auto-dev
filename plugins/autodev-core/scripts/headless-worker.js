@@ -43,10 +43,10 @@
  * Usage:
  *   node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>
  *        [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]
- *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]
+ *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
- *   node headless-worker.js settle --code <CODE> [--lost] [--ledger <file>] [--json]
+ *   node headless-worker.js settle --code <CODE> [--lost] [--unreported] [--ledger <file>] [--json]
  *   node headless-worker.js selftest
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  *
@@ -58,27 +58,34 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const claudePaths = require('./claude-paths.js');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const USAGE = [
     'Usage: node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>',
     '            [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]',
-    '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run]',
+    '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
-    '       node headless-worker.js settle --code <CODE> [--lost] [--ledger <file>] [--json]',
+    '       node headless-worker.js settle --code <CODE> [--lost] [--unreported] [--ledger <file>] [--json]',
     '       node headless-worker.js selftest',
     'start: spawn a detached supervisor that runs `claude -p` and appends CLAUDE_EXIT=<code> to the log.',
     '       The caller may exit at once; the result is the report file plus that exit line.',
     '       --config-dir is an absolute path, ~ or ~/<name>. A bare relative name is refused, and so is',
     '       a directory that does not exist, before anything is spawned or recorded.',
     '       --effort is one of low|medium|high|xhigh|max, passed to claude as --effort <level>; omitted, argv has no --effort.',
+    '       start refuses a script outside a plugin cache, because a worker started from a checkout runs code no',
+    '       release shipped. --dev runs the checkout on purpose. Every record names the version and script that ran.',
     'status: two axes per record, process (running|exited|unknown) and result (none|done|stopped|failed|unparseable).',
+    '        An unparseable report whose RESULT line names another code says so: RESULT line found for a different code.',
     '        A record started before this boot is unknown whatever its pid says; settled records leave after 7 days.',
     'settle: read the last RESULT <CODE> line of the report and mark the record settled.',
     'settle --lost: settle a record whose supervisor died without an exit line, as result lost. Refused unless',
     '        the record started before this boot, or its pid is dead with no exit line. A record with an exit line',
     '        takes plain settle. A lost record is its own result, never done, stopped or failed.',
+    'settle --unreported: settle a record whose worker exited without a RESULT <CODE> line, as result unreported.',
+    '        Refused while the log has no exit line (that is --lost), while the report has a RESULT line, and while',
+    '        <report dir>/<CODE>/<report name> has one (a report written into the scratch dir: move it, then settle).',
+    '        An unreported record is its own result, never done, stopped or failed.',
     'ask:    a worker asks by writing <report dir>/<CODE>/ask.json and keeps working. status shows ask=open',
     '        until answer.json lands beside it. No worker exits to ask.',
     'Not unattended-worker.js: that one composes scheduled-task calls and starts nothing.',
@@ -89,9 +96,10 @@ const CODE_RE = /^[A-Za-z0-9][A-Za-z0-9-]{1,23}$/;
 const PROMPT_MAX = 8000;
 const RESULT_STATES = ['done', 'stopped', 'failed'];
 // What a SETTLED record's `result` field can hold: a RESULT line's state, or
-// `lost` for a record settled by `settle --lost`. Kept apart from RESULT_STATES
-// on purpose: `lost` is never parsed from a report, so a worker cannot claim it.
-const SETTLED_RESULTS = [...RESULT_STATES, 'lost'];
+// `lost` for a record settled by `settle --lost`, or `unreported` for one settled
+// by `settle --unreported`. Kept apart from RESULT_STATES on purpose: neither is
+// ever parsed from a report, so a worker cannot claim one.
+const SETTLED_RESULTS = [...RESULT_STATES, 'lost', 'unreported'];
 const SCRUBBED_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'];
 const LOCK_STALE_MS = 60 * 1000;
 const LOCK_WAIT_MS = 5000;
@@ -105,6 +113,15 @@ const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const HEADLESS_NOTE = 'HEADLESS: this process exits the moment the turn ends, so run every gate and long '
     + 'command in the FOREGROUND with the Bash timeout at its maximum, background nothing, and do not end '
     + 'the turn until the report file is complete and carries its RESULT line.';
+
+// `[measured 2026-09-23]` in one fleet's worker transcripts the auto-mode
+// permission classifier refused four action classes: Production Deploy (19),
+// Secret-Store Writes (9), Production Reads (8) and Modify Shared Resources (3).
+// A worker that met one exited, and its relaunch met it again. Named up front,
+// each becomes one line for a person to run in the next release window.
+const DENIED_NOTE = 'DENIED UP FRONT: expect the permission classifier to refuse Production Deploy, Secret-Store Writes, '
+    + 'Production Reads and Modify Shared Resources in this run. Do not attempt them and do not stop on them: list each one '
+    + 'you need under a "Release window" heading in the report, with the exact command, and carry on with the rest.';
 
 // `[measured 2026-09-22]` briefs said "a new worktree" and `cmd > f.log` without
 // saying WHERE, so workers resolved both against whatever directory they stood
@@ -129,21 +146,47 @@ function askFiles(scratchDir) {
     return { ask: path.join(scratchDir, 'ask.json'), answer: path.join(scratchDir, 'answer.json') };
 }
 
-function askNote(scratchDir) {
+function askNote(scratchDir, code = path.basename(scratchDir)) {
     const f = askFiles(scratchDir);
     const slash = (p) => p.replace(/\\/g, '/');
     return `ASKING: never exit to ask. When a decision needs a person, write ${slash(f.ask)} as JSON `
         + '{"question","header","asked","blocks","options":[{"label","detail"}]}, the option you would take first and marked (Recommended). '
         + `Keep working on everything that does not depend on it, and read ${slash(f.answer)} ({"label","note"}) between steps. `
-        + 'Only when nothing independent is left, record the open question in the report and end with RESULT <CODE> stopped. '
+        + `Only when nothing independent is left, record the open question in the report and end with RESULT ${code} stopped. `
         + 'Never guess the answer and never read silence as approval.';
+}
+
+// `[measured 2026-09-23]` reports ended `RESULT DESIGN done:` while the ledger
+// code was `W2-DESIGN`, and the same for SWEEP: the prompt said `RESULT <CODE>`
+// and each worker filled in a code of its own. parseResult anchors on the exact
+// code, so both records read unparseable and could not be settled. The prompt
+// now carries the ledger code verbatim.
+function resultNote(code, report) {
+    return `RESULT: the last line of ${report.replace(/\\/g, '/')} is \`RESULT ${code} done|stopped|failed: <one sentence>\`, `
+        + `with the code exactly ${code}. Any other spelling of it reads as unparseable, and the run cannot be settled.`;
+}
+
+// `[measured 2026-09-23]` after an install, 11 of 12 workers ran this script
+// from a worktree rather than the installed plugin: the launching session
+// called the checkout it stood in. They ran code no release shipped, and no
+// record said so. So start refuses a script outside a plugin cache unless
+// --dev says that is intended, and every record names the version that ran.
+function scriptPlacement(file = __filename) {
+    const script = path.resolve(file);
+    const installed = /\/plugins\/cache\//i.test(script.replace(/\\/g, '/'));
+    let version = null;
+    try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(script), '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+        version = typeof manifest.version === 'string' && manifest.version ? manifest.version : null;
+    } catch { version = null; }
+    return { script, installed, version };
 }
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
 function parseArgs(argv) {
     const out = { _: [] };
-    const flags = ['help', 'dry-run', 'json', 'lost'];
+    const flags = ['help', 'dry-run', 'json', 'lost', 'unreported', 'dev'];
     const known = ['_', ...flags, 'code', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
         'permission-mode', 'cwd', 'claude-bin', 'ledger'];
     for (let i = 0; i < argv.length; i++) {
@@ -253,18 +296,89 @@ function withLedger(file, fn) {
 function isUnsettled(rec) { return rec.state !== 'settled'; }
 
 // ---------------------------------------------------------------- the child
-function composePrompt(text, scratchDir) {
-    const placement = scratchDir ? placementNote(scratchDir) + '\n\n' + askNote(scratchDir) + '\n\n' : '';
-    return text.replace(/\s+$/, '') + '\n\n' + placement + HEADLESS_NOTE + '\n';
+function composePrompt(text, scratchDir, { code = null, report = null } = {}) {
+    const notes = [];
+    if (scratchDir) notes.push(placementNote(scratchDir), askNote(scratchDir, code || path.basename(scratchDir)));
+    if (code && report) notes.push(resultNote(code, report));
+    notes.push(DENIED_NOTE, HEADLESS_NOTE);
+    return text.replace(/\s+$/, '') + '\n\n' + notes.join('\n\n') + '\n';
 }
 
 /** Where a worker's scratch output belongs: a directory named for its code, beside its report. */
 function scratchDirFor(o) { return path.join(path.dirname(o.report), o.code); }
 
-function readPrompt(file, scratchDir) {
+// `[measured 2026-09-24]` two workers finished done, PRs green, and wrote
+// REPORT.md into their scratch dir, one level below the ledger's report path.
+// Their prompts named the scratch dir and not the report file. The ledger read
+// the empty path, so both looked like workers that left no report, and settle
+// --unreported would have filed two finished PRs as unreported. So settle looks
+// in that one place, names the file, and never settles past it.
+/** The report file under the record's scratch dir, when it carries this code's RESULT line. */
+function misplacedReport(rec) {
+    if (!rec.report || !rec.code) return null;
+    const alt = path.join(scratchDirFor(rec), path.basename(rec.report));
+    if (path.resolve(alt) === path.resolve(rec.report)) return null;
+    const text = readText(alt);
+    if (text === null || writtenBefore(alt, rec.startedAt)) return null;
+    return parseResult(text, rec.code) ? alt : null;
+}
+
+function misplacedHint(moved, rec) {
+    return `${moved} has a RESULT ${rec.code} line: the worker wrote its report into its scratch dir. `
+        + `Move that file to ${rec.report}, then settle again`;
+}
+
+/** True when the file was last written more than a second before the run started: it belongs to an earlier run. */
+function writtenBefore(file, startedAt) {
+    const t = Date.parse(startedAt || '');
+    if (!Number.isFinite(t)) return false;
+    try { return fs.statSync(file).mtimeMs < t - 1000; } catch { return false; }
+}
+
+function staleHint(rec) {
+    let at = 'earlier';
+    try { at = new Date(fs.statSync(rec.report).mtimeMs).toISOString(); } catch { /* gone since the check */ }
+    return `${rec.report} was last written at ${at}, before this run started at ${rec.startedAt}, so its RESULT line `
+        + 'belongs to an earlier run of the same code. Wait for this run to write its own report, or move the old one aside and settle again';
+}
+
+// `[measured 2026-09-24]` a rerun at the same code appended to the previous
+// run's log and found its report. ACCESS-ALL and BLOG read "exited, stopped"
+// from their first runs while the reruns worked, a cap that counted reports
+// let three workers run against a limit of one, and a plain settle would have
+// filed each live worker under the previous run's result. So start moves the
+// previous run's files aside before it spawns, and the settled records that
+// named them follow the files.
+/** The files an earlier run of this code left where the new run will write, in a fixed order. */
+function priorRunFiles(o) {
+    const scratch = scratchDirFor(o);
+    const ask = askFiles(scratch);
+    const all = [o.log, o.report, path.join(scratch, path.basename(o.report)), ask.ask, ask.answer].map((p) => path.resolve(p));
+    return all.filter((p, i) => all.indexOf(p) === i && fs.existsSync(p));
+}
+
+function asideName(file, stamp) {
+    const ext = path.extname(file);
+    return path.join(path.dirname(file), `${path.basename(file, ext)}.prev-${stamp}${ext}`);
+}
+
+/** Rename each file aside, all or none: a failure puts back what already moved and refuses the start. */
+function moveAside(files, stamp) {
+    const moved = [];
+    try {
+        for (const from of files) { const to = asideName(from, stamp); fs.renameSync(from, to); moved.push({ from, to }); }
+    } catch (e) {
+        for (const m of moved.reverse()) { try { fs.renameSync(m.to, m.from); } catch { /* reported below */ } }
+        fault('move-aside-failed', `could not move an earlier run's files aside before starting (${e.code || e.message}). `
+            + `Nothing was started. Files: ${files.join(', ')}`);
+    }
+    return moved;
+}
+
+function readPrompt(file, scratchDir, o = {}) {
     if (!file) fault('usage', '--prompt-file is required');
     if (!fs.existsSync(file)) fault('prompt-missing', `${file} does not exist`);
-    const prompt = composePrompt(fs.readFileSync(file, 'utf8'), scratchDir);
+    const prompt = composePrompt(fs.readFileSync(file, 'utf8'), scratchDir, { code: o.code, report: o.report });
     if (prompt.length > PROMPT_MAX) {
         fault('prompt-too-long', `the prompt is ${prompt.length} characters after the placement and headless notes and the cap is ${PROMPT_MAX}: `
             + 'it travels in argv, so write a short pointer prompt that names a file to read');
@@ -385,6 +499,7 @@ function startOptions(opts) {
         cwd: opts.cwd ? path.resolve(opts.cwd) : process.cwd(),
         claudeBin: resolveClaudeBin(opts['claude-bin'] || 'claude'),
         ledger: path.resolve(opts.ledger || defaultLedger()),
+        dev: opts.dev === true,
     };
 }
 
@@ -400,8 +515,13 @@ function supervisorFlags(o) {
 
 function start(opts) {
     const o = startOptions(opts);
+    const placement = scriptPlacement();
+    if (!placement.installed && !o.dev) {
+        fault('not-installed', `${placement.script} is not inside a plugin cache, so a worker started from it runs code no release shipped. `
+            + 'Run the installed copy under <config dir>/plugins/cache/, or pass --dev to run this checkout on purpose');
+    }
     if (o.configDir) requireConfigDirExists(o.configDir);
-    const prompt = readPrompt(o.promptFile, scratchDirFor(o));
+    const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
     const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     if (opts['dry-run']) {
@@ -409,7 +529,9 @@ function start(opts) {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
             configDir: o.configDir, effort: o.effort,
+            script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev,
             log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
+            wouldMoveAside: priorRunFiles(o),
         };
     }
     // RESERVE, THEN SPAWN, THEN FILL IN. The code is reserved inside the lock
@@ -418,9 +540,10 @@ function start(opts) {
     // The order used to be spawn first and write second, and a refusal in the
     // write left a real worker running that no ledger named.
     const record = {
-        code: o.code, pid: null, startedAt: new Date().toISOString(),
+        code: o.code, pid: null, supervisorImage: path.basename(process.execPath).toLowerCase(), startedAt: new Date().toISOString(),
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
+        version: placement.version, script: placement.script, dev: !placement.installed,
         model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, state: 'starting',
     };
     const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;
@@ -428,6 +551,13 @@ function start(opts) {
         if (ledger.records.some((r) => r.code === o.code && isUnsettled(r))) {
             fault('code-active', `${o.code} has an unsettled record in ${o.ledger}; settle it or pick another code`);
         }
+        const moved = moveAside(priorRunFiles(o), record.startedAt.replace(/[-:.]/g, ''));
+        const to = new Map(moved.map((m) => [m.from, m.to]));
+        for (const r of ledger.records) {
+            if (r.code !== o.code) continue;
+            for (const k of ['log', 'report']) if (r[k] && to.has(path.resolve(r[k]))) r[k] = to.get(path.resolve(r[k]));
+        }
+        if (moved.length) record.movedAside = moved.map((m) => m.to);
         ledger.records.push(record);
     });
     let child;
@@ -457,7 +587,7 @@ function start(opts) {
  */
 function supervise(opts) {
     const o = startOptions(opts);
-    const prompt = readPrompt(o.promptFile, scratchDirFor(o));
+    const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
     const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
     const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     const plan = spawnPlan(argv);
@@ -509,11 +639,62 @@ function pidLiveness(pid, probe) {
     try { (probe || process.kill)(pid, 0); return 'alive'; } catch (e) { return livenessFromError(e); }
 }
 
+/**
+ * The image holding a pid, lowercased and without a directory, or null when it
+ * cannot be read. `[measured 2026-09-24]` a supervisor pid, 62756, had died and
+ * been reused by msedgewebview2.exe within the same boot, so kill(pid, 0)
+ * answered alive and the ledger kept the worker as running.
+ */
+function pidImage(pid, run = spawnSync, platform = process.platform) {
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    try {
+        if (platform === 'win32') {
+            const r = run('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+            if (!r || r.status !== 0) return null;
+            const m = String(r.stdout).match(/^"([^"]+)","(\d+)"/m);
+            return m && Number(m[2]) === pid ? m[1].toLowerCase() : null;
+        }
+        const r = run('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8', timeout: 5000 });
+        if (!r || r.status !== 0) return null;
+        const t = String(r.stdout).trim();
+        return t ? path.basename(t).toLowerCase() : null;
+    } catch {
+        return null;
+    }
+}
+
+/** The image a record's supervisor was started as. A record written before the field existed ran node. */
+function isSupervisorImage(rec, seen) {
+    const want = String((rec && rec.supervisorImage) || '').toLowerCase();
+    return want ? seen === want : /^node(?:\.exe)?$/.test(seen);
+}
+
+/**
+ * `alive`, `dead` or `reused` for a record's supervisor pid. `reused` is a pid
+ * that answers kill(pid, 0) while another image holds it. An image that cannot
+ * be read leaves the answer `alive`: not knowing is not proof the supervisor
+ * is gone.
+ */
+function supervisorLiveness(rec, { probe, image = pidImage } = {}) {
+    const l = pidLiveness(rec.pid, probe);
+    if (l !== 'alive') return l;
+    const seen = image(rec.pid);
+    return seen && !isSupervisorImage(rec, seen) ? 'reused' : 'alive';
+}
+
 /** The LAST `RESULT <code> <state>: <sentence>` line for this exact code, or null. */
 function parseResult(reportText, code) {
     const re = new RegExp(`^RESULT\\s+${code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(${RESULT_STATES.join('|')}):\\s*(.+)$`, 'gm');
     let last = null;
     for (const m of String(reportText).matchAll(re)) last = { state: m[1], sentence: m[2].trim() };
+    return last;
+}
+
+/** The code on the last well-formed RESULT line that names a DIFFERENT code, or null. */
+function otherResultCode(reportText, code) {
+    const re = new RegExp(`^RESULT\\s+(\\S+)\\s+(?:${RESULT_STATES.join('|')}):`, 'gm');
+    let last = null;
+    for (const m of String(reportText).matchAll(re)) if (m[1] !== code) last = m[1];
     return last;
 }
 
@@ -529,24 +710,30 @@ function bootAt() { return Date.now() - os.uptime() * 1000; }
  * A record whose startedAt precedes this boot is `unknown` whatever the pid
  * says: a pid is reused after a reboot, and a supervisor the reboot killed
  * never wrote its exit line, so the pid alone would report a stranger's
- * process as this worker, running, forever.
+ * process as this worker, running, forever. Within this boot, a pid that
+ * another image now holds is `unknown` for the same reason.
  */
-function recordStatus(rec, boot = bootAt()) {
+function recordStatus(rec, boot = bootAt(), image = pidImage) {
     const logText = readText(rec.log);
     const exit = logText === null ? null : exitCodeOf(logText);
     const started = Date.parse(rec.startedAt || '');
     let processState;
     if (exit !== null) processState = 'exited';
     else if (Number.isFinite(boot) && Number.isFinite(started) && started < boot) processState = 'unknown';
-    else processState = pidLiveness(rec.pid) === 'alive' ? 'running' : 'unknown';
+    else processState = supervisorLiveness(rec, { image }) === 'alive' ? 'running' : 'unknown';
     const reportText = readText(rec.report);
     let result = 'none';
     let sentence = null;
-    if (reportText !== null) {
+    let resultCodeFound = null;
+    const reportStale = reportText !== null && writtenBefore(rec.report, rec.startedAt);
+    if (reportStale) result = 'stale';
+    else if (reportText !== null) {
         const parsed = parseResult(reportText, rec.code);
         result = parsed ? parsed.state : 'unparseable';
         sentence = parsed ? parsed.sentence : null;
+        resultCodeFound = parsed ? null : otherResultCode(reportText, rec.code);
     }
+    const misplaced = result === 'none' || result === 'stale' || (result === 'unparseable' && !resultCodeFound) ? misplacedReport(rec) : null;
     // The settled axis says HOW the record was settled, read from the ledger,
     // because `result` above is the report's word and a lost record's report
     // usually has none. A settled value outside SETTLED_RESULTS surfaces as
@@ -555,8 +742,10 @@ function recordStatus(rec, boot = bootAt()) {
     const settledAs = settled ? (SETTLED_RESULTS.includes(rec.result) ? rec.result : `unrecognised:${rec.result}`) : null;
     return {
         code: rec.code, pid: rec.pid, startedAt: rec.startedAt, process: processState, exit,
-        result, sentence, reportExists: reportText !== null, settled, settledAs,
+        result, sentence, resultCodeFound, reportExists: reportText !== null, reportStale, misplacedReport: misplaced, settled, settledAs,
+        version: rec.version || null, dev: rec.dev === true,
         lostReason: settledAs === 'lost' ? (rec.reason || null) : null,
+        settleReason: settledAs === 'lost' || settledAs === 'unreported' ? (rec.reason || null) : null,
         log: rec.log, report: rec.report, cwd: rec.cwd || null, ...askState(rec),
     };
 }
@@ -597,8 +786,9 @@ function statusLines(value) {
     const lines = [value.population];
     for (const r of value.records) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
-            + `result=${r.result} settled=${r.settled}${r.settledAs === 'lost' ? ` settledAs=lost (${r.lostReason})` : ''}`
-            + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
+            + `result=${r.result}${r.resultCodeFound ? ` (RESULT line found for a different code: ${r.resultCodeFound})` : ''}`
+            + `${r.misplacedReport ? ` (report written into the scratch dir: ${r.misplacedReport})` : ''} settled=${r.settled}${r.settledAs === 'lost' || r.settledAs === 'unreported' ? ` settledAs=${r.settledAs} (${r.settleReason})` : ''}`
+            + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''} version=${r.version || '-'}${r.dev ? '(dev)' : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
     }
     return lines.join('\n') + '\n';
 }
@@ -606,21 +796,27 @@ function statusLines(value) {
 // ---------------------------------------------------------------- settle
 /**
  * Why a record with no exit line is provably not running, or null when it is
- * not provable. Two proofs, in order. A record started before this boot: the
+ * not provable. Three proofs, in order. A record started before this boot: the
  * reboot killed its supervisor, and its pid may now name a stranger, so the pid
  * is not consulted. A record started after this boot whose pid is dead: the
- * supervisor is gone without writing its line. Anything else, including an
- * alive pid and a pid that was never recorded, is not proof. The pid is the
+ * supervisor is gone without writing its line. A pid that another image now
+ * holds: the supervisor is gone and its pid was reused. Anything else, including
+ * an alive pid whose image cannot be read and a pid that was never recorded, is
+ * not proof. The pid is the
  * SUPERVISOR's, so a claude child that outlived a killed supervisor is not
  * seen by the second proof. The first proof is the one that covers a reboot.
  */
-function lostReason(rec, boot, liveness = pidLiveness) {
+function lostReason(rec, boot, liveness = pidLiveness, image = pidImage) {
     const started = Date.parse(rec.startedAt || '');
     if (Number.isFinite(boot) && Number.isFinite(started) && started < boot) {
         return `started ${rec.startedAt}, before this boot at ${new Date(boot).toISOString()}, and the log has no exit line`;
     }
     if (!Number.isInteger(rec.pid) || rec.pid <= 0) return null;
     if (liveness(rec.pid) === 'dead') return `pid ${rec.pid} is dead and the log has no exit line`;
+    const seen = image(rec.pid);
+    if (seen && !isSupervisorImage(rec, seen)) {
+        return `pid ${rec.pid} is now ${seen}, not the supervisor (${rec.supervisorImage || 'node'}), and the log has no exit line`;
+    }
     return null;
 }
 
@@ -632,17 +828,26 @@ function settle(opts) {
         if (!rec) fault('unknown-code', `no unsettled record for ${code} in ${file}`);
         const logText = readText(rec.log);
         const exit = logText === null ? null : exitCodeOf(logText);
+        if (opts.lost && opts.unreported) fault('usage', '--lost and --unreported name different endings: a worker with no exit line, and one that exited without a RESULT line. Pass one');
         if (opts.lost) return settleLost(rec, code, exit);
+        if (opts.unreported) return settleUnreported(rec, code, exit);
         if (exit === null) {
             fault('not-exited', `${rec.log} has no CLAUDE_EXIT line yet, so the worker is running or its supervisor never wrote one. `
                 + 'A supervisor killed by a reboot or a kill never writes it, and settle --lost settles such a record once it is provably not running');
         }
         const reportText = readText(rec.report);
+        if (reportText !== null && writtenBefore(rec.report, rec.startedAt)) fault('stale-report', staleHint(rec));
         const parsed = reportText === null ? null : parseResult(reportText, code);
         if (!parsed) {
-            fault('no-result', reportText === null
+            const other = reportText === null ? null : otherResultCode(reportText, code);
+            const moved = other ? null : misplacedReport(rec);
+            fault('no-result', (reportText === null
                 ? `${rec.report} does not exist`
-                : `${rec.report} has no line matching RESULT ${code} done|stopped|failed: <sentence>`);
+                : other
+                    ? `RESULT line found for a different code: ${rec.report} ends RESULT ${other}, and this record's code is ${code}. `
+                        + `Correct that line to RESULT ${code} done|stopped|failed: <sentence>, then settle again`
+                    : `${rec.report} has no line matching RESULT ${code} done|stopped|failed: <sentence>`)
+                + (other ? '' : moved ? `. ${misplacedHint(moved, rec)}` : '. If the worker ended without one, settle --unreported records that it left none'));
         }
         const settledAt = new Date().toISOString();
         Object.assign(rec, { state: 'settled', result: parsed.state, sentence: parsed.sentence, exit, settledAt });
@@ -669,6 +874,47 @@ function settleLost(rec, code, exit) {
     return { code, state: 'lost', reason, sentence: rec.sentence, reportResult: rec.reportResult, exit: null, report: rec.report, settledAt };
 }
 
+/**
+ * `settle --unreported` inside the ledger lock. `[measured 2026-09-24]` two
+ * workers stopped on a full disk (ENOSPC), exited 0 and could not write their
+ * report. --lost refused them (they have an exit line) and plain settle refused
+ * them (no RESULT line), so each record stayed `running` and `start` refused
+ * its code as code-active for good. This settles such a record as its own
+ * result. It never guesses a worker's word: a report with a RESULT line for this
+ * code takes plain settle, and one naming another code must be corrected first.
+ */
+function settleUnreported(rec, code, exit) {
+    if (exit === null) {
+        fault('not-exited', `${rec.log} has no CLAUDE_EXIT line, so the worker has not provably ended. `
+            + 'settle --lost settles a record whose supervisor died without one');
+    }
+    const boot = bootAt();
+    const started = Date.parse(rec.startedAt || '');
+    const thisBoot = !(Number.isFinite(boot) && Number.isFinite(started) && started < boot);
+    if (thisBoot && supervisorLiveness(rec) === 'alive') {
+        fault('still-running', `${rec.log} has an exit line, but the supervisor pid ${rec.pid} is alive, so that line can belong to an `
+            + 'earlier run appended to the same log. Settle once the supervisor has ended');
+    }
+    const reportText = readText(rec.report);
+    if (reportText !== null && writtenBefore(rec.report, rec.startedAt)) fault('stale-report', staleHint(rec));
+    if (reportText !== null && parseResult(reportText, code)) {
+        fault('has-result', `${rec.report} has a RESULT ${code} line. Settle it without --unreported`);
+    }
+    const other = reportText === null ? null : otherResultCode(reportText, code);
+    const moved = other ? null : misplacedReport(rec);
+    if (moved) fault('misplaced-report', misplacedHint(moved, rec));
+    if (other) {
+        fault('no-result', `RESULT line found for a different code: ${rec.report} ends RESULT ${other}, and this record's code is ${code}. `
+            + `Correct that line to RESULT ${code} done|stopped|failed: <sentence>, then settle again`);
+    }
+    const reason = reportText === null
+        ? `exited ${exit} and ${rec.report} does not exist`
+        : `exited ${exit} and ${rec.report} has no RESULT ${code} line`;
+    const settledAt = new Date().toISOString();
+    Object.assign(rec, { state: 'settled', result: 'unreported', reason, sentence: null, exit, settledAt });
+    return { code, state: 'unreported', reason, sentence: null, exit, report: rec.report, settledAt };
+}
+
 /** The liveness classifier over the shapes a real kill(pid, 0) can return. */
 function selftest() {
     const cases = {
@@ -679,9 +925,11 @@ function selftest() {
         eperm: pidLiveness(process.pid, () => { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; }),
         esrch: pidLiveness(process.pid, () => { const e = new Error('ESRCH'); e.code = 'ESRCH'; throw e; }),
         notAPid: pidLiveness(0),
+        ownImage: pidImage(process.pid),
     };
     const ok = cases.noError === 'alive' && cases.ESRCH === 'dead' && cases.EPERM === 'alive'
-        && cases.ownPid === 'alive' && cases.eperm === 'alive' && cases.esrch === 'dead' && cases.notAPid === 'dead';
+        && cases.ownPid === 'alive' && cases.eperm === 'alive' && cases.esrch === 'dead' && cases.notAPid === 'dead'
+        && (cases.ownImage === null ? process.platform !== 'win32' : isSupervisorImage({ supervisorImage: path.basename(process.execPath) }, cases.ownImage));
     if (!ok) fault('selftest-failed', JSON.stringify(cases));
     return { selftest: 'pass', cases };
 }
@@ -713,8 +961,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-    HEADLESS_NOTE, PROMPT_MAX, CODE_RE, placementNote, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
+    HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     askFiles, askNote, askState, scratchDirFor, readLedger, settle, start,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
-    livenessFromError, pidLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
+    livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
 };

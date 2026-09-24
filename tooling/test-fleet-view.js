@@ -100,7 +100,7 @@ function worker(code, { exit = 0, result = 'done', startedAgo = H, cwd = ROOT, e
     if (result) write(report, `Report\nRESULT ${code} ${result}: it ${result}\n`);
     return { code, pid: 0, startedAt: iso(startedAgo), log, report, promptFile, configDir: null, model: 'm1', effort: null, permissionMode: 'default', cwd, state: 'running', ...extra };
 }
-const records = [worker('W-SETTLE'), worker('W-STOPPED', { result: 'stopped' })];
+const records = [worker('W-SETTLE'), worker('W-STOPPED', { result: 'stopped', extra: { dev: true } })];
 writeJson(LEDGER, { version: 1, records });
 // W-STOPPED asked and was answered: relaunch must carry the answer.
 writeJson(path.join(WDIR, 'W-STOPPED', 'ask.json'), { question: 'Which base?' });
@@ -260,6 +260,7 @@ async function main() {
     const relPrompt = read(path.join(WDIR, 'W-STOPPED-R2.md')) || '';
     check('4. relaunch starts a new code with the same model, mode and cwd', rel.status === 303 && !!relaunched && relaunched.model === 'm1'
         && relaunched.permissionMode === 'default' && path.resolve(relaunched.cwd) === path.resolve(ROOT), decodeURIComponent(rel.headers.location || ''));
+    check('4. a relaunch of a --dev record is started with --dev too', !!relaunched && relaunched.dev === true, relaunched ? String(relaunched.dev) : 'no record');
     check('4. the relaunch prompt is the same brief plus the answer', relPrompt.startsWith('# W-STOPPED brief') && relPrompt.includes('origin/main') && relPrompt.includes('rebase first'), relPrompt.slice(-300));
 
     // takeover: win32 only, and --no-launch records the command without opening a window
@@ -275,7 +276,7 @@ async function main() {
 
     // stop: a real headless worker whose fake claude sleeps, and a decoy whose identity does not match.
     const hwStart = runBudgeted(process.execPath, [HW_SCRIPT, 'start', '--code', 'W-LIVE', '--prompt-file', path.join(WDIR, 'W-SETTLE.md'),
-        '--log', path.join(WDIR, 'W-LIVE.jsonl'), '--claude-bin', FAKE, '--ledger', LEDGER, '--cwd', ROOT],
+        '--log', path.join(WDIR, 'W-LIVE.jsonl'), '--claude-bin', FAKE, '--ledger', LEDGER, '--cwd', ROOT, '--dev'],
     { encoding: 'utf8', cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, FAKE_SLEEP_MS: '60000' }, timeout: 30000, maxTimeout: 120000 });
     let live = null;
     try { live = JSON.parse(String(hwStart.stdout).trim().split('\n').pop()).value; } catch { /* reported below */ }

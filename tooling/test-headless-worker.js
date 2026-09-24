@@ -90,9 +90,14 @@ function indeterminateCase(label, why) {
     console.error(`infrastructure: ${label} produced no verdict (${why})`);
 }
 
-/** The script as a subprocess. HOME is pinned under ROOT so the default ledger is never the real one. */
-function hw(args, env = {}) {
-    const r = runBudgeted(process.execPath, [SCRIPT, ...args], {
+/**
+ * The script as a subprocess. HOME is pinned under ROOT so the default ledger is never the real one.
+ * `start` gets --dev, because the suite runs the checkout on purpose. Case 26 drives the refusal
+ * without it, and an installed copy through `script`.
+ */
+function hw(args, env = {}, { dev = true, script = SCRIPT } = {}) {
+    const argv = args[0] === 'start' && dev ? [...args, '--dev'] : args;
+    const r = runBudgeted(process.execPath, [script, ...argv], {
         encoding: 'utf8',
         cwd: ROOT,
         env: { ...process.env, HOME, USERPROFILE: HOME, ...env },
@@ -791,6 +796,248 @@ try {
         check('24. the usage text lists settle --lost and says when it refuses', usage.includes('settle --code <CODE> [--lost]') && /settle --lost: [\s\S]*Refused unless/.test(usage));
     }
 
+    // ------------------------------------------------------------ 24b. settle --unreported
+    // `[measured 2026-09-24]` two workers stopped on a full disk (ENOSPC), exited
+    // 0 and could not write their report. --lost refused them (they have an exit line) and plain
+    // settle refused them (no RESULT line), so each record stayed running and
+    // start refused its code as code-active. --unreported settles such a record
+    // as result unreported, and ONLY once the worker has provably ended.
+    {
+        const dir = path.join(ROOT, 'T24b');
+        const ledger = path.join(dir, 'ledger.json');
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const deadPid = dead.pid;
+        const now = new Date().toISOString();
+        const mk = (code, { logText = 'noise\nCLAUDE_EXIT=0\n', reportText = null } = {}) => {
+            const rec = { code, pid: deadPid, startedAt: now, log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' };
+            if (logText !== null) write(rec.log, logText);
+            if (reportText !== null) write(rec.report, reportText);
+            return rec;
+        };
+        const records = [
+            mk('NOREPORT'),
+            mk('NOLINE', { reportText: '# notes\nthe worker wrote this and stopped\n' }),
+            mk('HASLINE', { reportText: 'RESULT HASLINE done: it finished.\n' }),
+            mk('RUNNING', { logText: 'stream noise, no exit line\n' }),
+            mk('WRONGCODE', { reportText: 'RESULT OTHERCODE done: a copied line.\n' }),
+            mk('BOTH'),
+            mk('EXIT3', { logText: 'noise\nCLAUDE_EXIT=3\n' }),
+        ];
+        write(ledger, JSON.stringify({ version: 1, records }, null, 2) + '\n');
+        const recOf = (code) => JSON.parse(read(ledger)).records.find((r) => r.code === code) || null;
+        check('24b. control: the dead pid came from an exited child', classify(dead) === 'verdict' && Number.isInteger(deadPid), `pid ${deadPid}`);
+
+        const plain = hw(['settle', '--code', 'NOREPORT', '--ledger', ledger]);
+        check('24b. control: plain settle on an exited record with no report still refuses no-result, and now names --unreported',
+            plain.exit === 1 && plain.json && plain.json.error.code === 'no-result' && /does not exist/.test(plain.json.error.message) && /settle --unreported/.test(plain.json.error.message), plain.stdout.slice(0, 240));
+        const lost = hw(['settle', '--code', 'NOREPORT', '--lost', '--ledger', ledger]);
+        check('24b. control: settle --lost still refuses it, because it has an exit line',
+            lost.exit === 1 && lost.json && lost.json.error.code === 'not-lost' && recOf('NOREPORT').state === 'running', lost.stdout.slice(0, 200));
+
+        const nr = hw(['settle', '--code', 'NOREPORT', '--unreported', '--ledger', ledger]);
+        const nv = nr.json && nr.json.ok ? nr.json.value : null;
+        const nrRec = recOf('NOREPORT');
+        check('24b. settle --unreported settles an exited record with no report as state unreported, naming the missing report',
+            nr.exit === 0 && !!nv && nv.state === 'unreported' && /exited 0 and .* does not exist/.test(nv.reason) && nv.exit === 0 && nv.sentence === null && typeof nv.settledAt === 'string', nr.stdout.slice(0, 240));
+        check('24b. the ledger records result unreported with a reason, never done, stopped or failed',
+            !!nrRec && nrRec.state === 'settled' && nrRec.result === 'unreported' && typeof nrRec.reason === 'string' && nrRec.exit === 0, JSON.stringify(nrRec).slice(0, 240));
+
+        const nl = hw(['settle', '--code', 'NOLINE', '--unreported', '--ledger', ledger]);
+        check('24b. a report with no RESULT line settles --unreported, and the reason names the missing line, not a missing file',
+            nl.exit === 0 && nl.json && nl.json.ok && /has no RESULT NOLINE line/.test(nl.json.value.reason) && !/does not exist/.test(nl.json.value.reason), nl.stdout.slice(0, 240));
+        const e3 = hw(['settle', '--code', 'EXIT3', '--unreported', '--ledger', ledger]);
+        check('24b. the reason carries the real exit code, 3, rather than assuming 0',
+            e3.exit === 0 && e3.json && e3.json.ok && /^exited 3 and /.test(e3.json.value.reason) && recOf('EXIT3').exit === 3, e3.stdout.slice(0, 240));
+
+        const has = hw(['settle', '--code', 'HASLINE', '--unreported', '--ledger', ledger]);
+        check('24b. settle --unreported REFUSES a record whose report has its RESULT line, with has-result, and leaves it unsettled',
+            has.exit === 1 && has.json && !has.json.ok && has.json.error.code === 'has-result' && /without --unreported/.test(has.json.error.message) && recOf('HASLINE').state === 'running', has.stdout.slice(0, 240));
+        const hasPlain = hw(['settle', '--code', 'HASLINE', '--ledger', ledger]);
+        check('24b. and plain settle takes that record as done', hasPlain.exit === 0 && hasPlain.json && hasPlain.json.ok && recOf('HASLINE').result === 'done', hasPlain.stdout.slice(0, 200));
+
+        const run = hw(['settle', '--code', 'RUNNING', '--unreported', '--ledger', ledger]);
+        check('24b. settle --unreported refuses a record with no exit line, with not-exited naming --lost',
+            run.exit === 1 && run.json && !run.json.ok && run.json.error.code === 'not-exited' && /settle --lost/.test(run.json.error.message) && recOf('RUNNING').state === 'running', run.stdout.slice(0, 240));
+        const wrong = hw(['settle', '--code', 'WRONGCODE', '--unreported', '--ledger', ledger]);
+        check('24b. settle --unreported refuses a report whose RESULT line names another code, so a mislabelled result is corrected, not buried',
+            wrong.exit === 1 && wrong.json && !wrong.json.ok && wrong.json.error.code === 'no-result' && /different code/.test(wrong.json.error.message) && /OTHERCODE/.test(wrong.json.error.message) && recOf('WRONGCODE').state === 'running', wrong.stdout.slice(0, 240));
+        const both = hw(['settle', '--code', 'BOTH', '--lost', '--unreported', '--ledger', ledger]);
+        check('24b. --lost with --unreported refuses with usage and settles nothing',
+            both.exit === 1 && both.json && !both.json.ok && both.json.error.code === 'usage' && recOf('BOTH').state === 'running', both.stdout.slice(0, 200));
+
+        const again = hw(['settle', '--code', 'NOREPORT', '--unreported', '--ledger', ledger]);
+        check('24b. a second settle --unreported finds no unsettled record', again.exit === 1 && again.json && !again.json.ok && again.json.error.code === 'unknown-code');
+
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const byCode = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('24b. status --json reports it as settled true, settledAs unreported, with settleReason and no lostReason',
+            !!byCode.NOREPORT && byCode.NOREPORT.settled === true && byCode.NOREPORT.settledAs === 'unreported'
+                && /does not exist/.test(byCode.NOREPORT.settleReason || '') && byCode.NOREPORT.lostReason === null, JSON.stringify(byCode.NOREPORT || null).slice(0, 240));
+        check('24b. status keeps done apart: HASLINE settledAs done with settleReason null',
+            !!byCode.HASLINE && byCode.HASLINE.settledAs === 'done' && byCode.HASLINE.settleReason === null);
+        const human = hw(['status', '--ledger', ledger]).stdout;
+        check('24b. status without --json names it settledAs=unreported with its reason',
+            /NOREPORT pid=\d+ process=exited exit=0 result=none settled=true settledAs=unreported \(exited 0 and /.test(human) && !/HASLINE[^\n]*settledAs=unreported/.test(human), human.slice(0, 400));
+        const usage = hw(['--help']).stdout;
+        check('24b. the usage text lists settle --unreported and says when it refuses',
+            usage.includes('settle --code <CODE> [--lost] [--unreported]') && /settle --unreported: [\s\S]*Refused while/.test(usage));
+    }
+
+    // ------------------------------------------------------------ 24c. a report written into the scratch dir
+    // `[measured 2026-09-24]` two workers finished done with green PRs and wrote
+    // REPORT.md into <report dir>/<CODE>/, one level below the ledger's path.
+    // Plain settle read no report, and --unreported would have filed both as
+    // unreported. Settle now finds that file, names it, and never settles past it.
+    {
+        const dir = path.join(ROOT, 'T24c');
+        const ledger = path.join(dir, 'ledger.json');
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const now = new Date().toISOString();
+        const mk = (code, { scratchText = null, reportText = null } = {}) => {
+            const rec = { code, pid: dead.pid, startedAt: now, log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' };
+            write(rec.log, 'noise\nCLAUDE_EXIT=0\n');
+            if (reportText !== null) write(rec.report, reportText);
+            if (scratchText !== null) write(path.join(dir, code, code + '.report.md'), scratchText);
+            return rec;
+        };
+        const records = [
+            mk('MOVED', { scratchText: 'notes\nRESULT MOVED done: PR 96 green.\n' }),
+            mk('MOVEDSTOP', { scratchText: 'RESULT MOVEDSTOP stopped: blocked on a key.\n' }),
+            mk('SCRATCHNOISE', { scratchText: 'a scratch file with no result line\n' }),
+            mk('EMPTYMAIN', { reportText: '# started, never finished\n', scratchText: 'RESULT EMPTYMAIN done: the real one.\n' }),
+        ];
+        write(ledger, JSON.stringify({ version: 1, records }, null, 2) + '\n');
+        const recOf = (code) => JSON.parse(read(ledger)).records.find((r) => r.code === code) || null;
+        const moved = path.join(dir, 'MOVED', 'MOVED.report.md');
+
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const byCode = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('24c. status --json names the report found in the scratch dir, while result stays none',
+            !!byCode.MOVED && byCode.MOVED.result === 'none' && byCode.MOVED.misplacedReport === moved, JSON.stringify(byCode.MOVED || null).slice(0, 300));
+        check('24c. status names it when the ledger path holds a report with no RESULT line too',
+            !!byCode.EMPTYMAIN && byCode.EMPTYMAIN.result === 'unparseable' && byCode.EMPTYMAIN.misplacedReport === path.join(dir, 'EMPTYMAIN', 'EMPTYMAIN.report.md'), JSON.stringify(byCode.EMPTYMAIN || null).slice(0, 300));
+        check('24c. a scratch file with no RESULT line is not a misplaced report', !!byCode.SCRATCHNOISE && byCode.SCRATCHNOISE.misplacedReport === null);
+        const human = hw(['status', '--ledger', ledger]).stdout;
+        check('24c. status without --json says the report was written into the scratch dir',
+            /MOVED pid=\d+ process=exited exit=0 result=none \(report written into the scratch dir: [^\n]*MOVED\.report\.md\) settled=false/.test(human), human.slice(0, 500));
+
+        const plain = hw(['settle', '--code', 'MOVED', '--ledger', ledger]);
+        check('24c. plain settle refuses no-result, names the scratch-dir file and says to move it, and does not offer --unreported',
+            plain.exit === 1 && plain.json && plain.json.error.code === 'no-result' && plain.json.error.message.includes(moved)
+                && /Move that file to /.test(plain.json.error.message) && !/--unreported/.test(plain.json.error.message) && recOf('MOVED').state === 'running', plain.stdout.slice(0, 300));
+        const unrep = hw(['settle', '--code', 'MOVED', '--unreported', '--ledger', ledger]);
+        check('24c. settle --unreported REFUSES with misplaced-report, so a finished worker is never filed as unreported',
+            unrep.exit === 1 && unrep.json && !unrep.json.ok && unrep.json.error.code === 'misplaced-report' && unrep.json.error.message.includes(moved) && recOf('MOVED').state === 'running', unrep.stdout.slice(0, 300));
+        const stopUnrep = hw(['settle', '--code', 'MOVEDSTOP', '--unreported', '--ledger', ledger]);
+        check('24c. the refusal holds for a stopped result as well as a done one',
+            stopUnrep.exit === 1 && stopUnrep.json && stopUnrep.json.error.code === 'misplaced-report' && recOf('MOVEDSTOP').state === 'running', stopUnrep.stdout.slice(0, 200));
+        const emptyUnrep = hw(['settle', '--code', 'EMPTYMAIN', '--unreported', '--ledger', ledger]);
+        check('24c. and for a ledger-path report with no RESULT line beside a scratch copy that has one',
+            emptyUnrep.exit === 1 && emptyUnrep.json && emptyUnrep.json.error.code === 'misplaced-report' && recOf('EMPTYMAIN').state === 'running', emptyUnrep.stdout.slice(0, 200));
+        const noise = hw(['settle', '--code', 'SCRATCHNOISE', '--unreported', '--ledger', ledger]);
+        check('24c. control: a scratch file with no RESULT line does not block --unreported',
+            noise.exit === 0 && noise.json && noise.json.ok && recOf('SCRATCHNOISE').result === 'unreported', noise.stdout.slice(0, 200));
+
+        fs.renameSync(moved, path.join(dir, 'MOVED.report.md'));
+        const after = hw(['settle', '--code', 'MOVED', '--ledger', ledger]);
+        check('24c. once the file is moved to the ledger path, plain settle takes it as done with its sentence',
+            after.exit === 0 && after.json && after.json.ok && after.json.value.state === 'done' && recOf('MOVED').result === 'done' && recOf('MOVED').sentence === 'PR 96 green.', after.stdout.slice(0, 200));
+    }
+
+    // ------------------------------------------------------------ 24d. a rerun at the same code
+    // `[measured 2026-09-24]` reruns of ACCESS-ALL and BLOG appended to their
+    // first runs' logs and found their first runs' reports, so status said
+    // "exited, stopped" while they worked, and a cap that counted reports let
+    // three workers run against a limit of one. start now moves the earlier
+    // run's files aside, and settle refuses a report older than its run.
+    {
+        const code = 'RERUN';
+        const dir = path.join(ROOT, code);
+        const log = path.join(dir, 'worker.log');
+        const ledger = path.join(dir, 'ledger.json');
+        const report = path.join(dir, 'worker.report.md');
+        const scratch = path.join(dir, code);
+        const scratchReport = path.join(scratch, 'worker.report.md');
+        const askF = path.join(scratch, 'ask.json');
+        const answerF = path.join(scratch, 'answer.json');
+        const old = new Date(Date.now() - 3600 * 1000);
+        write(log, 'first run noise\nCLAUDE_EXIT=0\n');
+        write(report, 'RESULT RERUN stopped: the first run hit a full disk.\n');
+        write(scratchReport, 'RESULT RERUN done: a stale scratch copy.\n');
+        write(askF, JSON.stringify({ question: 'an old question?' }));
+        write(answerF, JSON.stringify({ answer: 'an old answer' }));
+        for (const p of [log, report, scratchReport, askF, answerF]) fs.utimesSync(p, old, old);
+        const prev = { code, pid: 1, startedAt: new Date(old.getTime() - 600000).toISOString(), log, report, promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'settled', result: 'stopped', sentence: 'the first run hit a full disk.', exit: 0, settledAt: old.toISOString() };
+        write(ledger, JSON.stringify({ version: 1, records: [prev] }, null, 2) + '\n');
+
+        const dry = hw(['start', '--code', code, '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
+        const would = dry.json && dry.json.ok ? dry.json.value.wouldMoveAside : null;
+        check('24d. dry-run names the five files an earlier run left, and moves none of them',
+            Array.isArray(would) && would.length === 5 && [log, report, scratchReport, askF, answerF].every((p) => would.includes(path.resolve(p)) && fs.existsSync(p)), JSON.stringify(would));
+
+        const started = startFake(code, { exit: 0 });
+        const end = started.pid ? waitForEnd(log, started.pid) : { ending: 'no-pid', text: '' };
+        if (end.ending === 'timeout') indeterminateCase('24d', 'the fake did not finish inside the poll budget');
+        else {
+            const text = end.text;
+            const recs = JSON.parse(read(ledger)).records.filter((r) => r.code === code);
+            const oldRec = recs.find((r) => r.state === 'settled') || null;
+            const newRec = recs.find((r) => r.state !== 'settled') || null;
+            const aside = fs.readdirSync(dir).filter((n) => /^worker\.prev-\d{8}T\d{9}Z\.(log|report\.md)$/.test(n) || /^worker\.report\.prev-/.test(n));
+            check('24d. the rerun writes a fresh log: one exit line, none of the first run in it',
+                end.ending === 'exit-line' && (text.match(/^CLAUDE_EXIT=/gm) || []).length === 1 && !text.includes('first run noise'), text.slice(0, 300));
+            check('24d. the first run\'s log and report sit beside it under a .prev-<start stamp> name, contents intact',
+                !!oldRec && oldRec.log !== log && /first run noise/.test(read(oldRec.log) || '') && oldRec.report !== report && /first run hit a full disk/.test(read(oldRec.report) || ''),
+                JSON.stringify({ aside, oldLog: oldRec && oldRec.log, oldReport: oldRec && oldRec.report }));
+            check('24d. the settled record follows its files, and the new record lists all five it moved',
+                !!newRec && Array.isArray(newRec.movedAside) && newRec.movedAside.length === 5 && newRec.movedAside.includes(oldRec.log) && newRec.movedAside.includes(oldRec.report)
+                    && newRec.log === log && newRec.report === report, JSON.stringify(newRec).slice(0, 300));
+            check('24d. the scratch copy and the ask channel moved too, so nothing of the first run is where the rerun looks',
+                !fs.existsSync(report) && !fs.existsSync(scratchReport) && !fs.existsSync(askF) && !fs.existsSync(answerF));
+            const st = hw(['status', '--ledger', ledger, '--json']);
+            const row = st.json ? st.json.value.records.find((r) => r.code === code && !r.settled) : null;
+            check('24d. status reads the rerun as result none with no question, never the first run\'s stopped',
+                !!row && row.result === 'none' && row.ask === 'none' && row.misplacedReport === null && row.process === 'exited', JSON.stringify(row).slice(0, 300));
+            const oldRow = st.json ? st.json.value.records.find((r) => r.code === code && r.settled) : null;
+            check('24d. and the first run still reads as itself from the moved files', !!oldRow && oldRow.settledAs === 'stopped' && oldRow.result === 'stopped', JSON.stringify(oldRow).slice(0, 240));
+            const un = hw(['settle', '--code', code, '--unreported', '--ledger', ledger]);
+            check('24d. the rerun that left no report settles --unreported, as itself',
+                un.exit === 0 && un.json && un.json.ok && un.json.value.state === 'unreported' && /does not exist/.test(un.json.value.reason), un.stdout.slice(0, 240));
+        }
+
+        // Records an older supervisor already appended to: the guard is in settle.
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const adir = path.join(ROOT, 'T24d');
+        const aledger = path.join(adir, 'ledger.json');
+        const now = new Date().toISOString();
+        const mk = (c, pid, { reportText = null, scratchText = null } = {}) => {
+            const rec = { code: c, pid, startedAt: now, log: path.join(adir, c + '.log'), report: path.join(adir, c + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' };
+            write(rec.log, 'first run\nCLAUDE_EXIT=0\nsecond run, still working\n');
+            if (reportText !== null) { write(rec.report, reportText); fs.utimesSync(rec.report, old, old); }
+            if (scratchText !== null) { const p = path.join(adir, c, c + '.report.md'); write(p, scratchText); fs.utimesSync(p, old, old); }
+            return rec;
+        };
+        write(aledger, JSON.stringify({ version: 1, records: [
+            mk('APPENDED', dead.pid, { reportText: 'RESULT APPENDED stopped: from the first run.\n' }),
+            mk('LIVEAPPEND', process.pid),
+            mk('OLDSCRATCH', dead.pid, { scratchText: 'RESULT OLDSCRATCH done: from the first run.\n' }),
+        ] }, null, 2) + '\n');
+        const arec = (c) => JSON.parse(read(aledger)).records.find((r) => r.code === c) || null;
+        const ast = hw(['status', '--ledger', aledger, '--json']);
+        const aby = Object.fromEntries((ast.json ? ast.json.value.records : []).map((r) => [r.code, r]));
+        check('24d. status reads a report older than its run as result stale, with its sentence withheld',
+            !!aby.APPENDED && aby.APPENDED.result === 'stale' && aby.APPENDED.reportStale === true && aby.APPENDED.sentence === null, JSON.stringify(aby.APPENDED || null).slice(0, 240));
+        const aplain = hw(['settle', '--code', 'APPENDED', '--ledger', aledger]);
+        check('24d. plain settle refuses a report older than its run with stale-report, and leaves the record running',
+            aplain.exit === 1 && aplain.json && aplain.json.error.code === 'stale-report' && /earlier run/.test(aplain.json.error.message) && arec('APPENDED').state === 'running', aplain.stdout.slice(0, 240));
+        const aun = hw(['settle', '--code', 'APPENDED', '--unreported', '--ledger', aledger]);
+        check('24d. settle --unreported refuses it too', aun.exit === 1 && aun.json && aun.json.error.code === 'stale-report' && arec('APPENDED').state === 'running', aun.stdout.slice(0, 200));
+        const live = hw(['settle', '--code', 'LIVEAPPEND', '--unreported', '--ledger', aledger]);
+        check('24d. settle --unreported refuses while the supervisor pid is alive, since the exit line can be an earlier run\'s',
+            live.exit === 1 && live.json && live.json.error.code === 'still-running' && arec('LIVEAPPEND').state === 'running', live.stdout.slice(0, 240));
+        check('24d. a scratch copy older than the run is not a misplaced report', !!aby.OLDSCRATCH && aby.OLDSCRATCH.misplacedReport === null && aby.OLDSCRATCH.result === 'none');
+    }
+
     // ------------------------------------------------------------ 25. a worker asks by file and keeps working
     // `[measured 2026-09-22]` workers asked by exiting, so every question cost a
     // relaunch. The prompt must name ask.json and answer.json in the scratch
@@ -830,6 +1077,135 @@ try {
         const rec = (JSON.parse(read(real.ledger) || '{"records":[]}').records || [])[0] || {};
         check('25. a started record carries the cwd the worker ran in', typeof rec.cwd === 'string' && path.resolve(rec.cwd) === path.resolve(ROOT), rec.cwd);
     }
+
+    // 26. Workers run installed code. `[measured 2026-09-23]` after an install,
+    // 11 of 12 workers ran this script from a worktree, and no record said so.
+    {
+        const dir = path.join(ROOT, 'T26');
+        const ledger = path.join(dir, 'ledger.json');
+        const log = path.join(dir, 'T26.log');
+        const base = ['start', '--code', 'T26', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger];
+        const refused = hw(base, {}, { dev: false });
+        check('26. start from a checkout without --dev exits 1 with code not-installed and names --dev',
+            refused.exit === 1 && !!refused.json && !refused.json.ok && refused.json.error.code === 'not-installed' && refused.json.error.message.includes('--dev'), refused.stdout.slice(0, 200));
+        check('26. the refusal records nothing and spawns nothing', !fs.existsSync(ledger) && read(log) === null);
+        const dryRefused = hw([...base, '--dry-run'], {}, { dev: false });
+        check('26. the dry run refuses what the real start would', dryRefused.exit === 1 && !!dryRefused.json && !dryRefused.json.ok && dryRefused.json.error.code === 'not-installed');
+
+        const repoVersion = JSON.parse(read(path.join(path.dirname(SCRIPT), '..', '.claude-plugin', 'plugin.json'))).version;
+        const dry = hw([...base, '--dry-run']);
+        const dv = dry.json && dry.json.ok ? dry.json.value : {};
+        check('26. a --dev dry run names the checkout script, its version, installed=false and dev=true',
+            dv.installed === false && dv.dev === true && dv.version === repoVersion && path.resolve(dv.script || '.') === SCRIPT, JSON.stringify({ installed: dv.installed, dev: dv.dev, version: dv.version }));
+
+        // An installed copy: the same two files under <config>/plugins/cache/<marketplace>/autodev-core/<version>.
+        const inst = path.join(ROOT, 'cfg', 'plugins', 'cache', 'autodev', 'autodev-core', '9.9.9');
+        write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '9.9.9' }));
+        fs.mkdirSync(path.join(inst, 'scripts'), { recursive: true });
+        for (const f of ['headless-worker.js', 'claude-paths.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
+        const installed = hw([...base, '--dry-run'], {}, { dev: false, script: path.join(inst, 'scripts', 'headless-worker.js') });
+        const iv = installed.json && installed.json.ok ? installed.json.value : {};
+        check('26. the installed copy starts without --dev and names version 9.9.9',
+            installed.exit === 0 && iv.installed === true && iv.dev === false && iv.version === '9.9.9', installed.stdout.slice(0, 200));
+
+        const real = startFake('T26B');
+        if (real.pid) waitForEnd(real.log, real.pid);
+        const rec = (JSON.parse(read(real.ledger) || '{"records":[]}').records || [])[0] || {};
+        check('26. a started record names the version and script that ran, and dev',
+            rec.version === repoVersion && path.resolve(rec.script || '.') === SCRIPT && rec.dev === true, JSON.stringify({ version: rec.version, dev: rec.dev }));
+        const st = hw(['status', '--ledger', real.ledger]);
+        check('26. the status line names the version and (dev)', st.stdout.includes(`version=${repoVersion}(dev)`), st.stdout.slice(0, 240));
+    }
+
+    // 27. The ledger code travels into the prompt verbatim. `[measured 2026-09-23]`
+    // reports ended `RESULT DESIGN done:` for the ledger code W2-DESIGN, because the
+    // prompt said `RESULT <CODE>` and the worker picked a code of its own.
+    {
+        const dir = path.join(ROOT, 'T27');
+        const report = path.join(dir, 'W2-DESIGN.report.md');
+        const r = hw(['start', '--code', 'W2-DESIGN', '--prompt-file', PROMPT, '--log', path.join(dir, 'W2-DESIGN.log'), '--report', report,
+            '--claude-bin', FAKE, '--ledger', path.join(dir, 'dry.json'), '--dry-run']);
+        const v = r.json && r.json.ok ? r.json.value : null;
+        const promptArg = v ? v.argv[v.argv.indexOf('-p') + 1] : '';
+        check('27. the prompt names the report and its RESULT line with the exact ledger code',
+            promptArg.includes('RESULT W2-DESIGN done|stopped|failed: <one sentence>') && promptArg.includes(report.replace(/\\/g, '/')), promptArg.slice(-1400));
+        check('27. no placeholder code is left, and the ask note ends RESULT W2-DESIGN stopped',
+            !/<CODE>/.test(promptArg) && promptArg.includes('RESULT W2-DESIGN stopped'));
+        const denied = ['Production Deploy', 'Secret-Store Writes', 'Production Reads', 'Modify Shared Resources'];
+        check('27. the prompt names the four classifier-denied action classes and a Release window, before the HEADLESS note',
+            denied.every((c) => promptArg.includes(c)) && promptArg.indexOf('Release window') > 0
+            && promptArg.indexOf('Release window') < promptArg.indexOf(HEADLESS_NOTE) && promptArg.endsWith(HEADLESS_NOTE + '\n'));
+        check('27. the prompt still fits under PROMPT_MAX', promptArg.length < PROMPT_MAX, String(promptArg.length));
+    }
+
+    // 28. A RESULT line for another code is reported as that, not as a bare unparseable.
+    {
+        const s = synthRun('W2-DESIGN', { logText: 'CLAUDE_EXIT=0\n', reportText: 'notes\nRESULT DESIGN done: the design landed.\n' });
+        const st = hw(['status', '--ledger', s.ledger, '--json']);
+        const rec = st.json && st.json.ok ? st.json.value.records[0] : {};
+        check('28. status keeps result unparseable and names the code it found',
+            rec.result === 'unparseable' && rec.resultCodeFound === 'DESIGN', JSON.stringify(rec).slice(0, 200));
+        check('28. the human status line says RESULT line found for a different code',
+            /result=unparseable \(RESULT line found for a different code: DESIGN\)/.test(hw(['status', '--ledger', s.ledger]).stdout));
+        const r = hw(['settle', '--code', 'W2-DESIGN', '--ledger', s.ledger]);
+        check('28. settle refuses no-result and names the other code', r.exit === 1 && !!r.json && !r.json.ok && r.json.error.code === 'no-result'
+            && /RESULT line found for a different code/.test(r.json.error.message) && r.json.error.message.includes('RESULT DESIGN'), r.stdout.slice(0, 260));
+        const plain = synthRun('W2-PLAIN', { logText: 'CLAUDE_EXIT=0\n', reportText: 'no result line here\n' });
+        const p = hw(['status', '--ledger', plain.ledger, '--json']);
+        const prec = p.json && p.json.ok ? p.json.value.records[0] : {};
+        check('28. a report with no RESULT line at all names no other code', prec.result === 'unparseable' && prec.resultCodeFound === null);
+    }
+    // 29. A supervisor pid that another image holds, within this boot. `[measured 2026-09-24]`
+    // pid 62756 had been reused by msedgewebview2.exe, kill(pid, 0) answered alive,
+    // and the ledger kept the worker as running. Pure over injected lookups first,
+    // then through the CLI and the real lookup.
+    {
+        const { pidImage, supervisorLiveness, isSupervisorImage, lostReason, recordStatus } = require(SCRIPT);
+        const out = (stdout, status = 0) => () => ({ status, stdout });
+        check('29. pidImage reads the image from a tasklist CSV row for that pid',
+            pidImage(62756, out('"msedgewebview2.exe","62756","Console","1","45,000 K"\r\n'), 'win32') === 'msedgewebview2.exe');
+        check('29. pidImage answers null for no match, a row for another pid, a failed run and a non-pid',
+            pidImage(62756, out('INFO: No tasks are running which match the specified criteria.\r\n'), 'win32') === null
+            && pidImage(62756, out('"node.exe","6275","Console","1","1 K"\r\n'), 'win32') === null
+            && pidImage(62756, out('', 1), 'win32') === null
+            && pidImage(0, out('"node.exe","0"\r\n'), 'win32') === null);
+        check('29. pidImage reads a posix ps comm path as its basename', pidImage(5, out('/usr/local/bin/node\n'), 'linux') === 'node');
+        const rec = { pid: process.pid, supervisorImage: 'node.exe' };
+        check('29. another image is reused, the supervisor image and an unreadable one stay alive',
+            supervisorLiveness(rec, { image: () => 'msedgewebview2.exe' }) === 'reused'
+            && supervisorLiveness(rec, { image: () => 'node.exe' }) === 'alive'
+            && supervisorLiveness(rec, { image: () => null }) === 'alive');
+        check('29. a record written before supervisorImage existed expects node',
+            isSupervisorImage({}, 'node.exe') && isSupervisorImage({}, 'node') && !isSupervisorImage({}, 'msedgewebview2.exe'));
+        const boot = Date.now() - os.uptime() * 1000;
+        const now = { ...rec, code: 'REUSED', startedAt: new Date().toISOString(), log: path.join(ROOT, 'no-such.log'), report: path.join(ROOT, 'no-such.report.md') };
+        const why = lostReason(now, boot, () => 'alive', () => 'msedgewebview2.exe');
+        check('29. lostReason proves a reused pid lost and names both images', /is now msedgewebview2\.exe, not the supervisor \(node\.exe\)/.test(why || ''), why);
+        check('29. lostReason under the supervisor image is not proof', lostReason(now, boot, () => 'alive', () => 'node.exe') === null);
+        check('29. recordStatus reads a reused pid as process unknown', recordStatus(now, boot, () => 'msedgewebview2.exe').process === 'unknown');
+
+        // This suite's own pid, recorded as if its supervisor had been another image.
+        const dir = path.join(ROOT, 'reused');
+        const ledger = path.join(dir, 'ledger.json');
+        const own = path.basename(process.execPath).toLowerCase();
+        const mk = (code, supervisorImage) => ({ code, pid: process.pid, supervisorImage, startedAt: new Date().toISOString(), log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' });
+        write(ledger, JSON.stringify({ version: 1, records: [mk('STRANGER', 'claude-supervisor.exe'), mk('OWNIMAGE', own)] }, null, 2) + '\n');
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const byCode = Object.fromEntries((st.json && st.json.ok ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('29. status: a live pid under another image is unknown, and the control under its own image is running',
+            !!byCode.STRANGER && byCode.STRANGER.process === 'unknown' && !!byCode.OWNIMAGE && byCode.OWNIMAGE.process === 'running',
+            JSON.stringify([byCode.STRANGER && byCode.STRANGER.process, byCode.OWNIMAGE && byCode.OWNIMAGE.process]));
+        const lost = hw(['settle', '--code', 'STRANGER', '--lost', '--ledger', ledger]);
+        check('29. settle --lost settles the reused pid and names the image that holds it',
+            lost.exit === 0 && !!lost.json && lost.json.ok && lost.json.value.state === 'lost'
+            && lost.json.value.reason.includes(`is now ${own}, not the supervisor (claude-supervisor.exe)`), lost.stdout.slice(0, 240));
+        const ctl = hw(['settle', '--code', 'OWNIMAGE', '--lost', '--ledger', ledger]);
+        check('29. control: settle --lost still refuses a pid its own image holds',
+            ctl.exit === 1 && !!ctl.json && !ctl.json.ok && ctl.json.error.code === 'not-lost', ctl.stdout.slice(0, 200));
+        const self = hw(['selftest']);
+        check('29. selftest reads its own image', self.exit === 0 && !!self.json && self.json.ok && self.json.value.cases.ownImage === own,
+            JSON.stringify(self.json && self.json.value && self.json.value.cases));
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -843,7 +1219,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 25 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 29 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
