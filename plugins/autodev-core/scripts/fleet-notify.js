@@ -15,6 +15,12 @@
  * A notifier that repeats itself gets muted, and a muted notifier is worse than
  * none because it also stops you checking manually.
  *
+ * A WORKER'S ASK TAPS YOU TOO. A headless worker or a runs/ job asks by writing
+ * ask.json, and before 2026-09-24 only fleet-view.js showed it, on a page you had to
+ * open. The asks come from fleet-view's own openAsks(), so the toast and the
+ * page read the same files through the same code. An ask is keyed on its file
+ * and stamped with its mtime: once per ask, again if the worker rewrites it.
+ *
  * Usage:
  *   node fleet-notify.js                # one pass
  *   node fleet-notify.js --watch 120    # every 120s until stopped
@@ -30,6 +36,7 @@ const path = require('path');
 const claudePaths = require('./claude-paths.js');
 const { execFile, execFileSync } = require('child_process');
 const { scanFleet } = require(path.join(__dirname, 'fleet-status.js'));
+const fleetView = require(path.join(__dirname, 'fleet-view.js'));
 
 // Overridable so the dedup test can exercise real state writes without touching
 // the live file. The dedup is the load-bearing behaviour here, so it has to be
@@ -107,35 +114,72 @@ function toast(title, body) {
     }
 }
 
+// Old enough to be worth a toast? An UNPARSEABLE askedAt counts as old enough:
+// for a notifier, missing a real block is worse than one extra toast, so the
+// unknown case falls to the safe side rather than the quiet one.
+function oldEnough(askedAt) {
+    const t = Date.parse(askedAt);
+    if (!t) return true;
+    return (Date.now() - t) / 60000 >= MIN_AGE_MIN;
+}
+
+/** A blocked Desktop panel as one toast item, keyed on the session. */
+function panelItem(s) {
+    const q0 = s.pending.questions[0];
+    const q = (q0 && q0.question) || 'a question';
+    const n = (q0 && q0.options || []).length;
+    return {
+        key: s.sessionId, stamp: s.pending.askedAt, due: oldEnough(s.pending.askedAt),
+        title: s.title || 'A session is waiting', body: `${q}${n ? `  (${n} options)` : ''}`,
+        short: s.title || '?', name: s.title || s.sessionId,
+    };
+}
+
+/**
+ * Every open worker ask as a toast item. No min-age: that threshold was measured
+ * on Desktop panels, where a person already in the conversation answers half of
+ * them inside 2 minutes. Nobody is in a headless worker's conversation, so there
+ * is no quick answer to wait for. Nor has the rate ever burst: `[measured
+ * 2026-09-24]` 150 headless records since 09-21 wrote 0 asks, and 32 runs wrote 11.
+ */
+function askItems() {
+    let found;
+    try { found = fleetView.openAsks(fleetView.settings({})); } catch (e) {
+        return { items: [], sources: [`asks: COULD NOT READ (${e.message})`] };
+    }
+    const items = found.rows.map((r) => {
+        let stamp = 'unknown';
+        try { stamp = fs.statSync(r.askFile).mtime.toISOString(); } catch { /* removed since the read: 'unknown' still dedups */ }
+        const n = r.question.options.length;
+        return {
+            key: 'ask:' + r.askFile, stamp, due: true,
+            title: `${r.code} is asking`, body: `${r.question.text}${n ? `  (${n} options)` : ''}`,
+            short: r.code, name: r.code,
+        };
+    });
+    return { items, sources: found.sources.map((src) => src.population) };
+}
+
 /** One scan-and-notify pass. Returns how many notifications fired. */
 function pass() {
     const fleet = scanFleet(DAYS);
     const blocked = fleet.sessions.filter((s) => s.pending);
+    const asks = askItems();
+    const items = [...blocked.map(panelItem), ...asks.items];
     const state = readState();
 
-    // Drop state for anything no longer blocked, so a later block re-notifies.
-    const liveKeys = new Set(blocked.map((s) => s.sessionId));
+    // Drop state for anything no longer waiting, so a later block re-notifies.
+    const liveKeys = new Set(items.map((i) => i.key));
     const before = Object.keys(state).length;
     for (const k of Object.keys(state)) if (!liveKeys.has(k)) delete state[k];
     const didPrune = Object.keys(state).length !== before;
 
-    // Old enough to be worth a toast? An UNPARSEABLE askedAt counts as old
-    // enough: for a notifier, missing a real block is worse than one extra
-    // toast, so the unknown case falls to the safe side rather than the quiet one.
-    const oldEnough = (s) => {
-        const t = Date.parse(s.pending.askedAt);
-        if (!t) return true;
-        return (Date.now() - t) / 60000 >= MIN_AGE_MIN;
-    };
-
-    const fresh = blocked
-        .filter((s) => state[s.sessionId] !== s.pending.askedAt)
-        .filter(oldEnough);
+    const fresh = items.filter((i) => state[i.key] !== i.stamp).filter((i) => i.due);
 
     // Population every pass: a report that prints only a verdict cannot be told
     // apart from a probe that returned nothing.
     console.log(`${new Date().toISOString()}  ${fleet.population.transcripts} transcripts, `
-        + `${blocked.length} blocked, ${fresh.length} new`);
+        + `${blocked.length} blocked, ${asks.items.length} asking, ${fresh.length} new`);
 
     // A run marker, written EVERY pass whether or not anything fired.
     //
@@ -151,8 +195,12 @@ function pass() {
                 at: new Date().toISOString(),
                 transcripts: fleet.population.transcripts,
                 blocked: blocked.length,
+                asking: asks.items.length,
                 fresh: fresh.length,
                 dry: DRY,
+                // A missing ledger reads the same as an empty one in the count,
+                // so each source says here what it read or why it could not.
+                askSources: asks.sources,
             }) + '\n');
     } catch { /* an unwritable marker must not stop a notification */ }
 
@@ -167,15 +215,13 @@ function pass() {
     let fired = 0;
     try {
         if (fresh.length > MAX_INDIVIDUAL) {
-            const names = fresh.slice(0, 3).map((s) => s.title || '?').join(', ');
+            const names = fresh.slice(0, 3).map((i) => i.short).join(', ');
             toast(`${fresh.length} sessions are waiting on you`,
                 `${names} and ${fresh.length - 3} more. Open the fleet board.`);
             fired = 1;
         } else {
-            for (const s of fresh) {
-                const q = (s.pending.questions[0] && s.pending.questions[0].question) || 'a question';
-                const n = (s.pending.questions[0] && s.pending.questions[0].options || []).length;
-                toast(s.title || 'A session is waiting', `${q}${n ? `  (${n} options)` : ''}`);
+            for (const i of fresh) {
+                toast(i.title, i.body);
                 fired++;
             }
         }
@@ -183,9 +229,9 @@ function pass() {
         return 0;   // notify failed: leave state untouched so the next pass retries
     }
 
-    for (const s of fresh) state[s.sessionId] = s.pending.askedAt;
+    for (const i of fresh) state[i.key] = i.stamp;
     if (!DRY) writeState(state);
-    for (const s of fresh) console.log(`  notified: ${s.title || s.sessionId}`);
+    for (const i of fresh) console.log(`  notified: ${i.name}`);
     return fired;
 }
 

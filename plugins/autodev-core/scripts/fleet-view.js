@@ -444,6 +444,21 @@ function collect(s, now = Date.now()) {
     return { sources, rows, window: `live, asking, or touched in the last ${s.hours} h`, at: new Date(now).toISOString() };
 }
 
+/**
+ * The open asks alone, read by the same sources and the same question() the page uses, so
+ * fleet-notify.js and this page cannot disagree about what is waiting. Only runs/ and the
+ * headless ledger carry a question channel. Skipping the rest keeps a notify pass off the
+ * desktop session store, the slow read. collect() shows every question row whatever its age,
+ * so no window applies here either.
+ */
+function openAsks(s) {
+    const sources = [];
+    for (const [name, fn] of [['runs', runsSource], ['headless-worker', headlessSource]]) {
+        try { sources.push(fn(s)); } catch (e) { sources.push(unreadable(name, e.message)); }
+    }
+    return { sources, rows: sources.flatMap((src) => src.rows.filter((r) => r.question)) };
+}
+
 function rank(r) { return r.process === 'COULD-NOT-READ' ? 0 : r.question ? 1 : r.live ? 2 : 3; }
 
 function actionsFor(r, s) {
@@ -765,4 +780,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { parseArgs, settings, collect, doAction, processMatches, progressOf, lastPr, nextCode, renderPage, listLines, selftest, esc };
+module.exports = { parseArgs, settings, collect, openAsks, doAction, processMatches, progressOf, lastPr, nextCode, renderPage, listLines, selftest, esc };
