@@ -540,6 +540,23 @@ function run() {
         Array.isArray(reRows) && reRows.length === 2 && asking.length === 1
         && asking[0].askFile === reAskFile && asking[0].key === newest,
         `rows=${JSON.stringify((reRows || []).map((r) => ({ key: r.key, q: !!r.question, actions: r.actions })))}`);
+    // Both records name one report too, as every run from before start moved
+    // files aside does. The report is the newest run's, so the earlier row
+    // shows none of it and offers no relaunch of a run that was superseded.
+    const reReport = path.join(hRerun, 'workers', 'W-RE.report.md');
+    fs.writeFileSync(reReport, 'RESULT W-RE stopped: https://github.com/o/r/pull/7 waits on the answer.\n', 'utf8');
+    let rePr = null;
+    try {
+        rePr = JSON.parse(spawnSync(process.execPath,
+            [VIEW, 'list', '--json', '--home', hRerun, '--appdata', path.join(hRerun, 'appdata')],
+            { encoding: 'utf8', env: envFor(hRerun), windowsHide: true }).stdout).rows.filter((r) => r.code === 'W-RE');
+    } catch { /* stays null */ }
+    const reNew = (rePr || []).find((r) => r.key === newest) || {};
+    const reOld = (rePr || []).find((r) => r.key !== newest) || {};
+    check('the earlier row shows no PR and offers no relaunch, while the newest row shows both',
+        reOld.superseded === true && reOld.pr === null && !(reOld.actions || []).includes('relaunch') && /^superseded/.test(reOld.result || '')
+        && reNew.superseded === false && reNew.pr === 'https://github.com/o/r/pull/7' && (reNew.actions || []).includes('relaunch'),
+        `old=${JSON.stringify({ s: reOld.superseded, pr: reOld.pr, result: reOld.result, a: reOld.actions })} new=${JSON.stringify({ s: reNew.superseded, pr: reNew.pr, a: reNew.actions })}`);
 
     // =====================================================================
     console.log('\n=== an ask a rerun moved aside neither toasts nor counts ===');

@@ -88,6 +88,8 @@ const USAGE = [
     '        An unreported record is its own result, never done, stopped or failed.',
     'ask:    a worker asks by writing <report dir>/<CODE>/ask.json and keeps working. status shows ask=open',
     '        until answer.json lands beside it. No worker exits to ask.',
+    'rerun:  a later record at the same code supersedes an earlier one. The earlier one reads ask=superseded, and',
+    '        result=superseded with no exit from the log wherever it still shares the later run\'s report or log path.',
     'Not unattended-worker.js: that one composes scheduled-task calls and starts nothing.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'headless-workers.json')}`,
 ].join('\n') + '\n';
@@ -713,16 +715,38 @@ function bootAt() { return Date.now() - os.uptime() * 1000; }
  * process as this worker, running, forever. Within this boot, a pid that
  * another image now holds is `unknown` for the same reason.
  */
-function recordStatus(rec, boot = bootAt(), image = pidImage) {
-    const logText = readText(rec.log);
-    const exit = logText === null ? null : exitCodeOf(logText);
+/**
+ * The records after this one in the ledger at the same code and scratch dir.
+ * Every run at one code shares the scratch dir, so the ask.json there is the
+ * latest run's. A run from before start moved files aside can also share its
+ * log and report path with the later run. `[measured 2026-09-24]` 17 of 182
+ * live records had a later run at their code. All 17 shared its report path,
+ * and 15 shared its log. Without `records` nothing is superseded.
+ */
+function laterRuns(rec, records) {
+    const i = Array.isArray(records) ? records.indexOf(rec) : -1;
+    if (i < 0 || !rec.report || !rec.code) return [];
+    const scratch = path.resolve(scratchDirFor(rec));
+    return records.slice(i + 1).filter((r) => r.code === rec.code && r.report && path.resolve(scratchDirFor(r)) === scratch);
+}
+
+function recordStatus(rec, boot = bootAt(), image = pidImage, records = null) {
+    // A file a later run shares is that run's, so it says nothing about this
+    // one. A settled record keeps the exit settle read while the log was its own.
+    const later = laterRuns(rec, records);
+    const shared = (k) => later.some((l) => l[k] && rec[k] && path.resolve(l[k]) === path.resolve(rec[k]));
+    const ownLog = shared('log') ? null : rec.log;
+    const ownReport = shared('report') ? null : rec.report;
+    const logText = ownLog === null ? null : readText(ownLog);
+    const exit = logText !== null ? exitCodeOf(logText) : (ownLog === null && Number.isInteger(rec.exit) ? rec.exit : null);
     const started = Date.parse(rec.startedAt || '');
     let processState;
     if (exit !== null) processState = 'exited';
+    else if (ownLog === null) processState = 'unknown';
     else if (Number.isFinite(boot) && Number.isFinite(started) && started < boot) processState = 'unknown';
     else processState = supervisorLiveness(rec, { image }) === 'alive' ? 'running' : 'unknown';
-    const reportText = readText(rec.report);
-    let result = 'none';
+    const reportText = ownReport === null ? null : readText(ownReport);
+    let result = ownReport === null ? 'superseded' : 'none';
     let sentence = null;
     let resultCodeFound = null;
     const reportStale = reportText !== null && writtenBefore(rec.report, rec.startedAt);
@@ -746,7 +770,9 @@ function recordStatus(rec, boot = bootAt(), image = pidImage) {
         version: rec.version || null, dev: rec.dev === true,
         lostReason: settledAs === 'lost' ? (rec.reason || null) : null,
         settleReason: settledAs === 'lost' || settledAs === 'unreported' ? (rec.reason || null) : null,
-        log: rec.log, report: rec.report, cwd: rec.cwd || null, ...askState(rec),
+        log: ownLog, report: ownReport, cwd: rec.cwd || null,
+        supersededBy: later.length ? later[later.length - 1].startedAt || null : null,
+        ...(later.length ? { ask: 'superseded', question: null, askFile: null, answerFile: null } : askState(rec)),
     };
 }
 
@@ -777,7 +803,7 @@ function status(opts) {
         return { ledger: file, readable: false, population: `could not read ${file}: ${e.message}`, records: [] };
     }
     const boot = bootAt();
-    const records = ledger.records.filter((r) => !opts.code || r.code === opts.code).map((r) => recordStatus(r, boot));
+    const records = ledger.records.filter((r) => !opts.code || r.code === opts.code).map((r) => recordStatus(r, boot, undefined, ledger.records));
     const population = `${file}: ${ledger.records.length} record(s)${opts.code ? `, ${records.length} for ${opts.code}` : ''}`;
     return { ledger: file, readable: true, recordsRead: ledger.records.length, population, records };
 }
@@ -788,7 +814,7 @@ function statusLines(value) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
             + `result=${r.result}${r.resultCodeFound ? ` (RESULT line found for a different code: ${r.resultCodeFound})` : ''}`
             + `${r.misplacedReport ? ` (report written into the scratch dir: ${r.misplacedReport})` : ''} settled=${r.settled}${r.settledAs === 'lost' || r.settledAs === 'unreported' ? ` settledAs=${r.settledAs} (${r.settleReason})` : ''}`
-            + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''} version=${r.version || '-'}${r.dev ? '(dev)' : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
+            + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''}${r.supersededBy ? ` supersededBy=${r.supersededBy}` : ''} version=${r.version || '-'}${r.dev ? '(dev)' : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
     }
     return lines.join('\n') + '\n';
 }
@@ -964,5 +990,5 @@ module.exports = {
     HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
-    livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
+    livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, run,
 };
