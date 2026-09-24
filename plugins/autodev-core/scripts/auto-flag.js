@@ -34,6 +34,8 @@ function pathsFor(cwd, sid) {
         active: path.join(dir, 'auto-active.' + sid),
         exit: path.join(dir, 'auto-exit.' + sid),
         idle: path.join(dir, 'auto-idle-triggered.' + sid),
+        // Stop notes already handed to the model this session (stop-auto-check.js).
+        notes: path.join(dir, 'stop-notes.' + sid),
     };
 }
 

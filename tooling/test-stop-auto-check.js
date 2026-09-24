@@ -555,6 +555,88 @@ function runWithCfg(dir, cfg) {
     check('nudge: in auto mode the existing BLOCK path still wins', decision?.decision === 'block');
 }
 
+// ------------------------------------ F17: one wake per note per session
+//
+// Stop additionalContext continues the conversation. Sent on every approve,
+// the nudge woke the model at every stop: it answered in one line, the turn
+// ended, and the hook fired again with the same nudge. `[measured 2026-09-24]`
+// about 40 such turns in one session waiting on a background task.
+{
+    const ctx = (d) => d?.hookSpecificOutput?.additionalContext;
+    const dir = project({ prd: SPRINT_PENDING });
+    const first = run(dir, { session_id: 'loop' }).decision;
+    check('F17: first stop outside auto hands the model the nudge', (ctx(first) || '').includes('S1-002'));
+    const second = run(dir, { session_id: 'loop' }).decision;
+    check('F17: second stop, same session, still approves', second?.decision === 'approve');
+    check('F17: second stop, same session, has NO additionalContext', second !== null && second.hookSpecificOutput === undefined);
+    check('F17: the operator still sees it (systemMessage)', (second?.systemMessage || '').includes('S1-002'));
+    check('F17: a third stop stays quiet too', run(dir, { session_id: 'loop' }).decision?.hookSpecificOutput === undefined);
+    check('F17: another session in the same repo gets its own one nudge',
+        (ctx(run(dir, { session_id: 'other' }).decision) || '').includes('S1-002'));
+
+    // A ledger that cannot be read sends nothing to the model: a missed nudge
+    // costs one line, a missed guard costs a model call per stop.
+    const broken = project({ prd: SPRINT_PENDING });
+    fs.mkdirSync(path.join(broken, '.claude', 'stop-notes.sess'));
+    const b = run(broken).decision;
+    check('F17: unreadable ledger → approve, no additionalContext (fails closed)',
+        b?.decision === 'approve' && b.hookSpecificOutput === undefined && (b.systemMessage || '').includes('S1-002'));
+
+    // A repo with no .claude directory yet still gets its one nudge.
+    const bare = path.join(TMP, 'bare' + ++n);
+    fs.mkdirSync(bare);
+    fs.writeFileSync(path.join(bare, 'prd.json'), JSON.stringify(SPRINT_PENDING));
+    check('F17: no .claude dir → nudge still reaches the model once', (ctx(run(bare).decision) || '').includes('S1-002'));
+    check('F17: no .claude dir → and only once', run(bare).decision?.hookSpecificOutput === undefined);
+
+    // Ledgers are per session, so the first write sweeps week-old ones.
+    const swept = project({});
+    const old = path.join(swept, '.claude', 'stop-notes.gone');
+    const recent = path.join(swept, '.claude', 'stop-notes.kept');
+    fs.writeFileSync(old, '[]');
+    fs.writeFileSync(recent, '[]');
+    const eightDays = new Date(Date.now() - 8 * 86400000);
+    fs.utimesSync(old, eightDays, eightDays);
+    fs.writeFileSync(path.join(swept, 'prd.json'), JSON.stringify(SPRINT_PENDING));
+    run(swept);
+    check('F17: first write sweeps a week-old ledger', !fs.existsSync(old));
+    check('F17: and keeps a recent one', fs.existsSync(recent));
+}
+
+// The carried-queue note: once per DISTINCT note per session.
+{
+    const LABEL = 'Write up the session as a lessons entry';
+    const transcript = (name, panels) => {
+        const recs = [];
+        panels.forEach(([labels, picks], i) => {
+            recs.push({ message: { content: [{ type: 'tool_use', id: `p${i}`, name: 'AskUserQuestion',
+                input: { questions: [{ options: labels.map((l) => ({ label: l })) }] } }] } });
+            recs.push({ message: { content: [{ type: 'tool_result', tool_use_id: `p${i}`,
+                content: `Your questions have been answered: "Q"="${picks.join(',')}". You can now continue.` }] } });
+        });
+        const p = path.join(TMP, name);
+        fs.writeFileSync(p, recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+        return p;
+    };
+    const twoPanels = [[[LABEL, 'Other'], [LABEL]], [[LABEL, 'Else'], [LABEL]]];
+    const t = transcript('carried-a.jsonl', twoPanels);
+    const dir = project({ prd: SPRINT_PENDING });
+    const ctx = (d) => d?.hookSpecificOutput?.additionalContext || '';
+    const a = run(dir, { session_id: 'q', transcript_path: t }).decision;
+    check('F17 queue: first stop hands the model the carried item', ctx(a).includes(LABEL));
+    check('F17 queue: and the nudge with it', ctx(a).includes('S1-002'));
+    const b = run(dir, { session_id: 'q', transcript_path: t }).decision;
+    check('F17 queue: same note, same session → no additionalContext', b !== null && b.hookSpecificOutput === undefined);
+    check('F17 queue: operator still sees the carried item', (b?.systemMessage || '').includes(LABEL));
+
+    // A later panel changes the finding: that is a new note, sent once, alone.
+    const t3 = transcript('carried-b.jsonl', [...twoPanels, [[LABEL, 'More'], [LABEL]]]);
+    const c = run(dir, { session_id: 'q', transcript_path: t3 }).decision;
+    check('F17 queue: a changed finding reaches the model', /3 panels/.test(ctx(c)));
+    check('F17 queue: without re-sending the nudge', !ctx(c).includes('S1-002'));
+    check('F17 queue: and the changed note is also once', run(dir, { session_id: 'q', transcript_path: t3 }).decision?.hookSpecificOutput === undefined);
+}
+
 // Dependency graphs with no ready work get one reconciliation turn, then an
 // honest bounded stop. Controls use the same graph with one available root.
 for (const [label, prd, expected] of [
