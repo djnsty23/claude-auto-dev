@@ -286,6 +286,16 @@ function headlessSource(s) {
             askFile: st.askFile, answerFile: st.answerFile, record: rec, ledger: file,
         };
     });
+    // Every record at one code shares one scratch directory, so a rerun's
+    // ask.json is read by each earlier record there too. The newest run owns
+    // it: without this one ask showed on every row at its code and toasted
+    // once per row. [measured 2026-09-24] 15 codes held more than one record.
+    const owner = new Map();
+    for (const r of rows) {
+        const cur = r.askFile && owner.get(r.askFile);
+        if (r.askFile && (!cur || (ts(r.record.startedAt) || 0) >= (ts(cur.record.startedAt) || 0))) owner.set(r.askFile, r);
+    }
+    for (const r of rows) if (r.askFile && owner.get(r.askFile) !== r) { r.question = null; r.answered = false; }
     return { source, readable: true, population: `${source}: ${file}: ${ledger.records.length} record(s)`, rows };
 }
 
