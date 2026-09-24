@@ -1,5 +1,20 @@
 # Changelog
 
+## [8.174.0]
+
+### A Stop note wakes the model once per session
+
+- 8.173.0 sent every approve note as Stop `additionalContext`, which continues
+  the conversation. Outside auto, a repo with actionable prd.json stories then
+  woke the model at every stop with the same nudge: about 40 empty turns in one
+  session waiting on a background task.
+- The not-in-auto nudge now reaches the model once per session id, and each
+  distinct carried-queue note once per session. The operator still sees both on
+  every stop through `systemMessage`, which starts no turn.
+- The keys sent live in `.claude/stop-notes.<session>`. A ledger that cannot
+  be read or written sends nothing to the model, and ledgers older than seven
+  days are swept.
+
 ## [8.173.0]
 
 ### Every worker on one local page (#290)
