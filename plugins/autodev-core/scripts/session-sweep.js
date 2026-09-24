@@ -99,7 +99,7 @@ const REGENERABLE = [
   /^\.claude\/memory-sessions\//, /^\.claude\/\.claude\//, /^\.claude\/types\//,
   /^\.claude\/knowledge-surfaced$/, /^\.claude\/panel-deny\.json$/,
   /^\.claude\/settings\.local\.json$/, /^\.claude\/pre-compact-state\.json$/,
-  /^\.claude\/auto-(active|exit|idle-triggered)$/, /^\.claude\/\.typecheck-pending$/,
+  /^\.claude\/auto-(active|exit|idle-triggered)$/, /^\.claude\/\.typecheck-pending(\.\d+\.claim)?$/,
   /^\.claude\/memory-session-id$/, /^\.claude\/commit-msg\.txt$/, /^\.claude\/COMMIT_MSG_[^/]*\.txt$/,
 ];
 
