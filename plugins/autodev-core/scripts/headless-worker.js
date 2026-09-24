@@ -83,7 +83,8 @@ const USAGE = [
     '        the record started before this boot, or its pid is dead with no exit line. A record with an exit line',
     '        takes plain settle. A lost record is its own result, never done, stopped or failed.',
     'settle --unreported: settle a record whose worker exited without a RESULT <CODE> line, as result unreported.',
-    '        Refused while the log has no exit line (that is --lost) and while the report has a RESULT line.',
+    '        Refused while the log has no exit line (that is --lost), while the report has a RESULT line, and while',
+    '        <report dir>/<CODE>/<report name> has one (a report written into the scratch dir: move it, then settle).',
     '        An unreported record is its own result, never done, stopped or failed.',
     'ask:    a worker asks by writing <report dir>/<CODE>/ask.json and keeps working. status shows ask=open',
     '        until answer.json lands beside it. No worker exits to ask.',
@@ -305,6 +306,26 @@ function composePrompt(text, scratchDir, { code = null, report = null } = {}) {
 
 /** Where a worker's scratch output belongs: a directory named for its code, beside its report. */
 function scratchDirFor(o) { return path.join(path.dirname(o.report), o.code); }
+
+// `[measured 2026-09-24]` two workers finished done, PRs green, and wrote
+// REPORT.md into their scratch dir, one level below the ledger's report path.
+// Their prompts named the scratch dir and not the report file. The ledger read
+// the empty path, so both looked like workers that left no report, and settle
+// --unreported would have filed two finished PRs as unreported. So settle looks
+// in that one place, names the file, and never settles past it.
+/** The report file under the record's scratch dir, when it carries this code's RESULT line. */
+function misplacedReport(rec) {
+    if (!rec.report || !rec.code) return null;
+    const alt = path.join(scratchDirFor(rec), path.basename(rec.report));
+    if (path.resolve(alt) === path.resolve(rec.report)) return null;
+    const text = readText(alt);
+    return text !== null && parseResult(text, rec.code) ? alt : null;
+}
+
+function misplacedHint(moved, rec) {
+    return `${moved} has a RESULT ${rec.code} line: the worker wrote its report into its scratch dir. `
+        + `Move that file to ${rec.report}, then settle again`;
+}
 
 function readPrompt(file, scratchDir, o = {}) {
     if (!file) fault('usage', '--prompt-file is required');
@@ -610,6 +631,7 @@ function recordStatus(rec, boot = bootAt()) {
         sentence = parsed ? parsed.sentence : null;
         resultCodeFound = parsed ? null : otherResultCode(reportText, rec.code);
     }
+    const misplaced = result === 'none' || (result === 'unparseable' && !resultCodeFound) ? misplacedReport(rec) : null;
     // The settled axis says HOW the record was settled, read from the ledger,
     // because `result` above is the report's word and a lost record's report
     // usually has none. A settled value outside SETTLED_RESULTS surfaces as
@@ -618,7 +640,7 @@ function recordStatus(rec, boot = bootAt()) {
     const settledAs = settled ? (SETTLED_RESULTS.includes(rec.result) ? rec.result : `unrecognised:${rec.result}`) : null;
     return {
         code: rec.code, pid: rec.pid, startedAt: rec.startedAt, process: processState, exit,
-        result, sentence, resultCodeFound, reportExists: reportText !== null, settled, settledAs,
+        result, sentence, resultCodeFound, reportExists: reportText !== null, misplacedReport: misplaced, settled, settledAs,
         version: rec.version || null, dev: rec.dev === true,
         lostReason: settledAs === 'lost' ? (rec.reason || null) : null,
         settleReason: settledAs === 'lost' || settledAs === 'unreported' ? (rec.reason || null) : null,
@@ -662,7 +684,8 @@ function statusLines(value) {
     const lines = [value.population];
     for (const r of value.records) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
-            + `result=${r.result}${r.resultCodeFound ? ` (RESULT line found for a different code: ${r.resultCodeFound})` : ''} settled=${r.settled}${r.settledAs === 'lost' || r.settledAs === 'unreported' ? ` settledAs=${r.settledAs} (${r.settleReason})` : ''}`
+            + `result=${r.result}${r.resultCodeFound ? ` (RESULT line found for a different code: ${r.resultCodeFound})` : ''}`
+            + `${r.misplacedReport ? ` (report written into the scratch dir: ${r.misplacedReport})` : ''} settled=${r.settled}${r.settledAs === 'lost' || r.settledAs === 'unreported' ? ` settledAs=${r.settledAs} (${r.settleReason})` : ''}`
             + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''} version=${r.version || '-'}${r.dev ? '(dev)' : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
     }
     return lines.join('\n') + '\n';
@@ -708,13 +731,14 @@ function settle(opts) {
         const parsed = reportText === null ? null : parseResult(reportText, code);
         if (!parsed) {
             const other = reportText === null ? null : otherResultCode(reportText, code);
+            const moved = other ? null : misplacedReport(rec);
             fault('no-result', (reportText === null
                 ? `${rec.report} does not exist`
                 : other
                     ? `RESULT line found for a different code: ${rec.report} ends RESULT ${other}, and this record's code is ${code}. `
                         + `Correct that line to RESULT ${code} done|stopped|failed: <sentence>, then settle again`
                     : `${rec.report} has no line matching RESULT ${code} done|stopped|failed: <sentence>`)
-                + (other ? '' : '. If the worker ended without one, settle --unreported records that it left none'));
+                + (other ? '' : moved ? `. ${misplacedHint(moved, rec)}` : '. If the worker ended without one, settle --unreported records that it left none'));
         }
         const settledAt = new Date().toISOString();
         Object.assign(rec, { state: 'settled', result: parsed.state, sentence: parsed.sentence, exit, settledAt });
@@ -742,8 +766,8 @@ function settleLost(rec, code, exit) {
 }
 
 /**
- * `settle --unreported` inside the ledger lock. `[measured 2026-09-24]` four
- * workers exited 0 after 13 to 15 minutes on a full disk and never wrote their
+ * `settle --unreported` inside the ledger lock. `[measured 2026-09-24]` two
+ * workers stopped on a full disk (ENOSPC), exited 0 and could not write their
  * report. --lost refused them (they have an exit line) and plain settle refused
  * them (no RESULT line), so each record stayed `running` and `start` refused
  * its code as code-active for good. This settles such a record as its own
@@ -760,6 +784,8 @@ function settleUnreported(rec, code, exit) {
         fault('has-result', `${rec.report} has a RESULT ${code} line. Settle it without --unreported`);
     }
     const other = reportText === null ? null : otherResultCode(reportText, code);
+    const moved = other ? null : misplacedReport(rec);
+    if (moved) fault('misplaced-report', misplacedHint(moved, rec));
     if (other) {
         fault('no-result', `RESULT line found for a different code: ${rec.report} ends RESULT ${other}, and this record's code is ${code}. `
             + `Correct that line to RESULT ${code} done|stopped|failed: <sentence>, then settle again`);

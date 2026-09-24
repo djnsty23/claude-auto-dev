@@ -797,8 +797,8 @@ try {
     }
 
     // ------------------------------------------------------------ 24b. settle --unreported
-    // `[measured 2026-09-24]` four workers exited 0 on a full disk and never
-    // wrote their report. --lost refused them (they have an exit line) and plain
+    // `[measured 2026-09-24]` two workers stopped on a full disk (ENOSPC), exited
+    // 0 and could not write their report. --lost refused them (they have an exit line) and plain
     // settle refused them (no RESULT line), so each record stayed running and
     // start refused its code as code-active. --unreported settles such a record
     // as result unreported, and ONLY once the worker has provably ended.
@@ -881,6 +881,67 @@ try {
         const usage = hw(['--help']).stdout;
         check('24b. the usage text lists settle --unreported and says when it refuses',
             usage.includes('settle --code <CODE> [--lost] [--unreported]') && /settle --unreported: [\s\S]*Refused while/.test(usage));
+    }
+
+    // ------------------------------------------------------------ 24c. a report written into the scratch dir
+    // `[measured 2026-09-24]` two workers finished done with green PRs and wrote
+    // REPORT.md into <report dir>/<CODE>/, one level below the ledger's path.
+    // Plain settle read no report, and --unreported would have filed both as
+    // unreported. Settle now finds that file, names it, and never settles past it.
+    {
+        const dir = path.join(ROOT, 'T24c');
+        const ledger = path.join(dir, 'ledger.json');
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const now = new Date().toISOString();
+        const mk = (code, { scratchText = null, reportText = null } = {}) => {
+            const rec = { code, pid: dead.pid, startedAt: now, log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' };
+            write(rec.log, 'noise\nCLAUDE_EXIT=0\n');
+            if (reportText !== null) write(rec.report, reportText);
+            if (scratchText !== null) write(path.join(dir, code, code + '.report.md'), scratchText);
+            return rec;
+        };
+        const records = [
+            mk('MOVED', { scratchText: 'notes\nRESULT MOVED done: PR 96 green.\n' }),
+            mk('MOVEDSTOP', { scratchText: 'RESULT MOVEDSTOP stopped: blocked on a key.\n' }),
+            mk('SCRATCHNOISE', { scratchText: 'a scratch file with no result line\n' }),
+            mk('EMPTYMAIN', { reportText: '# started, never finished\n', scratchText: 'RESULT EMPTYMAIN done: the real one.\n' }),
+        ];
+        write(ledger, JSON.stringify({ version: 1, records }, null, 2) + '\n');
+        const recOf = (code) => JSON.parse(read(ledger)).records.find((r) => r.code === code) || null;
+        const moved = path.join(dir, 'MOVED', 'MOVED.report.md');
+
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const byCode = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('24c. status --json names the report found in the scratch dir, while result stays none',
+            !!byCode.MOVED && byCode.MOVED.result === 'none' && byCode.MOVED.misplacedReport === moved, JSON.stringify(byCode.MOVED || null).slice(0, 300));
+        check('24c. status names it when the ledger path holds a report with no RESULT line too',
+            !!byCode.EMPTYMAIN && byCode.EMPTYMAIN.result === 'unparseable' && byCode.EMPTYMAIN.misplacedReport === path.join(dir, 'EMPTYMAIN', 'EMPTYMAIN.report.md'), JSON.stringify(byCode.EMPTYMAIN || null).slice(0, 300));
+        check('24c. a scratch file with no RESULT line is not a misplaced report', !!byCode.SCRATCHNOISE && byCode.SCRATCHNOISE.misplacedReport === null);
+        const human = hw(['status', '--ledger', ledger]).stdout;
+        check('24c. status without --json says the report was written into the scratch dir',
+            /MOVED pid=\d+ process=exited exit=0 result=none \(report written into the scratch dir: [^\n]*MOVED\.report\.md\) settled=false/.test(human), human.slice(0, 500));
+
+        const plain = hw(['settle', '--code', 'MOVED', '--ledger', ledger]);
+        check('24c. plain settle refuses no-result, names the scratch-dir file and says to move it, and does not offer --unreported',
+            plain.exit === 1 && plain.json && plain.json.error.code === 'no-result' && plain.json.error.message.includes(moved)
+                && /Move that file to /.test(plain.json.error.message) && !/--unreported/.test(plain.json.error.message) && recOf('MOVED').state === 'running', plain.stdout.slice(0, 300));
+        const unrep = hw(['settle', '--code', 'MOVED', '--unreported', '--ledger', ledger]);
+        check('24c. settle --unreported REFUSES with misplaced-report, so a finished worker is never filed as unreported',
+            unrep.exit === 1 && unrep.json && !unrep.json.ok && unrep.json.error.code === 'misplaced-report' && unrep.json.error.message.includes(moved) && recOf('MOVED').state === 'running', unrep.stdout.slice(0, 300));
+        const stopUnrep = hw(['settle', '--code', 'MOVEDSTOP', '--unreported', '--ledger', ledger]);
+        check('24c. the refusal holds for a stopped result as well as a done one',
+            stopUnrep.exit === 1 && stopUnrep.json && stopUnrep.json.error.code === 'misplaced-report' && recOf('MOVEDSTOP').state === 'running', stopUnrep.stdout.slice(0, 200));
+        const emptyUnrep = hw(['settle', '--code', 'EMPTYMAIN', '--unreported', '--ledger', ledger]);
+        check('24c. and for a ledger-path report with no RESULT line beside a scratch copy that has one',
+            emptyUnrep.exit === 1 && emptyUnrep.json && emptyUnrep.json.error.code === 'misplaced-report' && recOf('EMPTYMAIN').state === 'running', emptyUnrep.stdout.slice(0, 200));
+        const noise = hw(['settle', '--code', 'SCRATCHNOISE', '--unreported', '--ledger', ledger]);
+        check('24c. control: a scratch file with no RESULT line does not block --unreported',
+            noise.exit === 0 && noise.json && noise.json.ok && recOf('SCRATCHNOISE').result === 'unreported', noise.stdout.slice(0, 200));
+
+        fs.renameSync(moved, path.join(dir, 'MOVED.report.md'));
+        const after = hw(['settle', '--code', 'MOVED', '--ledger', ledger]);
+        check('24c. once the file is moved to the ledger path, plain settle takes it as done with its sentence',
+            after.exit === 0 && after.json && after.json.ok && after.json.value.state === 'done' && recOf('MOVED').result === 'done' && recOf('MOVED').sentence === 'PR 96 green.', after.stdout.slice(0, 200));
     }
 
     // ------------------------------------------------------------ 25. a worker asks by file and keeps working
