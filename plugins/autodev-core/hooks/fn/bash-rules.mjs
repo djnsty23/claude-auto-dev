@@ -14,7 +14,8 @@
 //             one needs its own measurement. The fourth, `msys-pathconv`, is
 //             Windows-only and unscoped; its measurement is in its comment.
 //             The fifth, `argv-credential`, is unscoped too, and so is its
-//             measurement.
+//             measurement. The sixth, `worktree-placement`, is unscoped
+//             and measured in its comment.
 //
 // A rewrite must not change a command's FIRST TOKEN: the permission layer
 // matches an allowlist on it, inside next(e), so a prefix that the model never
@@ -61,6 +62,182 @@ const AMEND_RE = /(?:^|\s)--amend(?=\s|$)/;
 // `rev:.path` — a bare leading dot right after the colon is the shape MSYS
 // mangles; `rev:./path` and `rev:dir/.file` are fine.
 const DOT_LEADING_REV_PATH_RE = /\S+:\.[^\s\\/.]/;
+
+// --- worktree placement -----------------------------------------------------
+// Paths are handled as strings with forward slashes, never through node:path:
+// the helpers here stay pure, and the session's cwd is a Windows path while the
+// command is Git Bash text. `/c/x` is the same directory as `C:/x` there.
+
+/** Split one segment into shell words. Null on an unbalanced quote. A word
+ *  that the shell would expand (`$`, backticks) is marked, and so is a leading `~/`. */
+function shellWords(segment) {
+    const words = [];
+    let cur = null;
+    const start = () => { if (!cur) cur = { text: '', expands: false, tilde: false }; };
+    let quote = null;
+    const src = String(segment);
+    for (let i = 0; i < src.length; i++) {
+        const c = src[i];
+        if (quote === "'") {
+            if (c === "'") quote = null; else cur.text += c;
+            continue;
+        }
+        if (quote === '"') {
+            if (c === '"') { quote = null; continue; }
+            if (c === '\\' && i + 1 < src.length && '$`"\\'.includes(src[i + 1])) { cur.text += src[++i]; continue; }
+            if (c === '$' || c === '`') cur.expands = true;
+            cur.text += c;
+            continue;
+        }
+        if (/\s/.test(c)) { if (cur) { words.push(cur); cur = null; } continue; }
+        start();
+        if (c === "'" || c === '"') { quote = c; continue; }
+        if (c === '\\') { if (i + 1 < src.length) cur.text += src[++i]; continue; }
+        if (c === '$' || c === '`') cur.expands = true;
+        if (c === '~' && cur.text === '') {
+            if (/^(?:\/|\s|$)/.test(src.slice(i + 1, i + 2))) cur.tilde = true; else cur.expands = true;
+        }
+        cur.text += c;
+    }
+    if (quote) return null;
+    if (cur) words.push(cur);
+    return words;
+}
+
+function slashPath(p, windows) {
+    let t = String(p).replace(/\\/g, '/');
+    if (windows) {
+        const m = t.match(/^\/([A-Za-z])(?=\/|$)/);
+        if (m) t = m[1] + ':' + t.slice(2);
+    }
+    return t;
+}
+
+function normalizePath(t) {
+    const drive = /^[A-Za-z]:/.test(t) ? t.slice(0, 2).toUpperCase() : '';
+    const out = [];
+    for (const part of (drive ? t.slice(2) : t).split('/')) {
+        if (!part || part === '.') continue;
+        if (part === '..') out.pop(); else out.push(part);
+    }
+    return drive + '/' + out.join('/');
+}
+
+/** An absolute, normalized path, or null when it cannot be known from text. */
+function resolvePath(base, p, windows) {
+    const t = slashPath(p, windows);
+    if (windows ? /^[A-Za-z]:\//.test(t) : t.startsWith('/')) return normalizePath(t);
+    // Git Bash maps `/tmp` and friends onto its own install root.
+    if (t.startsWith('/') || /^[A-Za-z]:/.test(t) || !base) return null;
+    return normalizePath(base + '/' + t);
+}
+
+// The home a `~/` names, read from where the session stands: `C:/Users/<me>`,
+// `/home/<me>` or `/Users/<me>`. Anywhere else a `~/` word stays unread.
+const HOME_RE = /^(?:[A-Z]:\/Users\/[^/]+|\/home\/[^/]+|\/Users\/[^/]+)(?=\/|$)/i;
+function resolveWord(word, base, ctx) {
+    if (!word || word.expands) return null;
+    if (!word.tilde) return resolvePath(base, word.text, ctx.windows);
+    const home = ((ctx.start || '').match(HOME_RE) || [])[0];
+    return home ? normalizePath(home + '/' + word.text.slice(1)) : null;
+}
+
+const pathKey = (p, windows) => (windows ? p.toLowerCase() : p).replace(/\/+$/, '');
+function pathInside(child, parent, windows) {
+    const c = pathKey(child, windows);
+    const q = pathKey(parent, windows);
+    return c === q || c.startsWith(q + '/');
+}
+
+// Where gate sweeps and exports make throwaway worktrees and remove them:
+// worktree-placement.js calls these `transient`, not misplaced.
+const TRANSIENT_RE = /(?:^|\/)(?:tmp|temp)(?:\/|$)|^\/(?:private\/)?var\/folders\//i;
+
+// `git [globals] worktree add [options] <path> [<commit-ish>]`
+const WORKTREE_VALUE_OPTS = new Set(['-b', '-B', '--reason']);
+const REDIRECT_RE = /^\d*(?:>>?|<|>&|&>)/;
+// A redirection written alone, whose target is the next word: `2> err.txt`.
+const REDIRECT_BARE_RE = /^\d*(?:>>?|<|>&|&>)$/;
+
+/**
+ * When this segment is a `git worktree add` whose destination is known from
+ * the text and is not under its repository's `.claude/worktrees/` (or a temp
+ * dir), what to say. Null for everything else, and for anything it cannot read.
+ */
+function misplacedWorktree(segment, ctx) {
+    if (!/\bworktree\b/.test(segment) || !/\badd\b/.test(segment)) return null;
+    try {
+        const words = shellWords(segment);
+        if (!words) return null;
+        let i = 0;
+        while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i].text)) i++;
+        if (!words[i] || !/^git(?:\.exe)?$/.test(words[i].text)) return null;
+        i++;
+        let base = ctx.dir;
+        let viaC = false;
+        for (; i < words.length && words[i].text.startsWith('-'); i++) {
+            const w = words[i].text;
+            if (w === '-C') {
+                base = resolveWord(words[++i], base, ctx);
+                if (!base) return null;
+                viaC = true;
+            } else if (w === '-c') i++;
+            else if (/^--(?:git-dir|work-tree)/.test(w)) return null;
+        }
+        if (!words[i] || words[i].text !== 'worktree' || !words[i + 1] || words[i + 1].text !== 'add') return null;
+        const args = words.slice(i + 2);
+        let at = -1;
+        for (let k = 0; k < args.length; k++) {
+            const w = args[k].text;
+            if (w === '--') { at = k + 1 < args.length ? k + 1 : -1; break; }
+            if (REDIRECT_RE.test(w)) { if (REDIRECT_BARE_RE.test(w)) k++; continue; }
+            if (WORKTREE_VALUE_OPTS.has(w)) { k++; continue; }
+            if (w.startsWith('-')) continue;
+            at = k;
+            break;
+        }
+        if (at === -1 || !base) return null;
+        // Outside any repository, with nothing naming one, git refuses the add itself.
+        if (!ctx.repoRoot && !viaC && !ctx.moved) return null;
+        const dest = resolveWord(args[at], base, ctx);
+        if (!dest || TRANSIENT_RE.test(dest)) return null;
+
+        // The repository the command acts on: the session's own when it stands
+        // inside it, else the one a worktree path names, else the directory itself.
+        let root;
+        if (ctx.repoRoot && pathInside(base, ctx.repoRoot, ctx.windows)) root = ctx.repoRoot;
+        else {
+            const cut = pathKey(base, ctx.windows).indexOf('/.claude/worktrees/');
+            root = cut === -1 ? base : base.slice(0, cut);
+        }
+        const home = root.replace(/\/+$/, '') + '/.claude/worktrees';
+        if (pathInside(dest, home, ctx.windows) && pathKey(dest, ctx.windows) !== pathKey(home, ctx.windows)) return null;
+
+        const name = dest.replace(/\/+$/, '').split('/').pop() || 'wt';
+        const correct = home + '/' + name;
+        const quote = (t) => (/^[\w@%+=:,./-]+$/.test(t) ? t : '"' + t.replace(/(["\\$`])/g, '\\$1') + '"');
+        // The suggestion is the command alone: redirections are left for the caller to put back.
+        const shown = [];
+        for (let k = 0; k < args.length; k++) {
+            if (k !== at && REDIRECT_RE.test(args[k].text)) { if (REDIRECT_BARE_RE.test(args[k].text)) k++; continue; }
+            shown.push(k === at ? quote(correct) : quote(args[k].text));
+        }
+        const rest = shown.join(' ');
+        return { dest, root, correct, command: `git -C ${quote(root)} worktree add ${rest}`, viaC };
+    } catch {
+        return null;
+    }
+}
+
+/** The directory a `cd` segment moves to; undefined when the segment is no cd, null when unknown. */
+function cdTarget(segment, dir, ctx) {
+    if (!/^\s*(?:cd|pushd)\b/.test(segment)) return undefined;
+    const words = shellWords(segment);
+    if (!words || !/^(?:cd|pushd)$/.test(words[0].text)) return undefined;
+    const args = words.slice(1).filter((w) => !REDIRECT_RE.test(w.text));
+    if (args.length !== 1 || args[0].text === '-') return null;
+    return resolveWord(args[0], dir, ctx);
+}
 
 export const RULES = [
     {
@@ -144,6 +321,42 @@ export const RULES = [
             + '`VERCEL_TOKEN="$(doppler secrets get VERCEL_TOKEN --plain)" vercel deploy --prod`. '
             + 'vercel reads VERCEL_TOKEN, gh reads GH_TOKEN, doppler reads DOPPLER_TOKEN, supabase reads SUPABASE_ACCESS_TOKEN.',
     },
+    {
+        // Unscoped: every repository keeps its worktrees in <root>/.claude/worktrees/.
+        // `[measured 2026-09-22]` twelve worktrees had landed beside their repos
+        // in the code root, and on 2026-09-24 three more were still appearing.
+        // A sibling worktree is invisible from inside its repo and reads as one
+        // more project in the code root. worktree-placement.js finds them after
+        // the fact. This refuses the hand-typed `git worktree add` that makes one.
+        // EnterWorktree and `isolation: "worktree"` already use the right place.
+        //
+        // It reads only what the text states. A destination or a `-C` built from
+        // `$VAR`, `$(...)`, backticks or `~user` is allowed unread, and so is a
+        // temp dir, where gate sweeps make worktrees they remove. A leading `~/`
+        // resolves against the home the cwd shows (`C:/Users/<me>`, `/home/<me>`,
+        // `/Users/<me>`), and stays unread when the cwd shows none. A literal `cd`
+        // earlier in the command moves the base, and an unreadable one stops it.
+        //
+        // `[measured 2026-09-24]` over 30 days of one operator's transcripts
+        // (1,703 files, 144,166 Bash calls, 794 commands naming `worktree add`)
+        // it refuses 37 and allows 757. 35 refusals were worktrees beside a repo
+        // or loose in the code root. One passed a ref where the path goes, so git
+        // would have made a worktree named after the branch, and the refusal
+        // names that path. One was a deliberate worktree on another drive: that
+        // is the cost, one in 37, and a path held in a variable still passes.
+        // Before `~/` was resolved it missed one leak, a `cd ~/...` followed by
+        // an absolute sibling path, which it now refuses.
+        id: 'worktree-placement',
+        kind: 'deny',
+        scope: 'all',
+        test: (segment, ctx) => !!misplacedWorktree(segment, ctx),
+        reason: (segment, ctx) => {
+            const m = misplacedWorktree(segment, ctx);
+            return `This puts a worktree at ${m.dest}, outside ${m.root}/.claude/worktrees/. A worktree beside its repo is invisible from inside the repo `
+                + 'and reads as one more project in the code root. Put it where every other worktree of this repo lives: '
+                + `\`${m.command}\``;
+        },
+    },
 ];
 
 /**
@@ -152,6 +365,8 @@ export const RULES = [
  * working tree's directory name; a fork under another name is a different
  * repository with its own CLAUDE.md.
  */
+export { misplacedWorktree, shellWords, resolvePath };
+
 export function isAutodevRepo(repo) {
     if (!repo || typeof repo !== 'object') return false;
     const remote = typeof repo.remote === 'string' ? repo.remote : '';
@@ -173,7 +388,10 @@ export function isWindowsPath(p) {
  */
 export function decideBash({ command, cwd, repo }) {
     const original = String(command ?? '');
-    const ctx = { windows: isWindowsPath(cwd), inRepo: isAutodevRepo(repo) };
+    const windows = isWindowsPath(cwd);
+    const start = typeof cwd === 'string' && cwd ? resolvePath(null, cwd, windows) : null;
+    const root = repo && typeof repo.root === 'string' && repo.root ? resolvePath(null, repo.root, windows) : null;
+    const ctx = { windows, inRepo: isAutodevRepo(repo), start, dir: start, repoRoot: root, moved: false };
 
     // Everything from the first heredoc opener on is body text, not commands.
     const heredocAt = original.search(/<<-?\s*['"]?[A-Za-z_]/);
@@ -186,6 +404,8 @@ export function decideBash({ command, cwd, repo }) {
     for (let i = 0; i < parts.length; i += 2) {
         let segment = parts[i];
         if (!segment || !segment.trim()) continue;
+        const moved = cdTarget(segment, ctx.dir, ctx);
+        if (moved !== undefined) { ctx.dir = moved; ctx.moved = true; continue; }
         for (const rule of RULES) {
             if (rule.scope === 'repo' && !ctx.inRepo) continue;
             if (!rule.test(segment, ctx)) continue;
