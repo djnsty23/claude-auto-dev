@@ -1000,6 +1000,8 @@ try {
                 !!row && row.result === 'none' && row.ask === 'none' && row.misplacedReport === null && row.process === 'exited', JSON.stringify(row).slice(0, 300));
             const oldRow = st.json ? st.json.value.records.find((r) => r.code === code && r.settled) : null;
             check('24d. and the first run still reads as itself from the moved files', !!oldRow && oldRow.settledAs === 'stopped' && oldRow.result === 'stopped', JSON.stringify(oldRow).slice(0, 240));
+            check('24d. the first run\'s question channel reads superseded by the rerun, never the rerun\'s ask.json',
+                !!oldRow && oldRow.ask === 'superseded' && oldRow.askFile === null && !!newRec && oldRow.supersededBy === newRec.startedAt, JSON.stringify(oldRow).slice(0, 240));
             const un = hw(['settle', '--code', code, '--unreported', '--ledger', ledger]);
             check('24d. the rerun that left no report settles --unreported, as itself',
                 un.exit === 0 && un.json && un.json.ok && un.json.value.state === 'unreported' && /does not exist/.test(un.json.value.reason), un.stdout.slice(0, 240));
@@ -1206,6 +1208,55 @@ try {
         check('29. selftest reads its own image', self.exit === 0 && !!self.json && self.json.ok && self.json.value.cases.ownImage === own,
             JSON.stringify(self.json && self.json.value && self.json.value.cases));
     }
+
+    // ------------------------------------------------------------ 30. runs from before start moved files aside
+    // `[measured 2026-09-24]` 17 of 182 live records had a later run at their
+    // code, from before start moved an earlier run's files aside. All 17 shared
+    // the later run's report path and 15 its log, and every run at a code shares
+    // the scratch dir. So status gave each earlier record the later run's
+    // question, result and exit. A later record at the code and scratch dir now
+    // supersedes the earlier one, and a shared path is read as the later run's.
+    {
+        const dir = path.join(ROOT, 'T30');
+        const ledger = path.join(dir, 'ledger.json');
+        const log = path.join(dir, 'LEGACY.log');
+        const report = path.join(dir, 'LEGACY.report.md');
+        const t = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
+        const base = { promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default' };
+        const first = { ...base, code: 'LEGACY', pid: 1, startedAt: t(3), log, report, state: 'settled', result: 'stopped', sentence: 'the first run stopped.', exit: 3, settledAt: t(2.5) };
+        const noExit = { ...base, code: 'LEGACY', pid: 1, startedAt: t(2), log, report, state: 'settled', result: 'lost', reason: 'before this boot', settledAt: t(1.5) };
+        const last = { ...base, code: 'LEGACY', pid: 1, startedAt: t(1), log, report, state: 'settled', result: 'done', sentence: 'PR 7 green.', exit: 0, settledAt: t(0.5) };
+        const otherDir = path.join(dir, 'elsewhere');
+        const control = { ...base, code: 'LEGACY', pid: 1, startedAt: t(0.2), log: path.join(otherDir, 'LEGACY.log'), report: path.join(otherDir, 'LEGACY.report.md'), state: 'settled', result: 'stopped', exit: 0, settledAt: t(0.1) };
+        write(log, 'CLAUDE_EXIT=0\n');
+        write(report, 'RESULT LEGACY done: PR 7 green.\n');
+        write(path.join(dir, 'LEGACY', 'ask.json'), JSON.stringify({ question: 'Which base, on the last run?' }));
+        write(control.log, 'CLAUDE_EXIT=0\n');
+        write(control.report, 'RESULT LEGACY stopped: a run in another report dir.\n');
+        write(path.join(otherDir, 'LEGACY', 'ask.json'), JSON.stringify({ question: 'Its own question?' }));
+        write(ledger, JSON.stringify({ version: 1, records: [first, noExit, last, control] }, null, 2) + '\n');
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const rows = st.json && st.json.ok ? st.json.value.records : [];
+        const [r1, r2, r3, r4] = rows;
+        check('30. status reads all four records', rows.length === 4, JSON.stringify(rows.map((r) => r.startedAt)));
+        check('30. an earlier run that shares the later run\'s report reads result superseded, with no sentence and no report path',
+            !!r1 && r1.result === 'superseded' && r1.sentence === null && r1.report === null && r1.settledAs === 'stopped', JSON.stringify(r1).slice(0, 300));
+        check('30. and keeps the exit settle recorded, not the later run\'s exit line', !!r1 && r1.exit === 3 && r1.process === 'exited' && r1.log === null, JSON.stringify(r1).slice(0, 300));
+        check('30. with no recorded exit it reads exit none and process unknown, never the later run\'s 0',
+            !!r2 && r2.exit === null && r2.process === 'unknown' && r2.result === 'superseded', JSON.stringify(r2).slice(0, 300));
+        check('30. both earlier runs read ask superseded by the last one, with no question',
+            [r1, r2].every((r) => !!r && r.ask === 'superseded' && r.question === null && r.askFile === null) && !!r1 && r1.supersededBy === last.startedAt && r2.supersededBy === last.startedAt,
+            JSON.stringify([r1 && r1.supersededBy, r2 && r2.supersededBy]));
+        check('30. the last run reads its own report, exit and open question',
+            !!r3 && r3.result === 'done' && r3.exit === 0 && r3.ask === 'open' && r3.question === 'Which base, on the last run?' && r3.supersededBy === null, JSON.stringify(r3).slice(0, 300));
+        check('30. control: the same code under another report dir is not superseded by it, nor supersedes it',
+            !!r4 && r4.supersededBy === null && r4.ask === 'open' && r4.question === 'Its own question?' && r4.result === 'stopped', JSON.stringify(r4).slice(0, 300));
+        const lines = hw(['status', '--ledger', ledger]).stdout.split('\n').filter((l) => l.startsWith('LEGACY '));
+        check('30. the status lines show ask=open twice, once per scratch dir, and name who superseded the earlier two',
+            lines.length === 4 && lines.filter((l) => / ask=open\b/.test(l)).length === 2
+            && lines.slice(0, 2).every((l) => / ask=superseded\b/.test(l) && / result=superseded\b/.test(l) && l.includes(`supersededBy=${last.startedAt}`)),
+            JSON.stringify(lines));
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -1219,7 +1270,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 29 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 30 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);

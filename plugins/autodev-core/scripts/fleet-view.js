@@ -21,7 +21,8 @@
  *   answer    writes answer.json beside an open ask.json. Refused if one exists.
  *   settle    headless-worker settle for an exited worker.
  *   relaunch  the same prompt plus the answer, under a new code, same account,
- *             model, effort, permission mode and cwd.
+ *             model, effort, permission mode and cwd. Never from a run that a
+ *             later run at its code superseded.
  *   takeover  starts --takeover-script in a new console window (win32 only).
  *   stop      kills a headless worker by pid, only after the process identity
  *             matches the record. On Linux that is /proc/<pid>/cwd, on macOS
@@ -271,31 +272,24 @@ function headlessSource(s) {
     try { ledger = HW.readLedger(file); } catch (e) { return unreadable(source, e.message); }
     const boot = HW.bootAt();
     const rows = ledger.records.map((rec) => {
-        const st = HW.recordStatus(rec, boot);
-        const init = initOf(rec.log);
-        const reportText = readText(rec.report);
+        // st.log and st.report are null where a later run at this code shares the
+        // path, so a superseded row never shows that run's session, PR or activity.
+        const st = HW.recordStatus(rec, boot, undefined, ledger.records);
+        const init = initOf(st.log);
+        const reportText = readText(st.report);
         const cwd = rec.cwd || (init && init.cwd) || null;
         return {
             key: `headless-worker:${rec.code}:${rec.startedAt}`, source, kind: 'headless-worker', code: rec.code,
             title: clip((readText(rec.promptFile) || '').split('\n').find((l) => l.trim()) || rec.code, 90),
             project: project(cwd), cwd, account: rec.configDir || 'default', model: rec.model || (init && init.model) || null,
-            process: st.process, exit: st.exit, result: st.settled ? `${st.result} (settled)` : st.result, progress: lastActivity(rec.log),
-            lastAt: Math.max(mtime(rec.log) || 0, mtime(rec.report) || 0, ts(rec.startedAt) || 0) || null,
+            process: st.process, exit: st.exit, result: st.settled ? `${st.result} (settled)` : st.result, progress: lastActivity(st.log),
+            lastAt: Math.max(mtime(st.log) || 0, mtime(st.report) || 0, ts(rec.startedAt) || 0) || null,
             pr: lastPr(reportText), question: st.ask === 'open' || st.ask === 'unreadable' ? question(st.askFile, st.answerFile) : null,
             live: st.process === 'running', answered: st.ask === 'answered', pid: rec.pid, session: init && init.session, settled: st.settled,
+            superseded: st.supersededBy !== null,
             askFile: st.askFile, answerFile: st.answerFile, record: rec, ledger: file,
         };
     });
-    // Every record at one code shares one scratch directory, so a rerun's
-    // ask.json is read by each earlier record there too. The newest run owns
-    // it: without this one ask showed on every row at its code and toasted
-    // once per row. [measured 2026-09-24] 15 codes held more than one record.
-    const owner = new Map();
-    for (const r of rows) {
-        const cur = r.askFile && owner.get(r.askFile);
-        if (r.askFile && (!cur || (ts(r.record.startedAt) || 0) >= (ts(cur.record.startedAt) || 0))) owner.set(r.askFile, r);
-    }
-    for (const r of rows) if (r.askFile && owner.get(r.askFile) !== r) { r.question = null; r.answered = false; }
     return { source, readable: true, population: `${source}: ${file}: ${ledger.records.length} record(s)`, rows };
 }
 
@@ -478,7 +472,7 @@ function actionsFor(r, s) {
         if (r.process === 'exited' && !r.settled && /^(done|stopped|failed)$/.test(r.result)) a.push('settle');
         // A worker that finished its brief has nothing to continue, so relaunch is offered only
         // for one that stopped, failed, never reported, or was asked and has now been answered.
-        if (r.process !== 'running' && (!/^done\b/.test(r.result) || r.answered)) a.push('relaunch');
+        if (!r.superseded && r.process !== 'running' && (!/^done\b/.test(r.result) || r.answered)) a.push('relaunch');
         if (s.takeoverScript && r.session && process.platform === 'win32') a.push('takeover');
         if (r.process === 'running' && r.pid && r.cwd) a.push('stop');
     }
