@@ -796,6 +796,93 @@ try {
         check('24. the usage text lists settle --lost and says when it refuses', usage.includes('settle --code <CODE> [--lost]') && /settle --lost: [\s\S]*Refused unless/.test(usage));
     }
 
+    // ------------------------------------------------------------ 24b. settle --unreported
+    // `[measured 2026-09-24]` four workers exited 0 on a full disk and never
+    // wrote their report. --lost refused them (they have an exit line) and plain
+    // settle refused them (no RESULT line), so each record stayed running and
+    // start refused its code as code-active. --unreported settles such a record
+    // as result unreported, and ONLY once the worker has provably ended.
+    {
+        const dir = path.join(ROOT, 'T24b');
+        const ledger = path.join(dir, 'ledger.json');
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const deadPid = dead.pid;
+        const now = new Date().toISOString();
+        const mk = (code, { logText = 'noise\nCLAUDE_EXIT=0\n', reportText = null } = {}) => {
+            const rec = { code, pid: deadPid, startedAt: now, log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' };
+            if (logText !== null) write(rec.log, logText);
+            if (reportText !== null) write(rec.report, reportText);
+            return rec;
+        };
+        const records = [
+            mk('NOREPORT'),
+            mk('NOLINE', { reportText: '# notes\nthe worker wrote this and stopped\n' }),
+            mk('HASLINE', { reportText: 'RESULT HASLINE done: it finished.\n' }),
+            mk('RUNNING', { logText: 'stream noise, no exit line\n' }),
+            mk('WRONGCODE', { reportText: 'RESULT OTHERCODE done: a copied line.\n' }),
+            mk('BOTH'),
+            mk('EXIT3', { logText: 'noise\nCLAUDE_EXIT=3\n' }),
+        ];
+        write(ledger, JSON.stringify({ version: 1, records }, null, 2) + '\n');
+        const recOf = (code) => JSON.parse(read(ledger)).records.find((r) => r.code === code) || null;
+        check('24b. control: the dead pid came from an exited child', classify(dead) === 'verdict' && Number.isInteger(deadPid), `pid ${deadPid}`);
+
+        const plain = hw(['settle', '--code', 'NOREPORT', '--ledger', ledger]);
+        check('24b. control: plain settle on an exited record with no report still refuses no-result, and now names --unreported',
+            plain.exit === 1 && plain.json && plain.json.error.code === 'no-result' && /does not exist/.test(plain.json.error.message) && /settle --unreported/.test(plain.json.error.message), plain.stdout.slice(0, 240));
+        const lost = hw(['settle', '--code', 'NOREPORT', '--lost', '--ledger', ledger]);
+        check('24b. control: settle --lost still refuses it, because it has an exit line',
+            lost.exit === 1 && lost.json && lost.json.error.code === 'not-lost' && recOf('NOREPORT').state === 'running', lost.stdout.slice(0, 200));
+
+        const nr = hw(['settle', '--code', 'NOREPORT', '--unreported', '--ledger', ledger]);
+        const nv = nr.json && nr.json.ok ? nr.json.value : null;
+        const nrRec = recOf('NOREPORT');
+        check('24b. settle --unreported settles an exited record with no report as state unreported, naming the missing report',
+            nr.exit === 0 && !!nv && nv.state === 'unreported' && /exited 0 and .* does not exist/.test(nv.reason) && nv.exit === 0 && nv.sentence === null && typeof nv.settledAt === 'string', nr.stdout.slice(0, 240));
+        check('24b. the ledger records result unreported with a reason, never done, stopped or failed',
+            !!nrRec && nrRec.state === 'settled' && nrRec.result === 'unreported' && typeof nrRec.reason === 'string' && nrRec.exit === 0, JSON.stringify(nrRec).slice(0, 240));
+
+        const nl = hw(['settle', '--code', 'NOLINE', '--unreported', '--ledger', ledger]);
+        check('24b. a report with no RESULT line settles --unreported, and the reason names the missing line, not a missing file',
+            nl.exit === 0 && nl.json && nl.json.ok && /has no RESULT NOLINE line/.test(nl.json.value.reason) && !/does not exist/.test(nl.json.value.reason), nl.stdout.slice(0, 240));
+        const e3 = hw(['settle', '--code', 'EXIT3', '--unreported', '--ledger', ledger]);
+        check('24b. the reason carries the real exit code, 3, rather than assuming 0',
+            e3.exit === 0 && e3.json && e3.json.ok && /^exited 3 and /.test(e3.json.value.reason) && recOf('EXIT3').exit === 3, e3.stdout.slice(0, 240));
+
+        const has = hw(['settle', '--code', 'HASLINE', '--unreported', '--ledger', ledger]);
+        check('24b. settle --unreported REFUSES a record whose report has its RESULT line, with has-result, and leaves it unsettled',
+            has.exit === 1 && has.json && !has.json.ok && has.json.error.code === 'has-result' && /without --unreported/.test(has.json.error.message) && recOf('HASLINE').state === 'running', has.stdout.slice(0, 240));
+        const hasPlain = hw(['settle', '--code', 'HASLINE', '--ledger', ledger]);
+        check('24b. and plain settle takes that record as done', hasPlain.exit === 0 && hasPlain.json && hasPlain.json.ok && recOf('HASLINE').result === 'done', hasPlain.stdout.slice(0, 200));
+
+        const run = hw(['settle', '--code', 'RUNNING', '--unreported', '--ledger', ledger]);
+        check('24b. settle --unreported refuses a record with no exit line, with not-exited naming --lost',
+            run.exit === 1 && run.json && !run.json.ok && run.json.error.code === 'not-exited' && /settle --lost/.test(run.json.error.message) && recOf('RUNNING').state === 'running', run.stdout.slice(0, 240));
+        const wrong = hw(['settle', '--code', 'WRONGCODE', '--unreported', '--ledger', ledger]);
+        check('24b. settle --unreported refuses a report whose RESULT line names another code, so a mislabelled result is corrected, not buried',
+            wrong.exit === 1 && wrong.json && !wrong.json.ok && wrong.json.error.code === 'no-result' && /different code/.test(wrong.json.error.message) && /OTHERCODE/.test(wrong.json.error.message) && recOf('WRONGCODE').state === 'running', wrong.stdout.slice(0, 240));
+        const both = hw(['settle', '--code', 'BOTH', '--lost', '--unreported', '--ledger', ledger]);
+        check('24b. --lost with --unreported refuses with usage and settles nothing',
+            both.exit === 1 && both.json && !both.json.ok && both.json.error.code === 'usage' && recOf('BOTH').state === 'running', both.stdout.slice(0, 200));
+
+        const again = hw(['settle', '--code', 'NOREPORT', '--unreported', '--ledger', ledger]);
+        check('24b. a second settle --unreported finds no unsettled record', again.exit === 1 && again.json && !again.json.ok && again.json.error.code === 'unknown-code');
+
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const byCode = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('24b. status --json reports it as settled true, settledAs unreported, with settleReason and no lostReason',
+            !!byCode.NOREPORT && byCode.NOREPORT.settled === true && byCode.NOREPORT.settledAs === 'unreported'
+                && /does not exist/.test(byCode.NOREPORT.settleReason || '') && byCode.NOREPORT.lostReason === null, JSON.stringify(byCode.NOREPORT || null).slice(0, 240));
+        check('24b. status keeps done apart: HASLINE settledAs done with settleReason null',
+            !!byCode.HASLINE && byCode.HASLINE.settledAs === 'done' && byCode.HASLINE.settleReason === null);
+        const human = hw(['status', '--ledger', ledger]).stdout;
+        check('24b. status without --json names it settledAs=unreported with its reason',
+            /NOREPORT pid=\d+ process=exited exit=0 result=none settled=true settledAs=unreported \(exited 0 and /.test(human) && !/HASLINE[^\n]*settledAs=unreported/.test(human), human.slice(0, 400));
+        const usage = hw(['--help']).stdout;
+        check('24b. the usage text lists settle --unreported and says when it refuses',
+            usage.includes('settle --code <CODE> [--lost] [--unreported]') && /settle --unreported: [\s\S]*Refused while/.test(usage));
+    }
+
     // ------------------------------------------------------------ 25. a worker asks by file and keeps working
     // `[measured 2026-09-22]` workers asked by exiting, so every question cost a
     // relaunch. The prompt must name ask.json and answer.json in the scratch
