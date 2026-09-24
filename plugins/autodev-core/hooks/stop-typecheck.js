@@ -106,12 +106,20 @@ try {
     let isRetry = false;
     try { fs.unlinkSync(marker); isRetry = true; } catch { /* no block outstanding */ }
 
+    // CLAIMED BY RENAME, THEN READ. The list is per directory, so every session
+    // in this checkout appends to it. Reading it and then deleting it deleted
+    // any path a peer appended in between, and that edit was never checked.
+    // After the rename a peer's append starts a fresh list for the next Stop.
+    // What remains is an append that opened the file before the rename and
+    // wrote after the read below: one appendFileSync call wide.
     const pending = path.join(process.cwd(), '.claude', '.typecheck-pending');
-    let raw;
-    try { raw = fs.readFileSync(pending, 'utf8'); } catch { process.exit(0); }
+    const claim = pending + '.' + process.pid + '.claim';
+    try { fs.renameSync(pending, claim); } catch { process.exit(0); }
+    let raw = '';
+    try { raw = fs.readFileSync(claim, 'utf8'); } catch { /* claimed but unreadable: nothing to check */ }
     // Consumed on read, whatever happens next: a list that survives a failed
     // run would re-run the same check on a Stop that edited nothing.
-    try { fs.unlinkSync(pending); } catch { /* best effort */ }
+    try { fs.unlinkSync(claim); } catch { /* best effort */ }
 
     const files = [...new Set(raw.split('\n').map((s) => s.trim()).filter(Boolean))];
     if (files.length === 0) process.exit(0);
