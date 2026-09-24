@@ -10,6 +10,18 @@
  * Exit codes: 0 = pass, 1 = at least one FAIL
  */
 
+// check:entrypoints probes every script with --help under a 10 s budget, and
+// this file used to ignore the flag and run every check: 3.7 to 5.4 s idle.
+// `[measured 2026-09-24]` find-orphan-checks.js had the same shape at 3.0 to
+// 4.7 s idle and hit 10.03 s under a gate's load. A top-level `return` is
+// legal in a CommonJS module and lets stdout drain, which process.exit() may not.
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  process.stdout.write('Usage: node tooling/validate.js\n'
+    + '  Checks the invariants the plugin layout depends on.\n'
+    + 'Exit codes: 0 = pass, 1 = at least one FAIL\n');
+  return;
+}
+
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');

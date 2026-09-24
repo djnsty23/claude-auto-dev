@@ -105,6 +105,15 @@ const SPAWN_FIXTURE = `zz-spawn-fixture.${process.pid}.js`;
 const base = runValidate();
 check('validate is green on a clean tree', base.status === 0);
 
+// --help prints usage and runs no check. The baseline above is the control:
+// a run that falls through prints [PASS] lines, and a usage run prints none.
+check('control: a full run prints [PASS] lines', /^\[PASS\] /m.test(base.stdout || ''));
+for (const flag of ['--help', '-h']) {
+    const h = spawnSync(process.execPath, [VALIDATE, flag], { encoding: 'utf8', cwd: ROOT });
+    check(`${flag} prints usage and runs no check: exit 0, Usage on stdout, no [PASS] line`,
+        h.status === 0 && /^Usage: node tooling\/validate\.js/.test(h.stdout) && !/^\[(PASS|FAIL|WARN)\] /m.test(h.stdout));
+}
+
 // The stale-mutation-backup check. This is the only guard against the one defect
 // class no test can catch — a mutant that survives its suite is by definition
 // invisible to it. Three reached the public remote on 2026-08-16 while every
