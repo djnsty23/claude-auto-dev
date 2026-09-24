@@ -130,13 +130,24 @@ try {
 
                 // THROTTLE — cheap state-file check FIRST. State file lives at
                 // .claude/knowledge-surfaced, newline-separated "sessionId\tarea".
+                //
+                // APPENDED, NEVER REWRITTEN. Every session in this checkout shares
+                // the file. It was rewritten to keep only the current session's
+                // markers, which dropped every other session's lines, so those
+                // sessions surfaced the same brief again, and a marker a peer
+                // appended between the read and the rewrite was lost outright.
+                // One small append is atomic. The file is bounded by starting
+                // over once it passes SURFACED_CAP_BYTES, before it is read: the
+                // whole cost is one repeat brief per session and area.
                 const surfacedFile = path.join(cwd, '.claude', 'knowledge-surfaced');
+                const SURFACED_CAP_BYTES = 64 * 1024;
+                try {
+                    if (fs.statSync(surfacedFile).size > SURFACED_CAP_BYTES) fs.unlinkSync(surfacedFile);
+                } catch { /* no state file yet */ }
                 const marker = `${sessionId}\t${area}`;
-                let existing = '';
                 let already = false;
                 try {
-                    existing = fs.readFileSync(surfacedFile, 'utf8');
-                    already = existing.split('\n').includes(marker);
+                    already = fs.readFileSync(surfacedFile, 'utf8').split('\n').includes(marker);
                 } catch { /* no state file yet */ }
 
                 if (!already) {
@@ -183,16 +194,7 @@ try {
                         if (brief !== null) {
                             try {
                                 fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
-                                // Rewrite the throttle file to keep ONLY the CURRENT
-                                // session's markers (drop other sessions' lines) before
-                                // appending the new one. This bounds the file to this
-                                // session's areas across restarts and matches the
-                                // "session-specific" intent instead of growing unbounded.
-                                const kept = existing
-                                    .split('\n')
-                                    .filter((l) => l && l.startsWith(sessionId + '\t'));
-                                kept.push(marker);
-                                fs.writeFileSync(surfacedFile, kept.join('\n') + '\n');
+                                fs.appendFileSync(surfacedFile, marker + '\n');
                             } catch { /* non-critical */ }
                         }
                     }

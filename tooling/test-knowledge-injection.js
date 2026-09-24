@@ -293,18 +293,61 @@ if (!memDB.isAvailable()) {
         cases.push(['area: no file_path records no area', markers().length === before]);
     }
 
-    // The throttle file is rewritten to hold ONLY the current session's markers.
-    // `.filter((l) => l && l.startsWith(sessionId + '\t'))` loosened to `||`
-    // keeps every other session's lines too, and the file grows without bound
-    // across restarts — the exact thing the rewrite exists to prevent.
+    // Every session in a checkout shares the throttle file. It used to be
+    // rewritten to hold only the current session's markers, which dropped every
+    // other session's lines: those sessions then surfaced the same brief again.
+    // A marker is appended now, and other sessions' markers stay.
     {
         fs.writeFileSync(surfacedFile, `other-session\tsrc/old\n${CAP_SESSION}\tsrc/auth\n`);
         runCapture(path.join(CAP_PROJ, 'src/api/handler.js'), CAP_SESSION);
         const after = markers();
-        cases.push(["throttle: another session's markers are dropped on rewrite",
-            !after.some((l) => l.startsWith('other-session\t'))]);
+        cases.push(["throttle: another session's markers are kept",
+            after.includes('other-session\tsrc/old')]);
         cases.push(['throttle: the new area is recorded',
             after.some((l) => l === `${CAP_SESSION}\tsrc/api`)]);
+        cases.push(["throttle: this session's earlier marker is kept once",
+            after.filter((l) => l === `${CAP_SESSION}\tsrc/auth`).length === 1]);
+    }
+
+    // A marker a peer session appends between this hook's read of the file and
+    // its own write must survive. The preload plants it right after the read,
+    // every run, so a rewrite loses it deterministically.
+    {
+        const race = require('./race-interleave.js');
+        const PRELOAD = race.preloadPath();
+        const record = path.join(CAP_HOME, 'planted-surfaced.txt');
+        fs.writeFileSync(surfacedFile, `${CAP_SESSION}\tsrc/auth\n`);
+        const r = spawnSync(process.execPath, ['--require', PRELOAD, HOOK], {
+            input: JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: path.join(CAP_PROJ, 'src/db/pool.js') },
+                tool_output: 'ok', session_id: CAP_SESSION, cwd: CAP_PROJ }),
+            encoding: 'utf8', cwd: CAP_PROJ,
+            env: { ...process.env, CLAUDE_PLUGIN_ROOT: CAP_PLUGIN_ROOT, HOME: CAP_HOME, USERPROFILE: CAP_HOME,
+                RACE_SPEC: race.spec([{ op: 'readFileSync', basename: 'knowledge-surfaced', appendTo: surfacedFile,
+                    text: 'peer-live\tsrc/peer\n', times: 1 }], record) },
+        });
+        const after = markers();
+        cases.push(['throttle race: the hook exits 0', r.status === 0]);
+        cases.push(['throttle race: the probe planted one peer marker', race.planted(record).length === 1]);
+        cases.push(['throttle race: the peer marker appended mid-write survives', after.includes('peer-live\tsrc/peer')]);
+        cases.push(['throttle race: this edit\'s marker is recorded', after.includes(`${CAP_SESSION}\tsrc/db`)]);
+        try { fs.rmSync(path.dirname(PRELOAD), { recursive: true, force: true }); } catch { /* tmp */ }
+    }
+
+    // Appending alone would grow the file forever, so past its cap it starts
+    // over. The cost is one repeat brief per session and area.
+    {
+        const filler = [];
+        for (let i = 0; i < 1400; i++) filler.push(`old-session-${String(i).padStart(4, '0')}-${'x'.repeat(24)}\tsrc/area-${i}`);
+        fs.writeFileSync(surfacedFile, filler.join('\n') + '\n');
+        const bigBefore = fs.statSync(surfacedFile).size;
+        runCapture(path.join(CAP_PROJ, 'src/cache/lru.js'), CAP_SESSION);
+        const after = markers();
+        cases.push([`throttle cap: a file past the cap (${bigBefore} bytes) starts over`,
+            bigBefore > 64 * 1024 && !after.some((l) => l.startsWith('old-session-'))]);
+        cases.push(['throttle cap: the edit that found it full is recorded', after.includes(`${CAP_SESSION}\tsrc/cache`)]);
+        fs.writeFileSync(surfacedFile, 'small-session\tsrc/keep\n');
+        runCapture(path.join(CAP_PROJ, 'src/queue/job.js'), CAP_SESSION);
+        cases.push(['throttle cap: a file under the cap is not reset', markers().includes('small-session\tsrc/keep')]);
     }
 
     // ---- the brief must include every GROUP, not just decisions ----
