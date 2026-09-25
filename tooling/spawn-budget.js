@@ -93,6 +93,22 @@ const SPIN_FLOOR_MS = 120;
 const SPIN_ITERATIONS = 2e7;
 const CONTENTION_MAX = 20;
 
+// A retry that a timeout justified gets at least this multiple of the base,
+// whatever contentionFactor() read. The factor is a CPU probe and reads 1.00
+// until the cores saturate (see runBudgeted), while what starves a child is
+// often not CPU: process creation, disk, peer gates. `[measured 2026-09-24]`
+// test-hook-execution-evidence's checker ran out its 240000 ms base on both
+// attempts in two separate `npm test` runs, each reporting "2 attempts, budget
+// 240000ms", so the probe read 1.00 and the retry was variant D from the header:
+// the same budget, which is 0/4 under load. Four other gates were running without
+// the full-gate lock at the time. Under the lock the same suite passed with no
+// retry.
+//
+// The floor adds no new worst case: max(2, factor) never exceeds CONTENTION_MAX,
+// and maxTimeout and the parent deadline still clamp the result. What it costs is
+// one extra base budget on a retry that was going to run anyway.
+const MIN_RETRY_MULTIPLIER = 2;
+
 /**
  * How much slower is CPU-bound work on this machine RIGHT NOW than on an idle
  * fast one? Never cached: a factor measured before the load arrived is worse
@@ -367,10 +383,12 @@ function untilWrittenBeforeKill(attempt, readyFile, baseMs) {
  *                   long the reader waits to be told so.
  * Every other option is passed through to spawnSync untouched.
  *
- * Returns the spawnSync result with three fields added:
+ * Returns the spawnSync result with four fields added:
  *   budgetMs   the budget the returned attempt actually ran under
  *   attempts   1, or 2 when a timeout was retried
  *   factor     the contention measured at the timeout, or null if none was
+ *   multiplier what the retry's base was scaled by, max(MIN_RETRY_MULTIPLIER,
+ *              factor) before the cap and the deadline, or null with no retry
  */
 function runBudgeted(command, args, opts) {
     const o = Object.assign({}, opts);
@@ -390,29 +408,28 @@ function runBudgeted(command, args, opts) {
     const firstBudget = clampToDeadline(base);
     let r = cp.spawnSync(command, args, Object.assign(o, { timeout: firstBudget }));
     if (!timedOut(r) || !retry) {
-        return Object.assign(r, { budgetMs: firstBudget, attempts: 1, factor: null });
+        return Object.assign(r, { budgetMs: firstBudget, attempts: 1, factor: null, multiplier: null });
     }
     // The child blew a budget that is comfortable on an idle machine. Ask how
     // contended this machine is at THIS moment, and give the retry that much
     // more room. Measured 4/4 where retrying at the same budget was 0/4.
     //
-    // THE WIDENING IS INERT BELOW CORE SATURATION, and that is not a reason to
-    // drop the retry. `[measured 2026-09-10, 14 cores]` contentionFactor() reads
-    // 1.00 with 0 and with 7 extra busy workers, 1.38 at 14 and 2.47 at 28, so
-    // at the 1-min loads this project's gate actually runs at (5-15) the retry
-    // gets the SAME budget that just failed. What it still buys is RE-EXECUTION
-    // — which is the whole point of the `slow-once` child in
-    // test-spawn-budget.js, a child the retry rescues at any budget — so the
-    // honest reading is that a quiet machine pays one extra full budget for a
-    // second attempt and no extra head-room, not that the second attempt is
-    // worthless. The cost is real either way, which is why the clamp below
-    // matters: under a parent deadline that second budget can no longer be spent
-    // past the moment the parent kills this process.
+    // THE FACTOR IS INERT BELOW CORE SATURATION, so it is not the only input.
+    // `[measured 2026-09-10, 14 cores]` contentionFactor() reads 1.00 with 0 and
+    // with 7 extra busy workers, 1.38 at 14 and 2.47 at 28, so at the 1-min loads
+    // this project's gate actually runs at (5-15) a factor-only retry got the
+    // SAME budget that just failed: re-execution with no extra head-room. That
+    // still rescues the `slow-once` child in test-spawn-budget.js, but not a
+    // child starved by something the CPU probe cannot see, which is what
+    // MIN_RETRY_MULTIPLIER is for. The order below is the contract: the floor
+    // applies first, then maxTimeout, then the parent deadline, so a caller's
+    // cap and a parent's kill always win over the floor.
     const factor = contentionFactor();
+    const multiplier = Math.max(MIN_RETRY_MULTIPLIER, factor);
     const widened = clampToDeadline(
-        Math.min(cap === undefined ? Infinity : cap, Math.round(base * factor)));
+        Math.min(cap === undefined ? Infinity : cap, Math.round(base * multiplier)));
     r = cp.spawnSync(command, args, Object.assign(o, { timeout: widened }));
-    return Object.assign(r, { budgetMs: widened, attempts: 2, factor });
+    return Object.assign(r, { budgetMs: widened, attempts: 2, factor, multiplier });
 }
 
 /**
@@ -480,7 +497,7 @@ function sweepBudgetFor(suite) {
 module.exports = {
     contentionFactor, timedOut, classify, reason, runBudgeted, tally, exitCode,
     lastWords, untilWrittenBeforeKill, deadlineRemaining, clampToDeadline,
-    SPIN_FLOOR_MS, CONTENTION_MAX, DEADLINE_ENV, DEADLINE_FLOOR_MS,
+    SPIN_FLOOR_MS, CONTENTION_MAX, MIN_RETRY_MULTIPLIER, DEADLINE_ENV, DEADLINE_FLOOR_MS,
     sweepBudgetFor, SWEEP_SUITE_BUDGET_MS, SWEEP_RUNNER_BUDGET_MS, SWEEP_MEASURED_RUNNER_MS,
 };
 
@@ -507,8 +524,9 @@ if (require.main === module) {
 
         const clean = runBudgeted(NODE, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 30000 });
         t('a clean child is a verdict', classify(clean) === 'verdict', classify(clean));
-        t('  and costs exactly one attempt, with no probe', clean.attempts === 1 && clean.factor === null,
-            `attempts=${clean.attempts} factor=${clean.factor}`);
+        t('  and costs exactly one attempt, with no probe',
+            clean.attempts === 1 && clean.factor === null && clean.multiplier === null,
+            `attempts=${clean.attempts} factor=${clean.factor} multiplier=${clean.multiplier}`);
 
         const red = runBudgeted(NODE, ['-e', 'process.exit(1)'], { encoding: 'utf8', timeout: 30000 });
         t('an exit 1 is a verdict, not infrastructure', classify(red) === 'verdict', classify(red));
@@ -528,17 +546,21 @@ if (require.main === module) {
         t('  and retryOnTimeout:false really does stop at one attempt', hung.attempts === 1,
             `attempts=${hung.attempts}`);
 
+        // The expected multiplier is the literal 2, not MIN_RETRY_MULTIPLIER: a
+        // constant read back from the module would shrink with the module, and
+        // these equalities would pass on the inert retry they exist to forbid.
         const hungRetried = runBudgeted(NODE, ['-e', HANG], { encoding: 'utf8', timeout: 400 });
         t('a timeout is retried once by default', hungRetried.attempts === 2, `attempts=${hungRetried.attempts}`);
-        t('  and the retry budget is never NARROWER than the first attempt, and equals '
-            + 'the base scaled by the measured factor — the whole difference between '
-            + 'variant C3 and variant D, which reuses the same budget',
-            hungRetried.budgetMs >= 400
-                && hungRetried.budgetMs === Math.round(400 * hungRetried.factor),
+        t('  and the retry budget is at least TWICE the first attempt, and equals the base '
+            + 'scaled by max(2, measured factor), so the retry is never variant D, which '
+            + 'reuses the same budget',
+            hungRetried.budgetMs >= 800
+                && hungRetried.budgetMs === Math.round(400 * Math.max(2, hungRetried.factor)),
             `budgetMs=${hungRetried.budgetMs} factor=${hungRetried.factor}`);
-        t('  and the widening is the contention measured at the timeout',
-            hungRetried.factor !== null && hungRetried.budgetMs === Math.round(400 * hungRetried.factor),
-            `factor=${hungRetried.factor} budgetMs=${hungRetried.budgetMs}`);
+        t('  and the widening is the contention measured at the timeout, floored at 2',
+            hungRetried.factor !== null && hungRetried.multiplier === Math.max(2, hungRetried.factor)
+                && hungRetried.budgetMs === Math.round(400 * hungRetried.multiplier),
+            `factor=${hungRetried.factor} multiplier=${hungRetried.multiplier} budgetMs=${hungRetried.budgetMs}`);
         t('  and a retried timeout is still infrastructure, not a pass',
             classify(hungRetried) === 'infrastructure', classify(hungRetried));
 
@@ -586,9 +608,11 @@ if (require.main === module) {
             exitCode(5, 1) === 2 && exitCode(5, 0) === 1 && exitCode(0, 0) === 0,
             `${exitCode(5, 1)}/${exitCode(5, 0)}/${exitCode(0, 0)}`);
 
-        // A cap set EQUAL to the base always binds, because the factor is clamped
-        // at or above 1 and so the widened budget can never fall below the base.
-        // That makes this decidable without knowing how fast the machine is.
+        // A cap set EQUAL to the base always binds, because the multiplier is at
+        // least 2 and so the widened budget can never fall below the base. That
+        // makes this decidable without knowing how fast the machine is. It is
+        // also the proof that the floor applies BEFORE the cap: a floor applied
+        // after it would hand this retry 600.
         //
         // It is worth saying why, because the first draft got it wrong in the
         // way this whole module exists to prevent: it used base 300 with a cap
@@ -603,10 +627,61 @@ if (require.main === module) {
             `attempts=${capped.attempts} budgetMs=${capped.budgetMs}`);
         t('  and the cap holds whatever the factor measured, rather than only when it is small',
             capped.budgetMs <= 300 && capped.factor >= 1, `budgetMs=${capped.budgetMs} factor=${capped.factor}`);
-        t('  control: without a cap the SAME base widens to the measured factor instead, so '
-            + 'the cap is what clamped it and not an incidental equality',
-            hungRetried.budgetMs === Math.round(400 * hungRetried.factor)
-                && hungRetried.budgetMs >= 400, `budgetMs=${hungRetried.budgetMs} factor=${hungRetried.factor}`);
+        t('  control: without a cap a similar base widens to max(2, measured factor) instead, '
+            + 'so the cap is what clamped it and not an incidental equality',
+            hungRetried.budgetMs === Math.round(400 * Math.max(2, hungRetried.factor))
+                && hungRetried.budgetMs >= 800, `budgetMs=${hungRetried.budgetMs} factor=${hungRetried.factor}`);
+
+        // THE RETRY FLOOR, with the factor PINNED rather than measured, so each
+        // case has one literal answer on every machine. The ambient factor
+        // reads 1.00 below core saturation, which is the case the floor exists
+        // for, and the hungRetried equalities above grade it only on whatever
+        // the box supplied. The factor env var and the deadline are both
+        // controlled here and restored in a finally.
+        {
+            const FACTOR_ENV = 'AUTODEV_SPAWN_BUDGET_FACTOR';
+            const savedFactor = process.env[FACTOR_ENV];
+            const savedDeadline = process.env[DEADLINE_ENV];
+            try {
+                delete process.env[DEADLINE_ENV];
+                process.env[FACTOR_ENV] = '1';
+                const atOne = runBudgeted(NODE, ['-e', HANG], { encoding: 'utf8', timeout: 600 });
+                t('at factor 1 a timed-out 600 ms attempt is retried at 1200 ms, not 600: the '
+                    + 'probe read "no contention" and the retry still gets twice the room',
+                    atOne.attempts === 2 && atOne.factor === 1 && atOne.multiplier === 2
+                        && atOne.budgetMs === 1200,
+                    `attempts=${atOne.attempts} factor=${atOne.factor} multiplier=${atOne.multiplier} `
+                    + `budgetMs=${atOne.budgetMs}`);
+
+                process.env[FACTOR_ENV] = '8';
+                const atEight = runBudgeted(NODE, ['-e', HANG], { encoding: 'utf8', timeout: 100 });
+                t('  and above the floor the measured factor still decides: factor 8 on 100 ms is 800 ms',
+                    atEight.attempts === 2 && atEight.factor === 8 && atEight.multiplier === 8
+                        && atEight.budgetMs === 800,
+                    `attempts=${atEight.attempts} factor=${atEight.factor} multiplier=${atEight.multiplier} `
+                    + `budgetMs=${atEight.budgetMs}`);
+
+                // 1100 ms out, the 600 ms first attempt leaves at most 500 ms,
+                // so the parent deadline clamps the 1200 ms retry to its own
+                // 1000 ms floor. A floor applied after the deadline clamp would
+                // hand this retry 1200, which is the case above without a
+                // deadline.
+                process.env[FACTOR_ENV] = '1';
+                process.env[DEADLINE_ENV] = String(Date.now() + 1100);
+                const underDeadline = runBudgeted(NODE, ['-e', HANG], { encoding: 'utf8', timeout: 600 });
+                t('  and the parent deadline still wins over the floor: the same retry under a '
+                    + 'deadline 1100 ms out runs at the 1000 ms deadline floor, not 1200',
+                    underDeadline.attempts === 2 && underDeadline.multiplier === 2
+                        && underDeadline.budgetMs === 1000,
+                    `attempts=${underDeadline.attempts} multiplier=${underDeadline.multiplier} `
+                    + `budgetMs=${underDeadline.budgetMs}`);
+            } finally {
+                if (savedFactor === undefined) delete process.env[FACTOR_ENV];
+                else process.env[FACTOR_ENV] = savedFactor;
+                if (savedDeadline === undefined) delete process.env[DEADLINE_ENV];
+                else process.env[DEADLINE_ENV] = savedDeadline;
+            }
+        }
 
         // THE PARENT DEADLINE. Driven against a real hung child, and both
         // directions are covered on every machine rather than whichever one the
@@ -834,7 +909,8 @@ if (require.main === module) {
     }
     console.log('usage: node tooling/spawn-budget.js [--selftest|--probe]');
     console.log('  A library for suites that spawn their subject: a base budget, and on a');
-    console.log('  timeout one retry at a budget scaled by contention measured at that moment.');
+    console.log('  timeout one retry at a budget scaled by contention measured at that moment,');
+    console.log('  and never by less than 2x.');
     console.log('  Required by test-hook-execution-evidence, test-path-filter-deadlock and');
     console.log('  test-quota-tripwire. Measurements behind the policy are in the header.');
     process.exit(0);
