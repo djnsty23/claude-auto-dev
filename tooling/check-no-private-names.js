@@ -65,6 +65,7 @@
 //   node tooling/check-no-private-names.js --check-message F  ditto, for a commit
 //                                                             message (# lines
 //                                                             are ignored)
+//   node tooling/check-no-private-names.js --help           print the usage line
 
 const fs = require('fs');
 const path = require('path');
@@ -167,7 +168,18 @@ function scanText(src) {
 // CLI
 // ---------------------------------------------------------------------------
 
+const USAGE = 'Usage: node tooling/check-no-private-names.js [--list | --digest <name> | --check-text <file> | --check-message <file>]';
+
 function main(argv) {
+    // --help answers before any mode. It used to fall through to the whole-tree
+    // scan, the default mode: seconds of work nobody asked for. Under a HOME
+    // whose last segment is `home` that scan also exits 1, because the home-path
+    // half then matches every `/home/` in the tree.
+    if (argv.includes('--help') || argv.includes('-h')) {
+        console.log(USAGE);
+        return 0;
+    }
+
     if (argv.includes('--digest')) {
         const i = argv.indexOf('--digest');
         const word = argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')
