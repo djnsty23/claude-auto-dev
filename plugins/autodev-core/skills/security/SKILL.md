@@ -74,6 +74,35 @@ usage/billing signals and actionable alerts. Distinguish missing information
 from confirmed misconfiguration. Do not change provider settings outside the
 existing authorized scope.
 
+## 5. Protected routes, probed as every role
+
+A page that hides its UI client-side can still serve the data, and so can the
+API behind it. Ask the server as each role with `auth-matrix.js`, which does not
+follow redirects and exits 1 when a role that should be denied gets data:
+
+```bash
+MEMBER_COOKIE='...' ADMIN_COOKIE='...' node "${CLAUDE_PLUGIN_ROOT}/scripts/auth-matrix.js" auth-matrix.json
+```
+
+```json
+{
+  "baseUrl": "https://example.com",
+  "roles": { "anon": {}, "member": { "cookieEnv": "MEMBER_COOKIE" }, "admin": { "cookieEnv": "ADMIN_COOKIE" } },
+  "loginPattern": "^/login",
+  "sensitiveMarkers": ["a string only the admin data contains"],
+  "targets": [
+    { "path": "/admin", "method": "GET", "allowEmpty200": true,
+      "expect": { "anon": "deny", "member": "deny", "admin": "allow" } },
+    { "path": "/api/admin/users", "method": "GET",
+      "expect": { "anon": "deny", "member": "deny", "admin": "allow" } }
+  ]
+}
+```
+
+Exit 2 means a cell was not measured: an unset credential variable or a network
+error. It is not a pass. Credentials come only from the named variables and
+their values are never printed.
+
 ## Reporting
 
 One list, most severe first, combining findings from the reviews/checks that
