@@ -146,7 +146,7 @@ const mk = (...a) => { const d = tree(...a); trees.push(d); return d; };
     fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ scripts: {} }));
     const r = run(d);
     check('a tree with no scripts.gate is INDETERMINATE (exit 2)', r.code === 2, `exit=${r.code}\n${r.out}`);
-    check('it says why rather than reporting a clean sweep', /no readable .scripts\.gate./.test(r.out), r.out);
+    check('it says why rather than reporting a clean sweep', /no readable gate chain/.test(r.out), r.out);
 }
 {
     const d = mk('npm test && npm run check:suites', {});   // chain with zero fast steps

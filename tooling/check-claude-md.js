@@ -63,6 +63,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { readGateChain } = require('./gate-lock.js');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -163,13 +164,17 @@ function anchored(text, re) {
 // Authorities on disk.
 // ---------------------------------------------------------------------------
 
-/** The &&-separated steps of `scripts.gate`, in order. */
+/**
+ * The &&-separated steps of the gate chain, in order. `scripts.gate` is the
+ * lock wrapper (gate-lock.js); the chain is `scripts["gate:chain"]`, or
+ * `scripts.gate` in a tree with no wrapper. readGateChain() decides which.
+ */
 function gateSteps(root) {
     const pkgPath = path.join(root, 'package.json');
     if (!fs.existsSync(pkgPath)) return null;
     let pkg;
     try { pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')); } catch { return null; }
-    const gate = pkg.scripts && pkg.scripts.gate;
+    const gate = readGateChain(pkg);
     if (typeof gate !== 'string') return null;
     return gate.split('&&').map((s) => s.trim()).filter(Boolean);
 }
@@ -249,7 +254,7 @@ function fencedBlocks(text) {
 
 // ---------------------------------------------------------------------------
 // FAMILY A — the gate chain and its step count.
-// Authority: package.json `scripts.gate`.
+// Authority: the package.json gate chain, via readGateChain().
 // ---------------------------------------------------------------------------
 
 /**
@@ -271,7 +276,7 @@ const STEP_COUNT_ANCHORS = [
 function checkGate(md, root, report) {
     const steps = gateSteps(root);
     if (steps === null) {
-        report.unknown('gate', 'package.json has no scripts.gate to grade against');
+        report.unknown('gate', 'package.json has no gate chain (scripts["gate:chain"] or scripts.gate) to grade against');
         return;
     }
     const n = steps.length;
@@ -301,7 +306,7 @@ function checkGate(md, root, report) {
                 claim: 'the literal gate chain',
                 claimed: claimed.join(' && '),
                 actual: steps.join(' && '),
-                source: 'package.json scripts.gate',
+                source: 'package.json gate chain',
             });
         }
     }
@@ -328,7 +333,7 @@ function checkGate(md, root, report) {
             actual: a.offset === 0
                 ? `${expected} (${spell(expected)})`
                 : `${expected} (${spell(expected)}) — the chain has ${n} steps, this sentence counts N${a.offset}`,
-            source: 'package.json scripts.gate, &&-separated',
+            source: 'package.json gate chain, &&-separated',
         });
     }
 
@@ -866,7 +871,12 @@ function writeFixture(dir) {
     w('CLAUDE.md', FIXTURE_MD);
     w('package.json', JSON.stringify({
         repository: { url: 'git+https://github.com/example/nowhere.git' },
-        scripts: { gate: 'npm test && npm run check:alpha && npm run check:beta' },
+        // The real tree's shape: `gate` is the lock wrapper and the chain it
+        // runs is `gate:chain`. Grading the wrapper would fail every count.
+        scripts: {
+            gate: 'node tooling/gate-lock.js',
+            'gate:chain': 'npm test && npm run check:alpha && npm run check:beta',
+        },
     }, null, 2));
     w('.github/workflows/ci.yml',
         "jobs:\n  test:\n    steps:\n      - run: npm test\n"
