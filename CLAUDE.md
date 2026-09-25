@@ -14,6 +14,7 @@ them context on every prompt. Everything outside `plugins/` is repo machinery an
 ```bash
 npm run gate                 # THE GATE: twelve steps chained with &&. Run this.
 npm run gate:fast            # the cheap steps only, in seconds. NOT the gate.
+node tooling/gate-lock.js run -- npm run gate   # the gate, one per machine, under a shared lock
 npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 12.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md
