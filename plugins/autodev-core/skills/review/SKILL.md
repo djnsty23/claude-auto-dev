@@ -89,6 +89,31 @@ server runtimes, never client-reachable code. For deployment scope, verify the
 deployed revision and exercise affected functions after deploy. Defer to the `supabase` skill
 for the details.
 
+### 6. A redesign kept what production has
+A UI change that restructures pages (a redesign, a new layout, a framework
+move) is otherwise graded only against itself. Before merging one, compare its
+preview with production:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/parity-capture.js" \
+  --baseline https://example.com --candidate https://preview.example.com \
+  --harvest-baseline base.json --harvest-candidate cand.json --intent intent.json
+```
+
+It reports, route by route, what the candidate lost or changed: MISSING or
+redirected routes, SEO fields, JSON-LD types, links, CTAs, forms and text, each
+classed `replaced`, `intentional`, `lost` or `unclear`. Exit 1 blocks. Exit 2
+means something was not measured, which is never a pass. The population line
+names every route it compared. Read it before trusting a clean result.
+
+The harvest files hold what each page rendered. Print the probe with
+`--print-probe`, then for each route in the population line, on each side:
+open the page in the browser pane, evaluate the printed expression with the
+pane's JavaScript tool (`javascript_tool`), and append the returned object to
+that side's JSON array. Without both harvests, the rendered fields stay
+UNVERIFIED. The intent file lists removals the author meant:
+`{"removedRoutes": [], "removedHrefs": [], "textPatterns": [], "changedFields": []}`.
+
 ## Reporting
 
 Report the built-in reviewer's findings and yours as one list, most severe
