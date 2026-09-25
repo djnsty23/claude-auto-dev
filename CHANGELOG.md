@@ -1,5 +1,77 @@
 # Changelog
 
+## [8.175.0]
+
+### Workers run installed code and every ending can be settled (#296)
+
+- headless-worker `start` refuses a script outside a plugin cache unless
+  `--dev` says the checkout is intended. Every record carries the version,
+  script and dev flag, and fleet-view's relaunch keeps `--dev`.
+- The composed prompt names the report path and the RESULT line with the
+  ledger code verbatim. A RESULT line for another code shows as
+  `resultCodeFound`, and settle names the line to write.
+- `settle --unreported` settles a worker that exited without a RESULT line.
+  It refuses without an exit line, with a RESULT line for this code, and with
+  one naming another code.
+- A report written into `<report dir>/<CODE>/` is found and named, and
+  settle asks for it to be moved rather than filing a finished worker as
+  unreported.
+- A rerun at the same code moves the earlier run's log, report and ask files
+  aside first, all or none, so status never reads the previous run.
+- A supervisor pid now held by another image reads as not the supervisor:
+  `status` says unknown and `settle --lost` settles it.
+
+### The gate says why, and matches CI (#295)
+
+- `check:hook-parse` runs CI's `node --check` loop over every hook. The gate
+  is now twelve steps.
+- A red coverage run keeps its runner log and the failing suite's first FAIL
+  lines.
+- `find-orphan-checks.js` and `validate.js` answer `--help` without doing
+  their work, which had turned a release gate red at `check:entrypoints`.
+
+### Installs pin to the `stable` branch (#297)
+
+- README and MIGRATION install from `@stable`, a branch that moves only on
+  release. `bump.js` names the step that fast-forwards it. It is not
+  `release` because `release/<v>` branches make that name impossible.
+- check-plugin-drift fetches the recorded commit by sha into its own bare
+  repo, so a depth-1 marketplace clone no longer reads COULD NOT CHECK.
+
+### Two new Bash denies (#298, #300)
+
+- `argv-credential` refuses a credential passed as a command-line flag value
+  and gives the environment form instead. It shares its flag pattern with
+  the redactor.
+- `worktree-placement` refuses a `git worktree add` outside
+  `<repo>/.claude/worktrees/` and hands back the placed command. It fails
+  open on anything it cannot read.
+
+### Spawn budgets grade what they measured (#304, #305)
+
+- A child that did not start inside a sub-second budget is no longer read as
+  a defect. The lastWords children write, then create a ready file, and an
+  attempt killed at its budget without that file is re-run at 4x and 16x.
+  A child that never starts on any rung is INDETERMINATE, never red.
+- The blown-deadline case in the spawn-budget selftest accepts a kill at the
+  1000 ms floor as well as the child's own answer. A new control child that
+  answers only after 5 s must be killed at the floor on every run, which
+  also catches a clamp that returns `timeout: 0`.
+- lastWords says a child never started, exited or was killed, from the
+  fields spawnSync sets, instead of calling every silent child killed.
+
+### Fixes
+
+- A capture-active failure in test-knowledge-injection prints the hook
+  run's status, signal, error and stderr tail, and two of its checks no
+  longer pass on empty output (#303).
+- analyze-skill-invocations inventories each plugin once, at its own
+  version, when run from the plugin cache. It had counted every cached
+  version as a plugin (#299).
+- CLAUDE.md is cut from 33 KB to 8 KB. The incidents behind its rules moved
+  to `docs/claude-md-long-form.md`. Four skill texts that contradicted the
+  rules beside them are corrected (#294).
+
 ## [8.174.0]
 
 ### A Stop note wakes the model once per session
