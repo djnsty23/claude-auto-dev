@@ -66,6 +66,9 @@ const GUARDING = [
     // Keeps the cross-account session registry fleet-registry.js reads. A switch
     // would make a session invisible to the account dispatching it.
     'session-register.js',
+    // Keeps the session's env files under the Bash command cap. Past it every
+    // Bash call fails, so a switch would let a session turn off its own shell.
+    'session-env-dedupe.js',
 ];
 
 // ---------------------------------------------------------------- manifest
