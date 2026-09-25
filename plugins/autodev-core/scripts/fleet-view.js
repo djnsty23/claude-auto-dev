@@ -481,7 +481,9 @@ function nextCode(code, ledgerRecords) {
 
 /** Whether a live pid is the worker a record describes. Returns { ok, how, detail }. */
 function processMatches(pid, rec, platform = process.platform, runner = spawnSync) {
-    const want = path.resolve(rec.cwd);
+    // A win32 cwd resolves with win32 rules on any host: path.resolve on POSIX reads
+    // C:\w as a relative name and prefixes the host cwd, so the selftest failed there.
+    const want = (platform === 'win32' ? path.win32 : path).resolve(rec.cwd);
     const same = (a, b) => (platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
     if (platform === 'linux') {
         try { const cwd = fs.readlinkSync(`/proc/${pid}/cwd`); return { ok: same(path.resolve(cwd), want), how: 'proc-cwd', detail: cwd }; } catch (e) { return { ok: false, how: 'proc-cwd', detail: e.code || e.message }; }
