@@ -72,7 +72,10 @@ Run before every deploy (uses `security` skill):
 - [ ] Supabase RLS enabled on all public tables
 - [ ] Input validation on all user-facing forms
 - [ ] No `dangerouslySetInnerHTML` without sanitization
-- [ ] Auth checks on protected routes
+- [ ] Protected routes probed as every role, server-side:
+      `node "${CLAUDE_PLUGIN_ROOT}/scripts/auth-matrix.js" auth-matrix.json`
+      exits 0 (matrix format: `security` skill, section 5). Exit 1 is a leak or
+      a refused allowed role; exit 2 is an unmeasured cell, not a pass.
 - [ ] Fail-closed auth (deny by default, not allow by default)
 - [ ] No SSRF vectors (user URLs validated against private IPs)
 - [ ] Middleware covers all /dashboard/* and /api/* routes
