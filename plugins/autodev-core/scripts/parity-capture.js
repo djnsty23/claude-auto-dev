@@ -219,10 +219,22 @@ function parseHtml(html, pageUrl, hosts) {
 
 // ----------------------------------------------------------------- fetching
 
-async function get(url, timeoutMs) {
+function errText(e) {
+    return e.cause ? `${e.message} (${e.cause.code || e.cause.message})` : e.message;
+}
+
+async function getOnce(url, timeoutMs) {
     const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs), headers: { 'user-agent': 'parity-capture/1' } });
     const body = await res.text();
     return { status: res.status, location: res.headers.get('location'), xRobotsTag: norm(res.headers.get('x-robots-tag')).toLowerCase(), body };
+}
+
+// One retry for a request that failed below HTTP. A reused keep-alive socket the
+// server has just closed fails exactly this way, and on a loaded machine it did,
+// on localhost. A failure that repeats is reported as UNVERIFIED, never retried
+// into silence. An HTTP status is an answer and is never retried.
+async function get(url, timeoutMs) {
+    try { return await getOnce(url, timeoutMs); } catch { return getOnce(url, timeoutMs); }
 }
 
 // The chain is followed by hand so every hop is on the record: a redirect the
@@ -257,7 +269,7 @@ async function captureRoute(origin, route, hosts, timeoutMs) {
         };
         const v = slashVariant(route);
         if (v) {
-            try { out.slashStatus = (await get(new URL(v, origin).href, timeoutMs)).status; } catch (e) { out.slashStatus = `error: ${e.message}`; }
+            try { out.slashStatus = (await get(new URL(v, origin).href, timeoutMs)).status; } catch (e) { out.slashStatus = `error: ${errText(e)}`; }
         }
         if (out.status >= 200 && out.status < 300) {
             Object.assign(out, parseHtml(c.final.body, c.finalUrl, hosts));
@@ -265,7 +277,7 @@ async function captureRoute(origin, route, hosts, timeoutMs) {
         }
         return out;
     } catch (e) {
-        return { ok: false, error: e.cause ? `${e.message} (${e.cause.code || e.cause.message})` : e.message };
+        return { ok: false, error: errText(e) };
     }
 }
 
@@ -274,7 +286,7 @@ async function captureFile(origin, file, timeoutMs) {
         const r = await get(new URL(file, origin).href, timeoutMs);
         return { ok: true, status: r.status, body: r.status >= 200 && r.status < 300 ? r.body : '' };
     } catch (e) {
-        return { ok: false, error: e.cause ? `${e.message} (${e.cause.code || e.cause.message})` : e.message };
+        return { ok: false, error: errText(e) };
     }
 }
 
@@ -499,7 +511,10 @@ function judgeRoute(J, route, b, c, hb, hc) {
         J.add({ route, kind: 'route-redirected', class: J.routeIntended(route) ? 'intentional' : 'unclear', item: route, detail: `REDIRECTED: candidate ends at ${c.finalPath} via ${c.hops.map((h) => h.status).join(' -> ')}` });
         return;
     }
-    if (b.slashStatus !== c.slashStatus) {
+    const slashError = [b.slashStatus, c.slashStatus].find((x) => typeof x === 'string');
+    if (slashError) {
+        J.add({ route, kind: 'unverified', class: 'unverified', item: 'trailing-slash', detail: `trailing-slash variant could not be fetched: ${slashError}` });
+    } else if (b.slashStatus !== c.slashStatus) {
         J.add({ route, kind: 'trailing-slash', class: J.fieldIntended('trailingSlash') ? 'intentional' : 'unclear', item: slashVariant(route), detail: `trailing-slash variant: baseline ${b.slashStatus}, candidate ${c.slashStatus}` });
     }
     diffSeo(J, route, b.seo, c.seo);
