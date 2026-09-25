@@ -191,6 +191,62 @@ async function main() {
             fs.readFileSync(fx.lockPath + '.released-peer', 'utf8') === peer);
     }
 
+    // -- 4b. A live Git Bash holder whose pid only ps can see ------------------
+    // A lock written by a bash script records $$, an MSYS pid. tasklist cannot see
+    // it, so a wrapper that asked tasklist alone would read a live gate as dead and
+    // move its lock aside. The holder here is a real Git Bash, which is the only
+    // way to drive the ps branch: case 4's node holder is found by tasklist first.
+    if (!WIN) {
+        console.log('SKIP  live Git Bash holder: POSIX has one pid table, and case 4 covers it');
+    } else {
+        const ex = spawnSync('git', ['--exec-path'], { encoding: 'utf8', windowsHide: true });
+        const usrBin = ex.status === 0 ? path.resolve(ex.stdout.trim(), '..', '..', '..', 'usr', 'bin') : '';
+        const gitBash = usrBin && fs.existsSync(path.join(usrBin, 'bash.exe')) ? path.join(usrBin, 'bash.exe') : null;
+        let b = null;
+        let msysPid = 0;
+        if (gitBash) {
+            b = spawn(gitBash, ['-c', 'echo $$; read x'], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+            b.on('error', () => {});
+            let first = '';
+            b.stdout.on('data', (d) => { first += d; });
+            await waitFor(() => /^\d+\s/.test(first), 30000, 'bash to print its $$');
+            msysPid = Number(first.trim().split(/\s+/)[0]) || 0;
+        }
+        const psSees = msysPid > 0 && spawnSync(path.join(usrBin, 'ps.exe'), ['-p', String(msysPid)], { encoding: 'utf8', windowsHide: true })
+            .stdout.split(/\r?\n/).some((l) => l.trim().split(/\s+/)[0] === String(msysPid));
+        const tl = msysPid > 0 && spawnSync('tasklist', ['/FI', `PID eq ${msysPid}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true });
+        const tasklistSees = Boolean(tl && new RegExp(`^"[^"]*","${msysPid}"`, 'm').test(tl.stdout || ''));
+        if (!gitBash || !psSees || tasklistSees) {
+            console.log(`SKIP  live Git Bash holder: needs Git's bash (${gitBash ? 'found' : 'not found'}), a pid ps sees (${psSees}) and tasklist does not (${!tasklistSees})`);
+            if (b) { b.stdin.end(); killTree(b.pid); }
+        } else {
+            const fx = fixture('node probe.js 0');
+            fs.mkdirSync(fx.lockDir, { recursive: true });
+            const peer = `${msysPid}\ngate-tail-locked.sh, head abc1234, worktrees/bash-peer, started 11:30Z\n`;
+            fs.writeFileSync(fx.lockPath, peer);
+            const run = start(fx);
+            try {
+                const waiting = await waitFor(() => /waiting for/.test(run.out), 20000, 'the waiting line');
+                await sleep(1000);
+                check('live Git Bash holder: the wrapper waits for it', waiting, run.out);
+                // Read it tolerantly: the defect this case exists for moves the lock away.
+                const now = fs.existsSync(fx.lockPath) ? fs.readFileSync(fx.lockPath, 'utf8') : null;
+                check('live Git Bash holder: its lock is untouched and nothing is moved aside',
+                    now === peer && asides(fx, 'stale').length === 0, run.out);
+                check('live Git Bash holder: the chain has not run', saw(fx) === null, run.out);
+                b.stdin.end();
+                await new Promise((res) => (b.exitCode !== null ? res() : b.on('close', res)));
+                const r = await finished(run);
+                check('Git Bash holder gone: its lock is moved aside and the wrapper exits 0',
+                    r.code === 0 && asides(fx, 'stale').length === 1, `exit=${r.code}\n${r.out}`);
+            } finally {
+                // A live bash would hold the suite open after a red.
+                b.stdin.end();
+                killTree(b.pid);
+            }
+        }
+    }
+
     // -- 5. A dead holder: moved aside to .stale-HHMM, never deleted -----------
     {
         const fx = fixture('node probe.js 0');
