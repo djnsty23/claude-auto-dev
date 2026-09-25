@@ -759,6 +759,8 @@ function selftest() {
     const noRead = () => { throw Object.assign(new Error('gone'), { code: 'ENOENT' }); };
     t('linux identity reads supervise, --code and --cwd from the exact argv',
         processMatches(1, pwant, 'linux', undefined, argv('/usr/bin/node', '/x/headless-worker.js', 'supervise', '--code', 'B-X1', '--log', 'x', '--cwd', '/w t', '--claude-bin', 'c')).ok);
+    t('linux identity needs supervise, not only the code and cwd', !processMatches(1, pwant, 'linux', undefined, argv('node', 'hw.js', 'status', '--code', 'B-X1', '--cwd', '/w t')).ok);
+    t('darwin identity needs supervise, not only the code and cwd', !processMatches(1, pwant, 'darwin', fakeCmd('node hw.js status --code B-X1 --cwd /w t --claude-bin c')).ok);
     t('linux identity refuses another code', !processMatches(1, pwant, 'linux', undefined, argv('node', 'hw.js', 'supervise', '--code', 'B-X10', '--cwd', '/w t')).ok);
     t('linux identity refuses another cwd', !processMatches(1, pwant, 'linux', undefined, argv('node', 'hw.js', 'supervise', '--code', 'B-X1', '--cwd', '/w t2')).ok);
     t('linux identity refuses a decoy in the same directory', !processMatches(1, pwant, 'linux', undefined, argv('node', '-e', 'setTimeout(()=>{},60000)')).ok);
