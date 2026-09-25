@@ -485,6 +485,29 @@ try {
     }
 
     // -----------------------------------------------------------------------
+    // --help answers before any git call. Before it had a branch, --help fell
+    // through to the analysis: in a directory with no .git it exited 1 with the
+    // refusal above, and pointed at a repository it printed the whole ranking.
+    // Both runs below are that old behaviour's negatives, so each one fails if
+    // the branch goes: the first on the exit code, the second on the output.
+    // -----------------------------------------------------------------------
+    {
+        const usage = /^Usage: node mine-fixes\.js \[repo-path\]/;
+        for (const flag of ['--help', '-h']) {
+            const r = spawnSync(process.execPath, [SUBJECT, flag],
+                { cwd: PLAIN, encoding: 'utf8', env: { ...process.env, ...GIT_ENV } });
+            eq(`${flag} outside any repository exits 0`, r.status, 0);
+            check(`...printing the usage line and nothing else`,
+                usage.test(r.stdout) && r.stdout.trim().split('\n').length === 1, clip(r.stdout));
+            eq('...without reaching git', r.stderr, '');
+        }
+        const r = run([REPO, '--help']);
+        eq('--help beside a real repository exits 0', r.status, 0);
+        check('...and prints the usage line, not the ranking of that repository',
+            usage.test(r.stdout) && r.stdout.trim().split('\n').length === 1, clip(r.stdout));
+    }
+
+    // -----------------------------------------------------------------------
     // The pipe delivers every byte — AND WHAT THIS PAIR CANNOT DO.
     //
     // node's process.stdout is ASYNCHRONOUS when it is a pipe on POSIX (Linux and
