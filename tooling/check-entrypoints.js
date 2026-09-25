@@ -41,9 +41,12 @@
  * catches only a script that lets git's stderr through, and it would label a
  * script that ignores --help as indeterminate, which a re-run never clears.
  * The wall figures are with both hangs fixed, two runs each. About 3 s of the
- * difference builds the repository; about 5.5 s is check-no-private-names.js
- * and check-no-home-paths.js, which also ignore --help and now reach their
- * read-only scan of the tree instead of stopping at the missing .git.
+ * difference builds the repository. The other ~5.5 s that day was
+ * check-no-private-names.js and check-no-home-paths.js, which ignored --help
+ * and reached their read-only scan of the tree instead of stopping at the
+ * missing .git. Both now answer --help before any work. About 1.7 s of their
+ * share did not go away: it is the cold read of a freshly written copy, which
+ * the next script to read the whole tree now pays instead.
  *
  * The commit is built with plumbing (write-tree, commit-tree, update-ref), which
  * runs no hooks and needs no user config, under the scratch HOME and with every
