@@ -35,6 +35,25 @@ const ev = require('./subject-evidence.js');
 const sv = require('./suite-verdict-summary.js');
 
 const ROOT = path.resolve(__dirname, '..');
+
+// `[measured 2026-09-24]` --help fell through to the full sweep: over 150 s, a
+// check-suites-wt-* worktree under the OS temp dir, and a kill by pid to stop
+// it. check-entrypoints.js could not see it, because it probes a scratch copy
+// with no .git, where the sweep dies at its first git call and reads as having
+// returned. So the answer comes before the first git call, and its suite runs
+// it inside a real repository.
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    console.log('usage: node tooling/check-suites-can-fail.js [--verbose] [--all-subjects]\n' +
+        'Stubs the subject of every tooling/test-*.js suite and asserts the suite goes red.\n' +
+        'Grades HEAD in a private git worktree under the OS temp dir; refuses a dirty tree.\n' +
+        '--verbose: print the note on every row, not only on rows that are not ok.\n' +
+        '--all-subjects: stub every derived subject, not only the first that turns the suite red.\n' +
+        'Exit: 0 every suite verified, 1 at least one NOT verified, 2 indeterminate\n' +
+        '      (dirty tree, no worktree, or a mid-sweep conflict).');
+    process.exitCode = 0;
+    return;
+}
+
 const VERBOSE = process.argv.includes('--verbose');
 // Stub EVERY candidate instead of stopping at the first one that proves the suite
 // can fail. The verdict is identical either way — asserted over every outcome
