@@ -140,7 +140,24 @@ function writeMatrix(baseUrl, extra = {}) {
 
 // ---- running the child -----------------------------------------------------
 
-function run(script, args, envOverrides) {
+// A socket-using node child on Windows can die with 0xC0000409 (a native
+// fast-fail, 3221226505) under load, with no output. Measured 2026-09-25 on
+// Node 24.15: 6 of 100 concurrent suite runs, with fetch and with node:http
+// alike, and 0 of 800 for a child with no sockets. That code is never a verdict
+// (the script exits 0, 1 or 2), so the invocation is retried ONCE and the retry
+// is printed. A crash that repeats still fails the assertion.
+const NATIVE_CRASH = 3221226505;
+
+async function run(...a) {
+  let r = await runOnce(...a);
+  if (r.code === NATIVE_CRASH) {
+    console.log(`note: a child died with 0xC0000409 (native crash, no verdict); retrying it once: ${a[1].join(' ')}`);
+    r = await runOnce(...a);
+  }
+  return r;
+}
+
+function runOnce(script, args, envOverrides) {
   return new Promise((resolve) => {
     const env = { ...process.env, AM_TEST_ADMIN_COOKIE: ADMIN_COOKIE, AM_TEST_MEMBER_COOKIE: MEMBER_COOKIE };
     for (const [k, v] of Object.entries(envOverrides || {})) {
