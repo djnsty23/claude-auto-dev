@@ -54,6 +54,14 @@ check('selftest exits 0', self.status === 0 && !self.error, detail(self));
 check('selftest prints its population line', /population: \d+ assertions run/.test(self.stdout), detail(self));
 check('selftest proves a planted setInterval is HUNG', /PASS  planted setInterval is classified HUNG/.test(self.stdout), detail(self));
 check('selftest proves scratch-copy isolation', /PASS  and never into the source tree/.test(self.stdout), detail(self));
+// The scratch copy is a git repository so a script that ignores --help and
+// starts with a git call reaches its default action. Without it, both real
+// hangs of 2026-09-25 (check-suites-can-fail.js, mutate-sessions-gate.js) died
+// on the missing .git and read as answers.
+check('selftest proves a git-first script is probed past its git call',
+    /PASS  a script whose default action starts with a git call is probed past it, and HUNG/.test(self.stdout), detail(self));
+check('selftest proves inherited GIT_DIR/GIT_INDEX_FILE never reach git',
+    /PASS    and neither variable reached git/.test(self.stdout), detail(self));
 
 const real = run(['--json'], 600000, 'the gate --json population run');
 check('the repo population returns on --help (exit 0)', real.status === 0 && !real.error, detail(real));
