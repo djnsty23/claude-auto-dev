@@ -32,6 +32,8 @@ Already installed without it? In `~/.claude/settings.json`, add
 `"ref": "stable"` to the `source` of `extraKnownMarketplaces.autodev`, then
 run the `marketplace add` line above. Your plugins stay installed. Running
 the add line alone is refused while settings declare a different source.
+The add rewrites that entry without `"autoUpdate"`. If it was `true`, set it
+back beside `source`, or the install stops updating by itself.
 
 Two optional add-ons:
 
