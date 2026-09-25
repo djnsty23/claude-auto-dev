@@ -10,6 +10,7 @@
 // Asserting each is present in the population AND returned means a future rename
 // cannot make this suite pass by making the subject disappear.
 
+const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
@@ -88,6 +89,20 @@ for (const name of ['watch-panels.js', 'fleet-stop-watch.js', 'quota-tripwire.js
         direct.status === 0 && !direct.error && /node .*\.js/.test(direct.stdout), detail(direct));
 }
 check('human report names the budget and the counts', /\d+ script\(s\) probed with --help under a \d+ms budget, \d+ returned, 0 hung/.test(readable.stdout), readable.stdout.slice(0, 300));
+
+// A Workflow tool script is not a node entry point: node stops at a SyntaxError
+// on its top-level `return` before any --help branch could run, so probing it
+// measured the parser. It was probed until 2026-09-25 and sat in the non-zero
+// note as exit 1. The file must exist for its absence from the population to
+// mean anything, and a script beside it must stay in, so an over-broad filter
+// cannot pass this either.
+const { population } = require('./check-entrypoints.js');
+const pop = population(ROOT);
+const HEAL = path.join('plugins', 'autodev-core', 'scripts', 'heal-sweep.workflow.js');
+check('heal-sweep.workflow.js is on disk', fs.existsSync(path.join(ROOT, HEAL)), HEAL);
+check('  and is left out of the population', !pop.includes(HEAL), pop.filter((p) => /workflow/.test(p)).join(','));
+check('  while fleet-snapshot.js beside it stays in',
+    pop.includes(path.join('plugins', 'autodev-core', 'scripts', 'fleet-snapshot.js')), String(pop.length));
 
 let failed = 0;
 for (const [label, ok, d] of cases) {

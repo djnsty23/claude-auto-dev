@@ -59,8 +59,9 @@
  *
  * POPULATION. plugins/<name>/scripts/*.js, plugins/<name>/hooks/*.js, and
  * tooling/*.js excluding tooling/test-*.js (suites run on invocation and do not
- * take --help). Printed on every run, so a quiet result is distinguishable from
- * an empty scan.
+ * take --help) and any *.workflow.js (the Workflow tool runs those, node cannot;
+ * see WORKFLOW_SCRIPT). Printed on every run, so a quiet result is
+ * distinguishable from an empty scan.
  *
  *   node tooling/check-entrypoints.js                # probe the repo, exit 1 on any hang
  *   node tooling/check-entrypoints.js --budget-ms 5000
@@ -114,9 +115,20 @@ const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
 const BUDGET_MS = Math.max(500, Number(val('--budget-ms', 10000)) || 10000);
 
+/**
+ * A Workflow tool script, which node cannot run. The Workflow runtime executes
+ * its body as a function, supplies `args`, `agent`, `pipeline` and `log`, and
+ * takes its top-level `return` as the result. Under node, `export const meta`
+ * makes the file an ES module, where that `return` is a SyntaxError: `node
+ * heal-sweep.workflow.js --help` exits 1 before its first line runs, so no
+ * --help branch could ever execute and the probe measured the parser.
+ */
+const WORKFLOW_SCRIPT = /\.workflow\.js$/;
+
 /** Relative paths of every entry point in `root`, sorted. */
 function population(root) {
     const out = [];
+    const entry = (f) => f.endsWith('.js') && !WORKFLOW_SCRIPT.test(f);
     const pluginsDir = path.join(root, 'plugins');
     if (fs.existsSync(pluginsDir)) {
         for (const plugin of fs.readdirSync(pluginsDir)) {
@@ -124,7 +136,7 @@ function population(root) {
                 const dir = path.join(pluginsDir, plugin, sub);
                 if (!fs.existsSync(dir)) continue;
                 for (const f of fs.readdirSync(dir)) {
-                    if (f.endsWith('.js')) out.push(path.join('plugins', plugin, sub, f));
+                    if (entry(f)) out.push(path.join('plugins', plugin, sub, f));
                 }
             }
         }
@@ -132,7 +144,7 @@ function population(root) {
     const tooling = path.join(root, 'tooling');
     if (fs.existsSync(tooling)) {
         for (const f of fs.readdirSync(tooling)) {
-            if (f.endsWith('.js') && !/^test-/.test(f)) out.push(path.join('tooling', f));
+            if (entry(f) && !/^test-/.test(f)) out.push(path.join('tooling', f));
         }
     }
     return out.sort();
