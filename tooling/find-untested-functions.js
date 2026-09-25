@@ -122,6 +122,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { spawnSuiteSync } = require('./suite-tmp.js');
 
 const argv = process.argv.slice(2);
 // `[measured 2026-09-02]` --help fell through to the full coverage run, so a
@@ -330,7 +331,10 @@ const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodev-cov-'));
 const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodev-cov-log-'));
 const runnerLog = path.join(logDir, 'runner.log');
 const logFd = fs.openSync(runnerLog, 'w');
-const run = spawnSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js')], {
+// Through suite-tmp.js like every suite spawn: test-all.js gives each suite its
+// own temp root, and this gives the runner one, so nothing it or they leave in
+// os.tmpdir() survives. NODE_V8_COVERAGE is absolute and outside that root.
+const run = spawnSuiteSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js')], {
     cwd: ROOT,
     stdio: ['ignore', logFd, logFd],
     // CLAUDE_CONFIG_DIR is dropped for the reason test-all.js gives: a suite

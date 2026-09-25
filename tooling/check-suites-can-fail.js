@@ -33,6 +33,9 @@ const { spawnSync, execSync } = require('child_process');
 const sb = require('./spawn-budget.js');
 const ev = require('./subject-evidence.js');
 const sv = require('./suite-verdict-summary.js');
+// Every suite child runs on its own temp root, removed when it exits: see
+// suite-tmp.js for the leak that made this necessary.
+const { spawnSuiteSync } = require('./suite-tmp.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const VERBOSE = process.argv.includes('--verbose');
@@ -561,12 +564,12 @@ const runSuite = (suite) => {
     // checkRunner's child is the WHOLE of test-all.js — ~40x a single suite, and
     // measured at 827-890s against the 900s every suite used to share.
     const budget = sb.sweepBudgetFor(suite);
-    return spawnSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
+    return spawnSuiteSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
         cwd: SWEEP_ROOT, encoding: 'utf8', timeout: budget,
         env: suiteEnv({
             [sb.DEADLINE_ENV]: String(Date.now() + budget - REPORT_MARGIN_MS),
         }),
-    });
+    }, { label: suite });
 };
 
 const rows = [];
@@ -614,9 +617,9 @@ function checkValidator() {
     const file = path.join(SWEEP_ROOT, 'VERSION');
     if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', cause: sv.CAUSE.NO_SUBJECT, note: 'no VERSION file' };
 
-    const run = () => spawnSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
+    const run = () => spawnSuiteSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
         cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS, env: suiteEnv({}),
-    });
+    }, { label: suite });
     const base = run();
     if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate' };
     if (base.status !== 0) {
