@@ -331,6 +331,49 @@ async function main() {
         planted.push({ defect: 'no harvest (rendered UNVERIFIED, exit 2)', off: holds(off) ? 'PASS (vacuous)' : 'FAIL', on: holds(real) ? 'PASS' : 'FAIL' });
     }
 
+    // A candidate behind access control, as a preview deploy with deployment
+    // protection is: every request answers 401 or 403. Nothing about its
+    // content was measured, so the run is INDETERMINATE with the reason, not a
+    // site-wide "lost".
+    for (const status of [401, 403]) {
+        const locked = http.createServer((req, res) => { res.writeHead(status, { 'content-type': 'text/html' }); res.end('<h1>Authentication required</h1>'); });
+        await new Promise((r) => locked.listen(0, '127.0.0.1', r));
+        const lockedUrl = `http://127.0.0.1:${locked.address().port}`;
+        const holds = (o) => o.code === 2 && /INDETERMINATE \(exit 2\)/.test(o.stdout)
+            && findings(o, 'UNVERIFIED').some((l) => l.includes('candidate-protected') && l.includes(`answered ${status} at /`))
+            && findings(o, 'lost').length === 0 && findings(o, 'unclear').length === 0;
+        const real = await scenario(null, { candidateUrl: lockedUrl });
+        check(`candidate answers ${status} everywhere: exit 2, INDETERMINATE, one protected finding, nothing lost`, holds(real), `exit ${real.code}\n${real.stdout}${real.stderr}`);
+        check(`candidate answers ${status} everywhere: never reads as FAIL or PASS`, !/-> (FAIL|PASS)/.test(real.stdout), real.stdout);
+        const src = fs.readFileSync(SCRIPT, 'utf8');
+        const anchor = 'const locked = protectedAnswer(homeC);';
+        const hits = src.split(anchor).length - 1;
+        check(`candidate answers ${status}: the detector-off anchor matches exactly once`, hits === 1, hits);
+        const copy = path.join(TMP, `parity-off-protected-${status}.js`);
+        fs.writeFileSync(copy, src.replace(anchor, 'const locked = null;'));
+        const off = await scenario(null, { candidateUrl: lockedUrl, script: copy });
+        check(`candidate answers ${status}: with the detector off, every route reads lost and the run FAILS (exit 1)`,
+            !holds(off) && off.code === 1 && findings(off, 'lost', 'route-missing').length === 4, `exit ${off.code}\n${off.stdout}`);
+        planted.push({ defect: `candidate ${status} everywhere (exit 2)`, off: holds(off) ? 'PASS (vacuous)' : 'FAIL', on: holds(real) ? 'PASS' : 'FAIL' });
+        await new Promise((r) => locked.close(r));
+    }
+    // Control: one protected route on an open candidate is still a lost route.
+    {
+        B.state.site = baseSite(); C.state.site = baseSite();
+        const orig = C.server.listeners('request')[0];
+        C.server.removeAllListeners('request');
+        C.server.on('request', (req, res) => {
+            if (req.url === '/pricing') { res.writeHead(403); res.end(); return; }
+            orig(req, res);
+        });
+        const out = await runScript(SCRIPT, ['--baseline', B.state.origin, '--candidate', C.state.origin]);
+        C.server.removeAllListeners('request');
+        C.server.on('request', orig);
+        check('one route answering 403 on an open candidate is still MISSING, lost, exit 1',
+            out.code === 1 && findings(out, 'lost', 'route-missing').some((l) => l.includes('/pricing') && l.includes('candidate 403'))
+            && !out.stdout.includes('candidate-protected'), out.stdout);
+    }
+
     // ------------------------------------------------------------ smaller cases
     {
         const out = await scenario(null, { harvest: 'both' });
