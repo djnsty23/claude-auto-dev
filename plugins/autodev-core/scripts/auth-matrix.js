@@ -30,6 +30,10 @@
  * Credentials come ONLY from the named environment variables. Their values are
  * never printed: output names the variable and whether it is set.
  *
+ * A target path is one leading slash on baseUrl's origin. '//host', a
+ * backslash, whitespace or an absolute URL makes the matrix invalid, and every
+ * request re-checks its origin before a credential is attached.
+ *
  * VERDICTS, per cell (role x target):
  *   PASS        deny held (401/403/404, or a 3xx whose Location matches
  *               loginPattern, with no marker in the body; or an empty 200 on a
@@ -81,6 +85,22 @@ function parseArgs(argv) {
 
 // ---- matrix validation -----------------------------------------------------
 
+// Resolves a target path against baseUrl, or returns null when the result
+// could leave baseUrl's origin. The role's credential rides every request, so
+// a path that resolves to another host sends the cookie or token there.
+// `new URL` reads '//host/x' as scheme-relative, treats a backslash as a
+// slash, and strips tab and newline before parsing, so '/\host' and
+// '/<TAB>/host' reach another host too. Only a single leading slash followed
+// by printable non-backslash characters is accepted, and the resolved origin
+// is compared as well, so a parser quirk not listed here still fails closed.
+function resolveTarget(p, baseUrl) {
+  if (typeof p !== 'string' || !/^\/(?![/\\])/.test(p) || /[\\\u0000-\u0020\u007f]/.test(p)) return null;
+  let url;
+  let base;
+  try { url = new URL(p, baseUrl); base = new URL(baseUrl); } catch { return null; }
+  return url.origin === base.origin ? url : null;
+}
+
 function loadMatrix(file) {
   const errors = [];
   let m;
@@ -110,7 +130,9 @@ function loadMatrix(file) {
   const targets = Array.isArray(m.targets) ? m.targets : [];
   if (targets.length === 0) errors.push('targets is missing or empty');
   targets.forEach((t, i) => {
-    if (!t || typeof t.path !== 'string' || !t.path.startsWith('/')) errors.push(`target ${i}: path must start with /`);
+    if (!t || !resolveTarget(t.path, m.baseUrl)) {
+      errors.push(`target ${i}: path must be one leading slash and stay on baseUrl's origin (no //, no backslash, no whitespace)`);
+    }
     if (!t || !t.expect || typeof t.expect !== 'object') { errors.push(`target ${i}: expect is missing`); return; }
     for (const [role, e] of Object.entries(t.expect)) {
       if (!roles || !(role in roles)) errors.push(`target ${i}: expect names unknown role ${role}`);
@@ -150,7 +172,12 @@ function scrubber(values) {
 
 // ---- probing ---------------------------------------------------------------
 
-async function probe(url, target, credential, timeout) {
+async function probe(url, origin, target, credential, timeout) {
+  // Last check before a credential is attached: the request goes to the
+  // matrix's own origin or nowhere.
+  if (new URL(url).origin !== origin) {
+    throw Object.assign(new Error('cross-origin target refused'), { code: 'CROSS_ORIGIN_REFUSED' });
+  }
   const headers = { ...credential.headers };
   let body;
   if (target.body !== undefined) {
@@ -193,14 +220,15 @@ function grade(expect, resp, target, loginPattern, markerHits) {
 
 // Measures one cell into `row`. Every early return leaves a verdict behind.
 async function measureCell(row, url, target, credential, matrix, timeout, scrub) {
+  const origin = new URL(matrix.baseUrl).origin;
   const unverified = (why) => { row.verdict = 'UNVERIFIED'; row.why = why; };
   if (!row.expect) return unverified('no expectation declared for this role');
   if (!credential.present) return unverified(`${credential.env} is not set`);
   let resp;
   try {
-    resp = await probe(url, target, credential, timeout);
+    resp = await probe(url, origin, target, credential, timeout);
   } catch (e) {
-    const code = (e && e.cause && e.cause.code) || (e && e.name) || 'error';
+    const code = (e && e.cause && e.cause.code) || (e && e.code) || (e && e.name) || 'error';
     return unverified(`request failed: ${scrub(code)}`);
   }
   row.probed = true;
@@ -223,7 +251,10 @@ async function runMatrix(matrix, timeout) {
   const rows = [];
   for (const target of matrix.targets) {
     const method = (target.method || 'GET').toUpperCase();
-    const url = new URL(target.path, matrix.baseUrl).toString();
+    // loadMatrix already refused a path that leaves the origin. If one got
+    // through, fall back to the raw join and let probe() refuse it per cell.
+    const resolved = resolveTarget(target.path, matrix.baseUrl);
+    const url = resolved ? resolved.toString() : new URL(target.path, matrix.baseUrl).toString();
     const targetRows = [];
     for (const role of roleNames) {
       const row = { role, method, path: target.path, expect: target.expect[role] || null,
@@ -342,4 +373,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { grade, loadMatrix };
+module.exports = { grade, loadMatrix, resolveTarget };
