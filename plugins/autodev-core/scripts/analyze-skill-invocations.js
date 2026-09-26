@@ -17,9 +17,9 @@
  *
  * THREE DISTINCTIONS THAT DECIDE WHETHER THE NUMBER MEANS ANYTHING:
  *
- * 1. TWO CHANNELS, counted separately. See commandsInText below for the control
- *    that caught a first version reading only one of them and reporting a
- *    tenfold-too-low answer with total confidence.
+ * 1. SEPARATE CHANNELS, counted separately. See skillEvents below for the
+ *    control that caught a first version reading only one of them and
+ *    reporting a tenfold-too-low answer with total confidence.
  *
  * 2. `rule-*` skills (`user-invocable: false`) are reported separately from the
  *    ones a person can type. This used to say a `rule-*` hit was a paths glob
@@ -45,6 +45,7 @@
  *   node analyze-skill-invocations.js --dir /path/to/projects --plugins /path/to/plugins
  *   node analyze-skill-invocations.js --json
  *   node analyze-skill-invocations.js --selftest
+ *   node analyze-skill-invocations.js --help
  */
 
 'use strict';
@@ -62,61 +63,105 @@ const opt = (name, dflt) => {
 
 
 /**
- * Pull skill invocations out of one transcript's raw text.
- *
- * Deliberately a regex over the raw bytes rather than a JSON parse per line. A
- * transcript is large, frequently truncated mid-write while a session is live,
- * and a parse failure on one line would drop the whole file. A regex over raw
- * text degrades to missing a line rather than missing a session.
+ * Claude Code's own slash commands. A bare `/status` is the built-in, not this
+ * plugin's `status` skill. `[measured 2026-09-26]` six built-in `/status` runs
+ * in 30 days were credited to the skill. A plugin-qualified name
+ * (`/autodev-core:status`) is never in this set, so it still counts.
  */
-function skillsInText(text) {
-    const out = [];
-    const seen = new Set();
-    const re = /"skill"\s*:\s*"([a-zA-Z0-9:_-]+)"/g;
-    let m;
-    while ((m = re.exec(text)) !== null) {
-        // ONE CALL IS RECORDED TWICE. `[measured 2026-09-23]` the assistant
-        // record carries the tool_use input and, on the same line, a
-        // `wireToolInputs` map echoing it under the same `toolu_` id. Over seven
-        // days a bare count read 557 where a JSON parse of the Skill tool_use
-        // blocks found 283; older transcripts lack the echo, so the inflation
-        // is not a constant factor you could divide out. The id sits just
-        // before either copy, so it keys the dedupe, and after it the count
-        // equals the parse (283 of 283 at 7 days, 507 of 507 at 30). A match
-        // with no id nearby is counted as before rather than dropped.
-        const ids = text.slice(Math.max(0, m.index - 240), m.index).match(/toolu_[A-Za-z0-9]+/g);
-        if (ids) {
-            const key = ids[ids.length - 1] + ' ' + m[1];
-            if (seen.has(key)) continue;
-            seen.add(key);
-        }
-        out.push(m[1]);
-    }
-    return out;
+const BUILTIN_COMMANDS = new Set([
+    'add-dir', 'agents', 'artifacts', 'bug', 'clear', 'compact', 'config', 'context',
+    'cost', 'doctor', 'effort', 'exit', 'export', 'fast', 'feedback', 'help', 'hooks',
+    'ide', 'init', 'install-github-app', 'login', 'logout', 'mcp', 'memory', 'model',
+    'output-style', 'permissions', 'plugin', 'pr-comments', 'privacy-settings',
+    'release-notes', 'reload-plugins', 'reload-skills', 'rename', 'resume', 'rewind',
+    'sandbox', 'security-review', 'skills', 'status', 'statusline', 'tasks',
+    'terminal-setup', 'theme', 'todos', 'upgrade', 'usage', 'vim', 'workflows',
+]);
+
+/** The text of a message's content, whether it is a string or an array of blocks. */
+function contentText(content) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content.filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+        .map((b) => b.text).join('\n');
 }
 
 /**
- * Pull USER-TYPED slash commands out of one transcript's raw text.
+ * Every skill load in one transcript's text, each with its own timestamp.
  *
- * THIS IS THE HALF THAT WAS MISSED, and missing it inverted the answer.
- * `[measured 2026-08-25]` A first version of this script counted only the
- * `"skill"` field and reported that exactly ONE of this plugin's skills had ever
- * been invoked. The control that caught it: `autodev-core:brain` appears 2,138
- * times in the raw transcripts and ZERO times in that field, because a person
- * typing `/autodev-core:brain` is recorded as a command block, not as a Skill
- * tool call.
+ * THREE CHANNELS, and they mean different things:
  *
- * So there are two independent channels and they mean different things. The
- * `skill` field is the MODEL choosing to load something. The command block is a
- * PERSON typing it. A skill reachable by one and not the other is a different
- * problem from a skill reachable by neither, and a count that merges them
- * silently cannot tell you which you have.
+ *   model    a `Skill` tool_use block in an assistant record: the MODEL chose it.
+ *   typed    a user record that BEGINS with the command block: a PERSON typed it.
+ *            `builtin` is the same shape for one of Claude Code's own commands.
+ *   preload  an isMeta user record carrying `<skill-format>`: the HARNESS loaded
+ *            it, which is an agent's `skills:` frontmatter. Nobody chose it.
+ *
+ * `[measured 2026-08-25]` a first version read only the `"skill"` field and
+ * reported ONE of this plugin's skills as ever invoked. `autodev-core:brain`
+ * appeared 2,138 times in the raw transcripts and zero times in that field,
+ * because a person typing it is recorded as a command block. So the typed
+ * channel is not optional.
+ *
+ * PARSED PER LINE, NOT MATCHED OVER RAW BYTES. `[measured 2026-09-26]` a regex
+ * over the whole file made four errors at once. It dated nothing, so a resumed
+ * transcript carried July events into a 30-day window (F1). It matched a
+ * `<command-name>` quoted inside a tool_result or an assistant's prose: 29
+ * `audit` fires reported, 0 real (F2). It credited the built-in `/status` to the
+ * `status` skill (F3). It read the `wireToolInputs` echo of each call as a
+ * second call, about 2x (F4). A bad line now costs that line, not the file.
+ *
+ * `o.sinceMs` drops every event older than it, and every event with no
+ * timestamp, because an undated event cannot be shown to be inside the window.
+ * `o.seen` is shared across files: a forked or resumed session copies earlier
+ * records into a new transcript under the same tool_use id and record uuid.
  */
-function commandsInText(text) {
+function skillEvents(text, o) {
+    const opts = o || {};
+    const seen = opts.seen || new Set();
+    const hasWindow = typeof opts.sinceMs === 'number';
     const out = [];
-    const re = /<command-name>\s*\/?([A-Za-z0-9:_-]{1,60})\s*<\/command-name>/g;
-    let m;
-    while ((m = re.exec(text)) !== null) out.push(m[1]);
+    for (const line of String(text).split('\n')) {
+        const maybeModel = line.indexOf('"name":"Skill"') >= 0;
+        const maybeCommand = line.indexOf('<command-') >= 0;
+        if (!maybeModel && !maybeCommand) continue;
+        let rec;
+        try { rec = JSON.parse(line); } catch (e) { continue; }
+        if (!rec || typeof rec !== 'object') continue;
+        const at = typeof rec.timestamp === 'string' ? rec.timestamp : null;
+        if (hasWindow) {
+            const ms = at ? Date.parse(at) : NaN;
+            if (!(ms >= opts.sinceMs)) continue;
+        }
+        const msg = rec.message || {};
+        if (rec.type === 'assistant' && Array.isArray(msg.content)) {
+            msg.content.forEach((b, i) => {
+                if (!b || b.type !== 'tool_use' || b.name !== 'Skill') return;
+                if (!b.input || typeof b.input.skill !== 'string') return;
+                const key = 'model ' + (b.id || (msg.id || rec.uuid || at) + '#' + i);
+                if (seen.has(key)) return;
+                seen.add(key);
+                out.push({ name: b.input.skill, channel: 'model', at: at });
+            });
+            continue;
+        }
+        if (rec.type !== 'user') continue;
+        const t = contentText(msg.content);
+        if (!/^\s*<command-(?:name|message)>/.test(t)) continue;
+        const m = /<command-name>\s*\/?([A-Za-z0-9:_-]{1,60})\s*<\/command-name>/.exec(t);
+        if (!m) continue;
+        let channel;
+        if (rec.isMeta) {
+            if (!/<skill-format>/.test(t)) continue;
+            channel = 'preload';
+        } else {
+            channel = BUILTIN_COMMANDS.has(m[1]) ? 'builtin' : 'typed';
+        }
+        const key = channel + ' ' + (rec.uuid || at + ' ' + m[1]);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ name: m[1], channel: channel, at: at });
+    }
     return out;
 }
 
@@ -215,13 +260,22 @@ function analyse(o) {
 
     const counts = new Map();     // Skill-tool calls: the MODEL chose
     const cmdCounts = new Map();  // slash commands: a PERSON typed
+    const preCounts = new Map();  // agent `skills:` preloads: the HARNESS loaded
+    const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+    // The file's mtime only prefilters: a file last written before the window
+    // holds no event inside it. Each event is then windowed by its own
+    // timestamp, because a file written today can hold events from July.
+    const seen = new Set();
+    const builtins = new Set();   // names the reader classed as Claude Code's own
     let bytes = 0, unreadable = 0;
     for (const f of files) {
         let text = '';
         try { text = fs.readFileSync(f.path, 'utf8'); } catch (e) { unreadable++; continue; }
         bytes += f.size;
-        for (const s of skillsInText(text)) counts.set(s, (counts.get(s) || 0) + 1);
-        for (const c of commandsInText(text)) cmdCounts.set(c, (cmdCounts.get(c) || 0) + 1);
+        for (const e of skillEvents(text, { sinceMs: sinceMs, seen: seen })) {
+            bump(e.channel === 'model' ? counts : e.channel === 'preload' ? preCounts : cmdCounts, e.name);
+            if (e.channel === 'builtin') builtins.add(e.name);
+        }
     }
 
     const inv = readSkillInventory(o.pluginsDir, o.scriptsDir || __dirname);
@@ -230,26 +284,42 @@ function analyse(o) {
 
     let mine = 0, auto = 0, foreign = 0;
     let typedMine = 0, typedForeign = 0;
-    const firedInvocable = new Set();   // fired by EITHER channel
+    let preloaded = 0;
+    const firedInvocable = new Set();   // fired by ANY channel
     const firedByModel = new Set();
     const firedByUser = new Set();
+    const firedByPreload = new Set();
     const firedAuto = new Set();
+    const bySkill = {};                 // this plugin's skills only, per channel
+    const tally = (bare, channel, n) => {
+        const row = bySkill[bare] || (bySkill[bare] = { model: 0, typed: 0, preload: 0 });
+        row[channel] += n;
+    };
 
     for (const [name, n] of counts) {
         const bare = bareName(name);
-        if (invSet.has(bare)) { mine += n; firedInvocable.add(bare); firedByModel.add(bare); }
-        else if (autoSet.has(bare)) { auto += n; firedAuto.add(bare); }
+        if (invSet.has(bare)) { mine += n; firedInvocable.add(bare); firedByModel.add(bare); tally(bare, 'model', n); }
+        else if (autoSet.has(bare)) { auto += n; firedAuto.add(bare); tally(bare, 'model', n); }
         else foreign += n;
     }
     for (const [name, n] of cmdCounts) {
         const bare = bareName(name);
-        if (invSet.has(bare)) { typedMine += n; firedInvocable.add(bare); firedByUser.add(bare); }
-        else if (autoSet.has(bare)) { firedAuto.add(bare); }
+        // The reader decides what is built-in, so `status` here is Claude
+        // Code's /status and never this plugin's skill of the same name.
+        const builtin = builtins.has(name);
+        if (!builtin && invSet.has(bare)) { typedMine += n; firedInvocable.add(bare); firedByUser.add(bare); tally(bare, 'typed', n); }
+        else if (!builtin && autoSet.has(bare)) { firedAuto.add(bare); tally(bare, 'typed', n); }
         else typedForeign += n;
+    }
+    for (const [name, n] of preCounts) {
+        const bare = bareName(name);
+        preloaded += n;
+        if (invSet.has(bare)) { firedInvocable.add(bare); firedByPreload.add(bare); tally(bare, 'preload', n); }
+        else if (autoSet.has(bare)) { firedAuto.add(bare); tally(bare, 'preload', n); }
     }
 
     const never = inv.invocable.filter((n) => !firedInvocable.has(n)).sort();
-    const total = mine + auto + foreign + typedMine + typedForeign;
+    const total = mine + auto + foreign + typedMine + typedForeign + preloaded;
 
     return {
         days: o.days,
@@ -258,14 +328,16 @@ function analyse(o) {
         megabytes: +(bytes / 1048576).toFixed(1),
         total: total,
         mine: mine, auto: auto, foreign: foreign,
-        typedMine: typedMine, typedForeign: typedForeign,
+        typedMine: typedMine, typedForeign: typedForeign, preloaded: preloaded,
         distinct: counts.size, distinctTyped: cmdCounts.size,
         invocable: inv.invocable.length,
         autoOnly: inv.autoOnly.length,
         firedInvocable: [...firedInvocable].sort(),
         firedByModel: [...firedByModel].sort(),
         firedByUser: [...firedByUser].sort(),
+        firedByPreload: [...firedByPreload].sort(),
         firedAuto: [...firedAuto].sort(),
+        bySkill: bySkill,
         never: never,
         top: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10),
         topTyped: [...cmdCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10),
@@ -298,7 +370,7 @@ function report(r) {
         return 2;
     }
 
-    console.log('invocations: ' + r.total + ' across TWO channels, which mean different things');
+    console.log('invocations: ' + r.total + ' across THREE channels, which mean different things');
     console.log('');
     console.log('  MODEL chose (Skill tool), ' + r.distinct + ' distinct:');
     console.log('    ' + String(r.mine).padStart(5) + '  this plugin, user-invocable');
@@ -311,12 +383,15 @@ function report(r) {
     console.log('    ' + String(r.typedForeign).padStart(5) + '  built-in or unknown');
     for (const [name, n] of r.topTyped) console.log('      ' + String(n).padStart(4) + '  /' + name);
     console.log('');
+    console.log('  HARNESS preloaded (agent skills: frontmatter): ' + (r.preloaded || 0));
+    console.log('');
 
-    console.log('FIRED by EITHER channel, of this plugin\'s ' + r.invocable +
+    console.log('FIRED by ANY channel, of this plugin\'s ' + r.invocable +
         ' user-invocable skills: ' + r.firedInvocable.length);
     if (r.firedInvocable.length) console.log('  ' + r.firedInvocable.join(', '));
     console.log('    by model: ' + (r.firedByModel.join(', ') || 'none') +
-        '  |  by person: ' + (r.firedByUser.join(', ') || 'none'));
+        '  |  by person: ' + (r.firedByUser.join(', ') || 'none') +
+        '  |  by preload: ' + ((r.firedByPreload || []).join(', ') || 'none'));
     console.log('');
     console.log('NEVER FIRED in ' + r.days + 'd: ' + r.never.length + ' of ' + r.invocable);
     if (r.never.length) {
@@ -345,27 +420,57 @@ function selftest() {
         else { fail++; console.log('FAIL ' + label + (detail ? ' - ' + detail : '')); }
     };
 
-    const sample = '{"type":"x","skill":"artifact-design"}\n{"skill":"autodev-core:rule-diagnosis"}\n' +
-        '{"skill" : "gtm-kb"}\nnot json at all "skill":"phase"\n';
-    const got = skillsInText(sample);
-    t('extracts every skill occurrence', JSON.stringify(got) ===
-        JSON.stringify(['artifact-design', 'autodev-core:rule-diagnosis', 'gtm-kb', 'phase']),
-        JSON.stringify(got));
-    t('reads a plugin-prefixed name', got.indexOf('autodev-core:rule-diagnosis') >= 0);
-    t('survives a line that is not valid JSON', got.indexOf('phase') >= 0);
-    t('finds nothing in text with no skill field', skillsInText('{"a":1}').length === 0);
+    // Records in the shapes a real transcript carries. Built with
+    // JSON.stringify, one record per line, joined rather than escaped.
+    const NL = String.fromCharCode(10);
+    const skillCall = (skill, id, at) => JSON.stringify({
+        type: 'assistant', timestamp: at || '2026-09-20T10:00:00.000Z', uuid: 'a-' + id,
+        message: { id: 'msg_' + id, content: [{ type: 'tool_use', id: id, name: 'Skill', input: { skill: skill } }] },
+        wireToolInputs: { [id]: { skill: skill } },
+    });
+    const typed = (name, uuid, at) => JSON.stringify({
+        type: 'user', timestamp: at || '2026-09-20T10:00:00.000Z', uuid: uuid,
+        message: { role: 'user', content: '<command-message>' + name + '</command-message>' + NL +
+            '<command-name>/' + name + '</command-name>' },
+    });
+    const preload = (name, uuid) => JSON.stringify({
+        type: 'user', isMeta: true, timestamp: '2026-09-20T10:00:00.000Z', uuid: uuid,
+        message: { role: 'user', content: [{ type: 'text', text: '<command-message>' + name +
+            '</command-message>' + NL + '<command-name>' + name + '</command-name>' + NL + '<skill-format>true</skill-format>' }] },
+    });
+    const names = (evs, ch) => evs.filter((e) => !ch || e.channel === ch).map((e) => e.name);
 
-    // The echo that doubled every count: the same call under the same id in
-    // the tool_use block and in wireToolInputs. Two DIFFERENT ids must both
-    // count, or a dedupe keyed too loosely would pass this case by dropping all.
-    const echoed = [
-        '{"content":[{"type":"tool_use","id":"toolu_01AbC","name":"Skill","input":{"skill":"brain"}}],' +
-            '"wireToolInputs":{"toolu_01AbC":{"skill":"brain"}}}',
-        '{"content":[{"type":"tool_use","id":"toolu_02XyZ","name":"Skill","input":{"skill":"brain"}}],' +
-            '"wireToolInputs":{"toolu_02XyZ":{"skill":"brain"}}}',
-    ].join(String.fromCharCode(10));
-    const dedup = skillsInText(echoed);
-    t('counts a call echoed in wireToolInputs once', dedup.length === 2, JSON.stringify(dedup));
+    const got = skillEvents([
+        skillCall('artifact-design', 'toolu_01'),
+        skillCall('autodev-core:rule-diagnosis', 'toolu_02'),
+        'not json at all "name":"Skill" "skill":"phase"',
+        skillCall('gtm-kb', 'toolu_03'),
+    ].join(NL));
+    t('extracts every Skill tool_use', JSON.stringify(names(got, 'model')) ===
+        JSON.stringify(['artifact-design', 'autodev-core:rule-diagnosis', 'gtm-kb']), JSON.stringify(got));
+    t('a line that is not valid JSON costs that line, not the file', got.length === 3);
+    t('finds nothing in text with no skill record', skillEvents('{"a":1}').length === 0);
+
+    // F4. The echo that doubled every count: one call in the tool_use block
+    // and again in wireToolInputs. Two DIFFERENT ids must both count, or a
+    // dedupe keyed too loosely would pass by dropping all.
+    const dedup = skillEvents([skillCall('brain', 'toolu_A'), skillCall('brain', 'toolu_B')].join(NL));
+    t('F4: a call echoed in wireToolInputs counts once', dedup.length === 2, JSON.stringify(dedup));
+    const shared = new Set();
+    const copied = skillEvents(skillCall('brain', 'toolu_A'), { seen: shared })
+        .concat(skillEvents(skillCall('brain', 'toolu_A'), { seen: shared }));
+    t('F4: a call copied into a resumed transcript counts once across files', copied.length === 1,
+        JSON.stringify(copied));
+
+    // F1. The window is the event's own timestamp, never the file's mtime.
+    const since = Date.parse('2026-09-01T00:00:00.000Z');
+    const windowed = skillEvents([
+        skillCall('old-one', 'toolu_old', '2026-07-19T10:00:00.000Z'),
+        skillCall('new-one', 'toolu_new', '2026-09-20T10:00:00.000Z'),
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_nd', name: 'Skill', input: { skill: 'undated' } }] } }),
+    ].join(NL), { sinceMs: since });
+    t('F1: an event older than the window is dropped though its file is fresh',
+        JSON.stringify(names(windowed)) === JSON.stringify(['new-one']), JSON.stringify(windowed));
 
     t('bareName strips a plugin prefix', bareName('autodev-core:rule-diagnosis') === 'rule-diagnosis');
     t('bareName leaves an unprefixed name alone', bareName('lessons') === 'lessons');
@@ -373,21 +478,35 @@ function selftest() {
 
     // The command channel is the half a first version missed entirely, so it
     // gets a known-positive of its own rather than being assumed to work.
-    // Joined rather than escaped. A literal newline escape through a shell
-    // heredoc collapses into a real line break and breaks the file, which is how
-    // this block was written wrong the first time.
-    const cmdSample = [
-        '<command-name>/autodev-core:brain</command-name>',
-        '<command-name>/audit</command-name>',
-        '<command-name>compact</command-name>',
-        '<command-name>/?([\\w:.-]{1,40})</command-name>',
-    ].join(String.fromCharCode(10));
-    const cmds = commandsInText(cmdSample);
-    t('extracts a plugin-qualified slash command', cmds.indexOf('autodev-core:brain') >= 0,
+    const cmds = skillEvents([
+        typed('autodev-core:brain', 'u1'),
+        typed('audit', 'u2'),
+        typed('status', 'u3'),
+        preload('security', 'u4'),
+    ].join(NL));
+    t('extracts a plugin-qualified slash command', names(cmds, 'typed').indexOf('autodev-core:brain') >= 0,
         JSON.stringify(cmds));
-    t('extracts a bare slash command', cmds.indexOf('audit') >= 0);
-    t('tolerates a command written without its slash', cmds.indexOf('compact') >= 0);
-    t('refuses a regex literal masquerading as a command', cmds.length === 3, JSON.stringify(cmds));
+    t('extracts a bare slash command', names(cmds, 'typed').indexOf('audit') >= 0);
+    t('F3: a bare built-in command is builtin, never typed',
+        JSON.stringify(names(cmds, 'builtin')) === JSON.stringify(['status']), JSON.stringify(cmds));
+    t('an agent preload is its own channel, not a person typing',
+        JSON.stringify(names(cmds, 'preload')) === JSON.stringify(['security']), JSON.stringify(cmds));
+
+    // F2. The tag QUOTED anywhere but at the head of a real user turn.
+    const quoted = skillEvents([
+        JSON.stringify({ type: 'user', uuid: 'q1', timestamp: '2026-09-20T10:00:00.000Z', message: { content: [
+            { type: 'tool_result', content: '<command-name>/audit</command-name>' }] } }),
+        JSON.stringify({ type: 'assistant', uuid: 'q2', timestamp: '2026-09-20T10:00:00.000Z', message: { content: [
+            { type: 'text', text: '<command-name>/audit</command-name>' }] } }),
+        JSON.stringify({ type: 'user', uuid: 'q3', timestamp: '2026-09-20T10:00:00.000Z', message: { content:
+            'a prompt that mentions <command-name>/audit</command-name> in passing' } }),
+        JSON.stringify({ type: 'system', uuid: 'q4', timestamp: '2026-09-20T10:00:00.000Z',
+            content: '<command-name>/status</command-name>' }),
+    ].join(NL));
+    t('F2: a command tag quoted in a tool_result, prose or a system record is not a load',
+        quoted.length === 0, JSON.stringify(quoted));
+    const twice = skillEvents([typed('audit', 'same'), typed('audit', 'same')].join(NL));
+    t('a typed command recorded twice under one uuid counts once', twice.length === 1, JSON.stringify(twice));
 
     // The zero-total guard is the whole reason this can be trusted, so pin it.
     const broken = report({
@@ -425,7 +544,28 @@ function selftest() {
     return fail ? 1 : 0;
 }
 
+const HELP = [
+    'analyze-skill-invocations.js: which skills fire, by channel, and which never do.',
+    '',
+    'Usage: node analyze-skill-invocations.js [--days N] [--dir DIR] [--plugins DIR]',
+    '                                         [--max-files N] [--json] [--selftest]',
+    '',
+    '  --days N         window by each event timestamp, default 7',
+    '  --dir DIR        transcript root, default <config dir>/projects',
+    '  --plugins DIR    every child of DIR is a plugin root to inventory',
+    '  --max-files N    stop after N transcript files, default 4000',
+    '  --json           machine-readable, with per-skill counts in bySkill',
+    '  --selftest       planted cases for the reader, then exit',
+    '  --help, -h       this text, and nothing is read',
+    '',
+    'Exits 0 when every skill fired, 1 when some never did, 2 when the probe',
+    'saw nothing or could not read the inventory.',
+].join('\n');
+
 function main() {
+    // Before any work. `[measured 2026-09-26]` --help used to fall through to
+    // a 7-day analysis of the real transcripts and print it as the answer.
+    if (flag('--help') || flag('-h')) { console.log(HELP); return 0; }
     if (flag('--selftest')) return selftest();
 
     const result = analyse({
@@ -458,4 +598,6 @@ function main() {
 // exit on its own with the same status. Nothing here holds the loop open.
 // See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
 // conventions that have actually cost something.
-process.exitCode = main();
+if (require.main === module) process.exitCode = main();
+
+module.exports = { skillEvents: skillEvents, bareName: bareName, BUILTIN_COMMANDS: BUILTIN_COMMANDS };
