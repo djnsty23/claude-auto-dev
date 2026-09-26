@@ -29,7 +29,12 @@
  *   1  a finding: an untracked clickable or form, an untracked or double-firing
  *      element, or an event the baseline fired that the candidate never fires
  *   2  INDETERMINATE: no roots found, a config or harvest missing, empty or
- *      unparseable, or an element the probe could not click. Never a pass.
+ *      unparseable, an element the probe could not click, or one it refused
+ *      to click because it reads as destructive. Never a pass.
+ *
+ * The probe runs real click handlers. It never clicks an element carrying
+ * data-parity-skip or inside one, and it refuses an unmarked control whose
+ * label, attribute or style reads as destructive.
  *
  * ------------------------------------------------------------------ LIMITS
  *
@@ -479,8 +484,32 @@ async function harvest(opt) {
         }
         return parts.join(' > ');
     };
+    // The click runs the element's real handlers, and preventDefault stops only
+    // navigation and form submission. A local build is often wired to the
+    // production database, so a delete button clicked here deletes real data.
+    // Two guards: the author marks an element, or a region around it, with the
+    // skip attribute; and a control that reads as destructive is refused even
+    // unmarked, which leaves the run INDETERMINATE until someone decides.
+    const skipAttr = opt.skipAttribute || 'data-parity-skip';
+    const DESTRUCTIVE = /\b(?:delete|remove|destroy|erase|purge|wipe|deactivate|unsubscribe|revoke|refund|terminate|ban|disable|close account|cancel (?:subscription|account|plan|order|membership|booking))\b/i;
+    const DESTRUCTIVE_STYLE = /\b(?:destructive|danger)\b/i;
+    const attrOf = (node, k) => (node && typeof node.getAttribute === 'function' ? node.getAttribute(k) : null);
+    const skippedBy = (el) => {
+        for (let node = el; node; node = node.parentElement) if (attrOf(node, skipAttr) !== null) return node === el ? skipAttr : `${skipAttr} on an ancestor`;
+        return null;
+    };
+    const destructiveReason = (el) => {
+        if (attrOf(el, 'data-destructive') !== null) return 'data-destructive';
+        const style = [attrOf(el, 'class'), attrOf(el, 'data-variant'), attrOf(el, 'variant')].filter(Boolean).join(' ');
+        if (DESTRUCTIVE_STYLE.test(style)) return `styled "${(style.match(DESTRUCTIVE_STYLE) || [''])[0]}"`;
+        const words = [el.textContent, attrOf(el, 'aria-label'), attrOf(el, 'title'), attrOf(el, 'value'), attrOf(el, 'name'), attrOf(el, 'id'), attrOf(el, attr)]
+            .filter(Boolean).join(' ').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+        const m = words.match(DESTRUCTIVE);
+        return m ? `reads "${m[0].toLowerCase()}"` : null;
+    };
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const elements = [];
+    const skipped = [];
     let skippedNone = 0;
     const occurrences = {};
     try {
@@ -488,6 +517,13 @@ async function harvest(opt) {
         for (const el of nodes) {
             const value = el.getAttribute(attr);
             if (value === 'none') { skippedNone++; continue; }
+            const skipReason = skippedBy(el);
+            if (skipReason) { skipped.push({ selector: selectorFor(el), value, reason: skipReason }); continue; }
+            const danger = destructiveReason(el);
+            if (danger) {
+                elements.push({ selector: selectorFor(el), value, occurrence: 0, events: [], error: null, refused: `destructive, not clicked: ${danger}` });
+                continue;
+            }
             occurrences[value] = (occurrences[value] || 0) + 1;
             current = { selector: selectorFor(el), value, occurrence: occurrences[value], events: [], error: null };
             try { el.click(); } catch (err) { current.error = String(err && err.message ? err.message : err); }
@@ -503,7 +539,7 @@ async function harvest(opt) {
         window.removeEventListener('click', block, true);
         window.removeEventListener('submit', block, true);
     }
-    return { url: String(location.href), attribute: attr, settleMs, skippedNone, elements };
+    return { url: String(location.href), attribute: attr, settleMs, skippedNone, skipped, elements };
 }
 
 function probeSource(opt) {
@@ -513,6 +549,7 @@ function probeSource(opt) {
 // ------------------------------------------------------------------ judge
 
 function classify(el) {
+    if (el.refused) return 'refused';
     if (el.error) return 'error';
     const events = Array.isArray(el.events) ? el.events : [];
     if (events.length === 0) return 'untracked';
@@ -567,8 +604,9 @@ function cmdJudge(args) {
     const cand = hs[hs.length - 1];
     const elements = cand.elements.map((el) => ({
         selector: el.selector, value: el.value, class: classify(el),
-        events: (el.events || []).map((e) => e.name), error: el.error || null,
+        events: (el.events || []).map((e) => e.name), error: el.error || el.refused || null,
     }));
+    const skipped = Array.isArray(cand.skipped) ? cand.skipped : [];
     let lostEvents = [];
     if (hs.length === 2) {
         const baseNames = eventNames(hs[0]);
@@ -579,27 +617,34 @@ function cmdJudge(args) {
     const byClass = {};
     for (const e of elements) byClass[e.class] = (byClass[e.class] || 0) + 1;
     const findings = (byClass.untracked || 0) + (byClass.double || 0) + lostEvents.length;
-    const code = findings ? 1 : (byClass.error ? 2 : 0);
+    const unmeasured = (byClass.error || 0) + (byClass.refused || 0);
+    const code = findings ? 1 : (unmeasured ? 2 : 0);
     const verdict = code === 1 ? 'FAIL' : (code === 2 ? 'INDETERMINATE' : 'PASS');
     const population = {
         elements: elements.length, byClass,
         baselineElements: hs.length === 2 ? hs[0].elements.length : null,
-        skippedNone: cand.skippedNone || 0, url: cand.url || null,
+        skippedNone: cand.skippedNone || 0, skipped: skipped.length, url: cand.url || null,
     };
     if (asJson) {
-        console.log(JSON.stringify({ verdict, exit: code, population, elements, lostEvents }, null, 2));
+        console.log(JSON.stringify({ verdict, exit: code, population, elements, skipped, lostEvents }, null, 2));
         return code;
     }
     const classes = Object.entries(byClass).map(([k, n]) => `${n} ${k}`).join(', ');
-    console.log(`population: ${elements.length} elements judged (${classes})${hs.length === 2 ? `, baseline ${hs[0].elements.length} elements` : ''}, url ${cand.url || 'unknown'}`);
+    console.log(`population: ${elements.length} elements judged (${classes})${hs.length === 2 ? `, baseline ${hs[0].elements.length} elements` : ''}, `
+        + `${skipped.length} skipped by attribute, url ${cand.url || 'unknown'}`);
     for (const e of elements) {
         if (e.class === 'ok') continue;
-        const detail = e.class === 'error' ? e.error : (e.events.join(', ') || 'no events');
+        const detail = e.class === 'error' || e.class === 'refused' ? e.error : (e.events.join(', ') || 'no events');
         console.log(`  ${e.class.padEnd(9)} ${e.value}  ${e.selector || ''}  ${detail}`);
     }
+    for (const s of skipped) console.log(`  skipped   ${s.value}  ${s.selector || ''}  ${s.reason}, not clicked`);
     for (const n of lostEvents) console.log(`  lost-event ${n}  fired in the baseline, never in the candidate`);
     if (code === 1) console.log(`FAIL: ${findings} finding(s).`);
-    else if (code === 2) console.log(`INDETERMINATE: ${byClass.error} element(s) could not be clicked, so they were not measured.`);
+    else if (code === 2) {
+        console.log(`INDETERMINATE: ${unmeasured} element(s) were not measured (${byClass.error || 0} could not be clicked, `
+            + `${byClass.refused || 0} refused as destructive). Mark a destructive control data-parity-skip once you have decided, `
+            + 'or measure it against a database you can afford to change.');
+    }
     else console.log(`PASS: all ${elements.length} elements fired, none twice${hs.length === 2 ? ', and no baseline event was lost' : ''}.`);
     return code;
 }

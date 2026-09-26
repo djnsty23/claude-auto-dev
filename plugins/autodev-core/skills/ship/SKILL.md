@@ -340,6 +340,14 @@ every other check stays green. Two subcommands, run BEFORE the merge:
 - `judge` against a local or preview build, never production: the probe clicks
   every tracked element and their handlers really run. Harvest the base branch
   and the candidate on the same page, then compare:
+
+  ⚠️ **A local build pointed at the production database changes real data.**
+  `preventDefault` stops navigation and form submission, not an `onClick` that
+  calls an API. Point the build at a disposable database, and mark every
+  control that writes, deletes or sends with `data-parity-skip` (on the element
+  or on a region around it). The probe also refuses an unmarked control that
+  reads as destructive (delete, remove, revoke, unsubscribe, a `destructive` or
+  `danger` style) and leaves the run at exit 2 until it is marked.
   1. `node "${CLAUDE_PLUGIN_ROOT}/scripts/tracking-parity.js" judge --print-probe --settle-ms 400`
      prints one expression.
   2. In the in-app Browser pane, open the page (for example
@@ -351,7 +359,8 @@ every other check stays green. Two subcommands, run BEFORE the merge:
 
 Exit 1 names each `untracked` or `double` element and each `lost-event` (a name
 the baseline fired that the candidate never fires). Exit 2 means a harvest was
-missing, empty or unreadable: nothing was judged, so it is not a pass.
+missing, empty or unreadable, or an element was refused as destructive or could
+not be clicked: something was not judged, so it is not a pass.
 
 ### Verification Checklist
 

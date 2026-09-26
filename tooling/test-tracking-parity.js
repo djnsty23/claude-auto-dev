@@ -396,7 +396,7 @@ function probeSource(script = SCRIPT) {
 // holds capture listeners and a dataLayer. Clicking dispatches capture-phase
 // listeners on the window first, then the element's own handlers, which is the
 // order a real click follows.
-function fakePage() {
+function fakePage(build) {
   const listeners = [];
   const log = { preventDefault: 0, handlerSawPrevented: 0, noneClicked: 0, windowOpen: 0 };
   const win = {};
@@ -409,9 +409,9 @@ function fakePage() {
     const i = listeners.findIndex((l) => l.type === type && l.fn === fn);
     if (i >= 0) listeners.splice(i, 1);
   };
-  function el(tag, attrs, handlers) {
+  function el(tag, attrs, handlers, text = '', parent = null) {
     const node = {
-      tagName: tag.toUpperCase(), id: '', attrs, parentElement: null,
+      tagName: tag.toUpperCase(), id: '', attrs, parentElement: parent, textContent: text,
       getAttribute: (k) => (k in attrs ? attrs[k] : null),
       click() {
         const e = {
@@ -426,7 +426,7 @@ function fakePage() {
     return node;
   }
   const push = (o) => win.dataLayer.push(o);
-  const elements = [
+  const elements = build ? build(el, push, log) : [
     el('a', { 'data-cta': 'nav_home', href: '/' }, [(e) => { if (e.defaultPrevented) log.handlerSawPrevented++; push({ event: 'cta_click', cta: 'nav_home', user_id: 'U-SECRET-1' }); }]),
     el('button', { 'data-cta': 'hero_primary' }, [() => push({ event: 'cta_click' }), () => push({ event: 'cta_click' })]),
     el('button', { 'data-cta': 'via_gtag' }, [() => win.gtag('event', 'sign_up', { method: 'email' })]),
@@ -447,8 +447,8 @@ function fakePage() {
   return { win, log, listeners, originalPush };
 }
 
-async function runProbe(src) {
-  const page = fakePage();
+async function runProbe(src, build) {
+  const page = fakePage(build);
   const ctx = vm.createContext(page.win);
   let result = null;
   let error = null;
@@ -493,6 +493,65 @@ async function probeTests() {
   check('probe -> judge: double and untracked are found, the rest ok',
     r.code === 1 && classes.hero_primary === 'double' && classes.gtm_only === 'untracked'
     && classes.nav_home === 'ok' && classes.via_gtag === 'ok', `exit ${r.code}; ${JSON.stringify(classes)}`);
+}
+
+// ------------------------------------------------------------------ destructive controls
+
+// The probe runs real click handlers, and a local build is often wired to the
+// production database. A page with one safe control, three that read as
+// destructive, one marked with the skip attribute and one inside a marked
+// region. `log.danger` counts every handler that must never run.
+function dangerPage(el, push, log) {
+  log.danger = 0;
+  const boom = () => { log.danger++; push({ event: 'something_destroyed' }); };
+  const zone = el('section', { 'data-parity-skip': '' }, []);
+  return [
+    el('button', { 'data-cta': 'save_profile' }, [() => push({ event: 'profile_saved' })], 'Save profile'),
+    el('button', { 'data-cta': 'account_danger' }, [boom], 'Delete account'),
+    el('button', { 'data-cta': 'remove_member' }, [boom], 'Remove'),
+    el('button', { 'data-cta': 'confirm_action', class: 'btn bg-destructive' }, [boom], 'Yes, continue'),
+    el('button', { 'data-cta': 'rebuild_index', 'data-parity-skip': '' }, [boom], 'Rebuild index'),
+    el('button', { 'data-cta': 'zone_action' }, [boom], 'Run', zone),
+  ];
+}
+
+async function destructiveTests() {
+  const p = await runProbe(probeSource().src, dangerPage);
+  check('destructive: the probe runs', !p.error && !!p.result, p.error && p.error.message);
+  if (!p.result) return;
+  const by = Object.fromEntries(p.result.elements.map((e) => [e.value, e]));
+  check('destructive: no destructive or skipped handler ran', p.log.danger === 0, `danger handlers ran ${p.log.danger} time(s)`);
+  check('destructive: the safe control is still clicked and tracked', by.save_profile && by.save_profile.events.length === 1
+    && !by.save_profile.refused, JSON.stringify(by.save_profile));
+  check('destructive: a label reading "Delete account" is refused, and says why', by.account_danger
+    && /destructive, not clicked: reads "delete"/.test(by.account_danger.refused || ''), JSON.stringify(by.account_danger));
+  check('destructive: a data-cta value reading remove_member is refused', by.remove_member && /reads "remove"/.test(by.remove_member.refused || ''),
+    JSON.stringify(by.remove_member));
+  check('destructive: a destructive-styled control is refused whatever its label', by.confirm_action
+    && /styled "destructive"/.test(by.confirm_action.refused || ''), JSON.stringify(by.confirm_action));
+  const skipped = Object.fromEntries((p.result.skipped || []).map((x) => [x.value, x.reason]));
+  check('destructive: data-parity-skip on the element skips it', skipped.rebuild_index === 'data-parity-skip' && !by.rebuild_index,
+    JSON.stringify(p.result.skipped));
+  check('destructive: data-parity-skip on an ancestor skips it', skipped.zone_action === 'data-parity-skip on an ancestor' && !by.zone_action,
+    JSON.stringify(p.result.skipped));
+
+  // Judged: a refused control is unmeasured, so the run is INDETERMINATE, and
+  // the report names the refusal and the skips.
+  const f = path.join(TMP, 'harvest-destructive.json');
+  fs.writeFileSync(f, JSON.stringify(p.result));
+  const r = run(['judge', f]);
+  check('destructive -> judge: refused controls make the run INDETERMINATE (exit 2), never a pass', r.code === 2
+    && /3 refused as destructive/.test(r.stdout) && !/^PASS/m.test(r.stdout), `exit ${r.code}; ${r.stdout}`);
+  check('destructive -> judge: each refusal and each skip is printed', (r.stdout.match(/^ {2}refused /gm) || []).length === 3
+    && (r.stdout.match(/^ {2}skipped /gm) || []).length === 2 && /2 skipped by attribute/.test(r.stdout), r.stdout);
+  // Skipped alone is a decision already made: it does not hold the run open.
+  const onlySkipped = { ...p.result, elements: p.result.elements.filter((e) => !e.refused) };
+  const f2 = path.join(TMP, 'harvest-skipped-only.json');
+  fs.writeFileSync(f2, JSON.stringify(onlySkipped));
+  const r2 = run(['judge', f2, '--json']);
+  const j2 = json(r2);
+  check('destructive -> judge: explicit skips alone still PASS, and are listed in --json', r2.code === 0
+    && !!j2 && j2.population.skipped === 2 && j2.skipped.length === 2, `exit ${r2.code}; ${r2.stdout.slice(0, 300)}`);
 }
 
 // ------------------------------------------------------------------ detector off
@@ -564,11 +623,16 @@ async function detectorOffProbe() {
     ['P2', 'probe records the second push of a double-wired element', 'current.events.push(entry);',
       'if (!current.events.some((x) => x.name === entry.name)) current.events.push(entry);',
       (p) => !!p.result && p.result.elements.find((e) => e.value === 'hero_primary').events.length === 2],
+    // "Caught" here means the destructive handlers stayed unclicked.
+    ['P3', 'probe refuses a destructive control', 'if (danger) {', 'if (false) {',
+      (p) => !!p.result && p.log.danger === 0, dangerPage],
+    ['P4', 'probe honours data-parity-skip', 'if (skipReason) {', 'if (false) {',
+      (p) => !!p.result && p.log.danger === 0, dangerPage],
   ];
-  for (const [id, name, a, b, caught] of cases) {
+  for (const [id, name, a, b, caught, build] of cases) {
     const m = mutant(id, a, b);
-    const on = caught(await runProbe(probeSource(SCRIPT).src));
-    const off = m.path ? caught(await runProbe(probeSource(m.path).src)) : true;
+    const on = caught(await runProbe(probeSource(SCRIPT).src, build));
+    const off = m.path ? caught(await runProbe(probeSource(m.path).src, build)) : true;
     recordOff(id, name, on, off, m.error);
   }
 }
@@ -578,6 +642,7 @@ async function detectorOffProbe() {
 (async () => {
   try {
     await probeTests();
+    await destructiveTests();
     detectorOffStatic();
     detectorOffJudge();
     await detectorOffProbe();
