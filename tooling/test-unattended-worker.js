@@ -98,6 +98,16 @@ try {
     check('prompt never tells the run to use SendMessage', !/with SendMessage|send one report/i.test(prompt), (prompt.match(/.*SendMessage.*/g) || []).join(' | '));
     check('the done line names the report file and the RESULT line shape',
         prompt.toLowerCase().includes(`write one report to ${reportHome.toLowerCase()}`) && prompt.includes('RESULT logo-guide done|stopped|failed: <one line>'));
+    // Nobody watches an unattended session, so a turn that ends on a question
+    // leaves it idle with no RESULT line. The footer routes a question into
+    // the RESULT line itself, after the report instruction.
+    const noQuestion = 'Never end your turn with a question';
+    const iNoQuestion = prompt.indexOf(noQuestion);
+    check('the footer forbids ending the turn with a question, after the report instruction',
+        iNoQuestion > iReturn && iReturn > 0, iNoQuestion + ' vs ' + iReturn);
+    check('the footer routes a decision into a RESULT stopped line for its own slug',
+        prompt.slice(iNoQuestion).split('\n')[0].includes('`RESULT logo-guide stopped: <the question and the options>`, then end.'),
+        prompt.slice(iNoQuestion, iNoQuestion + 300));
     check('brief records the report path', ok.json && ok.json.value.record.report
         && ok.json.value.record.report.replace(/\\/g, '/').toLowerCase() === reportHome.toLowerCase(), ok.json && ok.json.value.record.report);
     check('prompt contains no backslash (a shell reads it as an escape)', !prompt.includes('\\'));
