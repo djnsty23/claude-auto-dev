@@ -3,6 +3,31 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-25: the session-env dedupe hook runs on every OS, not only Windows
+
+`hooks/session-env-dedupe.js` removes dead `export` lines from a session's
+`session-env/<session>/*-hook-<N>.sh` files, which the harness never
+truncates and which plugins such as openai-codex and vercel append to on every
+start, resume and compaction. Only the FAILURE is Windows-specific: past about
+8 KB the Bash tool's command passes the Windows command-line cap and every
+call dies at one constant line. The GROWTH happens on every OS.
+
+It runs everywhere because the rewrite is semantics-preserving (the suite
+sources the files in bash before and after and compares the values), it fires
+on three infrequent events, and a Windows-only branch would leave the Linux and
+macOS CI legs testing the hook through an override rather than the path users
+run. A POSIX user gets bounded files instead of an unbounded prefix on every
+Bash call, and no behaviour change.
+
+It is wired on PreCompact and SessionEnd, where no plugin hook writes, and on
+SessionStart for "resume" only, to cover a process killed before SessionEnd.
+SessionStart hooks run in parallel, so that path re-reads each file and renames
+only if it is unchanged. It logs names and counts, never values, to
+`${CLAUDE_PLUGIN_DATA}/session-env-dedupe.log`, and it has no userConfig
+switch, for the same reason the guarding hooks have none: turning it off turns
+off the session's shell once the files grow. Upstream: openai/codex-plugin-cc#528
+and anthropics/claude-code#78146.
+
 ## 2026-09-22: a second Claude profile keeps its own state, the fleet registry included
 
 A user can run a second, fully separate profile by pointing CLAUDE_CONFIG_DIR at

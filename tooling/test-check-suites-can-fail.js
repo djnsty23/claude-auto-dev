@@ -127,6 +127,27 @@ function makeRepo(label, files) {
     return dir;
 }
 
+// --help must answer before any work. `[measured 2026-09-24]` it fell through to
+// the full sweep: 150 s and a check-suites-wt-* worktree before a kill by pid.
+// check:entrypoints could not see that, because its scratch copy has no .git
+// and the sweep died at its first git call. So this runs --help inside a real,
+// clean, committed repository, where a fall-through DOES sweep, and plants a
+// suite that records where it ran and then outlasts the budget. A sweep that
+// ignores --help therefore trips every check below: it is killed at the budget,
+// prints no usage, leaves a registered worktree, and the marker names it.
+const HELP_BUDGET_MS = 10000;   // what check-entrypoints.js grants every --help probe
+const markerSuite = (marker) => [
+    "require(require('path').join(__dirname, '..', 'plugins', 'demo', 'subject.js'));",
+    `require('fs').appendFileSync(${JSON.stringify(marker)}, __dirname + '\\n');`,
+    `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${HELP_BUDGET_MS + 1000});`,
+    '',
+].join('\n');
+
+// Temp-root entries a sweep with this pid would have created.
+const sweepDirsFor = (pid) => fs.readdirSync(os.tmpdir())
+    .filter((d) => d.startsWith('check-suites-wt-' + pid + '-'))
+    .map((d) => path.join(os.tmpdir(), d));
+
 // Exit 2 is the sweep's INDETERMINATE, and on the CONTROL it stays
 // infrastructure: a box that cannot create the private worktree says nothing
 // about evidence. Once the control has produced a verdict, the environment is
@@ -149,6 +170,49 @@ function runSweep(dir, exit2IsVerdict) {
 
 const dirs = [];
 try {
+    // ---- HELP: usage, exit 0, and no sweep ----------------------------------
+    const markerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'suites-help-marker-'));
+    dirs.push(markerDir);
+    const marker = path.join(markerDir, 'ran-in.txt');
+    const helpRepo = makeRepo('help', {
+        'VERSION': '1.0.0\n',
+        'tooling/validate.js': GREEN_VALIDATE,
+        'plugins/demo/subject.js': SUBJECT,
+        'tooling/test-planted-marker.js': markerSuite(marker),
+    });
+    dirs.push(helpRepo);
+    for (const flag of ['--help', '-h']) {
+        fs.rmSync(marker, { force: true });
+        const t0 = Date.now();
+        // No retry: a second full budget would only wait out a fall-through twice.
+        const r = sb.runBudgeted(process.execPath, [path.join(helpRepo, 'tooling', path.basename(SWEEP)), flag], {
+            cwd: helpRepo, encoding: 'utf8', timeout: HELP_BUDGET_MS, retryOnTimeout: false, windowsHide: true, input: '',
+        });
+        const ms = Date.now() - t0;
+        const ranIn = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8').trim() : '';
+        const registered = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: helpRepo, encoding: 'utf8' })
+            .stdout.split('\n').filter((l) => l.startsWith('worktree ')).length;
+        const leftover = r.pid ? sweepDirsFor(r.pid) : [];
+        // A killed fall-through strands its worktree and exit handler; clear it
+        // here, by the child's own pid, so a red run leaves nothing behind.
+        dirs.push(...leftover);
+        // Killed with no marker is a box too slow to start node, not a verdict.
+        if (sb.timedOut(r) && !ranIn) {
+            infra++;
+            console.log(`INDETERMINATE  ${flag} produced no verdict: ${sb.reason(r)} ${sb.lastWords(r, 300)}`);
+            continue;
+        }
+        check(`help: ${flag} returns inside the ${HELP_BUDGET_MS} ms entrypoint budget`, !sb.timedOut(r), ms + ' ms');
+        check(`help: ${flag} exits 0`, r.status === 0, 'exit ' + r.status + ' signal ' + r.signal);
+        check(`help: ${flag} prints usage naming the flags the sweep accepts`,
+            /^usage: node tooling\/check-suites-can-fail\.js/m.test(r.stdout || '')
+                && /--verbose/.test(r.stdout) && /--all-subjects/.test(r.stdout),
+            JSON.stringify((r.stdout || '').slice(0, 200)));
+        check(`help: ${flag} creates no check-suites-wt-* worktree`,
+            !ranIn && registered === 1 && leftover.length === 0,
+            `planted suite ran in ${JSON.stringify(ranIn)}, ${registered} worktree(s) registered, ${leftover.length} left under the temp root`);
+    }
+
     // ---- CONTROL: every row green, nothing extra printed --------------------
     const control = makeRepo('control', {
         'VERSION': '1.0.0\n',
