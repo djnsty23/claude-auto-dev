@@ -66,6 +66,8 @@ const ACCEPTED = [
         why: 'Chrome Preferences of an agent-browser profile. Every run of this hook sets the same two keys to false, so a lost update rewrites the same values. The only other writer is Chrome.' },
     { file: 'plugins/autodev-core/hooks/peer-send-ledger.js', kind: 'replace', path: 'file',
         why: 'The prune holds an exclusive lock against other prunes and copies every byte appended after its read before the rename. What remains is an append between its last stat and the rename, only when the ledger passes PRUNE_BYTES.' },
+    { file: 'plugins/autodev-core/hooks/session-env-dedupe.js', kind: 'replace', path: 'path.join(dir, change.name)',
+        why: 'The dir is session-env/<session id>, one per session (hookDir builds it from the payload session_id). The replace is a compare-and-swap: it re-reads the file, renames only if it still holds the text the plan was made from, and replans on a miss. What remains is an append between that re-read and the rename, in its own session only.' },
     { file: 'plugins/autodev-core/hooks/session-register.js', kind: 'consume', path: 'path.join(DIR, name)',
         why: 'One record per session, named by the session id (read from the directory, so the key is not visible here). Deleted only when its own session has not written it for RETAIN_DAYS.' },
     { file: 'plugins/autodev-core/hooks/stop-auto-check.js', kind: 'rewrite', path: 'notesLedger',
