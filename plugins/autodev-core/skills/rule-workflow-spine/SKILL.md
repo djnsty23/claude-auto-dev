@@ -116,7 +116,7 @@ Before any UI change:
 Existing: `design`, `artifact-design`, `a11y`, `rule-design-system`, `rule-thumb-first`
 
 Step 2, build:
-Existing: `auto`, `refactor`, `migrate`, `iterate`, `heal`
+Existing: `auto`, `iterate`, `heal`
 
 Step 3, prove:
 Existing: `prove`, `test`, `preflight`, `review`, `show-your-work`, `rule-verification`, `rule-gate-integrity`
