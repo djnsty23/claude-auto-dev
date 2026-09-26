@@ -59,12 +59,20 @@
  *   node check-queue-freshness.js --queue Q.md --repo-root ~/Code --no-fetch
  *   node check-queue-freshness.js --queue Q.md --json
  *
- * Exit 3 = at least one premise is STALE. Exit 2 = nothing could be checked,
- * which is never reported as clear. Exit 0 = every premise checked still holds.
+ * Exit 3 = at least one premise is STALE or names a MISSING-FILE. Exit 2 =
+ * nothing could be checked, which is never reported as clear. Exit 0 = every
+ * premise checked still holds.
+ *
+ * A FAILED GIT CALL IS NOT AN ANSWER. `git grep` exits 1 for "no match" and 128
+ * or more for an error, and only the first means absent, and only when stderr
+ * is empty: it also exits 1 when it could not read an object. A git call that
+ * did not run cleanly makes its premise UNCHECKABLE, with a `why` naming git's
+ * exit status and stderr. It counts exactly as a premise-less item does: toward
+ * exit 2 when nothing else was checked, never toward exit 3, never as fresh.
  */
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const argv = process.argv.slice(2);
 const has = (n) => argv.includes('--' + n);
@@ -83,11 +91,62 @@ const REPO_ROOT = val('repo-root', null) || (() => {
     catch { return null; }
 })();
 
+/**
+ * Run git and keep everything it reported: status, signal, spawn error, stderr.
+ *
+ * This was `catch { return null; }` until 2026-09-26, and every caller read null
+ * as "git printed nothing". A `git grep` that died read as zero matches, so an
+ * expect=present premise came back STALE; a `cat-file -e` that died read as
+ * MISSING-FILE. `[measured 2026-09-25]` a gate went red on the dirty-tree case
+ * in tooling/test-check-queue-freshness.js (expects FRESH) with 224 node
+ * processes running, and that suite then failed 2 of 21 isolated runs and
+ * passed 48 of 48 later. The cause was never captured, because this wrapper
+ * threw it away.
+ *
+ * Only the caller knows which status means "no": 1 for `git grep`, an empty
+ * listing for `ls-tree`. So this returns the facts and never a verdict.
+ */
 function git(repo, args) {
-    try {
-        return execFileSync('git', ['-C', repo].concat(args),
-            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-    } catch { return null; }
+    const r = spawnSync('git', ['-C', repo].concat(args),
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    return {
+        command: 'git ' + args[0],
+        status: r.status,
+        signal: r.signal,
+        error: r.error ? (r.error.code || r.error.message) : null,
+        stdout: r.stdout || '',
+        stderr: (r.stderr || '').trim(),
+    };
+}
+
+/**
+ * Did git run to the end, exit with one of `statuses`, and report no error?
+ *
+ * STDERR COUNTS, and the exit status alone is not enough. `[measured 2026-09-26,
+ * git 2.54]` `git grep` over a tree with an unreadable object prints
+ * "error: ... unable to read <sha>" and still exits 1 when nothing it DID read
+ * matched, and 0 when something did. Either way the search did not cover the
+ * tree, so neither "absent" nor "only in comments" can be concluded from it.
+ */
+function answered(r, statuses) {
+    return !r.error && !r.signal && statuses.includes(r.status) && r.stderr === '';
+}
+
+/** One line naming the failure: `git grep exited 128: fatal: ...`. */
+function describeFailure(r) {
+    const how = r.error ? `failed (${r.error})`
+        : r.signal ? `was killed by ${r.signal}`
+            : `exited ${r.status}`;
+    return r.command + ' ' + how + (r.stderr ? ': ' + r.stderr.split('\n')[0] : '');
+}
+
+/** The verdict for a git call that did not answer. `notWhat` names the verdict it is not. */
+function gitFailed(base, r, notWhat) {
+    return Object.assign(base, {
+        verdict: 'UNCHECKABLE',
+        why: `${describeFailure(r)}. That is git failing to answer, NOT ${notWhat}`,
+        gitFailure: { command: r.command, status: r.status, signal: r.signal, error: r.error, stderr: r.stderr },
+    });
 }
 
 /**
@@ -239,13 +298,20 @@ function evaluate(p) {
         // A failed fetch is NOT fatal — the ref may still be readable from the
         // last fetch — but it is recorded, so a verdict taken from a stale
         // remote is never presented as a verdict taken from a current one.
-        if (git(repo, ['fetch', '--quiet', 'origin']) === null) base.fetchFailed = true;
+        const fetch = git(repo, ['fetch', '--quiet', 'origin']);
+        if (fetch.error || fetch.status !== 0) base.fetchFailed = describeFailure(fetch);
     }
 
-    const ref = (git(repo, ['rev-parse', '--abbrev-ref', 'origin/HEAD']) || '').trim()
-        || (git(repo, ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main']) ? 'origin/main' : null);
+    // origin/HEAD is unset on many clones, and the 128 it exits with there is
+    // expected, so only the fallback's failure is reported as git's.
+    const head = git(repo, ['rev-parse', '--abbrev-ref', 'origin/HEAD']);
+    let ref = !head.error && head.status === 0 ? head.stdout.trim() : '';
     if (!ref) {
-        return Object.assign(base, { verdict: 'UNCHECKABLE', why: 'could not resolve origin/HEAD' });
+        const main = git(repo, ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main']);
+        if (answered(main, [0])) ref = 'origin/main';
+        else if (answered(main, [1])) {
+            return Object.assign(base, { verdict: 'UNCHECKABLE', why: 'could not resolve origin/HEAD' });
+        } else return gitFailed(base, main, 'a missing origin/HEAD');
     }
     base.ref = ref;
 
@@ -254,9 +320,16 @@ function evaluate(p) {
     // removed from a file still there. One of the four stale items was stale
     // for exactly this reason, so it gets its own verdict rather than being
     // folded into `absent`.
+    //
+    // `ls-tree`, not `cat-file -e`. `[measured 2026-09-26, git 2.54]` cat-file
+    // exits 128 both for a path absent from the tree and for a tree it cannot
+    // read, and exits 1 for a path whose blob is unreadable, so none of its
+    // statuses means "missing" alone. ls-tree exits 0 with an EMPTY listing
+    // when the path is absent and reports anything else as a failure.
     if (p.file) {
-        const exists = git(repo, ['cat-file', '-e', `${ref}:${p.file}`]) !== null;
-        if (!exists) {
+        const entry = git(repo, ['ls-tree', '--name-only', ref, '--', p.file]);
+        if (!answered(entry, [0])) return gitFailed(base, entry, 'a missing file');
+        if (!entry.stdout.trim()) {
             return Object.assign(base, {
                 verdict: 'MISSING-FILE',
                 why: `${p.file} does not exist on ${ref}`,
@@ -264,10 +337,14 @@ function evaluate(p) {
         }
     }
 
+    // git grep exits 0 on a match and 1 on none. Any other outcome, or any
+    // stderr, is a search that did not happen, and reading it as "no match" is
+    // how a crashed grep reported finished work.
     const args = ['grep', '-n', '--fixed-strings', '-e', p.match, ref];
     if (p.file) args.push('--', p.file);
-    const raw = git(repo, args);
-    const hits = (raw || '').split('\n').map((s) => s.trim()).filter(Boolean);
+    const found = git(repo, args);
+    if (!answered(found, [0, 1])) return gitFailed(base, found, 'an absent string');
+    const hits = found.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
 
     // git grep prefixes every line with "<ref>:" — strip it so the output reads
     // as file:line:text, which is what a person can click.
@@ -339,6 +416,9 @@ function main() {
     const review = results.filter((r) => r.verdict === 'REVIEW');
     const fresh = results.filter((r) => r.verdict === 'FRESH');
     const checked = stale.length + missing.length + fresh.length + review.length;
+    // A subset of uncheckable, counted apart: "the queue carried nothing to
+    // check" and "git failed while checking" need different fixes.
+    const gitFailures = results.filter((r) => r.gitFailure);
 
     if (AS_JSON) {
         console.log(JSON.stringify({
@@ -353,6 +433,7 @@ function main() {
                 review: review.length,
                 fresh: fresh.length,
                 uncheckable: unchk.length,
+                gitFailed: gitFailures.length,
             },
             results: results.map((r) => ({
                 item: r.item.label,
@@ -361,14 +442,21 @@ function main() {
                 why: r.why,
                 premise: r.premise ? r.premise.raw : null,
                 matches: r.matches,
+                gitFailure: r.gitFailure,
             })),
         }, null, 2));
     } else {
         console.log(`QUEUE FRESHNESS  ${QUEUE}`);
         console.log(`  ${items.length} item(s), ${results.length} premise(s), `
             + `${checked} checked against origin/HEAD` + (NO_FETCH ? '  [--no-fetch: NOT re-fetched]' : ''));
-        if (results.some((r) => r.fetchFailed)) {
+        const fetchFailure = results.find((r) => r.fetchFailed);
+        if (fetchFailure) {
             console.log('  WARNING: a fetch failed. Verdicts below may be taken from a stale remote.');
+            console.log(`           ${fetchFailure.fetchFailed}`);
+        }
+        if (gitFailures.length) {
+            console.log(`  WARNING: git itself failed on ${gitFailures.length} premise(s). They are listed as`);
+            console.log('           UNCHECKABLE with git\'s own error, and are neither stale nor fresh.');
         }
         console.log('');
 
@@ -402,8 +490,16 @@ function main() {
         // same breath. That collapse is the failure this tool is about.
         if (!checked) {
             console.log('COULD NOT CHECK: 0 premises were evaluated. This is NOT "the queue is fresh".');
-            console.log(`  ${unchk.length} item(s)/premise(s) carried nothing checkable. Add a line like:`);
-            console.log('    PREMISE: repo=<name> expect=absent match="someSymbol" file=src/x.ts');
+            // A premise git failed on is not missing from the queue, so the
+            // advice to add one is for the rest only.
+            if (gitFailures.length) {
+                console.log(`  git failed on ${gitFailures.length} premise(s), named above: fix git, not the queue.`);
+            }
+            const bare = unchk.length - gitFailures.length;
+            if (bare) {
+                console.log(`  ${bare} item(s)/premise(s) carried nothing checkable. Add a line like:`);
+                console.log('    PREMISE: repo=<name> expect=absent match="someSymbol" file=src/x.ts');
+            }
         } else if (stale.length || missing.length) {
             console.log(`LIKELY STALE: ${stale.length} premise(s) falsified, ${missing.length} missing file(s), `
                 + `out of ${checked} checked — and ${unchk.length} that could not be checked at all.`);
