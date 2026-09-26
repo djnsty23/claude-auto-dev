@@ -286,6 +286,16 @@ function headlessSource(s) {
             askFile: st.askFile, answerFile: st.answerFile, record: rec, ledger: file,
         };
     });
+    // Every record at one code shares one scratch directory, so a rerun's
+    // ask.json is read by each earlier record there too. The newest run owns
+    // it: without this one ask showed on every row at its code and toasted
+    // once per row. [measured 2026-09-24] 15 codes held more than one record.
+    const owner = new Map();
+    for (const r of rows) {
+        const cur = r.askFile && owner.get(r.askFile);
+        if (r.askFile && (!cur || (ts(r.record.startedAt) || 0) >= (ts(cur.record.startedAt) || 0))) owner.set(r.askFile, r);
+    }
+    for (const r of rows) if (r.askFile && owner.get(r.askFile) !== r) { r.question = null; r.answered = false; }
     return { source, readable: true, population: `${source}: ${file}: ${ledger.records.length} record(s)`, rows };
 }
 
@@ -442,6 +452,21 @@ function collect(s, now = Date.now()) {
     }
     rows.sort((a, b) => rank(a) - rank(b) || (b.lastAt || 0) - (a.lastAt || 0));
     return { sources, rows, window: `live, asking, or touched in the last ${s.hours} h`, at: new Date(now).toISOString() };
+}
+
+/**
+ * The open asks alone, read by the same sources and the same question() the page uses, so
+ * fleet-notify.js and this page cannot disagree about what is waiting. Only runs/ and the
+ * headless ledger carry a question channel. Skipping the rest keeps a notify pass off the
+ * desktop session store, the slow read. collect() shows every question row whatever its age,
+ * so no window applies here either.
+ */
+function openAsks(s) {
+    const sources = [];
+    for (const [name, fn] of [['runs', runsSource], ['headless-worker', headlessSource]]) {
+        try { sources.push(fn(s)); } catch (e) { sources.push(unreadable(name, e.message)); }
+    }
+    return { sources, rows: sources.flatMap((src) => src.rows.filter((r) => r.question)) };
 }
 
 function rank(r) { return r.process === 'COULD-NOT-READ' ? 0 : r.question ? 1 : r.live ? 2 : 3; }
@@ -765,4 +790,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { parseArgs, settings, collect, doAction, processMatches, progressOf, lastPr, nextCode, renderPage, listLines, selftest, esc };
+module.exports = { parseArgs, settings, collect, openAsks, doAction, processMatches, progressOf, lastPr, nextCode, renderPage, listLines, selftest, esc };
