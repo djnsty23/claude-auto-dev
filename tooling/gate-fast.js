@@ -37,7 +37,8 @@
  *      false green the gate exists to prevent.
  *
  * THE POPULATION IS DERIVED, NOT LISTED. The full step set comes from
- * package.json's `scripts.gate` split on `&&` - the same authority
+ * package.json's gate chain (`scripts["gate:chain"]`, read by gate-lock.js's
+ * readGateChain) split on `&&` - the same authority
  * check-claude-md.js grades the prose against. A hand-maintained copy would rot
  * the first time someone added a step, silently, which is how the `passes` table
  * came to list four states while five existed. A step this script does not
@@ -58,6 +59,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { readGateChain } = require('./gate-lock.js');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -68,7 +70,10 @@ const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] 
 // ---------------------------------------------------------------------------
 
 /**
- * `scripts.gate` split on `&&`, reduced to the npm script NAMES it invokes.
+ * The gate chain split on `&&`, reduced to the npm script NAMES it invokes.
+ * The chain is `scripts["gate:chain"]` (`scripts.gate` is the lock wrapper,
+ * gate-lock.js), or `scripts.gate` in a tree with no wrapper. readGateChain()
+ * is the one definition of that.
  *
  * `npm test` and `npm run check:suites` are the two spellings the chain uses.
  * Anything else keeps `name: null` and is reported by its raw text, so an
@@ -79,7 +84,7 @@ function gateStepNames(root) {
     if (!fs.existsSync(pkgPath)) return null;
     let pkg;
     try { pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')); } catch { return null; }
-    const gate = pkg.scripts && pkg.scripts.gate;
+    const gate = readGateChain(pkg);
     if (typeof gate !== 'string') return null;
     return gate.split('&&').map((s) => s.trim()).filter(Boolean).map((raw) => {
         const run = /^npm run ([\w:-]+)$/.exec(raw);
@@ -99,7 +104,7 @@ function gateStepNames(root) {
  * was measured (0.2 s on 2026-09-15) and added by hand. That is the intended
  * path for every new step: measured first, listed second.
  *
- * Membership is tested against whatever `scripts.gate` actually contains, so a
+ * Membership is tested against whatever the gate chain actually contains, so a
  * name listed here but absent from the chain costs nothing.
  */
 const FAST = new Set([          // [measured 2026-09-15, load 4.6-5.4]
@@ -231,6 +236,17 @@ function selftest() {
     check('a package.json with no scripts.gate yields no population',
         gateStepNames(tmp) === null);
 
+    // 4b. The real tree's shape: `gate` is the lock wrapper, the chain lives in
+    //     `gate:chain`. Reading the wrapper as the chain would make every step
+    //     vanish into one unrecognised, deferred command.
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ scripts: {
+        gate: 'node tooling/gate-lock.js',
+        'gate:chain': 'npm test && npm run check:agents-md',
+    } }));
+    steps = gateStepNames(tmp);
+    check('the chain is read from gate:chain, not from the lock wrapper',
+        steps && steps.length === 2 && steps[1].name === 'check:agents-md', JSON.stringify(steps));
+
     // 5. The banner separates partial from complete. This is the whole point of
     //    the split and the only line a reader acts on.
     const okPartial = render([{ name: 'check:agents-md', status: 'PASS', code: 0, ms: 900 }],
@@ -273,7 +289,7 @@ function main() {
     if (has('--help') || has('-h')) {
         console.log('usage: node tooling/gate-fast.js [--json] [--root DIR] [--selftest]');
         console.log('');
-        console.log('Runs the cheap steps of package.json `scripts.gate` INDEPENDENTLY and');
+        console.log('Runs the cheap steps of the package.json gate chain INDEPENDENTLY and');
         console.log('reports which steps it did not run. This is NOT the gate: `npm run gate`');
         console.log('runs every step and is what a merge needs.');
         return;
@@ -283,7 +299,7 @@ function main() {
     const root = path.resolve(val('--root', path.join(__dirname, '..')));
     const steps = gateStepNames(root);
     if (steps === null) {
-        console.error('INDETERMINATE — package.json has no readable `scripts.gate`.');
+        console.error('INDETERMINATE — package.json has no readable gate chain (`scripts["gate:chain"]` or `scripts.gate`).');
         console.error('This script derives its step list from that chain and will not guess');
         console.error('one: a hardcoded population is how a fast tier comes to claim a step');
         console.error('nobody added it to.');
@@ -295,7 +311,7 @@ function main() {
     const deferred = steps.filter((s) => !(s.name && FAST.has(s.name)));
 
     if (fast.length === 0) {
-        console.error(`INDETERMINATE — none of the ${steps.length} steps in scripts.gate are`);
+        console.error(`INDETERMINATE — none of the ${steps.length} steps in the gate chain are`);
         console.error('classified fast. Either the chain was rewritten or FAST is stale.');
         console.error('Chain: ' + steps.map((s) => s.raw).join(' && '));
         process.exitCode = 2;

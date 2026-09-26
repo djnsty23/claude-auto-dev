@@ -37,6 +37,11 @@ npm test && npm run check:suites && npm run check:probe-shapes
 When the first step fails, run the remaining eleven yourself.
 The chain's exit status is a verdict on one step, not on twelve.
 
+- **`npm run gate` takes the machine-wide full-gate lock** (`tooling/gate-lock.js`), and the chain
+  above is `scripts["gate:chain"]`. It waits for a live holder and prints who it is behind, moves a
+  dead holder's lock aside to `.stale-HHMM`, and releases to `.released-HHMM` on any outcome. The
+  chain's exit code passes through. A chain it did not see finish exits 2. `AUTODEV_GATE_LOCK=0`
+  skips the lock.
 - **Exit 2 is INDETERMINATE**, never a pass or a fail. Read the conflict line before re-running.
 - **Run it on a clean tree, after committing and before pushing.** `check:suites` grades HEAD in a
   private worktree and refuses a dirty tree. Iterate with `npm test`, then commit, gate and push.
@@ -44,7 +49,8 @@ The chain's exit status is a verdict on one step, not on twelve.
   fails `tree-inert` on any change. Draft in a scratchpad. `git check-ignore -v <path>` says whether a
   path under `.claude/` is ignored.
 - **`gate:fast` does not satisfy the merge bar.** It runs the cheap steps it derives from
-  `scripts.gate` and names what it deferred. The bar is the full gate after any rebase.
+  `scripts["gate:chain"]`, takes no lock, and names what it deferred. The bar is the full gate
+  after any rebase.
 - **The gate is not what CI runs.** `check:hook-parse` is CI's `node --check` loop over
   `plugins/*/hooks/*.js`, but seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.
 - **Kill by pid, never by pattern.** Every worktree runs the same command lines, so `pkill -f`
