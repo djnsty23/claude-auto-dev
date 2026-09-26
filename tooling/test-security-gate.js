@@ -233,6 +233,10 @@ async function main() {
     const open = await run(['--root', clean, '--url', `${base}/good`, '--api', '/api/open', '--json']);
     check('a protected path answering 200 anonymously is an error', open.status === 1 && rules(open).has('live-api-open'), open.stdout);
 
+    // A comma list used to be fetched as ONE path, which 404s or 401s and reads GREEN while the open route hides in it.
+    const list = await run(['--root', clean, '--url', `${base}/good`, '--api', '/api/private,/api/open', '--json']);
+    check('a comma-separated --api list is probed path by path', list.status === 1 && rules(list).has('live-api-open'), list.stdout);
+
     const bare = await run(['--root', clean, '--url', `${base}/good`, '--api', 'api/open', '--json']);
     check('an --api path without its leading slash resolves from the host root', rules(bare).has('live-api-open'), bare.stdout);
     const mangled = await run(['--root', clean, '--url', `${base}/good`, '--api', 'C:/Program Files/Git/api/open']);

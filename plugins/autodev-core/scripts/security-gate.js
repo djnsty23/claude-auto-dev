@@ -51,9 +51,9 @@ Usage:
 
 Options:
   --root <dir>     project root (default: cwd). Files come from git when it is a repo.
-  --url <url>      also grade the live response headers of this page (repeatable)
+  --url <url>      also grade the live response headers of this page (repeatable, or a comma list)
   --api <path>     a protected path, fetched with no credentials against the first --url;
-                   a 2xx is a finding (repeatable)
+                   a 2xx is a finding (repeatable, or a comma list)
   --invite-only    assert Supabase sign-up is disabled; reads SUPABASE_URL (or
                    NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_ANON_KEY (or the NEXT_PUBLIC_ one)
   --strict         warnings fail too
@@ -417,6 +417,8 @@ async function liveChecks({ urls, apis, inviteOnly }) {
 async function main(argv) {
   const has = (f) => argv.includes(f);
   const all = (f) => argv.flatMap((a, i) => (a === f && argv[i + 1] ? [argv[i + 1]] : []));
+  // --url and --api take a comma list too: joined, the list would be fetched as one path and pass.
+  const list = (f) => all(f).flatMap((v) => v.split(',').map((x) => x.trim()).filter(Boolean));
   if (has('--help') || has('-h')) {
     console.log(HELP);
     return 0;
@@ -443,8 +445,8 @@ async function main(argv) {
   const files = readFiles(root, paths);
   const scan = scanFiles(files);
   const live = await liveChecks({
-    urls: [...(config.url || []), ...all('--url')],
-    apis: [...(config.api || []), ...all('--api')],
+    urls: [...(config.url || []), ...list('--url')],
+    apis: [...(config.api || []), ...list('--api')],
     inviteOnly: has('--invite-only') || config.inviteOnly === true,
   });
   problems.push(...live.problems);
