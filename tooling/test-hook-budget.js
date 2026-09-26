@@ -117,6 +117,8 @@ const DECISIONS = {
         'it kills processes on positive evidence only, and a payload is not evidence'),
     'plugins/autodev-core/hooks/session-register.js': OPEN(
         'a registry must never be the reason a session cannot start or end'),
+    'plugins/autodev-core/hooks/session-env-dedupe.js': OPEN(
+        'it is silent by contract and exits 0 on every path: a payload without a session id names no directory, so it rewrites nothing'),
     'plugins/autodev-core/hooks/user-prompt-image-scan.js': OPEN(
         'a degraded scan is better than a prompt that cannot be sent'),
     'plugins/autodev-core/hooks/inbox-notify.js': OPEN(
