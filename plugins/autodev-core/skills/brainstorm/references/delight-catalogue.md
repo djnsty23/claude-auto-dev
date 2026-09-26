@@ -6,7 +6,7 @@ proposes at least three entries that fit the product. Every entry is a proposal.
 It reaches the operator as an options artifact and a panel, and nothing here is
 built unasked.
 
-The first nine entries came out of one redesign of a calm, night-time product and
+The entries below came out of one redesign of a calm, night-time product and
 are generalised here. Add an entry when a touch lands with an operator: it needs
 the pattern, one line on when it fits, and one line on its guard.
 
