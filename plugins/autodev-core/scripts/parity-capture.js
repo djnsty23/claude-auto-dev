@@ -36,7 +36,9 @@
  *                changed canonical, a new redirect, text that moved client-only
  *
  * and anything that could not be measured is UNVERIFIED, never "unchanged".
- * With no rendered harvest, every rendered field is UNVERIFIED.
+ * With no rendered harvest, every rendered field is UNVERIFIED. A candidate
+ * whose root answers 401 or 403 (a preview behind deployment protection) is
+ * not measured at all: one UNVERIFIED finding, exit 2.
  *
  * ---------------------------------------------------------------- EXIT CODES
  *
@@ -571,6 +573,16 @@ function judgeSite(J, side) {
 
 const CLASSES = ['lost', 'unclear', 'replaced', 'intentional', 'unverified'];
 
+// A candidate whose root answers 401 or 403 is behind access control, most
+// often a preview deploy behind deployment protection. Every route, robots.txt
+// and the sitemap then answer the same way, and grading those answers would
+// report the whole site lost. Nothing about the candidate's content was
+// measured, so the run is INDETERMINATE with the reason, never a fail.
+function protectedAnswer(home) {
+    if (!home.ok) return null;
+    return home.status === 401 || home.status === 403 ? home.status : null;
+}
+
 function verdictOf(counts) {
     if (counts.lost + counts.unclear > 0) return { word: 'FAIL', exit: 1 };
     if (counts.unverified > 0) return { word: 'INDETERMINATE', exit: 2 };
@@ -586,11 +598,12 @@ async function run(opts) {
     const hc = loadHarvest(opts.harvestCandidate, candidate, hosts);
     const t = opts.timeoutMs;
 
-    const [smB, smC, rbB, rbC, homeB] = await Promise.all([
+    const [smB, smC, rbB, rbC, homeB, homeC] = await Promise.all([
         readSitemap(baseline, t), readSitemap(candidate, t),
         captureFile(baseline, '/robots.txt', t), captureFile(candidate, '/robots.txt', t),
-        captureRoute(baseline, '/', hosts, t),
+        captureRoute(baseline, '/', hosts, t), captureRoute(candidate, '/', hosts, t),
     ]);
+    const locked = protectedAnswer(homeC);
 
     // The population: what the baseline says exists, from three independent
     // places, printed with its sources so an empty run cannot pass as a clean one.
@@ -602,16 +615,22 @@ async function run(opts) {
     // Ordered so the cap drops the least-named first: routes the caller listed and
     // pages the home page links to come before the long tail of the sitemap.
     const all = [...new Set([].concat(sources.always, sources.routesFile, sources.links, sources.sitemap))];
-    const routes = all.slice(0, opts.maxRoutes);
-    const overCap = all.slice(opts.maxRoutes);
+    const routes = locked ? [] : all.slice(0, opts.maxRoutes);
+    const overCap = locked ? [] : all.slice(opts.maxRoutes);
 
     const caps = await pool(routes, 4, async (r) => {
-        const [b, c] = await Promise.all([r === '/' ? homeB : captureRoute(baseline, r, hosts, t), captureRoute(candidate, r, hosts, t)]);
+        const [b, c] = await Promise.all([r === '/' ? homeB : captureRoute(baseline, r, hosts, t), r === '/' ? homeC : captureRoute(candidate, r, hosts, t)]);
         return { r, b, c };
     });
 
     const J = makeJudge(intent);
-    judgeSite(J, { robots: { b: rbB, c: rbC }, sitemap: { b: smB, c: smC } });
+    if (locked) {
+        J.add({ route: '(site)', kind: 'unverified', class: 'unverified', item: 'candidate-protected',
+            detail: `candidate answered ${locked} at /, so it is behind access control (deployment protection on a preview?) `
+                + `and none of its ${all.length} routes were measured; point --candidate at an unprotected preview or a local server` });
+    } else {
+        judgeSite(J, { robots: { b: rbB, c: rbC }, sitemap: { b: smB, c: smC } });
+    }
     for (const { r, b, c } of caps) judgeRoute(J, r, b, c, hb, hc);
     if (overCap.length) {
         J.add({ route: '(site)', kind: 'unverified', class: 'unverified', item: 'cap', detail: `${overCap.length} of ${all.length} routes over --max-routes ${opts.maxRoutes} were not measured` });

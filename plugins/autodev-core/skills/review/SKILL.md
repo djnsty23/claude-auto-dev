@@ -104,7 +104,10 @@ It reports, route by route, what the candidate lost or changed: MISSING or
 redirected routes, SEO fields, JSON-LD types, links, CTAs, forms and text, each
 classed `replaced`, `intentional`, `lost` or `unclear`. Exit 1 blocks. Exit 2
 means something was not measured, which is never a pass. The population line
-names every route it compared. Read it before trusting a clean result.
+names every route it compared. Read it before trusting a clean result. A
+preview behind deployment protection answers 401 or 403 at `/`, and the run
+then stops at exit 2 with a `candidate-protected` line: point `--candidate` at
+an unprotected preview or a local server.
 
 The harvest files hold what each page rendered. Print the probe with
 `--print-probe`, then for each route in the population line, on each side:
