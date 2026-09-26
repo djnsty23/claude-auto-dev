@@ -300,7 +300,9 @@ function checkMessageListeners(path, text, contentScript) {
   return [finding(contentScript ? 'ext-content-origin' : 'message-origin', path, lineAt(text, m.index), 'A window message listener never reads event.origin.', 'Return early unless event.origin (and event.source) is the one expected.')];
 }
 
-const AUTH_MARKERS = /getUser|getSession|getServerSession|getClaims|getToken|currentUser|\bauth\s*\(|requireAuth|requireUser|requireAdmin|verify|signature|authorization|bearer|x-api-key|timingSafeEqual|CRON_SECRET|webhook/i;
+// exchangeCodeForSession and verifyOtp are the sign-in step itself: an OAuth or
+// magic-link callback must be reachable anonymously.
+const AUTH_MARKERS = /getUser|getSession|getServerSession|getClaims|getToken|currentUser|exchangeCodeForSession|verifyOtp|\bauth\s*\(|requireAuth|requireUser|requireAdmin|verify|signature|authorization|bearer|x-api-key|timingSafeEqual|CRON_SECRET|webhook/i;
 
 const isRoute = (p) => /(^|\/)app\/(?:.*\/)?route\.[cm]?[jt]s$/.test(p) || /(^|\/)pages\/api\/.+\.[cm]?[jt]s$/.test(p) || /(^|\/)supabase\/functions\/[^/_][^/]*\/index\.ts$/.test(p);
 
