@@ -588,9 +588,13 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
 
     // The hook counts after the sections below it have run, into a slot held
     // at this point, so its line still comes before the compaction pointer.
-    fs.writeFileSync(path.join(PROJ, 'RESUME.md'), '# resume\n', 'utf8');
+    // The session's own handoff, the name context-depth-nudge.js gives it: a
+    // root RESUME.md is not a pointer once only the session's own file counts.
+    const OWN = path.join(PROJ, '.claude', 'handoffs', 'RESUME-someone-.md');
+    fs.mkdirSync(path.dirname(OWN), { recursive: true });
+    fs.writeFileSync(OWN, '# resume\n', 'utf8');
     const e = pile('someone-else', {}, { source: 'compact' });
-    fs.rmSync(path.join(PROJ, 'RESUME.md'), { force: true });
+    fs.rmSync(OWN, { force: true });
     const at = (s) => e.ctx.indexOf(s);
     check('pile: the line keeps its place, before the compaction pointer',
         at('Session pile: 7') >= 0 && at('Context was just compacted') > at('Session pile: 7'));
