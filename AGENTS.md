@@ -105,7 +105,7 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 138,685 | 22 of 22 |
+| A  full body | 139,390 | 22 of 22 |
 | B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,308 | 22 of 22 |
 | B′ same, but dated LINES instead of paragraphs | 15,205 | 1 of 22 |
 | C  description only | 7,151 | 0 of 22 |
