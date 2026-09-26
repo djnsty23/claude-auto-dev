@@ -225,6 +225,44 @@ function makeMutant(name) {
   return { file, count };
 }
 
+// The two origin guards, disabled one at a time or together. `counts` has one
+// entry per anchor, and each must be 1 or the mutant proves nothing.
+const ORIGIN_GUARDS = {
+  validation: {
+    anchor: 'if (!t || !resolveTarget(t.path, m.baseUrl)) {',
+    replace: 'if (!t) {',
+  },
+  probe: {
+    anchor: 'if (new URL(url).origin !== origin) {',
+    replace: 'if (false) {',
+  },
+};
+
+function makeOriginMutant(names) {
+  let src = fs.readFileSync(SCRIPT, 'utf8');
+  const counts = [];
+  for (const n of names) {
+    const { anchor, replace } = ORIGIN_GUARDS[n];
+    counts.push(src.split(anchor).length - 1);
+    src = src.split(anchor).join(replace);
+  }
+  const file = path.join(TMP, `auth-matrix.mutant-origin-${names.join('-')}.js`);
+  fs.writeFileSync(file, src);
+  return { file, counts };
+}
+
+// A server that should never be reached: it records every request and the
+// cookie that came with it.
+async function listenRecorder() {
+  const hits = [];
+  const server = await listen((req, res) => {
+    hits.push({ url: req.url, cookie: req.headers.cookie || '' });
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end(MARKER);
+  });
+  return { server, hits };
+}
+
 // ---- cases -----------------------------------------------------------------
 
 async function main() {
@@ -361,6 +399,61 @@ async function main() {
     const member = json && rowOf(json, 'member', '/admin');
     check('a marker never seen in an allowed response makes the empty-200 deny UNVERIFIED',
       j.code === 2 && member && member.verdict === 'UNVERIFIED', `exit ${j.code} ${JSON.stringify(member)}`);
+  }
+
+  // A target path that resolves off baseUrl's origin would carry the role's
+  // credential to that host. Each form is refused before any request, to the
+  // other host or to baseUrl. The "evil" host is a second local server, so a
+  // request that got through is counted rather than assumed.
+  {
+    const app = await listenRecorder();
+    const evil = await listenRecorder();
+    const appUrl = `http://127.0.0.1:${app.server.address().port}`;
+    const host = `127.0.0.1:${evil.server.address().port}`;
+    const forms = [
+      { name: 'scheme-relative //host', path: `//${host}/x` },
+      { name: 'slash-backslash /\\host', path: `/\\${host}/x` },
+      { name: 'double backslash \\\\host', path: `\\\\${host}/x` },
+      { name: 'absolute URL', path: `http://${host}/x` },
+      { name: 'tab stripped by the URL parser /<TAB>/host', path: `/\t/${host}/x` },
+    ];
+    const matrixFor = (p) => writeMatrix(appUrl, { targets: [
+      { path: p, method: 'GET', expect: { anon: 'deny', member: 'deny', admin: 'allow' } },
+    ] });
+    for (const f of forms) {
+      const r = await run(SCRIPT, [matrixFor(f.path)]);
+      check(`${f.name}: refused as an invalid matrix (exit 2)`, r.code === 2 && /invalid matrix/.test(r.stderr),
+        `exit ${r.code}\n${r.stdout}${r.stderr}`);
+      check(`${f.name}: the error names the path rule`, /stay on baseUrl's origin/.test(r.stderr), r.stderr);
+      assertNoSecrets(f.name, r);
+    }
+    check('off-origin paths: the other host received no request', evil.hits.length === 0, JSON.stringify(evil.hits));
+    check('off-origin paths: baseUrl received no request either', app.hits.length === 0, JSON.stringify(app.hits));
+
+    // With matrix validation disabled, the per-request origin check alone
+    // still refuses every form, and each cell is UNVERIFIED, not a pass.
+    const noValidation = makeOriginMutant(['validation']);
+    check('validation-off mutant anchor matched exactly once', noValidation.counts[0] === 1, `matched ${noValidation.counts}`);
+    for (const f of forms) {
+      const r = await run(noValidation.file, [matrixFor(f.path), '--json']);
+      const json = parseJson(r);
+      const refused = json && json.rows.every((x) => x.verdict === 'UNVERIFIED' && /CROSS_ORIGIN_REFUSED/.test(x.why));
+      check(`${f.name}: with validation off, the request guard refuses every cell (exit 2)`, r.code === 2 && refused,
+        `exit ${r.code}\n${r.stdout.slice(0, 600)}${r.stderr}`);
+    }
+    check('validation off: the other host still received no request', evil.hits.length === 0, JSON.stringify(evil.hits));
+
+    // Both guards off: the admin cookie reaches the other host. This is the
+    // defect the guards exist for, and the proof the recorder can see it.
+    const noGuards = makeOriginMutant(['validation', 'probe']);
+    check('both-guards-off mutant anchors matched exactly once each',
+      noGuards.counts.every((c) => c === 1), `matched ${noGuards.counts}`);
+    const leaked = await run(noGuards.file, [matrixFor(forms[0].path)]);
+    check('both guards off: the admin cookie reaches the other host (the planted defect fires)',
+      evil.hits.some((h) => h.cookie === ADMIN_COOKIE), `exit ${leaked.code}, hits ${evil.hits.length}`);
+    mutantResults.push({ defect: 'off-origin-path', detector: 'origin', real: 2, mutant: `${evil.hits.length} off-origin hits` });
+    app.server.close();
+    evil.server.close();
   }
 
   // An unreachable server.
