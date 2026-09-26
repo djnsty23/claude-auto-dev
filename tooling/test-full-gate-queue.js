@@ -378,6 +378,30 @@ async function main() {
             w.code === 3 && tickets(fx).length === 0 && lockPid(fx) === h && /NOT taken/.test(w.out), w.out);
     }
 
+    // A poll that throws is retried; only a run of them gives the ticket up. A
+    // directory at the lock path makes every read throw EISDIR, on every OS.
+    {
+        const fx = fixture();
+        const a = sleeper();
+        fs.mkdirSync(fx.lock);
+        const w = spawn(process.execPath, [SUBJECT, 'wait', '--pid', String(a), '--what', 'retrying'],
+            { env: envFor(fx), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        let out = '';
+        w.stdout.on('data', (d) => { out += d; });
+        w.stderr.on('data', (d) => { out += d; });
+        const done = new Promise((r) => w.on('close', (code) => r(code)));
+        for (let i = 0; i < 300 && !/attempt 2 of/.test(out); i++) await sleep(20);
+        fs.rmdirSync(fx.lock);
+        const code = await done;
+        check('failed polls: wait retries after a throwing poll and takes the lock once reads work',
+            code === 0 && lockPid(fx) === a && /poll failed/.test(out), `${out}\nexit ${code}`);
+        const fx2 = fixture();
+        fs.mkdirSync(fx2.lock);
+        const g = run(SUBJECT, fx2, ['wait', '--pid', String(a), '--what', 'giving up']);
+        check('failed polls: ten in a row exit 1 and remove the ticket',
+            g.code === 1 && /gave up after 10 failed polls/.test(g.out) && tickets(fx2).length === 0, g.out);
+    }
+
     // With no --what, line 2 describes the checkout; with no lock path, the
     // default is under the OS home directory.
     {

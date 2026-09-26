@@ -66,6 +66,7 @@ const { spawnSync } = require('child_process');
 
 const TAG = 'full-gate-queue:';
 const EXIT_QUEUED = 3;
+const MAX_POLL_ERRORS = 10;
 const TICKET_RE = /^(\d{8}T\d{9}Z)-(\d{10})\.ticket$/;
 
 // ---------------------------------------------------------------------------
@@ -539,8 +540,27 @@ async function main() {
     let lastReport = 0;
     let stopped = null;
     for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, () => { stopped = s; });
+    let errors = 0;
     for (;;) {
-        const r = attempt();
+        let r;
+        try {
+            r = attempt();
+            errors = 0;
+        } catch (e) {
+            // Windows refuses a read while another process renames the file
+            // (EPERM, EBUSY). One failed poll must not cost the waiter its place,
+            // so it retries; only a run of failures gives the ticket up.
+            errors++;
+            log(`${TAG} poll failed (${e.code || e.message}), attempt ${errors} of ${MAX_POLL_ERRORS}`);
+            if (errors >= MAX_POLL_ERRORS) {
+                try { removeTicket(queueDirFor(lockPath), pid); } catch { /* the heartbeat expires it anyway */ }
+                console.error(`${TAG} gave up after ${errors} failed polls; lock NOT taken`);
+                process.exitCode = 1;
+                return;
+            }
+            await new Promise((res) => setTimeout(res, pollMs));
+            continue;
+        }
         if (r.acquired) {
             log(`${TAG} pid ${pid} holds ${lockPath} after ${Math.round((Date.now() - started) / 1000)} s`);
             return;
