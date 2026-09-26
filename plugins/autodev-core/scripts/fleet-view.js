@@ -24,10 +24,11 @@
  *             model, effort, permission mode and cwd.
  *   takeover  starts --takeover-script in a new console window (win32 only).
  *   stop      kills a headless worker by pid, only after the process identity
- *             matches the record. On Linux that is /proc/<pid>/cwd, on macOS
- *             lsof. Windows exposes no process cwd without native code, so there
- *             the check is the supervisor command line, which carries the
- *             record's --cwd and --code verbatim.
+ *             matches the record. The identity is the supervisor command line,
+ *             which carries `supervise` and the record's --code and --cwd
+ *             verbatim: /proc/<pid>/cmdline on Linux, ps on macOS, Win32_Process
+ *             on Windows. The process cwd is not used: the supervisor inherits
+ *             the directory `start` ran from, and a decoy can share it.
  * The page carries a per-start random token and every POST must return it. The
  * server binds 127.0.0.1 only and refuses a Host header that is not loopback,
  * so another origin can neither read the token nor rebind a name onto it.
@@ -479,28 +480,50 @@ function nextCode(code, ledgerRecords) {
     fault('no-code', `no free relaunch code for ${code}`);
 }
 
-/** Whether a live pid is the worker a record describes. Returns { ok, how, detail }. */
-function processMatches(pid, rec, platform = process.platform, runner = spawnSync) {
-    const want = path.resolve(rec.cwd);
-    const same = (a, b) => (platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+/**
+ * Whether a live pid is the headless-worker supervisor a record describes. Returns { ok, how, detail }.
+ * The identity is the supervisor's command line on every platform: `supervise`, the record's --code and
+ * its --cwd, which `start` passes verbatim. The process cwd is not an identity: the supervisor inherits
+ * whatever directory `start` ran from, not --cwd, and any unrelated process can sit in the same directory.
+ */
+function processMatches(pid, rec, platform = process.platform, runner = spawnSync, readFile = fs.readFileSync) {
+    // A win32 cwd resolves with win32 rules on any host: path.resolve on POSIX reads
+    // C:\w as a relative name and prefixes the host cwd, so the selftest failed there.
+    const P = platform === 'win32' ? path.win32 : path.posix;
+    const fold = (s) => (platform === 'win32' ? String(s).toLowerCase() : String(s));
+    const want = fold(P.resolve(rec.cwd));
     if (platform === 'linux') {
-        try { const cwd = fs.readlinkSync(`/proc/${pid}/cwd`); return { ok: same(path.resolve(cwd), want), how: 'proc-cwd', detail: cwd }; } catch (e) { return { ok: false, how: 'proc-cwd', detail: e.code || e.message }; }
+        // /proc/<pid>/cmdline is the exact argv, NUL-separated, so each flag's value is compared whole.
+        let args;
+        try { args = String(readFile(`/proc/${Number(pid)}/cmdline`, 'utf8')).split('\0'); } catch (e) { return { ok: false, how: 'proc-cmdline', detail: e.code || e.message }; }
+        if (args[args.length - 1] === '') args.pop();
+        if (!args.length) return { ok: false, how: 'proc-cmdline', detail: 'the process has no command line' };
+        const flag = (name) => { const i = args.indexOf(name); return i >= 0 && i + 1 < args.length ? args[i + 1] : null; };
+        const cwd = flag('--cwd');
+        const ok = args.includes('supervise') && flag('--code') === rec.code && cwd !== null && fold(P.resolve(cwd)) === want;
+        return { ok, how: 'proc-cmdline', detail: clip(args.join(' '), 300) };
     }
+    let how; let cmd;
     if (platform === 'darwin') {
-        const r = runner('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8' });
-        const line = String(r.stdout || '').split('\n').find((l) => l.startsWith('n'));
-        return line ? { ok: same(path.resolve(line.slice(1)), want), how: 'lsof-cwd', detail: line.slice(1) } : { ok: false, how: 'lsof-cwd', detail: 'lsof printed no cwd' };
-    }
-    if (platform === 'win32') {
+        how = 'ps-command';
+        const r = runner('ps', ['-ww', '-p', String(Number(pid)), '-o', 'command='], { encoding: 'utf8' });
+        cmd = String(r.stdout || '').trim();
+    } else if (platform === 'win32') {
+        how = 'win32-cmdline';
         const r = runner('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
             `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`], { encoding: 'utf8', windowsHide: true });
-        const cmd = String(r.stdout || '').trim();
-        if (!cmd) return { ok: false, how: 'win32-cmdline', detail: 'no such process, or its command line is unreadable' };
-        const hasCwd = cmd.toLowerCase().includes(`--cwd ${want.toLowerCase()}`) || cmd.toLowerCase().includes(`--cwd "${want.toLowerCase()}"`);
-        const hasCode = new RegExp(`--code\\s+"?${rec.code.replace(/[-]/g, '\\-')}"?(\\s|$)`).test(cmd);
-        return { ok: hasCwd && hasCode && /\bsupervise\b/.test(cmd), how: 'win32-cmdline', detail: clip(cmd, 300) };
+        cmd = String(r.stdout || '').trim();
+    } else {
+        return { ok: false, how: 'unsupported', detail: `no process identity check for ${platform}` };
     }
-    return { ok: false, how: 'unsupported', detail: `no process identity check for ${platform}` };
+    if (!cmd) return { ok: false, how, detail: 'no such process, or its command line is unreadable' };
+    // A joined command line: the value is either quoted or ends at whitespace or the end of the line,
+    // so a record for /w never matches a supervisor started with --cwd /w2.
+    const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const low = fold(cmd);
+    const hasCwd = low.includes(`--cwd "${want}"`) || new RegExp(`--cwd ${reEscape(want)}(\\s|$)`).test(low);
+    const hasCode = new RegExp(`--code\\s+"?${reEscape(rec.code)}"?(\\s|$)`).test(cmd);
+    return { ok: hasCwd && hasCode && /\bsupervise\b/.test(cmd), how, detail: clip(cmd, 300) };
 }
 
 function killTree(pid) {
@@ -727,11 +750,25 @@ function selftest() {
     t('win32 identity needs supervise, --code and --cwd', processMatches(1, want, 'win32', fakeCmd('node hw.js supervise --code B-X1 --log x --cwd "C:\\w t" --claude-bin c')).ok);
     t('win32 identity refuses another code', !processMatches(1, want, 'win32', fakeCmd('node hw.js supervise --code B-X10 --cwd "C:\\w t"')).ok);
     t('win32 identity refuses a missing process', !processMatches(1, want, 'win32', fakeCmd('')).ok);
+    t('win32 identity refuses a cwd that only shares a prefix', !processMatches(1, want, 'win32', fakeCmd('node hw.js supervise --code B-X1 --cwd C:\\w --claude-bin c')).ok
+        && !processMatches(1, { cwd: 'C:\\w', code: 'B-X1' }, 'win32', fakeCmd('node hw.js supervise --code B-X1 --cwd C:\\w2 --claude-bin c')).ok);
     t('an unknown platform is never a match', !processMatches(1, want, 'aix', fakeCmd('x')).ok);
-    const dcwd = path.resolve('fv-selftest-cwd');
-    const dwant = { cwd: dcwd, code: 'B-X1' };
-    t('darwin identity reads the lsof cwd', processMatches(1, dwant, 'darwin', fakeCmd(`p1\nfcwd\nn${dcwd}\n`)).ok);
-    t('darwin identity refuses another cwd', !processMatches(1, dwant, 'darwin', fakeCmd(`p1\nn${dcwd}-other\n`)).ok);
+    // POSIX: the same command-line identity. A process that merely sits in the record's cwd is not the worker.
+    const pwant = { cwd: '/w t', code: 'B-X1' };
+    const argv = (...a) => () => a.join('\0') + '\0';
+    const noRead = () => { throw Object.assign(new Error('gone'), { code: 'ENOENT' }); };
+    t('linux identity reads supervise, --code and --cwd from the exact argv',
+        processMatches(1, pwant, 'linux', undefined, argv('/usr/bin/node', '/x/headless-worker.js', 'supervise', '--code', 'B-X1', '--log', 'x', '--cwd', '/w t', '--claude-bin', 'c')).ok);
+    t('linux identity needs supervise, not only the code and cwd', !processMatches(1, pwant, 'linux', undefined, argv('node', 'hw.js', 'status', '--code', 'B-X1', '--cwd', '/w t')).ok);
+    t('darwin identity needs supervise, not only the code and cwd', !processMatches(1, pwant, 'darwin', fakeCmd('node hw.js status --code B-X1 --cwd /w t --claude-bin c')).ok);
+    t('linux identity refuses another code', !processMatches(1, pwant, 'linux', undefined, argv('node', 'hw.js', 'supervise', '--code', 'B-X10', '--cwd', '/w t')).ok);
+    t('linux identity refuses another cwd', !processMatches(1, pwant, 'linux', undefined, argv('node', 'hw.js', 'supervise', '--code', 'B-X1', '--cwd', '/w t2')).ok);
+    t('linux identity refuses a decoy in the same directory', !processMatches(1, pwant, 'linux', undefined, argv('node', '-e', 'setTimeout(()=>{},60000)')).ok);
+    t('linux identity refuses a missing process', !processMatches(1, pwant, 'linux', undefined, noRead).ok);
+    t('darwin identity reads the ps command line', processMatches(1, pwant, 'darwin', fakeCmd('/usr/local/bin/node /x/headless-worker.js supervise --code B-X1 --log x --cwd /w t --claude-bin c\n')).ok);
+    t('darwin identity refuses another cwd', !processMatches(1, pwant, 'darwin', fakeCmd('node hw.js supervise --code B-X1 --cwd /w t-other --claude-bin c')).ok);
+    t('darwin identity refuses a decoy and a missing process', !processMatches(1, pwant, 'darwin', fakeCmd('node -e setTimeout(()=>{},60000)')).ok
+        && !processMatches(1, pwant, 'darwin', fakeCmd('')).ok);
     t('age reads minutes, hours and days', age(Date.now() - 5 * 60000) === '5m' && age(Date.now() - 3 * 3600000) === '3h' && age(Date.now() - 3 * 86400000) === '3d');
     const failed = cases.filter((c) => !c.ok).map((c) => c.name);
     if (failed.length) fault('selftest-failed', failed.join(' | '));
