@@ -233,6 +233,11 @@ async function main() {
     const open = await run(['--root', clean, '--url', `${base}/good`, '--api', '/api/open', '--json']);
     check('a protected path answering 200 anonymously is an error', open.status === 1 && rules(open).has('live-api-open'), open.stdout);
 
+    const bare = await run(['--root', clean, '--url', `${base}/good`, '--api', 'api/open', '--json']);
+    check('an --api path without its leading slash resolves from the host root', rules(bare).has('live-api-open'), bare.stdout);
+    const mangled = await run(['--root', clean, '--url', `${base}/good`, '--api', 'C:/Program Files/Git/api/open']);
+    check('a Git Bash rewritten --api path is INDETERMINATE, never fetched as a URL', mangled.status === 2 && /rewritten by Git Bash/.test(mangled.stdout), mangled.stdout);
+
     const down = await run(['--root', clean, '--url', 'http://127.0.0.1:9/nothing']);
     check('an unreachable URL is INDETERMINATE (exit 2), never GREEN', down.status === 2 && /INDETERMINATE .*could not be fetched/.test(down.stdout), down.stdout);
 

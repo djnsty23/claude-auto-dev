@@ -376,7 +376,13 @@ async function liveChecks({ urls, apis, inviteOnly }) {
   if (apis.length && !urls.length) problems.push('--api needs a --url to resolve against');
   for (const api of apis) {
     if (!urls.length) break;
-    const target = new URL(api, urls[0]).toString();
+    // Git Bash rewrites an argument like /api/x into C:/Program Files/Git/api/x.
+    // Fetching that would test nothing, so it is reported rather than guessed back.
+    if (/^[A-Za-z]:[\\/]/.test(api)) {
+      problems.push(`--api ${api} is a local path, likely rewritten by Git Bash: pass it without the leading slash (api/x) or set MSYS_NO_PATHCONV=1`);
+      continue;
+    }
+    const target = new URL(api.startsWith('/') ? api : `/${api}`, urls[0]).toString();
     try {
       const r = await fetchHeaders(target, { redirect: 'manual' });
       lines.push(`${target} (no credentials) -> ${r.status}`);
