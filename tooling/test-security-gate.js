@@ -218,17 +218,26 @@ async function main() {
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'strict-origin-when-cross-origin',
   };
+  // A static site: the header carries only what a <meta> policy cannot, and
+  // the meta pins script by hash.
+  const HASH = `'sha256-${'B'.repeat(43)}='`;
+  const staticHeaders = { ...good, 'content-security-policy': "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" };
+  const metaTag = (policy) => `<meta http-equiv="content-security-policy" content="${policy}">`;
+  const strictMeta = metaTag(`script-src 'self' ${HASH} 'strict-dynamic'`);
+  const page = (head) => `<!doctype html><html><head><meta charset="utf-8">${head}</head><body><p>hi</p></body></html>`;
   const routes = {
     '/good': [200, good],
     '/report-only': [200, { 'content-type': 'text/html', 'content-security-policy-report-only': good['content-security-policy'], 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY' }],
     '/inline': [200, { ...good, 'content-security-policy': "script-src 'self' 'unsafe-inline'; frame-ancestors 'none'", 'x-powered-by': 'Next.js' }],
+    '/static': [200, staticHeaders, page(`${strictMeta}<script src="/a.js"></script>`)],
+    '/static-late': [200, staticHeaders, page(`<script src="/a.js"></script>${strictMeta}`)],
     '/api/private': [401, { 'content-type': 'application/json' }],
     '/api/open': [200, { 'content-type': 'application/json' }],
   };
   const server = http.createServer((req, res) => {
-    const [status, headers] = routes[req.url] || [404, {}];
+    const [status, headers, body] = routes[req.url] || [404, {}];
     res.writeHead(status, headers);
-    res.end(status === 200 ? '<html></html>' : '{}');
+    res.end(body ?? (status === 200 ? '<html></html>' : '{}'));
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -255,6 +264,11 @@ async function main() {
     const mangled = await run(['--root', clean, '--url', `${base}/good`, '--api', 'C:/Program Files/Git/api/open']);
     check('a Git Bash rewritten --api path is INDETERMINATE, never fetched as a URL', mangled.status === 2 && /rewritten by Git Bash/.test(mangled.stdout), mangled.stdout);
 
+    const st = await run(['--root', clean, '--url', `${base}/static`, '--json']);
+    check('a static page whose hash-pinned meta policy precedes every script is GREEN through the real fetch', st.status === 0 && !rules(st).has('live-csp-script'), st.stdout);
+    const stLate = await run(['--root', clean, '--url', `${base}/static-late`, '--json']);
+    check('the same meta policy after a <script> is live-csp-script through the real fetch', stLate.status === 1 && rules(stLate).has('live-csp-script'), stLate.stdout);
+
     const down = await run(['--root', clean, '--url', 'http://127.0.0.1:9/nothing']);
     check('an unreachable URL is INDETERMINATE (exit 2), never GREEN', down.status === 2 && /INDETERMINATE .*could not be fetched/.test(down.stdout), down.stdout);
 
@@ -275,6 +289,38 @@ async function main() {
     check('a five-minute HSTS max-age does not count', weak.some((f) => f.rule === 'live-hsts'), weak);
     const hostWild = C.checkLiveHeaders('http://x.example', { ...good, 'content-security-policy': "script-src https:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'" });
     check('script-src https: without strict-dynamic allows any host', hostWild.some((f) => f.rule === 'live-csp-script'), hostWild);
+
+    // A static site's <meta> policy. HSTS keeps every other header rule silent,
+    // so each case isolates the rule it names.
+    const https = { ...staticHeaders, 'strict-transport-security': 'max-age=63072000' };
+    const ruleSet = (list) => new Set(list.map((f) => f.rule));
+    const metaOnly = C.checkLiveHeaders('https://x.example', { ...good, 'content-security-policy': undefined, 'x-frame-options': 'DENY', 'strict-transport-security': 'max-age=63072000' },
+      page(metaTag(`script-src 'self' ${HASH} 'strict-dynamic'; object-src 'none'; base-uri 'self'`)));
+    check('a strict meta policy with no CSP header at all is silent', metaOnly.length === 0, metaOnly);
+    const late = C.checkLiveHeaders('https://x.example', https, page(`<script>go()</script>${strictMeta}`));
+    check('a meta policy after the first <script> fires live-csp-script and says why', late.some((f) => f.rule === 'live-csp-script' && /after the first <script>/.test(f.message)), late);
+    const inlineMeta = C.checkLiveHeaders('https://x.example', https, page(metaTag("script-src 'self' 'unsafe-inline'")));
+    check("a meta policy with 'unsafe-inline' and no hash fires live-csp-script", ruleSet(inlineMeta).has('live-csp-script'), inlineMeta);
+    const headerWins = C.checkLiveHeaders('https://x.example', { ...good, 'strict-transport-security': 'max-age=63072000' }, page(metaTag("script-src * 'unsafe-inline' 'unsafe-eval'")));
+    check('a strict header with a weak meta policy is silent: both are enforced', headerWins.length === 0, headerWins);
+    const entities = C.checkLiveHeaders('https://x.example', https,
+      page(`<meta http-equiv="content-security-policy" content="script-src &#39;self&#39; &#x27;sha256-${'C'.repeat(43)}=&apos; &#39;strict-dynamic&#39;">`));
+    check('entity-encoded quotes in a meta policy are decoded', entities.length === 0, entities);
+    const shape = C.checkLiveHeaders('https://x.example', https, page(`<META CONTENT='script-src &quot;x&quot; ${HASH} &#39;strict-dynamic&#39;' HTTP-EQUIV=Content-Security-Policy>`));
+    check('attribute order, attribute case and single quotes do not matter', shape.length === 0, shape);
+    const parsed = C.metaPolicies(page(strictMeta));
+    check('the parsed meta policy carries the hash exactly', parsed.length === 1 && parsed[0].covers && parsed[0].policy['script-src'].includes(HASH), parsed);
+    const frameMeta = C.checkLiveHeaders('https://x.example', { ...https, 'content-security-policy': undefined },
+      page(metaTag(`script-src 'self' ${HASH} 'strict-dynamic'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`)));
+    check('frame-ancestors in a meta policy alone still fires live-frame', ruleSet(frameMeta).has('live-frame') && !ruleSet(frameMeta).has('live-csp-script'), frameMeta);
+    const none = C.checkLiveHeaders('https://x.example', { ...https, 'content-security-policy': undefined, 'x-frame-options': 'DENY' }, page(''));
+    check('no header and no meta policy fires live-csp-missing', ruleSet(none).has('live-csp-missing'), none);
+    const lateOnly = C.checkLiveHeaders('https://x.example', { ...https, 'content-security-policy': undefined, 'x-frame-options': 'DENY' }, page(`<script>go()</script>${strictMeta}`));
+    check('a late meta policy and no header is live-csp-missing, naming the late meta', lateOnly.some((f) => f.rule === 'live-csp-missing' && /after the first <script>/.test(f.message)), lateOnly);
+    const commented = C.checkLiveHeaders('https://x.example', https, page(`<!-- ${strictMeta} -->`));
+    check('a commented-out meta policy does not count', ruleSet(commented).has('live-csp-script'), commented);
+    const inBody = C.checkLiveHeaders('https://x.example', https, `<html><head></head><body>${strictMeta}</body></html>`);
+    check('a meta policy outside <head> does not count', inBody.some((f) => f.rule === 'live-csp-script' && /outside <head>/.test(f.message)), inBody);
     check('checkLiveSignup is silent only on disable_signup true', C.checkLiveSignup('u', { disable_signup: true }).length === 0 && C.checkLiveSignup('u', {}).length === 1);
     check('jwtRole reads the role and survives garbage', C.jwtRole(SERVICE_JWT) === 'service_role' && C.jwtRole('not.a.jwt') === null);
     check('globRe: ** crosses directories and * does not', G.globRe('src/**').test('src/a/b.tsx') && !G.globRe('src/*').test('src/a/b.tsx'));

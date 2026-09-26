@@ -353,32 +353,104 @@ function parseCsp(value) {
   return out;
 }
 
+const ENTITIES = { quot: '"', apos: "'", amp: '&', lt: '<', gt: '>' };
+
+function decodeEntities(s) {
+  return s.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(quot|apos|amp|lt|gt));/gi, (m, dec, hex, name) => {
+    const code = dec ? Number(dec) : hex ? parseInt(hex, 16) : null;
+    if (code === null) return ENTITIES[name.toLowerCase()];
+    return code <= 0x10ffff ? String.fromCodePoint(code) : m;
+  });
+}
+
+// Directives a browser ignores when the policy arrives in a <meta> element.
+const META_IGNORED = ['frame-ancestors', 'report-uri', 'sandbox'];
+
 /**
- * headers: a lower-cased header map of one HTML response. Only an ENFORCED
- * policy counts: Report-Only blocks nothing.
+ * Every <meta http-equiv="content-security-policy"> in an HTML document, in
+ * order, with whether it covers the page. A browser applies a meta policy only
+ * from the point it is parsed, and only inside <head>: one after the first
+ * <script> leaves that script unrestricted, so it does not count as the page's
+ * policy. Comments are blanked first, keeping offsets, so a commented-out tag
+ * is neither a policy nor a script.
  */
-function checkLiveHeaders(url, headers) {
+function metaPolicies(html) {
+  if (typeof html !== 'string' || !html) return [];
+  const doc = html.replace(/<!--[\s\S]*?(?:-->|$)/g, (c) => ' '.repeat(c.length));
+  const firstOf = (re) => {
+    const m = re.exec(doc);
+    return m ? m.index : Infinity;
+  };
+  const firstScript = firstOf(/<script\b/i);
+  const headEnd = Math.min(firstOf(/<\/head\s*>/i), firstOf(/<body\b/i));
+  const out = [];
+  // Each alternative starts with a different character, so this stays linear.
+  for (const tag of doc.matchAll(/<meta\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
+    const attrs = {};
+    for (const a of tag[1].matchAll(/([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g)) {
+      const name = a[1].toLowerCase();
+      if (!(name in attrs)) attrs[name] = decodeEntities(a[2] ?? a[3] ?? a[4] ?? '');
+    }
+    if ((attrs['http-equiv'] || '').trim().toLowerCase() !== 'content-security-policy') continue;
+    const value = (attrs.content || '').trim();
+    if (!value) continue;
+    const policy = parseCsp(value);
+    for (const d of META_IGNORED) delete policy[d];
+    const where = tag.index > headEnd ? 'outside <head>' : tag.index > firstScript ? 'after the first <script>' : null;
+    out.push({ policy, covers: !where, where });
+  }
+  return out;
+}
+
+/** The reasons one policy leaves script open; empty when it restricts script. */
+function scriptGaps(policy) {
+  const script = policy['script-src'] || policy['default-src'] || [];
+  const nonceOrHash = script.some((s) => /^'(nonce|sha256|sha384|sha512)-/.test(s));
+  const strict = script.includes("'strict-dynamic'");
+  const bad = [];
+  if (script.includes("'unsafe-inline'") && !nonceOrHash) bad.push("'unsafe-inline'");
+  if (script.includes("'unsafe-eval'")) bad.push("'unsafe-eval'");
+  if (script.some((s) => s === 'data:' || s === 'blob:')) bad.push('data: or blob:');
+  if (!strict && script.some((s) => s === '*' || s === 'https:' || s === 'http:')) bad.push('any host');
+  if (!script.length) bad.push('no script-src or default-src');
+  return bad;
+}
+
+/**
+ * headers: a lower-cased header map of one HTML response. html: its body, when
+ * read. Only an ENFORCED policy counts: Report-Only blocks nothing.
+ *
+ * A static site cannot mint a nonce, so it pins script hashes in a <meta>
+ * policy and sends in the header only what a meta cannot carry. The browser
+ * enforces every policy at once, so script is restricted when ANY enforced
+ * policy (the header, or a meta that covers the page) restricts it.
+ * frame-ancestors counts only from the header: browsers ignore it in a meta.
+ */
+function checkLiveHeaders(url, headers, html) {
   const out = [];
   const h = (n) => headers[n.toLowerCase()];
   const at = (rule, message, fix) => out.push(finding(rule, url, 0, message, fix));
   const cspValue = h('content-security-policy');
   const csp = parseCsp(cspValue);
-  if (!cspValue) {
-    at('live-csp-missing', h('content-security-policy-report-only') ? 'Only a Report-Only policy is sent, which blocks nothing.' : 'No Content-Security-Policy header.', 'Send a nonce-based policy from the server on every HTML response.');
+  const metas = metaPolicies(html);
+  const late = metas.filter((m) => !m.covers).map((m) => ` A meta policy ${m.where} does not cover the page.`);
+  const enforced = [
+    ...(cspValue ? [{ policy: csp, source: 'the header' }] : []),
+    ...metas.filter((m) => m.covers).map((m) => ({ policy: m.policy, source: 'the meta policy' })),
+  ];
+  if (!enforced.length) {
+    const why = h('content-security-policy-report-only') ? 'Only a Report-Only policy is sent, which blocks nothing.' : 'No Content-Security-Policy header.';
+    at('live-csp-missing', `${why}${late.join('')}`, 'Send a nonce-based policy from the server on every HTML response.');
   } else {
-    const script = csp['script-src'] || csp['default-src'] || [];
-    const nonceOrHash = script.some((s) => /^'(nonce|sha256|sha384|sha512)-/.test(s));
-    const strict = script.includes("'strict-dynamic'");
-    const bad = [];
-    if (script.includes("'unsafe-inline'") && !nonceOrHash) bad.push("'unsafe-inline'");
-    if (script.includes("'unsafe-eval'")) bad.push("'unsafe-eval'");
-    if (script.some((s) => s === 'data:' || s === 'blob:')) bad.push('data: or blob:');
-    if (!strict && script.some((s) => s === '*' || s === 'https:' || s === 'http:')) bad.push('any host');
-    if (!script.length) bad.push('no script-src or default-src');
-    if (bad.length) at('live-csp-script', `script-src allows ${bad.join(', ')}.`, "Use 'self' plus a per-request nonce and 'strict-dynamic'.");
-    const objectClosed = (csp['object-src'] || csp['default-src'] || []).join(' ') === "'none'";
-    const gaps = [objectClosed ? '' : "object-src is not 'none'.", csp['base-uri'] ? '' : 'base-uri is not set.'].filter(Boolean);
-    if (gaps.length) at('live-csp-object-base', gaps.join(' '), "Add object-src 'none' and base-uri 'self'.");
+    const gaps = enforced.map((p) => ({ ...p, bad: scriptGaps(p.policy) }));
+    if (gaps.every((p) => p.bad.length)) {
+      const allows = gaps.length === 1 && gaps[0].source === 'the header' ? gaps[0].bad.join(', ') : gaps.map((p) => `${p.bad.join(', ')} (${p.source})`).join('; ');
+      at('live-csp-script', `script-src allows ${allows}.${late.join('')}`, "Use 'self' plus a per-request nonce and 'strict-dynamic'.");
+    }
+    const any = (test) => enforced.some((p) => test(p.policy));
+    const objectClosed = any((p) => (p['object-src'] || p['default-src'] || []).join(' ') === "'none'");
+    const open = [objectClosed ? '' : "object-src is not 'none'.", any((p) => p['base-uri']) ? '' : 'base-uri is not set.'].filter(Boolean);
+    if (open.length) at('live-csp-object-base', open.join(' '), "Add object-src 'none' and base-uri 'self'.");
   }
   if (!csp['frame-ancestors'] && !/^(deny|sameorigin)$/i.test(h('x-frame-options') || '')) at('live-frame', 'Neither frame-ancestors nor X-Frame-Options is set.', "Add frame-ancestors 'none' (or 'self').");
   if (/^https:/i.test(url) && !/max-age=\d{6,}/i.test(h('strict-transport-security') || '')) at('live-hsts', 'No Strict-Transport-Security with a max-age of at least 100000 seconds.', 'Send max-age=63072000; includeSubDomains.');
@@ -407,6 +479,7 @@ module.exports = {
   waivedInline,
   jwtRole,
   parseCsp,
+  metaPolicies,
   checkEnvFiles,
   checkSecrets,
   checkClientEnv,

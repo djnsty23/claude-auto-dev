@@ -15,7 +15,8 @@
  * TWO HALVES.
  *   static   every file `git ls-files -co --exclude-standard` lists, so an
  *            untracked file that is not ignored counts as committed
- *   live     `--url` fetches the page and grades its headers; `--api <path>`
+ *   live     `--url` fetches the page and grades its headers and any <meta>
+ *            policy in its body; `--api <path>`
  *            asserts a protected path refuses an anonymous caller;
  *            `--invite-only` asserts Supabase sign-up is closed
  *
@@ -51,7 +52,11 @@ Usage:
 
 Options:
   --root <dir>     project root (default: cwd). Files come from git when it is a repo.
+<<<<<<< HEAD
   --url <url>      also grade the live response headers of this page (repeatable, or a comma list)
+=======
+  --url <url>      also grade the live headers and <meta> CSP of this page (repeatable)
+>>>>>>> 6a5c8c4 (fix(security-gate): judge a static site's meta CSP, not just the header)
   --api <path>     a protected path, fetched with no credentials against the first --url;
                    a 2xx is a finding (repeatable, or a comma list)
   --invite-only    assert Supabase sign-up is disabled; reads SUPABASE_URL (or
@@ -264,19 +269,27 @@ function runControl() {
   const liveCsp = C.checkLiveHeaders('https://planted.example', { 'content-security-policy': "script-src 'self' 'unsafe-inline' 'unsafe-eval'" });
   const liveRules = new Set([...liveBad, ...liveCsp, ...C.checkLiveApi('https://planted.example/api', 200), ...C.checkLiveSignup('https://planted.example', { disable_signup: false })].map((f) => f.rule));
   const liveMissed = Object.keys(C.RULES).filter((r) => r.startsWith('live-') && !liveRules.has(r));
-  const liveClean = C.checkLiveHeaders('https://clean.example', {
+  const cleanHeaders = {
     'content-security-policy': "default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
     'strict-transport-security': 'max-age=63072000; includeSubDomains',
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'strict-origin-when-cross-origin',
-  });
+  };
+  const liveClean = C.checkLiveHeaders('https://clean.example', cleanHeaders);
+  // A static site: the header carries only what a meta cannot, the meta pins
+  // script by hash. Clean before the first <script>, open after it.
+  const staticHeaders = { ...cleanHeaders, 'content-security-policy': "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" };
+  const meta = `<meta http-equiv="content-security-policy" content="script-src 'self' 'sha256-${'A'.repeat(43)}=' 'strict-dynamic'">`;
+  const liveMeta = C.checkLiveHeaders('https://static.example', staticHeaders, `<head><meta charset="utf-8">${meta}<script src="/a.js"></script></head>`);
+  const lateMeta = C.checkLiveHeaders('https://static.example', staticHeaders, `<head><meta charset="utf-8"><script src="/a.js"></script>${meta}</head>`);
+  const metaMissed = lateMeta.some((f) => f.rule === 'live-csp-script') ? [] : ['live-csp-script (meta policy after <script>)'];
   const total = STATIC_RULES.length + Object.keys(C.RULES).length - STATIC_RULES.length;
   return {
-    ok: missed.length === 0 && liveMissed.length === 0 && noise.length === 0 && liveClean.length === 0,
+    ok: missed.length === 0 && liveMissed.length === 0 && metaMissed.length === 0 && noise.length === 0 && liveClean.length === 0 && liveMeta.length === 0,
     fired: total - missed.length - liveMissed.length,
     total,
-    missed: [...missed, ...liveMissed],
-    noise: [...noise, ...liveClean].map((f) => `${f.rule} ${f.path}`),
+    missed: [...missed, ...liveMissed, ...metaMissed],
+    noise: [...noise, ...liveClean, ...liveMeta].map((f) => `${f.rule} ${f.path}`),
   };
 }
 
@@ -359,6 +372,33 @@ async function fetchHeaders(url, init = {}) {
   return { status: res.status, headers, finalUrl: res.url || url, res };
 }
 
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
+
+/**
+ * The first MAX_BODY_BYTES of a response body as text. A meta policy belongs
+ * in <head>, so a longer page is cut rather than read whole. The fetch's
+ * timeout signal still bounds the read.
+ */
+async function readBody(res) {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let bytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = value.subarray(0, Math.max(0, MAX_BODY_BYTES - bytes));
+    bytes += chunk.length;
+    text += decoder.decode(chunk, { stream: true });
+    if (bytes >= MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => {});
+      break;
+    }
+  }
+  return text + decoder.decode();
+}
+
 async function liveChecks({ urls, apis, inviteOnly }) {
   const findings = [];
   const problems = [];
@@ -367,8 +407,19 @@ async function liveChecks({ urls, apis, inviteOnly }) {
     try {
       const r = await fetchHeaders(url);
       lines.push(`${url} -> ${r.status}${r.finalUrl !== url ? ` at ${r.finalUrl}` : ''}`);
-      if (!/text\/html/i.test(r.headers['content-type'] || '')) problems.push(`${url} did not answer HTML (${r.headers['content-type'] || 'no content-type'}); its headers were graded anyway`);
-      findings.push(...C.checkLiveHeaders(r.finalUrl, r.headers));
+      const isHtml = /text\/html/i.test(r.headers['content-type'] || '');
+      if (!isHtml) problems.push(`${url} did not answer HTML (${r.headers['content-type'] || 'no content-type'}); its headers were graded anyway`);
+      // The body carries a static site's <meta> policy. Without it the page is
+      // graded on headers alone, which can report a policy that is really there.
+      let html;
+      if (isHtml) {
+        try {
+          html = await readBody(r.res);
+        } catch (e) {
+          problems.push(`${url} body could not be read (${e.message}); graded on headers alone, so a <meta> policy was not seen`);
+        }
+      }
+      findings.push(...C.checkLiveHeaders(r.finalUrl, r.headers, html));
     } catch (e) {
       problems.push(`${url} could not be fetched: ${e.message}`);
     }
