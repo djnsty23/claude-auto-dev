@@ -17,6 +17,26 @@ name does not establish its coverage. The stack-specific checks below supplement
 that review. Work within existing authorization, including credential rotation
 or infrastructure changes already authorized by the user.
 
+## 0. Run the gate first
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/security-gate.js" --root .
+node "${CLAUDE_PLUGIN_ROOT}/scripts/security-gate.js" --root . --url https://<deployed-host>/ --api /api/<protected-path>
+```
+
+It decides what a machine can: committed `.env` files and live-format keys, a
+`service_role` JWT, secret-named `NEXT_PUBLIC_` variables, public tables without
+RLS, SECURITY DEFINER without `search_path`, a web app with no CSP, extension
+message handlers that never check the sender, and the live headers (enforced
+CSP without inline script, framing, HSTS, nosniff) plus anonymous access to the
+paths you name. `--rules` lists every rule. Exit 0 clean, 1 findings, 2
+indeterminate: treat 2 as not run, never as green.
+
+Its warnings (HTML sinks, routes with no visible auth call, tables with no
+GRANT, `using (true)` write policies) are leads for the sections below, not
+verdicts. A green gate proves its rules only. Sections 1-4 still apply,
+because ownership checks inside queries and business rules are invisible to it.
+
 ## 1. Secrets in source and migrations
 
 Enumerate relevant tracked/untracked source and migration files first, excluding

@@ -62,7 +62,18 @@ entry point; a missing historical screenshot does not waive that check.
 
 ## Step 2: Security Scan
 
-Run before every deploy (uses `security` skill):
+Run before every deploy (uses `security` skill). The gate is blocking: exit 1
+stops the deploy, and exit 2 means it did not run, which is not a pass.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/security-gate.js" --root .
+```
+
+After the deploy, run it again with `--url` on the deployed host and `--api` on
+each protected path, and add `--invite-only` for an app with no public sign-up.
+The static pass cannot see headers a platform adds or strips.
+
+The checklist below covers what the gate cannot decide:
 
 - [ ] No hardcoded API keys, tokens, or secrets in code
 - [ ] Inspect the actual staged paths and candidate commit for secret-bearing
