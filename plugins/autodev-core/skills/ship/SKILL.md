@@ -60,6 +60,15 @@ For new behavior, record that no earlier implementation existed and capture the
 new acceptance evidence. Additive code still needs verification through its real
 entry point; a missing historical screenshot does not waive that check.
 
+## Step 1c: The done bar
+
+For a product with a user-facing surface, load
+`${CLAUDE_PLUGIN_ROOT}/skills/ship/references/done-bar.md`. A green gate says the
+product works, and working is only the floor. Ship refuses to report such a
+product as done while any of the bar's six items lacks evidence on the
+candidate. It may still deploy an authorized increment. The report then names
+each unmet item, and each one becomes open work in `prd.json`, never a tick.
+
 ## Step 2: Security Scan
 
 Run before every deploy (uses `security` skill):
@@ -426,6 +435,7 @@ Verification: [pass/fail]
   - Console errors: none
   - Auth flow: ✓
   - Critical path: ✓
+Done bar: [met | unmet: the items by name]
 ```
 
 Populate the report from actual check artifacts with candidate SHA, environment

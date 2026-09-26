@@ -40,6 +40,7 @@ When a confirmed bug appears, route its evidence through `audit`. If fixing it i
 | `brainstorm quick` | Diff-based: only scan files changed recently (no agents, fast) |
 | `brainstorm apply` | Create prd.json stories from last scan results |
 | `brainstorm [topic]` | Targeted: ideas for a specific area |
+| `brainstorm delight` | The delight pass (Step 5) alone, on any pass |
 
 ## Quick Mode (brainstorm quick)
 
@@ -156,6 +157,28 @@ Propose only features that pass ALL these filters:
 
 Avoid generic suggestions like "add analytics dashboard", "team workspaces", "notification system" unless the competitor research specifically shows these as gaps that matter for THIS product's users.
 
+### Step 5: Delight pass (second pass onward)
+
+A product with a user-facing surface is not done when it works: see the done bar
+in `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/done-bar.md`. From the second
+improvement pass, propose personal touches unprompted. A second pass is any
+brainstorm that finds `.claude/agent-memory/brainstorm-history.md` already there
+when it starts (the first run creates it), any `iterate` round after the first,
+or any sprint after the first.
+
+1. Load `${CLAUDE_PLUGIN_ROOT}/skills/brainstorm/references/delight-catalogue.md`.
+2. Propose at least three touches whose "When it fits" line matches the product,
+   each with one sentence tying it to what the product is for. If fewer fit, name
+   the entries you weighed and why each fails. Never pad.
+3. They are proposals, never stories, and the Auto Mode Exception does not cover
+   them. Present them as an options artifact (the `design` skill's two or three
+   real variants with one recommendation) and a panel per `rule-options-protocol`.
+   Build a touch only after the operator picks it.
+4. Record each in that history file, so a rejected touch does not come back.
+
+They sit in their own rows of the findings table and do not count against the
+Proportional filter in Step 4.
+
 ## Phase 3: Present Findings
 
 Present a findings table. Do not auto-create stories.
@@ -178,6 +201,7 @@ Scanned [N] files in [T] seconds.
 | 4 | Architecture | Dashboard.tsx (450 lines) should split into 3 components | Medium |
 | 5 | Architecture | Client-side fetch in page.tsx could be server prefetch | Low |
 | 6 | Cleanup | 2 unused dependencies can be removed | Low |
+| 7 | Delight | [catalogue entry] for [what the product is for]: [the concrete touch] | Proposal |
 
 Codebase health: [honest assessment — "clean, no urgent issues" is valid]
 

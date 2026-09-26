@@ -102,6 +102,13 @@ Use `security`, `perf`, `a11y`, `test`, `scan` and `rule-verification` for the
 applicable execution details. Prefer focused probes over inventories of
 syntactic “offenders.” Preserve domain-specific project requirements.
 
+For a product with a user-facing surface, also grade the items of the done bar
+(`${CLAUDE_PLUGIN_ROOT}/skills/ship/references/done-bar.md`) that audit owns. A
+feature with no test of its own, or no test that drives the features together,
+is a Test integrity finding. Motion that janks, shifts layout, ends on a wrong
+value or ignores reduced motion is a UX/UI finding. The flair item belongs to
+brainstorm's delight pass, not to audit.
+
 ## Output Format
 
 ```markdown
