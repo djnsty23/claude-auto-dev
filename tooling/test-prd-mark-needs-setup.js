@@ -147,7 +147,12 @@ const FLAT = () => ({
 // ---------------------------------------------------------------- clear
 {
     const f = fixture(FLAT());
-    run(f, 'S1-002', 'Needs a key from https://example.com/keys');
+    // The setup mark is checked on its own: unchecked, a failed mark surfaced as
+    // "clear: exit 0" going red, naming the step that was never reached.
+    const mark = run(f, 'S1-002', 'Needs a key from https://example.com/keys');
+    check('clear setup: the mark itself exited 0 and wrote needs-setup',
+        mark.code === 0 && S.needsSetup(read(f)['S1-002']),
+        `code ${mark.code}, stderr: ${mark.err}, stdout: ${mark.out}`);
     const r = run(f, 'S1-002', '--clear');
     const st = read(f);
     check('clear: exit 0', r.code === 0, r.err);

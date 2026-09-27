@@ -177,7 +177,9 @@ function openStore(root, DatabaseSync, readOnly) {
   let db;
   try {
     db = new DatabaseSync(file, { readOnly });
-    db.exec('PRAGMA busy_timeout=250; PRAGMA foreign_keys=ON;');
+    // A worker and its dispatcher share the store. With journal_mode=DELETE and synchronous=FULL a
+    // commit holds the lock through its fsyncs, and 250 ms lost that race on a loaded CI runner.
+    db.exec('PRAGMA busy_timeout=2000; PRAGMA foreign_keys=ON;');
     const version = db.prepare('PRAGMA user_version').get().user_version;
     const app = db.prepare('PRAGMA application_id').get().application_id;
     requireThat(version === VERSION && app === APP_ID, 'store-invalid', 'Unsupported store schema');
@@ -185,7 +187,13 @@ function openStore(root, DatabaseSync, readOnly) {
     requireThat(canonical(tables) === canonical(['attempts', 'bootstraps', 'events', 'launches', 'metadata', 'missions', 'outbox', 'results']), 'store-invalid');
     if (!readOnly) db.exec('PRAGMA synchronous=FULL;');
     return db;
-  } catch (e) { if (db) db.close(); if (e.publicCode) throw e; fault('store-invalid'); }
+  } catch (e) {
+    if (db) db.close();
+    // A locked store is busy, not invalid: SQLITE_BUSY (5) and SQLITE_LOCKED (6) keep their errcode so
+    // callers report store-busy, which is retryable, instead of calling a healthy store corrupt.
+    if (e.publicCode || e.errcode === 5 || e.errcode === 6) throw e;
+    fault('store-invalid');
+  }
 }
 function mission(db, id) { const row = db.prepare('SELECT * FROM missions WHERE id=?').get(id); if (!row) fault('mission-missing'); return row; }
 function status(db, id) {
