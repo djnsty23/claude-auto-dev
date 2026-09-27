@@ -41,9 +41,19 @@ function gitEnv(extra) {
     return env;
 }
 
+// A fixture that cannot be built surfaces as ONE failure line carrying this
+// message, so it names everything git reported: the spawn error, the signal or
+// the exit status, and stderr. It was `r.stderr || r.error`, which read
+// "failed: undefined" for a git that exits non-zero without printing.
 function git(cwd, args, extra) {
     const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, env: gitEnv(extra) });
-    if (r.status !== 0) throw new Error('fixture git ' + args.join(' ') + ' failed: ' + (r.stderr || r.error));
+    if (r.error || r.signal || r.status !== 0) {
+        const how = r.error ? 'could not start (' + (r.error.code || r.error.message) + ')'
+            : r.signal ? 'was killed by ' + r.signal
+                : 'exited ' + r.status;
+        const stderr = (r.stderr || '').trim();
+        throw new Error('fixture git ' + args.join(' ') + ' ' + how + (stderr ? ': ' + stderr : ' and printed nothing on stderr'));
+    }
     return r.stdout;
 }
 
@@ -259,6 +269,21 @@ try {
         commit(w, ['README.md'], 'init', 1);
         const r = run(w, ['--ref', 'main']);
         check('a ref where no commit ever changed VERSION exits 2', r.code === 2 && /no commit on main changed VERSION/.test(r.out), detail(r));
+    }
+
+    // ---- the fixture's own git failures name themselves -------------------------
+    // Real failures of the real git binary, one per shape the message covers.
+    {
+        const w = makeRepo('1.0.0', 1);
+        const thrown = (fn) => { try { fn(); return null; } catch (e) { return String((e && e.message) || e); } };
+        const quiet = thrown(() => git(w, ['rev-parse', '--verify', '--quiet', 'refs/heads/nope']));
+        check('fixture git: a silent exit 1 throws naming the status, not "undefined"',
+            !!quiet && /exited 1 and printed nothing on stderr/.test(quiet) && !/undefined/.test(quiet), quiet);
+        // git localises its messages, so this keys on the status and a non-empty stderr.
+        const loud = thrown(() => git(w, ['rev-parse', '--verify', 'refs/heads/nope']));
+        check('  an exit 128 names the status and carries its stderr', !!loud && /exited 128: \S/.test(loud), loud);
+        const gone = thrown(() => git(path.join(TMP, 'no-such-dir'), ['status']));
+        check('  a git that cannot start names the spawn error', !!gone && /could not start \(ENOENT\)/.test(gone), gone);
     }
 
     // ---- arguments ----------------------------------------------------------------

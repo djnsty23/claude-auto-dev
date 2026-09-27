@@ -20,17 +20,47 @@
  * matches. `branches:` is honoured too: a workflow filtered to a branch the PR
  * does not target does not fire, and that is the other way a rollup is empty
  * for a benign reason.
+ *
+ * A FAILED GIT CALL IS NOT AN ANSWER. Until 2026-09-27 the wrapper was
+ * `catch { return null; }`, and a trunk git could not list read as a trunk with
+ * no workflows: the CLI printed "zero runs is the filter working" and exited 0.
+ * A workflow git could not read was reported but not counted, so check-pr-ready
+ * called an empty rollup "the path filter working" while that workflow might
+ * have been due. Now a failed listing sets `failure`, an unreadable workflow
+ * carries git's error in `why`, and the CLI exits 3 for either.
+ *
+ * Exit 0 = every workflow excluded the files, 2 = a run was due, 3 = could not tell.
  */
 
-const { execFileSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
+/** Run git and keep everything it reported: status, signal, spawn error, stderr. */
 function git(args, cwd) {
-    try {
-        return execFileSync('git', args, {
-            cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-            env: Object.assign({}, process.env, { MSYS_NO_PATHCONV: '1' }),
-        });
-    } catch (e) { return null; }
+    const r = spawnSync('git', args, {
+        cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+        env: Object.assign({}, process.env, { MSYS_NO_PATHCONV: '1' }),
+    });
+    return {
+        command: 'git ' + args[0],
+        status: r.status,
+        signal: r.signal,
+        error: r.error ? (r.error.code || r.error.message) : null,
+        stdout: r.stdout || '',
+        stderr: (r.stderr || '').trim(),
+    };
+}
+
+/** Did git run to the end, exit 0, and report nothing on stderr? */
+function answered(r) {
+    return !r.error && !r.signal && r.status === 0 && r.stderr === '';
+}
+
+/** One line naming the failure: `git ls-tree exited 128: fatal: ...`. */
+function describeFailure(r) {
+    const how = r.error ? `failed (${r.error})`
+        : r.signal ? `was killed by ${r.signal}`
+            : `exited ${r.status}`;
+    return r.command + ' ' + how + (r.stderr ? ': ' + r.stderr.split('\n')[0] : '');
 }
 
 /** Minimal glob-to-RegExp for the subset GitHub uses in path filters. */
@@ -74,16 +104,24 @@ function pullRequestBlock(yaml) {
  * @param {string} trunk  e.g. 'origin/main'; workflows are read at this ref
  * @param {string[]} files  paths the PR changes, repo-relative
  * @param {string} [base]  the PR's base branch name, for `branches:` filters
- * @returns {{workflows:Array<{name, hasPullRequest, wouldRun, why}>, anyDue:boolean, population:number}}
+ * @returns {{workflows:Array<{name, hasPullRequest, wouldRun, why}>, anyDue:boolean, population:number, failure?:string}}
+ *   `failure` is set when git could not list the trunk's workflows at all; a
+ *   workflow git could not read has `wouldRun: null` and git's error in `why`.
  */
 function explainEmptyRollup(cwd, trunk, files, base) {
-    const names = (git(['ls-tree', '--name-only', trunk, '.github/workflows/'], cwd) || '')
+    const list = git(['ls-tree', '--name-only', trunk, '.github/workflows/'], cwd);
+    if (!answered(list)) return { workflows: [], anyDue: false, population: 0, failure: describeFailure(list) };
+    const names = list.stdout
         .split('\n').map((s) => s.trim()).filter((s) => /\.ya?ml$/.test(s));
     const out = [];
     for (const p of names) {
-        const yaml = git(['show', trunk + ':' + p], cwd);
+        const shown = git(['show', trunk + ':' + p], cwd);
         const name = p.replace(/^.*\//, '');
-        if (yaml === null) { out.push({ name, hasPullRequest: null, wouldRun: null, why: 'unreadable at ' + trunk }); continue; }
+        if (!answered(shown)) {
+            out.push({ name, hasPullRequest: null, wouldRun: null, why: 'unreadable at ' + trunk + ': ' + describeFailure(shown) });
+            continue;
+        }
+        const yaml = shown.stdout;
         const block = pullRequestBlock(yaml);
         if (block === null) { out.push({ name, hasPullRequest: false, wouldRun: false, why: 'no pull_request trigger' }); continue; }
 
@@ -115,7 +153,13 @@ if (require.main === module) {
         console.log('pr-path-filters.js <repo> <trunk> <base-branch> <file>...'); process.exit(0);
     }
     const r = explainEmptyRollup(cwd, trunk, files, base === '-' ? undefined : base);
-    for (const w of r.workflows) console.log('  ' + w.name.padEnd(28) + (w.wouldRun ? 'WOULD RUN  ' : 'would not  ') + w.why);
-    console.log(r.anyDue ? 'a run was due and none exists' : 'every workflow excluded these files; zero runs is the filter working');
-    process.exit(r.anyDue ? 2 : 0);
+    const label = (w) => (w.wouldRun ? 'WOULD RUN  ' : w.wouldRun === null ? 'UNREADABLE ' : 'would not  ');
+    for (const w of r.workflows) console.log('  ' + w.name.padEnd(28) + label(w) + w.why);
+    const unreadable = r.workflows.filter((w) => w.wouldRun === null);
+    if (r.anyDue) console.log('a run was due and none exists');
+    else if (r.failure) console.log('COULD NOT TELL: ' + r.failure + '. That is git failing to list the workflows, NOT a trunk without any.');
+    else if (unreadable.length) console.log('COULD NOT TELL: git could not read ' + unreadable.length + ' of ' + r.population
+        + ' workflow(s), and any of them might have been due.');
+    else console.log('every workflow excluded these files; zero runs is the filter working');
+    process.exitCode = r.anyDue ? 2 : (r.failure || unreadable.length) ? 3 : 0;
 }

@@ -152,12 +152,18 @@ function checkPrReady(prNumber, cwd) {
                 pathFilter = explainEmptyRollup(cwd, 'origin/' + (pr.baseRefName || 'main'), files, pr.baseRefName);
             } catch (e) { pathFilter = null; }
         }
-        if (pathFilter && !pathFilter.anyDue && pathFilter.population > 0) {
+        // A workflow git could not read is not one that excluded the files: it
+        // might have been due. Only every workflow answering "would not" is benign.
+        const unreadable = pathFilter ? pathFilter.workflows.filter((w) => w.wouldRun === null) : [];
+        if (pathFilter && !pathFilter.anyDue && pathFilter.population > 0 && unreadable.length === 0) {
             reasons.push('the rollup is EMPTY and that is the path filter working: ' + files.length + ' changed file(s) excluded by all '
                 + pathFilter.population + ' workflow(s) at the trunk, so nothing could have run or gone red');
         } else if (pathFilter && pathFilter.anyDue) {
             const due = pathFilter.workflows.filter((w) => w.wouldRun).map((w) => w.name + ' (' + w.why + ')').join(', ');
             reasons.push('the rollup is EMPTY but a run was DUE and none exists: ' + due);
+        } else if (pathFilter && (pathFilter.failure || unreadable.length)) {
+            reasons.push('the rollup is EMPTY and git could not read the trunk\'s workflows to tell whether a run was due: '
+                + (pathFilter.failure || unreadable.map((w) => w.name + ' (' + w.why + ')').join(', ')));
         } else {
             reasons.push('the rollup is EMPTY, which looks identical to a clean one and is not'
                 + (files.length ? '' : '; could not read the changed files to tell whether a gate was due'));

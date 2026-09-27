@@ -35,11 +35,11 @@ function git(cwd, args) {
     return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
 }
 
-function run(cwd, args) {
+function run(cwd, args, env) {
     const r = spawnSync(process.execPath, [SUBJECT].concat(args || []), {
         cwd, encoding: 'utf8',
         // PATH is kept so git resolves; nothing else about this machine is read.
-        env: Object.assign({}, process.env, { GIT_CONFIG_GLOBAL: path.join(tmp, 'nogit') }),
+        env: Object.assign({}, env || process.env, { GIT_CONFIG_GLOBAL: path.join(tmp, 'nogit') }),
     });
     return { status: r.status, out: r.stdout || '', err: r.stderr || '' };
 }
@@ -213,6 +213,66 @@ try {
         const r = run(repo, []);
         check('a small UNTRACKED foreign RESUME.md is replaced without ceremony', r.status === 0,
             'status ' + r.status);
+    }
+
+    // ---- a FAILED tracking check is not "untracked" ---------------------------
+    //
+    // The check was `ls-files --error-unmatch` inside `catch { tracked = false; }`,
+    // so any git failure read as untracked, and a small foreign file that is
+    // untracked is replaceable. The hand-written tracked file above is the
+    // control: git answers there, and it is refused as tracked.
+    //
+    // Two real failures of the real git binary: a corrupt index (ls-files exits
+    // 128) and git missing from PATH (ENOENT). Each fixture holds a TRACKED
+    // hand-written RESUME.md, the file the first incident destroyed.
+    {
+        const repo = newRepo('corrupt-index');
+        const doc = path.join(repo, 'RESUME.md');
+        const original = 'A hand-written project handoff, small and tracked.\n';
+        fs.writeFileSync(doc, original);
+        git(repo, ['add', 'RESUME.md']);
+        git(repo, ['commit', '-qm', 'the handoff']);
+        fs.writeFileSync(path.join(repo, '.git', 'index'), 'not an index');
+        const probe = spawnSync('git', ['ls-files'], { cwd: repo, encoding: 'utf8' });
+        check('fixture check: git really cannot read the index', probe.status !== 0, 'status ' + probe.status);
+
+        const r = run(repo, []);
+        check('a tracking check that exits 128 does not clear the file: exit 3', r.status === 3, 'status ' + r.status);
+        check('  and the file is byte-identical afterwards', fs.readFileSync(doc, 'utf8') === original);
+        // git localises its messages, so this keys on the command and status.
+        has('  and the refusal names git\'s exit status', r.err, 'git ls-files exited 128');
+        has('  and says git could not tell, not that it is tracked', r.err, 'could not say whether it is tracked');
+    }
+
+    {
+        const repo = newRepo('no-git-on-path');
+        const doc = path.join(repo, 'RESUME.md');
+        const original = 'Another hand-written handoff.\n';
+        fs.writeFileSync(doc, original);
+        git(repo, ['add', 'RESUME.md']);
+        git(repo, ['commit', '-qm', 'the handoff']);
+        const noGit = {};
+        for (const k of Object.keys(process.env)) if (k.toUpperCase() !== 'PATH') noGit[k] = process.env[k];
+        noGit.PATH = path.join(tmp, 'no-git-here');
+        fs.mkdirSync(noGit.PATH);
+
+        const r = run(repo, [], noGit);
+        check('when git cannot be started in a repo, the file is not cleared: exit 3', r.status === 3, 'status ' + r.status);
+        check('  and the file is byte-identical afterwards', fs.readFileSync(doc, 'utf8') === original);
+        has('  and the refusal names the spawn error', r.err, 'ENOENT');
+    }
+
+    {
+        // The control for both: outside every repository git also exits 128,
+        // and there nothing can be tracked, so a small stray stays replaceable.
+        const dir = path.join(tmp, 'no-repo-here');
+        fs.mkdirSync(dir);
+        fs.writeFileSync(path.join(dir, 'RESUME.md'), 'scratch\n');
+        const probe = spawnSync('git', ['rev-parse', '--git-dir'], { cwd: dir, encoding: 'utf8' });
+        check('fixture check: the directory is inside no repository', probe.status !== 0, 'status ' + probe.status);
+        const r = run(dir, []);
+        check('a small foreign RESUME.md outside any repository is still replaced', r.status === 0,
+            'status ' + r.status + ' ' + r.err.slice(0, 200));
     }
 
     // ---- a LARGE untracked file is the hole the first guard left open -------

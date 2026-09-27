@@ -373,6 +373,35 @@ advance(app, {
     check('...and the run exits 2', res.status === 2, res.status);
 }
 
+{
+    // A COMMON STRING IS NOT A FAILED SEARCH. With node's default 1 MiB
+    // maxBuffer, a grep printing more than that was killed with ENOBUFS, so a
+    // string present on every line of a large file read UNCHECKABLE. The
+    // fixture check proves the output really exceeds 1 MiB, or this passes on
+    // any subject.
+    const LINES = 30000;
+    const body = [];
+    for (let i = 0; i < LINES; i++) body.push('export const row' + i + ' = COMMON_TOKEN; // padding to make each match line long');
+    const big = makeRepo('big-app', { 'src/big.ts': body.join('\n') + '\n' });
+    const out = spawnSync('git', ['-C', big, 'grep', '-n', '--fixed-strings', '-e', 'COMMON_TOKEN', 'origin/HEAD'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    check('fixture check: the grep prints more than 1 MiB', out.status === 0 && Buffer.byteLength(out.stdout) > 1024 * 1024,
+        out.status + ' ' + Buffer.byteLength(out.stdout || ''));
+
+    // run() uses spawnSync's own 1 MiB default, and the JSON carries every
+    // match, so this reads the subject through a larger buffer of its own.
+    const qf = path.join(fixture, 'Q-big.md');
+    fs.writeFileSync(qf, '**BIG · a string on every line** PREMISE: repo=big-app expect=present match=COMMON_TOKEN');
+    const r = spawnSync(process.execPath, [SUBJECT, '--queue', qf, '--repo-root', CODE, '--no-fetch', '--json'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    let json = null;
+    try { json = JSON.parse(r.stdout); } catch { /* left null on purpose */ }
+    const r0 = json && json.results[0];
+    check('a string matching more than 1 MiB of lines reads FRESH, not UNCHECKABLE',
+        !!r0 && r0.verdict === 'FRESH', r0 ? r0.verdict + ': ' + r0.why : r.stderr);
+    check('...with every match counted', !!r0 && r0.matches.length === LINES, r0 && r0.matches.length);
+}
+
 // ---------------------------------------------------------------------------
 // UNCHECKABLE is its own state and never collapses into fresh.
 // ---------------------------------------------------------------------------
@@ -389,12 +418,17 @@ advance(app, {
         res.json && res.json.population.fresh === 1 && res.json.population.uncheckable === 1, res.json);
     // The load-bearing one. A summary that says "nothing falsified" without
     // naming what it could not look at is the collapse this tool is about.
-    const human = run([
-        '**E · prose only**',
-        '**Beacon** ' + BEACON,
-    ].join('\n'), ['--no-json-marker']);
+    // run() always passes --json, and the JSON has an "uncheckable" key, so
+    // this runs the subject itself: through run() the check passed whatever
+    // the human sentence said.
+    const qf = path.join(fixture, 'Q-human-summary.md');
+    fs.writeFileSync(qf, ['**E · prose only**', '**Beacon** ' + BEACON].join('\n'));
+    const human = spawnSync(process.execPath, [SUBJECT, '--queue', qf, '--repo-root', CODE, '--no-fetch'], { encoding: 'utf8' });
+    let parsed = true;
+    try { JSON.parse(human.stdout); } catch { parsed = false; }
+    check('...the human report is not JSON, so the next check reads the sentence', !parsed, human.stdout.slice(0, 200));
     check('...and the human summary names the uncheckable count in the same sentence',
-        /could NOT be checked/.test(human.stdout) || /uncheckable/i.test(human.stdout), human.stdout.slice(-400));
+        /NO PREMISE FALSIFIED: 1 of 1 checked still hold.*\band 1 could NOT be checked/.test(human.stdout), human.stdout.slice(-400));
 }
 
 {
