@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { spawnSuiteSync } = require('./suite-tmp.js');
 
 const scriptsDir = __dirname;
 const repoRoot = path.resolve(scriptsDir, '..');
@@ -119,12 +120,16 @@ const results = [];
 // passed two arguments, so `args` was always undefined and spawnSync launched a
 // bare `node` with no script. Every suite "passed" without running, and CI was
 // green on an empty test run. Keep the parameter list matching the call sites.
+//
+// Each child gets its own temp root through suite-tmp.js, removed when it
+// exits. Suites leave their mkdtemp fixtures behind, and 62,325 of them piled
+// up in one day on the machine that runs this most; the reason is there.
 function run(label, args) {
-  const res = spawnSync(process.execPath, args, {
+  const res = spawnSuiteSync(process.execPath, args, {
     stdio: 'inherit',
     cwd: repoRoot,
     env: suiteEnv(),
-  });
+  }, { label });
   // spawnSync returns non-null `signal` if the child was killed, or a numeric
   // `status`.
   //
