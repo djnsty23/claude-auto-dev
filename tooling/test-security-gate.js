@@ -90,6 +90,8 @@ async function main() {
   {
     const r = await run(['--help']);
     check('--help exits 0 and names the exit codes', r.status === 0 && /Exit: 0 clean, 1 findings, 2 indeterminate/.test(r.stdout), r);
+    const optionLines = r.stdout.split('\n').filter((l) => /^ {2}--\w/.test(l)).map((l) => l.trim().split(/\s/)[0]);
+    check('--help lists each option once and carries no merge-conflict marker', optionLines.length === new Set(optionLines).size && !/^(<{7}|={7}|>{7})/m.test(r.stdout), r.stdout);
     const s = await run(['--selftest']);
     check('--selftest: every rule fires on the planted sample, none on the clean one', s.status === 0 && /control: (\d+) of \1 rules fire.*; 0 findings/.test(s.stdout), s.stdout);
     const l = await run(['--rules']);

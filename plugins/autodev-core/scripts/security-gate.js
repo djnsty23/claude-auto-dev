@@ -52,11 +52,7 @@ Usage:
 
 Options:
   --root <dir>     project root (default: cwd). Files come from git when it is a repo.
-<<<<<<< HEAD
-  --url <url>      also grade the live response headers of this page (repeatable, or a comma list)
-=======
-  --url <url>      also grade the live headers and <meta> CSP of this page (repeatable)
->>>>>>> 6a5c8c4 (fix(security-gate): judge a static site's meta CSP, not just the header)
+  --url <url>      also grade the live headers and <meta> CSP of this page (repeatable, or a comma list)
   --api <path>     a protected path, fetched with no credentials against the first --url;
                    a 2xx is a finding (repeatable, or a comma list)
   --invite-only    assert Supabase sign-up is disabled; reads SUPABASE_URL (or
