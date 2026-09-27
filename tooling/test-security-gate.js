@@ -142,6 +142,19 @@ async function main() {
     check('the same .env once ignored is not reported', r2.status === 0 && !rules(r2).has('env-file'), r2.stdout);
   }
 
+  // ------------------------------------------------ a root that is not a git repo
+  {
+    const dir = path.join(tmp, 'plain');
+    for (const [p, text] of Object.entries({ ...CLEAN_APP, 'node_modules/pkg/key.js': `const k = '${STRIPE}';\n` })) {
+      fs.mkdirSync(path.dirname(path.join(dir, p)), { recursive: true });
+      fs.writeFileSync(path.join(dir, p), text);
+    }
+    // The ceiling stops git finding a repo above the temp dir, so the walk is what runs.
+    const r = await run(['--root', dir], { GIT_CEILING_DIRECTORIES: tmp });
+    check('a plain directory is walked and says so', /files from directory walk \(not a git repo; ignore rules not applied\)/.test(r.stdout), r.stdout.slice(0, 400));
+    check('the walk skips node_modules and stays GREEN', r.status === 0 && /verdict: GREEN/.test(r.stdout), r.stdout.slice(-400));
+  }
+
   // ------------------------------------------------------------- waivers
   {
     const sink = 'export const H = ({ html }: { html: string }) => <div dangerouslySetInnerHTML={{ __html: html }} />;\n';
