@@ -37,8 +37,10 @@ result. If a chained stage fails, name the stages that did not run and execute
 them separately when useful; their results do not turn the failed chain green.
 
 On a machine where several sessions share one full-gate lock, queue for it
-rather than polling it. Run the wait, the gate and the release in ONE script, so
-the pid the lock names lives until the release:
+rather than polling it. A gate that takes the lock itself through this queue
+(autodev's own `npm run gate` does) needs nothing more: run it. For any other
+gate, run the wait, the gate and the release in ONE script, so the pid the lock
+names lives until the release:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/full-gate-queue.js" wait --pid "$PID" --what "<branch, head, worktree>"
@@ -48,8 +50,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/full-gate-queue.js" release --pid "$PID"
 
 Only the oldest live ticket may take the lock, and a release hands the lock
 straight to it, so arrival order decides and poll timing does not. Running the
-gate's steps one by one is still a full gate and still queues. `status` shows
-the holder and the queue.
+gate's steps one by one is still a full gate and still queues. A machine that
+allows more than one gate at a time sets its lane count once with `lanes N`;
+every waiter then takes whichever lane frees first. `status` shows each lane's
+holder and queue.
 
 ## Launch an owned candidate
 
