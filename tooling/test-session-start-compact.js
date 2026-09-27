@@ -20,15 +20,16 @@
 // mtime ordering that could do that. The System log recorded a low-virtual-memory
 // condition (Resource-Exhaustion-Detector, event 2004) at 07:38:41Z, the minute
 // this suite ran, and node started under a commit cap prints 0 bytes and exits
-// 0xC0000409, 0x80000003 or 134 (spawn-budget.js nativeDeath). So run() retries
-// what spawn-budget.js classifies as infrastructure, after a pause, and prints
-// each discarded attempt. A child that dies on every attempt ends grading, and
-// the suite exits 2, INDETERMINATE. An exit 0 with nothing on stdout, a JS error
-// (exit 1) and an exit 2 are the hook's own answers: graded, never retried.
+// 0xC0000409, 0x80000003 or 134 (spawn-budget.js nativeDeath). So every hook
+// child runs through spawn-budget.js runVerdict, which retries what classify()
+// calls infrastructure, after a pause, and prints each discarded attempt. A
+// child that dies on every attempt ends grading: every check after it is
+// reported as not graded, and the suite exits 2, INDETERMINATE. An exit 0 with
+// nothing on stdout, a JS error (exit 1) and an exit 2 are the hook's own
+// answers: graded, never retried.
 //
 // Run: node tooling/test-session-start-compact.js
 
-const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -36,20 +37,14 @@ const sb = require('./spawn-budget.js');
 
 const PLUGIN_ROOT = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
 const HOOK = path.join(PLUGIN_ROOT, 'hooks', 'session-start.js');
-// The pause before each retry. The red run's starved window covered two spawns
-// and was over by the third.
-const RETRY_MS = [1000, 3000, 9000];
 
 let pass = 0;
 let fail = 0;
 const failures = [];
-// Set when a hook child died on every attempt. Every check after it is reported
-// as not graded, never as a pass or a fail.
-let noVerdict = null;
 
 function check(name, ok, detail) {
-    if (noVerdict) {
-        console.log('SKIP  ' + name + '  (not graded: ' + noVerdict + ')');
+    if (sb.lostVerdict()) {
+        console.log('SKIP  ' + name + '  (not graded: ' + sb.lostVerdict() + ')');
         return;
     }
     if (ok) {
@@ -70,9 +65,11 @@ function project() {
 }
 
 function spawnHook(p, payload) {
-    return spawnSync(process.execPath, [HOOK], {
+    return sb.runVerdict(process.execPath, [HOOK], {
         input: JSON.stringify(Object.assign({ cwd: p.cwd, hook_event_name: 'SessionStart' }, payload)),
         encoding: 'utf8',
+        // An exit 2 is the hook's answer here, so it is graded like any other.
+        expect: 'exit2',
         cwd: p.cwd,
         env: Object.assign({}, process.env, {
             CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
@@ -91,33 +88,13 @@ function spawnHook(p, payload) {
     });
 }
 
-// What the child returned, for any run that did not answer with JSON.
-function diag(r, ms) {
-    return `status=${r.status} signal=${r.signal} error=${r.error ? (r.error.code || r.error.message) : 'none'}`
-        + ` ms=${ms} stdout=${JSON.stringify(String(r.stdout || '').slice(0, 80))}`
-        + ` stderr=${JSON.stringify(String(r.stderr || '').slice(0, 300))}`;
-}
-
 function run(p, payload) {
-    for (let attempt = 1; !noVerdict; attempt++) {
-        const t0 = Date.now();
-        const r = spawnHook(p, payload);
-        const ms = Date.now() - t0;
-        // An exit 2 is the hook's answer here, so it is graded like any other.
-        if (sb.classify(r, 'exit2') === 'verdict') {
-            let json = null;
-            try { json = JSON.parse(r.stdout); } catch { /* checked by the caller */ }
-            if (!json) console.log('  no JSON from the hook: ' + diag(r, ms));
-            return { status: r.status, out: r.stdout || '', err: r.stderr || '', json };
-        }
-        console.log(`  attempt ${attempt} of ${RETRY_MS.length + 1} produced no verdict (${sb.reason(r)}): ${diag(r, ms)}`);
-        if (attempt > RETRY_MS.length) {
-            noVerdict = `the hook child died ${attempt} times in a row, last ${sb.reason(r)}`;
-        } else {
-            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, RETRY_MS[attempt - 1]);
-        }
-    }
-    return { status: null, out: '', err: '', json: null };
+    const r = spawnHook(p, payload);
+    if (!r.verdict) return { status: null, out: '', err: '', json: null };
+    let json = null;
+    try { json = JSON.parse(r.stdout); } catch { /* checked by the caller */ }
+    if (!json) console.log('  no JSON from the hook: ' + sb.describeResult(r));
+    return { status: r.status, out: r.stdout || '', err: r.stderr || '', json };
 }
 
 function ctxOf(r) {
@@ -176,7 +153,7 @@ function writeAt(file, text, minutesAgo) {
         ctx.slice(0, 400));
     check('  and says to continue from its next steps', /next steps/.test(ctx));
     check('  exit 0 and empty stderr', compact.status === 0 && compact.err.length === 0);
-    check('  and never copies the handoff\'s contents', !ctx.includes('# RESUME'));
+    check('  and never copies the handoff\'s contents', !!compact.json && !ctx.includes('# RESUME'));
 }
 
 // --- which handoff wins ------------------------------------------------------------
@@ -234,6 +211,7 @@ function writeAt(file, text, minutesAgo) {
     }
 }
 
+const noVerdict = sb.lostVerdict();
 console.log('');
 console.log(sb.tally(pass, fail, noVerdict ? 1 : 0));
 console.log('subject: plugins/autodev-core/hooks/session-start.js, source "compact"; '
