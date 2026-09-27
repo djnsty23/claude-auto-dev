@@ -373,6 +373,35 @@ advance(app, {
     check('...and the run exits 2', res.status === 2, res.status);
 }
 
+{
+    // A COMMON STRING IS NOT A FAILED SEARCH. With node's default 1 MiB
+    // maxBuffer, a grep printing more than that was killed with ENOBUFS, so a
+    // string present on every line of a large file read UNCHECKABLE. The
+    // fixture check proves the output really exceeds 1 MiB, or this passes on
+    // any subject.
+    const LINES = 30000;
+    const body = [];
+    for (let i = 0; i < LINES; i++) body.push('export const row' + i + ' = COMMON_TOKEN; // padding to make each match line long');
+    const big = makeRepo('big-app', { 'src/big.ts': body.join('\n') + '\n' });
+    const out = spawnSync('git', ['-C', big, 'grep', '-n', '--fixed-strings', '-e', 'COMMON_TOKEN', 'origin/HEAD'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    check('fixture check: the grep prints more than 1 MiB', out.status === 0 && Buffer.byteLength(out.stdout) > 1024 * 1024,
+        out.status + ' ' + Buffer.byteLength(out.stdout || ''));
+
+    // run() uses spawnSync's own 1 MiB default, and the JSON carries every
+    // match, so this reads the subject through a larger buffer of its own.
+    const qf = path.join(fixture, 'Q-big.md');
+    fs.writeFileSync(qf, '**BIG · a string on every line** PREMISE: repo=big-app expect=present match=COMMON_TOKEN');
+    const r = spawnSync(process.execPath, [SUBJECT, '--queue', qf, '--repo-root', CODE, '--no-fetch', '--json'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    let json = null;
+    try { json = JSON.parse(r.stdout); } catch { /* left null on purpose */ }
+    const r0 = json && json.results[0];
+    check('a string matching more than 1 MiB of lines reads FRESH, not UNCHECKABLE',
+        !!r0 && r0.verdict === 'FRESH', r0 ? r0.verdict + ': ' + r0.why : r.stderr);
+    check('...with every match counted', !!r0 && r0.matches.length === LINES, r0 && r0.matches.length);
+}
+
 // ---------------------------------------------------------------------------
 // UNCHECKABLE is its own state and never collapses into fresh.
 // ---------------------------------------------------------------------------
