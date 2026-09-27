@@ -3,6 +3,36 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-26: a security gate that blocks only on rules with no measured false positive
+
+`plugins/autodev-core/scripts/security-gate.js` checks what a machine can decide
+before a web app ships: the files git would commit, Supabase migrations read as
+one ordered history, extension manifests and workers, and optionally the live
+response and anonymous access to named API paths. `ship`, `security`,
+`rule-security` and the `security-scanner` agent now run it first.
+
+Severity was set by measurement, not by taste. `[measured 2026-09-26]` the
+first draft ran over 33 local repositories. Error-level rules fired 67 times,
+and 55 of those were false: PEM headers with `...` for a body, AWS's documented
+`EXAMPLE` key id, short fake keys in security tests, and 41 tables in three
+repositories whose RLS was enabled in a `DO` loop through `format('%I')`. Each false class became a rule
+change plus a silent case in the built-in control. On the second run, all 12
+remaining errors were real: six apps with no CSP at all, two committed TLS
+private keys, and four SECURITY DEFINER functions without `search_path`. The
+judgement rules (HTML sinks, routes with no visible auth call, tables without
+GRANT, `using (true)` write policies, owner-rights views) stay warnings at 611
+hits, and fail only under `--strict`.
+
+The same run found the first draft hanging for over ten minutes on one 485 KB
+minified file. A regex skipping leading comments backtracked exponentially when
+one comment held another's delimiter. It is now a linear scan, and the
+remaining open quantifiers are bounded. The suite times a file built to that
+shape.
+
+A green run is printed as proof of the listed rules only. The gate cannot see
+an ownership check missing inside a query, which is why the `security` skill
+keeps its manual sections after the gate.
+
 ## 2026-09-25: the session-env dedupe hook runs on every OS, not only Windows
 
 `hooks/session-env-dedupe.js` removes dead `export` lines from a session's
