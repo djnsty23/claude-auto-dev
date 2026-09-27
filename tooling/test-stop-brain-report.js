@@ -10,20 +10,37 @@
 // which re-reads its whole context to learn nothing. So each quiet path asserts
 // ZERO BYTES on stdout AND stderr, not merely "no additionalContext" — a mutant
 // that writes to the wrong stream would otherwise pass.
+//
+// A HOOK CHILD THAT DIED OF THE MACHINE SAID NOTHING ABOUT THE HOOK. Every node
+// spawn goes through spawn-budget.js runVerdict, which re-runs a child that died
+// (nativeDeath) and, when one never answers, stops grading: the cases after it
+// print SKIP and the suite exits 2. Zero bytes is also what a child that did
+// nothing prints, so a quiet case asserts silence only where something else
+// shows the hook ran (the baseline it writes, or the notice before it), and an
+// ABSENCE check on a notice requires the notice first (`!!j &&`). The inert
+// paths write nothing by design, so their silence is ungated.
 
-const { spawnSync, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sb = require('./spawn-budget.js');
 
 const HOOK = path.join(__dirname, '..', 'plugins', 'autodev-core', 'hooks', 'stop-brain-report.js');
 const LEDGER = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'keyed-ledger.js'));
 
 let pass = 0;
 let fail = 0;
+let skipped = 0;
 const failures = [];
 
 function check(name, ok, detail) {
+    const lost = sb.lostVerdict();
+    if (lost) {
+        skipped++;
+        console.log('SKIP  ' + name + '  (not graded: ' + lost + ')');
+        return;
+    }
     if (ok) {
         pass++;
         console.log('PASS  ' + name + (detail ? '  (' + detail + ')' : ''));
@@ -56,7 +73,7 @@ function commitIn(dir, text) {
 
 /** Run the hook once. Returns {out, err, status}. */
 function run({ input, roleFile, stateFile, env }) {
-    const r = spawnSync(process.execPath, [HOOK], {
+    const r = sb.runVerdict(process.execPath, [HOOK], {
         input: typeof input === 'string' ? input : JSON.stringify(input),
         encoding: 'utf8',
         env: Object.assign({}, process.env, {
@@ -141,15 +158,17 @@ function spoke(r) {
     const state = stateFilePath();
 
     const first = run({ input: { session_id: 's2', cwd: repo }, roleFile: role, stateFile: state });
-    check('first sighting records a baseline and stays quiet', silentOk(first),
-        `out=${first.out.length}B`);
-
+    // The baseline is the hook's answer here: a child that exits 0 having
+    // done nothing is just as quiet.
     const recorded = LEDGER.readAll(state);
-    check('  and the baseline was actually written', !!(recorded.s2 && recorded.s2.sha),
+    const baseline = !!(recorded.s2 && recorded.s2.sha);
+    check('first sighting records a baseline and stays quiet', baseline && silentOk(first),
+        `out=${first.out.length}B baseline=${baseline}`);
+    check('  and the baseline was actually written', baseline,
         'sha=' + (recorded.s2 && String(recorded.s2.sha).slice(0, 8)));
 
     const again = run({ input: { session_id: 's2', cwd: repo }, roleFile: role, stateFile: state });
-    check('no commit since last look: still quiet', silentOk(again), `out=${again.out.length}B`);
+    check('no commit since last look: still quiet', baseline && silentOk(again), `out=${again.out.length}B`);
 }
 
 // --- the case it exists for ------------------------------------------------
@@ -232,9 +251,9 @@ const LIVE = (() => {
     check('stale role: the hook still speaks (a commit landed)', !!j, fired.out.slice(0, 120));
     check('  and says the record names no live coordinator', /DOES NOT NAME A LIVE COORDINATOR/.test(ctx), ctx.split('\n')[0]);
     check('  naming the dead session id and the archived record', /dead-session \(session_id brain-dead/.test(ctx) && /archived-desktop/.test(ctx), ctx);
-    check('  it hands out NO address to message', !/Message it before you go quiet/.test(ctx));
+    check('  it hands out NO address to message', !!j && !/Message it before you go quiet/.test(ctx));
     check('  and never by cwd', !/somewhere\/coordinator/.test(ctx) && /do not resolve a coordinator by cwd/.test(ctx));
-    check('  it does NOT block the turn', fired.status === 0 && !('decision' in j));
+    check('  it does NOT block the turn', !!j && fired.status === 0 && !('decision' in j));
 
     // Control: the same role file with a LIVE session_id is not called stale,
     // which is what proves the verdict came from the registries and not from
@@ -279,17 +298,17 @@ const LIVE = (() => {
     check('  it hands out the address that RESOLVES',
         /Message it before you go quiet: desktop session id `local_brain-desk`/.test(ctx), ctx.split('\n')[1]);
     check('  it does NOT send the session to the operator',
-        !/operator/.test(ctx), ctx);
+        !!j && !/operator/.test(ctx), ctx);
     check('  it does NOT claim the record names no live coordinator',
-        !/DOES NOT NAME A LIVE COORDINATOR/.test(ctx) && !/Nobody can be reached/.test(ctx), ctx.split('\n')[0]);
+        !!j && !/DOES NOT NAME A LIVE COORDINATOR/.test(ctx) && !/Nobody can be reached/.test(ctx), ctx.split('\n')[0]);
     check('  it names the stale FIELD, and as a field rather than an address',
         /PART OF THE ROLE FILE IS STALE/.test(ctx) && /`peer_name` \(not the name of any live session\)/.test(ctx)
         && /a field to re-stamp, not an address/.test(ctx), ctx.split('\n')[2]);
     check('  it does not offer the decayed peer name as an address',
-        !/Message it before you go quiet[^\n]*brain-peer-a7/.test(ctx), ctx.split('\n')[1]);
+        !!j && !/Message it before you go quiet[^\n]*brain-peer-a7/.test(ctx), ctx.split('\n')[1]);
     check('  it still does NOT emit session_id as an address',
-        !/brain-1/.test(ctx), ctx);
-    check('  and never by cwd', !/by cwd/.test(ctx) && !/somewhere\/coordinator/.test(ctx));
+        !!j && !/brain-1/.test(ctx), ctx);
+    check('  and never by cwd', !!j && !/by cwd/.test(ctx) && !/somewhere\/coordinator/.test(ctx));
     check('  it does NOT block the turn', fired.status === 0 && !!j && !('decision' in j), 'exit=' + fired.status);
 
     /* THE CONTROL THAT KEEPS THE ABOVE FROM BEING UNCONDITIONAL: the same
@@ -387,7 +406,7 @@ const LIVE = (() => {
     check('  it says the address reaches somebody else, not merely that nobody answers',
         /RESOLVES TO SOMEBODY ELSE/.test(ctx) && /Message NOBODY at that record/.test(ctx), ctx.split('\n')[0]);
     check('  it does NOT offer the stranger name as an address',
-        !/Message it before you go quiet/.test(ctx) && !/PART OF THE ROLE FILE IS STALE/.test(ctx), ctx.split('\n')[1]);
+        !!j && !/Message it before you go quiet/.test(ctx) && !/PART OF THE ROLE FILE IS STALE/.test(ctx), ctx.split('\n')[1]);
     check('  and a person is the right answer here, so it says so',
         /Report to the operator/.test(ctx), ctx.split('\n')[1]);
     check('  zero bytes on stderr, exit 0, turn not blocked', (() => {
@@ -422,9 +441,10 @@ const LIVE = (() => {
        is stale, the "-> live" resolution lines when nothing is. `session_id` is
        excluded from both sides by construction, which asserts the
        never-print-session_id property from a second direction. */
+    // `--status` exits 2 on a stale or dead record, which is its answer here.
     const fromStatus = (roleFile) => {
-        const r = spawnSync(process.execPath, [SUBJECT, '--status', '--role', roleFile], {
-            encoding: 'utf8', env: Object.assign({}, process.env, LIVE.env),
+        const r = sb.runVerdict(process.execPath, [SUBJECT, '--status', '--role', roleFile], {
+            encoding: 'utf8', env: Object.assign({}, process.env, LIVE.env), expect: 'exit2',
         });
         const out = r.stdout || '';
         const advice = (out.split('\n').find((l) => /PARTLY STALE AND STILL REACHABLE\. Use /.test(l)) || '');
@@ -436,6 +456,7 @@ const LIVE = (() => {
         return {
             offers: offers.sort().join(','),
             sendsToPerson: /Nobody can be reached|Message nobody at this record/.test(out),
+            said: out.length > 0,
         };
     };
     const fromHook = (roleFile) => {
@@ -450,6 +471,7 @@ const LIVE = (() => {
             offers: (line.match(/`([^`]+)`/g) || []).sort().join(','),
             sendsToPerson: /Report to the operator|Message NOBODY/.test(ctx),
             ctx,
+            spoke: !!j,
         };
     };
 
@@ -463,10 +485,13 @@ const LIVE = (() => {
         const roleFile = writeRole(rec);
         const s = fromStatus(roleFile);
         const h = fromHook(roleFile);
+        // Two children that both printed nothing agree on everything, so each
+        // side must have answered first: a commit landed, so the hook speaks.
+        const both = s.said && h.spoke;
         check('hook and --status agree on "' + label + '": same addresses offered',
-            s.offers === h.offers, '--status=[' + s.offers + '] hook=[' + h.offers + ']');
+            both && s.offers === h.offers, '--status=[' + s.offers + '] hook=[' + h.offers + ']');
         check('  and agree on whether a person is the answer',
-            s.sendsToPerson === h.sendsToPerson,
+            both && s.sendsToPerson === h.sendsToPerson,
             '--status=' + s.sendsToPerson + ' hook=' + h.sendsToPerson);
     }
     /* The pair that makes the four above discriminating: the four records must
@@ -491,29 +516,36 @@ const LIVE = (() => {
     run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     commitIn(repo, 'v2\n');
     const one = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
-    check('throttle: the first notice fires', !!spoke(one));
-    const notifiedSha = LEDGER.readAll(state).s4.sha;
+    // Suppression is only a claim once a notice opened the window. Without it
+    // every quiet case below passes on a hook that never ran.
+    const noticed = !!spoke(one);
+    check('throttle: the first notice fires', noticed);
+    const shaOf = () => (LEDGER.readAll(state).s4 || {}).sha;
+    const short = (sha) => String(sha || '').slice(0, 8);
+    const notifiedSha = shaOf();
 
     commitIn(repo, 'v3\n');
     const two = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
-    check('throttle: a second commit inside the window is SUPPRESSED', silentOk(two),
+    check('throttle: a second commit inside the window is SUPPRESSED', noticed && silentOk(two),
         `out=${two.out.length}B`);
 
-    const waiting = LEDGER.readAll(state);
+    const storedSha = shaOf();
     const pendingSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
     check('throttle: suppressed work does not advance the notified HEAD',
-        waiting.s4.sha === notifiedSha && pendingSha !== notifiedSha,
-        `stored=${waiting.s4.sha.slice(0, 8)} notified=${notifiedSha.slice(0, 8)} pending=${pendingSha.slice(0, 8)}`);
+        !!notifiedSha && storedSha === notifiedSha && pendingSha !== notifiedSha,
+        `stored=${short(storedSha)} notified=${short(notifiedSha)} pending=${short(pendingSha)}`);
     const stillWaiting = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
-    check('throttle: pending work stays quiet while the window is active', silentOk(stillWaiting),
+    check('throttle: pending work stays quiet while the window is active', noticed && silentOk(stillWaiting),
         `out=${stillWaiting.out.length}B err=${stillWaiting.err.length}B exit=${stillWaiting.status}`);
 
     // Age only the notice timestamp. A new commit here would hide the defect:
     // the final commit must be delivered when the cooldown ends without
     // requiring the worker to create more work first.
     const expired = LEDGER.readAll(state);
-    expired.s4.reportedAt = Date.now() - 21 * 60 * 1000;
-    LEDGER.write(state, 's4', expired.s4);
+    if (expired.s4) {
+        expired.s4.reportedAt = Date.now() - 21 * 60 * 1000;
+        LEDGER.write(state, 's4', expired.s4);
+    }
     const released = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
     const releasedContext = spoke(released);
     check('throttle: the same final commit is reported after cooldown expires',
@@ -521,9 +553,9 @@ const LIVE = (() => {
             && released.err.length === 0,
         `out=${released.out.length}B err=${released.err.length}B exit=${released.status}`);
     check('throttle: released work advances the notified HEAD',
-        LEDGER.readAll(state).s4.sha === pendingSha);
+        shaOf() === pendingSha);
     const duplicate = run({ input: { session_id: 's4', cwd: repo }, roleFile: role, stateFile: state });
-    check('throttle: the released commit is not reported twice', silentOk(duplicate),
+    check('throttle: the released commit is not reported twice', !!releasedContext && silentOk(duplicate),
         `out=${duplicate.out.length}B err=${duplicate.err.length}B exit=${duplicate.status}`);
 
     commitIn(repo, 'v4\n');
@@ -544,8 +576,11 @@ const LIVE = (() => {
     const state = stateFilePath();
     fs.writeFileSync(state, '{ this is not json');
     const r = run({ input: { session_id: 's5', cwd: repo }, roleFile: role, stateFile: state });
+    // A first sighting writes a baseline, which is what separates it from a
+    // child that did nothing.
+    const sighted = !!(LEDGER.readAll(state).s5 || {}).sha;
     check('corrupt state ledger: treated as a first sighting, never a crash',
-        silentOk(r), `exit=${r.status} err=${r.err.length}B`);
+        sighted && silentOk(r), `exit=${r.status} err=${r.err.length}B baseline=${sighted}`);
 }
 
 // --- published work must not read as unreported ----------------------------
@@ -591,7 +626,7 @@ const LIVE = (() => {
     check('  and says the work is already on the trunk',
         /already on the trunk|on the trunk/.test(pubCtx), pubCtx.split('\n')[0]);
     check('  and does NOT report it as bare commits ahead of upstream',
-        !/\d+ ahead of upstream/.test(pubCtx), pubCtx.split('\n')[0]);
+        !!pub && !/\d+ ahead of upstream/.test(pubCtx), pubCtx.split('\n')[0]);
 
     // The control that makes the two above mean something: identical fixture,
     // identical commit, the ONLY difference is that the work never reached the
@@ -605,7 +640,7 @@ const LIVE = (() => {
     check('  control: work NOT on the trunk still reports commits ahead of upstream',
         /\d+ ahead of upstream/.test(unpubCtx), unpubCtx.split('\n')[0]);
     check('  control: and does not claim the trunk carries it',
-        !/on the trunk/.test(unpubCtx), unpubCtx.split('\n')[0]);
+        !!unpub && !/on the trunk/.test(unpubCtx), unpubCtx.split('\n')[0]);
 
     // A repo with no origin at all must be unchanged: the trunk is UNKNOWN, and
     // unknown must not be reported as either published or unpublished.
@@ -619,8 +654,10 @@ const LIVE = (() => {
         !!noOrigin && !/on the trunk/.test(noCtx), noCtx.split('\n')[0]);
 }
 
+const lost = sb.lostVerdict();
 console.log('');
-console.log(`${pass} passed, ${fail} failed`);
+console.log(sb.tally(pass, fail, lost ? 1 : 0));
+if (lost) console.log(`INDETERMINATE: ${lost}. The ${skipped} cases after it were not graded.`);
 console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
     + (pass + fail) + ' cases over 6 inert paths, all FOUR role-record outcomes driven '
     + 'from fixtures (a wholly live record; a PARTLY stale one whose peer name decayed '
@@ -636,7 +673,5 @@ console.log('subject: plugins/autodev-core/hooks/stop-brain-report.js; '
     + 'shape with an off-trunk control and a no-origin case. Every quiet case asserts '
     + 'zero bytes on BOTH streams; the address line never offers cwd and never carries '
     + 'session_id.');
-if (fail) {
-    console.log('failed: ' + failures.join('; '));
-    process.exit(1);
-}
+if (fail) console.log('failed: ' + failures.join('; '));
+process.exitCode = sb.exitCode(fail, lost ? 1 : 0);
