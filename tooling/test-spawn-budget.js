@@ -331,6 +331,7 @@ function checkSelftest(label, r, detail) {
         'test-drift-audit-config.js',
         'test-telemetry-hook.js',
         'test-orphan-checks.js',
+        'test-mission-contract.js',
         'test-stop-brain-report.js',
     ];
     const problems = (src) => {

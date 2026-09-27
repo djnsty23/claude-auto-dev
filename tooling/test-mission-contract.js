@@ -11,12 +11,21 @@
 // The last group drives the real mission-store.js and runs only where the store
 // runs (node:sqlite plus POSIX ownership checks); elsewhere it says so by name.
 //
+// A CHILD THAT DIED OF THE MACHINE SAID NOTHING ABOUT THE BUILDER. Every node
+// child goes through spawn-budget.js runVerdict: a timeout gets one retry at a
+// budget widened by the contention measured right then, and a native death
+// (0xC0000409, 0x80000003, 134) is re-run after a pause. A child that never
+// answers stops grading: the checks after it print SKIP and the suite exits 2,
+// never 1. Before this, a dead child's empty stdout read as `json === null` and
+// failed every check that asked for a payload.
+//
 // Run: node tooling/test-mission-contract.js
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync, execFileSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
+const sb = require('./spawn-budget.js');
 
 const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'mission-contract.js');
 const STORE = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'mission-store.js');
@@ -26,13 +35,16 @@ const ROOT = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'miss
 
 let passed = 0;
 const failures = [];
+const skipped = [];
 function check(name, cond, detail) {
+    // A check made after a lost verdict graded nothing, whatever it reads.
+    if (sb.lostVerdict()) { skipped.push(name); return; }
     if (cond) { passed++; return; }
     failures.push(name + (detail === undefined ? '' : '\n      -> ' + String(detail).slice(0, 400)));
 }
 
 function run(args, opts = {}) {
-    const r = spawnSync(process.execPath, [SUBJECT, ...args], { encoding: 'utf8', cwd: opts.cwd || ROOT, timeout: 15000 });
+    const r = sb.runVerdict(process.execPath, [SUBJECT, ...args], { encoding: 'utf8', cwd: opts.cwd || ROOT, timeout: 15000 });
     let json = null; try { json = JSON.parse(r.stdout); } catch { /* usage text or garbage */ }
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
 }
@@ -44,7 +56,7 @@ function canon(v) {
     return JSON.stringify(v);
 }
 function storeCli(command, store, payload) {
-    const r = spawnSync(process.execPath, [STORE, command, '--store', store], { input: JSON.stringify(payload), encoding: 'utf8', timeout: 15000 });
+    const r = sb.runVerdict(process.execPath, [STORE, command, '--store', store], { input: JSON.stringify(payload), encoding: 'utf8', timeout: 15000 });
     let json = null; try { json = JSON.parse(r.stdout); } catch { /* not json */ }
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
 }
@@ -220,10 +232,18 @@ let s1;
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* leave it */ }
 
 const total = passed + failures.length;
+const lost = sb.lostVerdict();
+for (const name of skipped) console.log('SKIP  ' + name + '  (not graded: ' + lost + ')');
 if (failures.length) {
     console.error(`mission-contract: ${passed}/${total} passed, ${failures.length} FAILED\n`);
     for (const f of failures) console.error('  x ' + f);
-    process.exitCode = 1;
+}
+if (lost) {
+    console.log(`mission-contract: ${sb.tally(passed, failures.length, 1)}`);
+    console.log(`INDETERMINATE: ${lost}. The ${skipped.length} checks after it were not graded.`);
+}
+if (failures.length || lost) {
+    process.exitCode = sb.exitCode(failures.length, lost ? 1 : 0);
 } else {
     console.log(`mission-contract: ${passed}/${total} passed — deterministic payloads, five prd states kept apart, named refusals, and compare-before-write against the store`);
 }
