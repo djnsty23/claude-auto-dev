@@ -29,6 +29,9 @@ baseline and keep independent checks moving.
 1. **Scan the scope.** Use `audit` for defects and `brainstorm` for requested
    product/architecture ideas. Choose relevant perspectives and use supported
    tools within the available budget; do not assume five parallel agents.
+   From round 2 on a product with a user-facing surface, brainstorm also runs
+   its delight pass (its Step 5). Those touches go to the operator as proposals,
+   never into the fix queue.
 2. **Validate findings.** Reproduce candidates and check known-good controls.
    Deduplicate by root cause and observable behavior, not just file/title.
    Unexecuted checks or an unexpectedly empty target population are gaps. A
@@ -44,7 +47,10 @@ baseline and keep independent checks moving.
 5. **Check completion.** Re-scan the changed and adjacent risk surfaces and run
    applicable acceptance/gate checks on the current revision. If findings remain,
    continue within the budget. If the limit is reached, checkpoint exact work
-   and gaps for continuation.
+   and gaps for continuation. For a product with a user-facing surface, the
+   acceptance includes the done bar in
+   `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/done-bar.md`: a site that
+   works but misses one of its items has not converged.
 
 ## Round Limit
 
