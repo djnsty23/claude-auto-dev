@@ -50,6 +50,32 @@ function withMutant(from, to, fn) {
     try { return fn(file); } finally { fs.rmSync(file, { force: true }); }
 }
 
+// Records in the shapes a real transcript carries.
+let seq = 0;
+const skillCall = (name, at) => {
+    const id = 'toolu_cs' + (++seq);
+    return JSON.stringify({ type: 'assistant', timestamp: at, uuid: 'a' + seq,
+        message: { id: 'msg_cs' + seq, content: [{ type: 'tool_use', id: id, name: 'Skill', input: { skill: name } }] },
+        wireToolInputs: { [id]: { skill: name } } });
+};
+const typedCmd = (name, at) => JSON.stringify({ type: 'user', timestamp: at, uuid: 'u' + (++seq),
+    message: { role: 'user', content: '<command-message>' + name + '</command-message>\n<command-name>/'
+        + name + '</command-name>' } });
+
+/**
+ * A synthetic plugin tree, so no assertion names a real skill. A fixture that
+ * named one broke the day that skill was retired.
+ */
+function fixturePlugins(root, skills) {
+    for (const n of skills) {
+        const d = path.join(root, 'autodev-core', 'skills', n);
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, 'SKILL.md'),
+            '---\nname: ' + n + '\ndescription: Fixture skill ' + n + '.\n---\n\n# ' + n + '\n', 'utf8');
+    }
+    return root;
+}
+
 let tmp = null;
 try {
     // ---------------------------------------------------------------- surface
@@ -85,11 +111,10 @@ try {
     // slid. A suite whose verdict depends on how many slash commands somebody
     // typed this morning is a clock, not a test.
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'census-lopsided-'));
-    const typedLine = '{"timestamp":"2026-09-17T09:00:00.000Z","text":'
-        + '"<command-name>/design</command-name>"}';
+    const typedLines = [];
+    for (let i = 0; i < 25; i++) typedLines.push(typedCmd('design', '2026-09-17T09:00:00.000Z'));
     fs.writeFileSync(path.join(fixture, 'f.jsonl'),
-        new Array(25).fill(typedLine).join('\n')
-            + '\n{"timestamp":"2026-09-17T09:30:00.000Z","tool":{"skill":"autodev-core:design"}}\n',
+        typedLines.join('\n') + '\n' + skillCall('autodev-core:design', '2026-09-17T09:30:00.000Z') + '\n',
         'utf8');
 
     const healthy = run(SUBJECT, ['--dir', fixture, '--days', '3650']);
@@ -98,12 +123,12 @@ try {
         'status=' + healthy.status + ' ' + healthy.stdout.slice(0, 300));
 
     const blindHits = withMutant(
-        'const model = /"skill"\\s*:\\s*"([a-zA-Z0-9:_-]+)"/g;',
-        'const model = /"skiII"\\s*:\\s*"([a-zA-Z0-9:_-]+)"/g;',
+        'for (const h of skillEvents(text, { sinceMs: sinceMs, seen: seen })) {',
+        'for (const h of skillEvents(text, { sinceMs: sinceMs, seen: seen }).filter((e) => e.channel !== \'model\')) {',
         (f) => run(f, ['--dir', fixture, '--days', '3650']),
     );
     fs.rmSync(fixture, { recursive: true, force: true });
-    check('renaming the invocation field makes the probe declare itself BROKEN',
+    check('a blind model reader makes the probe declare itself BROKEN',
         blindHits.status === 2 || /PROBE BROKEN/.test(blindHits.stderr + blindHits.stdout),
         'status=' + blindHits.status + ' stderr=' + blindHits.stderr.slice(0, 200));
     check('  and it does NOT report the zero as a finding about the corpus',
@@ -143,16 +168,26 @@ try {
     // suite whose result depends on how many sessions this box happened to run
     // is not a test, and on a fresh clone it would report an empty world.
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'census-suite-'));
+    const plugins = fixturePlugins(path.join(tmp, 'plugins'), ['design', 'a11y', 'never-listed', 'status', 'quoted-only']);
     const L = '\\n';
-    fs.writeFileSync(path.join(tmp, 't.jsonl'), [
-        '{"timestamp":"2026-09-17T09:00:00.000Z","tool":{"skill":"autodev-core:design"}}',
+    fs.mkdirSync(path.join(tmp, 'projects'));
+    fs.writeFileSync(path.join(tmp, 'projects', 't.jsonl'), [
+        skillCall('autodev-core:design', '2026-09-17T09:00:00.000Z'),
+        // F3: the built-in /status, typed bare, is not the status skill.
+        typedCmd('status', '2026-09-17T09:10:00.000Z'),
+        // F2: the tag quoted inside a tool_result is not a load.
+        JSON.stringify({ type: 'user', timestamp: '2026-09-17T09:20:00.000Z', uuid: 'tr1', message: { content: [
+            { type: 'tool_result', content: '<command-name>/quoted-only</command-name>' }] } }),
+        JSON.stringify({ type: 'user', timestamp: '2026-09-17T09:25:00.000Z', uuid: 'tr2', message: { role: 'user',
+            content: 'a prompt that quotes <command-name>/quoted-only</command-name> mid-text' } }),
         '{"timestamp":"2026-09-17T10:00:00.000Z","content":"'
             + 'The following skills are available for use with the Skill tool:' + L + L
             + '- autodev-core:design: Creates distinctive UI.' + L
             + '- autodev-core:a11y' + L + L + 'end"}',
     ].join('\n'), 'utf8');
 
-    const real = run(SUBJECT, ['--dir', tmp, '--days', '3650', '--rendered', '--plugin', 'autodev-core', '--json']);
+    const real = run(SUBJECT, ['--dir', path.join(tmp, 'projects'), '--plugins', plugins, '--days', '3650',
+        '--rendered', '--plugin', 'autodev-core', '--json']);
     check('a run over a synthetic corpus exits 0', real.status === 0,
         'status=' + real.status + ' ' + (real.stderr || '').slice(0, 200));
     let parsed = null;
@@ -176,8 +211,14 @@ try {
         rowOf('a11y') && rowOf('a11y').slots === 0 && rowOf('a11y').listedIn === 1,
         JSON.stringify(rowOf('a11y') && { slots: rowOf('a11y').slots, listedIn: rowOf('a11y').listedIn }));
     check('a skill in neither the listing nor the transcript stays at zero',
-        rowOf('refactor') && rowOf('refactor').model === 0 && rowOf('refactor').slots === 0,
-        JSON.stringify(rowOf('refactor') && { model: rowOf('refactor').model, slots: rowOf('refactor').slots }));
+        rowOf('never-listed') && rowOf('never-listed').model === 0 && rowOf('never-listed').slots === 0,
+        JSON.stringify(rowOf('never-listed') && { model: rowOf('never-listed').model, slots: rowOf('never-listed').slots }));
+    check('F3: the built-in /status is not credited to a skill named status',
+        rowOf('status') && rowOf('status').typed === 0,
+        JSON.stringify(rowOf('status') && { typed: rowOf('status').typed }));
+    check('F2: a command tag quoted in a tool_result is not a load',
+        rowOf('quoted-only') && rowOf('quoted-only').typed === 0 && rowOf('quoted-only').model === 0,
+        JSON.stringify(rowOf('quoted-only') && { typed: rowOf('quoted-only').typed, model: rowOf('quoted-only').model }));
 
     // A corpus with no transcripts at all: PROBE BROKEN, not "nothing fires".
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'census-empty-'));

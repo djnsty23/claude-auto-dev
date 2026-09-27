@@ -13,12 +13,27 @@
 // hook's other blocks add nothing and every byte of additionalContext here is
 // this branch's.
 //
+// A HOOK CHILD THAT DIED OF THE MACHINE SAID NOTHING ABOUT THE HOOK.
+// `[measured 2026-09-27]` a full gate went red here, 19 passed and 2 failed:
+// both compact runs in "which handoff wins" printed 0 bytes, while the startup
+// run between them printed its 39. The hook has no timeout, no budget and no
+// mtime ordering that could do that. The System log recorded a low-virtual-memory
+// condition (Resource-Exhaustion-Detector, event 2004) at 07:38:41Z, the minute
+// this suite ran, and node started under a commit cap prints 0 bytes and exits
+// 0xC0000409, 0x80000003 or 134 (spawn-budget.js nativeDeath). So every hook
+// child runs through spawn-budget.js runVerdict, which retries what classify()
+// calls infrastructure, after a pause, and prints each discarded attempt. A
+// child that dies on every attempt ends grading: every check after it is
+// reported as not graded, and the suite exits 2, INDETERMINATE. An exit 0 with
+// nothing on stdout, a JS error (exit 1) and an exit 2 are the hook's own
+// answers: graded, never retried.
+//
 // Run: node tooling/test-session-start-compact.js
 
-const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sb = require('./spawn-budget.js');
 
 const PLUGIN_ROOT = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
 const HOOK = path.join(PLUGIN_ROOT, 'hooks', 'session-start.js');
@@ -28,6 +43,10 @@ let fail = 0;
 const failures = [];
 
 function check(name, ok, detail) {
+    if (sb.lostVerdict()) {
+        console.log('SKIP  ' + name + '  (not graded: ' + sb.lostVerdict() + ')');
+        return;
+    }
     if (ok) {
         pass++;
         console.log('PASS  ' + name + (detail ? '  (' + detail + ')' : ''));
@@ -45,25 +64,36 @@ function project() {
     return { root, cwd };
 }
 
-function run(p, payload) {
-    const r = spawnSync(process.execPath, [HOOK], {
+function spawnHook(p, payload) {
+    return sb.runVerdict(process.execPath, [HOOK], {
         input: JSON.stringify(Object.assign({ cwd: p.cwd, hook_event_name: 'SessionStart' }, payload)),
         encoding: 'utf8',
+        // An exit 2 is the hook's answer here, so it is graded like any other.
+        expect: 'exit2',
         cwd: p.cwd,
         env: Object.assign({}, process.env, {
             CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
             HOME: p.root,
             USERPROFILE: p.root,
             CLAUDE_CONFIG_DIR: path.join(p.root, '.claude'),
-            // The pile count reads the operator's real session list otherwise.
+            // An empty session store, not the operator's: `[measured 2026-09-27]`
+            // scanning the real one cost ~700 ms and 18 MB more per hook child
+            // (1315 records) than an empty one, on every spawn in this file.
+            SESSION_SWEEP_STORE: path.join(p.root, 'session-store'),
             AUTODEV_SESSION_PILE_MAX: '100000',
             // Keep the hook out of any enclosing git repo, so the working-tree and
             // parallel-work blocks stay silent.
             GIT_CEILING_DIRECTORIES: p.root,
         }),
     });
+}
+
+function run(p, payload) {
+    const r = spawnHook(p, payload);
+    if (!r.verdict) return { status: null, out: '', err: '', json: null };
     let json = null;
-    try { json = JSON.parse(r.stdout); } catch { /* checked below */ }
+    try { json = JSON.parse(r.stdout); } catch { /* checked by the caller */ }
+    if (!json) console.log('  no JSON from the hook: ' + sb.describeResult(r));
     return { status: r.status, out: r.stdout || '', err: r.stderr || '', json };
 }
 
@@ -87,15 +117,15 @@ function writeAt(file, text, minutesAgo) {
     check('compact with no handoff: exit 0, empty stderr', compact.status === 0 && compact.err.length === 0,
         `err=${compact.err.length}B`);
     check('compact with no handoff adds ZERO bytes: output identical to startup',
-        compact.out === startup.out, `startup=${startup.out.length}B compact=${compact.out.length}B`);
-    check('  and carries no additionalContext at all', !('hookSpecificOutput' in (compact.json || {})),
+        !!compact.json && compact.out === startup.out, `startup=${startup.out.length}B compact=${compact.out.length}B`);
+    check('  and carries no additionalContext at all', !!compact.json && !('hookSpecificOutput' in (compact.json || {})),
         compact.out.slice(0, 120));
 
     // An empty handoff directory, or one holding only non-markdown, is still no handoff.
     fs.mkdirSync(path.join(p.cwd, '.claude', 'handoffs'), { recursive: true });
     fs.writeFileSync(path.join(p.cwd, '.claude', 'handoffs', 'notes.txt'), 'x');
     const empty = run(p, { session_id: 'aaaa1111-x', source: 'compact' });
-    check('a handoff directory with no .md file: still zero added bytes', empty.out === startup.out,
+    check('a handoff directory with no .md file: still zero added bytes', !!empty.json && empty.out === startup.out,
         `${empty.out.length}B`);
 }
 
@@ -107,9 +137,9 @@ function writeAt(file, text, minutesAgo) {
 
     const startup = run(p, { session_id: 'bbbb2222-y', source: 'startup' });
     check('source startup with a handoff on disk: the compact text is absent',
-        !ctxOf(startup).includes('compacted'), ctxOf(startup).slice(0, 120));
+        !!startup.json && !ctxOf(startup).includes('compacted'), ctxOf(startup).slice(0, 120));
     const resume = run(p, { session_id: 'bbbb2222-y', source: 'resume' });
-    check('source resume: absent too', !ctxOf(resume).includes('compacted'));
+    check('source resume: absent too', !!resume.json && !ctxOf(resume).includes('compacted'));
 
     const compact = run(p, { session_id: 'bbbb2222-y', source: 'compact' });
     const ctx = ctxOf(compact);
@@ -123,7 +153,7 @@ function writeAt(file, text, minutesAgo) {
         ctx.slice(0, 400));
     check('  and says to continue from its next steps', /next steps/.test(ctx));
     check('  exit 0 and empty stderr', compact.status === 0 && compact.err.length === 0);
-    check('  and never copies the handoff\'s contents', !ctx.includes('# RESUME'));
+    check('  and never copies the handoff\'s contents', !!compact.json && !ctx.includes('# RESUME'));
 }
 
 // --- which handoff wins ------------------------------------------------------------
@@ -145,9 +175,9 @@ function writeAt(file, text, minutesAgo) {
     const stranger = run(p, { session_id: 'eeee5555-z', source: 'compact' });
     const strangerStartup = run(p, { session_id: 'eeee5555-z', source: 'startup' });
     check('a session with no handoff of its own is NOT pointed at a newer peer handoff',
-        !ctxOf(stranger).includes(newerPeer) && !ctxOf(stranger).includes(own), ctxOf(stranger).slice(0, 300));
+        !!stranger.json && !ctxOf(stranger).includes(newerPeer) && !ctxOf(stranger).includes(own), ctxOf(stranger).slice(0, 300));
     check('  and gets zero added bytes: output identical to its startup',
-        stranger.out === strangerStartup.out && stranger.err.length === 0,
+        !!stranger.json && stranger.out === strangerStartup.out && stranger.err.length === 0,
         `startup=${strangerStartup.out.length}B compact=${stranger.out.length}B`);
 
     const root = project();
@@ -157,11 +187,12 @@ function writeAt(file, text, minutesAgo) {
     writeAt(path.join(root.cwd, '.claude', 'handoffs', 'shared-RESUME.md'), 'shared', 5);
     const r = run(root, { session_id: 'ffff6666-z', source: 'compact' });
     check('a root RESUME.md or a differently named handoff is never offered',
-        !ctxOf(r).includes('compacted') && !r.out.includes('RESUME.md') && !r.out.includes('old.md'),
+        !!r.json && !ctxOf(r).includes('compacted') && !r.out.includes('RESUME.md') && !r.out.includes('old.md'),
         r.out.slice(0, 300));
 
-    const noId = ctxOf(run(p, { source: 'compact' }));
-    check('no session_id in the payload: no hint', !noId.includes('compacted'), noId.slice(0, 200));
+    const noIdRun = run(p, { source: 'compact' });
+    const noId = ctxOf(noIdRun);
+    check('no session_id in the payload: no hint', !!noIdRun.json && !noId.includes('compacted'), noId.slice(0, 200));
 }
 
 // --- a hostile directory name cannot carry a multi-line payload ------------------
@@ -180,14 +211,14 @@ function writeAt(file, text, minutesAgo) {
     }
 }
 
+const noVerdict = sb.lostVerdict();
 console.log('');
-console.log(`${pass} passed, ${fail} failed`);
+console.log(sb.tally(pass, fail, noVerdict ? 1 : 0));
 console.log('subject: plugins/autodev-core/hooks/session-start.js, source "compact"; '
     + (pass + fail) + ' cases: zero added bytes with no handoff (byte-identical to startup), '
     + 'silence on startup and resume with one present, the compact text with path, age and '
     + 'the fleet ledger, own-handoff-wins, no fallback to a newer peer file or a root '
     + 'RESUME.md, and a hostile path.');
-if (fail) {
-    console.log('failed: ' + failures.join('; '));
-    process.exit(1);
-}
+if (fail) console.log('failed: ' + failures.join('; '));
+if (noVerdict) console.log(`INDETERMINATE: ${noVerdict}. The cases after it were not graded.`);
+process.exitCode = sb.exitCode(fail, noVerdict ? 1 : 0);

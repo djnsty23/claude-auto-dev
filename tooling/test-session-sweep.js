@@ -131,6 +131,25 @@ function buildCases() {
     cases.push({ id: 'unpushed', wt, expectRisk: (r) => /^unpushed\(1\)$/.test(r), expectSafe: false });
   }
 
+  // 3b. The unpushed check itself fails. The branch is on origin, but this
+  //     clone has no `origin/<branch>` ref, which is the state of a branch
+  //     pushed from another clone and never fetched here. `git log
+  //     origin/<branch>..HEAD` then exits 128. The sweep read that as "nothing
+  //     unpushed" and cleared the worktree, with a commit that exists nowhere
+  //     else. Case 3 is the control: the same shape with the ref present.
+  {
+    const wt = makeWorktree('unpushed-unfetched', 'case-unfetched');
+    sh('git push -q -u origin case-unfetched', wt);
+    sh('git update-ref -d refs/remotes/origin/case-unfetched', wt);
+    commitIn(wt, 'u.txt', 'local only, never fetched');
+    // git localises its messages, so the label is matched on what it cannot
+    // translate: the command, the status, and the revision range.
+    cases.push({
+      id: 'unpushed-unfetched', wt, expectSafe: false,
+      expectRisk: (r) => /^unpushed-uncheckable\(git log exited 128: /.test(r || '') && /origin\/case-unfetched\.\.HEAD/.test(r),
+    });
+  }
+
   // 4. Branch never pushed, carrying a commit the default branch lacks.
   //    This is the case where `origin/<branch>..HEAD` resolves to nothing and a
   //    naive count reports 0 — an empty result that means the probe could not
@@ -542,6 +561,40 @@ function checkDoneUnboundAndSelf() {
   check('self: and does not settle', d.settle, false);
 }
 
+// A second failure of the same unpushed check, injected rather than reached:
+// GIT_CONFIG_* sets log.date=bogus, which only `git log` reads, so status,
+// rev-parse and ls-remote before it still answer and the log alone exits 128.
+// Its own store and its own worktree, because the variable reaches every git
+// call in the run, and the graded store must stay clean. The same worktree
+// swept without it is the control.
+function checkUnpushedLogDies() {
+  const wt = makeWorktree('log-dies', 'case-log-dies');
+  sh('git push -q -u origin case-log-dies', wt);
+  commitIn(wt, 'l.txt', 'local only');
+
+  const control = sweepWith([staleRec('log-dies-control', wt)], 'log-dies-control');
+  const c = control.find((r) => r.sessionId === 'local_log-dies-control');
+  check('log dies, control: the unpushed commit is counted while git works', c && c.risk, 'unpushed(1)');
+
+  const logDies = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'log.date', GIT_CONFIG_VALUE_0: 'bogus' };
+  const rows = sweepWith([staleRec('log-dies', wt)], 'log-dies', logDies);
+  const r = rows.find((x) => x.sessionId === 'local_log-dies');
+  check('log dies: a failed unpushed check is not safe', r && r.safe, false);
+  check('log dies: labelled unpushed-uncheckable, naming git\'s status and its error',
+    r && r.risk, (v) => /^unpushed-uncheckable\(git log exited 128: /.test(v || '') && /bogus/.test(v));
+
+  // --self is the route a session takes to archive itself.
+  const self = spawnSync(process.execPath, [SCRIPT, '--self'], {
+    cwd: wt, encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: path.join(ROOT, 'store-log-dies'), SESSION_SWEEP_OWNER: '', ...logDies },
+  });
+  let verdict = null;
+  try { verdict = JSON.parse(self.stdout); } catch { /* left null, and the checks below say so */ }
+  check('log dies, --self: the session may not settle', verdict && verdict.settle, false);
+  check('log dies, --self: the blocker names the failed check',
+    verdict && (verdict.blockers || []).some((b) => /^unpushed-uncheckable\(git log exited 128/.test(b)), true);
+}
+
 // The pipe delivers every byte.
 //
 // node's process.stdout is ASYNCHRONOUS when it is a pipe on POSIX (Linux and
@@ -624,6 +677,7 @@ function run() {
   checkLiveTranscriptBlocks();
   checkDoneUnboundAndSelf();
   checkPipeDeliversEveryByte();
+  checkUnpushedLogDies();
 
   // Two extra records for the ephemeral clock: same 5-day idle, differing only
   // by whether a schedule launched them. Derived from the same age so the pair

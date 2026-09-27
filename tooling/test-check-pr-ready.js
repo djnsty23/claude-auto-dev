@@ -229,6 +229,21 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
         r = invoke([artifact], { files: [] });
         check('CLI: artifact-only rollup without changed files cannot claim readiness',
             r.exit === 2 && r.result.reasons?.some(x => /could not read the changed files/.test(x)), r.detail);
+
+        // A FAILED git CALL IS NOT AN ANSWER. The docs-only READY above is the
+        // control for both: the same PR against a trunk git cannot list, then
+        // against the real trunk with its one workflow made unreadable.
+        r = invoke([], { files: [{ path: 'README.md' }], baseRefName: 'nope' });
+        check('CLI: a trunk git cannot list refuses an empty rollup and names git\'s error',
+            r.exit === 2 && r.result.reasons?.some(x => /git ls-tree exited 128/.test(x)), r.detail);
+        const blob = git('rev-parse', 'origin/main:.github/workflows/ci.yml').trim();
+        const loose = path.join(tmp, '.git', 'objects', blob.slice(0, 2), blob.slice(2));
+        fs.chmodSync(loose, 0o644); fs.unlinkSync(loose);
+        r = invoke([], { files: [{ path: 'README.md' }] });
+        check('CLI: a workflow git cannot read does not make an empty rollup READY',
+            r.exit === 2 && r.result.verdict === 'NOT_READY', r.detail);
+        check('  and the reason names git\'s error, not the path filter working',
+            r.result.reasons?.some(x => /git show exited 128/.test(x)) && !r.result.reasons?.some(x => /path filter working/.test(x)), r.detail);
     } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
     }

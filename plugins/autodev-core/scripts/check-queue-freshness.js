@@ -105,10 +105,15 @@ const REPO_ROOT = val('repo-root', null) || (() => {
  *
  * Only the caller knows which status means "no": 1 for `git grep`, an empty
  * listing for `ls-tree`. So this returns the facts and never a verdict.
+ *
+ * maxBuffer is 64 MiB, not node's 1 MiB default. At 1 MiB a premise naming a
+ * common string (an import, a type name) filled the buffer, spawnSync killed
+ * git with ENOBUFS, and a string present thousands of times read UNCHECKABLE.
+ * Past 64 MiB it still does, and says ENOBUFS: narrow the premise with file=.
  */
 function git(repo, args) {
     const r = spawnSync('git', ['-C', repo].concat(args),
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     return {
         command: 'git ' + args[0],
         status: r.status,

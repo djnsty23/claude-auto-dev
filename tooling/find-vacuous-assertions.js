@@ -129,6 +129,9 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+// The suite runs once per mutant, so a leaky suite leaks once per mutant too:
+// each run gets its own temp root, removed when it exits (see suite-tmp.js).
+const { spawnSuiteSync } = require('./suite-tmp.js');
 
 const [subject, suite] = process.argv.slice(2);
 
@@ -253,7 +256,7 @@ const OPS = [
 ];
 
 function suiteIsRed() {
-    const r = spawnSync('node', [suite], { encoding: 'utf8', timeout: 60000 });
+    const r = spawnSuiteSync('node', [suite], { encoding: 'utf8', timeout: 60000 });
     return { red: r.status !== 0, out: r.stdout || '' };
 }
 

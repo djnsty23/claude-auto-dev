@@ -12,18 +12,18 @@ them context on every prompt. Everything outside `plugins/` is repo machinery an
 ## Commands
 
 ```bash
-npm run gate                 # THE GATE: twelve steps chained with &&. Run this.
+npm run gate                 # THE GATE: thirteen steps chained with &&. Run this.
 npm run gate:fast            # the cheap steps only, in seconds. NOT the gate.
-npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 12.
+npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 13.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md
 node tooling/check-claude-md.js              # does THIS FILE still describe the tree?
 ```
 
-**`npm test` is ONE TWELFTH of the gate**, and nothing about it hints at the rest, which is why
-`npm run gate` exists: it chains all twelve.
+**`npm test` is ONE THIRTEENTH of the gate**, and nothing about it hints at the rest, which is why
+`npm run gate` exists: it chains all thirteen.
 
-**THE CHAIN IS `&&`, so a red first step means the other eleven NEVER RAN.** The gate is
+**THE CHAIN IS `&&`, so a red first step means the other twelve NEVER RAN.** The gate is
 
 ```
 npm test && npm run check:suites && npm run check:probe-shapes
@@ -31,12 +31,18 @@ npm test && npm run check:suites && npm run check:probe-shapes
   && npm run check:skill-tools && npm run check:skill-plugin-root
   && npm run check:agents-md && npm run check:decisions
   && npm run check:claude-md && npm run check:hook-parse
-  && npm run check:coverage
+  && npm run check:conflict-markers && npm run check:coverage
 ```
 
-When the first step fails, run the remaining eleven yourself.
-The chain's exit status is a verdict on one step, not on twelve.
+When the first step fails, run the remaining twelve yourself.
+The chain's exit status is a verdict on one step, not on thirteen.
 
+- **`npm run gate` takes the machine-wide full-gate lock** (`tooling/gate-lock.js`), and the chain
+  above is `scripts["gate:chain"]`. It waits in autodev-core's `full-gate-queue.js` queue, first
+  come first served and across every lane the machine allows, and prints who it is behind. It moves a
+  dead holder's lock aside to `.stale-HHMM`, and on any outcome hands the lock to the next ticket or
+  renames it to `.released-HHMM`. The chain's exit code passes through. A chain it did not see
+  finish exits 2. `AUTODEV_GATE_LOCK=0` skips the lock.
 - **Exit 2 is INDETERMINATE**, never a pass or a fail. Read the conflict line before re-running.
 - **Run it on a clean tree, after committing and before pushing.** `check:suites` grades HEAD in a
   private worktree and refuses a dirty tree. Iterate with `npm test`, then commit, gate and push.
@@ -44,9 +50,13 @@ The chain's exit status is a verdict on one step, not on twelve.
   fails `tree-inert` on any change. Draft in a scratchpad. `git check-ignore -v <path>` says whether a
   path under `.claude/` is ignored.
 - **`gate:fast` does not satisfy the merge bar.** It runs the cheap steps it derives from
-  `scripts.gate` and names what it deferred. The bar is the full gate after any rebase.
+  `scripts["gate:chain"]`, takes no lock, and names what it deferred. The bar is the full gate
+  after any rebase.
 - **The gate is not what CI runs.** `check:hook-parse` is CI's `node --check` loop over
   `plugins/*/hooks/*.js`, but seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.
+- **`check:conflict-markers` exists because a marker inside a string still parses.** It greps every
+  `git ls-files` path for a line of exactly seven `<`, `=` or `>` plus a space or end of line. Markdown
+  lines inside a closed fence are exempt, so show a conflict in a doc only inside a fence.
 - **Kill by pid, never by pattern.** Every worktree runs the same command lines, so `pkill -f`
   reaches peers. Confirm a pid's cwd, then kill that pid.
 - A child killed on timeout still carries its stdout. Report what it printed, not a bare `ETIMEDOUT`.

@@ -12,18 +12,26 @@
 //      because the search was by filename only. Five live test files that ran on
 //      every CI build were called abandoned.
 //
+// A TOOL CHILD THAT DIED OF THE MACHINE SAID NOTHING ABOUT THE TOOL. Every
+// spawn of find-orphan-checks.js goes through spawn-budget.js runVerdict, which
+// re-runs a child that died (nativeDeath) and, when one never answers, stops
+// grading: the cases after it print SKIP and the suite exits 2. An ABSENCE
+// check requires the tool's report first (an orphanChecks array, or the human
+// summary line), so a run that exits 0 and prints nothing fails it instead of
+// passing it.
+//
 // Run: node tooling/test-orphan-checks.js
 
-const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sb = require('./spawn-budget.js');
 
 const TOOL = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'find-orphan-checks.js');
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'orphan-test-')));
 
 const cases = [];
-const check = (label, ok) => cases.push([label, ok]);
+const check = (label, ok) => cases.push([label, ok, sb.lostVerdict()]);
 
 let n = 0;
 function repo(files) {
@@ -37,8 +45,24 @@ function repo(files) {
 }
 
 function run(dir) {
-    const r = spawnSync(process.execPath, [TOOL, dir, '--json'], { encoding: 'utf8' });
+    const r = sb.runVerdict(process.execPath, [TOOL, dir, '--json'], { encoding: 'utf8' });
     try { return JSON.parse(r.stdout); } catch { return { parseError: r.stdout + r.stderr }; }
+}
+
+// A JSON report that lists no orphaned check. A run that printed no report has
+// no orphanChecks array, so it is not "none".
+function noneOrphaned(out) {
+    return Array.isArray(out.orphanChecks) && out.orphanChecks.length === 0;
+}
+
+// A JSON report that does not list this script.
+function notOrphaned(out, script) {
+    return Array.isArray(out.orphanChecks) && !out.orphanChecks.some((o) => o.script === script);
+}
+
+// Did the human report print? Its summary always carries this line.
+function reported(stdout) {
+    return /orphaned ASSERTIONS:/.test(stdout || '');
 }
 
 const ASSERTS = 'if (x !== 1) { throw new Error("bad"); }\n';
@@ -56,7 +80,7 @@ out = run(repo({
     'package.json': JSON.stringify({ name: 'r', scripts: { check: 'node scripts/wired-check.mjs' } }),
     'scripts/wired-check.mjs': ASSERTS,
 }));
-check('a script wired only in package.json is NOT an orphan', (out.orphanChecks || []).length === 0);
+check('a script wired only in package.json is NOT an orphan', noneOrphaned(out));
 
 // 3. REGRESSION: matched by a runner include glob, named nowhere.
 out = run(repo({
@@ -64,7 +88,7 @@ out = run(repo({
     'vite.config.ts': 'export default { test: { include: ["scripts/**/*.test.mjs"] } };',
     'scripts/qa/deep.test.mjs': ASSERTS,
 }));
-check('a file matched by an include glob is NOT an orphan', (out.orphanChecks || []).length === 0);
+check('a file matched by an include glob is NOT an orphan', noneOrphaned(out));
 check('the glob is reported as honoured', (out.includeGlobs || []).includes('scripts/**/*.test.mjs'));
 
 // 4. Brace alternation in a glob.
@@ -74,7 +98,7 @@ out = run(repo({
     'scripts/a.spec.mjs': ASSERTS,
     'scripts/b.test.mjs': ASSERTS,
 }));
-check('brace alternation matches both forms', (out.orphanChecks || []).length === 0);
+check('brace alternation matches both forms', noneOrphaned(out));
 
 // 5. A glob must not match beyond its directory segment.
 out = run(repo({
@@ -89,7 +113,7 @@ out = run(repo({
     'package.json': JSON.stringify({ name: 'r' }),
     'scripts/migrate-users.mjs': MIGRATION,
 }));
-check('unreferenced migration is not called an orphaned check', (out.orphanChecks || []).length === 0);
+check('unreferenced migration is not called an orphaned check', noneOrphaned(out));
 
 // 7. Referenced from CI counts.
 out = run(repo({
@@ -97,7 +121,7 @@ out = run(repo({
     '.github/workflows/ci.yml': 'jobs:\n  t:\n    steps:\n      - run: node scripts/ci-check.mjs\n',
     'scripts/ci-check.mjs': ASSERTS,
 }));
-check('a script referenced from CI is not an orphan', (out.orphanChecks || []).length === 0);
+check('a script referenced from CI is not an orphan', noneOrphaned(out));
 
 // 8. Referenced by another script counts.
 out = run(repo({
@@ -105,14 +129,14 @@ out = run(repo({
     'scripts/runner.mjs': 'import "./child-check.mjs";\n',
     'scripts/child-check.mjs': ASSERTS,
 }));
-check('a script invoked by another script is not an orphan', (out.orphanChecks || []).length === 0);
+check('a script invoked by another script is not an orphan', noneOrphaned(out));
 
 // 9. Exit code is non-zero when an orphaned check exists, so CI can use it.
 const dir = repo({
     'package.json': JSON.stringify({ name: 'r' }),
     'scripts/lonely2.mjs': ASSERTS,
 });
-const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+const r = sb.runVerdict(process.execPath, [TOOL, dir], { encoding: 'utf8' });
 check('exits non-zero on an orphaned check', r.status === 1);
 check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
 
@@ -132,10 +156,10 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         'scripts/check-alpha.js': ASSERTS,
         'scripts/check-beta.js': ASSERTS,
     });
-    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
-    check('a pattern-discovered script is NOT an orphan', r.status === 0);
+    const r = sb.runVerdict(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    check('a pattern-discovered script is NOT an orphan', reported(r.stdout) && r.status === 0);
     check('  and is not named in the output',
-        !/check-alpha\.js/.test(r.stdout) && !/check-beta\.js/.test(r.stdout));
+        reported(r.stdout) && !/check-alpha\.js/.test(r.stdout) && !/check-beta\.js/.test(r.stdout));
 }
 
 // The guard that keeps failure mode 3 from silencing the whole report. An
@@ -157,7 +181,7 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         'scripts/other-b.mjs': MIGRATION,
         'scripts/other-c.mjs': MIGRATION,
     });
-    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    const r = sb.runVerdict(process.execPath, [TOOL, dir], { encoding: 'utf8' });
     check('an extension-only pattern does NOT suppress a real orphan', r.status === 1);
     check('  the real orphan is still named', /genuinely-orphaned\.js/.test(r.stdout));
 }
@@ -174,7 +198,7 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
     }));
     const orphans = (withNodeTest.orphanChecks || []).map((o) => o.script);
     check('node --test discovers scripts/*.test.js',
-        !orphans.some((f) => /store-mapping\.test\.js/.test(f)));
+        Array.isArray(withNodeTest.orphanChecks) && !orphans.some((f) => /store-mapping\.test\.js/.test(f)));
     check('  and a non-test script beside it is STILL an orphan',
         orphans.some((f) => /genuinely-orphaned\.js/.test(f)));
 
@@ -214,8 +238,7 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
             'package.json': JSON.stringify({ name: 'r' }),
             'scripts/probe.mjs': body,
         }));
-        check(`${label} is classified MANUAL, not an orphaned check`,
-            !(out.orphanChecks || []).some((o) => o.script === 'scripts/probe.mjs'));
+        check(`${label} is classified MANUAL, not an orphaned check`, notOrphaned(out, 'scripts/probe.mjs'));
     }
 
     // The over-suppression guard, and the one that matters most. A check with no
@@ -247,8 +270,9 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
     });
     const out = run(dir);
     const names = (out.orphanChecks || []).map((o) => o.script);
-    check('node_modules is not scanned', !names.some((f) => f.includes('node_modules')));
-    check('dot-directories are not scanned', !names.some((f) => f.startsWith('.hidden')));
+    const listed = Array.isArray(out.orphanChecks);
+    check('node_modules is not scanned', listed && !names.some((f) => f.includes('node_modules')));
+    check('dot-directories are not scanned', listed && !names.some((f) => f.startsWith('.hidden')));
     check('  but a real orphan beside them is still found',
         names.includes('scripts/real-orphan.mjs'));
 }
@@ -262,7 +286,7 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         'scripts/thing.spec.js': ASSERTS,
     });
     const out = run(dir);
-    check('jest testMatch in package.json is honoured', (out.orphanChecks || []).length === 0);
+    check('jest testMatch in package.json is honoured', noneOrphaned(out));
     check('  and the glob is reported as honoured',
         (out.includeGlobs || []).includes('**/scripts/**/*.spec.js'));
 }
@@ -280,9 +304,9 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         'package.json': JSON.stringify({ name: 'r' }),
         'scripts/charge-cards.mjs': "await stripe.charges.create({});\n" + ASSERTS,
     });
-    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    const r = sb.runVerdict(process.execPath, [TOOL, dir], { encoding: 'utf8' });
     check('a manual tool is not reported as an orphaned check',
-        !/Verification code that NOTHING runs[\s\S]*charge-cards/.test(r.stdout));
+        reported(r.stdout) && !/Verification code that NOTHING runs[\s\S]*charge-cards/.test(r.stdout));
     check('  but it IS still printed under the manual heading',
         /MANUAL tools/.test(r.stdout) && /charge-cards\.mjs/.test(r.stdout));
 }
@@ -292,9 +316,10 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
 // ever empty.
 {
     const dir = repo({ 'package.json': JSON.stringify({ name: 'r' }) });
-    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    const r = sb.runVerdict(process.execPath, [TOOL, dir], { encoding: 'utf8' });
     check('a repo with no scripts exits 0', r.status === 0);
-    check('  and reports nothing as orphaned', !/NOTHING runs/.test(r.stdout));
+    check('  and reports nothing as orphaned',
+        /No script directories found/.test(r.stdout) && !/NOTHING runs/.test(r.stdout));
 }
 
 // jest.config.json is a separate branch of the config-file match from the
@@ -307,7 +332,7 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
     }));
     check('jest.config.json is read for include globs',
         (out.includeGlobs || []).includes('**/scripts/**/*.check.js'));
-    check('  and a file it matches is not an orphan', (out.orphanChecks || []).length === 0);
+    check('  and a file it matches is not an orphan', noneOrphaned(out));
 }
 
 // Human output must not be JSON. `if (asJson)` forced true makes every run emit
@@ -317,10 +342,10 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         'package.json': JSON.stringify({ name: 'r' }),
         'scripts/lonely3.mjs': ASSERTS,
     });
-    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    const r = sb.runVerdict(process.execPath, [TOOL, dir], { encoding: 'utf8' });
     let parsed = null;
     try { parsed = JSON.parse(r.stdout); } catch { /* expected */ }
-    check('without --json the output is human text, not JSON', parsed === null);
+    check('without --json the output is human text, not JSON', reported(r.stdout) && parsed === null);
     check('  and still names the orphan', /lonely3\.mjs/.test(r.stdout));
 }
 
@@ -332,8 +357,8 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         'package.json': JSON.stringify({ name: 'r', scripts: { check: 'node scripts/wired.mjs' } }),
         'scripts/wired.mjs': ASSERTS,
     });
-    const r = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
-    check('a clean repo prints no orphan heading', !/NOTHING runs/.test(r.stdout));
+    const r = sb.runVerdict(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    check('a clean repo prints no orphan heading', reported(r.stdout) && !/NOTHING runs/.test(r.stdout));
     check('  and exits 0', r.status === 0);
 }
 
@@ -345,9 +370,9 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         'scripts/migrate-things.mjs': MIGRATION,
     };
     const dir = repo(files);
-    const plain = spawnSync(process.execPath, [TOOL, dir], { encoding: 'utf8' });
-    const all = spawnSync(process.execPath, [TOOL, dir, '--all'], { encoding: 'utf8' });
-    check('a one-off is not listed by default', !/migrate-things\.mjs/.test(plain.stdout));
+    const plain = sb.runVerdict(process.execPath, [TOOL, dir], { encoding: 'utf8' });
+    const all = sb.runVerdict(process.execPath, [TOOL, dir, '--all'], { encoding: 'utf8' });
+    check('a one-off is not listed by default', reported(plain.stdout) && !/migrate-things\.mjs/.test(plain.stdout));
     check('  but --all lists it by name', /migrate-things\.mjs/.test(all.stdout));
 }
 
@@ -376,19 +401,20 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
     const viaFileBytes = (args) => {
         const out = path.join(TMP, 'via-file.out');
         const fd = fs.openSync(out, 'w');
-        spawnSync(process.execPath, [TOOL].concat(args), { stdio: ['ignore', fd, 'ignore'] });
+        sb.runVerdict(process.execPath, [TOOL].concat(args), { stdio: ['ignore', fd, 'ignore'] });
         fs.closeSync(fd);
         return fs.statSync(out).size;
     };
-    const piped = spawnSync(process.execPath, [TOOL, dir, '--json'],
+    const piped = sb.runVerdict(process.execPath, [TOOL, dir, '--json'],
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
     const fileBytes = viaFileBytes([dir, '--json']);
 
     check('--json over many scripts exceeds one pipe buffer, so the next check is not vacuous ('
         + fileBytes + ' bytes)', fileBytes > PIPE_BUF);
+    // Two empty runs are equal too, so the pipe must have carried something.
     check('--json through a PIPE delivers every byte it writes to a FILE (pipe '
-        + pipeBytes + ', file ' + fileBytes + ')', pipeBytes === fileBytes);
+        + pipeBytes + ', file ' + fileBytes + ')', pipeBytes > 0 && pipeBytes === fileBytes);
     check('  and the piped JSON still parses at that size, under the orphan exit 1',
         (() => {
             try { return JSON.parse(piped.stdout).orphanChecks.length === 400 && piped.status === 1; }
@@ -401,10 +427,11 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
     // the exit than the single JSON write — measurably so on the sibling suites,
     // where the equivalent line stays green under the mutation even above the
     // buffer. It states the equality; it is not cover for this defect.
-    const reportPipe = spawnSync(process.execPath, [TOOL, dir],
+    const reportPipe = sb.runVerdict(process.execPath, [TOOL, dir],
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const reportBytes = Buffer.byteLength(reportPipe.stdout || '', 'utf8');
     check('  the human report through a PIPE also delivers every byte',
-        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === viaFileBytes([dir]));
+        reportBytes > 0 && reportBytes === viaFileBytes([dir]));
 }
 
 
@@ -416,21 +443,28 @@ check('names the file in human output', /lonely2\.mjs/.test(r.stdout));
         'package.json': JSON.stringify({ name: 'r', scripts: { test: 'vitest run' } }),
         'scripts/lonely-help-check.mjs': ASSERTS,
     });
-    const control = spawnSync(process.execPath, [TOOL], { cwd: dir, encoding: 'utf8' });
+    const control = sb.runVerdict(process.execPath, [TOOL], { cwd: dir, encoding: 'utf8' });
     check('control: run with no argument from inside the repo scans it and finds the orphan',
         control.status === 1 && /lonely-help-check/.test(control.stdout));
     for (const flag of ['--help', '-h']) {
-        const h = spawnSync(process.execPath, [TOOL, flag], { cwd: dir, encoding: 'utf8' });
+        const h = sb.runVerdict(process.execPath, [TOOL, flag], { cwd: dir, encoding: 'utf8' });
         check(`${flag} prints usage and scans nothing: exit 0, Usage on stdout, no orphan named`,
             h.status === 0 && /^Usage: node find-orphan-checks\.js/.test(h.stdout) && !/lonely-help-check/.test(h.stdout));
     }
 }
 
-let pass = 0, fail = 0;
-for (const [label, ok] of cases) {
+let pass = 0, fail = 0, skipped = 0;
+for (const [label, ok, lost] of cases) {
+    if (lost) {
+        skipped++;
+        console.log('SKIP  ' + label + '  (not graded: ' + lost + ')');
+        continue;
+    }
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
     ok ? pass++ : fail++;
 }
-console.log(`\n${pass} passed, ${fail} failed`);
+const lost = sb.lostVerdict();
+console.log(`\n${sb.tally(pass, fail, lost ? 1 : 0)}`);
+if (lost) console.log(`INDETERMINATE: ${lost}. The ${skipped} cases after it were not graded.`);
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
-process.exit(fail > 0 ? 1 : 0);
+process.exitCode = sb.exitCode(fail, lost ? 1 : 0);

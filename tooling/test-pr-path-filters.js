@@ -12,7 +12,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'pr-path-filters.js');
 const { explainEmptyRollup, globToRe, listUnder, pullRequestBlock } = require(SUBJECT);
@@ -118,6 +118,47 @@ if (tmp) {
     // A trunk that does not exist: nothing scanned, and it says so with a zero population.
     const none = explainEmptyRollup(tmp, 'origin/nope', ['README.md'], 'main');
     check('an unresolvable trunk yields an empty population, never a verdict', none.population === 0 && none.anyDue === false);
+    // git localises its messages, so these key on the command and status.
+    check('  and it names git\'s failure, so a caller cannot read it as a trunk without workflows',
+        /git ls-tree exited 128/.test(none.failure || '') && /origin\/nope/.test(none.failure || ''), String(none.failure));
+
+    // ---- a FAILED git CALL IS NOT AN ANSWER, through the CLI ------------------
+    //
+    // The wrapper was `catch { return null; }`, so a listing git could not make
+    // read as a trunk with no workflows, and the CLI printed "zero runs is the
+    // filter working" with exit 0. The same docs-only change against the real
+    // trunk is the control: git answers, every workflow excludes it, exit 0.
+    const cli = (trunk, env) => {
+        const r = spawnSync(process.execPath, [SUBJECT, tmp, trunk, 'main', 'README.md'], { encoding: 'utf8', env: env || process.env });
+        return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
+    };
+    let c = cli('origin/main');
+    check('CLI control: a docs-only change every workflow excludes exits 0', c.status === 0 && /zero runs is the filter working/.test(c.out),
+        c.status + ' ' + c.out.slice(-200));
+    c = cli('origin/nope');
+    check('CLI: a trunk git cannot list exits 3, not 0', c.status === 3, c.status + ' ' + c.out.slice(-200));
+    check('  and it names git\'s error instead of "zero runs is the filter working"',
+        /git ls-tree exited 128/.test(c.out) && !/zero runs is the filter working/.test(c.out), c.out.slice(-200));
+
+    const noGit = {};
+    for (const k of Object.keys(process.env)) if (k.toUpperCase() !== 'PATH') noGit[k] = process.env[k];
+    noGit.PATH = path.join(tmp, 'no-git-here');
+    c = cli('origin/main', noGit);
+    check('CLI: when git cannot be started it exits 3 and names the spawn error',
+        c.status === 3 && /ENOENT/.test(c.out) && !/zero runs is the filter working/.test(c.out), c.status + ' ' + c.out.slice(-200));
+
+    // A workflow git can list but not read: its blob is deleted from the object
+    // store (chmod first, loose objects are read-only on Windows). It goes LAST,
+    // because it breaks the fixture for everything after it.
+    const blob = git(['rev-parse', 'origin/main:.github/workflows/ignore-md.yml'], tmp).trim();
+    const loose = path.join(tmp, '.git', 'objects', blob.slice(0, 2), blob.slice(2));
+    fs.chmodSync(loose, 0o644); fs.unlinkSync(loose);
+    const lost = byName(explainEmptyRollup(tmp, 'origin/main', ['README.md'], 'main'))['ignore-md.yml'];
+    check('a workflow git cannot read is UNKNOWN, not excluded', lost && lost.wouldRun === null, JSON.stringify(lost));
+    check('  and its reason names git\'s error', lost && /git show exited 128/.test(lost.why), lost && lost.why);
+    c = cli('origin/main');
+    check('CLI: one unreadable workflow exits 3, not "zero runs is the filter working"',
+        c.status === 3 && /COULD NOT TELL/.test(c.out) && !/zero runs is the filter working/.test(c.out), c.status + ' ' + c.out.slice(-300));
 
     fs.rmSync(tmp, { recursive: true, force: true });
 }

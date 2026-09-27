@@ -44,15 +44,26 @@
  * second profile's sessions gate on the same CPU. So the default path is under
  * the OS home directory, never CLAUDE_CONFIG_DIR.
  *
- *   node full-gate-queue.js take    [--pid N] [--what TEXT]   one attempt: 0 holds the lock, 3 queued
+ * LANES. A machine may allow more than one full gate at a time. Lane 1 is the
+ * lock itself; lane k is the same name with `-k` before `.lock`
+ * (`full-gate-2.lock`), each with its own queue. The machine's lane count lives
+ * in a file beside lane 1 (`full-gate.lanes`, written by the `lanes` command),
+ * so one decision reaches every waiter. A waiter holds a ticket in every lane
+ * and takes whichever lane it reaches the head of while that lane is free, then
+ * leaves the other queues. `release` frees every lane whose lock names the pid.
+ *
+ *   node full-gate-queue.js take    [--pid N] [--what TEXT]   one attempt: 0 holds a lane, 3 queued
  *   node full-gate-queue.js wait    [--pid N] [--what TEXT] [--timeout-ms N]   blocks until 0
  *   node full-gate-queue.js release [--pid N]                 0 released or handed over, 1 not ours
- *   node full-gate-queue.js status  [--json]                  read-only
+ *   node full-gate-queue.js status  [--json]                  read-only, every lane
+ *   node full-gate-queue.js lanes   [N]                       print, or set, the machine's lane count
  *   node full-gate-queue.js --help
+ *   --lanes N on take, wait, release and status overrides the lane count for one call.
  *
  * ENVIRONMENT (the lock variables are shared with the gate wrapper, so both
  * always name the same file):
- *   AUTODEV_GATE_LOCK_PATH=FILE        the lock (default <home>/.claude/autodev/locks/full-gate.lock)
+ *   AUTODEV_GATE_LANES=N               lane count, over the lanes file (default 1)
+ *   AUTODEV_GATE_LOCK_PATH=FILE        lane 1's lock (default <home>/.claude/autodev/locks/full-gate.lock)
  *   AUTODEV_GATE_LOCK_POLL_MS=N        wait's poll interval (default 5000)
  *   AUTODEV_GATE_LOCK_REPORT_MS=N      how often wait re-prints its place (default 180000)
  *   AUTODEV_GATE_QUEUE_STALE_MS=N      heartbeat age at which a ticket is dropped (default 600000)
@@ -68,6 +79,7 @@ const TAG = 'full-gate-queue:';
 const EXIT_QUEUED = 3;
 const MAX_POLL_ERRORS = 10;
 const TICKET_RE = /^(\d{8}T\d{9}Z)-(\d{10})\.ticket$/;
+const MAX_LANES = 8;
 
 // ---------------------------------------------------------------------------
 // Paths and small helpers.
@@ -80,6 +92,54 @@ function defaultLockPath() {
 /** `full-gate.lock` -> `full-gate.queue`; any other name gets `.queue` appended. */
 function queueDirFor(lockPath) {
     return /\.lock$/.test(lockPath) ? lockPath.replace(/\.lock$/, '.queue') : `${lockPath}.queue`;
+}
+
+/** Lane k's lock: lane 1 is `base`, lane 2 of `full-gate.lock` is `full-gate-2.lock`. */
+function lanePath(base, k) {
+    if (k <= 1) return base;
+    return /\.lock$/.test(base) ? base.replace(/\.lock$/, `-${k}.lock`) : `${base}-${k}`;
+}
+
+function lanePaths(base, count) {
+    return Array.from({ length: count }, (_, i) => lanePath(base, i + 1));
+}
+
+/** `full-gate.lock` -> `full-gate.lanes`: the machine's lane count, one number. */
+function lanesFileFor(base) {
+    return /\.lock$/.test(base) ? base.replace(/\.lock$/, '.lanes') : `${base}.lanes`;
+}
+
+function parseLanes(v) {
+    const s = String(v === undefined || v === null ? '' : v).trim();
+    if (!/^\d+$/.test(s)) return null;
+    const n = Number(s);
+    return n >= 1 && n <= MAX_LANES ? n : null;
+}
+
+/**
+ * The lane count and where it came from: a --lanes flag, then
+ * AUTODEV_GATE_LANES, then the lanes file, then 1. A value that is not a whole
+ * number from 1 to MAX_LANES is skipped and named in `notes`, never guessed at.
+ */
+function laneCount(base, env, flag) {
+    const notes = [];
+    if (flag !== null && flag !== undefined) return { count: flag, source: '--lanes', notes };
+    if (env.AUTODEV_GATE_LANES !== undefined && env.AUTODEV_GATE_LANES !== '') {
+        const n = parseLanes(env.AUTODEV_GATE_LANES);
+        if (n) return { count: n, source: 'AUTODEV_GATE_LANES', notes };
+        notes.push(`AUTODEV_GATE_LANES=${env.AUTODEV_GATE_LANES} is not 1 to ${MAX_LANES}; ignored`);
+    }
+    const file = lanesFileFor(base);
+    let text = null;
+    try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+        if (e.code !== 'ENOENT') notes.push(`${path.basename(file)} unreadable (${e.code}); ignored`);
+    }
+    if (text !== null) {
+        const n = parseLanes(text);
+        if (n) return { count: n, source: path.basename(file), notes };
+        notes.push(`${path.basename(file)} does not hold 1 to ${MAX_LANES}; ignored`);
+    }
+    return { count: 1, source: 'default', notes };
 }
 
 /** HHMM in UTC, the suffix the hand-written convention uses. */
@@ -338,7 +398,7 @@ function lockBody(pid, what) {
  * first-come is the head check below: a ticket that is not the oldest live one
  * never touches the lock, however free it is.
  */
-function takeTurn({ lockPath, pid, what, staleMs, log }) {
+function takeTurn({ lockPath, pid, what, body: givenBody, staleMs, log }) {
     const queueDir = queueDirFor(lockPath);
     fs.mkdirSync(path.dirname(lockPath), { recursive: true });
     const held = readLock(lockPath);
@@ -351,7 +411,7 @@ function takeTurn({ lockPath, pid, what, staleMs, log }) {
     const mine = live.findIndex((t) => t.pid === pid);
     const queued = (holder) => ({ acquired: false, position: mine + 1, of: live.length, holder });
     if (mine !== 0) return queued(held);
-    const body = lockBody(pid, what);
+    const body = givenBody || lockBody(pid, what);
     let got = false;
     if (!held) got = tryCreate(lockPath, body);
     else if (held.pid !== null && isAlive(held.pid) === false) got = takeOverStale(lockPath, held, body, log);
@@ -383,6 +443,55 @@ function releaseLock({ lockPath, pid, staleMs, log }) {
     replaceInPlace(lockPath, lockBody(next.pid, `${next.what}, handed over by the queue`));
     try { fs.unlinkSync(next.file); } catch { /* its waiter saw the handoff first */ }
     return { released: true, to: next, aside };
+}
+
+/** Removes `pid`'s ticket from each of these lanes' queues. */
+function leaveQueues(lockPaths, pid) {
+    for (const lp of lockPaths) removeTicket(queueDirFor(lp), pid);
+}
+
+/**
+ * Releases every lane whose lock names `pid`. More than one only after a race:
+ * a release that read a queue just before the waiter left it can still hand
+ * that lane over. Returns one releaseLock result per lane it held.
+ */
+function releaseLanes({ lockPaths, pid, staleMs, log }) {
+    const out = [];
+    for (const lp of lockPaths) {
+        const held = readLock(lp);
+        if (held && held.pid === pid) out.push({ lockPath: lp, ...releaseLock({ lockPath: lp, pid, staleMs, log }) });
+    }
+    return out;
+}
+
+/**
+ * One attempt over every lane. A lane lock that already names `pid` (a queue
+ * release handed it over) is held. Otherwise it takes a turn in each lane in
+ * order and stops at the first it acquires. Having acquired one, it leaves
+ * every other queue and hands on any other lane a racing release gave it, so a
+ * waiter never sits on two lanes. Returns { acquired, lockPath } or, queued,
+ * the lane where it stands best: { acquired: false, lockPath, position, of,
+ * holder, lanes }.
+ */
+function takeAnyLane({ lockPaths, pid, what, body, staleMs, log }) {
+    const settle = (lockPath, r) => {
+        const others = lockPaths.filter((p) => p !== lockPath);
+        leaveQueues(others, pid);
+        releaseLanes({ lockPaths: others, pid, staleMs, log });
+        return { ...r, acquired: true, lockPath };
+    };
+    for (const lp of lockPaths) {
+        const held = readLock(lp);
+        if (held && held.pid === pid) return settle(lp, { handedOver: true });
+    }
+    const queued = [];
+    for (const lane of lockPaths) {
+        const r = takeTurn({ lockPath: lane, pid, what, body, staleMs, log });
+        if (r.acquired) return settle(lane, r);
+        queued.push({ ...r, lockPath: lane });
+    }
+    const best = queued.slice().sort((a, b) => a.position - b.position)[0];
+    return { ...best, lanes: queued };
 }
 
 function readStatus(lockPath, staleMs) {
@@ -424,66 +533,84 @@ function describe() {
 // ---------------------------------------------------------------------------
 
 function help() {
-    console.log(`usage: node full-gate-queue.js <take|wait|release|status> [options]
+    console.log(`usage: node full-gate-queue.js <take|wait|release|status|lanes> [options]
 
 A first-come ticket queue in front of the machine-wide full-gate lock.
-Only the oldest live ticket may take the lock, and a release hands the lock
-straight to it, so a newcomer cannot jump the queue.
+Only the oldest live ticket may take a lane's lock, and a release hands the
+lock straight to it, so a newcomer cannot jump the queue.
 
-  take     one attempt. Exit 0: --pid holds the lock. Exit 3: queued, place printed.
-  wait     take until the lock is held. Exit 0, or 3 when --timeout-ms runs out.
-  release  hand the lock to the oldest live ticket, or rename it to
-           .released-HHMM when nobody waits. Exit 1 when --pid does not hold it.
-  status   the holder and the queue in order, read-only. --json for a machine.
+  take     one attempt. Exit 0: --pid holds a lane. Exit 3: queued, place printed.
+  wait     take until a lane is held. Exit 0, or 3 when --timeout-ms runs out.
+  release  hand each lane --pid holds to its oldest live ticket, or rename the
+           lock to .released-HHMM when nobody waits. Exit 1 when it holds none.
+  status   every lane's holder and queue in order, read-only. --json for a machine.
+  lanes    print the machine's lane count; "lanes N" sets it (1 to ${MAX_LANES}).
 
   --pid N         the process that runs the gate and outlives it (default: the
                   parent shell). The lock and the ticket name this pid.
   --what TEXT     line 2 of the lock (default: branch, head and worktree).
-  --timeout-ms N  wait only: give up after N ms and remove the ticket.
+  --timeout-ms N  wait only: give up after N ms and remove the tickets.
+  --lanes N       this call only: use N lanes instead of the machine's count.
 
-Typical use, all in ONE background script so the pid lives throughout:
+Lane 1 is the lock; lane k is <name>-k.lock beside it, with its own queue.
+A waiter queues in every lane and takes the first it reaches the head of.
+
+When \`npm run gate\` takes the lock itself (tooling/gate-lock.js), run it
+alone: it queues through this script. Otherwise, in ONE background script
+so the pid lives throughout:
   node full-gate-queue.js wait --pid "$PID" --what "..."
   AUTODEV_GATE_LOCK=0 npm run gate; code=$?
   node full-gate-queue.js release --pid "$PID"
 
-env: AUTODEV_GATE_LOCK_PATH (default <home>/.claude/autodev/locks/full-gate.lock),
-AUTODEV_GATE_LOCK_POLL_MS (5000), AUTODEV_GATE_LOCK_REPORT_MS (180000),
-AUTODEV_GATE_QUEUE_STALE_MS (600000).`);
+env: AUTODEV_GATE_LOCK_PATH (lane 1; default <home>/.claude/autodev/locks/full-gate.lock),
+AUTODEV_GATE_LANES (over the lanes file), AUTODEV_GATE_LOCK_POLL_MS (5000),
+AUTODEV_GATE_LOCK_REPORT_MS (180000), AUTODEV_GATE_QUEUE_STALE_MS (600000).`);
 }
 
 function parseArgs(argv) {
-    const out = { cmd: null, pid: null, what: null, timeoutMs: null, json: false, help: false, bad: null };
+    const out = { cmd: null, arg: null, pid: null, what: null, timeoutMs: null, lanes: null, json: false, help: false, bad: null };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h') out.help = true;
         else if (a === '--json') out.json = true;
-        else if (a === '--pid' || a === '--what' || a === '--timeout-ms') {
+        else if (a === '--pid' || a === '--what' || a === '--timeout-ms' || a === '--lanes') {
             const v = argv[++i];
             if (v === undefined) { out.bad = `${a} needs a value`; break; }
             if (a === '--what') out.what = v;
-            else if (!/^\d+$/.test(v)) { out.bad = `${a} needs a whole number, got ${v}`; break; }
+            else if (a === '--lanes') {
+                out.lanes = parseLanes(v);
+                if (out.lanes === null) { out.bad = `--lanes needs a whole number from 1 to ${MAX_LANES}, got ${v}`; break; }
+            } else if (!/^\d+$/.test(v)) { out.bad = `${a} needs a whole number, got ${v}`; break; }
             else if (a === '--pid') out.pid = Number(v);
             else out.timeoutMs = Number(v);
         } else if (!out.cmd && !a.startsWith('-')) out.cmd = a;
+        else if (out.cmd === 'lanes' && out.arg === null && !a.startsWith('-')) out.arg = a;
         else { out.bad = `unknown argument ${a}`; break; }
     }
     return out;
 }
 
-function printStatus(s, json) {
-    if (json) { console.log(JSON.stringify(s, null, 2)); return; }
-    console.log(`lock:   ${s.lockPath}`);
-    if (!s.holder) console.log('holder: none, the lock is free');
+function printLane(s, k, count) {
+    const label = count > 1 ? `lane ${k}: ` : '';
+    console.log(`${label}lock:   ${s.lockPath}`);
+    if (!s.holder) console.log(`${label}holder: none, the lock is free`);
     else {
         const state = s.holder.alive === true ? 'alive' : s.holder.alive === false ? 'NOT running' : 'liveness unknown';
-        console.log(`holder: pid ${s.holder.pid === null ? '(line 1 is not a pid)' : s.holder.pid} (${state}): ${s.holder.what}`);
+        console.log(`${label}holder: pid ${s.holder.pid === null ? '(line 1 is not a pid)' : s.holder.pid} (${state}): ${s.holder.what}`);
     }
-    console.log(`queue:  ${s.queue.length} ticket(s) in ${s.queueDir}` +
+    console.log(`${label}queue:  ${s.queue.length} ticket(s) in ${s.queueDir}` +
         (s.otherFiles ? `, plus ${s.otherFiles} file(s) that are not tickets` : ''));
     s.queue.forEach((t, i) => {
         const note = t.dropReason ? ` [will be dropped: ${t.dropReason}]` : '';
         console.log(`  ${i + 1}. pid ${t.pid}, arrived ${t.arrived}, heartbeat ${t.heartbeatAgeS} s ago${note}: ${t.what}`);
     });
+}
+
+function printStatus(s, json) {
+    if (json) { console.log(JSON.stringify(s, null, 2)); return; }
+    console.log(`lanes:  ${s.laneCount} (from ${s.laneSource})`);
+    for (const n of s.notes) console.log(`note:   ${n}`);
+    s.lanes.forEach((lane, i) => printLane(lane, i + 1, s.laneCount));
 }
 
 function holderLine(h) {
@@ -493,19 +620,43 @@ function holderLine(h) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (args.help) { help(); return; }
-    if (args.bad || !['take', 'wait', 'release', 'status'].includes(args.cmd)) {
+    if (args.bad || !['take', 'wait', 'release', 'status', 'lanes'].includes(args.cmd)) {
         console.error(`${TAG} ${args.bad || (args.cmd ? `unknown command ${args.cmd}` : 'no command given')}; see --help`);
         process.exitCode = 1;
         return;
     }
     const env = process.env;
-    const lockPath = path.resolve(env.AUTODEV_GATE_LOCK_PATH || defaultLockPath());
+    const base = path.resolve(env.AUTODEV_GATE_LOCK_PATH || defaultLockPath());
     const staleMs = Math.max(1000, Number(env.AUTODEV_GATE_QUEUE_STALE_MS) || 600000);
     const pollMs = Math.max(50, Number(env.AUTODEV_GATE_LOCK_POLL_MS) || 5000);
     const reportMs = Math.max(0, Number(env.AUTODEV_GATE_LOCK_REPORT_MS) || 180000);
     const log = (line) => console.log(line);
 
-    if (args.cmd === 'status') { printStatus(readStatus(lockPath, staleMs), args.json); return; }
+    if (args.cmd === 'lanes') {
+        const file = lanesFileFor(base);
+        if (args.arg !== null) {
+            const n = parseLanes(args.arg);
+            if (n === null) { console.error(`${TAG} lanes needs a whole number from 1 to ${MAX_LANES}, got ${args.arg}`); process.exitCode = 1; return; }
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(file, `${n}\n`);
+            log(`${TAG} ${n} lane(s) on this machine, written to ${file}`);
+            return;
+        }
+        const lc = laneCount(base, env, null);
+        log(`${TAG} ${lc.count} lane(s), from ${lc.source}`);
+        for (const n of lc.notes) log(`${TAG} note: ${n}`);
+        return;
+    }
+
+    const lanes = laneCount(base, env, args.lanes);
+    const lockPaths = lanePaths(base, lanes.count);
+    const inLane = (lp) => (lanes.count > 1 ? ` (lane ${lockPaths.indexOf(lp) + 1} of ${lanes.count})` : '');
+
+    if (args.cmd === 'status') {
+        printStatus({ laneCount: lanes.count, laneSource: lanes.source, notes: lanes.notes,
+                      lanes: lockPaths.map((lp) => readStatus(lp, staleMs)) }, args.json);
+        return;
+    }
 
     const pid = args.pid === null ? process.ppid : args.pid;
     if (isAlive(pid) === false) {
@@ -515,21 +666,28 @@ async function main() {
     }
 
     if (args.cmd === 'release') {
-        const r = releaseLock({ lockPath, pid, staleMs, log });
-        if (!r.released) { console.error(`${TAG} ${r.why}`); process.exitCode = 1; return; }
-        log(r.to
-            ? `${TAG} released; the lock was handed to pid ${r.to.pid}, queued since ${r.to.arrived} (record ${path.basename(r.aside)})`
-            : `${TAG} released to ${path.basename(r.aside)}; nobody was queued`);
+        const held = releaseLanes({ lockPaths, pid, staleMs, log });
+        if (!held.length) {
+            // Nothing names this pid: report why from lane 1, as a single-lane release would.
+            console.error(`${TAG} ${releaseLock({ lockPath: base, pid, staleMs, log }).why}`);
+            process.exitCode = 1;
+            return;
+        }
+        for (const r of held) {
+            log(r.to
+                ? `${TAG} released${inLane(r.lockPath)}; the lock was handed to pid ${r.to.pid}, queued since ${r.to.arrived} (record ${path.basename(r.aside)})`
+                : `${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)}; nobody was queued`);
+        }
         return;
     }
 
     const what = args.what || describe();
-    const attempt = () => { resetProbes(); return takeTurn({ lockPath, pid, what, staleMs, log }); };
+    const attempt = () => { resetProbes(); return takeAnyLane({ lockPaths, pid, what, staleMs, log }); };
 
     if (args.cmd === 'take') {
         const r = attempt();
-        if (r.acquired) { log(`${TAG} pid ${pid} holds ${lockPath}`); return; }
-        log(`${TAG} queued: place ${r.position} of ${r.of}. Holder: ${holderLine(r.holder)}`);
+        if (r.acquired) { log(`${TAG} pid ${pid} holds ${r.lockPath}`); return; }
+        log(`${TAG} queued: place ${r.position} of ${r.of}${inLane(r.lockPath)}. Holder: ${holderLine(r.holder)}`);
         process.exitCode = EXIT_QUEUED;
         return;
     }
@@ -553,7 +711,7 @@ async function main() {
             errors++;
             log(`${TAG} poll failed (${e.code || e.message}), attempt ${errors} of ${MAX_POLL_ERRORS}`);
             if (errors >= MAX_POLL_ERRORS) {
-                try { removeTicket(queueDirFor(lockPath), pid); } catch { /* the heartbeat expires it anyway */ }
+                try { leaveQueues(lockPaths, pid); } catch { /* the heartbeat expires them anyway */ }
                 console.error(`${TAG} gave up after ${errors} failed polls; lock NOT taken`);
                 process.exitCode = 1;
                 return;
@@ -562,18 +720,18 @@ async function main() {
             continue;
         }
         if (r.acquired) {
-            log(`${TAG} pid ${pid} holds ${lockPath} after ${Math.round((Date.now() - started) / 1000)} s`);
+            log(`${TAG} pid ${pid} holds ${r.lockPath} after ${Math.round((Date.now() - started) / 1000)} s`);
             return;
         }
-        const key = `${r.position}/${r.of}/${r.holder ? r.holder.pid : '-'}`;
+        const key = `${r.lockPath}/${r.position}/${r.of}/${r.holder ? r.holder.pid : '-'}`;
         if (key !== lastKey || Date.now() - lastReport >= reportMs) {
-            log(`${TAG} waiting: place ${r.position} of ${r.of}. Holder: ${holderLine(r.holder)}`);
+            log(`${TAG} waiting: place ${r.position} of ${r.of}${inLane(r.lockPath)}. Holder: ${holderLine(r.holder)}`);
             lastKey = key;
             lastReport = Date.now();
         }
         const timedOut = args.timeoutMs !== null && Date.now() - started >= args.timeoutMs;
         if (stopped || timedOut) {
-            removeTicket(queueDirFor(lockPath), pid);
+            leaveQueues(lockPaths, pid);
             log(`${TAG} gave up (${stopped || `--timeout-ms ${args.timeoutMs}`}); ticket removed, lock NOT taken`);
             process.exitCode = stopped ? 2 : EXIT_QUEUED;
             return;
@@ -589,4 +747,7 @@ if (require.main === module) {
     });
 }
 
-module.exports = { takeTurn, releaseLock, readStatus, queueDirFor, defaultLockPath, isAlive, parseArgs };
+module.exports = {
+    takeTurn, takeAnyLane, releaseLock, releaseLanes, leaveQueues, readStatus, readLock, resetProbes,
+    queueDirFor, lanePath, lanePaths, lanesFileFor, laneCount, defaultLockPath, isAlive, parseArgs,
+};

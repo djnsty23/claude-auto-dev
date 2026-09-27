@@ -260,7 +260,7 @@ chain it into a push or a merge as though it were the gate.
 
 **`gate:fast` IS NOT THE GATE, and it says so on every run — including a clean
 one.** It prints what it ran, what it DEFERRED, and a summary line counting the
-steps that ran against the steps in `scripts.gate`, then the number deferred. A
+steps that ran against the steps in the gate chain, then the number deferred. A
 partial run that renders like a complete one is precisely the false green this
 file exists to prevent, so silence is not available to it; the other steps
 already print their population on a clean run for the same reason. **Nothing was
@@ -273,7 +273,9 @@ Exit 2 is INDETERMINATE here, and a chain folds that refusal into a verdict.
 And a partial run has to be able to LOOK partial. Every step runs on its own and
 the three states stay three.
 
-**The step list is DERIVED from `scripts.gate`, never copied.** `gate-fast.js`
+**The step list is DERIVED from the gate chain, never copied.** Since 2026-09-25
+that is `scripts["gate:chain"]`: `scripts.gate` is the lock wrapper,
+`tooling/gate-lock.js`, and `readGateChain()` there is the one reader. `gate-fast.js`
 splits that chain on `&&` — the same authority `check-claude-md.js` grades this
 file's counts against — and anything it does not recognise is DEFERRED, so a step
 added to the chain lands in the slow tier by default rather than being assumed

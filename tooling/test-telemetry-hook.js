@@ -10,15 +10,25 @@
 // Second, NEVER BLOCKING: a PostToolUse hook that exits non-zero, or prints,
 // costs something on every single tool call. Both are asserted on the failure
 // paths, not just the happy one.
+//
+// A HOOK CHILD THAT DIED OF THE MACHINE SAID NOTHING ABOUT THE HOOK. Every
+// spawn of the hook goes through spawn-budget.js runVerdict, which re-runs a
+// child that died (nativeDeath) and, when one never answers, stops grading:
+// the cases after it print SKIP and the suite exits 2. The hook prints nothing
+// by design, so the row it writes is its answer, and an ABSENCE check on its
+// output requires that row first (`ran &&`). A hook that exits 0 having done
+// nothing then fails the check instead of passing it.
 
-const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sb = require('./spawn-budget.js');
 
 const HOOK = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'hooks', 'telemetry.js');
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 const check = (label, ok, detail) => {
+  const lost = sb.lostVerdict();
+  if (lost) { skipped++; console.log('  SKIP ' + label + '  (not graded: ' + lost + ')'); return; }
   if (ok) { pass++; console.log('  ok   ' + label); }
   else { fail++; console.log('  FAIL ' + label + (detail ? ' — ' + detail : '')); }
 };
@@ -26,13 +36,16 @@ const check = (label, ok, detail) => {
 let seq = 0;
 function run(payload, env = {}) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'telem-' + seq++ + '-'));
-  const r = spawnSync(process.execPath, [HOOK], {
+  const r = sb.runVerdict(process.execPath, [HOOK], {
     input: typeof payload === 'string' ? payload : JSON.stringify(payload),
     encoding: 'utf8',
     cwd,
     env: { ...process.env, CLAUDE_TELEMETRY_DISABLED: '', CLAUDE_OTEL_ENDPOINT: '', ...env },
   });
-  const dir = path.join(cwd, '.claude', 'reports');
+  // The hook writes its row where the payload's cwd says the session is, and
+  // falls back to its own cwd when the payload names none.
+  const at = (payload && typeof payload === 'object' && payload.cwd) || cwd;
+  const dir = path.join(at, '.claude', 'reports');
   const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
   const lines = files.flatMap((f) => fs.readFileSync(path.join(dir, f), 'utf8').split('\n').filter(Boolean));
   return { ...r, files, lines, cwd };
@@ -69,7 +82,7 @@ check('duration_ms is carried through from the payload', ev.duration_ms === 42, 
 // so every event on this machine recorded a null session.
 check('session comes from the hook payload, not a dead env var', ev.session === 'sess-abc', String(ev.session));
 check('a hook with nothing to say is silent on both streams',
-  (ok.stdout || '') === '' && (ok.stderr || '') === '', JSON.stringify({ o: ok.stdout, e: ok.stderr }));
+  ok.lines.length === 1 && (ok.stdout || '') === '' && (ok.stderr || '') === '', JSON.stringify({ o: ok.stdout, e: ok.stderr }));
 
 // ---- privacy: the load-bearing property ----
 const SECRET = 'sk-live-CANARY-51N3z9';
@@ -79,7 +92,7 @@ const priv = run({
   tool_response: `response contained ${SECRET}`,
   session_id: 'sess-priv',
 });
-check('no tool CONTENT reaches the log', !priv.lines.join('\n').includes(SECRET), priv.lines.join('\n').slice(0, 120));
+check('no tool CONTENT reaches the log', priv.lines.length === 1 && !priv.lines.join('\n').includes(SECRET), priv.lines.join('\n').slice(0, 120));
 check('  but the call was still recorded', priv.lines.length === 1);
 check('  and its size reflects the content it did not log', JSON.parse(priv.lines[0] || '{}').input_size > SECRET.length);
 
@@ -129,8 +142,11 @@ const advise = (payload) => {
   const r = run(payload);
   let out = null;
   try { out = JSON.parse(r.stdout || 'null'); } catch { /* asserted below */ }
-  return { r, ctx: out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext };
+  // ran: the hook wrote its row, so a silent stdout is its answer and not a
+  // child that did nothing.
+  return { r, ran: r.lines.length === 1, ctx: out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext };
 };
+const saysNothing = (a) => a.ran && a.ctx == null;
 
 const tmpFail = advise({ tool_name: 'Bash', tool_input: {},
   tool_response: "Error: Cannot find module '/tmp/ai.json'" });
@@ -146,14 +162,14 @@ check('  and the hook still exits 0', tmpFail.r.status === 0);
 // 'wrote /tmp/x.json ok', which matches no signature — so both guards could be
 // removed and the suite stayed green.
 check('a SUCCESSFUL command whose stdout CONTAINS the signature says nothing',
-  advise({ tool_name: 'Bash', tool_input: {},
-    tool_response: "grep found: Cannot find module '/tmp/ai.json'" }).ctx == null);
+  saysNothing(advise({ tool_name: 'Bash', tool_input: {},
+    tool_response: "grep found: Cannot find module '/tmp/ai.json'" })));
 check('a failure that is NOT the /tmp split says nothing',
-  advise({ tool_name: 'Bash', tool_input: {}, tool_response: 'Error: connection refused' }).ctx == null);
+  saysNothing(advise({ tool_name: 'Bash', tool_input: {}, tool_response: 'Error: connection refused' })));
 check('a non-Bash tool says nothing',
-  advise({ tool_name: 'Read', tool_input: {}, tool_response: "Error: Cannot find module '/tmp/ai.json'" }).ctx == null);
-check('the ordinary happy path prints nothing at all',
-  (run({ tool_name: 'Bash', tool_input: {}, tool_response: 'ok' }).stdout || '') === '');
+  saysNothing(advise({ tool_name: 'Read', tool_input: {}, tool_response: "Error: Cannot find module '/tmp/ai.json'" })));
+const happy = run({ tool_name: 'Bash', tool_input: {}, tool_response: 'ok' });
+check('the ordinary happy path prints nothing at all', happy.lines.length === 1 && (happy.stdout || '') === '');
 
 // ---- the --no-verify record rider ----
 // coordinator-write-guard.js ASKS before a bypass; this rider asks for the
@@ -163,8 +179,16 @@ check('the ordinary happy path prints nothing at all',
 // the rider said nothing, and the commit negatives assert on the note's tag
 // because a commit also wakes the queue rider.
 {
-  const note = (command, over = {}) => advise({ tool_name: 'Bash', tool_input: { command },
-    tool_response: 'To github.com:x/y.git\n   abc..def  HEAD -> main', cwd: os.tmpdir(), ...over }).ctx || '';
+  // The rider's note, '' when it said nothing, or null when the hook wrote no
+  // row and so gave no answer at all. Each call gets a fresh directory outside
+  // any repo: the shared temp root would collect a row per call and could hold
+  // an earlier run's.
+  const note = (command, over = {}) => {
+    const a = advise({ tool_name: 'Bash', tool_input: { command },
+      tool_response: 'To github.com:x/y.git\n   abc..def  HEAD -> main',
+      cwd: fs.mkdtempSync(path.join(os.tmpdir(), 'telem-note-')), ...over });
+    return a.ran ? (a.ctx || '') : null;
+  };
   check('a successful `git push --no-verify` gets the record asked for',
     /\[no-verify\] This call ran `git push --no-verify`/.test(note('git push --no-verify origin HEAD')));
   check('  naming the git hook it skipped', /skips the pre-push hook/.test(note('git push --no-verify origin HEAD')));
@@ -178,13 +202,14 @@ check('the ordinary happy path prints nothing at all',
   check('a plain push says nothing', note('git push origin HEAD') === '');
   check('a push whose stdout mentions the flag says nothing',
     note('git push origin HEAD', { tool_response: 'hint: use --no-verify to skip' }) === '');
+  const message = note('git commit -m "explain --no-verify"');
   check('a commit MESSAGE carrying the flag is not a bypass',
-    !/\[no-verify\]/.test(note('git commit -m "explain --no-verify"')));
+    message !== null && !/\[no-verify\]/.test(message));
   check('`git push -n` is a dry run, not a bypass', note('git push -n origin HEAD') === '');
   check('a FAILED bypass push skipped nothing, so nothing is asked for',
     note('git push --no-verify origin HEAD', { tool_response: { is_error: true, content: 'rejected' } }) === '');
   check('a non-Bash tool says nothing',
-    advise({ tool_name: 'Read', tool_input: { file_path: 'x' }, tool_response: 'git push --no-verify' }).ctx == null);
+    saysNothing(advise({ tool_name: 'Read', tool_input: { file_path: 'x' }, tool_response: 'git push --no-verify' })));
   check('  and the rider never changes the exit code',
     advise({ tool_name: 'Bash', tool_input: { command: 'git push --no-verify origin HEAD' }, tool_response: 'ok' }).r.status === 0);
 
@@ -336,7 +361,7 @@ const t0 = Date.now();
 const slow = run({ tool_name: 'Read', tool_input: { file_path: 'x' } }, { CLAUDE_OTEL_ENDPOINT: 'http://127.0.0.1:9/none' });
 check('an unreachable OTLP endpoint still exits 0', slow.status === 0, 'exit ' + slow.status);
 check('  and still writes locally', slow.lines.length === 1);
-check('  and does not hang the tool call', Date.now() - t0 < 5000, `${Date.now() - t0}ms`);
+check('  and does not hang the tool call', slow.lines.length === 1 && Date.now() - t0 < 5000, `${Date.now() - t0}ms`);
 
 // ---- where the report is written ----
 //
@@ -351,7 +376,7 @@ check('  and does not hang the tool call', Date.now() - t0 < 5000, `${Date.now()
     const dir = path.join(root, '.claude', 'reports');
     return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
   };
-  const fire = (spawnCwd, payloadCwd) => spawnSync(process.execPath, [HOOK], {
+  const fire = (spawnCwd, payloadCwd) => sb.runVerdict(process.execPath, [HOOK], {
     input: JSON.stringify({
       tool_name: 'Bash',
       tool_input: { command: 'x' },
@@ -373,7 +398,7 @@ check('  and does not hang the tool call', Date.now() - t0 < 5000, `${Date.now()
 
   let r = fire(deep, deep);
   check('a payload deep in a repo writes at the repo ROOT', r.status === 0 && reportsIn(repo).length === 1);
-  check('  and writes nothing into the subdirectory', reportsIn(deep).length === 0);
+  check('  and writes nothing into the subdirectory', reportsIn(repo).length === 1 && reportsIn(deep).length === 0);
 
   // The shell wandering must not move the report: payload cwd is the session's.
   const repo2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telem-repo2-')));
@@ -381,7 +406,7 @@ check('  and does not hang the tool call', Date.now() - t0 < 5000, `${Date.now()
   const stray = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telem-stray-')));
   r = fire(stray, repo2);
   check('a wandering shell does not move the report', r.status === 0 && reportsIn(repo2).length === 1);
-  check('  and leaves the wandered-into directory clean', reportsIn(stray).length === 0);
+  check('  and leaves the wandered-into directory clean', reportsIn(repo2).length === 1 && reportsIn(stray).length === 0);
 
   // No repo above it: the start directory is used, unchanged.
   const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'telem-bare-')));
@@ -395,5 +420,7 @@ check('  and does not hang the tool call', Date.now() - t0 < 5000, `${Date.now()
     r.status === 0 && reportsIn(legacy).length === 1);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+const lost = sb.lostVerdict();
+console.log(`\n${sb.tally(pass, fail, lost ? 1 : 0)}`);
+if (lost) console.log(`INDETERMINATE: ${lost}. The ${skipped} cases after it were not graded.`);
+process.exitCode = sb.exitCode(fail, lost ? 1 : 0);

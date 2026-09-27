@@ -83,6 +83,7 @@
 
 const cp = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 // The spin below costs this many ms on an idle Apple M4 Pro (node 24.19.0,
 // median of 5: 125,125,126,126,132). It is a FAST-MACHINE FLOOR, not a
@@ -134,6 +135,25 @@ function timedOut(r) {
 }
 
 /**
+ * Did the child die of the MACHINE rather than exit on its own?
+ *
+ * `[measured 2026-09-27]` node started under a per-process commit cap (a Windows
+ * job object) printed 0 bytes of stdout every time and exited 0xC0000409 at
+ * 8 MB and 32 MB, 0x80000003 at 16 MB and 134 at 24 MB. At 32 MB stderr was
+ * empty too, so the status is the only tell. The same morning a full gate read
+ * two such children as `compact=0B` assertion failures, one minute after the
+ * System log recorded a low-virtual-memory condition.
+ *
+ * 134 is node's own exit on a fatal V8 error on Windows (POSIX reports SIGABRT,
+ * which `classify` already treats as infrastructure). A status at or above
+ * 0x80000000 is a Windows NTSTATUS warning or error. A JS program exits with
+ * neither unless it asks to, and a thrown error exits 1.
+ */
+function nativeDeath(r) {
+    return !!r && typeof r.status === 'number' && (r.status === 134 || r.status >= 0x80000000);
+}
+
+/**
  * Classify a spawnSync result as a verdict or as infrastructure.
  *
  * `expect` says which otherwise-suspicious outcomes this call site deliberately
@@ -151,7 +171,7 @@ function classify(r, expect) {
         const earlySelfExit = !r.error && !r.signal && (r.status === 0 || r.status === 1);
         return (ourKill || earlySelfExit) ? 'verdict' : 'infrastructure';
     }
-    if (r.error || r.signal || r.status === null) return 'infrastructure';
+    if (r.error || r.signal || r.status === null || nativeDeath(r)) return 'infrastructure';
     if (r.status === 2 && expect !== 'exit2') return 'infrastructure';
     return 'verdict';
 }
@@ -161,6 +181,7 @@ function reason(r) {
     if (timedOut(r)) return 'ETIMEDOUT';
     if (r.error) return String(r.error.code || r.error.message);
     if (r.signal) return 'signal ' + r.signal;
+    if (nativeDeath(r)) return `native exit 0x${r.status.toString(16).toUpperCase()} (${r.status})`;
     return 'status ' + r.status;
 }
 
@@ -455,6 +476,113 @@ function exitCode(fail, infra) {
     return infra > 0 ? 2 : (fail > 0 ? 1 : 0);
 }
 
+/**
+ * One line naming what a child returned, for an attempt that is about to be
+ * discarded or an answer that carried nothing parseable.
+ */
+function describeResult(r, ms) {
+    return `status=${r.status} signal=${r.signal} error=${r.error ? (r.error.code || r.error.message) : 'none'}`
+        + (ms === undefined ? '' : ` ms=${ms}`)
+        + ` stdout=${JSON.stringify(String(r.stdout || '').slice(0, 80))}`
+        + ` stderr=${JSON.stringify(String(r.stderr || '').slice(0, 300))}`;
+}
+
+/**
+ * spawnSync for a suite that GRADES WHAT ITS CHILD PRINTED, with a child that
+ * died of the machine retried instead of graded.
+ *
+ * WHY. A child that died of the machine (nativeDeath) printed nothing, and a
+ * suite that reads its stdout directly turns that nothing into a claim: a
+ * presence check goes red, and an ABSENCE check ("no hint", "adds zero bytes")
+ * passes. `[measured 2026-09-27]` a NODE_OPTIONS preload answered every node
+ * child of every tooling/test-*.js suite at a2b8d4c with 0xC0000409 and empty
+ * streams. 151 of the 168 suites spawn node children. 149 of those exited 1 and
+ * 2 exited 2. In 57 of them at least one check PASSED on the dead child and
+ * failed when the same child answered with the suite's own source instead, so
+ * those checks were grading output they never required to exist.
+ *
+ * The pauses, not a wider budget, are what a native death needs: the child was
+ * not slow, it never got the memory to start. The red gate run behind
+ * nativeDeath() lost two spawns to one starved window that was over by the
+ * third, so the default waits 1, 3 and 9 s. A TIMEOUT is not retried here:
+ * runBudgeted already gave it one widened retry, and a retry at the same budget
+ * is variant D in the header, 0/4.
+ *
+ * A child that produces no verdict on every attempt ENDS GRADING for the ledger
+ * it ran on. The ledger records why, lostVerdict() returns it, and every later
+ * runVerdict on that ledger returns at once without spawning. The suite then
+ * reports its remaining checks as not graded and exits 2. Without the
+ * short-circuit a starved machine would pay 13 s of pauses per remaining child.
+ *
+ * opts.expect    passed to classify ('exit2' | 'kill')
+ * opts.retryMs   the pauses before each retry, default RETRY_PAUSES_MS
+ * opts.log       where discarded attempts are printed, default console.log
+ * opts.ledger    where a lost verdict is recorded, default the one this process
+ *                shares. A suite is one process, so the default is the suite's.
+ *                A test of this function passes its own `{ lost: null }`.
+ * opts.timeout   when set, each attempt runs through runBudgeted
+ * Every other option goes to spawnSync untouched.
+ *
+ * Returns the last spawnSync result with four fields added:
+ *   verdict    true when classify called it a verdict. false means the caller
+ *              reports INDETERMINATE, never red
+ *   runs       how many times the child was spawned, 0 when the ledger had
+ *              already lost a verdict
+ *   discarded  one describeResult() line per attempt that produced no verdict
+ *   skipped    true when nothing was spawned because the ledger had lost one
+ */
+const RETRY_PAUSES_MS = [1000, 3000, 9000];
+const PROCESS_LEDGER = { lost: null };
+
+function lostVerdict(ledger) {
+    return (ledger || PROCESS_LEDGER).lost;
+}
+
+function pause(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// The script a node child runs, else the command, for the lost-verdict line.
+function childName(command, args) {
+    const script = (args || []).map(String).find((a) => /\.[cm]?js$/i.test(a));
+    return path.basename(script || String(command));
+}
+
+function runVerdict(command, args, opts) {
+    const o = Object.assign({}, opts);
+    const expect = o.expect;
+    const pauses = o.retryMs || RETRY_PAUSES_MS;
+    const log = o.log || console.log;
+    const ledger = o.ledger || PROCESS_LEDGER;
+    delete o.expect;
+    delete o.retryMs;
+    delete o.log;
+    delete o.ledger;
+    if (ledger.lost) {
+        const e = o.encoding && o.encoding !== 'buffer' ? '' : Buffer.alloc(0);
+        return { pid: 0, output: [null, e, e], stdout: e, stderr: e, status: null, signal: null,
+            verdict: false, runs: 0, discarded: [], skipped: true };
+    }
+    const discarded = [];
+    for (let run = 1; ; run++) {
+        const t0 = Date.now();
+        const r = o.timeout > 0 ? runBudgeted(command, args, o) : cp.spawnSync(command, args, o);
+        const ms = Date.now() - t0;
+        if (classify(r, expect) === 'verdict') {
+            return Object.assign(r, { verdict: true, runs: run, discarded, skipped: false });
+        }
+        const line = `attempt ${run} of ${pauses.length + 1} produced no verdict (${reason(r)}): ${describeResult(r, ms)}`;
+        discarded.push(line);
+        log('  ' + line);
+        if (timedOut(r) || run > pauses.length) {
+            ledger.lost = `${childName(command, args)} produced no verdict in ${run} attempt${run === 1 ? '' : 's'}, `
+                + `last ${reason(r)}`;
+            return Object.assign(r, { verdict: false, runs: run, discarded, skipped: false });
+        }
+        pause(pauses[run - 1]);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // THE SWEEP'S BUDGETS. One number used to serve two categorically different
 // children, and that is the whole defect.
@@ -500,7 +628,8 @@ function sweepBudgetFor(suite) {
 }
 
 module.exports = {
-    contentionFactor, timedOut, classify, reason, runBudgeted, tally, exitCode,
+    contentionFactor, timedOut, nativeDeath, classify, reason, runBudgeted, tally, exitCode,
+    describeResult, runVerdict, lostVerdict, RETRY_PAUSES_MS,
     lastWords, untilWrittenBeforeKill, deadlineRemaining, clampToDeadline,
     SPIN_FLOOR_MS, CONTENTION_MAX, DEADLINE_ENV, DEADLINE_FLOOR_MS,
     sweepBudgetFor, SWEEP_SUITE_BUDGET_MS, SWEEP_RUNNER_BUDGET_MS, SWEEP_MEASURED_RUNNER_MS,
@@ -525,7 +654,6 @@ if (require.main === module) {
         const t = (label, ok, detail) => cases.push([label, ok, detail]);
         const NODE = process.execPath;
         const os = require('os');
-        const path = require('path');
 
         const clean = runBudgeted(NODE, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 30000 });
         t('a clean child is a verdict', classify(clean) === 'verdict', classify(clean));
@@ -539,6 +667,24 @@ if (require.main === module) {
         t('an UNEXPECTED exit 2 is infrastructure', classify(two) === 'infrastructure', classify(two));
         t('  and the same exit 2 is a verdict where the call site expects it',
             classify(two, 'exit2') === 'verdict', classify(two, 'exit2'));
+
+        // A child that died of the machine. Real children where the platform can
+        // produce the status: POSIX exit codes are 8 bits, so an NTSTATUS there is
+        // a spawnSync-shaped result instead.
+        const died = (code) => (process.platform === 'win32' || code < 256
+            ? runBudgeted(NODE, ['-e', `process.exit(${code})`], { encoding: 'utf8', timeout: 30000 })
+            : { status: code, signal: null, stdout: '', stderr: '' });
+        for (const [label, code] of [['0xC0000409', 0xC0000409], ['0x80000003', 0x80000003], ['134', 134]]) {
+            const d = died(code);
+            t(`a native exit ${label} is infrastructure, never a red assertion`,
+                nativeDeath(d) && classify(d) === 'infrastructure' && classify(d, 'exit2') === 'infrastructure',
+                `status=${d.status} ${classify(d)} ${reason(d)}`);
+        }
+        t('  and the reason names the status in hex', reason(died(0xC0000409)) === 'native exit 0xC0000409 (3221226505)',
+            reason(died(0xC0000409)));
+        const below = died(0x7FFFFFFF);
+        t('  and 0x7FFFFFFF, one below the NTSTATUS range, is still a verdict',
+            !nativeDeath(below) && classify(below) === 'verdict', `status=${below.status} ${classify(below)}`);
 
         // A child that outlives any budget. Retry is disabled so the selftest
         // does not pay the widened budget twice.
@@ -862,6 +1008,94 @@ if (require.main === module) {
                 ctl.trail);
         }
 
+        // runVerdict. Each case runs on a ledger of its own, so a lost verdict in
+        // one cannot short-circuit the next, and the process ledger stays clean.
+        // The pauses are 1 ms: the retry is the claim here, not its timing. Every
+        // spawn is counted by the CHILD, appending to a file, so "how many times
+        // did it run" is not read back from the module under test.
+        {
+            const counter = path.join(os.tmpdir(), `sb-selftest-runs-${process.pid}`);
+            const quiet = () => {};
+            const v = (script, over) => {
+                fs.rmSync(counter, { force: true });
+                const r = runVerdict(NODE, ['-e', 'require("fs").appendFileSync(process.env.SB_COUNT,"x");' + script],
+                    Object.assign({ encoding: 'utf8', retryMs: [1, 1, 1], log: quiet, ledger: { lost: null },
+                        env: Object.assign({}, process.env, { SB_COUNT: counter }) }, over));
+                const spawned = fs.existsSync(counter) ? fs.readFileSync(counter, 'utf8').length : 0;
+                return Object.assign(r, { spawned });
+            };
+            try {
+                const ok = v('console.log("ANSWER")');
+                t('runVerdict: a child that answers is graded on its first run',
+                    ok.verdict && ok.runs === 1 && ok.spawned === 1 && ok.stdout.trim() === 'ANSWER',
+                    `verdict=${ok.verdict} runs=${ok.runs} spawned=${ok.spawned}`);
+                const one = v('process.exit(1)');
+                t('  and an exit 1 with nothing on stdout is the child\'s own answer, graded and never retried',
+                    one.verdict && one.spawned === 1 && one.status === 1, `spawned=${one.spawned} status=${one.status}`);
+                const zero = v('0');
+                t('  and so is an exit 0 with nothing on stdout',
+                    zero.verdict && zero.spawned === 1 && zero.status === 0 && zero.stdout === '',
+                    `spawned=${zero.spawned} status=${zero.status}`);
+                const two = v('process.exit(2)', { expect: 'exit2' });
+                t('  and so is an exit 2 the call site expects',
+                    two.verdict && two.spawned === 1, `spawned=${two.spawned}`);
+
+                const marker = path.join(os.tmpdir(), `sb-selftest-dies-once-${process.pid}`);
+                fs.rmSync(marker, { force: true });
+                let once;
+                try {
+                    once = v('const m=process.env.SB_DIES_ONCE;if(!require("fs").existsSync(m)){'
+                        + 'require("fs").writeFileSync(m,"1");process.exit(134)}console.log("SECOND")',
+                    { env: Object.assign({}, process.env, { SB_COUNT: counter, SB_DIES_ONCE: marker }) });
+                } finally {
+                    fs.rmSync(marker, { force: true });
+                }
+                t('a child that died of the machine once is re-run, and the re-run is what is graded',
+                    once.verdict && once.spawned === 2 && once.runs === 2 && once.stdout.trim() === 'SECOND',
+                    `verdict=${once.verdict} spawned=${once.spawned} stdout=${JSON.stringify(once.stdout)}`);
+                t('  and the discarded attempt is reported with its status',
+                    once.discarded.length === 1 && /\(native exit 0x86 \(134\)\): status=134/.test(once.discarded[0]),
+                    once.discarded.join(' | '));
+
+                const printed = [];
+                const ledger = { lost: null };
+                const dead = v('process.exit(134)', { log: (l) => printed.push(l), ledger });
+                t('a child that dies on every attempt is no verdict, after one run plus one per pause',
+                    !dead.verdict && dead.spawned === 4 && dead.runs === 4, `verdict=${dead.verdict} spawned=${dead.spawned}`);
+                t('  and every discarded attempt is printed, so a reader sees what the child returned',
+                    printed.length === 4 && printed.every((l) => /produced no verdict \(native exit 0x86 \(134\)\)/.test(l)),
+                    printed.join(' | '));
+                t('  and its ledger records the lost verdict',
+                    /produced no verdict in 4 attempts, last native exit 0x86 \(134\)/.test(lostVerdict(ledger) || ''),
+                    String(lostVerdict(ledger)));
+                const after = v('console.log("NEVER")', { ledger });
+                t('  and a later runVerdict on that ledger returns at once, spawning nothing',
+                    after.skipped && after.spawned === 0 && after.runs === 0 && !after.verdict
+                        && after.stdout === '' && after.status === null,
+                    `skipped=${after.skipped} spawned=${after.spawned} stdout=${JSON.stringify(after.stdout)}`);
+                const raw = runVerdict(NODE, ['-e', '0'], { ledger });
+                t('  and its empty streams are Buffers when no encoding was asked for, as spawnSync\'s are',
+                    Buffer.isBuffer(raw.stdout) && raw.stdout.length === 0, typeof raw.stdout);
+                const other = v('console.log("OTHER")');
+                t('  control: a child on another ledger still runs, so the short-circuit is per ledger',
+                    other.verdict && other.spawned === 1 && other.stdout.trim() === 'OTHER', `spawned=${other.spawned}`);
+                t('  and the process ledger is untouched by all of the above', lostVerdict() === null, String(lostVerdict()));
+
+                const unexpected = v('process.exit(2)');
+                t('an exit 2 the call site did not expect is retried like any other infrastructure',
+                    !unexpected.verdict && unexpected.spawned === 4, `spawned=${unexpected.spawned}`);
+
+                const tl = { lost: null };
+                const hung = v(HANG, { timeout: 300, retryOnTimeout: false, ledger: tl });
+                t('a timeout is not retried by runVerdict, because runBudgeted owns the timeout policy',
+                    !hung.verdict && timedOut(hung) && hung.runs === 1 && hung.spawned <= 1,
+                    `runs=${hung.runs} spawned=${hung.spawned} ${reason(hung)}`);
+                t('  and it still loses the verdict', /last ETIMEDOUT$/.test(lostVerdict(tl) || ''), String(lostVerdict(tl)));
+            } finally {
+                fs.rmSync(counter, { force: true });
+            }
+        }
+
         let bad = false;
         try { runBudgeted(NODE, ['-e', '0'], { encoding: 'utf8' }); } catch { bad = true; }
         t('a missing budget is refused rather than silently defaulted', bad);
@@ -886,6 +1120,8 @@ if (require.main === module) {
     console.log('usage: node tooling/spawn-budget.js [--selftest|--probe]');
     console.log('  A library for suites that spawn their subject: a base budget, and on a');
     console.log('  timeout one retry at a budget scaled by contention measured at that moment.');
+    console.log('  runVerdict re-runs a child that died of the machine and reports INDETERMINATE');
+    console.log('  when it never answers, so a suite never grades the empty output of a dead child.');
     console.log('  Required by test-hook-execution-evidence, test-path-filter-deadlock and');
     console.log('  test-quota-tripwire. Measurements behind the policy are in the header.');
     process.exit(0);

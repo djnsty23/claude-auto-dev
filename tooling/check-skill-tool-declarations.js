@@ -133,7 +133,7 @@ const VOCAB = [
 // Bare and -ing forms only. The third-person plural forms are excluded because
 // they double as nouns in exactly this corpus: "Fifty `Bash` calls returning a
 // line each are cheap" is a cost comparison, not an instruction to call Bash.
-// That case is a real line in `telemetry` and it is why the verb must also
+// That case was a real line in the retired `telemetry` skill and it is why the verb must also
 // PRECEDE the token -- see mandateClass.
 const MANDATE_VERBS = [
     'use', 'using', 'call', 'calling', 'run', 'running', 'invoke', 'invoking',
