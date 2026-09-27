@@ -38,10 +38,11 @@ When the first step fails, run the remaining eleven yourself.
 The chain's exit status is a verdict on one step, not on twelve.
 
 - **`npm run gate` takes the machine-wide full-gate lock** (`tooling/gate-lock.js`), and the chain
-  above is `scripts["gate:chain"]`. It waits for a live holder and prints who it is behind, moves a
-  dead holder's lock aside to `.stale-HHMM`, and releases to `.released-HHMM` on any outcome. The
-  chain's exit code passes through. A chain it did not see finish exits 2. `AUTODEV_GATE_LOCK=0`
-  skips the lock.
+  above is `scripts["gate:chain"]`. It waits in autodev-core's `full-gate-queue.js` queue, first
+  come first served and across every lane the machine allows, and prints who it is behind. It moves a
+  dead holder's lock aside to `.stale-HHMM`, and on any outcome hands the lock to the next ticket or
+  renames it to `.released-HHMM`. The chain's exit code passes through. A chain it did not see
+  finish exits 2. `AUTODEV_GATE_LOCK=0` skips the lock.
 - **Exit 2 is INDETERMINATE**, never a pass or a fail. Read the conflict line before re-running.
 - **Run it on a clean tree, after committing and before pushing.** `check:suites` grades HEAD in a
   private worktree and refuses a dirty tree. Iterate with `npm test`, then commit, gate and push.

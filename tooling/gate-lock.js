@@ -16,16 +16,21 @@
  *   line 2  what is running and where
  *   release renames the file to `full-gate.lock.released-HHMM` (UTC).
  *
- * WHAT IT DOES.
- *   1. Creates the lock with an exclusive create (`wx`), which is atomic.
- *   2. If a LIVE holder has it, waits, printing the holder's line 2 when it
- *      starts waiting and every few minutes after.
+ * WHAT IT DOES. The lock is taken through autodev-core's full-gate-queue.js,
+ * the same first-come queue `full-gate-queue.js wait` uses, so a newcomer
+ * running `npm run gate` never jumps a session already waiting.
+ *   1. Takes a ticket in the queue beside the lock, in every lane when the
+ *      machine has more than one, and takes the first lane it heads while that
+ *      lane is free (an atomic `wx` create).
+ *   2. While a LIVE holder or an earlier ticket is ahead, waits, printing the
+ *      holder's line 2 when it starts waiting and every few minutes after.
  *   3. If the holder is DEAD, renames the lock aside to `.stale-HHMM`, says so
  *      on one line, and acquires. It never deletes a lock and never kills a
  *      process. A holder it cannot judge (no pid on line 1, or no liveness
  *      probe could answer) is treated as alive: waiting is recoverable by hand,
  *      stealing a live gate's lock is not.
- *   4. Runs `npm run gate:chain`, then releases, whatever the outcome.
+ *   4. Runs `npm run gate:chain`, then releases, whatever the outcome: to the
+ *      next ticket when one waits, else by rename to `.released-HHMM`.
  *
  * EXIT STATUS. The chain's own exit code, exactly: 0, 1 and 2 stay three
  * states. A chain this script did not see finish (killed by a signal, a null
@@ -51,7 +56,8 @@
  *
  * ENVIRONMENT.
  *   AUTODEV_GATE_LOCK=0             skip the lock (CI, a one-session machine)
- *   AUTODEV_GATE_LOCK_PATH=FILE     lock file (default <home>/.claude/autodev/locks/full-gate.lock)
+ *   AUTODEV_GATE_LOCK_PATH=FILE     lane 1's lock file (default <home>/.claude/autodev/locks/full-gate.lock)
+ *   AUTODEV_GATE_LANES=N            lanes to wait on; else the `full-gate.lanes` file beside it, else 1
  *   AUTODEV_GATE_LOCK_POLL_MS=N     how often a waiter re-checks (default 5000)
  *   AUTODEV_GATE_LOCK_REPORT_MS=N   how often a waiter re-prints the holder (default 180000)
  */
@@ -86,169 +92,70 @@ function readGateChain(pkg) {
 }
 
 // ---------------------------------------------------------------------------
-// Lock primitives.
+// The lock, through the machine's queue. autodev-core's full-gate-queue.js
+// owns the lock format, the ticket queue beside it, lanes, liveness and stale
+// takeover, so this wrapper and a `full-gate-queue.js wait` take turns in one
+// first-come order. Before the queue this wrapper polled the lock itself, and
+// whoever polled first after a release won, whatever its place.
 // ---------------------------------------------------------------------------
 
-function defaultLockPath() {
-    return path.join(os.homedir(), '.claude', 'autodev', 'locks', 'full-gate.lock');
-}
+const queue = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'full-gate-queue.js'));
+
+const STALE_MS = 600000;
+const MAX_POLL_ERRORS = 10;
 
 function lockDisabled(env) {
     const v = String(env.AUTODEV_GATE_LOCK || '').trim().toLowerCase();
     return v === '0' || v === 'off' || v === 'false' || v === 'no';
 }
 
-/** HHMM in UTC, the suffix the hand-written convention uses. */
-function hhmm(d = new Date()) {
-    return d.toISOString().slice(11, 16).replace(':', '');
+/** Why a queued waiter cannot go yet, for the waiting line. */
+function whyWaiting(r) {
+    const h = r.holder;
+    const ahead = r.position - 1;
+    const behind = ahead > 0 ? ` (place ${r.position} of ${r.of} in its queue)` : '';
+    if (!h) return `free, but ${ahead} waiter(s) arrived first${behind}`;
+    if (h.pid === null) {
+        return `line 1 is not a pid, so its holder cannot be checked; move it aside by hand if nobody holds it${behind}`;
+    }
+    const alive = queue.isAlive(h.pid);
+    return (alive === null
+        ? `cannot tell whether pid ${h.pid} is alive (no liveness probe answered)`
+        : `held by live pid ${h.pid}`) + behind;
 }
 
-/** `<lock>.<kind>-HHMM`, or `-HHMM-2`, `-3`... when that name is taken. Never clobbers. */
-function asideName(lockPath, kind) {
-    const base = `${lockPath}.${kind}-${hhmm()}`;
-    if (!fs.existsSync(base)) return base;
-    for (let i = 2; i < 1000; i++) {
-        const p = `${base}-${i}`;
-        if (!fs.existsSync(p)) return p;
-    }
-    return `${base}-${process.pid}-${Date.now()}`;
-}
-
-/** Atomic exclusive create. true = ours now, false = someone holds it. */
-function tryCreate(file, body) {
-    let fd;
-    try {
-        fd = fs.openSync(file, 'wx');
-    } catch (e) {
-        if (e.code === 'EEXIST') return false;
-        throw e;
-    }
-    try { fs.writeSync(fd, body); } finally { fs.closeSync(fd); }
-    return true;
-}
-
-function readLock(file) {
-    let text;
-    try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
-        if (e.code === 'ENOENT') return null;
-        throw e;
-    }
-    const lines = text.split(/\r?\n/);
-    const first = (lines[0] || '').trim();
-    const pid = /^\d+$/.test(first) ? Number(first) : null;
-    return { text, pid, what: (lines[1] || '').trim() || '(no description on line 2)' };
-}
-
-// ---------------------------------------------------------------------------
-// Liveness. A holder pid may be a Windows pid or an MSYS/Git-Bash pid, so on
-// Windows it is alive if EITHER tasklist or ps finds it. Returns true, false,
-// or null when no probe could answer (the caller treats null as alive).
-// ---------------------------------------------------------------------------
-
-let psCommand; // resolved once: 'ps' on PATH, Git's bundled ps.exe, or null
-
-function resolvePs() {
-    if (psCommand !== undefined) return psCommand;
-    psCommand = null;
-    const probe = spawnSync('ps', ['-p', String(process.pid)], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
-    if (!probe.error) { psCommand = 'ps'; return psCommand; }
-    // `npm run gate` from PowerShell often lacks Git's usr/bin on PATH. Git knows
-    // where it lives: <git>/mingw64/libexec/git-core -> <git>/usr/bin/ps.exe.
-    const ex = spawnSync('git', ['--exec-path'], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
-    if (!ex.error && ex.status === 0) {
-        const candidate = path.resolve(ex.stdout.trim(), '..', '..', '..', 'usr', 'bin', 'ps.exe');
-        if (fs.existsSync(candidate)) psCommand = candidate;
-    }
-    return psCommand;
-}
-
-function isAlive(pid) {
-    if (!Number.isInteger(pid) || pid <= 0) return null;
-    if (pid === process.pid) return true;
-    if (process.platform !== 'win32') {
-        try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
-    }
-    const t = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'],
-        { encoding: 'utf8', windowsHide: true, timeout: 15000 });
-    const tasklistRan = !t.error && t.status === 0;
-    if (tasklistRan && new RegExp(`^"[^"]*","${pid}"`, 'm').test(t.stdout || '')) return true;
-    const ps = resolvePs();
-    let psRan = false;
-    if (ps) {
-        const p = spawnSync(ps, ['-p', String(pid)], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
-        if (!p.error) {
-            psRan = true;
-            const found = (p.stdout || '').split(/\r?\n/).some((l) => l.trim().split(/\s+/)[0] === String(pid));
-            if (found) return true;
-        }
-    }
-    // Dead only when BOTH namespaces were asked. Without ps an MSYS pid cannot
-    // be seen at all, and "cannot see it" is not "it is dead".
-    return tasklistRan && psRan ? false : null;
-}
-
-// ---------------------------------------------------------------------------
-// Taking a dead holder's lock. Serialised by a takeover file so two waiters
-// that both judged the same holder dead cannot move each other's fresh lock:
-// the second one re-reads under the takeover file and finds a live holder.
-// ---------------------------------------------------------------------------
-
-function takeOverStale(lockPath, judged, body, log) {
-    const mutex = `${lockPath}.takeover`;
-    if (!tryCreate(mutex, `${process.pid}\n`)) {
-        const m = readLock(mutex);
-        // A takeover file lives for milliseconds. One whose owner is dead is
-        // this script's own debris, not a gate lock, so it is removed.
-        if (m && m.pid !== null && isAlive(m.pid) === false) {
-            try { fs.unlinkSync(mutex); } catch { /* another waiter removed it first */ }
-        }
-        return false;
-    }
-    try {
-        const now = readLock(lockPath);
-        if (!now) return tryCreate(lockPath, body);
-        if (now.text !== judged.text || isAlive(now.pid) !== false) return false;
-        const aside = asideName(lockPath, 'stale');
-        fs.renameSync(lockPath, aside);
-        log(`${TAG} holder pid ${now.pid} is not running; moved its lock aside to ${path.basename(aside)} (it said: ${now.what})`);
-        return tryCreate(lockPath, body);
-    } finally {
-        try { fs.unlinkSync(mutex); } catch { /* already gone */ }
-    }
-}
-
-/** Resolves true once the lock is ours, false if stopped while waiting. */
-function acquire(lockPath, body, opts) {
+/**
+ * Resolves the lane lock once it names this process, or null if stopped while
+ * waiting. Each poll takes a turn in every lane's queue (`takeAnyLane`), which
+ * also refreshes this process's tickets. A transient filesystem error is
+ * retried; MAX_POLL_ERRORS in a row reject.
+ */
+function acquire(lockPaths, body, what, opts) {
     const { pollMs, reportMs, log, isStopped } = opts;
-    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    const pid = process.pid;
     let lastReport = 0;
-    let lastHolder = null;
+    let lastSeen = null;
+    let errors = 0;
     return new Promise((resolve, reject) => {
         const attempt = () => {
-            if (isStopped()) { resolve(false); return; }
+            if (isStopped()) { queue.leaveQueues(lockPaths, pid); resolve(null); return; }
             try {
-                if (tryCreate(lockPath, body)) { resolve(true); return; }
-                const held = readLock(lockPath);
-                if (held) {
-                    const alive = held.pid === null ? null : isAlive(held.pid);
-                    if (alive === false && takeOverStale(lockPath, held, body, log)) { resolve(true); return; }
-                    if (alive !== false) {
-                        const now = Date.now();
-                        if (held.text !== lastHolder || now - lastReport >= reportMs) {
-                            const why = held.pid === null
-                                ? 'line 1 is not a pid, so its holder cannot be checked; move it aside by hand if nobody holds it'
-                                : alive === null
-                                    ? `cannot tell whether pid ${held.pid} is alive (no liveness probe answered)`
-                                    : `held by live pid ${held.pid}`;
-                            log(`${TAG} waiting for ${lockPath}: ${why}. Holder says: ${held.what}`);
-                            lastReport = now;
-                            lastHolder = held.text;
-                        }
-                    }
+                queue.resetProbes();
+                const r = queue.takeAnyLane({ lockPaths, pid, what, body, staleMs: STALE_MS, log });
+                errors = 0;
+                if (r.acquired) { resolve(r.lockPath); return; }
+                const seen = `${r.lockPath}|${r.position}|${r.holder ? r.holder.text : ''}`;
+                const now = Date.now();
+                if (seen !== lastSeen || now - lastReport >= reportMs) {
+                    const says = r.holder ? r.holder.what : '(no lock)';
+                    log(`${TAG} waiting for ${r.lockPath}: ${whyWaiting(r)}. Holder says: ${says}`);
+                    lastReport = now;
+                    lastSeen = seen;
                 }
             } catch (e) {
-                reject(e);
-                return;
+                errors++;
+                log(`${TAG} queue poll failed (${e.code || e.message}), attempt ${errors} of ${MAX_POLL_ERRORS}`);
+                if (errors >= MAX_POLL_ERRORS) { queue.leaveQueues(lockPaths, pid); reject(e); return; }
             }
             setTimeout(attempt, pollMs);
         };
@@ -256,17 +163,21 @@ function acquire(lockPath, body, opts) {
     });
 }
 
-/** Renames our own lock to `.released-HHMM`. Touches nothing that is not ours. */
-function release(lockPath, log) {
-    const held = readLock(lockPath);
-    if (!held) { log(`${TAG} lock already gone at release; nothing renamed`); return; }
-    if (held.pid !== process.pid) {
-        log(`${TAG} the lock now names pid ${held.pid}, not this process (${process.pid}); left it untouched`);
-        return;
+/**
+ * Releases every lane that names this process: to the next queued waiter when
+ * there is one, else by rename to `.released-HHMM`. Touches nothing not ours.
+ */
+function release(lockPaths, log, { quiet = false } = {}) {
+    queue.resetProbes();
+    const done = queue.releaseLanes({ lockPaths, pid: process.pid, staleMs: STALE_MS, log });
+    for (const r of done) {
+        if (r.to) log(`${TAG} lock handed to queued pid ${r.to.pid} (${r.to.what}); record kept as ${path.basename(r.aside)}`);
+        else log(`${TAG} lock released to ${path.basename(r.aside)}`);
     }
-    const aside = asideName(lockPath, 'released');
-    fs.renameSync(lockPath, aside);
-    log(`${TAG} lock released to ${path.basename(aside)}`);
+    if (done.length || quiet) return;
+    const held = queue.readLock(lockPaths[0]);
+    if (!held) { log(`${TAG} lock already gone at release; nothing renamed`); return; }
+    log(`${TAG} the lock now names pid ${held.pid}, not this process (${process.pid}); left it untouched`);
 }
 
 // ---------------------------------------------------------------------------
@@ -360,14 +271,15 @@ function label(exit) {
 function help() {
     console.log('usage: node tooling/gate-lock.js [--root DIR]');
     console.log('');
-    console.log('What `npm run gate` runs. Takes the machine-wide full-gate lock (atomic');
-    console.log('create; waits for a live holder; moves a dead holder\'s lock aside to');
-    console.log('.stale-HHMM), runs `npm run gate:chain`, releases the lock to');
-    console.log('.released-HHMM, and exits with the chain\'s own exit code. A chain it did');
-    console.log('not see finish exits 2.');
+    console.log('What `npm run gate` runs. Queues for the machine-wide full-gate lock');
+    console.log('(first come, first served, through autodev-core full-gate-queue.js; moves');
+    console.log('a dead holder\'s lock aside to .stale-HHMM), runs `npm run gate:chain`,');
+    console.log('hands the lock to the next waiter or renames it to .released-HHMM, and');
+    console.log('exits with the chain\'s own exit code. A chain it did not see finish exits 2.');
     console.log('');
     console.log('env: AUTODEV_GATE_LOCK=0 skips the lock; AUTODEV_GATE_LOCK_PATH overrides');
-    console.log('its path (default <home>/.claude/autodev/locks/full-gate.lock).');
+    console.log('its path (default <home>/.claude/autodev/locks/full-gate.lock);');
+    console.log('AUTODEV_GATE_LANES=N waits on N lanes (default: the full-gate.lanes file, else 1).');
 }
 
 function main() {
@@ -383,7 +295,7 @@ function main() {
     }
     const env = process.env;
     const log = (line) => console.log(line);
-    const lockPath = path.resolve(env.AUTODEV_GATE_LOCK_PATH || defaultLockPath());
+    const base = path.resolve(env.AUTODEV_GATE_LOCK_PATH || queue.defaultLockPath());
     const pollMs = Math.max(50, Number(env.AUTODEV_GATE_LOCK_POLL_MS) || 5000);
     const reportMs = Math.max(0, Number(env.AUTODEV_GATE_LOCK_REPORT_MS) || 180000);
     const useLock = !lockDisabled(env);
@@ -398,14 +310,23 @@ function main() {
     }
 
     let held = false;
+    let released = false;
+    let lockPaths = [base];
     let child = null;
     let interrupted = null;
     let done = false;
 
+    // Leaves every queue and frees any lane naming this process. It runs when
+    // nothing is held too: a signal can land between a lane being handed over
+    // and this process seeing it, and a waiter's tickets must not outlive it.
     const releaseOnce = () => {
-        if (!held) return;
+        if (!useLock || released) return;
+        released = true;
+        try {
+            queue.leaveQueues(lockPaths, process.pid);
+            release(lockPaths, log, { quiet: !held });
+        } catch (e) { log(`${TAG} could not release ${base}: ${e.message}`); }
         held = false;
-        try { release(lockPath, log); } catch (e) { log(`${TAG} could not release ${lockPath}: ${e.message}`); }
     };
     const finish = (outcome) => {
         if (done) return;
@@ -463,20 +384,25 @@ function main() {
         return;
     }
 
-    const body = `${process.pid}\n${describe(root)}\n`;
-    acquire(lockPath, body, { pollMs, reportMs, log, isStopped: () => Boolean(interrupted) })
-        .then((ok) => {
-            if (!ok) return;
+    const lanes = queue.laneCount(base, env, null);
+    lockPaths = queue.lanePaths(base, lanes.count);
+    for (const note of lanes.notes) log(`${TAG} ${note}`);
+    if (lanes.count > 1) log(`${TAG} ${lanes.count} lanes (from ${lanes.source}); taking whichever frees first`);
+    const what = describe(root);
+    const body = `${process.pid}\n${what}\n`;
+    acquire(lockPaths, body, what, { pollMs, reportMs, log, isStopped: () => Boolean(interrupted) })
+        .then((lane) => {
+            if (!lane) return;
             held = true;
-            log(`${TAG} lock taken: ${lockPath} (pid ${process.pid})`);
+            log(`${TAG} lock taken: ${lane} (pid ${process.pid})`);
             runChain();
         })
         .catch((e) => {
-            log(`${TAG} could not take ${lockPath}: ${e.message}`);
+            log(`${TAG} could not take ${base}: ${e.message}`);
             finish({ spawnError: `lock error (${e.code || e.message})` });
         });
 }
 
-module.exports = { readGateChain, CHAIN_SCRIPT, isAlive, verdict };
+module.exports = { readGateChain, CHAIN_SCRIPT, isAlive: queue.isAlive, verdict };
 
 if (require.main === module) main();

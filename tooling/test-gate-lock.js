@@ -67,6 +67,7 @@ function envFor(fx, extra = {}) {
         AUTODEV_GATE_LOCK_REPORT_MS: '100000',
     }, extra);
     if (!('AUTODEV_GATE_LOCK' in extra)) delete env.AUTODEV_GATE_LOCK;
+    if (!('AUTODEV_GATE_LANES' in extra)) delete env.AUTODEV_GATE_LANES;
     return env;
 }
 
@@ -352,11 +353,101 @@ async function main() {
         const r = spawnSync(process.execPath, [SUBJECT, '--help'], { encoding: 'utf8', timeout: 10000 });
         check('--help exits 0 and prints usage', r.status === 0 && /usage: node tooling\/gate-lock\.js/.test(r.stdout), r.stdout);
     }
+
+    // -- 12. The queue: a free lock is not the wrapper's while a ticket is ahead --
+    {
+        const fx = fixture('node probe.js 0');
+        const peer = keepAlive();
+        const peerTicket = writeTicket(fx, peer.pid, 'peer waiting since 2000');
+        const run = start(fx);
+        const waiting = await waitFor(() => /waiting for/.test(run.out), 20000, 'the waiting line');
+        check('queue: a newcomer waits behind an earlier ticket though the lock is free', waiting, run.out);
+        check('queue: the waiting line says who arrived first',
+            /free, but 1 waiter\(s\) arrived first \(place 2 of 2 in its queue\)/.test(run.out), run.out);
+        await sleep(800);
+        check('queue: the chain has not run and no lock was created', saw(fx) === null && !fs.existsSync(fx.lockPath), run.out);
+        check("queue: the wrapper holds a ticket of its own",
+            ticketsOf(fx).some((n) => n.endsWith(`-${String(run.child.pid).padStart(10, '0')}.ticket`)), JSON.stringify(ticketsOf(fx)));
+        fs.rmSync(peerTicket, { force: true });
+        const r = await finished(run);
+        killTree(peer.pid);
+        check('queue: once the earlier ticket leaves, the wrapper runs and exits 0', r.code === 0, `exit=${r.code}\n${r.out}`);
+        heldThenReleased('queue', fx, run, r);
+        check('queue: no ticket is left behind', ticketsOf(fx).length === 0, JSON.stringify(ticketsOf(fx)));
+    }
+
+    // -- 13. Lanes: lane 1 busy, the wrapper takes lane 2 ----------------------
+    {
+        const fx = fixture('node probe.js 0');
+        const peer = keepAlive();
+        const held = `${peer.pid}\npeer gate on lane 1\n`;
+        fs.mkdirSync(fx.lockDir, { recursive: true });
+        fs.writeFileSync(fx.lockPath, held);
+        fs.writeFileSync(path.join(fx.lockDir, 'full-gate.lanes'), '2\n');
+        const r = await finished(start(fx));
+        killTree(peer.pid);
+        const lane2 = path.join(fx.lockDir, 'full-gate-2.lock');
+        check('lanes: exits 0 without waiting for lane 1', r.code === 0, `exit=${r.code}\n${r.out}`);
+        check('lanes: it names the lane count and its source', /2 lanes \(from full-gate\.lanes\)/.test(r.out), r.out);
+        check('lanes: it took lane 2', /lock taken: .*full-gate-2\.lock \(pid \d+\)/.test(r.out), r.out);
+        check("lanes: lane 1's lock is untouched", fs.readFileSync(fx.lockPath, 'utf8') === held);
+        const rel2 = fs.readdirSync(fx.lockDir).filter((f) => /^full-gate-2\.lock\.released-\d{4}$/.test(f));
+        check('lanes: lane 2 is released by rename', !fs.existsSync(lane2) && rel2.length === 1, fs.readdirSync(fx.lockDir).join(', '));
+        check('lanes: no ticket is left in either queue', ticketsOf(fx).length === 0
+            && ticketsOf(fx, 'full-gate-2.queue').length === 0, r.out);
+    }
+
+    // -- 14. Release hands the lock to the next ticket --------------------------
+    {
+        const fx = fixture('node probe.js 0 1500');
+        const peer = keepAlive();
+        const run = start(fx);
+        const started = await waitFor(() => saw(fx) !== null, 20000, 'the chain to start');
+        check('handover: the chain started under the lock', started, run.out);
+        writeTicket(fx, peer.pid, 'peer queued behind the running gate');
+        const r = await finished(run);
+        const now = fs.existsSync(fx.lockPath) ? fs.readFileSync(fx.lockPath, 'utf8') : '';
+        killTree(peer.pid);
+        check('handover: exits 0', r.code === 0, `exit=${r.code}\n${r.out}`);
+        check('handover: the lock now names the queued pid', now.split(/\r?\n/)[0] === String(peer.pid), now);
+        check('handover: it says who it handed to', new RegExp(`lock handed to queued pid ${peer.pid}`).test(r.out), r.out);
+        const rel = asides(fx, 'released');
+        check("handover: the wrapper's own record is kept as .released-HHMM", rel.length === 1
+            && fs.readFileSync(path.join(fx.lockDir, rel[0]), 'utf8').split(/\r?\n/)[0] === String(run.child.pid), JSON.stringify(rel));
+        check("handover: the peer's ticket is consumed", ticketsOf(fx).length === 0, JSON.stringify(ticketsOf(fx)));
+    }
+}
+
+/**
+ * A live process to stand in for a peer; killTree it when the case ends. The
+ * suite's end kills any left over, so a case that throws cannot keep the
+ * suite alive on a peer it never reached.
+ */
+const peers = [];
+function keepAlive() {
+    const p = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+    peers.push(p);
+    return p;
+}
+
+/** A queue ticket in full-gate-queue.js's format, dated 2000 so it is always first. */
+function writeTicket(fx, pid, what) {
+    const dir = path.join(fx.lockDir, 'full-gate.queue');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `20000101T000000000Z-${String(pid).padStart(10, '0')}.ticket`);
+    fs.writeFileSync(file, `${pid}\n${what}\n`);
+    return file;
+}
+
+function ticketsOf(fx, queue = 'full-gate.queue') {
+    const dir = path.join(fx.lockDir, queue);
+    return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.ticket')) : [];
 }
 
 main()
     .catch((e) => { failed++; console.log('FAIL  the suite threw: ' + (e && e.stack)); })
     .finally(() => {
+        for (const p of peers) { if (p.exitCode === null && p.signalCode === null) killTree(p.pid); }
         for (const d of temps) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } }
         console.log(`\n${passed} passed, ${failed} failed`);
         console.log(failed ? `${failed} gate-lock check(s) failed` : 'all gate-lock checks passed');

@@ -748,6 +748,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-    takeTurn, takeAnyLane, releaseLock, releaseLanes, leaveQueues, readStatus, resetProbes,
+    takeTurn, takeAnyLane, releaseLock, releaseLanes, leaveQueues, readStatus, readLock, resetProbes,
     queueDirFor, lanePath, lanePaths, lanesFileFor, laneCount, defaultLockPath, isAlive, parseArgs,
 };
