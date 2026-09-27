@@ -32,7 +32,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
@@ -391,15 +391,45 @@ const SHAPE = /^# RESUME\r?\n\r?\nWritten by `session-exit\.js`\. Six fields/;
 // larger than that is a document somebody maintains.
 const SUSPICIOUS_BYTES = 20000;
 
+/**
+ * Is `out` tracked by git? `{ tracked, gitFailure }`, where a git call that did
+ * not answer counts as TRACKED and names itself in `gitFailure`.
+ *
+ * This was `ls-files --error-unmatch` in a `catch { tracked = false; }`, so a
+ * corrupt index, a repository git refused to open, or git missing from PATH
+ * all read as "untracked", which clears a small foreign file for overwrite.
+ * `--error-unmatch` cannot be read any other way: it exits 1 AND prints on
+ * stderr for an untracked path, the same shape as a failure. Plain `ls-files`
+ * exits 0 and prints the path when tracked, nothing when not.
+ *
+ * Outside any repository git also exits 128, and there nothing can be tracked,
+ * so a failure is only a failure where a repository exists to fail in: a `.git`
+ * at or above the file, or GIT_DIR set.
+ */
+function trackedByGit(out) {
+    const r = spawnSync('git', ['ls-files', '--', out],
+        { cwd: path.dirname(out), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const stderr = (r.stderr || '').trim();
+    if (!r.error && !r.signal && r.status === 0 && !stderr) {
+        return { tracked: (r.stdout || '').trim() !== '', gitFailure: null };
+    }
+    let inRepoDir = !!process.env.GIT_DIR;
+    for (let d = path.dirname(out); !inRepoDir; d = path.dirname(d)) {
+        if (fs.existsSync(path.join(d, '.git'))) inRepoDir = true;
+        if (path.dirname(d) === d) break;
+    }
+    if (!inRepoDir) return { tracked: false, gitFailure: null };
+    const how = r.error ? 'failed (' + (r.error.code || r.error.message) + ')'
+        : r.signal ? 'was killed by ' + r.signal
+            : 'exited ' + r.status;
+    return { tracked: true, gitFailure: 'git ls-files ' + how + (stderr ? ': ' + stderr.split('\n')[0] : '') };
+}
+
 function refuseToClobber(out, aboutToWrite, carry) {
     let existing;
     try { existing = fs.readFileSync(out, 'utf8'); } catch { return null; }   // absent: fine
 
-    let tracked = true;
-    try {
-        execFileSync('git', ['ls-files', '--error-unmatch', '--', out],
-            { cwd: path.dirname(out), stdio: 'pipe' });
-    } catch { tracked = false; }
+    const { tracked, gitFailure } = trackedByGit(out);
 
     // SIZE, not just tracking. The first version of this guard refused only when
     // the target was tracked, and a peer named the hole immediately: a repo
@@ -454,6 +484,7 @@ function refuseToClobber(out, aboutToWrite, carry) {
 
     const why = quoted
         ? 'It is ' + existing.length + ' bytes and QUOTES this script\'s marker'
+        : gitFailure ? 'git could not say whether it is tracked (' + gitFailure + ')'
         : tracked && huge ? 'It is tracked by git AND is ' + existing.length + ' bytes'
         : tracked ? 'It is tracked by git'
         : 'It is ' + existing.length + ' bytes — far larger than the ' + aboutToWrite
