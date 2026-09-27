@@ -1,5 +1,103 @@
 # Changelog
 
+## [8.176.0]
+
+### `npm run gate` queues itself (#313, #325)
+
+- `npm run gate` is now `node tooling/gate-lock.js`, which takes the
+  full-gate lock itself and runs the twelve-step chain from
+  `scripts["gate:chain"]`. A session no longer has to remember the lock,
+  and gate-fast and check-claude-md read the chain through one reader.
+- full-gate-queue.js puts a first-come ticket queue in front of the lock,
+  so the longest waiter takes a freed lock instead of whoever polls first.
+- A machine can run more than one full gate: lane k is its own lock with
+  its own queue, the count lives in `full-gate.lanes`, and a waiter takes
+  the first lane it heads. The gate wrapper waits in every lane.
+- A live Git Bash holder is waited for, never moved aside.
+
+### New gate step: conflict markers
+
+- check-conflict-markers.js fails on a git conflict marker in any tracked
+  file, prints the population on every run and exits 2 when git fails. A
+  marker inside a closed Markdown fence is not graded. It exists because
+  markers committed inside a template-literal string parsed cleanly and
+  passed every other check.
+
+### A pre-deploy security gate for web apps (#330)
+
+- `security-gate.js --root .` checks a web app before deploy, and
+  `--url <host> --api <paths>` checks the live headers and protected
+  routes. Exit 1 blocks, exit 2 means not run.
+- Meta CSP v2: a static site that pins script hashes in a
+  `<meta http-equiv="content-security-policy">` is judged on its meta
+  policy together with the header, as a browser enforces both. It no
+  longer gets a false "no script-src" error.
+
+### A failed git call is never a verdict (#328)
+
+- check-queue-freshness, check-assignment, session-sweep, session-exit and
+  pr-path-filters read a failed git call as UNCHECKED or COULD NOT TELL.
+  Before, a dead `git grep` read as STALE, a dead `git diff` as CLEAR, and
+  a failed unpushed check let a session archive.
+
+### A child that died of the machine is never a verdict (#333)
+
+- spawn-budget.js `runVerdict` re-runs a child that died natively
+  (0xC0000409, 0x80000003, 134 with empty output) after 1, 3 and 9 s and
+  records a lost verdict as INDETERMINATE. Stop, session-start,
+  session-start-compact, drift-audit, telemetry, orphan-checks and
+  stop-brain-report suites run their children through it.
+- The mission-contract flake is fixed the same way: its children run
+  through `runVerdict`, and a child that never answers ends the suite at
+  exit 2 instead of a red.
+- test-memory-db-contention holds the lock from the writer's GO, not from
+  the lock, so it no longer races on a loaded machine (#332).
+
+### Suites leave no temp debris (#310)
+
+- Every suite child gets its own temp root through tooling/suite-tmp.js,
+  removed on exit, red or crash. One machine had gained 62,325 temp
+  entries in 24 hours.
+
+### Workers and the fleet page (#307, #327, #324)
+
+- fleet-notify toasts an open worker ask once per ask, so a headless
+  worker's question reaches someone.
+- A later headless run at the same code supersedes the earlier record, so
+  status no longer gives an old run the new run's ask, report or exit.
+- The unattended-worker brief forbids ending a turn on a question.
+
+### Hooks and session start (#326, #321, #302)
+
+- Every wired hook has a time budget and a written failure direction,
+  tested as a population in test-hook-budget.js.
+- Session start counts the session pile off the main thread, 16 reads at
+  a time, and no longer falls back to full parses of pretty-printed
+  records.
+- After a compaction, session start names only the session's own handoff.
+- session-env-dedupe keeps a session's env files under the Bash command
+  cap, so a resumed session no longer loses every Bash call.
+
+### Skills (#322, #329)
+
+- brainstorm has a done bar and, from the second pass on, a delight
+  catalogue that proposes personal touches as options, never as stories
+  built unasked. ship and audit grade the bar.
+- The skill counters window by event time, count only real loads and share
+  one reader. migrate, refactor, telemetry and rule-record-size are retired
+  after zero loads in 30 days on every channel.
+
+### Fixes
+
+- Seven repo tools answer `--help` with their usage line and exit 0 before
+  doing any work, and check-entrypoints probes a committed repository
+  (#319).
+- mutate-sessions-gate re-anchors the worktreeRisk mutant and refuses a
+  stale anchor (#311).
+- fleet-view CI on ubuntu and macOS is green again (#314).
+- `.claude/deliveries` and `.claude/shots` are ignored (#315), and the
+  prd-mark setup case is checked when clear (#316).
+
 ## [8.175.0]
 
 ### Workers run installed code and every ending can be settled (#296)
