@@ -962,7 +962,7 @@ if (require.main === module) {
 
 module.exports = {
     HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
-    askFiles, askNote, askState, scratchDirFor, readLedger, settle, start,
+    askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, recordStatus, lostReason, run,
 };
