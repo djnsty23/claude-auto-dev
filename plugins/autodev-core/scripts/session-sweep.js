@@ -48,7 +48,7 @@ function helpHeader() {
 const fs = require('fs');
 const path = require('path');
 const claudePaths = require('./claude-paths.js');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 // SESSION_SWEEP_STORE exists so the suite can drive a synthetic population
 // through the REAL code path. The safety check is the whole point of this
@@ -279,10 +279,40 @@ function detectWorkspaces(sessions) {
 // legally contain `;`, `|`, a backtick or `$(…)` — which the old
 // `execSync(\`git ${cmd}\`)` handed straight to /bin/sh -c. Each array element
 // reaches git as one literal argument, so a metacharacter is data, not syntax.
+//
+// gitRun keeps everything git reported: status, signal, spawn error, stderr.
+// Only the caller knows which status means "no", so it returns the facts and
+// never a verdict. git() is the old contract on top of it, trimmed stdout on
+// exit 0 and null otherwise, for the callers that already fail CLOSED on null.
+// A caller that would read null as "nothing there" must use gitRun instead.
+function gitRun(cwd, args) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  return {
+    command: 'git ' + args[0],
+    status: r.status,
+    signal: r.signal,
+    error: r.error ? (r.error.code || r.error.message) : null,
+    stdout: r.stdout || '',
+    stderr: (r.stderr || '').trim(),
+  };
+}
+
 function git(cwd, args) {
-  try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch { return null; }
+  const r = gitRun(cwd, args);
+  return r.error || r.signal || r.status !== 0 ? null : r.stdout.trim();
+}
+
+/** Did git run to the end, exit with one of `statuses`, and print nothing on stderr? */
+function answered(r, statuses) {
+  return !r.error && !r.signal && statuses.includes(r.status) && r.stderr === '';
+}
+
+/** One line naming the failure: `git log exited 128: fatal: ...`. */
+function describeFailure(r) {
+  const how = r.error ? `failed (${r.error})`
+    : r.signal ? `was killed by ${r.signal}`
+      : `exited ${r.status}`;
+  return r.command + ' ' + how + (r.stderr ? ': ' + r.stderr.split('\n')[0] : '');
 }
 
 /**
@@ -586,8 +616,16 @@ function worktreeRisk(s, all, opts = {}) {
     // a normal branch still matches through it.
     const onRemote = git(wt, ['ls-remote', '--heads', 'origin', '--', branch]);
     if (onRemote) {
-      const unpushed = git(wt, ['log', '--oneline', `origin/${branch}..HEAD`]);
-      if (unpushed && unpushed.length > 0) {
+      // A log that did not run is not a log with nothing in it. This read
+      // `git(...)` and skipped the check on null, so a failed log cleared the
+      // worktree as having nothing unpushed, the one reading that lets an
+      // archive delete it. The sibling branch below always failed closed.
+      // It fails when the branch is on origin but this clone never fetched it:
+      // `origin/<branch>` does not resolve and log exits 128.
+      const log = gitRun(wt, ['log', '--oneline', `origin/${branch}..HEAD`]);
+      if (!answered(log, [0])) return `unpushed-uncheckable(${describeFailure(log)})`;
+      const unpushed = log.stdout.trim();
+      if (unpushed.length > 0) {
         return `unpushed(${unpushed.split('\n').length})`;
       }
     } else {

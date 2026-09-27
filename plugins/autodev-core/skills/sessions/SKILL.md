@@ -81,6 +81,9 @@ Disposition is separate from verdict, and it is the one that decides:
 - `dirty(N)` / `unpushed(N)` / `branch-not-on-remote` / `stashed(N)` — finished
   but holds work that exists nowhere else. **Never archive.** Report it and let
   the user commit or push first.
+- `unpushed-uncheckable(<git's error>)`: the unpushed check itself failed,
+  most often because the branch is on origin but this clone never fetched it.
+  Unknown is not safe: fetch, then sweep again.
 - `third-party` — remote is not the operator's own account. Excluded entirely;
   client work is not swept by a tool.
 
