@@ -145,3 +145,9 @@ build/
 #    meant to be transient and nothing enforced it.
 .claude/eb11-shots/
 .claude/handoffs/
+
+# 7. The same per-path gap on 2026-09-25: `.claude/deliveries/` (files staged
+#    for a user) and `.claude/shots/` (another screenshot twin) showed up
+#    untracked in a session's status. Same exposure, same fix.
+.claude/deliveries/
+.claude/shots/
