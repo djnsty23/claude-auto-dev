@@ -19,6 +19,8 @@
  *   M1  any ticket may take a free lock, not only the oldest   -> newcomer jumps
  *   M2  a release hands the lock to the NEWEST ticket          -> newcomer jumps
  *   M3  liveness ignores ps, so an MSYS pid reads as dead      -> a live waiter is dropped
+ *   M4  a waiter tries only lane 1                             -> a free lane 2 sits idle
+ *   M5  a waiter that took a lane stays queued in the others   -> it blocks a lane it never uses
  */
 'use strict';
 
@@ -164,6 +166,38 @@ function scenarioHandoff(subject) {
     const rel3 = release(subject, fx, b);
     rows.push(['B releases with nobody queued: the lock is renamed aside, not handed over',
         rel3.code === 0 && !fs.existsSync(fx.lock) && asides(fx, 'released').length === 3 && /nobody was queued/.test(rel3.out), rel3.out]);
+    return rows;
+}
+
+/** Two lanes: a waiter takes whichever is free, and one that took a lane leaves the other queue. */
+function scenarioLanes(subject) {
+    const fx = fixture();
+    const lane2 = path.join(fx.dir, 'full-gate-2.lock');
+    const queue2 = path.join(fx.dir, 'full-gate-2.queue');
+    const pidOf = (f) => { try { return Number(fs.readFileSync(f, 'utf8').split(/\r?\n/)[0]); } catch { return null; } };
+    const ticketsIn = (d) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith('.ticket')) : []);
+    const [h, w, x] = [sleeper(), sleeper(), sleeper()];
+    const rows = [];
+    const set = run(subject, fx, ['lanes', '2']);
+    rows.push(['"lanes 2" writes full-gate.lanes beside the lock', set.code === 0 &&
+        fs.readFileSync(path.join(fx.dir, 'full-gate.lanes'), 'utf8').trim() === '2', set.out]);
+    fs.writeFileSync(fx.lock, `${h}\nlane 1 holder\n`);
+    const rw = take(subject, fx, w);
+    rows.push(['lane 1 held, lane 2 free: W takes lane 2 (exit 0, full-gate-2.lock names W)',
+        rw.code === 0 && pidOf(lane2) === w && lockPid(fx) === h, rw.out]);
+    rows.push(['W holds no ticket in lane 1 once it holds lane 2', ticketsIn(fx.queue).length === 0, ticketsIn(fx.queue).join(', ')]);
+    const rx = take(subject, fx, x);
+    rows.push(['both lanes held: X is queued (exit 3) with a ticket in each lane',
+        rx.code === 3 && ticketsIn(fx.queue).length === 1 && ticketsIn(queue2).length === 1, rx.out]);
+    const st = run(subject, fx, ['status']);
+    rows.push(['status names the lane count, its source and both lanes',
+        /lanes: {2}2 \(from full-gate\.lanes\)/.test(st.out) && st.out.includes(`lane 1: holder: pid ${h}`) && st.out.includes(`lane 2: holder: pid ${w}`), st.out]);
+    const rel = release(subject, fx, w);
+    rows.push(['W releases: lane 2 is handed to X, lane 1 is untouched',
+        rel.code === 0 && pidOf(lane2) === x && lockPid(fx) === h && /lane 2 of 2/.test(rel.out), rel.out]);
+    const rx2 = take(subject, fx, x);
+    rows.push(['X learns it holds lane 2 (exit 0) and leaves the lane 1 queue',
+        rx2.code === 0 && ticketsIn(fx.queue).length === 0, `${rx2.out}\nlane 1 tickets: ${ticketsIn(fx.queue).join(', ')}`]);
     return rows;
 }
 
@@ -341,8 +375,32 @@ async function main() {
         const js = run(SUBJECT, fx, ['status', '--json']);
         let parsed = null;
         try { parsed = JSON.parse(js.out); } catch { /* reported below */ }
-        check('status --json: parses, three tickets read, in arrival order',
-            parsed && parsed.ticketFilesRead === 3 && parsed.queue.map((t) => t.pid).join() === [a, b, d].join(), js.out);
+        const lane1 = parsed && parsed.lanes && parsed.lanes[0];
+        check('status --json: parses, one lane by default, three tickets read, in arrival order',
+            parsed && parsed.laneCount === 1 && parsed.laneSource === 'default' && parsed.lanes.length === 1 &&
+            lane1.ticketFilesRead === 3 && lane1.queue.map((t) => t.pid).join() === [a, b, d].join(), js.out);
+    }
+
+    report('two lanes', scenarioLanes(SUBJECT));
+
+    // The lane count: flag over env over file, and a bad value is named, not guessed at.
+    {
+        const fx = fixture();
+        fs.writeFileSync(path.join(fx.dir, 'full-gate.lanes'), 'lots\n');
+        const bad = run(SUBJECT, fx, ['lanes']);
+        check('lanes: an unreadable count in the file is named and the count falls back to 1',
+            bad.code === 0 && /1 lane\(s\), from default/.test(bad.out) && /does not hold 1 to 8; ignored/.test(bad.out), bad.out);
+        fs.writeFileSync(path.join(fx.dir, 'full-gate.lanes'), '3\n');
+        const envRun = spawnSync(process.execPath, [SUBJECT, 'status'],
+            { env: Object.assign(envFor(fx), { AUTODEV_GATE_LANES: '2' }), encoding: 'utf8', windowsHide: true });
+        check('lanes: AUTODEV_GATE_LANES wins over the file', /lanes: {2}2 \(from AUTODEV_GATE_LANES\)/.test(envRun.stdout), envRun.stdout);
+        const flag = run(SUBJECT, fx, ['status', '--lanes', '1']);
+        check('lanes: --lanes wins over the file for one call', /lanes: {2}1 \(from --lanes\)/.test(flag.out), flag.out);
+        const badFlag = run(SUBJECT, fx, ['status', '--lanes', '0']);
+        check('lanes: --lanes 0 exits 1', badFlag.code === 1 && /1 to 8/.test(badFlag.out), badFlag.out);
+        const badSet = run(SUBJECT, fx, ['lanes', '9']);
+        check('lanes: setting 9 exits 1 and leaves the file alone',
+            badSet.code === 1 && fs.readFileSync(path.join(fx.dir, 'full-gate.lanes'), 'utf8').trim() === '3', badSet.out);
     }
 
     // wait blocks until the handoff, then exits 0.
@@ -445,6 +503,10 @@ async function main() {
     if (m1) expectRed('M1', 'any ticket may take a free lock', scenarioNewcomerPollsFirst(m1));
     const m2 = mutant('M2', 'const next = live[0];', 'const next = live[live.length - 1];');
     if (m2) expectRed('M2', 'release hands the lock to the newest ticket', scenarioHandoff(m2));
+    const m4 = mutant('M4', 'for (const lane of lockPaths) {', 'for (const lane of lockPaths.slice(0, 1)) {');
+    if (m4) expectRed('M4', 'a waiter tries only lane 1', scenarioLanes(m4));
+    const m5 = mutant('M5', 'leaveQueues(others, pid);', '/* planted: stays queued */');
+    if (m5) expectRed('M5', 'a waiter that took a lane stays queued in the others', scenarioLanes(m5));
 
     const msys = await msysPid();
     if (msys.pid) {
