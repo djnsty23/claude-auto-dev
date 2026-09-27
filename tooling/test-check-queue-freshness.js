@@ -418,12 +418,17 @@ advance(app, {
         res.json && res.json.population.fresh === 1 && res.json.population.uncheckable === 1, res.json);
     // The load-bearing one. A summary that says "nothing falsified" without
     // naming what it could not look at is the collapse this tool is about.
-    const human = run([
-        '**E · prose only**',
-        '**Beacon** ' + BEACON,
-    ].join('\n'), ['--no-json-marker']);
+    // run() always passes --json, and the JSON has an "uncheckable" key, so
+    // this runs the subject itself: through run() the check passed whatever
+    // the human sentence said.
+    const qf = path.join(fixture, 'Q-human-summary.md');
+    fs.writeFileSync(qf, ['**E · prose only**', '**Beacon** ' + BEACON].join('\n'));
+    const human = spawnSync(process.execPath, [SUBJECT, '--queue', qf, '--repo-root', CODE, '--no-fetch'], { encoding: 'utf8' });
+    let parsed = true;
+    try { JSON.parse(human.stdout); } catch { parsed = false; }
+    check('...the human report is not JSON, so the next check reads the sentence', !parsed, human.stdout.slice(0, 200));
     check('...and the human summary names the uncheckable count in the same sentence',
-        /could NOT be checked/.test(human.stdout) || /uncheckable/i.test(human.stdout), human.stdout.slice(-400));
+        /NO PREMISE FALSIFIED: 1 of 1 checked still hold.*\band 1 could NOT be checked/.test(human.stdout), human.stdout.slice(-400));
 }
 
 {
