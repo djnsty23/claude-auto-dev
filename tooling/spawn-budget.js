@@ -134,6 +134,25 @@ function timedOut(r) {
 }
 
 /**
+ * Did the child die of the MACHINE rather than exit on its own?
+ *
+ * `[measured 2026-09-27]` node started under a per-process commit cap (a Windows
+ * job object) printed 0 bytes of stdout every time and exited 0xC0000409 at
+ * 8 MB and 32 MB, 0x80000003 at 16 MB and 134 at 24 MB. At 32 MB stderr was
+ * empty too, so the status is the only tell. The same morning a full gate read
+ * two such children as `compact=0B` assertion failures, one minute after the
+ * System log recorded a low-virtual-memory condition.
+ *
+ * 134 is node's own exit on a fatal V8 error on Windows (POSIX reports SIGABRT,
+ * which `classify` already treats as infrastructure). A status at or above
+ * 0x80000000 is a Windows NTSTATUS warning or error. A JS program exits with
+ * neither unless it asks to, and a thrown error exits 1.
+ */
+function nativeDeath(r) {
+    return !!r && typeof r.status === 'number' && (r.status === 134 || r.status >= 0x80000000);
+}
+
+/**
  * Classify a spawnSync result as a verdict or as infrastructure.
  *
  * `expect` says which otherwise-suspicious outcomes this call site deliberately
@@ -151,7 +170,7 @@ function classify(r, expect) {
         const earlySelfExit = !r.error && !r.signal && (r.status === 0 || r.status === 1);
         return (ourKill || earlySelfExit) ? 'verdict' : 'infrastructure';
     }
-    if (r.error || r.signal || r.status === null) return 'infrastructure';
+    if (r.error || r.signal || r.status === null || nativeDeath(r)) return 'infrastructure';
     if (r.status === 2 && expect !== 'exit2') return 'infrastructure';
     return 'verdict';
 }
@@ -161,6 +180,7 @@ function reason(r) {
     if (timedOut(r)) return 'ETIMEDOUT';
     if (r.error) return String(r.error.code || r.error.message);
     if (r.signal) return 'signal ' + r.signal;
+    if (nativeDeath(r)) return `native exit 0x${r.status.toString(16).toUpperCase()} (${r.status})`;
     return 'status ' + r.status;
 }
 
@@ -500,7 +520,7 @@ function sweepBudgetFor(suite) {
 }
 
 module.exports = {
-    contentionFactor, timedOut, classify, reason, runBudgeted, tally, exitCode,
+    contentionFactor, timedOut, nativeDeath, classify, reason, runBudgeted, tally, exitCode,
     lastWords, untilWrittenBeforeKill, deadlineRemaining, clampToDeadline,
     SPIN_FLOOR_MS, CONTENTION_MAX, DEADLINE_ENV, DEADLINE_FLOOR_MS,
     sweepBudgetFor, SWEEP_SUITE_BUDGET_MS, SWEEP_RUNNER_BUDGET_MS, SWEEP_MEASURED_RUNNER_MS,
@@ -539,6 +559,24 @@ if (require.main === module) {
         t('an UNEXPECTED exit 2 is infrastructure', classify(two) === 'infrastructure', classify(two));
         t('  and the same exit 2 is a verdict where the call site expects it',
             classify(two, 'exit2') === 'verdict', classify(two, 'exit2'));
+
+        // A child that died of the machine. Real children where the platform can
+        // produce the status: POSIX exit codes are 8 bits, so an NTSTATUS there is
+        // a spawnSync-shaped result instead.
+        const died = (code) => (process.platform === 'win32' || code < 256
+            ? runBudgeted(NODE, ['-e', `process.exit(${code})`], { encoding: 'utf8', timeout: 30000 })
+            : { status: code, signal: null, stdout: '', stderr: '' });
+        for (const [label, code] of [['0xC0000409', 0xC0000409], ['0x80000003', 0x80000003], ['134', 134]]) {
+            const d = died(code);
+            t(`a native exit ${label} is infrastructure, never a red assertion`,
+                nativeDeath(d) && classify(d) === 'infrastructure' && classify(d, 'exit2') === 'infrastructure',
+                `status=${d.status} ${classify(d)} ${reason(d)}`);
+        }
+        t('  and the reason names the status in hex', reason(died(0xC0000409)) === 'native exit 0xC0000409 (3221226505)',
+            reason(died(0xC0000409)));
+        const below = died(0x7FFFFFFF);
+        t('  and 0x7FFFFFFF, one below the NTSTATUS range, is still a verdict',
+            !nativeDeath(below) && classify(below) === 'verdict', `status=${below.status} ${classify(below)}`);
 
         // A child that outlives any budget. Retry is disabled so the selftest
         // does not pay the widened budget twice.
