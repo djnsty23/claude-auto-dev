@@ -103,12 +103,12 @@ function advance(repo, files, msg) {
     git(repo, ['push', '--quiet', 'origin', 'main']);
 }
 
-function run(queueBody, extra) {
+function run(queueBody, extra, env) {
     const qf = path.join(fixture, 'Q-' + Math.abs(hash(queueBody)) + '.md');
     fs.writeFileSync(qf, queueBody);
     const r = spawnSync(process.execPath,
         [SUBJECT, '--queue', qf, '--repo-root', CODE, '--no-fetch', '--json'].concat(extra || []),
-        { encoding: 'utf8' });
+        { encoding: 'utf8', env: env || process.env });
     let json = null;
     try { json = JSON.parse(r.stdout); } catch { /* left null on purpose */ }
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
@@ -268,6 +268,109 @@ advance(app, {
     const res = run('**W · dirty tree** PREMISE: repo=dirty-app expect=present match=KEEP file=src/a.ts');
     check('an uncommitted working-tree edit does not falsify a premise',
         verdictOf(res, 0) === 'FRESH', res.json);
+}
+
+// ---------------------------------------------------------------------------
+// A FAILED git CALL IS NOT AN EMPTY ONE.
+//
+// [measured 2026-09-25] a full gate went red on the dirty-tree case just above,
+// which expects FRESH, on a machine running 224 node processes. The subject's
+// git wrapper was `catch { return null; }` and every caller read null as "git
+// printed nothing": a grep that died was a grep that found nothing, so an
+// expect=present premise read STALE and a failed file check read MISSING-FILE.
+// What failed in that run was never captured. These cases make a git failure
+// name itself instead of becoming a verdict.
+//
+// Three real failures of the real git binary:
+//   1. `git grep` exits 128. Injected through GIT_CONFIG_* so ONLY grep fails
+//      and the file check before it still answers. A PATH shim would do the
+//      same on POSIX, but Windows resolves a bare `git` to .com or .exe only,
+//      so a script shim there is never found.
+//   2. `git grep` exits 1, its "no match" status, because an object it had to
+//      read is gone. [measured git 2.54] it says so on stderr and nowhere else.
+//   3. git cannot be started at all (ENOENT), which is the shape a spawn
+//      failure under load takes too (EAGAIN, ENOMEM).
+//
+// Each has a control on the same premise or in the same run, so UNCHECKABLE
+// cannot be passing because the subject stopped working altogether.
+// ---------------------------------------------------------------------------
+
+{
+    const premise = '**GF · grep dies** ' + BEACON;
+    const control = run(premise);
+    check('control: the premise reads FRESH while git works', verdictOf(control, 0) === 'FRESH', control.json);
+
+    const grepDies = Object.assign({}, process.env,
+        { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'grep.threads', GIT_CONFIG_VALUE_0: '-1' });
+    const res = run(premise, [], grepDies);
+    const r0 = res.json && res.json.results[0];
+    check('a git grep that exits 128 is UNCHECKABLE, never STALE',
+        verdictOf(res, 0) === 'UNCHECKABLE', res.json || res.stderr);
+    // git localises its messages, so the assertions key on what it cannot
+    // translate: the status, and the config key it names.
+    check('...the reason names git\'s exit status and its own error',
+        !!r0 && /git grep exited 128/.test(r0.why) && /grep\.threads/.test(r0.why), r0 && r0.why);
+    check('...and the JSON carries the status and stderr in full',
+        !!r0 && !!r0.gitFailure && r0.gitFailure.status === 128 && /grep\.threads/.test(r0.gitFailure.stderr), r0);
+    check('...and the run exits 2, "could not check", not 3', res.status === 2, res.status);
+    check('...counted apart as a git failure',
+        !!res.json && res.json.population.gitFailed === 1, res.json && res.json.population);
+
+    // The human report, run WITHOUT --json: run() always passes it.
+    const qf = path.join(fixture, 'Q-grep-dies.md');
+    fs.writeFileSync(qf, premise);
+    const human = spawnSync(process.execPath, [SUBJECT, '--queue', qf, '--repo-root', CODE, '--no-fetch'],
+        { encoding: 'utf8', env: grepDies });
+    check('...the human report names the git failure',
+        /git itself failed on 1 premise/.test(human.stdout), human.stdout.slice(-600));
+    check('...and does not tell the reader to add a PREMISE line the item already has',
+        !/carried nothing checkable/.test(human.stdout), human.stdout.slice(-600));
+}
+
+{
+    const broken = makeRepo('broken-app', {
+        'src/readable.ts': 'export const STILL_HERE = 1;\n',
+        'src/unreadable.ts': 'export const LOST = 1;\n',
+    });
+    const sha = git(broken, ['rev-parse', 'origin/main:src/unreadable.ts']).trim();
+    const loose = path.join(broken, '.git', 'objects', sha.slice(0, 2), sha.slice(2));
+    fs.chmodSync(loose, 0o644); // git writes loose objects read-only, and Windows will not unlink one
+    fs.unlinkSync(loose);
+    const gone = spawnSync('git', ['-C', broken, 'cat-file', '-e', sha]);
+    check('fixture check: git really cannot read the object', gone.status !== 0, gone.status);
+
+    const res = run([
+        '**K1 · scoped to the unreadable file** PREMISE: repo=broken-app expect=present match=LOST file=src/unreadable.ts',
+        '**K2 · whole tree, present** PREMISE: repo=broken-app expect=present match=LOST',
+        '**K3 · whole tree, absent** PREMISE: repo=broken-app expect=absent match=NEVER_WRITTEN',
+        '**K4 · scoped to the readable file** PREMISE: repo=broken-app expect=present match=STILL_HERE file=src/readable.ts',
+    ].join('\n'));
+    check('an unreadable object under a file= premise is UNCHECKABLE, not MISSING-FILE',
+        verdictOf(res, 0) === 'UNCHECKABLE', res.json);
+    check('a whole-tree search that could not read an object is UNCHECKABLE, not STALE',
+        verdictOf(res, 1) === 'UNCHECKABLE', res.json);
+    check('...and it cannot prove an absence either, so it is not FRESH',
+        verdictOf(res, 2) === 'UNCHECKABLE', res.json);
+    check('...each naming the object git could not read',
+        !!res.json && res.json.results.slice(0, 3).every((r) => r.why.includes(sha)),
+        res.json && res.json.results.map((r) => r.why));
+    check('...while a premise that never touches that object reads FRESH in the same run',
+        verdictOf(res, 3) === 'FRESH', res.json);
+    check('...and the run does not exit 3', res.status !== 3, res.status);
+}
+
+{
+    const noGit = {};
+    for (const k of Object.keys(process.env)) if (k.toUpperCase() !== 'PATH') noGit[k] = process.env[k];
+    noGit.PATH = path.join(fixture, 'no-git-here');
+    fs.mkdirSync(noGit.PATH);
+    const res = run('**NG · git will not start** ' + BEACON, [], noGit);
+    const r0 = res.json && res.json.results[0];
+    check('when git cannot be started, the premise is UNCHECKABLE',
+        verdictOf(res, 0) === 'UNCHECKABLE', res.json || res.stderr);
+    check('...and the reason names the spawn error, not a bare "could not resolve"',
+        !!r0 && /ENOENT/.test(r0.why), r0 && r0.why);
+    check('...and the run exits 2', res.status === 2, res.status);
 }
 
 // ---------------------------------------------------------------------------
