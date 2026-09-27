@@ -7,12 +7,20 @@
 // still printed "[Env] .env.local loaded"), and it rewrote the version number
 // inside the user's own MEMORY.md. Both are asserted gone here.
 //
+// A HOOK CHILD THAT DIED OF THE MACHINE SAID NOTHING ABOUT THE HOOK. Every
+// spawn of the hook goes through spawn-budget.js runVerdict, which re-runs a
+// child that died (nativeDeath) and, when one never answers, stops grading:
+// the cases after it print SKIP and the suite exits 2. An ABSENCE check reads
+// the parsed output first (`out !== null &&`), so a hook that exits 0 and
+// prints nothing fails it instead of passing it.
+//
 // Run: node tooling/test-session-start-hook.js
 
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sb = require('./spawn-budget.js');
 
 const PLUGIN_ROOT = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
 const HOOK = path.join(PLUGIN_ROOT, 'hooks', 'session-start.js');
@@ -29,7 +37,7 @@ const PROJ = path.join(TMP, 'proj');
 fs.mkdirSync(PROJ, { recursive: true });
 
 const cases = [];
-const check = (label, ok) => cases.push([label, ok]);
+const check = (label, ok) => cases.push([label, ok, sb.lostVerdict()]);
 // Checks that await, run in order before the results print.
 const later = [];
 
@@ -48,17 +56,24 @@ function hookEnv(extraEnv = {}) {
     return { ...env, ...extraEnv };
 }
 
+// The hook only ever exits 0, so no exit code is expected of it.
+function spawnHook(input, opts) {
+    return sb.runVerdict(process.execPath, [HOOK], Object.assign({ input, encoding: 'utf8' }, opts));
+}
+
 function run(payload, cwd = PROJ, extraEnv = {}) {
-    return spawnSync(process.execPath, [HOOK], {
-        input: JSON.stringify(payload),
-        encoding: 'utf8',
-        cwd,
-        env: hookEnv(extraEnv),
-    });
+    return spawnHook(JSON.stringify(payload), { cwd, env: hookEnv(extraEnv) });
 }
 
 function parse(r) {
     try { return JSON.parse(r.stdout); } catch { return null; }
+}
+
+// The hook's additionalContext, or null when it printed no JSON at all. An
+// absence check reads null as "no answer", never as "absent".
+function contextOf(r) {
+    const out = parse(r);
+    return out === null ? null : (out.hookSpecificOutput?.additionalContext || '');
 }
 
 // 1. No prd.json — banner only, still valid JSON.
@@ -67,7 +82,7 @@ let out = parse(r);
 check('exits 0 with no prd.json', r.status === 0);
 check('emits valid JSON', out !== null);
 check('emits a version banner as systemMessage', /^\[Auto-Dev v/.test(out?.systemMessage || ''));
-check('reports the real version, not a hardcoded fallback', !/v\?\]/.test(out?.systemMessage || ''));
+check('reports the real version, not a hardcoded fallback', out !== null && !/v\?\]/.test(out.systemMessage || ''));
 
 // 2. With prd.json — sprint state goes to additionalContext, where Claude reads it.
 fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
@@ -110,7 +125,7 @@ r = run({ cwd: PROJ, session_id: 's2b', hook_event_name: 'SessionStart' });
 const cF = parse(r)?.hookSpecificOutput?.additionalContext || '';
 check('FAILED stories are not counted as pending', /\b2 pending\b/.test(cF));
 check('FAILED gets its own named bucket', /\b3 FAILED\b/.test(cF));
-check('does not report the old folded count', !/\b5 pending\b/.test(cF));
+check('does not report the old folded count', parse(r) !== null && !/\b5 pending\b/.test(cF));
 
 // 2c. Archived work is counted, because completed stories LEAVE this file.
 // Counting `stories` alone is a count over the file, not over the project: a
@@ -145,7 +160,7 @@ fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
 r = run({ cwd: PROJ, session_id: 's2d', hook_event_name: 'SessionStart' });
 const cU = parse(r)?.hookSpecificOutput?.additionalContext || '';
 check('unreadable archive count is named, not rendered as zero', cU.includes('count unreadable'));
-check('does not fabricate a +0 archived', !cU.includes('+0 archived'));
+check('does not fabricate a +0 archived', parse(r) !== null && !cU.includes('+0 archived'));
 
 // 2e. No archive section at all is a real zero and says nothing extra.
 fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
@@ -154,7 +169,7 @@ fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
 }));
 r = run({ cwd: PROJ, session_id: 's2e', hook_event_name: 'SessionStart' });
 const cN = parse(r)?.hookSpecificOutput?.additionalContext || '';
-check('no archive section adds no archive note', !/archived|unreadable/.test(cN));
+check('no archive section adds no archive note', parse(r) !== null && !/archived|unreadable/.test(cN));
 check('reports a plain total when nothing is archived', cN.includes('1 total'));
 
 // 2f. A SIXTH state must be visible, not folded into a neighbour.
@@ -193,8 +208,9 @@ check('uses payload cwd, not process cwd', (parse(r)?.systemMessage || '').inclu
 fs.writeFileSync(path.join(PROJ, '.env.local'), 'SECRET_TOKEN=sk_live_should_never_be_touched\n');
 r = run({ cwd: PROJ, session_id: 's5', hook_event_name: 'SessionStart' });
 const whole = (r.stdout || '') + (r.stderr || '');
-check('does not claim to have loaded .env.local', !whole.includes('.env.local loaded'));
-check('does not echo secrets from .env.local', !whole.includes('sk_live_should_never_be_touched'));
+const heard = parse(r) !== null;
+check('does not claim to have loaded .env.local', heard && !whole.includes('.env.local loaded'));
+check('does not echo secrets from .env.local', heard && !whole.includes('sk_live_should_never_be_touched'));
 check('no .env.local parsing remains in the source', !HOOK_CODE.includes('.env.local'));
 
 // 6. Regression: the user's MEMORY.md must not be rewritten.
@@ -203,15 +219,12 @@ fs.mkdirSync(memDir, { recursive: true });
 const memFile = path.join(memDir, 'MEMORY.md');
 const memBefore = '## Project: demo (v1.0)\n\nnotes\n';
 fs.writeFileSync(memFile, memBefore);
-run({ cwd: PROJ, session_id: 's6', hook_event_name: 'SessionStart' });
-check('leaves MEMORY.md untouched', fs.readFileSync(memFile, 'utf8') === memBefore);
+r = run({ cwd: PROJ, session_id: 's6', hook_event_name: 'SessionStart' });
+check('leaves MEMORY.md untouched', parse(r) !== null && fs.readFileSync(memFile, 'utf8') === memBefore);
 check('no MEMORY.md writing remains in the source', !HOOK_CODE.includes('MEMORY.md'));
 
 // 7. Malformed stdin must never block a session from starting.
-r = spawnSync(process.execPath, [HOOK], {
-    input: 'not json', encoding: 'utf8', cwd: PROJ,
-    env: hookEnv(),
-});
+r = spawnHook('not json', { cwd: PROJ, env: hookEnv() });
 check('malformed stdin → exit 0', r.status === 0);
 check('malformed stdin → still valid JSON out', parse(r) !== null);
 
@@ -244,7 +257,7 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     fs.mkdirSync(bare2, { recursive: true });
     const out = parse(run({ cwd: bare2, session_id: 'b2', hook_event_name: 'SessionStart' }, bare2));
     const ctx = out?.hookSpecificOutput?.additionalContext || '';
-    check('no prd.json: says nothing about prd.json', !/prd\.json/.test(ctx));
+    check('no prd.json: says nothing about prd.json', out !== null && !/prd\.json/.test(ctx));
 }
 
 // lines 62/63 — the "next pending stories" line, and the untitled fallback.
@@ -256,9 +269,8 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     fs.writeFileSync(path.join(proj, 'prd.json'), JSON.stringify({
         sprint: '1', stories: { 'S1-001': { title: 'a', passes: true } },
     }));
-    let ctx = parse(run({ cwd: proj, session_id: 'x', hook_event_name: 'SessionStart' }, proj))
-        ?.hookSpecificOutput?.additionalContext || '';
-    check('nothing pending: no "next pending stories" line', !/Next pending stories/.test(ctx));
+    let ctx = contextOf(run({ cwd: proj, session_id: 'x', hook_event_name: 'SessionStart' }, proj));
+    check('nothing pending: no "next pending stories" line', ctx !== null && !/Next pending stories/.test(ctx));
 
     // A pending story with no title must read "untitled"; one with a title must
     // read its title. `s.title || 'untitled'` flipped to `&&` inverts both, and
@@ -288,9 +300,8 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     git('config', 'user.name', 't');
 
     // Clean tree → the line must be absent.
-    let ctx = parse(run({ cwd: repo, session_id: 'g0', hook_event_name: 'SessionStart' }, repo))
-        ?.hookSpecificOutput?.additionalContext || '';
-    check('clean tree: no uncommitted-changes line', !/uncommitted change/.test(ctx));
+    let ctx = contextOf(run({ cwd: repo, session_id: 'g0', hook_event_name: 'SessionStart' }, repo));
+    check('clean tree: no uncommitted-changes line', ctx !== null && !/uncommitted change/.test(ctx));
 
     // Exactly one change → singular.
     fs.writeFileSync(path.join(repo, 'a.txt'), 'x');
@@ -352,13 +363,14 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     writeCatalog(realVersion);
     out = go('d2');
     ctx = out?.hookSpecificOutput?.additionalContext || '';
-    check('catalog equal: no update line in the banner', !(out?.systemMessage || '').includes('update available'));
-    check('catalog equal: no update line in the context', !ctx.includes('/plugin update'));
+    check('catalog equal: no update line in the banner',
+        out !== null && !(out.systemMessage || '').includes('update available'));
+    check('catalog equal: no update line in the context', out !== null && !ctx.includes('/plugin update'));
 
     // Catalog BEHIND the install (mid-publish, rolled back) is not an update.
     writeCatalog('0.0.1');
     out = go('d3');
-    check('catalog behind: stays silent', !(out?.systemMessage || '').includes('update available'));
+    check('catalog behind: stays silent', out !== null && !(out.systemMessage || '').includes('update available'));
 
     // Fetch age. FETCH_HEAD older than a week → the clone stopped pulling, and
     // the "equal" verdict above is against a stale ceiling; say so.
@@ -375,8 +387,9 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     // A fresh fetch must not warn.
     const now = Date.now() / 1000;
     fs.utimesSync(fetchHead, now, now);
-    ctx = go('d5')?.hookSpecificOutput?.additionalContext || '';
-    check('fresh clone: no staleness line', !ctx.includes('marketplace update'));
+    out = go('d5');
+    ctx = out?.hookSpecificOutput?.additionalContext || '';
+    check('fresh clone: no staleness line', out !== null && !ctx.includes('marketplace update'));
 
     // ---- THE REAL CATALOG SHAPE ----
     //
@@ -414,7 +427,7 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     writeRealCatalog(realVersion);
     out = go('d8');
     check('real catalog shape, equal version: silent',
-        !(out?.systemMessage || '').includes('update available'));
+        out !== null && !(out.systemMessage || '').includes('update available'));
 
     // Freshness lived AFTER the `continue` in the same loop body, so the missing
     // field took this check down with it. Assert it independently, on the real
@@ -435,8 +448,9 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     // the `if (catVersion)` guard in the subject is DEFENSIVE, not load-bearing:
     // parse(null) yields [NaN], which fails the length-3 test, so the silence
     // below holds with or without it. Recorded rather than dressed up as a kill.
+    out = go('d10');
     check('no version anywhere: no update line invented',
-        !(go('d10')?.systemMessage || '').includes('update available'));
+        out !== null && !(out.systemMessage || '').includes('update available'));
 
     // Hand the fixture back exactly as it was found. The zero-bytes-when-clean
     // assertion further down shares this marketplace directory, and a stale
@@ -492,8 +506,9 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     check('parallel: the git fixture built (control)',
         gitp(['rev-parse', '--show-toplevel'], G).status === 0);
 
+    const solitary = contextOf(run({ cwd: G, session_id: 'p1', hook_event_name: 'SessionStart' }, G));
     check('a solitary clone emits no parallel-work line',
-        !ctxOf(G, 'p1').includes('Parallel work'));
+        solitary !== null && !solitary.includes('Parallel work'));
 
     // One unmerged branch on the remote.
     gitp(['checkout', '-q', '-b', 'feature/x'], G);
@@ -531,8 +546,9 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     const NOTGIT = path.join(TMP, 'notgit');
     fs.mkdirSync(NOTGIT, { recursive: true });
     const rp = run({ cwd: NOTGIT, session_id: 'p6', hook_event_name: 'SessionStart' }, NOTGIT);
+    const notgitCtx = contextOf(rp);
     check('a non-repo directory: exit 0, no parallel-work line',
-        rp.status === 0 && !(parse(rp)?.hookSpecificOutput?.additionalContext || '').includes('Parallel work'));
+        rp.status === 0 && notgitCtx !== null && !notgitCtx.includes('Parallel work'));
     check('a non-repo directory writes nothing to stderr', rp.stderr === '');
 }
 
@@ -559,12 +575,10 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     for (let i = 0; i < 2; i++) plant({}, 30);              // live but untouched for 30 days
 
     const pile = (id, extraEnv, extraPayload) => {
-        const res = spawnSync(process.execPath, [HOOK], {
-            input: JSON.stringify({ cwd: PROJ, session_id: id, hook_event_name: 'SessionStart', ...extraPayload }),
-            encoding: 'utf8', cwd: PROJ,
-            env: hookEnv({ SESSION_SWEEP_STORE: path.join(TMP, 'pile-store'), AUTODEV_SESSION_PILE_MAX: '', ...extraEnv }),
-        });
-        return { res, ctx: parse(res)?.hookSpecificOutput?.additionalContext || '' };
+        const res = run({ cwd: PROJ, session_id: id, hook_event_name: 'SessionStart', ...extraPayload }, PROJ,
+            { SESSION_SWEEP_STORE: path.join(TMP, 'pile-store'), AUTODEV_SESSION_PILE_MAX: '', ...extraEnv });
+        const out = parse(res);
+        return { res, out, ctx: out?.hookSpecificOutput?.additionalContext || '' };
     };
 
     const a = pile('someone-else');
@@ -572,12 +586,13 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
         /Session pile: 7 other live sessions/.test(a.ctx) && a.ctx.includes('(threshold 6)'));
     const b = pile('me-pile');
     check('pile: the calling session is not counted, so 6 is silent at threshold 6',
-        !b.ctx.includes('Session pile') && b.res.status === 0);
+        b.out !== null && !b.ctx.includes('Session pile') && b.res.status === 0);
     const c = pile('someone-else', { AUTODEV_SESSION_PILE_MAX: '10' });
-    check('pile: the threshold is read from AUTODEV_SESSION_PILE_MAX (control)', !c.ctx.includes('Session pile'));
+    check('pile: the threshold is read from AUTODEV_SESSION_PILE_MAX (control)',
+        c.out !== null && !c.ctx.includes('Session pile'));
     const d = pile('someone-else', { SESSION_SWEEP_STORE: path.join(TMP, 'no-such-store') });
     check('pile: an unreadable store says nothing and exits 0',
-        !d.ctx.includes('Session pile') && d.res.status === 0 && d.res.stderr === '');
+        d.out !== null && !d.ctx.includes('Session pile') && d.res.status === 0 && d.res.stderr === '');
 
     const { countLivePile } = require(path.join(PLUGIN_ROOT, 'scripts', 'session-pile.js'));
     const direct = countLivePile(PROJ, { store: path.join(TMP, 'pile-store') });
@@ -683,20 +698,21 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
         }
     };
     const payload = { cwd: PROJ, session_id: 'ambient', hook_event_name: 'SessionStart' };
-    const ctxOf = (res) => parse(res)?.hookSpecificOutput?.additionalContext || '';
-    const unisolated = () => ctxOf(spawnSync(process.execPath, [HOOK], {
-        input: JSON.stringify(payload), encoding: 'utf8', cwd: PROJ,
+    // Each read is null when the hook printed no JSON, and every absence check
+    // below requires it not to be.
+    const unisolated = () => contextOf(spawnHook(JSON.stringify(payload), {
+        cwd: PROJ,
         env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP,
             CLAUDE_CONFIG_DIR: path.join(TMP, '.claude'), AUTODEV_SESSION_PILE_MAX: '0' },
     }));
-    const isolated = (extraEnv = {}) => ctxOf(run(payload, PROJ, { AUTODEV_SESSION_PILE_MAX: '0', ...extraEnv }));
+    const isolated = (extraEnv = {}) => contextOf(run(payload, PROJ, { AUTODEV_SESSION_PILE_MAX: '0', ...extraEnv }));
 
     // The empty store gives a count of 0, and 0 > 0 is false: no line.
     const a = withAmbient({ SESSION_SWEEP_STORE: SWEEP }, () => ({ leak: unisolated(), run: isolated() }));
     check('store isolation (control): an ambient SESSION_SWEEP_STORE is read by the old env',
         /Session pile: 3 other live sessions/.test(a.leak));
     check('store isolation: run() reads zero records from an ambient SESSION_SWEEP_STORE',
-        !a.run.includes('Session pile'));
+        a.run !== null && !a.run.includes('Session pile'));
 
     // With SESSION_SWEEP_STORE gone, as for a reader that never knew it, the
     // hook falls back to the platform base dir. macOS resolves it from HOME,
@@ -705,13 +721,13 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     const b = withAmbient(baseVars, () => ({ leak: unisolated(), run: isolated({ SESSION_SWEEP_STORE: undefined }) }));
     if (process.platform === 'darwin') {
         check('store isolation (control, darwin): the base dir is under HOME, so the old env did not leak',
-            !b.leak.includes('Session pile'));
+            b.leak !== null && !b.leak.includes('Session pile'));
     } else {
         check('store isolation (control): an ambient APPDATA or XDG_CONFIG_HOME is read by the old env',
             /Session pile: 4 other live sessions/.test(b.leak));
     }
     check('store isolation: without SESSION_SWEEP_STORE, run() still reads zero records from the ambient base dirs',
-        !b.run.includes('Session pile'));
+        b.run !== null && !b.run.includes('Session pile'));
 }
 
 (async () => {
@@ -723,14 +739,21 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     check('store isolation: the empty store is still empty after every run',
         fs.readdirSync(EMPTY_STORE).length === 0);
 
-    let pass = 0, fail = 0;
-    for (const [label, ok] of cases) {
+    let pass = 0, fail = 0, skipped = 0;
+    for (const [label, ok, lost] of cases) {
+        if (lost) {
+            skipped++;
+            console.log('SKIP  ' + label + '  (not graded: ' + lost + ')');
+            continue;
+        }
         console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
         ok ? pass++ : fail++;
     }
-    console.log(`\n${pass} passed, ${fail} failed`);
+    const lost = sb.lostVerdict();
+    console.log(`\n${sb.tally(pass, fail, lost ? 1 : 0)}`);
+    if (lost) console.log(`INDETERMINATE: ${lost}. The ${skipped} cases after it were not graded.`);
 
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
 
-    process.exit(fail > 0 ? 1 : 0);
+    process.exitCode = sb.exitCode(fail, lost ? 1 : 0);
 })();

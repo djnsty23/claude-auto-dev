@@ -317,6 +317,99 @@ function checkSelftest(label, r, detail) {
     check('  population floor: the wiring check read a non-empty set', scanned >= 4, `scanned=${scanned}`);
 }
 
+// --- the verdict wiring: suites that grade what a node child PRINTS ----------
+// A child the machine killed prints nothing, and each of these suites used to
+// read that as the subject's answer, so an absence check passed on a dead
+// child. Each now spawns node through runVerdict and stops grading once a
+// verdict is lost. A bare node spawn, or a suite that never consults
+// lostVerdict, brings the class back.
+{
+    const CONVERTED = [
+        'test-stop-auto-check.js',
+        'test-session-start-compact.js',
+        'test-session-start-hook.js',
+        'test-drift-audit-config.js',
+        'test-telemetry-hook.js',
+        'test-orphan-checks.js',
+        'test-stop-brain-report.js',
+    ];
+    const problems = (src) => {
+        const found = [];
+        if (!/require\('\.\/spawn-budget\.js'\)/.test(src)) found.push('no require');
+        if (!/\bsb\.runVerdict\s*\(/.test(src)) found.push('no runVerdict');
+        if (!/\bsb\.lostVerdict\s*\(/.test(src)) found.push('no lostVerdict');
+        if (/\b(spawnSync|execFileSync|execSync)\s*\(\s*(process\.execPath|['"]node['"])/.test(src)) {
+            found.push('a bare node spawn');
+        }
+        return found;
+    };
+    let read = 0;
+    const off = [];
+    for (const name of CONVERTED) {
+        const file = path.join(TOOLING, name);
+        if (!fs.existsSync(file)) { off.push(name + ' (missing)'); continue; }
+        read++;
+        const p = problems(fs.readFileSync(file, 'utf8'));
+        if (p.length) off.push(`${name} (${p.join(', ')})`);
+    }
+    check(`all ${CONVERTED.length} output-grading suites spawn node through runVerdict and consult `
+        + `lostVerdict (${read} read)`, read === CONVERTED.length && off.length === 0, off.join('; '));
+
+    // The planted defects are derived from a real converted suite, so the
+    // predicate is shown to fire on the shape it guards and not on a toy.
+    const real = fs.readFileSync(path.join(TOOLING, CONVERTED[CONVERTED.length - 1]), 'utf8');
+    const reverted = real.replace('sb.runVerdict(process.execPath', 'spawnSync(process.execPath');
+    const blind = real.split('sb.lostVerdict(').join('sb.lostVerdictGone(');
+    check('  planted: a suite reverted to one bare node spawn is caught',
+        reverted !== real && problems(reverted).includes('a bare node spawn'), problems(reverted).join(', '));
+    check('  planted: a suite that never consults lostVerdict is caught',
+        blind !== real && problems(blind).includes('no lostVerdict'), problems(blind).join(', '));
+}
+
+// --- a lost verdict reaches the suite's EXIT CODE, out of process -----------
+// runVerdict's own cases run in process, and an in-process case cannot see an
+// exit code. This spawns a suite-shaped child that grades its own node child
+// the way the converted suites do: SKIP once a verdict is lost, an absence
+// check gated on the answer, then sb.tally and process.exitCode.
+{
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sb-verdict-'));
+    try {
+        const suite = path.join(dir, 'suite-shaped.js');
+        fs.writeFileSync(suite, `const sb = require(${JSON.stringify(SUBJECT)});\n`
+            + `const r = sb.runVerdict(process.execPath, ['-e', process.env.SB_CHILD], `
+            + `{ encoding: 'utf8', retryMs: [1, 1, 1] });\n`
+            + `let pass = 0, fail = 0;\n`
+            + `const check = (ok) => { if (sb.lostVerdict()) console.log('SKIP'); else if (ok) pass++; else fail++; };\n`
+            + `const answered = /ANSWER/.test(r.stdout);\n`
+            + `check(answered && !/WRONG/.test(r.stdout));\n`
+            + `const lost = sb.lostVerdict();\n`
+            + `console.log(sb.tally(pass, fail, lost ? 1 : 0));\n`
+            + `if (lost) console.log('INDETERMINATE: ' + lost);\n`
+            + `process.exitCode = sb.exitCode(fail, lost ? 1 : 0);\n`);
+        const drive = (child) => spawnSync(process.execPath, [suite], {
+            encoding: 'utf8', env: Object.assign({}, process.env, { SB_CHILD: child }),
+        });
+        const died = drive('process.exit(134)');
+        check('a suite whose node child dies on every attempt exits 2, not 1 and not 0',
+            died.status === 2 && /INDETERMINATE: /.test(died.stdout) && /attempt 4 of 4/.test(died.stdout)
+                && /0 passed, 0 failed/.test(died.stdout),
+            `status=${died.status} ${JSON.stringify((died.stdout || '').slice(-200))}`);
+        const answered = drive('process.stdout.write("ANSWER")');
+        check('  control: the same suite exits 0 when its child answers',
+            answered.status === 0 && /1 passed, 0 failed/.test(answered.stdout),
+            `status=${answered.status} ${JSON.stringify(answered.stdout)}`);
+        // The planted empty-output defect: exit 0, nothing printed. The gated
+        // absence check must fail on it, where the bare !/WRONG/ passed.
+        const silent = drive('');
+        check('  planted: a child that exits 0 and prints nothing fails the gated absence check',
+            silent.status === 1 && /0 passed, 1 failed/.test(silent.stdout),
+            `status=${silent.status} ${JSON.stringify(silent.stdout)}`);
+    } finally {
+        try { fs.rmSync(dir, { recursive: true, force: true }); }
+        catch (e) { console.error('suite fixture cleanup FAILED (' + (e.code || e.message) + ') at ' + dir); process.exitCode = 2; }
+    }
+}
+
 // --- the parent deadline, end to end and OUT OF PROCESS ----------------------
 // The module's selftest sets the variable on itself, which cannot show that a
 // budget published by a PARENT reaches a child. This spawns one, which is the

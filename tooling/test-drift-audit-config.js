@@ -11,18 +11,26 @@
 // tree and reads the audit's own output back. auditPlugins additionally needs a
 // real git repo, because the whole signal is "installed sha vs clone HEAD".
 //
+// AN AUDIT CHILD THAT DIED OF THE MACHINE SAID NOTHING ABOUT THE AUDIT. Every
+// spawn of drift-audit.js goes through spawn-budget.js runVerdict, which re-runs
+// a child that died (nativeDeath) and, when one never answers, stops grading:
+// the cases after it print SKIP and the suite exits 2. An ABSENCE check reads
+// the report header first (`reported(out) &&`), so an audit that exits 0 and
+// prints nothing fails it instead of passing it.
+//
 // Run: node tooling/test-drift-audit-config.js
 
-const { spawnSync, execSync } = require('child_process');
+const { execSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sb = require('./spawn-budget.js');
 
 const AUDIT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'drift-audit.js');
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'drift-cfg-')));
 
 const cases = [];
-const check = (label, ok) => cases.push([label, ok]);
+const check = (label, ok) => cases.push([label, ok, sb.lostVerdict()]);
 
 let n = 0;
 function config(files = {}) {
@@ -39,7 +47,7 @@ function config(files = {}) {
 // Runs the audit against a config dir and returns its stdout. HOME is redirected
 // too, so a machine's real ~/.claude can never leak into a case.
 function run(cfg) {
-    const r = spawnSync(process.execPath, [AUDIT], {
+    const r = sb.runVerdict(process.execPath, [AUDIT], {
         encoding: 'utf8',
         env: { ...process.env, CLAUDE_CONFIG_DIR: cfg, HOME: path.join(TMP, 'home'), USERPROFILE: path.join(TMP, 'home') },
     });
@@ -49,11 +57,18 @@ function run(cfg) {
 // Same, but keeping the status — the exit code IS the contract for anything
 // wiring this into CI, and asserting output alone leaves it free to invert.
 function runFull(cfg, extra = []) {
-    const r = spawnSync(process.execPath, [AUDIT, ...extra], {
+    const r = sb.runVerdict(process.execPath, [AUDIT, ...extra], {
         encoding: 'utf8',
         env: { ...process.env, CLAUDE_CONFIG_DIR: cfg, HOME: path.join(TMP, 'home'), USERPROFILE: path.join(TMP, 'home') },
     });
     return { out: (r.stdout || '') + (r.stderr || ''), status: r.status };
+}
+
+// Did the audit reach its report? "Drift audit —" is the header it prints only
+// once the run gets that far, so an absence check that requires it cannot pass
+// on a run that printed nothing.
+function reported(out) {
+    return /Drift audit —/.test(out);
 }
 
 // ------------------------------------------------------------- auditSettings
@@ -92,7 +107,7 @@ function runFull(cfg, extra = []) {
             deny: [],
         } } }));
     check('a grant on a not-yet-created file in a LIVE directory is left alone',
-        !/not-created-yet/.test(out));
+        reported(out) && !/not-created-yet/.test(out));
     check('  but a grant into a directory that is gone is reported',
         /no\/such\/directory/.test(out));
 }
@@ -101,7 +116,7 @@ function runFull(cfg, extra = []) {
 {
     const out = run(config({ 'settings.json': {
         permissions: { allow: ['Bash(npm test)', 'Read(~/notes)'], deny: ['Bash(rm -rf /)'] } } }));
-    check('a clean settings.json produces no settings finding', !/allow rule/.test(out));
+    check('a clean settings.json produces no settings finding', reported(out) && !/allow rule/.test(out));
 }
 
 // Narrowing has to actually clear the finding, because that is what the fix
@@ -115,14 +130,14 @@ function runFull(cfg, extra = []) {
     const narrowed = run(config({ 'settings.json': {
         permissions: { allow: ['Bash(export MSYS_NO_PATHCONV=*)'], deny: ['Bash(rm *)'] } } }));
     check('a bare-wildcard export IS reported', /allow rule/.test(bare));
-    check('  narrowing it to one variable CLEARS the finding', !/allow rule/.test(narrowed));
+    check('  narrowing it to one variable CLEARS the finding', reported(narrowed) && !/allow rule/.test(narrowed));
 
     const bareFetch = run(config({ 'settings.json': {
         permissions: { allow: ['Bash(wget *)'], deny: ['Bash(rm *)'] } } }));
     const narrowFetch = run(config({ 'settings.json': {
         permissions: { allow: ['Bash(wget https://api.github.com/*)'], deny: ['Bash(rm *)'] } } }));
     check('a bare-wildcard wget IS reported', /allow rule/.test(bareFetch));
-    check('  pinning it to one host CLEARS the finding', !/allow rule/.test(narrowFetch));
+    check('  pinning it to one host CLEARS the finding', reported(narrowFetch) && !/allow rule/.test(narrowFetch));
 }
 
 // The other class: narrowing must NOT clear a command whose purpose is running
@@ -160,7 +175,7 @@ function runFull(cfg, extra = []) {
     const out = run(cfg);
     check('a scheduled task untouched for 30d is reported', /nightly-audit/.test(out));
     check('  with the age in days', /30d/.test(out));
-    check('a task touched today is NOT reported', !/fresh-task/.test(out));
+    check('a task touched today is NOT reported', reported(out) && !/fresh-task/.test(out));
 }
 
 // A directory with no SKILL.md is not a task; it must not be reported.
@@ -169,8 +184,9 @@ function runFull(cfg, extra = []) {
     const dir = path.join(cfg, 'scheduled-tasks', 'not-a-task');
     const old = new Date(Date.now() - 60 * 86400000);
     fs.utimesSync(dir, old, old);
+    const out = run(cfg);
     check('a directory without SKILL.md is not treated as a task',
-        !/not-a-task/.test(run(cfg)));
+        reported(out) && !/not-a-task/.test(out));
 }
 
 // The .last-run heartbeat. The mtime heuristic above has a built-in
@@ -198,7 +214,7 @@ function runFull(cfg, extra = []) {
     // stamped-alive's stamp keeps its just-written mtime: a run completed today.
 
     const out = run(cfg);
-    check('a fresh heartbeat suppresses the old-SKILL.md warning entirely', !/stamped-alive/.test(out));
+    check('a fresh heartbeat suppresses the old-SKILL.md warning entirely', reported(out) && !/stamped-alive/.test(out));
     check('a stale heartbeat is reported', /stamped-dead/.test(out));
     check('  as a stopped run, not an unedited file', /last completed a run 6d ago/.test(out));
     check('  with the cadence it was judged against', /cadence 1d/.test(out));
@@ -223,7 +239,7 @@ function runFull(cfg, extra = []) {
     age('weekly-overdue', 12);
 
     const out = run(cfg);
-    check('a weekly stamp 6d old is on schedule', !/weekly-on-time/.test(out));
+    check('a weekly stamp 6d old is on schedule', reported(out) && !/weekly-on-time/.test(out));
     check('a weekly stamp 12d old is reported', /weekly-overdue/.test(out));
     check('  judged against its declared cadence', /cadence 7d/.test(out));
 }
@@ -237,7 +253,8 @@ function runFull(cfg, extra = []) {
         'scheduled-tasks/junk-cadence/SKILL.md': '# nightly\n',
         'scheduled-tasks/junk-cadence/.last-run': '{"cadence_days": -5}\n',
     });
-    check('a fresh stamp with a junk cadence is not reported', !/junk-cadence/.test(run(cfg)));
+    const out = run(cfg);
+    check('a fresh stamp with a junk cadence is not reported', reported(out) && !/junk-cadence/.test(out));
 }
 
 // ------------------------------------------------------------- auditPlugins
@@ -263,8 +280,9 @@ function runFull(cfg, extra = []) {
         },
     });
 
+    const matching = run(mk(head));
     check('installed sha matching clone HEAD reports nothing',
-        !/thing@mymarket/.test(run(mk(head))));
+        reported(matching) && !/thing@mymarket/.test(matching));
 
     const behind = run(mk('0'.repeat(40)));
     check('an installed sha behind the clone is reported', /thing@mymarket/.test(behind));
@@ -290,7 +308,7 @@ function runFull(cfg, extra = []) {
     // the reporting stage, so it separates a quiet skip from a dead process.
     const orphanOut = run(orphanMarket);
     check('an entry whose marketplace is unknown is skipped quietly',
-        !/thing@ghost/.test(orphanOut));
+        reported(orphanOut) && !/thing@ghost/.test(orphanOut));
     check('  and the run COMPLETED rather than crashing on it',
         /Drift audit —/.test(orphanOut));
 }
@@ -299,7 +317,7 @@ function runFull(cfg, extra = []) {
 {
     const bareOut = run(config({ 'settings.json': {} }));
     check('a config with no plugin files produces no plugin findings',
-        !/is installed at/.test(bareOut));
+        reported(bareOut) && !/is installed at/.test(bareOut));
     check('  and that run COMPLETED too', /Drift audit —/.test(bareOut));
 }
 
@@ -322,15 +340,16 @@ function runFull(cfg, extra = []) {
     });
     const out = run(adopted);
     check('a published-but-uninstalled sibling is reported', /extra@mk/.test(out));
-    check('  and the one you DO have installed is not', !/core@mk is published/.test(out));
+    check('  and the one you DO have installed is not', reported(out) && !/core@mk is published/.test(out));
 
     // The marketplace you have adopted nothing from is none of your business.
     const unadopted = config({
         'plugins/known_marketplaces.json': { mk: { installLocation: clone2 } },
         'plugins/installed_plugins.json': { plugins: { 'thing@other': [{ version: '1.0.0' }] } },
     });
+    const unadoptedOut = run(unadopted);
     check('a marketplace you use nothing from is not advertised',
-        !/extra@mk/.test(run(unadopted)));
+        reported(unadoptedOut) && !/extra@mk/.test(unadoptedOut));
 }
 
 // Past a handful, the list collapses to one line. Cherry-picking from a large
@@ -352,7 +371,7 @@ function runFull(cfg, extra = []) {
         'plugins/installed_plugins.json': { plugins: { 'p0@big': [{ version: '1.0.0' }] } },
     }));
     check('a large catalog is summarised, not enumerated', /20 of 21 published plugins/.test(outBig));
-    check('  and no individual plugin is named', !/p7@big is published/.test(outBig));
+    check('  and no individual plugin is named', reported(outBig) && !/p7@big is published/.test(outBig));
 
     // The other side: at or under the limit, names are still what you want.
     const small = path.join(TMP, 'small-catalog');
@@ -365,7 +384,7 @@ function runFull(cfg, extra = []) {
     }));
     check('a small marketplace still names each missing plugin',
         /b@sm is published/.test(outSmall) && /c@sm is published/.test(outSmall));
-    check('  and is not summarised', !/published plugins are not installed/.test(outSmall));
+    check('  and is not summarised', reported(outSmall) && !/published plugins are not installed/.test(outSmall));
 
     // A fully installed marketplace says nothing at all — the summary must not
     // fire on zero.
@@ -375,7 +394,7 @@ function runFull(cfg, extra = []) {
             'a@sm': [{ version: '1.0.0' }], 'b@sm': [{ version: '1.0.0' }], 'c@sm': [{ version: '1.0.0' }] } },
     }));
     check('a fully installed marketplace produces no plugin finding',
-        !/published/.test(full));
+        reported(full) && !/published/.test(full));
 }
 
 // An install path whose manifest is gone is a broken install, not drift.
@@ -413,7 +432,7 @@ function runFull(cfg, extra = []) {
         'plugins/installed_plugins.json': {
             plugins: { 'fine@mk': [{ version: '1.0.0', gitCommitSha: sha, installPath: ok }] } },
     }));
-    check('  and an install WITH its manifest is not', !/missing its manifest/.test(clean));
+    check('  and an install WITH its manifest is not', reported(clean) && !/missing its manifest/.test(clean));
 }
 
 // ---------------------------------------------------- the output contract
@@ -499,11 +518,11 @@ function runFull(cfg, extra = []) {
     const viaFileBytes = (extra) => {
         const out = path.join(TMP, 'via-file.out');
         const fd = fs.openSync(out, 'w');
-        spawnSync(process.execPath, [AUDIT, ...extra], { stdio: ['ignore', fd, 'ignore'], env });
+        sb.runVerdict(process.execPath, [AUDIT, ...extra], { stdio: ['ignore', fd, 'ignore'], env });
         fs.closeSync(fd);
         return fs.statSync(out).size;
     };
-    const piped = spawnSync(process.execPath, [AUDIT, '--json'],
+    const piped = sb.runVerdict(process.execPath, [AUDIT, '--json'],
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
     const pipeBytes = Buffer.byteLength(piped.stdout || '', 'utf8');
     const fileBytes = viaFileBytes(['--json']);
@@ -512,8 +531,9 @@ function runFull(cfg, extra = []) {
 
     check('--json over many findings exceeds one pipe buffer, so the next check is not vacuous ('
         + fileBytes + ' bytes)', fileBytes > PIPE_BUF);
+    // Two empty runs are equal too, so the pipe must have carried something.
     check('--json through a PIPE delivers every byte it writes to a FILE (pipe '
-        + pipeBytes + ', file ' + fileBytes + ')', pipeBytes === fileBytes);
+        + pipeBytes + ', file ' + fileBytes + ')', pipeBytes > 0 && pipeBytes === fileBytes);
     check('  and the piped JSON still parses at that size, under the fail exit 1',
         parsed !== null && Array.isArray(parsed.findings) && parsed.findings.length === 300
         && piped.status === 1);
@@ -524,18 +544,26 @@ function runFull(cfg, extra = []) {
     // the exit than the single JSON write — measurably so on the sibling suites,
     // where the equivalent line stays green under the mutation even above the
     // buffer. It states the equality; it is not cover for this defect.
-    const reportPipe = spawnSync(process.execPath, [AUDIT],
+    const reportPipe = sb.runVerdict(process.execPath, [AUDIT],
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+    const reportBytes = Buffer.byteLength(reportPipe.stdout || '', 'utf8');
     check('  the human report through a PIPE also delivers every byte',
-        Buffer.byteLength(reportPipe.stdout || '', 'utf8') === viaFileBytes([]));
+        reportBytes > 0 && reportBytes === viaFileBytes([]));
 }
 
 
-let pass = 0, fail = 0;
-for (const [label, ok] of cases) {
+let pass = 0, fail = 0, skipped = 0;
+for (const [label, ok, lost] of cases) {
+    if (lost) {
+        skipped++;
+        console.log('SKIP  ' + label + '  (not graded: ' + lost + ')');
+        continue;
+    }
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
     ok ? pass++ : fail++;
 }
-console.log(`\n${pass} passed, ${fail} failed`);
+const lost = sb.lostVerdict();
+console.log(`\n${sb.tally(pass, fail, lost ? 1 : 0)}`);
+if (lost) console.log(`INDETERMINATE: ${lost}. The ${skipped} cases after it were not graded.`);
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
-process.exit(fail > 0 ? 1 : 0);
+process.exitCode = sb.exitCode(fail, lost ? 1 : 0);
