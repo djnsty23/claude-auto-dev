@@ -6,12 +6,19 @@
 // including the two that must always terminate: the idle one-shot, and a sprint
 // whose remaining stories are all deferred.
 //
+// A HOOK CHILD THAT DIED OF THE MACHINE SAID NOTHING ABOUT THE HOOK. Every
+// spawn goes through spawn-budget.js runVerdict, which re-runs a child that
+// died (nativeDeath) and, when one never answers, stops grading: the cases
+// after it print SKIP and the suite exits 2. An ABSENCE check reads the parsed
+// decision first (`decision !== null &&`), so a hook that exits 0 and prints
+// nothing fails it instead of passing it.
+//
 // Run: node tooling/test-stop-auto-check.js
 
-const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sb = require('./spawn-budget.js');
 
 const PLUGIN_ROOT = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
 const HOOK = path.join(PLUGIN_ROOT, 'hooks', 'stop-auto-check.js');
@@ -19,7 +26,14 @@ const HOOK = path.join(PLUGIN_ROOT, 'hooks', 'stop-auto-check.js');
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'stopcheck-test-')));
 
 const cases = [];
-const check = (label, ok) => cases.push([label, ok]);
+// The third field is set when a hook child had already produced no verdict,
+// and the case is then reported as not graded.
+const check = (label, ok) => cases.push([label, ok, sb.lostVerdict()]);
+
+// The hook exits 0 on every path, so any other status is its own answer.
+function spawnHook(input, opts) {
+    return sb.runVerdict(process.execPath, [HOOK], Object.assign({ input, encoding: 'utf8' }, opts));
+}
 
 // Each scenario gets a clean project directory.
 let n = 0;
@@ -43,9 +57,7 @@ function project({ auto = false, exit = false, idle = false, prd = undefined, au
 }
 
 function run(dir, payload = {}) {
-    const r = spawnSync(process.execPath, [HOOK], {
-        input: JSON.stringify({ session_id: 'sess', cwd: dir, hook_event_name: 'Stop', ...payload }),
-        encoding: 'utf8',
+    const r = spawnHook(JSON.stringify({ session_id: 'sess', cwd: dir, hook_event_name: 'Stop', ...payload }), {
         cwd: dir,
         env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
     });
@@ -95,7 +107,7 @@ check('idle marker written', exists(d, 'auto-idle-triggered'));
 // The critical termination property: a second stop must NOT block again.
 ({ decision } = run(d));
 check('auto + all done, second stop → approve (idle is one-shot)', decision?.decision === 'approve');
-check('idle marker cleared', !exists(d, 'auto-idle-triggered'));
+check('idle marker cleared', decision !== null && !exists(d, 'auto-idle-triggered'));
 // ---------------------------------------- needs-setup: blocked on a HUMAN
 //
 // [measured 2026-08-28] auto/SKILL.md instructs sessions to write
@@ -115,9 +127,9 @@ check('idle marker cleared', !exists(d, 'auto-idle-triggered'));
     const { decision, r } = run(d);
     const said = (r.stdout || '') + (r.stderr || '');
     check('needs-setup does NOT count as remaining work',
-        !/tasks remaining/.test(said));
+        decision !== null && !/tasks remaining/.test(said));
     check('...and the sprint does NOT read complete',
-        !/Sprint complete/.test(said));
+        decision !== null && !/Sprint complete/.test(said));
     // The other half: it must not silently vanish either. A human is still on the
     // hook for it, and a report that omits it says the sprint is finished when it
     // is waiting on him.
@@ -160,7 +172,7 @@ check('idle marker cleared', !exists(d, 'auto-idle-triggered'));
     } } });
     const { decision, r } = run(d);
     check('CONTROL: no needs-setup story → no "blocked on the operator" phrase',
-        !/blocked on the operator/.test(decision?.reason || '') && !/Blocked on you/.test(r.stderr || ''));
+        decision !== null && !/blocked on the operator/.test(decision.reason || '') && !/Blocked on you/.test(r.stderr || ''));
 }
 {
     // The known-positive control, through the identical path. Without it, both
@@ -201,7 +213,7 @@ d = project({ auto: true, prd: SPRINT_DEFERRED });
 // It may still block once for idle detection — that is the normal
 // sprint-complete path — but it must not claim there is work outstanding.
 check('auto + only deferred left → not counted as remaining work',
-    !/tasks remaining/.test(decision?.reason || ''));
+    decision !== null && !/tasks remaining/.test(decision.reason || ''));
 
 // Drive it to completion the same way the idle path terminates.
 let guard = 0;
@@ -247,10 +259,7 @@ check('malformed prd.json clears the auto flag', !exists(d, 'auto-active'));
 
 // Malformed stdin must still produce a decision.
 d = project({ prd: SPRINT_PENDING });
-r = spawnSync(process.execPath, [HOOK], {
-    input: 'not json', encoding: 'utf8', cwd: d,
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-});
+r = spawnHook('not json', { cwd: d, env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
 let parsed = null;
 try { parsed = JSON.parse(r.stdout); } catch { /* stays null */ }
 check('malformed stdin → exit 0', r.status === 0);
@@ -263,9 +272,7 @@ check('malformed stdin → still approves', parsed?.decision === 'approve');
 const other = project({ auto: true, prd: SPRINT_PENDING });
 const elsewhere = path.join(TMP, 'elsewhere');
 fs.mkdirSync(elsewhere, { recursive: true });
-r = spawnSync(process.execPath, [HOOK], {
-    input: JSON.stringify({ session_id: 's', cwd: other, hook_event_name: 'Stop' }),
-    encoding: 'utf8',
+r = spawnHook(JSON.stringify({ session_id: 's', cwd: other, hook_event_name: 'Stop' }), {
     cwd: elsewhere,
     env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
 });
@@ -299,9 +306,7 @@ function withAges(dir, ages, { computedAt = new Date().toISOString() } = {}) {
 }
 
 function runWithCfg(dir, cfg) {
-    const r = spawnSync(process.execPath, [HOOK], {
-        input: JSON.stringify({ session_id: 's', cwd: dir, hook_event_name: 'Stop' }),
-        encoding: 'utf8',
+    const r = spawnHook(JSON.stringify({ session_id: 's', cwd: dir, hook_event_name: 'Stop' }), {
         env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: cfg },
     });
     let out = null;
@@ -446,9 +451,9 @@ function runWithCfg(dir, cfg) {
     // condition guarding it — it tests the message.
     const clean = project({ auto: true, prd: SPRINT_DONE });
     const cleanCfg = withAges(clean, {});
-    const { stderr: quiet } = runWithCfg(clean, cleanCfg);
+    const { out: cleanOut, stderr: quiet } = runWithCfg(clean, cleanCfg);
     check('  and nothing is reported when no story was skipped',
-        !/untouched >30d/.test(quiet));
+        cleanOut !== null && !/untouched >30d/.test(quiet));
 }
 
 // line 41 — `all[here] || all[cwd]`. Changing `||` to `&&` survived, because no
@@ -526,15 +531,15 @@ function runWithCfg(dir, cfg) {
     d = project({ prd: SPRINT_DONE });
     ({ decision } = run(d));
     check('nudge: all done → approve with NO systemMessage', decision?.decision === 'approve' && decision.systemMessage === undefined);
-    check('nudge: all done → no additionalContext either', decision?.hookSpecificOutput === undefined);
+    check('nudge: all done → no additionalContext either', decision !== null && decision.hookSpecificOutput === undefined);
 
     d = project({ prd: { stories: { 'S1-001': { title: 'a', passes: true }, 'S1-002': { title: 'b', passes: 'deferred' } } } });
     ({ decision } = run(d));
-    check('nudge: deferred is a decision not to do it, so NO nudge', decision?.systemMessage === undefined);
+    check('nudge: deferred is a decision not to do it, so NO nudge', decision !== null && decision.systemMessage === undefined);
 
     d = project({ prd: { stories: { 'S1-001': { title: 'a', passes: 'needs-setup' } } } });
     ({ decision } = run(d));
-    check('nudge: needs-setup cannot be pulled by an agent, so NO nudge', decision?.systemMessage === undefined);
+    check('nudge: needs-setup cannot be pulled by an agent, so NO nudge', decision !== null && decision.systemMessage === undefined);
 
     d = project({ prd: { stories: { 'S1-001': { title: 'a', passes: true }, 'S1-002': { title: 'b', passes: false } } } });
     ({ decision } = run(d));
@@ -570,7 +575,8 @@ function runWithCfg(dir, cfg) {
     check('F17: second stop, same session, still approves', second?.decision === 'approve');
     check('F17: second stop, same session, has NO additionalContext', second !== null && second.hookSpecificOutput === undefined);
     check('F17: the operator still sees it (systemMessage)', (second?.systemMessage || '').includes('S1-002'));
-    check('F17: a third stop stays quiet too', run(dir, { session_id: 'loop' }).decision?.hookSpecificOutput === undefined);
+    const third = run(dir, { session_id: 'loop' }).decision;
+    check('F17: a third stop stays quiet too', third !== null && third.hookSpecificOutput === undefined);
     check('F17: another session in the same repo gets its own one nudge',
         (ctx(run(dir, { session_id: 'other' }).decision) || '').includes('S1-002'));
 
@@ -587,7 +593,8 @@ function runWithCfg(dir, cfg) {
     fs.mkdirSync(bare);
     fs.writeFileSync(path.join(bare, 'prd.json'), JSON.stringify(SPRINT_PENDING));
     check('F17: no .claude dir → nudge still reaches the model once', (ctx(run(bare).decision) || '').includes('S1-002'));
-    check('F17: no .claude dir → and only once', run(bare).decision?.hookSpecificOutput === undefined);
+    const bareAgain = run(bare).decision;
+    check('F17: no .claude dir → and only once', bareAgain !== null && bareAgain.hookSpecificOutput === undefined);
 
     // Ledgers are per session, so the first write sweeps week-old ones.
     const swept = project({});
@@ -598,9 +605,9 @@ function runWithCfg(dir, cfg) {
     const eightDays = new Date(Date.now() - 8 * 86400000);
     fs.utimesSync(old, eightDays, eightDays);
     fs.writeFileSync(path.join(swept, 'prd.json'), JSON.stringify(SPRINT_PENDING));
-    run(swept);
+    const sweptAnswer = run(swept).decision;
     check('F17: first write sweeps a week-old ledger', !fs.existsSync(old));
-    check('F17: and keeps a recent one', fs.existsSync(recent));
+    check('F17: and keeps a recent one', sweptAnswer !== null && fs.existsSync(recent));
 }
 
 // The carried-queue note: once per DISTINCT note per session.
@@ -633,8 +640,9 @@ function runWithCfg(dir, cfg) {
     const t3 = transcript('carried-b.jsonl', [...twoPanels, [[LABEL, 'More'], [LABEL]]]);
     const c = run(dir, { session_id: 'q', transcript_path: t3 }).decision;
     check('F17 queue: a changed finding reaches the model', /3 panels/.test(ctx(c)));
-    check('F17 queue: without re-sending the nudge', !ctx(c).includes('S1-002'));
-    check('F17 queue: and the changed note is also once', run(dir, { session_id: 'q', transcript_path: t3 }).decision?.hookSpecificOutput === undefined);
+    check('F17 queue: without re-sending the nudge', c !== null && !ctx(c).includes('S1-002'));
+    const cAgain = run(dir, { session_id: 'q', transcript_path: t3 }).decision;
+    check('F17 queue: and the changed note is also once', cAgain !== null && cAgain.hookSpecificOutput === undefined);
 }
 
 // Dependency graphs with no ready work get one reconciliation turn, then an
@@ -650,11 +658,12 @@ for (const [label, prd, expected] of [
     const dir = project({ auto: true, prd });
     const initial = run(dir).decision;
     check(label + ': one reconciliation turn', initial?.decision === 'block' && expected.test(initial.reason || ''));
-    check(label + ': never claims complete', !/Sprint complete/.test(initial?.reason || ''));
+    check(label + ': never claims complete', initial !== null && !/Sprint complete/.test(initial.reason || ''));
     const final = run(dir).decision;
     check(label + ': bounded stop retains unresolved explanation', final?.decision === 'approve' && expected.test(final.systemMessage || ''));
     check(label + ': and the model is told too', expected.test(final?.hookSpecificOutput?.additionalContext || ''));
-    check(label + ': prd state preserved', JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'prd.json'), 'utf8'))) === JSON.stringify(prd));
+    check(label + ': prd state preserved', initial !== null && final !== null
+        && JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, 'prd.json'), 'utf8'))) === JSON.stringify(prd));
 }
 {
     const prd = { sprints: [
@@ -696,20 +705,28 @@ for (const [label, prd, expected] of [
 
     // A peer's exit signal ends the PEER's auto, never the owner's.
     fs.writeFileSync(path.join(dir, '.claude', 'auto-exit.sess-b'), '');
-    run(dir, { session_id: 'sess-b' });
-    check('F16: a peer\'s auto-exit leaves the owner\'s flag alone', fs.existsSync(path.join(dir, '.claude', 'auto-active.sess-a')));
+    const peerExit = run(dir, { session_id: 'sess-b' }).decision;
+    check('F16: a peer\'s auto-exit leaves the owner\'s flag alone',
+        peerExit !== null && fs.existsSync(path.join(dir, '.claude', 'auto-active.sess-a')));
     check('F16: and the owner keeps blocking', run(dir, { session_id: 'sess-a' }).decision?.decision === 'block');
 }
 
 // ---------------------------------------------------------------- report
 
-let pass = 0, fail = 0;
-for (const [label, ok] of cases) {
+let pass = 0, fail = 0, skipped = 0;
+for (const [label, ok, lost] of cases) {
+    if (lost) {
+        skipped++;
+        console.log('SKIP  ' + label + '  (not graded: ' + lost + ')');
+        continue;
+    }
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label);
     ok ? pass++ : fail++;
 }
-console.log(`\n${pass} passed, ${fail} failed`);
+const lost = sb.lostVerdict();
+console.log(`\n${sb.tally(pass, fail, lost ? 1 : 0)}`);
+if (lost) console.log(`INDETERMINATE: ${lost}. The ${skipped} cases after it were not graded.`);
 
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
 
-process.exit(fail > 0 ? 1 : 0);
+process.exitCode = sb.exitCode(fail, lost ? 1 : 0);
