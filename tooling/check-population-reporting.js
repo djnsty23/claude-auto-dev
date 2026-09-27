@@ -72,6 +72,7 @@
 //   node tooling/check-population-reporting.js
 //   node tooling/check-population-reporting.js --strict
 //   node tooling/check-population-reporting.js --selftest
+//   node tooling/check-population-reporting.js --help      print the usage line
 
 const fs = require('fs');
 const path = require('path');
@@ -666,6 +667,20 @@ function selftest() {
     process.exit(failed ? 1 : 0);
 }
 
-const argv = process.argv.slice(2);
-if (argv.includes('--selftest')) selftest();
-else scan({ strict: argv.includes('--strict') });
+const USAGE = 'Usage: node tooling/check-population-reporting.js [--strict | --selftest]';
+
+function main(argv) {
+    // --help answers before any work. It used to fall through to the scan,
+    // because this dispatch knew only --selftest and --strict: asking for help
+    // read every script in SCAN_DIRS, printed the findings and the population
+    // line, never the usage line, and exited 0.
+    if (argv.includes('--help') || argv.includes('-h')) {
+        console.log(USAGE);
+        return 0;
+    }
+    // selftest() and scan() set their own exit status and do not return.
+    if (argv.includes('--selftest')) selftest();
+    else scan({ strict: argv.includes('--strict') });
+}
+
+process.exitCode = main(process.argv.slice(2));

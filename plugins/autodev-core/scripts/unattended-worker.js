@@ -174,6 +174,10 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report,
         body.trim(),
         '',
         `WHEN DONE OR BLOCKED, write one report to ${rep} for ${returnTo}: the commits, each verification command with what it printed, and what remains. Its LAST line is exactly \`RESULT ${code} done|stopped|failed: <one line>\`. An unattended run cannot use SendMessage, so the file is the only return channel.`,
+        // [measured 2026-09-26] a worker ended its turn on a question. Nobody
+        // watches an unattended session, so it sat idle with no RESULT line
+        // and read as still running until a coordinator opened it by hand.
+        `Never end your turn with a question: nobody is watching this session to answer it. When you need a decision, write the report with its last line \`RESULT ${code} stopped: <the question and the options>\`, then end.`,
         `Do not delete scheduled task ${taskId}. Deleting it archives this session; the coordinator deletes it after reading your report.`,
         '',
     ].join('\n');

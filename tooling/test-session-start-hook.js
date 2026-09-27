@@ -31,12 +31,27 @@ fs.mkdirSync(PROJ, { recursive: true });
 const cases = [];
 const check = (label, ok) => cases.push([label, ok]);
 
-function run(payload, cwd = PROJ) {
+// Every variable a session-store reader resolves its path from points at one
+// empty dir, so no run reads the machine's real Desktop store. Without this the
+// pile count, its timing, and whether a "Session pile" line prints all depended
+// on who ran the suite: [measured 2026-09-24] 1,229 records, 412 ms, per run.
+const EMPTY_STORE = path.join(TMP, 'empty-store');
+fs.mkdirSync(EMPTY_STORE, { recursive: true });
+const STORE_VARS = ['SESSION_SWEEP_STORE', 'CLAUDE_SESSION_STORE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME'];
+
+function hookEnv(extraEnv = {}) {
+    const env = { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP, CLAUDE_CONFIG_DIR: path.join(TMP, '.claude') };
+    for (const v of STORE_VARS) env[v] = EMPTY_STORE;
+    // An undefined value removes the variable: spawn skips it.
+    return { ...env, ...extraEnv };
+}
+
+function run(payload, cwd = PROJ, extraEnv = {}) {
     return spawnSync(process.execPath, [HOOK], {
         input: JSON.stringify(payload),
         encoding: 'utf8',
         cwd,
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP, CLAUDE_CONFIG_DIR: path.join(TMP, '.claude') },
+        env: hookEnv(extraEnv),
     });
 }
 
@@ -193,7 +208,7 @@ check('no MEMORY.md writing remains in the source', !HOOK_CODE.includes('MEMORY.
 // 7. Malformed stdin must never block a session from starting.
 r = spawnSync(process.execPath, [HOOK], {
     input: 'not json', encoding: 'utf8', cwd: PROJ,
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP, CLAUDE_CONFIG_DIR: path.join(TMP, '.claude') },
+    env: hookEnv(),
 });
 check('malformed stdin → exit 0', r.status === 0);
 check('malformed stdin → still valid JSON out', parse(r) !== null);
@@ -520,9 +535,10 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
 }
 
 // ---- Session pile ----
-// A planted store, never the operator's real one: SESSION_SWEEP_STORE is set on
-// every run below. The population is built so each filter has a record it must
-// reject: archived, another repo, and a stale mtime.
+// A planted store, never the operator's real one: every run below points
+// SESSION_SWEEP_STORE at it, over hookEnv()'s empty default. The population is
+// built so each filter has a record it must reject: archived, another repo, and
+// a stale mtime.
 {
     const STORE = path.join(TMP, 'pile-store', 'ws', 'sub');
     fs.mkdirSync(STORE, { recursive: true });
@@ -544,8 +560,7 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
         const res = spawnSync(process.execPath, [HOOK], {
             input: JSON.stringify({ cwd: PROJ, session_id: id, hook_event_name: 'SessionStart' }),
             encoding: 'utf8', cwd: PROJ,
-            env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP, CLAUDE_CONFIG_DIR: path.join(TMP, '.claude'),
-                SESSION_SWEEP_STORE: path.join(TMP, 'pile-store'), AUTODEV_SESSION_PILE_MAX: '', ...extraEnv },
+            env: hookEnv({ SESSION_SWEEP_STORE: path.join(TMP, 'pile-store'), AUTODEV_SESSION_PILE_MAX: '', ...extraEnv }),
         });
         return { res, ctx: parse(res)?.hookSpecificOutput?.additionalContext || '' };
     };
@@ -569,6 +584,77 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
     check('pile: an unreadable store is null, not zero',
         countLivePile(PROJ, { store: path.join(TMP, 'no-such-store') }) === null);
 }
+
+// ---- The store every other run reads is the suite's, not the machine's ----
+//
+// A real store cannot be planted: records written into the operator's store
+// would show up in their Desktop app. So the ambient variables this process
+// passes on are pointed at planted stores instead, standing in for the real
+// paths. Each store holds a distinct number of live records for PROJ, and
+// AUTODEV_SESSION_PILE_MAX=0 makes a single counted record print the line, so
+// the line's count names which store leaked. Each control runs the hook with
+// the env run() used before hookEnv(), and proves its plant is reachable.
+{
+    const plantLive = (dir, n) => {
+        fs.mkdirSync(dir, { recursive: true });
+        for (let i = 0; i < n; i++) {
+            const rec = { sessionId: `local_ambient-${n}-${i}`, isArchived: false, originCwd: PROJ, cwd: PROJ };
+            fs.writeFileSync(path.join(dir, `${rec.sessionId}.json`), JSON.stringify(rec), 'utf8');
+        }
+    };
+    const AMBIENT = path.join(TMP, 'ambient');
+    const SWEEP = path.join(AMBIENT, 'sweep');
+    const BASE = path.join(AMBIENT, 'base');
+    plantLive(SWEEP, 3);
+    plantLive(path.join(BASE, 'Claude', 'claude-code-sessions'), 4);
+
+    const withAmbient = (vars, fn) => {
+        const saved = {};
+        for (const k of Object.keys(vars)) saved[k] = process.env[k];
+        const put = (k, v) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; };
+        try {
+            for (const [k, v] of Object.entries(vars)) put(k, v);
+            return fn();
+        } finally {
+            for (const [k, v] of Object.entries(saved)) put(k, v);
+        }
+    };
+    const payload = { cwd: PROJ, session_id: 'ambient', hook_event_name: 'SessionStart' };
+    const ctxOf = (res) => parse(res)?.hookSpecificOutput?.additionalContext || '';
+    const unisolated = () => ctxOf(spawnSync(process.execPath, [HOOK], {
+        input: JSON.stringify(payload), encoding: 'utf8', cwd: PROJ,
+        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: TMP, USERPROFILE: TMP,
+            CLAUDE_CONFIG_DIR: path.join(TMP, '.claude'), AUTODEV_SESSION_PILE_MAX: '0' },
+    }));
+    const isolated = (extraEnv = {}) => ctxOf(run(payload, PROJ, { AUTODEV_SESSION_PILE_MAX: '0', ...extraEnv }));
+
+    // The empty store gives a count of 0, and 0 > 0 is false: no line.
+    const a = withAmbient({ SESSION_SWEEP_STORE: SWEEP }, () => ({ leak: unisolated(), run: isolated() }));
+    check('store isolation (control): an ambient SESSION_SWEEP_STORE is read by the old env',
+        /Session pile: 3 other live sessions/.test(a.leak));
+    check('store isolation: run() reads zero records from an ambient SESSION_SWEEP_STORE',
+        !a.run.includes('Session pile'));
+
+    // With SESSION_SWEEP_STORE gone, as for a reader that never knew it, the
+    // hook falls back to the platform base dir. macOS resolves it from HOME,
+    // which run() always pointed at TMP, so only win32 and Linux could leak.
+    const baseVars = { SESSION_SWEEP_STORE: undefined, APPDATA: BASE, LOCALAPPDATA: BASE, XDG_CONFIG_HOME: BASE };
+    const b = withAmbient(baseVars, () => ({ leak: unisolated(), run: isolated({ SESSION_SWEEP_STORE: undefined }) }));
+    if (process.platform === 'darwin') {
+        check('store isolation (control, darwin): the base dir is under HOME, so the old env did not leak',
+            !b.leak.includes('Session pile'));
+    } else {
+        check('store isolation (control): an ambient APPDATA or XDG_CONFIG_HOME is read by the old env',
+            /Session pile: 4 other live sessions/.test(b.leak));
+    }
+    check('store isolation: without SESSION_SWEEP_STORE, run() still reads zero records from the ambient base dirs',
+        !b.run.includes('Session pile'));
+}
+
+// The zero reads above rest on the store dir staying empty. A hook that wrote
+// into APPDATA, LOCALAPPDATA or XDG_CONFIG_HOME would land here.
+check('store isolation: the empty store is still empty after every run',
+    fs.readdirSync(EMPTY_STORE).length === 0);
 
 let pass = 0, fail = 0;
 for (const [label, ok] of cases) {

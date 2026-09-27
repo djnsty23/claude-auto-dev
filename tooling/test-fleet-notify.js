@@ -35,6 +35,12 @@
 // absent: if the override were ignored the suite fails loudly rather than
 // writing into the live notifier's dedup memory.
 //
+// A WORKER'S ASK is the second thing that notifies: an ask.json under runs/ or
+// beside a headless worker's report. The page (fleet-view.js) already showed
+// those, so the case that matters is the two DISAGREEING. The ask section runs
+// the page's own `list --json` over the same fixture and compares the ask files
+// it shows with the ones the notifier recorded, file for file.
+//
 // FOUR THINGS ARE NOT PINNED HERE, deliberately, so nobody reads this file as
 // full coverage of the script:
 //   - the real toast. Delivery goes through powershell + toast.ps1 and firing
@@ -57,6 +63,8 @@ const { spawnSync } = require('child_process');
 const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'fleet-notify.js');
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-notify-'));
 const DRIVER = path.join(ROOT, 'drive-notify.js');
+const VIEW = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'fleet-view.js');
+const HW = require(path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'headless-worker.js'));
 
 let passed = 0;
 let failed = 0;
@@ -125,6 +133,43 @@ function desktop(home, id, title) {
         }) + '\n', 'utf8');
 }
 
+const autodev = (home) => path.join(home, '.claude', 'autodev');
+
+/** A runs/ job its launcher still calls running, with an open ask.json. */
+function runAsk(home, job, q) {
+    const dir = path.join(autodev(home), 'runs', job, '2026-09-24T00-00-00-000Z');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'status.json'), JSON.stringify({
+        job, cwd: '/fixture/project', state: 'running', started: minutesAgo(5),
+    }) + '\n', 'utf8');
+    fs.writeFileSync(path.join(dir, 'ask.json'), JSON.stringify(q) + '\n', 'utf8');
+    return path.join(dir, 'ask.json');
+}
+
+/**
+ * A headless worker that asked and then stopped, which is what the ask note
+ * tells one to do when nothing independent is left. Its ask.json lives in the
+ * scratch dir named by its code, beside its report.
+ */
+function headlessAsk(home, code, q, startedAt = minutesAgo(5)) {
+    const wdir = path.join(home, 'workers');
+    fs.mkdirSync(path.join(wdir, code), { recursive: true });
+    const rec = {
+        code, pid: 0, startedAt, cwd: '/fixture/project', state: 'running',
+        log: path.join(wdir, code + '.jsonl'), report: path.join(wdir, code + '.report.md'), promptFile: path.join(wdir, code + '.md'),
+    };
+    fs.writeFileSync(rec.promptFile, `# ${code} brief\n`, 'utf8');
+    fs.writeFileSync(rec.log, 'CLAUDE_EXIT=0\n', 'utf8');
+    fs.writeFileSync(rec.report, `RESULT ${code} stopped: waiting on an answer\n`, 'utf8');
+    const ledger = path.join(autodev(home), 'headless-workers.json');
+    const cur = readJson(ledger) || { version: 1, records: [] };
+    cur.records.push(rec);
+    fs.mkdirSync(autodev(home), { recursive: true });
+    fs.writeFileSync(ledger, JSON.stringify(cur) + '\n', 'utf8');
+    fs.writeFileSync(path.join(wdir, code, 'ask.json'), JSON.stringify(q) + '\n', 'utf8');
+    return path.join(wdir, code, 'ask.json');
+}
+
 // --- driving the subject -------------------------------------------------
 
 function envFor(home) {
@@ -153,8 +198,8 @@ const toastsIn = (r) => outOf(r).split('\n').filter((l) => l.startsWith('TOAST|'
     .map((l) => { const p = l.slice(6).split('|'); return { title: p[0], body: p.slice(1).join('|') }; });
 const firedIn = (r) => { const m = outOf(r).match(/^FIRED (\d+)$/m); return m ? Number(m[1]) : NaN; };
 const popIn = (r) => {
-    const m = outOf(r).match(/(\d+) transcripts, (\d+) blocked, (\d+) new/);
-    return m ? { transcripts: +m[1], blocked: +m[2], fresh: +m[3] } : null;
+    const m = outOf(r).match(/(\d+) transcripts, (\d+) blocked, (\d+) asking, (\d+) new/);
+    return m ? { transcripts: +m[1], blocked: +m[2], asking: +m[3], fresh: +m[4] } : null;
 };
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 const summarise = (r) => `exit=${r.status} out=${JSON.stringify(outOf(r).slice(0, 240))}`
@@ -194,7 +239,7 @@ function run() {
     check('a blocked panel older than min-age fires exactly one toast',
         d1.status === 0 && firedIn(d1) === 1 && toastsIn(d1).length === 1, summarise(d1));
     check('the pass prints the population it scanned, not just a verdict',
-        JSON.stringify(popIn(d1)) === JSON.stringify({ transcripts: 1, blocked: 1, fresh: 1 }),
+        JSON.stringify(popIn(d1)) === JSON.stringify({ transcripts: 1, blocked: 1, asking: 0, fresh: 1 }),
         `got ${JSON.stringify(popIn(d1))}`);
     check('the toast is titled with the session title from the desktop record',
         (toastsIn(d1)[0] || {}).title === 'alpha', `got ${JSON.stringify((toastsIn(d1)[0] || {}).title)}`);
@@ -221,7 +266,7 @@ function run() {
     check('re-scanning the same open panel notifies nothing',
         d2.status === 0 && firedIn(d2) === 0 && toastsIn(d2).length === 0, summarise(d2));
     check('and the silent pass still reports the session as blocked',
-        JSON.stringify(popIn(d2)) === JSON.stringify({ transcripts: 1, blocked: 1, fresh: 0 }),
+        JSON.stringify(popIn(d2)) === JSON.stringify({ transcripts: 1, blocked: 1, asking: 0, fresh: 0 }),
         `got ${JSON.stringify(popIn(d2))}`);
     check('a still-blocked session is NOT pruned out of the state',
         (readJson(stateFile(hDedup)) || {})[A] === askedA,
@@ -258,7 +303,7 @@ function run() {
     // Without this the case above is indistinguishable from a probe that saw
     // no sessions at all.
     check('and the same pass still SEES it as blocked, so the threshold is the reason',
-        JSON.stringify(popIn(a1)) === JSON.stringify({ transcripts: 1, blocked: 1, fresh: 0 }),
+        JSON.stringify(popIn(a1)) === JSON.stringify({ transcripts: 1, blocked: 1, asking: 0, fresh: 0 }),
         `got ${JSON.stringify(popIn(a1))}`);
     check('nothing is recorded for a panel that was held back',
         !fs.existsSync(stateFile(hAge)) || !((readJson(stateFile(hAge)) || {})[B]),
@@ -286,7 +331,7 @@ function run() {
     answer(hRe, C, 'tu_1');
     const r2 = drive(hRe, 'count');
     check('once answered the session is no longer counted blocked',
-        JSON.stringify(popIn(r2)) === JSON.stringify({ transcripts: 1, blocked: 0, fresh: 0 }),
+        JSON.stringify(popIn(r2)) === JSON.stringify({ transcripts: 1, blocked: 0, asking: 0, fresh: 0 }),
         `got ${JSON.stringify(popIn(r2))}`);
     check('the prune is PERSISTED although nothing fired on that pass',
         JSON.stringify(readJson(stateFile(hRe))) === '{}',
@@ -405,11 +450,173 @@ function run() {
     const hQuiet = makeHome('quiet');
     const q1 = drive(hQuiet, 'count');
     check('an empty fleet prints a zero population instead of nothing at all',
-        q1.status === 0 && JSON.stringify(popIn(q1)) === JSON.stringify({ transcripts: 0, blocked: 0, fresh: 0 }),
+        q1.status === 0 && JSON.stringify(popIn(q1)) === JSON.stringify({ transcripts: 0, blocked: 0, asking: 0, fresh: 0 }),
         summarise(q1));
     check('and still writes a marker, so a quiet run is distinguishable from no run',
         (readJson(markerFile(hQuiet)) || {}).transcripts === 0,
         `marker=${JSON.stringify(readJson(markerFile(hQuiet)))}`);
+
+    // =====================================================================
+    console.log('\n=== a worker ask notifies once, and the page shows the same asks ===');
+    // =====================================================================
+    const hAsk = makeHome('asks');
+    const runAskFile = runAsk(hAsk, 'job-seed',
+        { question: 'Seeded or production?', options: [{ label: 'Seeded (Recommended)' }, { label: 'Production' }] });
+    const wAskFile = headlessAsk(hAsk, 'W-ASK', { question: 'Which base?' });
+
+    const k1 = drive(hAsk, 'count');
+    check('two open asks fire two toasts, although both were written seconds ago',
+        k1.status === 0 && firedIn(k1) === 2 && toastsIn(k1).length === 2, summarise(k1));
+    check('the pass counts them as asking, apart from blocked panels',
+        JSON.stringify(popIn(k1)) === JSON.stringify({ transcripts: 0, blocked: 0, asking: 2, fresh: 2 }),
+        `got ${JSON.stringify(popIn(k1))}`);
+    const byTitle = Object.fromEntries(toastsIn(k1).map((t) => [t.title, t.body]));
+    check('each toast names the worker and carries its question and option count',
+        byTitle['job-seed is asking'] === 'Seeded or production?  (2 options)' && byTitle['W-ASK is asking'] === 'Which base?',
+        `got ${JSON.stringify(byTitle)}`);
+    const st1 = readJson(stateFile(hAsk)) || {};
+    check('each ask is recorded under its own file, stamped with its mtime',
+        st1['ask:' + runAskFile] === fs.statSync(runAskFile).mtime.toISOString()
+        && st1['ask:' + wAskFile] === fs.statSync(wAskFile).mtime.toISOString(),
+        `state=${JSON.stringify(st1)}`);
+    const km = readJson(markerFile(hAsk)) || {};
+    check('the marker counts the asks and says what each source read',
+        km.asking === 2 && Array.isArray(km.askSources) && km.askSources.length === 2
+        && /^runs: 1 run\(s\) read under /.test(km.askSources[0]) && /: 1 record\(s\)$/.test(km.askSources[1]),
+        `marker=${JSON.stringify(km)}`);
+
+    // The page is fleet-view's own CLI over the same HOME, not a second reading
+    // of the fixture: agreement is between the two programs, file for file.
+    const page = spawnSync(process.execPath,
+        [VIEW, 'list', '--json', '--home', hAsk, '--appdata', path.join(hAsk, 'appdata')],
+        { encoding: 'utf8', env: envFor(hAsk), windowsHide: true });
+    let pageAsks = null;
+    try { pageAsks = JSON.parse(page.stdout).rows.filter((r) => r.question).map((r) => r.askFile).sort(); } catch { /* stays null */ }
+    const notified = Object.keys(st1).filter((k) => k.startsWith('ask:')).map((k) => k.slice(4)).sort();
+    check('the page shows exactly the asks the notifier recorded, file for file',
+        notified.length === 2 && JSON.stringify(pageAsks) === JSON.stringify(notified),
+        `page=${JSON.stringify(pageAsks)} notified=${JSON.stringify(notified)} exit=${page.status}`);
+
+    const k2 = drive(hAsk, 'count');
+    check('re-scanning the same two asks notifies nothing',
+        firedIn(k2) === 0 && (popIn(k2) || {}).asking === 2, summarise(k2));
+
+    fs.writeFileSync(path.join(path.dirname(runAskFile), 'answer.json'), JSON.stringify({ label: 'Production' }) + '\n', 'utf8');
+    const k3 = drive(hAsk, 'count');
+    const st3 = readJson(stateFile(hAsk)) || {};
+    check('an answered ask stops counting, and its key is pruned on a pass that fired nothing',
+        firedIn(k3) === 0 && (popIn(k3) || {}).asking === 1
+        && !(('ask:' + runAskFile) in st3) && (('ask:' + wAskFile) in st3),
+        `${summarise(k3)} state=${JSON.stringify(st3)}`);
+
+    fs.writeFileSync(wAskFile, JSON.stringify({ question: 'Which base, now that main moved?' }) + '\n', 'utf8');
+    const later = new Date(Date.now() + 60000);
+    fs.utimesSync(wAskFile, later, later);
+    const k4 = drive(hAsk, 'count');
+    check('a worker that rewrites its ask notifies again, with the new question',
+        firedIn(k4) === 1 && (toastsIn(k4)[0] || {}).body === 'Which base, now that main moved?', summarise(k4));
+
+    // =====================================================================
+    console.log('\n=== a rerun at the same code is one ask, owned by the newest run ===');
+    // =====================================================================
+    // Every record at one code shares one scratch directory, so the rerun's
+    // ask.json is also what the earlier record there reads. [measured 2026-09-24]
+    // the live ledger held 15 codes with more than one record, one of them three.
+    const hRerun = makeHome('rerun');
+    headlessAsk(hRerun, 'W-RE', { question: 'First run?' }, minutesAgo(90));
+    const reAskFile = headlessAsk(hRerun, 'W-RE', { question: 'Which base, on the rerun?' }, minutesAgo(5));
+    const re1 = drive(hRerun, 'count');
+    check('two records sharing one ask.json fire ONE toast and count ONE ask',
+        firedIn(re1) === 1 && (popIn(re1) || {}).asking === 1
+        && (toastsIn(re1)[0] || {}).body === 'Which base, on the rerun?', summarise(re1));
+    const rePage = spawnSync(process.execPath,
+        [VIEW, 'list', '--json', '--home', hRerun, '--appdata', path.join(hRerun, 'appdata')],
+        { encoding: 'utf8', env: envFor(hRerun), windowsHide: true });
+    let reRows = null;
+    try { reRows = JSON.parse(rePage.stdout).rows.filter((r) => r.code === 'W-RE'); } catch { /* stays null */ }
+    const newest = (reRows || []).map((r) => r.key).sort().pop();
+    const asking = (reRows || []).filter((r) => r.question);
+    check('the page shows the question on the newest run only, never on the one before it',
+        Array.isArray(reRows) && reRows.length === 2 && asking.length === 1
+        && asking[0].askFile === reAskFile && asking[0].key === newest,
+        `rows=${JSON.stringify((reRows || []).map((r) => ({ key: r.key, q: !!r.question, actions: r.actions })))}`);
+
+    // =====================================================================
+    console.log('\n=== an ask a rerun moved aside neither toasts nor counts ===');
+    // =====================================================================
+    // headless-worker start renames the previous run's files, ask.json among
+    // them, before the rerun spawns. This drives that shipped move, not a copy
+    // of its naming, and then asks whether the renamed ask is still read.
+    const hAside = makeHome('aside');
+    const oldAsk = headlessAsk(hAside, 'W-MV', { question: 'Old question?' }, minutesAgo(90));
+    const mv1 = drive(hAside, 'count');
+    check('before the rerun, the first run\'s ask toasts once',
+        firedIn(mv1) === 1 && (toastsIn(mv1)[0] || {}).body === 'Old question?', summarise(mv1));
+    const ledgerFile = path.join(autodev(hAside), 'headless-workers.json');
+    const mvLedger = readJson(ledgerFile);
+    const prior = mvLedger.records[0];
+    const rerunAt = new Date().toISOString();
+    const moved = HW.moveAside(HW.priorRunFiles({ log: prior.log, report: prior.report, code: 'W-MV' }), rerunAt.replace(/[-:.]/g, ''));
+    const to = new Map(moved.map((m) => [m.from, m.to]));
+    for (const k of ['log', 'report']) if (to.has(path.resolve(prior[k]))) prior[k] = to.get(path.resolve(prior[k]));
+    mvLedger.records.push({ ...prior, startedAt: rerunAt, log: path.join(hAside, 'workers', 'W-MV.jsonl'), report: path.join(hAside, 'workers', 'W-MV.report.md') });
+    fs.writeFileSync(ledgerFile, JSON.stringify(mvLedger) + '\n', 'utf8');
+    const asideAsk = (moved.find((m) => m.from === path.resolve(oldAsk)) || {}).to;
+    check('the rerun moved the old ask aside, and the renamed file is still on disk',
+        !!asideAsk && fs.existsSync(asideAsk) && !fs.existsSync(oldAsk), `moved=${JSON.stringify(moved.map((m) => path.basename(m.to)))}`);
+    const mv2 = drive(hAside, 'count');
+    const mvState = readJson(stateFile(hAside)) || {};
+    check('the renamed ask neither toasts nor counts, and its key is pruned',
+        firedIn(mv2) === 0 && (popIn(mv2) || {}).asking === 0 && !Object.keys(mvState).some((k) => k.startsWith('ask:')),
+        `${summarise(mv2)} state=${JSON.stringify(mvState)}`);
+    let mvRows = null;
+    try {
+        mvRows = JSON.parse(spawnSync(process.execPath,
+            [VIEW, 'list', '--json', '--home', hAside, '--appdata', path.join(hAside, 'appdata')],
+            { encoding: 'utf8', env: envFor(hAside), windowsHide: true }).stdout).rows.filter((r) => r.code === 'W-MV');
+    } catch { /* stays null */ }
+    check('the page shows no question on either run once the old ask is moved aside',
+        Array.isArray(mvRows) && mvRows.length === 2 && mvRows.every((r) => !r.question),
+        `rows=${JSON.stringify((mvRows || []).map((r) => ({ key: r.key, q: r.question })))}`);
+    fs.writeFileSync(oldAsk, JSON.stringify({ question: 'New question?' }) + '\n', 'utf8');
+    const mv3 = drive(hAside, 'count');
+    check('the rerun\'s own ask, at the same path, toasts with its own question',
+        firedIn(mv3) === 1 && (toastsIn(mv3)[0] || {}).body === 'New question?', summarise(mv3));
+
+    // =====================================================================
+    console.log('\n=== panels and asks share one summary threshold ===');
+    // =====================================================================
+    const hMix = makeHome('mixed');
+    ['e', 'f'].forEach((c, i) => {
+        const id = sid(c);
+        desktop(hMix, id, 'panel-' + i);
+        block(hMix, id, { at: minutesAgo(40 + i), callId: 'tu_1', question: 'P' + i, options: 2 });
+    });
+    runAsk(hMix, 'job-x', { question: 'X?' });
+    headlessAsk(hMix, 'W-Y', { question: 'Y?' });
+    const x1 = drive(hMix, 'count');
+    check('two panels plus two asks is four, so ONE summary toast',
+        firedIn(x1) === 1 && toastsIn(x1).length === 1
+        && (toastsIn(x1)[0] || {}).title === '4 sessions are waiting on you', summarise(x1));
+    check('and all four are recorded, so the next pass is silent',
+        Object.keys(readJson(stateFile(hMix)) || {}).length === 4 && firedIn(drive(hMix, 'count')) === 0,
+        `state=${JSON.stringify(readJson(stateFile(hMix)))}`);
+
+    // =====================================================================
+    console.log('\n=== an unreadable ledger costs the asks, never the panels ===');
+    // =====================================================================
+    const hBadLedger = makeHome('badledger');
+    fs.mkdirSync(autodev(hBadLedger), { recursive: true });
+    fs.writeFileSync(path.join(autodev(hBadLedger), 'headless-workers.json'), '{not json', 'utf8');
+    const G = sid('0');
+    desktop(hBadLedger, G, 'zeta');
+    block(hBadLedger, G, { at: minutesAgo(60), callId: 'tu_1', question: 'Still here?', options: 2 });
+    const g1 = drive(hBadLedger, 'count');
+    check('a ledger that does not parse still lets a blocked panel notify',
+        g1.status === 0 && firedIn(g1) === 1 && (toastsIn(g1)[0] || {}).title === 'zeta', summarise(g1));
+    check('and the marker names the source it could not read',
+        ((readJson(markerFile(hBadLedger)) || {}).askSources || []).some((p) => /^headless-worker: COULD NOT READ/.test(p)),
+        `marker=${JSON.stringify(readJson(markerFile(hBadLedger)))}`);
 }
 
 try {

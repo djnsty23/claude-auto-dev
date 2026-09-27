@@ -23,6 +23,17 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-env-dedupe.js"],
+            "timeout": 10
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -224,6 +235,16 @@
             "statusMessage": "Saving sprint state..."
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-env-dedupe.js"],
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostCompact": [
@@ -259,6 +280,16 @@
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-register.js"],
             "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-env-dedupe.js"],
+            "timeout": 10
           }
         ]
       }
