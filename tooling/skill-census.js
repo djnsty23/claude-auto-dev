@@ -23,11 +23,11 @@
  *    frontmatter the host reads, so this is a count of real bytes in a real
  *    file, not an estimate.
  *
- * 2. LAST FIRED, exact to the transcript line. Not the file's mtime -- a
+ * 2. LAST FIRED, exact to the transcript record. Not the file's mtime -- a
  *    transcript written to today can hold an invocation from six days ago, and
- *    mtime would date every skill in it to today. For each match the nearest
- *    PRECEDING "timestamp" field is resolved by binary search over the
- *    timestamp positions in that file. The selftest plants exactly that case.
+ *    mtime would date every skill in it to today. Each load carries its own
+ *    record's timestamp, and the window is applied to that timestamp too
+ *    (F1). The selftest plants exactly that case.
  *
  * 3. TOKENS, ESTIMATED, and labelled as such everywhere it is printed. There is
  *    no tokenizer here and bytes/4 is a rule of thumb, not a measurement. It is
@@ -110,52 +110,16 @@ const PROJECTS_DIR = path.join(HOME, '.claude', 'projects');
 
 // ---------------------------------------------------------------- transcripts
 
-/** Byte offsets and values of every ISO timestamp in the text, ascending. */
-function timestampIndex(text) {
-    const positions = [];
-    const values = [];
-    const re = /"timestamp"\s*:\s*"(\d{4}-\d{2}-\d{2}T[^"]+)"/g;
-    let m;
-    while ((m = re.exec(text)) !== null) { positions.push(m.index); values.push(m[1]); }
-    return { positions: positions, values: values };
-}
-
-/** The last timestamp at or before `at`, or null when the match precedes them all. */
-function timestampBefore(idx, at) {
-    const p = idx.positions;
-    if (!p.length || at < p[0]) return null;
-    let lo = 0;
-    let hi = p.length - 1;
-    let best = 0;
-    while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (p[mid] <= at) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
-    }
-    return idx.values[best];
-}
-
 /**
- * Both channels, with a timestamp on every hit.
- *
- * The two regexes are the ones analyze-skill-invocations.js uses, deliberately
- * unchanged: a census that counted a different population than the script it
- * sits beside would produce two numbers for one question, and the difference
- * would be read as a finding about skills rather than about the readers.
+ * ONE READER FOR BOTH SCRIPTS. analyze-skill-invocations.js owns it: a census
+ * that counted a different population than the script it sits beside would
+ * produce two numbers for one question, and the difference would be read as a
+ * finding about skills rather than about the readers. `[measured 2026-09-26]`
+ * this file had kept a copy of the old regexes and drifted: it never gained
+ * the wireToolInputs dedupe, so its model column read about 2x (F4).
  */
-function hitsInText(text) {
-    const idx = timestampIndex(text);
-    const out = [];
-    const model = /"skill"\s*:\s*"([a-zA-Z0-9:_-]+)"/g;
-    const typed = /<command-name>\s*\/?([A-Za-z0-9:_-]{1,60})\s*<\/command-name>/g;
-    let m;
-    while ((m = model.exec(text)) !== null) {
-        out.push({ name: m[1], channel: 'model', at: timestampBefore(idx, m.index) });
-    }
-    while ((m = typed.exec(text)) !== null) {
-        out.push({ name: m[1], channel: 'typed', at: timestampBefore(idx, m.index) });
-    }
-    return out;
-}
+const { skillEvents } = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts',
+    'analyze-skill-invocations.js'));
 
 function bareName(s) {
     const t = String(s || '');
@@ -331,6 +295,7 @@ function census(o) {
     for (const r of corpus.rows) {
         r.model = 0;
         r.typed = 0;
+        r.preload = 0;
         r.lastFired = null;
         byName.set(r.name, r);
     }
@@ -343,18 +308,28 @@ function census(o) {
     let totalHits = 0;
     let modelHits = 0;
     let typedHits = 0;
+    let preloadHits = 0;
+    // Shared across files, so a record a resumed session copied into a new
+    // transcript is counted once.
+    const seen = new Set();
 
     for (const f of files) {
         let text = '';
         try { text = fs.readFileSync(f, 'utf8'); } catch (e) { unreadable++; continue; }
         scanned++;
         bytes += Buffer.byteLength(text, 'utf8');
-        for (const h of hitsInText(text)) {
+        for (const h of skillEvents(text, { sinceMs: sinceMs, seen: seen })) {
             totalHits++;
-            if (h.channel === 'model') modelHits++; else typedHits++;
+            // A built-in command is still the typed reader working, so it
+            // counts toward the channel total the blindness guard reads, and
+            // never toward a skill row: /status is not the status skill (F3).
+            if (h.channel === 'model') modelHits++;
+            else if (h.channel === 'preload') preloadHits++;
+            else typedHits++;
+            if (h.channel === 'builtin') continue;
             const row = byName.get(bareName(h.name));
             if (!row) continue;
-            if (h.channel === 'model') row.model++; else row.typed++;
+            row[h.channel]++;
             if (h.at && (!row.lastFired || h.at > row.lastFired)) row.lastFired = h.at;
         }
     }
@@ -385,6 +360,7 @@ function census(o) {
         totalHits: totalHits,
         modelHits: modelHits,
         typedHits: typedHits,
+        preloadHits: preloadHits,
         corpusError: corpus.error || null,
         render: render ? {
             listings: render.listings,
@@ -445,13 +421,13 @@ function pad(s, n) {
 
 function report(c) {
     const rows = c.rows.slice().sort((a, b) => {
-        const af = a.model + a.typed;
-        const bf = b.model + b.typed;
+        const af = a.model + a.typed + a.preload;
+        const bf = b.model + b.typed + b.preload;
         if (af !== bf) return af - bf;                 // never-fired first: they are the finding
         return b.listingBytes - a.listingBytes;
     });
     const invocable = rows.filter((r) => r.invocable);
-    const dead = invocable.filter((r) => r.model + r.typed === 0);
+    const dead = invocable.filter((r) => r.model + r.typed + r.preload === 0);
     const deadBytes = dead.reduce((s, r) => s + r.listingBytes, 0);
     const allBytes = rows.reduce((s, r) => s + r.listingBytes, 0);
 
@@ -462,7 +438,8 @@ function report(c) {
     // Both channel counts, always, so a blind reader is visible in the header
     // rather than only in a column of zeroes that reads as a corpus finding.
     console.log('              ' + c.totalHits + ' invocation(s) seen: '
-        + c.modelHits + ' model-chosen, ' + c.typedHits + ' typed');
+        + c.modelHits + ' model-chosen, ' + c.typedHits + ' typed, '
+        + (c.preloadHits || 0) + ' preloaded by an agent');
     const R = c.render;
     if (R) {
         console.log('              ' + R.listings + ' skill listing(s) read: ' + R.entriesPerListing
@@ -471,10 +448,10 @@ function report(c) {
     }
     console.log('');
     console.log('  ' + pad('skill', 24) + pad('inv', 5) + pad('model', 7) + pad('typed', 7)
-        + pad('last fired', 12) + (R ? pad('shown', 7) : '') + pad('bytes', 7) + '~tok');
+        + pad('preload', 9) + pad('last fired', 12) + (R ? pad('shown', 7) : '') + pad('bytes', 7) + '~tok');
     for (const r of rows) {
         console.log('  ' + pad(r.name, 24) + pad(r.invocable ? 'yes' : 'no', 5)
-            + pad(String(r.model), 7) + pad(String(r.typed), 7)
+            + pad(String(r.model), 7) + pad(String(r.typed), 7) + pad(String(r.preload), 9)
             + pad(fmtDate(r.lastFired), 12)
             + (R ? pad(r.slots + '/' + R.listings, 7) : '')
             + pad(String(r.listingBytes), 7)
@@ -522,6 +499,18 @@ function selftest() {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-census-'));
     const pluginsDir = path.join(tmp, 'plugins', 'demo', 'skills');
 
+    // Records in the shapes a real transcript carries.
+    const skillCall = (name, id, at) => JSON.stringify({
+        type: 'assistant', timestamp: at, uuid: 'a-' + id,
+        message: { id: 'msg_' + id, content: [{ type: 'tool_use', id: id, name: 'Skill', input: { skill: name } }] },
+        wireToolInputs: { [id]: { skill: name } },
+    });
+    const typedCmd = (name, uuid, at) => JSON.stringify({
+        type: 'user', timestamp: at, uuid: uuid,
+        message: { role: 'user', content: '<command-message>' + name + '</command-message>\n<command-name>/'
+            + name + '</command-name>' },
+    });
+
     const mk = (n, fm) => {
         fs.mkdirSync(path.join(pluginsDir, n), { recursive: true });
         fs.writeFileSync(path.join(pluginsDir, n, 'SKILL.md'), '---\n' + fm + '\n---\n\n# ' + n + '\n', 'utf8');
@@ -536,9 +525,9 @@ function selftest() {
     const t = path.join(tmp, 'a.jsonl');
     fs.writeFileSync(t, [
         '{"timestamp":"2026-09-10T10:00:00.000Z","x":1}',
-        '{"timestamp":"2026-09-17T09:00:00.000Z","tool":{"skill":"demo:firing"}}',
+        skillCall('demo:firing', 'toolu_s1', '2026-09-17T09:00:00.000Z'),
         '{"timestamp":"2026-09-18T23:00:00.000Z","note":"later line, no invocation"}',
-        '{"timestamp":"2026-09-12T08:00:00.000Z","text":"<command-name>/firing</command-name>"}',
+        typedCmd('firing', 'u_s1', '2026-09-12T08:00:00.000Z'),
     ].join('\n'), 'utf8');
 
     const c = census({ days: 3650, dir: tmp, pluginsDir: path.join(tmp, 'plugins'), files: [t] });
@@ -571,10 +560,29 @@ function selftest() {
     // The control that the census can go BLIND: change the field name and the
     // counts must collapse to zero rather than silently keeping the old answer.
     const blind = path.join(tmp, 'b.jsonl');
-    fs.writeFileSync(blind, '{"timestamp":"2026-09-17T09:00:00.000Z","tool":{"skiII":"demo:firing"}}\n', 'utf8');
+    fs.writeFileSync(blind, skillCall('demo:firing', 'toolu_b1', '2026-09-17T09:00:00.000Z')
+        .replace('"name":"Skill"', '"name":"SkiII"') + '\n', 'utf8');
     const c2 = census({ days: 3650, dir: tmp, pluginsDir: path.join(tmp, 'plugins'), files: [blind] });
     ok('a transcript with no recognisable field yields zero hits, not a stale count',
         c2.totalHits === 0, 'got ' + c2.totalHits);
+
+    // F4: one call is recorded with a wireToolInputs echo, and a resumed
+    // session copies it into a second file. It is still one load.
+    const echo1 = path.join(tmp, 'e1.jsonl');
+    const echo2 = path.join(tmp, 'e2.jsonl');
+    const once = skillCall('demo:firing', 'toolu_e1', '2026-09-17T09:00:00.000Z');
+    fs.writeFileSync(echo1, once + '\n', 'utf8');
+    fs.writeFileSync(echo2, once + '\n', 'utf8');
+    const c5 = census({ days: 3650, dir: tmp, pluginsDir: path.join(tmp, 'plugins'), files: [echo1, echo2] });
+    ok('F4: one Skill call, echoed and copied into a second file, counts once',
+        row3(c5, 'firing').model === 1, 'got ' + row3(c5, 'firing').model);
+
+    // F1: a load dated before the window does not count, whatever the mtime.
+    const stale = path.join(tmp, 'f1.jsonl');
+    fs.writeFileSync(stale, skillCall('demo:firing', 'toolu_f1', '2026-07-19T10:00:00.000Z') + '\n', 'utf8');
+    const c6 = census({ days: 7, dir: tmp, pluginsDir: path.join(tmp, 'plugins'), files: [stale] });
+    ok('F1: a load older than the window is not counted from a freshly written file',
+        row3(c6, 'firing').model === 0, 'got ' + row3(c6, 'firing').model);
 
     // ---- the listing reader, and the escape that defeated its first version.
     // The separator here is a real backslash and a real `n`, written as they
@@ -682,9 +690,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-    hitsInText: hitsInText,
-    timestampBefore: timestampBefore,
-    timestampIndex: timestampIndex,
     fmValue: fmValue,
     readCorpus: readCorpus,
     listingInText: listingInText,

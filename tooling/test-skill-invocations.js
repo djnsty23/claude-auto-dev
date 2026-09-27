@@ -49,6 +49,10 @@ skill('fixture-core', 'model-only', true);    // reached ONLY by the Skill tool
 skill('fixture-core', 'never-fired', true);   // reached by neither
 skill('fixture-core', 'also-never', true);
 skill('fixture-core', 'rule-auto', false);    // auto-loaded, not user-invocable
+skill('fixture-core', 'status', true);        // shares its name with the built-in /status
+skill('fixture-core', 'quoted-only', true);   // appears only QUOTED, never loaded
+skill('fixture-core', 'old-only', true);      // loaded only before the window
+skill('fixture-core', 'preloaded', true);     // loaded only by an agent skills: list
 
 const transcript = (name, lines) => {
   const d = path.join(projects, 'proj-a');
@@ -56,13 +60,41 @@ const transcript = (name, lines) => {
   fs.writeFileSync(path.join(d, name), lines.join('\n') + '\n', 'utf8');
 };
 
+// Records in the shapes a real transcript carries. `now` keeps every dated
+// event inside the default 7-day window whatever day the suite runs.
+const now = new Date(Date.now() - 3600000).toISOString();
+let seq = 0;
+const skillCall = (name, at) => {
+  const id = 'toolu_fx' + (++seq);
+  return JSON.stringify({ type: 'assistant', timestamp: at || now, uuid: 'a' + seq,
+    message: { id: 'msg_fx' + seq, content: [{ type: 'tool_use', id: id, name: 'Skill', input: { skill: name } }] },
+    wireToolInputs: { [id]: { skill: name } } });
+};
+const typedCmd = (name) => JSON.stringify({ type: 'user', timestamp: now, uuid: 'u' + (++seq),
+  message: { role: 'user', content: '<command-message>' + name + '</command-message>\n<command-name>/' + name + '</command-name>' } });
+const preloadCmd = (name) => JSON.stringify({ type: 'user', isMeta: true, timestamp: now, uuid: 'p' + (++seq),
+  message: { role: 'user', content: [{ type: 'text', text: '<command-message>' + name + '</command-message>\n<command-name>' +
+    name + '</command-name>\n<skill-format>true</skill-format>' }] } });
+
 transcript('a.jsonl', [
-  JSON.stringify({ type: 'x', skill: 'model-only' }),
-  JSON.stringify({ type: 'x', skill: 'fixture-core:rule-auto' }),
-  JSON.stringify({ type: 'x', skill: 'artifact-design' }),
-  '<command-name>/fixture-core:typed-only</command-name>',
-  '<command-name>/typed-only</command-name>',
-  '<command-name>/compact</command-name>',
+  skillCall('model-only'),
+  skillCall('fixture-core:rule-auto'),
+  skillCall('artifact-design'),
+  typedCmd('fixture-core:typed-only'),
+  typedCmd('typed-only'),
+  typedCmd('compact'),
+  // F3: the built-in /status, typed bare, is not the fixture's status skill.
+  typedCmd('status'),
+  // F2: the tag quoted in a tool_result and in assistant prose loads nothing.
+  JSON.stringify({ type: 'user', timestamp: now, uuid: 'q1', message: { content: [
+    { type: 'tool_result', content: '<command-name>/quoted-only</command-name>' }] } }),
+  JSON.stringify({ type: 'assistant', timestamp: now, uuid: 'q2', message: { content: [
+    { type: 'text', text: 'run <command-name>/quoted-only</command-name>' }] } }),
+  JSON.stringify({ type: 'user', timestamp: now, uuid: 'q3', message: { role: 'user', content:
+    'a prompt that quotes <command-name>/quoted-only</command-name> mid-text' } }),
+  // F1: a July event in a file written today is outside a 7-day window.
+  skillCall('old-only', '2026-07-19T10:00:00.000Z'),
+  preloadCmd('preloaded'),
 ]);
 
 const run = (extra) => spawnSync(process.execPath,
@@ -77,8 +109,17 @@ check('selftest exits 0', st.status === 0, 'exit ' + st.status);
 check('selftest reports its case count', /\d+ cases, 0 failed/.test(st.stdout || ''));
 check('selftest covers the command channel',
   /extracts a plugin-qualified slash command/.test(st.stdout || ''));
-check('selftest refuses a regex literal as a command',
-  /refuses a regex literal masquerading as a command/.test(st.stdout || ''));
+check('selftest covers the quoted-tag case',
+  /F2: a command tag quoted/.test(st.stdout || ''));
+
+// --help is a question, not a request to read 7 GB of transcripts.
+// `[measured 2026-09-26]` it used to fall through to a 7-day analysis.
+const help = spawnSync(process.execPath, [SCRIPT, '--help', '--dir', projects, '--plugins', plugins], { encoding: 'utf8' });
+check('--help exits 0', help.status === 0, 'exit ' + help.status);
+check('  and prints usage naming the flags', /Usage:/.test(help.stdout || '') &&
+  /--days/.test(help.stdout || '') && /--json/.test(help.stdout || ''), (help.stdout || '').slice(0, 200));
+check('  and reads nothing: no population line', !/population:/.test(help.stdout || ''),
+  (help.stdout || '').slice(0, 200));
 
 // ---------------------------------------------------------------------------
 // 2. BOTH channels counted. This is the regression that shipped once.
@@ -100,6 +141,18 @@ if (j) {
     'model=' + JSON.stringify(j.firedByModel) + ' user=' + JSON.stringify(j.firedByUser));
   check('a plugin-qualified and a bare slash command are the same skill',
     j.typedMine === 2, 'typedMine=' + j.typedMine);
+  check('F1: an event dated before the window is not counted, though its file is fresh',
+    (j.never || []).indexOf('old-only') >= 0 && !(j.bySkill || {})['old-only'], JSON.stringify(j.bySkill));
+  check('F2: a command tag quoted in a tool_result or prose is not a load',
+    (j.never || []).indexOf('quoted-only') >= 0, JSON.stringify(j.never));
+  check('F3: the built-in /status is not credited to a skill named status',
+    (j.never || []).indexOf('status') >= 0 && (j.firedByUser || []).indexOf('status') < 0,
+    'never=' + JSON.stringify(j.never) + ' user=' + JSON.stringify(j.firedByUser));
+  check('F4: one Skill call echoed in wireToolInputs is counted once',
+    Boolean((j.bySkill || {})['model-only']) && j.bySkill['model-only'].model === 1, JSON.stringify(j.bySkill));
+  check('an agent preload counts as fired, on its own channel',
+    (j.firedByPreload || []).indexOf('preloaded') >= 0 && (j.firedByUser || []).indexOf('preloaded') < 0 &&
+    j.preloaded === 1, 'preload=' + JSON.stringify(j.firedByPreload) + ' n=' + j.preloaded);
 
   check('skills reached by neither channel are listed as never-fired',
     (j.never || []).indexOf('never-fired') >= 0 && (j.never || []).indexOf('also-never') >= 0,
@@ -110,14 +163,14 @@ if (j) {
   check('an auto-loaded rule-* hit is not counted as a chosen invocation',
     j.mine === 1 && j.auto === 1, 'mine=' + j.mine + ' auto=' + j.auto);
   check('a rule-* skill is not in the user-invocable inventory',
-    j.invocable === 4 && j.autoOnly === 1, 'invocable=' + j.invocable + ' autoOnly=' + j.autoOnly);
+    j.invocable === 8 && j.autoOnly === 1, 'invocable=' + j.invocable + ' autoOnly=' + j.autoOnly);
   check('prose below the frontmatter does not flip a skill to auto-only',
-    j.invocable === 4, 'invocable=' + j.invocable);
+    j.invocable === 8, 'invocable=' + j.invocable);
 
   check('a skill outside this plugin is attributed as foreign',
     j.foreign === 1, 'foreign=' + j.foreign);
   check('a built-in slash command is attributed as foreign too',
-    j.typedForeign === 1, 'typedForeign=' + j.typedForeign);
+    j.typedForeign === 2, 'typedForeign=' + j.typedForeign);
   check('the population is reported, not just the counts',
     j.transcripts === 1 && j.unreadable === 0, JSON.stringify({ t: j.transcripts, u: j.unreadable }));
 }

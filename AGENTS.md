@@ -86,7 +86,7 @@ this machine. `CLAUDE.md` has the specifics.
 
 <!-- GENERATED BELOW — DO NOT EDIT BY HAND.
      Generator: tooling/generate-agents-md.js
-     Source:    plugins/autodev-core/skills/rule-*/SKILL.md (16 rules)
+     Source:    plugins/autodev-core/skills/rule-*/SKILL.md (15 rules)
      Version:   autodev 8.175.0
      Variant:   B
      Regenerate with: node tooling/generate-agents-md.js --write
@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 140,014 | 22 of 22 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,932 | 22 of 22 |
-| B′ same, but dated LINES instead of paragraphs | 15,829 | 1 of 22 |
-| C  description only | 7,151 | 0 of 22 |
+| A  full body | 130,317 | 22 of 22 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,220 | 22 of 22 |
+| B′ same, but dated LINES instead of paragraphs | 15,117 | 1 of 22 |
+| C  description only | 6,636 | 0 of 22 |
 
 ### rule-ab-testing
 
@@ -346,18 +346,6 @@ evidence, not independent proof each change repaired a shipped failure
 (see [`docs/failure-evidence.md`](../../../../docs/failure-evidence.md)).
 
 Full text: `plugins/autodev-core/skills/rule-ramifications/SKILL.md`
-
-### rule-record-size
-
-**paths:** `**/*.rs`, `**/*.go`, `**/*.c`, `**/*.h`, `**/*.cc`, `**/*.cpp`, `**/*.hpp`, `**/*.zig`, `**/*.swift`
-
-A record's size is not its payload's size. An enum is as large as its biggest variant, a growable container carries capacity it will never use, and padding is invisible in the source. Multiplied by a million rows that is real memory. Load before defining a struct, enum or cache entry that will exist in bulk.
-
-Per-record waste is the only kind that multiplies by a number nobody chose. The
-row count is set by traffic, not by a design decision, so a byte you did not
-notice is billed once per row forever.
-
-Full text: `plugins/autodev-core/skills/rule-record-size/SKILL.md`
 
 ### rule-report-shell
 

@@ -48,8 +48,6 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `setup` | Initialize new project |
 | `perf` | Performance audit (Core Web Vitals) |
 | `a11y` | Accessibility audit (WCAG 2.1 AA) |
-| `refactor` | Refactoring patterns |
-| `migrate` / `upgrade` | Dependency updates |
 | `security` | Pre-deploy security scan |
 | `pr` / `pr-review` | PR review with specialized agents |
 | `db` / `supabase` | Database operations, RLS, migrations |
@@ -102,7 +100,7 @@ Less-used commands, complete for reference.
 |-----|--------|
 | `setup project` | Scaffold a new project, or onboard an existing one — detects the stack and configures strict tooling |
 | `env` / `secrets` | Manage environment variables and credentials without pasting them into the chat |
-| `telemetry` / `tool stats` | Which tools a session burned context on, which days were busy, what failed |
+| `tool stats` | Run `node plugins/autodev-core/scripts/telemetry-report.js`: which tools a session burned context on, which days were busy, what failed |
 | `knowledge` / `brief me on` | Distil stored observations for a code area into a focused domain brief |
 | `archive` / `compact prd` | Move completed stories out of `prd.json` to cut its token cost |
 
