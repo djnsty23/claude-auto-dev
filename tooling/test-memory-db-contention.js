@@ -60,41 +60,60 @@ const initRun = spawnSync(process.execPath, [init], { encoding: 'utf8', env });
 const SID = initRun.stdout;
 check('setup: the subject creates its store and a session in the sandbox', /^ses/.test(SID) && fs.existsSync(DB_PATH));
 
-// Holds a write lock for HOLD_MS, announcing the moment it has it.
+// Holds a write lock, announcing the moment it has it, until the writer drops
+// GO, then HOLD_MS more. The hold used to run from the lock alone, so a writer
+// slow to spawn and require (over 700 ms in a loaded gate, 2026-09-27) started
+// its clock after the COMMIT and read {"ms":9}: the lock looked never held.
+// The writer drops GO with its clock already running, so its wait covers the
+// whole hold however late it starts.
 const HOLD_MS = 700;
+// A writer that dies before GO, or hangs, cannot hang the suite: the parent
+// drops GO itself once the writer exits, and the holder gives up after this.
+const SAFETY_MS = 15000;
 const holder = script('holder.js', `
+const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
+const go = process.argv[2];
+const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const db = new DatabaseSync(${JSON.stringify(slash(DB_PATH))});
 db.exec('BEGIN IMMEDIATE');
 process.stdout.write('locked\\n');
-Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${HOLD_MS});
+const t = Date.now();
+while (!fs.existsSync(go) && Date.now() - t < ${SAFETY_MS}) nap(5);
+process.stdout.write(fs.existsSync(go) ? 'GO after ' + (Date.now() - t) + ' ms\\n' : 'no GO in ${SAFETY_MS} ms\\n');
+nap(${HOLD_MS});
 db.exec('COMMIT');
 db.close();
 `);
 
 const writer = script('writer.js', `
+const fs = require('fs');
 const db = require(${JSON.stringify(slash(DB_JS))});
 const t = Date.now();
+fs.writeFileSync(process.argv[4], '');
 const id = db.saveObservation({ sessionId: process.argv[3], projectPath: '/proj', type: 'change', title: 'under lock ' + process.argv[2] });
 process.stdout.write(JSON.stringify({ id, ms: Date.now() - t }));
 `);
 
 function underLock(tag) {
+    const go = path.join(TMP, `go-${tag}`);
     return new Promise((resolve) => {
-        const h = spawn(process.execPath, [holder], { env });
+        const h = spawn(process.execPath, [holder, go], { env });
         let out = '';
         let fired = false;
         h.stdout.on('data', (d) => {
             out += d;
             if (!fired && out.includes('locked')) {
                 fired = true;
-                const w = spawnSync(process.execPath, [writer, tag, SID], { encoding: 'utf8', env });
+                const w = spawnSync(process.execPath, [writer, tag, SID, go], { encoding: 'utf8', env, timeout: SAFETY_MS });
+                if (!fs.existsSync(go)) fs.writeFileSync(go, '');
                 let parsed = null;
                 try { parsed = JSON.parse(w.stdout); } catch { /* reported below */ }
-                h.on('exit', () => resolve({ parsed, stderr: w.stderr || '' }));
+                const note = w.error ? `; writer ${w.error.code} after ${SAFETY_MS} ms, printed ${JSON.stringify(w.stdout)}` : '';
+                h.on('close', () => resolve({ parsed, note, stderr: w.stderr || '', holder: out.trim().split(/\r?\n/).join(', ') }));
             }
         });
-        h.on('exit', () => { if (!fired) resolve({ parsed: null, stderr: 'holder never locked' }); });
+        h.on('exit', () => { if (!fired) resolve({ parsed: null, note: '', stderr: 'holder never locked', holder: out }); });
     });
 }
 
@@ -105,9 +124,9 @@ process.stdout.write(JSON.stringify(db.pragmas ? db.pragmas() : null));
 
 (async () => {
     const r = await underLock('a');
-    check(`a write that meets a ${HOLD_MS} ms lock waits and lands (${JSON.stringify(r.parsed)})`,
+    check(`a write that meets a ${HOLD_MS} ms lock waits and lands (${JSON.stringify(r.parsed)}${r.note})`,
         !!r.parsed && typeof r.parsed.id === 'string' && r.parsed.id.length > 0);
-    check('  and it did wait, so the lock was really held', !!r.parsed && r.parsed.ms >= HOLD_MS / 2);
+    check(`  and it did wait, so the lock was really held (holder: ${r.holder})`, !!r.parsed && r.parsed.ms >= HOLD_MS / 2);
     check('  and nothing was reported as a DB error', !/DB error|database is locked/i.test(r.stderr));
 
     const p = spawnSync(process.execPath, [pragmas], { encoding: 'utf8', env });
