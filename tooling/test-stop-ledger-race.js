@@ -38,6 +38,11 @@ function runAsync(args, { input, env, cwd } = {}) {
         c.stdout.on('data', (d) => { out += d; });
         c.stderr.on('data', (d) => { err += d; });
         c.on('close', (status) => resolve({ out, err, status }));
+        // A child that never reads stdin (the module-race writer) can exit before this
+        // write lands. On POSIX that is an EPIPE on the pipe, and with no listener it
+        // throws in this process and kills the suite. The child's verdict is its exit
+        // status and output; any other stdin error is recorded where checks read it.
+        c.stdin.on('error', (e) => { if (e.code !== 'EPIPE') err += 'stdin ' + e.code + ' '; });
         c.stdin.end(input || '');
     });
 }

@@ -1075,7 +1075,11 @@ try {
         const real = startFake('T25B');
         if (real.pid) waitForEnd(real.log, real.pid);
         const rec = (JSON.parse(read(real.ledger) || '{"records":[]}').records || [])[0] || {};
-        check('25. a started record carries the cwd the worker ran in', typeof rec.cwd === 'string' && path.resolve(rec.cwd) === path.resolve(ROOT), rec.cwd);
+        // The record holds the child's process.cwd(), which the OS reports resolved: on macOS
+        // /var/folders is a symlink to /private/var/folders, so ROOT and the record name one
+        // directory by two spellings. Compare what each resolves to, not the strings.
+        const onDisk = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
+        check('25. a started record carries the cwd the worker ran in', typeof rec.cwd === 'string' && onDisk(rec.cwd) !== null && onDisk(rec.cwd) === onDisk(ROOT), `${rec.cwd} vs ${ROOT}`);
     }
 
     // 26. Workers run installed code. `[measured 2026-09-23]` after an install,
