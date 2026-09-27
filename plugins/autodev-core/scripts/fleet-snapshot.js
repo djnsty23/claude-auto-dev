@@ -13,6 +13,7 @@
  *   node fleet-snapshot.js --out board.html            gather live, render
  *   node fleet-snapshot.js --json > snapshot.json      gather live, dump the data
  *   node fleet-snapshot.js --data snapshot.json --out board.html   render a dump
+ *   node fleet-snapshot.js --help      print the usage line and exit 0
  *
  * Reads the same instruments the fleet already merges on, so the board and the
  * merge decision cannot disagree: check-pr-ready for each open PR, prd-states
@@ -272,8 +273,19 @@ function render(d) {
 
 module.exports = { gather, render, repoPanel, prdBar, esc, nextActionable };
 
+const USAGE = 'Usage: node fleet-snapshot.js --out <file.html> | --json | --data <snapshot.json> --out <file.html>';
+
 if (require.main === module) {
     const argv = process.argv.slice(2);
+    // --help answers before gather(). It used to fall through to it, because
+    // any argv without --data gathers live: with no brain-brief.json under the
+    // config dir that read threw ENOENT and exited 1 with a stack trace, and with
+    // one it ran git and gh across every mandate repo before printing the usage
+    // line it had been asked for.
+    if (argv.includes('--help') || argv.includes('-h')) {
+        console.log(USAGE);
+        process.exit(0);
+    }
     const arg = (n) => { const i = argv.indexOf(n); return i === -1 ? null : argv[i + 1]; };
     const dataFile = arg('--data');
     const out = arg('--out');
@@ -282,5 +294,5 @@ if (require.main === module) {
     else d = gather();
     if (argv.includes('--json')) console.log(JSON.stringify(d, null, 2));
     if (out) { fs.writeFileSync(out, render(d), 'utf8'); console.error('wrote ' + out + ' (' + fs.statSync(out).size + ' bytes) measured ' + d.measuredAt); }
-    if (!out && !argv.includes('--json')) console.log('fleet-snapshot.js --out <file.html> | --json | --data <snapshot.json> --out <file.html>');
+    if (!out && !argv.includes('--json')) console.log(USAGE);
 }

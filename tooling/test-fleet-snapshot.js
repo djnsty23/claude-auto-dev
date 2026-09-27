@@ -15,7 +15,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'fleet-snapshot.js');
 const { render, esc, nextActionable } = require(SUBJECT);
@@ -148,6 +148,24 @@ try {
     check('--data --out renders a dump to a file without touching git or gh', written === html, 'output differs from render(DATA)');
 } catch (e) { check('the CLI --data path runs', false, String(e.message).slice(0, 120)); }
 finally { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); }
+
+// ---- --help answers before gather() -------------------------------------------
+// Before it had a branch, --help fell through to gather(). The config dir here is
+// empty, so that old path reads a missing brain-brief.json and exits 1 with a
+// stack trace on stderr: each of the three checks below fails on it. An empty
+// config dir also means the old path can never reach a live gh or git call.
+let home = null;
+try {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-snapshot-help-'));
+    const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude') };
+    const usage = /^Usage: node fleet-snapshot\.js --out <file\.html> \| --json \| --data <snapshot\.json> --out <file\.html>$/;
+    for (const flag of ['--help', '-h']) {
+        const r = spawnSync(process.execPath, [SUBJECT, flag], { encoding: 'utf8', env, cwd: home, timeout: 30000 });
+        check(`${flag} exits 0`, r.status === 0, 'status ' + r.status + ' ' + String(r.stderr).slice(0, 120));
+        check('  and prints the usage line and nothing else', usage.test(String(r.stdout).trim()) && String(r.stdout).trim().split('\n').length === 1, JSON.stringify(String(r.stdout).slice(0, 160)));
+        check('  and writes nothing to stderr', r.stderr === '', JSON.stringify(String(r.stderr).slice(0, 160)));
+    }
+} finally { if (home) fs.rmSync(home, { recursive: true, force: true }); }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

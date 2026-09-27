@@ -23,10 +23,18 @@
  * Run it directly, or let `validate` spawn it:
  *   node tooling/check-no-home-paths.js
  *   node tooling/check-no-home-paths.js --selftest
+ *   node tooling/check-no-home-paths.js --help      print the usage line
  */
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+
+// --help answers before the scan. It used to be ignored, so asking for help
+// listed and read every tracked file, the default action.
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    console.log('Usage: node tooling/check-no-home-paths.js [--selftest]');
+    process.exit(0);
+}
 
 const ROOT = path.resolve(__dirname, '..');
 

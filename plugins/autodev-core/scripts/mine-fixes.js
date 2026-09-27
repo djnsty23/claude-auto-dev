@@ -7,6 +7,7 @@
 // list of what to gate, instead of inheriting someone else's checklist.
 //
 // Usage: node mine-fixes.js [repo-path] [--json] [--window-days=N] [--since=<git date>]
+//        node mine-fixes.js --help     print the line above and exit 0
 //
 // --window-days is the REWORK window: how soon after a feature a fix on the
 // same file counts as first-pass failure. --since is the DATE window: which
@@ -32,8 +33,18 @@ function git(a) {
     return execSync(`git ${a}`, { cwd: repo, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
 }
 
-// NUL record separator: --name-only puts a blank line between the format line
+const USAGE = 'Usage: node mine-fixes.js [repo-path] [--json] [--window-days=N] [--since=<git date>]';
+
 function main() {
+    // --help answers before any git call. It used to fall through to the analysis
+    // of the current directory: read-only, but work nobody asked for, and in a
+    // tree with no .git it exited 1 with "Not a git repository", which looked
+    // like an answer to a probe that never reached the usage line.
+    if (args.includes('--help') || args.includes('-h')) {
+        console.log(USAGE);
+        return 0;
+    }
+    // NUL record separator: --name-only puts a blank line between the format line
     // and the file list, so splitting on a blank line mis-frames every record.
     let RAW;
     try {

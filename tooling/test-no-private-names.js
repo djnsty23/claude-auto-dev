@@ -178,6 +178,26 @@ try {
         check('  while off CI the same path is still caught',
             offCi.status !== 0 && offCi.namesProbe);
     }
+
+    // ------------------------------------------ --help answers before the scan
+    // Before it had a branch, --help fell through to the whole-tree scan. The HOME
+    // below ends in a segment named `home`, the shape check-entrypoints.js gave
+    // its scratch HOME: off CI the old path then reports every `/home/` in the
+    // tree and exits 1 with the findings on stderr, and on CI it prints the clean
+    // population line. Either way the usage check fails on it.
+    {
+        const home = path.join(fakeRoot, 'home');
+        const usage = /^Usage: node tooling\/check-no-private-names\.js \[--list \| --digest <name> \| --check-text <file> \| --check-message <file>\]$/;
+        for (const flag of ['--help', '-h']) {
+            const r = spawnSync(process.execPath, [CHECKER, flag],
+                { encoding: 'utf8', cwd: ROOT, env: { ...process.env, HOME: home, USERPROFILE: home } });
+            check(`${flag} exits 0`, r.status === 0, `status ${r.status}`);
+            check('  and prints the usage line and nothing else',
+                usage.test(String(r.stdout).trim()) && String(r.stdout).trim().split('\n').length === 1,
+                JSON.stringify(String(r.stdout).slice(0, 160)));
+            check('  and writes nothing to stderr', r.stderr === '', JSON.stringify(String(r.stderr).slice(0, 160)));
+        }
+    }
 } finally {
     fs.rmSync(PROBE, { force: true });
     fs.rmSync(fakeRoot, { recursive: true, force: true });

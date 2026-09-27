@@ -13,9 +13,21 @@
 // intend to read, or you will be reading a mutant.
 //
 // Run: node tooling/mutate-sessions-gate.js
+//      node tooling/mutate-sessions-gate.js --help   print this line and exit 0
+//
+// --help returns before the dirty check. It used to be ignored, so asking for
+// help in a checkout started the sweep, which rewrites session-sweep.js in
+// place. check-entrypoints.js found it once its scratch copy became a git
+// repository: the probe ran past its 10 s budget there, where before it died on
+// the first git call and read as an answer. `[measured 2026-09-25]`
 
 const fs = require('fs');
 const { execSync, spawnSync } = require('child_process');
+
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log('usage: node tooling/mutate-sessions-gate.js   (mutation-tests tooling/test-session-sweep.js; rewrites its subject in place)');
+  process.exit(0);
+}
 
 const REPO = require('path').resolve(__dirname, '..');
 const SUBJECT = `${REPO}/plugins/autodev-core/scripts/session-sweep.js`;
