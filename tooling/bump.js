@@ -4,7 +4,8 @@
  *
  * VERSION is the single source of truth. Before 8.0 the version was smeared
  * across nine files and kept in step by platform-specific sed branches; now
- * there are five JSON files and one writer.
+ * there are five JSON files and one writer. It also regenerates AGENTS.md,
+ * whose banner carries the version.
  *
  * Usage: node tooling/bump.js <x.y.z>
  */
@@ -51,6 +52,19 @@ for (const p of fs.readdirSync(path.join(ROOT, 'plugins'))) {
   if (fs.existsSync(path.join(ROOT, rel))) {
     patchJSON(rel, (j) => { j.version = version; });
   }
+}
+
+// AGENTS.md carries the version in its banner, so a bump that skips it leaves
+// check:agents-md red. Every release before 8.177.0 regenerated it by hand.
+const { spawnSync } = require('child_process');
+const gen = spawnSync(process.execPath, [path.join(ROOT, 'tooling', 'generate-agents-md.js'), '--write'], {
+  cwd: ROOT, encoding: 'utf8', windowsHide: true,
+});
+if (gen.status !== 0) {
+  console.error(`\nError: generate-agents-md.js --write exited ${gen.status}\n${gen.stderr || gen.stdout}`);
+  process.exitCode = 1;
+} else {
+  console.log('  AGENTS.md');
 }
 
 console.log('\nNext:');
