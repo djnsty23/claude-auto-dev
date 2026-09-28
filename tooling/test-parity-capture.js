@@ -275,6 +275,17 @@ async function main() {
             exit: 1,
             off: ["if (kind === 'text' && candRendered && candRendered.includes(t)) {", "if (false) {"],
         },
+        {
+            name: 'text reworded',
+            mutate: (s) => {
+                s['/'].text = s['/'].text.map((x) => (x.startsWith('We build') ? 'We build sturdy widgets for every workshop.' : x));
+            },
+            assertion: 'a text finding on / for the widgets sentence, class replaced, and nothing lost',
+            holds: (o) => findings(o, 'replaced', 'text').some((l) => l.includes('We build sturdy widgets for every kind'))
+                && findings(o, 'lost').length === 0,
+            exit: 0,
+            off: ["if (best >= 0.5) J.add({ route, kind, class: 'replaced'", "if (false) J.add({ route, kind, class: 'replaced'"],
+        },
     ];
 
     for (const d of DEFECTS) {

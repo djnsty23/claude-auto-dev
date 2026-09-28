@@ -385,6 +385,14 @@ for (const args of [['--help'], ['static', '--help'], ['judge', '--help']]) {
   check(`help: ${args.join(' ')} exits 0 with usage`, r.code === 0 && /usage|Usage/.test(r.stdout), `exit ${r.code}`);
 }
 
+// ------------------------------------------------------------------ selftest
+
+{
+  const r = run(['--selftest']);
+  check('selftest: --selftest exits 0 and reports its planted violation caught',
+    r.code === 0 && /clean 0 violations of 1 clickables, planted 1 violation\(s\): PASS/.test(r.stdout), `exit ${r.code}; ${r.stdout}${r.stderr}`);
+}
+
 // ------------------------------------------------------------------ probe
 
 function probeSource(script = SCRIPT) {
