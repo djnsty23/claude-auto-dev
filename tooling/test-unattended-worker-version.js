@@ -97,7 +97,8 @@ try {
     // 2. Control: the checkout copy names the repo version and says dev.
     const dev = lifecycle(CHECKOUT, 'from-checkout');
     check('control: a checkout copy stamps its own version', dev.record && dev.record.version === REPO_VERSION, dev.record && dev.record.version);
-    check('control: a checkout copy says dev on every step', dev.brief && dev.brief.composedDev === true && dev.record.dev === true && dev.settle.settledDev === true);
+    check('control: a checkout copy says dev on every step', dev.brief && dev.record && dev.settle && dev.brief.composedDev === true && dev.record.dev === true && dev.settle.settledDev === true,
+        JSON.stringify([dev.brief && dev.brief.composedDev, dev.record && dev.record.dev, dev.settle && dev.settle.settledDev]));
 
     // 3. A settle that is refused writes no stamp.
     val(cli(CACHED, ['brief', '--repo', repo, '--slug', 'still-running', '--brief-file', briefFile, '--return', 'c', '--ledger', ledger]));

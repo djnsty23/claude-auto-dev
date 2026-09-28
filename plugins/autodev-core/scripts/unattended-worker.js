@@ -256,9 +256,9 @@ function brief(opts) {
     };
 }
 
-// The run session boots on whatever is installed when `record` runs, and a
-// script inside the plugin cache IS that install, so its manifest names the
-// release. A checkout copy names its own version, and `dev` says so.
+// A copy inside the plugin cache is the install the run session boots on, so
+// its manifest names the release. A checkout copy names the checkout's
+// version, and `dev` says so.
 function stamp(prefix) {
     const placement = scriptPlacement(__filename);
     return { [`${prefix}Version`]: placement.version, [`${prefix}Dev`]: !placement.installed };
