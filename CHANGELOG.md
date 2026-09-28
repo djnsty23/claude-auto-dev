@@ -1,5 +1,34 @@
 # Changelog
 
+## [8.177.0]
+
+### Shared-file read-modify-write detector (G10, #301)
+
+- find-shared-rmw pairs a read of a shared file held in one function with
+  a write of it in another, so a hook that rewrites a ledger from a stale
+  read fails the gate instead of losing a peer's line.
+- Three hooks it caught now append, rename or rotate instead of
+  rewriting: memory-capture, stop-typecheck and instructions-loaded.
+
+### parity-capture.js: a redesign graded against production (#317)
+
+- Fetches every route of a baseline and a candidate and reports each
+  loss (links, SEO fields, JSON-LD, forms, text, robots and sitemap) as
+  replaced, intentional or lost. A protected candidate is INDETERMINATE,
+  not a lost site.
+
+### auth-matrix.js: every protected route probed as every role (#318)
+
+- Signed out, signed in without the privilege, and privileged. Exit 1 on
+  a leak, 2 on any unverified cell, 0 only when every expected cell
+  passed. The ship checklist line now runs it.
+
+### tracking-parity.js: every action tracked, and tracked once (#320)
+
+- A static pass flags clickables and forms without a tracking attribute.
+  A rendered pass clicks each tracked element and grades ok, untracked,
+  double or lost. It never clicks a skipped or destructive control.
+
 ## [8.176.0]
 
 ### `npm run gate` queues itself (#313, #325)
