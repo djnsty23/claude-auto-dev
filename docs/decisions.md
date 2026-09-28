@@ -3,6 +3,37 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-09-28: the clock starts queued work through headless workers, behind a judge and a switch
+
+`plugins/autodev-core/scripts/brain-judge.js` is one tick the Brain clock runs
+every pass. It closes finished headless runs, asks a model for a verdict on
+each (accept, follow-up or escalate), and starts ready queued work through
+`unattended-worker.js launch`. Before it, the clock settled finished workers
+and started nothing, so the queue moved only while a Brain session was awake.
+
+The start channel is a headless `claude -p` worker, not a Desktop scheduled
+task. `[measured 2026-09-28]` a headless run has no scheduled-task tools, and
+an unattended scheduled run is refused `run_scheduled_task`. A cron-driven
+script is the one thing that runs with nobody awake, and it can spawn a
+headless worker.
+
+The judge runs with no tools, no MCP servers, no settings and no session, and
+reads the report and brief on stdin as fenced data. It answers by JSON schema,
+capped at 4 turns and 0.5 USD. `[measured 2026-09-28]` one call costs 0.03 to
+0.06 USD and about 5 s. A backfill over 46 finished runs cost 1.66 USD with no
+errors: escalate 26, accept 9, follow-up 11. Against the Brain's inferred next
+step it agreed on 10 of 46. Most disagreements are escalations the inference
+cannot see: it reads "no successor task" as accept, which also covers an
+escalation the Brain took to a person and a follow-up it did itself. So the
+switch ships dry, and a Brain writes `verdict --by brain` on the records it
+reads, which gives `compare` a measured side before anything goes live.
+
+Each step is off, dry or live in a switch file, and is live only when the
+switch says live AND the clock pass is live. No file means dry and an
+unreadable one means off, so a corrupt switch can stop the queue but never
+start it. Three failed clock passes stop judging and starting, and each step
+starts only when the rest of the tick's time budget covers its worst case.
+
 ## 2026-09-26: a security gate that blocks only on rules with no measured false positive
 
 `plugins/autodev-core/scripts/security-gate.js` checks what a machine can decide

@@ -41,8 +41,31 @@
  *           record has a session behind it and must go through settle.
  *   status  prints every ledger record and how many were read.
  *
- * WHAT IT IS NOT. It starts nothing, deletes nothing and verifies no result.
- * A `started` record means a session id was returned, not that step 0 passed.
+ * THE QUEUE (the headless channel). `[measured 2026-09-28]` nothing unattended
+ * can drive the scheduled-task path: a headless `claude -p` has no
+ * scheduled-tasks tools, and an unattended scheduled run is refused
+ * `run_scheduled_task`. So work that must start while nobody watches is queued
+ * here and started as a headless worker through headless-worker.js, by whatever
+ * cron runs `launch` (brain-judge.js, from the Brain clock).
+ *
+ *   enqueue records a brief as `queued`: the slug (at most 24 characters, since
+ *           it becomes the headless code), a copy of the brief under the task's
+ *           scratch directory, the launch options and any `--after` tasks.
+ *   ready   lists which queued tasks may start now (planStarts): every
+ *           dependency finished, succeeded and was accepted by a verdict, and
+ *           the concurrency and per-hour caps leave a slot.
+ *   launch  runs the brief checks again, composes the same STEP 0 prompt, and
+ *           calls `headless-worker.js start` with a pointer prompt, because the
+ *           prompt travels in argv. Success is `started` on channel headless.
+ *           A refusal leaves the record queued with lastLaunchError.
+ *   verdict records accept, follow-up or escalate for a finished task. A judge
+ *           verdict never replaces an existing one; the Brain's or the operator's does.
+ *   settle  on a headless record ends in `closed`: no scheduled task exists, so
+ *           there is nothing for `deleted` to record.
+ *
+ * WHAT IT IS NOT. Only `launch` starts anything. It deletes nothing and
+ * verifies no result. A `started` record means a session id or a supervisor
+ * pid was returned, not that step 0 passed.
  *
  * Usage:
  *   node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address>
@@ -53,6 +76,12 @@
  *   node unattended-worker.js deleted --task-id <id> [--ledger <file>]
  *   node unattended-worker.js retire --task-id <id> [--reason <text>] [--ledger <file>]
  *   node unattended-worker.js status [--task-id <id>] [--ledger <file>]
+ *   node unattended-worker.js enqueue --repo <dir> --slug <topic> --brief-file <md> --return <address>
+ *        [--after <task id>[,<task id>]] [--base origin/main] [--task-id <id>] [--title <text>]
+ *        [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>] [--ledger <file>]
+ *   node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]
+ *   node unattended-worker.js launch --task-id <id> [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]
+ *   node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator] [--ledger <file>]
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  */
 const fs = require('node:fs');
@@ -73,22 +102,46 @@ const USAGE = [
     '       then print create_scheduled_task arguments whose prompt opens with git worktree add.',
     'settle: delete_scheduled_task archives the run session, so it is safe only once the run has ended',
     '       AND its result was read (--report-read).',
-    'retire: close a composed record whose task never ran, freeing its slug and task id.',
-    'Starts nothing and deletes nothing: the coordinator makes the scheduled-tasks calls.',
+    '       node unattended-worker.js enqueue --repo <dir> --slug <topic> --brief-file <md> --return <address> [--after <id>[,<id>]]',
+    '            [--base origin/main] [--task-id <id>] [--title <text>] [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>] [--ledger <file>]',
+    '       node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]',
+    '       node unattended-worker.js launch --task-id <id> [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]',
+    '       node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator] [--ledger <file>]',
+    'retire: close a composed or queued record whose task never ran, freeing its slug and task id.',
+    'enqueue: queue a brief for the headless channel. The slug is at most 24 characters: it becomes the headless code.',
+    'ready: queued tasks whose dependencies were accepted, within the concurrency and per-hour caps.',
+    'launch: the only command that starts anything. It re-runs the brief checks and calls headless-worker.js start.',
+    'verdict: a judge verdict never replaces an existing one; --by brain or operator does.',
+    'The scheduled-task path starts nothing and deletes nothing: the coordinator makes those MCP calls.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'unattended-workers.json')}`,
 ].join('\n') + '\n';
 
-const ACTIVE = ['composed', 'started', 'settled'];
+const ACTIVE = ['queued', 'composed', 'started', 'settled'];
+// A record that ran and ended: the states a verdict and a dependency can read.
+const FINISHED = ['settled', 'closed', 'deleted'];
 const RUN_STATUSES = ['running', 'succeeded', 'failed'];
+const DECISIONS = ['accept', 'follow-up', 'escalate'];
+const VERDICT_BY = ['judge', 'brain', 'operator'];
 const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/;
+// headless-worker.js CODE_RE caps a code at 24 characters, and the slug is the code.
+const HEADLESS_SLUG_MAX = 24;
 const SESSION = /^local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const HOUR_MS = 60 * 60 * 1000;
+const LOCK_STALE_MS = 60 * 1000;
+// A suite sets AUTODEV_LEDGER_LOCK_WAIT_MS to see a refusal without waiting the full ten seconds.
+const LOCK_WAIT_MS = Number(process.env.AUTODEV_LEDGER_LOCK_WAIT_MS) || 10 * 1000;
+// A queued task whose launch was refused this many times stays queued for a person.
+const MAX_LAUNCH_ATTEMPTS = 3;
+const LAUNCH_TIMEOUT_MS = 60 * 1000;
+const FETCH_TIMEOUT_MS = 30 * 1000;
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
 function parseArgs(argv) {
     const out = { _: [] };
-    const flags = ['help', 'report-read'];
-    const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason'];
+    const flags = ['help', 'report-read', 'dry-run', 'dev'];
+    const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason',
+        'after', 'model', 'effort', 'permission-mode', 'config-dir', 'headless-worker', 'claude-bin', 'decision', 'by', 'max-concurrent', 'max-per-hour'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -113,8 +166,10 @@ const sameDir = (a, b) => {
     return process.platform === 'win32' ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
 };
 
-function git(repo, args) {
-    const r = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+function git(repo, args, timeoutMs) {
+    const r = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs });
+    // A timed-out git is a failed step the caller reports, not a missing git.
+    if (r.error && r.error.code === 'ETIMEDOUT') return { status: null, stdout: '', stderr: `timed out after ${timeoutMs} ms` };
     if (r.error) fault('git-unavailable', r.error.message);
     return { status: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
 }
@@ -136,6 +191,34 @@ function writeLedger(file, ledger) {
     fs.renameSync(temp, file);
 }
 
+function sleepMs(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+
+/**
+ * Every write holds `<ledger>.lock`. Before the queue, one coordinator wrote this
+ * ledger by hand. Now the Brain clock's launch and a Brain turn's enqueue can land
+ * in the same second, and a read-modify-write without a lock loses one of them.
+ * A lock older than LOCK_STALE_MS is a dead writer's, and is taken over.
+ */
+function withLock(ledgerFile, fn) {
+    const lock = `${ledgerFile}.lock`;
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+        try {
+            fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }), { flag: 'wx' });
+            break;
+        } catch (e) {
+            if (e.code !== 'EEXIST') fault('ledger-locked', `${lock}: ${e.code || e.message}`);
+            let age = null;
+            try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { age = null; }
+            if (age !== null && age > LOCK_STALE_MS) { try { fs.unlinkSync(lock); } catch { /* another writer took it over first */ } continue; }
+            if (Date.now() > deadline) fault('ledger-locked', `${lock} is held by another writer; try again`);
+            sleepMs(50);
+        }
+    }
+    try { return fn(); } finally { try { fs.unlinkSync(lock); } catch { /* already gone */ } }
+}
+
 function findRecord(ledger, taskId) {
     const rec = ledger.records.find((r) => r.taskId === taskId);
     if (!rec) fault('unknown-task', `no ledger record for task ${taskId}`);
@@ -154,7 +237,7 @@ function findRecord(ledger, taskId) {
  * starts with `cd "<worktree>" && `, and the worker re-reads the toplevel in the
  * same command before a commit, push or merge.
  */
-function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug, body, scratch }) {
+function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug, body, scratch, channel }) {
     const r = slashes(repo), w = slashes(worktree);
     const rep = slashes(report || path.join(scratch || os.tmpdir(), 'REPORT.md'));
     const code = slug || taskId;
@@ -178,7 +261,8 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report,
         // watches an unattended session, so it sat idle with no RESULT line
         // and read as still running until a coordinator opened it by hand.
         `Never end your turn with a question: nobody is watching this session to answer it. When you need a decision, write the report with its last line \`RESULT ${code} stopped: <the question and the options>\`, then end.`,
-        `Do not delete scheduled task ${taskId}. Deleting it archives this session; the coordinator deletes it after reading your report.`,
+        // A headless run has no scheduled task behind it, so the line would name one that does not exist.
+        ...(channel === 'headless' ? [] : [`Do not delete scheduled task ${taskId}. Deleting it archives this session; the coordinator deletes it after reading your report.`]),
         '',
     ].join('\n');
 }
@@ -187,32 +271,42 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report,
 function decideSettle(record, runStatus, reportRead) {
     if (!RUN_STATUSES.includes(runStatus)) fault('usage', `--run-status must be one of ${RUN_STATUSES.join(', ')}`);
     if (record.state === 'composed') return { deleteSafe: false, reason: 'no run recorded: run_scheduled_task, then record its session id' };
+    if (record.state === 'queued') return { deleteSafe: false, reason: 'queued and never launched: there is no run to settle' };
     if (record.state === 'deleted') return { deleteSafe: false, reason: 'already deleted' };
+    if (record.state === 'closed') return { deleteSafe: false, reason: 'already closed' };
     if (record.state === 'retired') return { deleteSafe: false, reason: 'retired before it ran: there is no run to settle' };
     if (runStatus === 'running') return { deleteSafe: false, reason: 'the run is still going, and deleting the task archives its session' };
     if (!reportRead) return { deleteSafe: false, reason: `the run ${runStatus} but its result was not read: read list_events for ${record.sessionId}, then pass --report-read` };
     return { deleteSafe: true, reason: `the run ${runStatus} and its result was read` };
 }
 
-function brief(opts) {
-    for (const k of ['repo', 'slug', 'brief-file', 'return']) if (!opts[k]) fault('usage', `--${k} is required for brief`);
-    if (!SLUG.test(opts.slug)) fault('bad-slug', `slug must match ${SLUG}`);
-    const taskId = opts['task-id'] || `worker-${opts.slug}`;
-    if (!SLUG.test(taskId)) fault('bad-task-id', `task id must match ${SLUG}`);
-    const base = opts.base || 'origin/main';
-    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(base)) fault('bad-base', `base ${base} is not a plain ref name`);
-
+function resolveRepo(raw) {
     let repo;
-    try { repo = fs.realpathSync.native(opts.repo); } catch { fault('not-a-repo', `${opts.repo} does not exist`); }
+    try { repo = fs.realpathSync.native(raw); } catch { fault('not-a-repo', `${raw} does not exist`); }
     const top = git(repo, ['rev-parse', '--show-toplevel']);
     if (top.status !== 0 || !sameDir(top.stdout, repo)) fault('not-a-repo', `${repo} is not the top of a git work tree`);
-    if (git(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).status !== 0) fault('base-unresolved', `${base} does not resolve in ${repo}; fetch first`);
+    return repo;
+}
 
-    const body = fs.existsSync(opts['brief-file']) ? fs.readFileSync(opts['brief-file'], 'utf8') : fault('brief-missing', `${opts['brief-file']} does not exist`);
-    if (!body.trim()) fault('brief-empty', `${opts['brief-file']} is empty`);
+function checkBase(base) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(base)) fault('bad-base', `base ${base} is not a plain ref name`);
+    return base;
+}
 
-    const branch = `claude/${opts.slug}`;
-    const worktree = path.join(repo, '.claude', 'worktrees', opts.slug);
+function readBrief(file) {
+    const body = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : fault('brief-missing', `${file} does not exist`);
+    if (!body.trim()) fault('brief-empty', `${file} is empty`);
+    return body;
+}
+
+/**
+ * Nothing already claims the slug: not the worktree path, the local branch, the
+ * origin branch, nor another active ledger record. `self` is the task being
+ * launched, whose own queued record is not a claim against itself.
+ */
+function checkUnclaimed(repo, slug, taskId, ledger, self = null) {
+    const branch = `claude/${slug}`;
+    const worktree = path.join(repo, '.claude', 'worktrees', slug);
     if (fs.existsSync(worktree)) fault('worktree-exists', `${worktree} already exists`);
     if (git(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0) fault('branch-exists', `local branch ${branch} already exists`);
     // Exit 2 is the only answer that means absent. Anything else, including an
@@ -221,42 +315,268 @@ function brief(opts) {
     const remote = git(repo, ['ls-remote', '--exit-code', '--heads', 'origin', branch]);
     if (remote.status === 0) fault('remote-branch-exists', `origin already has ${branch}`);
     if (remote.status !== 2) fault('origin-unreadable', `ls-remote origin exited ${remote.status}: ${remote.stderr}`);
+    checkLedgerFree(ledger, repo, slug, taskId, self);
+    return { branch, worktree };
+}
+
+function checkLedgerFree(ledger, repo, slug, taskId, self = null) {
+    const active = ledger.records.filter((r) => ACTIVE.includes(r.state) && r.taskId !== self);
+    if (active.some((r) => r.taskId === taskId)) fault('task-id-in-use', `task ${taskId} has an active ledger record`);
+    if (active.some((r) => sameDir(r.repo, repo) && r.slug === slug)) fault('ledger-collision', `slug ${slug} is active for ${repo}`);
+}
+
+function scratchFor(taskId) { return path.join(claudePaths.configDir(), 'autodev', 'reports', taskId); }
+
+function brief(opts) {
+    for (const k of ['repo', 'slug', 'brief-file', 'return']) if (!opts[k]) fault('usage', `--${k} is required for brief`);
+    if (!SLUG.test(opts.slug)) fault('bad-slug', `slug must match ${SLUG}`);
+    const taskId = opts['task-id'] || `worker-${opts.slug}`;
+    if (!SLUG.test(taskId)) fault('bad-task-id', `task id must match ${SLUG}`);
+    const base = checkBase(opts.base || 'origin/main');
+    const repo = resolveRepo(opts.repo);
+    if (git(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).status !== 0) fault('base-unresolved', `${base} does not resolve in ${repo}; fetch first`);
+    const body = readBrief(opts['brief-file']);
 
     const ledgerFile = opts.ledger || defaultLedger();
-    const ledger = readLedger(ledgerFile);
-    const active = ledger.records.filter((r) => ACTIVE.includes(r.state));
-    if (active.some((r) => r.taskId === taskId)) fault('task-id-in-use', `task ${taskId} has an active ledger record`);
-    if (active.some((r) => sameDir(r.repo, repo) && r.slug === opts.slug)) fault('ledger-collision', `slug ${opts.slug} is active for ${repo}`);
+    return withLock(ledgerFile, () => {
+        const ledger = readLedger(ledgerFile);
+        const { branch, worktree } = checkUnclaimed(repo, opts.slug, taskId, ledger);
+        const returnTo = opts.return;
+        // [measured 2026-09-22] a worker told only "a new worktree" and `> f.log`
+        // put both in the directory holding the checkouts. Name the scratch home.
+        const scratch = scratchFor(taskId);
+        const report = opts.report ? path.resolve(opts.report) : path.join(scratch, 'REPORT.md');
+        const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug: opts.slug, body, scratch });
+        const record = {
+            taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed',
+            composedAt: new Date().toISOString(),
+            promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
+        };
+        ledger.records = ledger.records.filter((r) => r.taskId !== taskId).concat(record);
+        writeLedger(ledgerFile, ledger);
+        return {
+            ledger: ledgerFile,
+            record,
+            createScheduledTask: { taskId, title: opts.title || `Worker: ${opts.slug}`, description: `Unattended worker for ${opts.slug} (one-off run)`, prompt },
+            next: ['create_scheduled_task with createScheduledTask (no cronExpression, no fireAt)', `run_scheduled_task ${taskId}`, `record --task-id ${taskId} --session <returned id>`],
+        };
+    });
+}
 
-    const returnTo = opts.return;
-    // [measured 2026-09-22] a worker told only "a new worktree" and `> f.log`
-    // put both in the directory holding the checkouts. Name the scratch home.
-    const scratch = path.join(claudePaths.configDir(), 'autodev', 'reports', taskId);
-    const report = opts.report ? path.resolve(opts.report) : path.join(scratch, 'REPORT.md');
-    const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug: opts.slug, body, scratch });
-    const record = {
-        taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed',
-        composedAt: new Date().toISOString(),
-        promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
+/**
+ * Queue a brief for the headless channel. The target checks that cannot go
+ * stale (repo, slug, base spelling, brief, dependencies, ledger claims) run now;
+ * the ones that can (base resolves, worktree, branches) run again at launch.
+ */
+function enqueue(opts) {
+    for (const k of ['repo', 'slug', 'brief-file', 'return']) if (!opts[k]) fault('usage', `--${k} is required for enqueue`);
+    if (!SLUG.test(opts.slug) || opts.slug.length > HEADLESS_SLUG_MAX) {
+        fault('bad-slug', `slug must match ${SLUG} and be at most ${HEADLESS_SLUG_MAX} characters, because it becomes the headless worker code`);
+    }
+    const taskId = opts['task-id'] || `worker-${opts.slug}`;
+    if (!SLUG.test(taskId)) fault('bad-task-id', `task id must match ${SLUG}`);
+    const base = checkBase(opts.base || 'origin/main');
+    const repo = resolveRepo(opts.repo);
+    const body = readBrief(opts['brief-file']);
+    const after = opts.after ? opts.after.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    if (after.includes(taskId)) fault('bad-dependency', `task ${taskId} cannot wait on itself`);
+    const launchOpts = {
+        model: opts.model || null,
+        effort: opts.effort || null,
+        permissionMode: opts['permission-mode'] || 'bypassPermissions',
+        configDir: opts['config-dir'] || null,
     };
-    ledger.records = ledger.records.filter((r) => r.taskId !== taskId).concat(record);
-    writeLedger(ledgerFile, ledger);
-    return {
-        ledger: ledgerFile,
-        record,
-        createScheduledTask: { taskId, title: opts.title || `Worker: ${opts.slug}`, description: `Unattended worker for ${opts.slug} (one-off run)`, prompt },
-        next: ['create_scheduled_task with createScheduledTask (no cronExpression, no fireAt)', `run_scheduled_task ${taskId}`, `record --task-id ${taskId} --session <returned id>`],
-    };
+    const ledgerFile = opts.ledger || defaultLedger();
+    return withLock(ledgerFile, () => {
+        const ledger = readLedger(ledgerFile);
+        for (const dep of after) if (!ledger.records.some((r) => r.taskId === dep)) fault('unknown-dependency', `--after names ${dep}, which has no ledger record`);
+        checkLedgerFree(ledger, repo, opts.slug, taskId);
+        const scratch = scratchFor(taskId);
+        fs.mkdirSync(scratch, { recursive: true });
+        const briefFile = path.join(scratch, 'BRIEF.md');
+        fs.writeFileSync(briefFile, body);
+        const record = {
+            taskId, repo, slug: opts.slug, branch: `claude/${opts.slug}`, worktree: path.join(repo, '.claude', 'worktrees', opts.slug), base,
+            returnTo: opts.return, report: path.join(scratch, 'REPORT.md'), state: 'queued', channel: 'headless',
+            title: opts.title || `Worker: ${opts.slug}`, queuedAt: new Date().toISOString(), after, briefFile,
+            briefSha256: crypto.createHash('sha256').update(body).digest('hex'), launch: launchOpts,
+        };
+        ledger.records = ledger.records.filter((r) => r.taskId !== taskId).concat(record);
+        writeLedger(ledgerFile, ledger);
+        return { ledger: ledgerFile, record };
+    });
+}
+
+/**
+ * Where a dependency stands: `ok` once it finished, succeeded and was accepted;
+ * `pending` while that can still happen with no person; `blocked` when only a
+ * person can move it (it failed, was retired, or its verdict was not accept).
+ */
+function dependencyState(dep) {
+    if (!dep) return { state: 'blocked', reason: 'no ledger record' };
+    if (dep.state === 'retired') return { state: 'blocked', reason: `${dep.taskId} was retired` };
+    if (!FINISHED.includes(dep.state)) return { state: 'pending', reason: `${dep.taskId} is ${dep.state}` };
+    if (dep.runStatus !== 'succeeded') return { state: 'blocked', reason: `${dep.taskId} ${dep.runStatus || 'ended with no run status'}` };
+    if (!dep.verdict) return { state: 'pending', reason: `${dep.taskId} awaits a verdict` };
+    if (dep.verdict.decision !== 'accept') return { state: 'blocked', reason: `${dep.taskId} verdict ${dep.verdict.decision}` };
+    return { state: 'ok', reason: `${dep.taskId} accepted` };
+}
+
+/**
+ * Which queued tasks may start now. Pure: the ledger's records and the clock in,
+ * the plan out, so a suite can drive every branch without a process.
+ * Queued tasks go first-in first-out. A started record of either channel holds a
+ * concurrency slot, and every launch in the last hour spends one of the hour's.
+ */
+function planStarts(records, { now = Date.now(), maxConcurrent = 2, maxPerHour = 2 } = {}) {
+    const byId = new Map(records.map((r) => [r.taskId, r]));
+    const running = records.filter((r) => r.state === 'started').length;
+    const launchedLastHour = records.filter((r) => {
+        const at = Date.parse(r.launchedAt || '');
+        return Number.isFinite(at) && now - at < HOUR_MS && now >= at;
+    }).length;
+    let slots = Math.max(0, Math.min(maxConcurrent - running, maxPerHour - launchedLastHour));
+    const slotsAtStart = slots;
+    const ready = []; const pending = []; const blocked = []; const capped = [];
+    const queued = records.filter((r) => r.state === 'queued')
+        .sort((a, b) => String(a.queuedAt).localeCompare(String(b.queuedAt)));
+    for (const rec of queued) {
+        const attempts = (rec.lastLaunchError && rec.lastLaunchError.attempts) || 0;
+        if (attempts >= MAX_LAUNCH_ATTEMPTS) { blocked.push({ taskId: rec.taskId, reason: `launch refused ${attempts} times, last: ${rec.lastLaunchError.code}` }); continue; }
+        const deps = (rec.after || []).map((id) => ({ id, ...dependencyState(byId.get(id)) }));
+        const stuck = deps.filter((d) => d.state === 'blocked');
+        if (stuck.length) { blocked.push({ taskId: rec.taskId, reason: stuck.map((d) => `${d.id}: ${d.reason}`).join('; ') }); continue; }
+        const waiting = deps.filter((d) => d.state === 'pending');
+        if (waiting.length) { pending.push({ taskId: rec.taskId, reason: waiting.map((d) => d.reason).join('; ') }); continue; }
+        if (slots > 0) { ready.push(rec.taskId); slots--; } else capped.push(rec.taskId);
+    }
+    return { ready, pending, blocked, capped, running, launchedLastHour, slots: slotsAtStart, maxConcurrent, maxPerHour };
+}
+
+function capOpt(opts, key, fallback) {
+    if (opts[key] === undefined) return fallback;
+    const n = Number(opts[key]);
+    if (!Number.isInteger(n) || n < 0) fault('usage', `--${key} must be a whole number`);
+    return n;
+}
+
+/** The pointer prompt: the composed prompt goes in a file, since headless-worker passes the prompt in argv. */
+function pointerPrompt(promptFile) {
+    return `Read ${slashes(promptFile)} in full with the Read tool before anything else, then follow it exactly. `
+        + 'It is your whole brief, and its STEP 0 comes first.\n';
+}
+
+function defaultHeadlessWorker() { return path.join(__dirname, 'headless-worker.js'); }
+
+/** The argv for `headless-worker.js start`, from a queued record and the launch flags. */
+function headlessArgs(rec, files, opts) {
+    const l = rec.launch || {};
+    const args = [opts['headless-worker'] ? path.resolve(opts['headless-worker']) : defaultHeadlessWorker(), 'start',
+        '--code', rec.slug, '--prompt-file', files.pointer, '--log', files.log, '--report', rec.report, '--cwd', rec.repo,
+        '--permission-mode', l.permissionMode || 'bypassPermissions'];
+    if (l.model) args.push('--model', l.model);
+    if (l.effort) args.push('--effort', l.effort);
+    if (l.configDir) args.push('--config-dir', l.configDir);
+    if (opts['claude-bin']) args.push('--claude-bin', opts['claude-bin']);
+    if (opts.dev) args.push('--dev');
+    if (opts['dry-run']) args.push('--dry-run');
+    return args;
+}
+
+function parseHeadless(r) {
+    if (r.error) return { ok: false, code: r.error.code === 'ETIMEDOUT' ? 'headless-timeout' : 'headless-spawn', message: r.error.message };
+    let doc = null;
+    try { doc = JSON.parse(String(r.stdout).trim().split(/\r?\n/).pop()); } catch { doc = null; }
+    if (!doc || typeof doc.ok !== 'boolean') return { ok: false, code: 'headless-unparseable', message: `exit ${r.status}: ${String(r.stdout || r.stderr).slice(0, 300)}` };
+    if (!doc.ok) return { ok: false, code: String((doc.error && doc.error.code) || 'unknown'), message: String((doc.error && doc.error.message) || '') };
+    return { ok: true, value: doc.value };
+}
+
+/**
+ * Start one queued task as a headless worker. The brief checks run again,
+ * because a worktree, branch or origin branch can have appeared since enqueue.
+ * A refusal anywhere leaves the record queued with lastLaunchError and an
+ * attempt count, and is rethrown so the caller sees exit 1.
+ */
+function launch(opts) {
+    if (!opts['task-id']) fault('usage', '--task-id is required');
+    const ledgerFile = opts.ledger || defaultLedger();
+    const dry = opts['dry-run'] === true;
+    const first = readLedger(ledgerFile);
+    const pre = findRecord(first, opts['task-id']);
+    if (pre.state !== 'queued') fault('bad-state', `task ${pre.taskId} is ${pre.state}, not queued`);
+    const fetched = git(pre.repo, ['fetch', '--quiet', 'origin'], FETCH_TIMEOUT_MS);
+    return withLock(ledgerFile, () => {
+        const ledger = readLedger(ledgerFile);
+        const rec = findRecord(ledger, opts['task-id']);
+        const refuse = (e) => {
+            // Only a queued record carries an attempt count: a refusal because the
+            // record already moved on must not write onto a record that ran.
+            if (!dry && rec.state === 'queued') {
+                const attempts = ((rec.lastLaunchError && rec.lastLaunchError.attempts) || 0) + 1;
+                rec.lastLaunchError = { code: e.publicCode || 'internal', message: e.message, at: new Date().toISOString(), attempts };
+                writeLedger(ledgerFile, ledger);
+            }
+            throw e;
+        };
+        try {
+            if (rec.state !== 'queued') fault('bad-state', `task ${rec.taskId} is ${rec.state}, not queued`);
+            resolveRepo(rec.repo);
+            if (fetched.status !== 0) fault('fetch-failed', `git fetch origin exited ${fetched.status}: ${fetched.stderr}`);
+            if (git(rec.repo, ['rev-parse', '--verify', '--quiet', `${rec.base}^{commit}`]).status !== 0) fault('base-unresolved', `${rec.base} does not resolve in ${rec.repo}`);
+            const { branch, worktree } = checkUnclaimed(rec.repo, rec.slug, rec.taskId, ledger, rec.taskId);
+            for (const dep of rec.after || []) {
+                const d = dependencyState(ledger.records.find((r) => r.taskId === dep));
+                if (d.state !== 'ok') fault('dependency-unmet', `${dep}: ${d.reason}`);
+            }
+            const body = readBrief(rec.briefFile);
+            const scratch = path.dirname(rec.briefFile);
+            const prompt = composePrompt({ repo: rec.repo, worktree, branch, base: rec.base, taskId: rec.taskId, returnTo: rec.returnTo,
+                report: rec.report, slug: rec.slug, body, scratch, channel: 'headless' });
+            const files = { prompt: path.join(scratch, 'PROMPT.md'), pointer: path.join(scratch, 'POINTER.md'), log: path.join(scratch, 'worker.log') };
+            fs.writeFileSync(files.prompt, prompt);
+            fs.writeFileSync(files.pointer, pointerPrompt(files.prompt));
+            const args = headlessArgs(rec, files, opts);
+            const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: LAUNCH_TIMEOUT_MS, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+            const h = parseHeadless(r);
+            if (!h.ok) fault(h.code, `headless-worker start refused: ${h.message}`);
+            if (dry) return { ledger: ledgerFile, dryRun: true, taskId: rec.taskId, files, headless: h.value };
+            const at = new Date().toISOString();
+            Object.assign(rec, {
+                state: 'started', startedAt: at, launchedAt: at,
+                promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
+                headless: { code: rec.slug, pid: h.value.supervisorPid || null, log: files.log, ledger: h.value.ledger || null,
+                    startedAt: (h.value.record && h.value.record.startedAt) || null, version: (h.value.record && h.value.record.version) || null },
+            });
+            delete rec.lastLaunchError;
+            writeLedger(ledgerFile, ledger);
+            return { ledger: ledgerFile, record: rec, files };
+        } catch (e) { return refuse(e); }
+    });
 }
 
 function mutate(opts, fn) {
     if (!opts['task-id']) fault('usage', '--task-id is required');
     const ledgerFile = opts.ledger || defaultLedger();
-    const ledger = readLedger(ledgerFile);
-    const rec = findRecord(ledger, opts['task-id']);
-    const value = fn(rec);
-    writeLedger(ledgerFile, ledger);
-    return { ledger: ledgerFile, record: rec, ...value };
+    return withLock(ledgerFile, () => {
+        const ledger = readLedger(ledgerFile);
+        const rec = findRecord(ledger, opts['task-id']);
+        const value = fn(rec);
+        writeLedger(ledgerFile, ledger);
+        return { ledger: ledgerFile, record: rec, ...value };
+    });
+}
+
+/** Record a verdict. A judge never replaces a standing verdict; the Brain or the operator can. */
+function applyVerdict(rec, { decision, reason, by = 'brain', at = new Date().toISOString() }) {
+    if (!DECISIONS.includes(decision)) fault('usage', `--decision must be one of ${DECISIONS.join(', ')}`);
+    if (!VERDICT_BY.includes(by)) fault('usage', `--by must be one of ${VERDICT_BY.join(', ')}`);
+    if (!reason || !String(reason).trim()) fault('usage', '--reason is required');
+    if (!FINISHED.includes(rec.state)) fault('bad-state', `task ${rec.taskId} is ${rec.state}; a verdict needs a finished run`);
+    if (rec.verdict && by === 'judge') return { applied: false, reason: `a ${rec.verdict.by} verdict (${rec.verdict.decision}) stands, and a judge never replaces one` };
+    const previous = rec.verdict || null;
+    rec.verdict = { decision, reason: String(reason).slice(0, 2000), by, at };
+    return { applied: true, previous };
 }
 
 function run(argv) {
@@ -264,6 +584,8 @@ function run(argv) {
     if (opts.help) return { help: true };
     const cmd = opts._[0];
     if (cmd === 'brief') return brief(opts);
+    if (cmd === 'enqueue') return enqueue(opts);
+    if (cmd === 'launch') return launch(opts);
     if (cmd === 'record') {
         if (!opts.session || !SESSION.test(opts.session)) fault('bad-session', '--session must be a local_<uuid> id returned by run_scheduled_task');
         return mutate(opts, (rec) => {
@@ -275,12 +597,19 @@ function run(argv) {
     if (cmd === 'settle') {
         return mutate(opts, (rec) => {
             const decision = decideSettle(rec, opts['run-status'], opts['report-read'] === true);
-            if (decision.deleteSafe) Object.assign(rec, { state: 'settled', settledAt: new Date().toISOString(), runStatus: opts['run-status'] });
+            if (decision.deleteSafe && rec.channel === 'headless') {
+                // No scheduled task stands behind a headless run: settling it is the end.
+                Object.assign(rec, { state: 'closed', settledAt: new Date().toISOString(), runStatus: opts['run-status'] });
+                decision.reason += ', and a headless run has no scheduled task to delete: closed';
+            } else if (decision.deleteSafe) {
+                Object.assign(rec, { state: 'settled', settledAt: new Date().toISOString(), runStatus: opts['run-status'] });
+            }
             return { decision };
         });
     }
     if (cmd === 'deleted') {
         return mutate(opts, (rec) => {
+            if (rec.channel === 'headless') fault('bad-state', `task ${rec.taskId} ran headless: there is no scheduled task to delete`);
             if (rec.state !== 'settled') fault('bad-state', `task ${rec.taskId} is ${rec.state}; settle it before deleting`);
             Object.assign(rec, { state: 'deleted', deletedAt: new Date().toISOString() });
             return {};
@@ -288,10 +617,19 @@ function run(argv) {
     }
     if (cmd === 'retire') {
         return mutate(opts, (rec) => {
-            if (rec.state !== 'composed') fault('bad-state', `task ${rec.taskId} is ${rec.state}; retire is only for a record with no run behind it`);
+            if (rec.state !== 'composed' && rec.state !== 'queued') fault('bad-state', `task ${rec.taskId} is ${rec.state}; retire is only for a record with no run behind it`);
             Object.assign(rec, { state: 'retired', retiredAt: new Date().toISOString(), reason: opts.reason || 'never ran' });
             return {};
         });
+    }
+    if (cmd === 'verdict') {
+        return mutate(opts, (rec) => ({ verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by: opts.by || 'brain' }) }));
+    }
+    if (cmd === 'ready') {
+        const ledgerFile = opts.ledger || defaultLedger();
+        const ledger = readLedger(ledgerFile);
+        const plan = planStarts(ledger.records, { maxConcurrent: capOpt(opts, 'max-concurrent', 2), maxPerHour: capOpt(opts, 'max-per-hour', 2) });
+        return { ledger: ledgerFile, ...plan };
     }
     if (cmd === 'status') {
         const ledgerFile = opts.ledger || defaultLedger();
@@ -316,4 +654,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { composePrompt, decideSettle, parseArgs, run };
+module.exports = { composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, FINISHED, DECISIONS };
