@@ -39,7 +39,13 @@
  *           task id claimed for ever. [measured 2026-09-16] a real record sat
  *           `composed` after the coordinator chose not to run it. A started
  *           record has a session behind it and must go through settle.
- *   status  prints every ledger record and how many were read.
+ *   status  prints every ledger record, how many were read, and how many of
+ *           the records that ran carry the version they ran on.
+ *
+ * VERSION. `brief`, `record` and `settle` each stamp the plugin version of the
+ * code that ran them, read the way headless-worker.js reads it, plus `dev` when
+ * that code sits outside a plugin cache. [measured 2026-09-28] 50 of 50 records
+ * carried no version, so nobody could tell which release a worker ran.
  *
  * THE QUEUE (the headless channel). `[measured 2026-09-28]` nothing unattended
  * can drive the scheduled-task path: a headless `claude -p` has no
@@ -88,6 +94,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const claudePaths = require('./claude-paths.js');
+const { scriptPlacement } = require('./headless-worker.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
@@ -349,7 +356,7 @@ function brief(opts) {
         const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug: opts.slug, body, scratch });
         const record = {
             taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed',
-            composedAt: new Date().toISOString(),
+            composedAt: new Date().toISOString(), ...stamp('composed'),
             promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
         };
         ledger.records = ledger.records.filter((r) => r.taskId !== taskId).concat(record);
@@ -555,6 +562,14 @@ function launch(opts) {
     });
 }
 
+// A copy inside the plugin cache is the install the run session boots on, so
+// its manifest names the release. A checkout copy names the checkout's
+// version, and `dev` says so.
+function stamp(prefix) {
+    const placement = scriptPlacement(__filename);
+    return { [`${prefix}Version`]: placement.version, [`${prefix}Dev`]: !placement.installed };
+}
+
 function mutate(opts, fn) {
     if (!opts['task-id']) fault('usage', '--task-id is required');
     const ledgerFile = opts.ledger || defaultLedger();
@@ -590,7 +605,9 @@ function run(argv) {
         if (!opts.session || !SESSION.test(opts.session)) fault('bad-session', '--session must be a local_<uuid> id returned by run_scheduled_task');
         return mutate(opts, (rec) => {
             if (rec.state !== 'composed') fault('bad-state', `task ${rec.taskId} is ${rec.state}, not composed`);
-            Object.assign(rec, { state: 'started', sessionId: opts.session, startedAt: new Date().toISOString() });
+            // `version` and `dev` under the names headless-worker.js records use.
+            const { startedVersion: version, startedDev: dev } = stamp('started');
+            Object.assign(rec, { state: 'started', sessionId: opts.session, startedAt: new Date().toISOString(), version, dev });
             return {};
         });
     }
@@ -599,10 +616,10 @@ function run(argv) {
             const decision = decideSettle(rec, opts['run-status'], opts['report-read'] === true);
             if (decision.deleteSafe && rec.channel === 'headless') {
                 // No scheduled task stands behind a headless run: settling it is the end.
-                Object.assign(rec, { state: 'closed', settledAt: new Date().toISOString(), runStatus: opts['run-status'] });
+                Object.assign(rec, { state: 'closed', settledAt: new Date().toISOString(), runStatus: opts['run-status'], ...stamp('settled') });
                 decision.reason += ', and a headless run has no scheduled task to delete: closed';
             } else if (decision.deleteSafe) {
-                Object.assign(rec, { state: 'settled', settledAt: new Date().toISOString(), runStatus: opts['run-status'] });
+                Object.assign(rec, { state: 'settled', settledAt: new Date().toISOString(), runStatus: opts['run-status'], ...stamp('settled') });
             }
             return { decision };
         });
@@ -637,7 +654,10 @@ function run(argv) {
         const records = opts['task-id'] ? [findRecord(ledger, opts['task-id'])] : ledger.records;
         const counts = {};
         for (const r of ledger.records) counts[r.state] = (counts[r.state] || 0) + 1;
-        return { ledger: ledgerFile, recordsRead: ledger.records.length, counts, records };
+        // Only a record that started can say which release ran it.
+        const ran = ledger.records.filter((r) => r.sessionId);
+        const versioned = ran.filter((r) => typeof r.version === 'string' && r.version).length;
+        return { ledger: ledgerFile, recordsRead: ledger.records.length, counts, ran: ran.length, versioned, unversioned: ran.length - versioned, records };
     }
     fault('usage', cmd ? `unknown command ${cmd}` : 'a command is required');
 }
