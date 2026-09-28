@@ -20,6 +20,22 @@
   did. Over 46 past runs it cost 1.66 USD with no errors.
 - headless-worker.js now passes `--report` to its supervisor. Before this,
   187 of 191 recorded runs had no report at their recorded path.
+- A review pass hardened both scripts:
+  - A ledger lock carries a token, so a writer whose lock was taken over
+    never deletes the new holder's lock. A lock counts as stale after 5
+    minutes, not 1, and ls-remote gets a 30 second timeout.
+  - An unreachable origin or a busy ledger is a transient refusal: it is
+    logged but never uses up the 3 launch attempts.
+  - A start that timed out after its supervisor spawned is found in the
+    headless ledger and recorded as started.
+  - Verdicts logged while judge was dry are written when it goes live,
+    with no second judge run.
+  - A record the judge fails on twice is escalated for a person.
+  - The report fence carries a per-call nonce, so a report cannot close it.
+  - Close no longer follows the start switch, so turning start off never
+    strands a running record. An unreadable state file stops judge and
+    start.
+  - Backfill and manual runs are tagged and spend no tick cap.
 
 ## [8.178.0]
 

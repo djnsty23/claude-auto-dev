@@ -18,7 +18,8 @@
  *     cost $0.044 for three turns. With Read allowed it was refused the report
  *     path by permissions, so the judge gets the text in its prompt.
  *
- * So the clock runs `tick`, which does four things in order, each capped:
+ * So the clock runs `tick`, three steps in order, each capped, each act an event
+ * the clock appends to its events.jsonl:
  *
  *   close   a headless-channel record whose headless run settled is closed in
  *           the unattended ledger (done or stopped read succeeded, anything
@@ -26,38 +27,34 @@
  *   judge   at most JUDGE_PER_TICK finished records a tick and JUDGE_PER_HOUR an
  *           hour get a verdict: accept, follow-up or escalate, from a tool-less
  *           `claude -p` capped at JUDGE_MAX_TURNS turns and JUDGE_BUDGET_USD.
+ *           A record the judge fails on JUDGE_FAILS_PER_RECORD times is logged
+ *           as escalate, so one bad report cannot hold the queue or keep spending.
  *   start   the queued tasks unattended-worker.js planStarts calls ready, at
  *           most START_MAX_CONCURRENT running and START_MAX_PER_HOUR an hour,
  *           each through unattended-worker.js launch.
- *   report  every act is an event the clock appends to its events.jsonl.
  *
- * THE KILL SWITCH. `switch.json` in the state directory holds a mode per step,
- * off, dry or live. An absent file means dry for both, and an unreadable one
- * means off for both. The clock's own --live flag is a second key: a step is
- * live only when the clock passes --live AND the switch says live. Dry judges
- * for real (that is the comparison against the Brain) but writes no verdict;
- * dry start launches nothing and logs what it would have started.
+ * THE KILL SWITCH. `switch.json` in the state directory holds a mode for judge
+ * and start, off, dry or live. An absent file means dry for both, and an
+ * unreadable one means off for both. The clock's own --live flag is a second
+ * key: a step is live only when the clock passes --live AND the switch says
+ * live. Dry judges for real (that is the comparison against the Brain) but
+ * writes no verdict. When judge goes live, the verdicts logged while dry are
+ * written without judging again. Dry start launches nothing and logs what it
+ * would have started. Close has no switch: it only mirrors a settle the
+ * headless ledger already holds, so it follows the clock's --live alone, and
+ * stopping new starts never strands a running record.
  *
  * THE BREAKER. The clock's own error streak (its last CLOCK_FAIL_STREAK passes
  * all errors), or a passes file that cannot be read, stops judge and start.
- * JUDGE_FAIL_STREAK judge runs in a row that errored stop judging until the
- * newest is JUDGE_COOLDOWN_MS old. Close runs regardless: it only mirrors a
- * settle the headless ledger already holds.
+ * JUDGE_FAIL_STREAK tick judge runs in a row that errored stop judging until the
+ * newest is JUDGE_COOLDOWN_MS old. An unreadable state file stops them too.
  *
  * WHAT IT IS NOT. It never merges, deploys, messages or deletes. A verdict is a
  * ledger field; what follows it is a queued task someone enqueued, or a Brain
  * turn. `compare` reads the Brain's decisions from what it did next (a same-stem
  * task queued after the run), which is an inference, and says so.
  *
- * Usage:
- *   node brain-judge.js tick [--live] [--judge-bin <path>] [--worker-bin <path>] [--headless-worker <file>] [--dev]
- *   node brain-judge.js judge --task-id <id> [--judge-bin <path>]      (judges and logs; writes no verdict)
- *   node brain-judge.js backfill [--limit 10] [--since <iso>] [--judge-bin <path>]
- *   node brain-judge.js compare
- *   node brain-judge.js switch [--judge off|dry|live] [--start off|dry|live]
- *   node brain-judge.js log [--limit 20]
- *   Every command takes [--state-dir <dir>] [--ledger <file>] [--headless-ledger <file>] [--clock-dir <dir>].
- * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
+ * Usage: see USAGE below, or `node brain-judge.js --help`.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -78,7 +75,8 @@ const USAGE = [
     'tick: close settled headless runs, judge finished ones, start ready queued work. The Brain clock runs it.',
     'switch: the kill switch. A step is live only when the switch says live AND tick gets --live.',
     '        An absent switch file means dry for both steps, an unreadable one means off for both.',
-    'judge and backfill judge for real and log the verdict; neither writes it to the ledger.',
+    'judge and backfill judge for real and log the verdict; neither writes it to the ledger, nor counts toward tick\'s caps.',
+    'Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.',
     'compare: the logged verdicts against what the Brain did next. The Brain side is inferred.',
 ].join('\n') + '\n';
 
@@ -98,6 +96,7 @@ const START_MAX_CONCURRENT = 2;
 const START_MAX_PER_HOUR = 2;
 const CLOCK_FAIL_STREAK = 3;
 const JUDGE_FAIL_STREAK = 3;
+const JUDGE_FAILS_PER_RECORD = 2;
 const HOUR_MS = 60 * 60 * 1000;
 const JUDGE_COOLDOWN_MS = HOUR_MS;
 const REPORT_TAIL_BYTES = 8 * 1024;
@@ -212,6 +211,9 @@ function effectiveMode(switchMode, liveFlag) {
     return switchMode === 'live' && liveFlag ? 'live' : 'dry';
 }
 
+/** The judge runs a tick made: backfill and manual runs spend no tick cap and trip no breaker. Rows before the field were all tick runs. */
+function tickRuns(rows) { return rows.filter((r) => !r.source || r.source === 'tick'); }
+
 /**
  * Whether judge and start may run. The clock's breaker is its last
  * CLOCK_FAIL_STREAK passes all ending in error; a passes file that cannot be
@@ -229,7 +231,7 @@ function breaker({ clockDir, stateDir, now = Date.now() }) {
     let judgeOpen = null;
     let runs = null;
     try { runs = readJsonl(path.join(stateDir, 'runs.jsonl')); } catch { runs = null; }
-    const tail = runs ? runs.rows.slice(-JUDGE_FAIL_STREAK) : [];
+    const tail = runs ? tickRuns(runs.rows).slice(-JUDGE_FAIL_STREAK) : [];
     if (tail.length === JUDGE_FAIL_STREAK && tail.every((r) => r.ok === false)) {
         const newest = ms(tail[tail.length - 1].at);
         if (newest !== null && now - newest < JUDGE_COOLDOWN_MS) judgeOpen = `the last ${JUDGE_FAIL_STREAK} judge runs errored, newest ${Math.floor((now - newest) / 60000)} min ago`;
@@ -273,20 +275,41 @@ function headlessRunOf(rec, headlessRecords) {
 function runStatusOfHeadless(result) { return result === 'done' || result === 'stopped' ? 'succeeded' : 'failed'; }
 
 function closeStep(ctx) {
-    const { mode, p, out } = ctx;
-    if (mode === 'off') { out.lines.push('close: off'); return; }
-    let headless;
-    try { headless = hw.readLedger(p.headlessLedger).records; } catch (e) { out.lines.push(`close: COULD-NOT-READ the headless ledger: ${e.message}`); return; }
+    const { mode, p, out, state } = ctx;
+    // A record names the headless ledger its run was started in; read each one once.
+    const ledgers = new Map();
+    const runsIn = (file) => {
+        if (!ledgers.has(file)) {
+            try { ledgers.set(file, hw.readLedger(file).records); } catch (e) { ledgers.set(file, e); }
+        }
+        return ledgers.get(file);
+    };
     const started = ctx.records.filter((r) => r.state === 'started' && r.channel === 'headless');
-    let closed = 0; let waiting = 0; let orphan = 0;
+    let closed = 0; let waiting = 0; let orphan = 0; let unreadable = 0;
     for (const rec of started) {
+        const headless = runsIn((rec.headless && rec.headless.ledger) || p.headlessLedger);
+        if (headless instanceof Error) { unreadable++; continue; }
         const h = headlessRunOf(rec, headless);
-        if (!h) { orphan++; continue; }
+        const key = judgementKey(rec);
+        if (!h) {
+            // Only a person can place a started record with no headless run. Say so once.
+            orphan++;
+            if (!state.reported[`orphan:${key}`]) {
+                state.reported[`orphan:${key}`] = new Date().toISOString();
+                out.events.push({ type: 'judge.close-orphan', key, detail: { taskId: rec.taskId, slug: rec.slug, ledger: (rec.headless && rec.headless.ledger) || p.headlessLedger } });
+            }
+            continue;
+        }
         if (h.state !== 'settled') { waiting++; continue; }
         const runStatus = runStatusOfHeadless(h.result);
-        const key = `${rec.taskId}@${rec.startedAt}`;
         const detail = { taskId: rec.taskId, slug: rec.slug, result: h.result, runStatus, sentence: String(h.sentence || '').slice(0, 200) };
-        if (mode === 'dry') { out.events.push({ type: 'judge.would-close', key, detail }); closed++; continue; }
+        if (mode === 'dry') {
+            closed++;
+            if (state.reported[`would-close:${key}`]) continue;
+            state.reported[`would-close:${key}`] = new Date().toISOString();
+            out.events.push({ type: 'judge.would-close', key, detail });
+            continue;
+        }
         try {
             uw.run(['settle', '--task-id', rec.taskId, '--run-status', runStatus, '--report-read', '--ledger', p.ledger]);
             out.events.push({ type: 'judge.closed', key, detail });
@@ -295,7 +318,8 @@ function closeStep(ctx) {
             out.events.push({ type: 'judge.close-failed', key, detail: { ...detail, error: e.publicCode || 'internal', message: e.message } });
         }
     }
-    out.lines.push(`close (${mode}): ${started.length} headless runs started, ${closed} ${mode === 'dry' ? 'would close' : 'closed'}, ${waiting} still running, ${orphan} with no headless record`);
+    out.lines.push(`close (${mode}): ${started.length} headless runs started, ${closed} ${mode === 'dry' ? 'would close' : 'closed'}, ${waiting} still running, `
+        + `${orphan} with no headless record${unreadable ? `, ${unreadable} in a headless ledger that could not be read` : ''}`);
 }
 
 // ---------------------------------------------------------------- judge
@@ -325,8 +349,14 @@ function lastNonEmptyLine(text) {
     return lines.length ? lines[lines.length - 1].trim() : '';
 }
 
-/** The judge's whole input. The report and brief are fenced and labelled as data. */
-function buildJudgePrompt(rec, report, brief) {
+/**
+ * The judge's whole input. The report and brief are fenced and labelled as data.
+ * The fence carries a per-call nonce, so a report cannot close it early and write
+ * rubric text of its own: an accept releases dependents with no person.
+ */
+function buildJudgePrompt(rec, report, brief, nonce = crypto.randomBytes(6).toString('hex')) {
+    const open = (label) => `<<<${label}-${nonce}`;
+    const close = (label) => `${label}-${nonce}>>>`;
     const lines = [RUBRIC, '', 'TASK',
         `task id: ${rec.taskId}`, `slug: ${rec.slug}`, `repo: ${path.basename(String(rec.repo || ''))}`,
         `channel: ${rec.channel || 'scheduled-task'}`, `run status: ${rec.runStatus || 'unknown'}`];
@@ -335,8 +365,8 @@ function buildJudgePrompt(rec, report, brief) {
         lines.push(`report last line: ${lastNonEmptyLine(report.text).slice(0, 300)}`,
             `report size: ${report.size} bytes${report.cut ? `, the last ${REPORT_TAIL_BYTES} shown` : ''}`);
     }
-    lines.push('', brief === null ? 'BRIEF: not stored for this task. Judge the report on its own terms.' : ['BRIEF (data)', '<<<BRIEF', brief.trimEnd(), 'BRIEF>>>'].join('\n'));
-    if (report.text !== null) lines.push('', 'REPORT (data)', '<<<REPORT', report.text.trimEnd(), 'REPORT>>>');
+    lines.push('', brief === null ? 'BRIEF: not stored for this task. Judge the report on its own terms.' : ['BRIEF (data)', open('BRIEF'), brief.trimEnd(), close('BRIEF')].join('\n'));
+    if (report.text !== null) lines.push('', 'REPORT (data)', open('REPORT'), report.text.trimEnd(), close('REPORT'));
     return lines.join('\n') + '\n';
 }
 
@@ -401,43 +431,77 @@ function judgeStep(ctx) {
     const { mode, p, out, br, now } = ctx;
     if (mode === 'off') { out.lines.push('judge: off'); return; }
     if (br.open) { out.lines.push(`judge: BREAKER OPEN: ${br.reasons.join('; ')}`); return; }
-    if (br.judgeOpen) { out.lines.push(`judge: BREAKER OPEN: ${br.judgeOpen}`); return; }
     const judged = readJsonl(path.join(p.state, 'judgements.jsonl'));
-    const keys = new Set((judged ? judged.rows : []).map((j) => j.key));
+    const latest = new Map((judged ? judged.rows : []).map((j) => [j.key, j]));
+    // A verdict logged while dry, or one whose ledger write failed, is written now. The judge already spent on it.
+    if (mode === 'live') applyLogged(ctx, latest);
+    if (br.judgeOpen) { out.lines.push(`judge: BREAKER OPEN: ${br.judgeOpen}`); return; }
     const runs = readJsonl(path.join(p.state, 'runs.jsonl'));
-    const lastHour = (runs ? runs.rows : []).filter((r) => ms(r.at) !== null && now - ms(r.at) < HOUR_MS).length;
-    const todo = judgeCandidates(ctx.records, keys, ctx.sinceMs);
+    const lastHour = tickRuns(runs ? runs.rows : []).filter((r) => ms(r.at) !== null && now - ms(r.at) < HOUR_MS).length;
+    const todo = judgeCandidates(ctx.records, new Set(latest.keys()), ctx.sinceMs);
     const room = Math.max(0, Math.min(JUDGE_PER_TICK, JUDGE_PER_HOUR - lastHour));
     out.lines.push(`judge (${mode}): ${todo.length} awaiting a verdict, ${lastHour} judge runs in the last hour, room for ${room}`);
     for (const rec of todo.slice(0, room)) {
         if (ctx.left() < JUDGE_TIMEOUT_MS) { out.lines.push(`judge: deferred to the next tick, ${Math.round(ctx.left() / 1000)} s left of the budget`); break; }
-        judgeAndLog(rec, mode, ctx);
+        judgeAndLog(rec, mode, ctx, 'tick');
     }
 }
 
-/** Judge one record, log the run and the verdict, and in live mode write it through unattended-worker verdict. */
-function judgeAndLog(rec, mode, ctx) {
+/** Write a verdict through unattended-worker verdict. Never throws: a refusal is the note. */
+function writeVerdict(p, taskId, decision, reason) {
+    try {
+        const v = uw.run(['verdict', '--task-id', taskId, '--decision', decision, '--reason', reason, '--by', 'judge', '--ledger', p.ledger]);
+        return { applied: v.verdict.applied, note: v.verdict.applied ? null : v.verdict.reason };
+    } catch (e) { return { applied: false, note: `${e.publicCode || 'internal'}: ${e.message}` }; }
+}
+
+function logJudgement(ctx, rec, row) {
+    const key = judgementKey(rec);
+    appendJsonl(path.join(ctx.p.state, 'judgements.jsonl'), {
+        key, taskId: rec.taskId, slug: rec.slug, repo: path.basename(String(rec.repo || '')), runStatus: rec.runStatus, ...row,
+    });
+    ctx.out.events.push({ type: 'judge.verdict', key, detail: { taskId: rec.taskId, slug: rec.slug, mode: row.mode, decision: row.decision,
+        reason: String(row.reason).slice(0, 200), applied: row.applied, costUsd: row.costUsd ?? null, ...(row.from ? { from: row.from } : {}) } });
+}
+
+/** Live: every in-window record with a logged, unapplied decision and no ledger verdict gets that decision written. */
+function applyLogged(ctx, latest) {
+    let applied = 0;
+    for (const rec of ctx.records) {
+        const j = latest.get(judgementKey(rec));
+        if (!j || j.applied || !uw.DECISIONS.includes(j.decision) || !uw.FINISHED.includes(rec.state) || rec.verdict) continue;
+        if (ctx.sinceMs !== null && !(ms(rec.settledAt) !== null && ms(rec.settledAt) >= ctx.sinceMs)) continue;
+        const w = writeVerdict(ctx.p, rec.taskId, j.decision, j.reason);
+        logJudgement(ctx, rec, { at: new Date().toISOString(), mode: 'live', decision: j.decision, reason: j.reason, evidence: j.evidence || [],
+            costUsd: 0, model: j.model || null, from: `logged ${j.mode} ${j.at}`, applied: w.applied, note: w.note });
+        if (w.applied) applied++;
+    }
+    if (applied) ctx.out.lines.push(`judge: wrote ${applied} logged verdict(s) to the ledger`);
+}
+
+/**
+ * Judge one record and log the run and the verdict; in live mode write it too.
+ * `source` is tick, backfill or manual: only tick runs spend the tick caps.
+ */
+function judgeAndLog(rec, mode, ctx, source) {
     const { p, out } = ctx;
     const at = new Date().toISOString();
-    const j = judgeRecord(rec, { judgeBin: ctx.opts['judge-bin'], model: ctx.opts.model || JUDGE_MODEL, cwd: p.state, reportsDir: p.reports });
-    appendJsonl(path.join(p.state, 'runs.jsonl'), { at, taskId: rec.taskId, ok: j.ok, error: j.error || null, costUsd: j.costUsd ?? null, turns: j.turns ?? null, durationMs: j.durationMs });
     const key = judgementKey(rec);
+    const j = judgeRecord(rec, { judgeBin: ctx.opts['judge-bin'], model: ctx.opts.model || JUDGE_MODEL, cwd: p.state, reportsDir: p.reports });
+    appendJsonl(path.join(p.state, 'runs.jsonl'), { at, key, taskId: rec.taskId, source, ok: j.ok, error: j.error || null, costUsd: j.costUsd ?? null, turns: j.turns ?? null, durationMs: j.durationMs });
     if (!j.ok) {
         out.events.push({ type: 'judge.error', key, detail: { taskId: rec.taskId, slug: rec.slug, error: j.error, costUsd: j.costUsd ?? null } });
+        const runs = readJsonl(path.join(p.state, 'runs.jsonl'));
+        const fails = (runs ? runs.rows : []).filter((r) => r.key === key && r.ok === false).length;
+        if (fails < JUDGE_FAILS_PER_RECORD) return j;
+        // The judge cannot read this one. A person can: escalate, and the queue moves on.
+        const reason = `the judge failed ${fails} times on this record, last: ${j.error}`;
+        const w = mode === 'live' ? writeVerdict(p, rec.taskId, 'escalate', reason) : { applied: false, note: null };
+        logJudgement(ctx, rec, { at, mode, decision: 'escalate', reason, evidence: [], costUsd: j.costUsd ?? null, model: j.model, from: 'judge-failed', applied: w.applied, note: w.note });
         return j;
     }
-    let applied = false; let note = null;
-    if (mode === 'live') {
-        try {
-            const v = uw.run(['verdict', '--task-id', rec.taskId, '--decision', j.decision, '--reason', j.reason, '--by', 'judge', '--ledger', p.ledger]);
-            applied = v.verdict.applied; note = applied ? null : v.verdict.reason;
-        } catch (e) { note = `${e.publicCode || 'internal'}: ${e.message}`; }
-    }
-    appendJsonl(path.join(p.state, 'judgements.jsonl'), {
-        at, key, taskId: rec.taskId, slug: rec.slug, repo: path.basename(String(rec.repo || '')), mode, runStatus: rec.runStatus,
-        decision: j.decision, reason: j.reason, evidence: j.evidence, costUsd: j.costUsd, turns: j.turns, model: j.model, applied, note,
-    });
-    out.events.push({ type: 'judge.verdict', key, detail: { taskId: rec.taskId, slug: rec.slug, mode, decision: j.decision, reason: j.reason.slice(0, 200), applied, costUsd: j.costUsd } });
+    const w = mode === 'live' ? writeVerdict(p, rec.taskId, j.decision, j.reason) : { applied: false, note: null };
+    logJudgement(ctx, rec, { at, mode, decision: j.decision, reason: j.reason, evidence: j.evidence, costUsd: j.costUsd, turns: j.turns, model: j.model, applied: w.applied, note: w.note });
     return j;
 }
 
@@ -450,7 +514,6 @@ function startStep(ctx) {
     const plan = uw.planStarts(ctx.records, { now: ctx.now, maxConcurrent: START_MAX_CONCURRENT, maxPerHour: START_MAX_PER_HOUR });
     out.lines.push(`start (${mode}): ${plan.ready.length} ready, ${plan.pending.length} waiting on a dependency, ${plan.blocked.length} blocked, `
         + `${plan.capped.length} over the cap; ${plan.running} running, ${plan.launchedLastHour} launched in the last hour`);
-    state.reported = state.reported || {};
     for (const b of plan.blocked) {
         // A blocked task needs a person. Say so once per reason, not every five minutes.
         const k = `blocked:${b.taskId}`;
@@ -486,6 +549,18 @@ function startStep(ctx) {
 
 // ---------------------------------------------------------------- tick
 
+/** Drop said-once keys for tasks that left the state they were said about, so state.json stays the size of the queue. */
+function pruneReported(state, records) {
+    const byId = new Map(records.map((r) => [r.taskId, r]));
+    for (const k of Object.keys(state.reported)) {
+        const [kind, rest] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)];
+        const taskId = rest.split('@')[0];
+        const rec = byId.get(taskId);
+        const still = kind === 'blocked' || kind === 'would' ? rec && rec.state === 'queued' : rec && rec.state === 'started';
+        if (!still) delete state.reported[k];
+    }
+}
+
 function budgetOpt(opts) {
     if (opts['budget-sec'] === undefined) return TICK_BUDGET_MS;
     const n = Number(opts['budget-sec']);
@@ -499,26 +574,33 @@ function tick(opts) {
     const lock = takeLock(p.state, now);
     if (!lock.ok) return { skipped: lock.reason, lines: [`tick skipped: ${lock.reason}`], events: [] };
     try {
+        const budgetMs = budgetOpt(opts);
         const sw = readSwitch(p.state);
-        const mode = { judge: effectiveMode(sw.judge, opts.live === true), start: effectiveMode(sw.start, opts.live === true) };
+        const mode = { close: opts.live === true ? 'live' : 'dry', judge: effectiveMode(sw.judge, opts.live === true), start: effectiveMode(sw.start, opts.live === true) };
         const stateFile = path.join(p.state, 'state.json');
-        const state = readJson(stateFile, {}) || {};
+        const read = readJson(stateFile, {});
+        // An unreadable state file hides the watermark. Guessing "now" would skip every record settled before it, so judge and start wait.
+        const stateOk = Boolean(read && typeof read === 'object');
+        const state = stateOk ? read : {};
         // The first tick sets the watermark: history before it is backfill's, never a tick's.
         if (!state.since) state.since = new Date(now).toISOString();
-        const out = { lines: [`mode: judge ${mode.judge}, start ${mode.start} (switch ${sw.source}${opts.live ? ', clock live' : ', clock dry'})`], events: [] };
+        state.reported = state.reported || {};
+        const out = { lines: [`mode: close ${mode.close}, judge ${mode.judge}, start ${mode.start} (switch ${sw.source}${opts.live ? ', clock live' : ', clock dry'})`], events: [] };
         const br = breaker({ clockDir: p.clockDir, stateDir: p.state, now });
+        if (!stateOk) br.reasons.push(`${stateFile} could not be read`);
+        br.open = br.reasons.length > 0;
         if (br.open) out.events.push({ type: 'judge.breaker-open', key: br.reasons.join('; '), detail: { reasons: br.reasons } });
-        const budgetMs = budgetOpt(opts);
         const ctx = { opts, p, out, br, now, state, sinceMs: ms(state.since), left: () => budgetMs - (Date.now() - now) };
         const load = () => { ctx.records = uw.run(['status', '--ledger', p.ledger]).records; };
         load();
-        closeStep({ ...ctx, mode: mode.start });
+        closeStep({ ...ctx, mode: mode.close });
         load();
         judgeStep({ ...ctx, mode: mode.judge });
         load();
         startStep({ ...ctx, mode: mode.start });
+        pruneReported(state, ctx.records);
         state.lastTick = new Date().toISOString();
-        writeJson(stateFile, state);
+        if (stateOk) writeJson(stateFile, state);
         return { mode, switch: sw, breaker: br, since: state.since, lines: out.lines, events: out.events };
     } finally { lock.release(); }
 }
@@ -539,7 +621,7 @@ function revealedDecision(rec, records) {
     const started = ms(rec.startedAt);
     const ended = ms(rec.settledAt) ?? started;
     const successor = records.find((o) => {
-        if (o === rec || o.taskId === rec.taskId || stem(o.slug) !== stem(rec.slug)) return false;
+        if (o.taskId === rec.taskId || stem(o.slug) !== stem(rec.slug)) return false;
         if (path.basename(String(o.repo || '')).toLowerCase() !== path.basename(String(rec.repo || '')).toLowerCase()) return false;
         const at = ms(o.composedAt || o.queuedAt);
         return at !== null && started !== null && at > started && ended !== null && at - ended <= SUCCESSOR_WINDOW_MS;
@@ -593,12 +675,12 @@ function backfill(opts) {
     const keys = new Set((judged ? judged.rows : []).map((j) => j.key));
     const sinceMs = opts.since ? ms(opts.since) : null;
     if (opts.since && sinceMs === null) fault('usage', '--since must be an ISO date');
-    const todo = records.filter((r) => uw.FINISHED.includes(r.state) && r.runStatus && !keys.has(judgementKey(r)))
+    const todo = records.filter((r) => uw.FINISHED.includes(r.state) && r.runStatus && !r.verdict && !keys.has(judgementKey(r)))
         .filter((r) => sinceMs === null || (ms(r.startedAt) !== null && ms(r.startedAt) >= sinceMs))
         .slice(0, limitOpt(opts, 10));
     const ctx = { opts, p, out: { lines: [], events: [] } };
     const results = todo.map((rec) => {
-        const j = judgeAndLog(rec, 'backfill', ctx);
+        const j = judgeAndLog(rec, 'backfill', ctx, 'backfill');
         return { taskId: rec.taskId, ok: j.ok, decision: j.decision || null, error: j.error || null, costUsd: j.costUsd ?? null };
     });
     return { judged: results.length, results };
@@ -610,7 +692,7 @@ function judgeOne(opts) {
     const rec = uw.run(['status', '--task-id', opts['task-id'], '--ledger', p.ledger]).records[0];
     if (!uw.FINISHED.includes(rec.state)) fault('bad-state', `task ${rec.taskId} is ${rec.state}; only a finished run can be judged`);
     const ctx = { opts, p, out: { lines: [], events: [] } };
-    const j = judgeAndLog(rec, 'manual', ctx);
+    const j = judgeAndLog(rec, 'manual', ctx, 'manual');
     return { taskId: rec.taskId, ...j };
 }
 
@@ -658,6 +740,6 @@ if (require.main === module) {
 
 module.exports = {
     parseArgs, readSwitch, effectiveMode, reportPathOf, breaker, takeLock, headlessRunOf, runStatusOfHeadless, buildJudgePrompt, judgeArgv,
-    parseJudgeOutput, judgeCandidates, revealedDecision, stem, readJsonl, run, VERDICT_SCHEMA, RUBRIC,
-    JUDGE_PER_TICK, JUDGE_PER_HOUR, START_MAX_CONCURRENT, START_MAX_PER_HOUR,
+    parseJudgeOutput, judgeCandidates, revealedDecision, stem, readJsonl, run, pruneReported, tickRuns, VERDICT_SCHEMA, RUBRIC,
+    JUDGE_PER_TICK, JUDGE_PER_HOUR, JUDGE_FAILS_PER_RECORD, START_MAX_CONCURRENT, START_MAX_PER_HOUR,
 };

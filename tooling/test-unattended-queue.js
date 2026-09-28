@@ -24,7 +24,7 @@ const { spawnSync, execFileSync } = require('child_process');
 const SCRIPTS = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts');
 const SUBJECT = path.join(SCRIPTS, 'unattended-worker.js');
 const HEADLESS = path.join(SCRIPTS, 'headless-worker.js');
-const { planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, decideSettle } = require(SUBJECT);
+const { planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, decideSettle, recoverTimedOutStart, withLock } = require(SUBJECT);
 
 let pass = 0, fail = 0, unchecked = 0;
 function check(label, ok, detail) {
@@ -151,6 +151,17 @@ try {
     cli(['launch', '--task-id', 'worker-guide-a', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger]);
     check('a second refusal counts a second attempt', recOf('worker-guide-a').lastLaunchError.attempts === 2);
     g(repo, 'branch', '-D', 'claude/guide-a');
+    // An unreachable origin is a refusal a later tick clears with no person: it must not use up the attempts.
+    cli(['enqueue', '--repo', repo, '--slug', 'guide-t', '--brief-file', briefFile, '--return', 'brain', '--ledger', ledger]);
+    const originAside = origin + '.aside';
+    fs.renameSync(origin, originAside);
+    let transientCode = null;
+    try { transientCode = code(cli(['launch', '--task-id', 'worker-guide-t', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger])); }
+    finally { fs.renameSync(originAside, origin); }
+    const tr = recOf('worker-guide-t');
+    check('a transient refusal is logged but never counted toward the attempt cap', transientCode === 'fetch-failed' && tr.state === 'queued'
+        && tr.lastLaunchError.transient === true && tr.lastLaunchError.attempts === 0, JSON.stringify(tr.lastLaunchError));
+    cli(['retire', '--task-id', 'worker-guide-t', '--ledger', ledger]);
     check('launch refuses a task whose dependency is unmet', code(cli(['launch', '--task-id', 'worker-guide-b', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger])) === 'dependency-unmet');
 
     // =======================================================================
@@ -208,10 +219,24 @@ try {
     const lock = `${ledger}.lock`;
     fs.writeFileSync(lock, '{}');
     check('a write waits on a fresh lock and then refuses', code(cli(['retire', '--task-id', 'worker-guide-b', '--ledger', ledger])) === 'ledger-locked' && recOf('worker-guide-b').state === 'queued');
-    const old = new Date(Date.now() - 5 * 60 * 1000);
+    const old = new Date(Date.now() - 10 * 60 * 1000);
     fs.utimesSync(lock, old, old);
-    check('a lock older than a minute is a dead writer\'s, and is taken over', cli(['retire', '--task-id', 'worker-guide-b', '--ledger', ledger]).status === 0 && recOf('worker-guide-b').state === 'retired');
+    check('a lock older than five minutes is a dead writer\'s, and is taken over', cli(['retire', '--task-id', 'worker-guide-b', '--ledger', ledger]).status === 0 && recOf('worker-guide-b').state === 'retired');
     check('a write removes its own lock', !fs.existsSync(lock));
+    withLock(ledger, () => { fs.writeFileSync(lock, JSON.stringify({ pid: 1, token: 'another-writer' })); });
+    check('a writer whose lock was taken over leaves the new holder\'s lock in place', fs.existsSync(lock) && JSON.parse(fs.readFileSync(lock, 'utf8')).token === 'another-writer');
+    fs.rmSync(lock, { force: true });
+
+    // A start that timed out after spawning its supervisor is found in the headless ledger, not refused.
+    const hl = path.join(scratch, 'recover-headless.json');
+    const spawned = Date.now();
+    fs.writeFileSync(hl, JSON.stringify({ version: 1, records: [
+        { code: 'rec-a', startedAt: new Date(spawned - 60 * 60 * 1000).toISOString(), pid: 11 },
+        { code: 'rec-a', startedAt: new Date(spawned + 2000).toISOString(), pid: 22 },
+    ] }));
+    const found = recoverTimedOutStart('rec-a', spawned, hl);
+    check('a timed-out start whose run is in the headless ledger counts as started', found && found.ok && found.value.supervisorPid === 22 && found.value.recovered === true && found.value.ledger === hl);
+    check('control: no run of that code since the spawn means the timeout stands', recoverTimedOutStart('rec-b', spawned, hl) === null && recoverTimedOutStart('rec-a', spawned + 60 * 1000, hl) === null);
 
     // =======================================================================
     // 8. Pure layer.

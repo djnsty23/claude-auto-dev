@@ -94,7 +94,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const claudePaths = require('./claude-paths.js');
-const { scriptPlacement } = require('./headless-worker.js');
+const { scriptPlacement, readLedger: readHeadlessLedger } = require('./headless-worker.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
@@ -134,13 +134,18 @@ const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/;
 const HEADLESS_SLUG_MAX = 24;
 const SESSION = /^local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HOUR_MS = 60 * 60 * 1000;
-const LOCK_STALE_MS = 60 * 1000;
+const LAUNCH_TIMEOUT_MS = 60 * 1000;
+const FETCH_TIMEOUT_MS = 30 * 1000;
+// launch holds the lock across an ls-remote and the supervisor start, up to about
+// 95 s. A stale threshold under that let a second writer take a live lock over, and
+// launch then wrote its older copy of the ledger on top.
+const LOCK_STALE_MS = 5 * 60 * 1000;
 // A suite sets AUTODEV_LEDGER_LOCK_WAIT_MS to see a refusal without waiting the full ten seconds.
 const LOCK_WAIT_MS = Number(process.env.AUTODEV_LEDGER_LOCK_WAIT_MS) || 10 * 1000;
 // A queued task whose launch was refused this many times stays queued for a person.
 const MAX_LAUNCH_ATTEMPTS = 3;
-const LAUNCH_TIMEOUT_MS = 60 * 1000;
-const FETCH_TIMEOUT_MS = 30 * 1000;
+// Refusals a later tick can clear with no person. They are logged, never counted.
+const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked'];
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
@@ -210,9 +215,10 @@ function withLock(ledgerFile, fn) {
     const lock = `${ledgerFile}.lock`;
     fs.mkdirSync(path.dirname(lock), { recursive: true });
     const deadline = Date.now() + LOCK_WAIT_MS;
+    const token = crypto.randomUUID();
     for (;;) {
         try {
-            fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }), { flag: 'wx' });
+            fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, at: new Date().toISOString(), token }), { flag: 'wx' });
             break;
         } catch (e) {
             if (e.code !== 'EEXIST') fault('ledger-locked', `${lock}: ${e.code || e.message}`);
@@ -223,7 +229,10 @@ function withLock(ledgerFile, fn) {
             sleepMs(50);
         }
     }
-    try { return fn(); } finally { try { fs.unlinkSync(lock); } catch { /* already gone */ } }
+    try { return fn(); } finally {
+        // Release only our own lock: one taken over as stale belongs to its new writer.
+        try { if (JSON.parse(fs.readFileSync(lock, 'utf8')).token === token) fs.unlinkSync(lock); } catch { /* gone or not ours */ }
+    }
 }
 
 function findRecord(ledger, taskId) {
@@ -319,7 +328,7 @@ function checkUnclaimed(repo, slug, taskId, ledger, self = null) {
     // Exit 2 is the only answer that means absent. Anything else, including an
     // unreachable origin, is treated as a claim, because a guessed "free" is the
     // expensive mistake: two sessions pushing one branch.
-    const remote = git(repo, ['ls-remote', '--exit-code', '--heads', 'origin', branch]);
+    const remote = git(repo, ['ls-remote', '--exit-code', '--heads', 'origin', branch], FETCH_TIMEOUT_MS);
     if (remote.status === 0) fault('remote-branch-exists', `origin already has ${branch}`);
     if (remote.status !== 2) fault('origin-unreadable', `ls-remote origin exited ${remote.status}: ${remote.stderr}`);
     checkLedgerFree(ledger, repo, slug, taskId, self);
@@ -500,6 +509,18 @@ function parseHeadless(r) {
 }
 
 /**
+ * A start that timed out can still have spawned its supervisor. If the headless
+ * ledger holds a run of this code begun after the spawn, the task started: record
+ * it, or the next ticks refuse on code-active and nothing ever closes the run.
+ */
+function recoverTimedOutStart(code, spawnedAt, file = path.join(claudePaths.configDir(), 'autodev', 'headless-workers.json')) {
+    let records;
+    try { records = readHeadlessLedger(file).records; } catch { return null; }
+    const run = records.filter((h) => h.code === code && Date.parse(h.startedAt || '') >= spawnedAt - 5000).pop();
+    return run ? { ok: true, value: { supervisorPid: run.pid || null, ledger: file, record: run, recovered: true } } : null;
+}
+
+/**
  * Start one queued task as a headless worker. The brief checks run again,
  * because a worktree, branch or origin branch can have appeared since enqueue.
  * A refusal anywhere leaves the record queued with lastLaunchError and an
@@ -520,8 +541,10 @@ function launch(opts) {
             // Only a queued record carries an attempt count: a refusal because the
             // record already moved on must not write onto a record that ran.
             if (!dry && rec.state === 'queued') {
-                const attempts = ((rec.lastLaunchError && rec.lastLaunchError.attempts) || 0) + 1;
-                rec.lastLaunchError = { code: e.publicCode || 'internal', message: e.message, at: new Date().toISOString(), attempts };
+                const code = e.publicCode || 'internal';
+                const transient = TRANSIENT_LAUNCH_CODES.includes(code);
+                const attempts = ((rec.lastLaunchError && rec.lastLaunchError.attempts) || 0) + (transient ? 0 : 1);
+                rec.lastLaunchError = { code, message: e.message, at: new Date().toISOString(), attempts, transient };
                 writeLedger(ledgerFile, ledger);
             }
             throw e;
@@ -544,8 +567,10 @@ function launch(opts) {
             fs.writeFileSync(files.prompt, prompt);
             fs.writeFileSync(files.pointer, pointerPrompt(files.prompt));
             const args = headlessArgs(rec, files, opts);
+            const spawnedAt = Date.now();
             const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: LAUNCH_TIMEOUT_MS, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-            const h = parseHeadless(r);
+            let h = parseHeadless(r);
+            if (!h.ok && h.code === 'headless-timeout' && !dry) h = recoverTimedOutStart(rec.slug, spawnedAt) || h;
             if (!h.ok) fault(h.code, `headless-worker start refused: ${h.message}`);
             if (dry) return { ledger: ledgerFile, dryRun: true, taskId: rec.taskId, files, headless: h.value };
             const at = new Date().toISOString();
@@ -674,4 +699,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, FINISHED, DECISIONS };
+module.exports = { composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };
