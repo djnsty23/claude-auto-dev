@@ -183,7 +183,10 @@ const FLOORS = {
     // `[measured 2026-09-13]` on Windows 11 at 84e0a75: 1061 named functions, 93
     // never called, of which 57 are REFUSED_BY_DESIGN below and 36 are graded
     // (the linux buckets plus four POSIX-gated single functions), 1 never loaded.
-    win32: { untested: 36, neverLoaded: 1, measured: '2026-09-13 at 84e0a75' },
+    // `[measured 2026-09-28]` at 1264796: 37. The one added is tracking-parity.js
+    // harvest(), which runs only inside a page after toString(), as layout-probe.js
+    // harvest() does. Of the four this release added, the other three are driven by suites.
+    win32: { untested: 37, neverLoaded: 1, measured: '2026-09-28 at 1264796' },
 };
 
 // CODE A PLATFORM REFUSES BY DESIGN, reported as its own population rather than
