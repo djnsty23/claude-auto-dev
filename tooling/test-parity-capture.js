@@ -103,6 +103,11 @@ function sitemapOf(site) {
     return `<?xml version="1.0"?><urlset>${Object.keys(site).map((r) => `<url><loc>https://example.com${r}</loc></url>`).join('')}</urlset>`;
 }
 
+// Every fixture server, so a throw mid-suite can still close them. An open
+// server keeps the event loop alive, and a suite that throws would then hang
+// until its caller times it out instead of exiting red.
+const SERVERS = new Set();
+
 // A server whose site can be swapped between cases, so two ports serve the run.
 function serve() {
     const state = { site: {}, robots: 'User-agent: *\nDisallow: /admin\n' };
@@ -118,6 +123,7 @@ function serve() {
         }
         res.writeHead(404, { 'content-type': 'text/html' }); res.end('<h1>Not found</h1>');
     });
+    SERVERS.add(server);
     return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
         state.origin = `http://127.0.0.1:${server.address().port}`;
         resolve({ server, state });
@@ -468,4 +474,8 @@ async function main() {
     process.exitCode = exitCode(fail, infra);
 }
 
-main().catch((e) => { console.error(e); process.exitCode = 1; });
+main().catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+    for (const server of SERVERS) { server.closeAllConnections(); server.close(); }
+});
