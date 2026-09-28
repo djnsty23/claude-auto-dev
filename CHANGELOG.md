@@ -1,5 +1,18 @@
 # Changelog
 
+## [8.178.0]
+
+### Unattended workers stamp the plugin version they ran on
+
+- unattended-worker.js writes the version on `brief`, `record` and a
+  delete-safe `settle`, read from the plugin manifest the way
+  headless-worker.js reads it, with `dev` when the script is a checkout
+  copy. The ledger had 50 records and none said which release ran them.
+- `status` now counts the started records that carry a version and those
+  that do not, so a legacy ledger shows its gap.
+- New suite test-unattended-worker-version drives the CLI from a planted
+  plugin-cache copy and checks it against the checkout copy.
+
 ## [8.177.0]
 
 ### Shared-file read-modify-write detector (G10, #301)
