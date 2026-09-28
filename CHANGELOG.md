@@ -1,5 +1,26 @@
 # Changelog
 
+## [8.179.0]
+
+### The Brain clock starts queued work, judges it and starts the next (#337)
+
+- unattended-worker.js gains a headless channel: `enqueue` with `--after`
+  dependencies, `ready`, `launch` through headless-worker, and `verdict`.
+  Starts are capped at 2 running and 2 an hour, and every ledger write now
+  takes a lock file.
+- New brain-judge.js is the tick the clock runs each pass. It closes a
+  finished headless run and judges it with a tool-less `claude -p`
+  (accept, follow-up or escalate, 4 turns and 0.5 USD at most, 6 runs an
+  hour). It then starts ready work. `switch` sets each step off, dry or
+  live, and a step is live only when the switch and the clock pass are
+  both live. No switch file means dry.
+- A breaker stops judging and starting after 3 failed clock passes, and a
+  time budget keeps each pass inside the scheduler's 4 minute limit.
+- `backfill`, `compare` and `log` grade the judge against what the Brain
+  did. Over 46 past runs it cost 1.66 USD with no errors.
+- headless-worker.js now passes `--report` to its supervisor. Before this,
+  187 of 191 recorded runs had no report at their recorded path.
+
 ## [8.178.0]
 
 ### Unattended workers stamp the plugin version they ran on
