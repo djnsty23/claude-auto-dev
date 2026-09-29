@@ -18,6 +18,11 @@
 // only the rework flag and had to re-derive the counting to add a date
 // filter. Both are plain git log windows and belong here.
 //
+// --records adds a `records` array to the --json output: one entry per rework
+// fix with its hash, its UTC commit day and the classes its subject matched.
+// tooling/mistake-recurrence.js reads it to date fix commits as incidents.
+// Without the flag the JSON is unchanged.
+//
 // Pure Node, no dependencies, read-only. Never writes to the repo.
 
 const { execSync } = require('child_process');
@@ -26,6 +31,7 @@ const path = require('path');
 const args = process.argv.slice(2);
 const repo = path.resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
 const asJson = args.includes('--json');
+const withRecords = args.includes('--records');
 const windowDays = Number((args.find((a) => a.startsWith('--window-days=')) || '').split('=')[1]) || 3;
 const since = (args.find((a) => a.startsWith('--since=')) || '').slice('--since='.length);
 
@@ -33,7 +39,7 @@ function git(a) {
     return execSync(`git ${a}`, { cwd: repo, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
 }
 
-const USAGE = 'Usage: node mine-fixes.js [repo-path] [--json] [--window-days=N] [--since=<git date>]';
+const USAGE = 'Usage: node mine-fixes.js [repo-path] [--json [--records]] [--window-days=N] [--since=<git date>]';
 
 function main() {
     // --help answers before any git call. It used to fall through to the analysis
@@ -117,7 +123,7 @@ function main() {
             (f) => f.ts < fix.ts && fix.ts - f.ts < WINDOW && f.files.some((x) => ff.has(x))
         );
         if (cause) {
-            rework.push({ fix: fix.subject, hash: fix.hash.slice(0, 8), introducedBy: cause.subject });
+            rework.push({ fix: fix.subject, hash: fix.hash.slice(0, 8), introducedBy: cause.subject, ts: fix.ts });
             for (const f of fix.files) if (cause.files.includes(f)) reworkFiles[f] = (reworkFiles[f] || 0) + 1;
         }
     }
@@ -161,6 +167,14 @@ function main() {
             reworkPct: Math.round(rework.length / fixes.length * 100),
             classes: ranked.map(([name, count]) => ({ name, count, examples: (classExamples[name] || []).slice(0, 3) })),
             hotFiles: Object.entries(reworkFiles).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([file, count]) => ({ file, count })),
+            ...(withRecords ? {
+                records: rework.map((r) => ({
+                    hash: r.hash,
+                    date: new Date(r.ts * 1000).toISOString().slice(0, 10),
+                    classes: CLASSES.filter(([, re]) => re.test(r.fix)).map(([name]) => name),
+                    fix: r.fix.slice(0, 110),
+                })),
+            } : {}),
         }, null, 2));
         return 0;
     }

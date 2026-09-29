@@ -508,6 +508,40 @@ try {
     }
 
     // -----------------------------------------------------------------------
+    // --records: one dated entry per rework fix, for mistake-recurrence.js.
+    // The flag is additive. Without it the JSON must not change at all, because
+    // other callers parse it. With it, every rework fix appears exactly once,
+    // dated by its UTC commit day, carrying every class its subject matched.
+    // -----------------------------------------------------------------------
+    {
+        const plain = runJson([REPO]);
+        const withRec = runJson([REPO, '--records']);
+        eq('--json --records exits 0', withRec.status, 0);
+        const j = withRec.json || {};
+        const recs = Array.isArray(j.records) ? j.records : [];
+        eq('without --records the JSON carries no records key', 'records' in (plain.json || {}), false);
+        const stripped = Object.assign({}, j);
+        delete stripped.records;
+        eq('...and every other key is identical with the flag on',
+            JSON.stringify(stripped), JSON.stringify(plain.json));
+        eq('one record per rework fix', recs.length, j.reworkCount);
+        check('every record has an 8-character hash and a YYYY-MM-DD day',
+            recs.length > 0 && recs.every((x) => /^[0-9a-f]{8}$/.test(x.hash) && /^\d{4}-\d{2}-\d{2}$/.test(x.date)), clip(JSON.stringify(recs)));
+        const panel = recs.find((x) => x.fix.startsWith('fix(panel): await'));
+        // BASE + 1h is 2025-06-15T16:06:40Z.
+        eq('a fix is dated by its UTC commit day', panel && panel.date, '2025-06-15');
+        check('...and carries the class its subject matched',
+            !!panel && panel.classes.includes('ordering / async race'), clip(JSON.stringify(panel)));
+        const ghost = recs.find((x) => x.fix === GHOST_SUBJECT);
+        // BASE + 2d + 3h is 2025-06-17T18:06:40Z.
+        eq('the separator-bearing fix two days later is dated two days later', ghost && ghost.date, '2025-06-17');
+        const report = recs.find((x) => x.fix.startsWith('fix(report):'));
+        eq('a fix matching two classes carries both', report && report.classes.length, 2);
+        eq('a fix on code no feature touched is not a record',
+            recs.some((x) => x.fix.startsWith('fix(legacy):')), false);
+    }
+
+    // -----------------------------------------------------------------------
     // The pipe delivers every byte — AND WHAT THIS PAIR CANNOT DO.
     //
     // node's process.stdout is ASYNCHRONOUS when it is a pipe on POSIX (Linux and
