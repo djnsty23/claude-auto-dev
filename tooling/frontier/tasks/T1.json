@@ -1,0 +1,19 @@
+{
+  "id": "T1",
+  "lane": "fix",
+  "size": "S",
+  "source": "a8ddd156 (A12 branch) instructions-loaded young small segment",
+  "parent": "ad59da72f7baf553dd62f9eef29a78f22c8ee7c9",
+  "fix": "a8ddd156e54255036e0c6730d966b683370daa99",
+  "brief": "T1.md",
+  "heldOut": ["tooling/test-instructions-loaded.js"],
+  "checks": [["node", "tooling/test-instructions-loaded.js"]],
+  "passToPass": [
+    ["node", "tooling/test-config-dir-isolation.js"],
+    ["node", "tooling/test-hook-budget.js"],
+    ["node", "tooling/test-hooks-profile.js"],
+    ["node", "tooling/test-find-shared-rmw.js"]
+  ],
+  "disclosed": ["ROTATE_BYTES", "KEEP_BYTES"],
+  "timeoutMin": 30
+}

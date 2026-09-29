@@ -1,0 +1,33 @@
+{
+  "id": "T4",
+  "lane": "fix",
+  "size": "M",
+  "source": "97ae6587 + cc1e1d9f spawn-budget untilWrittenBeforeKill and lastWords silence",
+  "parent": "db9c83fefe7f71e879405011e77b6d33d34dbbac",
+  "fix": "cc1e1d9fd5f77205a4442bac9543c6191d43261f",
+  "brief": "T4.md",
+  "heldOut": ["tooling/test-spawn-budget.js"],
+  "checks": [["node", "tooling/test-spawn-budget.js"]],
+  "passToPass": [
+    ["node", "tooling/test-away-state.js"],
+    ["node", "tooling/test-check-suites-can-fail.js"],
+    ["node", "tooling/test-coordinator-write-guard.js"],
+    ["node", "tooling/test-draft-skip-guard.js"],
+    ["node", "tooling/test-entrypoints.js"],
+    ["node", "tooling/test-fleet-board-entrypoints.js"],
+    ["node", "tooling/test-fleet-registry.js"],
+    ["node", "tooling/test-fleet-view.js"],
+    ["node", "tooling/test-headless-guard.js"],
+    ["node", "tooling/test-headless-worker.js"],
+    ["node", "tooling/test-idle-with-queue.js"],
+    ["node", "tooling/test-path-filter-deadlock.js"],
+    ["node", "tooling/test-pre-tool-filter.js"],
+    ["node", "tooling/test-quota-tripwire.js"],
+    ["node", "tooling/test-runner-guard.js"],
+    ["node", "tooling/test-session-register.js"],
+    ["node", "tooling/test-session-sweep.js"],
+    ["node", "tooling/test-vacuity-exit.js"]
+  ],
+  "disclosed": ["untilWrittenBeforeKill", "attempt", "readyFile", "baseMs", "verdict", "lastWords", "wrote nothing", "killed", "never started", "exited", "INDETERMINATE", ", N indeterminate", "population:", "child_process.spawnSync", "runBudgeted"],
+  "timeoutMin": 45
+}

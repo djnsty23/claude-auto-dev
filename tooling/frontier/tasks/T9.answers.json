@@ -1,0 +1,38 @@
+{
+  "planted": [
+    {
+      "id": "population",
+      "section": "S3",
+      "why": "Rule 4 keeps a dependency only when a queued record whose queuedAt is inside the last 30 days names it. A task queued earlier can still be queued: planStarts holds one after MAX_LAUNCH_ATTEMPTS refused launches, and one whose dependency awaits a verdict stays pending. Its dependency is then archived, and dependencyState reads the missing record as blocked with 'no ledger record', so the task can never start. The right population is every queued record, whatever its age.",
+      "match": [
+        "queuedAt|\\bqueued\\b[^.]{0,50}\\b(30|thirty)[- ]?days?|\\b(30|thirty)[- ]?days?[^.]{0,50}\\bqueued\\b",
+        "\\b(older|earlier)\\b[^.]{0,20}\\bqueued\\b|\\bqueued\\b[^.]{0,40}\\b(earlier|older|before the window|more than 30|over 30)\\b",
+        "dependen\\w*[^.]{0,30}\\b(scan|keep|check)\\b|no ledger record|\\bstrand|(blocked|stuck)[^.]{0,20}(for good|forever|permanently)|permanently (blocked|stuck)"
+      ],
+      "example": "The dependency scan reads only queued records whose queuedAt is inside the last 30 days, but a task queued earlier can still be waiting, so its dependency is archived and planStarts blocks it for good with no ledger record."
+    },
+    {
+      "id": "fail-open",
+      "section": "S5",
+      "why": "When the read-back throws, the job logs archive-verify-skipped and goes on to S6, which removes the records from the ledger. The proof S1 requires before a record leaves the ledger was never obtained, so a bad or missing month file loses those records for good. The job must stop and leave the ledger untouched until a later run can verify.",
+      "match": [
+        "fail(s|ed|ing)?[- ](open|closed)",
+        "verif\\w*[- ]skipped|skip\\w*[^.]{0,30}verif|unverified|without (any )?(verif\\w*|proof|confirm\\w*)",
+        "read[- ]?back[^.]{0,80}(throw|error|fail|except|cannot|could not)|(throw|error|fail|except)\\w*[^.]{0,80}read[- ]?back",
+        "\\b(no|not|without)\\b[^.]{0,20}\\bproof\\b"
+      ],
+      "example": "When the read-back throws, S5 logs archive-verify-skipped and still goes on to S6, so records leave the ledger with an unverified copy. It should fail closed and stop."
+    },
+    {
+      "id": "race",
+      "section": "S6",
+      "why": "S6 re-reads the ledger, filters it and writes it back with writeLedger without holding <ledger>.lock. Brain turns and the Brain clock write the same file under withLock at any time, so an enqueue, launch, settle or verdict that lands between S6's read and its rename is overwritten by S6's older copy. The temp file and rename stop torn reads, not lost updates.",
+      "match": [
+        "\\brac(e|es|ing|y)\\b|lost[- ]?updates?|clobber|read[- ]modify[- ]write|concurrent\\w*\\s+(\\w+\\s+)?(writ|enqueue|launch|verdict|settle|update|modif|brain|process)|\\bwrites?\\s+(it\\s+)?concurrently",
+        "withLock|ledger>?\\.lock|ledger('s)? lock|unlocked",
+        "\\b(without|never|missing|lacks?|skips?|omits?|no)\\b[^.]{0,30}\\block\\b|\\b(not|n't)\\s+(take|hold|acquire)\\w*[^.]{0,20}\\block\\b"
+      ],
+      "example": "S6 rewrites the ledger without holding <ledger>.lock through withLock, so an enqueue or verdict another process writes between the re-read and the rename is overwritten and lost."
+    }
+  ]
+}

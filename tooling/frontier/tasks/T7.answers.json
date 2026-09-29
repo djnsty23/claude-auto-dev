@@ -1,0 +1,93 @@
+{
+  "items": [
+    {
+      "path": "plugins/autodev-core/hooks/fn/sprint-status.mjs",
+      "why": "isActionable, isOutstanding and summarise read story.passes. FIVE-STATE-SAFE: an ESM copy of prd-states.js with all five states and an unrecognised bucket.",
+      "evidence": "lines 18, 24 and 49 at 62c539a5: `const p = story.passes`, `const p = s && s.passes`, compared to DONE, PENDING or undefined, FAILED, DEFERRED, NEEDS_SETUP"
+    },
+    {
+      "path": "plugins/autodev-memory/hooks/memory-session-end.js",
+      "why": "the SessionEnd prd summary reads v.passes. FIVE-STATE-SAFE: done is `=== true`, and pending (null or undefined), failed and needs-setup are separate groups.",
+      "evidence": "lines 69 and 102-104 at 62c539a5, in the module body. Deferred and unrecognised values fall in no group, which is a report choice, not a boolean read"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/check-spec-output.js",
+      "why": "the per-story loop reads s.passes to check a new story is null, a setup story is needs-setup, and an existing value is in VALID. FIVE-STATE-SAFE.",
+      "evidence": "lines 263-274 at 62c539a5: compares to NEEDS_SETUP, to null, and `!VALID.includes(s.passes)`"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/fleet-snapshot.js",
+      "why": "nextActionable reads v.passes to label a story failed or pending, after filtering with isActionable. FIVE-STATE-SAFE.",
+      "evidence": "line 107 at 62c539a5: `state: v && v.passes === false ? 'failed' : 'pending'`. The comment at line 86 records the old boolean-ish filter it replaced"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/mission-contract.js",
+      "why": "build prints story.passes in its story-not-actionable error, after isActionable decided. FIVE-STATE-SAFE.",
+      "evidence": "line 104 at 62c539a5: `JSON.stringify(story.passes)` inside the fail() message"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/prd-mark-needs-setup.js",
+      "why": "mark and clear read story.passes for their \"was\" and refusal messages, and decide through S.needsSetup. FIVE-STATE-SAFE.",
+      "evidence": "lines 133 and 148 at 62c539a5 read it. Lines 134 and 150 write it"
+    }
+  ],
+  "excluded": [
+    {
+      "path": "plugins/autodev-core/scripts/prd-states.js",
+      "why": "the helper module itself, left out by the brief"
+    },
+    {
+      "path": "tooling/test-archive-prd.js",
+      "why": "a test suite. Its oldSplit canary (`passes === true`) is a deliberate boolean reader, left out by the brief"
+    },
+    {
+      "path": "tooling/test-skill-prd-commands-selftest.js",
+      "why": "a test suite. Its BLIND command (`filter(s=>s.passes===true)`) is a deliberate canary, left out by the brief"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/brain-judge.js",
+      "why": "\"passes\" is the Brain clock's passes.jsonl, not a story field"
+    },
+    {
+      "path": "tooling/check-claude-md.js",
+      "why": "reads the passes table in CLAUDE.md as text, not a story"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/production-signals.js",
+      "why": "only writes `passes: null` into a new story"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/post-compact.js",
+      "why": "the string \"(passes: null)\" in its advice text"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/stop-auto-check.js",
+      "why": "comment only. It decides through workPlan and needsSetup"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/session-start.js",
+      "why": "goes through prd-states.js helpers"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/drift-audit.js",
+      "why": "comments only"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/fn/autodev-fn.mjs",
+      "why": "goes through sprint-status.mjs"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/prd-requirements.js",
+      "why": "comment only"
+    },
+    {
+      "path": "plugins/autodev-core/scripts/fleet-intent.js",
+      "why": "comment only"
+    },
+    {
+      "path": "plugins/autodev-core/skills/core/SKILL.md",
+      "why": "markdown. Its node -e command goes through prd-states.js"
+    }
+  ],
+  "note": "The literal question (readers that treat passes as a boolean) has an empty answer at 62c539a5: every direct reader keeps the five states apart. The brief asks for the direct readers instead, each classified in its why."
+}

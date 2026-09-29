@@ -1,0 +1,13 @@
+{
+  "id": "T8",
+  "lane": "locate",
+  "size": "M",
+  "source": "answer list at 62c539a5: hooks that print on the no-op path, measured by running each",
+  "parent": "62c539a57777787665995ad6b4cde2974bcfe80b",
+  "brief": "T8.md",
+  "answerFile": "frontier-answer.json",
+  "expected": "T8.answers.json",
+  "threshold": 0.8,
+  "support": [],
+  "timeoutMin": 30
+}

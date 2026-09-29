@@ -1,0 +1,14 @@
+{
+  "id": "T3",
+  "lane": "fix",
+  "size": "S",
+  "source": "a2b8d4c2 (#328) check-queue-freshness",
+  "parent": "b4230de8550f4fbc2b71241526f9a92819087cbe",
+  "fix": "a2b8d4c2f54f5211293a6a6359821f5cc84eafad",
+  "brief": "T3.md",
+  "heldOut": ["tooling/test-check-queue-freshness.js"],
+  "checks": [["node", "tooling/test-check-queue-freshness.js"]],
+  "passToPass": [],
+  "disclosed": ["gitFailure", "status", "stderr", "population.gitFailed", "git grep exited 128", "ENOENT", "git itself failed on N premise(s)", "carried nothing checkable", "UNCHECKABLE"],
+  "timeoutMin": 30
+}
