@@ -538,3 +538,21 @@ deploy to production and often run several concurrent sessions — use
 `git worktree add`, never `git checkout` in a live main tree, and re-run *their*
 gate **after** a rebase, not before: a change green on its own can go red on a new
 base without being touched.
+
+## Moved out of CLAUDE.md on 2026-09-29 (the 8 KB diet)
+
+- **The gate lock.** `npm run gate` takes the machine-wide full-gate lock (`tooling/gate-lock.js`).
+  It waits in autodev-core's `full-gate-queue.js` queue, first come first served across every lane the
+  machine allows, and prints who it is behind. It moves a dead holder's lock aside to `.stale-HHMM`,
+  and on any outcome hands the lock to the next ticket or renames it to `.released-HHMM`. A chain it
+  did not see finish exits 2. `AUTODEV_GATE_LOCK=0` skips the lock.
+- **`gate:fast`** runs the cheap steps it derives from `scripts["gate:chain"]`, takes no lock, and
+  names what it deferred.
+- **`tree-inert`**: `test-all.js` compares `git status` before and after. `git check-ignore -v <path>`
+  says whether a path under `.claude/` is ignored.
+- **`check:conflict-markers`** greps every `git ls-files` path for a line of exactly seven `<`, `=` or
+  `>` plus a space or end of line. Markdown lines inside a closed fence are exempt.
+- **Kill by pid**: `pkill -f` reaches peers, because every worktree runs the same command lines.
+- **Coverage asks four questions**: `find-orphan-checks.js` (scripts nobody runs), `check:hooks` (hooks
+  no suite drives), `check:functions` (functions never entered), `check:vacuity` (code no assertion
+  depends on, and it rewrites its subject).

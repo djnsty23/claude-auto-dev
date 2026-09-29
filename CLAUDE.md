@@ -20,9 +20,6 @@ node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md
 node tooling/check-claude-md.js              # does THIS FILE still describe the tree?
 ```
 
-**`npm test` is ONE THIRTEENTH of the gate**, and nothing about it hints at the rest, which is why
-`npm run gate` exists: it chains all thirteen.
-
 **THE CHAIN IS `&&`, so a red first step means the other twelve NEVER RAN.** The gate is
 
 ```
@@ -37,35 +34,24 @@ npm test && npm run check:suites && npm run check:probe-shapes
 When the first step fails, run the remaining twelve yourself.
 The chain's exit status is a verdict on one step, not on thirteen.
 
-- **`npm run gate` takes the machine-wide full-gate lock** (`tooling/gate-lock.js`), and the chain
-  above is `scripts["gate:chain"]`. It waits in autodev-core's `full-gate-queue.js` queue, first
-  come first served and across every lane the machine allows, and prints who it is behind. It moves a
-  dead holder's lock aside to `.stale-HHMM`, and on any outcome hands the lock to the next ticket or
-  renames it to `.released-HHMM`. The chain's exit code passes through. A chain it did not see
-  finish exits 2. `AUTODEV_GATE_LOCK=0` skips the lock.
-- **Exit 2 is INDETERMINATE**, never a pass or a fail. Read the conflict line before re-running.
+- **`npm run gate` waits its turn** in the machine-wide `full-gate-queue.js` queue
+  (`tooling/gate-lock.js`), then runs `scripts["gate:chain"]` and passes its exit code through.
+- **Exit 2 is INDETERMINATE**, never a pass or a fail: a chain the lock did not see finish, or a
+  conflict. Read the conflict line before re-running.
 - **Run it on a clean tree, after committing and before pushing.** `check:suites` grades HEAD in a
   private worktree and refuses a dirty tree. Iterate with `npm test`, then commit, gate and push.
-- **Do not touch the tree while it runs.** `test-all.js` compares `git status` before and after and
-  fails `tree-inert` on any change. Draft in a scratchpad. `git check-ignore -v <path>` says whether a
-  path under `.claude/` is ignored.
-- **`gate:fast` does not satisfy the merge bar.** It runs the cheap steps it derives from
-  `scripts["gate:chain"]`, takes no lock, and names what it deferred. The bar is the full gate
-  after any rebase.
+- **Do not touch the tree while it runs.** `test-all.js` fails `tree-inert` on any `git status`
+  change. Draft in a scratchpad.
+- **`gate:fast` does not satisfy the merge bar.** The bar is the full gate after any rebase.
 - **The gate is not what CI runs.** `check:hook-parse` is CI's `node --check` loop over
   `plugins/*/hooks/*.js`, but seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.
-- **`check:conflict-markers` exists because a marker inside a string still parses.** It greps every
-  `git ls-files` path for a line of exactly seven `<`, `=` or `>` plus a space or end of line. Markdown
-  lines inside a closed fence are exempt, so show a conflict in a doc only inside a fence.
-- **Kill by pid, never by pattern.** Every worktree runs the same command lines, so `pkill -f`
-  reaches peers. Confirm a pid's cwd, then kill that pid.
+- **A conflict marker inside a string still parses**, so `check:conflict-markers` greps every tracked
+  file. Show a conflict in a doc only inside a closed fence.
+- **Kill by pid, never by pattern**: every worktree runs the same command lines. Confirm the pid's cwd.
 - A child killed on timeout still carries its stdout. Report what it printed, not a bare `ETIMEDOUT`.
 - `$?` after a pipe is the pipe's status: `npm run check:suites | tail -3` reads 0 on an exit 2.
 
-`test-all.js` finds `tooling/test-*.js` by pattern: a new suite needs no registration. Coverage
-asks four questions: `find-orphan-checks.js` (scripts nobody runs), `check:hooks` (hooks no suite
-drives), `check:functions` (functions never entered), `check:vacuity` (code no assertion depends
-on, and it rewrites its subject).
+`test-all.js` finds `tooling/test-*.js` by pattern: a new suite needs no registration.
 
 ## Architecture
 
@@ -146,8 +132,6 @@ immediately before `bump.js`.
 
 ## Product repos
 
-**Commit and push autodev freely.** A product repo deploys to production and often has several
-sessions at once. Who merges and who deploys there is the operator's decision policy
-(`~/.claude/rules/decision-policy.md` when it exists), not this file. Without one, ask first. Use
-`git worktree add`, never `git checkout` in a live main tree, and re-run the product's own gate after
-a rebase, not before.
+**Commit and push autodev freely.** In a product repo, who merges and deploys is the operator's
+decision policy (`~/.claude/rules/decision-policy.md`), and without one, ask first. Use
+`git worktree add`, never `git checkout` in a live main tree, and re-run its gate after a rebase.
