@@ -91,6 +91,7 @@ function ctx(opts) {
         budgetStop: opts['budget-stop'] !== undefined ? Number(opts['budget-stop']) : 0.70,
         apiSources: String(opts['api-sources'] || 'none').split(',').map((s) => s.trim()).filter(Boolean),
         pollMs: Number(process.env.FRONTIER_POLL_MS || 20000),
+        processList: process.env.FRONTIER_PROCESS_LIST || null,
     };
 }
 
@@ -110,6 +111,92 @@ function writeJsonAtomic(file, value) {
 function sha(text) { return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16); }
 function sleepMs(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
 function isEmptyDir(dir) { try { return fs.readdirSync(dir).length === 0; } catch { return true; } }
+
+// ---------------------------------------------------------------- machine load
+// Wall time is a frontier axis, and a worker running a suite beside a peer's
+// gate is slower for a reason that is not the variant: one fix run measured
+// 1,220 s of local tool time against 94 s of API time while two coverage runs
+// shared the CPU. So a row records the heavy jobs (a gate, a coverage run, a
+// full suite) running outside its own process tree at start, at every batch
+// poll and at the end, plus the machine's CPU busy share over the window, and
+// frontier.js compares wall time only between runs that saw none.
+const HEAVY_RE = /\b(?:test-all|find-untested-functions|full-gate-queue|gate-lock)\.js\b|\brun gate\b/i;
+
+function cpuTimes() {
+    let idle = 0;
+    let total = 0;
+    for (const cpu of os.cpus()) { const t = cpu.times; idle += t.idle; total += t.user + t.nice + t.sys + t.idle + t.irq; }
+    return { idle, total };
+}
+/** Every process as { pid, ppid, cmd }, or null when the list cannot be read. */
+function processList(c) {
+    let text = null;
+    if (c.processList) {
+        try { text = fs.readFileSync(c.processList, 'utf8'); } catch { return null; }
+    } else if (process.platform === 'win32') {
+        const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+            'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }'],
+        { encoding: 'utf8', windowsHide: true, timeout: 30000, maxBuffer: 1 << 25 });
+        text = r.status === 0 ? r.stdout : null;
+    } else {
+        const r = spawnSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8', timeout: 30000, maxBuffer: 1 << 25 });
+        text = r.status === 0 ? (r.stdout || '').split('\n').map((l) => l.trim().replace(/^(\d+)\s+(\d+)\s+/, '$1\t$2\t')).join('\n') : null;
+    }
+    if (!text) return null;
+    return text.split(/\r?\n/).map((l) => l.split('\t')).filter((f) => f.length >= 3 && /^\d+$/.test(f[0]))
+        .map((f) => ({ pid: Number(f[0]), ppid: Number(f[1]), cmd: f.slice(2).join('\t') }));
+}
+/**
+ * Labels of the heavy jobs that are not the run's own: outside the tree under
+ * `rootPid` (the worker's own suite runs by relative path, so its command line
+ * cannot say whose it is) and not naming `ownRepo`. null when the list is null.
+ */
+function heavyJobs(procs, rootPid, ownRepo) {
+    if (!procs) return null;
+    const own = new Set(rootPid ? [Number(rootPid)] : []);
+    for (let grew = true; grew;) {
+        grew = false;
+        for (const p of procs) if (own.has(p.ppid) && !own.has(p.pid)) { own.add(p.pid); grew = true; }
+    }
+    const repo = ownRepo ? ownRepo.replace(/\\/g, '/').toLowerCase() : null;
+    return procs.filter((p) => p.pid !== process.pid && !own.has(p.pid) && HEAVY_RE.test(p.cmd)
+        && !(repo && p.cmd.replace(/\\/g, '/').toLowerCase().includes(repo))).map((p) => {
+        const m = p.cmd.replace(/\\/g, '/').match(/([^/"\s]+)\/tooling\/([\w-]+\.js)/);
+        return m ? `${m[2]}@${m[1]}` : p.cmd.match(HEAVY_RE)[0];
+    });
+}
+function sampleLoad(c, meta) {
+    return { at: new Date().toISOString(), cpu: cpuTimes(), heavy: heavyJobs(processList(c), meta.supervisorPid, meta.repo) };
+}
+/** Fold one poll's reading into the run's samples. */
+function noteLoad(samples, heavy) {
+    const s = samples || { n: 0, unreadable: 0, loaded: 0, max: 0, jobs: [] };
+    s.n++;
+    if (heavy === null) s.unreadable++;
+    else {
+        if (heavy.length) s.loaded++;
+        s.max = Math.max(s.max, heavy.length);
+        s.jobs = [...new Set([...s.jobs, ...heavy])].slice(0, 12);
+    }
+    return s;
+}
+/**
+ * The row's load: quiet when every reading was taken and none saw a heavy job,
+ * loaded when any did, unknown when a reading is missing. cpuBusy includes the
+ * run's own work, so it describes the window, not the neighbours.
+ */
+function loadRecord(start, end, samples) {
+    if (!start || !end) return { class: 'unknown', why: 'no start or end sample' };
+    const dTotal = end.cpu.total - start.cpu.total;
+    const s = [start.heavy, end.heavy].reduce((acc, h) => noteLoad(acc, h), samples ? JSON.parse(JSON.stringify(samples)) : null);
+    const cls = s.unreadable ? 'unknown' : s.loaded ? 'loaded' : 'quiet';
+    return {
+        class: cls, cpuBusy: dTotal > 0 ? Math.round(Math.min(1, Math.max(0, 1 - (end.cpu.idle - start.cpu.idle) / dTotal)) * 1000) / 1000 : null,
+        windowSec: Math.round((Date.parse(end.at) - Date.parse(start.at)) / 1000),
+        heavyStart: start.heavy ? start.heavy.length : null, heavyEnd: end.heavy ? end.heavy.length : null,
+        samples: s.n, loadedSamples: s.loaded, unreadableSamples: s.unreadable, heavyMax: s.max, jobs: s.jobs,
+    };
+}
 
 function git(args, { cwd, env, input } = {}) {
     const r = spawnSync('git', args, { cwd, env: env || process.env, input, encoding: 'utf8', maxBuffer: 1 << 28, windowsHide: true });
@@ -446,6 +533,7 @@ function start(c, meta, env) {
     try { out = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { out = null; }
     if (!out || !out.ok) fault('start-failed', `headless-worker start: ${out ? out.error.code + ' ' + out.error.message : (r.stderr || r.stdout || '').slice(0, 300)}`);
     Object.assign(meta, { state: 'running', startedAt: out.value.record.startedAt, supervisorPid: out.value.supervisorPid, workerVersion: out.value.record.version });
+    meta.loadStart = sampleLoad(c, meta);
     writeJsonAtomic(p.meta, meta);
     return meta;
 }
@@ -653,6 +741,8 @@ function finish(c, run, { allowKill = true } = {}) {
             timedOut = true;
         }
         const exitMs = exitM ? fs.statSync(p.log).mtimeMs : Date.now();
+        // Before grading: the held-out checks are this runner's own load.
+        const load = loadRecord(meta.loadStart, sampleLoad(c, meta), meta.loadSamples);
         const s = parseStream(log);
         const tokens = tokensOf(s.result);
         const init = s.init || {};
@@ -664,7 +754,7 @@ function finish(c, run, { allowKill = true } = {}) {
             durationMs: s.result ? s.result.duration_ms ?? null : null, durationApiMs: s.result ? s.result.duration_api_ms ?? null : null,
             turns: s.result ? s.result.num_turns ?? null : null, resultSubtype: s.result ? s.result.subtype || null : null,
             tokens, costUsd: tokens ? tokens.costUsd : null, costBasis: 'list price, notional on a Max plan',
-            apiKeySource: init.apiKeySource ?? null, budget, leak: { suspect: leaks.length > 0, hits: leaks.slice(0, 5) },
+            apiKeySource: init.apiKeySource ?? null, budget, leak: { suspect: leaks.length > 0, hits: leaks.slice(0, 5) }, load,
         };
         const fp = { model: init.model || null, claudeVersion: init.claude_code_version || null, permissionMode: init.permissionMode || null,
             loadedPlugins: (init.plugins || []).map((x) => `${x.name}@${x.version || '?'}`), tools: Array.isArray(init.tools) ? init.tools.length : null,
@@ -856,7 +946,17 @@ function batchLoop(c, id) {
     try {
         for (;;) {
             let stop = null;
-            for (const it of batch.items.filter((x) => x.state === 'running')) {
+            const live = batch.items.filter((x) => x.state === 'running');
+            const procs = live.length ? processList(c) : null;
+            for (const it of live) {
+                const mp = runPaths(c, it.run).meta;
+                const meta = readJson(mp, null);
+                if (meta && meta.state === 'running') {
+                    meta.loadSamples = noteLoad(meta.loadSamples, heavyJobs(procs, meta.supervisorPid, meta.repo));
+                    writeJsonAtomic(mp, meta);
+                }
+            }
+            for (const it of live) {
                 const row = finish(c, it.run);
                 if (row) {
                     it.state = 'done'; it.verdict = row.verdict;
@@ -980,4 +1080,5 @@ if (require.main === module) {
 }
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
-    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY };
+    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
+    processList, heavyJobs, noteLoad, loadRecord, HEAVY_RE };

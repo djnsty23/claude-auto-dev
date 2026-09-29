@@ -2,9 +2,15 @@
 'use strict';
 /**
  * The frontier over the runner's rows: pass rate per variant and lane, the
- * median notional cost, tokens and wall time, the task-by-variant matrix, the
- * tasks where variants disagree (the ones that get k = 3), and the Pareto set
- * on (pass rate, cost) and (pass rate, wall time).
+ * median notional cost, tokens, API time and wall time, the task-by-variant
+ * matrix, the tasks where variants disagree (the ones that get k = 3), and the
+ * Pareto set on (pass rate, cost), (pass rate, API time) and (pass rate, wall).
+ *
+ * Wall time moves with the machine's load: a worker's suite runs 8x slower
+ * beside a peer's coverage run. So the wall median reads only rows whose load
+ * class is quiet (no gate, coverage run or full suite outside the run's own
+ * tree at any reading), and a row with no load record counts as unknown. API
+ * time is the model's own time and reads every counted row.
  *
  *   node tooling/frontier/frontier.js [--data <dir>] [--json] [--write]
  *
@@ -34,9 +40,12 @@ function summarise(rows) {
     const variants = {};
     const matrix = {};
     for (const r of counted) {
-        const v = variants[r.variant] || (variants[r.variant] = { n: 0, passes: 0, costs: [], walls: [], tokens: [], lanes: {} });
+        const v = variants[r.variant] || (variants[r.variant] = { n: 0, passes: 0, costs: [], walls: [], quietWalls: [], apis: [], tokens: [], lanes: {}, load: { quiet: 0, loaded: 0, unknown: 0 } });
         v.n++; if (r.pass) v.passes++;
-        v.costs.push(r.costUsd); v.walls.push(r.wallMs); v.tokens.push(r.tokens ? r.tokens.total : null);
+        const cls = loadClass(r);
+        v.load[cls]++;
+        v.costs.push(r.costUsd); v.walls.push(r.wallMs); v.apis.push(r.durationApiMs); v.tokens.push(r.tokens ? r.tokens.total : null);
+        if (cls === 'quiet') v.quietWalls.push(r.wallMs);
         const l = v.lanes[r.lane] || (v.lanes[r.lane] = { n: 0, passes: 0 });
         l.n++; if (r.pass) l.passes++;
         const cell = (matrix[r.task] || (matrix[r.task] = {}))[r.variant] || (matrix[r.task][r.variant] = { n: 0, passes: 0 });
@@ -46,11 +55,18 @@ function summarise(rows) {
     for (const [id, v] of Object.entries(variants)) {
         const lanes = {};
         for (const [lane, l] of Object.entries(v.lanes)) lanes[lane] = { n: l.n, passes: l.passes, passRate: rate(l.passes, l.n) };
-        out[id] = { n: v.n, passes: v.passes, passRate: rate(v.passes, v.n), medianCostUsd: median(v.costs), medianWallMs: median(v.walls), medianTokens: median(v.tokens), lanes };
+        out[id] = { n: v.n, passes: v.passes, passRate: rate(v.passes, v.n), medianCostUsd: median(v.costs), medianApiMs: median(v.apis),
+            medianWallQuietMs: median(v.quietWalls), medianWallAnyLoadMs: median(v.walls), medianTokens: median(v.tokens), load: v.load, lanes };
     }
     const disagreements = Object.entries(matrix).filter(([, cells]) => new Set(Object.values(cells).map((c) => rate(c.passes, c.n))).size > 1).map(([t]) => t).sort();
     return { rows: rows.length, counted: counted.length, excluded, variants: out, matrix, disagreements,
-        pareto: { cost: pareto(out, 'medianCostUsd'), wall: pareto(out, 'medianWallMs') } };
+        pareto: { cost: pareto(out, 'medianCostUsd'), api: pareto(out, 'medianApiMs'), wall: pareto(out, 'medianWallQuietMs') } };
+}
+
+/** A row's load class from its record; a row from before the record is unknown. */
+function loadClass(r) {
+    const c = r.load && r.load.class;
+    return c === 'quiet' || c === 'loaded' ? c : 'unknown';
 }
 
 /** Variants no other variant beats on pass rate and the metric at once. */
@@ -67,18 +83,19 @@ function readRows(file) {
 
 function render(s) {
     const lines = [`frontier: ${s.counted} counted of ${s.rows} rows${Object.keys(s.excluded).length ? `, excluded ${JSON.stringify(s.excluded)}` : ''}`];
-    lines.push('variant   n  pass  rate   cost$   wall s   tokens');
+    const sec = (ms, w) => (ms === null ? '-' : (ms / 1000).toFixed(0)).padStart(w);
+    lines.push('variant   n  pass  rate   cost$   api s   quiet wall s   load q/l/u   tokens');
     for (const [id, v] of Object.entries(s.variants).sort()) {
-        lines.push(`${id.padEnd(8)} ${String(v.n).padStart(2)}  ${String(v.passes).padStart(4)}  ${String(v.passRate).padStart(5)}  ${v.medianCostUsd === null ? '    -' : v.medianCostUsd.toFixed(2).padStart(6)}  ${v.medianWallMs === null ? '     -' : (v.medianWallMs / 1000).toFixed(0).padStart(7)}  ${v.medianTokens === null ? '-' : v.medianTokens}`);
+        lines.push(`${id.padEnd(8)} ${String(v.n).padStart(2)}  ${String(v.passes).padStart(4)}  ${String(v.passRate).padStart(5)}  ${v.medianCostUsd === null ? '     -' : v.medianCostUsd.toFixed(2).padStart(6)}  ${sec(v.medianApiMs, 6)}  ${sec(v.medianWallQuietMs, 13)}  ${`${v.load.quiet}/${v.load.loaded}/${v.load.unknown}`.padStart(11)}   ${v.medianTokens === null ? '-' : v.medianTokens}`);
     }
-    lines.push(`pareto on cost: ${s.pareto.cost.join(', ') || '-'}; on wall time: ${s.pareto.wall.join(', ') || '-'}`);
+    lines.push(`pareto on cost: ${s.pareto.cost.join(', ') || '-'}; on API time: ${s.pareto.api.join(', ') || '-'}; on quiet wall time: ${s.pareto.wall.join(', ') || '-'}`);
     lines.push(`disagreements (k = 3 candidates): ${s.disagreements.join(', ') || 'none'}`);
     return lines.join('\n') + '\n';
 }
 
 function main(argv) {
     if (argv.includes('--help')) {
-        process.stdout.write('Usage: node tooling/frontier/frontier.js [--data <dir>] [--json] [--write]\n  Summarises runs.jsonl: pass rate, median cost, tokens and wall time per variant, the Pareto set and the disagreements.\n');
+        process.stdout.write('Usage: node tooling/frontier/frontier.js [--data <dir>] [--json] [--write]\n  Summarises runs.jsonl: pass rate, median cost, tokens, API time and quiet-load wall time per variant, the Pareto sets and the disagreements.\n');
         return 0;
     }
     const i = argv.indexOf('--data');
@@ -95,4 +112,4 @@ function main(argv) {
 }
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
-module.exports = { summarise, pareto, median };
+module.exports = { summarise, pareto, median, loadClass };
