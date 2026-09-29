@@ -48,6 +48,16 @@
  * case - silence from this tripwire means "measured, and not close", and
  * nothing else.
  *
+ * ONE MEASURE, NAMED. quota-burn.js prints `measure`: what one priced unit is.
+ * A source that prints none summed every transcript row, and Claude Code writes
+ * one row per content block, each repeating the response's usage. `[measured
+ * 2026-09-30]` over 7 days that sum read 2.32x the per-response one. Every
+ * sample and calibration point is stored with its measure, and only points of
+ * the current reading's measure are used. Without that, a ceiling calibrated on
+ * the row sum sits 2.3x above a per-response reading, and the tripwire stays
+ * silent through the wall. A calibration from another measure is its own
+ * diagnostic, calibration-other-measure.
+ *
  * USAGE
  *   node quota-tripwire.js                          # poll loop, 5 min, threshold 50 min
  *   node quota-tripwire.js --threshold-minutes 35
@@ -130,12 +140,19 @@ function tzStamp(ms) {
 
 // ----------------------------------------------------------------- state ----
 
+// A reading, sample or calibration point with no `measure` is a row sum: the
+// only thing quota-burn.js printed before it named its measure.
+const LEGACY_MEASURE = 'row';
+function measureOf(x) {
+  return (x && typeof x.measure === 'string' && x.measure) || LEGACY_MEASURE;
+}
+
 function emptyState() {
   return {
     version: 1,
     windowStart: null,
-    samples: [],        // [{ t: epochMs, cost: number }] - one measure only
-    calibration: [],    // [{ t, cost, pct }] - survives window rollover
+    samples: [],        // [{ t: epochMs, cost: number, measure }] - one measure only
+    calibration: [],    // [{ t, cost, pct, measure }] - survives window rollover
     ceiling: null,      // explicit override, in the same measure
     armed: true,
     firedAt: null,
@@ -196,17 +213,28 @@ function readSource(sourcePath) {
   }
   const ws = Date.parse(o.windowStart || '');
   if (!ws) return { ok: false, code: 'source-unparseable', detail: 'windowStart missing or unparseable' };
-  return { ok: true, cost: o.windowCost, windowStart: ws, population: o.population || null };
+  return { ok: true, cost: o.windowCost, windowStart: ws, measure: measureOf(o), population: o.population || null };
 }
 
 // --------------------------------------------------------------- ceiling ----
 
-function deriveCeiling(state, opts) {
+function deriveCeiling(state, opts, measure) {
   const explicit = opts.ceiling != null ? opts.ceiling : state.ceiling;
   if (explicit != null && Number.isFinite(explicit) && explicit > 0) {
     return { ok: true, ceiling: explicit, basis: 'explicit ceiling ' + money(explicit) };
   }
-  const cal = (state.calibration || []).slice().sort((a, b) => a.t - b.t);
+  const m = measure || LEGACY_MEASURE;
+  const all = state.calibration || [];
+  const cal = all.filter((p) => measureOf(p) === m).sort((a, b) => a.t - b.t);
+  if (cal.length < 2 && all.length > cal.length) {
+    // Points priced on another measure cannot anchor this one: a row-sum
+    // ceiling sits about 2.3x above a per-response reading, and would hold
+    // the tripwire silent until long after the wall.
+    return {
+      ok: false, code: 'calibration-other-measure',
+      detail: (all.length - cal.length) + ' calibration point(s) were taken on a different measure than this reading (' + m + '); run --calibrate <percent> twice, 30+ min apart',
+    };
+  }
   if (cal.length < 2) {
     return {
       ok: false, code: 'no-ceiling',
@@ -270,7 +298,11 @@ function evaluate(reading, prev, opts) {
   }
   state.windowStart = reading.windowStart;
 
-  state.samples.push({ t: nowMs, cost: reading.cost });
+  // A sample of another measure is not comparable: a rate across the switch
+  // from row sums to response sums reads as a large negative burn.
+  const measure = measureOf(reading);
+  state.samples = state.samples.filter((s) => measureOf(s) === measure);
+  state.samples.push({ t: nowMs, cost: reading.cost, measure });
   state.samples.sort((a, b) => a.t - b.t);
   const keepFrom = nowMs - Math.max(opts.lookbackMinutes * 3, 180) * 60000;
   state.samples = state.samples.filter((s) => s.t >= keepFrom).slice(-500);
@@ -291,7 +323,7 @@ function evaluate(reading, prev, opts) {
     };
   };
 
-  const c = deriveCeiling(state, opts);
+  const c = deriveCeiling(state, opts, measure);
   if (!c.ok) return diag(c.code, c.detail);
 
   const r = deriveRate(state.samples, nowMs, opts);
@@ -346,7 +378,7 @@ function takeReading(opts) {
   }
   const s = readSource(opts.sourcePath);
   if (!s.ok) return s;
-  return { ok: true, cost: s.cost, windowStart: s.windowStart, nowMs: Date.now(), population: s.population };
+  return { ok: true, cost: s.cost, windowStart: s.windowStart, measure: s.measure, nowMs: Date.now(), population: s.population };
 }
 
 function sourceDiagLine(code, detail) {
@@ -403,12 +435,12 @@ function cmdCalibrate() {
     process.exit(1);
   }
   const state = loadState(OPTS.statePath);
-  state.calibration.push({ t: reading.nowMs, cost: reading.cost, pct });
+  state.calibration.push({ t: reading.nowMs, cost: reading.cost, pct, measure: measureOf(reading) });
   state.calibration = state.calibration.slice(-20);
   const w = saveState(OPTS.statePath, state);
   if (!w.ok) { console.error('could not write state: ' + w.detail); process.exit(1); }
   console.log('calibrated: ' + pct + '% = ' + money(reading.cost) + ' at ' + tzStamp(reading.nowMs));
-  const c = deriveCeiling(state, OPTS);
+  const c = deriveCeiling(state, OPTS, measureOf(reading));
   if (c.ok) console.log('ceiling now ' + money(c.ceiling) + '  (' + c.basis + ')');
   else console.log('no ceiling yet: ' + c.detail);
 }
@@ -427,10 +459,12 @@ function cmdStatus() {
   console.log('reading    : ' + money(reading.cost) + '  window opened ' + tzStamp(reading.windowStart));
   console.log('samples    : ' + state.samples.length + '   calibration points: ' + state.calibration.length);
   console.log('armed      : ' + state.armed + (state.firedAt ? '   last fired ' + tzStamp(state.firedAt) : ''));
-  const c = deriveCeiling(state, OPTS);
+  const measure = measureOf(reading);
+  const c = deriveCeiling(state, OPTS, measure);
   if (!c.ok) { console.log('ceiling    : NONE - ' + c.detail); return; }
   console.log('ceiling    : ' + money(c.ceiling) + '  (' + c.basis + ')');
-  const r = deriveRate(state.samples.concat([{ t: reading.nowMs, cost: reading.cost }]), reading.nowMs, OPTS);
+  const same = state.samples.filter((s) => measureOf(s) === measure);
+  const r = deriveRate(same.concat([{ t: reading.nowMs, cost: reading.cost }]), reading.nowMs, OPTS);
   if (!r.ok) { console.log('rate       : NONE - ' + r.detail); return; }
   const remaining = c.ceiling - reading.cost;
   const minutes = remaining <= 0 ? 0 : r.rate <= 0 ? Infinity : remaining / r.rate;
