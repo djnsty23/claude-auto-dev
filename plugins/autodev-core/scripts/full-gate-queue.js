@@ -55,10 +55,18 @@
  *   node full-gate-queue.js take    [--pid N] [--what TEXT]   one attempt: 0 holds a lane, 3 queued
  *   node full-gate-queue.js wait    [--pid N] [--what TEXT] [--timeout-ms N]   blocks until 0
  *   node full-gate-queue.js release [--pid N]                 0 released or handed over, 1 not ours
+ *   node full-gate-queue.js leave   [--pid N]                 0 no ticket of --pid is left, 1 one is
  *   node full-gate-queue.js status  [--json]                  read-only, every lane
  *   node full-gate-queue.js lanes   [N]                       print, or set, the machine's lane count
  *   node full-gate-queue.js --help
- *   --lanes N on take, wait, release and status overrides the lane count for one call.
+ *   --lanes N on take, wait, release, leave and status overrides the lane count for one call.
+ *
+ * LEAVE. A waiter stopped from outside (TaskStop, a closed terminal) can leave
+ * its shell alive, and a live pid's ticket stays in every queue until its
+ * heartbeat goes stale, ten minutes by default. `leave` removes that pid's
+ * tickets from every lane at once. It never touches a lock: a pid that holds a
+ * lane is told to run `release`. It runs for a pid that is not running too,
+ * because a dead waiter's ticket is one of the tickets it exists to remove.
  *
  * ENVIRONMENT (the lock variables are shared with the gate wrapper, so both
  * always name the same file):
@@ -533,7 +541,7 @@ function describe() {
 // ---------------------------------------------------------------------------
 
 function help() {
-    console.log(`usage: node full-gate-queue.js <take|wait|release|status|lanes> [options]
+    console.log(`usage: node full-gate-queue.js <take|wait|release|leave|status|lanes> [options]
 
 A first-come ticket queue in front of the machine-wide full-gate lock.
 Only the oldest live ticket may take a lane's lock, and a release hands the
@@ -543,6 +551,9 @@ lock straight to it, so a newcomer cannot jump the queue.
   wait     take until a lane is held. Exit 0, or 3 when --timeout-ms runs out.
   release  hand each lane --pid holds to its oldest live ticket, or rename the
            lock to .released-HHMM when nobody waits. Exit 1 when it holds none.
+  leave    remove --pid's ticket from every lane's queue, for a waiter stopped
+           from outside whose shell lives on. Never touches a lock. Exit 0 when
+           no ticket of --pid is left, 1 when one could not be removed.
   status   every lane's holder and queue in order, read-only. --json for a machine.
   lanes    print the machine's lane count; "lanes N" sets it (1 to ${MAX_LANES}).
 
@@ -620,7 +631,7 @@ function holderLine(h) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (args.help) { help(); return; }
-    if (args.bad || !['take', 'wait', 'release', 'status', 'lanes'].includes(args.cmd)) {
+    if (args.bad || !['take', 'wait', 'release', 'leave', 'status', 'lanes'].includes(args.cmd)) {
         console.error(`${TAG} ${args.bad || (args.cmd ? `unknown command ${args.cmd}` : 'no command given')}; see --help`);
         process.exitCode = 1;
         return;
@@ -655,6 +666,30 @@ async function main() {
     if (args.cmd === 'status') {
         printStatus({ laneCount: lanes.count, laneSource: lanes.source, notes: lanes.notes,
                       lanes: lockPaths.map((lp) => readStatus(lp, staleMs)) }, args.json);
+        return;
+    }
+
+    if (args.cmd === 'leave') {
+        // Before the liveness check: a dead waiter's ticket is one leave exists to remove.
+        const leaving = args.pid === null ? process.ppid : args.pid;
+        const count = () => lockPaths.map((lp) => readTickets(queueDirFor(lp)).tickets.filter((t) => t.pid === leaving).length);
+        const before = count();
+        leaveQueues(lockPaths, leaving);
+        const after = count();
+        const sum = (a) => a.reduce((x, y) => x + y, 0);
+        const removed = sum(before) - sum(after);
+        log(removed
+            ? `${TAG} removed ${removed} ticket(s) of pid ${leaving} from ${before.filter((n) => n).length} of ${lockPaths.length} lane(s)`
+            : `${TAG} pid ${leaving} had no ticket in any of ${lockPaths.length} lane(s); nothing to remove`);
+        lockPaths.forEach((lp) => {
+            const held = readLock(lp);
+            if (held && held.pid === leaving) log(`${TAG} note: pid ${leaving} still holds ${lp}${inLane(lp)}. leave never releases a lock: run release --pid ${leaving}`);
+        });
+        if (removed && isAlive(leaving) !== false) log(`${TAG} note: pid ${leaving} is running. A wait still running for it takes a new ticket, at the back, on its next poll`);
+        if (sum(after)) {
+            console.error(`${TAG} ${sum(after)} ticket(s) of pid ${leaving} could not be removed`);
+            process.exitCode = 1;
+        }
         return;
     }
 

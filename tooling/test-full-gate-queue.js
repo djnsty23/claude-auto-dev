@@ -21,6 +21,7 @@
  *   M3  liveness ignores ps, so an MSYS pid reads as dead      -> a live waiter is dropped
  *   M4  a waiter tries only lane 1                             -> a free lane 2 sits idle
  *   M5  a waiter that took a lane stays queued in the others   -> it blocks a lane it never uses
+ *   M6  leave removes no ticket                                -> a stopped waiter keeps its place
  */
 'use strict';
 
@@ -215,6 +216,58 @@ function scenarioMsysWaiter(subject, msys) {
     return rows;
 }
 
+/**
+ * leave: a waiter stopped from outside keeps its tickets while its shell lives.
+ * Two lanes, so the tickets to remove sit in two queues, beside another live
+ * pid's ticket that must stay and a lock that must not move.
+ */
+function scenarioLeave(subject) {
+    const fx = fixture();
+    const queue2 = path.join(fx.dir, 'full-gate-2.queue');
+    const [h, x, y] = [sleeper(), sleeper(), sleeper()];
+    const pidsIn = (d) => (fs.existsSync(d)
+        ? fs.readdirSync(d).filter((f) => f.endsWith('.ticket')).sort().map((f) => Number(f.split('-')[1].replace('.ticket', '')))
+        : []);
+    const lane2Ticket = (pid, agoMs) => {
+        fs.mkdirSync(queue2, { recursive: true });
+        const d = new Date(Date.now() - agoMs);
+        const name = `${d.toISOString().replace(/[-:.]/g, '')}-${String(pid).padStart(10, '0')}.ticket`;
+        fs.writeFileSync(path.join(queue2, name), `${pid}\nplanted lane 2 ticket ${pid}\n${d.toISOString()}\n`);
+    };
+    const holderText = `${h}\nlane 1 holder\n`;
+    fs.writeFileSync(fx.lock, holderText);
+    plantTicket(fx, x, 90000);
+    plantTicket(fx, y, 60000);
+    lane2Ticket(x, 90000);
+    const leave = (pid) => run(subject, fx, ['leave', '--pid', String(pid), '--lanes', '2']);
+    const rows = [];
+    rows.push(['setup: X has a ticket in lane 1 and in lane 2, Y has one in lane 1',
+        JSON.stringify(pidsIn(fx.queue)) === JSON.stringify([x, y]) && JSON.stringify(pidsIn(queue2)) === JSON.stringify([x]),
+        `lane 1: ${pidsIn(fx.queue).join()} lane 2: ${pidsIn(queue2).join()}`]);
+    const first = leave(x);
+    rows.push(['leave --pid X exits 0 and reports "removed 2 ticket(s)"', first.code === 0 && /removed 2 ticket\(s\)/.test(first.out), first.out]);
+    rows.push(['X has no ticket left in lane 1 or lane 2', !pidsIn(fx.queue).includes(x) && pidsIn(queue2).length === 0,
+        `lane 1: ${pidsIn(fx.queue).join()} lane 2: ${pidsIn(queue2).join()}`]);
+    rows.push(['Y\'s ticket in lane 1 remains', JSON.stringify(pidsIn(fx.queue)) === JSON.stringify([y]), pidsIn(fx.queue).join()]);
+    rows.push(['the lane 1 lock held by H is untouched',
+        fs.existsSync(fx.lock) && fs.readFileSync(fx.lock, 'utf8') === holderText && asides(fx, 'released').length === 0 && asides(fx, 'stale').length === 0,
+        fs.existsSync(fx.lock) ? fs.readFileSync(fx.lock, 'utf8') : 'no lock']);
+    const again = leave(x);
+    rows.push(['a second leave --pid X exits 0 and says "nothing to remove"', again.code === 0 && /nothing to remove/.test(again.out), again.out]);
+    const d = deadPid();
+    plantTicket(fx, d, 45000);
+    const dead = leave(d);
+    rows.push(['a dead pid\'s planted ticket is removed with exit 0, not refused as "not running"',
+        dead.code === 0 && /removed 1 ticket\(s\)/.test(dead.out) && !/not running/.test(dead.out) && !pidsIn(fx.queue).includes(d),
+        `${dead.out}\nlane 1: ${pidsIn(fx.queue).join()}`]);
+    const holder = leave(h);
+    rows.push(['the holder H running leave --pid H exits 0, keeps the lock, and is told to run release',
+        holder.code === 0 && lockPid(fx) === h && /still holds/.test(holder.out) && /run release/.test(holder.out) &&
+        fs.readFileSync(fx.lock, 'utf8') === holderText, `${holder.out}\nlock: ${lockPid(fx)}`]);
+    rows.push(['Y\'s ticket still remains after every leave', JSON.stringify(pidsIn(fx.queue)) === JSON.stringify([y]), pidsIn(fx.queue).join()]);
+    return rows;
+}
+
 function report(label, rows) {
     for (const [name, ok, detail] of rows) check(`${label}: ${name}`, ok, detail);
 }
@@ -281,8 +334,8 @@ async function main() {
     {
         const fx = fixture();
         const h = run(SUBJECT, fx, ['--help']);
-        check('--help exits 0 and names all four commands',
-            h.code === 0 && ['take', 'wait', 'release', 'status'].every((c) => h.out.includes(c)), h.out);
+        check('--help exits 0 and names all five commands',
+            h.code === 0 && ['take', 'wait', 'release', 'leave', 'status'].every((c) => h.out.includes(c)), h.out);
         check('--help touches nothing', fs.readdirSync(fx.dir).length === 0, fs.readdirSync(fx.dir).join(', '));
         const bad = run(SUBJECT, fx, ['grab']);
         check('an unknown command exits 1 and points at --help', bad.code === 1 && /--help/.test(bad.out), bad.out);
@@ -382,6 +435,7 @@ async function main() {
     }
 
     report('two lanes', scenarioLanes(SUBJECT));
+    report('leave', scenarioLeave(SUBJECT));
 
     // The lane count: flag over env over file, and a bad value is named, not guessed at.
     {
@@ -507,6 +561,8 @@ async function main() {
     if (m4) expectRed('M4', 'a waiter tries only lane 1', scenarioLanes(m4));
     const m5 = mutant('M5', 'leaveQueues(others, pid);', '/* planted: stays queued */');
     if (m5) expectRed('M5', 'a waiter that took a lane stays queued in the others', scenarioLanes(m5));
+    const m6 = mutant('M6', 'leaveQueues(lockPaths, leaving);', '/* planted: leaves nothing */');
+    if (m6) expectRed('M6', 'leave removes nothing', scenarioLeave(m6));
 
     const msys = await msysPid();
     if (msys.pid) {
