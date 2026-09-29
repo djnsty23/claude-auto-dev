@@ -16,8 +16,9 @@
  * nothing; the worker env holds one token under the name claude reads and no
  * other credential; held-out files beat a worker that edits the test; a billed
  * API key is a billed-api row; a timeout kills the tree; finish is idempotent;
- * locate and review grading; the budget guard stops a batch; and the frontier's
- * Pareto set.
+ * locate and review grading; the budget guard stops a batch; a row records the
+ * machine load it ran under; and the frontier's Pareto sets, with wall time
+ * read from quiet rows only.
  */
 const fs = require('fs');
 const os = require('os');
@@ -38,6 +39,10 @@ const HOME = path.join(ROOT, 'claude home');
 const FAKE = path.join(ROOT, 'fake claude.js');
 const OUT = path.join(ROOT, 'out');
 const TOKEN = 'tok-fixture-value-7731';
+// Process tables for the load record: a real read costs a PowerShell start per
+// sample, and the rows need a known answer.
+const QUIET_PS = path.join(ROOT, 'ps quiet.tsv');
+const LOADED_PS = path.join(ROOT, 'ps loaded.tsv');
 
 let pass = 0;
 let fail = 0;
@@ -110,6 +115,8 @@ function buildTasks(s) {
 }
 
 function buildHome() {
+    write(QUIET_PS, '1\t0\tSystem\n2\t1\tnode server.js\n');
+    write(LOADED_PS, '1\t0\tSystem\n500\t1\tnode C:/code/peer-wt/tooling/test-all.js\n');
     write(path.join(HOME, 'CLAUDE.md'), '# global rules\n');
     write(path.join(HOME, 'rules/style.md'), 'Write plainly.\n');
     write(path.join(HOME, 'agents/scout.md'), '---\nname: scout\n---\n');
@@ -150,7 +157,7 @@ out({ type: 'result', subtype: 'success', duration_ms: 1234, duration_api_ms: 10
 function envFor(extra = {}) {
     return Object.assign({}, process.env, {
         FRONTIER_SRC: SRC, FRONTIER_TASKS: TASKS, FRONTIER_DATA: DATA, FRONTIER_WORK: WORK, FRONTIER_CLAUDE_HOME: HOME, FRONTIER_CLAUDE_BIN: FAKE,
-        FRONTIER_POLL_MS: '300', FAKE_OUT: OUT,
+        FRONTIER_POLL_MS: '300', FAKE_OUT: OUT, FRONTIER_PROCESS_LIST: QUIET_PS,
         CLAUDE_CODE_OAUTH_TOKEN_TESTACCT: TOKEN, CLAUDE_CODE_OAUTH_TOKEN_OTHER: 'other-account-value', ANTHROPIC_API_KEY: 'must-not-reach-the-worker',
         ANTHROPIC_AUTH_TOKEN: 'nor-this', SOME_SECRET: 'nor-this-one', DOPPLER_PROJECT: 'accounts',
     }, extra);
@@ -231,16 +238,54 @@ function unitCases() {
     const pr = R.composePrompt({ id: 'T9', lane: 'review', answerFile: 'frontier-answer.json' }, 'Review PLAN.md.\n', 'C:\\w\\repo');
     check('13. the prompt frame names the repo with forward slashes and the answer file', pr.includes('C:/w/repo') && pr.includes('`frontier-answer.json`') && pr.includes('Review PLAN.md.'), pr);
     const s = F.summarise([
-        { run: 'a', task: 'T1', lane: 'fix', variant: 'V0', verdict: 'pass', pass: true, costUsd: 4, wallMs: 100, tokens: { total: 10 } },
-        { run: 'b', task: 'T1', lane: 'fix', variant: 'V1', verdict: 'pass', pass: true, costUsd: 1, wallMs: 200, tokens: { total: 10 } },
-        { run: 'c', task: 'T2', lane: 'fix', variant: 'V0', verdict: 'pass', pass: true, costUsd: 4, wallMs: 100, tokens: { total: 10 } },
-        { run: 'd', task: 'T2', lane: 'fix', variant: 'V1', verdict: 'timeout', pass: false, costUsd: null, wallMs: 900, tokens: null },
+        { run: 'a', task: 'T1', lane: 'fix', variant: 'V0', verdict: 'pass', pass: true, costUsd: 4, wallMs: 100, tokens: { total: 10 }, load: { class: 'quiet' } },
+        { run: 'b', task: 'T1', lane: 'fix', variant: 'V1', verdict: 'pass', pass: true, costUsd: 1, wallMs: 200, tokens: { total: 10 }, load: { class: 'quiet' } },
+        { run: 'c', task: 'T2', lane: 'fix', variant: 'V0', verdict: 'pass', pass: true, costUsd: 4, wallMs: 100, tokens: { total: 10 }, load: { class: 'quiet' } },
+        { run: 'd', task: 'T2', lane: 'fix', variant: 'V1', verdict: 'timeout', pass: false, costUsd: null, wallMs: 900, tokens: null, load: { class: 'quiet' } },
         { run: 'e', task: 'T2', lane: 'fix', variant: 'V2', verdict: 'billed-api', pass: null, costUsd: 9, wallMs: 1, tokens: null },
     ]);
     check('14. frontier: a timeout counts as a fail, billed-api is excluded and reported', s.variants.V1.n === 2 && s.variants.V1.passRate === 0.5 && !s.variants.V2 && s.excluded['billed-api'] === 1, s.variants);
     check('15. frontier: Pareto on cost keeps both ends, on wall time only the dominant one', s.pareto.cost.join() === 'V0,V1' && s.pareto.wall.join() === 'V0', s.pareto);
     check('16. frontier: the disagreeing task is the k = 3 candidate', s.disagreements.join() === 'T2', s.disagreements);
     check('17. frontier: a null cost stays out of the median', s.variants.V1.medianCostUsd === 1, s.variants.V1);
+    const s2 = F.summarise([
+        { run: 'f', task: 'T1', lane: 'fix', variant: 'V0', verdict: 'pass', pass: true, costUsd: 1, wallMs: 100, durationApiMs: 50, tokens: { total: 1 }, load: { class: 'quiet' } },
+        { run: 'g', task: 'T1', lane: 'fix', variant: 'V1', verdict: 'pass', pass: true, costUsd: 1, wallMs: 50, durationApiMs: 20, tokens: { total: 1 }, load: { class: 'loaded' } },
+        { run: 'h', task: 'T2', lane: 'fix', variant: 'V1', verdict: 'pass', pass: true, costUsd: 1, wallMs: 80, durationApiMs: 30, tokens: { total: 1 } },
+    ]);
+    check('17b. frontier: wall time reads quiet rows only, API time reads every row, a row with no record is unknown',
+        s2.variants.V0.medianWallQuietMs === 100 && s2.variants.V1.medianWallQuietMs === null && s2.variants.V1.medianWallAnyLoadMs === 65
+        && s2.variants.V1.medianApiMs === 25 && s2.variants.V1.load.loaded === 1 && s2.variants.V1.load.unknown === 1, s2.variants);
+    check('17c. frontier: a variant with no quiet row is off the wall Pareto set, and API time still ranks it', s2.pareto.wall.join() === 'V0' && s2.pareto.api.join() === 'V1', s2.pareto);
+    const procs = [
+        { pid: 10, ppid: 1, cmd: 'node headless-worker.js supervise' },
+        { pid: 11, ppid: 10, cmd: 'claude -p' },
+        { pid: 12, ppid: 11, cmd: 'node tooling/test-all.js' },
+        { pid: 20, ppid: 1, cmd: 'node C:\\code\\wt\\peer\\tooling\\find-untested-functions.js --gate' },
+        { pid: 21, ppid: 1, cmd: 'node C:/Users/x/autodev-frontier/wt/F-1-T1-V0-1/tooling/test-all.js' },
+        { pid: 22, ppid: 1, cmd: 'node server.js' },
+        { pid: 23, ppid: 1, cmd: 'npm run gate' },
+    ];
+    const hj = R.heavyJobs(procs, 10, 'C:\\Users\\x\\autodev-frontier\\wt\\F-1-T1-V0-1');
+    const hjAll = R.heavyJobs(procs, null, null);
+    check('17d. heavyJobs drops the own tree and repo, keeps a peer gate and names it',
+        hj.length === 2 && hj.includes('find-untested-functions.js@peer') && hj.includes('run gate') && hjAll.length === 4 && R.heavyJobs(null, 1, '') === null, [hj, hjAll]);
+    const at0 = '2026-09-30T00:00:00.000Z';
+    const at1 = '2026-09-30T00:01:40.000Z';
+    const a0 = { at: at0, cpu: { idle: 0, total: 0 }, heavy: [] };
+    const a1 = { at: at1, cpu: { idle: 300, total: 1000 }, heavy: [] };
+    const polls = R.noteLoad(R.noteLoad(null, []), ['test-all.js@peer']);
+    const quiet = R.loadRecord(a0, a1, R.noteLoad(null, []));
+    const mid = R.loadRecord(a0, a1, polls);
+    const blind = R.loadRecord(a0, Object.assign({}, a1, { heavy: null }), null);
+    const none = R.loadRecord(undefined, a1, null);
+    check('17e. loadRecord: quiet with no heavy reading, loaded when one mid-run poll saw a peer, unknown when a reading failed or the start is missing',
+        quiet.class === 'quiet' && quiet.cpuBusy === 0.7 && quiet.windowSec === 100 && quiet.samples === 3
+        && mid.class === 'loaded' && mid.heavyMax === 1 && mid.jobs.join() === 'test-all.js@peer' && mid.heavyStart === 0 && polls.n === 2
+        && blind.class === 'unknown' && none.class === 'unknown', [quiet, mid, blind, none]);
+    const pl = R.processList({});
+    check('17f. processList reads the real table, and it holds this process under its parent',
+        Array.isArray(pl) && pl.length > 5 && pl.some((p) => p.pid === process.pid && p.ppid === process.ppid), pl && pl.length);
 }
 
 function cliCases(shas) {
@@ -385,6 +430,13 @@ function cliCases(shas) {
     const fr = spawnSync(process.execPath, [FRONTIER, '--data', DATA, '--json', '--write'], { encoding: 'utf8' });
     const fj = (() => { try { return JSON.parse(fr.stdout); } catch { return null; } })();
     check('60. frontier.js reads the rows and writes frontier.json', fr.status === 0 && fj && fj.variants.V0 && fs.existsSync(path.join(DATA, 'frontier.json')) && fj.excluded['billed-api'] === 1 && fj.excluded.contaminated === 1, fj && [fj.excluded, Object.keys(fj.variants)]);
+    const loaded = startAndFinish('TX', 'V1', 'fix', { FRONTIER_PROCESS_LIST: LOADED_PS });
+    const batchRows = rows().filter((r) => bf2 && bf2.items.some((i) => i.run === r.run));
+    check('61. a row records its load: quiet under a quiet table, loaded when a peer suite runs at start and end, and a batch row carries its polls',
+        cool.row && cool.row.load && cool.row.load.class === 'quiet' && loaded.row && loaded.row.load.class === 'loaded'
+        && loaded.row.load.heavyStart === 1 && loaded.row.load.heavyEnd === 1 && loaded.row.load.jobs.join() === 'test-all.js@peer-wt'
+        && batchRows.length === 2 && batchRows.every((r) => r.load.class === 'quiet' && r.load.samples >= 3),
+        [cool.row && cool.row.load, loaded.row && loaded.row.load, batchRows.map((r) => r.load)]);
 }
 
 // ---------------------------------------------------------------- main
