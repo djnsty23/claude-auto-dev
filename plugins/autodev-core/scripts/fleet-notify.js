@@ -27,8 +27,11 @@
  *   - a PREP HANDOVER, keyed on the tripwire's own `firedAt`, so a toast the OS
  *     refused is retried on the next pass like any other
  *   - a DIAGNOSTIC that needs a human (no ceiling, a stale calibration, a broken
- *     source), at most once per local day. `insufficient-samples` and
- *     `span-too-short` clear on the next pass by themselves and never toast.
+ *     source), at most once per code per local week, Monday to Sunday. A daily
+ *     toast for a condition nobody can cure that day teaches the reader to
+ *     skip the toast. A different code in the same week does toast: it is a
+ *     new problem. `insufficient-samples` and `span-too-short` clear on the
+ *     next pass by themselves and never toast.
  * Silence from the tripwire stays silent. `AUTODEV_QUOTA_TRIPWIRE=off` skips it.
  *
  * Usage:
@@ -180,13 +183,17 @@ function askItems() {
 
 const localDay = (d = new Date()) => [d.getFullYear(), d.getMonth() + 1, d.getDate()]
     .map((n) => String(n).padStart(2, '0')).join('-');
+// The local Monday of d's week. Built from local fields, so a DST change or a
+// month boundary cannot move it.
+const localWeek = (d = new Date()) =>
+    localDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)));
 
 /**
  * Run the quota tripwire once and turn what it said into toast items.
  *
  * `--diag-repeat-minutes 0` hands the dedup to this file: the tripwire prints
- * its diagnostic on every pass, and the once-a-day key below decides whether
- * it reaches a human. Not run under --dry, because a tripwire run advances its
+ * its diagnostic on every pass, and the once-per-code-per-week stamp below
+ * decides whether it reaches a human. Not run under --dry, because a tripwire run advances its
  * own state and would disarm on an alert that --dry then never shows.
  */
 function quotaItems() {
@@ -225,7 +232,7 @@ function quotaItems() {
     }
     if (diag && !SELF_CLEARING.has(diag.code)) {
         items.push({
-            key: 'quota:diag', stamp: localDay(), due: true, quota: true,
+            key: 'quota:diag', stamp: `${diag.code} week of ${localWeek()}`, due: true, quota: true,
             title: 'Quota tripwire cannot project',
             body: `code=${diag.code}: ${diag.detail}`.slice(0, 240),
             short: 'quota', name: `quota tripwire diagnostic ${diag.code}`,
@@ -245,12 +252,12 @@ function pass() {
     const state = readState();
 
     // Drop state for anything no longer waiting, so a later block re-notifies.
-    // The day's diagnostic key stays until the day ends: a diagnostic that
-    // clears and comes back within the day must not toast a second time.
+    // This week's diagnostic key stays until the week ends: a diagnostic that
+    // clears and comes back within the week must not toast a second time.
     const liveKeys = new Set(items.map((i) => i.key));
     const before = Object.keys(state).length;
     for (const k of Object.keys(state)) {
-        if (liveKeys.has(k) || (k === 'quota:diag' && state[k] === localDay())) continue;
+        if (liveKeys.has(k) || (k === 'quota:diag' && String(state[k]).endsWith(' week of ' + localWeek()))) continue;
         delete state[k];
     }
     const didPrune = Object.keys(state).length !== before;

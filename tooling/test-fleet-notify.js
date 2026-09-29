@@ -671,7 +671,14 @@ const ALERT = 'QUOTA TRIPWIRE  PREP HANDOVER  42 min to 100%  |  window $9,000 o
 const diagLine = (code, detail) => `QUOTA TRIPWIRE DIAGNOSTIC  code=${code}  cannot compute minutes-to-100%: ${detail}`
     + '  |  silence from this tripwire is NOT evidence of headroom';
 const quotaIn = (r) => { const m = outOf(r).match(/ new, quota (.+)$/m); return m ? m[1].trim() : null; };
-const today = () => { const d = new Date(); return [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, '0')).join('-'); };
+// This week's diagnostic stamp. The Monday is found by stepping back a day at
+// a time, not by the subject's arithmetic, so a wrong formula there cannot
+// agree with itself here.
+const weekStamp = (code) => {
+    const d = new Date();
+    while (d.getDay() !== 1) d.setDate(d.getDate() - 1);
+    return code + ' week of ' + [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, '0')).join('-');
+};
 
 function quotaCases() {
     // =====================================================================
@@ -733,7 +740,7 @@ function quotaCases() {
         summarise(f2));
 
     // =====================================================================
-    console.log('\n=== a diagnostic toasts at most once a day ===');
+    console.log('\n=== a diagnostic toasts at most once per code per week ===');
     // =====================================================================
     const hD = makeHome('quota-diag');
     tripwire(hD, { stdout: diagLine('calibration-stale', 'the last two calibration points predate this window') });
@@ -744,30 +751,33 @@ function quotaCases() {
         (toastsIn(g1)[0] || {}).title === 'Quota tripwire cannot project'
         && (toastsIn(g1)[0] || {}).body === 'code=calibration-stale: the last two calibration points predate this window',
         `got ${JSON.stringify(toastsIn(g1)[0])}`);
-    check('recorded under today\'s local date',
-        (readJson(stateFile(hD)) || {})['quota:diag'] === today(), `state=${JSON.stringify(readJson(stateFile(hD)))}`);
+    check('recorded as the code and this week\'s local Monday',
+        (readJson(stateFile(hD)) || {})['quota:diag'] === weekStamp('calibration-stale'),
+        `state=${JSON.stringify(readJson(stateFile(hD)))} want ${weekStamp('calibration-stale')}`);
     check('the same diagnostic on the next pass is silent', firedIn(drive(hD, 'count')) === 0, 'toasted twice');
     tripwire(hD, { stdout: diagLine('no-ceiling', 'no ceiling set') });
-    check('so is a DIFFERENT diagnostic the same day', firedIn(drive(hD, 'count')) === 0, 'toasted on a new code');
+    const g1b = drive(hD, 'count');
+    check('a DIFFERENT diagnostic the same week toasts, it is a new problem',
+        firedIn(g1b) === 1 && (toastsIn(g1b)[0] || {}).body === 'code=no-ceiling: no ceiling set', summarise(g1b));
     tripwire(hD);
     drive(hD, 'count');
-    check('a quiet pass keeps today\'s key rather than pruning it',
-        (readJson(stateFile(hD)) || {})['quota:diag'] === today(), `state=${JSON.stringify(readJson(stateFile(hD)))}`);
+    check('a quiet pass keeps this week\'s key rather than pruning it',
+        (readJson(stateFile(hD)) || {})['quota:diag'] === weekStamp('no-ceiling'), `state=${JSON.stringify(readJson(stateFile(hD)))}`);
     tripwire(hD, { stdout: diagLine('no-ceiling', 'no ceiling set') });
-    check('so a diagnostic that clears and returns the same day stays silent',
+    check('so a diagnostic that clears and returns the same week stays silent',
         firedIn(drive(hD, 'count')) === 0, 'toasted after a quiet pass');
 
     const st = readJson(stateFile(hD)) || {};
-    st['quota:diag'] = '2000-01-01';
+    st['quota:diag'] = 'no-ceiling week of 2000-01-03';
     fs.writeFileSync(stateFile(hD), JSON.stringify(st), 'utf8');
     const g2 = drive(hD, 'count');
-    check('a key from an earlier day lets the diagnostic toast again',
+    check('the same code under an earlier week\'s key toasts again',
         firedIn(g2) === 1 && (toastsIn(g2)[0] || {}).body === 'code=no-ceiling: no ceiling set', summarise(g2));
-    st['quota:diag'] = '2000-01-01';
+    st['quota:diag'] = 'no-ceiling week of 2000-01-03';
     fs.writeFileSync(stateFile(hD), JSON.stringify(st), 'utf8');
     tripwire(hD);
     drive(hD, 'count');
-    check('and an earlier day\'s key is pruned on a quiet pass',
+    check('and an earlier week\'s key is pruned on a quiet pass',
         !('quota:diag' in (readJson(stateFile(hD)) || {})), `state=${JSON.stringify(readJson(stateFile(hD)))}`);
 
     const hS = makeHome('quota-selfclear');

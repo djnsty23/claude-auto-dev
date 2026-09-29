@@ -57,8 +57,10 @@ worker's conversation to answer one quickly.
 
 Each pass also runs `quota-tripwire.js --once`. Its PREP HANDOVER line toasts
 once per firing. A DIAGNOSTIC (the tripwire cannot project) toasts at most once
-a day, and the two that clear themselves as samples arrive never toast. Silence
-from the tripwire stays silent. `AUTODEV_QUOTA_TRIPWIRE=off` skips it.
+per code per week, Monday to Sunday: a different code that week toasts, the
+same code returning does not. The two that clear themselves as samples arrive
+never toast. Silence from the tripwire stays silent. `AUTODEV_QUOTA_TRIPWIRE=off`
+skips it.
 
 To run it permanently, `install-fleet-notify-task.ps1` registers a scheduled task
 (every 2 min, interactive, hidden). Check it is doing the WORK, not merely
