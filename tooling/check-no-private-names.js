@@ -108,6 +108,7 @@ const DIGESTS = [
     'a09c341cc3da5c56',
     'a877b9437d9736a4',
     'b10fb05467abe0a2',
+    'b8e1e557d1080093',
     'c8b7aa8568bc0bfe',
 ];
 const DIGEST_SET = new Set(DIGESTS);
