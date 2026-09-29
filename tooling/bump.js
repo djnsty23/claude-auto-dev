@@ -70,7 +70,9 @@ if (gen.status !== 0) {
 console.log('\nNext:');
 console.log(`  1. Add a ## [${version}] section to CHANGELOG.md`);
 console.log('  2. node tooling/validate.js');
-console.log(`  3. git tag v${version}`);
+// Annotated: a lightweight tag carries no date or tagger, and check-release-lag
+// reads one as red. 8.178.0 and 8.179.0 shipped lightweight from this line.
+console.log(`  3. git tag -a v${version} -m "v${version}"`);
 // Installs pin to the stable branch (README), so moving it is what ships the
 // version. A plain push, never forced: the branch only ever moves forward.
 // Not `release`: origin keeps the old release/<version> PR branches, and a
