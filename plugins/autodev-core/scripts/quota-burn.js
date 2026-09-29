@@ -90,6 +90,36 @@ function windowStart(now = new Date()) {
     return d;
 }
 
+/**
+ * Price ONE transcript usage block at list price, split by token class.
+ *
+ * Exported so work-cost.js prices a row with this table rather than a copy of
+ * it: two price tables drift apart, and then the tripwire and the per-PR cost
+ * disagree about the same row. `tokens.cacheWrite` is both TTLs together.
+ */
+function priceUsage(u, model) {
+    const { rates, known } = ratesFor(model, u.speed);
+    const cc = u.cache_creation || {};
+    const w1h = cc.ephemeral_1h_input_tokens || 0;
+    // Any creation not attributed to the 1h bucket is priced at the 5m
+    // rate. When the split is absent entirely, cache_creation_input_tokens
+    // is the total and all of it lands here: the cheaper assumption, and
+    // the only one the data supports.
+    const w5m = Math.max(0, (u.cache_creation_input_tokens || 0) - w1h)
+        || (cc.ephemeral_5m_input_tokens || 0);
+    const input = u.input_tokens || 0;
+    const cacheRead = u.cache_read_input_tokens || 0;
+    const output = u.output_tokens || 0;
+    const cost = (
+        input * rates.in
+        + cacheRead * rates.in * CACHE_READ_MULT
+        + w5m * rates.in * CACHE_WRITE_5M_MULT
+        + w1h * rates.in * CACHE_WRITE_1H_MULT
+        + output * rates.out
+    ) / 1e6;
+    return { cost, known, tokens: { input, output, cacheWrite: w5m + w1h, cacheRead } };
+}
+
 function* transcripts(dir) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -132,25 +162,8 @@ function main() {
 
             rows++;
             const model = j.message.model || null;
-            const { rates, known } = ratesFor(model, u.speed);
+            const { cost: c, known } = priceUsage(u, model);
             if (!known) unknownModel++;
-
-            const cc = u.cache_creation || {};
-            const w1h = cc.ephemeral_1h_input_tokens || 0;
-            // Any creation not attributed to the 1h bucket is priced at the 5m
-            // rate. When the split is absent entirely, cache_creation_input_tokens
-            // is the total and all of it lands here — the cheaper assumption, and
-            // the only one the data supports.
-            const w5m = Math.max(0, (u.cache_creation_input_tokens || 0) - w1h)
-                || (cc.ephemeral_5m_input_tokens || 0);
-
-            const c = (
-                (u.input_tokens || 0) * rates.in
-                + (u.cache_read_input_tokens || 0) * rates.in * CACHE_READ_MULT
-                + w5m * rates.in * CACHE_WRITE_5M_MULT
-                + w1h * rates.in * CACHE_WRITE_1H_MULT
-                + (u.output_tokens || 0) * rates.out
-            ) / 1e6;
 
             cost += c;
             const k = model || '(unknown)';
@@ -190,4 +203,7 @@ function main() {
     }
 }
 
-main();
+// Behind require.main so work-cost.js can require the price table without
+// running a window scan in its own process.
+if (require.main === module) main();
+module.exports = { priceUsage, ratesFor, windowStart, transcripts };
