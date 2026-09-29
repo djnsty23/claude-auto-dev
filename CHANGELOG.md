@@ -1,5 +1,42 @@
 # Changelog
 
+## [8.179.0]
+
+### The Brain clock starts queued work, judges it and starts the next (#337)
+
+- unattended-worker.js gains a headless channel: `enqueue` with `--after`
+  dependencies, `ready`, `launch` through headless-worker, and `verdict`.
+  Starts are capped at 2 running and 2 an hour, and every ledger write now
+  takes a lock file.
+- New brain-judge.js is the tick the clock runs each pass. It closes a
+  finished headless run and judges it with a tool-less `claude -p`
+  (accept, follow-up or escalate, 4 turns and 0.5 USD at most, 6 runs an
+  hour). It then starts ready work. `switch` sets each step off, dry or
+  live, and a step is live only when the switch and the clock pass are
+  both live. No switch file means dry.
+- A breaker stops judging and starting after 3 failed clock passes, and a
+  time budget keeps each pass inside the scheduler's 4 minute limit.
+- `backfill`, `compare` and `log` grade the judge against what the Brain
+  did. Over 46 past runs it cost 1.66 USD with no errors.
+- headless-worker.js now passes `--report` to its supervisor. Before this,
+  187 of 191 recorded runs had no report at their recorded path.
+- A review pass hardened both scripts:
+  - A ledger lock carries a token, so a writer whose lock was taken over
+    never deletes the new holder's lock. A lock counts as stale after 5
+    minutes, not 1, and ls-remote gets a 30 second timeout.
+  - An unreachable origin or a busy ledger is a transient refusal: it is
+    logged but never uses up the 3 launch attempts.
+  - A start that timed out after its supervisor spawned is found in the
+    headless ledger and recorded as started.
+  - Verdicts logged while judge was dry are written when it goes live,
+    with no second judge run.
+  - A record the judge fails on twice is escalated for a person.
+  - The report fence carries a per-call nonce, so a report cannot close it.
+  - Close no longer follows the start switch, so turning start off never
+    strands a running record. An unreadable state file stops judge and
+    start.
+  - Backfill and manual runs are tagged and spend no tick cap.
+
 ## [8.178.0]
 
 ### Unattended workers stamp the plugin version they ran on

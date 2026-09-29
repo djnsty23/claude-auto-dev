@@ -505,9 +505,15 @@ function startOptions(opts) {
     };
 }
 
-/** The flags `start` hands its supervisor: the same options, spelled out. */
+/**
+ * The flags `start` hands its supervisor: the same options, spelled out.
+ * `[measured 2026-09-28]` --report was missing, so the supervisor rebuilt the
+ * default `<log>.report.md` and the RESULT note in the worker's prompt named that
+ * file, while the record and settle read the --report path. 187 of 191 fleet
+ * records passed a --report of their own.
+ */
 function supervisorFlags(o) {
-    const flags = ['--code', o.code, '--log', o.log, '--prompt-file', o.promptFile,
+    const flags = ['--code', o.code, '--log', o.log, '--report', o.report, '--prompt-file', o.promptFile,
         '--permission-mode', o.permissionMode, '--cwd', o.cwd, '--claude-bin', o.claudeBin];
     if (o.model) flags.push('--model', o.model);
     if (o.effort) flags.push('--effort', o.effort);

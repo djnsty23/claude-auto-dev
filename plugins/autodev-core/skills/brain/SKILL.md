@@ -142,6 +142,21 @@ Choose a channel that actually starts work:
   `mcp__scheduled-tasks__delete_scheduled_task` only when it answers
   `deleteSafe: true`, then `deleted`. A `started` record is a session id, not
   proof that STEP 0 passed: read the session's events.
+- Queue work the Brain clock starts with no session open:
+  `unattended-worker.js enqueue --repo <path> --slug <slug> --brief-file <file>
+  --return <address> [--after <taskId>]`. The clock's `judge` capability runs
+  `scripts/brain-judge.js tick` every pass. It closes a finished headless run,
+  judges it (accept, follow-up or escalate) with a tool-less `claude -p`, and
+  starts ready work through `unattended-worker.js launch`: at most 2 running,
+  2 launched an hour, 6 judge runs an hour. A task with `--after` starts only
+  once each dependency is closed as succeeded with an `accept` or `follow-up`
+  verdict. `brain-judge.js switch --judge <mode> --start <mode>` is the kill
+  switch, with modes off, dry and live. A step is live only when the switch
+  says live AND the clock pass is live, and no switch file means dry. Three
+  failed clock passes stop judging and starting. When you read a closed
+  record yourself, write your call with `unattended-worker.js verdict
+  --task-id <id> --decision <d> --reason <why> --by brain`: a judge never
+  overwrites it, and `brain-judge.js compare` grades the judge against it.
 
 Every brief stands alone: mission, acceptance, exact refs, evidence, ownership,
 permitted actions, actual verification commands, artifact path and return
