@@ -1,0 +1,130 @@
+{
+  "items": [
+    {
+      "path": "plugins/autodev-core/hooks/session-start.js",
+      "why": "SessionStart with no prd.json prints the version banner `{\"systemMessage\":\"[Auto-Dev v8.179.0]\"}`.",
+      "evidence": "Measured: 39 B stdout, 0 B stderr, exit 0 on the registered SessionStart input and a generic input, in a non-git and a clean git cwd. Its suite asserts \"banner only\" for this case"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/stop-auto-check.js",
+      "why": "Stop with no prd.json prints `{\"decision\":\"approve\"}`, which changes nothing Claude Code does.",
+      "evidence": "Measured: 23 B stdout, 0 B stderr, exit 0 on the registered Stop input, with and without a two-line transcript present, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/post-compact.js",
+      "why": "PostCompact with no prd.json prints a two-line header telling the session to re-read CLAUDE.md and ask the user.",
+      "evidence": "Measured: 145 B stdout, 0 B stderr, exit 0 on the registered PostCompact input, in a non-git and a clean git cwd. Its suite asserts it \"always emits the header\""
+    }
+  ],
+  "excluded": [
+    {
+      "path": "plugins/autodev-core/hooks/agent-browser-cleanup.js",
+      "why": "read, and run only with the kill tools off PATH (0 B). Its one print is the --help banner, and every child runs with stdio ignored or piped"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/session-register.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/session-env-dedupe.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/user-prompt-image-scan.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/inbox-notify.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/pre-tool-filter.js",
+      "why": "silent on well-formed input. Empty or malformed stdin gets exit 2 and 64 B stderr, and JSON null 87 B: fail closed by design, and not the no-op path"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/panel-recommendation.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/peer-message-budget.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/coordinator-write-guard.js",
+      "why": "silent on well-formed input. Only JSON null stdin prints (130 B stderr, exit 0)"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/headless-guard.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/artifact-write-guard.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/peer-send-ledger.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/post-tool-typecheck.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/telemetry.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/stop-brain-report.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/context-depth-nudge.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/stop-workflow-wall-note.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/stop-typecheck.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/stop-intent-record.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/stop-failure-note.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/pre-compact.js",
+      "why": "silent here. It prints only after saving a prd.json, which the no-op path does not have"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/instructions-loaded.js",
+      "why": "Measured: 0 B stdout and 0 B stderr on its registered input and a generic input, in a non-git and a clean git cwd"
+    },
+    {
+      "path": "plugins/autodev-memory/hooks/memory-session-start.js",
+      "why": "silent on well-formed input. Only JSON null stdin crashes with a stack (843 B stderr, exit 1)"
+    },
+    {
+      "path": "plugins/autodev-memory/hooks/memory-prompt-capture.js",
+      "why": "silent on well-formed input. Only JSON null stdin prints (81 B stderr, exit 0)"
+    },
+    {
+      "path": "plugins/autodev-memory/hooks/memory-capture.js",
+      "why": "silent on well-formed input. Only JSON null stdin crashes with a stack (825 B stderr, exit 1)"
+    },
+    {
+      "path": "plugins/autodev-memory/hooks/memory-session-end.js",
+      "why": "silent on well-formed input. Only JSON null stdin crashes with a stack (839 B stderr, exit 1)"
+    },
+    {
+      "path": "plugins/autodev-core/hooks/fn/autodev-fn.mjs",
+      "why": "the hooks.json `modules` entry, a function-hooks module, not a command hook script"
+    }
+  ],
+  "method": "Every command hook in plugins/*/hooks/hooks.json at 62c539a5, run with node v24.15.0, HOME, USERPROFILE and CLAUDE_CONFIG_DIR at an empty temp dir, cwd an empty non-git dir and separately a one-commit clean git repo, stdin the registered event input. Also run on empty, malformed and JSON null stdin to separate the exclusions."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "T9",
+  "lane": "review",
+  "size": "M",
+  "source": "planted plan: an unattended ledger archive with a race, a fail-open and a wrong population",
+  "parent": "62c539a57777787665995ad6b4cde2974bcfe80b",
+  "brief": "T9.md",
+  "answerFile": "frontier-answer.json",
+  "expected": "T9.answers.json",
+  "support": [{ "from": "T9-plan.md", "to": "PLAN.md" }],
+  "timeoutMin": 30
+}

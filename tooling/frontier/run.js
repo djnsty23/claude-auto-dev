@@ -1,0 +1,983 @@
+#!/usr/bin/env node
+'use strict';
+/**
+ * The frontier runner: real past autodev tasks, run under harness variants,
+ * each run recorded as (pass, tokens, wall time). Repo machinery, never ships.
+ *
+ * A task is a past fix. The worker gets the tree at the fix's parent as a
+ * one-commit repo (no history, so `git log` cannot show the answer), a brief,
+ * a fresh config dir and the plugins of the last release before the fix. The
+ * endpoint suites are held out and copied in after the worker stops. The
+ * runner, never the worker, runs the checks.
+ *
+ * Three refusals keep a row honest:
+ *   contaminated  a token only the fix adds is already in the config dir, the
+ *                 task repo or the plugin pin, so the answer is in the room.
+ *   billed-api    the init event says the run billed an API key, not the Max
+ *                 plan. The row is discarded and the batch stops.
+ *   token-missing the account's OAuth token is not in the environment.
+ *
+ * Where things live:
+ *   data (FRONTIER_DATA, default ~/.claude/autodev/frontier): runs.jsonl,
+ *        plant.json, batches/, ledger.json. Nothing a worker reads.
+ *   work (FRONTIER_WORK, default ~/autodev-frontier): snapshot/, pins/, and per
+ *        run wt/<run> (the task repo), cfg/<run> (its config dir) and
+ *        runs/<run> (prompt, log, report, check output). Outside ~/.claude, so
+ *        a worker editing its repo never trips a protected-path prompt.
+ */
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+const { spawnSync, spawn } = require('child_process');
+
+const USAGE = [
+    'Usage: node tooling/frontier/run.js <command> [options]',
+    '  snapshot                        freeze the harness config (CLAUDE.md, rules, agents, output styles, settings)',
+    '  plant [--task T1,T3]            unfixed red, fixed green, neighbours green, contamination fires; no model tokens',
+    '  prepare --task T --variant V    build the repo, config dir and pin, run the contamination check, start nothing',
+    '  run --task T --variant V --account <name> [--repeat n]   prepare and start one worker, return at once',
+    '  finish --run <id> [--wait-sec n]   grade an exited run and append its row; idempotent',
+    '  batch --tasks T1,T2|all --variants V0,V1 --account <name> [--k 1] [--max 2]   start a detached batch loop',
+    '  batch-resume --batch <id>       restart the loop of a batch whose loop died',
+    '  status [--json]                 batches and the latest rows',
+    'Options: --src <repo> --tasks-dir <dir> --data <dir> --work <dir> --claude-bin <path> --hw <headless-worker.js>',
+    '         --budget-stop 0.70 (seven-day utilisation that stops a batch) --api-sources none (allowed apiKeySource values)',
+    'The account token is read from CLAUDE_CODE_OAUTH_TOKEN_<ACCOUNT> and handed to the worker as',
+    'CLAUDE_CODE_OAUTH_TOKEN in its env only. Start under: doppler run --project accounts --config prd -- node run.js ...',
+    'Exit 0 done, 1 refused or failed (the JSON line says why).',
+];
+
+const HERE = __dirname;
+const DEFAULT_SRC = path.resolve(HERE, '..', '..');
+const DEFAULT_HW = path.join(DEFAULT_SRC, 'plugins', 'autodev-core', 'scripts', 'headless-worker.js');
+const EXIT_RE = /^CLAUDE_EXIT=(-?\d+)\s*$/m;
+const RUN_RE = /^F-[0-9]{8}-[A-Za-z0-9]{1,4}-[A-Za-z0-9]{1,3}-[0-9]{1,2}$/;
+// Settings keys a frozen snapshot keeps. Everything else (hooks, plugins, the
+// model, the status line, marketplaces) belongs to a variant or to the live machine.
+const SETTINGS_KEEP = ['env', 'permissions', 'outputStyle', 'autoCompactWindow', 'skipDangerousModePermissionPrompt', 'thinkingEnabled'];
+const SNAPSHOT_DIRS = ['rules', 'agents', 'output-styles'];
+// A variable whose name says it carries a credential never reaches a worker or a check.
+const SCRUB_RE = /^(ANTHROPIC_|CLAUDE_CODE_OAUTH_TOKEN|DOPPLER_)|TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|_PAT$/i;
+const PIN_SKIP = new Set(['autodev-memory']);
+
+function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
+
+function parseArgs(argv) {
+    const out = { _: [] };
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (!a.startsWith('--')) { out._.push(a); continue; }
+        const key = a.slice(2);
+        const next = argv[i + 1];
+        if (next === undefined || next.startsWith('--')) out[key] = true;
+        else { out[key] = next; i++; }
+    }
+    return out;
+}
+
+function homeDir() { return process.env.USERPROFILE || process.env.HOME || os.homedir(); }
+
+function ctx(opts) {
+    const src = path.resolve(opts.src || process.env.FRONTIER_SRC || DEFAULT_SRC);
+    return {
+        src,
+        tasks: path.resolve(opts['tasks-dir'] || process.env.FRONTIER_TASKS || path.join(HERE, 'tasks')),
+        data: path.resolve(opts.data || process.env.FRONTIER_DATA || path.join(homeDir(), '.claude', 'autodev', 'frontier')),
+        work: path.resolve(opts.work || process.env.FRONTIER_WORK || path.join(homeDir(), 'autodev-frontier')),
+        claudeHome: path.resolve(process.env.FRONTIER_CLAUDE_HOME || path.join(homeDir(), '.claude')),
+        claudeBin: opts['claude-bin'] || process.env.FRONTIER_CLAUDE_BIN || null,
+        hw: path.resolve(opts.hw || process.env.FRONTIER_HW || DEFAULT_HW),
+        budgetStop: opts['budget-stop'] !== undefined ? Number(opts['budget-stop']) : 0.70,
+        apiSources: String(opts['api-sources'] || 'none').split(',').map((s) => s.trim()).filter(Boolean),
+        pollMs: Number(process.env.FRONTIER_POLL_MS || 20000),
+    };
+}
+
+// ---------------------------------------------------------------- small io
+function readJson(file, fallback = undefined) {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
+        if (fallback !== undefined) return fallback;
+        fault('unreadable', `${file}: ${e.code || e.message}`);
+    }
+}
+function writeJsonAtomic(file, value) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
+    fs.renameSync(tmp, file);
+}
+function sha(text) { return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16); }
+function sleepMs(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function isEmptyDir(dir) { try { return fs.readdirSync(dir).length === 0; } catch { return true; } }
+
+function git(args, { cwd, env, input } = {}) {
+    const r = spawnSync('git', args, { cwd, env: env || process.env, input, encoding: 'utf8', maxBuffer: 1 << 28, windowsHide: true });
+    if (r.error) fault('git-failed', `git ${args[0]}: ${r.error.code || r.error.message}`);
+    if (r.status !== 0) fault('git-failed', `git ${args.join(' ').slice(0, 120)} exited ${r.status}: ${(r.stderr || '').trim().slice(0, 300)}`);
+    return r.stdout;
+}
+function revParse(src, rev) { return git(['rev-parse', '--verify', `${rev}^{commit}`], { cwd: src }).trim(); }
+
+/** Every file under dir (skipping .git), as absolute paths. */
+function walk(dir, out = []) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+    for (const e of entries) {
+        if (e.name === '.git') continue;
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p, out);
+        else if (e.isFile()) out.push(p);
+    }
+    return out;
+}
+function copyDir(from, to) {
+    for (const f of walk(from)) {
+        const dest = path.join(to, path.relative(from, f));
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(f, dest);
+    }
+}
+function dirHash(dir) {
+    const h = crypto.createHash('sha256');
+    for (const f of walk(dir).sort()) h.update(path.relative(dir, f).replace(/\\/g, '/')).update('\0').update(fs.readFileSync(f)).update('\0');
+    return h.digest('hex').slice(0, 16);
+}
+
+// ---------------------------------------------------------------- trees
+/**
+ * The files of `rev` (optionally only `paths`) written under `dir`, with LF
+ * endings whatever the machine's autocrlf says, through a private index so the
+ * source checkout's own index is never touched.
+ */
+function exportTree(src, rev, dir, paths = null) {
+    fs.mkdirSync(dir, { recursive: true });
+    const idx = path.join(os.tmpdir(), `frontier-idx-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const env = Object.assign({}, process.env, { GIT_INDEX_FILE: idx });
+    try {
+        git(['read-tree', rev], { cwd: src, env });
+        const prefix = dir.replace(/\\/g, '/').replace(/\/?$/, '/');
+        const base = ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'checkout-index', '-f', `--prefix=${prefix}`];
+        if (!paths) git([...base, '-a'], { cwd: src, env });
+        else {
+            const files = git(['ls-files', '-z', '--', ...paths], { cwd: src, env });
+            if (files) git([...base, '-z', '--stdin'], { cwd: src, env, input: files });
+        }
+    } finally {
+        try { fs.unlinkSync(idx); } catch { /* never created */ }
+    }
+}
+
+/** A fresh one-commit repo from a tree already on disk. */
+function initRepo(dir) {
+    const g = (args) => git(args, { cwd: dir });
+    g(['init', '-q']);
+    g(['config', 'core.autocrlf', 'false']);
+    g(['config', 'user.name', 'frontier']);
+    g(['config', 'user.email', 'frontier@example.invalid']);
+    g(['add', '-A']);
+    g(['commit', '-q', '--no-verify', '-m', 'snapshot']);
+}
+
+function buildTaskRepo(c, task, dir, rev) {
+    if (!isEmptyDir(dir)) fault('repo-exists', `${dir} already holds files; a run id is used once`);
+    exportTree(c.src, rev, dir);
+    for (const s of task.support || []) {
+        const dest = path.join(dir, s.to);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(path.join(c.tasks, s.from), dest);
+    }
+    initRepo(dir);
+}
+
+/** Held-out files from the fix commit, written over whatever the worker left. */
+function copyHeldOut(c, task, repo) {
+    for (const p of task.heldOut || []) {
+        const body = git(['show', `${task.fixSha}:${p}`], { cwd: c.src });
+        const dest = path.join(repo, p);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, body);
+    }
+}
+
+/** The plugins of the last release tag reachable from the task's parent, built once per tag. */
+function pinFor(c, parentSha) {
+    const tag = git(['describe', '--tags', '--abbrev=0', '--match', 'v*', parentSha], { cwd: c.src }).trim();
+    const dir = path.join(c.work, 'pins', tag);
+    const marker = path.join(dir, '.complete');
+    if (!fs.existsSync(marker)) {
+        const tmp = `${dir}.${process.pid}.tmp`;
+        fs.rmSync(tmp, { recursive: true, force: true });
+        const names = git(['ls-tree', '--name-only', `${tag}:plugins`], { cwd: c.src }).split('\n').filter((n) => n && !PIN_SKIP.has(n));
+        if (!names.length) fault('pin-empty', `${tag} has no plugins under plugins/`);
+        exportTree(c.src, tag, tmp, names.map((n) => `plugins/${n}`));
+        fs.rmSync(dir, { recursive: true, force: true });
+        fs.mkdirSync(path.dirname(dir), { recursive: true });
+        fs.renameSync(tmp, dir);
+        fs.writeFileSync(marker, JSON.stringify({ tag, commit: revParse(c.src, tag), plugins: names }) + '\n');
+    }
+    const meta = readJson(marker);
+    return { tag, dir, pluginDir: path.join(dir, 'plugins'), plugins: meta.plugins, hash: dirHash(path.join(dir, 'plugins')) };
+}
+
+// ---------------------------------------------------------------- snapshot
+function snapshot(c) {
+    const dir = path.join(c.work, 'snapshot');
+    const tmp = `${dir}.${process.pid}.tmp`;
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.mkdirSync(tmp, { recursive: true });
+    const claudeMd = path.join(c.claudeHome, 'CLAUDE.md');
+    if (fs.existsSync(claudeMd)) fs.copyFileSync(claudeMd, path.join(tmp, 'CLAUDE.md'));
+    for (const d of SNAPSHOT_DIRS) if (fs.existsSync(path.join(c.claudeHome, d))) copyDir(path.join(c.claudeHome, d), path.join(tmp, d));
+    const live = readJson(path.join(c.claudeHome, 'settings.json'), {});
+    const kept = {};
+    for (const k of SETTINGS_KEEP) if (k in live) kept[k] = live[k];
+    fs.writeFileSync(path.join(tmp, 'settings.json'), JSON.stringify(kept, null, 2) + '\n');
+    const hashes = { all: dirHash(tmp) };
+    for (const f of ['CLAUDE.md', 'settings.json', ...SNAPSHOT_DIRS]) {
+        const p = path.join(tmp, f);
+        if (!fs.existsSync(p)) hashes[f] = null;
+        else hashes[f] = fs.statSync(p).isDirectory() ? dirHash(p) : sha(fs.readFileSync(p));
+    }
+    const meta = { id: hashes.all, createdAt: new Date().toISOString(), source: path.basename(c.claudeHome), settingsKept: Object.keys(kept), settingsDropped: Object.keys(live).filter((k) => !(k in kept)), hashes };
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.renameSync(tmp, dir);
+    writeJsonAtomic(path.join(c.work, 'snapshot.json'), meta);
+    return meta;
+}
+
+function buildConfigDir(c, dir) {
+    const snap = path.join(c.work, 'snapshot');
+    const meta = readJson(path.join(c.work, 'snapshot.json'), null);
+    if (!meta || !fs.existsSync(snap)) fault('snapshot-missing', `no frozen harness at ${snap}: run \`node tooling/frontier/run.js snapshot\` once first`);
+    if (!isEmptyDir(dir)) fault('config-exists', `${dir} already holds files; a run id is used once`);
+    copyDir(snap, dir);
+    fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true }) + '\n');
+    return meta;
+}
+
+// ---------------------------------------------------------------- tasks
+function loadTask(c, id) {
+    if (!/^[A-Za-z0-9]{1,4}$/.test(String(id))) fault('usage', `task id ${id} is not 1-4 letters or digits`);
+    const file = path.join(c.tasks, `${id}.json`);
+    if (!fs.existsSync(file)) fault('no-task', `${file} does not exist`);
+    const raw = fs.readFileSync(file, 'utf8');
+    const task = JSON.parse(raw);
+    if (task.id !== id) fault('bad-task', `${file} says id ${task.id}`);
+    if (!['fix', 'locate', 'review', 'decide'].includes(task.lane)) fault('bad-task', `${id}: lane ${task.lane} is not fix, locate, review or decide`);
+    // The brief and the key are part of the task: editing either makes the plant check stale.
+    const part = (name) => { try { return name ? fs.readFileSync(path.join(c.tasks, name), 'utf8') : ''; } catch { return ''; } };
+    task.hash = sha([raw, part(task.brief), part(task.expected)].join('\n--\n'));
+    task.parentSha = revParse(c.src, task.parent);
+    if (task.lane === 'fix') {
+        if (!task.fix) fault('bad-task', `${id}: a fix task names its fix commit`);
+        task.fixSha = revParse(c.src, task.fix);
+        if (!Array.isArray(task.checks) || !task.checks.length) fault('bad-task', `${id}: a fix task has at least one check`);
+    } else {
+        if (!task.answerFile || !task.expected) fault('bad-task', `${id}: a ${task.lane} task names answerFile and expected`);
+    }
+    return task;
+}
+function allTaskIds(c) {
+    return fs.readdirSync(c.tasks).filter((f) => /^[A-Za-z0-9]{1,4}\.json$/.test(f)).map((f) => f.slice(0, -5))
+        .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+}
+function loadVariant(id) {
+    const all = readJson(path.join(HERE, 'variants.json'));
+    const v = all[id];
+    if (!v || id.startsWith('_')) fault('no-variant', `variant ${id} is not in variants.json`);
+    if (!/^[A-Za-z0-9]{1,3}$/.test(id)) fault('bad-variant', `variant id ${id} is not 1-3 letters or digits`);
+    return Object.assign({ id }, v);
+}
+
+// ---------------------------------------------------------------- contamination
+const CODEY = (w) => /[A-Z].*[A-Z_0-9]|[a-z][A-Z]|_|\d|-/.test(w.slice(1)) || /^[A-Z_0-9]{6,}$/.test(w);
+/**
+ * Tokens the fix adds that the parent tree does not contain anywhere, and that
+ * look like code (camelCase, SNAKE, digits, hyphenated codes), minus what the
+ * brief discloses on purpose. Plain English words are left out: a rule file
+ * saying "localises" is not the answer.
+ */
+function fixTokens(c, task) {
+    const diff = git(['diff', '--no-color', '-U0', task.parentSha, task.fixSha], { cwd: c.src });
+    const added = diff.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).join('\n');
+    const words = [...new Set(added.match(/[A-Za-z_][A-Za-z0-9_-]{5,}/g) || [])].filter(CODEY);
+    if (!words.length) return [];
+    const patterns = path.join(os.tmpdir(), `frontier-pat-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(patterns, words.join('\n') + '\n');
+    let found = '';
+    try {
+        const r = spawnSync('git', ['grep', '-h', '-o', '-I', '-F', '-f', patterns, task.parentSha], { cwd: c.src, encoding: 'utf8', maxBuffer: 1 << 28, windowsHide: true });
+        if (r.status !== 0 && r.status !== 1) fault('git-failed', `git grep over ${task.parentSha} exited ${r.status}`);
+        found = r.stdout || '';
+    } finally { fs.unlinkSync(patterns); }
+    // git grep -o prints each match as the longest pattern it hit; a shorter word
+    // inside a longer one is still in the parent, so test containment line by line.
+    const present = new Set(found.split('\n').filter(Boolean));
+    const disclosed = new Set(task.disclosed || []);
+    return words.filter((w) => !disclosed.has(w) && ![...present].some((p) => p.includes(w))).sort();
+}
+
+/** Every (token, file) hit under the given roots, first `limit` of them. */
+function scanForTokens(tokens, roots, limit = 10) {
+    const hits = [];
+    if (!tokens.length) return hits;
+    for (const root of roots) {
+        for (const f of walk(root)) {
+            let st;
+            try { st = fs.statSync(f); } catch { continue; }
+            if (st.size > 4 * 1024 * 1024) continue;
+            const text = fs.readFileSync(f, 'latin1');
+            for (const t of tokens) {
+                if (text.includes(t)) { hits.push({ token: t, file: f }); if (hits.length >= limit) return hits; }
+            }
+        }
+    }
+    return hits;
+}
+
+// ---------------------------------------------------------------- env
+/** The worker's env: no credential but the one account token, under the name claude reads. */
+function workerEnv(base, account) {
+    if (!/^[a-z0-9]{2,20}$/.test(String(account || ''))) fault('usage', '--account is a lowercase name, for example personal or work');
+    const name = `CLAUDE_CODE_OAUTH_TOKEN_${account.toUpperCase()}`;
+    const token = base[name];
+    if (!token) fault('token-missing', `${name} is not in the environment. Start the runner under doppler run --project accounts --config prd -- node tooling/frontier/run.js ...`);
+    const env = checksEnv(base);
+    env.CLAUDE_CODE_OAUTH_TOKEN = token;
+    return env;
+}
+/** A check's env, and the base of a worker's: every credential-shaped name removed, the gate lock off. */
+function checksEnv(base) {
+    const env = {};
+    for (const [k, v] of Object.entries(base)) if (!SCRUB_RE.test(k)) env[k] = v;
+    env.AUTODEV_GATE_LOCK = '0';
+    return env;
+}
+
+// ---------------------------------------------------------------- the prompt
+function composePrompt(task, brief, repo) {
+    const answer = task.lane === 'fix'
+        ? ['- The full gate (`npm run gate`) is not available here. Run the suites that cover what you change, for example `node tooling/test-<name>.js`.',
+            '- Commit your change when you are done (stage explicit paths, then `git commit -F <file>`).',
+            '- Your change is graded after you stop, by checks you cannot see.']
+        : [`- Write your answer to \`${task.answerFile}\` at the repository root, in the format the task gives. Change no other file.`,
+            '- The answer file is graded after you stop.'];
+    return [
+        `# Frontier task ${task.id}`,
+        '',
+        `You are working in ${repo.replace(/\\/g, '/')}, a git repository holding a one-commit snapshot of the autodev plugin marketplace. It has no remote and no history. Read its CLAUDE.md before you start.`,
+        '',
+        brief.replace(/\s+$/, ''),
+        '',
+        '## How this run works',
+        '- Work only inside this repository. Everything the task needs is in it.',
+        ...answer,
+        '',
+    ].join('\n');
+}
+
+// ---------------------------------------------------------------- run ids and paths
+function stamp(d = new Date()) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`;
+}
+function runPaths(c, run) {
+    const dir = path.join(c.work, 'runs', run);
+    return { dir, repo: path.join(c.work, 'wt', run), cfg: path.join(c.work, 'cfg', run), meta: path.join(dir, 'run.json'),
+        prompt: path.join(dir, 'prompt.md'), log: path.join(dir, 'worker.log'), report: path.join(dir, 'report.md'), checks: path.join(dir, 'checks.log') };
+}
+function newRunId(c, task, variant, repeat) {
+    for (let i = 0; i < 100; i++) {
+        const id = `F-${stamp(new Date(Date.now() + i * 1000))}-${task.id}-${variant.id}-${repeat}`;
+        if (!fs.existsSync(runPaths(c, id).dir)) return id;
+    }
+    fault('run-id', 'no free run id in 100 tries');
+}
+
+// ---------------------------------------------------------------- plant state
+function plantOk(c, task) {
+    const plant = readJson(path.join(c.data, 'plant.json'), { tasks: {} });
+    const rec = plant.tasks[task.id];
+    if (!rec) fault('not-planted', `${task.id} has no plant record: run \`run.js plant --task ${task.id}\` first`);
+    if (rec.taskHash !== task.hash) fault('plant-stale', `${task.id}.json changed since its plant check: re-run plant`);
+    if (!rec.ok) fault('plant-failed', `${task.id} failed its plant check: ${rec.reason}`);
+    return rec;
+}
+
+// ---------------------------------------------------------------- prepare and start
+function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
+    const task = loadTask(c, taskId);
+    const variant = loadVariant(variantId);
+    if (variant.lanes && !variant.lanes.includes(task.lane)) fault('lane-mismatch', `variant ${variant.id} runs only ${variant.lanes.join(',')} and ${task.id} is ${task.lane}`);
+    const plant = plantOk(c, task);
+    const run = newRunId(c, task, variant, repeat);
+    const p = runPaths(c, run);
+    fs.mkdirSync(p.dir, { recursive: true });
+    buildTaskRepo(c, task, p.repo, task.parentSha);
+    const snap = buildConfigDir(c, p.cfg);
+    const pin = pinFor(c, task.parentSha);
+    const tokens = task.lane === 'fix' ? fixTokens(c, task) : [];
+    const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir]);
+    const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
+    fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo));
+    const meta = {
+        run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, model: variant.model, effort: variant.effort || null,
+        account, repeat, createdAt: new Date().toISOString(), timeoutMin: Number(task.timeoutMin || 30),
+        repo: p.repo, cfg: p.cfg, log: p.log, report: p.report, prompt: p.prompt,
+        pin: { tag: pin.tag, hash: pin.hash, plugins: pin.plugins, dir: pin.pluginDir },
+        snapshot: snap.id, harnessCommit: revParse(c.src, 'HEAD'), plantAt: plant.at,
+        contamination: { tokens: tokens.length, hits },
+        state: hits.length ? 'contaminated' : 'prepared',
+    };
+    writeJsonAtomic(p.meta, meta);
+    return meta;
+}
+
+function start(c, meta, env) {
+    const p = runPaths(c, meta.run);
+    const argv = [c.hw, 'start', '--code', meta.run, '--prompt-file', p.prompt, '--log', p.log, '--report', p.report,
+        '--config-dir', p.cfg, '--model', meta.model, '--plugin-dir', meta.pin.dir, '--permission-mode', 'bypassPermissions',
+        '--cwd', p.repo, '--ledger', path.join(c.data, 'ledger.json'), '--dev'];
+    if (meta.effort) argv.push('--effort', meta.effort);
+    if (c.claudeBin) argv.push('--claude-bin', c.claudeBin);
+    const r = spawnSync(process.execPath, argv, { env, encoding: 'utf8', windowsHide: true, timeout: 60000 });
+    let out = null;
+    try { out = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { out = null; }
+    if (!out || !out.ok) fault('start-failed', `headless-worker start: ${out ? out.error.code + ' ' + out.error.message : (r.stderr || r.stdout || '').slice(0, 300)}`);
+    Object.assign(meta, { state: 'running', startedAt: out.value.record.startedAt, supervisorPid: out.value.supervisorPid, workerVersion: out.value.record.version });
+    writeJsonAtomic(p.meta, meta);
+    return meta;
+}
+
+function runOne(c, taskId, variantId, account, repeat, env) {
+    const wenv = workerEnv(env, account);
+    const meta = prepare(c, taskId, variantId, repeat, { account });
+    if (meta.state === 'contaminated') {
+        appendRow(c, rowFor(c, meta, { verdict: 'contaminated', pass: null }));
+        fault('contaminated', `${meta.run}: ${meta.contamination.hits.map((h) => `${h.token} in ${h.file}`).join('; ')}`);
+    }
+    return start(c, meta, wenv);
+}
+
+// ---------------------------------------------------------------- the stream
+function parseStream(text) {
+    const out = { init: null, result: null, rate: null, toolInputs: [] };
+    for (const line of text.split('\n')) {
+        if (!line.startsWith('{')) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'system' && ev.subtype === 'init' && !out.init) out.init = ev;
+        else if (ev.type === 'result') out.result = ev;
+        else if (ev.type === 'rate_limit_event') out.rate = ev;
+        else if (ev.type === 'assistant' && ev.message && Array.isArray(ev.message.content)) {
+            for (const item of ev.message.content) if (item.type === 'tool_use') out.toolInputs.push(JSON.stringify(item.input || {}));
+        }
+    }
+    return out;
+}
+
+/** Token totals across every model the run used (subagents included), from the result event. */
+function tokensOf(result) {
+    if (!result) return null;
+    const mu = result.modelUsage;
+    if (mu && typeof mu === 'object' && Object.keys(mu).length) {
+        const t = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, thinking: 0, costUsd: 0, perModel: {} };
+        for (const [m, u] of Object.entries(mu)) {
+            t.input += u.inputTokens || 0; t.output += u.outputTokens || 0; t.cacheWrite += u.cacheCreationInputTokens || 0;
+            t.cacheRead += u.cacheReadInputTokens || 0; t.thinking += u.thinkingTokens || 0; t.costUsd += u.costUSD || 0;
+            t.perModel[m] = { input: u.inputTokens || 0, output: u.outputTokens || 0, cacheWrite: u.cacheCreationInputTokens || 0, cacheRead: u.cacheReadInputTokens || 0, costUsd: u.costUSD || 0 };
+        }
+        t.total = t.input + t.output + t.cacheWrite + t.cacheRead;
+        t.costUsd = Math.round(t.costUsd * 10000) / 10000;
+        return t;
+    }
+    const u = result.usage || {};
+    const t = { input: u.input_tokens || 0, output: u.output_tokens || 0, cacheWrite: u.cache_creation_input_tokens || 0, cacheRead: u.cache_read_input_tokens || 0,
+        thinking: (u.output_tokens_details || {}).thinking_tokens || 0, costUsd: result.total_cost_usd || 0, perModel: {} };
+    t.total = t.input + t.output + t.cacheWrite + t.cacheRead;
+    return t;
+}
+
+/** Paths in the worker's tool calls that reach outside its own run: the source checkout, the live config, other runs. */
+function leakHits(toolInputs, run) {
+    const res = [
+        /claude-auto-dev/i,
+        /(?:Users[\\/]+[^\\/"]+|home[\\/]+[^\\/"]+|~|\$HOME|%USERPROFILE%)[\\/]+\.claude(?:-b|-w)?(?:[\\/"]|$)/i,
+        /claude-memory/i,
+    ];
+    const other = /autodev-frontier[\\/]+(?:wt|cfg|runs)[\\/]+([A-Za-z0-9-]+)/gi;
+    const hits = [];
+    for (const s of toolInputs) {
+        let hit = res.find((re) => re.test(s));
+        if (!hit) {
+            for (const m of s.matchAll(other)) if (m[1] !== run) { hit = true; break; }
+        }
+        if (hit) hits.push(s.slice(0, 160));
+    }
+    return hits;
+}
+
+// ---------------------------------------------------------------- grading
+function runChecks(argvs, repo, env, logFile, label) {
+    const out = [];
+    for (const argv of argvs || []) {
+        const real = argv.map((a) => a.replace('{frontier}', HERE));
+        const cmd = real[0] === 'node' ? process.execPath : real[0];
+        const t0 = Date.now();
+        const r = spawnSync(cmd, real.slice(1), { cwd: repo, env, encoding: 'utf8', timeout: 600000, maxBuffer: 1 << 26, windowsHide: true });
+        const ms = Date.now() - t0;
+        const exit = r.status === null ? null : r.status;
+        fs.appendFileSync(logFile, `\n=== ${label}: ${argv.join(' ')} -> exit ${exit}${r.error ? ' ' + (r.error.code || r.error.message) : ''} in ${ms} ms\n${(r.stdout || '').slice(-4000)}\n${(r.stderr || '').slice(-2000)}\n`);
+        out.push({ argv, exit, ms, timedOut: !!(r.error && r.error.code === 'ETIMEDOUT') });
+    }
+    return out;
+}
+const green = (checks) => checks.length > 0 && checks.every((k) => k.exit === 0);
+
+function normPath(p) { return String(p || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').trim(); }
+/** File-level F1 of a located list against the expected one. */
+function gradeLocate(answer, expected, threshold) {
+    const want = new Set((expected.items || []).map((i) => normPath(i.path)));
+    const got = new Set(((answer && answer.items) || []).map((i) => normPath(i && i.path)).filter(Boolean));
+    const tp = [...got].filter((p) => want.has(p)).length;
+    const precision = got.size ? tp / got.size : 0;
+    const recall = want.size ? tp / want.size : 0;
+    const f1 = precision + recall ? (2 * precision * recall) / (precision + recall) : 0;
+    const r3 = (x) => Math.round(x * 1000) / 1000;
+    return { tp, answered: got.size, expected: want.size, precision: r3(precision), recall: r3(recall), f1: r3(f1),
+        missed: [...want].filter((p) => !got.has(p)), extra: [...got].filter((p) => !want.has(p)), pass: f1 >= threshold };
+}
+/** Planted defects named (right section, blocker or major, claim matches), and blockers that match no planted defect. */
+function gradeReview(answer, expected) {
+    const findings = ((answer && answer.findings) || []).filter((f) => f && typeof f.claim === 'string');
+    const planted = (expected.planted || []).map((d) => ({ id: d.id, section: String(d.section).toUpperCase(), res: d.match.map((m) => new RegExp(m, 'i')) }));
+    const matchesAny = (f) => planted.some((d) => d.res.some((re) => re.test(f.claim)));
+    const found = planted.map((d) => ({ id: d.id, found: findings.some((f) => String(f.section).toUpperCase() === d.section
+        && ['blocker', 'major'].includes(String(f.severity).toLowerCase()) && d.res.some((re) => re.test(f.claim))) }));
+    const invented = findings.filter((f) => String(f.severity).toLowerCase() === 'blocker' && !matchesAny(f)).length;
+    const named = found.filter((d) => d.found).length;
+    return { named, planted: planted.length, invented, findings: findings.length, found, pass: planted.length > 0 && named === planted.length && invented === 0 };
+}
+
+/**
+ * A decision point: each question is a `choice` among options the brief lists (right when the
+ * choice is in `accept`) or an `order` of items (right when it holds every item once and every
+ * `before` pair in that order). The task passes when every question is right.
+ */
+function gradeDecide(answer, expected) {
+    const given = new Map((((answer && answer.answers) || []).filter((a) => a && a.id)).map((a) => [String(a.id), a]));
+    const results = (expected.questions || []).map((q) => {
+        const a = given.get(String(q.id));
+        if (!a) return { id: q.id, ok: false, why: 'unanswered' };
+        if (q.kind === 'order') {
+            const order = Array.isArray(a.order) ? a.order.map(String) : [];
+            const items = (q.items || []).map(String);
+            if (order.length !== items.length || new Set(order).size !== order.length || !items.every((i) => order.includes(i))) return { id: q.id, ok: false, why: 'not every item exactly once' };
+            const broken = (q.before || []).filter(([x, y]) => order.indexOf(String(x)) > order.indexOf(String(y)));
+            return { id: q.id, ok: broken.length === 0, why: broken.length ? `broke ${broken.map(([x, y]) => `${x} before ${y}`).join(', ')}` : 'order holds' };
+        }
+        const ok = (q.accept || []).map(String).includes(String(a.choice));
+        return { id: q.id, ok, why: `chose ${a.choice}` };
+    });
+    const right = results.filter((r) => r.ok).length;
+    return { right, questions: results.length, results, pass: results.length > 0 && right === results.length };
+}
+/** The key's own answer, from each question's `example` or, for one question, its `wrong`. */
+function decideAnswer(expected, wrongId = null) {
+    return { answers: (expected.questions || []).map((q) => Object.assign({ id: q.id }, q.id === wrongId ? q.wrong : q.example)) };
+}
+
+function gradeAnswer(c, task, repo) {
+    const expected = readJson(path.join(c.tasks, task.expected));
+    let answer = null;
+    try { answer = JSON.parse(fs.readFileSync(path.join(repo, task.answerFile), 'utf8')); } catch (e) {
+        return { pass: false, reason: `no readable ${task.answerFile}: ${e.code || e.message}` };
+    }
+    if (task.lane === 'decide') return gradeDecide(answer, expected);
+    return task.lane === 'locate' ? gradeLocate(answer, expected, Number(task.threshold || 0.8)) : gradeReview(answer, expected);
+}
+
+// ---------------------------------------------------------------- rows
+function rowsFile(c) { return path.join(c.data, 'runs.jsonl'); }
+function readRows(c) {
+    let text = '';
+    try { text = fs.readFileSync(rowsFile(c), 'utf8'); } catch { return []; }
+    return text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+}
+function appendRow(c, row) {
+    fs.mkdirSync(c.data, { recursive: true });
+    fs.appendFileSync(rowsFile(c), JSON.stringify(row) + '\n');
+    return row;
+}
+function rowFor(c, meta, extra) {
+    return Object.assign({
+        v: 1, run: meta.run, task: meta.task, lane: meta.lane, variant: meta.variant, account: meta.account, repeat: meta.repeat,
+        taskHash: meta.taskHash, startedAt: meta.startedAt || null,
+        fingerprint: { requestedModel: meta.model, effort: meta.effort, pin: meta.pin.tag, pinHash: meta.pin.hash, plugins: meta.pin.plugins,
+            snapshot: meta.snapshot, harnessCommit: meta.harnessCommit, workerVersion: meta.workerVersion || null },
+        contaminationTokens: meta.contamination.tokens, finishedAt: new Date().toISOString(),
+    }, extra);
+}
+
+function killTree(pid) {
+    if (!pid) return;
+    if (process.platform === 'win32') spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true, encoding: 'utf8' });
+    else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } } }
+}
+
+/**
+ * Grade one run and append its row. Returns the row, or null while the worker
+ * is still inside its time budget. A run past its budget is killed by
+ * supervisor pid and graded as a timeout. Idempotent under a per-run lock.
+ */
+function finish(c, run, { allowKill = true } = {}) {
+    if (!RUN_RE.test(run)) fault('usage', `${run} is not a run id`);
+    const p = runPaths(c, run);
+    const meta = readJson(p.meta);
+    const existing = readRows(c).find((r) => r.run === run);
+    if (existing) return existing;
+    const log = fs.existsSync(p.log) ? fs.readFileSync(p.log, 'utf8') : '';
+    const exitM = log.match(EXIT_RE);
+    const startedMs = Date.parse(meta.startedAt || meta.createdAt);
+    const overdue = Date.now() - startedMs > meta.timeoutMin * 60000;
+    if (!exitM && !overdue) return null;
+    const lock = path.join(p.dir, 'finish.lock');
+    let fd;
+    try { fd = fs.openSync(lock, 'wx'); } catch { return null; }
+    try {
+        let timedOut = false;
+        if (!exitM) {
+            if (!allowKill) return null;
+            killTree(meta.supervisorPid);
+            timedOut = true;
+        }
+        const exitMs = exitM ? fs.statSync(p.log).mtimeMs : Date.now();
+        const s = parseStream(log);
+        const tokens = tokensOf(s.result);
+        const init = s.init || {};
+        const rl = s.rate && s.rate.rate_limit_info && s.rate.rate_limit_info.unifiedWindows;
+        const budget = rl ? { fiveHour: (rl.five_hour || {}).utilization ?? null, sevenDay: (rl.seven_day || {}).utilization ?? null, at: new Date().toISOString() } : null;
+        const leaks = leakHits(s.toolInputs, run);
+        const base = {
+            exit: exitM ? Number(exitM[1]) : null, wallMs: Math.round(exitMs - startedMs),
+            durationMs: s.result ? s.result.duration_ms ?? null : null, durationApiMs: s.result ? s.result.duration_api_ms ?? null : null,
+            turns: s.result ? s.result.num_turns ?? null : null, resultSubtype: s.result ? s.result.subtype || null : null,
+            tokens, costUsd: tokens ? tokens.costUsd : null, costBasis: 'list price, notional on a Max plan',
+            apiKeySource: init.apiKeySource ?? null, budget, leak: { suspect: leaks.length > 0, hits: leaks.slice(0, 5) },
+        };
+        const fp = { model: init.model || null, claudeVersion: init.claude_code_version || null, permissionMode: init.permissionMode || null,
+            loadedPlugins: (init.plugins || []).map((x) => `${x.name}@${x.version || '?'}`), tools: Array.isArray(init.tools) ? init.tools.length : null,
+            mcpServers: (init.mcp_servers || []).map((m) => m.name), outputStyle: init.output_style || null };
+        let row;
+        if (s.init && !c.apiSources.includes(String(init.apiKeySource))) {
+            row = rowFor(c, meta, Object.assign(base, { verdict: 'billed-api', pass: null }));
+        } else if (timedOut) {
+            row = rowFor(c, meta, Object.assign(base, { verdict: 'timeout', pass: false }));
+        } else if (!s.init) {
+            row = rowFor(c, meta, Object.assign(base, { verdict: 'no-stream', pass: null }));
+        } else {
+            const task = loadTask(c, meta.task);
+            const env = checksEnv(process.env);
+            let grade;
+            if (task.lane === 'fix') {
+                copyHeldOut(c, task, meta.repo);
+                const checks = runChecks(task.checks, meta.repo, env, p.checks, 'check');
+                const p2p = runChecks(task.passToPass || [], meta.repo, env, p.checks, 'pass-to-pass');
+                grade = { checks, passToPass: p2p, pass: green(checks) && p2p.every((k) => k.exit === 0) };
+            } else {
+                grade = gradeAnswer(c, task, meta.repo);
+            }
+            row = rowFor(c, meta, Object.assign(base, { verdict: grade.pass ? 'pass' : 'fail', pass: grade.pass, grade }));
+        }
+        Object.assign(row.fingerprint, fp);
+        appendRow(c, row);
+        meta.state = 'finished';
+        writeJsonAtomic(p.meta, meta);
+        return row;
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
+// ---------------------------------------------------------------- plant
+/**
+ * A decide key must discriminate: its examples pass, an empty answer fails, each question's
+ * `wrong` answer alone fails, and every option and item it grades is named in the brief, so a
+ * worker could have picked it.
+ */
+function plantDecide(c, task) {
+    const expected = readJson(path.join(c.tasks, task.expected));
+    const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
+    const qs = expected.questions || [];
+    const self = gradeDecide(decideAnswer(expected), expected);
+    const empty = gradeDecide({ answers: [] }, expected);
+    const wrongFails = qs.map((q) => ({ id: q.id, fails: !!q.wrong && !gradeDecide(decideAnswer(expected, q.id), expected).pass }));
+    const named = [];
+    for (const q of qs) {
+        const words = q.kind === 'order' ? (q.items || []) : [...(q.accept || []), ...(q.wrong ? [q.wrong.choice] : [])];
+        for (const w of words) if (!brief.includes(String(w))) named.push(`${q.id}:${w}`);
+    }
+    const ok = qs.length > 0 && self.pass && !empty.pass && wrongFails.every((w) => w.fails) && named.length === 0;
+    return { ok, keySize: qs.length, selfPass: self.pass, emptyPass: empty.pass,
+        reason: ok ? 'key grades itself pass, an empty answer and each wrong answer fail, and the brief names every option'
+            : `key: ${qs.length} questions, self ${self.pass}, empty ${empty.pass}, wrong not failing [${wrongFails.filter((w) => !w.fails).map((w) => w.id).join(',')}], not in the brief [${named.join(',')}]` };
+}
+function plantTask(c, task) {
+    const at = new Date().toISOString();
+    const rec = { taskHash: task.hash, at, lane: task.lane };
+    if (task.drop) return Object.assign(rec, { ok: false, reason: `dropped: ${task.drop}` });
+    const scratch = path.join(c.work, 'plant', task.id);
+    fs.rmSync(scratch, { recursive: true, force: true });
+    const env = checksEnv(process.env);
+    const log = path.join(scratch, 'plant.log');
+    if (task.lane === 'decide') return Object.assign(rec, plantDecide(c, task));
+    if (task.lane !== 'fix') {
+        const expected = readJson(path.join(c.tasks, task.expected));
+        const self = task.lane === 'locate' ? gradeLocate(expected, expected, Number(task.threshold || 0.8)) : gradeReview({ findings: plantedFindings(expected) }, expected);
+        const empty = task.lane === 'locate' ? gradeLocate({ items: [] }, expected, Number(task.threshold || 0.8)) : gradeReview({ findings: [] }, expected);
+        const size = task.lane === 'locate' ? (expected.items || []).length : (expected.planted || []).length;
+        const ok = self.pass && !empty.pass && size >= 2;
+        return Object.assign(rec, { ok, keySize: size, selfPass: self.pass, emptyPass: empty.pass,
+            reason: ok ? 'key grades itself pass and an empty answer fail' : `key: self ${self.pass}, empty ${empty.pass}, ${size} items (needs 2 or more)` });
+    }
+    fs.mkdirSync(scratch, { recursive: true });
+    const parentRepo = path.join(scratch, 'parent');
+    const fixRepo = path.join(scratch, 'fix');
+    exportTree(c.src, task.parentSha, parentRepo);
+    exportTree(c.src, task.fixSha, fixRepo);
+    copyHeldOut(c, task, parentRepo);
+    const red = runChecks(task.checks, parentRepo, env, log, 'unfixed');
+    const grn = runChecks(task.checks, fixRepo, env, log, 'fixed');
+    const p2pParent = runChecks(task.passToPass || [], parentRepo, env, log, 'p2p unfixed');
+    const p2pFix = runChecks(task.passToPass || [], fixRepo, env, log, 'p2p fixed');
+    const tokens = fixTokens(c, task);
+    // The assertion is planted with the fix's own files: they must make it fire.
+    const planted = path.join(scratch, 'contamination-plant');
+    const changed = git(['diff', '--name-only', task.parentSha, task.fixSha], { cwd: c.src }).split('\n').filter(Boolean);
+    for (const f of changed) {
+        const dest = path.join(planted, f);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, git(['show', `${task.fixSha}:${f}`], { cwd: c.src }));
+    }
+    const fired = scanForTokens(tokens, [planted], 1).length > 0;
+    const unfixedRed = red.some((k) => k.exit !== 0);
+    const fixedGreen = green(grn);
+    const p2pOk = p2pParent.every((k) => k.exit === 0) && p2pFix.every((k) => k.exit === 0);
+    const reasons = [];
+    if (!unfixedRed) reasons.push('the checks pass on the unfixed tree, so the task measures nothing');
+    if (!fixedGreen) reasons.push('the checks fail on the fixed tree');
+    if (!p2pOk) reasons.push('a pass-to-pass suite is red on one side');
+    // A waiver is written in the task file with its reason; it never covers a
+    // task whose fix does add tokens, where the check must fire.
+    if (!tokens.length && !task.contaminationWaiver) reasons.push('the fix adds no distinctive token, so contamination cannot be checked, and the task carries no waiver');
+    else if (tokens.length && !fired) reasons.push('the contamination check did not fire on the fix files');
+    fs.rmSync(parentRepo, { recursive: true, force: true });
+    fs.rmSync(fixRepo, { recursive: true, force: true });
+    const okText = `red unfixed, green fixed, neighbours green, ${tokens.length ? 'contamination fires' : 'contamination waived'}`;
+    return Object.assign(rec, { ok: reasons.length === 0, reason: reasons.join('; ') || okText,
+        unfixed: red.map((k) => k.exit), fixed: grn.map((k) => k.exit), p2pUnfixed: p2pParent.map((k) => k.exit), p2pFixed: p2pFix.map((k) => k.exit),
+        contaminationTokens: tokens.length, contaminationFired: fired, contaminationWaiver: tokens.length ? null : task.contaminationWaiver || null });
+}
+/** The findings a perfect reviewer would write: one blocker per planted defect, quoting a phrase each regex accepts. */
+function plantedFindings(expected) {
+    return (expected.planted || []).map((d) => ({ section: d.section, severity: 'blocker', claim: d.example || '' }));
+}
+
+function plant(c, ids) {
+    const file = path.join(c.data, 'plant.json');
+    const state = readJson(file, { tasks: {} });
+    const results = {};
+    for (const id of ids) {
+        let rec;
+        try { rec = plantTask(c, loadTask(c, id)); } catch (e) { rec = { ok: false, reason: `${e.publicCode || 'error'}: ${e.message}`, at: new Date().toISOString() }; }
+        state.tasks[id] = rec;
+        results[id] = rec;
+        state.srcHead = revParse(c.src, 'HEAD');
+        state.updatedAt = new Date().toISOString();
+        writeJsonAtomic(file, state);
+    }
+    return results;
+}
+
+// ---------------------------------------------------------------- batch
+function batchFile(c, id) { return path.join(c.data, 'batches', `${id}.json`); }
+function pidAlive(pid) {
+    if (!pid) return false;
+    if (process.platform === 'win32') {
+        const r = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true });
+        return new RegExp(`"${pid}"`).test(r.stdout || '');
+    }
+    try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+/** The latest seven-day utilisation this account reported: finished rows, then the logs of runs still going. */
+function latestSevenDay(c, account, running) {
+    let best = null;
+    for (const r of readRows(c)) {
+        if (r.account === account && r.budget && typeof r.budget.sevenDay === 'number' && (!best || r.finishedAt > best.at)) best = { value: r.budget.sevenDay, at: r.finishedAt };
+    }
+    for (const run of running) {
+        const log = runPaths(c, run).log;
+        let text = '';
+        try { text = fs.readFileSync(log, 'utf8'); } catch { continue; }
+        const s = parseStream(text.slice(-262144));
+        const w = s.rate && s.rate.rate_limit_info && s.rate.rate_limit_info.unifiedWindows;
+        if (w && w.seven_day && typeof w.seven_day.utilization === 'number') {
+            const at = fs.statSync(log).mtime.toISOString();
+            if (!best || at > best.at) best = { value: w.seven_day.utilization, at };
+        }
+    }
+    return best;
+}
+
+function createBatch(c, { tasks, variants, account, k, max }) {
+    const id = `B-${stamp()}`;
+    const items = [];
+    for (let rep = 1; rep <= k; rep++) for (const t of tasks) for (const v of variants) items.push({ task: t, variant: v, rep, state: 'queued', run: null, verdict: null });
+    const batch = { id, createdAt: new Date().toISOString(), account, max, budgetStop: c.budgetStop, items, state: 'running', loopPid: null };
+    writeJsonAtomic(batchFile(c, id), batch);
+    return batch;
+}
+function spawnLoop(c, id, opts) {
+    const pass = [];
+    for (const k of ['src', 'tasks-dir', 'data', 'work', 'claude-bin', 'hw', 'budget-stop', 'api-sources']) if (opts[k] !== undefined) pass.push(`--${k}`, String(opts[k]));
+    const child = spawn(process.execPath, [__filename, 'batch-loop', '--batch', id, ...pass], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env });
+    child.unref();
+    return child.pid;
+}
+
+function batchLoop(c, id) {
+    const file = batchFile(c, id);
+    let batch = readJson(file);
+    batch.loopPid = process.pid;
+    batch.state = 'running';
+    writeJsonAtomic(file, batch);
+    const save = () => { batch.updatedAt = new Date().toISOString(); writeJsonAtomic(file, batch); };
+    try {
+        for (;;) {
+            let stop = null;
+            for (const it of batch.items.filter((x) => x.state === 'running')) {
+                const row = finish(c, it.run);
+                if (row) {
+                    it.state = 'done'; it.verdict = row.verdict;
+                    if (row.verdict === 'billed-api') stop = 'stopped-billed-api';
+                }
+            }
+            if (stop) {
+                for (const it of batch.items.filter((x) => x.state === 'running')) killTree(readJson(runPaths(c, it.run).meta).supervisorPid);
+                batch.state = stop; save(); return batch;
+            }
+            const running = batch.items.filter((x) => x.state === 'running').map((x) => x.run);
+            const queued = batch.items.filter((x) => x.state === 'queued');
+            if (!queued.length && !running.length) { batch.state = 'done'; save(); return batch; }
+            const reading = latestSevenDay(c, batch.account, running);
+            batch.lastBudget = reading;
+            if (reading && reading.value >= batch.budgetStop) {
+                if (!running.length) { batch.state = 'stopped-budget'; save(); return batch; }
+            } else {
+                // Without a reading yet, one run at a time until the first rate_limit_event lands.
+                const room = (reading ? batch.max : 1) - running.length;
+                for (const it of queued.slice(0, Math.max(0, room))) {
+                    try {
+                        const meta = runOne(c, it.task, it.variant, batch.account, it.rep, process.env);
+                        it.run = meta.run; it.state = 'running';
+                    } catch (e) {
+                        it.state = 'skipped'; it.verdict = e.publicCode || 'error'; it.error = e.message.slice(0, 300);
+                    }
+                    save();
+                }
+            }
+            save();
+            sleepMs(c.pollMs);
+        }
+    } catch (e) {
+        batch.state = 'loop-error'; batch.error = `${e.publicCode || 'internal'}: ${e.message}`.slice(0, 400); save();
+        throw e;
+    }
+}
+
+function status(c) {
+    const dir = path.join(c.data, 'batches');
+    let batches = [];
+    try { batches = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => readJson(path.join(dir, f), null)).filter(Boolean); } catch { batches = []; }
+    const rows = readRows(c);
+    return {
+        batches: batches.map((b) => ({ id: b.id, state: b.state, loopAlive: b.state === 'running' ? pidAlive(b.loopPid) : null, account: b.account,
+            done: b.items.filter((i) => i.state === 'done').length, running: b.items.filter((i) => i.state === 'running').length,
+            queued: b.items.filter((i) => i.state === 'queued').length, skipped: b.items.filter((i) => i.state === 'skipped').length,
+            pass: b.items.filter((i) => i.verdict === 'pass').length, lastBudget: b.lastBudget || null })),
+        rows: rows.length,
+        latest: rows.slice(-10).map((r) => ({ run: r.run, verdict: r.verdict, wallMs: r.wallMs, tokens: r.tokens ? r.tokens.total : null, costUsd: r.costUsd })),
+    };
+}
+
+// ---------------------------------------------------------------- cli
+function main(argv) {
+    const opts = parseArgs(argv);
+    const cmd = opts._[0];
+    if (!cmd || opts.help || cmd === 'help') { process.stdout.write(USAGE.join('\n') + '\n'); return 0; }
+    const c = ctx(opts);
+    const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+    let value;
+    switch (cmd) {
+        case 'snapshot': value = snapshot(c); break;
+        case 'plant': value = plant(c, opts.task ? list(opts.task) : allTaskIds(c)); break;
+        case 'prepare': {
+            if (!opts.task || !opts.variant) fault('usage', 'prepare needs --task and --variant');
+            value = prepare(c, opts.task, opts.variant, Number(opts.repeat || 1));
+            break;
+        }
+        case 'run': {
+            if (!opts.task || !opts.variant || !opts.account) fault('usage', 'run needs --task, --variant and --account');
+            value = runOne(c, opts.task, opts.variant, opts.account, Number(opts.repeat || 1), process.env);
+            break;
+        }
+        case 'finish': {
+            if (!opts.run) fault('usage', 'finish needs --run');
+            const deadline = Date.now() + Number(opts['wait-sec'] || 0) * 1000;
+            for (;;) {
+                value = finish(c, opts.run);
+                if (value || Date.now() >= deadline) break;
+                sleepMs(Math.min(c.pollMs, 2000));
+            }
+            if (!value) value = { run: opts.run, state: 'running' };
+            break;
+        }
+        case 'batch': {
+            if (!opts.tasks || !opts.variants || !opts.account) fault('usage', 'batch needs --tasks, --variants and --account');
+            workerEnv(process.env, opts.account);
+            const tasks = opts.tasks === 'all' ? allTaskIds(c) : list(opts.tasks);
+            const variants = list(opts.variants);
+            for (const t of tasks) plantOk(c, loadTask(c, t));
+            for (const v of variants) loadVariant(v);
+            const b = createBatch(c, { tasks, variants, account: opts.account, k: Number(opts.k || 1), max: Math.min(2, Number(opts.max || 2)) });
+            const pid = spawnLoop(c, b.id, opts);
+            value = { batch: b.id, items: b.items.length, loopPid: pid, file: batchFile(c, b.id) };
+            break;
+        }
+        case 'batch-resume': {
+            if (!opts.batch) fault('usage', 'batch-resume needs --batch');
+            const b = readJson(batchFile(c, opts.batch));
+            if (b.state === 'running' && pidAlive(b.loopPid)) fault('loop-alive', `${b.id} has a live loop, pid ${b.loopPid}`);
+            value = { batch: b.id, loopPid: spawnLoop(c, b.id, opts) };
+            break;
+        }
+        case 'batch-loop': value = batchLoop(c, opts.batch); break;
+        case 'status': value = status(c); break;
+        default: fault('usage', `unknown command ${cmd}; run with --help`);
+    }
+    process.stdout.write(JSON.stringify({ ok: true, value }) + '\n');
+    return 0;
+}
+
+if (require.main === module) {
+    try {
+        process.exitCode = main(process.argv.slice(2));
+    } catch (e) {
+        process.stdout.write(JSON.stringify({ ok: false, error: { code: e.publicCode || 'internal', message: e.message } }) + '\n');
+        process.exitCode = 1;
+    }
+}
+
+module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
+    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY };

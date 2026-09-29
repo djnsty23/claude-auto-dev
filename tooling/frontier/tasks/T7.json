@@ -1,0 +1,13 @@
+{
+  "id": "T7",
+  "lane": "locate",
+  "size": "S",
+  "source": "answer list at 62c539a5: direct readers of a story's passes field",
+  "parent": "62c539a57777787665995ad6b4cde2974bcfe80b",
+  "brief": "T7.md",
+  "answerFile": "frontier-answer.json",
+  "expected": "T7.answers.json",
+  "threshold": 0.8,
+  "support": [],
+  "timeoutMin": 20
+}

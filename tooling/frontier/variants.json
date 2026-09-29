@@ -1,0 +1,11 @@
+{
+  "_doc": "One axis moves per variant. The id is part of a run code, so keep it to 3 characters. Pins move only after a measured win and Andy's pick.",
+  "V0": { "model": "claude-opus-5-5", "effort": "medium", "note": "today's worker pin" },
+  "V1": { "model": "claude-sonnet-5-5", "effort": "medium", "note": "the Sonnet A/B" },
+  "V2": { "model": "claude-sonnet-5-5", "effort": "high", "note": "Sonnet one effort step up" },
+  "BOH": { "model": "claude-opus-5-5", "effort": "high", "note": "Brain seat: today's Opus at high" },
+  "BOX": { "model": "claude-opus-5-5", "effort": "xhigh", "note": "Brain seat: Opus at extra high" },
+  "BSH": { "model": "claude-sonnet-5-5", "effort": "high", "note": "Brain seat: Sonnet at high" },
+  "BSX": { "model": "claude-sonnet-5-5", "effort": "xhigh", "note": "Brain seat: Sonnet at extra high" },
+  "H0": { "model": "claude-haiku-4-5-20251001", "effort": null, "lanes": ["locate"], "note": "today's scout pin, locate lane only" }
+}
