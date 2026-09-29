@@ -23,7 +23,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const RUN = path.resolve(__dirname, 'frontier', 'run.js');
 const FRONTIER = path.resolve(__dirname, 'frontier', 'frontier.js');
@@ -286,6 +286,31 @@ function unitCases() {
     const pl = R.processList({});
     check('17f. processList reads the real table, and it holds this process under its parent',
         Array.isArray(pl) && pl.length > 5 && pl.some((p) => p.pid === process.pid && p.ppid === process.ppid), pl && pl.length);
+    const forced = R.loadRecord(a0, a1, R.noteLoad(null, []), { waitedSec: 600, timedOut: true, jobs: ['test-all.js@peer'] });
+    const waited = R.loadRecord(a0, a1, R.noteLoad(null, []), { waitedSec: 40, timedOut: false, jobs: [] });
+    check('17g. a run started after its quiet wait timed out is loaded on quiet samples, and one that got quiet stays quiet',
+        forced.class === 'loaded' && forced.quietWait.waitedSec === 600 && waited.class === 'quiet' && waited.quietWait.timedOut === false, [forced, waited]);
+    // A real heavy job on the real process table: the planted suite is a sleeping node process.
+    const peerSuite = path.join(ROOT, 'plantedpeer', 'tooling', 'test-all.js');
+    write(peerSuite, 'setInterval(() => {}, 1000);\n');
+    const planted = spawn(process.execPath, [peerSuite], { stdio: 'ignore', windowsHide: true });
+    try {
+        let seen = null;
+        for (let i = 0; i < 20 && !(seen && seen.includes('test-all.js@plantedpeer')); i++) { seen = R.heavyJobs(R.processList({}), null, null); if (i) sleep(250); }
+        const gb = { quietWaitMin: 10 };
+        const held = R.quietGate({}, gb);
+        check('17h. a planted peer suite on the real table is a heavy job, and the quiet gate holds on it and names it',
+            seen && seen.includes('test-all.js@plantedpeer') && held && held.hold === true && gb.waitingOn.includes('test-all.js@plantedpeer') && !!gb.waitingSince,
+            [seen, held, gb]);
+        const off = R.quietGate({}, { quietWaitMin: 0 });
+        const late = { quietWaitMin: 1, waitingSince: new Date(Date.now() - 61000).toISOString() };
+        const gone = R.quietGate({}, late);
+        check('17i. the gate is off at 0 minutes, and past its limit it releases the item as timed out, naming the job',
+            off === null && gone && gone.record && gone.record.timedOut === true && gone.record.waitedSec >= 61 && gone.record.jobs.includes('test-all.js@plantedpeer') && !late.waitingSince,
+            [off, gone, late]);
+    } finally {
+        try { planted.kill(); } catch { /* already gone */ }
+    }
 }
 
 function cliCases(shas) {
@@ -437,6 +462,48 @@ function cliCases(shas) {
         && loaded.row.load.heavyStart === 1 && loaded.row.load.heavyEnd === 1 && loaded.row.load.jobs.join() === 'test-all.js@peer-wt'
         && batchRows.length === 2 && batchRows.every((r) => r.load.class === 'quiet' && r.load.samples >= 3),
         [cool.row && cool.row.load, loaded.row && loaded.row.load, batchRows.map((r) => r.load)]);
+
+    // --quiet-wait: a batch holds its item while a peer suite runs, then starts it anyway at the limit
+    const batchDone = (id, polls) => {
+        let f = null;
+        for (let i = 0; i < polls; i++) { f = readJson(path.join(DATA, 'batches', `${id}.json`)); if (f && f.state !== 'running') break; sleep(250); }
+        return f;
+    };
+    const rowOf = (f) => f && f.items[0] && rows().find((r) => r.run === f.items[0].run);
+    const bt = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', '0.02'], { FAKE_MODE: 'fix', FRONTIER_PROCESS_LIST: LOADED_PS });
+    const bft = batchDone(bt.json && bt.json.value && bt.json.value.batch, 240);
+    const rt = rowOf(bft);
+    check('62. under a peer suite, --quiet-wait 0.02 holds past its limit, starts anyway and records the row as loaded, timed out and naming the job',
+        bft && bft.state === 'done' && bft.quietWaitMin === 0.02 && rt && rt.load.class === 'loaded' && rt.load.quietWait
+        && rt.load.quietWait.timedOut === true && rt.load.quietWait.waitedSec >= 1 && rt.load.quietWait.jobs.join() === 'test-all.js@peer-wt',
+        [bft && bft.state, rt && rt.load, bt.json || bt.stderr]);
+
+    const DYN_PS = path.join(ROOT, 'ps dynamic.tsv');
+    fs.copyFileSync(LOADED_PS, DYN_PS);
+    const bq = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', '5'], { FAKE_MODE: 'fix', FRONTIER_PROCESS_LIST: DYN_PS });
+    const bqid = bq.json && bq.json.value && bq.json.value.batch;
+    let held = null;
+    for (let i = 0; i < 80 && !(held && held.waitingOn); i++) { held = readJson(path.join(DATA, 'batches', `${bqid}.json`)); sleep(250); }
+    const stq = run(['status']);
+    const stBatch = stq.json && stq.json.ok && stq.json.value.batches.find((x) => x.id === bqid);
+    sleep(1200);
+    fs.copyFileSync(QUIET_PS, DYN_PS);
+    const bfq = batchDone(bqid, 240);
+    const rq = rowOf(bfq);
+    check('63. while a peer suite runs the batch holds its item and says what it waits on, in the batch file and in status',
+        held && held.waitingOn && held.waitingOn.join() === 'test-all.js@peer-wt' && held.items[0].state === 'queued'
+        && stBatch && stBatch.waiting && stBatch.waiting.on.join() === 'test-all.js@peer-wt', [held, stBatch]);
+    check('64. and once the peer ends it starts the item as quiet, with the time it waited and no timeout',
+        bfq && bfq.state === 'done' && !bfq.waitingOn && rq && rq.load.class === 'quiet' && rq.load.quietWait
+        && rq.load.quietWait.timedOut === false && rq.load.quietWait.waitedSec >= 1, [bfq && bfq.state, rq && rq.load]);
+
+    const bare = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait'], { FAKE_MODE: 'fix' });
+    const bfb = batchDone(bare.json && bare.json.value && bare.json.value.batch, 240);
+    const rb = rowOf(bfb);
+    const junk = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', 'soon']);
+    check('65. a bare --quiet-wait means 10 minutes and a quiet machine starts at once, and a non-number is a usage error',
+        bfb && bfb.quietWaitMin === 10 && rb && rb.load.quietWait && rb.load.quietWait.waitedSec === 0 && rb.load.class === 'quiet'
+        && junk.json && junk.json.error && junk.json.error.code === 'usage', [bfb && bfb.quietWaitMin, rb && rb.load, junk.json]);
 }
 
 // ---------------------------------------------------------------- main

@@ -38,7 +38,9 @@ const USAGE = [
     '  prepare --task T --variant V    build the repo, config dir and pin, run the contamination check, start nothing',
     '  run --task T --variant V --account <name> [--repeat n]   prepare and start one worker, return at once',
     '  finish --run <id> [--wait-sec n]   grade an exited run and append its row; idempotent',
-    '  batch --tasks T1,T2|all --variants V0,V1 --account <name> [--k 1] [--max 2]   start a detached batch loop',
+    '  batch --tasks T1,T2|all --variants V0,V1 --account <name> [--k 1] [--max 2] [--quiet-wait <min>]   start a detached batch loop',
+    '                                  --quiet-wait holds each item until no gate, coverage run or full suite runs on the',
+    '                                  machine, at most <min> minutes (10 when given alone), then starts it as a loaded row',
     '  batch-resume --batch <id>       restart the loop of a batch whose loop died',
     '  status [--json]                 batches and the latest rows',
     'Options: --src <repo> --tasks-dir <dir> --data <dir> --work <dir> --claude-bin <path> --hw <headless-worker.js>',
@@ -183,14 +185,17 @@ function noteLoad(samples, heavy) {
 /**
  * The row's load: quiet when every reading was taken and none saw a heavy job,
  * loaded when any did, unknown when a reading is missing. cpuBusy includes the
- * run's own work, so it describes the window, not the neighbours.
+ * run's own work, so it describes the window, not the neighbours. A run that
+ * --quiet-wait started after its wait timed out is loaded whatever the samples
+ * say: it began beside a heavy job.
  */
-function loadRecord(start, end, samples) {
-    if (!start || !end) return { class: 'unknown', why: 'no start or end sample' };
+function loadRecord(start, end, samples, quietWait = null) {
+    if (!start || !end) return { class: 'unknown', why: 'no start or end sample', quietWait };
     const dTotal = end.cpu.total - start.cpu.total;
     const s = [start.heavy, end.heavy].reduce((acc, h) => noteLoad(acc, h), samples ? JSON.parse(JSON.stringify(samples)) : null);
-    const cls = s.unreadable ? 'unknown' : s.loaded ? 'loaded' : 'quiet';
+    const cls = quietWait && quietWait.timedOut ? 'loaded' : s.unreadable ? 'unknown' : s.loaded ? 'loaded' : 'quiet';
     return {
+        quietWait,
         class: cls, cpuBusy: dTotal > 0 ? Math.round(Math.min(1, Math.max(0, 1 - (end.cpu.idle - start.cpu.idle) / dTotal)) * 1000) / 1000 : null,
         windowSec: Math.round((Date.parse(end.at) - Date.parse(start.at)) / 1000),
         heavyStart: start.heavy ? start.heavy.length : null, heavyEnd: end.heavy ? end.heavy.length : null,
@@ -538,9 +543,9 @@ function start(c, meta, env) {
     return meta;
 }
 
-function runOne(c, taskId, variantId, account, repeat, env) {
+function runOne(c, taskId, variantId, account, repeat, env, extra = {}) {
     const wenv = workerEnv(env, account);
-    const meta = prepare(c, taskId, variantId, repeat, { account });
+    const meta = Object.assign(prepare(c, taskId, variantId, repeat, { account }), extra);
     if (meta.state === 'contaminated') {
         appendRow(c, rowFor(c, meta, { verdict: 'contaminated', pass: null }));
         fault('contaminated', `${meta.run}: ${meta.contamination.hits.map((h) => `${h.token} in ${h.file}`).join('; ')}`);
@@ -742,7 +747,7 @@ function finish(c, run, { allowKill = true } = {}) {
         }
         const exitMs = exitM ? fs.statSync(p.log).mtimeMs : Date.now();
         // Before grading: the held-out checks are this runner's own load.
-        const load = loadRecord(meta.loadStart, sampleLoad(c, meta), meta.loadSamples);
+        const load = loadRecord(meta.loadStart, sampleLoad(c, meta), meta.loadSamples, meta.quietWait || null);
         const s = parseStream(log);
         const tokens = tokensOf(s.result);
         const init = s.init || {};
@@ -920,14 +925,40 @@ function latestSevenDay(c, account, running) {
     return best;
 }
 
-function createBatch(c, { tasks, variants, account, k, max }) {
+function createBatch(c, { tasks, variants, account, k, max, quietWaitMin = 0 }) {
     const id = `B-${stamp()}`;
     const items = [];
     for (let rep = 1; rep <= k; rep++) for (const t of tasks) for (const v of variants) items.push({ task: t, variant: v, rep, state: 'queued', run: null, verdict: null });
-    const batch = { id, createdAt: new Date().toISOString(), account, max, budgetStop: c.budgetStop, items, state: 'running', loopPid: null };
+    const batch = { id, createdAt: new Date().toISOString(), account, max, budgetStop: c.budgetStop, quietWaitMin, items, state: 'running', loopPid: null };
     writeJsonAtomic(batchFile(c, id), batch);
     return batch;
 }
+/**
+ * With --quiet-wait, an item starts only when no gate, coverage run or full
+ * suite runs anywhere on the machine, a sibling run's included. Held for at
+ * most quietWaitMin, then it starts anyway and its row is loaded. The wait
+ * spans polls, so running items keep being graded meanwhile. Returns null with
+ * the option off, { hold } while waiting, and { record } once it may start.
+ */
+function quietGate(c, batch) {
+    if (!(batch.quietWaitMin > 0)) return null;
+    const found = heavyJobs(processList(c), null, null);
+    // One gate is several heavy processes with one label, so labels are deduplicated before the cap.
+    const heavy = found && [...new Set(found)];
+    const busy = heavy === null || heavy.length > 0;
+    const since = batch.waitingSince ? Date.parse(batch.waitingSince) : Date.now();
+    const waitedSec = Math.round((Date.now() - since) / 1000);
+    if (busy && waitedSec < batch.quietWaitMin * 60) {
+        batch.waitingSince = new Date(since).toISOString();
+        batch.waitingOn = heavy === null ? ['process list unreadable'] : heavy.slice(0, 12);
+        return { hold: true };
+    }
+    const record = { waitedSec: batch.waitingSince ? waitedSec : 0, timedOut: busy, jobs: busy ? (heavy || ['process list unreadable']).slice(0, 12) : [] };
+    delete batch.waitingSince;
+    delete batch.waitingOn;
+    return { record };
+}
+
 function spawnLoop(c, id, opts) {
     const pass = [];
     for (const k of ['src', 'tasks-dir', 'data', 'work', 'claude-bin', 'hw', 'budget-stop', 'api-sources']) if (opts[k] !== undefined) pass.push(`--${k}`, String(opts[k]));
@@ -977,9 +1008,11 @@ function batchLoop(c, id) {
             } else {
                 // Without a reading yet, one run at a time until the first rate_limit_event lands.
                 const room = (reading ? batch.max : 1) - running.length;
-                for (const it of queued.slice(0, Math.max(0, room))) {
+                const next = queued.slice(0, Math.max(0, room));
+                const wait = next.length ? quietGate(c, batch) : null;
+                for (const it of wait && wait.hold ? [] : next) {
                     try {
-                        const meta = runOne(c, it.task, it.variant, batch.account, it.rep, process.env);
+                        const meta = runOne(c, it.task, it.variant, batch.account, it.rep, process.env, wait ? { quietWait: wait.record } : {});
                         it.run = meta.run; it.state = 'running';
                     } catch (e) {
                         it.state = 'skipped'; it.verdict = e.publicCode || 'error'; it.error = e.message.slice(0, 300);
@@ -1005,7 +1038,8 @@ function status(c) {
         batches: batches.map((b) => ({ id: b.id, state: b.state, loopAlive: b.state === 'running' ? pidAlive(b.loopPid) : null, account: b.account,
             done: b.items.filter((i) => i.state === 'done').length, running: b.items.filter((i) => i.state === 'running').length,
             queued: b.items.filter((i) => i.state === 'queued').length, skipped: b.items.filter((i) => i.state === 'skipped').length,
-            pass: b.items.filter((i) => i.verdict === 'pass').length, lastBudget: b.lastBudget || null })),
+            pass: b.items.filter((i) => i.verdict === 'pass').length, lastBudget: b.lastBudget || null,
+            waiting: b.waitingSince ? { since: b.waitingSince, on: b.waitingOn || [] } : null })),
         rows: rows.length,
         latest: rows.slice(-10).map((r) => ({ run: r.run, verdict: r.verdict, wallMs: r.wallMs, tokens: r.tokens ? r.tokens.total : null, costUsd: r.costUsd })),
     };
@@ -1050,7 +1084,9 @@ function main(argv) {
             const variants = list(opts.variants);
             for (const t of tasks) plantOk(c, loadTask(c, t));
             for (const v of variants) loadVariant(v);
-            const b = createBatch(c, { tasks, variants, account: opts.account, k: Number(opts.k || 1), max: Math.min(2, Number(opts.max || 2)) });
+            const qw = opts['quiet-wait'] === true ? 10 : Number(opts['quiet-wait'] || 0);
+            if (!(qw >= 0)) fault('usage', '--quiet-wait takes minutes, 10 when given alone');
+            const b = createBatch(c, { tasks, variants, account: opts.account, k: Number(opts.k || 1), max: Math.min(2, Number(opts.max || 2)), quietWaitMin: qw });
             const pid = spawnLoop(c, b.id, opts);
             value = { batch: b.id, items: b.items.length, loopPid: pid, file: batchFile(c, b.id) };
             break;
@@ -1081,4 +1117,4 @@ if (require.main === module) {
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
-    processList, heavyJobs, noteLoad, loadRecord, HEAVY_RE };
+    processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
