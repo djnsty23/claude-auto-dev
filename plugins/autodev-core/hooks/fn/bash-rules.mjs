@@ -15,7 +15,9 @@
 //             Windows-only and unscoped; its measurement is in its comment.
 //             The fifth, `argv-credential`, is unscoped too, and so is its
 //             measurement. The sixth, `worktree-placement`, is unscoped
-//             and measured in its comment.
+//             and measured in its comment. The seventh, `heredoc-backslash`,
+//             is Windows-only and the one rule that reads a heredoc body.
+//             Its measurement is in its comment.
 //
 // A rewrite must not change a command's FIRST TOKEN: the permission layer
 // matches an allowlist on it, inside next(e), so a prefix that the model never
@@ -229,6 +231,19 @@ function misplacedWorktree(segment, ctx) {
     }
 }
 
+// A heredoc whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`): bash passes its
+// body through byte for byte, so any change to those bytes is the harness's.
+const QUOTED_HEREDOC_RE = /<<-?[ \t]*(['"])([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n([\s\S]*?)(?:\n[ \t]*\2[ \t]*(?=\n|$)|$)/g;
+
+/** The first line of a quoted heredoc body that holds `\\`, or null. */
+function halvedHeredocLine(command) {
+    for (const m of String(command).matchAll(QUOTED_HEREDOC_RE)) {
+        const line = m[3].split('\n').find((l) => l.includes('\\\\'));
+        if (line !== undefined) return { delimiter: m[2], line: line.trim().slice(0, 120) };
+    }
+    return null;
+}
+
 /** The directory a `cd` segment moves to; undefined when the segment is no cd, null when unknown. */
 function cdTarget(segment, dir, ctx) {
     if (!/^\s*(?:cd|pushd)\b/.test(segment)) return undefined;
@@ -357,6 +372,44 @@ export const RULES = [
                 + `\`${m.command}\``;
         },
     },
+    {
+        // WHOLE: tested once against the full command, heredoc body included,
+        // where every other rule reads only the segments before the body.
+        //
+        // On Windows the Bash tool delivers every `\\` in a command as `\`
+        // before bash parses it, so a quoted delimiter does not protect the
+        // body. `[measured 2026-09-29]` with `od -c`: a quoted-heredoc `\\b`,
+        // a single-quoted `'x\\y'` and a single-quoted `'x\\\\y'` arrived as
+        // `\b`, `x\y` and `x\\y`. A regex or a JSON escape written through
+        // one then means something else: `'\\b'` in a JS catalog became a
+        // backspace and the pattern matched nothing, with no error.
+        //
+        // `[measured 2026-09-29]` 30 days of one operator's transcripts (2,054
+        // files, 187,729 Bash calls). 1,799 calls had a quoted heredoc body
+        // holding `\\`, and this rule refuses them. 21.4% of the 1,751 feeding
+        // an interpreter or a code file failed to parse (SyntaxError,
+        // unexpected EOF, invalid regex, bad control character), against 2.3%
+        // of the 16,605 such heredocs without `\\`. Another 32.4% ran with a
+        // Python "invalid escape sequence" warning naming the halved escape,
+        // 4.6% failed some other way, and 41.6% showed nothing, which
+        // includes the silent case above. Replayed through this module with
+        // each call's recorded cwd, the rule denied 1,803 calls and no other
+        // rule's count moved. The prose rule (write the script with the
+        // Write tool) was in force the whole window. Not refused:
+        // single-quoted arguments,
+        // 1,082 calls with `\\` and 10.6% with a symptom, too low for a deny.
+        id: 'heredoc-backslash',
+        kind: 'deny',
+        scope: 'all',
+        whole: true,
+        test: (command, ctx) => ctx.windows && !!halvedHeredocLine(command),
+        reason: (command) => {
+            const h = halvedHeredocLine(command);
+            return `On Windows the Bash tool delivers every \`\\\\\` as \`\\\`, even inside a quoted heredoc, so this <<'${h.delimiter}' body `
+                + `reaches bash with one backslash where it has two (first at: ${h.line}). A regex, a JSON escape or a path in it changes meaning, often with no error. `
+                + 'Write the script with the Write tool and run it by path (`node <file>`, `py -3 <file>`).';
+        },
+    },
 ];
 
 /**
@@ -365,7 +418,7 @@ export const RULES = [
  * working tree's directory name; a fork under another name is a different
  * repository with its own CLAUDE.md.
  */
-export { misplacedWorktree, shellWords, resolvePath };
+export { misplacedWorktree, shellWords, resolvePath, halvedHeredocLine };
 
 export function isAutodevRepo(repo) {
     if (!repo || typeof repo !== 'object') return false;
@@ -393,6 +446,11 @@ export function decideBash({ command, cwd, repo }) {
     const root = repo && typeof repo.root === 'string' && repo.root ? resolvePath(null, repo.root, windows) : null;
     const ctx = { windows, inRepo: isAutodevRepo(repo), start, dir: start, repoRoot: root, moved: false };
 
+    for (const rule of RULES) {
+        if (!rule.whole || (rule.scope === 'repo' && !ctx.inRepo) || !rule.test(original, ctx)) continue;
+        return { deny: typeof rule.reason === 'function' ? rule.reason(original, ctx) : rule.reason, rule: rule.id };
+    }
+
     // Everything from the first heredoc opener on is body text, not commands.
     const heredocAt = original.search(/<<-?\s*['"]?[A-Za-z_]/);
     const head = heredocAt === -1 ? original : original.slice(0, heredocAt);
@@ -407,7 +465,7 @@ export function decideBash({ command, cwd, repo }) {
         const moved = cdTarget(segment, ctx.dir, ctx);
         if (moved !== undefined) { ctx.dir = moved; ctx.moved = true; continue; }
         for (const rule of RULES) {
-            if (rule.scope === 'repo' && !ctx.inRepo) continue;
+            if (rule.whole || (rule.scope === 'repo' && !ctx.inRepo)) continue;
             if (!rule.test(segment, ctx)) continue;
             if (rule.kind === 'deny') {
                 const reason = typeof rule.reason === 'function' ? rule.reason(segment, ctx) : rule.reason;
