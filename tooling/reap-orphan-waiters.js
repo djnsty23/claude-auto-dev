@@ -139,6 +139,12 @@ function selftest() {
     process.exit(fail ? 1 : 0);
 }
 
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    console.log('Usage: node tooling/reap-orphan-waiters.js [--kill | --selftest]\n'
+        + '  Reports shell sleep loops polling an output file that no live process writes.\n'
+        + '  --kill stops the confirmed orphans. --selftest runs the classifier cases.');
+    process.exit(0);
+}
 if (process.argv.includes('--selftest')) selftest();
 
 const rows = classify();
