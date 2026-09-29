@@ -30,12 +30,14 @@ function check(name, cond, detail) {
 const near = (a, b, tol = 1e-9) => Math.abs(a - b) <= tol;
 
 let n = 0;
-function fixture(rows) {
+// Every argument after the first is another transcript file in the same
+// config dir, for a response whose rows are split across files.
+function fixture(rows, ...moreFiles) {
     const cfg = path.join(ROOT, 'cfg-' + (n++));
     const dir = path.join(cfg, 'projects', 'proj');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 't.jsonl'),
-        rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+    [rows].concat(moreFiles).forEach((r, i) => fs.writeFileSync(path.join(dir, 't' + (i || '') + '.jsonl'),
+        r.map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8'));
     return cfg;
 }
 
@@ -59,6 +61,10 @@ const beforeWindow = new Date(Date.parse(wsProbe.windowStart) - 3600 * 1000).toI
 
 const row = (usage, model = 'claude-opus-5', ts = insideWindow) =>
     ({ timestamp: ts, message: { model, usage } });
+// A row as Claude Code writes it: one per content block, each carrying the
+// response's message id, its request id, and the whole response's usage.
+const block = (id, usage) =>
+    ({ timestamp: insideWindow, requestId: 'req_' + id, message: { id: 'msg_' + id, model: 'claude-opus-5', usage } });
 
 // ------------------------------------------------------------- the contract
 
@@ -147,7 +153,7 @@ const row = (usage, model = 'claude-opus-5', ts = insideWindow) =>
     check('and at the HIGHEST published rate, not the cheapest',
         near(j.windowCost, 50), j.windowCost);
     check('and the fallback is counted in the population',
-        j.population.rowsPricedAtFallbackRate === 1, JSON.stringify(j.population));
+        j.population.responsesPricedAtFallbackRate === 1, JSON.stringify(j.population));
 }
 
 {
@@ -160,6 +166,71 @@ const row = (usage, model = 'claude-opus-5', ts = insideWindow) =>
     // under-reports, which is the dangerous direction.
     const { j } = run(fixture([row({ output_tokens: 1000000, speed: 'fast' }, 'claude-opus-5')]));
     check('fast mode is priced at its premium rate', near(j.windowCost, 50), j.windowCost);
+}
+
+// ------------------------------------------------ one API response, one price
+
+{
+    // THE DEFECT THIS GUARDS. A response with three content blocks is three
+    // transcript rows, and each repeats the response's usage. [measured
+    // 2026-09-29] summing rows put 60.4% of the cost on repeats, so the weekly
+    // figure read about 2.5x the real spend.
+    const u = { input_tokens: 1000000, output_tokens: 1000000 };   // 5 + 25
+    const { j } = run(fixture([block('a', u), block('a', u), block('a', u)]));
+    check('three blocks of one response are priced once', near(j.windowCost, 30, 1e-6), j.windowCost);
+    check('and the population counts rows and responses apart',
+        j.population.usageRowsInWindow === 3 && j.population.responsesInWindow === 1
+        && j.population.repeatedRows === 2, JSON.stringify(j.population));
+    check('and says what one priced unit is', j.measure === 'response', j.measure);
+}
+
+{
+    // The first row of a response is a streaming partial: its output count is
+    // a few tokens, and only the final row carries the real one.
+    const partial = { input_tokens: 1000000, output_tokens: 8 };
+    const final = { input_tokens: 1000000, output_tokens: 1000000 };
+    const { j } = run(fixture([block('p', partial), block('p', final)]));
+    check('a partial then a final row prices the final one', near(j.windowCost, 30, 1e-6), j.windowCost);
+}
+
+{
+    // A resumed or subagent transcript copies rows into another file, and the
+    // partial copy can be read AFTER the final row. The row with the most
+    // output wins, whatever order the files are read in.
+    const partial = { input_tokens: 1000000, output_tokens: 8 };
+    const final = { input_tokens: 1000000, output_tokens: 1000000 };
+    const { j } = run(fixture([block('x', final)], [block('x', partial)]));
+    check('a partial copy read after the final row does not replace it',
+        near(j.windowCost, 30, 1e-6), j.windowCost);
+    check('and one response across two files is priced once',
+        j.population.responsesInWindow === 1 && j.population.transcriptsRead === 2, JSON.stringify(j.population));
+}
+
+{
+    // Two responses are two prices, even with identical usage.
+    const u = { output_tokens: 1000000 };
+    const { j } = run(fixture([block('one', u), block('two', u)]));
+    check('two distinct responses are both priced', near(j.windowCost, 50), j.windowCost);
+}
+
+{
+    // A row with a message id and no request id still belongs to its response.
+    const u = { output_tokens: 1000000 };
+    const noReq = (id) => ({ timestamp: insideWindow, message: { id, model: 'claude-opus-5', usage: u } });
+    const { j } = run(fixture([noReq('msg_r'), noReq('msg_r')]));
+    check('a message id alone is enough to dedupe', near(j.windowCost, 25), j.windowCost);
+    check('and those rows are not reported as unkeyed',
+        j.population.rowsWithoutResponseId === 0, JSON.stringify(j.population));
+}
+
+{
+    // Neither id: nothing says two rows are one response, so each is priced
+    // and the count of them is reported. Undercounting is the unsafe direction.
+    const { j } = run(fixture([row({ output_tokens: 1000000 }), row({ output_tokens: 1000000 })]));
+    check('rows with no response id are each priced', near(j.windowCost, 50), j.windowCost);
+    check('and counted as rows without a response id',
+        j.population.rowsWithoutResponseId === 2 && j.population.responsesInWindow === 2,
+        JSON.stringify(j.population));
 }
 
 // ---------------------------------------------------------- degenerate input
@@ -207,4 +278,4 @@ if (failures.length) {
     for (const f of failures) console.error('  x ' + f);
     process.exit(1);
 }
-console.log(`quota-burn: ${passed}/${total} passed — the tripwire contract, the Wed 02:00 window, cache TTL rates, and pricing an unknown model HIGH`);
+console.log(`quota-burn: ${passed}/${total} passed: the tripwire contract, the Wed 02:00 window, cache TTL rates, one price per API response, and pricing an unknown model HIGH`);
