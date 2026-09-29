@@ -24,6 +24,10 @@ const PLUGIN_ROOT = path.resolve(__dirname, '..', 'plugins', 'autodev-core');
 const HOOK = path.join(PLUGIN_ROOT, 'hooks', 'stop-auto-check.js');
 
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'stopcheck-test-')));
+// Every child gets its own profile dir. The hook keeps per-session state under
+// CLAUDE_CONFIG_DIR, and a suite that inherits the real one writes into it.
+const CFG = path.join(TMP, 'cfg-home');
+const hookEnv = (cfg = CFG) => ({ ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: cfg });
 
 const cases = [];
 // The third field is set when a hook child had already produced no verdict,
@@ -56,10 +60,10 @@ function project({ auto = false, exit = false, idle = false, prd = undefined, au
     return dir;
 }
 
-function run(dir, payload = {}) {
+function run(dir, payload = {}, cfg = CFG) {
     const r = spawnHook(JSON.stringify({ session_id: 'sess', cwd: dir, hook_event_name: 'Stop', ...payload }), {
         cwd: dir,
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+        env: hookEnv(cfg),
     });
     let decision = null;
     try { decision = JSON.parse(r.stdout); } catch { /* stays null */ }
@@ -259,7 +263,7 @@ check('malformed prd.json clears the auto flag', !exists(d, 'auto-active'));
 
 // Malformed stdin must still produce a decision.
 d = project({ prd: SPRINT_PENDING });
-r = spawnHook('not json', { cwd: d, env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+r = spawnHook('not json', { cwd: d, env: hookEnv() });
 let parsed = null;
 try { parsed = JSON.parse(r.stdout); } catch { /* stays null */ }
 check('malformed stdin → exit 0', r.status === 0);
@@ -274,7 +278,7 @@ const elsewhere = path.join(TMP, 'elsewhere');
 fs.mkdirSync(elsewhere, { recursive: true });
 r = spawnHook(JSON.stringify({ session_id: 's', cwd: other, hook_event_name: 'Stop' }), {
     cwd: elsewhere,
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+    env: hookEnv(),
 });
 try { parsed = JSON.parse(r.stdout); } catch { parsed = null; }
 check('uses payload cwd, not process cwd', parsed?.decision === 'block');
@@ -307,7 +311,7 @@ function withAges(dir, ages, { computedAt = new Date().toISOString() } = {}) {
 
 function runWithCfg(dir, cfg) {
     const r = spawnHook(JSON.stringify({ session_id: 's', cwd: dir, hook_event_name: 'Stop' }), {
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: cfg },
+        env: hookEnv(cfg),
     });
     let out = null;
     try { out = JSON.parse(r.stdout); } catch { /* stays null */ }
@@ -581,10 +585,13 @@ function runWithCfg(dir, cfg) {
         (ctx(run(dir, { session_id: 'other' }).decision) || '').includes('S1-002'));
 
     // A ledger that cannot be read sends nothing to the model: a missed nudge
-    // costs one line, a missed guard costs a model call per stop.
+    // costs one line, a missed guard costs a model call per stop. Here the
+    // ledger directory is a FILE, so every ledger path under it is unreadable.
+    const blockedCfg = path.join(TMP, 'cfg-blocked');
+    fs.mkdirSync(path.join(blockedCfg, 'autodev'), { recursive: true });
+    fs.writeFileSync(path.join(blockedCfg, 'autodev', 'stop-notes'), 'not a directory');
     const broken = project({ prd: SPRINT_PENDING });
-    fs.mkdirSync(path.join(broken, '.claude', 'stop-notes.sess'));
-    const b = run(broken).decision;
+    const b = run(broken, {}, blockedCfg).decision;
     check('F17: unreadable ledger → approve, no additionalContext (fails closed)',
         b?.decision === 'approve' && b.hookSpecificOutput === undefined && (b.systemMessage || '').includes('S1-002'));
 
@@ -595,19 +602,69 @@ function runWithCfg(dir, cfg) {
     check('F17: no .claude dir → nudge still reaches the model once', (ctx(run(bare).decision) || '').includes('S1-002'));
     const bareAgain = run(bare).decision;
     check('F17: no .claude dir → and only once', bareAgain !== null && bareAgain.hookSpecificOutput === undefined);
+    check('F17: no .claude dir → and none is created', bareAgain !== null && !fs.existsSync(path.join(bare, '.claude')));
+
+    // One session, two repos: the nudge key is the same text in both, so a
+    // ledger keyed on the session alone would silence the second repo.
+    const repoA = project({ prd: SPRINT_PENDING });
+    const repoB = project({ prd: SPRINT_PENDING });
+    check('F17: one session, first repo → its nudge', (ctx(run(repoA, { session_id: 'roam' }).decision) || '').includes('S1-002'));
+    check('F17: same session, second repo → its own nudge', (ctx(run(repoB, { session_id: 'roam' }).decision) || '').includes('S1-002'));
 
     // Ledgers are per session, so the first write sweeps week-old ones.
-    const swept = project({});
-    const old = path.join(swept, '.claude', 'stop-notes.gone');
-    const recent = path.join(swept, '.claude', 'stop-notes.kept');
+    const sweepCfg = path.join(TMP, 'cfg-sweep');
+    const ledgers = path.join(sweepCfg, 'autodev', 'stop-notes');
+    fs.mkdirSync(ledgers, { recursive: true });
+    const old = path.join(ledgers, 'gone.000000000000.json');
+    const recent = path.join(ledgers, 'kept.000000000000.json');
     fs.writeFileSync(old, '[]');
     fs.writeFileSync(recent, '[]');
     const eightDays = new Date(Date.now() - 8 * 86400000);
     fs.utimesSync(old, eightDays, eightDays);
-    fs.writeFileSync(path.join(swept, 'prd.json'), JSON.stringify(SPRINT_PENDING));
-    const sweptAnswer = run(swept).decision;
-    check('F17: first write sweeps a week-old ledger', !fs.existsSync(old));
+    const swept = project({ prd: SPRINT_PENDING });
+    // A ledger from before the move, still sitting in the project tree.
+    const legacy = path.join(swept, '.claude', 'stop-notes.sess');
+    fs.writeFileSync(legacy, '[]');
+    const sweptAnswer = run(swept, {}, sweepCfg).decision;
+    check('F17: first write sweeps a week-old ledger', sweptAnswer !== null && !fs.existsSync(old));
     check('F17: and keeps a recent one', sweptAnswer !== null && fs.existsSync(recent));
+    check('F17: and removes a pre-move ledger from the project', sweptAnswer !== null && !fs.existsSync(legacy));
+}
+
+// ------------------------------------ F18: the ledger never dirties the project
+//
+// `[measured 2026-09-29]` the ledger was `<cwd>/.claude/stop-notes.<session>`,
+// untracked and not ignored. This repo's gate then exited 2 at check:suites,
+// which refuses a dirty tree, and the other eleven steps never ran. The hook
+// ships installed, so every user repo got the same file.
+{
+    const cp = require('child_process');
+    const git = (dir, ...args) => cp.execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid',
+        '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', ...args], { cwd: dir, encoding: 'utf8' });
+    const repo = project({ prd: SPRINT_PENDING });
+    const cfg = path.join(TMP, 'cfg-f18');
+    let ready = false;
+    try {
+        git(repo, 'init', '-q');
+        git(repo, 'add', 'prd.json');
+        git(repo, 'commit', '-q', '-m', 'init');
+        ready = git(repo, 'status', '--porcelain') === '';
+    } catch { /* ready stays false */ }
+    check('F18: control, the fixture repo starts clean', ready);
+    const first = run(repo, { session_id: 'f18' }, cfg).decision;
+    const second = run(repo, { session_id: 'f18' }, cfg).decision;
+    run(repo, { session_id: 'f18-peer' }, cfg);
+    // Positive control: the ledger was written somewhere, or the second stop
+    // would have handed the model the nudge again.
+    check('F18: control, the ledger recorded the note', (first?.hookSpecificOutput?.additionalContext || '').includes('S1-002')
+        && second !== null && second.hookSpecificOutput === undefined);
+    check('F18: nothing appears under the project .claude/', fs.readdirSync(path.join(repo, '.claude')).length === 0);
+    let status = null;
+    try { status = git(repo, 'status', '--porcelain', '--untracked-files=all'); } catch { /* stays null */ }
+    check('F18: git status --porcelain stays empty', status === '');
+    let ledgersHere = [];
+    try { ledgersHere = fs.readdirSync(path.join(cfg, 'autodev', 'stop-notes')); } catch { /* stays empty */ }
+    check('F18: the ledgers live under the profile, one per session', ledgersHere.length === 2);
 }
 
 // The carried-queue note: once per DISTINCT note per session.
