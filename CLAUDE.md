@@ -20,6 +20,8 @@ node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md
 node tooling/check-claude-md.js              # does THIS FILE still describe the tree?
 ```
 
+**`npm test` is ONE THIRTEENTH of the gate**, and `npm run gate` exists because it chains all thirteen.
+
 **THE CHAIN IS `&&`, so a red first step means the other twelve NEVER RAN.** The gate is
 
 ```
