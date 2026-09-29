@@ -3,7 +3,6 @@ name: archive-prd
 description: Archives completed stories from prd.json to reduce token usage.
 when_to_use: "Invoked when the user says \"archive\", \"compact prd\", \"prd too large\"."
 allowed-tools: Read, Write, Edit, Bash
-model: haiku
 user-invocable: true
 argument-hint: "[status|S-ID|unarchive S-ID]"
 ---
