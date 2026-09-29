@@ -22,6 +22,11 @@ const cp = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const args = process.argv.slice(2);
+if (args.includes('--help') || args.includes('-h')) {
+    console.log('Usage: node tooling/extract-plugin-types.js [--out <file>] [--exe <claude.exe>]\n'
+        + '  Recovers claude-code.d.ts from the installed Claude Code binary into .claude/types/.');
+    process.exit(0);
+}
 const opt = (name, fallback) => { const i = args.indexOf(name); return i === -1 ? fallback : args[i + 1]; };
 const outFile = path.resolve(ROOT, opt('--out', path.join('.claude', 'types', 'claude-code.d.ts')));
 
