@@ -94,7 +94,7 @@ function docsCommit(work, subject, hoursAgo) {
     commit(work, ['docs'], subject, hoursAgo, () => fs.appendFileSync(path.join(work, 'docs', 'notes.md'), subject + '\n'));
 }
 const push = (work) => git(work, ['push', '--quiet', 'origin', 'main']);
-const tagAndPush = (work, tag) => { git(work, ['tag', tag]); git(work, ['push', '--quiet', 'origin', tag]); };
+const tagAndPush = (work, tag) => { git(work, ['tag', '-a', tag, '-m', tag]); git(work, ['push', '--quiet', 'origin', tag]); };
 
 function run(cwd, args) {
     const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8', windowsHide: true, env: gitEnv() });
@@ -253,9 +253,23 @@ try {
         push(w);
         const r = run(w, ['--remote', 'no-such-remote']);
         check('an unlistable remote with no local tag exits 2, not red and not green', r.code === 2 && /could not list tags on no-such-remote/.test(r.out), detail(r));
-        git(w, ['tag', 'v5.0.0']);
+        git(w, ['tag', '-a', 'v5.0.0', '-m', 'v5.0.0']);
         const local = run(w, ['--remote', 'no-such-remote']);
-        check('  CONTROL: the same run with the tag present locally is green', local.code === 0 && /local present, no-such-remote unreadable/.test(local.out), detail(local));
+        check('  CONTROL: the same run with the tag present locally is green', local.code === 0 && /local present, no-such-remote unreadable .*, annotated$/m.test(local.out), detail(local));
+    }
+    {
+        // 8.178.0 and 8.179.0 shipped as lightweight tags. The same repo is red
+        // with one and green with the annotated control above.
+        const w = makeRepo('6.0.0', 5);
+        pluginCommit(w, 'fix(demo): fresh', 1);
+        push(w);
+        git(w, ['tag', 'v6.0.0']);
+        git(w, ['push', '--quiet', 'origin', 'v6.0.0']);
+        const r = run(w, []);
+        check('a lightweight release tag exits 1', r.code === 1, detail(r));
+        check('  the reason names the tag and the fix', /RED: tag v6\.0\.0 is lightweight: re-cut it with git tag -a/.test(r.out) && /v6\.0\.0: local present, origin present, LIGHTWEIGHT/.test(r.out), detail(r));
+        const j = run(w, ['--json']);
+        check('  --json carries annotated: false', j.json && j.json.tag && j.json.tag.annotated === false, detail(j));
     }
     {
         const w = path.join(TMP, 'no-version');
