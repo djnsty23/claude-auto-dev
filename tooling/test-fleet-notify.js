@@ -172,7 +172,12 @@ function headlessAsk(home, code, q, startedAt = minutesAgo(5)) {
 
 // --- driving the subject -------------------------------------------------
 
-function envFor(home) {
+// The quota tripwire is OFF for every case that does not write a stub for it,
+// so no fixture pass reads this machine's transcripts or its tripwire state.
+const quotaStub = (home) => path.join(home, 'stub-tripwire.js');
+const quotaState = (home) => path.join(home, 'state', 'quota-tripwire-state.json');
+
+function envFor(home, extra = {}) {
     const env = { ...process.env };
     // AUTODEV_FLEET_DIR would move the heartbeat store out of the fixture.
     for (const k of Object.keys(env)) if (/^AUTODEV_FLEET_DIR$/i.test(k)) delete env[k];
@@ -181,16 +186,18 @@ function envFor(home) {
         USERPROFILE: home,
         APPDATA: path.join(home, 'appdata'),
         AUTODEV_FLEET_STATE: stateFile(home),
-    });
+        AUTODEV_QUOTA_TRIPWIRE: fs.existsSync(quotaStub(home)) ? quotaStub(home) : 'off',
+        AUTODEV_QUOTA_STATE: quotaState(home),
+    }, extra);
 }
 
 // mode: 'count' records what the notifier was handed; 'throw' records it and
 // then fails, standing in for a toast the OS refused; 'real' installs no
 // notifier at all and so runs the shipped toast() — which is why the driver
 // refuses that mode without --dry.
-const drive = (home, mode, flags = []) => spawnSync(
+const drive = (home, mode, flags = [], extra = {}) => spawnSync(
     process.execPath, [DRIVER, SUBJECT, mode, ...flags],
-    { encoding: 'utf8', env: envFor(home), windowsHide: true },
+    { encoding: 'utf8', env: envFor(home, extra), windowsHide: true },
 );
 
 const outOf = (r) => (r.stdout || '');
@@ -634,6 +641,188 @@ function run() {
     check('and the marker names the source it could not read',
         ((readJson(markerFile(hBadLedger)) || {}).askSources || []).some((p) => /^headless-worker: COULD NOT READ/.test(p)),
         `marker=${JSON.stringify(readJson(markerFile(hBadLedger)))}`);
+
+    quotaCases();
+}
+
+// --- the quota tripwire ----------------------------------------------------
+
+// A stub standing in for quota-tripwire.js. Each pass it prints what
+// quota-stub.json says, writes the firedAt it is told into the --state file
+// it was handed, and logs its argv, so the call is observable as well as
+// its effect.
+function tripwire(home, { stdout = '', firedAt = null, exit = 0 } = {}) {
+    fs.writeFileSync(path.join(home, 'quota-stub.json'), JSON.stringify({ stdout, firedAt, exit }), 'utf8');
+    if (fs.existsSync(quotaStub(home))) return;
+    fs.writeFileSync(quotaStub(home), [
+        "const fs = require('fs'), path = require('path');",
+        "const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'quota-stub.json'), 'utf8'));",
+        "fs.appendFileSync(path.join(__dirname, 'quota-argv.txt'), process.argv.slice(2).join(' ') + String.fromCharCode(10));",
+        "const at = process.argv.indexOf('--state');",
+        'fs.mkdirSync(path.dirname(process.argv[at + 1]), { recursive: true });',
+        'fs.writeFileSync(process.argv[at + 1], JSON.stringify({ firedAt: cfg.firedAt }));',
+        'if (cfg.stdout) process.stdout.write(cfg.stdout + String.fromCharCode(10));',
+        'process.exit(cfg.exit);',
+        '',
+    ].join('\n'), 'utf8');
+}
+const ALERT = 'QUOTA TRIPWIRE  PREP HANDOVER  42 min to 100%  |  window $9,000 of $10,000 ceiling (90.0%)'
+    + '  |  burn $2.4/min over 60 min (7 samples)';
+const diagLine = (code, detail) => `QUOTA TRIPWIRE DIAGNOSTIC  code=${code}  cannot compute minutes-to-100%: ${detail}`
+    + '  |  silence from this tripwire is NOT evidence of headroom';
+const quotaIn = (r) => { const m = outOf(r).match(/ new, quota (.+)$/m); return m ? m[1].trim() : null; };
+const today = () => { const d = new Date(); return [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, '0')).join('-'); };
+
+function quotaCases() {
+    // =====================================================================
+    console.log('\n=== the quota tripwire: silence is silent, a threshold line toasts once ===');
+    // =====================================================================
+    const hQ = makeHome('quota');
+    tripwire(hQ);
+    const q0 = drive(hQ, 'count');
+    check('a silent tripwire fires nothing and the pass says it was silent',
+        q0.status === 0 && firedIn(q0) === 0 && quotaIn(q0) === 'silent', summarise(q0));
+    const argv0 = (fs.readFileSync(path.join(hQ, 'quota-argv.txt'), 'utf8').trim().split('\n')[0] || '');
+    check('the tripwire runs once, reports every diagnostic, and uses the state the notifier reads',
+        argv0 === `--once --diag-repeat-minutes 0 --state ${quotaState(hQ)}`, `argv=${JSON.stringify(argv0)}`);
+
+    const T1 = Date.now() - 60000;
+    tripwire(hQ, { stdout: ALERT, firedAt: T1 });
+    const q1 = drive(hQ, 'count');
+    check('a PREP HANDOVER line fires one toast',
+        firedIn(q1) === 1 && toastsIn(q1).length === 1 && quotaIn(q1) === 'alert', summarise(q1));
+    check('titled for what to do, with the projection as the body',
+        (toastsIn(q1)[0] || {}).title === 'Quota: prep handover'
+        && /^42 min to 100% {2}\| {2}window \$9,000 of \$10,000/.test((toastsIn(q1)[0] || {}).body || ''),
+        `got ${JSON.stringify(toastsIn(q1)[0])}`);
+    check('recorded under the tripwire\'s own firedAt',
+        (readJson(stateFile(hQ)) || {})['quota:alert'] === String(T1), `state=${JSON.stringify(readJson(stateFile(hQ)))}`);
+    check('and the marker says what the tripwire reported',
+        (readJson(markerFile(hQ)) || {}).quota === 'alert', `marker=${JSON.stringify(readJson(markerFile(hQ)))}`);
+
+    tripwire(hQ, { firedAt: T1 });
+    const q2 = drive(hQ, 'count');
+    check('the pass after, with the tripwire disarmed and quiet, fires nothing',
+        firedIn(q2) === 0 && quotaIn(q2) === 'silent', summarise(q2));
+    check('and keeps the alert recorded while the tripwire still holds it',
+        (readJson(stateFile(hQ)) || {})['quota:alert'] === String(T1), `state=${JSON.stringify(readJson(stateFile(hQ)))}`);
+
+    tripwire(hQ, { firedAt: null });
+    drive(hQ, 'count');
+    check('a re-armed tripwire prunes the alert key',
+        !('quota:alert' in (readJson(stateFile(hQ)) || {})), `state=${JSON.stringify(readJson(stateFile(hQ)))}`);
+    const T2 = Date.now();
+    tripwire(hQ, { stdout: ALERT, firedAt: T2 });
+    check('so the next crossing toasts again', firedIn(drive(hQ, 'count')) === 1, 'no toast on the second crossing');
+
+    // =====================================================================
+    console.log('\n=== a refused quota toast is retried after the one-shot line is gone ===');
+    // =====================================================================
+    const hQF = makeHome('quota-fail');
+    const T3 = Date.now() - 120000;
+    tripwire(hQF, { stdout: ALERT, firedAt: T3 });
+    const f1 = drive(hQF, 'throw');
+    check('the alert toast is attempted, and nothing is recorded when it fails',
+        toastsIn(f1).length === 1 && firedIn(f1) === 0 && !('quota:alert' in (readJson(stateFile(hQF)) || {})),
+        `${summarise(f1)} state=${JSON.stringify(readJson(stateFile(hQF)))}`);
+    tripwire(hQF, { firedAt: T3 });
+    const f2 = drive(hQF, 'count');
+    check('the next pass toasts it from the tripwire\'s firedAt although no line was printed',
+        firedIn(f2) === 1 && (toastsIn(f2)[0] || {}).title === 'Quota: prep handover'
+        && (toastsIn(f2)[0] || {}).body === `the tripwire fired at ${new Date(T3).toISOString()}. Run quota-tripwire.js --status`,
+        summarise(f2));
+
+    // =====================================================================
+    console.log('\n=== a diagnostic toasts at most once a day ===');
+    // =====================================================================
+    const hD = makeHome('quota-diag');
+    tripwire(hD, { stdout: diagLine('calibration-stale', 'the last two calibration points predate this window') });
+    const g1 = drive(hD, 'count');
+    check('a diagnostic that needs a human fires one toast',
+        firedIn(g1) === 1 && quotaIn(g1) === 'diagnostic calibration-stale', summarise(g1));
+    check('naming the code and the reason, without the boilerplate after it',
+        (toastsIn(g1)[0] || {}).title === 'Quota tripwire cannot project'
+        && (toastsIn(g1)[0] || {}).body === 'code=calibration-stale: the last two calibration points predate this window',
+        `got ${JSON.stringify(toastsIn(g1)[0])}`);
+    check('recorded under today\'s local date',
+        (readJson(stateFile(hD)) || {})['quota:diag'] === today(), `state=${JSON.stringify(readJson(stateFile(hD)))}`);
+    check('the same diagnostic on the next pass is silent', firedIn(drive(hD, 'count')) === 0, 'toasted twice');
+    tripwire(hD, { stdout: diagLine('no-ceiling', 'no ceiling set') });
+    check('so is a DIFFERENT diagnostic the same day', firedIn(drive(hD, 'count')) === 0, 'toasted on a new code');
+    tripwire(hD);
+    drive(hD, 'count');
+    check('a quiet pass keeps today\'s key rather than pruning it',
+        (readJson(stateFile(hD)) || {})['quota:diag'] === today(), `state=${JSON.stringify(readJson(stateFile(hD)))}`);
+    tripwire(hD, { stdout: diagLine('no-ceiling', 'no ceiling set') });
+    check('so a diagnostic that clears and returns the same day stays silent',
+        firedIn(drive(hD, 'count')) === 0, 'toasted after a quiet pass');
+
+    const st = readJson(stateFile(hD)) || {};
+    st['quota:diag'] = '2000-01-01';
+    fs.writeFileSync(stateFile(hD), JSON.stringify(st), 'utf8');
+    const g2 = drive(hD, 'count');
+    check('a key from an earlier day lets the diagnostic toast again',
+        firedIn(g2) === 1 && (toastsIn(g2)[0] || {}).body === 'code=no-ceiling: no ceiling set', summarise(g2));
+    st['quota:diag'] = '2000-01-01';
+    fs.writeFileSync(stateFile(hD), JSON.stringify(st), 'utf8');
+    tripwire(hD);
+    drive(hD, 'count');
+    check('and an earlier day\'s key is pruned on a quiet pass',
+        !('quota:diag' in (readJson(stateFile(hD)) || {})), `state=${JSON.stringify(readJson(stateFile(hD)))}`);
+
+    const hS = makeHome('quota-selfclear');
+    tripwire(hS, { stdout: diagLine('insufficient-samples', 'have 1 sample(s) of window cost, need 2') });
+    const s1 = drive(hS, 'count');
+    check('insufficient-samples clears itself on the next pass, so it never toasts',
+        firedIn(s1) === 0 && quotaIn(s1) === 'diagnostic insufficient-samples'
+        && !('quota:diag' in (readJson(stateFile(hS)) || {})), summarise(s1));
+    tripwire(hS, { stdout: diagLine('span-too-short', 'newest two samples span 0.5 min, need 2') });
+    check('nor does span-too-short', firedIn(drive(hS, 'count')) === 0, 'span-too-short toasted');
+
+    const hX = makeHome('quota-crash');
+    tripwire(hX, { exit: 3 });
+    const x1 = drive(hX, 'count');
+    check('a tripwire that dies without a line is a diagnostic, never silence',
+        firedIn(x1) === 1 && quotaIn(x1) === 'diagnostic tripwire-run-failed'
+        && /^code=tripwire-run-failed: exit 3/.test((toastsIn(x1)[0] || {}).body || ''), summarise(x1));
+
+    // =====================================================================
+    console.log('\n=== a quota toast never folds into the waiting summary ===');
+    // =====================================================================
+    const hMixQ = makeHome('quota-mixed');
+    ['4', '5', '6', '7'].forEach((c, i) => {
+        block(hMixQ, sid(c), { at: minutesAgo(30 + i), callId: 'tu_1', question: 'Q' + i, options: 2 });
+    });
+    tripwire(hMixQ, { stdout: ALERT, firedAt: Date.now() });
+    const m1 = drive(hMixQ, 'count');
+    const titles = toastsIn(m1).map((t) => t.title).sort();
+    check('four panels and an alert are two toasts: the alert, and a summary of the four',
+        firedIn(m1) === 2 && JSON.stringify(titles) === JSON.stringify(['4 sessions are waiting on you', 'Quota: prep handover']),
+        summarise(m1));
+
+    // =====================================================================
+    console.log('\n=== --dry leaves the tripwire alone ===');
+    // =====================================================================
+    const hQD = makeHome('quota-dry');
+    tripwire(hQD, { stdout: ALERT, firedAt: Date.now() });
+    const y1 = drive(hQD, 'real', ['--dry']);
+    check('--dry does not run the tripwire, whose state a run would advance',
+        y1.status === 0 && quotaIn(y1) === 'not run under --dry' && !fs.existsSync(path.join(hQD, 'quota-argv.txt')),
+        summarise(y1));
+
+    // =====================================================================
+    console.log('\n=== the shipped tripwire, end to end ===');
+    // =====================================================================
+    // The real quota-tripwire.js and quota-burn.js, over a fixture config dir
+    // with no transcripts and no calibration: it cannot project, and says so.
+    const hR = makeHome('quota-real');
+    const realTripwire = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'quota-tripwire.js');
+    const r1 = drive(hR, 'count', [], { AUTODEV_QUOTA_TRIPWIRE: realTripwire, CLAUDE_CONFIG_DIR: path.join(hR, '.claude') });
+    check('the shipped tripwire with no calibration toasts no-ceiling',
+        firedIn(r1) === 1 && quotaIn(r1) === 'diagnostic no-ceiling'
+        && /^code=no-ceiling: no ceiling set/.test((toastsIn(r1)[0] || {}).body || ''), summarise(r1));
+    check('and wrote its sample into the state the notifier pointed it at',
+        ((readJson(quotaState(hR)) || {}).samples || []).length === 1, `state=${JSON.stringify(readJson(quotaState(hR)))}`);
 }
 
 try {
