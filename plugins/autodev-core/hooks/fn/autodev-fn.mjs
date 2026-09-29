@@ -18,7 +18,7 @@
 //                           worker memory, never $.store, so a Bash command
 //                           that names the placeholder still runs with it.
 //   2. tool.call {Bash}     the command is decided (bash-rules.mjs: three
-//                           denies scoped to this repo, one Windows-only deny,
+//                           denies scoped to this repo, two Windows-only denies,
 //                           one credential-in-argv deny and one flag-appending
 //                           rewrite anywhere) and its
 //                           stdout/stderr are scrubbed of known values and
