@@ -14,12 +14,13 @@
  *   - the headless and unattended worker ledgers, for passes per story
  *
  * ONE API RESPONSE IS ONE PRICED ROW. A response is written as one row per
- * content block, and every row repeats its input and cache usage. Only the
- * last row carries the final output count. [measured 2026-09-29] over two
- * days, 14,361 of 24,421 usage rows repeated an earlier row's message id, and
- * they were 60% of the summed cost. Rows are keyed on message id and request
- * id, and the LAST one is priced. quota-burn.js sums every row, so its window
- * cost reads higher than the same rows summed here.
+ * content block, and every row repeats its input and cache usage. An early row
+ * is a streaming partial with a small output count. [measured 2026-09-29] over
+ * two days, 14,361 of 24,421 usage rows repeated an earlier row's message id,
+ * and they were 60% of the summed cost. Rows are keyed on message id and
+ * request id, and the row with the MOST output is priced, a tie going to the
+ * later row. quota-burn.js keeps the same row, so the two price one response
+ * alike.
  *
  * ATTRIBUTION, strongest evidence first
  *   1. the session ran `gh pr create` and the result names the PR
@@ -149,9 +150,13 @@ function scan(projects, sinceMs) {
             if (msg.usage) {
                 pop.usageRows++;
                 const key = msg.id ? msg.id + '|' + (j.requestId || '') : f + ':' + lineNo;
-                if (responses.has(key)) pop.repeatedRows++;
-                // The LAST row of a response carries its final output count.
-                responses.set(key, { s, u: msg.usage, model: msg.model || null });
+                const kept = responses.get(key);
+                if (kept) pop.repeatedRows++;
+                // Keep the row with the most output, as quota-burn.js does: a
+                // row read after the final one can still be a streaming partial.
+                if (!kept || (msg.usage.output_tokens || 0) >= (kept.u.output_tokens || 0)) {
+                    responses.set(key, { s, u: msg.usage, model: msg.model || null });
+                }
             }
             for (const c of Array.isArray(msg.content) ? msg.content : []) {
                 if (!c) continue;

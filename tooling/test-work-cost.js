@@ -144,6 +144,8 @@ const MAIN = {
         usageRow('S1', WORKTREE, ago(H), 'm1', 'r1', 'claude-opus-5', { ...M1, output_tokens: 1 }),
         usageRow('S1', WORKTREE, ago(H), 'm1', 'r1', 'claude-opus-5', { ...M1, output_tokens: 1 }),
         on('feat/a', usageRow('S1', WORKTREE, ago(H), 'm1', 'r1', 'claude-opus-5', { ...M1, output_tokens: 40000 })),
+        // A partial read AFTER the final row: the last row is not the one to price.
+        usageRow('S1', WORKTREE, ago(H), 'm1', 'r1', 'claude-opus-5', { ...M1, output_tokens: 3 }),
     ],
     // A subagent transcript: its rows carry the parent's session id.
     'proj/S1/subagents/agent-1.jsonl': [
@@ -237,12 +239,12 @@ check('the window says its days and start', j?.window?.days === 7 && !!Date.pars
 
 // -------------------------------------------------------- one response, one price
 
-check('a response written as three rows is priced once, from its last row',
+check('a response written as four rows is priced once, from its row with the most output, not its last',
     near(prOf(11)?.cost, 3.75), prOf(11)?.cost);
 check('repeated rows of one response are counted as repeated',
-    j?.population?.repeatedRows === 2, JSON.stringify(j?.population));
+    j?.population?.repeatedRows === 3, JSON.stringify(j?.population));
 check('usage rows in the span are all counted before the dedupe',
-    j?.population?.usageRows === 10, j?.population?.usageRows);
+    j?.population?.usageRows === 11, j?.population?.usageRows);
 check('responses priced is the distinct message id and request id pairs',
     j?.population?.responses === 8, j?.population?.responses);
 check('a row from before the span is not priced', near(j?.cost?.unattributed, 1), j?.cost?.unattributed);
@@ -255,8 +257,8 @@ check('no row priced at the fallback rate when every model is known',
 
 {
     const t = prOf(11)?.tokens || {};
-    check('input tokens are the last row\'s, not three rows\' sum', t.input === 100000, JSON.stringify(t));
-    check('output tokens are the last row\'s final count plus the subagent\'s', t.output === 60000, JSON.stringify(t));
+    check('input tokens are one row\'s, not four rows\' sum', t.input === 100000, JSON.stringify(t));
+    check('output tokens are the largest row\'s count plus the subagent\'s', t.output === 60000, JSON.stringify(t));
     check('cache write tokens are one response\'s', t.cacheWrite === 200000, JSON.stringify(t));
     check('cache read tokens are one response\'s', t.cacheRead === 1000000, JSON.stringify(t));
 }
