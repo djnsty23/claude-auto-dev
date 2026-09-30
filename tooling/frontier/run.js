@@ -1177,6 +1177,23 @@ function quietGate(c, batch) {
     return { record };
 }
 
+/**
+ * Restart a batch whose loop died. A wait that was open when the loop died is
+ * closed here, because quietGate measures from waitingSince: `[measured
+ * 2026-09-30]` a resume 14 hours after the loop died read waitedSec 51738, past
+ * every limit, so its item started at once on a loaded machine and the
+ * --quiet-wait it was resumed for held nothing. The resumed item waits afresh.
+ */
+function resumeBatch(c, id, opts, spawnFn = spawnLoop) {
+    const b = readJson(batchFile(c, id));
+    if (b.state === 'running' && pidAlive(b.loopPid)) fault('loop-alive', `${b.id} has a live loop, pid ${b.loopPid}`);
+    const stale = b.waitingSince || null;
+    delete b.waitingSince;
+    delete b.waitingOn;
+    writeJsonAtomic(batchFile(c, id), b);
+    return { batch: b.id, loopPid: spawnFn(c, b.id, opts), clearedWaitSince: stale };
+}
+
 function spawnLoop(c, id, opts) {
     const pass = [];
     for (const k of ['src', 'tasks-dir', 'data', 'work', 'claude-bin', 'hw', 'budget-stop', 'api-sources']) if (opts[k] !== undefined) pass.push(`--${k}`, String(opts[k]));
@@ -1311,9 +1328,7 @@ function main(argv) {
         }
         case 'batch-resume': {
             if (!opts.batch) fault('usage', 'batch-resume needs --batch');
-            const b = readJson(batchFile(c, opts.batch));
-            if (b.state === 'running' && pidAlive(b.loopPid)) fault('loop-alive', `${b.id} has a live loop, pid ${b.loopPid}`);
-            value = { batch: b.id, loopPid: spawnLoop(c, b.id, opts) };
+            value = resumeBatch(c, opts.batch, opts);
             break;
         }
         case 'batch-loop': value = batchLoop(c, opts.batch); break;
@@ -1335,4 +1350,4 @@ if (require.main === module) {
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows, routeFor,
-    RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
+    RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, processList, heavyJobs, noteLoad, loadRecord, quietGate, resumeBatch, HEAVY_RE };
