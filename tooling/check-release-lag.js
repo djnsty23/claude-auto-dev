@@ -16,6 +16,8 @@
  *   - RED when any of those has a committer date older than --max-age-hours
  *   - RED when the tag v<VERSION at the ref> is missing, locally and on the
  *     remote
+ *   - RED when that tag is present locally and lightweight: a release tag is
+ *     annotated, so it carries who cut it and when
  * First parent, so a --no-ff merge of old branch commits counts once, dated
  * by the merge, which is when the fix reached the ref. A fast-forward or a
  * rebase carries no such record, so those commits keep their own committer
@@ -129,6 +131,12 @@ function measure(opts, nowMs) {
     const local = git(['tag', '-l', tagName]);
     if (!local.ok) { report.errors.push('git tag -l failed: ' + local.err); return finish(); }
     report.tag.local = local.out.split('\n').map((l) => l.trim()).includes(tagName);
+    if (report.tag.local) {
+        const type = git(['cat-file', '-t', 'refs/tags/' + tagName]);
+        if (!type.ok) { report.errors.push('git cat-file -t ' + tagName + ' failed: ' + type.err); return finish(); }
+        report.tag.annotated = type.out.trim() === 'tag';
+        if (!report.tag.annotated) report.reasons.push('tag ' + tagName + ' is lightweight: re-cut it with git tag -a');
+    }
     const remote = git(['ls-remote', '--tags', opts.remote, 'refs/tags/' + tagName], 60000);
     if (remote.ok) report.tag.remote = remote.out.split('\n').some((l) => l.split('\t')[1] === 'refs/tags/' + tagName);
     else report.tag.remoteError = remote.err || 'git ls-remote failed';
@@ -151,7 +159,8 @@ function render(result) {
     let tag = '(not checked)';
     if (r.tag.name) {
         const remote = r.tag.remote === null ? 'unreadable (' + r.tag.remoteError + ')' : r.tag.remote ? 'present' : 'absent';
-        tag = r.tag.name + ': local ' + (r.tag.local ? 'present' : 'absent') + ', ' + r.remote + ' ' + remote;
+        tag = r.tag.name + ': local ' + (r.tag.local ? 'present' : 'absent') + ', ' + r.remote + ' ' + remote
+            + (r.tag.annotated === undefined ? '' : r.tag.annotated ? ', annotated' : ', LIGHTWEIGHT');
     }
     lines.push('  tag ' + tag);
     lines.push('verdict: ' + r.verdict.toUpperCase());

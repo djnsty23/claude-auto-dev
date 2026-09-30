@@ -1,0 +1,14 @@
+{
+  "id": "T5",
+  "lane": "fix",
+  "size": "M",
+  "source": "891bcdb4 (#281) check-branch-landed",
+  "parent": "ada120739cb8c3aab773bee188fc46490d90e8ee",
+  "fix": "891bcdb45eae1147b93ab9cdecf13412c5f9a386",
+  "brief": "T5.md",
+  "heldOut": ["tooling/test-check-branch-landed.js"],
+  "checks": [["node", "tooling/test-check-branch-landed.js"]],
+  "passToPass": [],
+  "disclosed": ["classify", "evidence.files", "baseBlob", "trunkBlob", "branchBlob", "conflict risk", "conflict", "path(s)", "(+K more)", "+A / -D"],
+  "timeoutMin": 45
+}

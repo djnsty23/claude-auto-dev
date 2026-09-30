@@ -1,0 +1,974 @@
+{
+  "_about": "The mistake classes tooling/mistake-recurrence.js counts. A class matches a lessons unit by its title first, by its first paragraphs when the title matches nothing. An anchor dates a prevention: kind rule or detector, repo mirror (the rules and lessons mirror) or code (this repo), a path, and a pattern whose first ADDED matching line is the landing. An anchor with no pattern is dated by the file's first commit. mineFixes names the mine-fixes classes whose rework fixes count toward the class. Overrides map <file>#<title prefix> to class ids and win over the matchers.",
+  "excludeFiles": [
+    "verification-traps-index.md"
+  ],
+  "classes": [
+    {
+      "id": "probe-too-early",
+      "name": "A probe reads the right surface before it settled",
+      "definition": "A wait, poll or screenshot reads a surface that has not stopped changing, so it measures a moment, not a state.",
+      "match": [
+        "too early",
+        "stopped changing",
+        "polling",
+        "waiting on a condition",
+        "streamed content",
+        "one-shot wait",
+        "watcher that only",
+        "hijacks the view"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "skills/lessons/references/agent-quality-full.md",
+          "re": "too early"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "10l|too early|stopped changing"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/verification-traps.md",
+          "re": "too early|stopped changing|poll"
+        }
+      ],
+      "mineFixes": [
+        "ordering / async race"
+      ]
+    },
+    {
+      "id": "empty-result-unproven",
+      "name": "An empty result from a probe never shown to see a positive",
+      "definition": "Zero, nothing or an exit code read as a fact about the world when the probe could not have seen the thing: a line-oriented grep, a filtered walk, a blind API.",
+      "match": [
+        "found nothing",
+        "empty result",
+        "line-oriented",
+        "cannot see a fact",
+        "--reverse",
+        "href in the head",
+        "three seconds old",
+        "never fires",
+        "invisible to the dom",
+        "failed fetch inside a poll",
+        "no receiver running"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "empty result|known.positive"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/verification-traps.md",
+          "re": "empty result|known.positive|found nothing"
+        },
+        {
+          "kind": "detector",
+          "repo": "code",
+          "path": "tooling/check-population-reporting.js"
+        }
+      ]
+    },
+    {
+      "id": "count-without-population",
+      "name": "A count or verdict without its population",
+      "definition": "A number reported without saying what was counted, or a measurement that answered a different question than the one asked.",
+      "match": [
+        "population",
+        "different question",
+        "wrong question",
+        "census",
+        "counting a keyed",
+        "filesystem grep",
+        "sorted by something else",
+        "one answer for many",
+        "doubled file",
+        "average is not",
+        "gross is not",
+        "unit you count"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "population"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/verification-traps.md",
+          "re": "population|different question"
+        },
+        {
+          "kind": "detector",
+          "repo": "code",
+          "path": "tooling/check-population-reporting.js"
+        }
+      ]
+    },
+    {
+      "id": "vacuous-gate",
+      "name": "A gate or assertion that cannot fire",
+      "definition": "A check green by construction: it runs after the damage, selects its population by the property it tests, asserts a truthy promise, or plants a defect that proves red without proving which case.",
+      "match": [
+        "vacuous",
+        "cannot fire",
+        "gate that runs last",
+        "runs last cannot",
+        "always passes",
+        "always reports",
+        "assertion of absence",
+        "passes for free",
+        "ways a gate lies",
+        "plant that reverts",
+        "mutation",
+        "rewrites the subject",
+        "during a sweep",
+        "upgrade detection",
+        "skips the code path"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "22c|plant the real defect|watch it fire|vacuous"
+        },
+        {
+          "kind": "detector",
+          "repo": "code",
+          "path": "tooling/check-suites-can-fail.js"
+        },
+        {
+          "kind": "detector",
+          "repo": "code",
+          "path": "tooling/find-vacuous-assertions.js"
+        }
+      ],
+      "mineFixes": []
+    },
+    {
+      "id": "plant-escapes",
+      "name": "A planted or documented value trips the gate meant to grade it",
+      "definition": "A fixture, planted secret or the gate's own documentation collides with the real population and produces findings of its own.",
+      "match": [
+        "tripped by its own",
+        "its own documentation",
+        "cried wolf",
+        "planted (pat|token|secret|value)"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "planted negative|derived from the subject"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "skills/lessons/references/verification-traps-sections.md",
+          "re": "tripped by its own documentation"
+        }
+      ]
+    },
+    {
+      "id": "red-about-the-probe",
+      "name": "A red that reports the probe or the machine",
+      "definition": "A failure caused by the probe, the load, the environment or an earlier step, read as a defect in the subject.",
+      "match": [
+        "a red (lies|that agrees|under load)",
+        "red lies",
+        "about the machine",
+        "timed-out check",
+        "probe's own header",
+        "broken probe",
+        "failed. badge",
+        "mangles the input",
+        "blank app",
+        "carried the whole session",
+        "port error is the symptom",
+        "wrong code",
+        "mutates its own baseline",
+        "stale automation chrome",
+        "half-configured instance",
+        "two .instances. in one process"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/verification-traps.md",
+          "re": "red result|red lies|a red"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "skills/lessons/references/agent-quality-full.md",
+          "re": "red lies|a red that"
+        }
+      ]
+    },
+    {
+      "id": "shell-quoting",
+      "name": "Shell quoting mangles an inline script",
+      "definition": "A heredoc, `node -e`, `py -c` or a git rev:path argument loses a backslash, a quote or a path on its way through the Bash tool.",
+      "match": [
+        "heredoc",
+        "backslash",
+        "curly quotes",
+        "node -e",
+        "rev:path",
+        "string-surgery",
+        "through write, not"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/windows.md",
+          "re": "heredoc mangles|heredoc.{0,60}(backslash|mangle|curly)"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": [
+            "rules/verification-traps.md",
+            "skills/lessons/references/verification-traps-sections.md"
+          ],
+          "re": "backslash does not survive"
+        }
+      ]
+    },
+    {
+      "id": "process-outlives-stop",
+      "name": "A stopped task leaves its process alive, or a kill hits the wrong one",
+      "definition": "TaskStop, a timeout or a pattern kill reports success while the real process keeps running, or reaches a peer's process.",
+      "match": [
+        "taskstop",
+        "process alive",
+        "loop alive",
+        "a start time is not ownership",
+        "kill by"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/windows.md",
+          "re": "taskstop"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": [
+            "rules/verification-traps.md",
+            "skills/lessons/references/verification-traps-sections.md"
+          ],
+          "re": "taskstop"
+        },
+        {
+          "kind": "rule",
+          "repo": "code",
+          "path": "CLAUDE.md",
+          "re": "kill by pid"
+        }
+      ],
+      "mineFixes": [
+        "lifecycle not cleaned up"
+      ]
+    },
+    {
+      "id": "windows-platform",
+      "name": "A Windows or Git Bash platform trap",
+      "definition": "The same command behaves differently on this platform: /tmp is two directories, cp1252 file I/O, the python Store stub, a drive-letter colon, long paths, a nested pwsh, a Bash env cap.",
+      "match": [
+        "/tmp",
+        "cp1252",
+        "encoding=",
+        "store stub",
+        "gcloud",
+        "tar reads",
+        "long paths",
+        "forward-slash path",
+        "powershell -file",
+        "outgrow the bash",
+        "in-place file rewrites",
+        "default shell",
+        "env does not persist",
+        "edit/write verification"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/windows.md"
+        }
+      ]
+    },
+    {
+      "id": "wrong-tree",
+      "name": "Work lands in, or disturbs, the wrong tree",
+      "definition": "A branch switched in a shared clone, a worktree nested or created beside the repo, two gates in one worktree, an edit that reached another tree.",
+      "match": [
+        "worktree",
+        "switch branches",
+        "clone another session",
+        "two gates",
+        "beside the repo",
+        "edits only its own"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/windows.md",
+          "re": "edit/write|wrong worktree"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/local-first.md",
+          "re": "worktree"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/fleet-brief.md",
+          "re": "names where|worktree"
+        }
+      ]
+    },
+    {
+      "id": "exit-status-misread",
+      "name": "An exit status hidden or misread",
+      "definition": "A `| tail`, `| head`, `;` or a backgrounded capture turns a red into a green or drops the failing name, grep's exit 1 is read as a failure, or a merge's conflict markers ship behind a pipe.",
+      "match": [
+        "\\bpipe\\b",
+        "tailed suite",
+        "&&.? chain",
+        "encode .found nothing. as failure",
+        "truncate its capture",
+        "conflict marker"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "code",
+          "path": "CLAUDE.md",
+          "re": "is not .&&.|after a pipe"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "git merge. never rides a pipe|rides a pipe"
+        },
+        {
+          "kind": "detector",
+          "repo": "code",
+          "path": "tooling/check-probe-shapes.js",
+          "re": "exit-code-through-a-pipe"
+        },
+        {
+          "kind": "detector",
+          "repo": "code",
+          "path": "tooling/check-conflict-markers.js"
+        }
+      ]
+    },
+    {
+      "id": "identifier-rot",
+      "name": "A remembered identifier or address goes stale",
+      "definition": "A session id, story id, branch name, line number or remembered target used after it changed or without being re-derived.",
+      "match": [
+        "address",
+        "session ids?",
+        "rots",
+        "reused across days",
+        "remember one",
+        "story ids?"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/fleet-brief.md",
+          "re": "ids rot|session id"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "skills/lessons/references/verification-traps-sections.md",
+          "re": "address rots"
+        }
+      ]
+    },
+    {
+      "id": "stale-report",
+      "name": "State reported or acted on after it changed",
+      "definition": "A status measured earlier is reported, relayed or acted on without a re-read, or two runs grade different trees.",
+      "match": [
+        "re-read immediately",
+        "between measuring and",
+        "before you speak",
+        "grade different trees",
+        "expired",
+        "stale"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/fleet-brief.md",
+          "re": "re-fetch|re-read"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "skills/lessons/references/fleet-incidents.md",
+          "re": "re-read immediately"
+        }
+      ]
+    },
+    {
+      "id": "borrowed-evidence",
+      "name": "Evidence that confirms itself or speaks for another layer",
+      "definition": "A grep matching your own words, a mockup read as behaviour, a comment read as a description, a recalled citation, a number that crossed a session boundary without its uncertainty.",
+      "match": [
+        "own words",
+        "\\b5e\\b",
+        "mockup",
+        "comment is rationale",
+        "recalled provenance",
+        "launders",
+        "\\b20b\\b",
+        "outside the repo is invisible"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "5e|speaks only for|mockup"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "20b|\\[measured\\]"
+        }
+      ]
+    },
+    {
+      "id": "fix-the-path",
+      "name": "One path fixed while the family or the event stays broken",
+      "definition": "A bug fixed where it was seen but not in its siblings, its inverse or its event, or a fix verified through a proxy that never ran it.",
+      "match": [
+        "similar instances",
+        "10d",
+        "family",
+        "fix the event",
+        "every check green",
+        "real pipeline",
+        "live-conf",
+        "10f",
+        "ground truth",
+        "\\b10g\\b"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "10d|similar instances|bug is a family"
+        }
+      ],
+      "mineFixes": [
+        "cross-surface consistency",
+        "duplicated derivation"
+      ]
+    },
+    {
+      "id": "absent-reads-safe",
+      "name": "An absent, skipped or unknown state reads as safe",
+      "definition": "A missing value, a skipped check, an optional parameter or an unrecognised input collapses to zero, pass or a permissive default.",
+      "match": [
+        "skipped check",
+        "label on a skip",
+        "default that revokes",
+        "optional param",
+        "fails? closed",
+        "could not run",
+        "phantom",
+        "external system.s vocabulary",
+        "\\b10j-ii\\b",
+        "\\b10d-iii\\b"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "fails closed|optional parameter"
+        }
+      ],
+      "mineFixes": [
+        "unhandled state in a flow"
+      ]
+    },
+    {
+      "id": "secret-exposure",
+      "name": "A secret rendered, carried in argv or revoked blind",
+      "definition": "A credential printed to a transcript, passed on a command line, selected with select=*, or revoked without finding every consumer.",
+      "match": [
+        "secret",
+        "token leak",
+        "refresh-token",
+        "credential",
+        "blast radius",
+        "select=\\*",
+        "rides argv"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/security.md",
+          "re": "never render|reaches stdout|rides argv|select=\\*"
+        },
+        {
+          "kind": "detector",
+          "repo": "mirror",
+          "path": "scripts/scan-transcript-secrets.js"
+        }
+      ]
+    },
+    {
+      "id": "deploy-identity",
+      "name": "A deploy blocked or hung by identity",
+      "definition": "A deploy refused, hung or linked to the wrong project because of the commit author, team membership or the CLI account.",
+      "match": [
+        "deploy",
+        "vercel",
+        "wrong-project link",
+        "cli hang"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/deploy-identity.md"
+        }
+      ],
+      "mineFixes": [
+        "config / env targeting"
+      ]
+    },
+    {
+      "id": "duplicate-work",
+      "name": "Work started without reading what peers already did",
+      "definition": "A brief, a fix or a PR begun without `git log`, `gh pr list` or a branch listing, duplicating or contradicting a peer.",
+      "match": [
+        "against the repo you are about to brief",
+        "duplicate work",
+        "already open",
+        "gh pr list"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/fleet-brief.md",
+          "re": "gh pr list"
+        }
+      ]
+    },
+    {
+      "id": "hand-kept-copy",
+      "name": "A hand-kept copy of a contract drifts",
+      "definition": "A mirror, an allowlist or a restated list maintained by hand beside its source, disagreeing with it in either direction.",
+      "match": [
+        "hand-kept",
+        "restates a contract",
+        "mirror fails",
+        "fourth home"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "skills/lessons/references/agent-quality-full.md",
+          "re": "restates a contract"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/backup-protocol.md",
+          "re": "additive"
+        }
+      ],
+      "mineFixes": [
+        "duplicated derivation"
+      ]
+    },
+    {
+      "id": "patch-anchor",
+      "name": "A scripted patch anchors on the wrong text",
+      "definition": "An anchor that collides, spans a wrapped line, or is graded by a checker the trim did not read.",
+      "match": [
+        "anchor",
+        "graded file"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "anchor discipline|anchor exactly|anchors? collid"
+        }
+      ]
+    },
+    {
+      "id": "browser-measure",
+      "name": "A browser measurement reports the wrong viewport or node",
+      "definition": "Emulation that reports success and changes nothing, innerWidth, a font rasteriser, a pseudo-element hit area, a hidden pane, the first querySelector match, or a scratch page with no viewport meta.",
+      "match": [
+        "viewport",
+        "innerwidth",
+        "resize",
+        "emulate",
+        "rasteriser",
+        "pseudo-element",
+        "tap-target",
+        "getboundingclientrect",
+        "phone width",
+        "measured rect",
+        "queryselector",
+        "wrong node",
+        "isolated context",
+        "demo mode",
+        "internal function",
+        "not in scope in the eval",
+        "browser pass",
+        "in-app browser pane",
+        "raw tag inside a code block"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/verification-traps.md",
+          "re": "viewport|innerwidth|emulate|resize|queryselector"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/local-first.md",
+          "re": "resize_window"
+        }
+      ]
+    },
+    {
+      "id": "claim-without-proof",
+      "name": "A claim of done or fixed without the command that shows it",
+      "definition": "Done, merged, fixed or passing stated from a diff, a plan or a memory, a claim stronger than its evidence, or a status that outlived its truth.",
+      "match": [
+        "opened #n",
+        "fixed in #",
+        "\\b20c\\b",
+        "test before commit",
+        "verify by task type",
+        "success criteria",
+        "\\b10e\\b",
+        "calibrated confidence",
+        "\\b5c"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "claim .done.|\\b20c\\b|opened #n|\\b5c\\b"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/writing-style.md",
+          "re": "never claim completion"
+        }
+      ]
+    },
+    {
+      "id": "external-assumed",
+      "name": "External behaviour assumed instead of researched",
+      "definition": "An API cap, pagination, a CLI's argv contract, a tool-denial source or a vendor vocabulary encoded from memory.",
+      "match": [
+        "research before",
+        "external system",
+        "argv contract",
+        "semantic judge",
+        "tool denials",
+        "batch api"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "\\b5b\\b|research before"
+        }
+      ]
+    },
+    {
+      "id": "ui-unlooked",
+      "name": "A UI change claimed done without looking at it",
+      "definition": "A visual change shipped on a code read, without screenshots at the named widths or an expert pass, or sections that render outside their column.",
+      "match": [
+        "visually check",
+        "expert-pass",
+        "expert pass",
+        "triple",
+        "review-and-polish",
+        "outside the column",
+        "one viewport is not"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "10b|visually|screenshot"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/workflow.md",
+          "re": "screenshot"
+        }
+      ],
+      "mineFixes": []
+    },
+    {
+      "id": "served-build",
+      "name": "The served build is not the one under test",
+      "definition": "A service worker, a stale dev server, a content-hashed file or an on-disk build graded instead of the change.",
+      "match": [
+        "served build",
+        "service worker",
+        "previous build",
+        "content-hashed",
+        "hand-run bless"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/verification-traps.md",
+          "re": "which build"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "skills/lessons/references/verification-traps-sections.md",
+          "re": "served build"
+        }
+      ],
+      "mineFixes": [
+        "cache / key scoping"
+      ]
+    },
+    {
+      "id": "partial-gate",
+      "name": "A partial test run stands in for the full gate",
+      "definition": "Targeted tests or a fast gate treated as the gate, so a tree-wide guard fails later in a queue or in CI.",
+      "match": [
+        "targeted tests",
+        "gate:fast",
+        "queued gate"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/local-first.md",
+          "re": "full test suite"
+        },
+        {
+          "kind": "rule",
+          "repo": "code",
+          "path": "CLAUDE.md",
+          "re": "gate:fast. does not satisfy|one thirteenth"
+        }
+      ]
+    },
+    {
+      "id": "fleet-handoff",
+      "name": "A fleet message, brief or file that never informs its reader",
+      "definition": "Going idle without a report, a failed agent read as empty, a brief without a location, a file sent from outside the cwd, a peer message that costs more than it carries.",
+      "match": [
+        "going idle",
+        "failed agent",
+        "brief that says",
+        "file sent from outside",
+        "peer traffic",
+        "broadcasts and verifies",
+        "leaves a note",
+        "what you propose",
+        "what you verified"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/fleet-brief.md"
+        }
+      ]
+    },
+    {
+      "id": "cost-unmeasured",
+      "name": "Spend or context grows without a measurement",
+      "definition": "A long session, an unpinned model, a fan-out or an unbudgeted workflow that bills more than the work needed.",
+      "match": [
+        "context depth",
+        "the bill",
+        "subagent pinning",
+        "max-pure",
+        "free-tier",
+        "10k-i",
+        "14c",
+        "the fleet .. parallel",
+        "10k\\."
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/agent-quality.md",
+          "re": "14c|context depth|300k"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "CLAUDE.md",
+          "re": "subagent|model:"
+        }
+      ]
+    },
+    {
+      "id": "decision-routing",
+      "name": "A decision routed to the wrong party",
+      "definition": "Asking what a command answers, deciding what needs a panel, a stop-here that did not stop, or a proposal time-boxed instead of complete.",
+      "match": [
+        "buckets",
+        "stop-here",
+        "auto-decide",
+        "time-boxing",
+        "trade-off when forks",
+        "pause for shared state",
+        "pr-first"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/decision-policy.md"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/options-protocol.md"
+        }
+      ]
+    },
+    {
+      "id": "public-leak",
+      "name": "Private text or client code reaches a public place",
+      "definition": "Prompt text, a surname, a local path or client-owned code committed to a public or personal repo.",
+      "match": [
+        "prompt-content leakage",
+        "client-owned",
+        "eventually-public",
+        "public-author",
+        "attribution ban"
+      ],
+      "anchors": [
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/security.md",
+          "re": "literal text of a chat|prompt"
+        },
+        {
+          "kind": "rule",
+          "repo": "mirror",
+          "path": "rules/backup-protocol.md",
+          "re": "client code"
+        },
+        {
+          "kind": "detector",
+          "repo": "code",
+          "path": "tooling/check-no-private-names.js"
+        }
+      ]
+    }
+  ],
+  "overrides": {
+    "agent-quality-full.md#7b. surgical": [],
+    "agent-quality-full.md#18b. always give the url": [],
+    "agent-quality-full.md#10k. the fleet": [],
+    "local-first-incidents.md#a fresh worktree boots a blank app": [
+      "red-about-the-probe"
+    ],
+    "rule-incidents.md#agent-quality.md 22b-i": [],
+    "rule-incidents.md#agent-quality.md 22c-ii": [
+      "plant-escapes"
+    ],
+    "rule-incidents.md#agent-quality.md 22c": [
+      "vacuous-gate"
+    ],
+    "rule-incidents.md#agent-quality.md 5c-ii": [
+      "claim-without-proof"
+    ],
+    "rule-incidents.md#deploy-identity.md before the": [],
+    "security-full.md#forbidden": [
+      "public-leak"
+    ],
+    "security-full.md#csp rollout": [],
+    "verification-traps-sections.md#exit codes that encode": [
+      "exit-status-misread"
+    ],
+    "verification-traps-sections.md#long inline `node -e`": [
+      "shell-quoting"
+    ],
+    "verification-traps-sections.md#reading the harness": [
+      "external-assumed"
+    ],
+    "verification-traps-sections.md#remediation advice needs testing": [
+      "claim-without-proof"
+    ],
+    "verification-traps-sections.md#a push run and a pr run": [
+      "served-build"
+    ],
+    "verification-traps-sections.md#a probe that mutates its own baseline": [
+      "red-about-the-probe"
+    ],
+    "windows-full.md#windows.md lines shortened": [],
+    "windows-full.md#default shell": [],
+    "windows-full.md#edit/write verification": [
+      "wrong-tree",
+      "windows-platform"
+    ]
+  }
+}

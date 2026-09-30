@@ -295,6 +295,65 @@ const OTHER_REPO = { root: '/srv/project-b', remote: 'git@github.com:someone/pro
     const rev = rules.decideBash({ command: 'git cat-file -p origin/main:.github/workflows/ci.yml', cwd: win, repo: OTHER_REPO });
     check('dot-leading rev:path on Windows is denied with the prefixed command in the reason',
         rev.deny && rev.rule === 'msys-pathconv' && rev.deny.includes('`MSYS_NO_PATHCONV=1 git cat-file -p origin/main:.github/workflows/ci.yml`'), JSON.stringify(rev).slice(0, 200));
+    // heredoc-backslash: every `\\` in a quoted heredoc body reaches bash as `\`
+    // on Windows. The first positive is the real recurrence of 2026-09-29, a
+    // catalog edit whose `\\b` arrived as a backspace, trimmed of its paths.
+    {
+        const planted = String.raw`cat > edit-catalog.js <<'EOF'
+'use strict';
+const fs = require('fs');
+C('external-assumed').anchors = [{ kind: 'rule', re: '\\b5b\\b|research before' }];
+EOF
+node edit-catalog.js tooling/mistake-classes.json`;
+        const hbDeny = [
+            ['the planted 09-29 recurrence', planted],
+            ['a python stdin script', String.raw`python - <<'PY'
+import re
+print(re.sub('\\s+', ' ', 'a  b'))
+PY`],
+            ['a double-quoted delimiter', String.raw`node - <<"JS"
+console.log('C:\\Users')
+JS`],
+            ['an indented terminator after <<-', String.raw`cat > a.py <<-'EOF'
+	x = '\\d+'
+	EOF`],
+        ];
+        const hbAllow = [
+            ['the planted command in a POSIX cwd', planted, posix],
+            ['one backslash in a quoted body', String.raw`node - <<'EOF'
+console.log(/\d+/.test('7'))
+EOF`, win],
+            ['an unquoted heredoc, where bash itself halves', String.raw`cat > a.txt <<EOF
+a\\b
+EOF`, win],
+            ['a single-quoted argument (measured too imprecise)', String.raw`grep -E 'a\\|b' f.txt`, win],
+            ['`\\` after the terminator', String.raw`cat > a.txt <<'EOF'
+plain
+EOF
+echo 'x\\y'`, win],
+        ];
+        let hbDenied = 0;
+        for (const [name, cmd] of hbDeny) {
+            const d = rules.decideBash({ command: cmd, cwd: win, repo: OTHER_REPO });
+            const ok = !!d.deny && d.rule === 'heredoc-backslash';
+            if (ok) hbDenied++;
+            check(`heredoc-backslash denies ${name}`, ok, JSON.stringify(d).slice(0, 200));
+        }
+        let hbAllowed = 0;
+        for (const [name, cmd, cwd] of hbAllow) {
+            const d = rules.decideBash({ command: cmd, cwd, repo: OTHER_REPO });
+            const ok = !d.deny;
+            if (ok) hbAllowed++;
+            check(`heredoc-backslash allows ${name}`, ok, JSON.stringify(d).slice(0, 200));
+        }
+        console.log(`  population: ${hbDeny.length} heredoc-backslash positives, ${hbDenied} denied, ${hbAllow.length} negatives, ${hbAllowed} untouched`);
+        const why = rules.decideBash({ command: planted, cwd: win, repo: OTHER_REPO }).deny || '';
+        check('the heredoc-backslash reason quotes the first line holding \\\\ and names the Write tool',
+            why.includes(String.raw`re: '\\b5b\\b|research before'`) && why.includes("<<'EOF'") && why.includes('Write tool'), why.slice(0, 300));
+        check('halvedHeredocLine answers null for a command with no heredoc', rules.halvedHeredocLine(String.raw`echo 'a\\b'`) === null);
+        const inRepo = rules.decideBash({ command: 'git commit -m "x" && ' + planted, cwd: win, repo: AUTODEV_REPO });
+        check('a whole-command deny is decided before the segment rules', inRepo.rule === 'heredoc-backslash', JSON.stringify(inRepo).slice(0, 200));
+    }
     const rev2 = rules.decideBash({ command: 'git show origin/main:.gitignore | head -3', cwd: win, repo: OTHER_REPO });
     check('git show rev:.file on Windows is denied naming its own segment, not the pipe tail',
         rev2.deny && rev2.deny.includes('`MSYS_NO_PATHCONV=1 git show origin/main:.gitignore`') && !rev2.deny.includes('head -3'), JSON.stringify(rev2).slice(0, 200));

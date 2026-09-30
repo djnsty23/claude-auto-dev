@@ -249,6 +249,14 @@ try {
             promptArg.endsWith(HEADLESS_NOTE + '\n') && /FOREGROUND/.test(HEADLESS_NOTE), promptArg.slice(-80));
         const noModel = hw(['start', '--code', 'DRY', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
         check('2. --model unset means no --model flag at all', noModel.json && !noModel.json.value.argv.includes('--model'));
+        check('2. --plugin-dir unset means no --plugin-dir flag at all', noModel.json && !noModel.json.value.argv.includes('--plugin-dir'));
+        // A frontier run pins its plugins per task: the flag must reach claude, and a missing tree must stop the start.
+        const pinned = hw(['start', '--code', 'DRY', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run', '--plugin-dir', ROOT]);
+        const pArgv = pinned.json && pinned.json.ok ? pinned.json.value.argv : [];
+        check('2. --plugin-dir <dir> reaches argv as --plugin-dir <resolved dir>', pArgv[pArgv.indexOf('--plugin-dir') + 1] === path.resolve(ROOT), JSON.stringify(pArgv).slice(0, 200));
+        const noPin = hw(['start', '--code', 'DRY', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run', '--plugin-dir', path.join(ROOT, 'no such plugins')]);
+        check('2. a --plugin-dir that is not a directory is refused as plugin-dir-missing',
+            noPin.exit === 1 && noPin.json && noPin.json.error.code === 'plugin-dir-missing', noPin.stdout.slice(0, 160));
         const badCode = hw(['start', '--code', 'bad code!', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
         check('a code outside the pattern is refused with code usage', badCode.exit === 1 && badCode.json && badCode.json.error.code === 'usage', badCode.stdout.slice(0, 120));
         // --prompt-file omitted: resolving '' is the cwd, a directory, so this used to read as an EISDIR under code internal.
