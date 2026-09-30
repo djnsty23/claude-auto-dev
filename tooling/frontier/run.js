@@ -52,6 +52,9 @@ const USAGE = [
     '       diagnose (one cause: file and mechanism keywords, decoys fail), plan (implied requirements, traps fail).',
     'A variant with a route map (V3) runs the variant its brief routes to: mechanical when the brief names a test,',
     '  an npm script, an exit code or checks the work must pass, open otherwise. The row keeps route and routedTo.',
+    'A variant with an escalation (V4) runs as itself, and in a batch a red or timed-out run queues a stage-2 run of',
+    '  the variant it escalates to, on a fresh repo, given the failing output. Rows keep stage and escalatedFrom, and',
+    '  frontier.js reads the pair as one attempt with both costs. A single `run` is stage 1 only.',
     'Options: --src <repo> --tasks-dir <dir> --data <dir> --work <dir> --claude-bin <path> --hw <headless-worker.js>',
     '         --budget-stop 0.70 (seven-day utilisation that stops a batch) --api-sources none (allowed apiKeySource values)',
     'The account token is read from CLAUDE_CODE_OAUTH_TOKEN_<ACCOUNT> and handed to the worker as',
@@ -515,7 +518,7 @@ function checksEnv(base) {
 }
 
 // ---------------------------------------------------------------- the prompt
-function composePrompt(task, brief, repo) {
+function composePrompt(task, brief, repo, failing = null) {
     const answer = task.lane === 'fix'
         ? ['- The full gate (`npm run gate`) is not available here. Run the suites that cover what you change, for example `node tooling/test-<name>.js`.',
             '- Commit your change when you are done (stage explicit paths, then `git commit -F <file>`).',
@@ -529,6 +532,17 @@ function composePrompt(task, brief, repo) {
         '',
         brief.replace(/\s+$/, ''),
         '',
+        ...(failing === null ? [] : [
+            '## A previous attempt failed',
+            'Another worker ran this task before you and its result was graded red. This is what the grading printed:',
+            '',
+            '~~~~text',
+            failing.replace(/\s+$/, ''),
+            '~~~~',
+            '',
+            'You start from a fresh copy of the repository: nothing that worker changed is in it.',
+            '',
+        ]),
         '## How this run works',
         '- Work only inside this repository. Everything the task needs is in it.',
         ...answer,
@@ -565,14 +579,20 @@ function plantOk(c, task) {
 }
 
 // ---------------------------------------------------------------- prepare and start
-function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
+function prepare(c, taskId, variantId, repeat = 1, { account = null, escalation = null } = {}) {
     const task = loadTask(c, taskId);
     const variant = loadVariant(variantId);
     const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
     // Every run records its brief's route, so frontier.js can derive the routed
-    // variant from rows measured without it. A routed variant runs its target.
+    // variant from rows measured without it. A routed variant runs its target,
+    // and the stage-2 run of an escalating variant runs the one it escalates to.
     const routing = routeFor(brief);
-    const target = resolveVariant(variant, routing.route);
+    let target = resolveVariant(variant, routing.route);
+    if (escalation) {
+        if (!variant.escalate) fault('bad-variant', `variant ${variant.id} does not escalate`);
+        target = loadVariant(variant.escalate);
+        if (target.route || target.escalate) fault('bad-variant', `variant ${variant.id} escalates to ${target.id}, which routes or escalates again`);
+    }
     if (target.lanes && !target.lanes.includes(task.lane)) {
         fault('lane-mismatch', `variant ${target.id}${target === variant ? '' : ` (where ${variant.id} routes ${routing.route})`} runs only ${target.lanes.join(',')} and ${task.id} is ${task.lane}`);
     }
@@ -587,10 +607,12 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
     // answer (its leakTerms): either one in the room refuses the run.
     const tokens = [...(task.fixSha ? fixTokens(c, task) : []), ...(task.leakTerms || [])];
     const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir]);
-    fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo));
+    fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo, escalation ? escalation.output : null));
     const meta = {
         run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, model: target.model, effort: target.effort || null,
         route: routing.route, routeSignals: routing.signals, routedTo: target === variant ? null : target.id,
+        stage: variant.escalate ? (escalation ? 2 : 1) : null, escalatedFrom: escalation ? escalation.from : null,
+        escalation: escalation ? { source: escalation.source, chars: escalation.output.length } : null,
         account, repeat, createdAt: new Date().toISOString(), timeoutMin: Number(task.timeoutMin || 30),
         repo: p.repo, cfg: p.cfg, log: p.log, report: p.report, prompt: p.prompt,
         pin: { tag: pin.tag, hash: pin.hash, plugins: pin.plugins, dir: pin.pluginDir },
@@ -621,7 +643,8 @@ function start(c, meta, env) {
 
 function runOne(c, taskId, variantId, account, repeat, env, extra = {}) {
     const wenv = workerEnv(env, account);
-    const meta = Object.assign(prepare(c, taskId, variantId, repeat, { account }), extra);
+    const { escalation = null, ...rest } = extra;
+    const meta = Object.assign(prepare(c, taskId, variantId, repeat, { account, escalation }), rest);
     if (meta.state === 'contaminated') {
         appendRow(c, rowFor(c, meta, { verdict: 'contaminated', pass: null }));
         fault('contaminated', `${meta.run}: ${meta.contamination.hits.map((h) => `${h.token} in ${h.file}`).join('; ')}`);
@@ -838,6 +861,7 @@ function appendRow(c, row) {
 function rowFor(c, meta, extra) {
     return Object.assign({
         v: 1, run: meta.run, task: meta.task, lane: meta.lane, variant: meta.variant, route: meta.route || null, routedTo: meta.routedTo || null,
+        stage: meta.stage || null, escalatedFrom: meta.escalatedFrom || null, escalation: meta.escalation || null,
         account: meta.account, repeat: meta.repeat, taskHash: meta.taskHash, startedAt: meta.startedAt || null,
         fingerprint: { requestedModel: meta.model, effort: meta.effort, pin: meta.pin.tag, pinHash: meta.pin.hash, plugins: meta.pin.plugins,
             snapshot: meta.snapshot, harnessCommit: meta.harnessCommit, workerVersion: meta.workerVersion || null },
@@ -925,6 +949,30 @@ function finish(c, run, { allowKill = true } = {}) {
     } finally {
         fs.closeSync(fd);
     }
+}
+
+/**
+ * What a red stage-1 run hands the run that escalates it: what the grading
+ * printed, never the key. A fix run's failing checks as they printed, last
+ * 4000 characters. An answer run gets its verdict only, because its grade
+ * lists the expected answer. The check output names the held-out tests the
+ * first worker could not see, so stage 2 knows more than a plain V0 run does:
+ * the same asymmetry the rule creates in real dispatch.
+ */
+const FAILING_MAX = 4000;
+function failingOutput(c, row) {
+    if (row.verdict === 'timeout') return { source: 'timeout', output: 'The previous worker ran past its time budget and was stopped. Nothing it did was graded.' };
+    if (row.lane === 'fix') {
+        let log = '';
+        try { log = fs.readFileSync(runPaths(c, row.run).checks, 'utf8'); } catch { log = ''; }
+        const red = log.split(/\n(?==== )/).filter((sec) => { const m = sec.match(/^=== .*? -> exit (\S+)/); return m && m[1] !== '0'; });
+        const text = red.map((s) => s.trim()).join('\n\n');
+        if (text) return { source: 'checks', output: text.length > FAILING_MAX ? text.slice(-FAILING_MAX) : text };
+        return { source: 'checks', output: 'The checks failed and printed nothing.' };
+    }
+    const task = readJson(path.join(c.tasks, `${row.task}.json`), {});
+    const reason = row.grade && row.grade.reason ? `: ${row.grade.reason}` : '.';
+    return { source: 'verdict', output: `The previous worker's answer in ${task.answerFile || 'its answer file'} was graded wrong${reason}` };
 }
 
 // ---------------------------------------------------------------- plant
@@ -1227,6 +1275,10 @@ function batchLoop(c, id) {
                 if (row) {
                     it.state = 'done'; it.verdict = row.verdict;
                     if (row.verdict === 'billed-api') stop = 'stopped-billed-api';
+                    // A red stage 1 of an escalating variant is half an attempt: queue its stage 2.
+                    if (row.stage === 1 && (row.verdict === 'fail' || row.verdict === 'timeout')) {
+                        batch.items.push({ task: it.task, variant: it.variant, rep: it.rep, stage: 2, from: row.run, state: 'queued', run: null, verdict: null });
+                    }
                 }
             }
             if (stop) {
@@ -1247,7 +1299,13 @@ function batchLoop(c, id) {
                 const wait = next.length ? quietGate(c, batch) : null;
                 for (const it of wait && wait.hold ? [] : next) {
                     try {
-                        const meta = runOne(c, it.task, it.variant, batch.account, it.rep, process.env, wait ? { quietWait: wait.record } : {});
+                        const extra = wait ? { quietWait: wait.record } : {};
+                        if (it.stage === 2) {
+                            const red = readRows(c).find((r) => r.run === it.from);
+                            if (!red) fault('no-stage-1', `stage 1 run ${it.from} has no row`);
+                            extra.escalation = Object.assign({ from: it.from }, failingOutput(c, red));
+                        }
+                        const meta = runOne(c, it.task, it.variant, batch.account, it.rep, process.env, extra);
                         it.run = meta.run; it.state = 'running';
                     } catch (e) {
                         it.state = 'skipped'; it.verdict = e.publicCode || 'error'; it.error = e.message.slice(0, 300);
@@ -1350,4 +1408,4 @@ if (require.main === module) {
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows, routeFor,
-    RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, processList, heavyJobs, noteLoad, loadRecord, quietGate, resumeBatch, HEAVY_RE };
+    RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, processList, heavyJobs, noteLoad, loadRecord, quietGate, resumeBatch, failingOutput, HEAVY_RE };
