@@ -71,7 +71,7 @@ const ACCEPTED = [
     { file: 'plugins/autodev-core/hooks/session-register.js', kind: 'consume', path: 'path.join(DIR, name)',
         why: 'One record per session, named by the session id (read from the directory, so the key is not visible here). Deleted only when its own session has not written it for RETAIN_DAYS.' },
     { file: 'plugins/autodev-core/hooks/stop-auto-check.js', kind: 'rewrite', path: 'notesLedger',
-        why: 'auto-flag.js pathsFor() names it stop-notes.<sid>: one file per session, with one writer.' },
+        why: 'ledgerPath() names it <sid>.<project hash>.json under the profile: one file per session and project, with one writer.' },
     { file: 'plugins/autodev-core/scripts/check-queue-drained.js', kind: 'rewrite', path: 'stateFile',
         why: 'The caller keys it by a hash of the transcript path, so one session owns each file. Losing it costs one full reprint.' },
     { file: 'plugins/autodev-core/scripts/fleet-intent.js', kind: 'rewrite', path: "recordPath('r', 'claude/x', tmp)",

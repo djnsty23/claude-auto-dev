@@ -27,6 +27,11 @@ ledger.json
 # Auto mode flag (session-specific)
 .claude/auto-active
 
+# Stop-note ledgers from before stop-auto-check.js moved them into the profile
+# (2026-09-29). An older installed plugin still writes them here, and one
+# untracked ledger made `npm run gate` exit 2 at check:suites.
+.claude/stop-notes.*
+
 # Session carriers and verbatim user prompts (autodev-memory). The directory
 # also writes its own .gitignore, so this line is belt-and-braces.
 .claude/memory-sessions/

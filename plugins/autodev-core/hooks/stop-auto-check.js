@@ -42,6 +42,23 @@ const carry = [];
 // This session's ledger of keyed notes the model has been handed. Set once the
 // cwd and session are known; while null, no keyed note reaches the model.
 let notesLedger = null;
+// The project's `.claude/`, where ledgers lived before ledgerPath(). Swept of
+// them on a session's first write.
+let legacyLedgerDir = null;
+
+// The ledger lives in the active profile's state, never in the project tree.
+// Until 2026-09-29 it was `<cwd>/.claude/stop-notes.<session>`: an untracked
+// file in every repo the plugin ran in, which dirtied the user's tree and made
+// this repo's own gate exit 2 at check:suites, a step that refuses a dirty tree.
+// Keyed on the session AND the project, because the nudge's key is the same
+// text in every repo: one session moving between two repos gets each nudge once.
+function ledgerPath(cwd, sid) {
+    const { configDir } = require(path.join(__dirname, '..', 'scripts', 'claude-paths.js'));
+    let where = path.resolve(cwd);
+    if (process.platform === 'win32') where = where.toLowerCase();
+    const project = require('crypto').createHash('sha256').update(where).digest('hex').slice(0, 12);
+    return path.join(configDir(), 'autodev', 'stop-notes', sid + '.' + project + '.json');
+}
 
 // The note is FOR THE MODEL: it names work to pick up. `systemMessage` reaches
 // only the operator's screen, so until 2026-09-23 no session ever read the
@@ -101,17 +118,24 @@ function forModel(notes) {
         fs.mkdirSync(path.dirname(notesLedger), { recursive: true });
         fs.writeFileSync(notesLedger, JSON.stringify(sent.concat(added)));
     } catch { return unkeyed; }
-    // One ledger per session, so they accumulate. Sweep old ones once, on the
-    // session's first write.
+    // One ledger per session and project, so they accumulate. Sweep old ones
+    // once, on the session's first write, and remove any this project still
+    // holds from before ledgerPath(): only this hook ever wrote that name.
     if (!sent.length) {
         try {
             const dir = path.dirname(notesLedger);
             for (const name of fs.readdirSync(dir)) {
-                if (!name.startsWith('stop-notes.')) continue;
+                if (!name.endsWith('.json')) continue;
                 const p = path.join(dir, name);
                 if (p !== notesLedger && Date.now() - fs.statSync(p).mtimeMs > LEDGER_MAX_AGE_MS) fs.unlinkSync(p);
             }
         } catch { /* a sweep must never strand a turn */ }
+        try {
+            for (const name of fs.readdirSync(legacyLedgerDir)) {
+                if (!name.startsWith('stop-notes.')) continue;
+                try { fs.unlinkSync(path.join(legacyLedgerDir, name)); } catch { /* a directory, or already gone */ }
+            }
+        } catch { /* no .claude here */ }
     }
     return out;
 }
@@ -238,8 +262,9 @@ try {
     // A plain flag still on disk (written through Bash, or before the
     // PostToolUse claim existed) becomes this session's now.
     autoFlags.claim(cwd, sid);
-    const { active: autoFlag, exit: exitFlag, idle: idleMarker, notes } = autoFlags.pathsFor(cwd, sid);
-    notesLedger = notes;
+    const { active: autoFlag, exit: exitFlag, idle: idleMarker, dir: flagDir } = autoFlags.pathsFor(cwd, sid);
+    try { notesLedger = ledgerPath(cwd, sid); } catch { /* no ledger: no keyed note reaches the model */ }
+    legacyLedgerDir = flagDir;
     const prdPath = path.join(cwd, 'prd.json');
 
     // Stale flag cleanup (>2 hours old = crashed session)
