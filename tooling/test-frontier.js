@@ -197,8 +197,9 @@ const fs = require('fs');
 const path = require('path');
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
-const mode = process.env.FAKE_MODE || 'noop';
 const model = val('--model') || 'unset';
+const byModel = process.env.FAKE_MODE_BY_MODEL ? JSON.parse(process.env.FAKE_MODE_BY_MODEL) : {};
+const mode = byModel[model] || process.env.FAKE_MODE || 'noop';
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const pdir = val('--plugin-dir');
 let plugins = [];
@@ -504,6 +505,40 @@ function derivedCases() {
         row('T5', 'V0', true, 4, { route: 'open', finishedAt: '2026-01-01T00:00:00Z' }),
     ], { routed: opts.routed }).variants['V3*'];
     check('69f. frontier: with no brief route, the latest row\'s route decides the pick', moved && moved.from.T5 === 'V1' && moved.n === 1, moved && moved.from);
+    escalationCases(row);
+}
+
+function escalationCases(row) {
+    const v4 = (task, run, stage, pass, costUsd, extra = {}) => row(task, 'V4', pass, costUsd, Object.assign({ run, stage }, extra));
+    const rs = [
+        v4('T1', 'a1', 1, true, 1),
+        v4('T2', 'b1', 1, false, 1), v4('T2', 'b2', 2, true, 4, { escalatedFrom: 'b1', load: { class: 'loaded' } }),
+        v4('T3', 'c1', 1, false, 1, { verdict: 'timeout' }), v4('T3', 'c2', 2, false, 4, { escalatedFrom: 'c1' }),
+        v4('T4', 'd1', 1, false, 1),
+        v4('T5', 'e2', 2, true, 4, { escalatedFrom: 'gone' }),
+    ];
+    const s = F.summarise(rs);
+    const v = s.variants.V4;
+    check('70a. frontier: an escalated V4 pair is one attempt with the stage-2 verdict and both costs summed, and a stage-1 pass stands alone',
+        v && v.n === 3 && v.passes === 2 && v.escalated === 2 && v.medianCostUsd === 5 && s.matrix.T2.V4.passes === 1 && s.matrix.T3.V4.passes === 0 && s.matrix.T1.V4.passes === 1,
+        [v, s.matrix]);
+    check('70b. frontier: a red stage 1 with no stage 2 and a stage 2 with no stage 1 are excluded and named, not counted',
+        s.excluded['escalation-missing'] === 1 && s.excluded['escalation-orphan'] === 1 && s.rows === 7 && s.counted === 3 && !s.matrix.T4 && !s.matrix.T5, [s.excluded, s.rows, s.counted]);
+    const pair = F.collapseEscalations(rs).find((r) => r.run === 'b1');
+    check('70c. frontier: the collapsed pair keeps the first run id, names the second, and is loaded when either run was',
+        pair && pair.escalatedRun === 'b2' && pair.pass === true && pair.load.class === 'loaded' && pair.wallMs === 200 && pair.tokens.total === 2 && pair.durationApiMs === 20, pair);
+
+    // What stage 2 is told: the red checks only, a timeout as such, and an answer lane's verdict without its key.
+    const fr = { data: path.join(ROOT, 'fo-data'), work: path.join(ROOT, 'fo-work'), tasks: TASKS };
+    const dir = path.join(fr.work, 'runs', 'F-30000000-TX-V4-1');
+    write(path.join(dir, 'checks.log'), '\n=== check: node tooling/test-add.js -> exit 1 in 40 ms\nnot ok add(2, 2) returned 0\n\n\n=== pass-to-pass: node tooling/test-other.js -> exit 0 in 30 ms\nall fine GREENLINE\n\n');
+    const fix = R.failingOutput(fr, { run: 'F-30000000-TX-V4-1', lane: 'fix', task: 'TX', verdict: 'fail' });
+    const out = R.failingOutput(fr, { run: 'x', lane: 'fix', task: 'TX', verdict: 'timeout' });
+    const ans = R.failingOutput(fr, { run: 'y', lane: 'locate', task: 'TL', verdict: 'fail', grade: { pass: false, missed: ['lib/add.js'], extra: [] } });
+    check('70d. failingOutput: a fix run hands on its red checks and not its green ones, a timeout says so, and an answer lane gets its verdict without the key',
+        fix.source === 'checks' && /exit 1/.test(fix.output) && /returned 0/.test(fix.output) && !/GREENLINE/.test(fix.output)
+        && out.source === 'timeout' && ans.source === 'verdict' && /frontier-answer\.json was graded wrong/.test(ans.output) && !/lib\/add/.test(ans.output),
+        [fix, out, ans]);
 }
 
 function cliCases(shas) {
@@ -778,6 +813,29 @@ function cliCases(shas) {
     check('65. a bare --quiet-wait means 10 minutes and a quiet machine starts at once, and a non-number is a usage error',
         bfb && bfb.quietWaitMin === 10 && rb && rb.load.quietWait && rb.load.quietWait.waitedSec === 0 && rb.load.class === 'quiet'
         && junk.json && junk.json.error && junk.json.error.code === 'usage', [bfb && bfb.quietWaitMin, rb && rb.load, junk.json]);
+
+    // V4: Sonnet goes red, so the batch queues a stage-2 Opus run on a fresh repo, told what failed.
+    const byModel = JSON.stringify({ 'claude-sonnet-5-5': 'noop', 'claude-opus-5-5': 'fix' });
+    const be = run(['batch', '--tasks', 'TX', '--variants', 'V4', '--account', 'testacct'], { FAKE_MODE_BY_MODEL: byModel });
+    const bfe = batchDone(be.json && be.json.value && be.json.value.batch, 240);
+    const er = bfe ? bfe.items.map((i) => rows().find((r) => r.run === i.run)) : [];
+    const [e1, e2] = er;
+    const prompt2 = e2 ? fs.readFileSync(path.join(WORK, 'runs', e2.run, 'prompt.md'), 'utf8') : '';
+    const prompt1 = e1 ? fs.readFileSync(path.join(WORK, 'runs', e1.run, 'prompt.md'), 'utf8') : '';
+    check('71. a red V4 stage 1 queues a stage-2 V0 run in the same batch, which starts from a fresh repo told what the checks printed',
+        bfe && bfe.state === 'done' && bfe.items.length === 2 && e1 && e2
+        && e1.stage === 1 && e1.verdict === 'fail' && e1.fingerprint.requestedModel === 'claude-sonnet-5-5'
+        && e2.stage === 2 && e2.escalatedFrom === e1.run && e2.verdict === 'pass' && e2.fingerprint.requestedModel === 'claude-opus-5-5' && e2.variant === 'V4'
+        && e2.escalation && e2.escalation.source === 'checks' && /## A previous attempt failed/.test(prompt2) && /test-add\.js -> exit 1/.test(prompt2)
+        && !/previous attempt/.test(prompt1),
+        [bfe && bfe.items, e1 && [e1.stage, e1.verdict], e2 && [e2.stage, e2.verdict, e2.escalation]]);
+    const bgreen = run(['batch', '--tasks', 'TX', '--variants', 'V4', '--account', 'testacct'], { FAKE_MODE: 'fix' });
+    const bfg = batchDone(bgreen.json && bgreen.json.value && bgreen.json.value.batch, 240);
+    const summary = F.summarise(rows().filter((r) => r.variant === 'V4'));
+    check('72. a green V4 stage 1 queues nothing, and the frontier reads the two V4 attempts as 2 of 2 with one escalated',
+        bfg && bfg.state === 'done' && bfg.items.length === 1 && bfg.items[0].verdict === 'pass'
+        && summary.variants.V4 && summary.variants.V4.n === 2 && summary.variants.V4.passes === 2 && summary.variants.V4.escalated === 1,
+        [bfg && bfg.items, summary.variants.V4]);
 }
 
 // ---------------------------------------------------------------- main

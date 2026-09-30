@@ -4,6 +4,7 @@
   "V1": { "model": "claude-sonnet-5-5", "effort": "medium", "note": "the Sonnet A/B" },
   "V2": { "model": "claude-sonnet-5-5", "effort": "high", "note": "Sonnet one effort step up" },
   "V3": { "route": { "mechanical": "V1", "open": "V0" }, "note": "routed: a brief naming a mechanical endpoint runs as V1, any other as V0" },
+  "V4": { "model": "claude-sonnet-5-5", "effort": "medium", "escalate": "V0", "note": "today's rule: Sonnet medium first, and on a grader red a fresh V0 run given the failing output; one attempt, both costs" },
   "BOH": { "model": "claude-opus-5-5", "effort": "high", "note": "Brain seat: today's Opus at high" },
   "BOX": { "model": "claude-opus-5-5", "effort": "xhigh", "note": "Brain seat: Opus at extra high" },
   "BSH": { "model": "claude-sonnet-5-5", "effort": "high", "note": "Brain seat: Sonnet at high" },

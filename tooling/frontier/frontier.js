@@ -19,6 +19,9 @@
  * variant that task's brief routes to. V3* is labelled derived, lists the tasks
  * with no rows of the pick, and sits out of the disagreements.
  *
+ * An escalating variant (V4) is read per attempt: a red stage 1 and the
+ * stage-2 run it queued are one row, with the stage-2 verdict and both costs.
+ *
  * Counted: pass, fail and timeout rows (a timeout is a fail). Not counted, and
  * reported beside the rest: billed-api, contaminated and no-stream rows, which
  * measured the harness failing to run, not the variant failing the task.
@@ -38,9 +41,9 @@ function median(xs) {
 }
 const rate = (p, n) => (n ? Math.round((p / n) * 1000) / 1000 : null);
 
-const blank = () => ({ n: 0, passes: 0, costs: [], walls: [], quietWalls: [], apis: [], tokens: [], lanes: {}, load: { quiet: 0, loaded: 0, unknown: 0 } });
+const blank = () => ({ n: 0, passes: 0, escalated: 0, costs: [], walls: [], quietWalls: [], apis: [], tokens: [], lanes: {}, load: { quiet: 0, loaded: 0, unknown: 0 } });
 function tally(v, r) {
-    v.n++; if (r.pass) v.passes++;
+    v.n++; if (r.pass) v.passes++; if (r.escalated) v.escalated++;
     const cls = loadClass(r);
     v.load[cls]++;
     v.costs.push(r.costUsd); v.walls.push(r.wallMs); v.apis.push(r.durationApiMs); v.tokens.push(r.tokens ? r.tokens.total : null);
@@ -51,7 +54,7 @@ function tally(v, r) {
 function stats(v) {
     const lanes = {};
     for (const [lane, l] of Object.entries(v.lanes)) lanes[lane] = { n: l.n, passes: l.passes, passRate: rate(l.passes, l.n) };
-    return { n: v.n, passes: v.passes, passRate: rate(v.passes, v.n), medianCostUsd: median(v.costs), medianApiMs: median(v.apis),
+    return { n: v.n, passes: v.passes, passRate: rate(v.passes, v.n), escalated: v.escalated, medianCostUsd: median(v.costs), medianApiMs: median(v.apis),
         medianWallQuietMs: median(v.quietWalls), medianWallAnyLoadMs: median(v.walls), medianTokens: median(v.tokens), load: v.load, lanes };
 }
 
@@ -83,7 +86,40 @@ function derive(counted, map, routes) {
     return Object.assign(stats(v), { derived: true, from, missing, unrouted });
 }
 
-function summarise(rows, { routes = {}, routed = {} } = {}) {
+/**
+ * An escalating variant (V4) spends two runs on an attempt whose first run
+ * goes red. Each pair becomes one row: the stage-2 verdict, with cost, API
+ * time, wall time and tokens summed over both, and loaded if either was. A red
+ * stage 1 with no stage 2 yet is `escalation-missing`, and a stage 2 whose
+ * stage 1 is gone is `escalation-orphan`: both are excluded and reported,
+ * because half an attempt is not a measurement of the variant.
+ */
+function collapseEscalations(rows) {
+    const add = (a, b) => (typeof a === 'number' && typeof b === 'number' ? a + b : null);
+    const firsts = new Set(rows.filter((r) => r.stage === 1).map((r) => r.run));
+    const second = new Map(rows.filter((r) => r.stage === 2 && r.escalatedFrom).map((r) => [r.escalatedFrom, r]));
+    const out = [];
+    for (const r of rows) {
+        if (r.stage === 2) {
+            if (!firsts.has(r.escalatedFrom)) out.push(Object.assign({}, r, { verdict: 'escalation-orphan', pass: null }));
+            continue;
+        }
+        if (r.stage !== 1 || !(r.verdict === 'fail' || r.verdict === 'timeout')) { out.push(r); continue; }
+        const s = second.get(r.run);
+        if (!s) { out.push(Object.assign({}, r, { verdict: 'escalation-missing', pass: null })); continue; }
+        const cls = [loadClass(r), loadClass(s)];
+        out.push(Object.assign({}, s, {
+            run: r.run, escalatedRun: s.run, escalated: true, startedAt: r.startedAt,
+            costUsd: add(r.costUsd, s.costUsd), wallMs: add(r.wallMs, s.wallMs), durationApiMs: add(r.durationApiMs, s.durationApiMs),
+            tokens: r.tokens && s.tokens ? { total: add(r.tokens.total, s.tokens.total) } : null,
+            load: { class: cls.includes('loaded') ? 'loaded' : cls.includes('unknown') ? 'unknown' : 'quiet' },
+        }));
+    }
+    return out;
+}
+
+function summarise(allRows, { routes = {}, routed = {} } = {}) {
+    const rows = collapseEscalations(allRows);
     const counted = rows.filter((r) => COUNTED.has(r.verdict));
     const excluded = {};
     for (const r of rows) if (!COUNTED.has(r.verdict)) excluded[r.verdict] = (excluded[r.verdict] || 0) + 1;
@@ -103,7 +139,7 @@ function summarise(rows, { routes = {}, routed = {} } = {}) {
         const d = derive(counted, map, routes);
         if (d.n > 0) out[`${id}*`] = d;
     }
-    return { rows: rows.length, counted: counted.length, excluded, variants: out, matrix, disagreements,
+    return { rows: allRows.length, counted: counted.length, excluded, variants: out, matrix, disagreements,
         pareto: { cost: pareto(out, 'medianCostUsd'), api: pareto(out, 'medianApiMs'), wall: pareto(out, 'medianWallQuietMs') } };
 }
 
@@ -136,6 +172,9 @@ function render(s) {
         if (!v.derived) continue;
         const from = Object.entries(v.from).map(([t, w]) => `${t}=${w}`).join(' ');
         lines.push(`${id} is derived, not run: per task, the rows of the variant its route picks (${from || 'none'})${v.missing.length ? `; no rows of the pick for ${v.missing.join(', ')}` : ''}${v.unrouted.length ? `; unrouted ${v.unrouted.join(', ')}` : ''}`);
+    }
+    for (const [id, v] of Object.entries(s.variants).sort()) {
+        if (v.escalated) lines.push(`${id}: ${v.escalated} of ${v.n} attempts escalated, each read as one attempt with both runs' cost, API time, wall time and tokens summed`);
     }
     lines.push(`pareto on cost: ${s.pareto.cost.join(', ') || '-'}; on API time: ${s.pareto.api.join(', ') || '-'}; on quiet wall time: ${s.pareto.wall.join(', ') || '-'}`);
     lines.push(`disagreements (k = 3 candidates): ${s.disagreements.join(', ') || 'none'}`);
@@ -184,4 +223,4 @@ function main(argv) {
 }
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
-module.exports = { summarise, derive, pareto, median, loadClass };
+module.exports = { summarise, derive, pareto, median, loadClass, collapseEscalations };
