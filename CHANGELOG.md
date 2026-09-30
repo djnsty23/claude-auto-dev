@@ -1,5 +1,37 @@
 # Changelog
 
+## [8.180.0]
+
+### Quota cost is priced once per API response, and the tripwire runs on every pass (#342, #345)
+
+- quota-burn.js prices each API response once. Before this, a response
+  split across several transcript rows was priced once per row.
+- quota-tripwire.js never mixes two measures of window cost, and refuses
+  to project from a stale calibration.
+- fleet-notify runs the tripwire on every pass, and a quota diagnostic
+  toasts once per code per week.
+
+### Hooks
+
+- A quoted heredoc whose body holds a double backslash is denied on
+  Windows, where Git Bash delivers it as a single one (#343).
+- The Stop-notes ledger moves out of the project tree (#339).
+- instructions-loaded spares a young, small segment from pruning.
+- headless-worker passes `--plugin-dir` through to claude.
+- full-gate-queue `leave --pid` removes a stopped waiter's tickets from
+  every lane.
+
+### Repo machinery (does not ship)
+
+- A measured harness frontier: a runner, graders and tasks from this
+  repository's history, with held-out checks, the machine load per run
+  and a quiet-wait before each item (#340).
+- mistake-recurrence counts incidents per class before and after its
+  rule. mine-fixes `--records` emits one dated entry per rework fix, and
+  work-cost reports tokens and list-price cost per merged PR (#343).
+- Releases cut annotated tags, and a lightweight tag reads as red (#341).
+- CLAUDE.md is trimmed under 8 KB, with the detail moved to the long form.
+
 ## [8.179.0]
 
 ### The Brain clock starts queued work, judges it and starts the next (#337)
