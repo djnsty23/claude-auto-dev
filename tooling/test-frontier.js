@@ -280,6 +280,19 @@ function unitCases() {
         JSON.stringify({ file_path: 'C:/Users/x/autodev-frontier/wt/F-29120000-T1-V0-1/.claude/settings.json' }),
     ], own);
     check('8. leakHits flags another run, the live config and the source checkout, not the own run or its repo .claude dir', leaks.length === 4, leaks);
+    const ownTree = 'C:/x/autodev-frontier/wt/F-29120000-T1-V0-1';
+    const ownWrites = R.leakHits([
+        JSON.stringify({ file_path: `${ownTree}/frontier-answer.json`, content: 'Results go under ~/.claude/autodev/reports/ and the source is claude-auto-dev.' }),
+        JSON.stringify({ file_path: `${ownTree}/lib/a.js`, old_string: 'a', new_string: '// see ~/.claude/rules' }),
+        JSON.stringify({ command: `cd ${ownTree} && cat > frontier-answer.json <<'EOF'\n{"risks":["memory in ~/.claude/CLAUDE.md"]}\nEOF` }),
+    ], own);
+    const outside = R.leakHits([
+        JSON.stringify({ file_path: 'C:/elsewhere/wt/F-29120000-T1-V0-10/answer.json', content: 'notes from ~/.claude/rules' }),
+        JSON.stringify({ file_path: 'C:/Users/x/.claude/rules/a.md', content: 'x' }),
+        JSON.stringify({ command: "cat ~/.claude/CLAUDE.md > notes.txt <<'EOF'\nplain\nEOF" }),
+    ], own);
+    check('8b. a write into the own run tree counts by its path alone, a heredoc body is not read, and a look-alike run id, an outside write or a read around a heredoc is still flagged',
+        ownWrites.length === 0 && outside.length === 3, { ownWrites, outside });
     const exp = { items: [{ path: 'a.js' }, { path: 'b.js' }, { path: 'c.js' }] };
     const g1 = R.gradeLocate({ items: [{ path: './a.js' }, { path: 'b.js' }, { path: 'c.js' }] }, exp, 0.8);
     const g2 = R.gradeLocate({ items: [{ path: 'a.js' }, { path: 'x.js' }] }, exp, 0.8);

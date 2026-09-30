@@ -746,6 +746,23 @@ function tokensOf(result) {
     return t;
 }
 
+/**
+ * The part of one tool input that can reach outside the run. A write into the
+ * run's own tree is its answer, so only its path counts: `[measured
+ * 2026-09-30]` two T11 plans were flagged for naming ~/.claude as a place the
+ * harness would write, inside their own answer file. A command keeps
+ * everything but its heredoc bodies, which are text being written.
+ */
+function readsOf(s, run) {
+    let j;
+    try { j = JSON.parse(s); } catch { return s; }
+    if (!j || typeof j !== 'object') return s;
+    const own = new RegExp(`[\\\\/]wt[\\\\/]+${run}(?:[\\\\/]|$)`, 'i');
+    if (typeof j.file_path === 'string' && own.test(j.file_path) && ['content', 'new_string', 'edits'].some((k) => k in j)) return j.file_path;
+    if (typeof j.command === 'string') return j.command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2(?=\s|$)/g, '<<heredoc');
+    return s;
+}
+
 /** Paths in the worker's tool calls that reach outside its own run: the source checkout, the live config, other runs. */
 function leakHits(toolInputs, run) {
     const res = [
@@ -755,12 +772,13 @@ function leakHits(toolInputs, run) {
     ];
     const other = /autodev-frontier[\\/]+(?:wt|cfg|runs)[\\/]+([A-Za-z0-9-]+)/gi;
     const hits = [];
-    for (const s of toolInputs) {
+    for (const raw of toolInputs) {
+        const s = readsOf(raw, run);
         let hit = res.find((re) => re.test(s));
         if (!hit) {
             for (const m of s.matchAll(other)) if (m[1] !== run) { hit = true; break; }
         }
-        if (hit) hits.push(s.slice(0, 160));
+        if (hit) hits.push(raw.slice(0, 160));
     }
     return hits;
 }
