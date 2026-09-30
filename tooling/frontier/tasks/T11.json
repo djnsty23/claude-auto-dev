@@ -7,6 +7,6 @@
   "brief": "T11.md",
   "answerFile": "frontier-answer.json",
   "expected": "T11.answers.json",
-  "leakTerms": ["tooling/frontier", "test-frontier"],
+  "leakTerms": ["tooling/frontier", "test-frontier", "held-out test never goes red", "Sonnet medium 0/4"],
   "timeoutMin": 30
 }

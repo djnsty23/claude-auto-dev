@@ -397,6 +397,102 @@ function unitCases() {
     openLaneCases();
     routeCases();
     derivedCases();
+    realKeyCases();
+}
+
+/**
+ * The shipped T10-T12 keys, graded against answers written here by hand, not
+ * read from the keys: a key that loses an example or a decoy cannot shrink
+ * these. The paraphrases are the ones a review passed through the first keys.
+ */
+function realKeyCases() {
+    const REAL = path.resolve(__dirname, 'frontier', 'tasks');
+    const key = (id) => readJson(path.join(REAL, `${id}.answers.json`));
+    const k10 = key('T10'); const k11 = key('T11'); const k12 = key('T12');
+    const d = (k, file, mechanism) => R.gradeDiagnose({ cause: { file, mechanism } }, k);
+    const t10 = 'tooling/test-headless-worker.js'; const t12 = 'tooling/test-inbox.js';
+
+    const hedges = [
+        ['Or the supervisor might be racing the write', true],
+        ['A supervisor race is another candidate', true],
+        ['Alternatively the supervisor may be racing the write', true],
+        ['Possibly the runner is also just noisy', true],
+        ['the ledger ends on its original inode, or perhaps the stat is cached', true],
+        ['Either ext4 reuses the inode, or the supervisor races the write', true],
+        ['Either it returns a - b, or the caller swaps them', true],
+        ['ext4 hands it to whichever file is created next, either the second .tmp or the supervisor\'s log', false],
+        ['one ordinary stall, maybe a GC pause, exceeds it', false],
+        ['It returns a - b on either call', false],
+        ['the second .tmp might get the same inode number', false],
+    ];
+    const hedgeWrong = hedges.filter(([s, want]) => R.hedgedSentence(s) !== want).map(([s]) => s);
+    const split = R.sentencesOf('The first .tmp in test-inbox.js lands; the second does not. Done');
+    check('73a. hedges: a second cause is hedged, and a qualifier, two file names or a modal on the one cause are not; a dot inside a name ends no sentence',
+        hedges.length === 11 && hedgeWrong.length === 0 && split.length === 3 && split[0] === 'The first .tmp in test-inbox.js lands', { hedgeWrong, split });
+
+    const right10 = [
+        "A start writes the ledger twice, each write renames a fresh .tmp over the file, and the case compared the ledger's dev:ino before and after the whole start. The first rename frees the old inode, and ext4 hands a just-freed number to the next file created, so the second .tmp gets the number the ledger started with and a file replaced twice reads as never replaced.",
+        "The first rename frees the ledger's inode and ext4 hands it to whichever file is created next, either the second .tmp or the supervisor's log; when the .tmp wins, the ledger ends on its original inode and reads as not replaced.",
+        "ext4 allocates the lowest available inode, so the second .tmp takes the ledger's former inode number and the dev:ino comparison sees equal values: a replaced file looks untouched.",
+    ].map((m) => d(k10, t10, m));
+    const race = d(k10, t10, 'The case stats the ledger before the supervisor has released its handle on the inode, so on slow Ubuntu runners the after reading shows the same inode and reads as not replaced.');
+    const split10 = d(k10, t10, 'The supervisor reuses a stale handle on slow runners. The after reading shows the same inode number and reads as not replaced.');
+    const might = d(k10, t10, 'ext4 reuses the just-freed inode number for the next .tmp, so the ledger ends with its original inode and reads as not replaced. Or the supervisor might be racing the write.');
+    check('73b. T10 key: three right paraphrases pass, a timing race in the right words fails on reuse, reuse words split from the inode fail, and a trailing "might" fails as hedged',
+        right10.every((g) => g.pass) && !race.pass && race.groups.find((g) => g.id === 'reuse').hit === false
+            && !split10.pass && !might.pass && might.hedged && might.groups.every((g) => g.hit),
+        { right: right10.map((g) => g.pass), race: race.groups, split10: split10.groups, might: might.hedged });
+
+    const right12 = [
+        "The predicate fullMs < emptyMs * 2 + 25 budgets a fixed I/O cost as a multiple of an unrelated spawn baseline. A faster machine measures a smaller empty time and therefore gets a TIGHTER absolute allowance, while a slow box's baseline makes the budget generous.",
+        "The predicate fullMs < emptyMs * 2 + 25 lets the 25 files cost only emptyMs + 25: the CI Mac spawns in 38ms so the files get 63ms and one 113ms stall fails it, while the dev Mac's 200ms empty time allows 225ms.",
+        'The budget is emptyMs * 2 + 25, a multiple of the spawn baseline, so the fast CI Mac at 38ms gets a tight 63ms allowance that one ordinary stall, maybe a GC pause, exceeds.',
+    ].map((m) => d(k12, t12, m));
+    const oneMachine = d(k12, t12, 'The budget is emptyMs * 2 + 25, and the CI Mac at 38ms gets 63ms for the files, which a 113ms APFS stat stall exceeds.');
+    check('73c. T12 key: a right answer in adjectives, in numbers, and with "maybe" on the stall passes, and one machine\'s numbers fail on faster',
+        right12.every((g) => g.pass) && !oneMachine.pass && oneMachine.groups.find((g) => g.id === 'faster').hit === false,
+        { right: right12.map((g) => [g.pass, g.groups, g.hedged]), oneMachine: oneMachine.groups });
+
+    const risks = ['held-out tests could be read', 'contamination through memory', 'noise from one run'];
+    const tools = ['tooling/sonnet-eval.js', 'tooling/test-sonnet-eval.js'];
+    const oneCommit = R.gradePlan({ steps: [
+        { do: 'Pick ten recent fixes from git history.' },
+        { do: 'For each, git worktree add at the commit one commit before the fix, and run Sonnet and Opus there on the same tasks.', creates: tools },
+        { do: 'The script runs the tests after the worker finishes and compares pass rates and cost.' }], risks }, k11);
+    const reset = R.gradePlan({ steps: [
+        { do: 'Pick ten recent fixes from git history.' },
+        { do: 'git clone the repo for each task.' },
+        { do: 'git reset --hard to the parent of the fix, and run Sonnet and Opus there on the same tasks.', creates: tools },
+        { do: 'The script runs the tests and compares pass rates and cost.' }], risks }, k11);
+    const edits = R.gradePlan({ steps: [
+        { do: 'Pick ten recent fixes from git history. Build each task repo with git archive of the parent.' },
+        { do: 'Add the harness and tooling/test-sonnet-eval.js.', edits: ['plugins/autodev-core/scripts/sonnet-eval.js'] },
+        { do: 'The script runs the held-out tests after the worker finishes, on the same tasks, and records cost.' }], risks }, k11);
+    check('73d. T11 key: a worktree "one commit before the fix" and a clone reset to the parent trip X2, and a harness edited under plugins/ trips X1',
+        oneCommit.traps.includes('X2') && reset.traps.includes('X2') && edits.traps.includes('X1') && !oneCommit.pass && !reset.pass && !edits.pass,
+        { oneCommit: oneCommit.traps, reset: reset.traps, edits: edits.traps });
+    const withRisks = R.gradePlan({ steps: [{ do: 'Pick recent fixes from git history.' }], risks: ['held-out tests', 'CLAUDE_CONFIG_DIR', 'noise'] }, k11);
+    const inSteps = R.gradePlan({ steps: [{ do: 'Pick recent fixes from git history. Keep the tests held-out, run in a fresh CLAUDE_CONFIG_DIR, and repeat for noise.' }] }, k11);
+    const ids = (g) => g.requirements.filter((r) => r.met).map((r) => r.id).join();
+    check('73e. T11 key: a danger named under risks meets no requirement, and the same words in a step meet R2, R5 and R7',
+        ids(withRisks) === 'R1' && ['R1', 'R2', 'R5', 'R7'].every((id) => ids(inSteps).split(',').includes(id)), [ids(withRisks), ids(inSteps)]);
+
+    const ex10 = k10.examples.map((a) => R.gradeDiagnose(a, k10).pass);
+    const ex12 = k12.examples.map((a) => R.gradeDiagnose(a, k12).pass);
+    const dec = [...k10.decoys.map((x) => R.gradeDiagnose(x.answer, k10)), ...k12.decoys.map((x) => R.gradeDiagnose(x.answer, k12))];
+    const x11 = ['X1', 'X2'].map((t) => R.gradePlan(k11.examples.traps[t], k11));
+    check('73f. shipped keys: every T10 and T12 example passes, every decoy fails, each T11 trap example trips its trap at the threshold, and T11 leak terms carry the config phrases',
+        ex10.length >= 7 && ex12.length >= 7 && dec.length >= 17 && ex10.every(Boolean) && ex12.every(Boolean) && dec.every((g) => !g.pass)
+            && x11.every((g, i) => g.traps.join() === ['X1', 'X2'][i] && g.met >= g.threshold) && R.gradePlan(k11.examples.right[0], k11).pass
+            && ['held-out test never goes red', 'Sonnet medium 0/4'].every((t) => readJson(path.join(REAL, 'T11.json')).leakTerms.includes(t)),
+        { ex10, ex12, decoys: dec.length, x11: x11.map((g) => [g.traps, g.met]) });
+
+    const base = { task: 'T1', variant: 'V0', verdict: 'pass', pass: true, costUsd: 1, wallMs: 10, durationApiMs: 5, tokens: { total: 1 }, load: { class: 'quiet' } };
+    const s = F.summarise([base, Object.assign({}, base, { run: 'b', leak: { suspect: true, hits: ['x'] } }),
+        Object.assign({}, base, { run: 'c', variant: 'V4', stage: 1, verdict: 'fail', pass: false }),
+        Object.assign({}, base, { run: 'd', variant: 'V4', stage: 2, escalatedFrom: 'c', leak: { suspect: true } })]);
+    check('74a. frontier: a leak-suspect row counts nowhere, and an escalation whose second run leaked is excluded as a pair',
+        s.counted === 1 && s.excluded['leak-suspect'] === 2 && !s.variants.V4 && s.variants.V0 && s.variants.V0.n === 1, { counted: s.counted, excluded: s.excluded });
 }
 
 function openLaneCases() {
