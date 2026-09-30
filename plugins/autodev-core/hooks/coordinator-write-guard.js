@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// PreToolUse hook on Bash — the coordinator-write ban, as a mechanism, and
-// since 2026-09-08 the `--no-verify` ask (second header, further down).
+// PreToolUse hook on Bash — the coordinator-write ban, as a mechanism, since
+// 2026-09-08 the `--no-verify` ask, and since 2026-09-30 the .env read deny
+// (second and third headers, further down).
 // Exit 2 = block, exit 0 = allow; exit 0 with a JSON decision on stdout = ask.
 //
 // WHY THIS EXISTS. `[measured 2026-09-01]` A coordinator session told to run the
@@ -105,7 +106,9 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         + 'Also ASKS (permissionDecision: ask on stdout) before git commit/push/merge/rebase/cherry-pick/am, but only\n'
         + 'when a bypass flag is present: --no-verify, commit/am -n, or -c core.hooksPath=. In an unattended run\n'
         + '(AI_AGENT ends _harness, or CLAUDE_CODE_ENTRYPOINT starts sdk-) the same text is a note, not a gate.\n'
-        + 'Either way the justification belongs in the commit or PR body.');
+        + 'Either way the justification belongs in the commit or PR body.\n'
+        + 'Also REFUSES (exit 2) a reader (cat, sed, awk, cut, grep and kin) that would print a .env file,\n'
+        + 'whatever masking it attempts. Key names, counts and -q stay allowed: scripts/env-file-read.js.');
     process.exit(0);
 }
 
@@ -404,6 +407,37 @@ function isInside(root, child) {
 // rider is what makes the recommended path the defensible one.
 // ===========================================================================
 
+// ===========================================================================
+// THE THIRD GUARD IN THIS FILE: A .env READ IS REFUSED. Added 2026-09-30.
+//
+// WHY. `[measured 2026-09-29]` a Bash command meant to show a .env file "with
+// values masked" printed 9 live credentials into a transcript: its mask kept
+// commented-out lines, and a commented-out key is still a live key. The prose
+// rule against it was in force that day. The recogniser, the incident and what
+// it cannot see are in scripts/env-file-read.js.
+//
+// POPULATION. `[measured 2026-09-30]` a replay of 30 days of transcripts from
+// both config dirs on this machine: 2,536 transcripts, 146,621 Bash calls
+// deduped by tool_use id, 4,549 mentioning `.env`. It refuses 33. Three of
+// those 33 recorded output the scrubber reads as credential-shaped. About 26
+// print value lines by construction (`grep '^KEY=' .env`, `cat .env`, `cut
+// -d= -f1` over a file with comments). About 7 are arguable: a public
+// Supabase URL grepped three times, a test fixture, two key-only patterns the
+// recogniser is too strict to accept, and a grep of boolean flag values. Each
+// of those has the sanctioned alternative the reason prints.
+//
+// WHY IT LIVES HERE, not in pre-tool-filter.js: the same cost argument as the
+// second guard. That hook's matcher is Read|Write|Edit, and widening it to
+// Bash reverses the 2026-08-17 decision its suite asserts. A branch here costs
+// one regex on the quiet path, and on the 3.1% of calls that mention `.env`
+// a require and about 2 µs of tokenising. Nor in hooks/fn/bash-rules.mjs:
+// those rules load only with CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1, and the
+// seat the incident happened on did not set it.
+//
+// FAILS OPEN on its own errors, like every path in this file: a throw inside
+// the recogniser allows the command rather than killing the turn.
+// ===========================================================================
+
 try {
     let data;
     try {
@@ -422,6 +456,22 @@ try {
     if (!command) process.exit(0);
 
     const cwd = path.resolve(data.cwd || process.cwd());
+
+    // The third guard. A block, so it runs before the ask can be delivered.
+    const MAY_READ_ENV = /\.env/i;   // same as scripts/env-file-read.js
+    if (MAY_READ_ENV.test(command)) {
+        let envHit = null;
+        let envReason = null;
+        try {
+            const lib = require(path.join(__dirname, '..', 'scripts', 'env-file-read.js'));
+            envHit = lib.findEnvFileRead(command);
+            envReason = lib.envReadReason;
+        } catch { envHit = null; }
+        if (envHit) {
+            process.stderr.write(envReason(envHit));
+            process.exit(2);
+        }
+    }
 
     // The ask is decided up front and DELIVERED at every allow below, so a
     // block (exit 2) still wins when both apply, and a session with no role
