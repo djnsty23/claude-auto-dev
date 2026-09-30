@@ -498,6 +498,30 @@ function scanForTokens(tokens, roots, limit = 10) {
     return hits;
 }
 
+/**
+ * Memory files above the task repo that claude loads as project memory.
+ * `[measured 2026-09-30]` claude walks up from its cwd to the root and reads
+ * each directory's CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md and
+ * .claude/rules/*.md, so a work root under the home directory loaded the live
+ * ~/.claude/CLAUDE.md and every live rule as project memory beside the frozen
+ * config. --config-dir moves only the user layer. The repo's own CLAUDE.md is
+ * part of the task and is not listed.
+ */
+function ancestorMemory(repo) {
+    const found = [];
+    let dir = path.dirname(path.resolve(repo));
+    for (;;) {
+        for (const name of ['CLAUDE.md', 'CLAUDE.local.md', path.join('.claude', 'CLAUDE.md')]) {
+            const f = path.join(dir, name);
+            try { if (fs.statSync(f).isFile()) found.push(f); } catch { /* absent */ }
+        }
+        for (const f of walk(path.join(dir, '.claude', 'rules'))) if (f.endsWith('.md')) found.push(f);
+        const up = path.dirname(dir);
+        if (up === dir) return found;
+        dir = up;
+    }
+}
+
 // ---------------------------------------------------------------- env
 /** The worker's env: no credential but the one account token, under the name claude reads. */
 function workerEnv(base, account) {
@@ -607,6 +631,12 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, escalation 
     // answer (its leakTerms): either one in the room refuses the run.
     const tokens = [...(task.fixSha ? fixTokens(c, task) : []), ...(task.leakTerms || [])];
     const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir]);
+    // Memory above the repo reaches the worker whatever it holds, so any file
+    // refuses the run. FRONTIER_ALLOW_ANCESTOR_MEMORY=1 records it instead, for
+    // the suite's fake claude, which loads no memory.
+    const ancestors = ancestorMemory(p.repo);
+    const ancestorsAllowed = process.env.FRONTIER_ALLOW_ANCESTOR_MEMORY === '1';
+    if (!ancestorsAllowed) for (const f of ancestors) hits.push({ token: 'ancestor memory', file: f });
     fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo, escalation ? escalation.output : null));
     const meta = {
         run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, model: target.model, effort: target.effort || null,
@@ -617,7 +647,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, escalation 
         repo: p.repo, cfg: p.cfg, log: p.log, report: p.report, prompt: p.prompt,
         pin: { tag: pin.tag, hash: pin.hash, plugins: pin.plugins, dir: pin.pluginDir },
         snapshot: snap.id, harnessCommit: revParse(c.src, 'HEAD'), plantAt: plant.at,
-        contamination: { tokens: tokens.length, hits },
+        contamination: { tokens: tokens.length, hits, ancestors, ancestorsAllowed },
         state: hits.length ? 'contaminated' : 'prepared',
     };
     writeJsonAtomic(p.meta, meta);
@@ -1421,6 +1451,6 @@ if (require.main === module) {
     }
 }
 
-module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
+module.exports = { parseArgs, fixTokens, scanForTokens, ancestorMemory, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows, routeFor,
     RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, sentencesOf, hedgedSentence, processList, heavyJobs, noteLoad, loadRecord, quietGate, resumeBatch, failingOutput, HEAVY_RE };
