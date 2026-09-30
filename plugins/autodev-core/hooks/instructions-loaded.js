@@ -56,18 +56,31 @@ const KEEP_BYTES = 600 * 1024;
 // check-rules-reachable.js reads the same pattern. test-instructions-loaded.js
 // drives both, so a rename on one side fails there.
 const SEGMENT = /^instructions-loaded\.\d{13}-\d+\.jsonl$/;
+// A segment under ROTATE_BYTES was cut by a load racing another rotation, and is
+// spared from pruning until it is this old. See rotate().
+const SPARE_MS = 60 * 60 * 1000;
 
 function rotate(fs, path, dir, log) {
     const { size } = fs.statSync(log);
     if (size < ROTATE_BYTES) return;
     const seg = path.join(dir, `instructions-loaded.${String(Date.now()).padStart(13, '0')}-${process.pid}.jsonl`);
     fs.renameSync(log, seg);
+    // Two loads that both saw the log over the line both rename. The second one
+    // renames the fresh live log the first started, so its small segment holds
+    // the newest rows on disk even when its name sorts older. Pruning by name
+    // alone deleted it: 20 concurrent loads on POSIX CI kept 11 of 20 rows. A
+    // segment under the line is therefore spared while it is young, and the cap
+    // still bounds the full ones.
     let kept = 0;
+    const now = Date.now();
     const segs = fs.readdirSync(dir).filter((n) => SEGMENT.test(n)).sort().reverse();
     for (const n of segs) {
         const p = path.join(dir, n);
-        if (kept >= KEEP_BYTES) { try { fs.unlinkSync(p); } catch { /* another load pruned it */ } continue; }
-        try { kept += fs.statSync(p).size; } catch { /* pruned meanwhile */ }
+        let st;
+        try { st = fs.statSync(p); } catch { continue; /* pruned meanwhile */ }
+        if (kept < KEEP_BYTES) { kept += st.size; continue; }
+        if (st.size < ROTATE_BYTES && now - st.mtimeMs < SPARE_MS) continue;
+        try { fs.unlinkSync(p); } catch { /* another load pruned it */ }
     }
 }
 

@@ -147,6 +147,32 @@ const filesIn = (rows) => new Set((rows || []).map((x) => x.file));
     });
 }
 
+function raceState() {
+    // The state twenty racing loads leave on POSIX, planted: a small segment
+    // holding the newest rows, named OLDER than the full segment this load cuts.
+    // Pruning by name alone deleted it (CI kept 11 of 20). A small segment past
+    // the spare age, and a full one past the cap, are still pruned.
+    seedFull(4100);
+    const small = (ts, tag) => {
+        const f = path.join(LOGS, `instructions-loaded.${String(ts).padStart(13, '0')}-1.jsonl`);
+        fs.writeFileSync(f, JSON.stringify({ at: '2026-09-24T00:00:02Z', file: `C:/p/${tag}.md`, reason: 'session_start', scoped: false, bytes: 1, cwd: 'C:/p' }) + '\n');
+        return f;
+    };
+    const racing = small(1, 'racing-row');
+    const stale = small(2, 'stale-row');
+    const hourAgo = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
+    fs.utimesSync(stale, hourAgo, hourAgo);
+    const oldFull = path.join(LOGS, 'instructions-loaded.0000000000000-1.jsonl');
+    fs.writeFileSync(oldFull, 'x'.repeat(700 * 1024) + '\n');
+    run(loadRow('C:/p/rotating.md'));
+    const got = filesIn(readLog(LOG));
+    check('race state: the rotation happened (a new full segment exists)', segments().some((n) => !/^instructions-loaded\.000000000000[012]-1\.jsonl$/.test(n)));
+    check('race state: a young small segment named older than the cut survives', fs.existsSync(racing) && got.has('C:/p/racing-row.md'));
+    check('race state: a small segment past the spare age is pruned', !fs.existsSync(stale));
+    check('race state: a full segment past the cap is pruned', !fs.existsSync(oldFull));
+    check('race state: the rotating load\'s own row survives', got.has('C:/p/rotating.md'));
+}
+
 function retention() {
     // Rotation is bounded: the live log plus the newest segments reaching the
     // cap. Three rotations in a row leave the oldest one gone.
@@ -209,6 +235,7 @@ check('a repo with no log exits 0', rep.status === 0);
 check('...and says NO EVIDENCE rather than reporting rules', /NO EVIDENCE/.test(rep.stdout || ''));
 
 concurrent.then(() => {
+    raceState();
     retention();
     try { fs.rmSync(sandbox, { recursive: true, force: true }); } catch { /* tmp */ }
     try { fs.rmSync(fresh, { recursive: true, force: true }); } catch { /* tmp */ }
