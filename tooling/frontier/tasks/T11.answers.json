@@ -8,7 +8,7 @@
     { "id": "R3", "why": "the task tree carries no history that holds the fix", "text": ["git archive", "one[- ]commit", "single[- ]commit", "no (?:git )?history", "without (?:git )?history", "strip(?:ped|s)? (?:the |its )?history", "git init", "orphan", "shallow", "fresh (?:git )?repo", "git log (?:would )?(?:show|reveal|leak)s?"] },
     { "id": "R4", "why": "each task is planted: red unfixed, green fixed", "text": ["\\bplant", "(?:red|fail\\w*)[\\s\\S]{0,60}(?:unfixed|before the fix|pre-?fix|parent)", "(?:unfixed|before the fix|pre-?fix|parent)[\\s\\S]{0,60}(?:red|fail)"] },
     { "id": "R5", "why": "the worker's config cannot carry the answer", "text": ["fresh (?:config|profile|home|claude)", "isolated (?:config|profile|home)", "empty (?:config|profile|home)", "CLAUDE_CONFIG_DIR", "--config-dir", "config[- ]dir", "contaminat", "(?:memory|memories|lessons|plugin cache)[\\s\\S]{0,60}(?:leak|contain|hold|carr|know|answer)", "leak[\\s\\S]{0,40}(?:memory|memories|lessons)"] },
-    { "id": "R6", "why": "the runner runs the checks, not the worker's claim", "text": ["\\b(?:runner|harness|grader|script|we)\\b[\\s\\S]{0,40}(?:runs?|executes?|grades?)[\\s\\S]{0,30}(?:checks?|tests?|suites?)", "not (?:the )?(?:worker|model|agent)'?s? (?:own )?(?:claim|report|word|say)", "(?:never|don't|do not) trust (?:the )?(?:worker|model|agent)"] },
+    { "id": "R6", "why": "the runner runs the checks, not the worker's claim", "text": ["\\b(?:runner|harness|grader|script|we)\\b[\\s\\S]{0,40}(?:runs?|executes?|grades?)[\\s\\S]{0,30}(?:checks?|tests?|suites?)", "not (?:the )?(?:worker|model|agent)'?s? (?:own )?(?:claim|report|word|say)", "(?:never|don't|do not) trust (?:the )?(?:worker|model|agent)", "claim(?:s|ed)?\\b[\\s\\S]{0,40}\\b(?:match|against|versus|vs\\.?|agree)", "(?:compare|check|match)\\w*\\b[\\s\\S]{0,30}\\b(?:RESULT|report|claim)\\w*\\b[\\s\\S]{0,40}\\b(?:measured|actual|command output|gate|tests?)\\b"] },
     { "id": "R7", "why": "repeats, because one run is noise", "text": ["\\bk ?= ?\\d", "repeat", "repetition", "several runs", "multiple runs", "(?:three|3|five|5) (?:runs|times|repeats)", "variance", "noise", "noisy", "run[- ]to[- ]run", "confidence", "significan"] },
     { "id": "R8", "why": "the same tasks and conditions, one variable", "text": ["same (?:tasks?|set|conditions|prompt|brief|harness|config)", "identical (?:tasks?|task set|set|conditions|prompt|brief|harness)", "one (?:variable|axis|thing) (?:at a time|changes|moves)", "only the model (?:changes|differs|varies)", "changing only the model", "hold(?:ing)? everything else", "paired", "head[- ]to[- ]head"] },
     { "id": "R9", "why": "cost is measured, not only pass rate", "text": ["\\btokens?\\b", "\\bcost", "\\bspend", "wall[- ]?(?:clock|time)", "duration", "latency", "\\bminutes\\b", "elapsed"] },
@@ -48,6 +48,19 @@
           { "do": "Report pass rate, token cost and duration per model." }
         ],
         "risks": ["Eight tasks cannot show a small gap."]
+      },
+      {
+        "steps": [
+          { "do": "Pick about ten tasks from this repository's history: merged fixes whose PR added or changed a test, each with a mechanical endpoint.", "creates": ["tooling/frontier/tasks/T1.json"], "commands": ["git log --oneline --merges"] },
+          { "do": "For each task, build the worker's repo with git archive of the parent commit into a fresh one-commit repo, so git log cannot show the fix." },
+          { "do": "Hold the fix's tests out of that repo and copy them in only after the worker stops. Grade each run by script: compare the worker's claims against the measured result of those tests." },
+          { "do": "Plant each task: its held-out tests must fail on the unfixed tree and pass on the fix, or the task is dropped." },
+          { "do": "Run every worker in a fresh config dir with no memory, lessons or plugin cache that could hold the fix, and grep it for the fix's distinctive tokens before each run." },
+          { "do": "Run Opus and Sonnet on the same tasks with the same brief and harness, changing only the model, k=3 each to see run-to-run noise." },
+          { "do": "Record pass, tokens and wall time per run and compare pass rate against cost.", "creates": ["tooling/frontier/run.js"] },
+          { "do": "Gate the runner with a suite that drives it through a fake claude binary, so the harness is tested without spending tokens.", "creates": ["tooling/test-frontier.js"] }
+        ],
+        "risks": ["Ten tasks at k=3 separate the models only when the gap is large.", "A task whose brief names the fix measures nothing."]
       }
     ],
     "careless": {
