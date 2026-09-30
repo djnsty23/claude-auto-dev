@@ -1,0 +1,37 @@
+{
+  "_doc": "Held-out key for T12. The cause is the predicate in the suite: fullMs < emptyMs * 2 + 25 budgets the files' cost as a multiple of the bare spawn time. A fast runner measures a small empty time and gets a tight allowance that one ordinary stall exceeds, while a slow machine's large empty time makes the budget generous, so it never reproduces there. A pass names the suite and matches both groups. A hedged mechanism fails.",
+  "cause": {
+    "files": ["tooling/test-inbox.js"],
+    "groups": [
+      {
+        "id": "baseline",
+        "why": "the budget is a multiple of, or scales with, the empty-inbox spawn time",
+        "match": ["^(?=[\\s\\S]*(?:empty|baseline|spawn|startup|start-up|process start))(?=[\\s\\S]*(?:multipl|\\* ?2|\\bx ?2\\b|\\b2 ?x\\b|two times|twice|double|scales? with|proportional|relative to|ratio|derived from|depends on|tied to))"]
+      },
+      {
+        "id": "faster",
+        "why": "so a faster machine gets a tighter budget and a slow one a generous budget",
+        "match": [
+          "(?:fast|quick|small(?:er)? (?:baseline|empty|spawn)|low(?:er)? (?:baseline|spawn))[\\s\\S]{0,80}(?:tight|small(?:er)? (?:budget|allowance|margin|headroom|limit|threshold)|less (?:headroom|room|slack|margin)|strict|lower (?:budget|limit|ceiling|threshold))",
+          "(?:tight|strict)[\\s\\S]{0,80}(?:fast|quick)",
+          "slow[\\s\\S]{0,80}(?:generous|loose|lenient|more (?:headroom|room|slack|margin)|larger (?:budget|allowance|margin)|bigger (?:budget|allowance|margin)|(?:budget|allowance|margin|headroom|limit|threshold) (?:is |gets |grows )?(?:larger|bigger|looser|wider))"
+        ]
+      }
+    ]
+  },
+  "maxMechanism": 600,
+  "examples": [
+    { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The flat-cost check allows fullMs < emptyMs * 2 + 25, a budget proportional to the empty spawn cost. A fast runner measures a small empty baseline and so gets a tight allowance that one ordinary 100ms stall exceeds, while a slow Mac's 200ms baseline leaves plenty of room." }, "ruledOut": ["the hook reading file contents"] },
+    { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The assertion budgets the 25-file cost as twice the empty-inbox time plus 25ms, so the allowance scales with how fast the machine spawns node: the quick macOS runner at 38ms gets a much smaller margin, and a single filesystem hiccup fails it." } },
+    { "cause": { "file": "./tooling/test-inbox.js", "mechanism": "Slow machines get a generous limit and fast ones a strict one: the threshold is a multiple of the empty-run baseline, so the 38ms CI Mac allows about 63ms for the files while the 200ms developer Mac allows over 200ms." } },
+    { "cause": { "file": "tooling/test-inbox.js", "mechanism": "fullMs < emptyMs * 2 + 25 grants the 25 files a margin of the empty spawn time plus 25ms. On a slower machine that allowance grows larger, which is why the developer Mac cannot reproduce a 113ms stall that fails the 38ms CI runner." } }
+  ],
+  "decoys": [
+    { "id": "noisy-runner", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The macOS CI runners are shared and noisy, so a garbage-collection pause or a disk stall during the 25-file run adds about 100ms and pushes it over the budget." } } },
+    { "id": "hook-reads-files", "answer": { "cause": { "file": "plugins/autodev-core/hooks/inbox-notify.js", "mechanism": "The hook reads every waiting file's contents instead of only statting it, so 25 files of 4 KB cost over 100ms on the macOS runner's slower disk." } } },
+    { "id": "apfs-stat", "answer": { "cause": { "file": "plugins/autodev-core/scripts/inbox-watch.js", "mechanism": "On APFS the first stat of a freshly created file is slow, so listing 25 new files costs about 100ms more than the empty inbox on a fresh CI disk." } } },
+    { "id": "baseline-without-faster", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is twice the empty baseline plus 25ms, and the 25-file run on macOS takes longer because APFS stats are expensive, so it exceeds that budget." } } },
+    { "id": "faster-without-baseline", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "Fast CI machines leave tight timing, so any 100ms stall during the 25-file run fails the check." } } },
+    { "id": "hedged", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is a multiple of the empty spawn time, so a fast runner gets a tight allowance that one stall exceeds. Possibly the runner is also just noisy." } } }
+  ]
+}

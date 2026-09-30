@@ -1,0 +1,13 @@
+{
+  "id": "T12",
+  "lane": "diagnose",
+  "size": "M",
+  "source": "039751f5 test-inbox flat-cost budget red on the macOS leg only",
+  "parent": "b9d0d564f832fb2d9294c64a805d1199a348eb64",
+  "fix": "039751f55c5b11980ac5cdaa8c778e786e92c632",
+  "brief": "T12.md",
+  "answerFile": "frontier-answer.json",
+  "expected": "T12.answers.json",
+  "leakTerms": ["tighter on faster", "TIGHTER on faster", "multiple of an unrelated"],
+  "timeoutMin": 30
+}

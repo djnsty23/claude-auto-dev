@@ -1,0 +1,38 @@
+{
+  "_doc": "Held-out key for T10. The cause is the probe in the suite, not the writer: a start renames two fresh .tmp files over the ledger, the first rename frees the old inode, and ext4 hands that number to the next file created, so a ledger replaced twice can end on the inode it started with. A pass names the suite and matches every group. A hedged mechanism fails.",
+  "cause": {
+    "files": ["tooling/test-headless-worker.js"],
+    "groups": [
+      {
+        "id": "reuse",
+        "why": "the inode number is reused after a rename frees it",
+        "match": ["^(?=[\\s\\S]*(?:inode|\\bino\\b|identit|dev:ino|file id))(?=[\\s\\S]*(?:reus|re-us|recycl|realloc|re-alloc|freed|releas|vacat|lowest free|free inode|hand(?:s|ed)? (?:it |that |the (?:old |same )?(?:number |inode )?)?(?:out|back)|(?:hand(?:s|ed)?|give[sn]?|gave|assign(?:s|ed)?|allocat\\w*)\\b[^.]{0,40}\\b(?:same|old|original|previous|freed|starting|initial)\\b|(?:gets?|got|receives?|takes?|ends? up with|lands? on)\\b[^.]{0,20}\\b(?:same|old|original|previous|starting|initial) (?:inode|ino\\b|number|identit)))"]
+      },
+      {
+        "id": "probe",
+        "why": "so the before and after identities of the ledger match and a replaced file reads as not replaced",
+        "match": [
+          "(?:same|original|old|starting|initial|previous|first|earlier|prior)\\b[\\s\\S]{0,40}(?:inode|\\bino\\b|identit|number|dev:ino)",
+          "(?:read|reads|look|looks|count|counts|counted|seen|appear|appears|register|registers)(?: as)? (?:unchanged|not replaced|never replaced|no change|the same)",
+          "\\bno change\\b",
+          "(?:inode|identit|number)[\\s\\S]{0,30}(?:as before|it started with|it had before|unchanged)"
+        ]
+      }
+    ]
+  },
+  "maxMechanism": 600,
+  "examples": [
+    { "cause": { "file": "tooling/test-headless-worker.js", "mechanism": "The case compares the ledger's dev:ino before and after a start that writes it twice. The first rename frees the old inode and ext4 reuses that just-freed number for the second .tmp, so the replaced ledger ends with its original inode and reads as not replaced." }, "ruledOut": ["a truncating write in the worker"] },
+    { "cause": { "file": "./tooling/test-headless-worker.js", "mechanism": "On ext4 a freshly freed inode number is handed out again to the next file created. A start renames two new .tmp files over the ledger, so the second can get the same inode number the ledger had before the start, and the check counts a real replacement as no change." } },
+    { "cause": { "file": "tooling\\test-headless-worker.js", "mechanism": "Inode recycling: the probe assumes a replaced file always gets a new inode, but Linux ext4 reallocates the just-released inode to the next .tmp, so after two renames the ledger can carry its starting inode again." } },
+    { "cause": { "file": "tooling/test-headless-worker.js", "mechanism": "Each start writes the ledger twice through a .tmp and rename. On ext4 the second .tmp gets the same inode number the ledger had before the start, so the dev:ino taken before and after are equal although the file was replaced." } }
+  ],
+  "decoys": [
+    { "id": "writer-not-atomic", "answer": { "cause": { "file": "plugins/autodev-core/scripts/headless-worker.js", "mechanism": "writeLedgerFile renames the .tmp over the ledger, and on Linux renameSync is not atomic under load, so about one write in ten lands as a truncating write in place and keeps the file identity." } } },
+    { "id": "timing-race", "answer": { "cause": { "file": "tooling/test-headless-worker.js", "mechanism": "The case stats the ledger before the detached supervisor has finished writing it, so on slow Ubuntu runners the after reading is taken too early: a timing race between the test and the supervisor." } } },
+    { "id": "stat-cache", "answer": { "cause": { "file": "tooling/test-headless-worker.js", "mechanism": "Node's statSync on Linux returns a cached dev and ino for a path renamed within the same millisecond, so the after reading repeats the old identity." } } },
+    { "id": "reuse-without-probe", "answer": { "cause": { "file": "tooling/test-headless-worker.js", "mechanism": "ext4 reuses inode numbers aggressively, which makes renames slower on the Ubuntu runner, so one start in ten times out before its write lands." } } },
+    { "id": "hedged", "answer": { "cause": { "file": "tooling/test-headless-worker.js", "mechanism": "ext4 reuses the just-freed inode number for the next .tmp, so the ledger can end with its original inode and read as not replaced. Alternatively the supervisor may be racing the write." } } },
+    { "id": "right-mechanism-writer-file", "answer": { "cause": { "file": "plugins/autodev-core/scripts/headless-worker.js", "mechanism": "The first rename frees the old inode and ext4 reuses that just-freed number for the second .tmp, so the replaced ledger ends with its original inode and reads as not replaced." } } }
+  ]
+}
