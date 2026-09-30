@@ -1,0 +1,14 @@
+{
+  "id": "T6",
+  "lane": "fix",
+  "size": "M",
+  "source": "19bc63ff (#284) headless-worker settle --lost",
+  "parent": "ddb3a6de2baa3ca6ce1de5c7a2b156841fbb4d6a",
+  "fix": "19bc63ff319238ea93b52fe6865e8b96a405099f",
+  "brief": "T6.md",
+  "heldOut": ["tooling/test-headless-worker.js"],
+  "checks": [["node", "tooling/test-headless-worker.js"]],
+  "passToPass": [],
+  "disclosed": ["--lost", "not-lost", "without --lost", "unknown-code", "not-exited", "settle --lost", "CLAUDE_EXIT", "reason", "settledAt", "started <startedAt>", "before this boot", "pid <pid> is dead", "sentence", "reportResult", "settledAs", "lostReason", " settledAs=lost (<reason>)", "settle --code <CODE> [--lost]", "settle --lost:", "Refused unless"],
+  "timeoutMin": 45
+}

@@ -1,0 +1,15 @@
+{
+  "id": "T2",
+  "lane": "fix",
+  "size": "XS",
+  "source": "ad59da72 --help pair (A12)",
+  "parent": "62c539a57777787665995ad6b4cde2974bcfe80b",
+  "fix": "ad59da72f7baf553dd62f9eef29a78f22c8ee7c9",
+  "brief": "T2.md",
+  "heldOut": [],
+  "checks": [["node", "{frontier}/checks/help-fast.js", "tooling/extract-plugin-types.js", "tooling/reap-orphan-waiters.js", "--budget-ms", "1000"]],
+  "passToPass": [["node", "tooling/test-entrypoints.js"]],
+  "disclosed": [],
+  "contaminationWaiver": "the fix is a generic --help branch that adds no identifier the parent lacks, so there is no token to search for",
+  "timeoutMin": 20
+}

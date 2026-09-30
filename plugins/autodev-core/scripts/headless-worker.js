@@ -44,6 +44,7 @@
  *   node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>
  *        [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]
  *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]
+ *        [--plugin-dir <dir>]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
  *   node headless-worker.js settle --code <CODE> [--lost] [--unreported] [--ledger <file>] [--json]
@@ -64,6 +65,7 @@ const USAGE = [
     'Usage: node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>',
     '            [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]',
     '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]',
+    '            [--plugin-dir <dir>]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
     '       node headless-worker.js settle --code <CODE> [--lost] [--unreported] [--ledger <file>] [--json]',
@@ -73,6 +75,8 @@ const USAGE = [
     '       --config-dir is an absolute path, ~ or ~/<name>. A bare relative name is refused, and so is',
     '       a directory that does not exist, before anything is spawned or recorded.',
     '       --effort is one of low|medium|high|xhigh|max, passed to claude as --effort <level>; omitted, argv has no --effort.',
+    '       --plugin-dir is passed to claude as --plugin-dir <dir>: a plugin, or a directory whose children are plugins.',
+    '       It must be a directory. A run that pins its plugins this way loads that tree, whatever the config dir installed.',
     '       start refuses a script outside a plugin cache, because a worker started from a checkout runs code no',
     '       release shipped. --dev runs the checkout on purpose. Every record names the version and script that ran.',
     'status: two axes per record, process (running|exited|unknown) and result (none|done|stopped|failed|unparseable).',
@@ -190,7 +194,7 @@ function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'dry-run', 'json', 'lost', 'unreported', 'dev'];
     const known = ['_', ...flags, 'code', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
-        'permission-mode', 'cwd', 'claude-bin', 'ledger'];
+        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -207,6 +211,7 @@ function parseArgs(argv) {
     return out;
 }
 
+function isDir(p) { try { return fs.statSync(p).isDirectory(); } catch { return false; } }
 function homeDir() { return process.env.USERPROFILE || process.env.HOME || os.homedir(); }
 function defaultLedger() { return path.join(claudePaths.configDir(), 'autodev', 'headless-workers.json'); }
 function defaultReport(log) { return log.replace(/\.[^./\\]+$/, '') + '.report.md'; }
@@ -388,8 +393,9 @@ function readPrompt(file, scratchDir, o = {}) {
     return prompt;
 }
 
-function buildArgv({ claudeBin, prompt, model, effort, permissionMode }) {
+function buildArgv({ claudeBin, prompt, model, effort, permissionMode, pluginDir = null }) {
     return [claudeBin, '-p', prompt, ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []),
+        ...(pluginDir ? ['--plugin-dir', pluginDir] : []),
         '--permission-mode', permissionMode, '--output-format', 'stream-json', '--verbose'];
 }
 
@@ -497,6 +503,7 @@ function startOptions(opts) {
         configDir: opts['config-dir'] ? resolveConfigDir(opts['config-dir']) : null,
         model: opts.model || null,
         effort: opts.effort ? requireEffort(opts.effort) : null,
+        pluginDir: opts['plugin-dir'] ? path.resolve(opts['plugin-dir']) : null,
         permissionMode: opts['permission-mode'] || 'default',
         cwd: opts.cwd ? path.resolve(opts.cwd) : process.cwd(),
         claudeBin: resolveClaudeBin(opts['claude-bin'] || 'claude'),
@@ -518,6 +525,7 @@ function supervisorFlags(o) {
     if (o.model) flags.push('--model', o.model);
     if (o.effort) flags.push('--effort', o.effort);
     if (o.configDir) flags.push('--config-dir', o.configDir);
+    if (o.pluginDir) flags.push('--plugin-dir', o.pluginDir);
     return flags;
 }
 
@@ -529,14 +537,15 @@ function start(opts) {
             + 'Run the installed copy under <config dir>/plugins/cache/, or pass --dev to run this checkout on purpose');
     }
     if (o.configDir) requireConfigDirExists(o.configDir);
+    if (o.pluginDir && !isDir(o.pluginDir)) fault('plugin-dir-missing', `--plugin-dir resolved to ${o.pluginDir}, which is not a directory`);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     if (opts['dry-run']) {
         return {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
-            configDir: o.configDir, effort: o.effort,
+            configDir: o.configDir, effort: o.effort, pluginDir: o.pluginDir,
             script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev,
             log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
             wouldMoveAside: priorRunFiles(o),
@@ -552,7 +561,7 @@ function start(opts) {
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
         version: placement.version, script: placement.script, dev: !placement.installed,
-        model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, state: 'starting',
+        model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, pluginDir: o.pluginDir, state: 'starting',
     };
     const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;
     withLedger(o.ledger, (ledger) => {
@@ -596,7 +605,7 @@ function start(opts) {
 function supervise(opts) {
     const o = startOptions(opts);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir });
     const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     const plan = spawnPlan(argv);
     fs.mkdirSync(path.dirname(o.log), { recursive: true });
