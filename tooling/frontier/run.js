@@ -50,6 +50,8 @@ const USAGE = [
     '  status [--json]                 batches and the latest rows',
     'Lanes: fix (held-out checks), locate (F1), review (planted defects), decide (choices and orders),',
     '       diagnose (one cause: file and mechanism keywords, decoys fail), plan (implied requirements, traps fail).',
+    'A variant with a route map (V3) runs the variant its brief routes to: mechanical when the brief names a test,',
+    '  an npm script, an exit code or checks the work must pass, open otherwise. The row keeps route and routedTo.',
     'Options: --src <repo> --tasks-dir <dir> --data <dir> --work <dir> --claude-bin <path> --hw <headless-worker.js>',
     '         --budget-stop 0.70 (seven-day utilisation that stops a batch) --api-sources none (allowed apiKeySource values)',
     'The account token is read from CLAUDE_CODE_OAUTH_TOKEN_<ACCOUNT> and handed to the worker as',
@@ -396,6 +398,57 @@ function loadVariant(id) {
     return Object.assign({ id }, v);
 }
 
+// ---------------------------------------------------------------- routing
+// What a brief says about how its work ends. An endpoint is a test file, an npm
+// script or check, an exit code, or checks and suites that must pass. A change
+// is an order to change code. A judgement is a decision, a plan, a diagnosis, a
+// review or a list. Hands-off forbids changing anything.
+const ROUTE_SIGNALS = {
+    endpoint: [
+        ['test-file', /\btest-[\w.-]+\.(?:[cm]?js|ts)\b|\b[\w-]+\.(?:test|spec)\.[cm]?[jt]sx?\b/i],
+        ['npm-script', /\bnpm (?:test|run [\w:.-]+)|\bcheck:[\w-]+/i],
+        ['exit-code', /\bexits? (?:with )?(?:code |status )?\d\b|\bexit (?:code|status)\b/i],
+        ['checks', /\bchecks? (?:use|read|call)\b|\b(?:tests?|suites?|checks?|gate) (?:must |should |to )?(?:pass|go green|turn green|stay green|are green|is green)\b|\bmake (?:the |it |them )?(?:tests?|suites?|checks?|gate) (?:pass|green)\b/i],
+    ],
+    change: [
+        ['imperative', /(?:^|[.!?:]\s+|\n\s*(?:[-*]\s+)?)(?:fix|make|implement|repair)\b/i],
+        ['wanted', /\bcorrect behaviou?r:|\bwanted:|\bnew export\b/i],
+    ],
+    judgement: [
+        ['decide', /\b(?:decide|choose|pick (?:one|between)|which option|recommend)\b/i],
+        ['plan', /\b(?:plan|propose|design) (?:how|the|a|an)\b/i],
+        ['diagnose', /\b(?:find|name|identify|explain) (?:the )?(?:root )?cause\b|\bdiagnos/i],
+        ['review', /\breview\b/i],
+        ['list', /\b(?:list|find) every\b/i],
+    ],
+    handsOff: [
+        ['no-change', /\b(?:do not|don't|never) (?:fix|build|change|edit|implement|modify)\b/i],
+    ],
+};
+/**
+ * The route a brief asks for: `mechanical` when it names an endpoint the work
+ * ends in and either orders a change or asks for no judgement, `open`
+ * otherwise. A test or gate named inside a decision, a diagnosis or a plan is
+ * the situation or an option, not the endpoint, and a brief that forbids
+ * changes ends in no suite whatever it names.
+ */
+function routeFor(brief) {
+    const text = String(brief || '');
+    const hit = (group) => ROUTE_SIGNALS[group].filter(([, re]) => re.test(text)).map(([id]) => id);
+    const signals = { endpoint: hit('endpoint'), change: hit('change'), judgement: hit('judgement'), handsOff: hit('handsOff') };
+    const mechanical = !signals.handsOff.length && signals.endpoint.length > 0 && (signals.change.length > 0 || !signals.judgement.length);
+    return { route: mechanical ? 'mechanical' : 'open', signals };
+}
+/** The variant that runs: one with a route map hands the run to the variant its route names, one hop only. */
+function resolveVariant(variant, route) {
+    if (!variant.route) return variant;
+    const to = variant.route[route];
+    if (!to) fault('bad-variant', `variant ${variant.id} has no target for the ${route} route`);
+    const target = loadVariant(to);
+    if (target.route) fault('bad-variant', `variant ${variant.id} routes to ${to}, which routes again`);
+    return target;
+}
+
 // ---------------------------------------------------------------- contamination
 const CODEY = (w) => /[A-Z].*[A-Z_0-9]|[a-z][A-Z]|_|\d|-/.test(w.slice(1)) || /^[A-Z_0-9]{6,}$/.test(w);
 /**
@@ -515,7 +568,14 @@ function plantOk(c, task) {
 function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
     const task = loadTask(c, taskId);
     const variant = loadVariant(variantId);
-    if (variant.lanes && !variant.lanes.includes(task.lane)) fault('lane-mismatch', `variant ${variant.id} runs only ${variant.lanes.join(',')} and ${task.id} is ${task.lane}`);
+    const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
+    // Every run records its brief's route, so frontier.js can derive the routed
+    // variant from rows measured without it. A routed variant runs its target.
+    const routing = routeFor(brief);
+    const target = resolveVariant(variant, routing.route);
+    if (target.lanes && !target.lanes.includes(task.lane)) {
+        fault('lane-mismatch', `variant ${target.id}${target === variant ? '' : ` (where ${variant.id} routes ${routing.route})`} runs only ${target.lanes.join(',')} and ${task.id} is ${task.lane}`);
+    }
     const plant = plantOk(c, task);
     const run = newRunId(c, task, variant, repeat);
     const p = runPaths(c, run);
@@ -527,10 +587,10 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
     // answer (its leakTerms): either one in the room refuses the run.
     const tokens = [...(task.fixSha ? fixTokens(c, task) : []), ...(task.leakTerms || [])];
     const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir]);
-    const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
     fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo));
     const meta = {
-        run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, model: variant.model, effort: variant.effort || null,
+        run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, model: target.model, effort: target.effort || null,
+        route: routing.route, routeSignals: routing.signals, routedTo: target === variant ? null : target.id,
         account, repeat, createdAt: new Date().toISOString(), timeoutMin: Number(task.timeoutMin || 30),
         repo: p.repo, cfg: p.cfg, log: p.log, report: p.report, prompt: p.prompt,
         pin: { tag: pin.tag, hash: pin.hash, plugins: pin.plugins, dir: pin.pluginDir },
@@ -777,8 +837,8 @@ function appendRow(c, row) {
 }
 function rowFor(c, meta, extra) {
     return Object.assign({
-        v: 1, run: meta.run, task: meta.task, lane: meta.lane, variant: meta.variant, account: meta.account, repeat: meta.repeat,
-        taskHash: meta.taskHash, startedAt: meta.startedAt || null,
+        v: 1, run: meta.run, task: meta.task, lane: meta.lane, variant: meta.variant, route: meta.route || null, routedTo: meta.routedTo || null,
+        account: meta.account, repeat: meta.repeat, taskHash: meta.taskHash, startedAt: meta.startedAt || null,
         fingerprint: { requestedModel: meta.model, effort: meta.effort, pin: meta.pin.tag, pinHash: meta.pin.hash, plugins: meta.pin.plugins,
             snapshot: meta.snapshot, harnessCommit: meta.harnessCommit, workerVersion: meta.workerVersion || null },
         contaminationTokens: meta.contamination.tokens, finishedAt: new Date().toISOString(),
@@ -1274,5 +1334,5 @@ if (require.main === module) {
 }
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
-    gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows,
+    gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows, routeFor,
     RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };

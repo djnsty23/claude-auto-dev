@@ -108,6 +108,9 @@ function buildTasks(s) {
         write(path.join(TASKS, `${id}.json`), JSON.stringify({ id, lane: 'decide', size: 'S', parent: s.parent, brief: 'TD.md', answerFile: 'frontier-answer.json', expected: `${id}.answers.json`, timeoutMin: 2 }));
         write(path.join(TASKS, `${id}.answers.json`), JSON.stringify(key));
     }
+    // TM: the fix of TX under a brief that names its endpoint, so it routes mechanical.
+    write(path.join(TASKS, 'TM.md'), 'Fix lib/add.js so that `node tooling/test-add.js` exits 0.\n');
+    fixTask('TM', { brief: 'TM.md' });
     // TDG: a diagnosis of the same defect. TDL leaks a keyword group in its brief.
     const diagKey = { cause: { files: ['lib/add.js'], groups: [
         { id: 'op', match: ['subtract|minus|a - b'] }, { id: 'should', match: ['\\bplus\\b|addition|a \\+ b'] }] },
@@ -375,6 +378,7 @@ function unitCases() {
         try { planted.kill(); } catch { /* already gone */ }
     }
     openLaneCases();
+    routeCases();
 }
 
 function openLaneCases() {
@@ -419,6 +423,37 @@ function openLaneCases() {
     check('67g. gradePlan: a step trap with no all words trips nothing', openAll.traps.length === 0 && openAll.pass, openAll.traps);
 }
 
+function routeCases() {
+    const route = (b) => R.routeFor(b).route;
+    const mech = [
+        'Fix the parser so that tooling/test-parse.js passes.',
+        'Make npm test pass.',
+        'Make the gate green.',
+        'The report counts a row twice.\n\nCorrect behaviour: each row once.\n\n## Interface the checks use\n`summarise(rows)` returns one entry per row.',
+    ];
+    check('68a. routeFor: a change whose brief names a test file, an npm script, the gate or the checks routes mechanical',
+        mech.every((b) => route(b) === 'mechanical'), mech.map(route));
+    const open = [
+        'Decide: A merge now, B run npm run gate first, C ask. Write frontier-answer.json.',
+        'tooling/test-inbox.js fails on macOS. Find the cause.',
+        'Plan how to find out whether the tests pass. Do not build anything.',
+        'Review PLAN.md. The suite must pass after it lands.',
+        'List every hook that exits 1 on a no-op path.',
+        'The fix PR #12 is green on npm test. Decide whether to merge it.',
+        '',
+    ];
+    check('68b. routeFor: a decision, a diagnosis, a plan, a review, a list and an empty brief route open, even when they name a test or a gate',
+        open.every((b) => route(b) === 'open'), open.map(route));
+    const handsOff = R.routeFor('tooling/test-add.js exits 1. Do not fix it.');
+    const handsOn = R.routeFor('tooling/test-add.js exits 1. Fix it.');
+    check('68c. routeFor: hands-off turns an endpoint with no judgement open, and the same brief ordering the fix routes mechanical',
+        handsOff.route === 'open' && handsOff.signals.endpoint.length > 0 && handsOff.signals.judgement.length === 0 && handsOff.signals.handsOff.length > 0
+        && handsOn.route === 'mechanical', [handsOff, handsOn]);
+    const both = R.routeFor('Fix lib/add.js so that tooling/test-add.js passes. Pick one of the two approaches in NOTES.md.');
+    check('68d. routeFor: a change order with an endpoint stays mechanical when it also asks for a choice',
+        both.route === 'mechanical' && both.signals.judgement.length > 0 && both.signals.change.length > 0, both);
+}
+
 function cliCases(shas) {
     process.stdout.write('cli\n');
     const help = run(['--help']);
@@ -451,6 +486,7 @@ function cliCases(shas) {
     check('25f. plant: a diagnose brief that matches a keyword group is refused for that alone', p && !p.TDL.ok && p.TDL.reason === 'the brief already matches groups [op]', p && p.TDL);
     check('25g. plant: a plan key passes, and one whose trap example trips nothing is refused naming the trap',
         p && p.TP.ok && p.TP.traps === 2 && !p.TPT.ok && p.TPT.reason === 'traps whose example does not fail on the trap alone [X2]', p && [p.TP, p.TPT]);
+    check('25h. plant: a routable fix task plants like any other', p && p.TM.ok && p.TM.unfixed[0] === 1 && p.TM.fixed[0] === 0, p && p.TM);
     const refusals = [
         ['TDX1', 'a diagnose decoy that passes', 'decoys that pass [same]'],
         ['TDX2', 'a diagnose example that fails', 'examples that fail [2]'],
@@ -562,12 +598,28 @@ function cliCases(shas) {
     fs.writeFileSync(briefPath, briefText);
     check('54c. editing a task brief after its plant check makes the run refuse as plant-stale', stale.json && stale.json.error && stale.json.error.code === 'plant-stale', stale.json);
 
+    // V3 routes at prepare time: a mechanical brief runs V1, an open one V0.
+    const pm = run(['prepare', '--task', 'TM', '--variant', 'V3']);
+    const mm = pm.json && pm.json.value;
+    check('54d. prepare V3 on a brief that names its endpoint runs V1: sonnet at medium, route mechanical, routedTo V1',
+        mm && mm.variant === 'V3' && mm.model === 'claude-sonnet-5-5' && mm.effort === 'medium' && mm.route === 'mechanical' && mm.routedTo === 'V1', mm || pm.json);
+    const po = run(['prepare', '--task', 'TX', '--variant', 'V3']);
+    const mo = po.json && po.json.value;
+    check('54e. prepare V3 on a brief with no endpoint runs V0: opus, route open, routedTo V0',
+        mo && mo.variant === 'V3' && mo.model === 'claude-opus-5-5' && mo.route === 'open' && mo.routedTo === 'V0', mo || po.json);
+    const routedRun = startAndFinish('TM', 'V3', 'fix');
+    const rr = routedRun.row;
+    const seenRouted = readJson(path.join(OUT, 'seen-fix.json'));
+    check('54f. a V3 run records its route and target on the row and starts the target model',
+        rr && rr.verdict === 'pass' && rr.variant === 'V3' && rr.route === 'mechanical' && rr.routedTo === 'V1' && rr.fingerprint.requestedModel === 'claude-sonnet-5-5'
+        && seenRouted && seenRouted.argv.includes('claude-sonnet-5-5'), [rr || routedRun.start.json, seenRouted && seenRouted.argv]);
+
     // The open lanes, graded through finish from the answer file.
     const dkey = readJson(path.join(TASKS, 'TDG.answers.json'));
     const dRight = startAndFinish('TDG', 'V0', 'answer', { FAKE_ANSWER: JSON.stringify(dkey.examples[0]) });
     const dDecoy = startAndFinish('TDG', 'V0', 'answer', { FAKE_ANSWER: JSON.stringify(dkey.decoys[0].answer) });
     check('54g. a diagnose answer is graded from the answer file: the right cause passes, the wrong file fails',
-        dRight.row && dRight.row.verdict === 'pass' && dDecoy.row && dDecoy.row.verdict === 'fail' && dDecoy.row.grade.fileOk === false,
+        dRight.row && dRight.row.verdict === 'pass' && dRight.row.route === 'open' && dDecoy.row && dDecoy.row.verdict === 'fail' && dDecoy.row.grade.fileOk === false,
         [dRight.row ? dRight.row.grade : dRight.start.json, dDecoy.row && dDecoy.row.grade]);
     const pkey = readJson(path.join(TASKS, 'TP.answers.json'));
     const pRight = startAndFinish('TP', 'V0', 'answer', { FAKE_ANSWER: JSON.stringify(pkey.examples.right[0]) });
