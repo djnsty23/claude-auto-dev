@@ -374,6 +374,22 @@ function unitCases() {
         check('17i. the gate is off at 0 minutes, and past its limit it releases the item as timed out, naming the job',
             off === null && gone && gone.record && gone.record.timedOut === true && gone.record.waitedSec >= 61 && gone.record.jobs.includes('test-all.js@plantedpeer') && !late.waitingSince,
             [off, gone, late]);
+        // A loop that died mid-wait leaves waitingSince behind. Resumed hours later, the old
+        // stamp is past every limit, so without the reset the item starts loaded at once.
+        const rc = { data: path.join(ROOT, 'resume-data') };
+        const staleSince = new Date(Date.now() - 14 * 3600 * 1000).toISOString();
+        const bf = path.join(rc.data, 'batches', 'B-resume.json');
+        write(bf, JSON.stringify({ id: 'B-resume', state: 'running', loopPid: null, quietWaitMin: 10, items: [], waitingSince: staleSince, waitingOn: ['run gate'] }));
+        let spawned = null;
+        const resumed = R.resumeBatch(rc, 'B-resume', {}, (_c, id) => { spawned = id; return 4242; });
+        const after = JSON.parse(fs.readFileSync(bf, 'utf8'));
+        // Read the stamps before quietGate runs: it writes a fresh waitingSince onto the batch it is given.
+        const cleared = !('waitingSince' in after) && !('waitingOn' in after);
+        const heldAgain = R.quietGate({}, after);
+        check('17j. batch-resume closes a wait the dead loop left open, so the resumed item waits afresh on a busy machine',
+            resumed.loopPid === 4242 && spawned === 'B-resume' && resumed.clearedWaitSince === staleSince
+                && cleared && heldAgain && heldAgain.hold === true,
+            [resumed, cleared, heldAgain]);
     } finally {
         try { planted.kill(); } catch { /* already gone */ }
     }
