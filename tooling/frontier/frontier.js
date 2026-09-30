@@ -139,12 +139,21 @@ function exclusion(r, hashes) {
     return null;
 }
 
+/** A regrade appends a row for a run already graded: the latest row of each run is the one that counts. */
+function latestPerRun(rows) {
+    const last = new Map();
+    rows.forEach((r, i) => last.set(r.run, i));
+    return rows.filter((r, i) => last.get(r.run) === i);
+}
+
 function summarise(allRows, { routes = {}, routed = {}, hashes = {} } = {}) {
-    const rows = collapseEscalations(allRows);
+    const latest = latestPerRun(allRows);
+    const rows = collapseEscalations(latest);
     const counts = (r) => COUNTED.has(r.verdict) && !exclusion(r, hashes);
     const counted = rows.filter(counts);
     const excluded = {};
     for (const r of rows) if (!counts(r)) { const k = COUNTED.has(r.verdict) ? exclusion(r, hashes) : r.verdict; excluded[k] = (excluded[k] || 0) + 1; }
+    if (latest.length < allRows.length) excluded.regraded = allRows.length - latest.length;
     const variants = {};
     const matrix = {};
     for (const r of counted) {

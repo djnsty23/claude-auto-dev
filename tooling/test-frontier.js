@@ -146,6 +146,10 @@ function buildTasks(s) {
     for (const id of ['TP', 'TPT']) {
         write(path.join(TASKS, `${id}.json`), JSON.stringify({ id, lane: 'plan', size: 'S', parent: s.parent, brief: 'TP.md', answerFile: 'frontier-answer.json', expected: `${id}.answers.json`, timeoutMin: 2 }));
     }
+    // TPR: a plan task the regrade cases re-key and re-brief. Its own brief, so TP stays put.
+    write(path.join(TASKS, 'TPR.md'), 'Can the cheaper model do the work? Plan how to find out, then regrade. Write frontier-answer.json.\n');
+    write(path.join(TASKS, 'TPR.answers.json'), JSON.stringify(planKey({ steps: [{ do: 'Open a worktree at the parent. Keep the tests held out.' }, { do: 'Run it.', creates: ['tooling/eval.js'] }] })));
+    write(path.join(TASKS, 'TPR.json'), JSON.stringify({ id: 'TPR', lane: 'plan', size: 'S', parent: s.parent, brief: 'TPR.md', answerFile: 'frontier-answer.json', expected: 'TPR.answers.json', timeoutMin: 2 }));
     // One broken key per refusal of the open-lane plant checks. Each must be
     // refused for exactly its own reason, so a removed check shows as a pass.
     const brokenDiag = {
@@ -890,6 +894,44 @@ function cliCases(shas) {
         [v3d, counted.length, fd.stderr]);
     const fdt = spawnSync(process.execPath, [FRONTIER, '--data', DATA, '--tasks', TASKS], { encoding: 'utf8' });
     check('54k. the table labels V3* as derived and names the tasks it could not fill', fdt.status === 0 && /^V3\* is derived, not run: .*TX=V0.*no rows of the pick for .*TM/m.test(fdt.stdout), fdt.stdout);
+
+    // regrade: a stored answer graded again under a corrected key, never under a new brief.
+    const narrow = { steps: [{ do: 'Keep the tests held out, and build each repo as a single-commit repository.' }] };
+    const rg = startAndFinish('TPR', 'V0', 'answer', { FAKE_ANSWER: JSON.stringify(narrow) });
+    const rgRun = rg.row && rg.row.run;
+    const rgSame = run(['regrade', '--run', String(rgRun)]);
+    const rowsOf = (id) => rows().filter((r) => r.run === id);
+    check('54l. regrade on an unchanged key returns the graded row and appends nothing',
+        rg.row && rg.row.verdict === 'fail' && rg.row.grade.met === 1 && rgSame.json && rgSame.json.ok && rgSame.json.value.verdict === 'fail'
+        && !rgSame.json.value.regradedFrom && rowsOf(rgRun).length === 1, [rg.row && rg.row.grade, rgSame.json, rowsOf(rgRun).length]);
+    const tprKey = readJson(path.join(TASKS, 'TPR.answers.json'));
+    tprKey.requirements[1].text = ['git archive|one[- ]commit|single[- ]commit'];
+    write(path.join(TASKS, 'TPR.answers.json'), JSON.stringify(tprKey));
+    const rgStale = run(['regrade', '--run', String(rgRun)]);
+    check('54m. a changed key is refused until the plant check has passed it', rgStale.exit === 1 && rgStale.json && rgStale.json.error.code === 'plant-stale'
+        && rowsOf(rgRun).length === 1, rgStale.json);
+    const rePlant = run(['plant', '--task', 'TPR']);
+    const rg2 = run(['regrade', '--run', String(rgRun)]);
+    const v2 = rg2.json && rg2.json.ok ? rg2.json.value : null;
+    const rg3 = run(['regrade', '--run', String(rgRun)]);
+    check('54n. after the plant check, regrade appends one passing row that keeps the old verdict and key, and a second regrade appends nothing',
+        rePlant.json && rePlant.json.value.TPR.ok && v2 && v2.verdict === 'pass' && v2.pass === true && v2.grade.met === 2
+        && v2.regradedFrom.verdict === 'fail' && v2.regradedFrom.taskHash === rg.row.taskHash && v2.taskHash !== rg.row.taskHash
+        && rg3.json && rg3.json.ok && rg3.json.value.regradedAt === v2.regradedAt && rowsOf(rgRun).length === 2,
+        [rePlant.json && rePlant.json.value.TPR, v2, rowsOf(rgRun).length]);
+    const rgSum = F.summarise(rowsOf(rgRun), { hashes: { TPR: v2 && v2.taskHash } });
+    check('54o. the frontier counts a regraded run once, on its latest row, and says how many rows it set aside',
+        rgSum.counted === 1 && rgSum.matrix.TPR && rgSum.matrix.TPR.V0.passes === 1 && rgSum.excluded.regraded === 1, rgSum);
+    const rgFin = run(['finish', '--run', String(rgRun)]);
+    check('54p. finish returns the latest row of a regraded run', rgFin.json && rgFin.json.ok && v2 && rgFin.json.value.regradedAt === v2.regradedAt, rgFin.json);
+    write(path.join(TASKS, 'TPR.md'), 'Can the cheaper model do the work? Plan how to find out, then regrade it twice. Write frontier-answer.json.\n');
+    run(['plant', '--task', 'TPR']);
+    const rgBrief = run(['regrade', '--run', String(rgRun)]);
+    check('54q. a brief that differs from the one the run saw is refused: a new brief needs a new run',
+        rgBrief.exit === 1 && rgBrief.json && rgBrief.json.error.code === 'brief-changed' && rowsOf(rgRun).length === 2, rgBrief.json);
+    const fixRow = rows().find((r) => r.task === 'TX' && (r.verdict === 'pass' || r.verdict === 'fail'));
+    const rgFix = run(['regrade', '--run', String(fixRow && fixRow.run)]);
+    check('54r. a fix run is refused: its held-out checks ran on a tree that is gone', rgFix.exit === 1 && rgFix.json && rgFix.json.error.code === 'bad-lane', rgFix.json);
 
     // the budget guard: a reading at 0.95 stops a batch before it starts anything
     const hot = startAndFinish('TX', 'V0', 'fix', { FAKE_7D: '0.95' });

@@ -43,6 +43,8 @@ const USAGE = [
     '  prepare --task T --variant V    build the repo, config dir and pin, run the contamination check, start nothing',
     '  run --task T --variant V --account <name> [--repeat n]   prepare and start one worker, return at once',
     '  finish --run <id> [--wait-sec n]   grade an exited run and append its row; idempotent',
+    '  regrade --run <id>              grade the stored answer of an open-lane run again under the current key of its task,',
+    '                                  and append the row; refused when the brief the run saw has changed. No model tokens',
     '  batch --tasks T1,T2|all --variants V0,V1 --account <name> [--k 1] [--max 2] [--quiet-wait <min>]   start a detached batch loop',
     '                                  --quiet-wait holds each item until no gate, coverage run or full suite runs on the',
     '                                  machine, at most <min> minutes (10 when given alone), then starts it as a loaded row',
@@ -973,7 +975,8 @@ function finish(c, run, { allowKill = true } = {}) {
     if (!RUN_RE.test(run)) fault('usage', `${run} is not a run id`);
     const p = runPaths(c, run);
     const meta = readJson(p.meta);
-    const existing = readRows(c).find((r) => r.run === run);
+    // The latest row: a regrade appends a row for a run already graded.
+    const existing = readRows(c).filter((r) => r.run === run).pop();
     if (existing) return existing;
     const log = fs.existsSync(p.log) ? fs.readFileSync(p.log, 'utf8') : '';
     const exitM = log.match(EXIT_RE);
@@ -1038,6 +1041,41 @@ function finish(c, run, { allowKill = true } = {}) {
     } finally {
         fs.closeSync(fd);
     }
+}
+
+/**
+ * Grade an open-lane run's stored answer again, under its task's current key,
+ * and append the new row beside the old one. A key is corrected on answers it
+ * has already seen, so the new row keeps the old verdict and grade in
+ * `regradedFrom`, and frontier.js counts only the latest row of a run. It is
+ * refused for a fix run (its checks ran on a tree that is gone), for a key the
+ * plant check has not passed, for an answer file that is gone, and for a
+ * brief that differs from the one the run saw: a new brief asks a new
+ * question, which only a new run answers. Idempotent: a row already on the
+ * current key is returned as it is.
+ */
+function regrade(c, run) {
+    if (!RUN_RE.test(run)) fault('usage', `${run} is not a run id`);
+    const p = runPaths(c, run);
+    const meta = readJson(p.meta);
+    if (!meta) fault('no-run', `${run} has no run.json`);
+    const last = readRows(c).filter((r) => r.run === run).pop();
+    if (!last) fault('not-finished', `${run} has no row: run finish first`);
+    if (last.verdict !== 'pass' && last.verdict !== 'fail') fault('not-graded', `${run} is ${last.verdict}, and only a graded answer can be graded again`);
+    const task = loadTask(c, meta.task);
+    if (task.lane === 'fix') fault('bad-lane', `${run} is a fix run: its held-out checks ran on a tree that is gone`);
+    if (last.taskHash === task.hash) return last;
+    plantOk(c, task);
+    const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
+    const seen = fs.readFileSync(p.prompt, 'utf8');
+    const same = meta.escalation ? seen.includes(brief.replace(/\s+$/, '')) : seen === composePrompt(task, brief, meta.repo, null);
+    if (!same) fault('brief-changed', `${task.id}'s brief is not the one ${run} saw: a new brief needs a new run`);
+    if (!fs.existsSync(path.join(meta.repo, task.answerFile))) fault('no-answer', `${run}'s ${task.answerFile} is gone`);
+    const grade = gradeAnswer(c, task, meta.repo);
+    return appendRow(c, Object.assign({}, last, {
+        taskHash: task.hash, verdict: grade.pass ? 'pass' : 'fail', pass: grade.pass, grade, regradedAt: new Date().toISOString(),
+        regradedFrom: { taskHash: last.taskHash, verdict: last.verdict, grade: last.grade, regradedAt: last.regradedAt || null },
+    }));
 }
 
 /**
@@ -1459,6 +1497,11 @@ function main(argv) {
             if (!value) value = { run: opts.run, state: 'running' };
             break;
         }
+        case 'regrade': {
+            if (!opts.run) fault('usage', 'regrade needs --run');
+            value = regrade(c, opts.run);
+            break;
+        }
         case 'batch': {
             if (!opts.tasks || !opts.variants || !opts.account) fault('usage', 'batch needs --tasks, --variants and --account');
             workerEnv(process.env, opts.account);
@@ -1495,6 +1538,6 @@ if (require.main === module) {
     }
 }
 
-module.exports = { parseArgs, fixTokens, scanForTokens, ancestorMemory, currentTaskHash, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
+module.exports = { parseArgs, regrade, fixTokens, scanForTokens, ancestorMemory, currentTaskHash, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows, routeFor,
     RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, sentencesOf, hedgedSentence, processList, heavyJobs, noteLoad, loadRecord, quietGate, resumeBatch, failingOutput, HEAVY_RE };
