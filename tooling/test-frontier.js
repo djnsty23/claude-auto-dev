@@ -379,6 +379,7 @@ function unitCases() {
     }
     openLaneCases();
     routeCases();
+    derivedCases();
 }
 
 function openLaneCases() {
@@ -452,6 +453,39 @@ function routeCases() {
     const both = R.routeFor('Fix lib/add.js so that tooling/test-add.js passes. Pick one of the two approaches in NOTES.md.');
     check('68d. routeFor: a change order with an endpoint stays mechanical when it also asks for a choice',
         both.route === 'mechanical' && both.signals.judgement.length > 0 && both.signals.change.length > 0, both);
+}
+
+function derivedCases() {
+    const row = (task, variant, pass, costUsd, extra = {}) => Object.assign({ run: `${task}-${variant}`, task, lane: 'fix', variant, verdict: pass ? 'pass' : 'fail', pass,
+        costUsd, wallMs: 100, durationApiMs: 10, tokens: { total: 1 }, load: { class: 'quiet' } }, extra);
+    const rs = [
+        row('T1', 'V0', true, 4), row('T1', 'V1', false, 1),
+        row('T2', 'V0', false, 4), row('T2', 'V1', true, 1),
+        row('T3', 'V0', true, 4, { route: 'mechanical' }),
+        row('T4', 'V1', true, 1),
+    ];
+    const opts = { routes: { T1: 'open', T2: 'mechanical' }, routed: { V3: { mechanical: 'V1', open: 'V0' } } };
+    const s = F.summarise(rs, opts);
+    const d = s.variants['V3*'];
+    check('69a. frontier: the derived V3* takes, per task, the rows of the variant its route picks, and beats both measured variants',
+        d && d.derived === true && d.n === 2 && d.passRate === 1 && d.from.T1 === 'V0' && d.from.T2 === 'V1' && s.variants.V0.passRate < 1 && s.variants.V1.passRate < 1, d);
+    check('69b. frontier: a task with no brief route takes its row\'s route and is listed missing when the pick has no rows, and a task with neither is unrouted',
+        d && d.from.T3 === 'V1' && d.missing.join() === 'T3' && d.unrouted.join() === 'T4', d && [d.from, d.missing, d.unrouted]);
+    const override = F.summarise(rs, { routes: Object.assign({}, opts.routes, { T3: 'open' }), routed: opts.routed })['variants']['V3*'];
+    check('69c. frontier: the brief\'s route wins over the row\'s', override && override.from.T3 === 'V0' && override.n === 3 && override.missing.length === 0, override && [override.from, override.n]);
+    const inMatrix = Object.values(s.matrix).some((cells) => 'V3*' in cells);
+    check('69d. frontier: V3* sits out of the matrix and the disagreements, and joins the Pareto sets',
+        !inMatrix && s.disagreements.join() === 'T1,T2' && s.pareto.cost.join() === 'V1,V3*', [inMatrix, s.disagreements, s.pareto.cost]);
+    const real = F.summarise(rs.concat([row('T1', 'V3', true, 2, { route: 'open', routedTo: 'V0' })]), opts);
+    const plain = F.summarise(rs);
+    check('69e. frontier: real V3 rows report as a plain V3 beside the derived V3*, and no route map derives nothing',
+        real.variants.V3 && !real.variants.V3.derived && real.variants.V3.n === 1 && (real.variants['V3*'] || {}).n === 2 && !plain.variants['V3*'], [real.variants.V3, Object.keys(plain.variants)]);
+    // A brief edited between runs leaves rows with two routes: the latest decides.
+    const moved = F.summarise([
+        row('T5', 'V1', false, 1, { route: 'mechanical', finishedAt: '2026-02-01T00:00:00Z' }),
+        row('T5', 'V0', true, 4, { route: 'open', finishedAt: '2026-01-01T00:00:00Z' }),
+    ], { routed: opts.routed }).variants['V3*'];
+    check('69f. frontier: with no brief route, the latest row\'s route decides the pick', moved && moved.from.T5 === 'V1' && moved.n === 1, moved && moved.from);
 }
 
 function cliCases(shas) {
@@ -640,6 +674,19 @@ function cliCases(shas) {
     check('54i. a leak term in the config dir marks the diagnose run contaminated and names the file, and a clean config does not',
         lp && lp.state === 'contaminated' && lp.contamination.hits.some((h) => h.token === 'SIGNFLIP' && /lesson-leak\.md$/.test(h.file))
         && cp && cp.state === 'prepared', [lp && lp.contamination || leakPrep.json, cp ? cp.state : cleanPrep.json]);
+
+    // frontier.js derives V3* from the rows already measured, routed by the fixture briefs.
+    const fd = spawnSync(process.execPath, [FRONTIER, '--data', DATA, '--tasks', TASKS, '--json'], { encoding: 'utf8' });
+    const fdj = (() => { try { return JSON.parse(fd.stdout); } catch { return null; } })();
+    const v3d = fdj && fdj.variants['V3*'];
+    const picks = { TX: 'V0', TDG: 'V0', TP: 'V0' };
+    const counted = rows().filter((r) => ['pass', 'fail', 'timeout'].includes(r.verdict) && picks[r.task] === r.variant);
+    check('54j. frontier.js --tasks derives V3* from the rows its routes pick, lists the tasks with none, and counts what the rows hold',
+        fd.status === 0 && v3d && v3d.derived === true && v3d.from.TX === 'V0' && v3d.from.TM === 'V1' && v3d.missing.includes('TM') && v3d.missing.includes('TL')
+        && v3d.n === counted.length && v3d.passes === counted.filter((r) => r.pass).length && fdj.variants.V3 && !fdj.variants.V3.derived,
+        [v3d, counted.length, fd.stderr]);
+    const fdt = spawnSync(process.execPath, [FRONTIER, '--data', DATA, '--tasks', TASKS], { encoding: 'utf8' });
+    check('54k. the table labels V3* as derived and names the tasks it could not fill', fdt.status === 0 && /^V3\* is derived, not run: .*TX=V0.*no rows of the pick for .*TM/m.test(fdt.stdout), fdt.stdout);
 
     // the budget guard: a reading at 0.95 stops a batch before it starts anything
     const hot = startAndFinish('TX', 'V0', 'fix', { FAKE_7D: '0.95' });
