@@ -193,8 +193,8 @@ function describe(root) {
     const branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']) || 'unknown-branch';
     const head = git(root, ['rev-parse', '--short=7', 'HEAD']) || 'unknown-head';
     const top = git(root, ['rev-parse', '--show-toplevel']) || root;
-    const started = new Date().toISOString().slice(0, 16) + 'Z';
-    return `npm run gate (gate-lock.js), branch ${branch}, head ${head}, worktree ${path.basename(top)}, started ${started}`;
+    const since = new Date().toISOString().slice(0, 16) + 'Z';
+    return `npm run gate (gate-lock.js), branch ${branch}, head ${head}, worktree ${path.basename(top)}, waiting since ${since}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -389,8 +389,10 @@ function main() {
     for (const note of lanes.notes) log(`${TAG} ${note}`);
     if (lanes.count > 1) log(`${TAG} ${lanes.count} lanes (from ${lanes.source}); taking whichever frees first`);
     const what = describe(root);
-    const body = `${process.pid}\n${what}\n`;
-    acquire(lockPaths, body, what, { pollMs, reportMs, log, isStopped: () => Boolean(interrupted) })
+    // No body of our own: the queue writes line 2 as `<what>, lock taken HH:MMZ`
+    // at the moment it creates the lock, so a reader sees when the lane changed
+    // hands, not when the wait began.
+    acquire(lockPaths, null, what,{ pollMs, reportMs, log, isStopped: () => Boolean(interrupted) })
         .then((lane) => {
             if (!lane) return;
             held = true;

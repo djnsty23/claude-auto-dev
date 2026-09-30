@@ -120,8 +120,8 @@ function heldThenReleased(label, fx, run, r) {
     check(`${label}: the chain ran while the lock existed`, s && s.exists === true, r.out);
     check(`${label}: line 1 of the lock is the wrapper's pid`, lines[0] === String(run.child.pid),
         `line 1 ${JSON.stringify(lines[0])}, wrapper pid ${run.child.pid}`);
-    check(`${label}: line 2 names branch, head, worktree and a UTC start`,
-        /branch .+, head .+, worktree .+, started \d{4}-\d\d-\d\dT\d\d:\d\dZ$/.test(lines[1] || ''), lines[1]);
+    check(`${label}: line 2 names branch, head, worktree, when the wait began and when the lane was taken`,
+        /branch .+, head .+, worktree .+, waiting since \d{4}-\d\d-\d\dT\d\d:\d\dZ, lock taken \d\d:\d\dZ$/.test(lines[1] || ''), lines[1]);
     check(`${label}: the lock is gone afterwards`, !fs.existsSync(fx.lockPath), r.out);
     const rel = asides(fx, 'released');
     check(`${label}: released by rename to .released-HHMM`,
