@@ -918,8 +918,11 @@ function cliCases(shas) {
         && rg3.json && rg3.json.ok && rg3.json.value.regradedAt === v2.regradedAt && rowsOf(rgRun).length === 2,
         [rePlant.json && rePlant.json.value.TPR, v2, rowsOf(rgRun).length]);
     const rgSum = F.summarise(rowsOf(rgRun), { hashes: { TPR: v2 && v2.taskHash } });
-    check('54o. the frontier counts a regraded run once, on its latest row, and says how many rows it set aside',
-        rgSum.counted === 1 && rgSum.matrix.TPR && rgSum.matrix.TPR.V0.passes === 1 && rgSum.excluded.regraded === 1, rgSum);
+    check('54o. the frontier reads a regraded run once, on its latest row, and reports it as fitted, not counted',
+        rgSum.counted === 0 && !rgSum.matrix.TPR && rgSum.excluded.regraded === 1 && rgSum.excluded.fitted === 1
+        && rgSum.fitted.length === 1 && rgSum.fitted[0].task === 'TPR' && rgSum.fitted[0].raw === 'fail' && rgSum.fitted[0].verdict === 'pass', rgSum);
+    const rgTable = spawnSync(process.execPath, [FRONTIER, '--data', DATA, '--tasks', TASKS], { encoding: 'utf8' });
+    check('54o2. the table names each fitted row with its raw and regraded verdict', rgTable.status === 0 && /^fitted, not counted: .*TPR\/V0 fail->pass/m.test(rgTable.stdout), rgTable.stdout);
     const rgFin = run(['finish', '--run', String(rgRun)]);
     check('54p. finish returns the latest row of a regraded run', rgFin.json && rgFin.json.ok && v2 && rgFin.json.value.regradedAt === v2.regradedAt, rgFin.json);
     write(path.join(TASKS, 'TPR.md'), 'Can the cheaper model do the work? Plan how to find out, then regrade it twice. Write frontier-answer.json.\n');

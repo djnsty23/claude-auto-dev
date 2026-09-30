@@ -131,11 +131,15 @@ function leaked(r) { return !!(r.leak && r.leak.suspect); }
  * its repo. `[measured 2026-09-30]` such workers loaded the live
  * ~/.claude/CLAUDE.md, and one quoted a result from it. A fix-lane verdict is
  * graded by held-out tests, which that memory does not carry, so it stands.
+ * `fitted`: a regraded row, graded under a key widened after reading that
+ * same answer. It is reported apart and turns clean only as a fresh run
+ * graded under a key frozen before it started.
  */
 function exclusion(r, hashes) {
     if (hashes[r.task] && r.taskHash && r.taskHash !== hashes[r.task]) return 'superseded';
     if (r.lane && r.lane !== 'fix' && r.ancestorMemory !== 0) return 'home-memory';
     if (leaked(r)) return 'leak-suspect';
+    if (r.regradedFrom) return 'fitted';
     return null;
 }
 
@@ -170,7 +174,9 @@ function summarise(allRows, { routes = {}, routed = {}, hashes = {} } = {}) {
         const d = derive(counted, map, routes);
         if (d.n > 0) out[`${id}*`] = d;
     }
-    return { rows: allRows.length, counted: counted.length, excluded, variants: out, matrix, disagreements,
+    const fitted = rows.filter((r) => COUNTED.has(r.verdict) && exclusion(r, hashes) === 'fitted')
+        .map((r) => ({ run: r.run, task: r.task, variant: r.variant, raw: r.regradedFrom.verdict, verdict: r.verdict }));
+    return { rows: allRows.length, counted: counted.length, excluded, fitted, variants: out, matrix, disagreements,
         pareto: { cost: pareto(out, 'medianCostUsd'), api: pareto(out, 'medianApiMs'), wall: pareto(out, 'medianWallQuietMs') } };
 }
 
@@ -209,6 +215,9 @@ function render(s) {
     }
     lines.push(`pareto on cost: ${s.pareto.cost.join(', ') || '-'}; on API time: ${s.pareto.api.join(', ') || '-'}; on quiet wall time: ${s.pareto.wall.join(', ') || '-'}`);
     lines.push(`disagreements (k = 3 candidates): ${s.disagreements.join(', ') || 'none'}`);
+    if (s.fitted.length) {
+        lines.push(`fitted, not counted: regraded under a key widened after reading the answer; a fresh run under the frozen key replaces each (${s.fitted.map((f) => `${f.task}/${f.variant} ${f.raw}->${f.verdict}`).join(', ')})`);
+    }
     return lines.join('\n') + '\n';
 }
 
