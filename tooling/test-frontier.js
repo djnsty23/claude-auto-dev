@@ -226,7 +226,7 @@ out({ type: 'result', subtype: 'success', duration_ms: 1234, duration_api_ms: 10
 function envFor(extra = {}) {
     return Object.assign({}, process.env, {
         FRONTIER_SRC: SRC, FRONTIER_TASKS: TASKS, FRONTIER_DATA: DATA, FRONTIER_WORK: WORK, FRONTIER_CLAUDE_HOME: HOME, FRONTIER_CLAUDE_BIN: FAKE,
-        FRONTIER_POLL_MS: '300', FAKE_OUT: OUT, FRONTIER_PROCESS_LIST: QUIET_PS,
+        FRONTIER_POLL_MS: '300', FAKE_OUT: OUT, FRONTIER_PROCESS_LIST: QUIET_PS, FRONTIER_ALLOW_ANCESTOR_MEMORY: '1',
         CLAUDE_CODE_OAUTH_TOKEN_TESTACCT: TOKEN, CLAUDE_CODE_OAUTH_TOKEN_OTHER: 'other-account-value', ANTHROPIC_API_KEY: 'must-not-reach-the-worker',
         ANTHROPIC_AUTH_TOKEN: 'nor-this', SOME_SECRET: 'nor-this-one', DOPPLER_PROJECT: 'accounts',
     }, extra);
@@ -725,6 +725,29 @@ function cliCases(shas) {
     fs.unlinkSync(path.join(HOME, 'rules', 'lesson.md'));
     run(['snapshot']);
 
+    // memory above the task repo: claude loads it as project memory, so any
+    // file there refuses the run, whatever it holds
+    const upMemory = path.join(WORK, '.claude', 'CLAUDE.md');
+    write(upMemory, 'Nothing about the task.\n');
+    const up = run(['run', '--task', 'TX', '--variant', 'V0', '--account', 'testacct'], { FRONTIER_ALLOW_ANCESTOR_MEMORY: '' });
+    check('35a. a CLAUDE.md above the task repo refuses the run as contaminated and names the file',
+        up.json && up.json.error && up.json.error.code === 'contaminated' && up.json.error.message.includes(`ancestor memory in ${upMemory}`), up.json);
+    const upAllowed = run(['prepare', '--task', 'TX', '--variant', 'V0']);
+    const ua = upAllowed.json && upAllowed.json.value;
+    check('35b. with FRONTIER_ALLOW_ANCESTOR_MEMORY=1 the run is prepared and the file is recorded',
+        ua && ua.state === 'prepared' && ua.contamination.ancestorsAllowed === true && ua.contamination.ancestors.includes(upMemory), ua && ua.contamination);
+    fs.unlinkSync(upMemory);
+    const am = path.join(ROOT, 'am');
+    write(path.join(am, 'CLAUDE.local.md'), 'x');
+    write(path.join(am, 'a', '.claude', 'rules', 'r.md'), 'x');
+    write(path.join(am, 'a', '.claude', 'rules', 'notes.txt'), 'x');
+    write(path.join(am, 'a', 'b', 'repo', 'CLAUDE.md'), 'the task repo own memory');
+    fs.mkdirSync(path.join(am, 'a', 'b', '.claude', 'rules'), { recursive: true });
+    const found = R.ancestorMemory(path.join(am, 'a', 'b', 'repo'));
+    const inAm = found.filter((f) => f.startsWith(am + path.sep)).map((f) => path.relative(am, f).replace(/\\/g, '/'));
+    check('35c. ancestorMemory lists CLAUDE.local.md and .claude/rules/*.md above the repo, not the repo own CLAUDE.md or a non-md rule',
+        inAm.sort().join() === ['CLAUDE.local.md', 'a/.claude/rules/r.md'].join(), inAm);
+
     const fixed = startAndFinish('TX', 'V0', 'fix');
     const row = fixed.row;
     check('36. a worker that fixes the bug passes, graded by the held-out test and the neighbour', row && row.verdict === 'pass' && row.grade.checks[0].exit === 0 && row.grade.passToPass[0].exit === 0, row || fixed.start.json);
@@ -859,7 +882,7 @@ function cliCases(shas) {
     check('59. status lists the batches and the row count', st.json && st.json.ok && st.json.value.batches.length === 2 && st.json.value.rows === rows().length, st.json && st.json.value);
     const fr = spawnSync(process.execPath, [FRONTIER, '--data', DATA, '--json', '--write'], { encoding: 'utf8' });
     const fj = (() => { try { return JSON.parse(fr.stdout); } catch { return null; } })();
-    check('60. frontier.js reads the rows and writes frontier.json', fr.status === 0 && fj && fj.variants.V0 && fs.existsSync(path.join(DATA, 'frontier.json')) && fj.excluded['billed-api'] === 1 && fj.excluded.contaminated === 1, fj && [fj.excluded, Object.keys(fj.variants)]);
+    check('60. frontier.js reads the rows and writes frontier.json', fr.status === 0 && fj && fj.variants.V0 && fs.existsSync(path.join(DATA, 'frontier.json')) && fj.excluded['billed-api'] === 1 && fj.excluded.contaminated === 2, fj && [fj.excluded, Object.keys(fj.variants)]);
     const loaded = startAndFinish('TX', 'V1', 'fix', { FRONTIER_PROCESS_LIST: LOADED_PS });
     const batchRows = rows().filter((r) => bf2 && bf2.items.some((i) => i.run === r.run));
     check('61. a row records its load: quiet under a quiet table, loaded when a peer suite runs at start and end, and a batch row carries its polls',
