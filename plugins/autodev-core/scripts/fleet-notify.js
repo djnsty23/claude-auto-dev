@@ -21,6 +21,19 @@
  * page read the same files through the same code. An ask is keyed on its file
  * and stamped with its mtime: once per ask, again if the worker rewrites it.
  *
+ * THE QUOTA TRIPWIRE RIDES THE SAME PASS. quota-tripwire.js was written to run
+ * under a Monitor, which only exists while a session is open, so at night it
+ * rang for nobody. Each pass now runs it once (`--once`) and toasts two things:
+ *   - a PREP HANDOVER, keyed on the tripwire's own `firedAt`, so a toast the OS
+ *     refused is retried on the next pass like any other
+ *   - a DIAGNOSTIC that needs a human (no ceiling, a stale calibration, a broken
+ *     source), at most once per code per local week, Monday to Sunday. A daily
+ *     toast for a condition nobody can cure that day teaches the reader to
+ *     skip the toast. A different code in the same week does toast: it is a
+ *     new problem. `insufficient-samples` and `span-too-short` clear on the
+ *     next pass by themselves and never toast.
+ * Silence from the tripwire stays silent. `AUTODEV_QUOTA_TRIPWIRE=off` skips it.
+ *
  * Usage:
  *   node fleet-notify.js                # one pass
  *   node fleet-notify.js --watch 120    # every 120s until stopped
@@ -34,7 +47,7 @@
 const fs = require('fs');
 const path = require('path');
 const claudePaths = require('./claude-paths.js');
-const { execFile, execFileSync } = require('child_process');
+const { execFile, execFileSync, spawnSync } = require('child_process');
 const { scanFleet } = require(path.join(__dirname, 'fleet-status.js'));
 const fleetView = require(path.join(__dirname, 'fleet-view.js'));
 
@@ -44,6 +57,14 @@ const fleetView = require(path.join(__dirname, 'fleet-view.js'));
 const STATE = process.env.AUTODEV_FLEET_STATE
     || path.join(claudePaths.configDir(), 'fleet', '.notified.json');
 const TOAST = path.join(__dirname, 'toast.ps1');
+// Overridable for the same reason as STATE: the suite points it at a stub, and
+// every older case turns it off so no fixture run reads the live window.
+const TRIPWIRE = process.env.AUTODEV_QUOTA_TRIPWIRE || path.join(__dirname, 'quota-tripwire.js');
+const QUOTA_STATE = process.env.AUTODEV_QUOTA_STATE
+    || path.join(claudePaths.configDir(), 'quota-tripwire-state.json');
+// Diagnostics the next pass clears without anyone acting: a first sample after
+// a rollover or a sleep, or two samples too close together to rate.
+const SELF_CLEARING = new Set(['insufficient-samples', 'span-too-short']);
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -160,18 +181,85 @@ function askItems() {
     return { items, sources: found.sources.map((src) => src.population) };
 }
 
+const localDay = (d = new Date()) => [d.getFullYear(), d.getMonth() + 1, d.getDate()]
+    .map((n) => String(n).padStart(2, '0')).join('-');
+// The local Monday of d's week. Built from local fields, so a DST change or a
+// month boundary cannot move it.
+const localWeek = (d = new Date()) =>
+    localDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)));
+
+/**
+ * Run the quota tripwire once and turn what it said into toast items.
+ *
+ * `--diag-repeat-minutes 0` hands the dedup to this file: the tripwire prints
+ * its diagnostic on every pass, and the once-per-code-per-week stamp below
+ * decides whether it reaches a human. Not run under --dry, because a tripwire run advances its
+ * own state and would disarm on an alert that --dry then never shows.
+ */
+function quotaItems() {
+    if (/^(0|off)$/i.test(TRIPWIRE)) return { items: [], status: 'off' };
+    if (DRY) return { items: [], status: 'not run under --dry' };
+    const r = spawnSync(process.execPath,
+        [TRIPWIRE, '--once', '--diag-repeat-minutes', '0', '--state', QUOTA_STATE],
+        // Above the tripwire's own 180 s source timeout, so a slow source is
+        // reported by the tripwire as source-failed rather than killed here.
+        { encoding: 'utf8', timeout: 200000, windowsHide: true });
+    const lines = String(r.stdout || '').split('\n').map((l) => l.trimEnd());
+    const alert = lines.find((l) => l.startsWith('QUOTA TRIPWIRE  PREP HANDOVER'));
+    let diag = null;
+    for (const l of lines) {
+        const m = l.match(/^QUOTA TRIPWIRE DIAGNOSTIC {2}code=(\S+) .*?: (.*?)(?: {2}\| |$)/);
+        if (m) { diag = { code: m[1], detail: m[2] }; break; }
+    }
+    if (!diag && (r.error || r.status !== 0)) {
+        diag = { code: 'tripwire-run-failed', detail: r.error ? r.error.message
+            : `exit ${r.status}: ${String(r.stderr || '').trim().slice(0, 160) || '(no stderr)'}` };
+    }
+
+    const items = [];
+    // Keyed on the tripwire's own record of firing, not on the one line it
+    // prints: that line appears once, so a refused toast would lose it.
+    let firedAt = null;
+    try { firedAt = JSON.parse(fs.readFileSync(QUOTA_STATE, 'utf8')).firedAt; } catch { /* no state yet */ }
+    if (Number.isFinite(firedAt)) {
+        items.push({
+            key: 'quota:alert', stamp: String(firedAt), due: true, quota: true,
+            title: 'Quota: prep handover',
+            body: alert ? alert.slice('QUOTA TRIPWIRE  PREP HANDOVER  '.length, 240)
+                : `the tripwire fired at ${new Date(firedAt).toISOString()}. Run quota-tripwire.js --status`,
+            short: 'quota', name: 'quota tripwire alert',
+        });
+    }
+    if (diag && !SELF_CLEARING.has(diag.code)) {
+        items.push({
+            key: 'quota:diag', stamp: `${diag.code} week of ${localWeek()}`, due: true, quota: true,
+            title: 'Quota tripwire cannot project',
+            body: `code=${diag.code}: ${diag.detail}`.slice(0, 240),
+            short: 'quota', name: `quota tripwire diagnostic ${diag.code}`,
+        });
+    }
+    const status = alert ? 'alert' : diag ? `diagnostic ${diag.code}` : 'silent';
+    return { items, status };
+}
+
 /** One scan-and-notify pass. Returns how many notifications fired. */
 function pass() {
     const fleet = scanFleet(DAYS);
     const blocked = fleet.sessions.filter((s) => s.pending);
     const asks = askItems();
-    const items = [...blocked.map(panelItem), ...asks.items];
+    const quota = quotaItems();
+    const items = [...blocked.map(panelItem), ...asks.items, ...quota.items];
     const state = readState();
 
     // Drop state for anything no longer waiting, so a later block re-notifies.
+    // This week's diagnostic key stays until the week ends: a diagnostic that
+    // clears and comes back within the week must not toast a second time.
     const liveKeys = new Set(items.map((i) => i.key));
     const before = Object.keys(state).length;
-    for (const k of Object.keys(state)) if (!liveKeys.has(k)) delete state[k];
+    for (const k of Object.keys(state)) {
+        if (liveKeys.has(k) || (k === 'quota:diag' && String(state[k]).endsWith(' week of ' + localWeek()))) continue;
+        delete state[k];
+    }
     const didPrune = Object.keys(state).length !== before;
 
     const fresh = items.filter((i) => state[i.key] !== i.stamp).filter((i) => i.due);
@@ -179,7 +267,7 @@ function pass() {
     // Population every pass: a report that prints only a verdict cannot be told
     // apart from a probe that returned nothing.
     console.log(`${new Date().toISOString()}  ${fleet.population.transcripts} transcripts, `
-        + `${blocked.length} blocked, ${asks.items.length} asking, ${fresh.length} new`);
+        + `${blocked.length} blocked, ${asks.items.length} asking, ${fresh.length} new, quota ${quota.status}`);
 
     // A run marker, written EVERY pass whether or not anything fired.
     //
@@ -201,6 +289,7 @@ function pass() {
                 // A missing ledger reads the same as an empty one in the count,
                 // so each source says here what it read or why it could not.
                 askSources: asks.sources,
+                quota: quota.status,
             }) + '\n');
     } catch { /* an unwritable marker must not stop a notification */ }
 
@@ -212,15 +301,22 @@ function pass() {
         return 0;
     }
 
+    // A quota toast always stands alone: "4 sessions are waiting on you" must
+    // never be where a PREP HANDOVER ends up.
+    const waiting = fresh.filter((i) => !i.quota);
     let fired = 0;
     try {
-        if (fresh.length > MAX_INDIVIDUAL) {
-            const names = fresh.slice(0, 3).map((i) => i.short).join(', ');
-            toast(`${fresh.length} sessions are waiting on you`,
-                `${names} and ${fresh.length - 3} more. Open the fleet board.`);
-            fired = 1;
+        for (const i of fresh.filter((x) => x.quota)) {
+            toast(i.title, i.body);
+            fired++;
+        }
+        if (waiting.length > MAX_INDIVIDUAL) {
+            const names = waiting.slice(0, 3).map((i) => i.short).join(', ');
+            toast(`${waiting.length} sessions are waiting on you`,
+                `${names} and ${waiting.length - 3} more. Open the fleet board.`);
+            fired++;
         } else {
-            for (const i of fresh) {
+            for (const i of waiting) {
                 toast(i.title, i.body);
                 fired++;
             }
@@ -236,6 +332,22 @@ function pass() {
 }
 
 function main() {
+    // A pass can now toast a quota diagnostic on an empty fixture, so a --help
+    // probe that fell through to pass() would put a real toast on the screen.
+    if (has('--help') || has('-h')) {
+        console.log([
+            'fleet-notify.js - toast when a session blocks, a worker asks, or the quota tripwire fires',
+            '',
+            '  node fleet-notify.js                # one pass',
+            '  node fleet-notify.js --watch 120    # every 120s until stopped',
+            '  node fleet-notify.js --dry          # print what WOULD fire, notify nothing',
+            '  node fleet-notify.js --test         # fire one sample toast and exit',
+            '  node fleet-notify.js --min-age 15   # minutes a panel waits before it toasts',
+            '',
+            'AUTODEV_QUOTA_TRIPWIRE=off skips the quota tripwire.',
+        ].join('\n'));
+        return;
+    }
     if (has('--test')) {
         toast('Fleet — test', 'The notifier can reach you. No action needed.');
         console.log('sent one test toast (exit 0 means the API accepted it, not that it rendered)');

@@ -96,9 +96,9 @@ function windowStart(now = new Date()) {
 /**
  * Price ONE transcript usage block at list price, split by token class.
  *
- * Exported so another script prices a row with this table rather than a copy
- * of it: two price tables drift apart, and then two readers disagree about the
- * same row. `tokens.cacheWrite` is both TTLs together.
+ * Exported so work-cost.js prices a row with this table rather than a copy of
+ * it: two price tables drift apart, and then the tripwire and the per-PR cost
+ * disagree about the same row. `tokens.cacheWrite` is both TTLs together.
  */
 function priceUsage(u, model) {
     const { rates, known } = ratesFor(model, u.speed);
@@ -245,7 +245,7 @@ function main() {
     }
 }
 
-// Behind require.main so another script can require the price table without
+// Behind require.main so work-cost.js can require the price table without
 // running a window scan in its own process.
 if (require.main === module) main();
 module.exports = { priceUsage, ratesFor, windowStart, transcripts, responseKey };

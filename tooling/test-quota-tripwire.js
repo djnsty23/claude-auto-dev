@@ -533,8 +533,10 @@ try {
             '--fixture-cost', '5',
             '--fixture-window', String(WSTART + 7 * 24 * 60 * MIN),
             '--fixture-now', String(BASE + 20 * MIN)]);
-        has('a new window drops the old samples, so there is no rate yet',
-            r.stdout, 'code=insufficient-samples');
+        // The calibration was taken in the OLD window, so the new one cannot
+        // project from it: dollars per point move with the account mix.
+        has('a new window does not project from the old window\'s calibration',
+            r.stdout, 'code=calibration-stale');
         eq('...leaving exactly the one new sample', samples(sp).length, 1);
         eq('...re-armed', field(sp, 'armed'), true);
         eq('...with no fire on record', field(sp, 'firedAt'), null);
@@ -552,6 +554,22 @@ try {
             '--fixture-window', String(WSTART + 7 * 24 * 60 * MIN),
             '--fixture-now', String(BASE + 10 * MIN)]);
         has('but a window rollover makes it speak again', d3.stdout, 'code=no-ceiling');
+    }
+    {
+        // The measured false alarm. A calibration from an earlier window put
+        // the ceiling at $12,449 while this window's cost already reads more.
+        // Projecting from it would print PREP HANDOVER on the first rated
+        // poll. It must say it cannot project instead, and stay armed.
+        const W2 = WSTART + 7 * 24 * 60 * MIN;
+        const sp = seed('stale-cal', { calibration: [CAL_A, CAL_B], windowStart: W2 });
+        const at = (cost, now) => run(['--once', '--state', sp, '--fixture-cost', String(cost),
+            '--fixture-window', String(W2), '--fixture-now', String(now)]);
+        const a = at(23000, W2 + 60 * MIN);
+        const b = at(23100, W2 + 70 * MIN);
+        has('a calibration from an earlier window is a diagnostic', a.stdout, 'code=calibration-stale');
+        hasnt('...and never a PREP HANDOVER on a ceiling the window already passed',
+            a.stdout + b.stdout, 'PREP HANDOVER');
+        eq('...so the tripwire stays armed for a real crossing', field(sp, 'armed'), true);
     }
 
     // =======================================================================

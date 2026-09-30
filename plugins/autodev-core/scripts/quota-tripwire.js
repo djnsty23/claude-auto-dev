@@ -218,7 +218,7 @@ function readSource(sourcePath) {
 
 // --------------------------------------------------------------- ceiling ----
 
-function deriveCeiling(state, opts, measure) {
+function deriveCeiling(state, opts, measure, windowStart) {
   const explicit = opts.ceiling != null ? opts.ceiling : state.ceiling;
   if (explicit != null && Number.isFinite(explicit) && explicit > 0) {
     return { ok: true, ceiling: explicit, basis: 'explicit ceiling ' + money(explicit) };
@@ -243,6 +243,21 @@ function deriveCeiling(state, opts, measure) {
   }
   const a = cal[cal.length - 2];
   const b = cal[cal.length - 1];
+  // A calibration from an EARLIER window does not describe this one. The
+  // window cost sums every account whose transcripts land in this config
+  // dir, while the app's percentage belongs to one account, so dollars per
+  // point move with the account mix. [measured 2026-09-29] the split went
+  // from 67% one account to 93.5% another between two consecutive windows,
+  // and a calibration five weeks old put the ceiling at $11,025 while the
+  // live window already read $23,000: a PREP HANDOVER on the first rated
+  // poll, for a wall nobody was near. Both points must be from this window.
+  const ws = windowStart != null ? windowStart : state.windowStart;
+  if (ws != null && a.t < ws) {
+    return {
+      ok: false, code: 'calibration-stale',
+      detail: 'the last two calibration points predate this window (older one ' + tzStamp(a.t) + ', window opened ' + tzStamp(ws) + '). Run --calibrate <percent> twice, 30+ min apart',
+    };
+  }
   const dPct = b.pct - a.pct;
   const dCost = b.cost - a.cost;
   if (!(dPct > 0) || !(dCost > 0)) {
@@ -323,7 +338,7 @@ function evaluate(reading, prev, opts) {
     };
   };
 
-  const c = deriveCeiling(state, opts, measure);
+  const c = deriveCeiling(state, opts, measure, reading.windowStart);
   if (!c.ok) return diag(c.code, c.detail);
 
   const r = deriveRate(state.samples, nowMs, opts);
@@ -440,7 +455,7 @@ function cmdCalibrate() {
   const w = saveState(OPTS.statePath, state);
   if (!w.ok) { console.error('could not write state: ' + w.detail); process.exit(1); }
   console.log('calibrated: ' + pct + '% = ' + money(reading.cost) + ' at ' + tzStamp(reading.nowMs));
-  const c = deriveCeiling(state, OPTS, measureOf(reading));
+  const c = deriveCeiling(state, OPTS, measureOf(reading), reading.windowStart);
   if (c.ok) console.log('ceiling now ' + money(c.ceiling) + '  (' + c.basis + ')');
   else console.log('no ceiling yet: ' + c.detail);
 }
@@ -460,7 +475,7 @@ function cmdStatus() {
   console.log('samples    : ' + state.samples.length + '   calibration points: ' + state.calibration.length);
   console.log('armed      : ' + state.armed + (state.firedAt ? '   last fired ' + tzStamp(state.firedAt) : ''));
   const measure = measureOf(reading);
-  const c = deriveCeiling(state, OPTS, measure);
+  const c = deriveCeiling(state, OPTS, measure, reading.windowStart);
   if (!c.ok) { console.log('ceiling    : NONE - ' + c.detail); return; }
   console.log('ceiling    : ' + money(c.ceiling) + '  (' + c.basis + ')');
   const same = state.samples.filter((s) => measureOf(s) === measure);
@@ -707,6 +722,14 @@ function selftest() {
   T('A17 sub-minimum span => span-too-short diagnostic', () => {
     const r = deriveRate([{ t: base, cost: 1000 }, { t: base + 30000, cost: 1100 }], base + 30000, O);
     eq(r.ok, false); eq(r.code, 'span-too-short');
+  });
+
+  // A18 - a calibration taken before this window opened projects nothing.
+  T('A18 calibration from an earlier window => calibration-stale diagnostic', () => {
+    const c = deriveCeiling(withCal(), O, undefined, base + 7 * 24 * 60 * MIN);
+    eq(c.ok, false); eq(c.code, 'calibration-stale');
+    const inside = deriveCeiling(withCal(), O, undefined, base - 60 * MIN);
+    eq(inside.ok, true, 'the same points inside the window must still derive:');
   });
 
   try { fs.rmSync(scratch, { recursive: true, force: true }); } catch (e) {}

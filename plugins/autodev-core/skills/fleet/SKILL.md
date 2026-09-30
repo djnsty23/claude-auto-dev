@@ -55,6 +55,13 @@ the toast and the fleet-view page list the same asks. A rewritten ask fires
 again. The 15-minute wait below does not apply to asks: nobody is in a headless
 worker's conversation to answer one quickly.
 
+Each pass also runs `quota-tripwire.js --once`. Its PREP HANDOVER line toasts
+once per firing. A DIAGNOSTIC (the tripwire cannot project) toasts at most once
+per code per week, Monday to Sunday: a different code that week toasts, the
+same code returning does not. The two that clear themselves as samples arrive
+never toast. Silence from the tripwire stays silent. `AUTODEV_QUOTA_TRIPWIRE=off`
+skips it.
+
 To run it permanently, `install-fleet-notify-task.ps1` registers a scheduled task
 (every 2 min, interactive, hidden). Check it is doing the WORK, not merely
 launching — Task Scheduler's "Last Result: 0" only means the launcher started:
