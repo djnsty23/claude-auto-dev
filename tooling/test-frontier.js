@@ -30,7 +30,9 @@ const FRONTIER = path.resolve(__dirname, 'frontier', 'frontier.js');
 const R = require(RUN);
 const F = require(FRONTIER);
 
-const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'frontier test-'));
+// Real path: on macOS the tmpdir is /var/folders, a worker's process.cwd() reads
+// /private/var/folders, and case 42 compares the two.
+const ROOT = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'frontier test-')));
 const SRC = path.join(ROOT, 'src');
 const TASKS = path.join(ROOT, 'tasks');
 const DATA = path.join(ROOT, 'data');
