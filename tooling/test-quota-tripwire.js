@@ -634,6 +634,52 @@ try {
         eq('and the second reading of the same cost does not repeat it', b.stdout, '');
     }
     {
+        // THE SWITCH TO ONE PRICE PER API RESPONSE. A calibration taken while
+        // quota-burn.js summed every row prices the wall about 2.3x too high.
+        // Against per-response readings that ceiling is 700 minutes away, so
+        // the tripwire would stay silent through the real wall.
+        const stub = okStub({ windowCost: 5400, windowStart: WSTART_ISO, measure: 'response' });
+        const sp = seed('src-measure-legacy-cal', {
+            calibration: [CAL_A, CAL_B], windowStart: WSTART,
+            samples: [{ t: Date.now() - 30 * MIN, cost: 5100, measure: 'response' }],
+        });
+        const r = run(['--once', '--state', sp, '--source', stub]);
+        has('a row-sum calibration under a per-response reading is a diagnostic, not silence',
+            r.stdout, 'code=calibration-other-measure');
+        has('...naming the measure it expected', r.stdout, 'different measure than this reading (response)');
+    }
+    {
+        // A row-sum sample is not rated against a per-response one: the delta
+        // across the switch is a large negative burn, which reads as headroom.
+        const stub = okStub({ windowCost: 5400, windowStart: WSTART_ISO, measure: 'response' });
+        const sp = seed('src-measure-samples', {
+            calibration: [CAL_A, CAL_B].map((p) => Object.assign({ measure: 'response' }, p)),
+            windowStart: WSTART,
+            samples: [{ t: Date.now() - 30 * MIN, cost: 12000 }],
+        });
+        const r = run(['--once', '--state', sp, '--source', stub]);
+        eq('a sample of another measure is dropped', samples(sp).length, 1);
+        eq('...and the new sample records its measure', (samples(sp)[0] || {}).measure, 'response');
+        has('...so the rate waits for a second sample of this measure', r.stdout, 'code=insufficient-samples');
+    }
+    {
+        const stub = okStub({ windowCost: 12100, windowStart: WSTART_ISO, measure: 'response' });
+        const sp = seed('src-measure-match', {
+            calibration: [CAL_A, CAL_B].map((p) => Object.assign({ measure: 'response' }, p)),
+            windowStart: WSTART,
+            samples: [{ t: Date.now() - 30 * MIN, cost: 11800, measure: 'response' }],
+        });
+        const r = run(['--once', '--state', sp, '--source', stub]);
+        has('a calibration on the reading\'s own measure still fires', r.stdout, 'PREP HANDOVER');
+    }
+    {
+        const stub = okStub({ windowCost: 9559, windowStart: WSTART_ISO, measure: 'response' });
+        const sp = statePath('cal-measure');
+        run(['--calibrate', '83', '--state', sp, '--source', stub]);
+        eq('--calibrate stores the measure its point was taken on',
+            (calibration(sp)[0] || {}).measure, 'response');
+    }
+    {
         const missing = path.join(fixture, 'no-such-burn.js');
         const sp = seed('src-missing', { calibration: [CAL_A, CAL_B] });
         const r = run(['--once', '--state', sp, '--source', missing]);

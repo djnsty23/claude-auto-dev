@@ -59,6 +59,9 @@ const CACHE_READ_MULT = 0.1;
 const CACHE_WRITE_5M_MULT = 1.25;
 const CACHE_WRITE_1H_MULT = 2;
 
+// The priced unit. A source that prints no `measure` summed every usage row.
+const MEASURE = 'response';
+
 /**
  * An UNKNOWN model is priced at the most expensive published rate, not skipped
  * and not zero. A tripwire that under-reports is worse than one that over-
@@ -120,6 +123,22 @@ function priceUsage(u, model) {
     return { cost, known, tokens: { input, output, cacheWrite: w5m + w1h, cacheRead } };
 }
 
+/**
+ * The key of the API response a usage row belongs to, or null.
+ *
+ * Claude Code writes one transcript row per content block, and every row of a
+ * response repeats that response's usage. [measured 2026-09-29] over two days,
+ * 14,361 of 24,421 usage rows were repeats and 60.4% of the summed cost, so a
+ * sum over rows read about 2.5x the real spend. A response is its message id
+ * plus its request id. A row with neither cannot be matched to a response and
+ * is counted on its own.
+ */
+function responseKey(j) {
+    const id = (j.message && j.message.id) || '';
+    const req = j.requestId || '';
+    return id || req ? id + '|' + req : null;
+}
+
 function* transcripts(dir) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -139,9 +158,14 @@ function main() {
     const mtimeFloor = Number.isFinite(days) && days >= 0
         ? Math.min(wsMs, Date.now() - days * 86400000) : wsMs;
 
-    let files = 0, skipped = 0, rows = 0, unreadable = 0, unknownModel = 0;
-    const byModel = new Map();
-    let cost = 0;
+    let files = 0, skipped = 0, rows = 0, unreadable = 0, unknownModel = 0, unkeyed = 0;
+    // One entry per API response, and the row kept is the one with the most
+    // output. Every row repeats the same input and cache usage, but an early
+    // row is a streaming partial: [measured 2026-09-30] 8 output tokens where
+    // the final row of the same response said 549. "Keep the last row" is not
+    // enough, because a resumed or subagent transcript copies rows into another
+    // file, and 2,773 times in 7 days the partial copy was read after the final.
+    const responses = new Map();
 
     for (const f of transcripts(PROJECTS)) {
         let st;
@@ -161,19 +185,31 @@ function main() {
             if (!t || t < wsMs) continue;
 
             rows++;
-            const model = j.message.model || null;
-            const { cost: c, known } = priceUsage(u, model);
-            if (!known) unknownModel++;
-
-            cost += c;
-            const k = model || '(unknown)';
-            byModel.set(k, (byModel.get(k) || 0) + c);
+            const key = responseKey(j);
+            if (!key) unkeyed++;
+            const kept = key && responses.get(key);
+            if (kept && (u.output_tokens || 0) < (kept.u.output_tokens || 0)) continue;
+            responses.set(key || f + ':' + rows, { u, model: j.message.model || null });
         }
+    }
+
+    const byModel = new Map();
+    let cost = 0;
+    for (const { u, model } of responses.values()) {
+        const { cost: c, known } = priceUsage(u, model);
+        if (!known) unknownModel++;
+        cost += c;
+        const k = model || '(unknown)';
+        byModel.set(k, (byModel.get(k) || 0) + c);
     }
 
     const population = {
         transcriptsRead: files, transcriptsSkippedByMtime: skipped,
-        usageRowsInWindow: rows, unreadable, rowsPricedAtFallbackRate: unknownModel,
+        usageRowsInWindow: rows,
+        responsesInWindow: responses.size,
+        repeatedRows: rows - responses.size,
+        rowsWithoutResponseId: unkeyed,
+        unreadable, responsesPricedAtFallbackRate: unknownModel,
     };
 
     if (has('json')) {
@@ -182,6 +218,10 @@ function main() {
             windowStart: ws.toISOString(),
             currency: 'USD',
             basis: 'list-price equivalent; NOT a subscription bill',
+            // What one priced unit is. quota-tripwire.js stores this beside
+            // every sample and calibration point and never mixes two measures:
+            // a sum over rows reads 2.3x to 2.5x a sum over responses.
+            measure: MEASURE,
             byModel: Object.fromEntries(byModel),
             population,
         }) + '\n');
@@ -191,10 +231,12 @@ function main() {
     console.log('QUOTA BURN — list-price equivalent, NOT a bill');
     console.log('  window opened : ' + ws.toISOString() + '  (Wed 02:00 local)');
     console.log('  window cost   : $' + cost.toFixed(2));
-    console.log('  population    : ' + rows + ' usage row(s) in window, from ' + files
+    console.log('  population    : ' + responses.size + ' API response(s) from ' + rows
+        + ' usage row(s) in window (' + (rows - responses.size) + ' repeated a response, '
+        + unkeyed + ' had no response id and count alone), ' + files
         + ' transcript(s) read, ' + skipped + ' skipped by mtime, ' + unreadable + ' unreadable');
     if (unknownModel) {
-        console.log('  !! ' + unknownModel + ' row(s) had an unrecognised model and were priced at the');
+        console.log('  !! ' + unknownModel + ' response(s) had an unrecognised model and were priced at the');
         console.log('     HIGHEST published rate. Over-reporting is the safe direction for a tripwire.');
     }
     console.log('');
@@ -206,4 +248,4 @@ function main() {
 // Behind require.main so work-cost.js can require the price table without
 // running a window scan in its own process.
 if (require.main === module) main();
-module.exports = { priceUsage, ratesFor, windowStart, transcripts };
+module.exports = { priceUsage, ratesFor, windowStart, transcripts, responseKey };
