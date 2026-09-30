@@ -15,7 +15,9 @@
           "(?:fast|quick|small(?:er)? (?:baseline|empty|spawn)|low(?:er)? (?:baseline|spawn))[\\s\\S]{0,80}(?:tight|small(?:er)? (?:budget|allowance|margin|headroom|limit|threshold)|less (?:headroom|room|slack|margin)|strict|lower (?:budget|limit|ceiling|threshold))",
           "(?:tight|strict)[\\s\\S]{0,80}(?:fast|quick)",
           "\\d+ ?ms\\b[\\s\\S]{0,80}?\\b(?:gets?|allows?|leaves?|grants?)\\b[\\s\\S]{0,160}?\\b(?:while|whereas|but)\\b[\\s\\S]{0,60}?\\d+ ?ms\\b[\\s\\S]{0,60}?\\b(?:gets?|allows?|leaves?|grants?)\\b",
-          "slow[\\s\\S]{0,80}(?:generous|loose|lenient|more (?:headroom|room|slack|margin)|larger (?:budget|allowance|margin)|bigger (?:budget|allowance|margin)|(?:budget|allowance|margin|headroom|limit|threshold) (?:is |gets |grows )?(?:larger|bigger|looser|wider))"
+          "slow[\\s\\S]{0,80}(?:generous|loose|lenient|more (?:headroom|room|slack|margin)|larger (?:budget|allowance|margin)|bigger (?:budget|allowance|margin)|(?:budget|allowance|margin|headroom|limit|threshold) (?:is |gets |grows )?(?:larger|bigger|looser|wider))",
+          "\\bfast\\w*\\b[\\s\\S]{0,60}?\\d+(?:\\.\\d+)? ?ms\\b[\\s\\S]{0,80}?\\b(?:gives?|gets?|allows?|leaves?|grants?|absorbs?|tolerates?)\\b(?:(?!same)[\\s\\S]){0,20}?~?\\d+(?:\\.\\d+)? ?m?s\\b[\\s\\S]{0,12}?\\b(?:limit|budget|slack|extra|headroom|allowance)\\b",
+          "\\bfast\\w*\\b[\\s\\S]{0,60}?\\d+(?:\\.\\d+)? ?ms\\b[\\s\\S]{0,40}?\\b(?:bound|limit|budget|allowance|threshold|ceiling)\\s+(?:is|of|becomes|=)\\s*~?\\d+(?:\\.\\d+)? ?ms\\b"
         ]
       }
     ]
@@ -28,7 +30,9 @@
     { "cause": { "file": "tooling/test-inbox.js", "mechanism": "fullMs < emptyMs * 2 + 25 grants the 25 files a margin of the empty spawn time plus 25ms. On a slower machine that allowance grows larger, which is why the developer Mac cannot reproduce a 113ms stall that fails the 38ms CI runner." } },
     { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The predicate fullMs < emptyMs * 2 + 25 budgets a fixed I/O cost as a multiple of an unrelated spawn baseline. A faster machine measures a smaller empty time and therefore gets a TIGHTER absolute allowance, while a slow box's baseline makes the budget generous." } },
     { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The predicate fullMs < emptyMs * 2 + 25 lets the 25 files cost only emptyMs + 25: the CI Mac spawns in 38ms so the files get 63ms and one 113ms stall fails it, while the dev Mac's 200ms empty time allows 225ms." } },
-    { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is emptyMs * 2 + 25, a multiple of the spawn baseline, so the fast CI Mac at 38ms gets a tight 63ms allowance that one ordinary stall, maybe a GC pause, exceeds." } }
+    { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is emptyMs * 2 + 25, a multiple of the spawn baseline, so the fast CI Mac at 38ms gets a tight 63ms allowance that one ordinary stall, maybe a GC pause, exceeds." } },
+    { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The check bounds the full run by twice the empty spawn time plus 25ms. The fast CI runner measures 38ms empty, so its bound is 101ms, and one VM stall breaks it." } },
+    { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The flat-cost check allows the full case emptyMs * 2 + 25, a limit that scales with the machine. The fast CI runner at 38ms empty gets only about 100ms of budget; a developer Mac at 200ms empty gets 425ms. One filesystem stall on the runner breaks it and never does locally." } }
   ],
   "decoys": [
     { "id": "noisy-runner", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The macOS CI runners are shared and noisy, so a garbage-collection pause or a disk stall during the 25-file run adds about 100ms and pushes it over the budget." } } },
@@ -37,6 +41,8 @@
     { "id": "baseline-without-faster", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is twice the empty baseline plus 25ms, and the 25-file run on macOS takes longer because APFS stats are expensive, so it exceeds that budget." } } },
     { "id": "faster-without-baseline", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "Fast CI machines leave tight timing, so any 100ms stall during the 25-file run fails the check." } } },
     { "id": "hedged", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is a multiple of the empty spawn time, so a fast runner gets a tight allowance that one stall exceeds. Possibly the runner is also just noisy." } } },
-    { "id": "numbers-one-machine", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is emptyMs * 2 + 25, and the CI Mac at 38ms gets 63ms for the files, which a 113ms APFS stat stall exceeds." } } }
+    { "id": "numbers-one-machine", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is emptyMs * 2 + 25, and the CI Mac at 38ms gets 63ms for the files, which a 113ms APFS stat stall exceeds." } } },
+    { "id": "two-machines-no-direction", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is emptyMs * 2 + 25. The CI runner at 38ms gets 101ms and a local Mac at 200ms gets 425ms, and the Mac fails because its stat calls are slower." } } },
+    { "id": "fast-same-slack", "answer": { "cause": { "file": "tooling/test-inbox.js", "mechanism": "The budget is twice the empty spawn time plus 25ms, and the fast runner at 38ms gets the same 25ms of slack as any machine, which one stall exceeds." } } }
   ]
 }
