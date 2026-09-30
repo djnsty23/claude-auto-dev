@@ -1,0 +1,12 @@
+{
+  "id": "T11",
+  "lane": "plan",
+  "size": "M",
+  "source": "the A13 frontier plan, asked for again as a vague brief",
+  "parent": "62c539a57777787665995ad6b4cde2974bcfe80b",
+  "brief": "T11.md",
+  "answerFile": "frontier-answer.json",
+  "expected": "T11.answers.json",
+  "leakTerms": ["tooling/frontier", "test-frontier"],
+  "timeoutMin": 30
+}

@@ -1,0 +1,90 @@
+{
+  "_doc": "Held-out key for T11, a plan from a vague ask. The requirements are what the brief implies but does not say: tasks from real history with held-out tests, a task tree with no history, a plant check, a config the answer cannot leak through, grading by the runner, repeats, one variable, cost, and the harness as repo machinery with its own suite. A pass meets the threshold and trips no trap. X1: the harness under plugins/, which ships to every user. X2: a step that hands the worker a checkout at the fix's parent, whose history holds the fix.",
+  "threshold": 8,
+  "maxChars": 8000,
+  "requirements": [
+    { "id": "R1", "why": "tasks come from the repository's real history", "text": ["from (?:the |this |our )?(?:repo(?:sitory)?'?s? )?(?:git )?history", "git log", "\\b(?:past|previous|prior|earlier|recent|merged|historical|real|actual)\\b[\\s\\S]{0,30}\\b(?:fix|fixes|commits?|PRs?|pull requests?|changes|bugs|defects)\\b"] },
+    { "id": "R2", "why": "the grading tests are held out of the worker's tree", "text": ["held[- ]out", "hidden (?:tests?|suites?|checks?)", "withh[eo]ld", "(?:copied|copy|added|add|run)\\b[\\s\\S]{0,20}\\bafter the (?:worker|run|agent|model) (?:stops|finishes|ends|exits|is done)"] },
+    { "id": "R3", "why": "the task tree carries no history that holds the fix", "text": ["git archive", "one[- ]commit", "single[- ]commit", "no (?:git )?history", "without (?:git )?history", "strip(?:ped|s)? (?:the |its )?history", "git init", "orphan", "shallow", "fresh (?:git )?repo", "git log (?:would )?(?:show|reveal|leak)s?"] },
+    { "id": "R4", "why": "each task is planted: red unfixed, green fixed", "text": ["\\bplant", "(?:red|fail\\w*)[\\s\\S]{0,60}(?:unfixed|before the fix|pre-?fix|parent)", "(?:unfixed|before the fix|pre-?fix|parent)[\\s\\S]{0,60}(?:red|fail)"] },
+    { "id": "R5", "why": "the worker's config cannot carry the answer", "text": ["fresh (?:config|profile|home|claude)", "isolated (?:config|profile|home)", "empty (?:config|profile|home)", "CLAUDE_CONFIG_DIR", "--config-dir", "config[- ]dir", "contaminat", "(?:memory|memories|lessons|plugin cache)[\\s\\S]{0,60}(?:leak|contain|hold|carr|know|answer)", "leak[\\s\\S]{0,40}(?:memory|memories|lessons)"] },
+    { "id": "R6", "why": "the runner runs the checks, not the worker's claim", "text": ["\\b(?:runner|harness|grader|script|we)\\b[\\s\\S]{0,40}(?:runs?|executes?|grades?)[\\s\\S]{0,30}(?:checks?|tests?|suites?)", "not (?:the )?(?:worker|model|agent)'?s? (?:own )?(?:claim|report|word|say)", "(?:never|don't|do not) trust (?:the )?(?:worker|model|agent)"] },
+    { "id": "R7", "why": "repeats, because one run is noise", "text": ["\\bk ?= ?\\d", "repeat", "repetition", "several runs", "multiple runs", "(?:three|3|five|5) (?:runs|times|repeats)", "variance", "noise", "noisy", "run[- ]to[- ]run", "confidence", "significan"] },
+    { "id": "R8", "why": "the same tasks and conditions, one variable", "text": ["same (?:tasks?|set|conditions|prompt|brief|harness|config)", "identical (?:tasks?|task set|set|conditions|prompt|brief|harness)", "one (?:variable|axis|thing) (?:at a time|changes|moves)", "only the model (?:changes|differs|varies)", "changing only the model", "hold(?:ing)? everything else", "paired", "head[- ]to[- ]head"] },
+    { "id": "R9", "why": "cost is measured, not only pass rate", "text": ["\\btokens?\\b", "\\bcost", "\\bspend", "wall[- ]?(?:clock|time)", "duration", "latency", "\\bminutes\\b", "elapsed"] },
+    { "id": "R10", "why": "the harness is repo machinery under tooling/", "text": ["\\btooling/(?!test-)[\\w./-]+"], "path": ["^tooling/(?!test-)"] },
+    { "id": "R11", "why": "the harness has its own suite", "text": ["\\btooling/test-[\\w-]+\\.js"], "path": ["^tooling/test-[^/]+\\.js$"] }
+  ],
+  "traps": [
+    { "id": "X1", "why": "a harness under plugins/ ships to every user of the marketplace", "creates": "^plugins/" },
+    { "id": "X2", "why": "a checkout at the fix's parent keeps the history that holds the fix", "step": {
+      "all": ["worktree|git clone|\\bclone\\b|git checkout|check(?:ed)?[- ]?out", "parent|pre-?fix|before (?:the|each|its) fix|unfixed|commit before|starting commit|base commit"],
+      "none": ["git archive|one[- ]commit|single[- ]commit|no (?:git )?history|without (?:git )?history|fresh (?:git )?repo|git init|orphan|(?:not|never|don't|avoid|instead of)\\b[\\s\\S]{0,25}(?:worktree|clone|check(?:ed)? ?out)"]
+    } }
+  ],
+  "examples": {
+    "right": [
+      {
+        "steps": [
+          { "do": "Pick about ten tasks from this repository's history: merged fixes whose PR added or changed a test, each with a mechanical endpoint.", "creates": ["tooling/frontier/tasks/T1.json"], "commands": ["git log --oneline --merges"] },
+          { "do": "For each task, build the worker's repo with git archive of the parent commit into a fresh one-commit repo, so git log cannot show the fix." },
+          { "do": "Hold the fix's tests out of that repo: copy them in only after the worker stops, and have the runner run them, not the worker's claim." },
+          { "do": "Plant each task: its held-out tests must fail on the unfixed tree and pass on the fix, or the task is dropped." },
+          { "do": "Run every worker in a fresh config dir with no memory, lessons or plugin cache that could hold the fix, and grep it for the fix's distinctive tokens before each run." },
+          { "do": "Run Opus and Sonnet on the same tasks with the same brief and harness, changing only the model, k=3 each to see run-to-run noise." },
+          { "do": "Record pass, tokens and wall time per run and compare pass rate against cost.", "creates": ["tooling/frontier/run.js"] },
+          { "do": "Gate the runner with a suite that drives it through a fake claude binary, so the harness is tested without spending tokens.", "creates": ["tooling/test-frontier.js"] }
+        ],
+        "risks": ["Ten tasks at k=3 separate the models only when the gap is large.", "A task whose brief names the fix measures nothing."]
+      },
+      {
+        "steps": [
+          { "do": "Mine merged PRs that changed a test for eight candidate tasks.", "commands": ["gh pr list --state merged"] },
+          { "do": "Export each pre-fix tree with git archive into a new repo with no history." },
+          { "do": "Keep the tests from each fix held out of the task repo. The harness runs those tests itself after the worker exits." },
+          { "do": "Before trusting a task, confirm its tests are red on the parent and green on the fix." },
+          { "do": "Start each worker with CLAUDE_CONFIG_DIR pointed at an empty profile, so no memory leaks the answer." },
+          { "do": "Run both models over the identical task set three times each, one variable at a time.", "creates": ["tooling/model-eval/run.js", "tooling/test-model-eval.js"] },
+          { "do": "Report pass rate, token cost and duration per model." }
+        ],
+        "risks": ["Eight tasks cannot show a small gap."]
+      }
+    ],
+    "careless": {
+      "steps": [
+        { "do": "Pick three recent PRs." },
+        { "do": "Check out each PR's parent commit in a git worktree and give Sonnet the PR description.", "commands": ["git worktree add ../eval <sha>^"] },
+        { "do": "See whether Sonnet's change makes the PR's tests pass, and compare with what Opus did." }
+      ],
+      "risks": []
+    },
+    "traps": {
+      "X1": {
+        "steps": [
+          { "do": "Pick about ten tasks from this repository's history: merged fixes whose PR added or changed a test.", "commands": ["git log --oneline --merges"] },
+          { "do": "For each task, build the worker's repo with git archive of the parent commit into a fresh one-commit repo." },
+          { "do": "Hold the fix's tests out: copy them in only after the worker stops, and have the runner run them, not the worker's claim." },
+          { "do": "Plant each task: its held-out tests must fail on the unfixed tree and pass on the fix." },
+          { "do": "Run every worker in a fresh config dir with no memory or lessons." },
+          { "do": "Run Opus and Sonnet on the same tasks, changing only the model, k=3 each." },
+          { "do": "Record pass, tokens and wall time per run.", "creates": ["plugins/autodev-core/scripts/model-eval.js"] },
+          { "do": "Gate it with a suite.", "creates": ["tooling/test-model-eval.js"] }
+        ],
+        "risks": []
+      },
+      "X2": {
+        "steps": [
+          { "do": "Pick about ten tasks from this repository's history: merged fixes whose PR added or changed a test.", "commands": ["git log --oneline --merges"] },
+          { "do": "For each task, check out the parent commit in a git worktree and start the worker there." },
+          { "do": "Hold the fix's tests out: copy them in only after the worker stops, and have the runner run them, not the worker's claim." },
+          { "do": "Plant each task: its held-out tests must fail on the unfixed tree and pass on the fix." },
+          { "do": "Run every worker in a fresh config dir with no memory or lessons." },
+          { "do": "Run Opus and Sonnet on the same tasks, changing only the model, k=3 each." },
+          { "do": "Record pass, tokens and wall time per run.", "creates": ["tooling/frontier/run.js"] },
+          { "do": "Gate it with a suite.", "creates": ["tooling/test-frontier.js"] }
+        ],
+        "risks": []
+      }
+    }
+  }
+}

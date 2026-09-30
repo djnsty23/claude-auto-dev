@@ -1,0 +1,13 @@
+{
+  "id": "T10",
+  "lane": "diagnose",
+  "size": "M",
+  "source": "3ce459cc (#275) test-headless-worker case 17 red on ubuntu only",
+  "parent": "43cfd21d399a85b48d2684fe4a2086aaf95929fd",
+  "fix": "3ce459cc647eacbf447e20f42ef8c6b3d0814f99",
+  "brief": "T10.md",
+  "answerFile": "frontier-answer.json",
+  "expected": "T10.answers.json",
+  "leakTerms": ["ext4"],
+  "timeoutMin": 30
+}
