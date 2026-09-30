@@ -1020,15 +1020,157 @@ expectAsk('role held + push INSIDE the home repo with --no-verify still asks',
         + `${without.stdout.length}B out ${without.stderr.length}B err`);
 }
 
+// ---------------------------------------------------------------------------
+// I. THE .env READ DENY. Third guard in the same file, added 2026-09-30.
+//
+//    Always on, like the ask, so every case uses the ABSENT role file unless it
+//    is testing the interaction. A refusal is exit 2, zero bytes on stdout, and
+//    a stderr reason that names the file and the sanctioned alternative. The
+//    three refused shapes are real command shapes from transcripts on this
+//    machine, the first of them the incident verbatim; the negatives are the forms the
+//    rules tell a session to use instead, so a too-wide deny is a red test.
+// ---------------------------------------------------------------------------
+/** A .env refusal: exit 2, silent stdout, and a reason naming the file and the keys-only form. */
+function expectEnvBlock(label, res, file) {
+    const ok = res.exit === 2 && res.stdout.length === 0
+        && res.stderr.startsWith('Blocked: ')
+        && res.stderr.includes(`would print ${file} into the transcript`)
+        && res.stderr.includes(`grep -oE '^[A-Z][A-Z0-9_]*' ${file}`);
+    check(label, ok, `exit ${res.exit}, stdout ${res.stdout.length}B, stderr ${JSON.stringify(res.stderr.slice(0, 90))}`);
+}
+
+// The three real shapes.
+expectEnvBlock('the 2026-09-29 incident: a sed mask piped through cat -A, cut and head is refused',
+    noRole("sed -E 's/^([^=#]*)=.*/\\1=<v>/' .env.local.stage | sed -E 's/^(#.{0,60}).*/\\1/' | cat -A | cut -c1-90 | head -80"),
+    '.env.local.stage');
+expectEnvBlock('a key-pattern grep whose lines are cut at `=` is refused: a line with no `=` passes whole',
+    noRole('grep -E "^[A-Za-z_][A-Za-z0-9_]*=" .env.local.stage | cut -d= -f1 | tr \'\\n\' \' \''),
+    '.env.local.stage');
+expectEnvBlock('a grep across source files and a .env glob is refused',
+    noRole('grep -rn "REVIEW_PASSWORD\\|review_login" app/src/middleware.ts app/.env* 2>/dev/null'),
+    'app/.env*');
+expectEnvBlock('`cat .env.local | grep -i review` is refused: the filter prints whole value lines',
+    noRole('cat .env.local | grep -i review'), '.env.local');
+expectEnvBlock('`cut -d= -f1 < .env` is refused: input by redirection counts', noRole('cut -d= -f1 < .env'), '.env');
+expectEnvBlock('the deny holds in a later segment after `cd`', noRole('cd app && head -5 .env'), '.env');
+
+// The planted negatives: what the rules say to do instead.
+expectSilentAllow('the sanctioned keys-only grep is allowed',
+    noRole("grep -oE '^[A-Z][A-Z0-9_]*' .env.local"));
+expectSilentAllow('`grep -c` on one key is allowed: a count is not a value',
+    noRole("grep -c '^STRIPE_KEY=' .env"));
+expectSilentAllow('`export $(grep ... | xargs)` is allowed: the output is captured, never printed',
+    noRole("export $(grep -v '^#' .env | xargs)"));
+expectSilentAllow('writing a .env through a heredoc is allowed, even with `cat .env` inside the body',
+    noRole('cat > .env <<EOF\nA=1\ncat .env\nEOF\necho done'));
+expectSilentAllow('a template is not a secret: `cat .env.example` is allowed', noRole('cat .env.example'));
+expectSilentAllow('`grep -rn ".env" src/` searches FOR the name and is allowed', noRole('grep -rn ".env" src/'));
+expectSilentAllow('`ls -la .env*` is not a reader', noRole("ls -la .env* | awk '{print $5, $9}'"));
+
+// Interaction with the ban and the ask: the deny needs no role file, and a
+// role file does not switch it off.
+expectEnvBlock('role held + `cat .env` in the home repo is still refused',
+    run({ payload: bash('cat .env', { cwd: HOME_REPO }) }), '.env');
+
+// MUTATION, with different provenance from the recogniser: two literal
+// commands that differ by one flag. `-o` is what makes the keys-only form
+// safe; without it the same grep prints every matching line whole.
+{
+    const withO = noRole("grep -oE '^[A-Z][A-Z0-9_]*' .env.local");
+    const withoutO = noRole("grep -E '^[A-Z][A-Z0-9_]*' .env.local");
+    const ok = withO.exit === 0 && withO.stdout.length === 0 && withO.stderr.length === 0
+        && withoutO.exit === 2 && withoutO.stderr.startsWith('Blocked: ');
+    check('MUTATION: removing `-o`, and nothing else, turns the allow into a refusal', ok,
+        `with -o: exit ${withO.exit} ${withO.stderr.length}B err; without: exit ${withoutO.exit}`);
+}
+
+// ---------------------------------------------------------------------------
+// J. THE RECOGNISER, in process. The subprocess cases above prove the wiring;
+//    this table is the breadth, 60 commands at microseconds each. Every row is
+//    either a real transcript shape or a boundary the header of
+//    scripts/env-file-read.js names. R is refused, A is allowed.
+// ---------------------------------------------------------------------------
+{
+    const envRead = require(path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'env-file-read.js'));
+    const table = [
+        ['R', 'cat .env.local'],
+        ['R', "awk -F= '{print $1}' .env"],
+        ['R', 'cut -d= -f1 .env.production'],
+        ['R', 'grep -rn KEY .env*'],
+        ['R', 'grep -v "^#" .env | xargs'],
+        ['R', 'cat C:\\\\proj\\\\.env'],
+        ['R', 'cat "${ROOT}/.env"'],
+        ['R', 'sudo cat /srv/app/.env'],
+        ['R', 'diff .env .env.example'],
+        ['R', 'cat .env 2>/dev/null'],
+        ['R', 'cat .env >&2'],
+        ['R', 'tr "=" " " < .envrc'],
+        ['R', 'cat prod.env'],
+        ['R', "grep -oE '^ADMIN_EMAILS=.*' .env.local | sed 's/=.*@/=***@/'"],
+        ['R', "grep '^DATABASE_URL=' .env.local | sed -E 's#.*@([^:/]+).*#\\1#'"],
+        ['R', 'cat .env* | cut -d= -f1 | head'],
+        ['R', "grep -oE '^[A-Z_]+=[a-z]{0,4}' .env"],
+        ['R', "grep -oE '^[^=]+' .env"],
+        ['R', "grep -oE '^[A-Z_]+=.' .env"],
+        ['R', "cat .env | grep -v '^#'"],
+        ['R', "grep -oE '^A_[A-Z]*|B_.*' .env"],
+        ['R', 'tail -1 .env.local'],
+        ['A', "grep -o '^[A-Z_]*' .env.local | tr '\\n' ' '"],
+        ['A', 'grep -c . .env.local'],
+        ['A', "grep -q '^STRIPE_KEY=' .env && echo set"],
+        ['A', 'grep -l KEY .env .env.local'],
+        ['A', 'set -a; . ./.env; set +a'],
+        ['A', "rg -g '.env*' --files"],
+        ['A', 'cat <<EOF > .env.local\nKEY=x\nEOF'],
+        ['A', 'grep -v OLD .env > .env.new'],
+        ['A', "sed -i 's/^OLD=/NEW=/' .env"],
+        ['A', 'node scripts/apply.mjs --from .env.local.stage'],
+        ['A', 'cat .env &>/dev/null'],
+        ['A', 'git commit -F msg.txt  # mentions cat .env'],
+        ['A', 'echo "cat .env is refused"'],
+        ['A', 'KEY=$(grep ^KEY= .env | cut -d= -f2) node x.js'],
+        ['A', 'cp .env.example .env'],
+        ['A', 'grep "x" file <<< ".env"'],
+        ['A', "grep -oE '^[A-Z][A-Z0-9_]*=' .env.local | tr -d '='"],
+        ['A', "cat .env.local | grep -oE '^[A-Z][A-Z0-9_]*='"],
+        ['A', 'grep -oE "^(DATABASE_URL|DB_SSL_CA)=" .env.local.prod'],
+        ['A', "grep -oE '^[[:space:]]*(export )?[A-Za-z_][A-Za-z0-9_]*=' .env.local.prod | sort -u"],
+        ['A', "grep -oE '^[A-Z_]*BITBUCKET[A-Z_]*|^[A-Z_]*BB_[A-Z_]*' .env.local.prod"],
+        ['A', 'grep KEY .env | wc -l'],
+        ['A', "cat .env | grep -v '^#' | grep -c ."],
+        ['A', 'cat .env.sample .env.template .env.local.example'],
+        ['A', 'source .env'],
+    ];
+    let wrong = [];
+    for (const [want, cmd] of table) {
+        const got = envRead.findEnvFileRead(cmd) ? 'R' : 'A';
+        if (got !== want) wrong.push(`${want} got ${got}: ${cmd.split('\n')[0]}`);
+    }
+    check(`recogniser table: ${table.length - wrong.length}/${table.length} rows as expected`
+        + ` (${table.filter((r) => r[0] === 'R').length} refused, ${table.filter((r) => r[0] === 'A').length} allowed)`,
+    wrong.length === 0, wrong.join(' | '));
+
+    // The file-shape predicate on its own, both directions, with literals.
+    const shapes = { '.env': true, '.env.local.stage': true, '.envrc': true, 'prod.env': true, '.env*': true,
+        'a/b/.env.production': true, '.env.example': false, '.env.local.sample': false, 'env.ts': false,
+        '.environment.md': false };
+    const shapeWrong = Object.entries(shapes).filter(([w, want]) => envRead.isEnvFile(w) !== want).map(([w]) => w);
+    check(`isEnvFile: ${Object.keys(shapes).length - shapeWrong.length}/${Object.keys(shapes).length} names classified`,
+        shapeWrong.length === 0, shapeWrong.join(', '));
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
+
+// Section J runs in process: the table and the file-shape predicate.
+const IN_PROCESS = 2;
 
 // The population, not a bare verdict: what was driven, and how. Without it a
 // green run is indistinguishable from a suite that asserted nothing.
 console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
-    + `driven as a subprocess ${pass + fail} times over `
+    + `${pass + fail} checks, all but the ${IN_PROCESS} recogniser checks driven as a subprocess, over `
     + `${['inert-without-role', 'the ban', 'mention-is-not-execution', 'cwd escapes',
-        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'mutation'].length} case groups; `
+        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'env read deny', 'env recogniser', 'mutation'].length} case groups; `
     + `every allow asserted zero bytes on BOTH stdout and stderr.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
