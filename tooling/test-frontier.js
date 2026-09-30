@@ -110,6 +110,69 @@ function buildTasks(s) {
         write(path.join(TASKS, `${id}.json`), JSON.stringify({ id, lane: 'decide', size: 'S', parent: s.parent, brief: 'TD.md', answerFile: 'frontier-answer.json', expected: `${id}.answers.json`, timeoutMin: 2 }));
         write(path.join(TASKS, `${id}.answers.json`), JSON.stringify(key));
     }
+    // TDG: a diagnosis of the same defect. TDL leaks a keyword group in its brief.
+    const diagKey = { cause: { files: ['lib/add.js'], groups: [
+        { id: 'op', match: ['subtract|minus|a - b'] }, { id: 'should', match: ['\\bplus\\b|addition|a \\+ b'] }] },
+    examples: [
+        { cause: { file: 'lib/add.js', mechanism: 'It returns a - b, a subtraction, where it should return a + b.' } },
+        { cause: { file: './lib/add.js', mechanism: 'The function subtracts its second argument: minus where plus is meant.' } }],
+    decoys: [
+        { id: 'wrong-file', answer: { cause: { file: 'tooling/test-other.js', mechanism: 'It returns a - b, a subtraction, where it should return a + b.' } } },
+        { id: 'wrong-mechanism', answer: { cause: { file: 'lib/add.js', mechanism: 'The arguments arrive as strings, so they are concatenated.' } } },
+        { id: 'hedged', answer: { cause: { file: 'lib/add.js', mechanism: 'It returns a - b where it should return a + b, or perhaps the caller swaps the arguments.' } } }] };
+    write(path.join(TASKS, 'TDG.answers.json'), JSON.stringify(diagKey));
+    write(path.join(TASKS, 'TDG.md'), 'add(2, 2) returns 0 instead of 4. Find the cause. Do not fix it. Write frontier-answer.json.\n');
+    write(path.join(TASKS, 'TDL.md'), 'add(2, 2) returns 0 because it computes a - b. Find the cause. Write frontier-answer.json.\n');
+    for (const [id, brief] of [['TDG', 'TDG.md'], ['TDL', 'TDL.md']]) {
+        write(path.join(TASKS, `${id}.json`), JSON.stringify({ id, lane: 'diagnose', size: 'S', parent: s.parent, fix: s.fix, brief, answerFile: 'frontier-answer.json', expected: 'TDG.answers.json', leakTerms: ['SIGNFLIP'], timeoutMin: 2 }));
+    }
+    // TP: a plan. TPT has a trap whose example trips nothing, so its key is refused.
+    const planKey = (x2Example) => ({ threshold: 2, requirements: [
+        { id: 'R1', text: ['held[- ]out'] }, { id: 'R2', text: ['git archive|one[- ]commit'] }, { id: 'R3', path: ['^tooling/'] }],
+    traps: [{ id: 'X1', creates: '^plugins/' }, { id: 'X2', step: { all: ['worktree', 'parent'], none: ['git archive'] } }],
+    examples: {
+        right: [{ steps: [{ do: 'Build each task repo with git archive of the parent. Keep the tests held out.', creates: ['tooling/eval.js'] }] }],
+        careless: { steps: [{ do: 'Open a worktree at the parent and run the model there.' }] },
+        traps: {
+            X1: { steps: [{ do: 'Build each task repo with git archive. Keep the tests held out.', creates: ['plugins/autodev-core/scripts/eval.js'] }] },
+            X2: x2Example,
+        } } });
+    write(path.join(TASKS, 'TP.md'), 'Can the cheaper model do the work? Plan how to find out. Write frontier-answer.json.\n');
+    write(path.join(TASKS, 'TP.answers.json'), JSON.stringify(planKey({ steps: [{ do: 'Open a worktree at the parent. Keep the tests held out.' }, { do: 'Run it.', creates: ['tooling/eval.js'] }] })));
+    write(path.join(TASKS, 'TPT.answers.json'), JSON.stringify(planKey({ steps: [{ do: 'Build each repo with git archive of the parent in a worktree. Keep the tests held out.', creates: ['tooling/eval.js'] }] })));
+    for (const id of ['TP', 'TPT']) {
+        write(path.join(TASKS, `${id}.json`), JSON.stringify({ id, lane: 'plan', size: 'S', parent: s.parent, brief: 'TP.md', answerFile: 'frontier-answer.json', expected: `${id}.answers.json`, timeoutMin: 2 }));
+    }
+    // One broken key per refusal of the open-lane plant checks. Each must be
+    // refused for exactly its own reason, so a removed check shows as a pass.
+    const brokenDiag = {
+        TDX1: [{ decoys: diagKey.decoys.concat([{ id: 'same', answer: diagKey.examples[0] }]) }, {}],
+        TDX2: [{ examples: diagKey.examples.concat([{ cause: { file: 'lib/other.js', mechanism: diagKey.examples[0].cause.mechanism } }]) }, {}],
+        TDX3: [{ decoys: diagKey.decoys.concat([{ id: 'gone', answer: { cause: { file: 'lib/missing.js', mechanism: 'It is missing.' } } }]) }, {}],
+        TDX4: [{}, { leakTerms: ['module.exports'] }],
+        TDX5: [{}, { leakTerms: undefined }],
+        TDX6: [{ examples: diagKey.examples.slice(0, 1), decoys: diagKey.decoys.slice(0, 1) }, {}],
+    };
+    for (const [id, [keyPatch, taskPatch]] of Object.entries(brokenDiag)) {
+        write(path.join(TASKS, `${id}.answers.json`), JSON.stringify(Object.assign({}, diagKey, keyPatch)));
+        write(path.join(TASKS, `${id}.json`), JSON.stringify(Object.assign({ id, lane: 'diagnose', size: 'S', parent: s.parent, brief: 'TDG.md', answerFile: 'frontier-answer.json', expected: `${id}.answers.json`, leakTerms: ['SIGNFLIP'], timeoutMin: 2 }, taskPatch)));
+    }
+    const base = planKey({ steps: [{ do: 'Open a worktree at the parent. Keep the tests held out.' }, { do: 'Run it.', creates: ['tooling/eval.js'] }] });
+    write(path.join(TASKS, 'TPX5.md'), 'Plan it with git archive. Write frontier-answer.json.\n');
+    const brokenPlan = {
+        TPX1: [{ threshold: 0 }, {}],
+        TPX2: [{ examples: Object.assign({}, base.examples, { right: [base.examples.careless] }) }, {}],
+        TPX3: [{ examples: Object.assign({}, base.examples, { careless: base.examples.right[0] }) }, {}],
+        TPX4: [{ traps: [], examples: Object.assign({}, base.examples, { traps: {} }) }, {}],
+        TPX5: [{}, { brief: 'TPX5.md' }],
+        TPX6: [{}, { leakTerms: ['module.exports'] }],
+        TPX7: [{ examples: Object.assign({}, base.examples, { right: [] }) }, {}],
+        TPX8: [{ examples: { right: base.examples.right, traps: base.examples.traps } }, {}],
+    };
+    for (const [id, [keyPatch, taskPatch]] of Object.entries(brokenPlan)) {
+        write(path.join(TASKS, `${id}.answers.json`), JSON.stringify(Object.assign({}, base, keyPatch)));
+        write(path.join(TASKS, `${id}.json`), JSON.stringify(Object.assign({ id, lane: 'plan', size: 'S', parent: s.parent, brief: 'TP.md', answerFile: 'frontier-answer.json', expected: `${id}.answers.json`, timeoutMin: 2 }, taskPatch)));
+    }
     write(path.join(TASKS, 'TR.answers.json'), JSON.stringify({ planted: [
         { id: 'race', section: 'S2', match: ['\\brace\\b', 'concurrent write'], example: 'Two writers race on the ledger with no lock.' },
         { id: 'open', section: 'S3', match: ['fails? open', 'missing file .*(pass|proceed)'], example: 'The check fails open when the file is missing.' },
@@ -313,6 +376,49 @@ function unitCases() {
     } finally {
         try { planted.kill(); } catch { /* already gone */ }
     }
+    openLaneCases();
+}
+
+function openLaneCases() {
+    const dk = readJson(path.join(TASKS, 'TDG.answers.json'));
+    const right = dk.examples.map((a) => R.gradeDiagnose(a, dk));
+    check('66a. gradeDiagnose: both right examples pass, ./lib/add.js normalised', right.every((g) => g.pass) && right[1].file === 'lib/add.js', right);
+    const wrongFile = R.gradeDiagnose(dk.decoys[0].answer, dk);
+    check('66b. gradeDiagnose: the right mechanism in the wrong file fails on the file alone', !wrongFile.pass && !wrongFile.fileOk && wrongFile.groups.every((g) => g.hit) && !wrongFile.hedged, wrongFile);
+    const wrongMech = R.gradeDiagnose(dk.decoys[1].answer, dk);
+    check('66c. gradeDiagnose: the right file with the wrong mechanism fails on its groups', !wrongMech.pass && wrongMech.fileOk && wrongMech.groups.some((g) => !g.hit), wrongMech);
+    const hedged = R.gradeDiagnose(dk.decoys[2].answer, dk);
+    check('66d. gradeDiagnose: a hedged right answer fails on the hedge alone', !hedged.pass && hedged.fileOk && hedged.groups.every((g) => g.hit) && hedged.hedged, hedged);
+    const long = R.gradeDiagnose({ cause: { file: 'lib/add.js', mechanism: `${dk.examples[0].cause.mechanism} ${'x'.repeat(600)}` } }, dk);
+    const empty = R.gradeDiagnose({}, dk);
+    check('66e. gradeDiagnose: a mechanism past maxMechanism fails, and an empty answer fails', !long.pass && long.tooLong && long.fileOk && !empty.pass, [long.tooLong, empty]);
+    const plainEither = R.gradeDiagnose({ cause: { file: 'lib/add.js', mechanism: 'It returns a - b on either call, where it should return a + b.' } }, dk);
+    const eitherOr = R.gradeDiagnose({ cause: { file: 'lib/add.js', mechanism: 'Either it returns a - b where it should return a + b, or the caller swaps them.' } }, dk);
+    check('66f. gradeDiagnose: "on either call" is not a hedge, and "either this or that" is', plainEither.pass && !plainEither.hedged && eitherOr.hedged && !eitherOr.pass, [plainEither.hedged, eitherOr.hedged]);
+
+    const pk = readJson(path.join(TASKS, 'TP.answers.json'));
+    const pRight = R.gradePlan(pk.examples.right[0], pk);
+    check('67a. gradePlan: the right plan meets every requirement and trips nothing', pRight.pass && pRight.met === 3 && pRight.traps.length === 0, pRight);
+    const careless = R.gradePlan(pk.examples.careless, pk);
+    check('67b. gradePlan: the careless plan fails the threshold and trips the history trap', !careless.pass && careless.met < careless.threshold && careless.traps.join() === 'X2', careless);
+    const x1 = R.gradePlan(pk.examples.traps.X1, pk);
+    check('67c. gradePlan: a plan that meets the threshold but creates under plugins/ fails on X1', !x1.pass && x1.met >= x1.threshold && x1.traps.join() === 'X1', x1);
+    const x2 = R.gradePlan(pk.examples.traps.X2, pk);
+    check('67d. gradePlan: a plan that meets the threshold but opens a worktree at the parent fails on X2', !x2.pass && x2.met >= x2.threshold && x2.traps.join() === 'X2', x2);
+    // The carve-out can only remove a trip, so prove it removes one: the same
+    // step matches every `all` pattern, and only the git archive words save it.
+    const step = 'Build each repo with git archive of the parent in a worktree. Keep the tests held out.';
+    const carved = R.gradePlan({ steps: [{ do: step, creates: ['tooling/eval.js'] }] }, pk);
+    const bare = R.gradePlan({ steps: [{ do: step.replace('with git archive ', ''), creates: ['tooling/eval.js'] }] }, pk);
+    const allMatch = pk.traps[1].step.all.every((m) => new RegExp(m, 'i').test(step));
+    check('67e. gradePlan: the none words of a step trap remove a trip the all words make', allMatch && carved.traps.length === 0 && carved.pass && bare.traps.join() === 'X2' && !bare.pass, [allMatch, carved.traps, bare.traps]);
+    const huge = R.gradePlan({ steps: [{ do: `${'Keep the tests held out. '.repeat(400)}git archive`, creates: ['tooling/eval.js'] }] }, pk);
+    check('67f. gradePlan: an empty plan fails, and one past maxChars fails', !R.gradePlan({}, pk).pass && huge.tooLong && !huge.pass && huge.met === 3, [huge.tooLong, huge.met]);
+    // Every pattern of an empty list matches, so a step trap with no `all`
+    // words would trip on every step. It must trip on none.
+    const noAll = Object.assign({}, pk, { traps: [{ id: 'X9', step: { all: [], none: [] } }] });
+    const openAll = R.gradePlan(pk.examples.right[0], noAll);
+    check('67g. gradePlan: a step trap with no all words trips nothing', openAll.traps.length === 0 && openAll.pass, openAll.traps);
 }
 
 function cliCases(shas) {
@@ -342,6 +448,30 @@ function cliCases(shas) {
     check('25b. plant: a decide key passes when its examples pass and each wrong answer fails', p && p.TD.ok, p && p.TD);
     check('25c. plant: a decide key that accepts its own wrong answer is refused, naming the question', p && !p.TDW.ok && /wrong not failing \[q1\]/.test(p.TDW.reason), p && p.TDW);
     check('25d. plant: a decide key grading an option the brief never names is refused', p && !p.TDN.ok && /not in the brief \[q1:Z\]/.test(p.TDN.reason), p && p.TDN);
+    check('25e. plant: a diagnose key passes its examples, fails its decoys, and the fix files fire the contamination check',
+        p && p.TDG.ok && p.TDG.examples === 2 && p.TDG.decoys === 3 && p.TDG.contaminationTokens >= 1 && p.TDG.contaminationFired === true && p.TDG.leakTerms === 1, p && p.TDG);
+    check('25f. plant: a diagnose brief that matches a keyword group is refused for that alone', p && !p.TDL.ok && p.TDL.reason === 'the brief already matches groups [op]', p && p.TDL);
+    check('25g. plant: a plan key passes, and one whose trap example trips nothing is refused naming the trap',
+        p && p.TP.ok && p.TP.traps === 2 && !p.TPT.ok && p.TPT.reason === 'traps whose example does not fail on the trap alone [X2]', p && [p.TP, p.TPT]);
+    const refusals = [
+        ['TDX1', 'a diagnose decoy that passes', 'decoys that pass [same]'],
+        ['TDX2', 'a diagnose example that fails', 'examples that fail [2]'],
+        ['TDX3', 'a diagnose key naming a file the parent lacks', 'files not in the parent tree [lib/missing.js]'],
+        ['TDX4', 'a diagnose leak term already in the parent tree', 'leak terms already in the brief or the parent tree [module.exports]'],
+        ['TDX5', 'a diagnose task with no fix and no leak terms', 'nothing to search the room for: name the fix or leakTerms'],
+        ['TDX6', 'a diagnose key with one example and one decoy', '1 examples, needs 2 or more; 1 decoys, needs 2 or more'],
+        ['TPX1', 'a plan threshold of 0, which lets an empty plan pass', 'threshold 0 is not between 1 and 3; an empty plan passes'],
+        ['TPX2', 'a plan right example that fails', 'right examples that fail [0]'],
+        ['TPX3', 'a plan careless example that passes', 'the careless example passes'],
+        ['TPX4', 'a plan key with no trap', 'no trap'],
+        ['TPX5', 'a plan brief that already meets a requirement', 'the brief already meets [R2]'],
+        ['TPX6', 'a plan leak term already in the parent tree', 'leak terms already in the brief or the parent tree [module.exports]'],
+        ['TPX7', 'a plan key with no right example', 'no right example'],
+        ['TPX8', 'a plan key with no careless example', 'no careless example'],
+    ];
+    for (const [id, what, reason] of refusals) {
+        check(`25i. plant refuses ${what}, for that reason alone (${id})`, p && p[id] && !p[id].ok && p[id].reason === reason, p && p[id]);
+    }
 
     const pre = run(['prepare', '--task', 'TX', '--variant', 'V0']);
     check('26. prepare without a snapshot is refused as snapshot-missing', pre.json && !pre.json.ok && pre.json.error.code === 'snapshot-missing', pre.json);
@@ -433,6 +563,33 @@ function cliCases(shas) {
     const stale = run(['run', '--task', 'TD', '--variant', 'V1', '--account', 'testacct']);
     fs.writeFileSync(briefPath, briefText);
     check('54c. editing a task brief after its plant check makes the run refuse as plant-stale', stale.json && stale.json.error && stale.json.error.code === 'plant-stale', stale.json);
+
+    // The open lanes, graded through finish from the answer file.
+    const dkey = readJson(path.join(TASKS, 'TDG.answers.json'));
+    const dRight = startAndFinish('TDG', 'V0', 'answer', { FAKE_ANSWER: JSON.stringify(dkey.examples[0]) });
+    const dDecoy = startAndFinish('TDG', 'V0', 'answer', { FAKE_ANSWER: JSON.stringify(dkey.decoys[0].answer) });
+    check('54g. a diagnose answer is graded from the answer file: the right cause passes, the wrong file fails',
+        dRight.row && dRight.row.verdict === 'pass' && dDecoy.row && dDecoy.row.verdict === 'fail' && dDecoy.row.grade.fileOk === false,
+        [dRight.row ? dRight.row.grade : dRight.start.json, dDecoy.row && dDecoy.row.grade]);
+    const pkey = readJson(path.join(TASKS, 'TP.answers.json'));
+    const pRight = startAndFinish('TP', 'V0', 'answer', { FAKE_ANSWER: JSON.stringify(pkey.examples.right[0]) });
+    const pTrap = startAndFinish('TP', 'V0', 'answer', { FAKE_ANSWER: JSON.stringify(pkey.examples.traps.X1) });
+    check('54h. a plan answer is graded from the answer file: the right plan passes, the plugins/ plan fails on X1',
+        pRight.row && pRight.row.verdict === 'pass' && pRight.row.grade.met === 3 && pTrap.row && pTrap.row.verdict === 'fail' && pTrap.row.grade.traps.join() === 'X1',
+        [pRight.row ? pRight.row.grade : pRight.start.json, pTrap.row && pTrap.row.grade]);
+
+    // A leak term in the live rules: prose that would carry the diagnosis refuses the run.
+    write(path.join(HOME, 'rules', 'lesson-leak.md'), 'The add bug is a SIGNFLIP.\n');
+    run(['snapshot']);
+    const leakPrep = run(['prepare', '--task', 'TDG', '--variant', 'V0']);
+    const lp = leakPrep.json && leakPrep.json.value;
+    fs.unlinkSync(path.join(HOME, 'rules', 'lesson-leak.md'));
+    run(['snapshot']);
+    const cleanPrep = run(['prepare', '--task', 'TDG', '--variant', 'V0']);
+    const cp = cleanPrep.json && cleanPrep.json.value;
+    check('54i. a leak term in the config dir marks the diagnose run contaminated and names the file, and a clean config does not',
+        lp && lp.state === 'contaminated' && lp.contamination.hits.some((h) => h.token === 'SIGNFLIP' && /lesson-leak\.md$/.test(h.file))
+        && cp && cp.state === 'prepared', [lp && lp.contamination || leakPrep.json, cp ? cp.state : cleanPrep.json]);
 
     // the budget guard: a reading at 0.95 stops a batch before it starts anything
     const hot = startAndFinish('TX', 'V0', 'fix', { FAKE_7D: '0.95' });
