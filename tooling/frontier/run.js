@@ -10,9 +10,14 @@
  * endpoint suites are held out and copied in after the worker stops. The
  * runner, never the worker, runs the checks.
  *
+ * Open lanes grade an answer file instead: locate, review, decide, diagnose
+ * (one cause, its file and its mechanism) and plan (implied requirements and
+ * traps). Their keys are held out too, and plant proves each key discriminates.
+ *
  * Three refusals keep a row honest:
- *   contaminated  a token only the fix adds is already in the config dir, the
- *                 task repo or the plugin pin, so the answer is in the room.
+ *   contaminated  a token only the fix adds, or a task's leak term (the prose
+ *                 that would carry an open answer), is already in the config
+ *                 dir, the task repo or the plugin pin: the answer is in the room.
  *   billed-api    the init event says the run billed an API key, not the Max
  *                 plan. The row is discarded and the batch stops.
  *   token-missing the account's OAuth token is not in the environment.
@@ -43,6 +48,8 @@ const USAGE = [
     '                                  machine, at most <min> minutes (10 when given alone), then starts it as a loaded row',
     '  batch-resume --batch <id>       restart the loop of a batch whose loop died',
     '  status [--json]                 batches and the latest rows',
+    'Lanes: fix (held-out checks), locate (F1), review (planted defects), decide (choices and orders),',
+    '       diagnose (one cause: file and mechanism keywords, decoys fail), plan (implied requirements, traps fail).',
     'Options: --src <repo> --tasks-dir <dir> --data <dir> --work <dir> --claude-bin <path> --hw <headless-worker.js>',
     '         --budget-stop 0.70 (seven-day utilisation that stops a batch) --api-sources none (allowed apiKeySource values)',
     'The account token is read from CLAUDE_CODE_OAUTH_TOKEN_<ACCOUNT> and handed to the worker as',
@@ -62,6 +69,7 @@ const SNAPSHOT_DIRS = ['rules', 'agents', 'output-styles'];
 // A variable whose name says it carries a credential never reaches a worker or a check.
 const SCRUB_RE = /^(ANTHROPIC_|CLAUDE_CODE_OAUTH_TOKEN|DOPPLER_)|TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|_PAT$/i;
 const PIN_SKIP = new Set(['autodev-memory']);
+const LANES = ['fix', 'locate', 'review', 'decide', 'diagnose', 'plan'];
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
@@ -356,7 +364,10 @@ function loadTask(c, id) {
     const raw = fs.readFileSync(file, 'utf8');
     const task = JSON.parse(raw);
     if (task.id !== id) fault('bad-task', `${file} says id ${task.id}`);
-    if (!['fix', 'locate', 'review', 'decide'].includes(task.lane)) fault('bad-task', `${id}: lane ${task.lane} is not fix, locate, review or decide`);
+    if (!LANES.includes(task.lane)) fault('bad-task', `${id}: lane ${task.lane} is not one of ${LANES.join(', ')}`);
+    if (task.leakTerms !== undefined && !(Array.isArray(task.leakTerms) && task.leakTerms.every((t) => typeof t === 'string' && t.length >= 4))) {
+        fault('bad-task', `${id}: leakTerms is a list of strings of 4 or more characters`);
+    }
     // The brief and the key are part of the task: editing either makes the plant check stale.
     const part = (name) => { try { return name ? fs.readFileSync(path.join(c.tasks, name), 'utf8') : ''; } catch { return ''; } };
     task.hash = sha([raw, part(task.brief), part(task.expected)].join('\n--\n'));
@@ -367,6 +378,9 @@ function loadTask(c, id) {
         if (!Array.isArray(task.checks) || !task.checks.length) fault('bad-task', `${id}: a fix task has at least one check`);
     } else {
         if (!task.answerFile || !task.expected) fault('bad-task', `${id}: a ${task.lane} task names answerFile and expected`);
+        // A diagnosis may name the commit that fixed what it diagnoses, so the
+        // fix's own tokens are searched for in the room like a fix task's.
+        if (task.lane === 'diagnose' && task.fix) task.fixSha = revParse(c.src, task.fix);
     }
     return task;
 }
@@ -509,7 +523,9 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
     buildTaskRepo(c, task, p.repo, task.parentSha);
     const snap = buildConfigDir(c, p.cfg);
     const pin = pinFor(c, task.parentSha);
-    const tokens = task.lane === 'fix' ? fixTokens(c, task) : [];
+    // A fix's own tokens, and for an open task the prose that would carry its
+    // answer (its leakTerms): either one in the room refuses the run.
+    const tokens = [...(task.fixSha ? fixTokens(c, task) : []), ...(task.leakTerms || [])];
     const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir]);
     const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
     fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo));
@@ -681,6 +697,60 @@ function decideAnswer(expected, wrongId = null) {
     return { answers: (expected.questions || []).map((q) => Object.assign({ id: q.id }, q.id === wrongId ? q.wrong : q.example)) };
 }
 
+// Words that offer a second cause beside the first. A mechanism commits to one,
+// and what was considered and dropped goes in `ruledOut`, which is not graded.
+// "either" hedges only in an either-or inside one sentence: "on either write"
+// names no alternative.
+const HEDGE_RE = /\b(?:perhaps|possibly|maybe|alternatively)\b|\beither\b[^.]{0,80}\bor\b|\banother (?:possible )?(?:cause|explanation|possibility)\b|\bcould also be\b/i;
+/**
+ * One named cause. It passes when its file is one the key accepts, its
+ * mechanism hits every keyword group, offers no second cause and fits in
+ * `maxMechanism` characters (600 by default), so an answer that lists every
+ * candidate fails as hedged or too long.
+ */
+function gradeDiagnose(answer, expected) {
+    const cause = (answer && answer.cause) || {};
+    const file = normPath(cause.file);
+    const mechanism = typeof cause.mechanism === 'string' ? cause.mechanism : '';
+    const key = expected.cause || {};
+    const groups = (key.groups || []).map((g) => ({ id: g.id, hit: (g.match || []).some((m) => new RegExp(m, 'i').test(mechanism)) }));
+    const fileOk = !!file && (key.files || []).map(normPath).includes(file);
+    const hedged = HEDGE_RE.test(mechanism);
+    const tooLong = mechanism.length > Number(expected.maxMechanism || 600);
+    return { file, fileOk, groups, hedged, tooLong, chars: mechanism.length,
+        pass: fileOk && groups.length > 0 && groups.every((g) => g.hit) && !hedged && !tooLong };
+}
+
+/**
+ * A plan against the requirements its vague brief implies. A requirement is met
+ * when one of its `text` patterns matches the plan's prose (each step's `do` and
+ * `commands`, and the risks) or one of its `path` patterns matches a path a step
+ * creates. The plan passes at `threshold` requirements met with no trap tripped.
+ * A trap trips on a created path matching its `creates` pattern, or on one step
+ * whose text matches every `step.all` pattern and no `step.none` pattern.
+ */
+function gradePlan(answer, expected) {
+    const strs = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
+    const steps = ((answer && Array.isArray(answer.steps) && answer.steps) || []).filter((s) => s && typeof s === 'object');
+    const doOf = (s) => (typeof s.do === 'string' ? s.do : '');
+    const prose = [...steps.map((s) => [doOf(s), ...strs(s.commands)].join('\n')), ...strs(answer && answer.risks)].join('\n');
+    const creates = steps.flatMap((s) => strs(s.creates)).map(normPath);
+    const any = (pats, text) => (pats || []).some((m) => new RegExp(m, 'i').test(text));
+    const requirements = (expected.requirements || []).map((r) => ({ id: r.id, met: any(r.text, prose) || creates.some((p) => any(r.path, p)) }));
+    const stepTrips = (t, s) => {
+        const text = [doOf(s), ...strs(s.commands), ...strs(s.creates), ...strs(s.edits)].join('\n');
+        const all = t.step.all || [];
+        return all.length > 0 && all.every((m) => new RegExp(m, 'i').test(text)) && !any(t.step.none, text);
+    };
+    const traps = (expected.traps || []).filter((t) => (t.creates && creates.some((p) => new RegExp(t.creates, 'i').test(p)))
+        || (t.step && steps.some((s) => stepTrips(t, s)))).map((t) => t.id);
+    const met = requirements.filter((r) => r.met).length;
+    const threshold = Number(expected.threshold);
+    const tooLong = prose.length > Number(expected.maxChars || 8000);
+    return { met, threshold, requirements, traps, steps: steps.length, chars: prose.length, tooLong,
+        pass: requirements.length > 0 && met >= threshold && traps.length === 0 && !tooLong };
+}
+
 function gradeAnswer(c, task, repo) {
     const expected = readJson(path.join(c.tasks, task.expected));
     let answer = null;
@@ -688,6 +758,8 @@ function gradeAnswer(c, task, repo) {
         return { pass: false, reason: `no readable ${task.answerFile}: ${e.code || e.message}` };
     }
     if (task.lane === 'decide') return gradeDecide(answer, expected);
+    if (task.lane === 'diagnose') return gradeDiagnose(answer, expected);
+    if (task.lane === 'plan') return gradePlan(answer, expected);
     return task.lane === 'locate' ? gradeLocate(answer, expected, Number(task.threshold || 0.8)) : gradeReview(answer, expected);
 }
 
@@ -818,6 +890,99 @@ function plantDecide(c, task) {
         reason: ok ? 'key grades itself pass, an empty answer and each wrong answer fail, and the brief names every option'
             : `key: ${qs.length} questions, self ${self.pass}, empty ${empty.pass}, wrong not failing [${wrongFails.filter((w) => !w.fails).map((w) => w.id).join(',')}], not in the brief [${named.join(',')}]` };
 }
+/** The contamination assertion, planted with the fix's own files: they must make it fire. */
+function contaminationPlant(c, task, scratch) {
+    const tokens = fixTokens(c, task);
+    const planted = path.join(scratch, 'contamination-plant');
+    const changed = git(['diff', '--name-only', task.parentSha, task.fixSha], { cwd: c.src }).split('\n').filter(Boolean);
+    for (const f of changed) {
+        const dest = path.join(planted, f);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, git(['show', `${task.fixSha}:${f}`], { cwd: c.src }));
+    }
+    return { tokens, fired: scanForTokens(tokens, [planted], 1).length > 0 };
+}
+function inTree(c, sha, file) {
+    return spawnSync('git', ['cat-file', '-e', `${sha}:${file}`], { cwd: c.src, windowsHide: true }).status === 0;
+}
+/** Leak terms the brief or the parent tree already holds: the first tells the worker, the second fires on every run. */
+function leakTermsPresent(c, task, brief) {
+    return (task.leakTerms || []).filter((t) => {
+        if (brief.includes(t)) return true;
+        const r = spawnSync('git', ['grep', '-q', '-F', '-e', t, task.parentSha], { cwd: c.src, windowsHide: true });
+        if (r.status !== 0 && r.status !== 1) fault('git-failed', `git grep for a leak term over ${task.parentSha} exited ${r.status}`);
+        return r.status === 0;
+    });
+}
+/**
+ * A diagnose key must discriminate: at least two example answers pass, at least
+ * two decoys and an empty answer fail, the brief matches no keyword group (it
+ * would hand the worker the mechanism), every file the key names is in the
+ * parent tree, no leak term is already in the brief or the tree, and a fix the
+ * task names fires the contamination check.
+ */
+function plantDiagnose(c, task, scratch) {
+    const expected = readJson(path.join(c.tasks, task.expected));
+    const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
+    const examples = expected.examples || [];
+    const decoys = expected.decoys || [];
+    const groups = (expected.cause && expected.cause.groups) || [];
+    const reasons = [];
+    if (examples.length < 2) reasons.push(`${examples.length} examples, needs 2 or more`);
+    if (decoys.length < 2) reasons.push(`${decoys.length} decoys, needs 2 or more`);
+    const exFail = examples.map((a, i) => (gradeDiagnose(a, expected).pass ? null : i)).filter((i) => i !== null);
+    if (exFail.length) reasons.push(`examples that fail [${exFail.join(',')}]`);
+    const decoyPass = decoys.filter((d) => gradeDiagnose(d.answer, expected).pass).map((d) => d.id);
+    if (decoyPass.length) reasons.push(`decoys that pass [${decoyPass.join(',')}]`);
+    if (gradeDiagnose({}, expected).pass) reasons.push('an empty answer passes');
+    const inBrief = groups.filter((g) => (g.match || []).some((m) => new RegExp(m, 'i').test(brief))).map((g) => g.id);
+    if (inBrief.length) reasons.push(`the brief already matches groups [${inBrief.join(',')}]`);
+    const named = [...((expected.cause && expected.cause.files) || []), ...decoys.map((d) => d.answer && d.answer.cause && d.answer.cause.file)];
+    const absent = [...new Set(named.filter(Boolean).map(normPath))].filter((f) => !inTree(c, task.parentSha, f));
+    if (absent.length) reasons.push(`files not in the parent tree [${absent.join(',')}]`);
+    const leaks = leakTermsPresent(c, task, brief);
+    if (leaks.length) reasons.push(`leak terms already in the brief or the parent tree [${leaks.join(',')}]`);
+    const cont = task.fixSha ? contaminationPlant(c, task, scratch) : null;
+    if (cont && cont.tokens.length && !cont.fired) reasons.push('the contamination check did not fire on the fix files');
+    if (!(cont && cont.tokens.length) && !(task.leakTerms || []).length) reasons.push('nothing to search the room for: name the fix or leakTerms');
+    return { ok: reasons.length === 0, keySize: groups.length, examples: examples.length, decoys: decoys.length,
+        contaminationTokens: cont ? cont.tokens.length : 0, contaminationFired: cont ? cont.fired : null, leakTerms: (task.leakTerms || []).length,
+        reason: reasons.join('; ') || `examples pass, decoys and an empty answer fail, the brief matches no group${cont && cont.tokens.length ? ', contamination fires' : ''}` };
+}
+/**
+ * A plan key must discriminate: every right example passes, the careless one
+ * and an empty plan fail, each trap has an example that meets the threshold
+ * and fails on that trap, and the brief meets no text requirement by itself.
+ */
+function plantPlan(c, task) {
+    const expected = readJson(path.join(c.tasks, task.expected));
+    const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
+    const ex = expected.examples || {};
+    const reqs = expected.requirements || [];
+    const traps = expected.traps || [];
+    const reasons = [];
+    const threshold = Number(expected.threshold);
+    if (!(threshold >= 1 && threshold <= reqs.length)) reasons.push(`threshold ${expected.threshold} is not between 1 and ${reqs.length}`);
+    const right = ex.right || [];
+    if (!right.length) reasons.push('no right example');
+    const rightFail = right.map((a, i) => (gradePlan(a, expected).pass ? null : i)).filter((i) => i !== null);
+    if (rightFail.length) reasons.push(`right examples that fail [${rightFail.join(',')}]`);
+    if (!ex.careless) reasons.push('no careless example');
+    else if (gradePlan(ex.careless, expected).pass) reasons.push('the careless example passes');
+    if (gradePlan({}, expected).pass) reasons.push('an empty plan passes');
+    if (!traps.length) reasons.push('no trap');
+    const trapMiss = traps.filter((t) => {
+        const g = ex.traps && ex.traps[t.id] ? gradePlan(ex.traps[t.id], expected) : null;
+        return !g || g.pass || !g.traps.includes(t.id) || !(g.met >= g.threshold);
+    }).map((t) => t.id);
+    if (trapMiss.length) reasons.push(`traps whose example does not fail on the trap alone [${trapMiss.join(',')}]`);
+    const inBrief = reqs.filter((r) => (r.text || []).some((m) => new RegExp(m, 'i').test(brief))).map((r) => r.id);
+    if (inBrief.length) reasons.push(`the brief already meets [${inBrief.join(',')}]`);
+    const leaks = leakTermsPresent(c, task, brief);
+    if (leaks.length) reasons.push(`leak terms already in the brief or the parent tree [${leaks.join(',')}]`);
+    return { ok: reasons.length === 0, keySize: reqs.length, threshold, traps: traps.length, rightExamples: right.length, leakTerms: (task.leakTerms || []).length,
+        reason: reasons.join('; ') || 'right examples pass, the careless and empty plans fail, each trap fails its example, the brief meets nothing' };
+}
 function plantTask(c, task) {
     const at = new Date().toISOString();
     const rec = { taskHash: task.hash, at, lane: task.lane };
@@ -827,6 +992,8 @@ function plantTask(c, task) {
     const env = checksEnv(process.env);
     const log = path.join(scratch, 'plant.log');
     if (task.lane === 'decide') return Object.assign(rec, plantDecide(c, task));
+    if (task.lane === 'diagnose') return Object.assign(rec, plantDiagnose(c, task, scratch));
+    if (task.lane === 'plan') return Object.assign(rec, plantPlan(c, task));
     if (task.lane !== 'fix') {
         const expected = readJson(path.join(c.tasks, task.expected));
         const self = task.lane === 'locate' ? gradeLocate(expected, expected, Number(task.threshold || 0.8)) : gradeReview({ findings: plantedFindings(expected) }, expected);
@@ -846,16 +1013,7 @@ function plantTask(c, task) {
     const grn = runChecks(task.checks, fixRepo, env, log, 'fixed');
     const p2pParent = runChecks(task.passToPass || [], parentRepo, env, log, 'p2p unfixed');
     const p2pFix = runChecks(task.passToPass || [], fixRepo, env, log, 'p2p fixed');
-    const tokens = fixTokens(c, task);
-    // The assertion is planted with the fix's own files: they must make it fire.
-    const planted = path.join(scratch, 'contamination-plant');
-    const changed = git(['diff', '--name-only', task.parentSha, task.fixSha], { cwd: c.src }).split('\n').filter(Boolean);
-    for (const f of changed) {
-        const dest = path.join(planted, f);
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, git(['show', `${task.fixSha}:${f}`], { cwd: c.src }));
-    }
-    const fired = scanForTokens(tokens, [planted], 1).length > 0;
+    const { tokens, fired } = contaminationPlant(c, task, scratch);
     const unfixedRed = red.some((k) => k.exit !== 0);
     const fixedGreen = green(grn);
     const p2pOk = p2pParent.every((k) => k.exit === 0) && p2pFix.every((k) => k.exit === 0);
@@ -1116,5 +1274,5 @@ if (require.main === module) {
 }
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
-    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
-    processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
+    gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows,
+    RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
