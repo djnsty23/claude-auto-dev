@@ -113,16 +113,21 @@ function collapseEscalations(rows) {
             costUsd: add(r.costUsd, s.costUsd), wallMs: add(r.wallMs, s.wallMs), durationApiMs: add(r.durationApiMs, s.durationApiMs),
             tokens: r.tokens && s.tokens ? { total: add(r.tokens.total, s.tokens.total) } : null,
             load: { class: cls.includes('loaded') ? 'loaded' : cls.includes('unknown') ? 'unknown' : 'quiet' },
+            leak: { suspect: leaked(r) || leaked(s) },
         }));
     }
     return out;
 }
 
+/** A worker that read outside its task tree may have read the answer, so its verdict measures nothing. */
+function leaked(r) { return !!(r.leak && r.leak.suspect); }
+
 function summarise(allRows, { routes = {}, routed = {} } = {}) {
     const rows = collapseEscalations(allRows);
-    const counted = rows.filter((r) => COUNTED.has(r.verdict));
+    const counts = (r) => COUNTED.has(r.verdict) && !leaked(r);
+    const counted = rows.filter(counts);
     const excluded = {};
-    for (const r of rows) if (!COUNTED.has(r.verdict)) excluded[r.verdict] = (excluded[r.verdict] || 0) + 1;
+    for (const r of rows) if (!counts(r)) { const k = COUNTED.has(r.verdict) ? 'leak-suspect' : r.verdict; excluded[k] = (excluded[k] || 0) + 1; }
     const variants = {};
     const matrix = {};
     for (const r of counted) {

@@ -780,14 +780,23 @@ function decideAnswer(expected, wrongId = null) {
     return { answers: (expected.questions || []).map((q) => Object.assign({ id: q.id }, q.id === wrongId ? q.wrong : q.example)) };
 }
 
-// Words that offer a second cause beside the first. A mechanism commits to one,
-// and what was considered and dropped goes in `ruledOut`, which is not graded.
-// "either" hedges only in an either-or inside one sentence: "on either write"
-// names no alternative.
-const HEDGE_RE = /\b(?:perhaps|possibly|maybe|alternatively)\b|\beither\b[^.]{0,80}\bor\b|\banother (?:possible )?(?:cause|explanation|possibility)\b|\bcould also be\b/i;
+// A mechanism commits to one cause, and what was considered and dropped goes
+// in `ruledOut`, which is not graded. A hedge offers a SECOND cause, so the
+// test is per sentence: one that opens on a hedge word, one that names another
+// cause, or an either-or whose "or" branch is a clause with its own verb.
+// "maybe a GC pause" inside a sentence qualifies the one cause, and "either
+// the second .tmp or the log" names two files, not two causes.
+const HEDGE_LEAD_RE = /^(?:alternatively|or|perhaps|possibly|maybe|it (?:may|might|could) (?:also |instead )?be|there (?:may|might|could) also)\b/i;
+const HEDGE_RE = /\banother (?:possible |likely |plausible )?(?:cause|explanation|possibility|candidate|culprit|suspect|reason)\b|\b(?:could|might|may) (?:also|instead) be\b|\bor else\b|\bor (?:perhaps|possibly|maybe)\b|\balternatively\b/i;
+const EITHER_RE = /\beither\b[\s\S]*?\bor\s+(?:(?:\S+\s+){0,3}?(?:is|are|was|were|has|had|does|did|may|might|could|can|will|would|races?|racing|reuses?|renames?|writes?|reads?|stats?|fails?|causes?|returns?|caches?|lands?|hits?|exceeds?|runs?|takes?|gets?|truncates?|times out)|(?:the|a|an|its|this|that|their)\s+\w+\s+\w+s)\b/i;
+/** Sentences of a mechanism. A dot inside a name (".tmp", "test-inbox.js") ends none. */
+function sentencesOf(text) {
+    return String(text).split(/[.;!?](?=\s|$)/).map((s) => s.trim()).filter(Boolean);
+}
+function hedgedSentence(s) { return HEDGE_LEAD_RE.test(s) || HEDGE_RE.test(s) || EITHER_RE.test(s); }
 /**
- * One named cause. It passes when its file is one the key accepts, its
- * mechanism hits every keyword group, offers no second cause and fits in
+ * One named cause. It passes when its file is one the key accepts, one
+ * sentence of its mechanism hits each keyword group, it offers no second cause and fits in
  * `maxMechanism` characters (600 by default), so an answer that lists every
  * candidate fails as hedged or too long.
  */
@@ -796,9 +805,12 @@ function gradeDiagnose(answer, expected) {
     const file = normPath(cause.file);
     const mechanism = typeof cause.mechanism === 'string' ? cause.mechanism : '';
     const key = expected.cause || {};
-    const groups = (key.groups || []).map((g) => ({ id: g.id, hit: (g.match || []).some((m) => new RegExp(m, 'i').test(mechanism)) }));
+    // Per sentence, so the words of one group cannot be collected from two
+    // claims: "released its handle" in one and "the same inode" in another.
+    const sentences = sentencesOf(mechanism);
+    const groups = (key.groups || []).map((g) => ({ id: g.id, hit: (g.match || []).some((m) => sentences.some((s) => new RegExp(m, 'i').test(s))) }));
     const fileOk = !!file && (key.files || []).map(normPath).includes(file);
-    const hedged = HEDGE_RE.test(mechanism);
+    const hedged = sentences.some(hedgedSentence);
     const tooLong = mechanism.length > Number(expected.maxMechanism || 600);
     return { file, fileOk, groups, hedged, tooLong, chars: mechanism.length,
         pass: fileOk && groups.length > 0 && groups.every((g) => g.hit) && !hedged && !tooLong };
@@ -806,26 +818,29 @@ function gradeDiagnose(answer, expected) {
 
 /**
  * A plan against the requirements its vague brief implies. A requirement is met
- * when one of its `text` patterns matches the plan's prose (each step's `do` and
- * `commands`, and the risks) or one of its `path` patterns matches a path a step
- * creates. The plan passes at `threshold` requirements met with no trap tripped.
- * A trap trips on a created path matching its `creates` pattern, or on one step
+ * when one of its `text` patterns matches a step (its `do` and `commands`) or
+ * one of its `path` patterns matches a path a step creates. Risks are graded for
+ * length only: naming a danger is not a step that avoids it. The plan passes at
+ * `threshold` requirements met with no trap tripped. A trap trips on a path a
+ * step creates or edits that matches its `creates` pattern, or on one step
  * whose text matches every `step.all` pattern and no `step.none` pattern.
  */
 function gradePlan(answer, expected) {
     const strs = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
     const steps = ((answer && Array.isArray(answer.steps) && answer.steps) || []).filter((s) => s && typeof s === 'object');
     const doOf = (s) => (typeof s.do === 'string' ? s.do : '');
-    const prose = [...steps.map((s) => [doOf(s), ...strs(s.commands)].join('\n')), ...strs(answer && answer.risks)].join('\n');
+    const stepProse = steps.map((s) => [doOf(s), ...strs(s.commands)].join('\n')).join('\n');
+    const prose = [stepProse, ...strs(answer && answer.risks)].join('\n');
     const creates = steps.flatMap((s) => strs(s.creates)).map(normPath);
+    const touches = [...creates, ...steps.flatMap((s) => strs(s.edits)).map(normPath)];
     const any = (pats, text) => (pats || []).some((m) => new RegExp(m, 'i').test(text));
-    const requirements = (expected.requirements || []).map((r) => ({ id: r.id, met: any(r.text, prose) || creates.some((p) => any(r.path, p)) }));
+    const requirements = (expected.requirements || []).map((r) => ({ id: r.id, met: any(r.text, stepProse) || creates.some((p) => any(r.path, p)) }));
     const stepTrips = (t, s) => {
         const text = [doOf(s), ...strs(s.commands), ...strs(s.creates), ...strs(s.edits)].join('\n');
         const all = t.step.all || [];
         return all.length > 0 && all.every((m) => new RegExp(m, 'i').test(text)) && !any(t.step.none, text);
     };
-    const traps = (expected.traps || []).filter((t) => (t.creates && creates.some((p) => new RegExp(t.creates, 'i').test(p)))
+    const traps = (expected.traps || []).filter((t) => (t.creates && touches.some((p) => new RegExp(t.creates, 'i').test(p)))
         || (t.step && steps.some((s) => stepTrips(t, s)))).map((t) => t.id);
     const met = requirements.filter((r) => r.met).length;
     const threshold = Number(expected.threshold);
@@ -1408,4 +1423,4 @@ if (require.main === module) {
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows, routeFor,
-    RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, processList, heavyJobs, noteLoad, loadRecord, quietGate, resumeBatch, failingOutput, HEAVY_RE };
+    RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, sentencesOf, hedgedSentence, processList, heavyJobs, noteLoad, loadRecord, quietGate, resumeBatch, failingOutput, HEAVY_RE };
