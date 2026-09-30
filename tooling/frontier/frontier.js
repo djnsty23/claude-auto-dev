@@ -114,6 +114,7 @@ function collapseEscalations(rows) {
             tokens: r.tokens && s.tokens ? { total: add(r.tokens.total, s.tokens.total) } : null,
             load: { class: cls.includes('loaded') ? 'loaded' : cls.includes('unknown') ? 'unknown' : 'quiet' },
             leak: { suspect: leaked(r) || leaked(s) },
+            ancestorMemory: r.ancestorMemory === 0 && s.ancestorMemory === 0 ? 0 : null,
         }));
     }
     return out;
@@ -122,12 +123,28 @@ function collapseEscalations(rows) {
 /** A worker that read outside its task tree may have read the answer, so its verdict measures nothing. */
 function leaked(r) { return !!(r.leak && r.leak.suspect); }
 
-function summarise(allRows, { routes = {}, routed = {} } = {}) {
+/**
+ * Why a row with a counted verdict still does not count, or null when it does.
+ * `superseded`: its task's file, brief or key changed since, so it answered
+ * another question. `home-memory`: an open-lane row written before the
+ * ancestor-memory guard (ancestorMemory absent) or with memory recorded above
+ * its repo. `[measured 2026-09-30]` such workers loaded the live
+ * ~/.claude/CLAUDE.md, and one quoted a result from it. A fix-lane verdict is
+ * graded by held-out tests, which that memory does not carry, so it stands.
+ */
+function exclusion(r, hashes) {
+    if (hashes[r.task] && r.taskHash && r.taskHash !== hashes[r.task]) return 'superseded';
+    if (r.lane && r.lane !== 'fix' && r.ancestorMemory !== 0) return 'home-memory';
+    if (leaked(r)) return 'leak-suspect';
+    return null;
+}
+
+function summarise(allRows, { routes = {}, routed = {}, hashes = {} } = {}) {
     const rows = collapseEscalations(allRows);
-    const counts = (r) => COUNTED.has(r.verdict) && !leaked(r);
+    const counts = (r) => COUNTED.has(r.verdict) && !exclusion(r, hashes);
     const counted = rows.filter(counts);
     const excluded = {};
-    for (const r of rows) if (!counts(r)) { const k = COUNTED.has(r.verdict) ? 'leak-suspect' : r.verdict; excluded[k] = (excluded[k] || 0) + 1; }
+    for (const r of rows) if (!counts(r)) { const k = COUNTED.has(r.verdict) ? exclusion(r, hashes) : r.verdict; excluded[k] = (excluded[k] || 0) + 1; }
     const variants = {};
     const matrix = {};
     for (const r of counted) {
@@ -221,11 +238,17 @@ function main(argv) {
         process.stderr.write(`frontier: cannot read ${path.join(data, 'runs.jsonl')}: ${e.code || e.message}\n`);
         return 1;
     }
-    const s = Object.assign({ generatedAt: new Date().toISOString() }, summarise(rows, routing(tasksDir, rows)));
+    const { currentTaskHash } = require('./run.js');
+    const hashes = {};
+    for (const id of new Set(rows.map((r) => r.task).filter((x) => /^[A-Za-z0-9]{1,4}$/.test(String(x))))) {
+        const h = currentTaskHash(tasksDir, id);
+        if (h) hashes[id] = h;
+    }
+    const s = Object.assign({ generatedAt: new Date().toISOString() }, summarise(rows, Object.assign(routing(tasksDir, rows), { hashes })));
     if (argv.includes('--write')) fs.writeFileSync(path.join(data, 'frontier.json'), JSON.stringify(s, null, 2) + '\n');
     process.stdout.write(argv.includes('--json') ? JSON.stringify(s) + '\n' : render(s));
     return 0;
 }
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
-module.exports = { summarise, derive, pareto, median, loadClass, collapseEscalations };
+module.exports = { summarise, derive, pareto, median, loadClass, collapseEscalations, exclusion };

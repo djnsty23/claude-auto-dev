@@ -92,6 +92,15 @@ function parseArgs(argv) {
 }
 
 function homeDir() { return process.env.USERPROFILE || process.env.HOME || os.homedir(); }
+/**
+ * Work trees must have no claude memory above them (see ancestorMemory), and a
+ * home directory usually holds .claude/CLAUDE.md. On Windows the drive root
+ * takes a new directory without elevation. Elsewhere the home default stands
+ * and the guard names the file to move away from.
+ */
+function defaultWork() {
+    return process.platform === 'win32' ? path.join(path.parse(homeDir()).root, 'autodev-frontier') : path.join(homeDir(), 'autodev-frontier');
+}
 
 function ctx(opts) {
     const src = path.resolve(opts.src || process.env.FRONTIER_SRC || DEFAULT_SRC);
@@ -99,7 +108,7 @@ function ctx(opts) {
         src,
         tasks: path.resolve(opts['tasks-dir'] || process.env.FRONTIER_TASKS || path.join(HERE, 'tasks')),
         data: path.resolve(opts.data || process.env.FRONTIER_DATA || path.join(homeDir(), '.claude', 'autodev', 'frontier')),
-        work: path.resolve(opts.work || process.env.FRONTIER_WORK || path.join(homeDir(), 'autodev-frontier')),
+        work: path.resolve(opts.work || process.env.FRONTIER_WORK || defaultWork()),
         claudeHome: path.resolve(process.env.FRONTIER_CLAUDE_HOME || path.join(homeDir(), '.claude')),
         claudeBin: opts['claude-bin'] || process.env.FRONTIER_CLAUDE_BIN || null,
         hw: path.resolve(opts.hw || process.env.FRONTIER_HW || DEFAULT_HW),
@@ -362,6 +371,18 @@ function buildConfigDir(c, dir) {
 }
 
 // ---------------------------------------------------------------- tasks
+/** A task's hash over its file, brief and key. frontier.js reads rows under an older hash as superseded. */
+function hashTask(tasksDir, raw, task) {
+    const part = (name) => { try { return name ? fs.readFileSync(path.join(tasksDir, name), 'utf8') : ''; } catch { return ''; } };
+    return sha([raw, part(task.brief), part(task.expected)].join('\n--\n'));
+}
+/** The current hash of task `id` in `tasksDir`, or null when its file is gone or unreadable. */
+function currentTaskHash(tasksDir, id) {
+    try {
+        const raw = fs.readFileSync(path.join(tasksDir, `${id}.json`), 'utf8');
+        return hashTask(tasksDir, raw, JSON.parse(raw));
+    } catch { return null; }
+}
 function loadTask(c, id) {
     if (!/^[A-Za-z0-9]{1,4}$/.test(String(id))) fault('usage', `task id ${id} is not 1-4 letters or digits`);
     const file = path.join(c.tasks, `${id}.json`);
@@ -374,8 +395,7 @@ function loadTask(c, id) {
         fault('bad-task', `${id}: leakTerms is a list of strings of 4 or more characters`);
     }
     // The brief and the key are part of the task: editing either makes the plant check stale.
-    const part = (name) => { try { return name ? fs.readFileSync(path.join(c.tasks, name), 'utf8') : ''; } catch { return ''; } };
-    task.hash = sha([raw, part(task.brief), part(task.expected)].join('\n--\n'));
+    task.hash = hashTask(c.tasks, raw, task);
     task.parentSha = revParse(c.src, task.parent);
     if (task.lane === 'fix') {
         if (!task.fix) fault('bad-task', `${id}: a fix task names its fix commit`);
@@ -505,10 +525,14 @@ function scanForTokens(tokens, roots, limit = 10) {
  * .claude/rules/*.md, so a work root under the home directory loaded the live
  * ~/.claude/CLAUDE.md and every live rule as project memory beside the frozen
  * config. --config-dir moves only the user layer. The repo's own CLAUDE.md is
- * part of the task and is not listed.
+ * part of the task and is not listed. `stop` ends the walk after that
+ * directory: the suite sets it (FRONTIER_MEMORY_STOP) to its own temp root,
+ * because its fake claude loads nothing and the machine above it is not the
+ * subject. A real run leaves it unset.
  */
-function ancestorMemory(repo) {
+function ancestorMemory(repo, stop = process.env.FRONTIER_MEMORY_STOP || null) {
     const found = [];
+    const end = stop ? path.resolve(stop) : null;
     let dir = path.dirname(path.resolve(repo));
     for (;;) {
         for (const name of ['CLAUDE.md', 'CLAUDE.local.md', path.join('.claude', 'CLAUDE.md')]) {
@@ -517,7 +541,8 @@ function ancestorMemory(repo) {
         }
         for (const f of walk(path.join(dir, '.claude', 'rules'))) if (f.endsWith('.md')) found.push(f);
         const up = path.dirname(dir);
-        if (up === dir) return found;
+        const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+        if (up === dir || (end && same(dir, end))) return found;
         dir = up;
     }
 }
@@ -632,11 +657,9 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, escalation 
     const tokens = [...(task.fixSha ? fixTokens(c, task) : []), ...(task.leakTerms || [])];
     const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir]);
     // Memory above the repo reaches the worker whatever it holds, so any file
-    // refuses the run. FRONTIER_ALLOW_ANCESTOR_MEMORY=1 records it instead, for
-    // the suite's fake claude, which loads no memory.
+    // refuses the run.
     const ancestors = ancestorMemory(p.repo);
-    const ancestorsAllowed = process.env.FRONTIER_ALLOW_ANCESTOR_MEMORY === '1';
-    if (!ancestorsAllowed) for (const f of ancestors) hits.push({ token: 'ancestor memory', file: f });
+    for (const f of ancestors) hits.push({ token: 'ancestor memory', file: f });
     fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo, escalation ? escalation.output : null));
     const meta = {
         run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, model: target.model, effort: target.effort || null,
@@ -647,7 +670,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, escalation 
         repo: p.repo, cfg: p.cfg, log: p.log, report: p.report, prompt: p.prompt,
         pin: { tag: pin.tag, hash: pin.hash, plugins: pin.plugins, dir: pin.pluginDir },
         snapshot: snap.id, harnessCommit: revParse(c.src, 'HEAD'), plantAt: plant.at,
-        contamination: { tokens: tokens.length, hits, ancestors, ancestorsAllowed },
+        contamination: { tokens: tokens.length, hits, ancestors, memoryStop: process.env.FRONTIER_MEMORY_STOP || null },
         state: hits.length ? 'contaminated' : 'prepared',
     };
     writeJsonAtomic(p.meta, meta);
@@ -677,7 +700,9 @@ function runOne(c, taskId, variantId, account, repeat, env, extra = {}) {
     const meta = Object.assign(prepare(c, taskId, variantId, repeat, { account, escalation }), rest);
     if (meta.state === 'contaminated') {
         appendRow(c, rowFor(c, meta, { verdict: 'contaminated', pass: null }));
-        fault('contaminated', `${meta.run}: ${meta.contamination.hits.map((h) => `${h.token} in ${h.file}`).join('; ')}`);
+        const up = meta.contamination.hits.some((h) => h.token === 'ancestor memory')
+            ? '. Memory above the task repo loads as project memory: set --work or FRONTIER_WORK to a directory with none above it' : '';
+        fault('contaminated', `${meta.run}: ${meta.contamination.hits.map((h) => `${h.token} in ${h.file}`).join('; ')}${up}`);
     }
     return start(c, meta, wenv);
 }
@@ -911,6 +936,7 @@ function rowFor(c, meta, extra) {
         fingerprint: { requestedModel: meta.model, effort: meta.effort, pin: meta.pin.tag, pinHash: meta.pin.hash, plugins: meta.pin.plugins,
             snapshot: meta.snapshot, harnessCommit: meta.harnessCommit, workerVersion: meta.workerVersion || null },
         contaminationTokens: meta.contamination.tokens, finishedAt: new Date().toISOString(),
+        ancestorMemory: meta.contamination && Array.isArray(meta.contamination.ancestors) ? meta.contamination.ancestors.length : null,
     }, extra);
 }
 
@@ -1451,6 +1477,6 @@ if (require.main === module) {
     }
 }
 
-module.exports = { parseArgs, fixTokens, scanForTokens, ancestorMemory, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
+module.exports = { parseArgs, fixTokens, scanForTokens, ancestorMemory, currentTaskHash, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, gradeDiagnose, gradePlan, plantedFindings, readRows, routeFor,
     RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY, HEDGE_RE, sentencesOf, hedgedSentence, processList, heavyJobs, noteLoad, loadRecord, quietGate, resumeBatch, failingOutput, HEAVY_RE };

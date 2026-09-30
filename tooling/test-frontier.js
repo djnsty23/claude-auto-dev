@@ -226,7 +226,7 @@ out({ type: 'result', subtype: 'success', duration_ms: 1234, duration_api_ms: 10
 function envFor(extra = {}) {
     return Object.assign({}, process.env, {
         FRONTIER_SRC: SRC, FRONTIER_TASKS: TASKS, FRONTIER_DATA: DATA, FRONTIER_WORK: WORK, FRONTIER_CLAUDE_HOME: HOME, FRONTIER_CLAUDE_BIN: FAKE,
-        FRONTIER_POLL_MS: '300', FAKE_OUT: OUT, FRONTIER_PROCESS_LIST: QUIET_PS, FRONTIER_ALLOW_ANCESTOR_MEMORY: '1',
+        FRONTIER_POLL_MS: '300', FAKE_OUT: OUT, FRONTIER_PROCESS_LIST: QUIET_PS, FRONTIER_MEMORY_STOP: ROOT,
         CLAUDE_CODE_OAUTH_TOKEN_TESTACCT: TOKEN, CLAUDE_CODE_OAUTH_TOKEN_OTHER: 'other-account-value', ANTHROPIC_API_KEY: 'must-not-reach-the-worker',
         ANTHROPIC_AUTH_TOKEN: 'nor-this', SOME_SECRET: 'nor-this-one', DOPPLER_PROJECT: 'accounts',
     }, extra);
@@ -495,6 +495,21 @@ function realKeyCases() {
         Object.assign({}, base, { run: 'd', variant: 'V4', stage: 2, escalatedFrom: 'c', leak: { suspect: true } })]);
     check('74a. frontier: a leak-suspect row counts nowhere, and an escalation whose second run leaked is excluded as a pair',
         s.counted === 1 && s.excluded['leak-suspect'] === 2 && !s.variants.V4 && s.variants.V0 && s.variants.V0.n === 1, { counted: s.counted, excluded: s.excluded });
+
+    const row = (run, extra) => Object.assign({}, base, { run }, extra);
+    const s2 = F.summarise([
+        row('A', { task: 'T1', lane: 'fix', taskHash: 'h1' }),
+        row('B', { task: 'T1', lane: 'fix', taskHash: 'old' }),
+        row('C', { task: 'T2', lane: 'diagnose' }),
+        row('D', { task: 'T2', lane: 'diagnose', ancestorMemory: 0 }),
+        row('E', { task: 'T2', lane: 'diagnose', ancestorMemory: 3 }),
+        row('F', { task: 'T2', lane: 'diagnose', variant: 'V4', stage: 1, verdict: 'fail', pass: false, ancestorMemory: 0 }),
+        row('G', { task: 'T2', lane: 'diagnose', variant: 'V4', stage: 2, escalatedFrom: 'F' }),
+        row('H', { task: 'T3', lane: 'plan', taskHash: 'x', ancestorMemory: 0 }),
+    ], { hashes: { T1: 'h1', T2: 'h2' } });
+    check('74b. frontier: a row under an older task hash is superseded, an open-lane row without ancestorMemory 0 is home-memory (an escalation pair included), and a fix-lane row stands without it',
+        s2.counted === 3 && s2.excluded.superseded === 1 && s2.excluded['home-memory'] === 3 && !s2.variants.V4 && s2.variants.V0.n === 3,
+        { counted: s2.counted, excluded: s2.excluded });
 }
 
 function openLaneCases() {
@@ -729,24 +744,27 @@ function cliCases(shas) {
     // file there refuses the run, whatever it holds
     const upMemory = path.join(WORK, '.claude', 'CLAUDE.md');
     write(upMemory, 'Nothing about the task.\n');
-    const up = run(['run', '--task', 'TX', '--variant', 'V0', '--account', 'testacct'], { FRONTIER_ALLOW_ANCESTOR_MEMORY: '' });
+    const up = run(['run', '--task', 'TX', '--variant', 'V0', '--account', 'testacct']);
     check('35a. a CLAUDE.md above the task repo refuses the run as contaminated and names the file',
         up.json && up.json.error && up.json.error.code === 'contaminated' && up.json.error.message.includes(`ancestor memory in ${upMemory}`), up.json);
-    const upAllowed = run(['prepare', '--task', 'TX', '--variant', 'V0']);
-    const ua = upAllowed.json && upAllowed.json.value;
-    check('35b. with FRONTIER_ALLOW_ANCESTOR_MEMORY=1 the run is prepared and the file is recorded',
-        ua && ua.state === 'prepared' && ua.contamination.ancestorsAllowed === true && ua.contamination.ancestors.includes(upMemory), ua && ua.contamination);
     fs.unlinkSync(upMemory);
+    const clean = run(['prepare', '--task', 'TX', '--variant', 'V0']);
+    const cl = clean.json && clean.json.value;
+    check('35b. with the file gone the run is prepared, and its meta records no memory above it and the stop',
+        cl && cl.state === 'prepared' && Array.isArray(cl.contamination.ancestors) && cl.contamination.ancestors.length === 0 && cl.contamination.memoryStop === ROOT, cl && cl.contamination);
     const am = path.join(ROOT, 'am');
     write(path.join(am, 'CLAUDE.local.md'), 'x');
     write(path.join(am, 'a', '.claude', 'rules', 'r.md'), 'x');
     write(path.join(am, 'a', '.claude', 'rules', 'notes.txt'), 'x');
     write(path.join(am, 'a', 'b', 'repo', 'CLAUDE.md'), 'the task repo own memory');
     fs.mkdirSync(path.join(am, 'a', 'b', '.claude', 'rules'), { recursive: true });
-    const found = R.ancestorMemory(path.join(am, 'a', 'b', 'repo'));
-    const inAm = found.filter((f) => f.startsWith(am + path.sep)).map((f) => path.relative(am, f).replace(/\\/g, '/'));
+    const rel = (list) => list.map((f) => path.relative(am, f).replace(/\\/g, '/')).sort().join();
+    const found = R.ancestorMemory(path.join(am, 'a', 'b', 'repo'), am);
     check('35c. ancestorMemory lists CLAUDE.local.md and .claude/rules/*.md above the repo, not the repo own CLAUDE.md or a non-md rule',
-        inAm.sort().join() === ['CLAUDE.local.md', 'a/.claude/rules/r.md'].join(), inAm);
+        rel(found) === ['CLAUDE.local.md', 'a/.claude/rules/r.md'].join(), rel(found));
+    const stopped = R.ancestorMemory(path.join(am, 'a', 'b', 'repo'), path.join(am, 'a'));
+    check('35d. the walk ends at its stop directory: a file above the stop is not listed, one in it is',
+        rel(stopped) === 'a/.claude/rules/r.md', rel(stopped));
 
     const fixed = startAndFinish('TX', 'V0', 'fix');
     const row = fixed.row;
@@ -754,7 +772,7 @@ function cliCases(shas) {
     check('37. the row carries tokens by class and the notional cost from the result event', row && row.tokens.total === 370 && row.tokens.cacheRead === 300 && row.tokens.thinking === 5 && row.costUsd === 0.5 && row.turns === 3, row && row.tokens);
     check('38. the fingerprint names the model, the pin, the loaded plugins and apiKeySource none',
         row && row.fingerprint.model === 'claude-opus-5-5' && row.fingerprint.pin === 'v1.0.0' && row.fingerprint.loadedPlugins.join() === 'autodev-core@1.0.0' && row.apiKeySource === 'none', row && row.fingerprint);
-    check('39. the budget reading comes from the rate_limit_event, and no leak is flagged', row && row.budget && row.budget.sevenDay === 0.1 && row.leak.suspect === false, row && [row.budget, row.leak]);
+    check('39. the budget reading comes from the rate_limit_event, and no leak is flagged', row && row.budget && row.budget.sevenDay === 0.1 && row.leak.suspect === false && row.ancestorMemory === 0, row && [row.budget, row.leak, row.ancestorMemory]);
     const seen = readJson(path.join(OUT, 'seen-fix.json'));
     check('40. the worker saw its token under CLAUDE_CODE_OAUTH_TOKEN', seen && seen.tokenDigest === require('crypto').createHash('sha256').update(TOKEN).digest('hex') && seen.names.includes('CLAUDE_CODE_OAUTH_TOKEN'), seen && seen.names);
     const banned = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_TESTACCT', 'CLAUDE_CODE_OAUTH_TOKEN_OTHER', 'SOME_SECRET', 'DOPPLER_PROJECT'];
