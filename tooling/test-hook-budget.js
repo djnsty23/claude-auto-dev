@@ -25,23 +25,33 @@
 // one budget per event (BUDGET_MS), and drives every wired entry as a subprocess
 // in a sandbox:
 //
-//   1. a valid payload for its event, timed min-of-RUNS against a bare-node floor
-//      measured interleaved with it, and judged against the event's budget;
+//   1. a valid payload for its event, its CPU measured min-of-RUNS against a
+//      bare-node floor measured interleaved with it, and judged against the
+//      event's budget;
 //   2. garbage stdin and empty stdin, judged against the hook's decision;
 //   3. a valid payload with every state directory pointing at a regular file,
 //      which must never block the event (a guard that cannot write its ledger
 //      has not seen a reason to refuse anything).
 //
-// BUDGETS ARE OVERHEAD, IN IDLE-MACHINE MILLISECONDS. Overhead is the hook's
-// fastest run minus the fastest bare-node run beside it, so node's own startup
-// is not charged to the hook. The budget scales up (never down) by how slow that
-// floor is right now against FLOOR_REF_MS, so a contended machine slows the
-// budget with the hook instead of turning load into a red.
+// BUDGETS ARE OVERHEAD, IN CPU MILLISECONDS. The hook process measures itself
+// (tooling/cpu-telemetry.js, through a preload), and its Node descendants report
+// too. A wall clock charged the hook for every other process on the machine, so
+// a second gate in the other lane turned load into a red. Overhead is the hook's
+// lowest CPU minus the lowest bare-node CPU beside it, so node's own startup is
+// not charged to the hook. The budget still scales up (never down) by how
+// expensive that floor is right now against FLOOR_REF_MS. Windows counts CPU in
+// 15.6 ms ticks, so a figure here moves in steps of that size. A run with no CPU
+// record is NOT MEASURED (exit 2 if nothing failed), never zero.
 //
-// Every judge is shown to fire: a real wired hook wrapped in a sleep past its
-// budget must go over, every decision flipped must disagree with what the hook
-// actually did, and a wired list with one timeout removed or one hook
-// unclassified must be reported.
+// What CPU does not see: time a hook spends waiting on a non-Node child (git,
+// a shell, ps). The harness timeout each hook declares is the wall-clock bound,
+// and the timeouts are asserted below.
+//
+// Every judge is shown to fire: a real wired hook wrapped in a CPU burn past its
+// budget must go over, the same hook wrapped in a SLEEP of the same length must
+// not (a wall clock would charge the sleep), every decision flipped must
+// disagree with what the hook actually did, and a wired list with one timeout
+// removed or one hook unclassified must be reported.
 //
 // Nothing real is touched. HOME, USERPROFILE, CLAUDE_CONFIG_DIR, APPDATA,
 // LOCALAPPDATA and XDG_CONFIG_HOME point into a temp dir, the cwd is a temp git
@@ -51,18 +61,21 @@
 // Run: node tooling/test-hook-budget.js [--report]
 
 'use strict';
-const { spawnSync, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSyncCpu } = require('./cpu-telemetry.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const PLUGINS = ['autodev-core', 'autodev-memory'];
 const REPORT = process.argv.includes('--report');
 const RUNS = 3;
 
-// `[measured 2026-09-24]` fastest run of an empty script on the box that set these budgets.
-const FLOOR_REF_MS = 50;
+// CPU of an empty script under the preload. `[measured 2026-10-02]` single runs
+// on a 16-core Windows 11 box read 15, 31, 46 and 62 ms (whole 15.6 ms ticks), so
+// three ticks is the reference above which the budget starts to scale.
+const FLOOR_REF_MS = 47;
 
 // Overhead a hook may add to one event, in idle-machine milliseconds. The
 // tighter an event's budget, the more often it fires: PreToolUse and PostToolUse
@@ -174,9 +187,12 @@ const DECISIONS = {
 
 let pass = 0;
 let fail = 0;
+let notMeasured = 0;
 const check = (label, ok, detail) => {
     if (ok) { pass++; console.log('PASS', label); } else { fail++; console.log('FAIL', label, detail === undefined ? '' : JSON.stringify(detail)); }
 };
+// A CPU figure that could not be read is no verdict, in either direction.
+const unmeasured = (label, why) => { notMeasured++; console.log('NOT MEASURED', label, why); };
 
 // ---------------------------------------------------------------- the wired list
 
@@ -324,12 +340,13 @@ function payloadFor(w) {
     }
 }
 
+// cpuMs is the CPU the hook process and its Node descendants spent, read from
+// their own records; null when the hook left no record (killed, or the preload
+// did not load). The timeout stays: it is the wall-clock watchdog.
 function run(file, input, env, timeoutMs) {
-    const t = process.hrtime.bigint();
-    const r = spawnSync(process.execPath, [file], { cwd: CWD, input, encoding: 'utf8', env, timeout: timeoutMs, windowsHide: true });
-    const ms = Number(process.hrtime.bigint() - t) / 1e6;
+    const r = spawnSyncCpu(process.execPath, [file], { cwd: CWD, input, encoding: 'utf8', env, timeout: timeoutMs, windowsHide: true });
     const error = r.error ? r.error.code || String(r.error) : r.signal ? `killed by ${r.signal}` : null;
-    return { ms, status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', error };
+    return { cpuMs: r.cpu.cpuMs, cpuWhy: r.cpu.why, status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', error };
 }
 
 // An empty script, run through run() like a hook, so the floor pays exactly what
@@ -340,15 +357,22 @@ function run(file, input, env, timeoutMs) {
 const EMPTY = path.join(SB, 'empty.js');
 fs.writeFileSync(EMPTY, '');
 const floorRun = (env) => run(EMPTY, '', env, 30000);
+// `missing` names the first run with no CPU record; its figures are then not
+// a measurement and the caller reports NOT MEASURED.
 function measure(file, input, env, timeoutMs) {
     const hook = [];
     const floor = [];
     let last;
+    let missing = null;
     for (let i = 0; i < RUNS; i++) {
-        floor.push(floorRun(env).ms);
+        const f = floorRun(env);
         last = run(file, input, env, timeoutMs);
-        hook.push(last.ms);
+        if (f.cpuMs === null) missing = missing || `floor run: ${f.cpuWhy}`;
+        if (last.cpuMs === null) missing = missing || `hook run: ${last.cpuWhy}`;
+        floor.push(f.cpuMs);
+        hook.push(last.cpuMs);
     }
+    if (missing) return { missing, last };
     return { hookMin: Math.min(...hook), hookMed: hook.sort((a, b) => a - b)[Math.floor(RUNS / 2)], floorMin: Math.min(...floor), last };
 }
 
@@ -375,12 +399,13 @@ for (const w of wired) {
     const env = sandboxEnv(w.pluginRoot, false);
     const timeoutMs = (w.timeout || 60) * 1000;
     const m = measure(file, JSON.stringify(payloadFor(w)), env, timeoutMs);
-    const j = judgeCost(w.event, m.hookMin, m.floorMin);
     const label = `${w.event}${w.matcher ? ` [${w.matcher}]` : ''} ${w.key}`;
     // A crash is fast. A timing only means something for a run that finished its
     // work, so the valid run must have exited 0 before its time is believed.
     check(`${label}: a valid payload exits 0`, m.last.status === 0 && !m.last.error, { status: m.last.status, error: m.last.error, stderr: m.last.stderr.slice(0, 200) });
-    check(`${label}: ${j.overhead.toFixed(0)} ms over the node floor, budget ${j.budget.toFixed(0)} ms`, !j.over,
+    if (m.missing) { unmeasured(`${label}: CPU cost`, m.missing); continue; }
+    const j = judgeCost(w.event, m.hookMin, m.floorMin);
+    check(`${label}: ${j.overhead.toFixed(0)} CPU ms over the node floor, budget ${j.budget.toFixed(0)} ms`, !j.over,
         { hookMin: +m.hookMin.toFixed(1), floorMin: +m.floorMin.toFixed(1), scale: +j.scale.toFixed(2) });
     rows.push({ label, event: w.event, hookMin: m.hookMin, hookMed: m.hookMed, floorMin: m.floorMin, overhead: j.overhead, budget: j.budget, timeout: w.timeout });
 }
@@ -431,19 +456,42 @@ if (process.platform === 'win32') {
 
 // ---------------------------------------------------------------- every judge fires
 
-// A real wired hook, wrapped in a sleep past its event's budget, must go over.
-// The sleep is wall time (Atomics.wait), so it adds at least its length on a
-// machine of any speed, and the budget it has to beat is the scaled one.
+// A real wired hook, wrapped in a CPU burn past its event's budget, must go
+// over. The burn spins until process.cpuUsage() has advanced by its length, so
+// it adds at least that much CPU on a machine of any speed, and the budget it
+// has to beat is the scaled one.
+//
+// The same hook wrapped in a SLEEP of the same length must NOT go over. A sleep
+// costs wall time and no CPU, which is exactly what a loaded machine does to a
+// subject: this is the control that a wall clock crept back into the
+// measurement, or that the parent's CPU is being read in place of the hook's
+// (that reads near zero, so the burn above would stop going over).
 {
     const w = wired.find((x) => x.key === 'plugins/autodev-core/hooks/telemetry.js' && x.event === 'PostToolUse') || wired[0];
     const env = sandboxEnv(w.pluginRoot, false);
-    const floorNow = Math.min(...Array.from({ length: RUNS }, () => floorRun(env).ms));
-    const sleepMs = Math.ceil(BUDGET_MS[w.event] * Math.max(1, floorNow / FLOOR_REF_MS) * 1.5) + 100;
-    const slow = path.join(SB, 'slow-' + path.basename(w.rel));
-    fs.writeFileSync(slow, `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${sleepMs});\nrequire(${JSON.stringify(path.join(w.pluginRoot, w.rel))});\n`);
-    const m = measure(slow, JSON.stringify(payloadFor(w)), env, 30000);
-    const j = judgeCost(w.event, m.hookMin, m.floorMin);
-    check(`known positive: ${w.key} slowed by ${sleepMs} ms goes over its ${j.budget.toFixed(0)} ms budget (overhead ${j.overhead.toFixed(0)} ms)`, j.over);
+    const floors = Array.from({ length: RUNS }, () => floorRun(env).cpuMs);
+    const real = JSON.stringify(path.join(w.pluginRoot, w.rel));
+    if (floors.some((f) => f === null)) {
+        unmeasured('known positive and known negative', 'the floor run left no CPU record');
+    } else {
+        const extraMs = Math.ceil(BUDGET_MS[w.event] * Math.max(1, Math.min(...floors) / FLOOR_REF_MS) * 1.5) + 100;
+        const burn = path.join(SB, 'burn-' + path.basename(w.rel));
+        fs.writeFileSync(burn, `{ const t = process.cpuUsage(); for (;;) { const d = process.cpuUsage(t); if ((d.user + d.system) / 1000 >= ${extraMs}) break; } }\nrequire(${real});\n`);
+        const hot = measure(burn, JSON.stringify(payloadFor(w)), env, 60000);
+        if (hot.missing) unmeasured('known positive', hot.missing);
+        else {
+            const j = judgeCost(w.event, hot.hookMin, hot.floorMin);
+            check(`known positive: ${w.key} burning ${extraMs} CPU ms goes over its ${j.budget.toFixed(0)} ms budget (overhead ${j.overhead.toFixed(0)} ms)`, j.over);
+        }
+        const sleep = path.join(SB, 'sleep-' + path.basename(w.rel));
+        fs.writeFileSync(sleep, `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${extraMs});\nrequire(${real});\n`);
+        const idle = measure(sleep, JSON.stringify(payloadFor(w)), env, 60000);
+        if (idle.missing) unmeasured('known negative', idle.missing);
+        else {
+            const j = judgeCost(w.event, idle.hookMin, idle.floorMin);
+            check(`known negative: ${w.key} sleeping ${extraMs} ms stays inside its ${j.budget.toFixed(0)} ms budget (overhead ${j.overhead.toFixed(0)} CPU ms)`, !j.over);
+        }
+    }
 }
 
 // Every bad-input decision, flipped, must disagree with what the hook did. A
@@ -487,5 +535,5 @@ if (REPORT) {
 }
 
 try { fs.rmSync(SB, { recursive: true, force: true }); } catch { /* a locked temp file is the OS's to clear */ }
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exitCode = fail ? 1 : 0;
+console.log(`\n${pass} passed, ${fail} failed${notMeasured ? `, ${notMeasured} not measured` : ''}`);
+process.exitCode = fail ? 1 : notMeasured ? 2 : 0;

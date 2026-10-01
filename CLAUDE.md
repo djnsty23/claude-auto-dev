@@ -15,6 +15,7 @@ them context on every prompt. Everything outside `plugins/` is repo machinery an
 npm run gate                 # THE GATE: thirteen steps chained with &&. Run this.
 npm run gate:fast            # the cheap steps only, in seconds. NOT the gate.
 npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 13.
+                             # It publishes the coverage receipt that check:coverage grades.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
 node tooling/generate-agents-md.js --write   # after editing any rule-*/SKILL.md
 node tooling/check-claude-md.js              # does THIS FILE still describe the tree?
@@ -45,8 +46,10 @@ The chain's exit status is a verdict on one step, not on thirteen.
   `origin/main`, commit, and run the gate once on that clean tree: `check:suites` grades HEAD in a
   private worktree and refuses a dirty tree. Merge with `plugins/autodev-core/scripts/merge-lock.js`,
   which takes the per-repo merge lock, refuses a base that moved, and reads the merged tree back.
-- **Do not touch the tree while it runs.** `test-all.js` fails `tree-inert` on any `git status`
-  change. Draft in a scratchpad.
+- **Do not touch the tree while it runs.** `test-all.js` fails `tree-inert` when a suite changes
+  `git status` under a stable HEAD, and reads a moved HEAD as INDETERMINATE (exit 2). Draft in a
+  scratchpad. `check:coverage` grades the receipt that `npm test` left and refuses (exit 2) one
+  that is missing, stale, partial or red; `find-untested-functions.js --fresh` measures anew.
 - **`gate:fast` does not satisfy the merge bar.** The bar is the full gate on the rebased candidate.
 - **The gate is not what CI runs.** `check:hook-parse` is CI's `node --check` loop over
   `plugins/*/hooks/*.js`, but seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.

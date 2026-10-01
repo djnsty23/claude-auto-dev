@@ -39,6 +39,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
+const cpu = require('./cpu-telemetry.js');
 
 const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'away-state.js');
 const { readAwayState } = require(SUBJECT);
@@ -193,23 +194,20 @@ function cli(args, over = {}) {
 }
 
 {
-    const t0 = Date.now();
-    const r = cli(['--help']);
-    const ms = Date.now() - t0;
-    // THE TIMING HALF IS ONLY MEASURABLE ON A SINGLE-ATTEMPT RUN. `ms` spans
-    // every attempt plus the contention probe between them, so on a retried run
-    // it is guaranteed to exceed the budget that provoked the retry and would
-    // fail this assertion for the one reason it must not: the machine was busy.
-    // A retry means the timing question could not be measured, not that the
-    // answer was no.
-    if (r.attempts > 1) {
+    // The budget is the subject's own CPU over the empty-node floor, measured
+    // inside the subject (tooling/cpu-telemetry.js), so a busy machine cannot
+    // move it. A retried run, or one that left no CPU record, cannot answer the
+    // question: that is indeterminate, never a pass and never zero.
+    const { value: r, cpu: c } = cpu.measure(() => cli(['--help']));
+    const own = cpu.ownCpuMs(c);
+    if (r.attempts > 1 || own.ms === null) {
         infra++;
-        indeterminate.push('--help timing (the run retried, so the wall clock spans a killed attempt)');
-        console.error('infrastructure: --help timing not measurable (' + r.attempts
-            + ' attempt(s), ' + ms + 'ms spans a killed attempt)');
+        const why = r.attempts > 1 ? 'the run retried, so the measurement spans a killed attempt' : own.why;
+        indeterminate.push('--help CPU (' + why + ')');
+        console.error('infrastructure: --help CPU not measurable (' + why + ')');
     } else {
-        check('--help returns 0 with usage, inside the entrypoint budget',
-            r.status === 0 && (r.stdout || '').length > 0 && ms < 10000, `exit ${r.status}, ${ms}ms`);
+        check('--help returns 0 with usage, inside the entrypoint CPU budget',
+            r.status === 0 && (r.stdout || '').length > 0 && own.ms < 10000, `exit ${r.status}, ${Math.round(own.ms)} CPU ms over the node floor`);
     }
 }
 {

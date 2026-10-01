@@ -19,6 +19,7 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 const { spawn, spawnSync } = require('child_process');
+const cpu = require('./cpu-telemetry.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const GATE = path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'security-gate.js');
@@ -27,6 +28,7 @@ const G = require(GATE);
 
 let passed = 0;
 const failures = [];
+const notMeasured = [];
 function check(name, cond, detail) {
   if (cond) { passed++; return; }
   failures.push(name + (detail !== undefined ? `\n      -> ${JSON.stringify(detail).slice(0, 600)}` : ''));
@@ -207,10 +209,17 @@ async function main() {
     // hold each other's delimiters, then half a megabyte of minified code.
     const nasty = `${'/* a */ // b */ /* // c */ '.repeat(2000)}\n${'var a=1;//x*/'.repeat(38000)}`;
     const dir = repo('minified', { ...CLEAN_APP, 'public/vendor.js': nasty });
-    const t = Date.now();
-    const r = await run(['--root', dir]);
-    const ms = Date.now() - t;
-    check('a 500 KB minified file with nested comment delimiters scans in under 10 s', r.status === 0 && ms < 10000, { ms, status: r.status });
+    // CPU the gate process spent, not the wall clock: a loaded machine slows a
+    // linear scan in wall time too, and this asks only whether the scan went
+    // super-linear. The 60 s kill in run() stays as the wall-clock watchdog.
+    const { value: r, cpu: c } = await cpu.measure(() => run(['--root', dir]));
+    const own = cpu.ownCpuMs(c);
+    if (own.ms === null) {
+      notMeasured.push(`the minified-file scan: ${own.why}`);
+      check('the minified-file scan still exits 0', r.status === 0, { status: r.status });
+    } else {
+      check('a 500 KB minified file with nested comment delimiters scans in under 10 s of CPU', r.status === 0 && own.ms < 10000, { ...own, status: r.status });
+    }
   }
 
   // -------------------------------------------------------- live headers
@@ -337,6 +346,13 @@ main()
       console.error(`\nFAIL  ${failures.length} of ${passed + failures.length}`);
       for (const f of failures) console.error(`    - ${f}`);
       process.exitCode = 1;
+      return;
+    }
+    if (notMeasured.length) {
+      // No CPU record is no measurement: neither a pass nor a fail.
+      console.error(`\nINDETERMINATE  ${notMeasured.length} budget(s) NOT MEASURED (${passed} assertions passed):`);
+      for (const n of notMeasured) console.error(`    - ${n}`);
+      process.exitCode = 2;
       return;
     }
     console.log(`PASS  ${passed} assertions: the gate as a subprocess over ${repos} temp git repos and a local HTTP server.`);

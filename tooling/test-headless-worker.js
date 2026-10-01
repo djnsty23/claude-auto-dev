@@ -35,6 +35,7 @@
 // Every temp root has a SPACE in its name and every file is utf8 with \n.
 
 const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
+const cpu = require('./cpu-telemetry.js');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -213,10 +214,17 @@ try {
 
     // 1. --help: instant, no side effect.
     {
-        const t0 = Date.now();
-        const res = hw(['--help']);
-        const ms = Date.now() - t0;
-        check('1. --help exits 0 within 2 s and prints usage', res.exit === 0 && ms < 2000 && /Usage: node headless-worker\.js start/.test(res.stdout), `exit ${res.exit}, ${ms} ms`);
+        // The budget is the script's own CPU over the empty-node floor,
+        // measured inside it (tooling/cpu-telemetry.js), so a loaded machine
+        // cannot move it. No CPU record is indeterminate, never zero.
+        const { value: res, cpu: c } = cpu.measure(() => hw(['--help']));
+        const own = cpu.ownCpuMs(c);
+        if (own.ms === null) {
+            indeterminateCase('1. --help CPU', own.why);
+            check('1. --help exits 0 and prints usage', res.exit === 0 && /Usage: node headless-worker\.js start/.test(res.stdout), `exit ${res.exit}`);
+        } else {
+            check('1. --help exits 0 within 2 s of CPU and prints usage', res.exit === 0 && own.ms < 2000 && /Usage: node headless-worker\.js start/.test(res.stdout), `exit ${res.exit}, ${Math.round(own.ms)} CPU ms over the node floor`);
+        }
         const bare = hw([]);
         check('1. no subcommand prints usage and exits 0', bare.exit === 0 && /Usage:/.test(bare.stdout), `exit ${bare.exit}`);
         check('1. afterwards the default ledger path does not exist', !fs.existsSync(DEFAULT_LEDGER) && !fs.existsSync(path.dirname(DEFAULT_LEDGER)), DEFAULT_LEDGER);

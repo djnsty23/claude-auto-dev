@@ -120,7 +120,95 @@ function spawnSuiteSync(file, args, options, opts) {
     return res;
 }
 
-module.exports = { PREFIX, TMP_KEYS, createSuiteTmp, envWithTmp, removeSuiteTmp, spawnSuiteSync };
+// The async twin of spawnSuiteSync, for a runner that reads the child's output
+// as it arrives (test-all.js tees it to its own stdout and a per-suite log).
+// Resolves once the child has closed AND its temp root is gone, never before,
+// so a caller that starts the next suite on resolve never overlaps cleanup.
+//
+// The result has spawnSync's shape: status, signal, error (ETIMEDOUT on a
+// timeout kill, the spawn error otherwise), pid, plus tmpRoot and tmpRemoved.
+// opts.onStdout / opts.onStderr receive each chunk when that stream is piped.
+//
+// 'close' waits for every holder of the child's pipes, and a suite that leaves
+// a grandchild holding them would hold the runner forever. So after 'exit' the
+// pipes get opts.closeGraceMs (default 5000) to drain, then they are destroyed
+// and the result says `stdioHeld: true`.
+function spawnSuite(file, args, options, opts) {
+    const { spawn } = require('child_process');
+    const o = opts || {};
+    const a = args || [];
+    const label = o.label || path.basename(String(a.length ? a[a.length - 1] : file));
+    const log = o.log || ((line) => process.stderr.write(line + '\n'));
+    const base = (options && options.env) || process.env;
+    let dir = null;
+    try {
+        dir = createSuiteTmp(o.parent);
+    } catch (e) {
+        log(`[${label}] temp root not created (${e.code || e.message}); running on the shared temp dir`);
+    }
+    const env = dir ? envWithTmp(base, dir) : base;
+    const spawnOpts = Object.assign({}, options, { env });
+    const timeout = spawnOpts.timeout;
+    delete spawnOpts.timeout;
+    const grace = o.closeGraceMs === undefined ? 5000 : o.closeGraceMs;
+    return new Promise((resolve) => {
+        const res = { status: null, signal: null, error: undefined, pid: undefined, tmpRoot: dir, tmpRemoved: null, stdioHeld: false };
+        let settled = false;
+        let timer = null;
+        let graceTimer = null;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (timer) clearTimeout(timer);
+            if (graceTimer) clearTimeout(graceTimer);
+            if (dir) {
+                const r = removeSuiteTmp(dir, o.rm);
+                res.tmpRemoved = r.ok;
+                if (!r.ok) log(`[${label}] temp root not removed (${r.code}): ${dir}`);
+            }
+            resolve(res);
+        };
+        let child;
+        try {
+            child = spawn(file, a, spawnOpts);
+        } catch (e) {
+            res.error = e;
+            finish();
+            return;
+        }
+        res.pid = child.pid;
+        if (child.stdout && o.onStdout) child.stdout.on('data', o.onStdout);
+        if (child.stderr && o.onStderr) child.stderr.on('data', o.onStderr);
+        if (timeout > 0) {
+            timer = setTimeout(() => {
+                const e = new Error(`spawn ${file} ETIMEDOUT`);
+                e.code = 'ETIMEDOUT';
+                res.error = e;
+                try { child.kill('SIGTERM'); } catch { /* already gone */ }
+            }, timeout);
+        }
+        child.on('error', (e) => {
+            if (!res.error) res.error = e;
+            // A spawn that never started emits no 'close' on every Node version.
+            if (child.pid === undefined) finish();
+        });
+        child.on('exit', (code, signal) => {
+            res.status = code;
+            res.signal = signal;
+            graceTimer = setTimeout(() => {
+                res.stdioHeld = true;
+                for (const s of [child.stdout, child.stderr]) { if (s) s.destroy(); }
+                finish();
+            }, grace);
+        });
+        child.on('close', (code, signal) => {
+            if (res.status === null && res.signal === null) { res.status = code; res.signal = signal; }
+            finish();
+        });
+    });
+}
+
+module.exports = { PREFIX, TMP_KEYS, createSuiteTmp, envWithTmp, removeSuiteTmp, spawnSuiteSync, spawnSuite };
 
 // --- CLI -------------------------------------------------------------------
 // This file lives in tooling/ and is not a test-*.js, so check-entrypoints
