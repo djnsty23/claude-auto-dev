@@ -730,6 +730,49 @@ check('malformed stdin → still valid JSON out', parse(r) !== null);
         b.run !== null && !b.run.includes('Session pile'));
 }
 
+// ---- Apps no gate covers ----
+//
+// A nested app that no CI step, git hook or root gate script reaches is named
+// once, with what it is missing and what is at risk. Wired into the root gate,
+// the line goes away; outside a git repository the check does not run at all.
+// The red and the green are the same repository, one script apart.
+{
+    const UG = path.join(TMP, 'ungated');
+    const put = (rel, body) => {
+        fs.mkdirSync(path.dirname(path.join(UG, rel)), { recursive: true });
+        fs.writeFileSync(path.join(UG, rel), typeof body === 'string' ? body : JSON.stringify(body));
+    };
+    // The root has no gate-named script, so the root app is ungated too, and
+    // the hook must still name only the nested one.
+    const rootPkg = { name: 'shop', scripts: { dev: 'next dev', build: 'next build' }, dependencies: { next: '15' } };
+    put('package.json', rootPkg);
+    put('apps/admin/package.json', { name: 'admin', scripts: { dev: 'next dev' } });
+    put('apps/admin/middleware.ts', 'export const m = (req) => req.cookies.get(process.env.DATABASE_URL);\n');
+    spawnSync('git', ['init', '-q'], { cwd: UG, windowsHide: true });
+    const payload = { cwd: UG, session_id: 'ungated', hook_event_name: 'SessionStart' };
+
+    const red = contextOf(run(payload, UG));
+    check('ungated apps: a nested app no gate reaches is named, with the population',
+        red !== null && /Ungated apps: 1 of 2 apps in this repository/.test(red) && red.includes('apps/admin'));
+    check('ungated apps: the line says what is missing and what is at risk',
+        red !== null && red.includes('missing CI and tests; at risk: database, cookies, auth'));
+    check('ungated apps: the line names the command that prints the detail',
+        red !== null && red.includes('check-ungated-apps.js'));
+    check('ungated apps: the root app is never named, even with no gate of its own',
+        red !== null && (red.match(/\(missing /g) || []).length === 1);
+
+    put('package.json', Object.assign({}, rootPkg, { scripts: Object.assign({}, rootPkg.scripts, { gate: 'npm run build && npm --prefix apps/admin run build' }) }));
+    const green = contextOf(run(payload, UG));
+    check('ungated apps: once a root gate script reaches the app, the hook adds nothing',
+        green !== null && !green.includes('Ungated apps'));
+
+    put('package.json', rootPkg);
+    fs.rmSync(path.join(UG, '.git'), { recursive: true, force: true });
+    const notRepo = contextOf(run(payload, UG));
+    check('ungated apps: outside a git repository the check does not run',
+        notRepo !== null && !notRepo.includes('Ungated apps'));
+}
+
 (async () => {
     for (const fn of later) await fn();
 
