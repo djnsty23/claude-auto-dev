@@ -632,7 +632,7 @@ function analyseComponents(snapshot, T) {
 
     const findings = [];
     const exempt = {
-        markedOk: 0, consistentGroup: 0, pillRadius: 0, narrowAccent: 0, barTrack: 0,
+        markedOk: 0, consistentGroup: 0, selectedSegment: 0, pillRadius: 0, narrowAccent: 0, barTrack: 0,
         rail: 0, fullBleed: 0, inlineLink: 0, wrappedByTarget: 0, disabled: 0,
     };
     const population = {
@@ -737,15 +737,20 @@ function analyseComponents(snapshot, T) {
             // Glued: two adjacent controls with no gap that are NOT one
             // consistent group. A segmented button group is the same height,
             // frame and fill throughout and is exempt; a bordered counter
-            // fused to a solid button is not.
+            // fused to a solid button is not. A segmented group with one
+            // segment selected differs in fill only, and its segments are
+            // square where they join; two rounded controls that collide are
+            // not joined, so they still fire.
             for (let k = 0; k + 1 < line.length; k++) {
                 const a = line[k];
                 const b = line[k + 1];
                 const gap = b.box.l - a.box.r;
                 if (!(gap > -1 && gap < T.gluedGapPx)) continue;
-                const consistent = Math.abs(a.box.h - b.box.h) <= 1 && frameOf(a) === frameOf(b) &&
-                    paintedOf(a) === paintedOf(b) && (!paintedOf(a) || a.bgc === b.bgc);
+                const sameShape = Math.abs(a.box.h - b.box.h) <= 1 && frameOf(a) === frameOf(b);
+                const consistent = sameShape && paintedOf(a) === paintedOf(b) && (!paintedOf(a) || a.bgc === b.bgc);
                 if (consistent) { exempt.consistentGroup++; continue; }
+                const joined = frameOf(a) > 0 && a.br[1] <= 1 && a.br[2] <= 1 && b.br[0] <= 1 && b.br[3] <= 1;
+                if (sameShape && joined) { exempt.selectedSegment++; continue; }
                 push(CODES.GLUED_CONTROLS, a.sel + ' + ' + b.sel, {
                     gapPx: r2(gap), a: view[k], b: view[k + 1],
                 }, `two different controls touch (${r2(gap)}px apart): ${a.box.h}px ${paintedOf(a) ? 'filled' : 'outlined'} beside ${b.box.h}px ${paintedOf(b) ? 'filled' : 'outlined'}`,

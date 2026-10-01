@@ -112,7 +112,7 @@ for (const w of WIDTHS) {
 
 // ------------------------------------------------------------ the clean control
 
-const EXEMPTIONS = ['consistentGroup', 'pillRadius', 'narrowAccent', 'barTrack', 'rail', 'fullBleed', 'inlineLink', 'wrappedByTarget'];
+const EXEMPTIONS = ['consistentGroup', 'selectedSegment', 'pillRadius', 'narrowAccent', 'barTrack', 'rail', 'fullBleed', 'inlineLink', 'wrappedByTarget'];
 for (const w of WIDTHS) {
     const r = CHECKS.analyse(load(`components-clean-${w}`));
     check(`components-clean @${w}: zero findings`, r.status === 'MEASURED' && r.findings.length === 0, r.findings.map((f) => `${f.code} ${f.sel}`));

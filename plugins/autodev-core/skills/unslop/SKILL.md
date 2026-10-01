@@ -55,7 +55,7 @@ finding, and overridable on `rendered-layout-gate.js` as `--<name> <n>`.
 | `DOC-SCROLL`, `OVERFLOW-CULPRIT`, `CLIPPED-TEXT`, `TEXT-OCCLUDED` | the existing overflow and occlusion checks | see `rendered-layout-gate.js --how` |
 
 Correct shapes that look like defects are exempt and **counted**: a segmented
-button group (consistent), a pill or avatar (radius), a centred accent
+button group (consistent, or with one selected segment joined by square corners), a pill or avatar (radius), a centred accent
 (narrow), a progress fill (track), a horizontal rail, a full-bleed band, a link
 inside a sentence, a small control wrapped by a 44px label or parent. The only
 way to exempt a real element is `data-unslop-ok="CODE ..."` in the product's
