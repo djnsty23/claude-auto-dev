@@ -438,6 +438,290 @@ function harvest(opt) {
 }
 
 /**
+ * Runs INSIDE the page, after harvest(). The COMPONENT half: the computed style
+ * facts the component rules in layout-checks.js need, and nothing else. It
+ * judges nothing either.
+ *
+ * WHY A SECOND FUNCTION rather than more fields in harvest(). harvest() is
+ * hashed into probeSha and twenty committed real-browser snapshots carry that
+ * hash; editing it would invalidate every one of them for data the overflow and
+ * occlusion checks never read. This function has its own hash, componentSha,
+ * and its own fixtures, so each half goes stale only when its own source moves.
+ *
+ * WHAT IT RECORDS per visible element (short keys, because a real page runs to
+ * thousands of rows): the border box, display and flex direction, the VISIBLE
+ * width of each border side (a side whose style is none or whose colour is
+ * transparent counts 0), corner radii, padding, own background alpha and colour
+ * beside the colour BEHIND it (a background equal to what it sits on paints
+ * nothing a reader can see), a zero-blur box-shadow spread (the ring idiom), the
+ * interactive kind, own text and the union of its glyph boxes, truncation
+ * facts, whether it sits in a horizontal rail, its landmark, any
+ * data-unslop-ok exemption, and its ::before / ::after boxes where they paint.
+ *
+ * @param {{componentSha:string, maxComponents:number}} opt
+ */
+function harvestComponents(opt) {
+    var o = opt || {};
+    var MAX = o.maxComponents || 3000;
+    var doc = document;
+    var de = doc.documentElement;
+    var vw = de.clientWidth;
+
+    // A focused control draws its focus ring, and a ring inside a bordered
+    // wrapper reads as a double border. Nothing should be focused when a
+    // resting layout is measured.
+    if (doc.activeElement && doc.activeElement !== doc.body && doc.activeElement.blur) doc.activeElement.blur();
+
+    function r2(n) { return Math.round(n * 100) / 100; }
+    function px(v) { var n = parseFloat(v); return isNaN(n) ? 0 : r2(n); }
+    function shortSel(el) {
+        if (!el || el.nodeType !== 1) return '?';
+        var t = el.tagName.toLowerCase();
+        if (el.id) return t + '#' + el.id;
+        var raw = typeof el.className === 'string' ? el.className : '';
+        var cls = raw.trim().split(/\s+/).filter(Boolean).slice(0, 2);
+        return t + (cls.length ? '.' + cls.join('.') : '');
+    }
+    function selPath(el) {
+        var parts = [];
+        var cur = el;
+        for (var i = 0; i < 3 && cur && cur.nodeType === 1; i++) {
+            parts.unshift(shortSel(cur));
+            cur = cur.parentElement;
+        }
+        return parts.join(' > ');
+    }
+    function boxOf(r) {
+        return { l: r2(r.left), t: r2(r.top), r: r2(r.right), b: r2(r.bottom), w: r2(r.width), h: r2(r.height) };
+    }
+    function alphaOf(colour) {
+        if (!colour) return 0;
+        var m = /^rgba?\(([^)]+)\)$/.exec(String(colour).trim());
+        if (!m) return 1;
+        var parts = m[1].split(/[\s,\/]+/).filter(Boolean);
+        return parts.length >= 4 ? parseFloat(parts[3]) : 1;
+    }
+    function norm(colour) { return String(colour || '').replace(/\s+/g, ''); }
+    var SIDES = ['Top', 'Right', 'Bottom', 'Left'];
+    function borderWidths(cs) {
+        var out = [];
+        for (var s = 0; s < 4; s++) {
+            var st = cs['border' + SIDES[s] + 'Style'];
+            var w = px(cs['border' + SIDES[s] + 'Width']);
+            out.push(st === 'none' || st === 'hidden' || alphaOf(cs['border' + SIDES[s] + 'Color']) < 0.05 ? 0 : w);
+        }
+        return out;
+    }
+    // The largest zero-offset, zero-blur spread among visible box-shadows: the
+    // way utility CSS draws a "ring". Split on commas outside parentheses.
+    function ringOf(cs) {
+        var bs = cs.boxShadow;
+        var best = { w: 0, inset: false };
+        if (!bs || bs === 'none') return best;
+        var parts = [];
+        var depth = 0;
+        var cur = '';
+        for (var i = 0; i < bs.length; i++) {
+            var ch = bs[i];
+            if (ch === '(') depth++;
+            if (ch === ')') depth--;
+            if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; continue; }
+            cur += ch;
+        }
+        parts.push(cur);
+        for (var p = 0; p < parts.length; p++) {
+            var part = parts[p];
+            var col = /rgba?\([^)]*\)/.exec(part);
+            if (col && alphaOf(col[0]) < 0.05) continue;
+            var rest = col ? part.replace(col[0], '') : part;
+            var lens = rest.trim().split(/\s+/).filter(function (x) { return /px$/.test(x) || x === '0'; }).map(parseFloat);
+            if (lens.length >= 4 && lens[0] === 0 && lens[1] === 0 && lens[2] === 0 && lens[3] > best.w) {
+                best = { w: r2(lens[3]), inset: /\binset\b/.test(part) };
+            }
+        }
+        return best;
+    }
+    var ROLES = { button: 1, link: 1, tab: 1, menuitem: 1, checkbox: 1, radio: 1, switch: 1, option: 1 };
+    function interactiveKind(el) {
+        var tag = el.tagName;
+        if (tag === 'A') return el.hasAttribute('href') ? 'a' : null;
+        if (tag === 'BUTTON' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'SUMMARY') return tag.toLowerCase();
+        if (tag === 'INPUT') return el.type === 'hidden' ? null : 'input:' + el.type;
+        var role = el.getAttribute('role');
+        return role && ROLES[role] ? 'role:' + role : null;
+    }
+    function ownText(el) {
+        var t = '';
+        for (var c = 0; c < el.childNodes.length; c++) {
+            if (el.childNodes[c].nodeType === 3) t += el.childNodes[c].nodeValue;
+        }
+        return t.replace(/\s+/g, ' ').trim();
+    }
+    function textBox(el) {
+        var l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+        for (var c = 0; c < el.childNodes.length; c++) {
+            var n = el.childNodes[c];
+            if (n.nodeType !== 3 || !n.nodeValue.trim()) continue;
+            var range = doc.createRange();
+            range.selectNodeContents(n);
+            var rs = range.getClientRects();
+            for (var q = 0; q < rs.length; q++) {
+                if (!(rs[q].width > 0 && rs[q].height > 0)) continue;
+                l = Math.min(l, rs[q].left); t = Math.min(t, rs[q].top);
+                r = Math.max(r, rs[q].right); b = Math.max(b, rs[q].bottom);
+            }
+        }
+        return l === Infinity ? null : { l: r2(l), t: r2(t), r: r2(r), b: r2(b), w: r2(r - l), h: r2(b - t) };
+    }
+    function behindOf(el) {
+        var cur = el.parentElement;
+        while (cur) {
+            var c = getComputedStyle(cur).backgroundColor;
+            if (alphaOf(c) > 0) return norm(c);
+            cur = cur.parentElement;
+        }
+        return 'canvas';
+    }
+    // Inside a horizontal rail the reader scrolls to the content, so an edge
+    // position there is the rail's business, not a gutter.
+    function inRail(el) {
+        var cur = el.parentElement;
+        while (cur && cur !== de) {
+            var ox = getComputedStyle(cur).overflowX;
+            if ((ox === 'auto' || ox === 'scroll') && cur.scrollWidth > cur.clientWidth + 1) return true;
+            cur = cur.parentElement;
+        }
+        return false;
+    }
+    var LANDMARK = 'header,nav,footer,aside,main,dialog,[role=banner],[role=navigation],[role=contentinfo],[role=dialog]';
+    function landmarkOf(el) {
+        var lm = el.closest ? el.closest(LANDMARK) : null;
+        return lm ? shortSel(lm) : null;
+    }
+    // An exemption is a reviewed attribute in the product's source, never a
+    // flag on the command line: data-unslop-ok="TRUNCATED-TEXT TAP-TARGET".
+    function okOf(el) {
+        var holder = el.closest ? el.closest('[data-unslop-ok]') : null;
+        return holder ? holder.getAttribute('data-unslop-ok').split(/[\s,]+/).filter(Boolean) : [];
+    }
+    function pseudoBoxes(el, rect, cs) {
+        var out = [];
+        var which = ['before', 'after'];
+        for (var w = 0; w < 2; w++) {
+            var ps = getComputedStyle(el, '::' + which[w]);
+            if (!ps || ps.content === 'none' || ps.content === 'normal' || ps.display === 'none') continue;
+            var pw = px(ps.width);
+            var ph = px(ps.height);
+            if (!(pw > 0 && ph > 0)) continue;
+            var pos = ps.position;
+            var box = null;
+            if (pos === 'absolute' || pos === 'fixed') {
+                // The containing block of an absolute pseudo-element is its
+                // host's padding box when the host is positioned, which is the
+                // case this records; a fixed one is placed against the viewport.
+                var bl = px(cs.borderLeftWidth);
+                var bt = px(cs.borderTopWidth);
+                var br = px(cs.borderRightWidth);
+                var bb = px(cs.borderBottomWidth);
+                var ox0 = pos === 'fixed' ? 0 : rect.left + bl;
+                var oy0 = pos === 'fixed' ? 0 : rect.top + bt;
+                var cbw = pos === 'fixed' ? vw : rect.width - bl - br;
+                var cbh = pos === 'fixed' ? de.clientHeight : rect.height - bt - bb;
+                var x = ps.left !== 'auto' ? ox0 + px(ps.left) : (ps.right !== 'auto' ? ox0 + cbw - px(ps.right) - pw : ox0);
+                var y = ps.top !== 'auto' ? oy0 + px(ps.top) : (ps.bottom !== 'auto' ? oy0 + cbh - px(ps.bottom) - ph : oy0);
+                box = { l: r2(x), t: r2(y), r: r2(x + pw), b: r2(y + ph), w: pw, h: ph };
+            }
+            out.push({
+                w: which[w], pos: pos, box: box, wd: pw, ht: ph,
+                bg: r2(alphaOf(ps.backgroundColor)), img: ps.backgroundImage !== 'none',
+            });
+        }
+        return out;
+    }
+
+    var SKIP = { SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, TITLE: 1, HEAD: 1, BR: 1, NOSCRIPT: 1, TEMPLATE: 1, 'NEXTJS-PORTAL': 1 };
+    var all = Array.prototype.slice.call(doc.querySelectorAll('*'));
+    var recs = [];
+    var index = new Map();
+    var dropped = 0;
+    var hidden = 0;
+    for (var i = 0; i < all.length; i++) {
+        var el = all[i];
+        if (SKIP[el.tagName]) continue;
+        var rect = el.getBoundingClientRect();
+        // Under 2px on either axis is the visually-hidden idiom or a hairline,
+        // neither of which a component rule has anything to say about.
+        if (rect.width < 2 || rect.height < 2) continue;
+        if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) { hidden++; continue; }
+        if (recs.length >= MAX) { dropped++; continue; }
+        var cs = getComputedStyle(el);
+        var txt = ownText(el);
+        var ring = ringOf(cs);
+        var ol = cs.outlineStyle !== 'none' && alphaOf(cs.outlineColor) >= 0.05 ? px(cs.outlineWidth) : 0;
+        var bga = alphaOf(cs.backgroundColor);
+        var parentText = el.parentElement ? ownText(el.parentElement) : '';
+        var lc = parseInt(cs.webkitLineClamp || cs.lineClamp, 10);
+        index.set(el, recs.length);
+        recs.push({
+            i: recs.length,
+            p: null,
+            sel: selPath(el),
+            tag: el.tagName.toLowerCase(),
+            cls: (typeof el.className === 'string' ? el.className : '').trim().slice(0, 160),
+            box: boxOf(rect),
+            d: cs.display,
+            fd: cs.flexDirection,
+            pos: cs.position,
+            bw: borderWidths(cs),
+            br: [px(cs.borderTopLeftRadius), px(cs.borderTopRightRadius), px(cs.borderBottomRightRadius), px(cs.borderBottomLeftRadius)],
+            pad: [px(cs.paddingTop), px(cs.paddingRight), px(cs.paddingBottom), px(cs.paddingLeft)],
+            bg: r2(bga),
+            bgc: bga > 0 ? norm(cs.backgroundColor) : null,
+            behind: behindOf(el),
+            img: cs.backgroundImage !== 'none',
+            ring: ring.w,
+            ringInset: ring.inset,
+            ol: ol,
+            ia: interactiveKind(el),
+            dis: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
+            txt: txt.slice(0, 60),
+            tb: txt ? textBox(el) : null,
+            // Display inline inside a run of text: the WCAG target-size
+            // exception for a link in a sentence.
+            inl: cs.display === 'inline' && !!parentText,
+            to: cs.textOverflow === 'ellipsis',
+            lc: isNaN(lc) ? 0 : lc,
+            ws: cs.whiteSpace,
+            ox: cs.overflowX,
+            oy: cs.overflowY,
+            sw: el.scrollWidth, cw: el.clientWidth, sh: el.scrollHeight, ch: el.clientHeight,
+            rail: inRail(el),
+            lm: landmarkOf(el),
+            ok: okOf(el),
+            ps: pseudoBoxes(el, rect, cs),
+        });
+    }
+    for (var j = 0; j < all.length; j++) {
+        var e2 = all[j];
+        if (!index.has(e2)) continue;
+        var pe = e2.parentElement;
+        while (pe && !index.has(pe)) pe = pe.parentElement;
+        recs[index.get(e2)].p = pe ? index.get(pe) : null;
+    }
+    return {
+        schema: 'autodev.components/1',
+        sha: o.componentSha || null,
+        clientWidth: vw,
+        considered: all.length,
+        recorded: recs.length,
+        hiddenSkipped: hidden,
+        droppedForCap: dropped,
+        truncated: dropped > 0,
+        elements: recs,
+    };
+}
+
+/**
  * Hash of the harvester source. Committed snapshots carry it and the suite
  * compares, so editing this file with stale fixtures is loud rather than silent.
  */
@@ -445,17 +729,31 @@ function probeSha() {
     return crypto.createHash('sha256').update(harvest.toString()).digest('hex').slice(0, 12);
 }
 
-/** The pasteable expression. Self-contained: it closes over nothing. */
+/** The same guard for the component half, with its own fixtures. */
+function componentSha() {
+    return crypto.createHash('sha256').update(harvestComponents.toString()).digest('hex').slice(0, 12);
+}
+
+/**
+ * The pasteable expression. Self-contained: it closes over nothing. It runs
+ * harvest(), then harvestComponents() into `components`. A component harvest
+ * that throws leaves the overflow and occlusion snapshot intact and records the
+ * error, so the component rules report UNMEASURED rather than a clean zero.
+ */
 function probeSource(options) {
     const opt = Object.assign(
-        { scrollSteps: 3, maxElements: 4000, maxTextElements: 400 },
+        { scrollSteps: 3, maxElements: 4000, maxTextElements: 400, maxComponents: 3000 },
         options || {}
     );
     opt.probeSha = probeSha();
-    return '(' + harvest.toString() + ')(' + JSON.stringify(opt) + ')';
+    opt.componentSha = componentSha();
+    return '(function (o) { var s = (' + harvest.toString() + ')(o); ' +
+        'try { s.components = (' + harvestComponents.toString() + ')(o); } ' +
+        'catch (e) { s.components = { schema: "autodev.components/1", error: String(e && e.message || e) }; } ' +
+        'return s; })(' + JSON.stringify(opt) + ')';
 }
 
-module.exports = { harvest, probeSource, probeSha };
+module.exports = { harvest, harvestComponents, probeSource, probeSha, componentSha };
 
 if (require.main === module) {
     const argv = process.argv.slice(2);
@@ -465,6 +763,10 @@ if (require.main === module) {
     };
     if (argv.includes('--sha')) {
         console.log(probeSha());
+        process.exit(0);
+    }
+    if (argv.includes('--component-sha')) {
+        console.log(componentSha());
         process.exit(0);
     }
     if (argv.includes('--help') || argv.includes('-h')) {
@@ -477,6 +779,7 @@ if (require.main === module) {
         console.log('  --max-text <n>        cap on sampled text records (default 400)');
         console.log('  --label <s>           free text carried into the snapshot');
         console.log('  --sha                 hash of the harvester source');
+        console.log('  --component-sha       hash of the component harvester source');
         console.log('');
         console.log('Paste the printed expression into a browser evaluation tool, save the JSON');
         console.log('it returns, then feed the saved files to rendered-layout-gate.js.');
