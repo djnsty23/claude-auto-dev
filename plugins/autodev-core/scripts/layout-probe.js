@@ -159,6 +159,27 @@ function harvest(opt) {
         };
     }
 
+    // An ANCESTOR of the text is above it in the hit stack only through a
+    // pseudo-element (a stretched-link or tap-area ::after): its own
+    // background paints beneath its descendants and cannot hide them. So the
+    // paint that sits over the text is the pseudo-element's, never the box's.
+    function pseudoPaintFacts(el) {
+        var f = paintFacts(el);
+        var a = 0, img = false, bd = false;
+        ['::before', '::after'].forEach(function (w) {
+            var ps = getComputedStyle(el, w);
+            if (!ps || ps.content === 'none' || ps.display === 'none') return;
+            a = Math.max(a, alphaOf(ps.backgroundColor));
+            if (ps.backgroundImage !== 'none') img = true;
+            var pbf = ps.backdropFilter || ps.webkitBackdropFilter || 'none';
+            if (pbf !== 'none') bd = true;
+        });
+        f.bgAlpha = r4(a);
+        f.hasBgImage = img;
+        f.hasBackdrop = bd;
+        return f;
+    }
+
     // A modal owns the screen, so every word under it reads as occluded. Left
     // unflagged, one open dialog turns into a page of findings about a page
     // nobody is looking at.
@@ -383,9 +404,11 @@ function harvest(opt) {
                     var occ = null;
                     if (above.length) {
                         var cand = above[0];
-                        var pf = paintFacts(cand);
+                        var viaPseudo = cand.contains(te);
+                        var pf = viaPseudo ? pseudoPaintFacts(cand) : paintFacts(cand);
                         occ = {
                             sel: selPath(cand),
+                            viaPseudo: viaPseudo,
                             bgAlpha: pf.bgAlpha,
                             hasBgImage: pf.hasBgImage,
                             hasBackdrop: pf.hasBackdrop,
