@@ -86,7 +86,7 @@ Use the product's own worktree, never its live main tree.
    own test accounts, and only on localhost. A product whose sign-in goes to a hosted identity
    provider needs the operator to run this leg: give them the exact command. Values are never
    printed; the report says only whether each name was present.
-   Add `--init-storage <json>` to pre-set a stored consent choice, so a banner does not cover
+   Add `--init-storage <json>` (local storage) or `--cookies name=value` to pre-set a stored consent choice, so a banner does not cover
    every screenshot.
 4. **Vision pass (advisory).** `unslop-sweep.js vision-pack <out> --max 12`, then spawn one
    `Agent` (opus) with `vision-pack.json` and
