@@ -90,6 +90,48 @@ const DEFAULTS = {
     // Share of a text run's glyph boxes that must fall outside a clipping
     // container before the text counts as cut off.
     clipMinFraction: 0.25,
+
+    // ---- component rules, judged from snapshot.components (harvestComponents)
+    // A row of controls whose heights, centres, border widths, radii or
+    // horizontal padding spread wider than these reads as assembled from parts.
+    rowHeightTolPx: 2,
+    rowCenterTolPx: 2,
+    rowBorderTolPx: 0.5,
+    rowRadiusTolPx: 2,
+    rowPaddingTolPx: 4,
+    // A row container taller than this is a layout region, not a toolbar.
+    rowMaxHeightPx: 120,
+    // The size band of a control. A boxed element outside it is a card or a
+    // badge, not a button.
+    controlMinPx: 12,
+    controlMaxHeightPx: 64,
+    controlMaxWidthPx: 480,
+    // Two visibly different controls closer than this read as one broken one.
+    gluedGapPx: 2,
+    // A framed box this close inside another frame draws two lines.
+    doubleBorderPx: 2,
+    // A decorative bar: painted, textless, at most this tall, at least this wide.
+    barMaxHeightPx: 8,
+    barMinWidthPx: 24,
+    // A bar covering at least this share of its container's width was meant to
+    // span it. A narrower one is an accent and is counted, not reported.
+    barMinSpanFraction: 0.5,
+    barEdgeTolPx: 2,
+    // A container this short around a bar is a track (a progress bar), and a
+    // fill that does not span its track is the point of a track.
+    barTrackMaxPx: 16,
+    // Text or a control closer than this to the viewport edge on a touch width.
+    gutterMinPx: 12,
+    // The widest viewport the touch-only rules (gutter, tap size) apply at.
+    touchMaxWidth: 767,
+    // The smallest tap target on a touch width, both axes.
+    tapMinPx: 44,
+    // Content wider (or taller, under a line clamp) than its box by more than
+    // this, in a box that ellipsises or clips, is truncated.
+    truncMinPx: 1,
+    // Repeated siblings whose spacing spreads wider than this break rhythm.
+    rhythmTolPx: 8,
+    rhythmMinRepeats: 3,
 };
 
 // An ancestor that lets the reader scroll to the content ABSORBS the overflow
@@ -112,6 +154,34 @@ const CODES = {
     OVERFLOW_CULPRIT: 'OVERFLOW-CULPRIT',
     CLIPPED_TEXT: 'CLIPPED-TEXT',
     TEXT_OCCLUDED: 'TEXT-OCCLUDED',
+    ROW_HEIGHT: 'ROW-HEIGHT',
+    ROW_CENTER: 'ROW-CENTER',
+    ROW_BORDER: 'ROW-BORDER',
+    ROW_RADIUS: 'ROW-RADIUS',
+    ROW_PADDING: 'ROW-PADDING',
+    GLUED_CONTROLS: 'GLUED-CONTROLS',
+    DOUBLE_BORDER: 'DOUBLE-BORDER',
+    SHORT_BAR: 'SHORT-BAR',
+    NO_GUTTER: 'NO-GUTTER',
+    TAP_TARGET: 'TAP-TARGET',
+    TRUNCATED_TEXT: 'TRUNCATED-TEXT',
+    RHYTHM: 'RHYTHM',
+};
+
+// The component codes, and the subset that applies only on a touch width. A
+// mobile-only code at a desktop width counts null, never 0: it was not asked.
+const COMPONENT_CODES = [
+    CODES.ROW_HEIGHT, CODES.ROW_CENTER, CODES.ROW_BORDER, CODES.ROW_RADIUS, CODES.ROW_PADDING,
+    CODES.GLUED_CONTROLS, CODES.DOUBLE_BORDER, CODES.SHORT_BAR, CODES.NO_GUTTER,
+    CODES.TAP_TARGET, CODES.TRUNCATED_TEXT, CODES.RHYTHM,
+];
+const TOUCH_ONLY = new Set([CODES.NO_GUTTER, CODES.TAP_TARGET]);
+// counts.components key per code.
+const COUNT_KEY = {
+    'ROW-HEIGHT': 'rowHeight', 'ROW-CENTER': 'rowCenter', 'ROW-BORDER': 'rowBorder',
+    'ROW-RADIUS': 'rowRadius', 'ROW-PADDING': 'rowPadding', 'GLUED-CONTROLS': 'glued',
+    'DOUBLE-BORDER': 'doubleBorder', 'SHORT-BAR': 'shortBar', 'NO-GUTTER': 'noGutter',
+    'TAP-TARGET': 'tapTarget', 'TRUNCATED-TEXT': 'truncated', 'RHYTHM': 'rhythm',
 };
 
 function unmeasured(reason, detail, snapshot) {
@@ -446,6 +516,12 @@ function analyse(snapshot, options) {
     // confident zero from a check that had nothing to look at. Both text-based
     // codes report null rather than 0 when nothing was sampled, so the row
     // reads "n/a" and cannot be mistaken for a clean page.
+    // --- the component rules. null when the snapshot carries no component
+    // harvest (every snapshot taken before harvestComponents existed), so an
+    // old fixture reads n/a for them rather than a confident zero.
+    const comp = analyseComponents(snapshot, T);
+    if (comp) findings.push(...comp.findings);
+
     const sawText = texts.length > 0;
     const counts = {
         total: findings.length,
@@ -455,6 +531,7 @@ function analyse(snapshot, options) {
         occluded: sawText ? findings.filter((f) => f.code === CODES.TEXT_OCCLUDED).length : null,
         textCovered: sawText,
         exempt,
+        components: comp ? comp.counts : null,
     };
 
     return {
@@ -467,11 +544,406 @@ function analyse(snapshot, options) {
         probeSha: snapshot.probeSha || null,
         viewport: vp,
         population: snapshot.population || null,
+        componentPopulation: comp ? comp.population : null,
+        componentSha: snapshot.components ? snapshot.components.sha || null : null,
         modalSeen: modal,
         thresholds: T,
         findings,
         counts,
     };
+}
+
+// ======================================================= COMPONENT RULES
+//
+// Judged from snapshot.components, which harvestComponents() in
+// layout-probe.js fills. Every rule below is a measurement against a named
+// threshold in DEFAULTS. None is a taste call: taste is the vision pass in
+// unslop-sweep.js, which is advisory and never fails anything.
+//
+// THE VOCABULARY the rules share:
+//   painted   draws its own background a reader can see: an image, or a
+//             colour of alpha >= 0.1 that differs from the colour behind it
+//   frame     the widest visible border side, ring (zero-blur box-shadow
+//             spread) or outline
+//   boxed     framed or painted: a shape the eye reads as one object
+//   control   boxed and inside the control size band
+//
+// THE ONE EXEMPTION is data-unslop-ok="CODE ..." on the element or an
+// ancestor, in the product's source. It is reviewed like any other line of
+// code and every use is counted (exempt.markedOk), so it cannot hide a defect
+// quietly. There is no command-line way to silence a rule on one element.
+
+const r2 = (n) => Math.round(n * 100) / 100;
+const spread = (xs) => (xs.length ? Math.max(...xs) - Math.min(...xs) : 0);
+
+function frameOf(e) {
+    return Math.max(e.bw[0], e.bw[1], e.bw[2], e.bw[3], e.ring || 0, e.ol || 0);
+}
+function framedSides(e) {
+    return e.bw.filter((w) => w > 0).length;
+}
+function paintedOf(e) {
+    return !!e.img || (e.bg >= 0.1 && e.bgc !== e.behind);
+}
+function boxedOf(e) {
+    return frameOf(e) > 0 || paintedOf(e);
+}
+function isControl(e, T) {
+    return boxedOf(e) &&
+        e.box.h >= T.controlMinPx && e.box.h <= T.controlMaxHeightPx &&
+        e.box.w >= T.controlMinPx && e.box.w <= T.controlMaxWidthPx;
+}
+function isPill(e) {
+    return Math.min(...e.br) >= e.box.h / 2 - 1;
+}
+function isRowContainer(e) {
+    const flexRow = (e.d === 'flex' || e.d === 'inline-flex') && (e.fd === 'row' || e.fd === 'row-reverse');
+    return flexRow || e.d === 'grid' || e.d === 'inline-grid';
+}
+
+/**
+ * @param {object} snapshot  carries `components` from harvestComponents()
+ * @param {object} T         thresholds (DEFAULTS merged with overrides)
+ * @returns {null | {findings, counts, population}}  null when unmeasured
+ */
+function analyseComponents(snapshot, T) {
+    const comp = snapshot.components;
+    const vp = snapshot.viewport;
+    if (!comp || comp.error || !Array.isArray(comp.elements) || !comp.elements.length) return null;
+    const els = comp.elements;
+    const cw = vp.clientWidth;
+    const width = vp.requestedWidth;
+    const touch = cw <= T.touchMaxWidth;
+
+    const kids = new Map();
+    for (const e of els) {
+        if (e.p == null) continue;
+        if (!kids.has(e.p)) kids.set(e.p, []);
+        kids.get(e.p).push(e);
+    }
+    const childrenOf = (e) => kids.get(e.i) || [];
+    const parentOf_ = (e) => (e.p == null ? null : els[e.p] || null);
+    const subtreeHasText = (e, depth) => {
+        if (e.txt) return true;
+        if (depth <= 0) return false;
+        return childrenOf(e).some((c) => subtreeHasText(c, depth - 1));
+    };
+    const onScreen = (b) => b.r > 0 && b.l < cw;
+
+    const findings = [];
+    const exempt = {
+        markedOk: 0, consistentGroup: 0, pillRadius: 0, narrowAccent: 0, barTrack: 0,
+        rail: 0, fullBleed: 0, inlineLink: 0, wrappedByTarget: 0, disabled: 0,
+    };
+    const population = {
+        recorded: comp.recorded, considered: comp.considered, droppedForCap: comp.droppedForCap,
+        truncated: !!comp.truncated, rowContainers: 0, rowLines: 0, rowItems: 0, framedPairs: 0,
+        barCandidates: 0, gutterCandidates: touch ? 0 : null, tapCandidates: touch ? 0 : null,
+        truncCandidates: 0, rhythmRuns: 0,
+    };
+
+    const push = (code, sel, detail, note, threshold, okOn) => {
+        if (okOn.some((e) => e && (e.ok || []).includes(code))) { exempt.markedOk++; return; }
+        findings.push({ check: 'component', code, width, sel, lm: (okOn[0] && okOn[0].lm) || null, detail, note, threshold });
+    };
+
+    // ------------------------------------------------------- rows of controls
+    //
+    // A row root is a flex row or grid container no taller than rowMaxHeightPx.
+    // Its items are the CONTROLS reached by descending through unboxed
+    // wrappers, so a header that nests a two-control group in a plain div still
+    // compares all four controls on one line. A wrapper that is itself a row
+    // container is absorbed and not judged again as its own row.
+    const absorbed = new Set();
+    for (const root of els) {
+        if (!isRowContainer(root) || root.box.h > T.rowMaxHeightPx || absorbed.has(root.i)) continue;
+        if (!onScreen(root.box)) continue;
+        const items = [];
+        const collect = (node, depth) => {
+            for (const c of childrenOf(node)) {
+                if (isControl(c, T)) { items.push(c); continue; }
+                if (boxedOf(c) || depth <= 0) continue;
+                if (isRowContainer(c)) absorbed.add(c.i);
+                collect(c, depth - 1);
+            }
+        };
+        collect(root, 4);
+        population.rowContainers++;
+        const visible = items.filter((c) => onScreen(c.box));
+        // Lines: items overlapping vertically by at least half the shorter one.
+        const lines = [];
+        for (const it of visible.sort((a, b) => a.box.t - b.box.t)) {
+            const line = lines.find((ln) => ln.some((o) => {
+                const ov = Math.min(o.box.b, it.box.b) - Math.max(o.box.t, it.box.t);
+                return ov >= 0.5 * Math.min(o.box.h, it.box.h);
+            }));
+            if (line) line.push(it); else lines.push([it]);
+        }
+        for (const line of lines) {
+            if (line.length < 2) continue;
+            line.sort((a, b) => a.box.l - b.box.l);
+            population.rowLines++;
+            population.rowItems += line.length;
+            const okOn = [root, ...line];
+            const view = line.map((c) => ({
+                sel: c.sel, h: c.box.h, cy: r2(c.box.t + c.box.h / 2), frame: frameOf(c),
+                radius: Math.max(...c.br), padX: r2(c.pad[3]), painted: paintedOf(c),
+            }));
+
+            const hs = line.map((c) => c.box.h);
+            if (spread(hs) > T.rowHeightTolPx) {
+                push(CODES.ROW_HEIGHT, root.sel, { items: view, spreadPx: r2(spread(hs)) },
+                    `${line.length} controls in one row span heights ${Math.min(...hs)} to ${Math.max(...hs)}px`,
+                    `height spread > ${T.rowHeightTolPx}px`, okOn);
+            }
+            const cys = line.map((c) => c.box.t + c.box.h / 2);
+            if (spread(cys) > T.rowCenterTolPx) {
+                push(CODES.ROW_CENTER, root.sel, { items: view, spreadPx: r2(spread(cys)) },
+                    `vertical centres in one row differ by ${r2(spread(cys))}px`,
+                    `centre spread > ${T.rowCenterTolPx}px`, okOn);
+            }
+            // Border weight among the FRAMED items only. A solid primary
+            // button beside an outlined secondary is a hierarchy, not a defect;
+            // a 1px outline beside a 2px ring is.
+            const framed = line.filter((c) => frameOf(c) > 0);
+            const fw = framed.map(frameOf);
+            if (framed.length >= 2 && spread(fw) > T.rowBorderTolPx) {
+                push(CODES.ROW_BORDER, root.sel, { items: view, spreadPx: r2(spread(fw)) },
+                    `framed controls in one row use border weights ${[...new Set(fw)].join(', ')}px`,
+                    `frame-width spread > ${T.rowBorderTolPx}px`, okOn);
+            }
+            // Radius among the non-pill items. A pill or a circle is a shape
+            // choice that scales with height, so it is not compared by px.
+            const square = line.filter((c) => !isPill(c));
+            exempt.pillRadius += line.length - square.length;
+            const rs = square.map((c) => Math.max(...c.br));
+            if (square.length >= 2 && spread(rs) > T.rowRadiusTolPx) {
+                push(CODES.ROW_RADIUS, root.sel, { items: view, spreadPx: r2(spread(rs)) },
+                    `non-pill controls in one row use corner radii ${[...new Set(rs)].join(', ')}px`,
+                    `radius spread > ${T.rowRadiusTolPx}px`, okOn);
+            }
+            // Horizontal padding among controls that carry words. An icon
+            // button has no text inset to compare, and a square control (an
+            // avatar's initial, a one-glyph button) centres its content by
+            // size, not by padding.
+            const worded = line.filter((c) => subtreeHasText(c, 3) && Math.abs(c.box.w - c.box.h) > 2);
+            const ps = worded.map((c) => c.pad[3]);
+            if (worded.length >= 2 && spread(ps) > T.rowPaddingTolPx) {
+                push(CODES.ROW_PADDING, root.sel, { items: view, spreadPx: r2(spread(ps)) },
+                    `text controls in one row inset their labels by ${[...new Set(ps)].join(', ')}px`,
+                    `left-padding spread > ${T.rowPaddingTolPx}px`, okOn);
+            }
+
+            // Glued: two adjacent controls with no gap that are NOT one
+            // consistent group. A segmented button group is the same height,
+            // frame and fill throughout and is exempt; a bordered counter
+            // fused to a solid button is not.
+            for (let k = 0; k + 1 < line.length; k++) {
+                const a = line[k];
+                const b = line[k + 1];
+                const gap = b.box.l - a.box.r;
+                if (!(gap > -1 && gap < T.gluedGapPx)) continue;
+                const consistent = Math.abs(a.box.h - b.box.h) <= 1 && frameOf(a) === frameOf(b) &&
+                    paintedOf(a) === paintedOf(b) && (!paintedOf(a) || a.bgc === b.bgc);
+                if (consistent) { exempt.consistentGroup++; continue; }
+                push(CODES.GLUED_CONTROLS, a.sel + ' + ' + b.sel, {
+                    gapPx: r2(gap), a: view[k], b: view[k + 1],
+                }, `two different controls touch (${r2(gap)}px apart): ${a.box.h}px ${paintedOf(a) ? 'filled' : 'outlined'} beside ${b.box.h}px ${paintedOf(b) ? 'filled' : 'outlined'}`,
+                `gap < ${T.gluedGapPx}px between controls that differ in height, frame or fill`, [a, b]);
+            }
+        }
+    }
+
+    // --------------------------------------------------------- double borders
+    //
+    // A framed box sitting within doubleBorderPx of the inside of another
+    // frame on all four sides draws two lines where the design meant one. The
+    // same element carrying both a border and an outer ring is the same defect
+    // on one node.
+    for (const e of els) {
+        if (!onScreen(e.box)) continue;
+        const sides = framedSides(e);
+        const hasRing = (e.ring || 0) > 0;
+        if (sides >= 3 && hasRing && !e.ringInset) {
+            population.framedPairs++;
+            push(CODES.DOUBLE_BORDER, e.sel, { kind: 'self', border: Math.max(...e.bw), ring: e.ring },
+                `one element draws a ${Math.max(...e.bw)}px border and a ${e.ring}px ring around it`,
+                'border and outer ring on the same element', [e]);
+            continue;
+        }
+        if (sides < 3 && !hasRing) continue;
+        let a = parentOf_(e);
+        while (a && !(framedSides(a) >= 3 || (a.ring || 0) > 0)) a = parentOf_(a);
+        if (!a) continue;
+        population.framedPairs++;
+        const ext = hasRing && !e.ringInset ? e.ring : 0;
+        const inset = (a.ring || 0) > 0 && a.ringInset ? a.ring : 0;
+        const c = { t: e.box.t - ext, r: e.box.r + ext, b: e.box.b + ext, l: e.box.l - ext };
+        const p = {
+            t: a.box.t + a.bw[0] + inset, r: a.box.r - a.bw[1] - inset,
+            b: a.box.b - a.bw[2] - inset, l: a.box.l + a.bw[3] + inset,
+        };
+        const gaps = [c.t - p.t, p.r - c.r, p.b - c.b, c.l - p.l].map(r2);
+        if (gaps.every((g) => g >= -1 && g <= T.doubleBorderPx)) {
+            push(CODES.DOUBLE_BORDER, e.sel, { kind: 'nested', outer: a.sel, gapsPx: gaps, inner: frameOf(e), outerFrame: frameOf(a) },
+                `a ${frameOf(e)}px frame sits ${Math.max(...gaps)}px inside ${a.sel}'s ${frameOf(a)}px frame`,
+                `all four gaps between frames <= ${T.doubleBorderPx}px`, [e, a]);
+        }
+    }
+
+    // ------------------------------------------------------ short decorative bars
+    //
+    // A thin painted stripe at the top or bottom edge of its container that
+    // covers most of the width but stops short of an edge. A centred accent
+    // under a heading covers less than barMinSpanFraction and is counted, not
+    // reported. A fill inside a short track is a progress bar.
+    const containerOf = (e) => {
+        let a = parentOf_(e);
+        while (a && !(boxedOf(a) || /^(header|nav|footer|section|aside|main|body|article)$/.test(a.tag))) a = parentOf_(a);
+        return a;
+    };
+    const bars = [];
+    for (const e of els) {
+        if (paintedOf(e) && !subtreeHasText(e, 2) && e.box.h <= T.barMaxHeightPx && e.box.w >= T.barMinWidthPx) {
+            bars.push({ box: e.box, host: e, cont: containerOf(e), sel: e.sel });
+        }
+        for (const ps of e.ps || []) {
+            if (!ps.box || !(ps.bg >= 0.1 || ps.img)) continue;
+            if (ps.box.h > T.barMaxHeightPx || ps.box.w < T.barMinWidthPx) continue;
+            bars.push({ box: ps.box, host: e, cont: e, sel: e.sel + '::' + ps.w });
+        }
+    }
+    for (const bar of bars) {
+        const cont = bar.cont;
+        if (!cont || !onScreen(bar.box)) continue;
+        population.barCandidates++;
+        if (cont.box.h <= T.barTrackMaxPx) { exempt.barTrack++; continue; }
+        const atEdge = Math.abs(bar.box.t - cont.box.t) <= T.barEdgeTolPx || Math.abs(cont.box.b - bar.box.b) <= T.barEdgeTolPx;
+        if (!atEdge) continue;
+        const spans = bar.box.l <= cont.box.l + T.barEdgeTolPx && bar.box.r >= cont.box.r - T.barEdgeTolPx;
+        if (spans) continue;
+        const frac = bar.box.w / cont.box.w;
+        if (frac < T.barMinSpanFraction) { exempt.narrowAccent++; continue; }
+        push(CODES.SHORT_BAR, bar.sel, {
+            container: cont.sel, barLeft: bar.box.l, barRight: bar.box.r,
+            containerLeft: cont.box.l, containerRight: cont.box.r, spanFraction: r2(frac),
+        }, `a ${bar.box.h}px stripe covers ${Math.round(frac * 100)}% of ${cont.sel} and stops ${r2(bar.box.l - cont.box.l)}px from the left, ${r2(cont.box.r - bar.box.r)}px from the right`,
+        `edge stripe covering >= ${T.barMinSpanFraction} of its container without spanning it (tolerance ${T.barEdgeTolPx}px)`, [bar.host, cont]);
+    }
+
+    // --------------------------------------------------------- touch-width rules
+    if (touch) {
+        // Missing side gutter: controls first, then text not inside a control
+        // already reported, so one cramped button is one finding.
+        const reported = new Set();
+        const inReported = (e) => {
+            for (let a = parentOf_(e); a; a = parentOf_(a)) if (reported.has(a.i)) return true;
+            return false;
+        };
+        const gutterOf = (b) => r2(Math.min(b.l, cw - b.r));
+        const candidates = [
+            ...els.filter((e) => isControl(e, T)),
+            ...els.filter((e) => e.tb && !isControl(e, T)),
+        ];
+        for (const e of candidates) {
+            const b = isControl(e, T) ? e.box : e.tb;
+            if (!onScreen(b)) continue;
+            population.gutterCandidates++;
+            if (e.rail) { exempt.rail++; continue; }
+            if (e.box.w >= cw - 1) { exempt.fullBleed++; continue; }
+            const g = gutterOf(b);
+            if (g >= T.gutterMinPx) continue;
+            if (inReported(e)) continue;
+            reported.add(e.i);
+            push(CODES.NO_GUTTER, e.sel, { left: b.l, right: r2(cw - b.r), clientWidth: cw, text: e.txt || null },
+                `${isControl(e, T) ? 'a control' : 'text'} sits ${g}px from the ${b.l <= cw - b.r ? 'left' : 'right'} edge of a ${cw}px screen`,
+                `distance to the viewport edge < ${T.gutterMinPx}px at width <= ${T.touchMaxWidth}`, [e]);
+        }
+
+        // Tap targets: the box unioned with any positioned pseudo-element
+        // (the hit-area expansion idiom), and passed when a larger interactive
+        // ancestor or label wraps it. A link inside a sentence is the WCAG
+        // inline exception.
+        for (const e of els) {
+            if (!e.ia || !onScreen(e.box)) continue;
+            population.tapCandidates++;
+            if (e.dis) { exempt.disabled++; continue; }
+            if (e.inl) { exempt.inlineLink++; continue; }
+            let t = Object.assign({}, e.box);
+            for (const ps of e.ps || []) {
+                if (!ps.box) continue;
+                t = { l: Math.min(t.l, ps.box.l), t: Math.min(t.t, ps.box.t), r: Math.max(t.r, ps.box.r), b: Math.max(t.b, ps.box.b) };
+            }
+            const w = r2(t.r - t.l);
+            const h = r2(t.b - t.t);
+            if (w >= T.tapMinPx && h >= T.tapMinPx) continue;
+            let wrapped = false;
+            for (let a = parentOf_(e); a; a = parentOf_(a)) {
+                if ((a.ia || a.tag === 'label') && a.box.w >= T.tapMinPx && a.box.h >= T.tapMinPx) { wrapped = true; break; }
+            }
+            if (wrapped) { exempt.wrappedByTarget++; continue; }
+            push(CODES.TAP_TARGET, e.sel, { w, h, kind: e.ia, text: e.txt || null },
+                `a ${e.ia} target measures ${w}x${h}px`,
+                `tap target < ${T.tapMinPx}x${T.tapMinPx}px at width <= ${T.touchMaxWidth}`, [e]);
+        }
+    }
+
+    // ------------------------------------------------------------ truncation
+    for (const e of els) {
+        if (!onScreen(e.box)) continue;
+        const ell = e.to && e.sw > e.cw + T.truncMinPx;
+        const clamp = e.lc > 0 && e.sh > e.ch + T.truncMinPx;
+        const cut = (e.ox === 'hidden' || e.ox === 'clip') && /nowrap|pre/.test(e.ws || '') && e.sw > e.cw + T.truncMinPx && subtreeHasText(e, 2);
+        if (e.to || e.lc > 0 || cut) population.truncCandidates++;
+        if (!(ell || clamp || cut)) continue;
+        const how = ell ? 'ellipsis' : clamp ? `line-clamp ${e.lc}` : 'clipped nowrap';
+        push(CODES.TRUNCATED_TEXT, e.sel, {
+            how, scrollWidth: e.sw, clientWidth: e.cw, scrollHeight: e.sh, clientHeight: e.ch, text: e.txt || null,
+        }, `text is cut by ${how}: content ${clamp ? e.sh + 'px tall in ' + e.ch : e.sw + 'px wide in ' + e.cw}px`,
+        `content exceeds its box by > ${T.truncMinPx}px in a box that truncates`, [e]);
+    }
+
+    // --------------------------------------------------------- vertical rhythm
+    //
+    // A run of rhythmMinRepeats or more consecutive siblings with the same tag
+    // and class list, stacked one under another, is a repeated section. The
+    // space between consecutive ones (the gap, plus their facing padding when
+    // they are unpainted, because then the padding is visible whitespace)
+    // should not spread wider than rhythmTolPx.
+    for (const [, sibs] of kids) {
+        let run = [];
+        const flush = () => {
+            if (run.length >= T.rhythmMinRepeats) {
+                population.rhythmRuns++;
+                const spaces = [];
+                for (let k = 0; k + 1 < run.length; k++) {
+                    const a = run[k];
+                    const b = run[k + 1];
+                    const both = paintedOf(a) && paintedOf(b);
+                    spaces.push(r2(b.box.t - a.box.b + (both ? 0 : a.pad[2] + b.pad[0])));
+                }
+                if (spread(spaces) > T.rhythmTolPx) {
+                    push(CODES.RHYTHM, run[0].sel, { repeats: run.length, spacingsPx: spaces, spreadPx: r2(spread(spaces)) },
+                        `${run.length} repeated ${run[0].tag} blocks are spaced ${spaces.join(', ')}px apart`,
+                        `spacing spread > ${T.rhythmTolPx}px across >= ${T.rhythmMinRepeats} repeats`, run);
+                }
+            }
+            run = [];
+        };
+        for (const e of sibs) {
+            const prev = run[run.length - 1];
+            const same = prev && prev.tag === e.tag && prev.cls === e.cls && e.box.t >= prev.box.b - 1;
+            if (!same) flush();
+            run.push(e);
+        }
+        flush();
+    }
+
+    const counts = { total: findings.length, exempt };
+    for (const code of COMPONENT_CODES) {
+        counts[COUNT_KEY[code]] = TOUCH_ONLY.has(code) && !touch ? null : findings.filter((f) => f.code === code).length;
+    }
+    return { findings, counts, population };
 }
 
 /**
@@ -513,7 +985,10 @@ function summarise(results) {
     };
 }
 
-module.exports = { analyse, summarise, DEFAULTS, CODES, REFUSALS, SCROLLS, CLIPS, PINNED };
+module.exports = {
+    analyse, analyseComponents, summarise, DEFAULTS, CODES, COMPONENT_CODES, TOUCH_ONLY, COUNT_KEY,
+    REFUSALS, SCROLLS, CLIPS, PINNED,
+};
 
 if (require.main === module) {
     console.log('layout-checks.js - the judging half of the rendered-layout gate.');

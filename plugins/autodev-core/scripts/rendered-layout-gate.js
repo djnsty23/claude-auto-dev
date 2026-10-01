@@ -300,6 +300,23 @@ function report(results, opts) {
         );
     }
     out.push('');
+    // The component rules, one row per rule and one column per width. n/a is
+    // a width the rule was not asked (a touch-only rule at a desktop width) or
+    // a snapshot taken before the component harvest existed.
+    const measuredRs = results.filter((r) => r.status === 'MEASURED');
+    if (!measuredRs.some((r) => r.counts && r.counts.components)) {
+        out.push('component rules: n/a (these snapshots carry no component harvest; capture with the current probe)');
+    } else {
+        out.push('component rules     ' + measuredRs.map((r) => String(r.width).padStart(6)).join(''));
+        for (const code of CHECKS.COMPONENT_CODES) {
+            const key = CHECKS.COUNT_KEY[code];
+            out.push(code.padEnd(20) + measuredRs.map((r) => {
+                const v = r.counts.components ? r.counts.components[key] : null;
+                return (v === null || v === undefined ? 'n/a' : String(v)).padStart(6);
+            }).join(''));
+        }
+    }
+    out.push('');
     const tTot = s.textTotal || 0;
     const pct = tTot ? Math.round((s.textSampled / tTot) * 100) : null;
     out.push(`${s.measured} of ${s.widths} widths measured, ${s.refused} refused. ` +
@@ -360,6 +377,8 @@ function report(results, opts) {
         }
         const ex = results.filter((r) => r.counts).reduce((a, r) => {
             for (const [k, v] of Object.entries(r.counts.exempt)) a[k] = (a[k] || 0) + v;
+            const ce = r.counts.components ? r.counts.components.exempt : {};
+            for (const [k, v] of Object.entries(ce)) a[k] = (a[k] || 0) + v;
             return a;
         }, {});
         const shown = Object.entries(ex).filter(([, v]) => v > 0);
