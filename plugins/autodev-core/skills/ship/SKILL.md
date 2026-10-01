@@ -69,6 +69,15 @@ product as done while any of the bar's six items lacks evidence on the
 candidate. It may still deploy an authorized increment. The report then names
 each unmet item, and each one becomes open work in `prd.json`, never a tick.
 
+## Step 1d: The unslop sweep, on any UI change
+
+When the change touches anything a user sees, load the `unslop` skill and run its
+sweep on a local build of the candidate before deploying. Its mechanical
+findings are done-bar item 3 evidence. A finding at the candidate SHA is open
+work: write it to `prd.json` with `unslop-sweep.js stories`, and do not report
+item 3 as met while one stands. Vision findings are advisory and block nothing.
+A fix made for this step is proven by `unslop-sweep.js compare` saying COUNTS.
+
 ## Step 2: Security Scan
 
 Run before every deploy (uses `security` skill). The gate is blocking: exit 1
