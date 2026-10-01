@@ -259,6 +259,10 @@ for (const w of [360, 390, 414]) {
     const scrolled = s.text.filter((t) => (t.scrollY || 0) > 0
         && (t.samples || []).some((x) => x.occluder && /header\.bar/.test(x.occluder.sel) && x.occluder.bgAlpha >= 0.5));
     check('and it really does cover text once scrolled', scrolled.length > 0, scrolled.length);
+    // The hit is the bar's static CHILD, pinned only through its ancestor:
+    // the shape a real sticky header has, and the one the exemption missed.
+    const viaChild = scrolled.some((t) => t.samples.some((x) => x.occluder && x.occluder.position === 'static' && x.occluder.pinnedBy === 'fixed'));
+    check('and the occluder is the static child of the bar, pinned through its ancestor', viaChild, scrolled.slice(0, 1).map((t) => t.samples.map((x) => x.occluder)));
     check('so the clean control still reports nothing', CHECKS.analyse(s).counts.occluded === 0);
 }
 {

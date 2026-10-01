@@ -157,6 +157,11 @@ already occurred to that hand:
   a pinned bar covers what you scroll      the clean control itself, once it grew
   beneath it                               tall enough to scroll: its own fixed
                                            header covers the h1 at scrollY 64.
+  ...and so does a child of one            a real product's sticky header, whose
+                                           colour stripe and language button are
+                                           static themselves: 10 of the top 10
+                                           ranked findings until the probe
+                                           recorded the pinned ancestor.
 
 FOUR PAGES IS NOT A RATE. It proves the gate can run real HTML without crying
 wolf, and says nothing about precision across a corpus. Collect real runs before

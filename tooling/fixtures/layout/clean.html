@@ -39,10 +39,13 @@
   /* Fixed header. Does not contribute to document scroll width and sits
      above nothing that carries text. */
   .bar{position:fixed;top:0;left:0;right:0;height:44px;background:#111;color:#fff;display:flex;align-items:center;padding:0 16px;z-index:10}
+  /* An opaque static child filling the bar, as a real header's stripe or
+     button does: the hit under the bar is this, not the fixed box itself. */
+  .bar-inner{display:flex;align-items:center;align-self:stretch;flex:1;margin:0 -16px;padding:0 16px;background:#111}
   .below-bar{margin-top:60px}
 </style></head>
 <body>
-<header class="bar">clean control</header>
+<header class="bar"><span class="bar-inner">clean control</span></header>
 <main class="wrap below-bar">
   <h1>A page with nothing wrong with it</h1>
   <p>Four things on this page look like defects to a checker that measures rectangles and stops there. None of them is one. This page must produce zero findings at every width, or the gate is not safe to run against real work.</p>
