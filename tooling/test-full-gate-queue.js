@@ -83,6 +83,31 @@ function killAll() {
 // Fixtures and invocation.
 // ---------------------------------------------------------------------------
 
+/**
+ * The checkout every subprocess runs in. The class now comes from the caller's
+ * repository, and this suite's own tree is the harness, so the cases run from a
+ * plain product repository: one commit, no harness marker.
+ */
+let productRepo = null;
+function repoDir() {
+    if (productRepo) return productRepo;
+    productRepo = path.join(mkTemp('fgq-repo-'), 'shop');
+    fs.mkdirSync(productRepo, { recursive: true });
+    fs.writeFileSync(path.join(productRepo, 'package.json'), JSON.stringify({ name: 'shop', private: true }));
+    const g = (args) => spawnSync('git', ['-C', productRepo, ...args], { encoding: 'utf8', windowsHide: true });
+    g(['init', '-q']);
+    g(['add', 'package.json']);
+    g(['-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-qm', 'fixture']);
+    return productRepo;
+}
+
+/** One boot-identity cache for every case, so the boot probe runs once per suite, not once per fixture. */
+let bootCache = null;
+function bootCacheFile() {
+    if (!bootCache) bootCache = path.join(mkTemp('fgq-boot-'), 'boot.json');
+    return bootCache;
+}
+
 function fixture() {
     const dir = path.join(mkTemp('fgq-'), 'locks');
     fs.mkdirSync(dir, { recursive: true });
@@ -96,6 +121,7 @@ function envFor(fx, extra = {}) {
         AUTODEV_GATE_LOCK_POLL_MS: '100',
         AUTODEV_GATE_LOCK_REPORT_MS: '100000',
         AUTODEV_GATE_QUEUE_STALE_MS: '600000',
+        AUTODEV_GATE_BOOT_CACHE: bootCacheFile(),
     }, extra);
     if (!('AUTODEV_GATE_CLASS' in extra)) delete env.AUTODEV_GATE_CLASS;
     if (!('AUTODEV_GATE_LANES' in extra)) delete env.AUTODEV_GATE_LANES;
@@ -104,7 +130,7 @@ function envFor(fx, extra = {}) {
 
 function run(subject, fx, args, extraEnv) {
     const r = spawnSync(process.execPath, [subject, ...args],
-        { env: envFor(fx, extraEnv), encoding: 'utf8', windowsHide: true, timeout: 120000 });
+        { cwd: repoDir(), env: envFor(fx, extraEnv), encoding: 'utf8', windowsHide: true, timeout: 120000 });
     return { code: r.status, out: `${r.stdout || ''}${r.stderr || ''}`, error: r.error };
 }
 
@@ -428,8 +454,11 @@ function mutant(id, anchor, replacement) {
     const count = src.split(anchor).length - 1;
     check(`${id}: the anchor matches exactly once in the subject (found ${count})`, count === 1, anchor);
     if (count !== 1) return null;
-    const file = path.join(mkTemp(`fgq-${id}-`), 'full-gate-queue.js');
+    const dir = mkTemp(`fgq-${id}-`);
+    const file = path.join(dir, 'full-gate-queue.js');
     fs.writeFileSync(file, src.replace(anchor, replacement));
+    // The libraries it requires, copied beside it unchanged.
+    for (const lib of ['gate-identity.js', 'gate-records.js']) fs.copyFileSync(path.join(path.dirname(SUBJECT), lib), path.join(dir, lib));
     return file;
 }
 
