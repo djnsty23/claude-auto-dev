@@ -95,7 +95,7 @@ result needs a positive control.
 | Accessibility | Effective names/labels, keyboard/focus, native-control semantics, contrast, input type/inputmode/autocomplete/paste, reduced motion, zoom and effective hit targets. Use `a11y`; native buttons need no extra key handler |
 | Types / errors | Unsafe external data, conflicting declarations, suppression directives and error/rejection boundaries. Intentional CLI output and diagnostics are valid; investigate secret leakage/noise by context |
 | UX / UI | Loading/error/empty/content, actionable feedback, persistence, actual desktop/mobile layout, overflow/long content and tokens. Verify effective image dimensions and list performance rather than requiring one CSS pattern, fullscreen modal or virtualization threshold |
-| Test integrity | Critical acceptance/deny/retry paths; actual assertions and entry points; a missing test filename or raw coverage percentage alone does not establish a gap |
+| Test integrity | Critical acceptance/deny/retry paths; actual assertions and entry points; a missing test filename or raw coverage percentage alone does not establish a gap. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/check-ungated-apps.js" .` first: an app no CI step, git hook or root gate script reaches (exit 1) is outside every check here, so audit it as unverified code, never as covered by the root gate |
 | Release readiness | Required config/target without exposing values; runtime asset/PWA paths; rewrites/headers; current gate checks, deployment identity and affected live flows when authorized. Do not infer deployment readiness from one successful unrelated job |
 
 Use `security`, `perf`, `a11y`, `test`, `scan` and `rule-verification` for the

@@ -386,6 +386,32 @@ try {
         }
     } catch { /* not a git repo, git unavailable, or an unparseable worktree list */ }
 
+    // ---- Apps no gate covers ----
+    //
+    // A nested app with its own package.json, framework and deploy target was
+    // left out of the root app's CI, typecheck and lint as a throwaway, then
+    // grew to a production app with no tests and no CI step. The session-end
+    // hooks covered only the root, so every turn reported green over it, and a
+    // later review found 150 defects no check could have caught. This is the
+    // first point every session passes before it can commit, so it says once,
+    // here, which apps sit outside every gate. Nested apps only, and silent
+    // when there are none: see hookLine() in check-ungated-apps.js.
+    //
+    // Git repositories only, so the file list is git's and never a walk: a
+    // session started in a home directory would otherwise walk all of it. No
+    // commit counts (one git call per app) and a 1.5 s budget on the risk scan,
+    // so a large repository costs this hook one file listing and a few reads.
+    // Not a repository, or unreadable: nothing is added.
+    try {
+        const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+            cwd, timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+        }).toString().trim();
+        const script = path.join(PLUGIN_ROOT, 'scripts', 'check-ungated-apps.js');
+        const { assess, hookLine } = require(script);
+        const line = hookLine(assess(repoRoot, { history: false, deadlineMs: 1500 }), script, stripUntrusted);
+        if (line) context.push(line);
+    } catch { /* not a git repo, or the check failed: it is advisory, the banner must survive it */ }
+
     // ---- Session pile ----
     //
     // [measured 2026-09-13] 35 live Desktop sessions, 24 of them reading as
